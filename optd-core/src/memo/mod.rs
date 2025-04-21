@@ -4,6 +4,8 @@ mod merge_repr;
 
 use std::collections::{HashMap, HashSet};
 
+use async_recursion::async_recursion;
+
 use crate::cir::{
     Cost, Goal, GoalId, GoalMemberId, GroupId, ImplementationRule, LogicalExpression,
     LogicalExpressionId, LogicalProperties, PhysicalExpression, PhysicalExpressionId,
@@ -67,8 +69,6 @@ impl MergeGroupResult {
 /// Information about a merged goal, including its ID and expressions
 #[derive(Debug)]
 pub struct MergedGoalInfo {
-    /// The best costed expression for this goal, if any
-    pub best_expr: Option<(PhysicalExpressionId, Cost)>,
     /// ID of the merged goal
     pub goal_id: GoalId,
 
@@ -92,6 +92,16 @@ pub struct MergeGoalResult {
     pub new_repr_goal_id: GoalId,
 }
 
+/// Result of merging two cost expressions.
+#[derive(Debug)]
+pub struct MergeCostExprResult {
+    /// The new representative cost expression id.
+    pub repr_expr: PhysicalExpressionId,
+
+    /// Cost expressions that were stale
+    pub stale_cost_exprs: HashSet<PhysicalExpressionId>,
+}
+
 /// Results of merge operations with newly dirtied expressions.
 #[derive(Debug, Default)]
 pub struct MergeResult {
@@ -100,6 +110,9 @@ pub struct MergeResult {
 
     /// Goal merge results.
     pub goal_merges: Vec<MergeGoalResult>,
+
+    /// Cost expression merge results.
+    pub cost_expr_merges: Vec<MergeCostExprResult>,
 
     /// Transformations that were marked as dirty and need new application.
     pub dirty_transformations: Vec<(LogicalExpressionId, TransformationRule)>,

@@ -1,6 +1,10 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use async_recursion::async_recursion;
+
+use crate::cir::Child;
+
 use super::Memoize;
 use super::merge_repr::Representative;
 use super::*;
@@ -18,10 +22,22 @@ pub struct MemoryMemo {
     /// A mapping from logical expression id to group id.
     logical_expr_group_index: HashMap<LogicalExpressionId, GroupId>,
 
+    /// Dependent logical expression ids for each group id.
+    /// This is used to quickly find all the logical expressions that have a child equal to the group id, which is the key.
+    /// Dependent here does not mean the dependency stuff that we have in the memo table
+    group_dependent_logical_exprs: HashMap<GroupId, HashSet<LogicalExpressionId>>,
+
     /// Physical expression id to node.
     physical_exprs: HashMap<PhysicalExpressionId, (PhysicalExpression, Option<Cost>)>,
     /// Physical expression node to id.
     physical_expr_node_to_id_index: HashMap<PhysicalExpression, PhysicalExpressionId>,
+    /// A mapping from physical expression id to all goals that contain it.
+    physical_expr_goal_index: HashMap<PhysicalExpressionId, HashSet<GoalId>>,
+
+    /// Dependent physical expression ids for each goal id.
+    /// This is used to quickly find all the physical expressions that have a child equal to the goal id, which is the key.
+    /// Dependent here does not mean the dependency stuff that we have in the memo table
+    goal_dependent_physical_exprs: HashMap<GoalId, HashSet<PhysicalExpressionId>>,
 
     /// Goal id to state.
     goals: HashMap<GoalId, GoalState>,
@@ -202,11 +218,9 @@ impl Memoize for MemoryMemo {
 
         let group_2_state = self.groups.remove(&group_id_2).unwrap();
         let group_2_exprs = group_2_state.logical_exprs.iter().cloned().collect();
-        // let goal_2_goals = group_2_state.goals.iter().cloned().collect();
 
         let group1_state = self.groups.get_mut(&group_id_1).unwrap();
         let group1_exprs = group1_state.logical_exprs.iter().cloned().collect();
-        // let group_1_goals = group1_state.goals.iter().cloned().collect();
 
         for logical_expr_id in group_2_state.logical_exprs {
             // Update the logical expression to point to the new group id.
@@ -228,7 +242,72 @@ impl Memoize for MemoryMemo {
 
         result.group_merges.push(merge_group_result);
 
-        // TODO(yuchen): one-level memo goal merges.
+        // So now, we have to find out all the goals that belong to both groups but contain the same properties.
+
+        let group_1_goals = group1_state.goals.iter().cloned().collect::<HashSet<_>>();
+        let group_2_goals = group_2_state.goals.iter().cloned().collect::<HashSet<_>>();
+
+        for goal_id1 in group_1_goals.iter() {
+            for goal_id2 in group_2_goals.iter() {
+                let goal_1 = self.goals.get(&goal_id1).unwrap();
+                let goal_2 = self.goals.get(&goal_id2).unwrap();
+                let goal_1_props = &goal_1.goal.1;
+                let goal_2_props = &goal_2.goal.1;
+                if goal_1_props == goal_2_props {
+                    let merged_goal_result = self
+                        .merge_goals_helper(goal_id1.clone(), goal_id2.clone())
+                        .await?;
+                    result.goal_merges.push(merged_goal_result);
+                }
+            }
+        }
+
+        // Let's check for cascading merges now.
+        let logical_expr_with_group_2_as_child = self
+            .group_dependent_logical_exprs
+            .get(&group_id_2)
+            .unwrap()
+            .clone();
+
+        for logical_expr_id in logical_expr_with_group_2_as_child.iter() {
+            let logical_expr = self.logical_exprs.get(logical_expr_id).unwrap();
+            let repr_logical_expr = self.create_repr_logical_expr(logical_expr.clone()).await?;
+            let repr_logical_expr_id = self.get_logical_expr_id(&repr_logical_expr).await?;
+            // merge the logical exprs
+            self.repr_logical_expr
+                .merge(&logical_expr_id, &repr_logical_expr_id);
+
+            let parent_group_id = self.logical_expr_group_index.get(logical_expr_id).unwrap();
+            let parent_group_state = self.groups.get_mut(parent_group_id).unwrap();
+            // We remove the stale logical expr from the parent group.
+            parent_group_state.logical_exprs.remove(logical_expr_id);
+
+            // is the repr logical expr already part of a group?
+            if let Some(repr_parent_group_id) =
+                self.logical_expr_group_index.get(&repr_logical_expr_id)
+            {
+                // the repr logical expr is part of a group, so
+                let parent_group_id = self.logical_expr_group_index.get(logical_expr_id).unwrap();
+                if repr_parent_group_id != parent_group_id {
+                    // we have another merge to do
+                    // TODO(Sarvesh): do a cascading merge between repr_parent_group_id and parent_group_id
+                    // let merge_result = self
+                    //     .merge_groups(repr_parent_group_id, parent_group_id)
+                    //     .await?;
+                    // result.group_merges.push(merge_result);
+                    // TODO(Sarvesh): merge the cascading merge result with the current result.
+                }
+            } else {
+                // the repr logical expr is not part of a group, so we add it to the parent group.
+                // We add the new repr logical expr to the parent group.
+                parent_group_state
+                    .logical_exprs
+                    .insert(repr_logical_expr_id);
+                // we update the index
+                self.logical_expr_group_index
+                    .insert(repr_logical_expr_id, parent_group_id.clone());
+            }
+        }
 
         Ok(Some(result))
     }
@@ -588,6 +667,25 @@ impl Memoize for MemoryMemo {
             .insert(logical_expr.clone(), logical_expr_id);
         self.logical_exprs
             .insert(logical_expr_id, logical_expr.clone());
+
+        for child in logical_expr.children.iter() {
+            match child {
+                Child::Singleton(group_id) => {
+                    self.group_dependent_logical_exprs
+                        .entry(group_id.clone())
+                        .or_default()
+                        .insert(logical_expr_id);
+                }
+                Child::VarLength(group_ids) => {
+                    for group_id in group_ids.iter() {
+                        self.group_dependent_logical_exprs
+                            .entry(group_id.clone())
+                            .or_default()
+                            .insert(logical_expr_id);
+                    }
+                }
+            }
+        }
         Ok(logical_expr_id)
     }
 
@@ -619,6 +717,29 @@ impl Memoize for MemoryMemo {
             .insert(physical_expr.clone(), physical_expr_id);
         self.physical_exprs
             .insert(physical_expr_id, (physical_expr.clone(), None));
+
+        for child in physical_expr.children.iter() {
+            match child {
+                Child::Singleton(goal_id) => {
+                    if let GoalMemberId::GoalId(goal_id) = goal_id {
+                        self.goal_dependent_physical_exprs
+                            .entry(goal_id.clone())
+                            .or_default()
+                            .insert(physical_expr_id);
+                    }
+                }
+                Child::VarLength(goal_ids) => {
+                    for goal_id in goal_ids.iter() {
+                        if let GoalMemberId::GoalId(goal_id) = goal_id {
+                            self.goal_dependent_physical_exprs
+                                .entry(goal_id.clone())
+                                .or_default()
+                                .insert(physical_expr_id);
+                        }
+                    }
+                }
+            }
+        }
         Ok(physical_expr_id)
     }
 
@@ -662,6 +783,191 @@ impl Memoize for MemoryMemo {
 }
 
 impl MemoryMemo {
+    /// Creates a new logical expression with the same children but with the children being the representative group ids.
+    async fn create_repr_logical_expr(
+        &mut self,
+        logical_expr: LogicalExpression,
+    ) -> MemoizeResult<LogicalExpression> {
+        let mut repr_logical_expr = logical_expr.clone();
+        let mut new_children = Vec::new();
+
+        for child in repr_logical_expr.children.iter() {
+            match child {
+                Child::Singleton(group_id) => {
+                    let repr_group_id = self.find_repr_group(group_id.clone()).await?;
+                    new_children.push(Child::Singleton(repr_group_id));
+                }
+                Child::VarLength(group_ids) => {
+                    let new_group_ids = group_ids
+                        .iter()
+                        .map(|group_id| {
+                            let group_id = group_id.clone();
+                            let self_ref = &self;
+                            // TODO(Sarvesh): this is a hack to get the repr group id, i'm sure there's a better way to do this.
+                            async move { self_ref.find_repr_group(group_id).await }
+                        })
+                        .collect::<Vec<_>>();
+
+                    let new_group_ids = futures::future::join_all(new_group_ids)
+                        .await
+                        .into_iter()
+                        .collect::<Result<Vec<_>, _>>()?;
+
+                    new_children.push(Child::VarLength(new_group_ids));
+                }
+            }
+        }
+        repr_logical_expr.children = new_children;
+        Ok(repr_logical_expr)
+    }
+
+    /// Creates a new physical expression with the same children but with the children being the representative group ids.
+    async fn create_repr_physical_expr(
+        &mut self,
+        physical_expr: PhysicalExpression,
+    ) -> MemoizeResult<PhysicalExpression> {
+        let mut repr_physical_expr = physical_expr.clone();
+        let mut new_children = Vec::new();
+
+        for child in repr_physical_expr.children.iter() {
+            match child {
+                Child::Singleton(goal_member_id) => {
+                    if let GoalMemberId::GoalId(goal_id) = goal_member_id {
+                        let repr_goal_id = self.find_repr_goal(goal_id.clone()).await?;
+                        new_children.push(Child::Singleton(GoalMemberId::GoalId(repr_goal_id)));
+                    } else {
+                        new_children.push(Child::Singleton(goal_member_id.clone()));
+                    }
+                }
+                Child::VarLength(goal_member_ids) => {
+                    let mut new_goal_member_ids = Vec::new();
+                    for goal_member_id in goal_member_ids.iter() {
+                        match goal_member_id {
+                            GoalMemberId::GoalId(goal_id) => {
+                                let repr_goal_id = self.find_repr_goal(goal_id.clone()).await?;
+                                new_goal_member_ids.push(GoalMemberId::GoalId(repr_goal_id));
+                            }
+                            GoalMemberId::PhysicalExpressionId(physical_expr_id) => {
+                                let repr_physical_expr_id = self.find_repr_physical_expr(physical_expr_id.clone()).await?;
+                                new_goal_member_ids.push(GoalMemberId::PhysicalExpressionId(repr_physical_expr_id));
+                            }
+                        }
+                    }
+                    new_children.push(Child::VarLength(new_goal_member_ids));
+                }
+            }
+        }
+        repr_physical_expr.children = new_children;
+        Ok(repr_physical_expr)
+    }
+
+    /// Merges two goals into a single goal.
+    async fn merge_goals_helper(
+        &mut self,
+        goal_id1: GoalId,
+        goal_id2: GoalId,
+    ) -> MemoizeResult<MergeGoalResult> {
+        let goal_2 = self.goals.remove(&goal_id2).unwrap();
+        let goal_1 = self.goals.get(&goal_id1).unwrap();
+        let goal_1_props = &goal_1.goal.1;
+        let goal_2_props = &goal_2.goal.1;
+        self.repr_goal.merge(&goal_id2, &goal_id1);
+
+        let mut merged_goal_result = MergeGoalResult {
+            merged_goals: HashMap::new(),
+            best_expr: None,
+            new_repr_goal_id: goal_id1,
+        };
+
+        let best_expr_goal1 = self.get_best_optimized_physical_expr(goal_id1).await?;
+        let best_expr_goal2 = self.get_best_optimized_physical_expr(goal_id2).await?;
+
+        let best_expr = match (best_expr_goal1, best_expr_goal2) {
+            (Some(best_expr_goal1), Some(best_expr_goal2)) => {
+                Some(if best_expr_goal1.1 < best_expr_goal2.1 {
+                    best_expr_goal1
+                } else {
+                    best_expr_goal2
+                })
+            }
+            (Some(best_expr_goal1), None) => Some(best_expr_goal1),
+            (None, Some(best_expr_goal2)) => Some(best_expr_goal2),
+            (None, None) => None,
+        };
+
+        if let Some(best_expr) = best_expr {
+            merged_goal_result.best_expr = Some(best_expr);
+        }
+
+        let mut merged_goal_info_1 = MergedGoalInfo {
+            goal_id: goal_id1.clone(),
+            members: goal_1.members.iter().cloned().collect(),
+            seen_best_expr_before_merge: {
+                if let Some(best_expr_goal1) = best_expr_goal1 {
+                    if let Some(best_expr_goal2) = best_expr_goal2 {
+                        // goal 1 and goal 2 both had expr, return true if goal 1's is better or equal to goal 2's
+                        best_expr_goal1.1 <= best_expr_goal2.1
+                    } else {
+                        // goal 1 had a best expr before merge but goal 2 didn't
+                        true
+                    }
+                } else {
+                    // neither goal had a best expr before merge
+                    false
+                }
+            },
+        };
+
+        let mut merged_goal_info_2 = MergedGoalInfo {
+            goal_id: goal_id2.clone(),
+            members: goal_2.members.iter().cloned().collect(),
+            seen_best_expr_before_merge: {
+                if let Some(best_expr_goal2) = best_expr_goal2 {
+                    if let Some(best_expr_goal1) = best_expr_goal1 {
+                        // goal 2 and goal 1 both had expr, return true if goal 2's is better or equal to goal 1's
+                        best_expr_goal2.1 <= best_expr_goal1.1
+                    } else {
+                        // goal 2 had a best expr before merge but goal 1 didn't
+                        true
+                    }
+                } else {
+                    // neither goal had a best expr before merge
+                    false
+                }
+            },
+        };
+
+        merged_goal_result
+            .merged_goals
+            .insert(goal_id1.clone(), merged_goal_info_1);
+        merged_goal_result
+            .merged_goals
+            .insert(goal_id2.clone(), merged_goal_info_2);
+
+        // Now, we need to update all the physical exprs that depend on goal 2 to now depend on goal 1.
+        let goal_2_dependent_physical_exprs = self
+            .goal_dependent_physical_exprs
+            .get(&goal_id2)
+            .unwrap()
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for physical_expr_id in goal_2_dependent_physical_exprs {
+            let (physical_expr, cost) = self.physical_exprs.get(&physical_expr_id).unwrap();
+            let repr_physical_expr = self
+                .create_repr_physical_expr(physical_expr.clone())
+                .await?;
+            let repr_physical_expr_id = self.get_physical_expr_id(&repr_physical_expr).await?;
+
+            // merge the physical exprs
+            self.repr_physical_expr
+                .merge(&physical_expr_id, &repr_physical_expr_id);
+        }
+
+        Ok(merged_goal_result)
+    }
+
     /// Generates a new group id.
     fn next_group_id(&mut self) -> GroupId {
         let group_id = GroupId(self.next_shared_id);
