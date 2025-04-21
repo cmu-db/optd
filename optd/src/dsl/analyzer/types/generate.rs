@@ -1,4 +1,4 @@
-use super::registry::{TypeRegistry, create_function_type};
+use super::registry::TypeRegistry;
 use crate::dsl::{
     analyzer::{
         context::Context,
@@ -354,14 +354,8 @@ impl TypeRegistry {
         args: &[Arc<Expr<TypedSpan>>],
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
-        //TODO: WRONG
-        let arg_types: Vec<_> = args.iter().map(|arg| arg.metadata.ty.clone()).collect();
-        let fun_type = TypedSpan::new(
-            create_function_type(&arg_types, &expr.metadata.ty),
-            expr.metadata.span.clone(),
-        );
-        self.add_constraint_subtypes(&fun_type, &[func.metadata.clone()]);
-
+        let arg_types: Vec<_> = args.iter().map(|arg| arg.metadata.clone()).collect();
+        self.add_constraint_call(&expr.metadata, &func.metadata, &arg_types);
         self.generate_expr(func, ctx.clone())?;
         args.iter()
             .try_for_each(|arg| self.generate_expr(arg, ctx.clone()))
@@ -578,7 +572,7 @@ mod scope_check_tests {
                 CoreData, Expr, ExprKind, FunKind, HIR, LetBinding, MatchArm, Pattern, PatternKind,
                 TypedSpan, Value,
             },
-            types::registry::type_registry_tests::create_test_span,
+            types::registry::{create_function_type, type_registry_tests::create_test_span},
         },
         utils::span::Span,
     };
