@@ -341,7 +341,7 @@ impl Diagnose for Box<AnalyzerError> {
                 found,
             } => self.build_single_span_report(
                 span,
-                &format!("Argument number mismatch for function call"),
+                "Argument number mismatch for function call",
                 &format!("Expected {} arguments, but found {}", expected, found),
                 "Check the function signature and ensure you're passing the correct number of arguments",
             ),

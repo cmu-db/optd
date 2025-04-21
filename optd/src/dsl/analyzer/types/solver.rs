@@ -114,7 +114,7 @@ impl TypeRegistry {
                 }
 
                 let param_types = match &**param {
-                    Tuple(types) => types.iter().cloned().collect::<Vec<_>>(),
+                    Tuple(types) => types.to_vec(),
                     Unit => vec![],
                     _ => vec![param.clone()],
                 };
