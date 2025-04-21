@@ -23,3 +23,5 @@ fn main(log: Logical): Logical? = match log
     | Add(left, right) -> left
     \ _ -> fail("brru")
 
+fn (log: [Logical]) vla() = match log 
+    \ [a .. [v .. bla]] -> none

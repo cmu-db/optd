@@ -95,6 +95,8 @@ impl ASTConverter {
                 let hir_head = self.convert_pattern(head, &None)?;
                 let hir_tail = self.convert_pattern(tail, &None)?;
 
+                ty = TypeKind::Array(hir_head.metadata.ty.clone()).into();
+
                 ArrayDecomp(hir_head.into(), hir_tail.into())
             }
         };

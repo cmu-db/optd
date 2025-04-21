@@ -395,7 +395,7 @@ impl fmt::Display for Type {
                     write!(f, ")")
                 }
             }
-            Map(key, val) => write!(f, "{{{} -> {}}}", key, val),
+            Map(key, val) => write!(f, "{{{} : {}}}", key, val),
             Optional(inner) => write!(f, "{}?", inner),
 
             // Memo status types

@@ -178,12 +178,7 @@ impl TypeRegistry {
             }
             Operator(_) => panic!("Operators may not be in the HIR yet"),
             ArrayDecomp(head, tail) => {
-                let head_ty = TypedSpan::new(
-                    TypeKind::Array(head.metadata.ty.clone()).into(),
-                    head.metadata.span.clone(),
-                );
-                self.add_constraint_subtypes(&pattern.metadata, &[head_ty, tail.metadata.clone()]);
-
+                self.add_constraint_subtypes(&pattern.metadata, &[tail.metadata.clone()]);
                 self.generate_pattern(head, ctx)?;
                 self.generate_pattern(tail, ctx)?;
             }
@@ -373,11 +368,11 @@ impl TypeRegistry {
     }
 
     /// Generates constraints for map expressions while verifying scopes.
-    /// Enforces the type relationship:
-    /// For each key:
+    /// Enforces the type relationship for each key:
     /// - `EqHash >: key`
     /// - `map_key >: key`
-    /// For each value:
+    /// 
+    /// Enforces the type relationship for each value:
     /// - `map_value >: value`
     fn generate_map(
         &mut self,
@@ -396,7 +391,7 @@ impl TypeRegistry {
         });
 
         let Map(map_key, map_value) = &*expr.metadata.ty else {
-            panic!("Type should be set to map during from_ast conversion");
+            panic!("Type should be set to map in from_ast");
         };
 
         entries.iter().for_each(|(k, v)| {
@@ -479,22 +474,36 @@ impl TypeRegistry {
 
         match core_data {
             CoreData::Array(exprs) => {
-                let entries: Vec<_> = exprs
-                    .iter()
-                    .map(|val| TypedSpan::new(Array(val.metadata.ty.clone()).into(), span.clone()))
-                    .collect();
+                let Array(array_element_type) = &*expr.metadata.ty else {
+                    panic!("Type should be set to array in from_ast");
+                };
 
-                self.add_constraint_subtypes(&expr.metadata, &entries);
+                exprs.iter().for_each(|val| {
+                    self.add_constraint_subtypes(
+                        &TypedSpan::new(array_element_type.clone(), span.clone()),
+                        &[val.metadata.clone()],
+                    );
+                });
+
                 exprs
                     .iter()
                     .try_for_each(|expr| self.generate_expr(expr, ctx.clone()))?;
             }
             CoreData::Tuple(exprs) => {
-                let element_types: Vec<_> =
-                    exprs.iter().map(|expr| expr.metadata.ty.clone()).collect();
-                let tuple_type = TypedSpan::new(Tuple(element_types.clone()).into(), span.clone());
+                let Tuple(tuple_element_types) = &*expr.metadata.ty else {
+                    panic!("Type should be set to tuple in from_ast");
+                };
 
-                self.add_constraint_subtypes(&expr.metadata, &[tuple_type.clone()]);
+                exprs
+                    .iter()
+                    .zip(tuple_element_types.iter())
+                    .for_each(|(expr_val, ty)| {
+                        self.add_constraint_subtypes(
+                            &TypedSpan::new(ty.clone(), span.clone()),
+                            &[expr_val.metadata.clone()],
+                        );
+                    });
+
                 exprs
                     .iter()
                     .try_for_each(|expr| self.generate_expr(expr, ctx.clone()))?;
@@ -523,8 +532,7 @@ impl TypeRegistry {
                 self.generate_expr(body, fn_ctx)?;
             }
             CoreData::Fail(expr) => {
-                let string_type =
-                    TypedSpan::new(TypeKind::String.into(), expr.metadata.span.clone());
+                let string_type = TypedSpan::new(String.into(), expr.metadata.span.clone());
                 self.add_constraint_equal(&expr.metadata, &string_type);
                 self.generate_expr(expr, ctx)?;
             }
