@@ -31,8 +31,6 @@ pub struct MemoryMemo {
     physical_exprs: HashMap<PhysicalExpressionId, (PhysicalExpression, Option<Cost>)>,
     /// Physical expression node to id.
     physical_expr_node_to_id_index: HashMap<PhysicalExpression, PhysicalExpressionId>,
-    /// A mapping from physical expression id to all goals that contain it.
-    physical_expr_goal_index: HashMap<PhysicalExpressionId, HashSet<GoalId>>,
 
     /// Dependent physical expression ids for each goal id.
     /// This is used to quickly find all the physical expressions that have a child equal to the goal id, which is the key.
@@ -848,8 +846,12 @@ impl MemoryMemo {
                                 new_goal_member_ids.push(GoalMemberId::GoalId(repr_goal_id));
                             }
                             GoalMemberId::PhysicalExpressionId(physical_expr_id) => {
-                                let repr_physical_expr_id = self.find_repr_physical_expr(physical_expr_id.clone()).await?;
-                                new_goal_member_ids.push(GoalMemberId::PhysicalExpressionId(repr_physical_expr_id));
+                                let repr_physical_expr_id = self
+                                    .find_repr_physical_expr(physical_expr_id.clone())
+                                    .await?;
+                                new_goal_member_ids.push(GoalMemberId::PhysicalExpressionId(
+                                    repr_physical_expr_id,
+                                ));
                             }
                         }
                     }
