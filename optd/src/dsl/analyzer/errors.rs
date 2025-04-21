@@ -1,9 +1,13 @@
 use super::{hir::Identifier, types::registry::Type};
-use crate::dsl::utils::{
-    errors::Diagnose,
-    span::{Span, Spanned},
+use crate::dsl::{
+    analyzer::types::registry::type_display,
+    utils::{
+        errors::Diagnose,
+        span::{Span, Spanned},
+    },
 };
 use ariadne::{Color, Label, Report, ReportKind, Source};
+use std::collections::HashMap;
 
 /// Wrapper for analysis errors
 #[derive(Debug)]
@@ -89,6 +93,8 @@ pub enum AnalyzerErrorKind {
         child: Type,
         parent: Type,
         span: Span,
+        // To be able to call display function of Type.
+        unknowns: HashMap<usize, Type>,
     },
 
     ArgumentNumberMismatch {
@@ -100,12 +106,16 @@ pub enum AnalyzerErrorKind {
     InvalidCallReceiver {
         function: Type,
         span: Span,
+        // To be able to call display function of Type.
+        unknowns: HashMap<usize, Type>,
     },
 
     InvalidFieldAccess {
         object: Type,
         span: Span,
         field: String,
+        // To be able to call display function of Type.
+        unknowns: HashMap<usize, Type>,
     },
 }
 
@@ -213,11 +223,17 @@ impl AnalyzerErrorKind {
         .into()
     }
 
-    pub fn new_invalid_subtype(child: &Type, parent: &Type, span: &Span) -> Box<Self> {
+    pub fn new_invalid_subtype(
+        child: &Type,
+        parent: &Type,
+        span: &Span,
+        unknowns: HashMap<usize, Type>,
+    ) -> Box<Self> {
         Self::InvalidSubtype {
             child: child.clone(),
             parent: parent.clone(),
             span: span.clone(),
+            unknowns,
         }
         .into()
     }
@@ -231,19 +247,30 @@ impl AnalyzerErrorKind {
         .into()
     }
 
-    pub fn new_invalid_call_receiver(function: &Type, span: &Span) -> Box<Self> {
+    pub fn new_invalid_call_receiver(
+        function: &Type,
+        span: &Span,
+        unknowns: HashMap<usize, Type>,
+    ) -> Box<Self> {
         Self::InvalidCallReceiver {
             function: function.clone(),
             span: span.clone(),
+            unknowns,
         }
         .into()
     }
 
-    pub fn new_invalid_field_access(object: &Type, span: &Span, field: &Identifier) -> Box<Self> {
+    pub fn new_invalid_field_access(
+        object: &Type,
+        span: &Span,
+        field: &Identifier,
+        unknowns: HashMap<usize, Type>,
+    ) -> Box<Self> {
         Self::InvalidFieldAccess {
             object: object.clone(),
             span: span.clone(),
             field: field.clone(),
+            unknowns,
         }
         .into()
     }
@@ -334,7 +361,7 @@ impl Diagnose for Box<AnalyzerError> {
                 &format!("Expected {} fields, but found {}", expected, found),
                 "Check the number of fields in the type definition",
             ),
-            InvalidSubtype { child, parent, span } => self.build_type_mismatch_report(child, parent, span),
+            InvalidSubtype { child, parent, span, unknowns } => self.build_type_mismatch_report(child, parent, span, unknowns),
             ArgumentNumberMismatch {
                 span,
                 expected,
@@ -348,13 +375,14 @@ impl Diagnose for Box<AnalyzerError> {
             InvalidCallReceiver {
                 function,
                 span,
+                unknowns
             } => self.build_single_span_report(
                 span,
                 "Invalid function call",
-                &format!("Expression of type '{}' cannot be called", function),
+                &format!("Expression of type '{}' cannot be called", type_display(function, unknowns)),
                 "Only functions, maps, and arrays can be called",
             ),
-            InvalidFieldAccess { object, span, field } => self.build_invalid_field_access_report(object, span, field),
+            InvalidFieldAccess { object, span, field, unknowns } => self.build_invalid_field_access_report(object, span, field, unknowns),
         }
     }
 
@@ -430,15 +458,26 @@ impl AnalyzerError {
     }
 
     /// Helper method to build a report for type mismatch errors
-    fn build_type_mismatch_report(&self, child: &Type, parent: &Type, span: &Span) -> Report<Span> {
+    fn build_type_mismatch_report(
+        &self,
+        child: &Type,
+        parent: &Type,
+        span: &Span,
+        unknowns: &HashMap<usize, Type>,
+    ) -> Report<Span> {
         let mut report = Report::build(ReportKind::Error, span.clone()).with_message(format!(
             "Type error: '{}' is not a subtype of '{}'",
-            child, parent
+            type_display(child, unknowns),
+            type_display(parent, unknowns)
         ));
 
         report = report.with_label(
             Label::new(span.clone())
-                .with_message(format!("Expected type '{}' but found '{}'", parent, child))
+                .with_message(format!(
+                    "Expected type '{}' but found '{}'",
+                    type_display(parent, unknowns),
+                    type_display(child, unknowns)
+                ))
                 .with_color(Color::Red),
         );
 
@@ -462,15 +501,20 @@ impl AnalyzerError {
         object: &Type,
         span: &Span,
         field: &String,
+        unknowns: &HashMap<usize, Type>,
     ) -> Report<Span> {
         let mut report = Report::build(ReportKind::Error, span.clone()).with_message(format!(
             "Invalid field access: type '{}' has no field '{}'",
-            object, *field
+            type_display(object, unknowns),
+            *field,
         ));
 
         report = report.with_label(
             Label::new(span.clone())
-                .with_message(format!("Expression of type '{}'", object))
+                .with_message(format!(
+                    "Expression of type '{}'",
+                    type_display(object, unknowns)
+                ))
                 .with_color(Color::Blue),
         );
 

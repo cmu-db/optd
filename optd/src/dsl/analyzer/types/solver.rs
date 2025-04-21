@@ -1,11 +1,8 @@
 use super::registry::{Constraint, Type, TypeRegistry};
-use crate::dsl::{
-    analyzer::{
-        errors::AnalyzerErrorKind,
-        hir::{Identifier, TypedSpan},
-        types::{registry::TypeKind, subtypes::EnforceError},
-    },
-    utils::span::OptionalSpanned,
+use crate::dsl::analyzer::{
+    errors::AnalyzerErrorKind,
+    hir::{Identifier, TypedSpan},
+    types::{registry::TypeKind, subtypes::EnforceError},
 };
 use std::mem;
 
@@ -77,9 +74,10 @@ impl TypeRegistry {
                 // However, in the future we might want to do something fancier here to
                 // improve error reporting.
                 Merge | Meet | Subtype => AnalyzerErrorKind::new_invalid_subtype(
-                    &self.resolve_type(&child.ty),
-                    &self.resolve_type(parent_ty),
+                    &child.ty,
+                    parent_ty,
                     &child.span,
+                    self.resolved_unknown.clone(),
                 ),
             }
         })
@@ -171,6 +169,7 @@ impl TypeRegistry {
             _ => Err(AnalyzerErrorKind::new_invalid_call_receiver(
                 &inner_resolved,
                 &inner.span,
+                self.resolved_unknown.clone(),
             )),
         }
     }
@@ -191,7 +190,12 @@ impl TypeRegistry {
             Adt(name) => self
                 .get_product_field_type(name, field)
                 .ok_or_else(|| {
-                    AnalyzerErrorKind::new_invalid_field_access(&inner_resolved, &inner.span, field)
+                    AnalyzerErrorKind::new_invalid_field_access(
+                        &inner_resolved,
+                        &inner.span,
+                        field,
+                        self.resolved_unknown.clone(),
+                    )
                 })
                 .and_then(|field_ty| {
                     self.check_subtype_constraint(
@@ -203,15 +207,16 @@ impl TypeRegistry {
                 &inner_resolved,
                 &inner.span,
                 field,
+                self.resolved_unknown.clone(),
             )),
         }
     }
 
-    /// Recursively resolves all Unknown types within a type structure.
-    ///self.
-    /// This method walks through composite types (arrays, tuples, etc.)
-    /// and replaces any Unknown types with their concrete inferred types
-    /// from the registry.
+    /// Resolves any Unknown types to their concrete types.
+    ///
+    /// This method checks if a type is an Unknown variant and replaces it
+    /// with its concrete inferred type from the registry. Other types are
+    /// returned as-is.
     ///
     /// # Arguments
     ///
@@ -219,32 +224,19 @@ impl TypeRegistry {
     ///
     /// # Returns
     ///
-    /// A new Type with all Unknown types replaced by their concrete types
+    /// The resolved Type if it was an Unknown type, otherwise the original Type
     pub(super) fn resolve_type(&self, ty: &Type) -> Type {
         use TypeKind::*;
 
-        let resolved_kind = match &*ty.value {
+        match &*ty.value {
             Unknown(id) => {
                 if let Some(resolved) = self.resolved_unknown.get(id) {
-                    return self.resolve_type(resolved);
+                    resolved.clone()
                 } else {
-                    return ty.clone();
+                    ty.clone()
                 }
             }
-            Array(elem) => Array(self.resolve_type(elem)),
-            Closure(param, ret) => Closure(self.resolve_type(param), self.resolve_type(ret)),
-            Tuple(elems) => Tuple(elems.iter().map(|e| self.resolve_type(e)).collect()),
-            Map(key, val) => Map(self.resolve_type(key), self.resolve_type(val)),
-            Optional(inner) => Optional(self.resolve_type(inner)),
-            Stored(inner) => Stored(self.resolve_type(inner)),
-            Costed(inner) => Costed(self.resolve_type(inner)),
-            // For all other types that don't contain nested types, just clone.
-            _ => return ty.clone(),
-        };
-
-        OptionalSpanned {
-            value: resolved_kind.into(),
-            span: ty.span.clone(),
+            _ => ty.clone(),
         }
     }
 }

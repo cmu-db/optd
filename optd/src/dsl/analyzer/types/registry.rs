@@ -3,7 +3,6 @@ use crate::dsl::analyzer::hir::{Identifier, TypedSpan};
 use crate::dsl::parser::ast::{Adt, Field, Type as AstType};
 use crate::dsl::utils::span::{OptionalSpanned, Span, Spanned};
 use Adt::*;
-use core::fmt;
 use std::collections::BTreeMap;
 use std::{
     collections::{HashMap, HashSet},
@@ -387,59 +386,82 @@ fn convert_ast_type(ast_ty: Spanned<AstType>) -> Type {
     OptionalSpanned::spanned(kind, span)
 }
 
-impl fmt::Display for Type {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use TypeKind::*;
+/// Converts a type to its string representation, resolving unknown types when possible.
+///
+/// This function formats a type as a string, including proper handling of unknown types.
+/// When an unknown type is encountered, it will be resolved using the provided map.
+/// If the unknown type has been resolved, it will be displayed with a ">=" prefix
+/// to indicate it represents "at least" this type.
+///
+/// # Arguments
+///
+/// * `ty` - The type to convert to a string
+/// * `resolved_unknown` - Map of unknown type IDs to their resolved concrete types
+///
+/// # Returns
+///
+/// A string representation of the type
+pub(crate) fn type_display(ty: &Type, resolved_unknown: &HashMap<usize, Type>) -> String {
+    use TypeKind::*;
 
-        match &*self.value {
-            // Primitive types
-            I64 => write!(f, "I64"),
-            String => write!(f, "String"),
-            Bool => write!(f, "Bool"),
-            F64 => write!(f, "F64"),
+    match &*ty.value {
+        // Primitive types.
+        I64 => "I64".to_string(),
+        String => "String".to_string(),
+        Bool => "Bool".to_string(),
+        F64 => "F64".to_string(),
 
-            // Special types
-            Unit => write!(f, "()"),
-            Universe => write!(f, "Universe"),
-            Nothing => write!(f, "Nothing"),
-            None => write!(f, "None"),
+        // Special types.
+        Unit => "()".to_string(),
+        Universe => "Universe".to_string(),
+        Nothing => "Nothing".to_string(),
+        None => "None".to_string(),
 
-            // Unknown type
-            Unknown(id) => write!(f, "Unknown({})", id),
-
-            // User types
-            Adt(name) => write!(f, "{}", name),
-            Generic(name) => write!(f, "{}", name),
-
-            // Composite types
-            Array(elem) => write!(f, "[{}]", elem),
-            Closure(param, ret) => write!(f, "{} -> {}", param, ret),
-            Tuple(elems) => {
-                if elems.is_empty() {
-                    write!(f, "()")
-                } else {
-                    write!(f, "(")?;
-                    for (i, elem) in elems.iter().enumerate() {
-                        if i > 0 {
-                            write!(f, ", ")?;
-                        }
-                        write!(f, "{}", elem)?;
-                    }
-                    write!(f, ")")
-                }
-            }
-            Map(key, val) => write!(f, "{{{} : {}}}", key, val),
-            Optional(inner) => write!(f, "{}?", inner),
-
-            // Memo status types
-            Stored(inner) => write!(f, "{}*", inner),
-            Costed(inner) => write!(f, "{}$", inner),
-
-            // Native trait types
-            Concat => write!(f, "Concat"),
-            EqHash => write!(f, "EqHash"),
-            Arithmetic => write!(f, "Arithmetic"),
+        // Unknown type
+        Unknown(id) => {
+            format!(
+                "≧ {}",
+                type_display(resolved_unknown.get(id).unwrap(), resolved_unknown)
+            )
         }
+
+        // User types.
+        Adt(name) => name.to_string(),
+        Generic(name) => name.to_string(),
+
+        // Composite types.
+        Array(elem) => format!("[{}]", type_display(elem, resolved_unknown)),
+        Closure(param, ret) => format!(
+            "{} -> {}",
+            type_display(param, resolved_unknown),
+            type_display(ret, resolved_unknown)
+        ),
+        Tuple(elems) => {
+            if elems.is_empty() {
+                "()".to_string()
+            } else {
+                let elem_strs: Vec<_> = elems
+                    .iter()
+                    .map(|elem| type_display(elem, resolved_unknown))
+                    .collect();
+                format!("({})", elem_strs.join(", "))
+            }
+        }
+        Map(key, val) => format!(
+            "{{{}:{}}}",
+            type_display(key, resolved_unknown),
+            type_display(val, resolved_unknown)
+        ),
+        Optional(inner) => format!("{}?", type_display(inner, resolved_unknown)),
+
+        // Memo status types.
+        Stored(inner) => format!("{}*", type_display(inner, resolved_unknown)),
+        Costed(inner) => format!("{}$", type_display(inner, resolved_unknown)),
+
+        // Native trait types.
+        Concat => "Concat".to_string(),
+        EqHash => "EqHash".to_string(),
+        Arithmetic => "Arithmetic".to_string(),
     }
 }
 
