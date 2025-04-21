@@ -33,7 +33,6 @@ impl ASTConverter {
     pub(super) fn convert_type(
         &mut self,
         ast_type: &Spanned<AstType>,
-        ascending: bool,
         generics: &HashSet<Identifier>,
     ) -> Result<Type, Box<AnalyzerErrorKind>> {
         use TypeKind::*;
@@ -45,33 +44,27 @@ impl ASTConverter {
             AstType::Bool => Bool,
             AstType::Float64 => F64,
             AstType::Unit => Unit,
-            AstType::Array(elem_type) => Array(self.convert_type(elem_type, ascending, generics)?),
+            AstType::Array(elem_type) => Array(self.convert_type(elem_type, generics)?),
             AstType::Closure(param_type, return_type) => Closure(
-                self.convert_type(param_type, ascending, generics)?,
-                self.convert_type(return_type, ascending, generics)?,
+                self.convert_type(param_type, generics)?,
+                self.convert_type(return_type, generics)?,
             ),
             AstType::Tuple(types) => {
                 let mut hir_types = Vec::new();
                 for t in types {
-                    let converted_type = self.convert_type(t, ascending, generics)?;
+                    let converted_type = self.convert_type(t, generics)?;
                     hir_types.push(converted_type);
                 }
 
                 Tuple(hir_types)
             }
             AstType::Map(key_type, value_type) => Map(
-                self.convert_type(key_type, ascending, generics)?,
-                self.convert_type(value_type, ascending, generics)?,
+                self.convert_type(key_type, generics)?,
+                self.convert_type(value_type, generics)?,
             ),
-            AstType::Questioned(inner_type) => {
-                Optional(self.convert_type(inner_type, ascending, generics)?)
-            }
-            AstType::Starred(inner_type) => {
-                Stored(self.convert_type(inner_type, ascending, generics)?)
-            }
-            AstType::Dollared(inner_type) => {
-                Costed(self.convert_type(inner_type, ascending, generics)?)
-            }
+            AstType::Questioned(inner_type) => Optional(self.convert_type(inner_type, generics)?),
+            AstType::Starred(inner_type) => Stored(self.convert_type(inner_type, generics)?),
+            AstType::Dollared(inner_type) => Costed(self.convert_type(inner_type, generics)?),
             AstType::Identifier(name) => {
                 if generics.contains(name) {
                     Generic(name.clone())
@@ -85,13 +78,7 @@ impl ASTConverter {
                 }
             }
             AstType::Error => panic!("AST should no longer contain errors"),
-            AstType::Unknown => {
-                if ascending {
-                    self.registry.new_unknown_asc()
-                } else {
-                    self.registry.new_unknown_desc()
-                }
-            }
+            AstType::Unknown => self.registry.new_unknown(),
         };
 
         Ok(Type::spanned(kind, span))
@@ -137,7 +124,7 @@ mod types_tests {
 
         for (ast_type, expected_type) in test_cases {
             let result = converter
-                .convert_type(&spanned(ast_type), true, &generics)
+                .convert_type(&spanned(ast_type), &generics)
                 .expect("Primitive type conversion should succeed");
             assert_eq!(*result.value, expected_type);
         }
@@ -155,7 +142,7 @@ mod types_tests {
         // Test array type
         let array_type = AstType::Array(spanned(AstType::Int64));
         let result = converter
-            .convert_type(&spanned(array_type), true, &generics)
+            .convert_type(&spanned(array_type), &generics)
             .expect("Array type conversion should succeed");
         match &*result.value {
             TypeKind::Array(elem_type) => assert_eq!(*elem_type.value, TypeKind::I64),
@@ -167,7 +154,7 @@ mod types_tests {
         let return_type = spanned(AstType::Bool);
         let closure_type = AstType::Closure(param_type, return_type);
         let result = converter
-            .convert_type(&spanned(closure_type), true, &generics)
+            .convert_type(&spanned(closure_type), &generics)
             .expect("Closure type conversion should succeed");
         match &*result.value {
             TypeKind::Closure(param, ret) => {
@@ -182,7 +169,7 @@ mod types_tests {
         let value_type = spanned(AstType::Identifier("TestType".to_string()));
         let map_type = AstType::Map(key_type, value_type);
         let result = converter
-            .convert_type(&spanned(map_type), true, &generics)
+            .convert_type(&spanned(map_type), &generics)
             .expect("Map type conversion should succeed");
         match &*result.value {
             TypeKind::Map(key, val) => {
@@ -206,7 +193,7 @@ mod types_tests {
         let inner_type = spanned(AstType::Int64);
         let questioned_type = AstType::Questioned(inner_type);
         let result = converter
-            .convert_type(&spanned(questioned_type), true, &generics)
+            .convert_type(&spanned(questioned_type), &generics)
             .expect("Optional type conversion should succeed");
         match &*result.value {
             TypeKind::Optional(inner) => assert_eq!(*inner.value, TypeKind::I64),
@@ -217,7 +204,7 @@ mod types_tests {
         let inner_type = spanned(AstType::Int64);
         let starred_type = AstType::Starred(inner_type);
         let result = converter
-            .convert_type(&spanned(starred_type), true, &generics)
+            .convert_type(&spanned(starred_type), &generics)
             .expect("Stored type conversion should succeed");
         match &*result.value {
             TypeKind::Stored(inner) => assert_eq!(*inner.value, TypeKind::I64),
@@ -228,7 +215,7 @@ mod types_tests {
         let inner_type = spanned(AstType::Int64);
         let dollared_type = AstType::Dollared(inner_type);
         let result = converter
-            .convert_type(&spanned(dollared_type), true, &generics)
+            .convert_type(&spanned(dollared_type), &generics)
             .expect("Costed type conversion should succeed");
         match &*result.value {
             TypeKind::Costed(inner) => assert_eq!(*inner.value, TypeKind::I64),
@@ -239,7 +226,7 @@ mod types_tests {
         let inner_type = spanned(AstType::Identifier("TestType".to_string()));
         let starred_type = AstType::Starred(inner_type);
         let result = converter
-            .convert_type(&spanned(starred_type), true, &generics)
+            .convert_type(&spanned(starred_type), &generics)
             .expect("Stored type with identifier should succeed");
         match &*result.value {
             TypeKind::Stored(inner) => {
@@ -262,7 +249,7 @@ mod types_tests {
         let adt_type = AstType::Identifier("MyType".to_string());
         let generics = HashSet::new();
         let result = converter
-            .convert_type(&spanned(adt_type), true, &generics)
+            .convert_type(&spanned(adt_type), &generics)
             .expect("Registered ADT type conversion should succeed");
         match &*result.value {
             TypeKind::Adt(name) => assert_eq!(name, "MyType"),
@@ -271,7 +258,7 @@ mod types_tests {
 
         // Test undefined type identifier - should return an error
         let undefined_type = AstType::Identifier("UndefinedType".to_string());
-        let result = converter.convert_type(&spanned(undefined_type), true, &generics);
+        let result = converter.convert_type(&spanned(undefined_type), &generics);
         assert!(result.is_err(), "Expected error for undefined type");
 
         // Test generic identifier
@@ -279,7 +266,7 @@ mod types_tests {
         let mut generics = HashSet::new();
         generics.insert("T".to_string());
         let result = converter
-            .convert_type(&spanned(generic_type), true, &generics)
+            .convert_type(&spanned(generic_type), &generics)
             .expect("Generic type conversion should succeed");
         match &*result.value {
             TypeKind::Generic(name) => assert_eq!(name, "T"),
@@ -308,7 +295,6 @@ mod types_tests {
             converter
                 .convert_type(
                     &spanned(AstType::Identifier("TypeA".to_string())),
-                    true,
                     &generics
                 )
                 .is_ok()
@@ -317,7 +303,6 @@ mod types_tests {
             converter
                 .convert_type(
                     &spanned(AstType::Identifier("TypeB".to_string())),
-                    true,
                     &generics
                 )
                 .is_ok()
@@ -326,7 +311,6 @@ mod types_tests {
         // Invalid types should return errors
         let result = converter.convert_type(
             &spanned(AstType::Identifier("UnknownType".to_string())),
-            true,
             &generics,
         );
         assert!(result.is_err());
@@ -338,7 +322,6 @@ mod types_tests {
                     &spanned(AstType::Array(spanned(AstType::Identifier(
                         "TypeA".to_string()
                     )))),
-                    true,
                     &generics
                 )
                 .is_ok()
@@ -349,7 +332,6 @@ mod types_tests {
             &spanned(AstType::Array(spanned(AstType::Identifier(
                 "UnknownType".to_string(),
             )))),
-            true,
             &generics,
         );
         assert!(result.is_err());
@@ -372,7 +354,7 @@ mod types_tests {
         let array_type = AstType::Array(spanned(AstType::Identifier("DataType".to_string())));
         assert!(
             converter
-                .convert_type(&spanned(array_type), true, &generics)
+                .convert_type(&spanned(array_type), &generics)
                 .is_ok()
         );
 
@@ -380,7 +362,7 @@ mod types_tests {
         let invalid_array = AstType::Array(spanned(AstType::Identifier("InvalidType".to_string())));
         assert!(
             converter
-                .convert_type(&spanned(invalid_array), true, &generics)
+                .convert_type(&spanned(invalid_array), &generics)
                 .is_err()
         );
 
@@ -391,7 +373,7 @@ mod types_tests {
         );
         assert!(
             converter
-                .convert_type(&spanned(map_type), true, &generics)
+                .convert_type(&spanned(map_type), &generics)
                 .is_ok()
         );
 
@@ -402,7 +384,7 @@ mod types_tests {
         );
         assert!(
             converter
-                .convert_type(&spanned(invalid_map1), true, &generics)
+                .convert_type(&spanned(invalid_map1), &generics)
                 .is_err()
         );
 
@@ -413,7 +395,7 @@ mod types_tests {
         );
         assert!(
             converter
-                .convert_type(&spanned(invalid_map2), true, &generics)
+                .convert_type(&spanned(invalid_map2), &generics)
                 .is_err()
         );
 
@@ -424,7 +406,7 @@ mod types_tests {
         )));
         assert!(
             converter
-                .convert_type(&spanned(nested_type), true, &generics)
+                .convert_type(&spanned(nested_type), &generics)
                 .is_ok()
         );
 
@@ -435,7 +417,7 @@ mod types_tests {
         )));
         assert!(
             converter
-                .convert_type(&spanned(invalid_nested), true, &generics)
+                .convert_type(&spanned(invalid_nested), &generics)
                 .is_err()
         );
     }
@@ -457,7 +439,7 @@ mod types_tests {
         let generic_type = AstType::Identifier("T".to_string());
         assert!(
             converter
-                .convert_type(&spanned(generic_type), true, &generics)
+                .convert_type(&spanned(generic_type), &generics)
                 .is_ok()
         );
 
@@ -465,7 +447,7 @@ mod types_tests {
         let data_type = AstType::Identifier("DataType".to_string());
         assert!(
             converter
-                .convert_type(&spanned(data_type), true, &generics)
+                .convert_type(&spanned(data_type), &generics)
                 .is_ok()
         );
 
@@ -473,7 +455,7 @@ mod types_tests {
         let invalid_type = AstType::Identifier("InvalidType".to_string());
         assert!(
             converter
-                .convert_type(&spanned(invalid_type), true, &generics)
+                .convert_type(&spanned(invalid_type), &generics)
                 .is_err()
         );
 
@@ -484,7 +466,7 @@ mod types_tests {
         );
         assert!(
             converter
-                .convert_type(&spanned(complex_type), true, &generics)
+                .convert_type(&spanned(complex_type), &generics)
                 .is_ok()
         );
 
@@ -495,7 +477,7 @@ mod types_tests {
         );
         assert!(
             converter
-                .convert_type(&spanned(invalid_complex), true, &generics)
+                .convert_type(&spanned(invalid_complex), &generics)
                 .is_err()
         );
     }
@@ -515,7 +497,7 @@ mod types_tests {
             AstType::Questioned(spanned(AstType::Identifier("DataType".to_string())));
         assert!(
             converter
-                .convert_type(&spanned(optional_type), true, &generics)
+                .convert_type(&spanned(optional_type), &generics)
                 .is_ok()
         );
 
@@ -524,7 +506,7 @@ mod types_tests {
             AstType::Questioned(spanned(AstType::Identifier("InvalidType".to_string())));
         assert!(
             converter
-                .convert_type(&spanned(invalid_optional), true, &generics)
+                .convert_type(&spanned(invalid_optional), &generics)
                 .is_err()
         );
 
@@ -532,7 +514,7 @@ mod types_tests {
         let stored_type = AstType::Starred(spanned(AstType::Identifier("DataType".to_string())));
         assert!(
             converter
-                .convert_type(&spanned(stored_type), true, &generics)
+                .convert_type(&spanned(stored_type), &generics)
                 .is_ok()
         );
 
@@ -541,7 +523,7 @@ mod types_tests {
             AstType::Starred(spanned(AstType::Identifier("InvalidType".to_string())));
         assert!(
             converter
-                .convert_type(&spanned(invalid_stored), true, &generics)
+                .convert_type(&spanned(invalid_stored), &generics)
                 .is_err()
         );
 
@@ -549,7 +531,7 @@ mod types_tests {
         let costed_type = AstType::Dollared(spanned(AstType::Identifier("DataType".to_string())));
         assert!(
             converter
-                .convert_type(&spanned(costed_type), true, &generics)
+                .convert_type(&spanned(costed_type), &generics)
                 .is_ok()
         );
 
@@ -558,7 +540,7 @@ mod types_tests {
             AstType::Dollared(spanned(AstType::Identifier("InvalidType".to_string())));
         assert!(
             converter
-                .convert_type(&spanned(invalid_costed), true, &generics)
+                .convert_type(&spanned(invalid_costed), &generics)
                 .is_err()
         );
     }

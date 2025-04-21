@@ -35,21 +35,21 @@ impl TypeRegistry {
 
         let glb_kind = match (&*type1.value, &*type2.value) {
             // Substitute Unknown types with their current inferred type.
-            (UnknownAsc(_) | UnknownDesc(_), _) => {
+            (Unknown(_), _) => {
                 let bound_unknown = self.resolve_type(type1);
                 return self.greatest_lower_bound(&bound_unknown, type2);
             }
-            (_, UnknownAsc(_) | UnknownDesc(_)) => {
+            (_, Unknown(_)) => {
                 let bound_unknown = self.resolve_type(type2);
                 return self.greatest_lower_bound(type1, &bound_unknown);
             }
 
+            // Nothing is the bottom type - GLB with anything is Nothing.
+            (Nothing, _) | (_, Nothing) => Nothing,
+
             // Universe is the top type - GLB(Universe, T) = T.
             (Universe, other) => other.clone(),
             (other, Universe) => other.clone(),
-
-            // Nothing is the bottom type - GLB with anything is Nothing.
-            (Nothing, _) | (_, Nothing) => Nothing,
 
             // Primitive types - check for equality.
             (I64, I64)

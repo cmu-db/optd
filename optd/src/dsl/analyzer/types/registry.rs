@@ -38,9 +38,8 @@ pub enum TypeKind {
     Nothing,  // Inherits all types.
     None,     // Inherits all optionals.
 
-    // Unknown types.
-    UnknownAsc(usize),  // Strictly ascending types.
-    UnknownDesc(usize), // Strictly descending types.
+    // Unknown type.
+    Unknown(usize),
 
     // User types.
     Adt(Identifier),
@@ -245,24 +244,13 @@ impl TypeRegistry {
         Some(convert_ast_type(field.ty))
     }
 
-    /// Creates a new unknown, ascending type.
-    pub fn new_unknown_asc(&mut self) -> TypeKind {
+    pub fn new_unknown(&mut self) -> TypeKind {
         use TypeKind::*;
 
         let id = self.next_unknown_id;
         self.next_unknown_id += 1;
         self.resolved_unknown.insert(id, Nothing.into());
-        UnknownAsc(id)
-    }
-
-    /// Creates a new unknown, descending type.
-    pub fn new_unknown_desc(&mut self) -> TypeKind {
-        use TypeKind::*;
-
-        let id = self.next_unknown_id;
-        self.next_unknown_id += 1;
-        self.resolved_unknown.insert(id, Universe.into());
-        UnknownDesc(id)
+        Unknown(id)
     }
 
     /// Adds a subtyping constraint set: `parent >: all children`
@@ -383,8 +371,8 @@ impl fmt::Display for Type {
             Nothing => write!(f, "Nothing"),
             None => write!(f, "None"),
 
-            UnknownAsc(id) => write!(f, "UnknownAsc({})", id),
-            UnknownDesc(id) => write!(f, "UnknownDesc({})", id),
+            // Unknown type
+            Unknown(id) => write!(f, "Unknown({})", id),
 
             // User types
             Adt(name) => write!(f, "{}", name),

@@ -351,7 +351,7 @@ impl TypeRegistry {
 
     /// Generates constraints for function calls while verifying scopes.
     /// Enforces the type relationship:
-    /// - `func >: Closure(args_types, expr.type)`
+    /// - `Closure(args_types, expr.type) >: func`
     fn generate_call(
         &mut self,
         expr: &Expr<TypedSpan>,
@@ -359,6 +359,7 @@ impl TypeRegistry {
         args: &[Arc<Expr<TypedSpan>>],
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
+        //TODO: WRONG
         let arg_types: Vec<_> = args.iter().map(|arg| arg.metadata.ty.clone()).collect();
         let fun_type = TypedSpan::new(
             create_function_type(&arg_types, &expr.metadata.ty),
@@ -373,8 +374,11 @@ impl TypeRegistry {
 
     /// Generates constraints for map expressions while verifying scopes.
     /// Enforces the type relationship:
-    /// - `EqHash >: all keys`
-    /// - `expr >: all maps`
+    /// For each key:
+    /// - `EqHash >: key`
+    /// - `map_key >: key`
+    /// For each value:
+    /// - `map_value >: value`
     fn generate_map(
         &mut self,
         expr: &Expr<TypedSpan>,
@@ -382,26 +386,29 @@ impl TypeRegistry {
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
         use TypeKind::*;
-
         let span = &expr.metadata.span;
 
-        let eqhash_type = TypedSpan::new(EqHash.into(), span.clone());
-        entries
-            .iter()
-            .for_each(|(k, _)| self.add_constraint_subtypes(&eqhash_type, &[k.metadata.clone()]));
+        entries.iter().for_each(|(k, _)| {
+            self.add_constraint_subtypes(
+                &TypedSpan::new(EqHash.into(), span.clone()),
+                &[k.metadata.clone()],
+            )
+        });
 
-        // TODO: This is WRONG!!!
-        let entry_maps: Vec<_> = entries
-            .iter()
-            .map(|(k, v)| {
-                TypedSpan::new(
-                    Map(k.metadata.ty.clone(), v.metadata.ty.clone()).into(),
-                    span.clone(),
-                )
-            })
-            .collect();
+        let Map(map_key, map_value) = &*expr.metadata.ty else {
+            panic!("Type should be set to map during from_ast conversion");
+        };
 
-        self.add_constraint_subtypes(&expr.metadata, &entry_maps);
+        entries.iter().for_each(|(k, v)| {
+            self.add_constraint_subtypes(
+                &TypedSpan::new(map_key.clone(), span.clone()),
+                &[k.metadata.clone()],
+            );
+            self.add_constraint_subtypes(
+                &TypedSpan::new(map_value.clone(), span.clone()),
+                &[v.metadata.clone()],
+            );
+        });
 
         entries.iter().try_for_each(|(k, v)| {
             self.generate_expr(k, ctx.clone())?;

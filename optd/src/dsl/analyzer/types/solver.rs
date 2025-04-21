@@ -111,7 +111,7 @@ impl TypeRegistry {
         &mut self,
         inner: &TypedSpan,
         field: &Identifier,
-        outer: &TypedSpan,
+        outer: &TypedSpan, // TODO: Should check if that one is no longer
     ) -> Result<bool, Box<AnalyzerErrorKind>> {
         let inner_resolved = self.resolve_type(&inner.ty);
 
@@ -152,7 +152,7 @@ impl TypeRegistry {
         use TypeKind::*;
 
         let resolved_kind = match &*ty.value {
-            UnknownAsc(id) | UnknownDesc(id) => {
+            Unknown(id) => {
                 if let Some(resolved) = self.resolved_unknown.get(id) {
                     return self.resolve_type(resolved);
                 } else {

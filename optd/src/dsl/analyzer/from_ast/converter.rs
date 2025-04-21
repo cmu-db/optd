@@ -92,7 +92,7 @@ impl ASTConverter {
         let params = self.get_parameters(func, &generics)?;
         let param_types = params.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
 
-        let return_type = self.convert_type(&func.return_type, true, &generics)?;
+        let return_type = self.convert_type(&func.return_type, &generics)?;
         let fn_type = create_function_type(&param_types, &return_type);
 
         match &func.body {
@@ -149,7 +149,7 @@ impl ASTConverter {
             Some(receiver) => {
                 vec![(
                     (*receiver.name).clone(),
-                    self.convert_type(&receiver.ty, false, generics)?,
+                    self.convert_type(&receiver.ty, generics)?,
                 )]
             }
             None => vec![],
@@ -163,7 +163,7 @@ impl ASTConverter {
                     .map(|field| {
                         Ok((
                             (*field.name).clone(),
-                            self.convert_type(&field.ty, false, generics)?,
+                            self.convert_type(&field.ty, generics)?,
                         ))
                     })
                     .collect::<Result<Vec<_>, Box<_>>>()?,

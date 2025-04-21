@@ -1,0 +1,19 @@
+data Logical =
+    | Add(left: Logical, right: Logical)
+    | List(bla: [Logical])
+    \ Const(val: I64)
+
+data Physical
+data LogicalProperties
+data PhysicalProperties
+
+// fn ident(other: Logical) = other
+
+// fn main(log: Logical): Logical? = ident(Const(5))
+
+fn vlaa() =
+    let 
+        v = (x: Const, y: Const) -> x#val,
+        vol: Logical = Const(5)
+    in
+        v(vol, vol) 

@@ -47,7 +47,7 @@ impl ASTConverter {
         use PatternKind::*;
 
         let span = spanned_pattern.span.clone();
-        let mut ty = self.registry.new_unknown_asc().into();
+        let mut ty = self.registry.new_unknown().into();
 
         let kind = match &*spanned_pattern.value {
             AstPattern::Error => panic!("AST should no longer contain errors"),
@@ -87,7 +87,7 @@ impl ASTConverter {
                 Wildcard
             }
             AstPattern::EmptyArray => {
-                ty = TypeKind::Array(self.registry.new_unknown_asc().into()).into();
+                ty = TypeKind::Array(self.registry.new_unknown().into()).into();
 
                 EmptyArray
             }

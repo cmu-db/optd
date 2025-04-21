@@ -1,5 +1,6 @@
 data Logical =
     | Add(left: Logical, right: Logical)
+    | List(bla: [Logical])
     \ Const(val: I64)
 
 data Physical
@@ -8,9 +9,17 @@ data PhysicalProperties
 
 fn (log: Logical) fold = x -> x
 
+fn arr_as_function(other: Logical, idx: I64, closure: I64 -> Logical?) = closure(idx)
+
 fn main(log: Logical): Logical? = match log 
+    | Add(Add(_, _), right: Const(val)) -> {
+        let closure = x -> right in
+        closure(5)
+    }
+    | fooo -> arr_as_function(Physical, 0, [log])
+    | List(bla) -> match bla
+        | bla -> bla
+        \ [] -> none
     | Add(left, right) -> left
     \ _ -> fail("brru")
-
-fn map() = {"a" : 5, "b" : 4}
 
