@@ -85,7 +85,7 @@ pub enum Constraint {
     ///
     /// This constraint enforces that `parent` is a supertype of `child`,
     /// allowing substitution of a more specific type where a more general type is expected.
-    Subtype { parent: TypedSpan, child: TypedSpan },
+    Subtype { parent: Type, child: TypedSpan },
 
     /// Closure call: `outer >: inner(args)`
     ///
@@ -104,7 +104,7 @@ pub enum Constraint {
     FieldAccess {
         inner: TypedSpan,
         field: Identifier,
-        outer: TypedSpan,
+        outer: Type,
     },
 }
 
@@ -271,7 +271,7 @@ impl TypeRegistry {
     ///
     /// * `parent` - The type that must be a supertype of all children
     /// * `children` - The types that must be children of parent
-    pub fn add_constraint_subtypes(&mut self, parent: &TypedSpan, children: &[TypedSpan]) {
+    pub fn add_constraint_subtypes(&mut self, parent: &Type, children: &[TypedSpan]) {
         for child in children {
             self.constraints.push(Constraint::Subtype {
                 parent: parent.clone(),
@@ -291,12 +291,12 @@ impl TypeRegistry {
     pub fn add_constraint_equal(&mut self, target_type: &TypedSpan, other_type: &TypedSpan) {
         self.constraints.push(Constraint::Subtype {
             child: target_type.clone(),
-            parent: other_type.clone(),
+            parent: other_type.ty.clone(),
         });
 
         self.constraints.push(Constraint::Subtype {
             child: other_type.clone(),
-            parent: target_type.clone(),
+            parent: target_type.ty.clone(),
         });
     }
 
@@ -334,7 +334,7 @@ impl TypeRegistry {
     /// * `inner` - The type containing the field
     pub fn add_constraint_field_access(
         &mut self,
-        outer: &TypedSpan,
+        outer: &Type,
         field: &Identifier,
         inner: &TypedSpan,
     ) {

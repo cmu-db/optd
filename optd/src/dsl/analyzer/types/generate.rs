@@ -45,7 +45,7 @@ impl TypeRegistry {
                         self.create_function_scope(hir.context.clone(), &args[..], &fun.metadata)?;
 
                     let ret_type = self.ty_return.as_ref().cloned().unwrap();
-                    self.add_constraint_subtypes(&ret_type, &[body.metadata.clone()]);
+                    self.add_constraint_subtypes(&ret_type.ty, &[body.metadata.clone()]);
                     self.generate_expr(body, ctx)
                 }
                 Function(Udf(_)) => Ok(()), // UDFs have no body to check.
@@ -142,8 +142,8 @@ impl TypeRegistry {
             self.generate_expr(&arm.expr, arm_ctx)?;
         }
 
-        self.add_constraint_subtypes(&scrutinee.metadata, &pattern_types);
-        self.add_constraint_subtypes(&expr.metadata, &arm_types);
+        self.add_constraint_subtypes(&scrutinee.metadata.ty, &pattern_types);
+        self.add_constraint_subtypes(&expr.metadata.ty, &arm_types);
 
         self.generate_expr(scrutinee, ctx)
     }
@@ -167,18 +167,16 @@ impl TypeRegistry {
                     .iter()
                     .enumerate()
                     .try_for_each(|(i, field_pat)| {
-                        let field_type = TypedSpan::new(
-                            self.get_product_field_type_by_index(name, i).unwrap(),
-                            field_pat.metadata.span.clone(),
+                        self.add_constraint_subtypes(
+                            &self.get_product_field_type_by_index(name, i).unwrap(),
+                            &[field_pat.metadata.clone()],
                         );
-
-                        self.add_constraint_subtypes(&field_type, &[field_pat.metadata.clone()]);
                         self.generate_pattern(field_pat, ctx)
                     })?;
             }
             Operator(_) => panic!("Operators may not be in the HIR yet"),
             ArrayDecomp(head, tail) => {
-                self.add_constraint_subtypes(&pattern.metadata, &[tail.metadata.clone()]);
+                self.add_constraint_subtypes(&pattern.metadata.ty, &[tail.metadata.clone()]);
                 self.generate_pattern(head, ctx)?;
                 self.generate_pattern(tail, ctx)?;
             }
@@ -204,7 +202,7 @@ impl TypeRegistry {
         let branch_types = [then_branch.metadata.clone(), else_branch.metadata.clone()];
 
         self.add_constraint_equal(&bool_type, &cond.metadata);
-        self.add_constraint_subtypes(&expr.metadata, &branch_types);
+        self.add_constraint_subtypes(&expr.metadata.ty, &branch_types);
 
         self.generate_expr(cond, ctx.clone())?;
         self.generate_expr(then_branch, ctx.clone())?;
@@ -223,7 +221,7 @@ impl TypeRegistry {
         let mut new_ctx = ctx.clone();
         new_ctx.push_scope();
 
-        self.add_constraint_subtypes(&expr.metadata, &[inner_expr.metadata.clone()]);
+        self.add_constraint_subtypes(&expr.metadata.ty, &[inner_expr.metadata.clone()]);
         self.generate_expr(inner_expr, new_ctx)
     }
 
@@ -241,8 +239,8 @@ impl TypeRegistry {
         // Bind the type to the context.
         let dummy = Self::dummy_value(&binding.metadata.ty, &binding.metadata.span);
 
-        self.add_constraint_subtypes(&binding.metadata, &[binding.expr.metadata.clone()]);
-        self.add_constraint_subtypes(&expr.metadata, &[body.metadata.clone()]);
+        self.add_constraint_subtypes(&binding.metadata.ty, &[binding.expr.metadata.clone()]);
+        self.add_constraint_subtypes(&expr.metadata.ty, &[body.metadata.clone()]);
 
         self.generate_expr(&binding.expr, ctx.clone())?;
         ctx.try_bind(binding.name.to_string(), dummy)?;
@@ -281,30 +279,30 @@ impl TypeRegistry {
 
         match op {
             Add | Sub | Mul | Div => {
-                self.add_constraint_subtypes(&expr.metadata, &op_types);
-                self.add_constraint_subtypes(&arithmetic_type, &op_types);
+                self.add_constraint_subtypes(&expr.metadata.ty, &op_types);
+                self.add_constraint_subtypes(&arithmetic_type.ty, &op_types);
             }
             Lt => {
                 self.add_constraint_equal(&bool_type, &expr.metadata);
-                self.add_constraint_subtypes(&arithmetic_type, &op_types);
+                self.add_constraint_subtypes(&arithmetic_type.ty, &op_types);
                 self.add_constraint_equal(&left.metadata, &right.metadata);
             }
             Eq => {
                 self.add_constraint_equal(&bool_type, &expr.metadata);
-                self.add_constraint_subtypes(&eqhash_type, &op_types);
+                self.add_constraint_subtypes(&eqhash_type.ty, &op_types);
                 self.add_constraint_equal(&left.metadata, &right.metadata);
             }
             And | Or => {
                 self.add_constraint_equal(&bool_type, &expr.metadata);
-                self.add_constraint_subtypes(&bool_type, &op_types);
+                self.add_constraint_subtypes(&bool_type.ty, &op_types);
             }
             Range => {
                 self.add_constraint_equal(&array_i64_type, &expr.metadata);
-                self.add_constraint_subtypes(&i64_type, &op_types);
+                self.add_constraint_subtypes(&i64_type.ty, &op_types);
             }
             Concat => {
-                self.add_constraint_subtypes(&expr.metadata, &op_types);
-                self.add_constraint_subtypes(&concat_type, &op_types);
+                self.add_constraint_subtypes(&expr.metadata.ty, &op_types);
+                self.add_constraint_subtypes(&concat_type.ty, &op_types);
             }
         }
 
@@ -332,8 +330,8 @@ impl TypeRegistry {
 
         match op {
             Neg => {
-                self.add_constraint_subtypes(&arithmetic_type, &[operand.metadata.clone()]);
-                self.add_constraint_subtypes(&expr.metadata, &[operand.metadata.clone()]);
+                self.add_constraint_subtypes(&arithmetic_type.ty, &[operand.metadata.clone()]);
+                self.add_constraint_subtypes(&expr.metadata.ty, &[operand.metadata.clone()]);
             }
             Not => {
                 self.add_constraint_equal(&bool_type, &operand.metadata);
@@ -375,28 +373,18 @@ impl TypeRegistry {
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
         use TypeKind::*;
-        let span = &expr.metadata.span;
 
-        entries.iter().for_each(|(k, _)| {
-            self.add_constraint_subtypes(
-                &TypedSpan::new(EqHash.into(), span.clone()),
-                &[k.metadata.clone()],
-            )
-        });
+        entries
+            .iter()
+            .for_each(|(k, _)| self.add_constraint_subtypes(&EqHash.into(), &[k.metadata.clone()]));
 
         let Map(map_key, map_value) = &*expr.metadata.ty else {
             panic!("Type should be set to map in from_ast");
         };
 
         entries.iter().for_each(|(k, v)| {
-            self.add_constraint_subtypes(
-                &TypedSpan::new(map_key.clone(), span.clone()),
-                &[k.metadata.clone()],
-            );
-            self.add_constraint_subtypes(
-                &TypedSpan::new(map_value.clone(), span.clone()),
-                &[v.metadata.clone()],
-            );
+            self.add_constraint_subtypes(map_key, &[k.metadata.clone()]);
+            self.add_constraint_subtypes(map_value, &[v.metadata.clone()]);
         });
 
         entries.iter().try_for_each(|(k, v)| {
@@ -435,7 +423,7 @@ impl TypeRegistry {
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
         let ty_return = self.ty_return.as_ref().cloned().unwrap();
-        self.add_constraint_subtypes(&ty_return, &[inner_expr.metadata.clone()]);
+        self.add_constraint_subtypes(&ty_return.ty, &[inner_expr.metadata.clone()]);
         self.generate_expr(inner_expr, ctx)
     }
 
@@ -450,7 +438,7 @@ impl TypeRegistry {
         field_name: &str,
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
-        self.add_constraint_field_access(&expr.metadata, &field_name.to_string(), &obj.metadata);
+        self.add_constraint_field_access(&expr.metadata.ty, &field_name.to_string(), &obj.metadata);
         self.generate_expr(obj, ctx)
     }
 
@@ -464,8 +452,6 @@ impl TypeRegistry {
     ) -> Result<(), Box<AnalyzerErrorKind>> {
         use TypeKind::*;
 
-        let span = &expr.metadata.span;
-
         match core_data {
             CoreData::Array(exprs) => {
                 let Array(array_element_type) = &*expr.metadata.ty else {
@@ -473,10 +459,7 @@ impl TypeRegistry {
                 };
 
                 exprs.iter().for_each(|val| {
-                    self.add_constraint_subtypes(
-                        &TypedSpan::new(array_element_type.clone(), span.clone()),
-                        &[val.metadata.clone()],
-                    );
+                    self.add_constraint_subtypes(&array_element_type, &[val.metadata.clone()]);
                 });
 
                 exprs
@@ -492,10 +475,7 @@ impl TypeRegistry {
                     .iter()
                     .zip(tuple_element_types.iter())
                     .for_each(|(expr_val, ty)| {
-                        self.add_constraint_subtypes(
-                            &TypedSpan::new(ty.clone(), span.clone()),
-                            &[expr_val.metadata.clone()],
-                        );
+                        self.add_constraint_subtypes(ty, &[expr_val.metadata.clone()]);
                     });
 
                 exprs
@@ -504,12 +484,10 @@ impl TypeRegistry {
             }
             CoreData::Struct(name, exprs) => {
                 exprs.iter().enumerate().try_for_each(|(i, field_expr)| {
-                    let field_type = TypedSpan::new(
-                        self.get_product_field_type_by_index(name, i).unwrap(),
-                        field_expr.metadata.span.clone(),
+                    self.add_constraint_subtypes(
+                        &self.get_product_field_type_by_index(name, i).unwrap(),
+                        &[field_expr.metadata.clone()],
                     );
-
-                    self.add_constraint_subtypes(&field_type, &[field_expr.metadata.clone()]);
                     self.generate_expr(field_expr, ctx.clone())
                 })?;
             }
@@ -521,7 +499,7 @@ impl TypeRegistry {
                 let fn_ctx = self.create_function_scope(ctx, &params[..], &expr.metadata)?;
 
                 let ret_type = self.ty_return.as_ref().cloned().unwrap();
-                self.add_constraint_subtypes(&ret_type, &[body.metadata.clone()]);
+                self.add_constraint_subtypes(&ret_type.ty, &[body.metadata.clone()]);
 
                 self.generate_expr(body, fn_ctx)?;
             }

@@ -67,18 +67,18 @@ impl TypeRegistry {
     fn check_subtype_constraint(
         &mut self,
         child: &TypedSpan,
-        parent: &TypedSpan,
+        parent_ty: &Type,
     ) -> Result<bool, Box<AnalyzerErrorKind>> {
         use EnforceError::*;
 
-        self.enforce_subtype(&child.ty, &parent.ty).map_err(|err| {
+        self.enforce_subtype(&child.ty, parent_ty).map_err(|err| {
             match err {
                 // For now, no need to distinguish between both errors.
                 // However, in the future we might want to do something fancier here to
                 // improve error reporting.
                 Merge | Meet | Subtype => AnalyzerErrorKind::new_invalid_subtype(
                     &self.resolve_type(&child.ty),
-                    &self.resolve_type(&parent.ty),
+                    &self.resolve_type(parent_ty),
                     &child.span,
                 ),
             }
@@ -119,20 +119,15 @@ impl TypeRegistry {
                     _ => vec![param.clone()],
                 };
 
-                let param_changed = args.iter().zip(param_types.iter()).try_fold(
-                    false,
-                    |acc, (arg, param_type)| -> Result<_, Box<_>> {
-                        let changed = self.check_subtype_constraint(
-                            arg,
-                            &TypedSpan::new(param_type.clone(), inner.span.clone()),
-                        )?;
-                        Ok(acc || changed)
-                    },
-                )?;
+                let mut param_changed = false;
+                for (arg, param_type) in args.iter().zip(param_types.iter()) {
+                    let changed = self.check_subtype_constraint(arg, param_type)?;
+                    param_changed |= changed;
+                }
 
                 let ret_changed = self.check_subtype_constraint(
                     &TypedSpan::new(ret.clone(), inner.span.clone()),
-                    outer,
+                    &outer.ty,
                 )?;
 
                 Ok(param_changed || ret_changed)
@@ -147,15 +142,12 @@ impl TypeRegistry {
                     ));
                 }
 
-                self.check_subtype_constraint(
-                    &args[0],
-                    &TypedSpan::new(key_type.clone(), inner.span.clone()),
-                )?;
+                self.check_subtype_constraint(&args[0], key_type)?;
 
                 let optional_val_type = Optional(val_type.clone()).into();
                 self.check_subtype_constraint(
                     &TypedSpan::new(optional_val_type, inner.span.clone()),
-                    outer,
+                    &outer.ty,
                 )
             }
 
@@ -168,16 +160,12 @@ impl TypeRegistry {
                     ));
                 }
 
-                let i64_type = I64.into();
-                self.check_subtype_constraint(
-                    &args[0],
-                    &TypedSpan::new(i64_type, inner.span.clone()),
-                )?;
+                self.check_subtype_constraint(&args[0], &I64.into())?;
 
                 let optional_elem_type = Optional(elem_type.clone()).into();
                 self.check_subtype_constraint(
                     &TypedSpan::new(optional_elem_type, inner.span.clone()),
-                    outer,
+                    &outer.ty,
                 )
             }
             _ => Err(AnalyzerErrorKind::new_invalid_call_receiver(
@@ -191,7 +179,7 @@ impl TypeRegistry {
         &mut self,
         inner: &TypedSpan,
         field: &Identifier,
-        outer: &TypedSpan,
+        outer: &Type,
     ) -> Result<bool, Box<AnalyzerErrorKind>> {
         use TypeKind::*;
 
