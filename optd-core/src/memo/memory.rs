@@ -37,6 +37,11 @@ pub struct MemoryMemo {
     /// Dependent here does not mean the dependency stuff that we have in the memo table
     goal_dependent_physical_exprs: HashMap<GoalId, HashSet<PhysicalExpressionId>>,
 
+    /// Dependent physical expression ids for each physical expression id.
+    /// This is used to quickly find all the physical expressions that have a child equal to the physical expression id, which is the key.
+    physical_expr_dependent_physical_exprs:
+        HashMap<PhysicalExpressionId, HashSet<PhysicalExpressionId>>,
+
     /// Goal id to state.
     goals: HashMap<GoalId, GoalState>,
     /// Goal node to id.
@@ -252,10 +257,11 @@ impl Memoize for MemoryMemo {
                 let goal_1_props = &goal_1.goal.1;
                 let goal_2_props = &goal_2.goal.1;
                 if goal_1_props == goal_2_props {
-                    let merged_goal_result = self
+                    let (merged_goal_result, merge_physical_expr_results) = self
                         .merge_goals_helper(goal_id1.clone(), goal_id2.clone())
                         .await?;
                     result.goal_merges.push(merged_goal_result);
+                    result.physical_expr_merges.extend(merge_physical_expr_results);
                 }
             }
         }
@@ -718,21 +724,29 @@ impl Memoize for MemoryMemo {
 
         for child in physical_expr.children.iter() {
             match child {
-                Child::Singleton(goal_id) => {
-                    if let GoalMemberId::GoalId(goal_id) = goal_id {
+                Child::Singleton(goal_member_id) => {
+                    if let GoalMemberId::GoalId(goal_id) = goal_member_id {
                         self.goal_dependent_physical_exprs
                             .entry(goal_id.clone())
                             .or_default()
                             .insert(physical_expr_id);
                     }
                 }
-                Child::VarLength(goal_ids) => {
-                    for goal_id in goal_ids.iter() {
-                        if let GoalMemberId::GoalId(goal_id) = goal_id {
-                            self.goal_dependent_physical_exprs
-                                .entry(goal_id.clone())
-                                .or_default()
-                                .insert(physical_expr_id);
+                Child::VarLength(goal_member_ids) => {
+                    for goal_member_id in goal_member_ids.iter() {
+                        match goal_member_id {
+                            GoalMemberId::GoalId(goal_id) => {
+                                self.goal_dependent_physical_exprs
+                                    .entry(goal_id.clone())
+                                    .or_default()
+                                    .insert(physical_expr_id);
+                            }
+                            GoalMemberId::PhysicalExpressionId(child_physical_expr_id) => {
+                                self.physical_expr_dependent_physical_exprs
+                                    .entry(child_physical_expr_id.clone())
+                                    .or_default()
+                                    .insert(physical_expr_id);
+                            }
                         }
                     }
                 }
@@ -863,12 +877,51 @@ impl MemoryMemo {
         Ok(repr_physical_expr)
     }
 
+    async fn merge_physical_exprs(
+        &mut self,
+        physical_expr_id: PhysicalExpressionId,
+    ) -> MemoizeResult<Vec<MergePhysicalExprResult>> {
+        let (physical_expr, cost) = self.physical_exprs.get(&physical_expr_id).unwrap();
+        let repr_physical_expr = self
+            .create_repr_physical_expr(physical_expr.clone())
+            .await?;
+        let repr_physical_expr_id = self.get_physical_expr_id(&repr_physical_expr).await?;
+
+        // merge the physical exprs
+        self.repr_physical_expr
+            .merge(&physical_expr_id, &repr_physical_expr_id);
+
+        let mut stale_physical_exprs = HashSet::new();
+        stale_physical_exprs.insert(physical_expr_id);
+
+        let mut results = Vec::new();
+        results.push(MergePhysicalExprResult {
+            repr_physical_expr: repr_physical_expr_id,
+            stale_physical_exprs: stale_physical_exprs,
+        });
+
+        let dependent_physical_exprs = self
+            .physical_expr_dependent_physical_exprs
+            .get(&physical_expr_id);
+        if let Some(dependent_physical_exprs) = dependent_physical_exprs {
+            let dependent_physical_exprs =
+                dependent_physical_exprs.iter().cloned().collect::<Vec<_>>();
+            for dependent_physical_expr_id in dependent_physical_exprs {
+                // TODO(Sarvesh): handle async recursion
+                // let merge_physical_expr_result = self.merge_physical_exprs(dependent_physical_expr_id.clone()).await?;
+                // results.extend(merge_physical_expr_result);
+            }
+        }
+
+        Ok(results)
+    }
+
     /// Merges two goals into a single goal.
     async fn merge_goals_helper(
         &mut self,
         goal_id1: GoalId,
         goal_id2: GoalId,
-    ) -> MemoizeResult<MergeGoalResult> {
+    ) -> MemoizeResult<(MergeGoalResult, Vec<MergePhysicalExprResult>)> {
         let goal_2 = self.goals.remove(&goal_id2).unwrap();
         let goal_1 = self.goals.get(&goal_id1).unwrap();
         let goal_1_props = &goal_1.goal.1;
@@ -955,19 +1008,13 @@ impl MemoryMemo {
             .cloned()
             .collect::<Vec<_>>();
 
+        let mut results = Vec::new();
         for physical_expr_id in goal_2_dependent_physical_exprs {
-            let (physical_expr, cost) = self.physical_exprs.get(&physical_expr_id).unwrap();
-            let repr_physical_expr = self
-                .create_repr_physical_expr(physical_expr.clone())
-                .await?;
-            let repr_physical_expr_id = self.get_physical_expr_id(&repr_physical_expr).await?;
-
-            // merge the physical exprs
-            self.repr_physical_expr
-                .merge(&physical_expr_id, &repr_physical_expr_id);
+            let merge_physical_expr_result = self.merge_physical_exprs(physical_expr_id).await?;
+            results.extend(merge_physical_expr_result);
         }
 
-        Ok(merged_goal_result)
+        Ok((merged_goal_result, results))
     }
 
     /// Generates a new group id.

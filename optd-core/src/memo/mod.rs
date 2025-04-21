@@ -94,12 +94,12 @@ pub struct MergeGoalResult {
 
 /// Result of merging two cost expressions.
 #[derive(Debug)]
-pub struct MergeCostExprResult {
-    /// The new representative cost expression id.
-    pub repr_expr: PhysicalExpressionId,
+pub struct MergePhysicalExprResult {
+    /// The new representative physical expression id.
+    pub repr_physical_expr: PhysicalExpressionId,
 
-    /// Cost expressions that were stale
-    pub stale_cost_exprs: HashSet<PhysicalExpressionId>,
+    /// Physical expressions that were stale
+    pub stale_physical_exprs: HashSet<PhysicalExpressionId>,
 }
 
 /// Results of merge operations with newly dirtied expressions.
@@ -111,17 +111,16 @@ pub struct MergeResult {
     /// Goal merge results.
     pub goal_merges: Vec<MergeGoalResult>,
 
-    /// Cost expression merge results.
-    pub cost_expr_merges: Vec<MergeCostExprResult>,
+    /// Physical expression merge results.
+    pub physical_expr_merges: Vec<MergePhysicalExprResult>,
+    // /// Transformations that were marked as dirty and need new application.
+    // pub dirty_transformations: Vec<(LogicalExpressionId, TransformationRule)>,
 
-    /// Transformations that were marked as dirty and need new application.
-    pub dirty_transformations: Vec<(LogicalExpressionId, TransformationRule)>,
+    // /// Implementations that were marked as dirty and need new application.
+    // pub dirty_implementations: Vec<(LogicalExpressionId, GoalId, ImplementationRule)>,
 
-    /// Implementations that were marked as dirty and need new application.
-    pub dirty_implementations: Vec<(LogicalExpressionId, GoalId, ImplementationRule)>,
-
-    /// Costings that were marked as dirty and need recomputation.
-    pub dirty_costings: Vec<PhysicalExpressionId>,
+    // /// Costings that were marked as dirty and need recomputation.
+    // pub dirty_costings: Vec<PhysicalExpressionId>,
 }
 
 pub struct ForwardResult {
