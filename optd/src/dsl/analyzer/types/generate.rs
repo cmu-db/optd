@@ -459,7 +459,7 @@ impl TypeRegistry {
                 };
 
                 exprs.iter().for_each(|val| {
-                    self.add_constraint_subtypes(&array_element_type, &[val.metadata.clone()]);
+                    self.add_constraint_subtypes(array_element_type, &[val.metadata.clone()]);
                 });
 
                 exprs
