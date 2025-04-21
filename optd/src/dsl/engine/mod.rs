@@ -1,6 +1,9 @@
-use crate::dsl::analyzer::{
-    context::Context,
-    hir::{Expr, ExprKind, Goal, GroupId, Value},
+use crate::{
+    catalog::Catalog,
+    dsl::analyzer::{
+        context::Context,
+        hir::{Expr, ExprKind, Goal, GroupId, Value},
+    },
 };
 use std::sync::Arc;
 
@@ -28,15 +31,18 @@ pub enum EngineResponse<O> {
 pub struct Engine<O: Clone + Send + 'static> {
     /// The original HIR context containing all defined expressions and rules.
     pub(crate) context: Context,
+    /// The catalog containing all table metadata and statistics.
+    pub(crate) catalog: Arc<dyn Catalog>,
     /// The continuation to return from the current function scope.
     pub(crate) fun_return: Option<Continuation<Value, EngineResponse<O>>>,
 }
 
 impl<O: Clone + Send + 'static> Engine<O> {
     /// Creates a new engine with the given context and expander.
-    pub fn new(context: Context) -> Self {
+    pub fn new(context: Context, catalog: Arc<dyn Catalog>) -> Self {
         Self {
             context,
+            catalog,
             fun_return: None,
         }
     }
@@ -45,6 +51,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
     pub fn with_new_context(self, context: Context) -> Self {
         Self {
             context,
+            catalog: self.catalog,
             fun_return: self.fun_return,
         }
     }
@@ -53,6 +60,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
     pub fn with_new_return(self, fun_return: Continuation<Value, EngineResponse<O>>) -> Self {
         Self {
             context: self.context,
+            catalog: self.catalog,
             fun_return: Some(fun_return),
         }
     }

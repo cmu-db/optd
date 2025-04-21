@@ -1,7 +1,10 @@
 use super::{Catalog as OptdCatalog, CatalogError};
 use async_trait::async_trait;
-use iceberg::{Catalog as IcebergCatalog, NamespaceIdent, TableIdent, table::Table};
-use std::collections::HashMap;
+use iceberg::{
+    Catalog as IcebergCatalog, NamespaceIdent, TableIdent, io::FileIOBuilder, table::Table,
+};
+use iceberg_catalog_memory::MemoryCatalog;
+use std::{collections::HashMap, sync::Arc};
 
 /// The default namespace for the Iceberg catalog.
 ///
@@ -10,11 +13,15 @@ static DEFAULT_NAMESPACE: &str = "default";
 
 /// A wrapper around an arbitrary Iceberg catalog.
 #[derive(Debug)]
-pub struct OptdIcebergCatalog<C: IcebergCatalog>(C);
+pub struct OptdIcebergCatalog<C: IcebergCatalog>(Arc<C>);
 
 impl<C: IcebergCatalog> OptdIcebergCatalog<C> {
     /// Creates a new catalog.
     pub fn new(catalog: C) -> Self {
+        Self(Arc::new(catalog))
+    }
+
+    pub fn new_from_arc(catalog: Arc<C>) -> Self {
         Self(catalog)
     }
 
@@ -29,6 +36,16 @@ impl<C: IcebergCatalog> OptdIcebergCatalog<C> {
             .await
             .map_err(|e| CatalogError::Unknown(e.to_string()))
     }
+}
+
+/// Creates an in-memory catalog.
+pub fn memory_catalog() -> OptdIcebergCatalog<MemoryCatalog> {
+    let file_io = FileIOBuilder::new("memory")
+        .build()
+        .expect("unable to create file");
+    let catalog = Arc::new(MemoryCatalog::new(file_io, Some("mock".to_string())));
+
+    OptdIcebergCatalog(catalog)
 }
 
 #[async_trait]

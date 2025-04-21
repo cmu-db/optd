@@ -2,7 +2,7 @@ use super::{binary::eval_binary_op, unary::eval_unary_op};
 use crate::capture;
 use crate::dsl::analyzer::hir::{
     BinOp, CoreData, Expr, ExprKind, FunKind, Goal, GroupId, Identifier, LetBinding, Literal,
-    LogicalOp, Materializable, PhysicalOp, UdfKind, UnaryOp, Value,
+    LogicalOp, Materializable, PhysicalOp, Udf, UnaryOp, Value,
 };
 use crate::dsl::analyzer::map::Map;
 use crate::dsl::engine::{Continuation, Engine, EngineResponse};
@@ -219,7 +219,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
                         CoreData::Function(FunKind::Closure(params, body)) => {
                             engine.evaluate_closure_call(params, body, args, k).await
                         }
-                        CoreData::Function(FunKind::Udf(UdfKind::Linked(udf))) => {
+                        CoreData::Function(FunKind::Udf(udf)) => {
                             engine.evaluate_rust_udf_call(udf, args, k).await
                         }
 
@@ -576,16 +576,18 @@ impl<O: Clone + Send + 'static> Engine<O> {
     /// * `k` - The continuation to receive evaluation results
     pub(crate) async fn evaluate_rust_udf_call(
         self,
-        udf: fn(Vec<Value>) -> Value,
+        udf: Udf,
         args: Vec<Arc<Expr>>,
         k: Continuation<Value, EngineResponse<O>>,
     ) -> EngineResponse<O> {
+        let catalog = Arc::clone(&self.catalog);
+
         self.evaluate_sequence(
             args,
             Arc::new(move |arg_values| {
-                Box::pin(capture!([udf, k], async move {
+                Box::pin(capture!([udf, catalog, k], async move {
                     // Call the UDF with the argument values.
-                    let result = udf(arg_values);
+                    let result = udf.call(&arg_values, catalog.as_ref());
 
                     // Pass the result to the continuation.
                     k(result).await
@@ -671,7 +673,8 @@ impl<O: Clone + Send + 'static> Engine<O> {
 
 #[cfg(test)]
 mod tests {
-    use crate::dsl::analyzer::hir::{Goal, GroupId, LetBinding, Materializable, UdfKind};
+    use crate::catalog::iceberg::memory_catalog;
+    use crate::dsl::analyzer::hir::{Goal, GroupId, LetBinding, Materializable, Udf};
     use crate::dsl::engine::Engine;
     use crate::dsl::utils::tests::{
         array_val, assert_values_equal, create_logical_operator, create_physical_operator,
@@ -693,7 +696,8 @@ mod tests {
     async fn test_if_then_else() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog.clone());
 
         // if true then "yes" else "no"
         let true_condition = Arc::new(Expr::new(IfThenElse(
@@ -716,7 +720,7 @@ mod tests {
         // Let's create a more complex condition: if x > 10 then x * 2 else x / 2
         let mut ctx = Context::default();
         ctx.bind("x".to_string(), lit_val(int(20)));
-        let engine_with_x = Engine::new(ctx);
+        let engine_with_x = Engine::new(ctx, catalog);
 
         let complex_condition = Arc::new(Expr::new(IfThenElse(
             Arc::new(Expr::new(Binary(
@@ -765,7 +769,8 @@ mod tests {
     async fn test_let_binding() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // let x = 10 in x + 5
         let let_expr = Arc::new(Expr::new(Let(
@@ -794,7 +799,8 @@ mod tests {
         let mut ctx = Context::default();
         // Bind a variable in the outer scope
         ctx.bind("x".to_string(), lit_val(int(10)));
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // Create an inner let binding to shadow x
         let inner_let = Arc::new(Expr::new(Let(
@@ -845,7 +851,8 @@ mod tests {
     async fn test_evaluate_binary_logical() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // Test direct binary expression evaluation for AND operator
         // true && true = true
@@ -1018,7 +1025,8 @@ mod tests {
         )));
 
         ctx.bind("test_return".to_string(), test_return_function);
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // Call with x = 5, should return "too small" directly, skipping the string concatenation
         let small_call = Arc::new(Expr::new(Call(
@@ -1057,7 +1065,8 @@ mod tests {
     async fn test_nested_let_bindings() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // let x = 10 in
         // let y = x * 2 in
@@ -1100,7 +1109,8 @@ mod tests {
         )));
 
         ctx.bind("add".to_string(), add_function);
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // Call the function: add(10, 20)
         let call_expr = Arc::new(Expr::new(Call(
@@ -1125,24 +1135,24 @@ mod tests {
         let mut ctx = Context::default();
 
         // Define a Rust UDF that calculates the sum of array elements
-        let sum_function =
-            Value::new(CoreData::Function(FunKind::Udf(UdfKind::Linked(
-                |args| match &args[0].data {
-                    CoreData::Array(elements) => {
-                        let mut sum = 0;
-                        for elem in elements {
-                            if let CoreData::Literal(Literal::Int64(value)) = &elem.data {
-                                sum += value;
-                            }
+        let sum_function = Value::new(CoreData::Function(FunKind::Udf(Udf {
+            func: |args, _catalog| match &args[0].data {
+                CoreData::Array(elements) => {
+                    let mut sum = 0;
+                    for elem in elements {
+                        if let CoreData::Literal(Literal::Int64(value)) = &elem.data {
+                            sum += value;
                         }
-                        Value::new(CoreData::Literal(Literal::Int64(sum)))
                     }
-                    _ => panic!("Expected array argument"),
-                },
-            ))));
+                    Value::new(CoreData::Literal(Literal::Int64(sum)))
+                }
+                _ => panic!("Expected array argument"),
+            },
+        })));
 
         ctx.bind("sum".to_string(), sum_function);
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // Call the function: sum([1, 2, 3, 4, 5])
         let call_expr = Arc::new(Expr::new(Call(
@@ -1171,7 +1181,8 @@ mod tests {
     async fn test_map_creation() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // Create a map with key-value pairs: { "a": 1, "b": 2, "c": 3 }
         let map_expr = Arc::new(Expr::new(Map(vec![
@@ -1250,19 +1261,22 @@ mod tests {
         // Add a map lookup function
         ctx.bind(
             "get".to_string(),
-            Value::new(CoreData::Function(FunKind::Udf(UdfKind::Linked(|args| {
-                if args.len() != 2 {
-                    panic!("get function requires 2 arguments");
-                }
+            Value::new(CoreData::Function(FunKind::Udf(Udf {
+                func: |args, _catalog| {
+                    if args.len() != 2 {
+                        panic!("get function requires 2 arguments");
+                    }
 
-                match &args[0].data {
-                    CoreData::Map(map) => map.get(&args[1]),
-                    _ => panic!("First argument must be a map"),
-                }
-            })))),
+                    match &args[0].data {
+                        CoreData::Map(map) => map.get(&args[1]),
+                        _ => panic!("First argument must be a map"),
+                    }
+                },
+            }))),
         );
 
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // Create a nested map:
         // {
@@ -1372,7 +1386,8 @@ mod tests {
         )));
 
         ctx.bind("factorial".to_string(), factorial_function);
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // Create a program that:
         // 1. Defines variables for different values
@@ -1411,7 +1426,8 @@ mod tests {
     async fn test_array_indexing() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // Create an array [10, 20, 30, 40, 50]
         let array_expr = Arc::new(Expr::new(CoreVal(array_val(vec![
@@ -1454,7 +1470,8 @@ mod tests {
     async fn test_tuple_indexing() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // Create a tuple (10, "hello", true)
         let tuple_expr = Arc::new(Expr::new(CoreVal(Value::new(CoreData::Tuple(vec![
@@ -1483,7 +1500,8 @@ mod tests {
     async fn test_struct_indexing() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // Create a struct Point { x: 10, y: 20 }
         let struct_expr = Arc::new(Expr::new(CoreVal(struct_val(
@@ -1510,7 +1528,8 @@ mod tests {
     async fn test_map_lookup() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // Create a map with key-value pairs: { "a": 1, "b": 2, "c": 3 }
         // Use a let expression to bind the map and do lookups directly
@@ -1566,7 +1585,8 @@ mod tests {
     async fn test_complex_collection_and_index() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // Create a let expression that binds an array and then accesses it
         // let arr = [10, 20, 30, 40, 50] in
@@ -1612,7 +1632,8 @@ mod tests {
     async fn test_logical_operator_indexing() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // Create a logical operator: LogicalJoin { joinType: "inner", condition: "x = y" } [TableScan("orders"), TableScan("lineitem")]
         let join_op = create_logical_operator(
@@ -1709,7 +1730,8 @@ mod tests {
     async fn test_physical_operator_indexing() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // Create a physical operator: HashJoin { method: "hash", condition: "id = id" } [IndexScan("customers"), ParallelScan("orders")]
         let join_op = create_physical_operator(
@@ -1846,7 +1868,8 @@ mod tests {
         )));
 
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // Evaluate the expressions
         let join_type_results =
@@ -1941,7 +1964,8 @@ mod tests {
         )));
 
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // Evaluate the expressions
         let method_results =
@@ -1989,7 +2013,8 @@ mod tests {
     async fn test_nested_operator_indexing() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // Create a nested operator:
         // Project [col1, col2] (
@@ -2078,7 +2103,8 @@ mod tests {
         ctx.push_scope();
         ctx.bind("inner_var".to_string(), lit_val(int(200)));
 
-        let engine = Engine::new(ctx);
+        let catalog = memory_catalog();
+        let engine = Engine::new(ctx, Arc::new(catalog));
 
         // Reference to a variable in the current (inner) scope
         let inner_ref = Arc::new(Expr::new(Ref("inner_var".to_string())));
