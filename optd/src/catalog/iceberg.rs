@@ -11,8 +11,8 @@ use std::{collections::HashMap, sync::Arc};
 /// TODO(connor): For now, keep everything in the default namespace for simplicity.
 static DEFAULT_NAMESPACE: &str = "default";
 
-/// A wrapper around an arbitrary Iceberg catalog.
-#[derive(Debug)]
+/// A wrapper around an arbitrary Iceberg Catalog.
+#[derive(Debug, Clone)]
 pub struct OptdIcebergCatalog<C: IcebergCatalog>(Arc<C>);
 
 impl<C: IcebergCatalog> OptdIcebergCatalog<C> {
@@ -30,7 +30,6 @@ impl<C: IcebergCatalog> OptdIcebergCatalog<C> {
         let namespace_ident = NamespaceIdent::new(DEFAULT_NAMESPACE.to_string());
         let table_ident = TableIdent::new(namespace_ident, table_name.to_string());
 
-        // TODO(connor): FIX ERROR HANDLING.
         self.0
             .load_table(&table_ident)
             .await
@@ -38,7 +37,7 @@ impl<C: IcebergCatalog> OptdIcebergCatalog<C> {
     }
 }
 
-/// Creates an in-memory catalog.
+/// Creates a basic in-memory catalog. Used for testing.
 pub fn memory_catalog() -> OptdIcebergCatalog<MemoryCatalog> {
     let file_io = FileIOBuilder::new("memory")
         .build()

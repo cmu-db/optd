@@ -81,10 +81,12 @@ impl Udf {
     }
 }
 
-/// Types of functions in the system
+/// The different kinds of functions in the system.
 #[derive(Debug, Clone)]
 pub enum FunKind<M: ExprMetadata = NoMetadata> {
     Closure(Vec<Identifier>, Arc<Expr<M>>),
+    /// A user-defined function. Note that the [`Value`] type passed to [`Udf`]s do not carry any
+    /// metadata like `Value<TypedSpan>`.
     Udf(Udf),
 }
 

@@ -54,7 +54,8 @@ enum Commands {
     Compile(Config),
 }
 
-pub fn temp_fake_udf(_args: &[Value], _catalog: &dyn Catalog) -> Value {
+/// A simple user-defined function.
+pub fn hello_udf(_args: &[Value], _catalog: &dyn Catalog) -> Value {
     println!("Hello from UDF!");
     Value::new(CoreData::<Value>::None)
 }
@@ -63,10 +64,8 @@ fn main() -> Result<(), Vec<CompileError>> {
     let cli = Cli::parse();
 
     let mut udfs = HashMap::new();
-    let udf = Udf {
-        func: temp_fake_udf,
-    };
-    udfs.insert("temp_fake_udf".to_string(), udf);
+    let udf = Udf { func: hello_udf };
+    udfs.insert("hello_udf".to_string(), udf);
 
     let Commands::Compile(config) = cli.command;
 
