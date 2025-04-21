@@ -96,7 +96,7 @@ impl TypeRegistry {
         let inner_resolved = self.resolve_type(&inner.ty);
 
         match &*inner_resolved.value {
-            Unknown(_) => Ok(false),
+            Nothing => Ok(false),
 
             Closure(param, ret) => {
                 let param_len = match &**param {
@@ -186,7 +186,8 @@ impl TypeRegistry {
         let inner_resolved = self.resolve_type(&inner.ty);
 
         match &*inner_resolved.value {
-            Unknown(_) => Ok(false),
+            Nothing => Ok(false),
+
             Adt(name) => self
                 .get_product_field_type(name, field)
                 .ok_or_else(|| {
