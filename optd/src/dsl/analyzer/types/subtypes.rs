@@ -178,10 +178,9 @@ impl TypeRegistry {
             (Map(child_key, child_val), Map(parent_key, parent_val)) => {
                 println!("{} <: {}", child, parent);
 
-                Ok(self
-                .enforce_subtype_inner(parent_key, child_key, memo)?
-                || self.enforce_subtype_inner(child_val, parent_val, memo)?)
-            },
+                Ok(self.enforce_subtype_inner(parent_key, child_key, memo)?
+                    || self.enforce_subtype_inner(child_val, parent_val, memo)?)
+            }
 
             // Function contravariance on args, covariance on return type:
             // (T1 -> U1) <: (T2 -> U2) if T2 <: T1 and U1 <: U2.

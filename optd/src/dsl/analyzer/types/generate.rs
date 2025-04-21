@@ -371,7 +371,7 @@ impl TypeRegistry {
     /// Enforces the type relationship for each key:
     /// - `EqHash >: key`
     /// - `map_key >: key`
-    /// 
+    ///
     /// Enforces the type relationship for each value:
     /// - `map_value >: value`
     fn generate_map(

@@ -91,6 +91,17 @@ pub enum AnalyzerErrorKind {
         span: Span,
     },
 
+    ArgumentNumberMismatch {
+        span: Span,
+        expected: usize,
+        found: usize,
+    },
+
+    InvalidCallReceiver {
+        function: Type,
+        span: Span,
+    },
+
     InvalidFieldAccess {
         object: Type,
         span: Span,
@@ -211,6 +222,23 @@ impl AnalyzerErrorKind {
         .into()
     }
 
+    pub fn new_argument_number_mismatch(span: &Span, expected: usize, found: usize) -> Box<Self> {
+        Self::ArgumentNumberMismatch {
+            span: span.clone(),
+            expected,
+            found,
+        }
+        .into()
+    }
+
+    pub fn new_invalid_call_receiver(function: &Type, span: &Span) -> Box<Self> {
+        Self::InvalidCallReceiver {
+            function: function.clone(),
+            span: span.clone(),
+        }
+        .into()
+    }
+
     pub fn new_invalid_field_access(object: &Type, span: &Span, field: &Identifier) -> Box<Self> {
         Self::InvalidFieldAccess {
             object: object.clone(),
@@ -307,6 +335,25 @@ impl Diagnose for Box<AnalyzerError> {
                 "Check the number of fields in the type definition",
             ),
             InvalidSubtype { child, parent, span } => self.build_type_mismatch_report(child, parent, span),
+            ArgumentNumberMismatch {
+                span,
+                expected,
+                found,
+            } => self.build_single_span_report(
+                span,
+                &format!("Argument number mismatch for function call"),
+                &format!("Expected {} arguments, but found {}", expected, found),
+                "Check the function signature and ensure you're passing the correct number of arguments",
+            ),
+            InvalidCallReceiver {
+                function,
+                span,
+            } => self.build_single_span_report(
+                span,
+                "Invalid function call",
+                &format!("Expression of type '{}' cannot be called", function),
+                "Only functions, maps, and arrays can be called",
+            ),
             InvalidFieldAccess { object, span, field } => self.build_invalid_field_access_report(object, span, field),
         }
     }
@@ -327,6 +374,8 @@ impl Diagnose for Box<AnalyzerError> {
             InvalidInheritance { child_span, .. } => child_span,
             FieldNumberMismatch { span, .. } => span,
             InvalidSubtype { span, .. } => span,
+            ArgumentNumberMismatch { span, .. } => span,
+            InvalidCallReceiver { span, .. } => span,
             InvalidFieldAccess { span, .. } => span,
         };
 

@@ -87,10 +87,20 @@ pub enum Constraint {
     /// allowing substitution of a more specific type where a more general type is expected.
     Subtype { parent: TypedSpan, child: TypedSpan },
 
-    /// Field access: `inner.field = outer`
+    /// Closure call: `outer >: inner(args)`
+    ///
+    /// This constraint enforces that the function type `inner` can be called with
+    /// the arguments `args`, and that the result type matches `outer`.
+    Call {
+        inner: TypedSpan,
+        args: Vec<TypedSpan>,
+        outer: TypedSpan,
+    },
+
+    /// Field access: `outer >: inner.field`
     ///
     /// This constraint enforces that the type `inner` has a field named `field`
-    /// with a type that matches `outer`. Used for struct field access.
+    /// with a type that matches `outer`.
     FieldAccess {
         inner: TypedSpan,
         field: Identifier,
@@ -287,6 +297,29 @@ impl TypeRegistry {
         self.constraints.push(Constraint::Subtype {
             child: other_type.clone(),
             parent: target_type.clone(),
+        });
+    }
+
+    /// Adds a function call constraint: `outer >: inner(args)`
+    ///
+    /// This enforces that the function type `inner` can be called with
+    /// the arguments `args`, and that the result type matches `outer`.
+    ///
+    /// # Arguments
+    ///
+    /// * `outer` - The expected return type of the function call
+    /// * `inner` - The function type being called
+    /// * `args` - The arguments being passed to the function
+    pub fn add_constraint_call(
+        &mut self,
+        outer: &TypedSpan,
+        inner: &TypedSpan,
+        args: &[TypedSpan],
+    ) {
+        self.constraints.push(Constraint::Call {
+            inner: inner.clone(),
+            args: args.to_vec(),
+            outer: outer.clone(),
         });
     }
 
