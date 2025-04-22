@@ -57,6 +57,7 @@ fn create_expr_tree(depth: I64, base: Logical): Logical =
 fn constant_folder(): Logical -> Logical =
     (expr) ->
         match expr
+            | Physical -> Number(5)
             | Add(Number(a), Number(b)) -> Number(a + b)
             | Sub(Number(a), Number(b)) -> Number(a - b)
             | Mul(Number(a), Number(b)) -> Number(a * b)

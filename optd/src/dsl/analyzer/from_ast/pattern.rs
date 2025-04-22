@@ -87,15 +87,15 @@ impl ASTConverter {
                 Wildcard
             }
             AstPattern::EmptyArray => {
-                ty = TypeKind::Array(self.registry.new_unknown_asc().into()).into();
+                ty = TypeKind::Array(ty).into();
 
                 EmptyArray
             }
             AstPattern::ArrayDecomp(head, tail) => {
+                ty = TypeKind::Array(ty).into();
+
                 let hir_head = self.convert_pattern(head, &None)?;
                 let hir_tail = self.convert_pattern(tail, &None)?;
-
-                ty = TypeKind::Array(hir_head.metadata.ty.clone()).into();
 
                 ArrayDecomp(hir_head.into(), hir_tail.into())
             }
