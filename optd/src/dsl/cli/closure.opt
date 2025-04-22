@@ -1,0 +1,95 @@
+data Logical =
+    | Operation = 
+        | Binary = 
+            | Arithmetic = 
+                | Add(left: Logical, right: Logical)
+                | Mul(left: Logical, right: Logical)
+                | Div(left: Logical, right: Logical)
+                \ Sub(left: Logical, right: Logical)
+            \ Comparison = 
+                | Equal(left: Logical, right: Logical)
+                \ LessThan(left: Logical, right: Logical)
+        \ Unary = 
+            | Neg(value: Logical)
+            \ Not(value: Logical)
+    | Literal = 
+        | Number(val: I64)
+        \ Boolean(val: Bool)
+    \ Variable(name: String)
+data Physical
+data LogicalProperties
+data PhysicalProperties
+
+fn eval(expr: Logical) = match expr
+    | Add(l, r) -> eval(l) + eval(r)
+    | Sub(l, r) -> eval(l) - eval(r)
+    | Mul(l, r) -> eval(l) * eval(r)
+    | Div(l, r) -> eval(l) / eval(r)
+    | Neg(v) -> -eval(v)
+    | Number(n) -> n
+    \ _ -> 0
+
+fn map_binary(op: Logical, f: Logical -> Logical): Logical = 
+    match op 
+        | Add(l, r) -> Add(f(l), f(r))
+        | Sub(l, r) -> Sub(f(l), f(r))
+        | Mul(l, r) -> Mul(f(l), f(r))
+        | Div(l, r) -> Div(f(l), f(r))
+        \ other -> other
+
+fn binary_op(op_type: String) =
+    (left: Logical) -> 
+        (right: Logical) -> match op_type
+            | "add" -> Add(left, right)
+            | "sub" -> Sub(left, right)
+            | "mul" -> Mul(left, right)
+            | "div" -> Div(left, right)
+            \ _ -> Add(left, right)
+        
+fn create_expr_tree(depth: I64, base: Logical): Logical =
+    match depth
+        | 0 -> base
+        \ _ -> Add(
+                create_expr_tree(depth - 1, Mul(base, Number(depth))),
+                create_expr_tree(depth - 1, Number(depth))
+            )
+
+fn constant_folder(): Logical -> Logical =
+    (expr) ->
+        match expr
+            | Add(Number(a), Number(b)) -> Number(a + b)
+            | Sub(Number(a), Number(b)) -> Number(a - b)
+            | Mul(Number(a), Number(b)) -> Number(a * b)
+            | Div(Number(a), Number(b)) -> Number(a / b)
+            \ other -> map_binary(other, constant_folder())
+
+fn main(): Logical = 
+    let
+        a = Number(10),
+        b = Number(20),
+        
+        // Create functions
+        add = binary_op("add"),
+        mul = binary_op("mul"),
+        
+        // Apply functions
+        expr1 = add(a)(b),           
+        expr2 = mul(a)(b),
+        
+        // Create complex expression
+        tree = create_expr_tree(3, a),
+        
+        // Apply transformations
+        folder = constant_folder(),
+        optimized = folder(tree),
+        
+        // Test composition
+        double = (x: Logical) -> Mul(x, Number(2)),
+        double_and_optimize = (x: Logical) -> folder(double(x))
+    in
+        // Return a complex expression with mixed inferences
+        add(
+            double_and_optimize(expr1)
+        )(
+            map_binary(expr2, (x: Logical) -> Add(x, Number(1)))
+        )

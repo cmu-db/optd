@@ -16,9 +16,9 @@ fn main(log: Logical): Logical? = match log
         let closure = x -> right in
         closure(5)
     }
-    | fooo -> arr_as_function(Physical, 0, [log])
+    | fooo -> arr_as_function(Const(54), 0, [log])
     | List(bla) -> match bla
-        | bla -> bla
+        | vla -> vla(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)
         \ [] -> none
     | Add(left, right) -> left
     \ _ -> fail("brru")

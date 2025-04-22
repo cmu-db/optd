@@ -14,6 +14,6 @@ data PhysicalProperties
 fn vlaa() =
     let 
         v = (x: Const, y: Const) -> x#val,
-        vol: Logical = Const(5)
+        vol = Const(5)
     in
         v(vol, vol) 
