@@ -100,16 +100,16 @@ impl TypeRegistry {
             // Nothing is the bottom type - it is a subtype of everything.
             (Nothing, _) => Ok(false),
 
-            // Fall back to LUB for the ascending type if GLB fails.
+            // Fall back to GLB for the descending type if LUB fails.
             (UnknownDesc(id_desc), UnknownAsc(id_asc)) => {
                 let child = self.resolve_type(child);
                 let parent = self.resolve_type(parent);
 
-                self.greatest_lower_bound(&child, &parent)
-                    .map(|glb| self.update_unknown_if_changed(id_desc, &child, glb))
+                self.least_upper_bound(&child, &parent)
+                    .map(|lub| self.update_unknown_if_changed(id_asc, &parent, lub))
                     .or_else(|_| {
                         self.least_upper_bound(&child, &parent)
-                            .map(|lub| self.update_unknown_if_changed(id_asc, &parent, lub))
+                            .map(|glb| self.update_unknown_if_changed(id_desc, &child, glb))
                     })
             }
 
