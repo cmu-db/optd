@@ -127,7 +127,7 @@ pub struct TypeRegistry {
     /// for better error reporting during type checking and semantic analysis.
     pub product_fields: HashMap<Identifier, Vec<Field>>,
     /// The type of the return value of the current function.
-    pub ty_return: Option<TypedSpan>,
+    pub ty_return: Option<Type>,
     /// The set of collected type constraints to be solved.
     pub constraints: Vec<Constraint>,
     /// Maps unknown type IDs to their current inferred concrete types.

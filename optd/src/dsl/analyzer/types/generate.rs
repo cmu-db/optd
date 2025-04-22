@@ -45,7 +45,7 @@ impl TypeRegistry {
                         self.create_function_scope(hir.context.clone(), &args[..], &fun.metadata)?;
 
                     let ret_type = self.ty_return.as_ref().cloned().unwrap();
-                    self.add_constraint_subtypes(&ret_type.ty, &[body.metadata.clone()]);
+                    self.add_constraint_subtypes(&ret_type, &[body.metadata.clone()]);
                     self.generate_expr(body, ctx)
                 }
                 Function(Udf(_)) => Ok(()), // UDFs have no body to check.
@@ -69,7 +69,7 @@ impl TypeRegistry {
         // Extract the parameter types from the function type.
         let param_types = match &*metadata.ty {
             Closure(param_type, ret_type) => {
-                self.ty_return = Some(TypedSpan::new(ret_type.clone(), metadata.span.clone()));
+                self.ty_return = Some(ret_type.clone());
                 match &*param_type.value {
                     Tuple(types) => types.clone(),
                     _ => vec![param_type.clone()],
@@ -423,7 +423,7 @@ impl TypeRegistry {
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
         let ty_return = self.ty_return.as_ref().cloned().unwrap();
-        self.add_constraint_subtypes(&ty_return.ty, &[inner_expr.metadata.clone()]);
+        self.add_constraint_subtypes(&ty_return, &[inner_expr.metadata.clone()]);
         self.generate_expr(inner_expr, ctx)
     }
 
@@ -499,7 +499,7 @@ impl TypeRegistry {
                 let fn_ctx = self.create_function_scope(ctx, &params[..], &expr.metadata)?;
 
                 let ret_type = self.ty_return.as_ref().cloned().unwrap();
-                self.add_constraint_subtypes(&ret_type.ty, &[body.metadata.clone()]);
+                self.add_constraint_subtypes(&ret_type, &[body.metadata.clone()]);
 
                 self.generate_expr(body, fn_ctx)?;
             }
