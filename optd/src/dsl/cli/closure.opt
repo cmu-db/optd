@@ -91,5 +91,5 @@ fn main(): Logical =
         add(
             double_and_optimize(expr1)
         )(
-            map_binary(expr2, (x: Logical) -> Add(x, Number(1)))
+            map_binary(expr2, (x) -> Add(x, Number(1)))
         )
