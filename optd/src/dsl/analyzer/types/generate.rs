@@ -113,7 +113,15 @@ impl TypeRegistry {
             Return(inner_expr) => self.generate_return(inner_expr, ctx),
             FieldAccess(obj, field_name) => self.generate_field_access(expr, obj, field_name, ctx),
             CoreExpr(core_data) => self.generate_core_expr(expr, core_data, ctx),
-            CoreVal(value) => self.generate_core_val(expr, value, ctx),
+            // TODO(#80): Nothing to do here as only three types of CoreVals are created
+            // during the from_ast phase.
+            // 1. None (which already sets the type correctly)
+            // 2. Literals (ditto)
+            // 3. External closures (i.e. declared with fn), but those are already handled in
+            //    generate_constraints.
+            // Note: It makes no sense that functions can be expressions. They should only be
+            // values. Once we change that, we just move the function core_expr code.
+            CoreVal(_) => Ok(()),
         }
     }
 
@@ -496,12 +504,14 @@ impl TypeRegistry {
             }
             CoreData::Function(FunKind::Udf(_)) => panic!("UDFs may not appear within functions"),
             CoreData::Function(FunKind::Closure(params, body)) => {
+                let outer_ret_type = self.ty_return.take();
                 let fn_ctx = self.create_function_scope(ctx, &params[..], &expr.metadata)?;
+                let inner_ret_type = self.ty_return.clone().unwrap();
 
-                let ret_type = self.ty_return.as_ref().cloned().unwrap();
-                self.add_constraint_subtypes(&ret_type, &[body.metadata.clone()]);
-
+                self.add_constraint_subtypes(&inner_ret_type, &[body.metadata.clone()]);
                 self.generate_expr(body, fn_ctx)?;
+
+                self.ty_return = outer_ret_type;
             }
             CoreData::Fail(expr) => {
                 let string_type = TypedSpan::new(String.into(), expr.metadata.span.clone());
@@ -509,25 +519,6 @@ impl TypeRegistry {
                 self.generate_expr(expr, ctx)?;
             }
             CoreData::Literal(_) | CoreData::None => {}
-        }
-
-        Ok(())
-    }
-
-    /// Generates constraints for core values while verifying scopes.
-    /// Enforces the type relationship:
-    /// - `expr = value`
-    fn generate_core_val(
-        &mut self,
-        expr: &Expr<TypedSpan>,
-        value: &Value<TypedSpan>,
-        ctx: Context<TypedSpan>,
-    ) -> Result<(), Box<AnalyzerErrorKind>> {
-        self.add_constraint_equal(&expr.metadata, &value.metadata);
-
-        if let CoreData::Function(FunKind::Closure(params, body)) = &value.data {
-            let fn_ctx = self.create_function_scope(ctx, &params[..], &value.metadata)?;
-            self.generate_expr(body, fn_ctx)?;
         }
 
         Ok(())
