@@ -14,16 +14,24 @@ pub(super) enum EnforceError {
 }
 
 impl TypeRegistry {
-    /// Checks if a type is a subtype of another type.
+    /// Enforces that one type is a subtype of another, potentially refining unknown types.
     ///
-    /// This method determines if `child` is a subtype of `parent` according to
+    /// This method checks if `child` is a subtype of `parent` according to
     /// the language's type system rules. It handles primitive types, complex types
     /// with covariant and contravariant relationships, and user-defined ADTs.
     ///
-    /// During type inference, this method can also refine unknown types to satisfy
-    /// subtyping constraints. When an unknown type is encountered:
-    /// - As a parent: It is updated to the least upper bound of itself and the child type.
-    /// - As a child: It is simply substituted and checked against the parent type.
+    /// During type inference, this method can refine unknown types to satisfy
+    /// subtyping constraints according to their variance:
+    /// - When an `UnknownAsc` type is encountered as a parent, it is updated to the
+    ///   least upper bound (LUB) of itself and the child type. These types start
+    ///   at `Nothing` and ascend up the type hierarchy as needed.
+    /// - When an `UnknownDesc` type is encountered as a child, it is updated to the
+    ///   greatest lower bound (GLB) of itself and the parent type. These types start
+    ///   at `Universe` and descend down the type hierarchy as needed.
+    /// - When an `UnknownAsc` type is encountered as a child, its resolved type is
+    ///   checked against the parent type.
+    /// - When an `UnknownDesc` type is encountered as a parent, its resolved type is
+    ///   checked against the child type.
     ///
     /// The method iteratively performs these checks until it reaches a stable state
     /// where no more unknown types can be refined.
@@ -92,23 +100,43 @@ impl TypeRegistry {
             // Nothing is the bottom type - it is a subtype of everything.
             (Nothing, _) => Ok(false),
 
-            // If parent is unknown, bump up to LUB of child.
-            (_, Unknown(id)) => {
+            // Fall back to LUB for the ascending type if GLB fails.
+            (UnknownDesc(id_desc), UnknownAsc(id_asc)) => {
+                let child = self.resolve_type(child);
                 let parent = self.resolve_type(parent);
-                let lub = self.least_upper_bound(child, &parent)?;
 
-                if lub != parent {
-                    self.resolved_unknown.insert(*id, lub);
-                    Ok(true)
-                } else {
-                    Ok(false)
-                }
+                self.greatest_lower_bound(&child, &parent)
+                    .map(|glb| self.update_unknown_if_changed(id_desc, &child, glb))
+                    .or_else(|_| {
+                        self.least_upper_bound(&child, &parent)
+                            .map(|lub| self.update_unknown_if_changed(id_asc, &parent, lub))
+                    })
             }
 
-            // If child is unknown, check if its resolved type is a subtype of parent.
-            (Unknown(_), _) => {
+            // Update an unknown ascending parent by computing LUB with child.
+            (_, UnknownAsc(id)) => {
+                let parent = self.resolve_type(parent);
+                self.least_upper_bound(child, &parent)
+                    .map(|lub| self.update_unknown_if_changed(id, &parent, lub))
+            }
+
+            // Update an unknown descending child by computing GLB with parent.
+            (UnknownDesc(id), _) => {
+                let child = self.resolve_type(child);
+                self.greatest_lower_bound(&child, parent)
+                    .map(|glb| self.update_unknown_if_changed(id, &child, glb))
+            }
+
+            // Resolve unknown ascending child and recurse.
+            (UnknownAsc(_), _) => {
                 let child = self.resolve_type(child);
                 self.enforce_subtype_inner(&child, parent, memo)
+            }
+
+            // Resolve unknown descending parent and recurse.
+            (_, UnknownDesc(_)) => {
+                let parent = self.resolve_type(parent);
+                self.enforce_subtype_inner(child, &parent, memo)
             }
 
             // Generics only match if they have strictly the same name.
@@ -238,6 +266,15 @@ impl TypeRegistry {
             (F64, Arithmetic) => Ok(false),
 
             _ => Err(Subtype),
+        }
+    }
+
+    fn update_unknown_if_changed(&mut self, id: &usize, old_type: &Type, new_type: Type) -> bool {
+        if &new_type != old_type {
+            self.resolved_unknown.insert(*id, new_type);
+            true
+        } else {
+            false
         }
     }
 

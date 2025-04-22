@@ -2,7 +2,10 @@ use super::registry::{Constraint, Type, TypeRegistry};
 use crate::dsl::analyzer::{
     errors::AnalyzerErrorKind,
     hir::{Identifier, TypedSpan},
-    types::{registry::TypeKind, subtypes::EnforceError},
+    types::{
+        registry::{TypeKind, type_display},
+        subtypes::EnforceError,
+    },
 };
 use std::mem;
 
@@ -68,6 +71,13 @@ impl TypeRegistry {
     ) -> Result<bool, Box<AnalyzerErrorKind>> {
         use EnforceError::*;
 
+        println!("Checking raw type: {:?} <: {:?}", child.ty, parent_ty);
+        println!(
+            "Checking subtype constraint: {} <: {}",
+            type_display(&child.ty, &self.resolved_unknown),
+            type_display(parent_ty, &self.resolved_unknown)
+        );
+
         self.enforce_subtype(&child.ty, parent_ty).map_err(|err| {
             match err {
                 // For now, no need to distinguish between both errors.
@@ -90,6 +100,18 @@ impl TypeRegistry {
         outer: &TypedSpan,
     ) -> Result<bool, Box<AnalyzerErrorKind>> {
         use TypeKind::*;
+
+        println!("Checking raw type: {:?}", inner.ty);
+
+        println!(
+            "Checking call constraint: {}({}) -> {}",
+            type_display(&inner.ty, &self.resolved_unknown),
+            args.iter()
+                .map(|arg| type_display(&arg.ty, &self.resolved_unknown))
+                .collect::<Vec<_>>()
+                .join(", "),
+            type_display(&outer.ty, &self.resolved_unknown)
+        );
 
         let inner_resolved = self.resolve_type(&inner.ty);
 
@@ -229,7 +251,7 @@ impl TypeRegistry {
         use TypeKind::*;
 
         match &*ty.value {
-            Unknown(id) => {
+            UnknownAsc(id) | UnknownDesc(id) => {
                 if let Some(resolved) = self.resolved_unknown.get(id) {
                     resolved.clone()
                 } else {

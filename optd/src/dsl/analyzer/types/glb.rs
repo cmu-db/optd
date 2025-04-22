@@ -35,11 +35,11 @@ impl TypeRegistry {
 
         let glb_kind = match (&*type1.value, &*type2.value) {
             // Substitute Unknown types with their current inferred type.
-            (Unknown(_), _) => {
+            (UnknownAsc(_) | UnknownDesc(_), _) => {
                 let bound_unknown = self.resolve_type(type1);
                 return self.greatest_lower_bound(&bound_unknown, type2);
             }
-            (_, Unknown(_)) => {
+            (_, UnknownAsc(_) | UnknownDesc(_)) => {
                 let bound_unknown = self.resolve_type(type2);
                 return self.greatest_lower_bound(type1, &bound_unknown);
             }

@@ -37,8 +37,9 @@ pub enum TypeKind {
     Nothing,  // Inherits all types.
     None,     // Inherits all optionals.
 
-    // Unknown type.
-    Unknown(usize),
+    // Unknown types.
+    UnknownAsc(usize),  // Strictly ascending types.
+    UnknownDesc(usize), // Strictly descending types.
 
     // User types.
     Adt(Identifier),
@@ -253,13 +254,24 @@ impl TypeRegistry {
         Some(convert_ast_type(field.ty))
     }
 
-    pub fn new_unknown(&mut self) -> TypeKind {
+    /// Creates a new unknown, ascending type.
+    pub fn new_unknown_asc(&mut self) -> TypeKind {
         use TypeKind::*;
 
         let id = self.next_unknown_id;
         self.next_unknown_id += 1;
         self.resolved_unknown.insert(id, Nothing.into());
-        Unknown(id)
+        UnknownAsc(id)
+    }
+
+    /// Creates a new unknown, descending type.
+    pub fn new_unknown_desc(&mut self) -> TypeKind {
+        use TypeKind::*;
+
+        let id = self.next_unknown_id;
+        self.next_unknown_id += 1;
+        self.resolved_unknown.insert(id, Universe.into());
+        UnknownDesc(id)
     }
 
     /// Adds a subtyping constraint set: `parent >: all children`
@@ -417,10 +429,16 @@ pub(crate) fn type_display(ty: &Type, resolved_unknown: &HashMap<usize, Type>) -
         Nothing => "Nothing".to_string(),
         None => "None".to_string(),
 
-        // Unknown type
-        Unknown(id) => {
+        // Unknown types
+        UnknownAsc(id) => {
             format!(
-                "≧ {}",
+                "≧{{{}}}",
+                type_display(resolved_unknown.get(id).unwrap(), resolved_unknown)
+            )
+        }
+        UnknownDesc(id) => {
+            format!(
+                "≦{{{}}}",
                 type_display(resolved_unknown.get(id).unwrap(), resolved_unknown)
             )
         }
