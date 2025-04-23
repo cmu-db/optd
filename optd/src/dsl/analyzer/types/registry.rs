@@ -282,7 +282,7 @@ impl TypeRegistry {
     ///
     /// * `parent` - The type that must be a supertype of all children
     /// * `children` - The types that must be children of parent
-    pub fn add_constraint_subtypes(&mut self, parent: &Type, children: &[TypedSpan]) {
+    pub(super) fn add_constraint_subtypes(&mut self, parent: &Type, children: &[TypedSpan]) {
         for child in children {
             self.constraints.push(Constraint::Subtype {
                 parent: parent.clone(),
@@ -299,7 +299,7 @@ impl TypeRegistry {
     ///
     /// * `target_type` - The type that is expected to be equal to other_type
     /// * `other_type` - The type that is being compared for equality
-    pub fn add_constraint_equal(&mut self, target_type: &TypedSpan, other_type: &TypedSpan) {
+    pub(super) fn add_constraint_equal(&mut self, target_type: &TypedSpan, other_type: &TypedSpan) {
         self.constraints.push(Constraint::Subtype {
             child: target_type.clone(),
             parent: other_type.ty.clone(),
@@ -321,7 +321,7 @@ impl TypeRegistry {
     /// * `outer` - The expected return type of the function call
     /// * `inner` - The function type being called
     /// * `args` - The arguments being passed to the function
-    pub fn add_constraint_call(
+    pub(super) fn add_constraint_call(
         &mut self,
         outer: &TypedSpan,
         inner: &TypedSpan,
@@ -343,7 +343,7 @@ impl TypeRegistry {
     /// * `outer` - The expected type of the field
     /// * `field` - The name of the field with its source location
     /// * `inner` - The type containing the field
-    pub fn add_constraint_field_access(
+    pub(super) fn add_constraint_field_access(
         &mut self,
         outer: &Type,
         field: &Identifier,
@@ -354,6 +354,34 @@ impl TypeRegistry {
             field: field.clone(),
             outer: outer.clone(),
         });
+    }
+
+    /// Resolves any Unknown types to their concrete types.
+    ///
+    /// This method checks if a type is an Unknown variant and replaces it
+    /// with its concrete inferred type from the registry. Other types are
+    /// returned as-is.
+    ///
+    /// # Arguments
+    ///
+    /// * `ty` - The type to resolve
+    ///
+    /// # Returns
+    ///
+    /// The resolved Type if it was an Unknown type, otherwise the original Type
+    pub(super) fn resolve_type(&self, ty: &Type) -> Type {
+        use TypeKind::*;
+
+        match &*ty.value {
+            UnknownAsc(id) | UnknownDesc(id) => {
+                if let Some(resolved) = self.resolved_unknown.get(id) {
+                    resolved.clone()
+                } else {
+                    ty.clone()
+                }
+            }
+            _ => ty.clone(),
+        }
     }
 }
 

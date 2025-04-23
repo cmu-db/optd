@@ -185,10 +185,12 @@ impl TypeRegistry {
             Operator(_) => panic!("Operators may not be in the HIR yet"),
             ArrayDecomp(head, tail) => {
                 if let TypeKind::Array(ty) = &*pattern.metadata.ty {
-                    self.add_constraint_subtypes(&ty, &[head.metadata.clone()]);
+                    self.add_constraint_subtypes(ty, &[head.metadata.clone()]);
                 } else {
                     panic!("Type should be set to array in from_ast");
                 }
+
+                // TODO: Generate some list constraint here.
 
                 self.add_constraint_subtypes(&pattern.metadata.ty, &[tail.metadata.clone()]);
                 self.generate_pattern(head, ctx)?;

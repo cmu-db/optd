@@ -2,7 +2,7 @@ use super::registry::{Constraint, Type, TypeRegistry};
 use crate::dsl::analyzer::{
     errors::AnalyzerErrorKind,
     hir::{Identifier, TypedSpan},
-    types::{registry::TypeKind, subtypes::EnforceError},
+    types::registry::TypeKind,
 };
 use std::mem;
 
@@ -11,30 +11,45 @@ impl TypeRegistry {
     ///
     /// This method iterates through all constraints, checking subtype relationships
     /// and refining unknown types until either all constraints are satisfied or
-    /// a constraint cannot be satisfied.
+    /// a constraint cannot be satisfied and no more progress can be made.
     ///
     /// # Returns
     ///
     /// * `Ok(())` if all constraints are successfully resolved
-    /// * `Err(error)` containing the first encountered type error
+    /// * `Err(error)` containing the last encountered type error when no further progress could be made
     pub fn resolve(&mut self) -> Result<(), Box<AnalyzerErrorKind>> {
         let mut any_changed = true;
+        let mut last_error = None;
 
         while any_changed {
             any_changed = false;
+            last_error = None;
 
             // Temporarily take ownership of constraints to avoid borrow checker issues.
             let constraints = mem::take(&mut self.constraints);
 
             for constraint in &constraints {
-                any_changed |= self.check_constraint(constraint)?
+                match self.check_constraint(constraint) {
+                    Ok(changed) => {
+                        any_changed |= changed;
+                    }
+                    Err(err) => {
+                        // Store the error but continue processing other constraints.
+                        last_error = Some(err);
+                    }
+                }
             }
 
             // Put constraints back.
             self.constraints = constraints;
         }
 
-        Ok(())
+        // Only return an error if no more progress can be made and we have an error.
+        if let Some(err) = last_error {
+            Err(err)
+        } else {
+            Ok(())
+        }
     }
 
     /// Checks if a single constraint is satisfied.
@@ -65,21 +80,19 @@ impl TypeRegistry {
         child: &TypedSpan,
         parent_ty: &Type,
     ) -> Result<bool, Box<AnalyzerErrorKind>> {
-        use EnforceError::*;
+        let mut has_changed = false;
+        let is_subtype = self.is_subtype_infer(&child.ty, parent_ty, &mut has_changed);
 
-        self.enforce_subtype(&child.ty, parent_ty).map_err(|err| {
-            match err {
-                // For now, no need to distinguish between both errors.
-                // However, in the future we might want to do something fancier here to
-                // improve error reporting.
-                Merge | Meet | Subtype => AnalyzerErrorKind::new_invalid_subtype(
-                    &child.ty,
-                    parent_ty,
-                    &child.span,
-                    self.resolved_unknown.clone(),
-                ),
-            }
-        })
+        if is_subtype {
+            Ok(has_changed)
+        } else {
+            Err(AnalyzerErrorKind::new_invalid_subtype(
+                &child.ty,
+                parent_ty,
+                &child.span,
+                self.resolved_unknown.clone(),
+            ))
+        }
     }
 
     fn check_call_constraint(
@@ -139,13 +152,15 @@ impl TypeRegistry {
                     ));
                 }
 
-                self.check_subtype_constraint(&args[0], key_type)?;
+                let key_changed = self.check_subtype_constraint(&args[0], key_type)?;
 
                 let optional_val_type = Optional(val_type.clone()).into();
-                self.check_subtype_constraint(
+                let val_changed = self.check_subtype_constraint(
                     &TypedSpan::new(optional_val_type, inner.span.clone()),
                     &outer.ty,
-                )
+                )?;
+
+                Ok(key_changed || val_changed)
             }
 
             Array(elem_type) => {
@@ -157,13 +172,15 @@ impl TypeRegistry {
                     ));
                 }
 
-                self.check_subtype_constraint(&args[0], &I64.into())?;
+                let idx_changed = self.check_subtype_constraint(&args[0], &I64.into())?;
 
                 let optional_elem_type = Optional(elem_type.clone()).into();
-                self.check_subtype_constraint(
+                let elem_changed = self.check_subtype_constraint(
                     &TypedSpan::new(optional_elem_type, inner.span.clone()),
                     &outer.ty,
-                )
+                )?;
+
+                Ok(idx_changed || elem_changed)
             }
             _ => Err(AnalyzerErrorKind::new_invalid_call_receiver(
                 &inner_resolved,
@@ -208,34 +225,6 @@ impl TypeRegistry {
                 field,
                 self.resolved_unknown.clone(),
             )),
-        }
-    }
-
-    /// Resolves any Unknown types to their concrete types.
-    ///
-    /// This method checks if a type is an Unknown variant and replaces it
-    /// with its concrete inferred type from the registry. Other types are
-    /// returned as-is.
-    ///
-    /// # Arguments
-    ///
-    /// * `ty` - The type to resolve
-    ///
-    /// # Returns
-    ///
-    /// The resolved Type if it was an Unknown type, otherwise the original Type
-    pub(super) fn resolve_type(&self, ty: &Type) -> Type {
-        use TypeKind::*;
-
-        match &*ty.value {
-            UnknownAsc(id) | UnknownDesc(id) => {
-                if let Some(resolved) = self.resolved_unknown.get(id) {
-                    resolved.clone()
-                } else {
-                    ty.clone()
-                }
-            }
-            _ => ty.clone(),
         }
     }
 }

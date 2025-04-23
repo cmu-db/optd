@@ -18,10 +18,10 @@ fn main(log: Logical): Logical? = match log
     }
     | fooo -> arr_as_function(Const(54), 0, [log])
     | List(bla) -> match bla
-        | vla -> vla(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)
+        | vla -> vla(0)
         \ [] -> none
     | Add(left, right) -> left
     \ _ -> fail("brru")
 
-fn (log: [Logical]) vla() = match log 
-    \ [a .. [v .. bla]] -> none
+fn (log: [Logical]) vla: List = match log 
+    \ [Const(5) .. [v .. []]] -> v

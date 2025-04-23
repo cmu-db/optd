@@ -1,5 +1,5 @@
 use super::registry::{Type, TypeRegistry};
-use crate::dsl::analyzer::types::{registry::TypeKind, subtypes::EnforceError};
+use crate::dsl::analyzer::types::registry::TypeKind;
 
 impl TypeRegistry {
     /// Finds the greatest lower bound (GLB) of two types.
@@ -24,24 +24,35 @@ impl TypeRegistry {
     ///      or computes a common Function type if no direct subtyping relationship exists.
     ///      Only applies when the Function parameter type is I64.
     /// 7. Nothing is the bottom type, Universe is the top type, so GLB(Universe, T) = T and GLB(Nothing, T) = Nothing.
-    /// 8. If no common subtype exists, an error is returned.
+    /// 8. If no common subtype exists, returns the Nothing type.
+    ///
+    /// # Arguments
+    ///
+    /// * `type1` - First type to compare
+    /// * `type2` - Second type to compare
+    /// * `has_changed` - Mutable reference to a boolean that will be set to true if
+    ///   any unknown types were modified during the computation.
+    ///
+    /// # Returns
+    ///
+    /// The greatest lower bound of the two types, or Nothing if no common subtype exists.
     pub(super) fn greatest_lower_bound(
         &mut self,
         type1: &Type,
         type2: &Type,
-    ) -> Result<Type, EnforceError> {
-        use EnforceError::*;
+        has_changed: &mut bool,
+    ) -> Type {
         use TypeKind::*;
 
         let glb_kind = match (&*type1.value, &*type2.value) {
             // Substitute Unknown types with their current inferred type.
             (UnknownAsc(_) | UnknownDesc(_), _) => {
                 let bound_unknown = self.resolve_type(type1);
-                return self.greatest_lower_bound(&bound_unknown, type2);
+                return self.greatest_lower_bound(&bound_unknown, type2, has_changed);
             }
             (_, UnknownAsc(_) | UnknownDesc(_)) => {
                 let bound_unknown = self.resolve_type(type2);
-                return self.greatest_lower_bound(type1, &bound_unknown);
+                return self.greatest_lower_bound(type1, &bound_unknown, has_changed);
             }
 
             // Nothing is the bottom type - GLB with anything is Nothing.
@@ -61,7 +72,7 @@ impl TypeRegistry {
 
             // Array covariance: GLB(Array<T1>, Array<T2>) = Array<GLB(T1, T2)>.
             (Array(elem1), Array(elem2)) => {
-                let glb_elem = self.greatest_lower_bound(elem1, elem2)?;
+                let glb_elem = self.greatest_lower_bound(elem1, elem2, has_changed);
                 Array(glb_elem)
             }
 
@@ -69,81 +80,85 @@ impl TypeRegistry {
             (Tuple(elems1), Tuple(elems2)) if elems1.len() == elems2.len() => {
                 let mut glb_elems = Vec::with_capacity(elems1.len());
                 for (e1, e2) in elems1.iter().zip(elems2.iter()) {
-                    glb_elems.push(self.greatest_lower_bound(e1, e2)?);
+                    glb_elems.push(self.greatest_lower_bound(e1, e2, has_changed));
                 }
                 Tuple(glb_elems)
             }
 
             // Map with contravariant keys and covariant values.
             (Map(key1, val1), Map(key2, val2)) => {
-                let lub_key = self.least_upper_bound(key1, key2)?;
-                let glb_val = self.greatest_lower_bound(val1, val2)?;
+                let lub_key = self.least_upper_bound(key1, key2, has_changed);
+                let glb_val = self.greatest_lower_bound(val1, val2, has_changed);
                 Map(lub_key, glb_val)
             }
 
             // Optional type handling.
             (Optional(inner1), Optional(inner2)) => {
-                let glb_inner = self.greatest_lower_bound(inner1, inner2)?;
+                let glb_inner = self.greatest_lower_bound(inner1, inner2, has_changed);
                 Optional(glb_inner)
             }
             (None, Optional(_)) | (Optional(_), None) => None,
             (Optional(inner), _) => {
-                return self.greatest_lower_bound(inner, type2);
+                return self.greatest_lower_bound(inner, type2, has_changed);
             }
             (_, Optional(inner)) => {
-                return self.greatest_lower_bound(type1, inner);
+                return self.greatest_lower_bound(type1, inner, has_changed);
             }
 
             // Stored type handling.
             (Stored(inner1), Stored(inner2)) => {
-                let glb_inner = self.greatest_lower_bound(inner1, inner2)?;
+                let glb_inner = self.greatest_lower_bound(inner1, inner2, has_changed);
                 Stored(glb_inner)
             }
 
             // Costed type handling.
             (Costed(inner1), Costed(inner2)) => {
-                let glb_inner = self.greatest_lower_bound(inner1, inner2)?;
+                let glb_inner = self.greatest_lower_bound(inner1, inner2, has_changed);
                 Costed(glb_inner)
             }
 
             // Mixed Stored and Costed - result is Costed (more specific).
             (Costed(costed), Stored(stored)) | (Stored(stored), Costed(costed)) => {
-                let glb_inner = self.greatest_lower_bound(costed, stored)?;
+                let glb_inner = self.greatest_lower_bound(costed, stored, has_changed);
                 Costed(glb_inner)
             }
 
             // Unwrap Stored/Costed for GLB with other types.
             (Stored(stored), _) => {
-                return self.greatest_lower_bound(stored, type2);
+                return self.greatest_lower_bound(stored, type2, has_changed);
             }
             (_, Stored(stored)) => {
-                return self.greatest_lower_bound(type1, stored);
+                return self.greatest_lower_bound(type1, stored, has_changed);
             }
             (Costed(costed), _) => {
-                return self.greatest_lower_bound(costed, type2);
+                return self.greatest_lower_bound(costed, type2, has_changed);
             }
             (_, Costed(costed)) => {
-                return self.greatest_lower_bound(type1, costed);
+                return self.greatest_lower_bound(type1, costed, has_changed);
             }
 
             // Function type handling - covariant parameters, contravariant return types (reversed from LUB).
             (Closure(param1, ret1), Closure(param2, ret2)) => {
-                let param_lub = self.least_upper_bound(param1, param2)?;
-                let ret_glb = self.greatest_lower_bound(ret1, ret2)?;
+                let param_lub = self.least_upper_bound(param1, param2, has_changed);
+                let ret_glb = self.greatest_lower_bound(ret1, ret2, has_changed);
                 Closure(param_lub, ret_glb)
             }
 
             // Map/Function compatibility - a Map can be seen as a function from keys to optional values.
             (Map(key_type, val_type), Closure(param_type, ret_type))
             | (Closure(param_type, ret_type), Map(key_type, val_type)) => {
-                let param_lub = self.least_upper_bound(param_type, key_type)?;
-                let ret_glb =
-                    self.greatest_lower_bound(ret_type, &Optional(val_type.clone()).into())?;
+                let param_lub = self.least_upper_bound(param_type, key_type, has_changed);
+                let ret_glb = self.greatest_lower_bound(
+                    ret_type,
+                    &Optional(val_type.clone()).into(),
+                    has_changed,
+                );
 
                 if let Optional(inner) = &*ret_glb.value {
                     Map(param_lub, inner.clone())
                 } else {
-                    return Err(Meet);
+                    // Return Nothing for incompatible types
+                    Nothing
                 }
             }
 
@@ -152,13 +167,17 @@ impl TypeRegistry {
             | (Closure(param_type, ret_type), Array(elem_type))
                 if matches!(&*param_type.value, I64) =>
             {
-                let ret_glb =
-                    self.greatest_lower_bound(ret_type, &Optional(elem_type.clone()).into())?;
+                let ret_glb = self.greatest_lower_bound(
+                    ret_type,
+                    &Optional(elem_type.clone()).into(),
+                    has_changed,
+                );
 
                 if let Optional(inner) = &*ret_glb.value {
                     Array(inner.clone())
                 } else {
-                    return Err(Meet);
+                    // Return Nothing for incompatible types
+                    Nothing
                 }
             }
 
@@ -169,39 +188,44 @@ impl TypeRegistry {
                 } else if self.inherits_adt(adt2, adt1) {
                     *type2.value.clone()
                 } else {
-                    return Err(Meet);
+                    // Return Nothing for incompatible types
+                    Nothing
                 }
             }
 
             // Native trait handling: re-use enforce subtype for convenience.
-            (Concat | EqHash | Arithmetic, other) if self.enforce_subtype(type2, type1).is_ok() => {
+            (Concat | EqHash | Arithmetic, other)
+                if self.is_subtype_infer(type2, type1, has_changed) =>
+            {
                 other.clone()
             }
-            (other, Concat | EqHash | Arithmetic) if self.enforce_subtype(type1, type2).is_ok() => {
+            (other, Concat | EqHash | Arithmetic)
+                if self.is_subtype_infer(type1, type2, has_changed) =>
+            {
                 other.clone()
             }
 
             // Default case - incompatible types
-            _ => return Err(Meet),
+            _ => Nothing,
         };
 
         let result = glb_kind.into();
 
-        // Verify post-condition.
+        // Verify post-condition in debug mode only
         debug_assert!(
-            self.enforce_subtype(&result, type1).is_ok(),
+            self.is_subtype(&result, type1),
             "GLB post-condition failed: {:?} is not a subtype of {:?}",
             result,
             type1
         );
         debug_assert!(
-            self.enforce_subtype(&result, type2).is_ok(),
+            self.is_subtype(&result, type2),
             "GLB post-condition failed: {:?} is not a subtype of {:?}",
             result,
             type2
         );
 
-        Ok(result)
+        result
     }
 }
 
@@ -213,16 +237,16 @@ mod tests {
 
     /// Helper function to simplify GLB assertions
     pub fn assert_glb_eq(reg: &mut TypeRegistry, t1: &Type, t2: &Type, expected: TypeKind) {
-        let result = reg.greatest_lower_bound(t1, t2);
-        assert_eq!(result.unwrap(), expected.into());
+        let mut has_changed = false;
+        let result = reg.greatest_lower_bound(t1, t2, &mut has_changed);
+        assert_eq!(result, expected.into());
     }
 
-    /// Helper function to verify GLB errors
-    pub fn assert_glb_err(reg: &mut TypeRegistry, t1: &Type, t2: &Type) {
-        assert!(
-            reg.greatest_lower_bound(t1, t2).is_err(),
-            "Expected GLB to fail but it succeeded"
-        );
+    /// Helper function to verify GLB results in Nothing
+    pub fn assert_glb_nothing(reg: &mut TypeRegistry, t1: &Type, t2: &Type) {
+        let mut has_changed = false;
+        let result = reg.greatest_lower_bound(t1, t2, &mut has_changed);
+        assert_eq!(*result.value, Nothing);
     }
 
     #[test]
@@ -246,14 +270,14 @@ mod tests {
         );
 
         // Related types (siblings)
-        assert_glb_err(
+        assert_glb_nothing(
             &mut reg,
             &Adt("Dog".to_string()).into(),
             &Adt("Cat".to_string()).into(),
         );
 
         // Unrelated types
-        assert_glb_err(
+        assert_glb_nothing(
             &mut reg,
             &Adt("Dog".to_string()).into(),
             &Adt("Car".to_string()).into(),
@@ -297,10 +321,11 @@ mod tests {
         );
 
         // Arrays of related types (siblings)
-        assert_glb_err(
+        assert_glb_eq(
             &mut reg,
             &Array(Adt("Dog".to_string()).into()).into(),
             &Array(Adt("Cat".to_string()).into()).into(),
+            Array(Nothing.into()),
         );
     }
 
@@ -347,7 +372,7 @@ mod tests {
         );
 
         // Tuples with mixed compatibility
-        assert_glb_err(
+        assert_glb_eq(
             &mut reg,
             &Tuple(vec![
                 Adt("Dog".to_string()).into(),
@@ -359,10 +384,11 @@ mod tests {
                 Adt("LandVehicles".to_string()).into(),
             ])
             .into(),
+            Tuple(vec![Nothing.into(), Adt("Car".to_string()).into()]),
         );
 
         // Different length tuples
-        assert_glb_err(
+        assert_glb_nothing(
             &mut reg,
             &Tuple(vec![Adt("Dog".to_string()).into()]).into(),
             &Tuple(vec![
@@ -504,10 +530,11 @@ mod tests {
         );
 
         // Optional of unrelated types
-        assert_glb_err(
+        assert_glb_eq(
             &mut reg,
             &Optional(Adt("Dog".to_string()).into()).into(),
             &Optional(Adt("Car".to_string()).into()).into(),
+            Optional(Nothing.into()),
         );
 
         // None and Optional
