@@ -131,6 +131,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
 
 #[cfg(test)]
 mod tests {
+    use crate::catalog::iceberg::memory_catalog;
     use crate::dsl::engine::Engine;
     use crate::dsl::{
         analyzer::{
@@ -153,7 +154,8 @@ mod tests {
     async fn test_materialized_logical_operator() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // Create a materialized logical operator expression with nested expressions to evaluate
         let log_op = LogicalOp::logical(Operator {
@@ -226,7 +228,8 @@ mod tests {
     async fn test_unmaterialized_logical_operator() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // Create an unmaterialized logical operator with a group ID
         let group_id = GroupId(42);
@@ -255,7 +258,8 @@ mod tests {
     async fn test_materialized_physical_operator() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // Create a materialized physical operator expression with nested expressions to evaluate
         let phys_op = PhysicalOp::physical(Operator {
@@ -328,7 +332,8 @@ mod tests {
     async fn test_unmaterialized_physical_operator() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // Create an unmaterialized physical operator with a goal
         let goal = Goal {
@@ -370,7 +375,8 @@ mod tests {
     async fn test_nested_logical_operators() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // Create a Join operator with two Scan operators as children
         let scan1 = Arc::new(Expr::new(CoreVal(create_logical_operator(

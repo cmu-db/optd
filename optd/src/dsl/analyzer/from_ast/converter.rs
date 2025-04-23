@@ -1,14 +1,13 @@
 use crate::dsl::analyzer::errors::AnalyzerErrorKind;
-use crate::dsl::analyzer::hir::{Annotation, FunKind, Identifier, UdfKind};
+use crate::dsl::analyzer::hir::{Annotation, FunKind, Identifier};
 use crate::dsl::analyzer::types::registry::{Type, TypeRegistry, create_function_type};
 use crate::dsl::analyzer::{
     context::Context,
-    hir::{CoreData, HIR, TypedSpan, Value},
+    hir::{CoreData, HIR, TypedSpan, Udf, Value},
 };
 use crate::dsl::parser::ast::{Function, Item, Module};
 use crate::dsl::utils::span::Spanned;
 use FunKind::*;
-use UdfKind::*;
 use std::collections::{HashMap, HashSet};
 
 /// Converts an AST to a High-level Intermediate Representation (HIR).
@@ -20,6 +19,19 @@ pub struct ASTConverter {
     pub(super) registry: TypeRegistry,
     /// Annotations for HIR expressions.
     pub(super) annotations: HashMap<Identifier, Vec<Annotation>>,
+    /// User-defined functions.
+    pub(super) udfs: HashMap<String, Udf>,
+}
+
+impl ASTConverter {
+    pub fn new_with_udfs(udfs: HashMap<String, Udf>) -> Self {
+        ASTConverter {
+            context: Default::default(),
+            registry: Default::default(),
+            annotations: Default::default(),
+            udfs,
+        }
+    }
 }
 
 impl ASTConverter {
@@ -110,12 +122,14 @@ impl ASTConverter {
                 self.context.try_bind(name.clone(), fn_value)?;
             }
             None => {
+                let udf = self
+                    .udfs
+                    .get(name)
+                    .ok_or_else(|| AnalyzerErrorKind::new_unknown_udf(name, &fn_span))?
+                    .clone();
+
                 // Process external function (UDF).
-                let fn_value = Value::new_with(
-                    CoreData::Function(Udf(Unlinked(name.clone()))),
-                    fn_type,
-                    fn_span,
-                );
+                let fn_value = Value::new_with(CoreData::Function(Udf(udf)), fn_type, fn_span);
 
                 self.context.try_bind(name.clone(), fn_value)?;
             }
@@ -177,6 +191,7 @@ impl ASTConverter {
 #[cfg(test)]
 mod converter_tests {
     use super::*;
+    use crate::catalog::Catalog;
     use crate::dsl::analyzer::hir::{CoreData, FunKind};
     use crate::dsl::parser::ast::{self, Adt, Function, Item, Module, Type as AstType};
     use crate::dsl::utils::span::{Span, Spanned};
@@ -377,29 +392,55 @@ mod converter_tests {
     }
 
     #[test]
-    fn test_process_external_function() {
-        // Create an external function (no body)
+    fn test_process_external_function_link() {
+        // Create an external function that will not be linked.
         let ext_func = create_simple_function("external_function", false);
         let module = create_module_with_functions(vec![ext_func]);
 
-        // Create and run the converter
-        let converter = ASTConverter::default();
+        pub fn external_function(_args: &[Value], _catalog: &dyn Catalog) -> Value {
+            println!("Hello from UDF!");
+            Value::new(CoreData::<Value>::None)
+        }
+
+        // Link the dummy function.
+        let mut udfs = HashMap::new();
+        let udf = Udf {
+            func: external_function,
+        };
+        udfs.insert("external_function".to_string(), udf);
+
+        // Run the converter.
+        let converter = ASTConverter::new_with_udfs(udfs);
         let result = converter.convert(&module);
 
-        // Verify result is Ok and contains the expected function
+        // There should be no error if linking succeeded.
         assert!(result.is_ok());
         let (hir, _registry) = result.unwrap();
 
-        // Check that function is in the context
+        // Check that the function is in the context.
         let func_val = hir.context.lookup("external_function");
         assert!(func_val.is_some());
 
-        // Verify it's an unlinked UDF
-        if let CoreData::Function(FunKind::Udf(UdfKind::Unlinked(name))) = &func_val.unwrap().data {
-            assert_eq!(name, "external_function");
+        // Verify it is the same function pointer.
+        if let CoreData::Function(FunKind::Udf(udf)) = &func_val.unwrap().data {
+            assert_eq!(udf.func as usize, external_function as usize);
         } else {
             panic!("Expected unlinked UDF");
         }
+    }
+
+    #[test]
+    fn test_process_external_function_fail() {
+        // Create an external function that will not be linked.
+        let ext_func = create_simple_function("external_function", false);
+        let module = create_module_with_functions(vec![ext_func]);
+
+        // Create and run the converter.
+        let converter = ASTConverter::default();
+        let result = converter.convert(&module);
+
+        // Verify that an error is raised.
+        assert!(result.is_err());
     }
 
     #[test]

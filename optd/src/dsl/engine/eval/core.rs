@@ -94,6 +94,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
 
 #[cfg(test)]
 mod tests {
+    use crate::catalog::iceberg::memory_catalog;
     use crate::dsl::analyzer::hir::{BinOp, LetBinding};
     use crate::dsl::utils::tests::{
         TestHarness, evaluate_and_collect, int, lit_expr, ref_expr, string,
@@ -112,7 +113,8 @@ mod tests {
     #[tokio::test]
     async fn test_literal_evaluation() {
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
         let harness = TestHarness::new();
 
         // Create a literal expression
@@ -134,7 +136,8 @@ mod tests {
     async fn test_array_evaluation() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // Create an array expression with values to evaluate
         let array_expr = Arc::new(Expr::new(CoreExpr(CoreData::Array(vec![
@@ -172,7 +175,8 @@ mod tests {
     async fn test_tuple_evaluation() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // Create a tuple expression with mixed types
         let tuple_expr = Arc::new(Expr::new(CoreExpr(CoreData::Tuple(vec![
@@ -210,7 +214,8 @@ mod tests {
     async fn test_struct_evaluation() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // Create a struct expression
         let struct_expr = Arc::new(Expr::new(CoreExpr(CoreData::Struct(
@@ -244,7 +249,8 @@ mod tests {
     async fn test_function_evaluation() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // Create a function expression (just a simple closure)
         let fn_expr = Arc::new(Expr::new(CoreExpr(CoreData::Function(FunKind::Closure(
@@ -269,7 +275,8 @@ mod tests {
     async fn test_null_evaluation() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // Create a null expression
         let null_expr = Arc::new(Expr::new(CoreExpr(CoreData::None)));
@@ -323,7 +330,8 @@ mod tests {
         let mut ctx = Context::default();
         ctx.bind("fail_fn".to_string(), fail_fn);
         ctx.bind("main_fn".to_string(), main_fn);
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // This should not run the addition, but should escape to the function return with the error message
         let call_expr = Arc::new(Expr::new(Call(ref_expr("main_fn"), vec![])));

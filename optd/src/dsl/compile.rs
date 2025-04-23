@@ -3,7 +3,7 @@ use crate::dsl::{
         context::Context,
         errors::AnalyzerError,
         from_ast::ASTConverter,
-        hir::{HIR, TypedSpan},
+        hir::{HIR, TypedSpan, Udf},
         semantic_checks::adt_check,
         types::registry::TypeRegistry,
     },
@@ -13,7 +13,7 @@ use crate::dsl::{
 };
 use clap::{Args, Parser};
 use colored::Colorize;
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::HashMap};
 use std::{fs, path::PathBuf};
 
 /// Compilation configuration and options.
@@ -64,7 +64,7 @@ pub struct Verbosity {
 /// Compiles a file into the [`HIR`].
 ///
 /// TODO fix error handling.
-pub fn compile_hir(config: Config) -> Result<HIR, Vec<CompileError>> {
+pub fn compile_hir(config: Config, udfs: HashMap<String, Udf>) -> Result<HIR, Vec<CompileError>> {
     let source_path = config.path_str();
 
     // If we cannot find the file we can't compile anything, so exit immediately.
@@ -107,7 +107,7 @@ pub fn compile_hir(config: Config) -> Result<HIR, Vec<CompileError>> {
         println!("{} Converting AST to HIR and TypeRegistry...", "→".cyan());
     }
 
-    let (typed_hir, mut type_registry) = ast_to_hir(&source, ast).map_err(|e| vec![e])?;
+    let (typed_hir, mut type_registry) = ast_to_hir(&source, ast, udfs).map_err(|e| vec![e])?;
 
     if config.verbose() {
         println!("{}", "AST to HIR conversion successful".green());
@@ -178,8 +178,9 @@ pub fn parse(source: &str, config: &Config) -> Result<Module, Vec<CompileError>>
 pub fn ast_to_hir(
     source: &str,
     ast: Module,
+    udfs: HashMap<String, Udf>,
 ) -> Result<(HIR<TypedSpan>, TypeRegistry), CompileError> {
-    let converter = ASTConverter::default();
+    let converter = ASTConverter::new_with_udfs(udfs);
     converter.convert(&ast).map_err(|err_kind| {
         CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
     })

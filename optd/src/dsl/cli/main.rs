@@ -27,8 +27,12 @@
 //! cargo run --bin optd-cli -- compile path/to/example.opt --verbose --show-ast --show-hir
 //! ```
 
+use std::collections::HashMap;
+
 use clap::{Parser, Subcommand};
 use colored::Colorize;
+use optd::catalog::Catalog;
+use optd::dsl::analyzer::hir::{CoreData, Udf, Value};
 use optd::dsl::compile::{Config, compile_hir};
 use optd::dsl::utils::errors::{CompileError, Diagnose};
 
@@ -50,11 +54,22 @@ enum Commands {
     Compile(Config),
 }
 
+/// A simple user-defined function.
+pub fn hello_udf(_args: &[Value], _catalog: &dyn Catalog) -> Value {
+    println!("Hello from UDF!");
+    Value::new(CoreData::<Value>::None)
+}
+
 fn main() -> Result<(), Vec<CompileError>> {
     let cli = Cli::parse();
 
+    let mut udfs = HashMap::new();
+    let udf = Udf { func: hello_udf };
+    udfs.insert("hello_udf".to_string(), udf);
+
     let Commands::Compile(config) = cli.command;
-    let _hir = compile_hir(config).unwrap_or_else(|errors| handle_errors(&errors));
+
+    let _hir = compile_hir(config, udfs).unwrap_or_else(|errors| handle_errors(&errors));
 
     Ok(())
 }
