@@ -275,15 +275,12 @@ impl Diagnose for Box<AnalyzerError> {
                 .with_help("Add at least one parameter or a receiver to this function")
                 .with_note("Functions without parameters are not supported in this language")
                 .finish(),
-            UnknownUdf { name, span } => Report::build(ReportKind::Error, span.clone())
-                .with_message(format!("Unknown UDF found: '{}'", name))
-                .with_label(
-                    Label::new(span.clone())
-                        .with_message("UDF linker error")
-                        .with_color(Color::Magenta),
-                )
-                .with_help(format!("Ensure that the UDF {} is provided before compilation", name))
-                .finish(),
+            UnknownUdf { name, span } => self.build_single_span_report(
+                span,
+                &format!("Undefined UDF named: '{}'", name),
+                &format!("'{}' is not a valid UDF", name),
+                &format!("Ensure that the UDF {} is provided before compilation", name),
+            ),
             UndefinedReference { name, span } => self.build_single_span_report(
                 span,
                 &format!("Undefined reference to: '{}'", name),
