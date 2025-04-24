@@ -33,6 +33,14 @@ pub struct Config {
 }
 
 impl Config {
+    /// Creates a new Config instance with the given path.
+    pub fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            verbosity: Default::default(),
+        }
+    }
+
     /// A helper method to get the verbosity.
     fn verbose(&self) -> bool {
         self.verbosity.verbose
@@ -45,7 +53,7 @@ impl Config {
 }
 
 /// Verbosity settings for compilation.
-#[derive(Args)]
+#[derive(Args, Default)]
 pub struct Verbosity {
     /// Print detailed processing information.
     #[arg(long)]
@@ -133,7 +141,7 @@ pub fn compile_hir(config: Config, udfs: HashMap<String, Udf>) -> Result<HIR, Ve
         println!("{} Performing type inference...", "→".cyan());
     }
 
-    let hir = infer(&source, &typed_hir, &mut type_registry)?;
+    let hir = infer(&source, &typed_hir, &mut type_registry).map_err(|e| vec![e])?;
 
     if config.verbose() {
         println!("{}", "Type inference successful".green());
@@ -213,24 +221,16 @@ pub fn infer(
     source: &str,
     hir: &HIR<TypedSpan>,
     registry: &mut TypeRegistry,
-) -> Result<HIR, Vec<CompileError>> {
+) -> Result<HIR, CompileError> {
     // Step 1 & 2: Perform scope checking and generate type constraints
     // This traverses the HIR, verifies scopes, and creates constraints for all expressions
     registry.generate_constraints(hir).map_err(|err_kind| {
-        vec![CompileError::AnalyzerError(AnalyzerError::new(
-            source.to_string(),
-            *err_kind,
-        ))]
+        CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
     })?;
 
     // Step 3: Resolve constraints.
-    registry.resolve().map_err(|err_kinds| {
-        err_kinds
-            .into_iter()
-            .map(|err_kind| {
-                CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
-            })
-            .collect::<Vec<_>>()
+    registry.resolve().map_err(|err_kind| {
+        CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
     })?;
 
     // TODO(alexis): Step 4: Transform HIR

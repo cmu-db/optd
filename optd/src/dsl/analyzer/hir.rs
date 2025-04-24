@@ -50,12 +50,12 @@ pub trait ExprMetadata: Debug + Clone {}
 pub struct NoMetadata;
 impl ExprMetadata for NoMetadata {}
 
-/// Combined span and type information for an expression
+/// Combined span and type information for an expression.
 #[derive(Debug, Clone)]
 pub struct TypedSpan {
-    /// Source code location.
+    /// Source code location of the expression.
     pub span: Span,
-    /// Inferred type.
+    /// Inferred type (includes span).
     pub ty: Type,
 }
 impl ExprMetadata for TypedSpan {}

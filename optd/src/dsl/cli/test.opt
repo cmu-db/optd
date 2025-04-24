@@ -1,0 +1,12 @@
+data Logical =
+    | Add(left: Logical, right: Logical)
+    \ Number(val: I64)
+
+data Physical
+data LogicalProperties
+data PhysicalProperties
+
+fn constant_folder(): Logical -> Logical =
+    (expr) ->
+        match expr
+            \ Add(_, _) -> Number(5)

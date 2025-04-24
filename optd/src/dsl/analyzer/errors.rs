@@ -1,9 +1,13 @@
-use super::hir::{Identifier, TypedSpan};
-use crate::dsl::utils::{
-    errors::Diagnose,
-    span::{Span, Spanned},
+use super::{hir::Identifier, types::registry::Type};
+use crate::dsl::{
+    analyzer::types::registry::type_display,
+    utils::{
+        errors::Diagnose,
+        span::{Span, Spanned},
+    },
 };
 use ariadne::{Color, Label, Report, ReportKind, Source};
+use std::collections::HashMap;
 
 /// Wrapper for analysis errors
 #[derive(Debug)]
@@ -91,14 +95,32 @@ pub enum AnalyzerErrorKind {
     },
 
     InvalidSubtype {
-        child: TypedSpan,
-        parent: TypedSpan,
+        child: Type,
+        parent: Type,
+        span: Span,
+        // To be able to call display function of Type.
+        unknowns: HashMap<usize, Type>,
+    },
+
+    ArgumentNumberMismatch {
+        span: Span,
+        expected: usize,
+        found: usize,
+    },
+
+    InvalidCallReceiver {
+        function: Type,
+        span: Span,
+        // To be able to call display function of Type.
+        unknowns: HashMap<usize, Type>,
     },
 
     InvalidFieldAccess {
-        object: TypedSpan,
-        field_name: String,
-        field_span: Span,
+        object: Type,
+        span: Span,
+        field: String,
+        // To be able to call display function of Type.
+        unknowns: HashMap<usize, Type>,
     },
 }
 
@@ -214,23 +236,54 @@ impl AnalyzerErrorKind {
         .into()
     }
 
-    pub fn new_invalid_subtype(child: &TypedSpan, parent: &TypedSpan) -> Box<Self> {
+    pub fn new_invalid_subtype(
+        child: &Type,
+        parent: &Type,
+        span: &Span,
+        unknowns: HashMap<usize, Type>,
+    ) -> Box<Self> {
         Self::InvalidSubtype {
             child: child.clone(),
             parent: parent.clone(),
+            span: span.clone(),
+            unknowns,
+        }
+        .into()
+    }
+
+    pub fn new_argument_number_mismatch(span: &Span, expected: usize, found: usize) -> Box<Self> {
+        Self::ArgumentNumberMismatch {
+            span: span.clone(),
+            expected,
+            found,
+        }
+        .into()
+    }
+
+    pub fn new_invalid_call_receiver(
+        function: &Type,
+        span: &Span,
+        unknowns: HashMap<usize, Type>,
+    ) -> Box<Self> {
+        Self::InvalidCallReceiver {
+            function: function.clone(),
+            span: span.clone(),
+            unknowns,
         }
         .into()
     }
 
     pub fn new_invalid_field_access(
-        object: &TypedSpan,
-        field_name: &str,
-        field_span: &Span,
+        object: &Type,
+        span: &Span,
+        field: &Identifier,
+        unknowns: HashMap<usize, Type>,
     ) -> Box<Self> {
         Self::InvalidFieldAccess {
             object: object.clone(),
-            field_name: field_name.to_string(),
-            field_span: field_span.clone(),
+            span: span.clone(),
+            field: field.clone(),
+            unknowns,
         }
         .into()
     }
@@ -265,16 +318,11 @@ impl Diagnose for Box<AnalyzerError> {
                 "First declared here",
                 "Identifiers must be unique within the same scope",
             ),
-            IncompleteFunction { name, span } => Report::build(ReportKind::Error, span.clone())
-                .with_message(format!("Incomplete function definition: '{}'", name))
-                .with_label(
-                    Label::new(span.clone())
-                        .with_message("Function must have at least one parameter")
-                        .with_color(Color::Magenta),
-                )
-                .with_help("Add at least one parameter or a receiver to this function")
-                .with_note("Functions without parameters are not supported in this language")
-                .finish(),
+            IncompleteFunction { name, span } => self.build_single_span_report(
+                span,
+                &format!("Incomplete function definition: '{}'", name),
+                "Function must have at least one parameter",
+                "Add at least one parameter or a receiver to this function"),
             UnknownUdf { name, span } => self.build_single_span_report(
                 span,
                 &format!("Undefined UDF named: '{}'", name),
@@ -300,9 +348,7 @@ impl Diagnose for Box<AnalyzerError> {
                 "Type cannot be constructed, or does not exist",
                 "Only defined leaf types can be constructed",
             ),
-            MissingCoreType { name, src_path } => {
-                self.build_missing_core_type_report(name, src_path)
-            }
+            MissingCoreType { name, src_path } => self.build_missing_core_type_report(name, src_path),
             InvalidType { span } => self.build_single_span_report(
                 span,
                 "Invalid type usage",
@@ -333,29 +379,28 @@ impl Diagnose for Box<AnalyzerError> {
                 &format!("Expected {} fields, but found {}", expected, found),
                 "Check the number of fields in the type definition",
             ),
-            InvalidSubtype {
-                child,
-                parent,
-            } => self.build_duplicate_report(
-                &child.span,
-                &parent.span,
-                &format!("Type error: '{}' is not a subtype of '{}'", child.ty, parent.ty),
-                &format!("Found type '{}' here", child.ty),
-                &format!("Expected type '{}' here", parent.ty),
-                "The types are incompatible - consider adding an explicit annotation or using a compatible type",
+            InvalidSubtype { child, parent, span, unknowns } => self.build_type_mismatch_report(child, parent, span, unknowns),
+            ArgumentNumberMismatch {
+                span,
+                expected,
+                found,
+            } => self.build_single_span_report(
+                span,
+                "Argument number mismatch for function call",
+                &format!("Expected {} arguments, but found {}", expected, found),
+                "Check the function signature and ensure you're passing the correct number of arguments",
             ),
-            InvalidFieldAccess {
-                object,
-                field_name,
-                field_span,
-            } => self.build_duplicate_report(
-                field_span,
-                &object.span,
-                &format!("Invalid field access: type '{}' has no field '{}'", object.ty, field_name),
-                &format!("Field '{}' accessed here", field_name),
-                &format!("Object of type '{}' defined here", object.ty),
-                "Check for typos in the field name or ensure you're accessing the right type of object",
+            InvalidCallReceiver {
+                function,
+                span,
+                unknowns
+            } => self.build_single_span_report(
+                span,
+                "Invalid function call",
+                &format!("Expression of type '{}' cannot be called", type_display(function, unknowns)),
+                "Only functions, maps, and arrays can be called",
             ),
+            InvalidFieldAccess { object, span, field, unknowns } => self.build_invalid_field_access_report(object, span, field, unknowns),
         }
     }
 
@@ -375,8 +420,10 @@ impl Diagnose for Box<AnalyzerError> {
             InvalidType { span, .. } => span,
             InvalidInheritance { child_span, .. } => child_span,
             FieldNumberMismatch { span, .. } => span,
-            InvalidSubtype { child, .. } => &child.span,
-            InvalidFieldAccess { field_span, .. } => field_span,
+            InvalidSubtype { span, .. } => span,
+            ArgumentNumberMismatch { span, .. } => span,
+            InvalidCallReceiver { span, .. } => span,
+            InvalidFieldAccess { span, .. } => span,
         };
 
         (span.src_file.clone(), Source::from(self.src_code.clone()))
@@ -426,6 +473,72 @@ impl AnalyzerError {
                     .with_color(Color::Blue),
             )
             .with_help(help)
+            .finish()
+    }
+
+    /// Helper method to build a report for type mismatch errors
+    fn build_type_mismatch_report(
+        &self,
+        child: &Type,
+        parent: &Type,
+        span: &Span,
+        unknowns: &HashMap<usize, Type>,
+    ) -> Report<Span> {
+        let mut report = Report::build(ReportKind::Error, span.clone()).with_message(format!(
+            "Type error: '{}' is not a subtype of '{}'",
+            type_display(child, unknowns),
+            type_display(parent, unknowns)
+        ));
+
+        report = report.with_label(
+            Label::new(span.clone())
+                .with_message(format!(
+                    "Expected type '{}' but found '{}'",
+                    type_display(parent, unknowns),
+                    type_display(child, unknowns)
+                ))
+                .with_color(Color::Red),
+        );
+
+        // If there is an annotation, can improve error reporting.
+        if let Some(parent_type_span) = parent.span.as_ref() {
+            report = report.with_label(
+                Label::new(parent_type_span.clone())
+                    .with_message("Expected type annotated here")
+                    .with_color(Color::Yellow),
+            );
+        }
+
+        report
+            .with_help("The types are incompatible - consider adding an explicit type conversion or using a compatible type")
+            .finish()
+    }
+
+    /// Helper method to build a report for invalid field access errors
+    fn build_invalid_field_access_report(
+        &self,
+        object: &Type,
+        span: &Span,
+        field: &String,
+        unknowns: &HashMap<usize, Type>,
+    ) -> Report<Span> {
+        let mut report = Report::build(ReportKind::Error, span.clone()).with_message(format!(
+            "Invalid field access: type '{}' has no field '{}'",
+            type_display(object, unknowns),
+            *field,
+        ));
+
+        report = report.with_label(
+            Label::new(span.clone())
+                .with_message(format!(
+                    "Expression of type '{}'",
+                    type_display(object, unknowns)
+                ))
+                .with_color(Color::Blue),
+        );
+
+        report
+            .with_help("Check for typos in the field name or ensure you're accessing the right type of object")
             .finish()
     }
 
@@ -483,9 +596,9 @@ impl AnalyzerError {
             .finish()
     }
 
-    /// Helper method to build a more informative report for missing core types
+    /// Helper method to build a report for missing core types.
     fn build_missing_core_type_report(&self, name: &str, src_path: &str) -> Report<Span> {
-        // Create a span at the beginning of the file
+        // Create a span at the beginning of the file.
         let span = Span::new(src_path.to_string(), 0..0);
 
         Report::build(ReportKind::Error, span.clone())

@@ -104,7 +104,7 @@ impl ASTConverter {
         let params = self.get_parameters(func, &generics)?;
         let param_types = params.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
 
-        let return_type = self.convert_type(&func.return_type, &generics)?;
+        let return_type = self.convert_type(&func.return_type, &generics, true)?;
         let fn_type = create_function_type(&param_types, &return_type);
 
         match &func.body {
@@ -163,7 +163,7 @@ impl ASTConverter {
             Some(receiver) => {
                 vec![(
                     (*receiver.name).clone(),
-                    self.convert_type(&receiver.ty, generics)?,
+                    self.convert_type(&receiver.ty, generics, false)?,
                 )]
             }
             None => vec![],
@@ -177,7 +177,7 @@ impl ASTConverter {
                     .map(|field| {
                         Ok((
                             (*field.name).clone(),
-                            self.convert_type(&field.ty, generics)?,
+                            self.convert_type(&field.ty, generics, false)?,
                         ))
                     })
                     .collect::<Result<Vec<_>, Box<_>>>()?,
@@ -193,6 +193,7 @@ mod converter_tests {
     use super::*;
     use crate::catalog::Catalog;
     use crate::dsl::analyzer::hir::{CoreData, FunKind};
+    use crate::dsl::analyzer::types::registry::TypeKind;
     use crate::dsl::parser::ast::{self, Adt, Function, Item, Module, Type as AstType};
     use crate::dsl::utils::span::{Span, Spanned};
 
@@ -486,9 +487,9 @@ mod converter_tests {
         assert!(func_val.is_some());
 
         // Verify the return type is a generic
-        match &func_val.unwrap().metadata.ty {
-            Type::Closure(_, ret_type) => {
-                assert_eq!(**ret_type, Type::Generic(String::from("T")));
+        match &*func_val.unwrap().metadata.ty.value {
+            TypeKind::Closure(_, ret_type) => {
+                assert_eq!(**ret_type, TypeKind::Generic(String::from("T")));
             }
             _ => panic!("Expected closure type"),
         }

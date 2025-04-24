@@ -1,10 +1,10 @@
 use crate::dsl::analyzer::errors::AnalyzerErrorKind;
 use crate::dsl::analyzer::hir::{Identifier, TypedSpan};
 use crate::dsl::parser::ast::{Adt, Field, Type as AstType};
-use crate::dsl::utils::span::Span;
+use crate::dsl::utils::span::{OptionalSpanned, Span, Spanned};
 use Adt::*;
-use core::fmt;
 use std::collections::BTreeMap;
+use std::hash::Hasher;
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
@@ -20,12 +20,12 @@ pub const PHYSICAL_PROPS: &str = "PhysicalProperties";
 
 pub const CORE_TYPES: [&str; 4] = [LOGICAL_TYPE, PHYSICAL_TYPE, LOGICAL_PROPS, PHYSICAL_PROPS];
 
-/// Represents types in the language.
+/// Represents the core structure of a type without metadata.
 ///
 /// This enum contains both primitive types (like Int64, String) and complex types
 /// (like Array, Tuple, Closure) as well as user-defined types through ADTs.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Type {
+pub enum TypeKind {
     // Primitive types.
     I64,
     String,
@@ -34,30 +34,59 @@ pub enum Type {
 
     // Special types.
     Unit,
-    Universe,       // All types are subtypes of Universe.
-    Nothing,        // Inherits all types.
-    None,           // Inherits all optionals.
-    Unknown(usize), // Unique identifier for unknown types.
+    Universe, // All types are subtypes of Universe.
+    Nothing,  // Inherits all types.
+    None,     // Inherits all optionals.
+
+    // Unknown types.
+    UnknownAsc(usize),  // Strictly ascending types.
+    UnknownDesc(usize), // Strictly descending types.
 
     // User types.
     Adt(Identifier),
     Generic(Identifier),
 
     // Composite types.
-    Array(Box<Type>),
-    Closure(Box<Type>, Box<Type>),
+    Array(Type),
+    Closure(Type, Type),
     Tuple(Vec<Type>),
-    Map(Box<Type>, Box<Type>),
-    Optional(Box<Type>),
+    Map(Type, Type),
+    Optional(Type),
 
     // For Logical & Physical: memo status.
-    Stored(Box<Type>),
-    Costed(Box<Type>),
+    Stored(Type),
+    Costed(Type),
 
     // Native trait types
     Concat,     // For types that can be concatenated (String, Array, Map).
     EqHash,     // For types that support equality and hashing.
     Arithmetic, // For types that support arithmetic operations.
+}
+
+/// Represents a type, potentially with span information.
+///
+/// This struct wraps a TypeKind with optional span information, allowing
+/// types to carry source location data when needed.
+pub type Type = OptionalSpanned<TypeKind>;
+
+impl From<TypeKind> for Type {
+    fn from(kind: TypeKind) -> Self {
+        OptionalSpanned::unspanned(kind)
+    }
+}
+
+impl PartialEq for Type {
+    fn eq(&self, other: &Self) -> bool {
+        *self.value == *other.value
+    }
+}
+
+impl Eq for Type {}
+
+impl Hash for Type {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.value.hash(state);
+    }
 }
 
 /// Represents a constraint on a type.
@@ -67,23 +96,30 @@ pub enum Type {
 /// source code location where it was generated to provide useful error messages.
 #[derive(Debug, Clone)]
 pub enum Constraint {
-    /// Subtyping relationship: `target_type >: sub_type`
+    /// Subtyping relationship: `parent >: child`
     ///
-    /// This constraint enforces that `target_type` is a supertype of `sub_type`,
+    /// This constraint enforces that `parent` is a supertype of `child`,
     /// allowing substitution of a more specific type where a more general type is expected.
-    Subtype {
-        target_type: TypedSpan,
-        sub_type: TypedSpan,
+    Subtype { parent: Type, child: TypedSpan },
+
+    /// Closure call: `outer >: inner(args)`
+    ///
+    /// This constraint enforces that the function type `inner` can be called with
+    /// the arguments `args`, and that the result type matches `outer`.
+    Call {
+        inner: TypedSpan,
+        args: Vec<TypedSpan>,
+        outer: TypedSpan,
     },
 
-    /// Field access: `inner.field = outer`
+    /// Field access: `outer >: inner.field`
     ///
     /// This constraint enforces that the type `inner` has a field named `field`
-    /// with a type that matches `outer`. Used for struct field access.
+    /// with a type that matches `outer`.
     FieldAccess {
         inner: TypedSpan,
         field: Identifier,
-        outer: TypedSpan,
+        outer: Type,
     },
 }
 
@@ -106,17 +142,30 @@ pub struct TypeRegistry {
     /// for better error reporting during type checking and semantic analysis.
     pub product_fields: HashMap<Identifier, Vec<Field>>,
     /// The type of the return value of the current function.
-    pub ty_return: Option<TypedSpan>,
+    pub ty_return: Option<Type>,
     /// The set of collected type constraints to be solved.
     pub constraints: Vec<Constraint>,
     /// Maps unknown type IDs to their current inferred concrete types.
     /// Types start at `Nothing`, and get bumped up when needed by the constraint.
     pub resolved_unknown: HashMap<usize, Type>,
-    /// Current ID to use for new Unknown types
+    /// Current ID to use for new Unknown types.
     pub next_unknown_id: usize,
 }
 
 impl TypeRegistry {
+    /// Creates a new TypeRegistry instance.
+    pub fn new() -> Self {
+        Self {
+            subtypes: BTreeMap::new(),
+            spans: HashMap::new(),
+            product_fields: HashMap::new(),
+            ty_return: None,
+            constraints: Vec::new(),
+            resolved_unknown: HashMap::new(),
+            next_unknown_id: 0,
+        }
+    }
+
     /// Registers an ADT in the type registry
     ///
     /// This method updates the type hierarchy by adding the ADT and all its
@@ -190,19 +239,6 @@ impl TypeRegistry {
         }
     }
 
-    /// Creates a new TypeRegistry instance
-    pub fn new() -> Self {
-        Self {
-            subtypes: BTreeMap::new(),
-            spans: HashMap::new(),
-            product_fields: HashMap::new(),
-            ty_return: None,
-            constraints: Vec::new(),
-            resolved_unknown: HashMap::new(),
-            next_unknown_id: 0,
-        }
-    }
-
     /// Retrieves the type of a field from a product ADT by name.
     ///
     /// This function should only be called once the registry has been validated,
@@ -218,7 +254,7 @@ impl TypeRegistry {
             .find(|field| *field.name.value == *field_name)
             .cloned()?;
 
-        Some(convert_ast_type(*field.ty.value))
+        Some(convert_ast_type(field.ty))
     }
 
     /// Retrieves the type of a field from a product ADT by index position.
@@ -228,32 +264,44 @@ impl TypeRegistry {
         index: usize,
     ) -> Option<Type> {
         let fields = self.product_fields.get(adt_name)?;
-        let field = fields.get(index)?;
+        let field = fields.get(index).cloned()?;
 
-        Some(convert_ast_type(*field.ty.value.clone()))
+        Some(convert_ast_type(field.ty))
     }
 
-    /// Creates a new unknown type
-    pub fn new_unknown(&mut self) -> Type {
+    /// Creates a new unknown, ascending type.
+    pub fn new_unknown_asc(&mut self) -> TypeKind {
+        use TypeKind::*;
+
         let id = self.next_unknown_id;
         self.next_unknown_id += 1;
-        self.resolved_unknown.insert(id, Type::Nothing);
-        Type::Unknown(id)
+        self.resolved_unknown.insert(id, Nothing.into());
+        UnknownAsc(id)
     }
 
-    /// Adds a subtyping constraint set: `target_type >: all sub_types`
+    /// Creates a new unknown, descending type.
+    pub fn new_unknown_desc(&mut self) -> TypeKind {
+        use TypeKind::*;
+
+        let id = self.next_unknown_id;
+        self.next_unknown_id += 1;
+        self.resolved_unknown.insert(id, Universe.into());
+        UnknownDesc(id)
+    }
+
+    /// Adds a subtyping constraint set: `parent >: all children`
     ///
-    /// This constraint enforces that the target_type is a supertype of all the sub_types.
+    /// This constraint enforces that the parent is a supertype of all the children.
     ///
     /// # Arguments
     ///
-    /// * `target_type` - The type that must be a supertype of all sub_types
-    /// * `sub_types` - The types that must be subtypes of target_type
-    pub fn add_constraint_subtypes(&mut self, target_type: &TypedSpan, sub_types: &[TypedSpan]) {
-        for sub_type in sub_types {
+    /// * `parent` - The type that must be a supertype of all children
+    /// * `children` - The types that must be children of parent
+    pub(super) fn add_constraint_subtypes(&mut self, parent: &Type, children: &[TypedSpan]) {
+        for child in children {
             self.constraints.push(Constraint::Subtype {
-                target_type: target_type.clone(),
-                sub_type: sub_type.clone(),
+                parent: parent.clone(),
+                child: child.clone(),
             });
         }
     }
@@ -266,15 +314,38 @@ impl TypeRegistry {
     ///
     /// * `target_type` - The type that is expected to be equal to other_type
     /// * `other_type` - The type that is being compared for equality
-    pub fn add_constraint_equal(&mut self, target_type: &TypedSpan, other_type: &TypedSpan) {
+    pub(super) fn add_constraint_equal(&mut self, target_type: &TypedSpan, other_type: &TypedSpan) {
         self.constraints.push(Constraint::Subtype {
-            target_type: target_type.clone(),
-            sub_type: other_type.clone(),
+            child: target_type.clone(),
+            parent: other_type.ty.clone(),
         });
 
         self.constraints.push(Constraint::Subtype {
-            target_type: other_type.clone(),
-            sub_type: target_type.clone(),
+            child: other_type.clone(),
+            parent: target_type.ty.clone(),
+        });
+    }
+
+    /// Adds a function call constraint: `outer >: inner(args)`
+    ///
+    /// This enforces that the function type `inner` can be called with
+    /// the arguments `args`, and that the result type matches `outer`.
+    ///
+    /// # Arguments
+    ///
+    /// * `outer` - The expected return type of the function call
+    /// * `inner` - The function type being called
+    /// * `args` - The arguments being passed to the function
+    pub(super) fn add_constraint_call(
+        &mut self,
+        outer: &TypedSpan,
+        inner: &TypedSpan,
+        args: &[TypedSpan],
+    ) {
+        self.constraints.push(Constraint::Call {
+            inner: inner.clone(),
+            args: args.to_vec(),
+            outer: outer.clone(),
         });
     }
 
@@ -287,116 +358,171 @@ impl TypeRegistry {
     /// * `outer` - The expected type of the field
     /// * `field` - The name of the field with its source location
     /// * `inner` - The type containing the field
-    pub fn add_constraint_field_access(
+    pub(super) fn add_constraint_field_access(
         &mut self,
-        outer: &TypedSpan,
-        field: &str,
+        outer: &Type,
+        field: &Identifier,
         inner: &TypedSpan,
     ) {
         self.constraints.push(Constraint::FieldAccess {
             inner: inner.clone(),
-            field: field.to_string(),
+            field: field.clone(),
             outer: outer.clone(),
         });
+    }
+
+    /// Resolves any Unknown types to their concrete types.
+    ///
+    /// This method checks if a type is an Unknown variant and replaces it
+    /// with its concrete inferred type from the registry. Other types are
+    /// returned as-is.
+    ///
+    /// # Arguments
+    ///
+    /// * `ty` - The type to resolve
+    ///
+    /// # Returns
+    ///
+    /// The resolved Type if it was an Unknown type, otherwise the original Type
+    pub(super) fn resolve_type(&self, ty: &Type) -> Type {
+        use TypeKind::*;
+
+        match &*ty.value {
+            UnknownAsc(id) | UnknownDesc(id) => {
+                if let Some(resolved) = self.resolved_unknown.get(id) {
+                    resolved.clone()
+                } else {
+                    ty.clone()
+                }
+            }
+            _ => ty.clone(),
+        }
     }
 }
 
 /// Creates a function type from parameter types and return type.
-pub fn create_function_type(param_types: &[Type], return_type: &Type) -> Type {
-    use Type::*;
+pub(crate) fn create_function_type(param_types: &[Type], return_type: &Type) -> Type {
+    use TypeKind::*;
 
     let param_type = if param_types.is_empty() {
-        Unit
+        Unit.into()
     } else if param_types.len() == 1 {
         param_types[0].clone()
     } else {
-        Tuple(param_types.to_vec())
+        Tuple(param_types.to_vec()).into()
     };
 
-    Closure(param_type.into(), return_type.clone().into())
+    Closure(param_type, return_type.clone()).into()
 }
 
-/// Converts an AST type to a Type enum.
-fn convert_ast_type(ty: AstType) -> Type {
-    use Type::*;
+/// Converts an AST type to a HIR Type.
+fn convert_ast_type(ast_ty: Spanned<AstType>) -> Type {
+    use TypeKind::*;
 
-    match ty {
+    let span = ast_ty.span;
+    let kind = match *ast_ty.value {
         AstType::Identifier(name) => Adt(name),
         AstType::Int64 => I64,
         AstType::String => String,
         AstType::Bool => Bool,
         AstType::Unit => Unit,
         AstType::Float64 => F64,
-        AstType::Array(inner) => Array(convert_ast_type(*inner.value).into()),
-        AstType::Closure(params, ret) => Closure(
-            convert_ast_type(*params.value).into(),
-            convert_ast_type(*ret.value).into(),
-        ),
+        AstType::Array(inner) => Array(convert_ast_type(inner)),
+        AstType::Closure(params, ret) => Closure(convert_ast_type(params), convert_ast_type(ret)),
         AstType::Tuple(inner) => {
-            let inner_types = inner
-                .iter()
-                .map(|ty| convert_ast_type(*ty.value.clone()))
-                .collect();
+            let inner_types = inner.into_iter().map(convert_ast_type).collect();
             Tuple(inner_types)
         }
-        AstType::Map(key, val) => Map(
-            convert_ast_type(*key.value).into(),
-            convert_ast_type(*val.value).into(),
-        ),
-        AstType::Questioned(inner) => Optional(convert_ast_type(*inner.value).into()),
+        AstType::Map(key, val) => Map(convert_ast_type(key), convert_ast_type(val)),
+        AstType::Questioned(inner) => Optional(convert_ast_type(inner)),
         _ => panic!("Registry has not been properly validated"),
-    }
+    };
+
+    OptionalSpanned::spanned(kind, span)
 }
 
-impl fmt::Display for Type {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            // Primitive types
-            Type::I64 => write!(f, "I64"),
-            Type::String => write!(f, "String"),
-            Type::Bool => write!(f, "Bool"),
-            Type::F64 => write!(f, "F64"),
+/// Converts a type to its string representation, resolving unknown types when possible.
+///
+/// This function formats a type as a string, including proper handling of unknown types.
+/// When an unknown type is encountered, it will be resolved using the provided map.
+/// If the unknown type has been resolved, it will be displayed with a ">=" prefix
+/// to indicate it represents "at least" this type.
+///
+/// # Arguments
+///
+/// * `ty` - The type to convert to a string
+/// * `resolved_unknown` - Map of unknown type IDs to their resolved concrete types
+///
+/// # Returns
+///
+/// A string representation of the type
+pub(crate) fn type_display(ty: &Type, resolved_unknown: &HashMap<usize, Type>) -> String {
+    use TypeKind::*;
 
-            // Special types
-            Type::Unit => write!(f, "()"),
-            Type::Universe => write!(f, "Universe"),
-            Type::Nothing => write!(f, "Nothing"),
-            Type::None => write!(f, "None"),
-            Type::Unknown(id) => write!(f, "Unknown({})", id),
+    match &*ty.value {
+        // Primitive types.
+        I64 => "I64".to_string(),
+        String => "String".to_string(),
+        Bool => "Bool".to_string(),
+        F64 => "F64".to_string(),
 
-            // User types
-            Type::Adt(name) => write!(f, "{}", name),
-            Type::Generic(name) => write!(f, "{}", name),
+        // Special types.
+        Unit => "()".to_string(),
+        Universe => "Universe".to_string(),
+        Nothing => "Nothing".to_string(),
+        None => "None".to_string(),
 
-            // Composite types
-            Type::Array(elem) => write!(f, "[{}]", elem),
-            Type::Closure(param, ret) => write!(f, "{} -> {}", param, ret),
-            Type::Tuple(elems) => {
-                if elems.is_empty() {
-                    write!(f, "()")
-                } else {
-                    write!(f, "(")?;
-                    for (i, elem) in elems.iter().enumerate() {
-                        if i > 0 {
-                            write!(f, ", ")?;
-                        }
-                        write!(f, "{}", elem)?;
-                    }
-                    write!(f, ")")
-                }
-            }
-            Type::Map(key, val) => write!(f, "{{{} -> {}}}", key, val),
-            Type::Optional(inner) => write!(f, "{}?", inner),
-
-            // Memo status types
-            Type::Stored(inner) => write!(f, "{}*", inner),
-            Type::Costed(inner) => write!(f, "{}$", inner),
-
-            // Native trait types
-            Type::Concat => write!(f, "Concat"),
-            Type::EqHash => write!(f, "EqHash"),
-            Type::Arithmetic => write!(f, "Arithmetic"),
+        // Unknown types
+        UnknownAsc(id) => {
+            format!(
+                "≧{{{}}}",
+                type_display(resolved_unknown.get(id).unwrap(), resolved_unknown)
+            )
         }
+        UnknownDesc(id) => {
+            format!(
+                "≦{{{}}}",
+                type_display(resolved_unknown.get(id).unwrap(), resolved_unknown)
+            )
+        }
+
+        // User types.
+        Adt(name) => name.to_string(),
+        Generic(name) => name.to_string(),
+
+        // Composite types.
+        Array(elem) => format!("[{}]", type_display(elem, resolved_unknown)),
+        Closure(param, ret) => format!(
+            "{} -> {}",
+            type_display(param, resolved_unknown),
+            type_display(ret, resolved_unknown)
+        ),
+        Tuple(elems) => {
+            if elems.is_empty() {
+                "()".to_string()
+            } else {
+                let elem_strs: Vec<_> = elems
+                    .iter()
+                    .map(|elem| type_display(elem, resolved_unknown))
+                    .collect();
+                format!("({})", elem_strs.join(", "))
+            }
+        }
+        Map(key, val) => format!(
+            "{{{}:{}}}",
+            type_display(key, resolved_unknown),
+            type_display(val, resolved_unknown)
+        ),
+        Optional(inner) => format!("{}?", type_display(inner, resolved_unknown)),
+
+        // Memo status types.
+        Stored(inner) => format!("{}*", type_display(inner, resolved_unknown)),
+        Costed(inner) => format!("{}$", type_display(inner, resolved_unknown)),
+
+        // Native trait types.
+        Concat => "Concat".to_string(),
+        EqHash => "EqHash".to_string(),
+        Arithmetic => "Arithmetic".to_string(),
     }
 }
 
@@ -462,41 +588,41 @@ pub mod type_registry_tests {
     fn test_create_function_type() {
         // Test with no parameters
         let params: Vec<Type> = vec![];
-        let return_type = Type::I64;
+        let return_type = TypeKind::I64.into();
         let result = create_function_type(&params, &return_type);
-        match result {
-            Type::Closure(param, ret) => {
-                assert_eq!(*param, Type::Unit);
-                assert_eq!(*ret, Type::I64);
+        match &*result.value {
+            TypeKind::Closure(param, ret) => {
+                assert_eq!(*param.value, TypeKind::Unit);
+                assert_eq!(*ret.value, TypeKind::I64);
             }
             _ => panic!("Expected Closure type"),
         }
 
         // Test with one parameter
-        let params = vec![Type::I64];
+        let params = vec![TypeKind::I64.into()];
         let result = create_function_type(&params, &return_type);
-        match result {
-            Type::Closure(param, ret) => {
-                assert_eq!(*param, Type::I64);
-                assert_eq!(*ret, Type::I64);
+        match &*result.value {
+            TypeKind::Closure(param, ret) => {
+                assert_eq!(*param.value, TypeKind::I64);
+                assert_eq!(*ret.value, TypeKind::I64);
             }
             _ => panic!("Expected Closure type"),
         }
 
         // Test with multiple parameters
-        let params = vec![Type::I64, Type::Bool];
+        let params = vec![TypeKind::I64.into(), TypeKind::Bool.into()];
         let result = create_function_type(&params, &return_type);
-        match result {
-            Type::Closure(param, ret) => {
-                match &*param {
-                    Type::Tuple(types) => {
+        match &*result.value {
+            TypeKind::Closure(param, ret) => {
+                match &*param.value {
+                    TypeKind::Tuple(types) => {
                         assert_eq!(types.len(), 2);
-                        assert_eq!(types[0], Type::I64);
-                        assert_eq!(types[1], Type::Bool);
+                        assert_eq!(*types[0].value, TypeKind::I64);
+                        assert_eq!(*types[1].value, TypeKind::Bool);
                     }
                     _ => panic!("Expected Tuple type for parameters"),
                 }
-                assert_eq!(*ret, Type::I64);
+                assert_eq!(*ret.value, TypeKind::I64);
             }
             _ => panic!("Expected Closure type"),
         }

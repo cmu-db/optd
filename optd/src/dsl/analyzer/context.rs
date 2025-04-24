@@ -3,7 +3,10 @@ use super::{
     hir::{ExprMetadata, Identifier, NoMetadata, TypedSpan},
 };
 use crate::dsl::analyzer::hir::Value;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 /// A stack-based variable binding system that implements lexical scoping.
 ///
@@ -118,20 +121,35 @@ impl<M: ExprMetadata> Context<M> {
         self.current_scope.insert(name, val);
     }
 
-    /// Gets all values from all scopes in the context.
+    /// Gets all values from all scopes in the context, ordered by their identifiers.
+    /// (for deterministic output)
     ///
     /// This retrieves values from all lexical scopes, including both the current
-    /// scope and all previous (outer) scopes.
+    /// scope and all previous (outer) scopes. The values are ordered by their
+    /// identifiers (keys) for consistent output.
+    ///
+    /// If a variable exists in multiple scopes, the innermost definition takes precedence
+    /// in accordance with lexical scoping rules.
     ///
     /// # Returns
     ///
-    /// A vector containing references to all values in the context.
+    /// A vector containing references to all values in the context, ordered by their identifiers.
     pub fn get_all_values(&self) -> Vec<&Value<M>> {
-        self.previous_scopes
-            .iter()
-            .flat_map(|scope| scope.values())
-            .chain(self.current_scope.values())
-            .collect()
+        let mut sorted_values: BTreeMap<&Identifier, &Value<M>> = BTreeMap::new();
+
+        // Process scopes from outermost to innermost to maintain lexical scoping rules
+        // (later insertions with the same key will overwrite earlier ones)
+        for scope in &self.previous_scopes {
+            for (key, value) in scope.iter() {
+                sorted_values.insert(key, value);
+            }
+        }
+
+        for (key, value) in &self.current_scope {
+            sorted_values.insert(key, value);
+        }
+
+        sorted_values.into_values().collect()
     }
 }
 

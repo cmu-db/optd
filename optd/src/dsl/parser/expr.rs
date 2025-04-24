@@ -22,12 +22,18 @@ fn binary_op(
 ) -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, Span>> + Clone {
     term.clone()
         .then(op.then(term.clone()).repeated())
-        .map_with_span(|(left, rights), span| {
-            let mut result = left;
-            for (bin_op, right) in rights {
-                result = Spanned::new(Expr::Binary(result, bin_op, right), span.clone());
-            }
-            result
+        .map(|(left, rights)| {
+            rights
+                .into_iter()
+                .fold(left.clone(), |acc, (bin_op, right)| {
+                    let left_span = left.span.clone();
+                    let right_span = right.span.clone();
+                    let new_span = Span::new(
+                        left_span.src_file.clone(),
+                        left_span.range.0..right_span.range.1,
+                    );
+                    Spanned::new(Expr::Binary(acc, bin_op, right), new_span)
+                })
         })
 }
 
@@ -221,12 +227,17 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
                             PostfixOp::Method(Spanned::new(name, name_span), args)
                         }),
                 ))
-                .map_with_span(|op, span| (op, span))
+                .map_with_span(|op, op_span| (op, op_span))
                 .repeated(),
             )
-            .map(|(initial, ops)| {
-                ops.into_iter().fold(initial, |acc, (op, span)| {
-                    Spanned::new(Expr::Postfix(acc, op), span)
+            .map(|(atom, ops)| {
+                ops.into_iter().fold(atom.clone(), |acc, (op, op_span)| {
+                    let atom_span = &atom.span;
+                    let new_span = Span::new(
+                        atom_span.src_file.clone(),
+                        atom_span.range.0..op_span.range.1,
+                    );
+                    Spanned::new(Expr::Postfix(acc, op), new_span)
                 })
             })
             .boxed();
