@@ -1,16 +1,8 @@
-#[cfg(test)]
-pub mod memory;
-mod merge_repr;
-
+use crate::core::cir::*;
 use std::collections::{HashMap, HashSet};
 
-use async_recursion::async_recursion;
-
-use crate::cir::{
-    Cost, Goal, GoalId, GoalMemberId, GroupId, ImplementationRule, LogicalExpression,
-    LogicalExpressionId, LogicalProperties, PhysicalExpression, PhysicalExpressionId,
-    TransformationRule,
-};
+mod memory;
+mod merge_repr;
 
 /// Type alias for results returned by Memoize trait methods
 pub type MemoizeResult<T> = Result<T, MemoizeError>;
