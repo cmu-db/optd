@@ -64,7 +64,7 @@ impl TypeRegistry {
     ///
     /// * `Ok(bool)` - The constraint is satisfied, with a boolean indicating if any types were changed.
     /// * `Err((Box<AnalyzerErrorKind>, bool))` - The constraint failed, with the error and a boolean
-    ///    indicating if any types were changed during the check.
+    ///   indicating if any types were changed during the check.
     fn check_constraint(&mut self, constraint: &Constraint) -> ConstraintResult {
         match constraint {
             Constraint::Subtype { child, parent } => self.check_subtype_constraint(child, parent),
@@ -246,5 +246,351 @@ impl TypeRegistry {
                 false,
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::dsl::{
+        compile::{CompileOptions, ast_to_hir, infer, parse, registry_check},
+        utils::errors::CompileError,
+    };
+
+    // Helper function to run type inference on a program
+    fn run_type_inference(source: &str, source_path: &str) -> Result<(), Vec<CompileError>> {
+        // Append the required core type declarations to each test program
+        let core_types = r#"
+        data Logical
+        data Physical
+        data LogicalProperties
+        data PhysicalProperties
+        "#;
+
+        let full_source = format!("{}\n{}", core_types, source);
+
+        let options = CompileOptions {
+            source_path: source_path.to_string(),
+        };
+
+        // Step 1: Parse the program to AST
+        let ast = parse(&full_source, &options).map_err(|errors| {
+            errors
+                .iter()
+                .for_each(|err| eprintln!("Parse error: {:?}", err));
+            errors
+        })?;
+
+        // Step 2: Convert AST to HIR with type spans
+        let (hir, mut registry) = ast_to_hir(&full_source, ast).map_err(|err| {
+            eprintln!("AST to HIR error: {:?}", err);
+            vec![err]
+        })?;
+
+        // Step 3: Check the registry for valid ADTs
+        registry_check(&full_source, source_path, &registry).map_err(|err| {
+            eprintln!("Registry check error: {:?}", err);
+            vec![err]
+        })?;
+
+        // Step 4: Run type inference
+        infer(&full_source, &hir, &mut registry).map_err(|err| {
+            eprintln!("Type inference error: {:?}", err);
+            vec![err]
+        })?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_valid_higher_order_function() {
+        let source = r#"
+        data Expr = 
+            | BinOp(left: Expr, op: String, right: Expr)
+            | Num(value: I64)
+            \ Var(name: String)
+
+        fn (e: Expr) map(f: (Expr) -> Expr) = match e
+            | BinOp(l, o, r) -> BinOp(f(l), o, f(r))
+            | Num(v) -> Num(v)
+            \ Var(n) -> Var(n)
+
+        fn main(): Expr = 
+            let 
+                expr = BinOp(Num(10), "+", Num(20)),
+                add_one = (e: Expr) -> match e
+                    | Num(v) -> Num(v + 1)
+                    \ other -> other
+            in
+                expr.map(add_one)
+        "#;
+
+        let result = run_type_inference(source, "higher_order.opt");
+        assert!(
+            result.is_ok(),
+            "Valid higher-order function program failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_pattern_matching_with_adts() {
+        let source = r#"
+        data Shape =
+            | Circle(radius: F64)
+            | Rectangle(width: F64, height: F64)
+            \ Triangle(a: F64, b: F64, c: F64)
+
+        fn (s: Shape?) area = match s
+            | Circle(r) -> 3.14 * r * r
+            | Rectangle(w, h) -> w * h
+            \ Triangle(a, b, c) -> 
+                let p = (a + b + c) / 2.0 in
+                (p * (p - a) * (p - b) * (p - c))
+
+        fn main(): F64 = 
+            let shapes = [Circle(5.0), Rectangle(4.0, 6.0), Triangle(3.0, 4.0, 5.0)] in
+            shapes(0).area()
+        "#;
+
+        let result = run_type_inference(source, "pattern_matching.opt");
+        assert!(
+            result.is_ok(),
+            "Valid pattern matching program failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_type_inheritance() {
+        let source = r#"
+        data Animal = 
+            | Mammal =
+            | Dog(name: String, breed: String)
+            \ Cat(name: String, lives: String)
+                \ Bird(name: String, can_fly: Bool)
+        
+            fn describe(animal: Animal): String = match animal
+                | Dog(name, breed) -> name ++ " is a " ++ breed ++ " dog"
+                | Cat(name, lives) -> name ++ " is a cat with " ++ lives ++ " lives"
+                \ Bird(name, can_fly) -> 
+                    if can_fly then 
+                        name ++ " is a bird that can fly" 
+                    else 
+                        name ++ " is a bird that cannot fly"
+        
+            fn main2(): String = 
+                let 
+                    dog = Dog("Rex", "German Shepherd"),
+                    cat = Cat("Whiskers", "9"),
+                    bird = Bird("Tweety", true)
+                in
+                    describe(dog) ++ "\n" ++ describe(cat) ++ "\n" ++ describe(bird)
+        "#;
+
+        let result = run_type_inference(source, "inheritance.opt");
+        assert!(
+            result.is_ok(),
+            "Valid inheritance program failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_type_mismatch_error() {
+        let source = r#"
+        data Counter(value: I64)
+
+        fn increment(c: Counter): Counter = Counter(c#value + 1)
+        fn add(a: I64, b: I64): I64 = a + b
+
+        // Error: add returns I64 but increment expects Counter
+        fn main(): Counter = increment(add(5, 3))
+        "#;
+
+        let result = run_type_inference(source, "type_mismatch.opt");
+        assert!(
+            result.is_err(),
+            "Invalid program with type mismatch didn't fail type inference"
+        );
+    }
+
+    #[test]
+    fn test_incompatible_inheritance_error() {
+        let source = r#"
+        data Vehicle = 
+            | Car(make: String, model: String)
+            \ Boat(name: String, length: F64)
+
+        data Animal = 
+            | Dog(name: String)
+            \ Cat(name: String)
+
+        fn drive(v: Car) = v#make ++ " " ++ v#model ++ " is being driven"
+
+        fn main(): String = 
+            let 
+                myCar = Car("Toyota", "Camry"),
+                myDog = Dog("Rex")
+            in
+                drive(myDog)  // Error: Dog is not a Car
+        "#;
+
+        let result = run_type_inference(source, "incompatible_inheritance.opt");
+        assert!(
+            result.is_err(),
+            "Invalid program with incompatible inheritance didn't fail type inference"
+        );
+    }
+
+    #[test]
+    fn test_complex_higher_order_functions() {
+        let source = r#"
+        data Expr = 
+            | BinOp(left: Expr, op: String, right: Expr)
+            | Num(value: I64)
+            \ Var(name: String)
+
+        fn (e: Expr) fold(f: (I64, String, I64) -> I64): I64 = match e
+            | BinOp(Num(l), o, Num(r)) -> f(l, o, r)
+            | BinOp(l, o, r) -> l.fold(f) + r.fold(f)
+            | Num(v) -> v
+            \ Var(_) -> 0
+
+        fn calculate(left: I64, op: String, right: I64) = match op
+            | "+" -> left + right
+            | "-" -> left - right
+            | "*" -> left * right
+            \ "/" -> left / right
+
+        fn main(): I64 = 
+            let 
+                expr = BinOp(BinOp(Num(5), "+", Num(3)), "*", Num(2)),
+                result = expr.fold(calculate)
+            in
+                result
+        "#;
+
+        let result = run_type_inference(source, "complex_higher_order.opt");
+        assert!(
+            result.is_ok(),
+            "Valid complex higher-order functions program failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_function_type_inference() {
+        let source = r#"
+        data Num(value: I64)
+
+        fn apply(f: (I64) -> I64, n: I64) = f(n)
+        
+        fn main() = 
+            let 
+                double = (x: I64) -> x * 2,
+                triple = (x: I64) -> x * 3,
+                compose = (f: (I64) -> I64, g: (I64) -> I64) -> 
+                    (x: I64) -> f(g(x))
+            in
+                apply(compose(double, triple), 5)  // Should be 2 * (3 * 5) = 30
+        "#;
+
+        let result = run_type_inference(source, "function_inference.opt");
+        assert!(
+            result.is_ok(),
+            "Valid function type inference program failed"
+        );
+    }
+
+    #[test]
+    fn test_type_inference_in_recursive_functions() {
+        let source = r#"
+        data List = 
+            | Cons(head: I64, tail: List)
+            \ Nil
+
+        fn sum(list: List) = match list
+            | Cons(head, tail) -> head + sum(tail)
+            \ Nil -> 0
+
+        fn factorial(n: I64) = 
+            if n <= 1 then 
+                1 
+            else 
+                n * factorial(n - 1)
+
+        fn main(): I64 = 
+            let 
+                list = Cons(1, Cons(2, Cons(3, Nil))),
+                fact5 = factorial(5)
+            in
+                sum(list) + fact5
+        "#;
+
+        let result = run_type_inference(source, "recursive_functions.opt");
+        assert!(
+            result.is_ok(),
+            "Valid recursive functions program failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_unannotated_function_parameters() {
+        let source = r#"
+        data Num(value: I64)
+        
+        fn add(a: I64, b: I64) = a + b
+        
+        fn apply(f: I64 -> I64, n: I64) = f(n)
+        
+        fn main() = 
+            let
+                double = x -> 2,
+                number = 5,
+                result = add(number, apply(double, 10))
+            in
+                result
+        "#;
+
+        let result = run_type_inference(source, "unannotated_parameters.opt");
+        assert!(
+            result.is_ok(),
+            "Type inference for unannotated parameters failed"
+        );
+    }
+
+    #[test]
+    fn test_complex_adt_hierarchy() {
+        let source = r#"
+        data Expression = 
+            | Literal = 
+                | IntLiteral(value: I64)
+                | BoolLiteral(value: Bool)
+                \ StringLiteral(value: String)
+            | BinaryOp = 
+                | Arithmetic = 
+                    | Add(left: Expression, right: Expression)
+                    | Subtract(left: Expression, right: Expression)
+                    | Multiply(left: Expression, right: Expression)
+                    \ Divide(left: Expression, right: Expression)
+                \ Logic = 
+                    | And(left: Expression, right: Expression)
+                    | Or(left: Expression, right: Expression)
+                    \ Not(expr: Expression)
+            \ Variable(name: String)
+
+        fn evaluate(expr: Expression): I64 = match expr
+            | IntLiteral(value) -> value
+            | Add(left, right) -> evaluate(left) + evaluate(right)
+            | Subtract(left, right) -> evaluate(left) - evaluate(right)
+            | Multiply(left, right) -> evaluate(left) * evaluate(right)
+            | Divide(left, right) -> evaluate(left) / evaluate(right)
+            \ _ -> 0  // Simplified for other cases
+
+        fn main(): I64 = 
+            evaluate(Add(IntLiteral(10), Multiply(IntLiteral(3), IntLiteral(4))))
+        "#;
+
+        let result = run_type_inference(source, "complex_adt_hierarchy.opt");
+        assert!(
+            result.is_ok(),
+            "Valid complex ADT hierarchy program failed type inference"
+        );
     }
 }

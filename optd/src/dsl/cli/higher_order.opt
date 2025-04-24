@@ -59,11 +59,16 @@ fn constant_folder(): Logical -> Logical =
             | Div(Number(a), Number(b)) -> Number(a / b)
             \ other -> map_binary(other, constant_folder())
 
+fn arrays(a: [Binary]) = none
+
 fn main(): Logical = 
     let
         a = Number(10),
         b = Number(20),
         
+        v = [Add(Number(5), Number(5))] ++ [Mul(Number(5), Number(5))],
+        l = arrays(v),
+
         // Create functions
         add = binary_op("add"),
         mul = binary_op("mul"),

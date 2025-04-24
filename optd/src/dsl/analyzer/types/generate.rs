@@ -190,7 +190,7 @@ impl TypeRegistry {
                     panic!("Type should be set to array in from_ast");
                 }
 
-                // TODO: Generate some list constraint here.
+                // TODO(#81): Generate some extra list constraint here.
 
                 self.add_constraint_subtypes(&pattern.metadata.ty, &[tail.metadata.clone()]);
                 self.generate_pattern(head, ctx)?;

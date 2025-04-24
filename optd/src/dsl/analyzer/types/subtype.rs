@@ -93,13 +93,15 @@ impl TypeRegistry {
             // Nothing is the bottom type - it is a subtype of everything.
             (Nothing, _) => true,
 
-            // Here we could take GLB or LUB. Taking the LUB leads to more
-            // understandable error messages, so we choose that.
-            (UnknownDesc(_), UnknownAsc(id_asc)) => {
+            // Here we could take GLB or LUB. For now we take the GLB.
+            // Most likely the best approach would be to postpone potential
+            // type bumps & dumps here until absolutely no other progress can
+            // be made. This would lead to better inference.
+            (UnknownDesc(id_desc), UnknownAsc(_)) => {
                 let child = self.resolve_type(child);
                 let parent = self.resolve_type(parent);
-                let lub = self.least_upper_bound(&child, &parent, has_changed);
-                *has_changed |= self.update_unknown_if_changed(id_asc, &parent, lub);
+                let glb = self.greatest_lower_bound(&child, &parent, has_changed);
+                *has_changed |= self.update_unknown_if_changed(id_desc, &child, glb);
                 true
             }
 
