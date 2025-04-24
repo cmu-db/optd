@@ -59,7 +59,7 @@ impl<T> Spanned<T> {
 /// OptionalSpanned allows for attaching source location information to values
 /// when available, while still allowing values to exist without spans when
 /// they're not needed or not available.
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Debug)]
 pub struct OptionalSpanned<T> {
     /// The wrapped value.
     pub value: Box<T>,

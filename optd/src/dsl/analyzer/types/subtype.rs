@@ -43,7 +43,7 @@ impl TypeRegistry {
         has_changed: &mut bool,
     ) -> bool {
         // Continue checking until we reach stability (no more type updates).
-        // Stop if we've reached a stable state (no more updates) or got a negative result.
+        // Stop if we've reached a stable state.
         loop {
             let mut local_changed = false;
             let is_subtype =
@@ -52,7 +52,7 @@ impl TypeRegistry {
             // Update the outer has_changed flag if we made changes.
             *has_changed |= local_changed;
 
-            if !local_changed || !is_subtype {
+            if !local_changed {
                 return is_subtype;
             }
         }
@@ -93,26 +93,29 @@ impl TypeRegistry {
             // Nothing is the bottom type - it is a subtype of everything.
             (Nothing, _) => true,
 
-            // Can't perform any change without impacting correctness.
-            // Simply resolve.
-            (UnknownDesc(_), UnknownAsc(_)) => self.is_subtype_inner(
-                &self.resolve_type(child),
-                &self.resolve_type(parent),
-                memo,
-                has_changed,
-            ),
+            // Here we could take GLB or LUB. Taking the LUB leads to more
+            // understandable error messages, so we choose that.
+            (UnknownDesc(_), UnknownAsc(id_asc)) => {
+                let child = self.resolve_type(child);
+                let parent = self.resolve_type(parent);
+                let lub = self.least_upper_bound(&child, &parent, has_changed);
+                *has_changed |= self.update_unknown_if_changed(id_asc, &parent, lub);
+                true
+            }
 
             // Update an unknown ascending parent by computing LUB with child.
             (_, UnknownAsc(id)) => {
-                let lub = self.least_upper_bound(child, &self.resolve_type(parent), has_changed);
-                *has_changed |= self.update_unknown_if_changed(id, parent, lub);
+                let parent = self.resolve_type(parent);
+                let lub = self.least_upper_bound(child, &parent, has_changed);
+                *has_changed |= self.update_unknown_if_changed(id, &parent, lub);
                 true
             }
 
             // Update an unknown descending child by computing GLB with parent.
             (UnknownDesc(id), _) => {
-                let glb = self.greatest_lower_bound(&self.resolve_type(child), parent, has_changed);
-                *has_changed |= self.update_unknown_if_changed(id, child, glb);
+                let child = self.resolve_type(child);
+                let glb = self.greatest_lower_bound(&child, parent, has_changed);
+                *has_changed |= self.update_unknown_if_changed(id, &child, glb);
                 true
             }
 

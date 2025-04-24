@@ -1,10 +1,16 @@
 use super::registry::{Constraint, Type, TypeRegistry};
-use crate::dsl::analyzer::{
-    errors::AnalyzerErrorKind,
-    hir::{Identifier, TypedSpan},
-    types::registry::TypeKind,
+use crate::dsl::{
+    analyzer::{
+        errors::AnalyzerErrorKind,
+        hir::{Identifier, TypedSpan},
+        types::registry::TypeKind,
+    },
+    utils::span::Span,
 };
 use std::mem;
+
+/// Result type for constraint checking that tracks type changes even on error
+type ConstraintResult = Result<bool, (Box<AnalyzerErrorKind>, bool)>;
 
 impl TypeRegistry {
     /// Resolves all collected constraints and fills in the concrete types.
@@ -33,8 +39,9 @@ impl TypeRegistry {
                     Ok(changed) => {
                         any_changed |= changed;
                     }
-                    Err(err) => {
+                    Err((err, changed)) => {
                         // Store the error but continue processing other constraints.
+                        any_changed |= changed;
                         last_error = Some(err);
                     }
                 }
@@ -45,10 +52,9 @@ impl TypeRegistry {
         }
 
         // Only return an error if no more progress can be made and we have an error.
-        if let Some(err) = last_error {
-            Err(err)
-        } else {
-            Ok(())
+        match last_error {
+            Some(err) => Err(err),
+            None => Ok(()),
         }
     }
 
@@ -57,17 +63,17 @@ impl TypeRegistry {
     /// # Returns
     ///
     /// * `Ok(bool)` - The constraint is satisfied, with a boolean indicating if any types were changed.
-    /// * `Err(Box<AnalyzerErrorKind>)` - The constraint failed, with the error.
-    fn check_constraint(
-        &mut self,
-        constraint: &Constraint,
-    ) -> Result<bool, Box<AnalyzerErrorKind>> {
-        use Constraint::*;
-
+    /// * `Err((Box<AnalyzerErrorKind>, bool))` - The constraint failed, with the error and a boolean
+    ///    indicating if any types were changed during the check.
+    fn check_constraint(&mut self, constraint: &Constraint) -> ConstraintResult {
         match constraint {
-            Subtype { child, parent } => self.check_subtype_constraint(child, parent),
-            Call { inner, args, outer } => self.check_call_constraint(inner, args, outer),
-            FieldAccess {
+            Constraint::Subtype { child, parent } => self.check_subtype_constraint(child, parent),
+
+            Constraint::Call { inner, args, outer } => {
+                self.check_call_constraint(inner, args, outer)
+            }
+
+            Constraint::FieldAccess {
                 inner,
                 field,
                 outer,
@@ -79,19 +85,20 @@ impl TypeRegistry {
         &mut self,
         child: &TypedSpan,
         parent_ty: &Type,
-    ) -> Result<bool, Box<AnalyzerErrorKind>> {
+    ) -> ConstraintResult {
         let mut has_changed = false;
         let is_subtype = self.is_subtype_infer(&child.ty, parent_ty, &mut has_changed);
 
         if is_subtype {
             Ok(has_changed)
         } else {
-            Err(AnalyzerErrorKind::new_invalid_subtype(
+            let err = AnalyzerErrorKind::new_invalid_subtype(
                 &child.ty,
                 parent_ty,
                 &child.span,
                 self.resolved_unknown.clone(),
-            ))
+            );
+            Err((err, has_changed))
         }
     }
 
@@ -100,93 +107,100 @@ impl TypeRegistry {
         inner: &TypedSpan,
         args: &[TypedSpan],
         outer: &TypedSpan,
-    ) -> Result<bool, Box<AnalyzerErrorKind>> {
-        use TypeKind::*;
-
+    ) -> ConstraintResult {
         let inner_resolved = self.resolve_type(&inner.ty);
 
         match &*inner_resolved.value {
-            Nothing => Ok(false),
+            TypeKind::Nothing => Ok(false),
 
-            Closure(param, ret) => {
-                let param_len = match &**param {
-                    Tuple(types) => types.len(),
-                    Unit => 0,
-                    _ => 1,
+            TypeKind::Closure(param, ret) => {
+                let (param_len, param_types) = match &**param {
+                    TypeKind::Tuple(types) => (types.len(), types.to_vec()),
+                    TypeKind::Unit => (0, vec![]),
+                    _ => (1, vec![param.clone()]),
                 };
 
                 if param_len != args.len() {
-                    return Err(AnalyzerErrorKind::new_argument_number_mismatch(
-                        &inner.span,
-                        param_len,
-                        args.len(),
+                    return Err((
+                        AnalyzerErrorKind::new_argument_number_mismatch(
+                            &inner.span,
+                            param_len,
+                            args.len(),
+                        ),
+                        false,
                     ));
                 }
 
-                let param_types = match &**param {
-                    Tuple(types) => types.to_vec(),
-                    Unit => vec![],
-                    _ => vec![param.clone()],
-                };
-
-                let mut param_changed = false;
-                for (arg, param_type) in args.iter().zip(param_types.iter()) {
-                    let changed = self.check_subtype_constraint(arg, param_type)?;
-                    param_changed |= changed;
-                }
-
-                let ret_changed = self.check_subtype_constraint(
+                let param_result = args.iter().zip(param_types.iter()).try_fold(
+                    false,
+                    |acc_changes, (arg, param_type)| match self
+                        .check_subtype_constraint(arg, param_type)
+                    {
+                        Ok(changed) => Ok(acc_changes | changed),
+                        Err((err, changed)) => Err((err, acc_changes | changed)),
+                    },
+                );
+                let ret_result = self.check_subtype_constraint(
                     &TypedSpan::new(ret.clone(), inner.span.clone()),
                     &outer.ty,
-                )?;
+                );
 
-                Ok(param_changed || ret_changed)
+                self.combine_results(param_result, ret_result)
             }
 
-            Map(key_type, val_type) => {
-                if args.len() != 1 {
-                    return Err(AnalyzerErrorKind::new_argument_number_mismatch(
-                        &inner.span,
-                        1,
-                        args.len(),
-                    ));
-                }
-
-                let key_changed = self.check_subtype_constraint(&args[0], key_type)?;
-
-                let optional_val_type = Optional(val_type.clone()).into();
-                let val_changed = self.check_subtype_constraint(
-                    &TypedSpan::new(optional_val_type, inner.span.clone()),
-                    &outer.ty,
-                )?;
-
-                Ok(key_changed || val_changed)
+            TypeKind::Map(key_type, val_type) => {
+                self.check_indexable(&inner.span, args, key_type, val_type, &outer.ty)
             }
 
-            Array(elem_type) => {
-                if args.len() != 1 {
-                    return Err(AnalyzerErrorKind::new_argument_number_mismatch(
-                        &inner.span,
-                        1,
-                        args.len(),
-                    ));
-                }
-
-                let idx_changed = self.check_subtype_constraint(&args[0], &I64.into())?;
-
-                let optional_elem_type = Optional(elem_type.clone()).into();
-                let elem_changed = self.check_subtype_constraint(
-                    &TypedSpan::new(optional_elem_type, inner.span.clone()),
-                    &outer.ty,
-                )?;
-
-                Ok(idx_changed || elem_changed)
+            TypeKind::Array(elem_type) => {
+                let index_type = TypeKind::I64.into();
+                self.check_indexable(&inner.span, args, &index_type, elem_type, &outer.ty)
             }
-            _ => Err(AnalyzerErrorKind::new_invalid_call_receiver(
-                &inner_resolved,
-                &inner.span,
-                self.resolved_unknown.clone(),
+
+            _ => Err((
+                AnalyzerErrorKind::new_invalid_call_receiver(
+                    &inner_resolved,
+                    &inner.span,
+                    self.resolved_unknown.clone(),
+                ),
+                false,
             )),
+        }
+    }
+
+    fn check_indexable(
+        &mut self,
+        span: &Span,
+        args: &[TypedSpan],
+        key_type: &Type,
+        elem_type: &Type,
+        outer_ty: &Type,
+    ) -> ConstraintResult {
+        if args.len() != 1 {
+            return Err((
+                AnalyzerErrorKind::new_argument_number_mismatch(span, 1, args.len()),
+                false,
+            ));
+        }
+
+        let index_result = self.check_subtype_constraint(&args[0], key_type);
+        let optional_elem_type = TypeKind::Optional(elem_type.clone()).into();
+        let elem_result = self
+            .check_subtype_constraint(&TypedSpan::new(optional_elem_type, span.clone()), outer_ty);
+
+        self.combine_results(index_result, elem_result)
+    }
+
+    fn combine_results(
+        &self,
+        result1: ConstraintResult,
+        result2: ConstraintResult,
+    ) -> ConstraintResult {
+        match (result1, result2) {
+            (Ok(changed1), Ok(changed2)) => Ok(changed1 | changed2),
+            (Ok(changed1), Err((err2, changed2))) => Err((err2, changed1 | changed2)),
+            (Err((err1, changed1)), Ok(changed2)) => Err((err1, changed1 | changed2)),
+            (Err((err1, changed1)), Err((_, changed2))) => Err((err1, changed1 | changed2)),
         }
     }
 
@@ -195,35 +209,41 @@ impl TypeRegistry {
         inner: &TypedSpan,
         field: &Identifier,
         outer: &Type,
-    ) -> Result<bool, Box<AnalyzerErrorKind>> {
-        use TypeKind::*;
-
+    ) -> ConstraintResult {
         let inner_resolved = self.resolve_type(&inner.ty);
 
         match &*inner_resolved.value {
-            Nothing => Ok(false),
+            TypeKind::Nothing => Ok(false),
 
-            Adt(name) => self
-                .get_product_field_type(name, field)
-                .ok_or_else(|| {
-                    AnalyzerErrorKind::new_invalid_field_access(
-                        &inner_resolved,
-                        &inner.span,
-                        field,
-                        self.resolved_unknown.clone(),
-                    )
-                })
-                .and_then(|field_ty| {
-                    self.check_subtype_constraint(
-                        &TypedSpan::new(field_ty, inner.span.clone()),
-                        outer,
-                    )
-                }),
-            _ => Err(AnalyzerErrorKind::new_invalid_field_access(
-                &inner_resolved,
-                &inner.span,
-                field,
-                self.resolved_unknown.clone(),
+            TypeKind::Adt(name) => {
+                match self.get_product_field_type(name, field) {
+                    Some(field_ty) => {
+                        // Check that the field type is a subtype of the outer type.
+                        self.check_subtype_constraint(
+                            &TypedSpan::new(field_ty, inner.span.clone()),
+                            outer,
+                        )
+                    }
+                    None => Err((
+                        AnalyzerErrorKind::new_invalid_field_access(
+                            &inner_resolved,
+                            &inner.span,
+                            field,
+                            self.resolved_unknown.clone(),
+                        ),
+                        false,
+                    )),
+                }
+            }
+
+            _ => Err((
+                AnalyzerErrorKind::new_invalid_field_access(
+                    &inner_resolved,
+                    &inner.span,
+                    field,
+                    self.resolved_unknown.clone(),
+                ),
+                false,
             )),
         }
     }

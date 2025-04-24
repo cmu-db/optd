@@ -4,6 +4,7 @@ use crate::dsl::parser::ast::{Adt, Field, Type as AstType};
 use crate::dsl::utils::span::{OptionalSpanned, Span, Spanned};
 use Adt::*;
 use std::collections::BTreeMap;
+use std::hash::Hasher;
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
@@ -71,6 +72,20 @@ pub type Type = OptionalSpanned<TypeKind>;
 impl From<TypeKind> for Type {
     fn from(kind: TypeKind) -> Self {
         OptionalSpanned::unspanned(kind)
+    }
+}
+
+impl PartialEq for Type {
+    fn eq(&self, other: &Self) -> bool {
+        *self.value == *other.value
+    }
+}
+
+impl Eq for Type {}
+
+impl Hash for Type {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.value.hash(state);
     }
 }
 

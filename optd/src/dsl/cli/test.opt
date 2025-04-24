@@ -1,11 +1,12 @@
 data Logical =
     | Add(left: Logical, right: Logical)
-    \ Val(val: I64)
+    \ Number(val: I64)
 
 data Physical
 data LogicalProperties
 data PhysicalProperties
 
-fn create_expr_tree(depth: I64): F64 =
-    match depth
-        \ a -> a + 5.5
+fn constant_folder(): Logical -> Logical =
+    (expr) ->
+        match expr
+            \ Add(_, _) -> Number(5)

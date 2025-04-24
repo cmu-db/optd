@@ -46,14 +46,12 @@ fn binary_op(op_type: String) =
             | "div" -> Div(left, right)
             \ _ -> Add(left, right)
         
-fn create_expr_tree(depth: I64, base: Logical): F64 =
-    match depth
-        | a -> (5.5 / depth)
-        | 0 -> fail("")
-        \ _ -> fail("")
+fn create_expr_tree(depth: I64, base: Logical) =
+    match base
+        \ a -> base
 
 fn constant_folder(): Logical -> Logical =
-    (expr) ->
+    (expr: Logical) ->
         match expr
             | Add(Number(a), Number(b)) -> Number(a + b)
             | Sub(Number(a), Number(b)) -> Number(a - b)
@@ -89,5 +87,5 @@ fn main(): Logical =
         add(
             double_and_optimize(expr1)
         )(
-            map_binary(expr2, (x) -> Add(x, Number(1)))
+            map_binary(expr2, (x: Logical) -> Add(x, Number(1)))
         )
