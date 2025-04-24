@@ -18,6 +18,7 @@
 use super::context::Context;
 use super::map::Map;
 use super::types::registry::Type;
+use crate::catalog::Catalog;
 use crate::dsl::utils::span::Span;
 use std::fmt::Debug;
 use std::{collections::HashMap, sync::Arc};
@@ -66,18 +67,27 @@ impl TypedSpan {
     }
 }
 
-/// User-defined function: either linked or unlinked
 #[derive(Debug, Clone)]
-pub enum UdfKind<M: ExprMetadata> {
-    Linked(fn(Vec<Value<M>>) -> Value<M>),
-    Unlinked(Identifier),
+pub struct Udf {
+    /// The function pointer to the user-defined function.
+    ///
+    /// Note that [`Value`]s passed to and returned from this UDF do not have associated metadata.
+    pub func: fn(&[Value], &dyn Catalog) -> Value,
 }
 
-/// Types of functions in the system
+impl Udf {
+    pub fn call(&self, values: &[Value], catalog: &dyn Catalog) -> Value {
+        (self.func)(values, catalog)
+    }
+}
+
+/// The different kinds of functions in the system.
 #[derive(Debug, Clone)]
-pub enum FunKind<M: ExprMetadata> {
+pub enum FunKind<M: ExprMetadata = NoMetadata> {
     Closure(Vec<Identifier>, Arc<Expr<M>>),
-    Udf(UdfKind<M>),
+    /// A user-defined function. Note that the [`Value`] type passed to [`Udf`]s do not carry any
+    /// metadata like `Value<TypedSpan>`.
+    Udf(Udf),
 }
 
 /// Group identifier in the optimizer
@@ -294,7 +304,7 @@ pub type MapEntry<M> = (Arc<Expr<M>>, Arc<Expr<M>>);
 
 /// Expression node kinds without metadata
 #[derive(Debug, Clone)]
-pub enum ExprKind<M: ExprMetadata> {
+pub enum ExprKind<M: ExprMetadata = NoMetadata> {
     /// Pattern matching expression
     PatternMatch(Arc<Expr<M>>, Vec<MatchArm<M>>),
     /// Conditional expression
@@ -387,7 +397,7 @@ impl Pattern<TypedSpan> {
 
 /// Pattern node kinds without metadata
 #[derive(Debug, Clone)]
-pub enum PatternKind<M: ExprMetadata> {
+pub enum PatternKind<M: ExprMetadata = NoMetadata> {
     /// Bind a value to a name
     Bind(Identifier, Box<Pattern<M>>),
     /// Match a literal value

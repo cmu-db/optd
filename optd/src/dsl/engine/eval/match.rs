@@ -531,7 +531,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::dsl::analyzer::hir::{LetBinding, UdfKind};
+    use crate::catalog::iceberg::memory_catalog;
+    use crate::dsl::analyzer::hir::{LetBinding, Udf};
     use crate::dsl::engine::Engine;
     use crate::dsl::utils::tests::{
         array_decomp_pattern, array_val, bind_pattern, create_logical_operator,
@@ -556,7 +557,8 @@ mod tests {
     async fn test_simple_literal_patterns() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // Create a match expression: match 42 { 42 => "matched", _ => "not matched" }
         let match_expr = pattern_match_expr(
@@ -584,7 +586,8 @@ mod tests {
     async fn test_bind_pattern_with_nesting() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // Create a match expression:
         // match 42 {
@@ -668,17 +671,18 @@ mod tests {
         let mut ctx = Context::default();
         ctx.bind(
             "length".to_string(),
-            Value::new(CoreData::Function(FunKind::Udf(UdfKind::Linked(
-                |args| match &args[0].data {
+            Value::new(CoreData::Function(FunKind::Udf(Udf {
+                func: |args, _catalog| match &args[0].data {
                     CoreData::Array(elements) => {
                         Value::new(CoreData::Literal(int(elements.len() as i64)))
                     }
                     _ => panic!("Expected array"),
                 },
-            )))),
+            }))),
         );
 
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // Evaluate the expression
         let results = evaluate_and_collect(match_expr, engine, harness).await;
@@ -697,7 +701,8 @@ mod tests {
     async fn test_struct_patterns() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // Create a struct value Point { x: 10, y: 20 }
         let struct_expr = Arc::new(Expr::new(CoreVal(struct_val(
@@ -744,7 +749,8 @@ mod tests {
     async fn test_complex_operator_patterns() {
         let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // Create a logical operator: LogicalJoin { joinType: "inner", condition: "x = y" } [TableScan("orders"), TableScan("lineitem")]
         let op = Operator {
@@ -923,7 +929,8 @@ mod tests {
         );
 
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // Evaluate the expression
         let results = evaluate_and_collect(match_expr, engine, harness).await;
@@ -974,12 +981,14 @@ mod tests {
 
         // Create a to_string function
         let to_string_fn = Arc::new(Expr::new(CoreVal(Value::new(CoreData::Function(
-            FunKind::Udf(UdfKind::Linked(|args| match &args[0].data {
-                CoreData::Literal(lit) => {
-                    Value::new(CoreData::Literal(string(&format!("{:?}", lit))))
-                }
-                _ => Value::new(CoreData::Literal(string("<non-literal>"))),
-            })),
+            FunKind::Udf(Udf {
+                func: |args, _catalog| match &args[0].data {
+                    CoreData::Literal(lit) => {
+                        Value::new(CoreData::Literal(string(&format!("{:?}", lit))))
+                    }
+                    _ => Value::new(CoreData::Literal(string("<non-literal>"))),
+                },
+            }),
         )))));
 
         // Create a match expression to match against the expanded physical operator
@@ -1048,7 +1057,8 @@ mod tests {
         );
 
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // Evaluate the expression
         let results = evaluate_and_collect(match_expr, engine, harness).await;
@@ -1083,17 +1093,18 @@ mod tests {
         // Add to_string function to convert numbers to strings
         ctx.bind(
             "to_string".to_string(),
-            Value::new(CoreData::Function(FunKind::Udf(UdfKind::Linked(
-                |args| match &args[0].data {
+            Value::new(CoreData::Function(FunKind::Udf(Udf {
+                func: |args, _catalog| match &args[0].data {
                     CoreData::Literal(Literal::Int64(i)) => {
                         Value::new(CoreData::Literal(string(&i.to_string())))
                     }
                     _ => panic!("Expected integer literal"),
                 },
-            )))),
+            }))),
         );
 
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // Create a struct value Point { x: 30, y: 40 }
         let struct_expr = Arc::new(Expr::new(CoreVal(struct_val(
@@ -1215,18 +1226,19 @@ mod tests {
         // Add to_string function to convert complex values to strings
         ctx.bind(
             "to_string".to_string(),
-            Value::new(CoreData::Function(FunKind::Udf(UdfKind::Linked(
-                |args| match &args[0].data {
+            Value::new(CoreData::Function(FunKind::Udf(Udf {
+                func: |args, _catalog| match &args[0].data {
                     CoreData::Literal(lit) => {
                         Value::new(CoreData::Literal(string(&format!("{:?}", lit))))
                     }
                     CoreData::Array(_) => Value::new(CoreData::Literal(string("<array>"))),
                     _ => Value::new(CoreData::Literal(string("<unknown>"))),
                 },
-            )))),
+            }))),
         );
 
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // Create a deeply nested operator:
         // Project [col1, col2] (
@@ -1473,7 +1485,8 @@ mod tests {
         );
 
         let ctx = Context::default();
-        let engine = Engine::new(ctx);
+        let catalog = Arc::new(memory_catalog());
+        let engine = Engine::new(ctx, catalog);
 
         // Evaluate the expression
         let results = evaluate_and_collect(match_expr, engine, harness).await;

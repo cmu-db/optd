@@ -18,7 +18,9 @@ colored = "3.0.0"
 enum_dispatch = "0.3.13"
 futures = "0.3.31"
 iceberg = { version = "0.4.0", default-features = false }
+iceberg-catalog-memory = "0.4.0"
 ordered-float = "5.0.0"
+tempfile = "3.19.1"
 tokio = { version = "1.44.2", features = ["macros", "rt"] }
 trait-variant = "0.1.2"
 

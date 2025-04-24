@@ -3,7 +3,7 @@ use crate::dsl::{
         context::Context,
         errors::AnalyzerError,
         from_ast::ASTConverter,
-        hir::{HIR, TypedSpan},
+        hir::{HIR, TypedSpan, Udf},
         semantic_checks::adt_check,
         types::registry::TypeRegistry,
     },
@@ -11,26 +11,164 @@ use crate::dsl::{
     parser::{ast::Module, module::parse_module},
     utils::errors::CompileError,
 };
+use clap::{Args, Parser};
+use colored::Colorize;
+use std::{borrow::Cow, collections::HashMap};
+use std::{fs, path::PathBuf};
 
-/// Compilation options for the DSL.
-pub struct CompileOptions {
-    /// Path to the main module source file.
-    pub source_path: String,
+/// Compilation configuration and options.
+#[derive(Parser)]
+#[command(
+    name = "optd",
+    about = "Optimizer DSL compiler and toolchain",
+    version,
+    author
+)]
+pub struct Config {
+    /// Input file to compile.
+    path: PathBuf,
+    /// The verbosity settings.
+    #[command(flatten)]
+    verbosity: Verbosity,
+}
+
+impl Config {
+    /// Creates a new Config instance with the given path.
+    pub fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            verbosity: Default::default(),
+        }
+    }
+
+    /// A helper method to get the verbosity.
+    fn verbose(&self) -> bool {
+        self.verbosity.verbose
+    }
+
+    /// A helper method to get the path as a string.
+    fn path_str(&self) -> Cow<'_, str> {
+        self.path.to_string_lossy()
+    }
+}
+
+/// Verbosity settings for compilation.
+#[derive(Args, Default)]
+pub struct Verbosity {
+    /// Print detailed processing information.
+    #[arg(long)]
+    verbose: bool,
+    /// Print the AST in a readable format (must enable --verbose).
+    #[arg(long)]
+    show_ast: bool,
+    /// Print the typed-span HIR in a readable format (must enable --verbose).
+    #[arg(long)]
+    show_typedspan_hir: bool,
+    /// Print the final HIR in a readable format (must enable --verbose).
+    #[arg(long)]
+    show_hir: bool,
+}
+
+/// Compiles a file into the [`HIR`].
+///
+/// TODO fix error handling.
+pub fn compile_hir(config: Config, udfs: HashMap<String, Udf>) -> Result<HIR, Vec<CompileError>> {
+    let source_path = config.path_str();
+
+    // If we cannot find the file we can't compile anything, so exit immediately.
+    let source = fs::read_to_string(&config.path).unwrap_or_else(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            eprintln!(
+                "{} {}",
+                "✘".red().bold(),
+                format!("File not found: {}", source_path).red()
+            );
+            eprintln!("  Please check the path and file permissions.\n");
+        } else {
+            eprintln!(
+                "{} {}",
+                "✘".red().bold(),
+                format!("Error reading file: {}", e).red()
+            );
+        }
+        std::process::exit(1);
+    });
+
+    // Step 1: Parse.
+    if config.verbose() {
+        println!("{} Compiling file: {}", "⏳".blue(), config.path_str());
+        println!("{} Parsing source code...", "→".cyan());
+    }
+
+    let ast = parse(&source, &config)?;
+
+    if config.verbose() {
+        println!("{}", "Parse successful".green());
+
+        if config.verbosity.show_ast {
+            println!("\nAST Structure:\n{:#?}", ast);
+        }
+    }
+
+    // Step 2: AST to HIR.
+    if config.verbose() {
+        println!("{} Converting AST to HIR and TypeRegistry...", "→".cyan());
+    }
+
+    let (typed_hir, mut type_registry) = ast_to_hir(&source, ast, udfs).map_err(|e| vec![e])?;
+
+    if config.verbose() {
+        println!("{}", "AST to HIR conversion successful".green());
+
+        if config.verbosity.show_typedspan_hir {
+            println!("\nTyped-Span HIR Structure:\n{:#?}", typed_hir);
+        }
+    }
+
+    // Step 3: TypeRegistry Check.
+    if config.verbose() {
+        println!("{} Checking TypeRegistry...", "→".cyan());
+    }
+
+    registry_check(&source, &source_path, &type_registry).map_err(|e| vec![e])?;
+
+    if config.verbose() {
+        println!("{}", "TypeRegistry check successful".green());
+    }
+
+    // Step 4: Type Inference.
+    if config.verbose() {
+        println!("{} Performing type inference...", "→".cyan());
+    }
+
+    let hir = infer(&source, &typed_hir, &mut type_registry).map_err(|e| vec![e])?;
+
+    if config.verbose() {
+        println!("{}", "Type inference successful".green());
+
+        if config.verbosity.show_hir {
+            println!("\nTyped-Span HIR Structure:\n{:#?}", hir);
+        }
+
+        println!("\n{}", "Compilation completed successfully!".green().bold());
+    }
+
+    Ok(hir)
 }
 
 /// Parse DSL source code to AST.
 ///
 /// This function performs lexing and parsing stages of compilation,
 /// returning either the parsed AST Module or collected errors.
-pub fn parse(source: &str, options: &CompileOptions) -> Result<Module, Vec<CompileError>> {
+pub fn parse(source: &str, config: &Config) -> Result<Module, Vec<CompileError>> {
     let mut errors = Vec::new();
     // Step 1: Lexing
-    let (tokens_opt, lex_errors) = lex(source, &options.source_path);
+    let (tokens_opt, lex_errors) = lex(source, &config.path_str());
     errors.extend(lex_errors);
     match tokens_opt {
         Some(tokens) => {
             // Step 2: Parsing
-            let (ast_opt, parse_errors) = parse_module(tokens, source, &options.source_path);
+            let (ast_opt, parse_errors) = parse_module(tokens, source, &config.path_str());
             errors.extend(parse_errors);
             match ast_opt {
                 Some(ast) if errors.is_empty() => Ok(ast),
@@ -48,8 +186,9 @@ pub fn parse(source: &str, options: &CompileOptions) -> Result<Module, Vec<Compi
 pub fn ast_to_hir(
     source: &str,
     ast: Module,
+    udfs: HashMap<String, Udf>,
 ) -> Result<(HIR<TypedSpan>, TypeRegistry), CompileError> {
-    let converter = ASTConverter::default();
+    let converter = ASTConverter::new_with_udfs(udfs);
     converter.convert(&ast).map_err(|err_kind| {
         CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
     })

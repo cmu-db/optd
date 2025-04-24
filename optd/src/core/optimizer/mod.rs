@@ -1,3 +1,4 @@
+use crate::catalog::Catalog;
 use crate::core::cir::{
     Cost, Goal, GoalId, GroupId, LogicalExpressionId, LogicalPlan, LogicalProperties,
     PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpressionId, PhysicalPlan, RuleBook,
@@ -15,6 +16,7 @@ use futures::{
 };
 use jobs::{Job, JobId};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 use tasks::{Task, TaskId};
 
 mod egest;
@@ -104,6 +106,7 @@ pub struct Optimizer<M: Memoize> {
     memo: M,
     rule_book: RuleBook,
     hir_context: Context,
+    catalog: Arc<dyn Catalog>,
 
     // Message handling.
     pending_messages: Vec<PendingMessage>,
@@ -139,6 +142,7 @@ impl<M: Memoize> Optimizer<M> {
     fn new(
         memo: M,
         hir: HIR,
+        catalog: Arc<dyn Catalog>,
         message_tx: Sender<OptimizerMessage>,
         message_rx: Receiver<OptimizerMessage>,
         optimize_rx: Receiver<OptimizeRequest>,
@@ -148,6 +152,7 @@ impl<M: Memoize> Optimizer<M> {
             memo,
             rule_book: RuleBook::default(),
             hir_context: hir.context,
+            catalog,
 
             // Message handling.
             pending_messages: Vec::new(),
@@ -178,12 +183,19 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     /// Launch a new optimizer and return a sender for client communication.
-    pub fn launch(memo: M, hir: HIR) -> Sender<OptimizeRequest> {
+    pub fn launch(memo: M, hir: HIR, catalog: Arc<dyn Catalog>) -> Sender<OptimizeRequest> {
         let (message_tx, message_rx) = mpsc::channel(0);
         let (optimize_tx, optimize_rx) = mpsc::channel(0);
 
         // Start the background processing loop.
-        let optimizer = Self::new(memo, hir, message_tx.clone(), message_rx, optimize_rx);
+        let optimizer = Self::new(
+            memo,
+            hir,
+            catalog,
+            message_tx.clone(),
+            message_rx,
+            optimize_rx,
+        );
         tokio::spawn(async move {
             // TODO(Alexis): If an error occurs we could restart or reboot the memo.
             // Rather than failing (e.g. memo could be distributed).

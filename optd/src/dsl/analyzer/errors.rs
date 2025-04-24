@@ -47,6 +47,11 @@ pub enum AnalyzerErrorKind {
         span: Span,
     },
 
+    UnknownUdf {
+        name: String,
+        span: Span,
+    },
+
     UndefinedReference {
         name: String,
         span: Span,
@@ -144,6 +149,14 @@ impl AnalyzerErrorKind {
 
     pub fn new_incomplete_function(name: &str, span: &Span) -> Box<Self> {
         Self::IncompleteFunction {
+            name: name.to_string(),
+            span: span.clone(),
+        }
+        .into()
+    }
+
+    pub fn new_unknown_udf(name: &str, span: &Span) -> Box<Self> {
+        Self::UnknownUdf {
             name: name.to_string(),
             span: span.clone(),
         }
@@ -309,7 +322,12 @@ impl Diagnose for Box<AnalyzerError> {
                 span,
                 &format!("Incomplete function definition: '{}'", name),
                 "Function must have at least one parameter",
-                "Add at least one parameter or a receiver to this function",
+                "Add at least one parameter or a receiver to this function"),
+            UnknownUdf { name, span } => self.build_single_span_report(
+                span,
+                &format!("Undefined UDF named: '{}'", name),
+                &format!("'{}' is not a valid UDF", name),
+                &format!("Ensure that the UDF {} is provided before compilation", name),
             ),
             UndefinedReference { name, span } => self.build_single_span_report(
                 span,
@@ -393,6 +411,7 @@ impl Diagnose for Box<AnalyzerError> {
             DuplicateAdt { duplicate_span, .. } => duplicate_span,
             DuplicateIdentifier { duplicate_span, .. } => duplicate_span,
             IncompleteFunction { span, .. } => span,
+            UnknownUdf { span, .. } => span,
             UndefinedReference { span, .. } => span,
             CyclicType { path } => &path[0].span,
             UndefinedType { span, .. } => span,

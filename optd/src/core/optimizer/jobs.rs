@@ -269,7 +269,7 @@ impl<M: Memoize> Optimizer<M> {
         expression_id: LogicalExpressionId,
         job_id: JobId,
     ) -> Result<(), Error> {
-        let engine = Engine::new(self.hir_context.clone());
+        let engine = Engine::new(self.hir_context.clone(), self.catalog.clone());
 
         let plan: PartialLogicalPlan = self
             .memo
@@ -311,7 +311,7 @@ impl<M: Memoize> Optimizer<M> {
         group_id: GroupId,
         job_id: JobId,
     ) -> Result<(), Error> {
-        let engine = Engine::new(self.hir_context.clone());
+        let engine = Engine::new(self.hir_context.clone(), self.catalog.clone());
 
         let plan: PartialLogicalPlan = self
             .memo
@@ -350,7 +350,7 @@ impl<M: Memoize> Optimizer<M> {
         goal_id: GoalId,
         job_id: JobId,
     ) -> Result<(), Error> {
-        let engine = Engine::new(self.hir_context.clone());
+        let engine = Engine::new(self.hir_context.clone(), self.catalog.clone());
 
         let Goal(_, physical_props) = self.memo.materialize_goal(goal_id).await?;
         let plan = self
@@ -389,7 +389,7 @@ impl<M: Memoize> Optimizer<M> {
         expression_id: PhysicalExpressionId,
         job_id: JobId,
     ) -> Result<(), Error> {
-        let engine = Engine::new(self.hir_context.clone());
+        let engine = Engine::new(self.hir_context.clone(), self.catalog.clone());
 
         let plan = self.egest_partial_plan(expression_id).await?;
 

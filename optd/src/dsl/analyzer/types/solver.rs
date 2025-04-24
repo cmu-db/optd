@@ -252,51 +252,30 @@ impl TypeRegistry {
 #[cfg(test)]
 mod tests {
     use crate::dsl::{
-        compile::{CompileOptions, ast_to_hir, infer, parse, registry_check},
+        compile::{Config, compile_hir},
         utils::errors::CompileError,
     };
+    use std::collections::HashMap;
 
-    // Helper function to run type inference on a program
     fn run_type_inference(source: &str, source_path: &str) -> Result<(), Vec<CompileError>> {
-        // Append the required core type declarations to each test program
+        // Append the required core type declarations to each test program.
         let core_types = r#"
-        data Logical
-        data Physical
-        data LogicalProperties
-        data PhysicalProperties
+            data Logical
+            data Physical
+            data LogicalProperties
+            data PhysicalProperties
         "#;
 
         let full_source = format!("{}\n{}", core_types, source);
 
-        let options = CompileOptions {
-            source_path: source_path.to_string(),
-        };
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+        let file_path = temp_dir.path().join(source_path);
 
-        // Step 1: Parse the program to AST
-        let ast = parse(&full_source, &options).map_err(|errors| {
-            errors
-                .iter()
-                .for_each(|err| eprintln!("Parse error: {:?}", err));
-            errors
-        })?;
+        std::fs::write(&file_path, full_source).expect("Failed to write to temp file");
 
-        // Step 2: Convert AST to HIR with type spans
-        let (hir, mut registry) = ast_to_hir(&full_source, ast).map_err(|err| {
-            eprintln!("AST to HIR error: {:?}", err);
-            vec![err]
-        })?;
-
-        // Step 3: Check the registry for valid ADTs
-        registry_check(&full_source, source_path, &registry).map_err(|err| {
-            eprintln!("Registry check error: {:?}", err);
-            vec![err]
-        })?;
-
-        // Step 4: Run type inference
-        infer(&full_source, &hir, &mut registry).map_err(|err| {
-            eprintln!("Type inference error: {:?}", err);
-            vec![err]
-        })?;
+        let config = Config::new(file_path);
+        let udfs = HashMap::new();
+        let _ = compile_hir(config, udfs)?;
 
         Ok(())
     }
