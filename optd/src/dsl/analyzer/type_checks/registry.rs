@@ -258,11 +258,7 @@ impl TypeRegistry {
     }
 
     /// Retrieves the type of a field from a product ADT by index position.
-    pub fn get_product_field_type_by_index(
-        &self,
-        adt_name: &Identifier,
-        index: usize,
-    ) -> Option<Type> {
+    pub fn get_product_field_type_by_index(&self, adt_name: &str, index: usize) -> Option<Type> {
         let fields = self.product_fields.get(adt_name)?;
         let field = fields.get(index).cloned()?;
 

@@ -1,5 +1,4 @@
 use super::{
-    errors::AnalyzerErrorKind,
     hir::{HIR, TypedSpan},
     type_checks::registry::TypeRegistry,
 };
@@ -16,10 +15,7 @@ mod converter;
 /// This function performs a deep translation of all structures that may contain
 /// metadata, recursively removing the metadata and producing equivalent structures
 /// without it.
-pub fn into_hir(
-    hir_typedspan: HIR<TypedSpan>,
-    registry: &TypeRegistry,
-) -> Result<HIR, Box<AnalyzerErrorKind>> {
+pub fn into_hir(hir_typedspan: HIR<TypedSpan>, registry: &TypeRegistry) -> HIR {
     use CoreData::*;
     use FunKind::*;
 
@@ -28,7 +24,7 @@ pub fn into_hir(
     // Convert all function bindings from the original context.
     for (name, fun) in hir_typedspan.context.get_all_bindings() {
         let converted_fun = match &fun.data {
-            Function(Closure(args, body)) => Closure(args.clone(), convert_expr(body, registry)?),
+            Function(Closure(args, body)) => Closure(args.clone(), convert_expr(body, registry)),
             Function(Udf(udf)) => Udf(udf.clone()),
             _ => panic!("Expected a function, but got: {:?}", fun.data),
         };
@@ -39,8 +35,8 @@ pub fn into_hir(
     // Push the context scope of the module, as we have processed all functions.
     context.push_scope();
 
-    Ok(HIR {
+    HIR {
         context,
         annotations: hir_typedspan.annotations,
-    })
+    }
 }

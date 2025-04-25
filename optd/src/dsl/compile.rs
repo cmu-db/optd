@@ -231,7 +231,5 @@ pub fn infer(
 
     // Step 4: Transform HIR
     // After type inference, transform the HIR into its final form with complete type information.
-    into_hir(hir, registry).map_err(|err_kind| {
-        CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
-    })
+    Ok(into_hir(hir, registry))
 }

@@ -1,5 +1,5 @@
 use super::registry::{Type, TypeRegistry};
-use crate::dsl::analyzer::{hir::Identifier, type_checks::registry::TypeKind};
+use crate::dsl::analyzer::type_checks::registry::TypeKind;
 use std::collections::HashSet;
 
 impl TypeRegistry {
@@ -273,7 +273,7 @@ impl TypeRegistry {
         }
     }
 
-    pub(crate) fn inherits_adt(&self, child_name: &Identifier, parent_name: &Identifier) -> bool {
+    pub(crate) fn inherits_adt(&self, child_name: &str, parent_name: &str) -> bool {
         if child_name == parent_name {
             return true;
         }
