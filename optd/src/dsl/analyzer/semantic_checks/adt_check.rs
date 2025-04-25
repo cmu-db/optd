@@ -3,7 +3,7 @@ use crate::dsl::{
     analyzer::{
         errors::AnalyzerErrorKind,
         hir::Identifier,
-        types::registry::{CORE_TYPES, LOGICAL_TYPE, PHYSICAL_TYPE, TypeRegistry},
+        type_checks::registry::{CORE_TYPES, LOGICAL_TYPE, PHYSICAL_TYPE, TypeRegistry},
     },
     parser::ast::Type as AstType,
     utils::span::Span,
@@ -185,7 +185,7 @@ fn check_type(
 mod adt_validation_tests {
     use crate::dsl::analyzer::hir::Identifier;
     use crate::dsl::analyzer::semantic_checks::adt_check::adt_check;
-    use crate::dsl::analyzer::types::registry::{
+    use crate::dsl::analyzer::type_checks::registry::{
         LOGICAL_PROPS, LOGICAL_TYPE, PHYSICAL_PROPS, PHYSICAL_TYPE, TypeRegistry,
     };
     use crate::dsl::parser::ast::{Field, Type as AstType};

@@ -1,5 +1,5 @@
 use super::registry::{Type, TypeRegistry};
-use crate::dsl::analyzer::{hir::Identifier, types::registry::TypeKind};
+use crate::dsl::analyzer::{hir::Identifier, type_checks::registry::TypeKind};
 use std::collections::HashSet;
 
 impl TypeRegistry {
@@ -283,7 +283,7 @@ impl TypeRegistry {
 pub mod tests {
     use super::*;
     use crate::dsl::{
-        analyzer::types::registry::type_registry_tests::{create_product_adt, create_sum_adt},
+        analyzer::type_checks::registry::type_registry_tests::{create_product_adt, create_sum_adt},
         parser::ast::Type as AstType,
     };
     use TypeKind::*;

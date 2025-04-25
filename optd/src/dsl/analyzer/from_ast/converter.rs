@@ -1,6 +1,6 @@
 use crate::dsl::analyzer::errors::AnalyzerErrorKind;
 use crate::dsl::analyzer::hir::{Annotation, FunKind, Identifier};
-use crate::dsl::analyzer::types::registry::{Type, TypeRegistry, create_function_type};
+use crate::dsl::analyzer::type_checks::registry::{Type, TypeRegistry, create_function_type};
 use crate::dsl::analyzer::{
     context::Context,
     hir::{CoreData, HIR, TypedSpan, Udf, Value},
@@ -193,7 +193,7 @@ mod converter_tests {
     use super::*;
     use crate::catalog::Catalog;
     use crate::dsl::analyzer::hir::{CoreData, FunKind};
-    use crate::dsl::analyzer::types::registry::TypeKind;
+    use crate::dsl::analyzer::type_checks::registry::TypeKind;
     use crate::dsl::parser::ast::{self, Adt, Function, Item, Module, Type as AstType};
     use crate::dsl::utils::span::{Span, Spanned};
 

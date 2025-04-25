@@ -9,7 +9,7 @@ use crate::dsl::analyzer::hir::{
     BinOp, CoreData, Expr, ExprKind, FunKind, Identifier, LetBinding, Literal, TypedSpan, UnaryOp,
     Value,
 };
-use crate::dsl::analyzer::types::registry::{Type, TypeKind, create_function_type};
+use crate::dsl::analyzer::type_checks::registry::{Type, TypeKind, create_function_type};
 use crate::dsl::parser::ast::{
     self, BinOp as AstBinOp, Expr as AstExpr, Literal as AstLiteral, PostfixOp,
 };

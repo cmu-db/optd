@@ -1,5 +1,5 @@
 use crate::dsl::{
-    analyzer::{errors::AnalyzerErrorKind, hir::Identifier, types::registry::TypeRegistry},
+    analyzer::{errors::AnalyzerErrorKind, hir::Identifier, type_checks::registry::TypeRegistry},
     parser::ast::Type as AstType,
     utils::span::Spanned,
 };

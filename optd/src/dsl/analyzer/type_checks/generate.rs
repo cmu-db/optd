@@ -7,7 +7,7 @@ use crate::dsl::{
             BinOp, CoreData, Expr, ExprKind, FunKind, HIR, Identifier, LetBinding, MapEntry,
             MatchArm, Pattern, PatternKind, TypedSpan, UnaryOp, Value,
         },
-        types::registry::{Type, TypeKind},
+        type_checks::registry::{Type, TypeKind},
     },
     utils::span::Span,
 };
@@ -549,7 +549,7 @@ mod scope_check_tests {
                 CoreData, Expr, ExprKind, FunKind, HIR, LetBinding, MatchArm, Pattern, PatternKind,
                 TypedSpan, Value,
             },
-            types::registry::{create_function_type, type_registry_tests::create_test_span},
+            type_checks::registry::{create_function_type, type_registry_tests::create_test_span},
         },
         utils::span::Span,
     };

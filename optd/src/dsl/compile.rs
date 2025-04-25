@@ -5,7 +5,7 @@ use crate::dsl::{
         from_ast::ASTConverter,
         hir::{HIR, TypedSpan, Udf},
         semantic_checks::adt_check,
-        types::registry::TypeRegistry,
+        type_checks::registry::TypeRegistry,
     },
     lexer::lex::lex,
     parser::{ast::Module, module::parse_module},

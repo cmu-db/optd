@@ -3,7 +3,7 @@ use crate::dsl::{
     analyzer::{
         errors::AnalyzerErrorKind,
         hir::{Identifier, TypedSpan},
-        types::registry::TypeKind,
+        type_checks::registry::TypeKind,
     },
     utils::span::Span,
 };

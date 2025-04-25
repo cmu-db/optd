@@ -4,4 +4,4 @@ pub mod from_ast;
 pub mod hir;
 pub mod map;
 pub mod semantic_checks;
-pub mod types;
+pub mod type_checks;

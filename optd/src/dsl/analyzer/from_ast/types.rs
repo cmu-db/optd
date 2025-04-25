@@ -6,7 +6,7 @@
 use super::ASTConverter;
 use crate::dsl::analyzer::errors::AnalyzerErrorKind;
 use crate::dsl::analyzer::hir::Identifier;
-use crate::dsl::analyzer::types::registry::{Type, TypeKind};
+use crate::dsl::analyzer::type_checks::registry::{Type, TypeKind};
 use crate::dsl::parser::ast::Type as AstType;
 use crate::dsl::utils::span::Spanned;
 use std::collections::HashSet;

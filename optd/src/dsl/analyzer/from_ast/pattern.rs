@@ -6,7 +6,7 @@
 use super::ASTConverter;
 use crate::dsl::analyzer::errors::AnalyzerErrorKind;
 use crate::dsl::analyzer::hir::{Identifier, MatchArm, Pattern, PatternKind, TypedSpan};
-use crate::dsl::analyzer::types::registry::{Type, TypeKind};
+use crate::dsl::analyzer::type_checks::registry::{Type, TypeKind};
 use crate::dsl::parser::ast::{self, Pattern as AstPattern};
 use crate::dsl::utils::span::Spanned;
 use std::collections::HashSet;
@@ -113,7 +113,7 @@ impl ASTConverter {
 mod pattern_tests {
     use crate::dsl::analyzer::from_ast::ASTConverter;
     use crate::dsl::analyzer::hir::{Literal, PatternKind};
-    use crate::dsl::analyzer::types::registry::TypeKind;
+    use crate::dsl::analyzer::type_checks::registry::TypeKind;
     use crate::dsl::parser::ast::{self, Field, Literal as AstLiteral, Pattern as AstPattern};
     use crate::dsl::utils::span::{Span, Spanned};
     use std::collections::HashSet;
