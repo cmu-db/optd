@@ -3,7 +3,7 @@
 //! This module contains functions for converting AST type nodes to their
 //! corresponding HIR type representations.
 
-use super::ASTConverter;
+use super::converter::ASTConverter;
 use crate::dsl::analyzer::errors::AnalyzerErrorKind;
 use crate::dsl::analyzer::hir::Identifier;
 use crate::dsl::analyzer::type_checks::registry::{Type, TypeKind};
@@ -100,6 +100,7 @@ impl ASTConverter {
 #[cfg(test)]
 mod types_tests {
     use super::*;
+    use crate::dsl::analyzer::from_ast::converter::ASTConverter;
     use crate::dsl::parser::ast;
     use crate::dsl::utils::span::{Span, Spanned};
     use std::collections::HashSet;

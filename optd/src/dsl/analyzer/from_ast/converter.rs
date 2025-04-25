@@ -3,16 +3,16 @@ use crate::dsl::analyzer::hir::{Annotation, FunKind, Identifier};
 use crate::dsl::analyzer::type_checks::registry::{Type, TypeRegistry, create_function_type};
 use crate::dsl::analyzer::{
     context::Context,
-    hir::{CoreData, HIR, TypedSpan, Udf, Value},
+    hir::{CoreData, TypedSpan, Udf, Value},
 };
-use crate::dsl::parser::ast::{Function, Item, Module};
+use crate::dsl::parser::ast::Function;
 use crate::dsl::utils::span::Spanned;
 use FunKind::*;
 use std::collections::{HashMap, HashSet};
 
-/// Converts an AST to a High-level Intermediate Representation (HIR).
+/// Converter util struct from AST to HIR<TypedSpan>.
 #[derive(Debug, Clone, Default)]
-pub struct ASTConverter {
+pub(super) struct ASTConverter {
     /// Context for variable bindings.
     pub(super) context: Context<TypedSpan>,
     /// Registry of types for type checking and subtyping.
@@ -24,7 +24,8 @@ pub struct ASTConverter {
 }
 
 impl ASTConverter {
-    pub fn new_with_udfs(udfs: HashMap<String, Udf>) -> Self {
+    /// Creates a new ASTConverter with an empty context and type registry.
+    pub(super) fn new_with_udfs(udfs: HashMap<String, Udf>) -> Self {
         ASTConverter {
             context: Default::default(),
             registry: Default::default(),
@@ -32,56 +33,11 @@ impl ASTConverter {
             udfs,
         }
     }
-}
-
-impl ASTConverter {
-    /// Converts an AST module to a partially typed and spanned HIR.
-    ///
-    /// This method processes all items in the AST module and transforms them into the HIR representation.
-    /// For functions, it handles receivers, parameters, function bodies, and return types.
-    ///
-    /// # Arguments
-    ///
-    /// * `module` - The AST module to convert
-    ///
-    /// # Returns
-    ///
-    /// The HIR representation and TypeRegistry, or an AnalyzerErrorKind if conversion fails.
-    pub fn convert(
-        mut self,
-        module: &Module,
-    ) -> Result<(HIR<TypedSpan>, TypeRegistry), Box<AnalyzerErrorKind>> {
-        // First pass: Process all ADTs to register types.
-        for item in &module.items {
-            if let Item::Adt(spanned_adt) = item {
-                self.registry.register_adt(&spanned_adt.value)?;
-            }
-        }
-
-        // Second pass: Process all functions, using the type registry to verify
-        // for invalid type annotations & constructions.
-        for item in &module.items {
-            if let Item::Function(spanned_fn) = item {
-                self.register_function(spanned_fn)?;
-            }
-        }
-
-        // Push the context scope of the module, as we have processed all functions.
-        self.context.push_scope();
-
-        Ok((
-            HIR {
-                context: self.context,
-                annotations: self.annotations,
-            },
-            self.registry,
-        ))
-    }
 
     /// Registers a function AST node and adds it to the context.
     ///
     /// Handles function parameters, return type, and body conversion.
-    fn register_function(
+    pub(super) fn register_function(
         &mut self,
         spanned_fn: &Spanned<Function>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
@@ -192,6 +148,7 @@ impl ASTConverter {
 mod converter_tests {
     use super::*;
     use crate::catalog::Catalog;
+    use crate::dsl::analyzer::from_ast::from_ast;
     use crate::dsl::analyzer::hir::{CoreData, FunKind};
     use crate::dsl::analyzer::type_checks::registry::TypeKind;
     use crate::dsl::parser::ast::{self, Adt, Function, Item, Module, Type as AstType};
@@ -305,9 +262,8 @@ mod converter_tests {
         let func = create_simple_function("test_function", true);
         let module = create_module_with_functions(vec![func]);
 
-        // Create and run the converter
-        let converter = ASTConverter::default();
-        let result = converter.convert(&module);
+        // Run the conversion
+        let result = from_ast(&module, HashMap::new());
 
         // Verify result is Ok and contains the expected function
         assert!(result.is_ok());
@@ -323,9 +279,8 @@ mod converter_tests {
         let func = create_annotated_function("annotated_function", vec!["test", "important"]);
         let module = create_module_with_functions(vec![func]);
 
-        // Create and run the converter
-        let converter = ASTConverter::default();
-        let result = converter.convert(&module);
+        // Run the conversion
+        let result = from_ast(&module, HashMap::new());
 
         // Verify result is Ok and contains the expected annotations
         assert!(result.is_ok());
@@ -346,9 +301,8 @@ mod converter_tests {
         let func = create_function_without_params("invalid_function");
         let module = create_module_with_functions(vec![func]);
 
-        // Create and run the converter
-        let converter = ASTConverter::default();
-        let result = converter.convert(&module);
+        // Run the conversion
+        let result = from_ast(&module, HashMap::new());
 
         // Verify result is an Error
         assert!(result.is_err());
@@ -372,9 +326,8 @@ mod converter_tests {
         // Create a module with both the ADT and the method
         let module = create_module_with_adts_and_functions(vec![my_type_adt], vec![method]);
 
-        // Create and run the converter
-        let converter = ASTConverter::default();
-        let result = converter.convert(&module);
+        // Run the conversion
+        let result = from_ast(&module, HashMap::new());
 
         // Verify result is Ok and contains the expected method
         assert!(result.is_ok());
@@ -410,9 +363,8 @@ mod converter_tests {
         };
         udfs.insert("external_function".to_string(), udf);
 
-        // Run the converter.
-        let converter = ASTConverter::new_with_udfs(udfs);
-        let result = converter.convert(&module);
+        // Run the conversion with UDFs.
+        let result = from_ast(&module, udfs);
 
         // There should be no error if linking succeeded.
         assert!(result.is_ok());
@@ -426,7 +378,7 @@ mod converter_tests {
         if let CoreData::Function(FunKind::Udf(udf)) = &func_val.unwrap().data {
             assert_eq!(udf.func as usize, external_function as usize);
         } else {
-            panic!("Expected unlinked UDF");
+            panic!("Expected UDF function");
         }
     }
 
@@ -436,9 +388,8 @@ mod converter_tests {
         let ext_func = create_simple_function("external_function", false);
         let module = create_module_with_functions(vec![ext_func]);
 
-        // Create and run the converter.
-        let converter = ASTConverter::default();
-        let result = converter.convert(&module);
+        // Run the conversion without UDFs.
+        let result = from_ast(&module, HashMap::new());
 
         // Verify that an error is raised.
         assert!(result.is_err());
@@ -451,9 +402,8 @@ mod converter_tests {
         let func2 = create_simple_function("duplicate", true);
         let module = create_module_with_functions(vec![func1, func2]);
 
-        // Create and run the converter
-        let converter = ASTConverter::default();
-        let result = converter.convert(&module);
+        // Run the conversion
+        let result = from_ast(&module, HashMap::new());
 
         // Verify result is an Error (duplicate name)
         assert!(result.is_err());
@@ -474,9 +424,8 @@ mod converter_tests {
         let func = spanned(func_val);
         let module = create_module_with_functions(vec![func]);
 
-        // Create and run the converter
-        let converter = ASTConverter::default();
-        let result = converter.convert(&module);
+        // Run the conversion
+        let result = from_ast(&module, HashMap::new());
 
         // Verify result is Ok
         assert!(result.is_ok());

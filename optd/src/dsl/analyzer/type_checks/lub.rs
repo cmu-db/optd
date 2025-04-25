@@ -283,7 +283,9 @@ impl TypeRegistry {
 pub mod tests {
     use super::*;
     use crate::dsl::{
-        analyzer::type_checks::registry::type_registry_tests::{create_product_adt, create_sum_adt},
+        analyzer::type_checks::registry::type_registry_tests::{
+            create_product_adt, create_sum_adt,
+        },
         parser::ast::Type as AstType,
     };
     use TypeKind::*;

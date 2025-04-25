@@ -3,7 +3,7 @@
 //! This module contains functions for converting AST pattern nodes to their
 //! corresponding HIR representations.
 
-use super::ASTConverter;
+use super::converter::ASTConverter;
 use crate::dsl::analyzer::errors::AnalyzerErrorKind;
 use crate::dsl::analyzer::hir::{Identifier, MatchArm, Pattern, PatternKind, TypedSpan};
 use crate::dsl::analyzer::type_checks::registry::{Type, TypeKind};
@@ -111,7 +111,7 @@ impl ASTConverter {
 
 #[cfg(test)]
 mod pattern_tests {
-    use crate::dsl::analyzer::from_ast::ASTConverter;
+    use crate::dsl::analyzer::from_ast::converter::ASTConverter;
     use crate::dsl::analyzer::hir::{Literal, PatternKind};
     use crate::dsl::analyzer::type_checks::registry::TypeKind;
     use crate::dsl::parser::ast::{self, Field, Literal as AstLiteral, Pattern as AstPattern};

@@ -3,11 +3,10 @@
 //! This module contains functions for converting AST expression nodes to their
 //! corresponding HIR representations.
 
-use super::ASTConverter;
+use super::converter::ASTConverter;
 use crate::dsl::analyzer::errors::AnalyzerErrorKind;
 use crate::dsl::analyzer::hir::{
     BinOp, CoreData, Expr, ExprKind, FunKind, Identifier, LetBinding, Literal, TypedSpan, UnaryOp,
-    Value,
 };
 use crate::dsl::analyzer::type_checks::registry::{Type, TypeKind, create_function_type};
 use crate::dsl::parser::ast::{
@@ -38,11 +37,7 @@ impl ASTConverter {
             AstExpr::Literal(lit) => {
                 let (hir_lit, hir_ty) = self.convert_literal(lit);
                 ty = hir_ty;
-                CoreVal(Value::new_with(
-                    CoreData::Literal(hir_lit),
-                    ty.clone(),
-                    span.clone(),
-                ))
+                CoreExpr(CoreData::Literal(hir_lit))
             }
             AstExpr::Ref(ident) => self.convert_ref(ident),
             AstExpr::Binary(left, op, right) => {
@@ -112,7 +107,7 @@ impl ASTConverter {
             }
             AstExpr::None => {
                 ty = None.into();
-                CoreVal(Value::new_with(CoreData::None, ty.clone(), span.clone()))
+                CoreExpr(CoreData::None)
             }
             AstExpr::Block(block) => self.convert_block(block, generics)?,
         };
@@ -493,11 +488,11 @@ mod expr_tests {
             .expect("Integer literal conversion should succeed");
 
         match &result.kind {
-            ExprKind::CoreVal(value) => match &value.data {
+            ExprKind::CoreExpr(value) => match &value {
                 CoreData::Literal(Literal::Int64(val)) => assert_eq!(*val, 42),
                 _ => panic!("Expected Int64 literal"),
             },
-            _ => panic!("Expected CoreVal"),
+            _ => panic!("Expected CoreExpr"),
         }
 
         // Test string literal
@@ -507,11 +502,11 @@ mod expr_tests {
             .expect("String literal conversion should succeed");
 
         match &result.kind {
-            ExprKind::CoreVal(value) => match &value.data {
+            ExprKind::CoreExpr(value) => match &value {
                 CoreData::Literal(Literal::String(val)) => assert_eq!(val, "hello"),
                 _ => panic!("Expected String literal"),
             },
-            _ => panic!("Expected CoreVal"),
+            _ => panic!("Expected CoreExpr"),
         }
 
         // Test boolean literal
@@ -521,11 +516,11 @@ mod expr_tests {
             .expect("Boolean literal conversion should succeed");
 
         match &result.kind {
-            ExprKind::CoreVal(value) => match &value.data {
+            ExprKind::CoreExpr(value) => match &value {
                 CoreData::Literal(Literal::Bool(val)) => assert!(*val),
                 _ => panic!("Expected Bool literal"),
             },
-            _ => panic!("Expected CoreVal"),
+            _ => panic!("Expected CoreExpr"),
         }
 
         // Test float literal
@@ -538,11 +533,11 @@ mod expr_tests {
             .expect("Float literal conversion should succeed");
 
         match &result.kind {
-            ExprKind::CoreVal(value) => match &value.data {
+            ExprKind::CoreExpr(value) => match &value {
                 CoreData::Literal(Literal::Float64(val)) => assert_eq!(*val, float_val),
                 _ => panic!("Expected Float64 literal"),
             },
-            _ => panic!("Expected CoreVal"),
+            _ => panic!("Expected CoreExpr"),
         }
 
         // Test unit literal
@@ -552,11 +547,11 @@ mod expr_tests {
             .expect("Unit literal conversion should succeed");
 
         match &result.kind {
-            ExprKind::CoreVal(value) => match &value.data {
+            ExprKind::CoreExpr(value) => match &value {
                 CoreData::Literal(Literal::Unit) => (),
                 _ => panic!("Expected Unit literal"),
             },
-            _ => panic!("Expected CoreVal"),
+            _ => panic!("Expected CoreExpr"),
         }
     }
 
@@ -641,11 +636,11 @@ mod expr_tests {
 
                 // Verify operands are swapped (original right is now left)
                 match &left_expr.kind {
-                    ExprKind::CoreVal(value) => match &value.data {
+                    ExprKind::CoreExpr(value) => match &value {
                         CoreData::Literal(Literal::Int64(val)) => assert_eq!(*val, 2),
                         _ => panic!("Expected Int64 literal"),
                     },
-                    _ => panic!("Expected CoreVal"),
+                    _ => panic!("Expected CoreExpr"),
                 }
             }
             _ => panic!("Expected Binary expression (desugared >)"),
@@ -1217,11 +1212,11 @@ mod expr_tests {
 
         match &result.kind {
             ExprKind::CoreExpr(CoreData::Fail(error)) => match &error.kind {
-                ExprKind::CoreVal(value) => match &value.data {
+                ExprKind::CoreExpr(value) => match &value {
                     CoreData::Literal(Literal::String(msg)) => assert_eq!(msg, "error"),
                     _ => panic!("Expected String literal"),
                 },
-                _ => panic!("Expected CoreVal"),
+                _ => panic!("Expected CoreExpr"),
             },
             _ => panic!("Expected Fail expression"),
         }
@@ -1362,11 +1357,11 @@ mod expr_tests {
             ExprKind::NewScope(expr) => {
                 // Verify the inner expression
                 match &expr.kind {
-                    ExprKind::CoreVal(value) => match &value.data {
+                    ExprKind::CoreExpr(value) => match &value {
                         CoreData::Literal(Literal::Int64(val)) => assert_eq!(*val, 42),
                         _ => panic!("Expected Int64 literal inside block"),
                     },
-                    _ => panic!("Expected CoreVal inside block"),
+                    _ => panic!("Expected CoreExpr inside block"),
                 }
             }
             _ => panic!("Expected NewScope expression"),
