@@ -70,3 +70,95 @@ pub(super) fn find_field_index(
 
     panic!("Field {} not found in struct {}", field_name, struct_name);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dsl::analyzer::type_checks::registry::type_registry_tests::{
+        create_product_adt, create_sum_adt,
+    };
+    use crate::dsl::analyzer::type_checks::registry::{LOGICAL_TYPE, PHYSICAL_TYPE};
+    use crate::dsl::parser::ast::Type as AstType;
+
+    fn create_registry_with_operators() -> TypeRegistry {
+        let mut registry = TypeRegistry::new();
+
+        // Create a LogicalJoin with mixed fields
+        let logical_join = create_product_adt(
+            "LogicalJoin",
+            vec![
+                ("join_type", AstType::String),
+                ("condition", AstType::String),
+                ("left", AstType::Identifier(LOGICAL_TYPE.to_string())),
+                ("right", AstType::Identifier(LOGICAL_TYPE.to_string())),
+            ],
+        );
+
+        // Create a PhysicalFilter with mixed fields
+        let physical_filter = create_product_adt(
+            "PhysicalFilter",
+            vec![
+                ("predicate", AstType::String),
+                ("selectivity", AstType::Float64),
+                ("child", AstType::Identifier(PHYSICAL_TYPE.to_string())),
+            ],
+        );
+
+        // Create Logical and Physical enums
+        let logical_enum = create_sum_adt(LOGICAL_TYPE, vec![logical_join]);
+        let physical_enum = create_sum_adt(PHYSICAL_TYPE, vec![physical_filter]);
+
+        registry.register_adt(&logical_enum).unwrap();
+        registry.register_adt(&physical_enum).unwrap();
+        registry
+    }
+
+    #[test]
+    fn test_field_index_normal_struct() {
+        let mut registry = TypeRegistry::new();
+        let point = create_product_adt(
+            "Point",
+            vec![
+                ("x", AstType::Int64),
+                ("y", AstType::Int64),
+                ("z", AstType::Int64),
+            ],
+        );
+        registry.register_adt(&point).unwrap();
+
+        assert_eq!(find_field_index("Point", "x", &registry), 0);
+        assert_eq!(find_field_index("Point", "y", &registry), 1);
+        assert_eq!(find_field_index("Point", "z", &registry), 2);
+    }
+
+    #[test]
+    fn test_field_index_logical_operator() {
+        let registry = create_registry_with_operators();
+
+        // Data fields come first
+        assert_eq!(find_field_index("LogicalJoin", "join_type", &registry), 0);
+        assert_eq!(find_field_index("LogicalJoin", "condition", &registry), 1);
+
+        // Children fields come after data fields
+        assert_eq!(find_field_index("LogicalJoin", "left", &registry), 2);
+        assert_eq!(find_field_index("LogicalJoin", "right", &registry), 3);
+    }
+
+    #[test]
+    fn test_field_index_physical_operator() {
+        let registry = create_registry_with_operators();
+
+        // Data fields come first
+        assert_eq!(
+            find_field_index("PhysicalFilter", "predicate", &registry),
+            0
+        );
+        assert_eq!(
+            find_field_index("PhysicalFilter", "selectivity", &registry),
+            1
+        );
+
+        // Child field comes after data fields
+        assert_eq!(find_field_index("PhysicalFilter", "child", &registry), 2);
+    }
+}

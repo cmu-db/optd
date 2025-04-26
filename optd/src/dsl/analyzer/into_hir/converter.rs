@@ -191,3 +191,507 @@ fn convert_field_access(
         vec![Expr::new(CoreExpr(CoreData::Literal(Literal::Int64(field_index)))).into()],
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dsl::{
+        analyzer::{
+            hir::{BinOp, Literal},
+            type_checks::registry::{
+                LOGICAL_TYPE, PHYSICAL_TYPE, TypeKind, TypeRegistry,
+                type_registry_tests::{
+                    create_product_adt, create_sum_adt, create_test_span, spanned,
+                },
+            },
+        },
+        parser::ast::Type as AstType,
+    };
+
+    fn create_registry_with_operators() -> TypeRegistry {
+        let mut registry = TypeRegistry::new();
+
+        // Create LogicalJoin
+        let logical_join = create_product_adt(
+            "LogicalJoin",
+            vec![
+                ("join_type", AstType::String),
+                ("condition", AstType::String),
+                ("left", AstType::Identifier(LOGICAL_TYPE.to_string())),
+                ("right", AstType::Identifier(LOGICAL_TYPE.to_string())),
+            ],
+        );
+
+        // Create LogicalScan
+        let logical_scan = create_product_adt("LogicalScan", vec![("table_name", AstType::String)]);
+
+        // Create PhysicalHashJoin
+        let physical_hash_join = create_product_adt(
+            "PhysicalHashJoin",
+            vec![
+                ("hash_keys", AstType::Array(spanned(AstType::String))),
+                ("build_side", AstType::String),
+                ("left", AstType::Identifier(PHYSICAL_TYPE.to_string())),
+                ("right", AstType::Identifier(PHYSICAL_TYPE.to_string())),
+            ],
+        );
+
+        // Create PhysicalTableScan
+        let physical_table_scan = create_product_adt(
+            "PhysicalTableScan",
+            vec![
+                ("table_name", AstType::String),
+                ("columns", AstType::Array(spanned(AstType::String))),
+            ],
+        );
+
+        // Create enums
+        let logical_enum = create_sum_adt(LOGICAL_TYPE, vec![logical_join, logical_scan]);
+        let physical_enum =
+            create_sum_adt(PHYSICAL_TYPE, vec![physical_hash_join, physical_table_scan]);
+
+        registry.register_adt(&logical_enum).unwrap();
+        registry.register_adt(&physical_enum).unwrap();
+        registry
+    }
+
+    #[test]
+    fn test_convert_literal_expr() {
+        let registry = TypeRegistry::new();
+        let lit_expr = Expr::new_with(
+            ExprKind::CoreExpr(CoreData::Literal(Literal::Int64(42))),
+            TypeKind::I64.into(),
+            create_test_span(),
+        );
+
+        let converted = convert_expr(&Arc::new(lit_expr), &registry);
+
+        match &converted.kind {
+            ExprKind::CoreExpr(CoreData::Literal(Literal::Int64(value))) => {
+                assert_eq!(*value, 42);
+            }
+            _ => panic!("Expected literal"),
+        }
+    }
+
+    #[test]
+    fn test_convert_binary_expr() {
+        let registry = TypeRegistry::new();
+        let binary_expr = Expr::new_with(
+            ExprKind::Binary(
+                Arc::new(Expr::new_with(
+                    ExprKind::CoreExpr(CoreData::Literal(Literal::Int64(1))),
+                    TypeKind::I64.into(),
+                    create_test_span(),
+                )),
+                BinOp::Add,
+                Arc::new(Expr::new_with(
+                    ExprKind::CoreExpr(CoreData::Literal(Literal::Int64(2))),
+                    TypeKind::I64.into(),
+                    create_test_span(),
+                )),
+            ),
+            TypeKind::I64.into(),
+            create_test_span(),
+        );
+
+        let converted = convert_expr(&Arc::new(binary_expr), &registry);
+
+        match &converted.kind {
+            ExprKind::Binary(left, op, right) => {
+                assert!(matches!(op, BinOp::Add));
+                match &left.kind {
+                    ExprKind::CoreExpr(CoreData::Literal(Literal::Int64(1))) => {}
+                    _ => panic!("Expected literal 1"),
+                }
+                match &right.kind {
+                    ExprKind::CoreExpr(CoreData::Literal(Literal::Int64(2))) => {}
+                    _ => panic!("Expected literal 2"),
+                }
+            }
+            _ => panic!("Expected binary operation"),
+        }
+    }
+
+    #[test]
+    fn test_convert_field_access() {
+        let mut registry = TypeRegistry::new();
+        let point = create_product_adt(
+            "Point",
+            vec![
+                ("x", AstType::Int64),
+                ("y", AstType::Int64),
+                ("z", AstType::Int64),
+            ],
+        );
+        registry.register_adt(&point).unwrap();
+
+        let field_access = Expr::new_with(
+            ExprKind::FieldAccess(
+                Arc::new(Expr::new_with(
+                    ExprKind::Ref("point".to_string()),
+                    TypeKind::Adt("Point".to_string()).into(),
+                    create_test_span(),
+                )),
+                "y".to_string(),
+            ),
+            TypeKind::I64.into(),
+            create_test_span(),
+        );
+
+        let converted = convert_expr(&Arc::new(field_access), &registry);
+
+        match &converted.kind {
+            ExprKind::Call(_, args) => {
+                assert_eq!(args.len(), 1);
+                match &args[0].kind {
+                    ExprKind::CoreExpr(CoreData::Literal(Literal::Int64(1))) => {}
+                    _ => panic!("Expected index 1 for field 'y'"),
+                }
+            }
+            _ => panic!("Expected call expression"),
+        }
+    }
+
+    #[test]
+    fn test_convert_pattern_literal() {
+        let registry = TypeRegistry::new();
+        let pattern = Pattern::new_with(
+            PatternKind::Literal(Literal::String("test".to_string())),
+            TypeKind::String.into(),
+            create_test_span(),
+        );
+
+        let converted = convert_pattern(&pattern, &registry);
+
+        match &converted.kind {
+            PatternKind::Literal(Literal::String(s)) => {
+                assert_eq!(s, "test");
+            }
+            _ => panic!("Expected literal pattern"),
+        }
+    }
+
+    #[test]
+    fn test_convert_logical_struct_to_operator() {
+        let registry = create_registry_with_operators();
+
+        // Create LogicalJoin struct
+        let logical_join = Expr::new_with(
+            ExprKind::CoreExpr(CoreData::Struct(
+                "LogicalJoin".to_string(),
+                vec![
+                    // join_type: "inner"
+                    Arc::new(Expr::new_with(
+                        ExprKind::CoreExpr(CoreData::Literal(Literal::String("inner".to_string()))),
+                        TypeKind::String.into(),
+                        create_test_span(),
+                    )),
+                    // condition: "a = b"
+                    Arc::new(Expr::new_with(
+                        ExprKind::CoreExpr(CoreData::Literal(Literal::String("a = b".to_string()))),
+                        TypeKind::String.into(),
+                        create_test_span(),
+                    )),
+                    // left: LogicalScan
+                    Arc::new(Expr::new_with(
+                        ExprKind::CoreExpr(CoreData::Struct(
+                            "LogicalScan".to_string(),
+                            vec![Arc::new(Expr::new_with(
+                                ExprKind::CoreExpr(CoreData::Literal(Literal::String(
+                                    "left_table".to_string(),
+                                ))),
+                                TypeKind::String.into(),
+                                create_test_span(),
+                            ))],
+                        )),
+                        TypeKind::Adt("LogicalScan".to_string()).into(),
+                        create_test_span(),
+                    )),
+                    // right: LogicalScan
+                    Arc::new(Expr::new_with(
+                        ExprKind::CoreExpr(CoreData::Struct(
+                            "LogicalScan".to_string(),
+                            vec![Arc::new(Expr::new_with(
+                                ExprKind::CoreExpr(CoreData::Literal(Literal::String(
+                                    "right_table".to_string(),
+                                ))),
+                                TypeKind::String.into(),
+                                create_test_span(),
+                            ))],
+                        )),
+                        TypeKind::Adt("LogicalScan".to_string()).into(),
+                        create_test_span(),
+                    )),
+                ],
+            )),
+            TypeKind::Adt("LogicalJoin".to_string()).into(),
+            create_test_span(),
+        );
+
+        let converted = convert_expr(&Arc::new(logical_join), &registry);
+
+        match &converted.kind {
+            ExprKind::CoreExpr(CoreData::Logical(Materializable::Materialized(logical_op))) => {
+                assert_eq!(logical_op.operator.tag, "LogicalJoin");
+                assert_eq!(logical_op.operator.data.len(), 2); // join_type and condition
+                assert_eq!(logical_op.operator.children.len(), 2); // left and right
+
+                // Check data fields
+                match &logical_op.operator.data[0].kind {
+                    ExprKind::CoreExpr(CoreData::Literal(Literal::String(s))) => {
+                        assert_eq!(s, "inner");
+                    }
+                    _ => panic!("Expected join_type string"),
+                }
+                match &logical_op.operator.data[1].kind {
+                    ExprKind::CoreExpr(CoreData::Literal(Literal::String(s))) => {
+                        assert_eq!(s, "a = b");
+                    }
+                    _ => panic!("Expected condition string"),
+                }
+
+                // Check children are logical operators
+                for child in &logical_op.operator.children {
+                    match &child.kind {
+                        ExprKind::CoreExpr(CoreData::Logical(_)) => {}
+                        _ => panic!("Expected logical operator child"),
+                    }
+                }
+            }
+            _ => panic!("Expected LogicalOp"),
+        }
+    }
+
+    #[test]
+    fn test_convert_physical_struct_to_operator() {
+        let registry = create_registry_with_operators();
+
+        // Create PhysicalHashJoin struct
+        let physical_hash_join = Expr::new_with(
+            ExprKind::CoreExpr(CoreData::Struct(
+                "PhysicalHashJoin".to_string(),
+                vec![
+                    // hash_keys: ["key1", "key2"]
+                    Arc::new(Expr::new_with(
+                        ExprKind::CoreExpr(CoreData::Array(vec![
+                            Arc::new(Expr::new_with(
+                                ExprKind::CoreExpr(CoreData::Literal(Literal::String(
+                                    "key1".to_string(),
+                                ))),
+                                TypeKind::String.into(),
+                                create_test_span(),
+                            )),
+                            Arc::new(Expr::new_with(
+                                ExprKind::CoreExpr(CoreData::Literal(Literal::String(
+                                    "key2".to_string(),
+                                ))),
+                                TypeKind::String.into(),
+                                create_test_span(),
+                            )),
+                        ])),
+                        TypeKind::Array(TypeKind::String.into()).into(),
+                        create_test_span(),
+                    )),
+                    // build_side: "left"
+                    Arc::new(Expr::new_with(
+                        ExprKind::CoreExpr(CoreData::Literal(Literal::String("left".to_string()))),
+                        TypeKind::String.into(),
+                        create_test_span(),
+                    )),
+                    // left: PhysicalTableScan
+                    Arc::new(Expr::new_with(
+                        ExprKind::CoreExpr(CoreData::Struct(
+                            "PhysicalTableScan".to_string(),
+                            vec![
+                                Arc::new(Expr::new_with(
+                                    ExprKind::CoreExpr(CoreData::Literal(Literal::String(
+                                        "left_table".to_string(),
+                                    ))),
+                                    TypeKind::String.into(),
+                                    create_test_span(),
+                                )),
+                                Arc::new(Expr::new_with(
+                                    ExprKind::CoreExpr(CoreData::Array(vec![])),
+                                    TypeKind::Array(TypeKind::String.into()).into(),
+                                    create_test_span(),
+                                )),
+                            ],
+                        )),
+                        TypeKind::Adt("PhysicalTableScan".to_string()).into(),
+                        create_test_span(),
+                    )),
+                    // right: PhysicalTableScan
+                    Arc::new(Expr::new_with(
+                        ExprKind::CoreExpr(CoreData::Struct(
+                            "PhysicalTableScan".to_string(),
+                            vec![
+                                Arc::new(Expr::new_with(
+                                    ExprKind::CoreExpr(CoreData::Literal(Literal::String(
+                                        "right_table".to_string(),
+                                    ))),
+                                    TypeKind::String.into(),
+                                    create_test_span(),
+                                )),
+                                Arc::new(Expr::new_with(
+                                    ExprKind::CoreExpr(CoreData::Array(vec![])),
+                                    TypeKind::Array(TypeKind::String.into()).into(),
+                                    create_test_span(),
+                                )),
+                            ],
+                        )),
+                        TypeKind::Adt("PhysicalTableScan".to_string()).into(),
+                        create_test_span(),
+                    )),
+                ],
+            )),
+            TypeKind::Adt("PhysicalHashJoin".to_string()).into(),
+            create_test_span(),
+        );
+
+        let converted = convert_expr(&Arc::new(physical_hash_join), &registry);
+
+        match &converted.kind {
+            ExprKind::CoreExpr(CoreData::Physical(Materializable::Materialized(physical_op))) => {
+                assert_eq!(physical_op.operator.tag, "PhysicalHashJoin");
+                assert_eq!(physical_op.operator.data.len(), 2); // hash_keys and build_side
+                assert_eq!(physical_op.operator.children.len(), 2); // left and right
+
+                // Check children are physical operators
+                for child in &physical_op.operator.children {
+                    match &child.kind {
+                        ExprKind::CoreExpr(CoreData::Physical(_)) => {}
+                        _ => panic!("Expected physical operator child"),
+                    }
+                }
+            }
+            _ => panic!("Expected PhysicalOp"),
+        }
+    }
+
+    #[test]
+    fn test_convert_logical_pattern_to_operator() {
+        let registry = create_registry_with_operators();
+
+        // Create LogicalJoin pattern
+        let logical_join_pattern = Pattern::new_with(
+            PatternKind::Struct(
+                "LogicalJoin".to_string(),
+                vec![
+                    // Pattern for join_type
+                    Pattern::new_with(
+                        PatternKind::Wildcard,
+                        TypeKind::String.into(),
+                        create_test_span(),
+                    ),
+                    // Pattern for condition
+                    Pattern::new_with(
+                        PatternKind::Literal(Literal::String("a = b".to_string())),
+                        TypeKind::String.into(),
+                        create_test_span(),
+                    ),
+                    // Pattern for left child
+                    Pattern::new_with(
+                        PatternKind::Wildcard,
+                        TypeKind::Adt("LogicalScan".to_string()).into(),
+                        create_test_span(),
+                    ),
+                    // Pattern for right child
+                    Pattern::new_with(
+                        PatternKind::Bind(
+                            "right_scan".to_string(),
+                            Box::new(Pattern::new_with(
+                                PatternKind::Wildcard,
+                                TypeKind::Adt("LogicalScan".to_string()).into(),
+                                create_test_span(),
+                            )),
+                        ),
+                        TypeKind::Adt("LogicalScan".to_string()).into(),
+                        create_test_span(),
+                    ),
+                ],
+            ),
+            TypeKind::Adt("LogicalJoin".to_string()).into(),
+            create_test_span(),
+        );
+
+        let converted = convert_pattern(&logical_join_pattern, &registry);
+
+        match &converted.kind {
+            PatternKind::Operator(operator) => {
+                assert_eq!(operator.tag, "LogicalJoin");
+                assert_eq!(operator.data.len(), 2); // join_type and condition
+                assert_eq!(operator.children.len(), 2); // left and right
+
+                // Check that data patterns are in correct order
+                match &operator.data[0].kind {
+                    PatternKind::Wildcard => {}
+                    _ => panic!("Expected wildcard pattern for join_type"),
+                }
+                match &operator.data[1].kind {
+                    PatternKind::Literal(Literal::String(s)) => {
+                        assert_eq!(s, "a = b");
+                    }
+                    _ => panic!("Expected literal pattern for condition"),
+                }
+
+                // Check that children patterns are in correct order
+                match &operator.children[0].kind {
+                    PatternKind::Wildcard => {}
+                    _ => panic!("Expected wildcard pattern for left child"),
+                }
+                match &operator.children[1].kind {
+                    PatternKind::Bind(name, _) => {
+                        assert_eq!(name, "right_scan");
+                    }
+                    _ => panic!("Expected bind pattern for right child"),
+                }
+            }
+            _ => panic!("Expected Operator pattern"),
+        }
+    }
+
+    #[test]
+    fn test_convert_normal_struct_remains_unchanged() {
+        let mut registry = TypeRegistry::new();
+
+        // Create a normal struct that doesn't inherit from Logical/Physical
+        let person = create_product_adt(
+            "Person",
+            vec![("name", AstType::String), ("age", AstType::Int64)],
+        );
+        registry.register_adt(&person).unwrap();
+
+        // Create Person struct
+        let person_expr = Expr::new_with(
+            ExprKind::CoreExpr(CoreData::Struct(
+                "Person".to_string(),
+                vec![
+                    Arc::new(Expr::new_with(
+                        ExprKind::CoreExpr(CoreData::Literal(Literal::String("Alice".to_string()))),
+                        TypeKind::String.into(),
+                        create_test_span(),
+                    )),
+                    Arc::new(Expr::new_with(
+                        ExprKind::CoreExpr(CoreData::Literal(Literal::Int64(30))),
+                        TypeKind::I64.into(),
+                        create_test_span(),
+                    )),
+                ],
+            )),
+            TypeKind::Adt("Person".to_string()).into(),
+            create_test_span(),
+        );
+
+        let converted = convert_expr(&Arc::new(person_expr), &registry);
+
+        // Should remain a struct, not converted to operator
+        match &converted.kind {
+            ExprKind::CoreExpr(CoreData::Struct(name, fields)) => {
+                assert_eq!(name, "Person");
+                assert_eq!(fields.len(), 2);
+            }
+            _ => panic!("Expected struct to remain unchanged"),
+        }
+    }
+}

@@ -228,10 +228,10 @@ fn <K, V> (pairs: [(K, V)]) to_map(): {K : V} = match pairs
 fn (catalog: Catalog) get_table_schema(name: String): Schema
 
 [udf]
-fn (logical: Logical*) properties(): LogicalProperties
+fn (logical: Logical*) properties: LogicalProperties
 
 [udf]
-fn (costed: Physical$) statistics(): CostedProperties
+fn (costed: Physical$) statistics: CostedProperties
 
 // -------------------------
 // 9. Transformation Rules
