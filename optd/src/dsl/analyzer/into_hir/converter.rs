@@ -11,7 +11,7 @@ use crate::dsl::analyzer::{
 };
 use std::sync::Arc;
 
-pub fn convert_expr(expr: &Arc<Expr<TypedSpan>>, registry: &TypeRegistry) -> Arc<Expr> {
+pub(super) fn convert_expr(expr: &Arc<Expr<TypedSpan>>, registry: &TypeRegistry) -> Arc<Expr> {
     use ExprKind::*;
 
     let converted_kind = match &expr.kind {
@@ -73,7 +73,7 @@ pub fn convert_expr(expr: &Arc<Expr<TypedSpan>>, registry: &TypeRegistry) -> Arc
     Expr::new(converted_kind).into()
 }
 
-pub fn convert_pattern(pattern: &Pattern<TypedSpan>, registry: &TypeRegistry) -> Pattern {
+pub(super) fn convert_pattern(pattern: &Pattern<TypedSpan>, registry: &TypeRegistry) -> Pattern {
     use PatternKind::*;
 
     let converted_kind = match &pattern.kind {
