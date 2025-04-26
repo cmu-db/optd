@@ -1,20 +1,46 @@
-use super::{
-    hir::{HIR, TypedSpan},
-    type_checks::registry::TypeRegistry,
-};
-use crate::dsl::analyzer::{
-    context::Context,
-    hir::{CoreData, FunKind, Value},
-};
+//! Conversion module for transforming typed HIR into untyped HIR
+//!
+//! This module handles the transformation of High-level Intermediate Representation (HIR)
+//! from a typed form (with `TypedSpan` metadata) to an untyped form. The conversion process
+//! involves:
+//!
+//! 1. Removing type annotations from expressions and patterns
+//! 2. Converting struct expressions to operator expressions where appropriate
+//! 3. Transforming field access expressions into indexing operations
+//!
+//! # Structure
+//!
+//! The module is organized into several submodules:
+//!
+//! - `converter`: Main conversion logic for expressions and patterns
+//! - `operators`: Specialized logic for transforming structs into logical/physical operators
+//! - `field_indexing`: Utilities for calculating proper field indices, accounting for operator structures
+
 use converter::convert_expr;
 
-mod converter;
+use crate::dsl::analyzer::{
+    context::Context,
+    hir::{CoreData, FunKind, HIR, TypedSpan, Value},
+    type_checks::registry::TypeRegistry,
+};
 
-// Converts an HIR with TypedSpan metadata to an HIR without metadata.
+mod converter;
+mod field_indexing;
+mod operators;
+
+/// Converts a typed HIR into an untyped HIR by removing all type annotations
 ///
-/// This function performs a deep translation of all structures that may contain
-/// metadata, recursively removing the metadata and producing equivalent structures
-/// without it.
+/// This function takes a HIR with type information and produces a HIR without type information,
+/// converting all expressions and patterns in the process.
+///
+/// # Arguments
+///
+/// * `hir` - The typed HIR to convert
+/// * `registry` - The type registry containing type information
+///
+/// # Returns
+///
+/// A new HIR instance without type annotations
 pub fn into_hir(hir_typedspan: HIR<TypedSpan>, registry: &TypeRegistry) -> HIR {
     use CoreData::*;
     use FunKind::*;

@@ -1,13 +1,17 @@
+use super::field_indexing::find_field_index;
+use super::operators::{transform_pattern_to_operator, transform_struct_to_operator};
+use crate::dsl::analyzer::hir::{Literal, LogicalOp, Materializable, Operator, PhysicalOp};
+use crate::dsl::analyzer::type_checks::registry::{LOGICAL_TYPE, TypeKind};
 use crate::dsl::analyzer::{
     hir::{
-        self, CoreData, Expr, ExprKind, FunKind, LetBinding, LogicalOp, MatchArm, Materializable,
-        Operator, Pattern, PatternKind, PhysicalOp, TypedSpan,
+        self, CoreData, Expr, ExprKind, FunKind, LetBinding, MatchArm, Pattern, PatternKind,
+        TypedSpan,
     },
-    type_checks::registry::{LOGICAL_TYPE, PHYSICAL_TYPE, Type, TypeKind, TypeRegistry},
+    type_checks::registry::TypeRegistry,
 };
 use std::sync::Arc;
 
-pub(super) fn convert_expr(expr: &Arc<Expr<TypedSpan>>, registry: &TypeRegistry) -> Arc<Expr> {
+pub fn convert_expr(expr: &Arc<Expr<TypedSpan>>, registry: &TypeRegistry) -> Arc<Expr> {
     use ExprKind::*;
 
     let converted_kind = match &expr.kind {
@@ -54,10 +58,7 @@ pub(super) fn convert_expr(expr: &Arc<Expr<TypedSpan>>, registry: &TypeRegistry)
         }
         Ref(ident) => Ref(ident.clone()),
         Return(expr) => Return(convert_expr(expr, registry)),
-        FieldAccess(_, _) => {
-            // TODO: Change here.
-            todo!()
-        }
+        FieldAccess(expr, field_name) => convert_field_access(expr, field_name, registry),
         CoreExpr(core_data) => CoreExpr(convert_core_data_expr(core_data, registry)),
         CoreVal(_) => {
             // TODO(#80): Nothing to do here as only one type of CoreVal is created.
@@ -70,6 +71,44 @@ pub(super) fn convert_expr(expr: &Arc<Expr<TypedSpan>>, registry: &TypeRegistry)
     };
 
     Expr::new(converted_kind).into()
+}
+
+pub fn convert_pattern(pattern: &Pattern<TypedSpan>, registry: &TypeRegistry) -> Pattern {
+    use PatternKind::*;
+
+    let converted_kind = match &pattern.kind {
+        Bind(ident, pattern) => Bind(ident.clone(), convert_pattern(pattern, registry).into()),
+        Literal(lit) => Literal(lit.clone()),
+        Struct(name, patterns) => {
+            if registry.is_logical_or_physical(name) {
+                let (children, data) = transform_pattern_to_operator(name, patterns, registry);
+
+                Operator(hir::Operator {
+                    tag: name.clone(),
+                    data,
+                    children,
+                })
+            } else {
+                let converted_patterns = patterns
+                    .iter()
+                    .map(|pattern| convert_pattern(pattern, registry))
+                    .collect();
+
+                Struct(name.clone(), converted_patterns)
+            }
+        }
+        Operator(_) => {
+            panic!("Operator patterns are not supported in HIR<TypedSpan>");
+        }
+        Wildcard => Wildcard,
+        EmptyArray => EmptyArray,
+        ArrayDecomp(head, tail) => ArrayDecomp(
+            convert_pattern(head, registry).into(),
+            convert_pattern(tail, registry).into(),
+        ),
+    };
+
+    Pattern::new(converted_kind)
 }
 
 fn convert_core_data_expr(
@@ -99,8 +138,8 @@ fn convert_core_data_expr(
             Tuple(converted_elements)
         }
         Struct(name, fields) => {
-            if is_logical_or_physical(registry, name) {
-                let (children, data) = transform_expr_to_operator(name, fields, registry);
+            if registry.is_logical_or_physical(name) {
+                let (children, data) = transform_struct_to_operator(name, fields, registry);
                 let operator = Operator {
                     tag: name.clone(),
                     data,
@@ -133,111 +172,22 @@ fn convert_core_data_expr(
     }
 }
 
-fn convert_pattern(pattern: &Pattern<TypedSpan>, registry: &TypeRegistry) -> Pattern {
-    use PatternKind::*;
+fn convert_field_access(
+    expr: &Arc<Expr<TypedSpan>>,
+    field_name: &str,
+    registry: &TypeRegistry,
+) -> ExprKind {
+    use ExprKind::*;
 
-    let converted_kind = match &pattern.kind {
-        Bind(ident, pattern) => Bind(ident.clone(), convert_pattern(pattern, registry).into()),
-        Literal(lit) => Literal(lit.clone()),
-        Struct(name, patterns) => {
-            if is_logical_or_physical(registry, name) {
-                let (children, data) = transform_pattern_to_operator(name, patterns, registry);
-
-                Operator(hir::Operator {
-                    tag: name.clone(),
-                    data,
-                    children,
-                })
-            } else {
-                let converted_patterns = patterns
-                    .iter()
-                    .map(|pattern| convert_pattern(pattern, registry))
-                    .collect();
-
-                Struct(name.clone(), converted_patterns)
-            }
-        }
-        Operator(_) => {
-            panic!("Operator patterns are not supported in HIR<TypedSpan>");
-        }
-        Wildcard => Wildcard,
-        EmptyArray => EmptyArray,
-        ArrayDecomp(head, tail) => ArrayDecomp(
-            convert_pattern(head, registry).into(),
-            convert_pattern(tail, registry).into(),
-        ),
+    let expr_type = registry.resolve_type(&expr.metadata.ty);
+    let struct_name = match &*expr_type.value {
+        TypeKind::Adt(name) => name,
+        _ => panic!("Field access on non-struct type: error in type inference"),
     };
+    let field_index = find_field_index(struct_name, field_name, registry);
 
-    Pattern::new(converted_kind)
-}
-
-// Separate fields into children (logical/physical) and data (others).
-fn transform_expr_to_operator(
-    struct_name: &str,
-    fields: &[Arc<Expr<TypedSpan>>],
-    registry: &TypeRegistry,
-) -> (Vec<Arc<Expr>>, Vec<Arc<Expr>>) {
-    let mut children = Vec::new();
-    let mut data = Vec::new();
-
-    for (index, field) in fields.iter().enumerate() {
-        let field_type = registry
-            .get_product_field_type_by_index(struct_name, index)
-            .unwrap();
-
-        let is_child = is_child_type(&field_type, registry);
-
-        if is_child {
-            children.push(convert_expr(field, registry));
-        } else {
-            data.push(convert_expr(field, registry));
-        }
-    }
-
-    (children, data)
-}
-
-// Pattern version.
-fn transform_pattern_to_operator(
-    struct_name: &str,
-    patterns: &[Pattern<TypedSpan>],
-    registry: &TypeRegistry,
-) -> (Vec<Pattern>, Vec<Pattern>) {
-    let mut children = Vec::new();
-    let mut data = Vec::new();
-
-    for (index, pattern) in patterns.iter().enumerate() {
-        let field_type = registry
-            .get_product_field_type_by_index(struct_name, index)
-            .unwrap();
-
-        let is_child = is_child_type(&field_type, registry);
-
-        if is_child {
-            children.push(convert_pattern(pattern, registry));
-        } else {
-            data.push(convert_pattern(pattern, registry));
-        }
-    }
-
-    (children, data)
-}
-
-// Helper function to check if a type should be a child
-fn is_child_type(ty: &Type, registry: &TypeRegistry) -> bool {
-    use TypeKind::*;
-
-    match &*ty.value {
-        Adt(name) => is_logical_or_physical(registry, name),
-        Array(element_type) => match &*element_type.value {
-            Adt(name) => is_logical_or_physical(registry, name),
-            _ => false,
-        },
-        _ => false,
-    }
-}
-
-// Helper function to check if an ADT is logical or physical
-fn is_logical_or_physical(registry: &TypeRegistry, name: &str) -> bool {
-    registry.inherits_adt(name, LOGICAL_TYPE) || registry.inherits_adt(name, PHYSICAL_TYPE)
+    Call(
+        convert_expr(expr, registry),
+        vec![Expr::new(CoreExpr(CoreData::Literal(Literal::Int64(field_index)))).into()],
+    )
 }

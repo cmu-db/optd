@@ -1,6 +1,7 @@
+pub(crate) mod converter;
 mod generate;
 mod glb;
 mod lub;
-pub mod registry;
+pub(crate) mod registry;
 mod solver;
 mod subtype;

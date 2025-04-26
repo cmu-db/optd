@@ -1,7 +1,7 @@
 use crate::dsl::analyzer::errors::AnalyzerErrorKind;
 use crate::dsl::analyzer::hir::{Identifier, TypedSpan};
-use crate::dsl::parser::ast::{Adt, Field, Type as AstType};
-use crate::dsl::utils::span::{OptionalSpanned, Span, Spanned};
+use crate::dsl::parser::ast::{Adt, Field};
+use crate::dsl::utils::span::{OptionalSpanned, Span};
 use Adt::*;
 use std::collections::BTreeMap;
 use std::hash::Hasher;
@@ -9,6 +9,8 @@ use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
 };
+
+use super::converter::convert_ast_type;
 
 // Core type constants.
 // These are expressed as strings, not a Type enum, because they are
@@ -380,7 +382,7 @@ impl TypeRegistry {
     /// # Returns
     ///
     /// The resolved Type if it was an Unknown type, otherwise the original Type
-    pub(super) fn resolve_type(&self, ty: &Type) -> Type {
+    pub(crate) fn resolve_type(&self, ty: &Type) -> Type {
         use TypeKind::*;
 
         match &*ty.value {
@@ -396,137 +398,11 @@ impl TypeRegistry {
     }
 }
 
-/// Creates a function type from parameter types and return type.
-pub(crate) fn create_function_type(param_types: &[Type], return_type: &Type) -> Type {
-    use TypeKind::*;
-
-    let param_type = if param_types.is_empty() {
-        Unit.into()
-    } else if param_types.len() == 1 {
-        param_types[0].clone()
-    } else {
-        Tuple(param_types.to_vec()).into()
-    };
-
-    Closure(param_type, return_type.clone()).into()
-}
-
-/// Converts an AST type to a HIR Type.
-fn convert_ast_type(ast_ty: Spanned<AstType>) -> Type {
-    use TypeKind::*;
-
-    let span = ast_ty.span;
-    let kind = match *ast_ty.value {
-        AstType::Identifier(name) => Adt(name),
-        AstType::Int64 => I64,
-        AstType::String => String,
-        AstType::Bool => Bool,
-        AstType::Unit => Unit,
-        AstType::Float64 => F64,
-        AstType::Array(inner) => Array(convert_ast_type(inner)),
-        AstType::Closure(params, ret) => Closure(convert_ast_type(params), convert_ast_type(ret)),
-        AstType::Tuple(inner) => {
-            let inner_types = inner.into_iter().map(convert_ast_type).collect();
-            Tuple(inner_types)
-        }
-        AstType::Map(key, val) => Map(convert_ast_type(key), convert_ast_type(val)),
-        AstType::Questioned(inner) => Optional(convert_ast_type(inner)),
-        _ => panic!("Registry has not been properly validated"),
-    };
-
-    OptionalSpanned::spanned(kind, span)
-}
-
-/// Converts a type to its string representation, resolving unknown types when possible.
-///
-/// This function formats a type as a string, including proper handling of unknown types.
-/// When an unknown type is encountered, it will be resolved using the provided map.
-/// If the unknown type has been resolved, it will be displayed with a ">=" prefix
-/// to indicate it represents "at least" this type.
-///
-/// # Arguments
-///
-/// * `ty` - The type to convert to a string
-/// * `resolved_unknown` - Map of unknown type IDs to their resolved concrete types
-///
-/// # Returns
-///
-/// A string representation of the type
-pub(crate) fn type_display(ty: &Type, resolved_unknown: &HashMap<usize, Type>) -> String {
-    use TypeKind::*;
-
-    match &*ty.value {
-        // Primitive types.
-        I64 => "I64".to_string(),
-        String => "String".to_string(),
-        Bool => "Bool".to_string(),
-        F64 => "F64".to_string(),
-
-        // Special types.
-        Unit => "()".to_string(),
-        Universe => "Universe".to_string(),
-        Nothing => "Nothing".to_string(),
-        None => "None".to_string(),
-
-        // Unknown types
-        UnknownAsc(id) => {
-            format!(
-                "≧{{{}}}",
-                type_display(resolved_unknown.get(id).unwrap(), resolved_unknown)
-            )
-        }
-        UnknownDesc(id) => {
-            format!(
-                "≦{{{}}}",
-                type_display(resolved_unknown.get(id).unwrap(), resolved_unknown)
-            )
-        }
-
-        // User types.
-        Adt(name) => name.to_string(),
-        Generic(name) => name.to_string(),
-
-        // Composite types.
-        Array(elem) => format!("[{}]", type_display(elem, resolved_unknown)),
-        Closure(param, ret) => format!(
-            "{} -> {}",
-            type_display(param, resolved_unknown),
-            type_display(ret, resolved_unknown)
-        ),
-        Tuple(elems) => {
-            if elems.is_empty() {
-                "()".to_string()
-            } else {
-                let elem_strs: Vec<_> = elems
-                    .iter()
-                    .map(|elem| type_display(elem, resolved_unknown))
-                    .collect();
-                format!("({})", elem_strs.join(", "))
-            }
-        }
-        Map(key, val) => format!(
-            "{{{}:{}}}",
-            type_display(key, resolved_unknown),
-            type_display(val, resolved_unknown)
-        ),
-        Optional(inner) => format!("{}?", type_display(inner, resolved_unknown)),
-
-        // Memo status types.
-        Stored(inner) => format!("{}*", type_display(inner, resolved_unknown)),
-        Costed(inner) => format!("{}$", type_display(inner, resolved_unknown)),
-
-        // Native trait types.
-        Concat => "Concat".to_string(),
-        EqHash => "EqHash".to_string(),
-        Arithmetic => "Arithmetic".to_string(),
-    }
-}
-
 #[cfg(test)]
 pub mod type_registry_tests {
     use super::*;
     use crate::dsl::{
-        parser::ast::Field,
+        parser::ast::{Field, Type as AstType},
         utils::span::{Span, Spanned},
     };
 
@@ -578,49 +454,5 @@ pub mod type_registry_tests {
 
         let result = registry.register_adt(&car2);
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_create_function_type() {
-        // Test with no parameters
-        let params: Vec<Type> = vec![];
-        let return_type = TypeKind::I64.into();
-        let result = create_function_type(&params, &return_type);
-        match &*result.value {
-            TypeKind::Closure(param, ret) => {
-                assert_eq!(*param.value, TypeKind::Unit);
-                assert_eq!(*ret.value, TypeKind::I64);
-            }
-            _ => panic!("Expected Closure type"),
-        }
-
-        // Test with one parameter
-        let params = vec![TypeKind::I64.into()];
-        let result = create_function_type(&params, &return_type);
-        match &*result.value {
-            TypeKind::Closure(param, ret) => {
-                assert_eq!(*param.value, TypeKind::I64);
-                assert_eq!(*ret.value, TypeKind::I64);
-            }
-            _ => panic!("Expected Closure type"),
-        }
-
-        // Test with multiple parameters
-        let params = vec![TypeKind::I64.into(), TypeKind::Bool.into()];
-        let result = create_function_type(&params, &return_type);
-        match &*result.value {
-            TypeKind::Closure(param, ret) => {
-                match &*param.value {
-                    TypeKind::Tuple(types) => {
-                        assert_eq!(types.len(), 2);
-                        assert_eq!(*types[0].value, TypeKind::I64);
-                        assert_eq!(*types[1].value, TypeKind::Bool);
-                    }
-                    _ => panic!("Expected Tuple type for parameters"),
-                }
-                assert_eq!(*ret.value, TypeKind::I64);
-            }
-            _ => panic!("Expected Closure type"),
-        }
     }
 }

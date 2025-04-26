@@ -98,21 +98,13 @@ fn check_product_fields(registry: &TypeRegistry) -> Result<(), Box<AnalyzerError
                 &field.ty.value,
                 &field.ty.span,
                 registry,
-                is_logical(adt_name, registry),
-                is_physical(adt_name, registry),
+                registry.inherits_adt(adt_name, LOGICAL_TYPE),
+                registry.inherits_adt(adt_name, PHYSICAL_TYPE),
             )?;
         }
     }
 
     Ok(())
-}
-
-fn is_logical(ty: &Identifier, registry: &TypeRegistry) -> bool {
-    registry.inherits_adt(ty, LOGICAL_TYPE)
-}
-
-fn is_physical(ty: &Identifier, registry: &TypeRegistry) -> bool {
-    registry.inherits_adt(ty, PHYSICAL_TYPE)
 }
 
 fn valid_core_type(
@@ -124,8 +116,8 @@ fn valid_core_type(
 ) -> Result<(), Box<AnalyzerErrorKind>> {
     // Check if the type is logical but not allowed to be logical,
     // or is physical but not allowed to be physical.
-    let invalid_logical = is_logical(ty, registry) && !allows_logical;
-    let invalid_physical = is_physical(ty, registry) && !allows_physical;
+    let invalid_logical = registry.inherits_adt(ty, LOGICAL_TYPE) && !allows_logical;
+    let invalid_physical = registry.inherits_adt(ty, PHYSICAL_TYPE) && !allows_physical;
 
     if invalid_logical || invalid_physical {
         return Err(AnalyzerErrorKind::new_invalid_type(span));

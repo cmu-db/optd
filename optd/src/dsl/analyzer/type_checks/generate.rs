@@ -545,7 +545,9 @@ mod scope_check_tests {
             CoreData, Expr, ExprKind, FunKind, HIR, LetBinding, MatchArm, Pattern, PatternKind,
             TypedSpan, Value,
         },
-        type_checks::registry::{create_function_type, type_registry_tests::create_test_span},
+        type_checks::{
+            converter::create_function_type, registry::type_registry_tests::create_test_span,
+        },
     };
     use std::collections::HashMap;
     use std::sync::Arc;
