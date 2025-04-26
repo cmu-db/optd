@@ -30,8 +30,8 @@ pub struct Config {
     #[command(flatten)]
     verbosity: Verbosity,
     /// Mock UDFs (user-defined functions) to load.
-    #[arg(long)]
-    mock_udf: Vec<String>,
+    #[arg(long, value_delimiter = ' ', num_args = 1..)]
+    mock_udfs: Vec<String>,
 }
 
 impl Config {
@@ -40,7 +40,7 @@ impl Config {
         Self {
             path,
             verbosity: Default::default(),
-            mock_udf: Default::default(),
+            mock_udfs: Default::default(),
         }
     }
 
@@ -55,7 +55,7 @@ impl Config {
     }
 
     pub fn mock_udfs(&self) -> &[String] {
-        self.mock_udf.as_ref()
+        self.mock_udfs.as_ref()
     }
 }
 

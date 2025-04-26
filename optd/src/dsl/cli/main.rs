@@ -25,7 +25,7 @@
 //! cargo run --bin optd-cli -- compile path/to/example.opt
 //! cargo run --bin optd-cli -- compile path/to/example.opt --verbose
 //! cargo run --bin optd-cli -- compile path/to/example.opt --verbose --show-ast --show-hir
-//! cargo run --bin optd-cli -- compile path/to/example.opt --mock-udf hello --mock-udf world
+//! cargo run --bin optd-cli -- compile path/to/example.opt --mock-udfs hello get_schema world
 //! ```
 
 use std::collections::HashMap;
