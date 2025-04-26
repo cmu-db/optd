@@ -1,6 +1,9 @@
 use super::{hir::Identifier, type_checks::registry::Type};
 use crate::dsl::{
-    analyzer::type_checks::converter::type_display,
+    analyzer::{
+        into_hir::annotations::{IMPLEMENTATION_SIGNATURE_TYPE, TRANSFORMATION_SIGNATURE_TYPE},
+        type_checks::converter::type_display,
+    },
     utils::{
         errors::Diagnose,
         span::{Span, Spanned},
@@ -119,6 +122,20 @@ pub enum AnalyzerErrorKind {
         object: Type,
         span: Span,
         field: String,
+        // To be able to call display function of Type.
+        unknowns: HashMap<usize, Type>,
+    },
+
+    InvalidTransformation {
+        span: Span,
+        actual_signature: Type,
+        // To be able to call display function of Type.
+        unknowns: HashMap<usize, Type>,
+    },
+
+    InvalidImplementation {
+        span: Span,
+        actual_signature: Type,
         // To be able to call display function of Type.
         unknowns: HashMap<usize, Type>,
     },
@@ -287,6 +304,32 @@ impl AnalyzerErrorKind {
         }
         .into()
     }
+
+    pub fn new_invalid_transformation(
+        span: &Span,
+        actual_signature: &Type,
+        unknowns: HashMap<usize, Type>,
+    ) -> Box<Self> {
+        Self::InvalidTransformation {
+            span: span.clone(),
+            actual_signature: actual_signature.clone(),
+            unknowns,
+        }
+        .into()
+    }
+
+    pub fn new_invalid_implementation(
+        span: &Span,
+        actual_signature: &Type,
+        unknowns: HashMap<usize, Type>,
+    ) -> Box<Self> {
+        Self::InvalidImplementation {
+            span: span.clone(),
+            actual_signature: actual_signature.clone(),
+            unknowns,
+        }
+        .into()
+    }
 }
 
 impl Diagnose for Box<AnalyzerError> {
@@ -401,6 +444,39 @@ impl Diagnose for Box<AnalyzerError> {
                 "Only functions, maps, and arrays can be called",
             ),
             InvalidFieldAccess { object, span, field, unknowns } => self.build_invalid_field_access_report(object, span, field, unknowns),
+            InvalidTransformation {
+                span,
+                actual_signature,
+                unknowns,
+            } => {
+                // Assuming these are defined in annotations.rs
+                self.build_single_span_report(
+                    span,
+                    "Invalid transformation function signature",
+                    &format!(
+                        "Found: {}\nExpected a subtype of: {}",
+                        type_display(actual_signature, unknowns),
+                        type_display(&TRANSFORMATION_SIGNATURE_TYPE, unknowns)
+                    ),
+                    "Transformations must match the expected signature pattern",
+                )
+            },
+            InvalidImplementation {
+                span,
+                actual_signature,
+                unknowns,
+            } => {
+                self.build_single_span_report(
+                    span,
+                    "Invalid implementation function signature",
+                    &format!(
+                        "Found: {}\nExpected a subtype of: {}",
+                        type_display(actual_signature, unknowns),
+                        type_display(&IMPLEMENTATION_SIGNATURE_TYPE, unknowns)
+                    ),
+                    "Implementations must match the expected signature pattern",
+                )
+            },
         }
     }
 
@@ -424,6 +500,8 @@ impl Diagnose for Box<AnalyzerError> {
             ArgumentNumberMismatch { span, .. } => span,
             InvalidCallReceiver { span, .. } => span,
             InvalidFieldAccess { span, .. } => span,
+            InvalidTransformation { span, .. } => span,
+            InvalidImplementation { span, .. } => span,
         };
 
         (span.src_file.clone(), Source::from(self.src_code.clone()))

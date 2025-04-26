@@ -60,7 +60,7 @@ impl TypeRegistry {
 
     /// Simple wrapper for is_subtype_infer that ignores the has_changed parameter.
     /// Useful for testing and cases where tracking changes isn't needed.
-    pub(super) fn is_subtype(&mut self, child: &Type, parent: &Type) -> bool {
+    pub(crate) fn is_subtype(&mut self, child: &Type, parent: &Type) -> bool {
         let mut has_changed = false;
         self.is_subtype_infer(child, parent, &mut has_changed)
     }
