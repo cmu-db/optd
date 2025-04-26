@@ -17,7 +17,7 @@ pub const TRANSFORMATION_ANNOTATION: &str = "transformation";
 pub static IMPLEMENTATION_SIGNATURE_TYPE: Lazy<Type> = Lazy::new(|| {
     use TypeKind::*;
     let params_type = Tuple(vec![
-        Stored(Adt(PHYSICAL_TYPE.to_string()).into()).into(),
+        Stored(Adt(LOGICAL_TYPE.to_string()).into()).into(),
         Adt(PHYSICAL_PROPS.to_string()).into(),
     ])
     .into();
@@ -154,7 +154,7 @@ mod tests {
         // Create an implementation function with optional return type
         let function_type = TypeKind::Closure(
             TypeKind::Tuple(vec![
-                TypeKind::Stored(TypeKind::Adt(PHYSICAL_TYPE.to_string()).into()).into(),
+                TypeKind::Stored(TypeKind::Adt(LOGICAL_TYPE.to_string()).into()).into(),
                 TypeKind::Adt(PHYSICAL_PROPS.to_string()).into(),
             ])
             .into(),
@@ -194,7 +194,7 @@ mod tests {
         // Create an implementation function that returns PhysicalHashJoin (subtype of Physical)
         let function_type = TypeKind::Closure(
             TypeKind::Tuple(vec![
-                TypeKind::Stored(TypeKind::Adt(PHYSICAL_TYPE.to_string()).into()).into(),
+                TypeKind::Stored(TypeKind::Adt(LOGICAL_TYPE.to_string()).into()).into(),
                 TypeKind::Adt(PHYSICAL_PROPS.to_string()).into(),
             ])
             .into(),
@@ -238,7 +238,7 @@ mod tests {
         // Create an invalid function type (wrong return type)
         let function_type = TypeKind::Closure(
             TypeKind::Tuple(vec![
-                TypeKind::Stored(TypeKind::Adt(PHYSICAL_TYPE.to_string()).into()).into(),
+                TypeKind::Stored(TypeKind::Adt(LOGICAL_TYPE.to_string()).into()).into(),
                 TypeKind::Adt(PHYSICAL_PROPS.to_string()).into(),
             ])
             .into(),
