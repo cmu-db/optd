@@ -76,7 +76,6 @@ fn main() -> Result<(), Vec<CompileError>> {
         udfs.insert(mock_udf.to_string(), udf.clone());
     }
 
-
     let _hir = compile_hir(config, udfs).unwrap_or_else(|errors| handle_errors(&errors));
 
     Ok(())
