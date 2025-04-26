@@ -449,16 +449,17 @@ impl Diagnose for Box<AnalyzerError> {
                 actual_signature,
                 unknowns,
             } => {
-                // Assuming these are defined in annotations.rs
                 self.build_single_span_report(
                     span,
                     "Invalid transformation function signature",
                     &format!(
-                        "Found: {}\nExpected a subtype of: {}",
-                        type_display(actual_signature, unknowns),
+                        "Found: '{}'",
+                        type_display(actual_signature, unknowns)
+                    ),
+                    &format!(
+                        "Expected a subtype of: '{}'",
                         type_display(&TRANSFORMATION_SIGNATURE_TYPE, unknowns)
                     ),
-                    "Transformations must match the expected signature pattern",
                 )
             },
             InvalidImplementation {
@@ -470,11 +471,13 @@ impl Diagnose for Box<AnalyzerError> {
                     span,
                     "Invalid implementation function signature",
                     &format!(
-                        "Found: {}\nExpected a subtype of: {}",
-                        type_display(actual_signature, unknowns),
+                        "Found: '{}'",
+                        type_display(actual_signature, unknowns)
+                    ),
+                    &format!(
+                        "Expected a subtype of: '{}'", 
                         type_display(&IMPLEMENTATION_SIGNATURE_TYPE, unknowns)
                     ),
-                    "Implementations must match the expected signature pattern",
                 )
             },
         }

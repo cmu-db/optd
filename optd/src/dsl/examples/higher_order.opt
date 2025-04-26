@@ -61,7 +61,11 @@ fn constant_folder(): Logical -> Logical =
 
 fn arrays(a: [Binary]) = none
 
-fn main(): Logical = 
+[implementation]
+fn (phys: Physical*) implementation(prop: PhysicalProperties) = none
+
+[transformation]
+fn main(log: Logical): Logical = 
     let
         a = Number(10),
         b = Number(20),
