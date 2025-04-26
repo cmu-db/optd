@@ -29,6 +29,9 @@ pub struct Config {
     /// The verbosity settings.
     #[command(flatten)]
     verbosity: Verbosity,
+    /// Mock UDFs (user-defined functions) to load.
+    #[arg(long, value_delimiter = ' ', num_args = 1..)]
+    mock_udfs: Vec<String>,
 }
 
 impl Config {
@@ -37,17 +40,22 @@ impl Config {
         Self {
             path,
             verbosity: Default::default(),
+            mock_udfs: Default::default(),
         }
     }
 
     /// A helper method to get the verbosity.
-    fn verbose(&self) -> bool {
+    pub fn verbosity(&self) -> bool {
         self.verbosity.verbose
     }
 
     /// A helper method to get the path as a string.
-    fn path_str(&self) -> Cow<'_, str> {
+    pub fn path_str(&self) -> Cow<'_, str> {
         self.path.to_string_lossy()
+    }
+
+    pub fn mock_udfs(&self) -> &[String] {
+        self.mock_udfs.as_ref()
     }
 }
 
@@ -92,14 +100,14 @@ pub fn compile_hir(config: Config, udfs: HashMap<String, Udf>) -> Result<HIR, Ve
     });
 
     // Step 1: Parse.
-    if config.verbose() {
+    if config.verbosity() {
         println!("{} Compiling file: {}", "⏳".blue(), config.path_str());
         println!("{} Parsing source code...", "→".cyan());
     }
 
     let ast = parse(&source, &config)?;
 
-    if config.verbose() {
+    if config.verbosity() {
         println!("{}", "Parse successful".green());
 
         if config.verbosity.show_ast {
@@ -108,13 +116,13 @@ pub fn compile_hir(config: Config, udfs: HashMap<String, Udf>) -> Result<HIR, Ve
     }
 
     // Step 2: AST to HIR<TypedSpan>.
-    if config.verbose() {
+    if config.verbosity() {
         println!("{} Converting AST to HIR and TypeRegistry...", "→".cyan());
     }
 
     let (typed_hir, mut type_registry) = ast_to_hir(&source, ast, udfs).map_err(|e| vec![e])?;
 
-    if config.verbose() {
+    if config.verbosity() {
         println!("{}", "AST to HIR conversion successful".green());
 
         if config.verbosity.show_typedspan_hir {
@@ -123,24 +131,24 @@ pub fn compile_hir(config: Config, udfs: HashMap<String, Udf>) -> Result<HIR, Ve
     }
 
     // Step 3: Semantic checks.
-    if config.verbose() {
+    if config.verbosity() {
         println!("{} Checking TypeRegistry...", "→".cyan());
     }
 
     registry_check(&source, &source_path, &type_registry).map_err(|e| vec![e])?;
 
-    if config.verbose() {
+    if config.verbosity() {
         println!("{}", "TypeRegistry check successful".green());
     }
 
     // Step 4: Type checks & inference.
-    if config.verbose() {
+    if config.verbosity() {
         println!("{} Performing type inference...", "→".cyan());
     }
 
     let hir = infer(&source, typed_hir, &mut type_registry).map_err(|e| vec![e])?;
 
-    if config.verbose() {
+    if config.verbosity() {
         println!("{}", "Type inference successful".green());
 
         if config.verbosity.show_hir {

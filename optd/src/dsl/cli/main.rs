@@ -25,6 +25,7 @@
 //! cargo run --bin optd-cli -- compile path/to/example.opt
 //! cargo run --bin optd-cli -- compile path/to/example.opt --verbose
 //! cargo run --bin optd-cli -- compile path/to/example.opt --verbose --show-ast --show-hir
+//! cargo run --bin optd-cli -- compile path/to/example.opt --mock-udfs hello get_schema world
 //! ```
 
 use std::collections::HashMap;
@@ -54,9 +55,9 @@ enum Commands {
     Compile(Config),
 }
 
-/// A simple user-defined function.
-pub fn hello_udf(_args: &[Value], _catalog: &dyn Catalog) -> Value {
-    println!("Hello from UDF!");
+/// A unimplemented user-defined function.
+pub fn unimplemented_udf(_args: &[Value], _catalog: &dyn Catalog) -> Value {
+    println!("This user-defined function is unimplemented!");
     Value::new(CoreData::<Value>::None)
 }
 
@@ -64,10 +65,16 @@ fn main() -> Result<(), Vec<CompileError>> {
     let cli = Cli::parse();
 
     let mut udfs = HashMap::new();
-    let udf = Udf { func: hello_udf };
-    udfs.insert("hello_udf".to_string(), udf);
+    let udf = Udf {
+        func: unimplemented_udf,
+    };
+    udfs.insert("unimplemented_udf".to_string(), udf.clone());
 
     let Commands::Compile(config) = cli.command;
+
+    for mock_udf in config.mock_udfs() {
+        udfs.insert(mock_udf.to_string(), udf.clone());
+    }
 
     let _hir = compile_hir(config, udfs).unwrap_or_else(|errors| handle_errors(&errors));
 
