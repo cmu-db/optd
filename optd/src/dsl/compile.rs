@@ -1,11 +1,10 @@
+use super::analyzer::{from_ast::from_ast, into_hir::into_hir};
 use crate::dsl::{
     analyzer::{
-        context::Context,
         errors::AnalyzerError,
-        from_ast::ASTConverter,
         hir::{HIR, TypedSpan, Udf},
         semantic_checks::adt_check,
-        types::registry::TypeRegistry,
+        type_checks::registry::TypeRegistry,
     },
     lexer::lex::lex,
     parser::{ast::Module, module::parse_module},
@@ -70,8 +69,6 @@ pub struct Verbosity {
 }
 
 /// Compiles a file into the [`HIR`].
-///
-/// TODO fix error handling.
 pub fn compile_hir(config: Config, udfs: HashMap<String, Udf>) -> Result<HIR, Vec<CompileError>> {
     let source_path = config.path_str();
 
@@ -110,7 +107,7 @@ pub fn compile_hir(config: Config, udfs: HashMap<String, Udf>) -> Result<HIR, Ve
         }
     }
 
-    // Step 2: AST to HIR.
+    // Step 2: AST to HIR<TypedSpan>.
     if config.verbose() {
         println!("{} Converting AST to HIR and TypeRegistry...", "→".cyan());
     }
@@ -125,7 +122,7 @@ pub fn compile_hir(config: Config, udfs: HashMap<String, Udf>) -> Result<HIR, Ve
         }
     }
 
-    // Step 3: TypeRegistry Check.
+    // Step 3: Semantic checks.
     if config.verbose() {
         println!("{} Checking TypeRegistry...", "→".cyan());
     }
@@ -136,18 +133,18 @@ pub fn compile_hir(config: Config, udfs: HashMap<String, Udf>) -> Result<HIR, Ve
         println!("{}", "TypeRegistry check successful".green());
     }
 
-    // Step 4: Type Inference.
+    // Step 4: Type checks & inference.
     if config.verbose() {
         println!("{} Performing type inference...", "→".cyan());
     }
 
-    let hir = infer(&source, &typed_hir, &mut type_registry).map_err(|e| vec![e])?;
+    let hir = infer(&source, typed_hir, &mut type_registry).map_err(|e| vec![e])?;
 
     if config.verbose() {
         println!("{}", "Type inference successful".green());
 
         if config.verbosity.show_hir {
-            println!("\nTyped-Span HIR Structure:\n{:#?}", hir);
+            println!("\nHIR Structure:\n{:#?}", hir);
         }
 
         println!("\n{}", "Compilation completed successfully!".green().bold());
@@ -188,8 +185,7 @@ pub fn ast_to_hir(
     ast: Module,
     udfs: HashMap<String, Udf>,
 ) -> Result<(HIR<TypedSpan>, TypeRegistry), CompileError> {
-    let converter = ASTConverter::new_with_udfs(udfs);
-    converter.convert(&ast).map_err(|err_kind| {
+    from_ast(&ast, udfs).map_err(|err_kind| {
         CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
     })
 }
@@ -219,12 +215,12 @@ pub fn registry_check(
 /// 4. Transforming the typed HIR into its final form.
 pub fn infer(
     source: &str,
-    hir: &HIR<TypedSpan>,
+    hir: HIR<TypedSpan>,
     registry: &mut TypeRegistry,
 ) -> Result<HIR, CompileError> {
     // Step 1 & 2: Perform scope checking and generate type constraints
     // This traverses the HIR, verifies scopes, and creates constraints for all expressions
-    registry.generate_constraints(hir).map_err(|err_kind| {
+    registry.generate_constraints(&hir).map_err(|err_kind| {
         CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
     })?;
 
@@ -233,13 +229,7 @@ pub fn infer(
         CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
     })?;
 
-    // TODO(alexis): Step 4: Transform HIR
+    // Step 4: Transform HIR
     // After type inference, transform the HIR into its final form with complete type information.
-
-    // Currently returns a simplified HIR with default context and original annotations
-    // This is a placeholder until the TODO items are implemented.
-    Ok(HIR {
-        context: Context::default(),
-        annotations: hir.annotations.clone(),
-    })
+    Ok(into_hir(hir, registry))
 }

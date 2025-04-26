@@ -17,7 +17,7 @@
 
 use super::context::Context;
 use super::map::Map;
-use super::types::registry::Type;
+use super::type_checks::registry::Type;
 use crate::catalog::Catalog;
 use crate::dsl::utils::span::Span;
 use std::fmt::Debug;

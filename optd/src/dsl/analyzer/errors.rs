@@ -1,6 +1,6 @@
-use super::{hir::Identifier, types::registry::Type};
+use super::{hir::Identifier, type_checks::registry::Type};
 use crate::dsl::{
-    analyzer::types::registry::type_display,
+    analyzer::type_checks::converter::type_display,
     utils::{
         errors::Diagnose,
         span::{Span, Spanned},

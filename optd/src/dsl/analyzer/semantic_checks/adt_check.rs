@@ -3,7 +3,7 @@ use crate::dsl::{
     analyzer::{
         errors::AnalyzerErrorKind,
         hir::Identifier,
-        types::registry::{CORE_TYPES, LOGICAL_TYPE, PHYSICAL_TYPE, TypeRegistry},
+        type_checks::registry::{CORE_TYPES, LOGICAL_TYPE, PHYSICAL_TYPE, TypeRegistry},
     },
     parser::ast::Type as AstType,
     utils::span::Span,
@@ -98,21 +98,13 @@ fn check_product_fields(registry: &TypeRegistry) -> Result<(), Box<AnalyzerError
                 &field.ty.value,
                 &field.ty.span,
                 registry,
-                is_logical(adt_name, registry),
-                is_physical(adt_name, registry),
+                registry.inherits_adt(adt_name, LOGICAL_TYPE),
+                registry.inherits_adt(adt_name, PHYSICAL_TYPE),
             )?;
         }
     }
 
     Ok(())
-}
-
-fn is_logical(ty: &Identifier, registry: &TypeRegistry) -> bool {
-    registry.inherits_adt(ty, &LOGICAL_TYPE.to_string())
-}
-
-fn is_physical(ty: &Identifier, registry: &TypeRegistry) -> bool {
-    registry.inherits_adt(ty, &PHYSICAL_TYPE.to_string())
 }
 
 fn valid_core_type(
@@ -124,8 +116,8 @@ fn valid_core_type(
 ) -> Result<(), Box<AnalyzerErrorKind>> {
     // Check if the type is logical but not allowed to be logical,
     // or is physical but not allowed to be physical.
-    let invalid_logical = is_logical(ty, registry) && !allows_logical;
-    let invalid_physical = is_physical(ty, registry) && !allows_physical;
+    let invalid_logical = registry.inherits_adt(ty, LOGICAL_TYPE) && !allows_logical;
+    let invalid_physical = registry.inherits_adt(ty, PHYSICAL_TYPE) && !allows_physical;
 
     if invalid_logical || invalid_physical {
         return Err(AnalyzerErrorKind::new_invalid_type(span));
@@ -185,7 +177,7 @@ fn check_type(
 mod adt_validation_tests {
     use crate::dsl::analyzer::hir::Identifier;
     use crate::dsl::analyzer::semantic_checks::adt_check::adt_check;
-    use crate::dsl::analyzer::types::registry::{
+    use crate::dsl::analyzer::type_checks::registry::{
         LOGICAL_PROPS, LOGICAL_TYPE, PHYSICAL_PROPS, PHYSICAL_TYPE, TypeRegistry,
     };
     use crate::dsl::parser::ast::{Field, Type as AstType};

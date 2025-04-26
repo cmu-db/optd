@@ -7,7 +7,7 @@ use crate::dsl::{
             BinOp, CoreData, Expr, ExprKind, FunKind, HIR, Identifier, LetBinding, MapEntry,
             MatchArm, Pattern, PatternKind, TypedSpan, UnaryOp, Value,
         },
-        types::registry::{Type, TypeKind},
+        type_checks::registry::{Type, TypeKind},
     },
     utils::span::Span,
 };
@@ -37,9 +37,9 @@ impl TypeRegistry {
 
         // Process each function in the HIR context separately.
         hir.context
-            .get_all_values()
+            .get_all_bindings()
             .iter()
-            .try_for_each(|fun| match &fun.data {
+            .try_for_each(|(_, fun)| match &fun.data {
                 Function(Closure(args, body)) => {
                     let ctx =
                         self.create_function_scope(hir.context.clone(), &args[..], &fun.metadata)?;
@@ -113,15 +113,12 @@ impl TypeRegistry {
             Return(inner_expr) => self.generate_return(inner_expr, ctx),
             FieldAccess(obj, field_name) => self.generate_field_access(expr, obj, field_name, ctx),
             CoreExpr(core_data) => self.generate_core_expr(expr, core_data, ctx),
-            // TODO(#80): Nothing to do here as only three types of CoreVals are created
-            // during the from_ast phase.
-            // 1. None (which already sets the type correctly)
-            // 2. Literals (ditto)
-            // 3. External closures (i.e. declared with fn), but those are already handled in
+            // TODO(#80): Nothing to do here as only one type of CoreVal is created.
+            // 1. External closures (i.e. declared with fn), but those are already handled in
             //    generate_constraints.
             // Note: It makes no sense that functions can be expressions. They should only be
             // values. Once we change that, we just move the function core_expr code.
-            CoreVal(_) => Ok(()),
+            CoreVal(_) => panic!("CoreVal should not be in HIR<TypedSpan>"),
         }
     }
 
@@ -541,24 +538,23 @@ impl TypeRegistry {
 #[cfg(test)]
 mod scope_check_tests {
     use super::*;
-    use crate::dsl::{
-        analyzer::{
-            context::Context,
-            errors::AnalyzerErrorKind,
-            hir::{
-                CoreData, Expr, ExprKind, FunKind, HIR, LetBinding, MatchArm, Pattern, PatternKind,
-                TypedSpan, Value,
-            },
-            types::registry::{create_function_type, type_registry_tests::create_test_span},
+    use crate::dsl::analyzer::{
+        context::Context,
+        errors::AnalyzerErrorKind,
+        hir::{
+            CoreData, Expr, ExprKind, FunKind, HIR, LetBinding, MatchArm, Pattern, PatternKind,
+            TypedSpan, Value,
         },
-        utils::span::Span,
+        type_checks::{
+            converter::create_function_type, registry::type_registry_tests::create_test_span,
+        },
     };
     use std::collections::HashMap;
     use std::sync::Arc;
 
-    // Create a dummy value for binding
-    fn dummy_value(span: Span) -> Value<TypedSpan> {
-        Value::new_with(CoreData::None, TypeKind::None.into(), span)
+    // Create a dummy core data for expression testing
+    fn dummy_core_data() -> CoreData<Arc<Expr<TypedSpan>>, TypedSpan> {
+        CoreData::None
     }
 
     // Setup a context with a function for testing
@@ -628,7 +624,7 @@ mod scope_check_tests {
                 LetBinding::new_with(
                     let_var.clone(),
                     Arc::new(Expr::new_with(
-                        ExprKind::CoreVal(dummy_value(create_test_span())),
+                        ExprKind::CoreExpr(dummy_core_data()),
                         TypeKind::Nothing.into(),
                         create_test_span(),
                     )),
@@ -724,7 +720,7 @@ mod scope_check_tests {
                 LetBinding::new_with(
                     let_var.clone(),
                     Arc::new(Expr::new_with(
-                        ExprKind::CoreVal(dummy_value(create_test_span())),
+                        ExprKind::CoreExpr(dummy_core_data()),
                         TypeKind::Nothing.into(),
                         create_test_span(),
                     )),
@@ -736,7 +732,7 @@ mod scope_check_tests {
                         LetBinding::new_with(
                             let_var.clone(),
                             Arc::new(Expr::new_with(
-                                ExprKind::CoreVal(dummy_value(create_test_span())),
+                                ExprKind::CoreExpr(dummy_core_data()),
                                 TypeKind::Nothing.into(),
                                 create_test_span(),
                             )),
@@ -880,7 +876,7 @@ mod scope_check_tests {
                 LetBinding::new_with(
                     x_var.clone(),
                     Arc::new(Expr::new_with(
-                        ExprKind::CoreVal(dummy_value(create_test_span())),
+                        ExprKind::CoreExpr(dummy_core_data()),
                         TypeKind::Nothing.into(),
                         create_test_span(),
                     )),
@@ -893,7 +889,7 @@ mod scope_check_tests {
                             LetBinding::new_with(
                                 x_var.clone(),
                                 Arc::new(Expr::new_with(
-                                    ExprKind::CoreVal(dummy_value(create_test_span())),
+                                    ExprKind::CoreExpr(dummy_core_data()),
                                     TypeKind::Nothing.into(),
                                     create_test_span(),
                                 )),

@@ -121,11 +121,11 @@ impl<M: ExprMetadata> Context<M> {
         self.current_scope.insert(name, val);
     }
 
-    /// Gets all values from all scopes in the context, ordered by their identifiers.
+    /// Gets all key-value pairs from all scopes in the context, ordered by their identifiers.
     /// (for deterministic output)
     ///
-    /// This retrieves values from all lexical scopes, including both the current
-    /// scope and all previous (outer) scopes. The values are ordered by their
+    /// This retrieves key-value pairs from all lexical scopes, including both the current
+    /// scope and all previous (outer) scopes. The pairs are ordered by their
     /// identifiers (keys) for consistent output.
     ///
     /// If a variable exists in multiple scopes, the innermost definition takes precedence
@@ -133,12 +133,13 @@ impl<M: ExprMetadata> Context<M> {
     ///
     /// # Returns
     ///
-    /// A vector containing references to all values in the context, ordered by their identifiers.
-    pub fn get_all_values(&self) -> Vec<&Value<M>> {
+    /// A vector containing tuples of (identifier, value) pairs for all bindings in the context,
+    /// ordered by their identifiers.
+    pub fn get_all_bindings(&self) -> Vec<(&Identifier, &Value<M>)> {
         let mut sorted_values: BTreeMap<&Identifier, &Value<M>> = BTreeMap::new();
 
         // Process scopes from outermost to innermost to maintain lexical scoping rules
-        // (later insertions with the same key will overwrite earlier ones)
+        // (later insertions with the same key will overwrite earlier ones).
         for scope in &self.previous_scopes {
             for (key, value) in scope.iter() {
                 sorted_values.insert(key, value);
@@ -149,7 +150,7 @@ impl<M: ExprMetadata> Context<M> {
             sorted_values.insert(key, value);
         }
 
-        sorted_values.into_values().collect()
+        sorted_values.into_iter().collect()
     }
 }
 

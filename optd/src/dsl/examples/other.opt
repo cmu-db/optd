@@ -7,10 +7,7 @@ data Physical
 data LogicalProperties
 data PhysicalProperties
 
-// fn ident(other: Logical) = other
-
-// fn main(log: Logical): Logical? = ident(Const(5))
-
+[cool]
 fn vlaa() =
     let 
         v = (x: Const, y: Const) -> x#val,

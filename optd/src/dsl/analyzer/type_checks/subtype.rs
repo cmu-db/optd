@@ -1,5 +1,5 @@
-use super::registry::{Type, TypeRegistry};
-use crate::dsl::analyzer::{hir::Identifier, types::registry::TypeKind};
+use super::registry::{LOGICAL_TYPE, PHYSICAL_TYPE, Type, TypeRegistry};
+use crate::dsl::analyzer::type_checks::registry::TypeKind;
 use std::collections::HashSet;
 
 impl TypeRegistry {
@@ -273,11 +273,24 @@ impl TypeRegistry {
         }
     }
 
-    pub(crate) fn inherits_adt(&self, child_name: &Identifier, parent_name: &Identifier) -> bool {
+    /// Determines if one ADT inherits from another ADT
+    ///
+    /// Checks if `child_name` is a subtype of `parent_name` in the type hierarchy.
+    /// This includes both direct inheritance and transitive inheritance through
+    /// intermediary types.
+    ///
+    /// # Arguments
+    ///
+    /// * `child_name` - The name of the potential child ADT
+    /// * `parent_name` - The name of the potential parent ADT
+    ///
+    /// # Returns
+    ///
+    /// `true` if `child_name` inherits from `parent_name`, `false` otherwise
+    pub(crate) fn inherits_adt(&self, child_name: &str, parent_name: &str) -> bool {
         if child_name == parent_name {
             return true;
         }
-
         if let Some(variants) = self.subtypes.get(parent_name) {
             variants
                 .iter()
@@ -286,13 +299,60 @@ impl TypeRegistry {
             false
         }
     }
+
+    /// Checks if an ADT inherits from either the Logical or Physical type
+    ///
+    /// This is a specialized check for query plan operators, determining whether
+    /// a given ADT represents a logical or physical operator in the query plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the ADT to check
+    ///
+    /// # Returns
+    ///
+    /// `true` if the ADT inherits from either Logical or Physical type, `false` otherwise
+    pub(crate) fn is_logical_or_physical(&self, name: &str) -> bool {
+        self.inherits_adt(name, LOGICAL_TYPE) || self.inherits_adt(name, PHYSICAL_TYPE)
+    }
+
+    /// Determines if a type should be treated as a child in an operator
+    ///
+    /// When converting structs to operators, this function determines whether a field
+    /// should be categorized as a child node (logical/physical operator) or as regular
+    /// data. This is important for proper operator structure conversion.
+    ///
+    /// # Rules
+    ///
+    /// * ADT types that inherit from Logical or Physical are considered children
+    /// * Arrays of ADT types that inherit from Logical or Physical are considered children
+    /// * All other types are considered data fields
+    ///
+    /// # Arguments
+    ///
+    /// * `ty` - The type to check
+    ///
+    /// # Returns
+    ///
+    /// `true` if the type should be treated as a child in an operator, `false` if it should be treated as data
+    pub(crate) fn is_child_type(&self, ty: &Type) -> bool {
+        use TypeKind::*;
+        match &*ty.value {
+            Adt(name) => self.is_logical_or_physical(name),
+            Array(element_type) => match &*element_type.value {
+                Adt(name) => self.is_logical_or_physical(name),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::dsl::{
-        analyzer::types::registry::type_registry_tests::{
+        analyzer::type_checks::registry::type_registry_tests::{
             create_product_adt, create_sum_adt, spanned,
         },
         parser::ast::Type as AstType,

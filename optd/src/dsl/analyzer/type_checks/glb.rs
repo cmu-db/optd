@@ -1,5 +1,5 @@
 use super::registry::{Type, TypeRegistry};
-use crate::dsl::analyzer::types::registry::TypeKind;
+use crate::dsl::analyzer::type_checks::registry::TypeKind;
 
 impl TypeRegistry {
     /// Finds the greatest lower bound (GLB) of two types.
@@ -232,7 +232,7 @@ impl TypeRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dsl::analyzer::types::lub::tests::setup_type_hierarchy;
+    use crate::dsl::analyzer::type_checks::lub::tests::setup_type_hierarchy;
     use TypeKind::*;
 
     /// Helper function to simplify GLB assertions
