@@ -179,34 +179,35 @@ impl<M: Memoize> Optimizer<M> {
             let new_repr_group_exprs = group_merge.new_repr_group_exprs;
             let old_non_repr_group_exprs = group_merge.old_non_repr_group_exprs;
 
-            let repr_task_id = self.group_exploration_task_index.get(&repr_group_id);
+            let repr_group_task_id = self.group_exploration_task_index.get(&repr_group_id);
             let non_repr_group_task_id = self.group_exploration_task_index.get(&non_repr_group_id);
-            if repr_task_id.is_none() && non_repr_group_task_id.is_none() {
+            if repr_group_task_id.is_none() && non_repr_group_task_id.is_none() {
                 // There is no task for the new or old representative group
                 // So, we don't have any subscribers to notify or anything to move.
                 // This merge does not change anything for the task graph.
                 continue;
             }
 
-            if repr_task_id.is_none() {
+            if repr_group_task_id.is_none() {
                 // TODO(Sarvesh): we need to create a new explore group task for the new representative group.
             }
-            let repr_task_id = &self
+            let repr_group_task_id = &self
                 .group_exploration_task_index
                 .get(&repr_group_id)
                 .unwrap()
                 .clone();
 
             // we need to forward all the results from the non-repr group to subscribers of the repr group and also launch the transform expr tasks.
-            let (optimize_goal_task_ids, fork_logical_task_ids) = {
+            let (optimize_goal_task_ids, fork_logical_task_ids, repr_group_transform_expr_task_ids) = {
                 let repr_task = self
                     .tasks
-                    .get_mut(repr_task_id)
+                    .get_mut(repr_group_task_id)
                     .unwrap()
                     .as_explore_group_mut();
                 (
                     repr_task.optimize_goal_out.clone(),
                     repr_task.fork_logical_out.clone(),
+                    repr_task.transform_expr_in.clone(),
                 )
             };
 
@@ -216,11 +217,6 @@ impl<M: Memoize> Optimizer<M> {
                 .collect::<HashSet<LogicalExpressionId>>();
 
             for logical_expr_id in exprs_not_seen_by_repr_group {
-                // Launch the transformation tasks
-                let transformations = self.rule_book.get_transformations().to_vec();
-                self.create_transformation_tasks(logical_expr_id, *repr_task_id, transformations)
-                    .await?;
-
                 // Forward the logical expression to all the outs
                 // Launch the implementation tasks
                 for optimize_goal_task_id in optimize_goal_task_ids.iter() {
@@ -280,7 +276,11 @@ impl<M: Memoize> Optimizer<M> {
             let non_repr_group_task_id = non_repr_group_task_id.unwrap();
 
             // TODO(Sarvesh): we need to forward all the results from the repr group to subscribers of the non-repr group.
-            let (optimize_goal_task_ids, fork_logical_task_ids) = {
+            let (
+                optimize_goal_task_ids,
+                fork_logical_task_ids,
+                non_repr_group_transform_expr_task_ids,
+            ) = {
                 let non_repr_group_task = self
                     .tasks
                     .get_mut(non_repr_group_task_id)
@@ -289,6 +289,7 @@ impl<M: Memoize> Optimizer<M> {
                 (
                     non_repr_group_task.optimize_goal_out.clone(),
                     non_repr_group_task.fork_logical_out.clone(),
+                    non_repr_group_task.transform_expr_in.clone(),
                 )
             };
 
@@ -348,8 +349,85 @@ impl<M: Memoize> Optimizer<M> {
                 }
             }
 
-            // TODO(Sarvesh): we need to move all the subscribers to the repr group.
-            // TODO(Sarvesh): we also need to delete the non-repr group task and all the tasks that are publishers to it.
+            // Now let's handle all the ins! The children! The transform expression tasks!
+            // We have two set of tasks. For the logical expression in the union of those sets,
+            // there can be a unique and repr transform expression task, or a unique and non-repr transform expression task, or both.
+            // So, what we do is, we first look for duplicates in the union of the two sets.
+
+            let mut exprs_to_trans_tasks = HashMap::new();
+            for task_id in repr_group_transform_expr_task_ids
+                .iter()
+                .chain(non_repr_group_transform_expr_task_ids.iter())
+            {
+                let task = self.tasks.get(task_id).unwrap().as_transform_expression();
+                let logical_expr_id = task.logical_expr_id;
+                let repr_logical_expr_id =
+                    self.memo.find_repr_logical_expr(logical_expr_id).await?;
+                exprs_to_trans_tasks
+                    .entry(repr_logical_expr_id)
+                    .or_insert_with(HashMap::new)
+                    .entry(task.rule.clone())
+                    .or_insert_with(Vec::new)
+                    .push((task_id, logical_expr_id));
+            }
+
+            for expr in all_exprs.iter() {
+                if !exprs_to_trans_tasks.contains_key(expr) {
+                    // If there is not task for this expr, then we need to create a new one.
+                    let transformations = self.rule_book.get_transformations().to_vec();
+                    self.create_transformation_tasks(*expr, *repr_group_task_id, transformations)
+                        .await?;
+                } else {
+                    let mut all_tasks_for_this_expr =
+                        exprs_to_trans_tasks.get(expr).unwrap().clone();
+                    for rule in self.rule_book.get_transformations().to_vec() {
+                        if !all_tasks_for_this_expr.contains_key(&rule) {
+                            let impl_expr_task_id = self
+                                .create_transform_expression_task(
+                                    rule.clone(),
+                                    *expr,
+                                    *repr_group_task_id,
+                                )
+                                .await?;
+                        } else if all_tasks_for_this_expr.get(&rule).unwrap().len() == 1 {
+                            let (task_id, task_expr_id) =
+                                all_tasks_for_this_expr.get(&rule).unwrap()[0];
+                            if task_expr_id == *expr {
+                                // The task is already the repr task, so we don't need to do anything.
+                                continue;
+                            } else {
+                                // The task is not the repr task, so we need to update the task to point to the new expr.
+                                let task = self
+                                    .tasks
+                                    .get_mut(task_id)
+                                    .unwrap()
+                                    .as_transform_expression_mut();
+                                task.logical_expr_id = *expr;
+                                task.explore_group_out = *repr_group_task_id;
+                            }
+                        } else {
+                            // If there is more than one task for this expr, then we need to merge them.
+                            for (task_id, task_expr_id) in
+                                all_tasks_for_this_expr.get(&rule).unwrap()
+                            {
+                                if task_expr_id == expr {
+                                    // The task is already the repr task, so we just make sure that it points to the new repr group.
+                                    let task = self
+                                        .tasks
+                                        .get_mut(task_id)
+                                        .unwrap()
+                                        .as_transform_expression_mut();
+                                    task.explore_group_out = *repr_group_task_id;
+                                    continue;
+                                } else {
+                                    // The task is not the repr task, so we need to delete it.
+                                    self.try_delete_task(**task_id);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
         // for group_merge in result.group_merges {
         //     // For each MergedGroupInfo
