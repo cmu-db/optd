@@ -832,7 +832,7 @@ impl MemoryMemo {
         let mut merged_goal_result = MergeGoalResult {
             best_expr: None,
             new_repr_goal_id: goal_id1,
-            old_non_repr_goal_id: goal_id2,
+            non_repr_goal_id: goal_id2,
             repr_goal_seen_best_expr_before_merge: false,
             non_repr_goal_seen_best_expr_before_merge: false,
             members: HashSet::default(),
