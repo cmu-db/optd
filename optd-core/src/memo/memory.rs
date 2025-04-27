@@ -901,13 +901,12 @@ impl MemoryMemo {
             .insert(goal_id2.clone(), merged_goal_info_2);
 
         // Now, we need to update all the physical exprs that depend on goal 2 to now depend on goal 1.
-        let goal_2_dependent_physical_exprs = self
+        let goal_2_dependent_physical_exprs = match self
             .goal_dependent_physical_exprs
-            .get(&goal_id2)
-            .unwrap()
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
+            .get(&goal_id2) {
+                None => { HashSet::default()}
+                Some(exprs) => { exprs.clone() }
+            };
 
         let mut results = Vec::new();
         for physical_expr_id in goal_2_dependent_physical_exprs {
@@ -932,12 +931,13 @@ impl MemoryMemo {
             return Ok(None);
         }
         let mut result = MergeResult::default();
-
         let group_2_state = self.groups.remove(&group_id_2).unwrap();
-        let group_2_exprs = group_2_state.logical_exprs.iter().cloned().collect();
+        let group_2_exprs: Vec<LogicalExpressionId> =
+            group_2_state.logical_exprs.iter().cloned().collect();
 
         let group1_state = self.groups.get_mut(&group_id_1).unwrap();
-        let group1_exprs = group1_state.logical_exprs.iter().cloned().collect();
+        let group1_exprs: Vec<LogicalExpressionId> =
+            group1_state.logical_exprs.iter().cloned().collect();
 
         for logical_expr_id in group_2_state.logical_exprs {
             // Update the logical expression to point to the new group id.
@@ -947,15 +947,20 @@ impl MemoryMemo {
             assert!(old_group_id.is_some());
             group1_state.logical_exprs.insert(logical_expr_id);
         }
-        let mut merge_group_result = MergeGroupResult::new(group_id_1);
+        let mut merge_group_result = MergeGroupResult::new(group_id_1, group_id_2);
         merge_group_result
-            .merged_groups
-            .insert(group_id_1, group1_exprs);
+            .all_exprs_in_merged_group
+            .extend(group1_exprs.iter().cloned());
         merge_group_result
-            .merged_groups
-            .insert(group_id_2, group_2_exprs);
+            .all_exprs_in_merged_group
+            .extend(group_2_exprs.iter().cloned());
 
         self.repr_group.merge(&group_id_2, &group_id_1);
+
+        merge_group_result.new_repr_group_exprs.extend(group1_exprs);
+        merge_group_result
+            .old_non_repr_group_exprs
+            .extend(group_2_exprs);
 
         result.group_merges.push(merge_group_result);
 
@@ -983,11 +988,11 @@ impl MemoryMemo {
         }
 
         // Let's check for cascading merges now.
-        let logical_expr_with_group_2_as_child = self
-            .group_dependent_logical_exprs
-            .get(&group_id_2)
-            .unwrap()
-            .clone();
+        let logical_expr_with_group_2_as_child =
+            match self.group_dependent_logical_exprs.get(&group_id_2) {
+                None => HashSet::default(),
+                Some(exprs) => exprs.clone(),
+            };
 
         for logical_expr_id in logical_expr_with_group_2_as_child.iter() {
             let logical_expr = self.logical_exprs.get(logical_expr_id).unwrap();

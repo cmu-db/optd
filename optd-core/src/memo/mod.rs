@@ -48,8 +48,19 @@ pub enum Status {
 pub struct MergeGroupResult {
     /// ID of the new representative group id.
     pub new_repr_group_id: GroupId,
-    /// Groups that were merged along with their expressions.
-    pub merged_groups: HashMap<GroupId, Vec<LogicalExpressionId>>,
+    pub old_non_repr_group_id: GroupId,
+
+    // A Key assumption here is that all expressions here are representative expressions i.e. the children group IDs of the expressions are all repr group IDs.
+    /// All expressions in the merged group.
+    pub all_exprs_in_merged_group: HashSet<LogicalExpressionId>,
+
+    // A Key assumption here is that all expressions here are representative expressions i.e. the children group IDs of the expressions are all repr group IDs.
+    /// The expressions that were in the old non-repr group.
+    pub old_non_repr_group_exprs: HashSet<LogicalExpressionId>,
+
+    // A Key assumption here is that all expressions here are representative expressions i.e. the children group IDs of the expressions are all repr group IDs.
+    /// The expressions that are in the repr group.
+    pub new_repr_group_exprs: HashSet<LogicalExpressionId>,
 }
 
 impl MergeGroupResult {
@@ -58,10 +69,13 @@ impl MergeGroupResult {
     /// # Parameters
     /// * `merged_groups` - Groups that were merged along with their expressions.
     /// * `new_repr_group_id` - ID of the new representative group id.
-    pub fn new(new_repr_group_id: GroupId) -> Self {
+    pub fn new(new_repr_group_id: GroupId, old_non_repr_group_id: GroupId) -> Self {
         Self {
             new_repr_group_id,
-            merged_groups: HashMap::new(),
+            old_non_repr_group_id,
+            all_exprs_in_merged_group: HashSet::new(),
+            old_non_repr_group_exprs: HashSet::new(),
+            new_repr_group_exprs: HashSet::new(),
         }
     }
 }
@@ -75,6 +89,7 @@ pub struct MergedGoalInfo {
     /// Whether this goal contained the best costed expression before merging.
     pub seen_best_expr_before_merge: bool,
 
+    /// TODO(Sarvesh): This is not used anywhere.
     /// All members in this goal, which can be physical expressions or references to other goals
     pub members: Vec<GoalMemberId>,
 }

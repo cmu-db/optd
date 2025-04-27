@@ -17,6 +17,152 @@ use crate::{
 };
 
 impl<M: Memoize> Optimizer<M> {
+    /// Recursively deletes tasks that are no longer needed.
+    /// Confirms before deletion that the task is not subscribed to by any other task by checking if the parent tasks (the outs) exist in the task index.
+    /// If the parent task is not found in the task index, then the given task is safely deleted. Else, we do not delete the task.
+    pub(super) fn try_delete_task(&mut self, task_id: TaskId) {
+        if let Some(task) = self.tasks.get(&task_id) {
+            // Check if the task is subscribed to by any other task. If yes, then return.
+            match task {
+                Task::ExploreGroup(task) => {
+                    for id in task.fork_logical_out.iter() {
+                        if self.tasks.get(id).is_some() {
+                            return;
+                        }
+                    }
+                    for id in task.optimize_goal_out.iter() {
+                        if self.tasks.get(id).is_some() {
+                            return;
+                        }
+                    }
+                }
+                Task::TransformExpression(task) => {
+                    if self.tasks.get(&task.explore_group_out).is_some() {
+                        return;
+                    }
+                }
+                Task::ForkLogical(task) => {
+                    if self.tasks.get(&task.out).is_some() {
+                        return;
+                    }
+                }
+                Task::OptimizePlan(task) => {
+                    panic!("OptimizePlan task should not be deleted");
+                }
+                Task::OptimizeGoal(task) => {
+                    for id in task.optimize_goal_out.iter() {
+                        if self.tasks.get(&id).is_some() {
+                            return;
+                        }
+                    }
+                    for id in task.optimize_plan_out.iter() {
+                        if self.tasks.get(&id).is_some() {
+                            return;
+                        }
+                    }
+                    for id in task.fork_costed_out.iter() {
+                        if self.tasks.get(&id).is_some() {
+                            return;
+                        }
+                    }
+                }
+                Task::ImplementExpression(task) => {
+                    if self.tasks.get(&task.optimize_goal_out).is_some() {
+                        return;
+                    }
+                }
+                Task::CostExpression(task) => {
+                    for id in task.optimize_goal_out.iter() {
+                        if self.tasks.get(&id).is_some() {
+                            return;
+                        }
+                    }
+                }
+                Task::ContinueWithLogical(task) => {
+                    if self.tasks.get(&task.fork_out).is_some() {
+                        return;
+                    }
+                }
+                Task::ForkCosted(task) => {
+                    if self.tasks.get(&task.out).is_some() {
+                        return;
+                    }
+                }
+                Task::ContinueWithCosted(task) => {
+                    if self.tasks.get(&task.fork_out).is_some() {
+                        return;
+                    }
+                }
+            }
+
+            // No subscribers, safe to delete.
+            let task = self.tasks.remove(&task_id).unwrap();
+
+            // Try to delete the publisher tasks.
+            match task {
+                Task::ExploreGroup(task) => {
+                    self.group_exploration_task_index.remove(&task.group_id);
+                    for id in task.transform_expr_in {
+                        self.try_delete_task(id);
+                    }
+                }
+                Task::TransformExpression(task) => {
+                    for id in task.fork_in {
+                        self.try_delete_task(id);
+                    }
+                }
+                Task::ForkLogical(task) => {
+                    for id in task.continue_ins {
+                        self.try_delete_task(id);
+                    }
+                    self.try_delete_task(task.explore_group_in);
+                }
+                Task::OptimizePlan(optimize_plan_task) => {
+                    panic!("OptimizePlan task should not be deleted");
+                }
+                Task::OptimizeGoal(task) => {
+                    self.goal_optimization_task_index.remove(&task.goal_id);
+                    self.try_delete_task(task.explore_group_in);
+                    for id in task.optimize_goal_in {
+                        self.try_delete_task(id);
+                    }
+                    for id in task.implement_expression_in {
+                        self.try_delete_task(id);
+                    }
+                    for id in task.cost_expression_in {
+                        self.try_delete_task(id);
+                    }
+                }
+                Task::ImplementExpression(task) => {
+                    if let Some(id) = task.fork_in {
+                        self.try_delete_task(id);
+                    }
+                }
+                Task::CostExpression(task) => {
+                    if let Some(id) = task.fork_in {
+                        self.try_delete_task(id);
+                    }
+                }
+                Task::ContinueWithLogical(task) => {
+                    if let Some(id) = task.fork_in {
+                        self.try_delete_task(id);
+                    }
+                }
+                Task::ForkCosted(task) => {
+                    for id in task.continue_ins {
+                        self.try_delete_task(id);
+                    }
+                    self.try_delete_task(task.optimize_goal_in);
+                }
+                Task::ContinueWithCosted(task) => {
+                    if let Some(id) = task.fork_in {
+                        self.try_delete_task(id);
+                    }
+                }
+            }
+        }
+    }
+
     /// Helper method to handle different types of merge results.
     ///
     /// This method processes the results of group and goal merges, updating
@@ -25,7 +171,186 @@ impl<M: Memoize> Optimizer<M> {
     /// # Parameters
     /// * `result` - The merge result to handle.
     pub(super) async fn handle_merge_result(&mut self, result: MergeResult) -> Result<(), Error> {
-        // // <I. Apply group merges>
+        // <I. Apply group merges>
+        for group_merge in result.group_merges {
+            let repr_group_id = group_merge.new_repr_group_id;
+            let non_repr_group_id = group_merge.old_non_repr_group_id;
+            let all_exprs = group_merge.all_exprs_in_merged_group;
+            let new_repr_group_exprs = group_merge.new_repr_group_exprs;
+            let old_non_repr_group_exprs = group_merge.old_non_repr_group_exprs;
+
+            let repr_task_id = self.group_exploration_task_index.get(&repr_group_id);
+            let non_repr_group_task_id = self.group_exploration_task_index.get(&non_repr_group_id);
+            if repr_task_id.is_none() && non_repr_group_task_id.is_none() {
+                // There is no task for the new or old representative group
+                // So, we don't have any subscribers to notify or anything to move.
+                // This merge does not change anything for the task graph.
+                continue;
+            }
+
+            if repr_task_id.is_none() {
+                // TODO(Sarvesh): we need to create a new explore group task for the new representative group.
+            }
+            let repr_task_id = &self
+                .group_exploration_task_index
+                .get(&repr_group_id)
+                .unwrap()
+                .clone();
+
+            // we need to forward all the results from the non-repr group to subscribers of the repr group and also launch the transform expr tasks.
+            let (optimize_goal_task_ids, fork_logical_task_ids) = {
+                let repr_task = self
+                    .tasks
+                    .get_mut(repr_task_id)
+                    .unwrap()
+                    .as_explore_group_mut();
+                (
+                    repr_task.optimize_goal_out.clone(),
+                    repr_task.fork_logical_out.clone(),
+                )
+            };
+
+            let exprs_not_seen_by_repr_group = all_exprs
+                .difference(&new_repr_group_exprs)
+                .cloned()
+                .collect::<HashSet<LogicalExpressionId>>();
+
+            for logical_expr_id in exprs_not_seen_by_repr_group {
+                // Launch the transformation tasks
+                let transformations = self.rule_book.get_transformations().to_vec();
+                self.create_transformation_tasks(logical_expr_id, *repr_task_id, transformations)
+                    .await?;
+
+                // Forward the logical expression to all the outs
+                // Launch the implementation tasks
+                for optimize_goal_task_id in optimize_goal_task_ids.iter() {
+                    let goal_id = {
+                        let optimize_goal_task = self
+                            .tasks
+                            .get(optimize_goal_task_id)
+                            .unwrap()
+                            .as_optimize_goal();
+                        optimize_goal_task.goal_id
+                    };
+
+                    let implementations = self.rule_book.get_implementations().to_vec();
+
+                    let impl_expr_task_ids = self
+                        .create_implementation_tasks(
+                            logical_expr_id,
+                            goal_id,
+                            *optimize_goal_task_id,
+                            implementations,
+                        )
+                        .await?;
+
+                    let optimize_goal_task = self
+                        .tasks
+                        .get_mut(optimize_goal_task_id)
+                        .unwrap()
+                        .as_optimize_goal_mut();
+
+                    for task_id in impl_expr_task_ids {
+                        optimize_goal_task.add_implement_expr_in(task_id);
+                    }
+                }
+
+                // Create continuation for each logical expression from the other groups
+                // at each fork point that depends on the group.
+                // Launch the fork logical transformation tasks
+                for fork_logical_task_id in fork_logical_task_ids.iter() {
+                    let cont_with_logical_task_id = self
+                        .create_continue_with_logical_task(logical_expr_id, *fork_logical_task_id)
+                        .await?;
+                    let fork_logical_task = self
+                        .tasks
+                        .get_mut(fork_logical_task_id)
+                        .unwrap()
+                        .as_fork_logical_mut();
+                    fork_logical_task.add_continue_in(cont_with_logical_task_id);
+                }
+            }
+
+            let non_repr_group_task_id = self.group_exploration_task_index.get(&non_repr_group_id);
+            if non_repr_group_task_id.is_none() {
+                // There is no task for the non-representative group
+                // So we don't need to forward any results to this group's subscribers, as there are no subscribers to this group.
+                continue;
+            }
+            let non_repr_group_task_id = non_repr_group_task_id.unwrap();
+
+            // TODO(Sarvesh): we need to forward all the results from the repr group to subscribers of the non-repr group.
+            let (optimize_goal_task_ids, fork_logical_task_ids) = {
+                let non_repr_group_task = self
+                    .tasks
+                    .get_mut(non_repr_group_task_id)
+                    .unwrap()
+                    .as_explore_group_mut();
+                (
+                    non_repr_group_task.optimize_goal_out.clone(),
+                    non_repr_group_task.fork_logical_out.clone(),
+                )
+            };
+
+            let exprs_not_seen_by_non_repr_group = all_exprs
+                .difference(&old_non_repr_group_exprs)
+                .cloned()
+                .collect::<HashSet<LogicalExpressionId>>();
+
+            for logical_expr_id in exprs_not_seen_by_non_repr_group {
+                // Forward the logical expression to all the outs
+                // Launch the implementation tasks
+                for optimize_goal_task_id in optimize_goal_task_ids.iter() {
+                    let goal_id = {
+                        let optimize_goal_task = self
+                            .tasks
+                            .get(optimize_goal_task_id)
+                            .unwrap()
+                            .as_optimize_goal();
+                        optimize_goal_task.goal_id
+                    };
+
+                    let implementations = self.rule_book.get_implementations().to_vec();
+
+                    let impl_expr_task_ids = self
+                        .create_implementation_tasks(
+                            logical_expr_id,
+                            goal_id,
+                            *optimize_goal_task_id,
+                            implementations,
+                        )
+                        .await?;
+
+                    let optimize_goal_task = self
+                        .tasks
+                        .get_mut(optimize_goal_task_id)
+                        .unwrap()
+                        .as_optimize_goal_mut();
+
+                    for task_id in impl_expr_task_ids {
+                        optimize_goal_task.add_implement_expr_in(task_id);
+                    }
+                }
+
+                // Create continuation for each logical expression from the other groups
+                // at each fork point that depends on the group.
+                // Launch the fork logical transformation tasks
+                for fork_logical_task_id in fork_logical_task_ids.iter() {
+                    let cont_with_logical_task_id = self
+                        .create_continue_with_logical_task(logical_expr_id, *fork_logical_task_id)
+                        .await?;
+                    let fork_logical_task = self
+                        .tasks
+                        .get_mut(fork_logical_task_id)
+                        .unwrap()
+                        .as_fork_logical_mut();
+                    fork_logical_task.add_continue_in(cont_with_logical_task_id);
+                }
+            }
+
+            // TODO(Sarvesh): we need to move all the subscribers to the repr group.
+            // TODO(Sarvesh): we also need to delete the non-repr group task and all the tasks that are publishers to it.
+        }
         // for group_merge in result.group_merges {
         //     // For each MergedGroupInfo
         //     // 1. For each group
