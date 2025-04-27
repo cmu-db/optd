@@ -830,9 +830,12 @@ impl MemoryMemo {
         self.repr_goal.merge(&goal_id2, &goal_id1);
 
         let mut merged_goal_result = MergeGoalResult {
-            merged_goals: HashMap::new(),
             best_expr: None,
             new_repr_goal_id: goal_id1,
+            old_non_repr_goal_id: goal_id2,
+            repr_goal_seen_best_expr_before_merge: false,
+            non_repr_goal_seen_best_expr_before_merge: false,
+            members: HashSet::default(),
         };
 
         let best_expr_goal1 = self.get_best_optimized_physical_expr(goal_id1).await?;
@@ -855,57 +858,44 @@ impl MemoryMemo {
             merged_goal_result.best_expr = Some(best_expr);
         }
 
-        let mut merged_goal_info_1 = MergedGoalInfo {
-            goal_id: goal_id1.clone(),
-            members: goal_1.members.iter().cloned().collect(),
-            seen_best_expr_before_merge: {
-                if let Some(best_expr_goal1) = best_expr_goal1 {
-                    if let Some(best_expr_goal2) = best_expr_goal2 {
-                        // goal 1 and goal 2 both had expr, return true if goal 1's is better or equal to goal 2's
-                        best_expr_goal1.1 <= best_expr_goal2.1
-                    } else {
-                        // goal 1 had a best expr before merge but goal 2 didn't
-                        true
-                    }
-                } else {
-                    // neither goal had a best expr before merge
-                    false
-                }
-            },
-        };
-
-        let mut merged_goal_info_2 = MergedGoalInfo {
-            goal_id: goal_id2.clone(),
-            members: goal_2.members.iter().cloned().collect(),
-            seen_best_expr_before_merge: {
+        merged_goal_result.repr_goal_seen_best_expr_before_merge = {
+            if let Some(best_expr_goal1) = best_expr_goal1 {
                 if let Some(best_expr_goal2) = best_expr_goal2 {
-                    if let Some(best_expr_goal1) = best_expr_goal1 {
-                        // goal 2 and goal 1 both had expr, return true if goal 2's is better or equal to goal 1's
-                        best_expr_goal2.1 <= best_expr_goal1.1
-                    } else {
-                        // goal 2 had a best expr before merge but goal 1 didn't
-                        true
-                    }
+                    // goal 1 and goal 2 both had expr, return true if goal 1's is better or equal to goal 2's
+                    best_expr_goal1.1 <= best_expr_goal2.1
                 } else {
-                    // neither goal had a best expr before merge
-                    false
+                    // goal 1 had a best expr before merge but goal 2 didn't
+                    true
                 }
-            },
+            } else {
+                // neither goal had a best expr before merge
+                false
+            }
         };
 
-        merged_goal_result
-            .merged_goals
-            .insert(goal_id1.clone(), merged_goal_info_1);
-        merged_goal_result
-            .merged_goals
-            .insert(goal_id2.clone(), merged_goal_info_2);
+        merged_goal_result.non_repr_goal_seen_best_expr_before_merge = {
+            if let Some(best_expr_goal2) = best_expr_goal2 {
+                if let Some(best_expr_goal1) = best_expr_goal1 {
+                    // goal 2 and goal 1 both had expr, return true if goal 2's is better or equal to goal 1's
+                    best_expr_goal2.1 <= best_expr_goal1.1
+                } else {
+                    // goal 2 had a best expr before merge but goal 1 didn't
+                    true
+                }
+            } else {
+                // neither goal had a best expr before merge
+                false
+            }
+        };
+
+        merged_goal_result.members = goal_1.members.iter().cloned().collect();
+        merged_goal_result.members.extend(goal_2.members.iter().cloned());
 
         // Now, we need to update all the physical exprs that depend on goal 2 to now depend on goal 1.
-        let goal_2_dependent_physical_exprs = match self
-            .goal_dependent_physical_exprs
-            .get(&goal_id2) {
-                None => { HashSet::default()}
-                Some(exprs) => { exprs.clone() }
+        let goal_2_dependent_physical_exprs =
+            match self.goal_dependent_physical_exprs.get(&goal_id2) {
+                None => HashSet::default(),
+                Some(exprs) => exprs.clone(),
             };
 
         let mut results = Vec::new();

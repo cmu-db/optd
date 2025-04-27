@@ -12,7 +12,7 @@ use crate::{
         TransformationRule,
     },
     error::Error,
-    memo::{Memoize, MergeResult, MergedGoalInfo},
+    memo::{Memoize, MergeResult},
     optimizer::tasks::TaskId,
 };
 
@@ -190,6 +190,7 @@ impl<M: Memoize> Optimizer<M> {
 
             if repr_group_task_id.is_none() {
                 // TODO(Sarvesh): we need to create a new explore group task for the new representative group.
+                self.create_explore_group_task(repr_group_id, None).await?;
             }
             let repr_group_task_id = &self
                 .group_exploration_task_index
@@ -223,9 +224,10 @@ impl<M: Memoize> Optimizer<M> {
                     let goal_id = {
                         let optimize_goal_task = self
                             .tasks
-                            .get(optimize_goal_task_id)
+                            .get_mut(optimize_goal_task_id)
                             .unwrap()
-                            .as_optimize_goal();
+                            .as_optimize_goal_mut();
+                        optimize_goal_task.explore_group_in = *repr_group_task_id;
                         optimize_goal_task.goal_id
                     };
 
@@ -263,6 +265,7 @@ impl<M: Memoize> Optimizer<M> {
                         .get_mut(fork_logical_task_id)
                         .unwrap()
                         .as_fork_logical_mut();
+                    fork_logical_task.explore_group_in = *repr_group_task_id;
                     fork_logical_task.add_continue_in(cont_with_logical_task_id);
                 }
             }
@@ -273,7 +276,7 @@ impl<M: Memoize> Optimizer<M> {
                 // So we don't need to forward any results to this group's subscribers, as there are no subscribers to this group.
                 continue;
             }
-            let non_repr_group_task_id = non_repr_group_task_id.unwrap();
+            let non_repr_group_task_id = &non_repr_group_task_id.unwrap().clone();
 
             // TODO(Sarvesh): we need to forward all the results from the repr group to subscribers of the non-repr group.
             let (
@@ -305,9 +308,10 @@ impl<M: Memoize> Optimizer<M> {
                     let goal_id = {
                         let optimize_goal_task = self
                             .tasks
-                            .get(optimize_goal_task_id)
+                            .get_mut(optimize_goal_task_id)
                             .unwrap()
-                            .as_optimize_goal();
+                            .as_optimize_goal_mut();
+                        optimize_goal_task.explore_group_in = *repr_group_task_id;
                         optimize_goal_task.goal_id
                     };
 
@@ -345,6 +349,7 @@ impl<M: Memoize> Optimizer<M> {
                         .get_mut(fork_logical_task_id)
                         .unwrap()
                         .as_fork_logical_mut();
+                    fork_logical_task.explore_group_in = *repr_group_task_id;
                     fork_logical_task.add_continue_in(cont_with_logical_task_id);
                 }
             }
@@ -428,6 +433,10 @@ impl<M: Memoize> Optimizer<M> {
                     }
                 }
             }
+        }
+
+        for goal_merge in result.goal_merges {
+            let repr_goal_id = goal_merge.new_repr_goal_id;
         }
         // for group_merge in result.group_merges {
         //     // For each MergedGroupInfo
@@ -882,55 +891,55 @@ impl<M: Memoize> Optimizer<M> {
         // }
     }
 
-    /// Helper method to merge optimization tasks for merged goals.
-    async fn merge_optimization_tasks(
-        &mut self,
-        _all_exprs_by_goal: &[MergedGoalInfo],
-        _new_repr_goal_id: GoalId,
-    ) {
-        // // Collect all task IDs associated with the merged goals.
-        // let optimization_tasks: Vec<_> = all_exprs_by_goal
-        //     .iter()
-        //     .filter_map(|goal_info| {
-        //         self.goal_optimization_task_index
-        //             .get(&goal_info.goal_id)
-        //             .copied()
-        //             .map(|task_id| (task_id, goal_info.goal_id))
-        //     })
-        //     .collect();
+    // Helper method to merge optimization tasks for merged goals.
+    // async fn merge_optimization_tasks(
+    //     &mut self,
+    //     _all_exprs_by_goal: &[MergedGoalInfo],
+    //     _new_repr_goal_id: GoalId,
+    // ) {
+    // // Collect all task IDs associated with the merged goals.
+    // let optimization_tasks: Vec<_> = all_exprs_by_goal
+    //     .iter()
+    //     .filter_map(|goal_info| {
+    //         self.goal_optimization_task_index
+    //             .get(&goal_info.goal_id)
+    //             .copied()
+    //             .map(|task_id| (task_id, goal_info.goal_id))
+    //     })
+    //     .collect();
 
-        // match optimization_tasks.as_slice() {
-        //     [] => (), // No tasks exist, nothing to do.
+    // match optimization_tasks.as_slice() {
+    //     [] => (), // No tasks exist, nothing to do.
 
-        //     [(task_id, goal_id)] => {
-        //         // Just one task exists - update its index and kind.
-        //         if *goal_id != new_repr_goal_id {
-        //             self.goal_optimization_task_index.remove(goal_id);
-        //         }
+    //     [(task_id, goal_id)] => {
+    //         // Just one task exists - update its index and kind.
+    //         if *goal_id != new_repr_goal_id {
+    //             self.goal_optimization_task_index.remove(goal_id);
+    //         }
 
-        //         self.goal_optimization_task_index
-        //             .insert(new_repr_goal_id, *task_id);
-        //     }
+    //         self.goal_optimization_task_index
+    //             .insert(new_repr_goal_id, *task_id);
+    //     }
 
-        //     [(primary_task_id, _), rest @ ..] => {
-        //         // Multiple tasks - merge them into the primary task.
-        //         let mut children_to_add = Vec::new();
-        //         for (task_id, _) in rest {
-        //             let task = self.tasks.get(task_id).unwrap();
-        //             children_to_add.extend(task.children.clone());
-        //             self.tasks.remove(task_id);
-        //         }
+    //     [(primary_task_id, _), rest @ ..] => {
+    //         // Multiple tasks - merge them into the primary task.
+    //         let mut children_to_add = Vec::new();
+    //         for (task_id, _) in rest {
+    //             let task = self.tasks.get(task_id).unwrap();
+    //             children_to_add.extend(task.children.clone());
+    //             self.tasks.remove(task_id);
+    //         }
 
-        //         let primary_task = self.tasks.get_mut(primary_task_id).unwrap();
-        //         primary_task.children.extend(children_to_add);
+    //         let primary_task = self.tasks.get_mut(primary_task_id).unwrap();
+    //         primary_task.children.extend(children_to_add);
 
-        //         for goal_info in all_exprs_by_goal {
-        //             self.goal_optimization_task_index.remove(&goal_info.goal_id);
-        //         }
+    //         for goal_info in all_exprs_by_goal {
+    //             self.goal_optimization_task_index.remove(&goal_info.goal_id);
+    //         }
 
-        //         self.goal_optimization_task_index
-        //             .insert(new_repr_goal_id, *primary_task_id);
-        //     }
-        // }
-    }
+    //         self.goal_optimization_task_index
+    //             .insert(new_repr_goal_id, *primary_task_id);
+    //     }
+    // }
+    // }
 }

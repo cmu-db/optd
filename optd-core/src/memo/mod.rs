@@ -80,31 +80,29 @@ impl MergeGroupResult {
     }
 }
 
-/// Information about a merged goal, including its ID and expressions
-#[derive(Debug)]
-pub struct MergedGoalInfo {
-    /// ID of the merged goal
-    pub goal_id: GoalId,
-
-    /// Whether this goal contained the best costed expression before merging.
-    pub seen_best_expr_before_merge: bool,
-
-    /// TODO(Sarvesh): This is not used anywhere.
-    /// All members in this goal, which can be physical expressions or references to other goals
-    pub members: Vec<GoalMemberId>,
-}
-
 /// Result of merging two goals.
 #[derive(Debug)]
 pub struct MergeGoalResult {
-    /// Goals that were merged along with their potential best costed expression.
-    pub merged_goals: HashMap<GoalId, MergedGoalInfo>,
-
     /// The best costed expression for all merged goals combined.
     pub best_expr: Option<(PhysicalExpressionId, Cost)>,
 
     /// ID of the new representative goal id.
     pub new_repr_goal_id: GoalId,
+
+    /// ID of the old non-representative goal id.
+    pub old_non_repr_goal_id: GoalId,
+
+    /// Whether the representative goal contained the best costed expression before merging.
+    pub repr_goal_seen_best_expr_before_merge: bool,
+
+    /// Whether the non-representative goal contained the best costed expression before merging.
+    pub non_repr_goal_seen_best_expr_before_merge: bool,
+
+    /// All members in the merged goal, unlike for group merge results, these may not necessarily be representative IDs.
+    /// The reasoning for this is that there is an edge case where the merging two groups results in 2 pairs of goals being merged.
+    /// However, if one fo the goals is a member of the other goals, then we cannot guarantee the order in which the merge will happen.
+    /// Hence, we cannot guarantee that the members are representative IDs.
+    pub members: HashSet<GoalMemberId>,
 }
 
 /// Result of merging two cost expressions.
