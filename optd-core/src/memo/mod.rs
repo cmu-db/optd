@@ -90,7 +90,7 @@ pub struct MergeGoalResult {
     pub new_repr_goal_id: GoalId,
 
     /// ID of the old non-representative goal id.
-    pub old_non_repr_goal_id: GoalId,
+    pub non_repr_goal_id: GoalId,
 
     /// Whether the representative goal contained the best costed expression before merging.
     pub repr_goal_seen_best_expr_before_merge: bool,

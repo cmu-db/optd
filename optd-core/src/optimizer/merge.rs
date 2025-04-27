@@ -437,6 +437,7 @@ impl<M: Memoize> Optimizer<M> {
 
         for goal_merge in result.goal_merges {
             let repr_goal_id = goal_merge.new_repr_goal_id;
+            let non_repr_goal_id = goal_merge.non_repr_goal_id;
         }
         // for group_merge in result.group_merges {
         //     // For each MergedGroupInfo
