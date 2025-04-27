@@ -18,7 +18,7 @@ pub static IMPLEMENTATION_SIGNATURE_TYPE: Lazy<Type> = Lazy::new(|| {
     use TypeKind::*;
     let params_type = Tuple(vec![
         Stored(Adt(LOGICAL_TYPE.to_string()).into()).into(),
-        Adt(PHYSICAL_PROPS.to_string()).into(),
+        Optional(Adt(PHYSICAL_PROPS.to_string()).into()).into(),
     ])
     .into();
     let return_type = Optional(Adt(PHYSICAL_TYPE.to_string()).into()).into();
@@ -155,7 +155,7 @@ mod tests {
         let function_type = TypeKind::Closure(
             TypeKind::Tuple(vec![
                 TypeKind::Stored(TypeKind::Adt(LOGICAL_TYPE.to_string()).into()).into(),
-                TypeKind::Adt(PHYSICAL_PROPS.to_string()).into(),
+                TypeKind::Optional(TypeKind::Adt(PHYSICAL_PROPS.to_string()).into()).into(),
             ])
             .into(),
             TypeKind::Optional(TypeKind::Adt(PHYSICAL_TYPE.to_string()).into()).into(),
@@ -195,7 +195,7 @@ mod tests {
         let function_type = TypeKind::Closure(
             TypeKind::Tuple(vec![
                 TypeKind::Stored(TypeKind::Adt(LOGICAL_TYPE.to_string()).into()).into(),
-                TypeKind::Adt(PHYSICAL_PROPS.to_string()).into(),
+                TypeKind::Optional(TypeKind::Adt(PHYSICAL_PROPS.to_string()).into()).into(),
             ])
             .into(),
             TypeKind::Adt("PhysicalHashJoin".to_string()).into(),
