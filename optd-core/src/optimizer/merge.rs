@@ -438,6 +438,13 @@ impl<M: Memoize> Optimizer<M> {
         for goal_merge in result.goal_merges {
             let repr_goal_id = goal_merge.new_repr_goal_id;
             let non_repr_goal_id = goal_merge.non_repr_goal_id;
+
+            let repr_goal_task_id = self.goal_optimization_task_index.get(&repr_goal_id);
+            // if repr_goal_task_id.is_none() {
+            //     // TODO(Sarvesh): we need to create a new optimize goal task for the repr goal.
+            //     self.create_optimize_goal_task(repr_goal_id, None).await?;
+            // }
+            let repr_goal_task_id = repr_goal_task_id.unwrap();
         }
         // for group_merge in result.group_merges {
         //     // For each MergedGroupInfo

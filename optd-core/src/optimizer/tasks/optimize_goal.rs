@@ -23,7 +23,7 @@ pub struct OptimizeGoalTask {
 
 impl OptimizeGoalTask {
     /// Creates a new `OptimizeGoalTask` and track `out` as a subscriber.
-    pub fn new(goal_id: GoalId, out: SourceTaskId, explore_group_in: TaskId) -> Self {
+    pub fn new(goal_id: GoalId, out: Option<SourceTaskId>, explore_group_in: TaskId) -> Self {
         let mut task = Self {
             goal_id,
             optimize_plan_out: Vec::new(),
@@ -34,7 +34,9 @@ impl OptimizeGoalTask {
             implement_expression_in: Vec::new(),
             cost_expression_in: Vec::new(),
         };
-        task.add_subscriber(out);
+        if let Some(out) = out {
+            task.add_subscriber(out);
+        }
         task
     }
 
@@ -78,7 +80,7 @@ impl<M: Memoize> Optimizer<M> {
                 let best_optimized = self.memo.get_best_optimized_physical_expr(goal_id).await?;
                 Ok((*task_id, best_optimized))
             } else {
-                self.create_optimize_goal_task(goal_id, out).await
+                self.create_optimize_goal_task(goal_id, Some(out)).await
             }
         })
         .await?;
@@ -87,7 +89,7 @@ impl<M: Memoize> Optimizer<M> {
     pub async fn create_optimize_goal_task(
         &mut self,
         goal_id: GoalId,
-        out: SourceTaskId,
+        out: Option<SourceTaskId>,
     ) -> Result<(TaskId, Option<(PhysicalExpressionId, Cost)>), Error> {
         let task_id = self.next_task_id();
 
