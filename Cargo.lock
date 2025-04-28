@@ -2006,6 +2006,7 @@ dependencies = [
  "futures",
  "iceberg",
  "iceberg-catalog-memory",
+ "once_cell",
  "ordered-float 5.0.0",
  "tempfile",
  "tokio",
