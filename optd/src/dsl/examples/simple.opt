@@ -16,12 +16,12 @@ fn main(log: Logical): Logical? = match log
         let closure = x -> right in
         closure(5)
     }
-    | fooo -> arr_as_function(Const(54), 0, [log])
+    | fooo -> arr_as_function(fooo, 0, [log])
     | List(bla) -> match bla
         | vla -> vla(0)
         \ [] -> none
     | Add(left, right) -> left
     \ _ -> fail("brru")
 
-fn (log: [Logical]) vla: List = match log 
-    \ [Const(5) .. [v .. []]] -> v
+fn (log: [Logical]) vla: [Logical] = match log 
+    \ [Const(5) .. [List([Const(5) .. _]) .. v]] -> v
