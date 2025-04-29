@@ -268,16 +268,15 @@ impl TypeRegistry {
         match &pattern.kind {
             Bind(_, sub_pattern) => self.check_pattern_match_constraint(scrutinee, sub_pattern),
             Struct(name, field_patterns) => {
-                let field_checks_result = field_patterns.iter().enumerate().fold(
-                    Ok(false),
-                    |acc_result, (i, field_pat)| {
+                let field_checks_result = field_patterns.iter().enumerate().try_fold(
+                    false,
+                    |acc_changed, (i, field_pat)| {
                         let field_type = self.get_product_field_type_by_index(name, i).unwrap();
                         let field_scrutinee =
                             TypedSpan::new(field_type, field_pat.metadata.span.clone());
 
-                        let field_result =
-                            self.check_pattern_match_constraint(&field_scrutinee, field_pat);
-                        self.combine_results(acc_result, field_result)
+                        self.check_pattern_match_constraint(&field_scrutinee, field_pat)
+                            .map(|changed| acc_changed | changed)
                     },
                 );
 
