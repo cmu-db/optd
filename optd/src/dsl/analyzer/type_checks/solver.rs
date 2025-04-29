@@ -9,9 +9,6 @@ use crate::dsl::{
 };
 use std::mem;
 
-/// Result type for constraint checking that tracks type changes even on error
-type ConstraintResult = Result<bool, (Box<AnalyzerErrorKind>, bool)>;
-
 impl TypeRegistry {
     /// Resolves all collected constraints and fills in the concrete types.
     ///
@@ -21,8 +18,8 @@ impl TypeRegistry {
     ///
     /// # Returns
     ///
-    /// * `Ok(())` if all constraints are successfully resolved
-    /// * `Err(error)` containing the last encountered type error when no further progress could be made
+    /// * `Ok(())` if all constraints are successfully resolved.
+    /// * `Err(error)` containing the last encountered type error when no further progress could be made.
     pub fn resolve(&mut self) -> Result<(), Box<AnalyzerErrorKind>> {
         let mut any_changed = true;
         let mut last_error = None;
@@ -35,13 +32,14 @@ impl TypeRegistry {
             let constraints = mem::take(&mut self.constraints);
 
             for constraint in &constraints {
-                match self.check_constraint(constraint) {
-                    Ok(changed) => {
-                        any_changed |= changed;
+                let mut constraint_changed = false;
+                match self.check_constraint(constraint, &mut constraint_changed) {
+                    Ok(()) => {
+                        any_changed |= constraint_changed;
                     }
-                    Err((err, changed)) => {
+                    Err(err) => {
                         // Store the error but continue processing other constraints.
-                        any_changed |= changed;
+                        any_changed |= constraint_changed;
                         last_error = Some(err);
                     }
                 }
@@ -58,30 +56,30 @@ impl TypeRegistry {
         }
     }
 
-    /// Checks if a single constraint is satisfied.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(bool)` - The constraint is satisfied, with a boolean indicating if any types were changed.
-    /// * `Err((Box<AnalyzerErrorKind>, bool))` - The constraint failed, with the error and a boolean
-    ///   indicating if any types were changed during the check.
-    fn check_constraint(&mut self, constraint: &Constraint) -> ConstraintResult {
+    /// Checks if a single constraint is satisfied
+    fn check_constraint(
+        &mut self,
+        constraint: &Constraint,
+        changed: &mut bool,
+    ) -> Result<(), Box<AnalyzerErrorKind>> {
         match constraint {
-            Constraint::Subtype { child, parent } => self.check_subtype_constraint(child, parent),
+            Constraint::Subtype { child, parent } => {
+                self.check_subtype_constraint(child, parent, changed)
+            }
 
             Constraint::Call { inner, args, outer } => {
-                self.check_call_constraint(inner, args, outer)
+                self.check_call_constraint(inner, args, outer, changed)
             }
 
             Constraint::Scrutinee { scrutinee, pattern } => {
-                self.check_pattern_match_constraint(scrutinee, pattern)
+                self.check_pattern_match_constraint(scrutinee, pattern, changed)
             }
 
             Constraint::FieldAccess {
                 inner,
                 field,
                 outer,
-            } => self.check_field_access_constraint(inner, field, outer),
+            } => self.check_field_access_constraint(inner, field, outer, changed),
         }
     }
 
@@ -89,21 +87,18 @@ impl TypeRegistry {
         &mut self,
         child: &TypedSpan,
         parent_ty: &Type,
-    ) -> ConstraintResult {
-        let mut has_changed = false;
-        let is_subtype = self.is_subtype_infer(&child.ty, parent_ty, &mut has_changed);
-
-        if is_subtype {
-            Ok(has_changed)
-        } else {
-            let err = AnalyzerErrorKind::new_invalid_subtype(
-                &child.ty,
-                parent_ty,
-                &child.span,
-                self.resolved_unknown.clone(),
-            );
-            Err((err, has_changed))
-        }
+        changed: &mut bool,
+    ) -> Result<(), Box<AnalyzerErrorKind>> {
+        self.is_subtype_infer(&child.ty, parent_ty, changed)
+            .then_some(())
+            .ok_or_else(|| {
+                AnalyzerErrorKind::new_invalid_subtype(
+                    &child.ty,
+                    parent_ty,
+                    &child.span,
+                    self.resolved_unknown.clone(),
+                )
+            })
     }
 
     fn check_call_constraint(
@@ -111,11 +106,12 @@ impl TypeRegistry {
         inner: &TypedSpan,
         args: &[TypedSpan],
         outer: &TypedSpan,
-    ) -> ConstraintResult {
+        changed: &mut bool,
+    ) -> Result<(), Box<AnalyzerErrorKind>> {
         let inner_resolved = self.resolve_type(&inner.ty);
 
         match &*inner_resolved.value {
-            TypeKind::Nothing => Ok(false),
+            TypeKind::Nothing => Ok(()),
 
             TypeKind::Closure(param, ret) => {
                 let (param_len, param_types) = match &**param {
@@ -125,56 +121,50 @@ impl TypeRegistry {
                 };
 
                 if param_len != args.len() {
-                    return Err((
-                        AnalyzerErrorKind::new_argument_number_mismatch(
-                            &inner.span,
-                            param_len,
-                            args.len(),
-                        ),
-                        false,
+                    return Err(AnalyzerErrorKind::new_argument_number_mismatch(
+                        &inner.span,
+                        param_len,
+                        args.len(),
                     ));
                 }
 
-                let param_result = args.iter().zip(param_types.iter()).try_fold(
-                    false,
-                    |acc_changes, (arg, param_type)| match self
-                        .check_subtype_constraint(arg, param_type)
-                    {
-                        Ok(changed) => Ok(acc_changes | changed),
-                        Err((err, changed)) => Err((err, acc_changes | changed)),
-                    },
-                );
-                let ret_result = self.check_subtype_constraint(
+                args.iter()
+                    .zip(param_types.iter())
+                    .try_for_each(|(arg, param_type)| {
+                        self.check_subtype_constraint(arg, param_type, changed)
+                    })?;
+
+                self.check_subtype_constraint(
                     &TypedSpan::new(ret.clone(), inner.span.clone()),
                     &outer.ty,
-                );
-
-                self.combine_results(param_result, ret_result)
+                    changed,
+                )
             }
 
-            // Maps are callable with key type for indexing.
             TypeKind::Map(key_type, val_type) => {
-                self.check_indexable(&inner.span, args, key_type, val_type, &outer.ty)
+                self.check_indexable(&inner.span, args, key_type, val_type, &outer.ty, changed)
             }
 
-            // Arrays are callable with integer indices.
             TypeKind::Array(elem_type) => {
                 let index_type = TypeKind::I64.into();
-                self.check_indexable(&inner.span, args, &index_type, elem_type, &outer.ty)
+                self.check_indexable(
+                    &inner.span,
+                    args,
+                    &index_type,
+                    elem_type,
+                    &outer.ty,
+                    changed,
+                )
             }
 
-            _ => Err((
-                AnalyzerErrorKind::new_invalid_call_receiver(
-                    &inner_resolved,
-                    &inner.span,
-                    self.resolved_unknown.clone(),
-                ),
-                false,
+            _ => Err(AnalyzerErrorKind::new_invalid_call_receiver(
+                &inner_resolved,
+                &inner.span,
+                self.resolved_unknown.clone(),
             )),
         }
     }
 
-    // Helper for array/map indexing operations where lookups might fail.
     fn check_indexable(
         &mut self,
         span: &Span,
@@ -182,20 +172,26 @@ impl TypeRegistry {
         key_type: &Type,
         elem_type: &Type,
         outer_ty: &Type,
-    ) -> ConstraintResult {
+        changed: &mut bool,
+    ) -> Result<(), Box<AnalyzerErrorKind>> {
         if args.len() != 1 {
-            return Err((
-                AnalyzerErrorKind::new_argument_number_mismatch(span, 1, args.len()),
-                false,
+            return Err(AnalyzerErrorKind::new_argument_number_mismatch(
+                span,
+                1,
+                args.len(),
             ));
         }
 
-        let index_result = self.check_subtype_constraint(&args[0], key_type);
-        let optional_elem_type = TypeKind::Optional(elem_type.clone()).into();
-        let elem_result = self
-            .check_subtype_constraint(&TypedSpan::new(optional_elem_type, span.clone()), outer_ty);
+        // Check index type.
+        self.check_subtype_constraint(&args[0], key_type, changed)?;
 
-        self.combine_results(index_result, elem_result)
+        // Check element type (wrapped in Optional).
+        let optional_elem_type = TypeKind::Optional(elem_type.clone()).into();
+        self.check_subtype_constraint(
+            &TypedSpan::new(optional_elem_type, span.clone()),
+            outer_ty,
+            changed,
+        )
     }
 
     fn check_field_access_constraint(
@@ -203,41 +199,33 @@ impl TypeRegistry {
         inner: &TypedSpan,
         field: &Identifier,
         outer: &Type,
-    ) -> ConstraintResult {
+        changed: &mut bool,
+    ) -> Result<(), Box<AnalyzerErrorKind>> {
         let inner_resolved = self.resolve_type(&inner.ty);
 
         match &*inner_resolved.value {
-            TypeKind::Nothing => Ok(false),
+            // Wait for the field access to be resolved.
+            TypeKind::Nothing => Ok(()),
 
-            TypeKind::Adt(name) => {
-                match self.get_product_field_type(name, field) {
-                    Some(field_ty) => {
-                        // Check that the field type is a subtype of the outer type.
-                        self.check_subtype_constraint(
-                            &TypedSpan::new(field_ty, inner.span.clone()),
-                            outer,
-                        )
-                    }
-                    None => Err((
-                        AnalyzerErrorKind::new_invalid_field_access(
-                            &inner_resolved,
-                            &inner.span,
-                            field,
-                            self.resolved_unknown.clone(),
-                        ),
-                        false,
-                    )),
-                }
-            }
-
-            _ => Err((
-                AnalyzerErrorKind::new_invalid_field_access(
+            TypeKind::Adt(name) => match self.get_product_field_type(name, field) {
+                Some(field_ty) => self.check_subtype_constraint(
+                    &TypedSpan::new(field_ty, inner.span.clone()),
+                    outer,
+                    changed,
+                ),
+                None => Err(AnalyzerErrorKind::new_invalid_field_access(
                     &inner_resolved,
                     &inner.span,
                     field,
                     self.resolved_unknown.clone(),
-                ),
-                false,
+                )),
+            },
+
+            _ => Err(AnalyzerErrorKind::new_invalid_field_access(
+                &inner_resolved,
+                &inner.span,
+                field,
+                self.resolved_unknown.clone(),
             )),
         }
     }
@@ -246,90 +234,68 @@ impl TypeRegistry {
         &mut self,
         scrutinee: &TypedSpan,
         pattern: &Pattern<TypedSpan>,
-    ) -> ConstraintResult {
+        changed: &mut bool,
+    ) -> Result<(), Box<AnalyzerErrorKind>> {
         use PatternKind::*;
         use TypeKind::*;
 
         let scrutinee_ty = self.resolve_type(&scrutinee.ty);
         if matches!(*scrutinee_ty.value, TypeKind::Nothing) {
-            return Ok(false);
+            // Wait for the scrutinee to be resolved.
+            return Ok(());
         }
 
         match &pattern.kind {
-            Bind(_, sub_pattern) => self.check_pattern_match_constraint(scrutinee, sub_pattern),
+            Bind(_, sub_pattern) => {
+                self.check_pattern_match_constraint(scrutinee, sub_pattern, changed)
+            }
 
             Struct(name, field_patterns) => {
-                // Process all field patterns using fold to accumulate all changes and errors.
-                // Using #[allow(clippy::manual_try_fold)] to silence the warning since we specifically
-                // don't want try_fold's early-return behavior.
-                #[allow(clippy::manual_try_fold)]
-                let field_checks_result = field_patterns.iter().enumerate().fold(
-                    Ok(false),
-                    |acc_result, (i, field_pat)| {
+                field_patterns
+                    .iter()
+                    .enumerate()
+                    .try_for_each(|(i, field_pat)| {
                         let field_type = self.get_product_field_type_by_index(name, i).unwrap();
                         let field_scrutinee =
                             TypedSpan::new(field_type, field_pat.metadata.span.clone());
 
-                        let field_result =
-                            self.check_pattern_match_constraint(&field_scrutinee, field_pat);
+                        self.check_pattern_match_constraint(&field_scrutinee, field_pat, changed)
+                    })?;
 
-                        self.combine_results(acc_result, field_result)
-                    },
-                );
-
-                let pattern_check = self.check_subtype_constraint(&pattern.metadata, &scrutinee.ty);
-                self.combine_results(field_checks_result, pattern_check)
+                self.check_subtype_constraint(&pattern.metadata, &scrutinee.ty, changed)
             }
 
             Operator(_) => panic!("Operators may not be in the HIR yet"),
 
             ArrayDecomp(head, tail) => {
-                let head_check = if let Array(ty) = &*scrutinee_ty.value {
+                if let Array(ty) = &*scrutinee_ty.value {
+                    // First check head pattern against element type.
                     let inner_scrutinee = TypedSpan::new(ty.clone(), scrutinee.span.clone());
-                    self.check_pattern_match_constraint(&inner_scrutinee, head)
+                    self.check_pattern_match_constraint(&inner_scrutinee, head, changed)?;
+
+                    // Then check tail pattern.
+                    self.check_pattern_match_constraint(scrutinee, tail, changed)
                 } else {
-                    return Err((
-                        AnalyzerErrorKind::new_invalid_array_decomposition(
-                            &scrutinee.span,
-                            &pattern.metadata.span,
-                            &scrutinee_ty,
-                            self.resolved_unknown.clone(),
-                        ),
-                        false,
-                    ));
-                };
-
-                let tail_check = self.check_pattern_match_constraint(scrutinee, tail);
-                let inner_check = self.combine_results(head_check, tail_check);
-                let pattern_check = self.check_subtype_constraint(&pattern.metadata, &scrutinee.ty);
-
-                self.combine_results(inner_check, pattern_check)
+                    Err(AnalyzerErrorKind::new_invalid_array_decomposition(
+                        &scrutinee.span,
+                        &pattern.metadata.span,
+                        &scrutinee_ty,
+                        self.resolved_unknown.clone(),
+                    ))
+                }
             }
 
             EmptyArray | Literal(_) => {
-                self.check_subtype_constraint(&pattern.metadata, &scrutinee.ty)
+                self.check_subtype_constraint(&pattern.metadata, &scrutinee.ty, changed)
             }
 
             Wildcard => {
-                // Here, we just try to enforce the wildcard type to be the same as the scrutinee type.
-                let lhs = self.check_subtype_constraint(scrutinee, &pattern.metadata.ty);
-                let rhs = self.check_subtype_constraint(&pattern.metadata, &scrutinee_ty);
-                self.combine_results(lhs, rhs)
-            }
-        }
-    }
+                // First check scrutinee against wildcard type.
+                self.check_subtype_constraint(scrutinee, &pattern.metadata.ty, changed)?;
 
-    // Combines results while preserving type changes and prioritizing the first error
-    fn combine_results(
-        &self,
-        result1: ConstraintResult,
-        result2: ConstraintResult,
-    ) -> ConstraintResult {
-        match (result1, result2) {
-            (Ok(changed1), Ok(changed2)) => Ok(changed1 | changed2),
-            (Ok(changed1), Err((err2, changed2))) => Err((err2, changed1 | changed2)),
-            (Err((err1, changed1)), Ok(changed2)) => Err((err1, changed1 | changed2)),
-            (Err((err1, changed1)), Err((_, changed2))) => Err((err1, changed1 | changed2)),
+                // Then check wildcard pattern against scrutinee type
+                self.check_subtype_constraint(&pattern.metadata, &scrutinee_ty, changed)
+            }
         }
     }
 }
