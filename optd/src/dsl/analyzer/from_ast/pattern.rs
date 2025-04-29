@@ -6,7 +6,7 @@
 use super::converter::ASTConverter;
 use crate::dsl::analyzer::errors::AnalyzerErrorKind;
 use crate::dsl::analyzer::hir::{Identifier, MatchArm, Pattern, PatternKind, TypedSpan};
-use crate::dsl::analyzer::type_checks::registry::{Type, TypeKind};
+use crate::dsl::analyzer::type_checks::registry::TypeKind;
 use crate::dsl::parser::ast::{self, Pattern as AstPattern};
 use crate::dsl::utils::span::Spanned;
 use std::collections::HashSet;
@@ -19,13 +19,12 @@ impl ASTConverter {
     /// the patterns and expressions in match arms.
     pub(super) fn convert_match_arms(
         &mut self,
-        scrutinee_ty: &Type,
         arms: &[Spanned<ast::MatchArm>],
         generics: &HashSet<Identifier>,
     ) -> Result<Vec<MatchArm<TypedSpan>>, Box<AnalyzerErrorKind>> {
         arms.iter()
             .map(|arm| {
-                let pattern = self.convert_pattern(&arm.pattern, &Some(scrutinee_ty.clone()))?;
+                let pattern = self.convert_pattern(&arm.pattern)?;
                 let expr = self.convert_expr(&arm.expr, generics)?;
 
                 Ok(MatchArm {
@@ -38,70 +37,53 @@ impl ASTConverter {
 
     /// Converts an AST pattern to an HIR pattern.
     ///
-    /// Each pattern kind determines its own specific type, which will be used
-    /// during pattern matching and constraint solving.
+    /// We must be very conservative in our type initialization here, as it requires
+    /// more information about the scrutinee (e.g. $, *, Array, etc.).
     fn convert_pattern(
         &mut self,
         spanned_pattern: &Spanned<AstPattern>,
-        parent_ty: &Option<Type>,
     ) -> Result<Pattern<TypedSpan>, Box<AnalyzerErrorKind>> {
         use TypeKind::*;
 
         let span = spanned_pattern.span.clone();
+        let mut ty = self.registry.new_unknown_asc().into();
 
-        let (kind, ty) = match &*spanned_pattern.value {
+        let kind = match &*spanned_pattern.value {
             AstPattern::Error => panic!("AST should no longer contain errors"),
             AstPattern::Bind(name, inner_pattern) => {
-                let hir_inner = self.convert_pattern(inner_pattern, parent_ty)?;
+                let hir_inner = self.convert_pattern(inner_pattern)?;
+                ty = hir_inner.metadata.ty.clone();
 
-                (
-                    PatternKind::Bind(*name.value.clone(), hir_inner.clone().into()),
-                    hir_inner.metadata.ty,
-                )
+                PatternKind::Bind(*name.value.clone(), hir_inner.clone().into())
             }
             AstPattern::Constructor(name, args) => {
                 self.validate_constructor(name, &span, args.len())?;
 
                 let hir_args = args
                     .iter()
-                    .enumerate()
-                    .map(|(idx, arg)| {
-                        self.convert_pattern(
-                            arg,
-                            &self
-                                .registry
-                                .get_product_field_type_by_index(name, idx)
-                                .unwrap()
-                                .into(),
-                        )
-                    })
+                    .map(|arg| self.convert_pattern(arg))
                     .collect::<Result<Vec<_>, _>>()?;
+                ty = Adt(*name.value.clone()).into();
 
-                (
-                    PatternKind::Struct(*name.value.clone(), hir_args),
-                    Adt(*name.value.clone()).into(),
-                )
+                PatternKind::Struct(*name.value.clone(), hir_args)
             }
             AstPattern::Literal(lit) => {
                 let (hir_lit, hir_ty) = self.convert_literal(lit);
+                ty = hir_ty;
 
-                (PatternKind::Literal(hir_lit), hir_ty)
+                PatternKind::Literal(hir_lit)
             }
-            AstPattern::Wildcard => (
-                PatternKind::Wildcard,
-                parent_ty
-                    .clone()
-                    .unwrap_or_else(|| self.registry.new_unknown_asc().into()),
-            ),
-            AstPattern::EmptyArray => (PatternKind::EmptyArray, Array(Nothing.into()).into()),
+            AstPattern::Wildcard => PatternKind::Wildcard,
+            AstPattern::EmptyArray => {
+                ty = Array(Nothing.into()).into();
+                PatternKind::EmptyArray
+            }
             AstPattern::ArrayDecomp(head, tail) => {
-                let hir_head = self.convert_pattern(head, &Option::None)?;
-                let hir_tail = self.convert_pattern(tail, parent_ty)?;
+                let hir_head = self.convert_pattern(head)?;
+                let hir_tail = self.convert_pattern(tail)?;
+                ty = Array(hir_head.metadata.ty.clone()).into();
 
-                (
-                    PatternKind::ArrayDecomp(hir_head.clone().into(), hir_tail.into()),
-                    Array(self.registry.new_unknown_asc().into()).into(),
-                )
+                PatternKind::ArrayDecomp(hir_head.clone().into(), hir_tail.into())
             }
         };
 
@@ -113,7 +95,6 @@ impl ASTConverter {
 mod pattern_tests {
     use crate::dsl::analyzer::from_ast::converter::ASTConverter;
     use crate::dsl::analyzer::hir::{Literal, PatternKind};
-    use crate::dsl::analyzer::type_checks::registry::TypeKind;
     use crate::dsl::parser::ast::{self, Field, Literal as AstLiteral, Pattern as AstPattern};
     use crate::dsl::utils::span::{Span, Spanned};
     use std::collections::HashSet;
@@ -181,12 +162,9 @@ mod pattern_tests {
 
         let arms = vec![arm1, arm2, arm3];
 
-        // Create some arbitrary scrutinee type
-        let scrutinee_ty = TypeKind::I64.into();
-
         // Convert the match arms
         let result = converter
-            .convert_match_arms(&scrutinee_ty, &arms, &HashSet::new())
+            .convert_match_arms(&arms, &HashSet::new())
             .expect("Failed to convert match arms");
 
         // Check the converted result
@@ -222,7 +200,7 @@ mod pattern_tests {
         let invalid_arm = create_match_arm(invalid_pattern, invalid_expr);
 
         let invalid_arms = vec![invalid_arm];
-        let result = converter.convert_match_arms(&scrutinee_ty, &invalid_arms, &HashSet::new());
+        let result = converter.convert_match_arms(&invalid_arms, &HashSet::new());
         assert!(
             result.is_err(),
             "Expected error for undefined type in match arm"
@@ -243,7 +221,7 @@ mod pattern_tests {
         // Test literal pattern
         let int_pattern = spanned(AstPattern::Literal(AstLiteral::Int64(42)));
         let result = converter
-            .convert_pattern(&int_pattern, &None)
+            .convert_pattern(&int_pattern)
             .expect("Literal pattern conversion should succeed");
 
         match &result.kind {
@@ -254,7 +232,7 @@ mod pattern_tests {
         // Test wildcard pattern
         let wildcard_pattern = spanned(AstPattern::Wildcard);
         let result = converter
-            .convert_pattern(&wildcard_pattern, &None)
+            .convert_pattern(&wildcard_pattern)
             .expect("Wildcard pattern conversion should succeed");
 
         match &result.kind {
@@ -267,7 +245,7 @@ mod pattern_tests {
         let bind_pattern = spanned(AstPattern::Bind(spanned("x".to_string()), inner));
 
         let result = converter
-            .convert_pattern(&bind_pattern, &None)
+            .convert_pattern(&bind_pattern)
             .expect("Binding pattern conversion should succeed");
 
         match &result.kind {
@@ -282,7 +260,7 @@ mod pattern_tests {
         ));
 
         let result = converter
-            .convert_pattern(&constructor_pattern, &None)
+            .convert_pattern(&constructor_pattern)
             .expect("Constructor pattern conversion should succeed");
 
         match &result.kind {
@@ -296,7 +274,7 @@ mod pattern_tests {
         // Test array patterns
         let empty_array_pattern = spanned(AstPattern::EmptyArray);
         let result = converter
-            .convert_pattern(&empty_array_pattern, &None)
+            .convert_pattern(&empty_array_pattern)
             .expect("Empty array pattern conversion should succeed");
 
         match &result.kind {
@@ -309,7 +287,7 @@ mod pattern_tests {
             spanned("UnknownType".to_string()),
             vec![spanned(AstPattern::Wildcard), spanned(AstPattern::Wildcard)],
         ));
-        let result = converter.convert_pattern(&unknown_constructor, &None);
+        let result = converter.convert_pattern(&unknown_constructor);
         assert!(
             result.is_err(),
             "Expected error for unknown type in constructor pattern"
@@ -333,7 +311,7 @@ mod pattern_tests {
         let array_decomp = spanned(AstPattern::ArrayDecomp(head, tail));
 
         let result = converter
-            .convert_pattern(&array_decomp, &None)
+            .convert_pattern(&array_decomp)
             .expect("Array decomposition pattern conversion should succeed");
 
         match &result.kind {
@@ -374,7 +352,7 @@ mod pattern_tests {
             spanned("Shape".to_string()),
             vec![spanned(AstPattern::Wildcard)],
         ));
-        assert!(converter.convert_pattern(&shape_pattern, &None).is_ok());
+        assert!(converter.convert_pattern(&shape_pattern).is_ok());
 
         // Test nested constructor patterns (all valid)
         let circle_inner = spanned(AstPattern::Constructor(
@@ -387,7 +365,7 @@ mod pattern_tests {
             vec![circle_inner],
         ));
 
-        let result = converter.convert_pattern(&nested_pattern, &None);
+        let result = converter.convert_pattern(&nested_pattern);
         assert!(
             result.is_ok(),
             "Valid nested constructor pattern should succeed"
@@ -404,7 +382,7 @@ mod pattern_tests {
             vec![invalid_inner],
         ));
 
-        let result = converter.convert_pattern(&invalid_nested, &None);
+        let result = converter.convert_pattern(&invalid_nested);
         assert!(
             result.is_err(),
             "Nested pattern with invalid constructor should fail"
@@ -428,7 +406,7 @@ mod pattern_tests {
             vec![spanned(AstPattern::Wildcard), spanned(AstPattern::Wildcard)],
         ));
 
-        let result = converter.convert_pattern(&correct_pattern, &None);
+        let result = converter.convert_pattern(&correct_pattern);
         assert!(
             result.is_ok(),
             "Constructor pattern with correct field count should succeed"
@@ -440,7 +418,7 @@ mod pattern_tests {
             vec![spanned(AstPattern::Wildcard)],
         ));
 
-        let result = converter.convert_pattern(&too_few_args, &None);
+        let result = converter.convert_pattern(&too_few_args);
         assert!(
             result.is_err(),
             "Constructor pattern with too few arguments should fail"
@@ -456,7 +434,7 @@ mod pattern_tests {
             ],
         ));
 
-        let result = converter.convert_pattern(&too_many_args, &None);
+        let result = converter.convert_pattern(&too_many_args);
         assert!(
             result.is_err(),
             "Constructor pattern with too many arguments should fail"

@@ -2,7 +2,7 @@ use super::registry::{Constraint, Type, TypeRegistry};
 use crate::dsl::{
     analyzer::{
         errors::AnalyzerErrorKind,
-        hir::{Identifier, TypedSpan},
+        hir::{Identifier, Pattern, PatternKind, TypedSpan},
         type_checks::registry::TypeKind,
     },
     utils::span::Span,
@@ -71,6 +71,10 @@ impl TypeRegistry {
 
             Constraint::Call { inner, args, outer } => {
                 self.check_call_constraint(inner, args, outer)
+            }
+
+            Constraint::Scrutinee { scrutinee, pattern } => {
+                self.check_pattern_match_constraint(scrutinee, pattern)
             }
 
             Constraint::FieldAccess {
@@ -245,6 +249,68 @@ impl TypeRegistry {
                 ),
                 false,
             )),
+        }
+    }
+
+    fn check_pattern_match_constraint(
+        &mut self,
+        scrutinee: &TypedSpan,
+        pattern: &Pattern<TypedSpan>,
+    ) -> ConstraintResult {
+        use PatternKind::*;
+
+        let scrutinee_ty = self.resolve_type(&scrutinee.ty);
+        if matches!(*scrutinee_ty.value, TypeKind::Nothing) {
+            // TODO: May also throw an error here.
+            return Ok(false);
+        }
+
+        match &pattern.kind {
+            Bind(_, sub_pattern) => self.check_pattern_match_constraint(scrutinee, sub_pattern),
+            Struct(name, field_patterns) => {
+                let field_checks_result = field_patterns.iter().enumerate().fold(
+                    Ok(false),
+                    |acc_result, (i, field_pat)| {
+                        let field_type = self.get_product_field_type_by_index(name, i).unwrap();
+                        let field_scrutinee =
+                            TypedSpan::new(field_type, field_pat.metadata.span.clone());
+
+                        let field_result =
+                            self.check_pattern_match_constraint(&field_scrutinee, field_pat);
+                        self.combine_results(acc_result, field_result)
+                    },
+                );
+
+                let pattern_check = self.check_subtype_constraint(&pattern.metadata, &scrutinee.ty);
+                self.combine_results(field_checks_result, pattern_check)
+            }
+            Operator(_) => panic!("Operators may not be in the HIR yet"),
+            ArrayDecomp(head, tail) => {
+                // TODO: What about OPTIONAL???????????
+                let head_check = if let TypeKind::Array(ty) = &*scrutinee_ty {
+                    // We duplicate the span out of lack of any better way to do this for now.
+                    let inner_scrutinee = TypedSpan::new(ty.clone(), scrutinee.span.clone());
+                    self.check_pattern_match_constraint(&inner_scrutinee, head)
+                } else {
+                    // TODO: Add a special error here.
+                    todo!("Add a special error here: not array!")
+                };
+                let tail_check = self.check_pattern_match_constraint(scrutinee, tail);
+                let inner_check = self.combine_results(head_check, tail_check);
+
+                let outer_check = self.check_subtype_constraint(&pattern.metadata, &scrutinee.ty);
+
+                self.combine_results(inner_check, outer_check)
+            }
+            EmptyArray | Literal(_) => {
+                self.check_subtype_constraint(&pattern.metadata, &scrutinee.ty)
+            }
+            Wildcard => {
+                // Here, we just try to enforce the wildcard type to be the same as the scrutinee type.
+                let lhs = self.check_subtype_constraint(scrutinee, &pattern.metadata.ty);
+                let rhs = self.check_subtype_constraint(&pattern.metadata, &scrutinee_ty);
+                self.combine_results(lhs, rhs)
+            }
         }
     }
 }
