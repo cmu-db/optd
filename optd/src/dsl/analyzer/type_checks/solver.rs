@@ -72,7 +72,7 @@ impl TypeRegistry {
             }
 
             Constraint::Scrutinee { scrutinee, pattern } => {
-                self.check_pattern_match_constraint(scrutinee, pattern, changed)
+                self.check_scrutinee_constraint(scrutinee, pattern, changed)
             }
 
             Constraint::FieldAccess {
@@ -230,7 +230,7 @@ impl TypeRegistry {
         }
     }
 
-    fn check_pattern_match_constraint(
+    fn check_scrutinee_constraint(
         &mut self,
         scrutinee: &TypedSpan,
         pattern: &Pattern<TypedSpan>,
@@ -247,7 +247,7 @@ impl TypeRegistry {
 
         match &pattern.kind {
             Bind(_, sub_pattern) => {
-                self.check_pattern_match_constraint(scrutinee, sub_pattern, changed)
+                self.check_scrutinee_constraint(scrutinee, sub_pattern, changed)
             }
 
             Struct(name, field_patterns) => {
@@ -259,7 +259,7 @@ impl TypeRegistry {
                         let field_scrutinee =
                             TypedSpan::new(field_type, field_pat.metadata.span.clone());
 
-                        self.check_pattern_match_constraint(&field_scrutinee, field_pat, changed)
+                        self.check_scrutinee_constraint(&field_scrutinee, field_pat, changed)
                     })?;
 
                 self.check_subtype_constraint(&pattern.metadata, &scrutinee.ty, changed)
@@ -271,10 +271,10 @@ impl TypeRegistry {
                 if let Array(ty) = &*scrutinee_ty.value {
                     // First check head pattern against element type.
                     let inner_scrutinee = TypedSpan::new(ty.clone(), scrutinee.span.clone());
-                    self.check_pattern_match_constraint(&inner_scrutinee, head, changed)?;
+                    self.check_scrutinee_constraint(&inner_scrutinee, head, changed)?;
 
                     // Then check tail pattern.
-                    self.check_pattern_match_constraint(scrutinee, tail, changed)
+                    self.check_scrutinee_constraint(scrutinee, tail, changed)
                 } else {
                     Err(AnalyzerErrorKind::new_invalid_array_decomposition(
                         &scrutinee.span,
