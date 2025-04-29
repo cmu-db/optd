@@ -152,10 +152,12 @@ impl TypeRegistry {
                 self.combine_results(param_result, ret_result)
             }
 
+            // Maps are callable with key type for indexing.
             TypeKind::Map(key_type, val_type) => {
                 self.check_indexable(&inner.span, args, key_type, val_type, &outer.ty)
             }
 
+            // Arrays are callable with integer indices.
             TypeKind::Array(elem_type) => {
                 let index_type = TypeKind::I64.into();
                 self.check_indexable(&inner.span, args, &index_type, elem_type, &outer.ty)
@@ -172,6 +174,7 @@ impl TypeRegistry {
         }
     }
 
+    // Helper for array/map indexing operations where lookups might fail.
     fn check_indexable(
         &mut self,
         span: &Span,
@@ -193,19 +196,6 @@ impl TypeRegistry {
             .check_subtype_constraint(&TypedSpan::new(optional_elem_type, span.clone()), outer_ty);
 
         self.combine_results(index_result, elem_result)
-    }
-
-    fn combine_results(
-        &self,
-        result1: ConstraintResult,
-        result2: ConstraintResult,
-    ) -> ConstraintResult {
-        match (result1, result2) {
-            (Ok(changed1), Ok(changed2)) => Ok(changed1 | changed2),
-            (Ok(changed1), Err((err2, changed2))) => Err((err2, changed1 | changed2)),
-            (Err((err1, changed1)), Ok(changed2)) => Err((err1, changed1 | changed2)),
-            (Err((err1, changed1)), Err((_, changed2))) => Err((err1, changed1 | changed2)),
-        }
     }
 
     fn check_field_access_constraint(
@@ -258,58 +248,88 @@ impl TypeRegistry {
         pattern: &Pattern<TypedSpan>,
     ) -> ConstraintResult {
         use PatternKind::*;
+        use TypeKind::*;
 
         let scrutinee_ty = self.resolve_type(&scrutinee.ty);
         if matches!(*scrutinee_ty.value, TypeKind::Nothing) {
-            // TODO: May also throw an error here.
             return Ok(false);
         }
 
         match &pattern.kind {
             Bind(_, sub_pattern) => self.check_pattern_match_constraint(scrutinee, sub_pattern),
+
             Struct(name, field_patterns) => {
-                let field_checks_result = field_patterns.iter().enumerate().try_fold(
-                    false,
-                    |acc_changed, (i, field_pat)| {
+                // Process all field patterns using fold to accumulate all changes and errors.
+                // Using #[allow(clippy::manual_try_fold)] to silence the warning since we specifically
+                // don't want try_fold's early-return behavior.
+                #[allow(clippy::manual_try_fold)]
+                let field_checks_result = field_patterns.iter().enumerate().fold(
+                    Ok(false),
+                    |acc_result, (i, field_pat)| {
                         let field_type = self.get_product_field_type_by_index(name, i).unwrap();
                         let field_scrutinee =
                             TypedSpan::new(field_type, field_pat.metadata.span.clone());
 
-                        self.check_pattern_match_constraint(&field_scrutinee, field_pat)
-                            .map(|changed| acc_changed | changed)
+                        let field_result =
+                            self.check_pattern_match_constraint(&field_scrutinee, field_pat);
+
+                        self.combine_results(acc_result, field_result)
                     },
                 );
 
                 let pattern_check = self.check_subtype_constraint(&pattern.metadata, &scrutinee.ty);
                 self.combine_results(field_checks_result, pattern_check)
             }
+
             Operator(_) => panic!("Operators may not be in the HIR yet"),
+
             ArrayDecomp(head, tail) => {
-                // TODO: What about OPTIONAL???????????
-                let head_check = if let TypeKind::Array(ty) = &*scrutinee_ty {
-                    // We duplicate the span out of lack of any better way to do this for now.
+                let head_check = if let Array(ty) = &*scrutinee_ty.value {
                     let inner_scrutinee = TypedSpan::new(ty.clone(), scrutinee.span.clone());
                     self.check_pattern_match_constraint(&inner_scrutinee, head)
                 } else {
-                    // TODO: Add a special error here.
-                    todo!("Add a special error here: not array!")
+                    return Err((
+                        AnalyzerErrorKind::new_invalid_array_decomposition(
+                            &scrutinee.span,
+                            &pattern.metadata.span,
+                            &scrutinee_ty,
+                            self.resolved_unknown.clone(),
+                        ),
+                        false,
+                    ));
                 };
+
                 let tail_check = self.check_pattern_match_constraint(scrutinee, tail);
                 let inner_check = self.combine_results(head_check, tail_check);
+                let pattern_check = self.check_subtype_constraint(&pattern.metadata, &scrutinee.ty);
 
-                let outer_check = self.check_subtype_constraint(&pattern.metadata, &scrutinee.ty);
-
-                self.combine_results(inner_check, outer_check)
+                self.combine_results(inner_check, pattern_check)
             }
+
             EmptyArray | Literal(_) => {
                 self.check_subtype_constraint(&pattern.metadata, &scrutinee.ty)
             }
+
             Wildcard => {
                 // Here, we just try to enforce the wildcard type to be the same as the scrutinee type.
                 let lhs = self.check_subtype_constraint(scrutinee, &pattern.metadata.ty);
                 let rhs = self.check_subtype_constraint(&pattern.metadata, &scrutinee_ty);
                 self.combine_results(lhs, rhs)
             }
+        }
+    }
+
+    // Combines results while preserving type changes and prioritizing the first error
+    fn combine_results(
+        &self,
+        result1: ConstraintResult,
+        result2: ConstraintResult,
+    ) -> ConstraintResult {
+        match (result1, result2) {
+            (Ok(changed1), Ok(changed2)) => Ok(changed1 | changed2),
+            (Ok(changed1), Err((err2, changed2))) => Err((err2, changed1 | changed2)),
+            (Err((err1, changed1)), Ok(changed2)) => Err((err1, changed1 | changed2)),
+            (Err((err1, changed1)), Err((_, changed2))) => Err((err1, changed1 | changed2)),
         }
     }
 }
@@ -635,6 +655,229 @@ mod tests {
         assert!(
             result.is_ok(),
             "Valid complex ADT hierarchy program failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_list_pattern_matching() {
+        let source = r#"
+        data Foo = 
+            | Add(left: Foo, right: Foo)
+            | List(bla: [Foo])
+            \ Const(val: I64)
+            
+        fn (log: Foo) fold = x -> x
+        
+        fn arr_as_function(other: Foo, idx: I64, closure: I64 -> Foo?) = closure(idx)
+        
+        fn main(log: Foo): Foo? = match log
+            | Add(Add(_,_), right: Const(val)) -> {
+                let closure = x -> right in
+                closure(5)
+            }
+            | fooo -> arr_as_function(fooo, 0, [log])
+            | List(bla) -> match bla
+                | vla -> vla(0)
+                \ [] -> none
+            | Add(left, right) -> left
+            \ _ -> fail("brru")
+            
+        fn (log: [Foo]) vla: [Foo] = match log
+            \ [Const(5) .. [List([Const(5) .. _]) .. v]] -> v
+        "#;
+
+        let result = run_type_inference(source, "list_pattern_matching.opt");
+        assert!(
+            result.is_ok(),
+            "Valid list pattern matching program failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_complex_list_decomposition() {
+        let source = r#"
+        data Foo = 
+            | Add(left: Foo, right: Foo)
+            | List(bla: [Foo])
+            \ Const(val: I64)
+            
+        // Test different array decomposition patterns
+        fn process_array(arr: [Foo]): I64 = match arr
+            | [] -> 0
+            | [x .. _] -> match x
+                | Const(val) -> val
+                \ _ -> 1
+            | [x .. [y .. _]] -> match x
+                | Const(a) -> a
+                \ _ -> 2
+            | [Const(a) .. rest] -> a + process_array(rest)
+            \ _ -> -1
+            
+        fn main(): I64 = 
+            let array = [Const(1), Const(2), Const(3), Const(4)] in
+            process_array(array)
+        "#;
+
+        let result = run_type_inference(source, "complex_list_decomposition.opt");
+        assert!(
+            result.is_ok(),
+            "Valid complex list decomposition program failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_nested_list_patterns() {
+        let source = r#"
+        data Foo = 
+            | Add(left: Foo, right: Foo)
+            | List(bla: [Foo])
+            \ Const(val: I64)
+            
+        fn process_nested(nested: [[Foo]]): I64 = match nested
+            | [] -> 0
+            | [[] .. _] -> 1
+            | [[Const(x) .. _] .. rest] -> x + process_nested(rest)
+            | [[Add(Const(a), Const(b)) .. _] .. rest] -> a + b + process_nested(rest)
+            \ _ -> -1
+            
+        fn main(): I64 = process_nested([[Add(Const(2), Const(3))]])
+        "#;
+
+        let result = run_type_inference(source, "nested_list_patterns.opt");
+        assert!(
+            result.is_ok(),
+            "Valid nested list patterns program failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_list_pattern_type_mismatch() {
+        let source = r#"
+        data Foo = 
+        | Add(left: Foo, right: Foo)
+        | List(bla: [Foo])
+        \ Const(val: I64)
+    
+        data Bar(value: String)
+        
+        // This should fail because we're trying to match a list of Bar 
+        // with a pattern expecting a list of Foo
+        fn process_incorrect_types(bars: [Bar]): I64 = match bars
+            | [Const(5) .. _] -> 1  // Type mismatch: Bar is not compatible with Const
+            \ _ -> 0
+            
+        fn main(): I64 = 
+            let bars = [Bar("test")] in
+            process_incorrect_types(bars)
+        "#;
+
+        let result = run_type_inference(source, "list_pattern_type_mismatch.opt");
+        assert!(
+            result.is_err(),
+            "Type mismatch in list pattern should have failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_array_decomp_on_non_array() {
+        let source = r#"
+        data Foo = 
+            | Add(left: Foo, right: Foo)
+            | List(bla: [Foo])
+            \ Const(val: I64)
+        
+        // This should fail because we're using array decomposition on a non-array type
+        fn process_non_array(foo: Foo): I64 = match foo
+            | [head .. tail] -> 1  // Error: Foo is not an array type
+            \ _ -> 0
+            
+        fn main(): I64 = 
+            let foo = Const(42) in
+            process_non_array(foo)
+        "#;
+
+        let result = run_type_inference(source, "array_decomp_on_non_array.opt");
+        assert!(
+            result.is_err(),
+            "Array decomposition on non-array type should have failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_inconsistent_list_pattern() {
+        let source = r#"
+        data Foo = 
+        | Add(left: Foo, right: Foo)
+        \ Const(val: I64)
+    
+        // This should fail because the pattern is inconsistent in its typing
+        fn process_mixed_list(mixed: [I64]): I64 = match mixed
+            | [x .. [Const(y) .. rest]] -> x + y  // Error: Const is Foo type but we're matching against [I64]
+            \ _ -> 0
+            
+        fn main(): I64 = 
+            let nums = [1, 2, 3] in
+            process_mixed_list(nums)
+        "#;
+
+        let result = run_type_inference(source, "inconsistent_list_pattern.opt");
+        assert!(
+            result.is_err(),
+            "Inconsistent types in list pattern should have failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_nested_pattern_type_mismatch() {
+        let source = r#"
+        data Foo = 
+        | Add(left: Foo, right: Foo)
+        | List(bla: [Foo])
+        \ Const(val: I64)
+    
+        data Bar = 
+            | Text(value: String)
+            \ Number(value: F64)
+        
+        // This should fail due to type mismatch in nested patterns
+        fn process_nested(items: [[Foo]]): I64 = match items
+            | [] -> 0
+            | [[Text("w") .. []] .. rest] -> 1  // Error: Text is not compatible with Foo
+            \ _ -> -1
+            
+        fn main(): I64 =
+            let dat = [
+                [Const(5)],
+                [Add(Const(2), Const(3))]
+            ] in
+            process_nested(dat)
+        "#;
+
+        let result = run_type_inference(source, "nested_pattern_type_mismatch.opt");
+        assert!(
+            result.is_err(),
+            "Type mismatch in nested pattern should have failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_incompatible_array_usage() {
+        let source = r#"
+        data Foo = 
+            | Add(left: Foo, right: Foo)
+            | List(bla: [Foo])
+            \ Const(val: I64)
+        
+        // This should fail because we're trying to use the array as a function with wrong parameter type
+        fn main(): Foo = 
+            let arr = [Const(1), Const(2)] in
+            arr("index")  // Error: String index for array that expects I64
+        "#;
+
+        let result = run_type_inference(source, "incompatible_array_usage.opt");
+        assert!(
+            result.is_err(),
+            "Using string index on array should have failed type inference"
         );
     }
 }
