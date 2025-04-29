@@ -2,15 +2,12 @@ use super::registry::{Constraint, Type, TypeRegistry};
 use crate::dsl::{
     analyzer::{
         errors::AnalyzerErrorKind,
-        hir::{Identifier, TypedSpan},
+        hir::{Identifier, Pattern, PatternKind, TypedSpan},
         type_checks::registry::TypeKind,
     },
     utils::span::Span,
 };
 use std::mem;
-
-/// Result type for constraint checking that tracks type changes even on error
-type ConstraintResult = Result<bool, (Box<AnalyzerErrorKind>, bool)>;
 
 impl TypeRegistry {
     /// Resolves all collected constraints and fills in the concrete types.
@@ -21,8 +18,8 @@ impl TypeRegistry {
     ///
     /// # Returns
     ///
-    /// * `Ok(())` if all constraints are successfully resolved
-    /// * `Err(error)` containing the last encountered type error when no further progress could be made
+    /// * `Ok(())` if all constraints are successfully resolved.
+    /// * `Err(error)` containing the last encountered type error when no further progress could be made.
     pub fn resolve(&mut self) -> Result<(), Box<AnalyzerErrorKind>> {
         let mut any_changed = true;
         let mut last_error = None;
@@ -35,13 +32,14 @@ impl TypeRegistry {
             let constraints = mem::take(&mut self.constraints);
 
             for constraint in &constraints {
-                match self.check_constraint(constraint) {
-                    Ok(changed) => {
-                        any_changed |= changed;
+                let mut constraint_changed = false;
+                match self.check_constraint(constraint, &mut constraint_changed) {
+                    Ok(()) => {
+                        any_changed |= constraint_changed;
                     }
-                    Err((err, changed)) => {
+                    Err(err) => {
                         // Store the error but continue processing other constraints.
-                        any_changed |= changed;
+                        any_changed |= constraint_changed;
                         last_error = Some(err);
                     }
                 }
@@ -58,26 +56,30 @@ impl TypeRegistry {
         }
     }
 
-    /// Checks if a single constraint is satisfied.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(bool)` - The constraint is satisfied, with a boolean indicating if any types were changed.
-    /// * `Err((Box<AnalyzerErrorKind>, bool))` - The constraint failed, with the error and a boolean
-    ///   indicating if any types were changed during the check.
-    fn check_constraint(&mut self, constraint: &Constraint) -> ConstraintResult {
+    /// Checks if a single constraint is satisfied
+    fn check_constraint(
+        &mut self,
+        constraint: &Constraint,
+        changed: &mut bool,
+    ) -> Result<(), Box<AnalyzerErrorKind>> {
         match constraint {
-            Constraint::Subtype { child, parent } => self.check_subtype_constraint(child, parent),
+            Constraint::Subtype { child, parent } => {
+                self.check_subtype_constraint(child, parent, changed)
+            }
 
             Constraint::Call { inner, args, outer } => {
-                self.check_call_constraint(inner, args, outer)
+                self.check_call_constraint(inner, args, outer, changed)
+            }
+
+            Constraint::Scrutinee { scrutinee, pattern } => {
+                self.check_scrutinee_constraint(scrutinee, pattern, changed)
             }
 
             Constraint::FieldAccess {
                 inner,
                 field,
                 outer,
-            } => self.check_field_access_constraint(inner, field, outer),
+            } => self.check_field_access_constraint(inner, field, outer, changed),
         }
     }
 
@@ -85,21 +87,18 @@ impl TypeRegistry {
         &mut self,
         child: &TypedSpan,
         parent_ty: &Type,
-    ) -> ConstraintResult {
-        let mut has_changed = false;
-        let is_subtype = self.is_subtype_infer(&child.ty, parent_ty, &mut has_changed);
-
-        if is_subtype {
-            Ok(has_changed)
-        } else {
-            let err = AnalyzerErrorKind::new_invalid_subtype(
-                &child.ty,
-                parent_ty,
-                &child.span,
-                self.resolved_unknown.clone(),
-            );
-            Err((err, has_changed))
-        }
+        changed: &mut bool,
+    ) -> Result<(), Box<AnalyzerErrorKind>> {
+        self.is_subtype_infer(&child.ty, parent_ty, changed)
+            .then_some(())
+            .ok_or_else(|| {
+                AnalyzerErrorKind::new_invalid_subtype(
+                    &child.ty,
+                    parent_ty,
+                    &child.span,
+                    self.resolved_unknown.clone(),
+                )
+            })
     }
 
     fn check_call_constraint(
@@ -107,11 +106,12 @@ impl TypeRegistry {
         inner: &TypedSpan,
         args: &[TypedSpan],
         outer: &TypedSpan,
-    ) -> ConstraintResult {
+        changed: &mut bool,
+    ) -> Result<(), Box<AnalyzerErrorKind>> {
         let inner_resolved = self.resolve_type(&inner.ty);
 
         match &*inner_resolved.value {
-            TypeKind::Nothing => Ok(false),
+            TypeKind::Nothing => Ok(()),
 
             TypeKind::Closure(param, ret) => {
                 let (param_len, param_types) = match &**param {
@@ -121,49 +121,46 @@ impl TypeRegistry {
                 };
 
                 if param_len != args.len() {
-                    return Err((
-                        AnalyzerErrorKind::new_argument_number_mismatch(
-                            &inner.span,
-                            param_len,
-                            args.len(),
-                        ),
-                        false,
+                    return Err(AnalyzerErrorKind::new_argument_number_mismatch(
+                        &inner.span,
+                        param_len,
+                        args.len(),
                     ));
                 }
 
-                let param_result = args.iter().zip(param_types.iter()).try_fold(
-                    false,
-                    |acc_changes, (arg, param_type)| match self
-                        .check_subtype_constraint(arg, param_type)
-                    {
-                        Ok(changed) => Ok(acc_changes | changed),
-                        Err((err, changed)) => Err((err, acc_changes | changed)),
-                    },
-                );
-                let ret_result = self.check_subtype_constraint(
+                args.iter()
+                    .zip(param_types.iter())
+                    .try_for_each(|(arg, param_type)| {
+                        self.check_subtype_constraint(arg, param_type, changed)
+                    })?;
+
+                self.check_subtype_constraint(
                     &TypedSpan::new(ret.clone(), inner.span.clone()),
                     &outer.ty,
-                );
-
-                self.combine_results(param_result, ret_result)
+                    changed,
+                )
             }
 
             TypeKind::Map(key_type, val_type) => {
-                self.check_indexable(&inner.span, args, key_type, val_type, &outer.ty)
+                self.check_indexable(&inner.span, args, key_type, val_type, &outer.ty, changed)
             }
 
             TypeKind::Array(elem_type) => {
                 let index_type = TypeKind::I64.into();
-                self.check_indexable(&inner.span, args, &index_type, elem_type, &outer.ty)
+                self.check_indexable(
+                    &inner.span,
+                    args,
+                    &index_type,
+                    elem_type,
+                    &outer.ty,
+                    changed,
+                )
             }
 
-            _ => Err((
-                AnalyzerErrorKind::new_invalid_call_receiver(
-                    &inner_resolved,
-                    &inner.span,
-                    self.resolved_unknown.clone(),
-                ),
-                false,
+            _ => Err(AnalyzerErrorKind::new_invalid_call_receiver(
+                &inner_resolved,
+                &inner.span,
+                self.resolved_unknown.clone(),
             )),
         }
     }
@@ -175,33 +172,26 @@ impl TypeRegistry {
         key_type: &Type,
         elem_type: &Type,
         outer_ty: &Type,
-    ) -> ConstraintResult {
+        changed: &mut bool,
+    ) -> Result<(), Box<AnalyzerErrorKind>> {
         if args.len() != 1 {
-            return Err((
-                AnalyzerErrorKind::new_argument_number_mismatch(span, 1, args.len()),
-                false,
+            return Err(AnalyzerErrorKind::new_argument_number_mismatch(
+                span,
+                1,
+                args.len(),
             ));
         }
 
-        let index_result = self.check_subtype_constraint(&args[0], key_type);
+        // Check index type.
+        self.check_subtype_constraint(&args[0], key_type, changed)?;
+
+        // Check element type (wrapped in Optional).
         let optional_elem_type = TypeKind::Optional(elem_type.clone()).into();
-        let elem_result = self
-            .check_subtype_constraint(&TypedSpan::new(optional_elem_type, span.clone()), outer_ty);
-
-        self.combine_results(index_result, elem_result)
-    }
-
-    fn combine_results(
-        &self,
-        result1: ConstraintResult,
-        result2: ConstraintResult,
-    ) -> ConstraintResult {
-        match (result1, result2) {
-            (Ok(changed1), Ok(changed2)) => Ok(changed1 | changed2),
-            (Ok(changed1), Err((err2, changed2))) => Err((err2, changed1 | changed2)),
-            (Err((err1, changed1)), Ok(changed2)) => Err((err1, changed1 | changed2)),
-            (Err((err1, changed1)), Err((_, changed2))) => Err((err1, changed1 | changed2)),
-        }
+        self.check_subtype_constraint(
+            &TypedSpan::new(optional_elem_type, span.clone()),
+            outer_ty,
+            changed,
+        )
     }
 
     fn check_field_access_constraint(
@@ -209,42 +199,103 @@ impl TypeRegistry {
         inner: &TypedSpan,
         field: &Identifier,
         outer: &Type,
-    ) -> ConstraintResult {
+        changed: &mut bool,
+    ) -> Result<(), Box<AnalyzerErrorKind>> {
         let inner_resolved = self.resolve_type(&inner.ty);
 
         match &*inner_resolved.value {
-            TypeKind::Nothing => Ok(false),
+            // Wait for the field access to be resolved.
+            TypeKind::Nothing => Ok(()),
 
-            TypeKind::Adt(name) => {
-                match self.get_product_field_type(name, field) {
-                    Some(field_ty) => {
-                        // Check that the field type is a subtype of the outer type.
-                        self.check_subtype_constraint(
-                            &TypedSpan::new(field_ty, inner.span.clone()),
-                            outer,
-                        )
-                    }
-                    None => Err((
-                        AnalyzerErrorKind::new_invalid_field_access(
-                            &inner_resolved,
-                            &inner.span,
-                            field,
-                            self.resolved_unknown.clone(),
-                        ),
-                        false,
-                    )),
-                }
-            }
-
-            _ => Err((
-                AnalyzerErrorKind::new_invalid_field_access(
+            TypeKind::Adt(name) => match self.get_product_field_type(name, field) {
+                Some(field_ty) => self.check_subtype_constraint(
+                    &TypedSpan::new(field_ty, inner.span.clone()),
+                    outer,
+                    changed,
+                ),
+                None => Err(AnalyzerErrorKind::new_invalid_field_access(
                     &inner_resolved,
                     &inner.span,
                     field,
                     self.resolved_unknown.clone(),
-                ),
-                false,
+                )),
+            },
+
+            _ => Err(AnalyzerErrorKind::new_invalid_field_access(
+                &inner_resolved,
+                &inner.span,
+                field,
+                self.resolved_unknown.clone(),
             )),
+        }
+    }
+
+    fn check_scrutinee_constraint(
+        &mut self,
+        scrutinee: &TypedSpan,
+        pattern: &Pattern<TypedSpan>,
+        changed: &mut bool,
+    ) -> Result<(), Box<AnalyzerErrorKind>> {
+        use PatternKind::*;
+        use TypeKind::*;
+
+        let scrutinee_ty = self.resolve_type(&scrutinee.ty);
+        if matches!(*scrutinee_ty.value, TypeKind::Nothing) {
+            // Wait for the scrutinee to be resolved.
+            return Ok(());
+        }
+
+        match &pattern.kind {
+            Bind(_, sub_pattern) => {
+                self.check_scrutinee_constraint(scrutinee, sub_pattern, changed)
+            }
+
+            Struct(name, field_patterns) => {
+                field_patterns
+                    .iter()
+                    .enumerate()
+                    .try_for_each(|(i, field_pat)| {
+                        let field_type = self.get_product_field_type_by_index(name, i).unwrap();
+                        let field_scrutinee =
+                            TypedSpan::new(field_type, field_pat.metadata.span.clone());
+
+                        self.check_scrutinee_constraint(&field_scrutinee, field_pat, changed)
+                    })?;
+
+                self.check_subtype_constraint(&pattern.metadata, &scrutinee.ty, changed)
+            }
+
+            Operator(_) => panic!("Operators may not be in the HIR yet"),
+
+            ArrayDecomp(head, tail) => {
+                if let Array(ty) = &*scrutinee_ty.value {
+                    // First check head pattern against element type.
+                    let inner_scrutinee = TypedSpan::new(ty.clone(), scrutinee.span.clone());
+                    self.check_scrutinee_constraint(&inner_scrutinee, head, changed)?;
+
+                    // Then check tail pattern.
+                    self.check_scrutinee_constraint(scrutinee, tail, changed)
+                } else {
+                    Err(AnalyzerErrorKind::new_invalid_array_decomposition(
+                        &scrutinee.span,
+                        &pattern.metadata.span,
+                        &scrutinee_ty,
+                        self.resolved_unknown.clone(),
+                    ))
+                }
+            }
+
+            EmptyArray | Literal(_) => {
+                self.check_subtype_constraint(&pattern.metadata, &scrutinee.ty, changed)
+            }
+
+            Wildcard => {
+                // First check scrutinee against wildcard type.
+                self.check_subtype_constraint(scrutinee, &pattern.metadata.ty, changed)?;
+
+                // Then check wildcard pattern against scrutinee type
+                self.check_subtype_constraint(&pattern.metadata, &scrutinee_ty, changed)
+            }
         }
     }
 }
@@ -570,6 +621,229 @@ mod tests {
         assert!(
             result.is_ok(),
             "Valid complex ADT hierarchy program failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_list_pattern_matching() {
+        let source = r#"
+        data Foo = 
+            | Add(left: Foo, right: Foo)
+            | List(bla: [Foo])
+            \ Const(val: I64)
+            
+        fn (log: Foo) fold = x -> x
+        
+        fn arr_as_function(other: Foo, idx: I64, closure: I64 -> Foo?) = closure(idx)
+        
+        fn main(log: Foo): Foo? = match log
+            | Add(Add(_,_), right: Const(val)) -> {
+                let closure = x -> right in
+                closure(5)
+            }
+            | fooo -> arr_as_function(fooo, 0, [log])
+            | List(bla) -> match bla
+                | vla -> vla(0)
+                \ [] -> none
+            | Add(left, right) -> left
+            \ _ -> fail("brru")
+            
+        fn (log: [Foo]) vla: [Foo] = match log
+            \ [Const(5) .. [List([Const(5) .. _]) .. v]] -> v
+        "#;
+
+        let result = run_type_inference(source, "list_pattern_matching.opt");
+        assert!(
+            result.is_ok(),
+            "Valid list pattern matching program failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_complex_list_decomposition() {
+        let source = r#"
+        data Foo = 
+            | Add(left: Foo, right: Foo)
+            | List(bla: [Foo])
+            \ Const(val: I64)
+            
+        // Test different array decomposition patterns
+        fn process_array(arr: [Foo]): I64 = match arr
+            | [] -> 0
+            | [x .. _] -> match x
+                | Const(val) -> val
+                \ _ -> 1
+            | [x .. [y .. _]] -> match x
+                | Const(a) -> a
+                \ _ -> 2
+            | [Const(a) .. rest] -> a + process_array(rest)
+            \ _ -> -1
+            
+        fn main(): I64 = 
+            let array = [Const(1), Const(2), Const(3), Const(4)] in
+            process_array(array)
+        "#;
+
+        let result = run_type_inference(source, "complex_list_decomposition.opt");
+        assert!(
+            result.is_ok(),
+            "Valid complex list decomposition program failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_nested_list_patterns() {
+        let source = r#"
+        data Foo = 
+            | Add(left: Foo, right: Foo)
+            | List(bla: [Foo])
+            \ Const(val: I64)
+            
+        fn process_nested(nested: [[Foo]]): I64 = match nested
+            | [] -> 0
+            | [[] .. _] -> 1
+            | [[Const(x) .. _] .. rest] -> x + process_nested(rest)
+            | [[Add(Const(a), Const(b)) .. _] .. rest] -> a + b + process_nested(rest)
+            \ _ -> -1
+            
+        fn main(): I64 = process_nested([[Add(Const(2), Const(3))]])
+        "#;
+
+        let result = run_type_inference(source, "nested_list_patterns.opt");
+        assert!(
+            result.is_ok(),
+            "Valid nested list patterns program failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_list_pattern_type_mismatch() {
+        let source = r#"
+        data Foo = 
+        | Add(left: Foo, right: Foo)
+        | List(bla: [Foo])
+        \ Const(val: I64)
+    
+        data Bar(value: String)
+        
+        // This should fail because we're trying to match a list of Bar 
+        // with a pattern expecting a list of Foo
+        fn process_incorrect_types(bars: [Bar]): I64 = match bars
+            | [Const(5) .. _] -> 1  // Type mismatch: Bar is not compatible with Const
+            \ _ -> 0
+            
+        fn main(): I64 = 
+            let bars = [Bar("test")] in
+            process_incorrect_types(bars)
+        "#;
+
+        let result = run_type_inference(source, "list_pattern_type_mismatch.opt");
+        assert!(
+            result.is_err(),
+            "Type mismatch in list pattern should have failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_array_decomp_on_non_array() {
+        let source = r#"
+        data Foo = 
+            | Add(left: Foo, right: Foo)
+            | List(bla: [Foo])
+            \ Const(val: I64)
+        
+        // This should fail because we're using array decomposition on a non-array type
+        fn process_non_array(foo: Foo): I64 = match foo
+            | [head .. tail] -> 1  // Error: Foo is not an array type
+            \ _ -> 0
+            
+        fn main(): I64 = 
+            let foo = Const(42) in
+            process_non_array(foo)
+        "#;
+
+        let result = run_type_inference(source, "array_decomp_on_non_array.opt");
+        assert!(
+            result.is_err(),
+            "Array decomposition on non-array type should have failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_inconsistent_list_pattern() {
+        let source = r#"
+        data Foo = 
+        | Add(left: Foo, right: Foo)
+        \ Const(val: I64)
+    
+        // This should fail because the pattern is inconsistent in its typing
+        fn process_mixed_list(mixed: [I64]): I64 = match mixed
+            | [x .. [Const(y) .. rest]] -> x + y  // Error: Const is Foo type but we're matching against [I64]
+            \ _ -> 0
+            
+        fn main(): I64 = 
+            let nums = [1, 2, 3] in
+            process_mixed_list(nums)
+        "#;
+
+        let result = run_type_inference(source, "inconsistent_list_pattern.opt");
+        assert!(
+            result.is_err(),
+            "Inconsistent types in list pattern should have failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_nested_pattern_type_mismatch() {
+        let source = r#"
+        data Foo = 
+        | Add(left: Foo, right: Foo)
+        | List(bla: [Foo])
+        \ Const(val: I64)
+    
+        data Bar = 
+            | Text(value: String)
+            \ Number(value: F64)
+        
+        // This should fail due to type mismatch in nested patterns
+        fn process_nested(items: [[Foo]]): I64 = match items
+            | [] -> 0
+            | [[Text("w") .. []] .. rest] -> 1  // Error: Text is not compatible with Foo
+            \ _ -> -1
+            
+        fn main(): I64 =
+            let dat = [
+                [Const(5)],
+                [Add(Const(2), Const(3))]
+            ] in
+            process_nested(dat)
+        "#;
+
+        let result = run_type_inference(source, "nested_pattern_type_mismatch.opt");
+        assert!(
+            result.is_err(),
+            "Type mismatch in nested pattern should have failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_incompatible_array_usage() {
+        let source = r#"
+        data Foo = 
+            | Add(left: Foo, right: Foo)
+            | List(bla: [Foo])
+            \ Const(val: I64)
+        
+        // This should fail because we're trying to use the array as a function with wrong parameter type
+        fn main(): Foo = 
+            let arr = [Const(1), Const(2)] in
+            arr("index")  // Error: String index for array that expects I64
+        "#;
+
+        let result = run_type_inference(source, "incompatible_array_usage.opt");
+        assert!(
+            result.is_err(),
+            "Using string index on array should have failed type inference"
         );
     }
 }

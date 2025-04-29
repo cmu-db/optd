@@ -274,7 +274,7 @@ impl ASTConverter {
         generics: &HashSet<Identifier>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let hir_scrutinee = self.convert_expr(scrutinee, generics)?;
-        let hir_arms = self.convert_match_arms(&hir_scrutinee.metadata.ty, arms, generics)?;
+        let hir_arms = self.convert_match_arms(arms, generics)?;
 
         Ok(PatternMatch(hir_scrutinee.into(), hir_arms))
     }

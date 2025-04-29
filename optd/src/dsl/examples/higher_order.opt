@@ -62,7 +62,7 @@ fn constant_folder(): Logical -> Logical =
 fn arrays(a: [Binary]) = none
 
 [implementation]
-fn (phys: Physical*) implementation(prop: PhysicalProperties) = 5
+fn (log: Logical*) implementation(prop: PhysicalProperties?) = none
 
 [transformation]
 fn main(log: Logical): Logical = 

@@ -1,5 +1,5 @@
 use crate::dsl::analyzer::errors::AnalyzerErrorKind;
-use crate::dsl::analyzer::hir::{Identifier, TypedSpan};
+use crate::dsl::analyzer::hir::{Identifier, Pattern, TypedSpan};
 use crate::dsl::parser::ast::{Adt, Field};
 use crate::dsl::utils::span::{OptionalSpanned, Span};
 use Adt::*;
@@ -112,6 +112,18 @@ pub enum Constraint {
         inner: TypedSpan,
         args: Vec<TypedSpan>,
         outer: TypedSpan,
+    },
+
+    /// Pattern match: `scrutinee >: pattern`
+    ///
+    /// This constraint enforces that the type of `scrutinee` is compatible with
+    /// the pattern `pattern`. It does not only check for subtyping, but also
+    /// ensures that the pattern can be destructured from the scrutinee.
+    ///
+    /// (e.g. in the context of list decomposition, * and $ handling, etc.)
+    Scrutinee {
+        scrutinee: TypedSpan,
+        pattern: Pattern<TypedSpan>,
     },
 
     /// Field access: `outer >: inner.field`
@@ -289,8 +301,6 @@ impl TypeRegistry {
 
     /// Adds a subtyping constraint set: `parent >: all children`
     ///
-    /// This constraint enforces that the parent is a supertype of all the children.
-    ///
     /// # Arguments
     ///
     /// * `parent` - The type that must be a supertype of all children
@@ -305,8 +315,6 @@ impl TypeRegistry {
     }
 
     /// Adds an equality constraint: `target_type = other_type`
-    ///
-    /// This constraint enforces that the target_type is equal to other_type.
     ///
     /// # Arguments
     ///
@@ -326,9 +334,6 @@ impl TypeRegistry {
 
     /// Adds a function call constraint: `outer >: inner(args)`
     ///
-    /// This enforces that the function type `inner` can be called with
-    /// the arguments `args`, and that the result type matches `outer`.
-    ///
     /// # Arguments
     ///
     /// * `outer` - The expected return type of the function call
@@ -347,9 +352,24 @@ impl TypeRegistry {
         });
     }
 
-    /// Adds a field access constraint: `outer >: inner.field`
+    /// Adds a pattern match constraint: `scrutinee >: pattern`
     ///
-    /// This enforces that a type has a field with a particular name and type.
+    /// # Arguments
+    ///
+    /// * `scrutinee` - The type of the scrutinee being matched
+    /// * `pattern` - The pattern being matched against the scrutinee
+    pub(super) fn add_constraint_scrutinee(
+        &mut self,
+        scrutinee: &TypedSpan,
+        pattern: &Pattern<TypedSpan>,
+    ) {
+        self.constraints.push(Constraint::Scrutinee {
+            scrutinee: scrutinee.clone(),
+            pattern: pattern.clone(),
+        });
+    }
+
+    /// Adds a field access constraint: `outer >: inner.field`
     ///
     /// # Arguments
     ///

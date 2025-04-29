@@ -133,29 +133,30 @@ impl TypeRegistry {
         arms: &[MatchArm<TypedSpan>],
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
-        let mut pattern_types = Vec::with_capacity(arms.len());
         let mut arm_types = Vec::with_capacity(arms.len());
 
         for arm in arms {
-            pattern_types.push(arm.pattern.metadata.clone());
             arm_types.push(arm.expr.metadata.clone());
+
+            self.add_constraint_scrutinee(&scrutinee.metadata, &arm.pattern);
 
             let mut arm_ctx = ctx.clone();
             arm_ctx.push_scope();
 
-            self.generate_pattern(&arm.pattern, &mut arm_ctx)?;
+            Self::generate_pattern(&arm.pattern, &mut arm_ctx)?;
             self.generate_expr(&arm.expr, arm_ctx)?;
         }
 
-        self.add_constraint_subtypes(&scrutinee.metadata.ty, &pattern_types);
         self.add_constraint_subtypes(&expr.metadata.ty, &arm_types);
 
         self.generate_expr(scrutinee, ctx)
     }
 
-    /// Validates pattern bindings, and adds them to the context.
+    /// Adds pattern bindings to the context.
+    ///
+    /// Pattern validity is checked later in the type checker, as it requires
+    /// more information about the scrutinee (e.g. $, *, Array, etc.).
     fn generate_pattern(
-        &mut self,
         pattern: &Pattern<TypedSpan>,
         ctx: &mut Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
@@ -165,33 +166,17 @@ impl TypeRegistry {
             Bind(name, sub_pattern) => {
                 let dummy = Self::dummy_value(&pattern.metadata.ty, &pattern.metadata.span);
                 ctx.try_bind(name.clone(), dummy)?;
-                self.generate_pattern(sub_pattern, ctx)?;
+                Self::generate_pattern(sub_pattern, ctx)?;
             }
-            Struct(name, field_patterns) => {
+            Struct(_, field_patterns) => {
                 field_patterns
                     .iter()
-                    .enumerate()
-                    .try_for_each(|(i, field_pat)| {
-                        self.add_constraint_subtypes(
-                            &self.get_product_field_type_by_index(name, i).unwrap(),
-                            &[field_pat.metadata.clone()],
-                        );
-                        self.generate_pattern(field_pat, ctx)
-                    })?;
+                    .try_for_each(|field_pat| Self::generate_pattern(field_pat, ctx))?;
             }
             Operator(_) => panic!("Operators may not be in the HIR yet"),
             ArrayDecomp(head, tail) => {
-                if let TypeKind::Array(ty) = &*pattern.metadata.ty {
-                    self.add_constraint_subtypes(ty, &[head.metadata.clone()]);
-                } else {
-                    panic!("Type should be set to array in from_ast");
-                }
-
-                // TODO(#81): Generate some extra list constraint here.
-
-                self.add_constraint_subtypes(&pattern.metadata.ty, &[tail.metadata.clone()]);
-                self.generate_pattern(head, ctx)?;
-                self.generate_pattern(tail, ctx)?;
+                Self::generate_pattern(head, ctx)?;
+                Self::generate_pattern(tail, ctx)?;
             }
             Wildcard | EmptyArray | Literal(_) => {} // Terminal patterns, no action needed.
         }

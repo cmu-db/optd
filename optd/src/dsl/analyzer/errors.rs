@@ -139,6 +139,14 @@ pub enum AnalyzerErrorKind {
         // To be able to call display function of Type.
         unknowns: HashMap<usize, Type>,
     },
+
+    InvalidArrayDecomposition {
+        scrutinee_span: Span,
+        pattern_span: Span,
+        scrutinee_type: Type,
+        // To be able to call display function of Type
+        unknowns: HashMap<usize, Type>,
+    },
 }
 
 impl AnalyzerErrorKind {
@@ -330,6 +338,22 @@ impl AnalyzerErrorKind {
         }
         .into()
     }
+
+    // New constructor for array decomposition errors
+    pub fn new_invalid_array_decomposition(
+        scrutinee_span: &Span,
+        pattern_span: &Span,
+        scrutinee_type: &Type,
+        unknowns: HashMap<usize, Type>,
+    ) -> Box<Self> {
+        Self::InvalidArrayDecomposition {
+            scrutinee_span: scrutinee_span.clone(),
+            pattern_span: pattern_span.clone(),
+            scrutinee_type: scrutinee_type.clone(),
+            unknowns,
+        }
+        .into()
+    }
 }
 
 impl Diagnose for Box<AnalyzerError> {
@@ -480,6 +504,13 @@ impl Diagnose for Box<AnalyzerError> {
                     ),
                 )
             },
+            // Handler for the new InvalidArrayDecomposition error
+            InvalidArrayDecomposition {
+                scrutinee_span,
+                pattern_span,
+                scrutinee_type,
+                unknowns,
+            } => self.build_array_decomp_error_report(scrutinee_span, pattern_span, scrutinee_type, unknowns),
         }
     }
 
@@ -505,6 +536,7 @@ impl Diagnose for Box<AnalyzerError> {
             InvalidFieldAccess { span, .. } => span,
             InvalidTransformation { span, .. } => span,
             InvalidImplementation { span, .. } => span,
+            InvalidArrayDecomposition { pattern_span, .. } => pattern_span, // Use pattern span as primary
         };
 
         (span.src_file.clone(), Source::from(self.src_code.clone()))
@@ -620,6 +652,37 @@ impl AnalyzerError {
 
         report
             .with_help("Check for typos in the field name or ensure you're accessing the right type of object")
+            .finish()
+    }
+
+    /// Helper method to build a report for array decomposition errors
+    fn build_array_decomp_error_report(
+        &self,
+        scrutinee_span: &Span,
+        pattern_span: &Span,
+        scrutinee_type: &Type,
+        unknowns: &HashMap<usize, Type>,
+    ) -> Report<Span> {
+        let mut report = Report::build(ReportKind::Error, pattern_span.clone())
+            .with_message("Cannot decompose further here");
+
+        report = report
+            .with_label(
+                Label::new(pattern_span.clone())
+                    .with_message("Array decomposition pattern used here")
+                    .with_color(Color::Red),
+            )
+            .with_label(
+                Label::new(scrutinee_span.clone())
+                    .with_message(format!(
+                        "Expression contains type '{}', which is not an array",
+                        type_display(scrutinee_type, unknowns)
+                    ))
+                    .with_color(Color::Blue),
+            );
+
+        report
+            .with_help("Array decomposition patterns can only be used with array types")
             .finish()
     }
 
