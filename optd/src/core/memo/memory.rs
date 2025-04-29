@@ -122,15 +122,9 @@ impl GoalState {
     }
 }
 
-impl Memoize for MemoryMemo {
-    async fn merge_groups(
-        &mut self,
-        group_id_1: GroupId,
-        group_id_2: GroupId,
-    ) -> MemoizeResult<Option<MergeResult>> {
-        self.merge_groups_helper(group_id_1, group_id_2).await
-    }
+impl OptimizerState for MemoryMemo {}
 
+impl Memo for MemoryMemo {
     async fn get_logical_properties(
         &self,
         group_id: GroupId,
@@ -207,6 +201,14 @@ impl Memoize for MemoryMemo {
             .insert(logical_expr_id, group_id);
 
         Ok(group_id)
+    }
+
+    async fn merge_groups(
+        &mut self,
+        group_id_1: GroupId,
+        group_id_2: GroupId,
+    ) -> MemoizeResult<Option<MergeResult>> {
+        self.merge_groups_helper(group_id_1, group_id_2).await
     }
 
     async fn get_best_optimized_physical_expr(
@@ -333,6 +335,170 @@ impl Memoize for MemoryMemo {
         }
     }
 
+    async fn find_repr_group(&self, group_id: GroupId) -> MemoizeResult<GroupId> {
+        let repr_group_id = self.repr_group.find(&group_id);
+        Ok(repr_group_id)
+    }
+
+    async fn find_repr_goal(&self, goal_id: GoalId) -> MemoizeResult<GoalId> {
+        let repr_goal_id = self.repr_goal.find(&goal_id);
+        Ok(repr_goal_id)
+    }
+
+    async fn find_repr_logical_expr(
+        &self,
+        logical_expr_id: LogicalExpressionId,
+    ) -> MemoizeResult<LogicalExpressionId> {
+        let repr_expr_id = self.repr_logical_expr.find(&logical_expr_id);
+        Ok(repr_expr_id)
+    }
+
+    async fn find_repr_physical_expr(
+        &self,
+        physical_expr_id: PhysicalExpressionId,
+    ) -> MemoizeResult<PhysicalExpressionId> {
+        let repr_expr_id = self.repr_physical_expr.find(&physical_expr_id);
+        Ok(repr_expr_id)
+    }
+}
+
+impl Materialize for MemoryMemo {
+    async fn get_goal_id(&mut self, goal: &Goal) -> MemoizeResult<GoalId> {
+        if let Some(goal_id) = self.goal_node_to_id_index.get(goal).cloned() {
+            return Ok(goal_id);
+        }
+        let goal_id = self.next_goal_id();
+        self.goal_node_to_id_index.insert(goal.clone(), goal_id);
+        self.goals.insert(goal_id, GoalState::new(goal.clone()));
+
+        let Goal(group_id, _) = goal;
+        self.groups.get_mut(group_id).unwrap().goals.insert(goal_id);
+        Ok(goal_id)
+    }
+
+    async fn materialize_goal(&self, goal_id: GoalId) -> MemoizeResult<Goal> {
+        let state = self
+            .goals
+            .get(&goal_id)
+            .ok_or(MemoizeError::GoalNotFound(goal_id))?;
+
+        Ok(state.goal.clone())
+    }
+
+    async fn get_logical_expr_id(
+        &mut self,
+        logical_expr: &LogicalExpression,
+    ) -> MemoizeResult<LogicalExpressionId> {
+        if let Some(logical_expr_id) = self
+            .logical_expr_node_to_id_index
+            .get(logical_expr)
+            .cloned()
+        {
+            return Ok(logical_expr_id);
+        }
+        let logical_expr_id = self.next_logical_expr_id();
+        self.logical_expr_node_to_id_index
+            .insert(logical_expr.clone(), logical_expr_id);
+        self.logical_exprs
+            .insert(logical_expr_id, logical_expr.clone());
+
+        for child in logical_expr.children.iter() {
+            match child {
+                Child::Singleton(group_id) => {
+                    self.group_dependent_logical_exprs
+                        .entry(*group_id)
+                        .or_default()
+                        .insert(logical_expr_id);
+                }
+                Child::VarLength(group_ids) => {
+                    for group_id in group_ids.iter() {
+                        self.group_dependent_logical_exprs
+                            .entry(*group_id)
+                            .or_default()
+                            .insert(logical_expr_id);
+                    }
+                }
+            }
+        }
+        Ok(logical_expr_id)
+    }
+
+    async fn materialize_logical_expr(
+        &self,
+        logical_expr_id: LogicalExpressionId,
+    ) -> MemoizeResult<LogicalExpression> {
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await?;
+        let logical_expr = self
+            .logical_exprs
+            .get(&logical_expr_id)
+            .ok_or(MemoizeError::LogicalExprNotFound(logical_expr_id))?;
+        Ok(logical_expr.clone())
+    }
+
+    async fn get_physical_expr_id(
+        &mut self,
+        physical_expr: &PhysicalExpression,
+    ) -> MemoizeResult<PhysicalExpressionId> {
+        if let Some(physical_expr_id) = self
+            .physical_expr_node_to_id_index
+            .get(physical_expr)
+            .cloned()
+        {
+            return Ok(physical_expr_id);
+        }
+        let physical_expr_id = self.next_physical_expr_id();
+        self.physical_expr_node_to_id_index
+            .insert(physical_expr.clone(), physical_expr_id);
+        self.physical_exprs
+            .insert(physical_expr_id, (physical_expr.clone(), None));
+
+        for child in physical_expr.children.iter() {
+            match child {
+                Child::Singleton(goal_member_id) => {
+                    if let GoalMemberId::GoalId(goal_id) = goal_member_id {
+                        self.goal_dependent_physical_exprs
+                            .entry(*goal_id)
+                            .or_default()
+                            .insert(physical_expr_id);
+                    }
+                }
+                Child::VarLength(goal_member_ids) => {
+                    for goal_member_id in goal_member_ids.iter() {
+                        match goal_member_id {
+                            GoalMemberId::GoalId(goal_id) => {
+                                self.goal_dependent_physical_exprs
+                                    .entry(*goal_id)
+                                    .or_default()
+                                    .insert(physical_expr_id);
+                            }
+                            GoalMemberId::PhysicalExpressionId(child_physical_expr_id) => {
+                                self.physical_expr_dependent_physical_exprs
+                                    .entry(*child_physical_expr_id)
+                                    .or_default()
+                                    .insert(physical_expr_id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(physical_expr_id)
+    }
+
+    async fn materialize_physical_expr(
+        &self,
+        physical_expr_id: PhysicalExpressionId,
+    ) -> MemoizeResult<PhysicalExpression> {
+        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await?;
+        let (physical_expr, _) = self
+            .physical_exprs
+            .get(&physical_expr_id)
+            .ok_or(MemoizeError::PhysicalExprNotFound(physical_expr_id))?;
+        Ok(physical_expr.clone())
+    }
+}
+
+impl TaskState for MemoryMemo {
     async fn get_transformation_status(
         &self,
         logical_expr_id: LogicalExpressionId,
@@ -524,166 +690,6 @@ impl Memoize for MemoryMemo {
         }
 
         Ok(())
-    }
-
-    async fn get_goal_id(&mut self, goal: &Goal) -> MemoizeResult<GoalId> {
-        if let Some(goal_id) = self.goal_node_to_id_index.get(goal).cloned() {
-            return Ok(goal_id);
-        }
-        let goal_id = self.next_goal_id();
-        self.goal_node_to_id_index.insert(goal.clone(), goal_id);
-        self.goals.insert(goal_id, GoalState::new(goal.clone()));
-
-        let Goal(group_id, _) = goal;
-        self.groups.get_mut(group_id).unwrap().goals.insert(goal_id);
-        Ok(goal_id)
-    }
-
-    async fn materialize_goal(&self, goal_id: GoalId) -> MemoizeResult<Goal> {
-        let state = self
-            .goals
-            .get(&goal_id)
-            .ok_or(MemoizeError::GoalNotFound(goal_id))?;
-
-        Ok(state.goal.clone())
-    }
-
-    async fn get_logical_expr_id(
-        &mut self,
-        logical_expr: &LogicalExpression,
-    ) -> MemoizeResult<LogicalExpressionId> {
-        if let Some(logical_expr_id) = self
-            .logical_expr_node_to_id_index
-            .get(logical_expr)
-            .cloned()
-        {
-            return Ok(logical_expr_id);
-        }
-        let logical_expr_id = self.next_logical_expr_id();
-        self.logical_expr_node_to_id_index
-            .insert(logical_expr.clone(), logical_expr_id);
-        self.logical_exprs
-            .insert(logical_expr_id, logical_expr.clone());
-
-        for child in logical_expr.children.iter() {
-            match child {
-                Child::Singleton(group_id) => {
-                    self.group_dependent_logical_exprs
-                        .entry(*group_id)
-                        .or_default()
-                        .insert(logical_expr_id);
-                }
-                Child::VarLength(group_ids) => {
-                    for group_id in group_ids.iter() {
-                        self.group_dependent_logical_exprs
-                            .entry(*group_id)
-                            .or_default()
-                            .insert(logical_expr_id);
-                    }
-                }
-            }
-        }
-        Ok(logical_expr_id)
-    }
-
-    async fn materialize_logical_expr(
-        &self,
-        logical_expr_id: LogicalExpressionId,
-    ) -> MemoizeResult<LogicalExpression> {
-        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await?;
-        let logical_expr = self
-            .logical_exprs
-            .get(&logical_expr_id)
-            .ok_or(MemoizeError::LogicalExprNotFound(logical_expr_id))?;
-        Ok(logical_expr.clone())
-    }
-
-    async fn get_physical_expr_id(
-        &mut self,
-        physical_expr: &PhysicalExpression,
-    ) -> MemoizeResult<PhysicalExpressionId> {
-        if let Some(physical_expr_id) = self
-            .physical_expr_node_to_id_index
-            .get(physical_expr)
-            .cloned()
-        {
-            return Ok(physical_expr_id);
-        }
-        let physical_expr_id = self.next_physical_expr_id();
-        self.physical_expr_node_to_id_index
-            .insert(physical_expr.clone(), physical_expr_id);
-        self.physical_exprs
-            .insert(physical_expr_id, (physical_expr.clone(), None));
-
-        for child in physical_expr.children.iter() {
-            match child {
-                Child::Singleton(goal_member_id) => {
-                    if let GoalMemberId::GoalId(goal_id) = goal_member_id {
-                        self.goal_dependent_physical_exprs
-                            .entry(*goal_id)
-                            .or_default()
-                            .insert(physical_expr_id);
-                    }
-                }
-                Child::VarLength(goal_member_ids) => {
-                    for goal_member_id in goal_member_ids.iter() {
-                        match goal_member_id {
-                            GoalMemberId::GoalId(goal_id) => {
-                                self.goal_dependent_physical_exprs
-                                    .entry(*goal_id)
-                                    .or_default()
-                                    .insert(physical_expr_id);
-                            }
-                            GoalMemberId::PhysicalExpressionId(child_physical_expr_id) => {
-                                self.physical_expr_dependent_physical_exprs
-                                    .entry(*child_physical_expr_id)
-                                    .or_default()
-                                    .insert(physical_expr_id);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Ok(physical_expr_id)
-    }
-
-    async fn materialize_physical_expr(
-        &self,
-        physical_expr_id: PhysicalExpressionId,
-    ) -> MemoizeResult<PhysicalExpression> {
-        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await?;
-        let (physical_expr, _) = self
-            .physical_exprs
-            .get(&physical_expr_id)
-            .ok_or(MemoizeError::PhysicalExprNotFound(physical_expr_id))?;
-        Ok(physical_expr.clone())
-    }
-
-    async fn find_repr_group(&self, group_id: GroupId) -> MemoizeResult<GroupId> {
-        let repr_group_id = self.repr_group.find(&group_id);
-        Ok(repr_group_id)
-    }
-
-    async fn find_repr_goal(&self, goal_id: GoalId) -> MemoizeResult<GoalId> {
-        let repr_goal_id = self.repr_goal.find(&goal_id);
-        Ok(repr_goal_id)
-    }
-
-    async fn find_repr_logical_expr(
-        &self,
-        logical_expr_id: LogicalExpressionId,
-    ) -> MemoizeResult<LogicalExpressionId> {
-        let repr_expr_id = self.repr_logical_expr.find(&logical_expr_id);
-        Ok(repr_expr_id)
-    }
-
-    async fn find_repr_physical_expr(
-        &self,
-        physical_expr_id: PhysicalExpressionId,
-    ) -> MemoizeResult<PhysicalExpressionId> {
-        let repr_expr_id = self.repr_physical_expr.find(&physical_expr_id);
-        Ok(repr_expr_id)
     }
 }
 

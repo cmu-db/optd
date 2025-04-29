@@ -131,18 +131,16 @@ impl ForwardResult {
     }
 }
 
-/// Core interface for memo-based query optimization.
-///
-/// This trait defines the operations needed to store, retrieve, and manipulate
-/// the memo data structure that powers the dynamic programming approach to
-/// query optimization. The memo stores logical and physical expressions by their IDs,
-/// manages expression properties, and tracks optimization status.
-#[trait_variant::make(Send)]
-pub trait Memoize: Send + Sync + 'static {
-    //
-    // Logical expression and group operations.
-    //
+pub trait OptimizerState: Memo + Materialize + TaskState {}
 
+//
+// Logical expression and group operations.
+//
+//
+// Physical expression and goal operations.
+//
+#[trait_variant::make(Send)]
+pub trait Memo {
     /// Retrieves logical properties for a group ID.
     ///
     /// # Parameters
@@ -226,10 +224,6 @@ pub trait Memoize: Send + Sync + 'static {
         group_id_2: GroupId,
     ) -> MemoizeResult<Option<MergeResult>>;
 
-    //
-    // Physical expression and goal operations.
-    //
-
     /// Gets the best optimized physical expression ID for a goal ID.
     ///
     /// # Parameters
@@ -285,6 +279,134 @@ pub trait Memoize: Send + Sync + 'static {
         physical_expr_id: PhysicalExpressionId,
     ) -> MemoizeResult<Option<Cost>>;
 
+    /// Finds the representative group ID for a given group ID.
+    ///
+    /// # Parameters
+    /// * `group_id` - The group ID to find the representative for.
+    ///
+    /// # Returns
+    /// The representative group ID (which may be the same as the input if
+    /// it's already the representative).
+    async fn find_repr_group(&self, group_id: GroupId) -> MemoizeResult<GroupId>;
+
+    /// Finds the representative goal ID for a given goal ID.
+    ///
+    /// # Parameters
+    /// * `goal_id` - The goal ID to find the representative for.
+    ///
+    /// # Returns
+    /// The representative goal ID (which may be the same as the input if
+    /// it's already the representative).
+    async fn find_repr_goal(&self, goal_id: GoalId) -> MemoizeResult<GoalId>;
+
+    /// Finds the representative logical expression ID for a given logical expression ID.
+    ///
+    /// # Parameters
+    /// * `logical_expr_id` - The logical expression ID to find the representative for.
+    ///
+    /// # Returns
+    /// The representative logical expression ID (which may be the same as the input if
+    /// it's already the representative).
+    async fn find_repr_logical_expr(
+        &self,
+        logical_expr_id: LogicalExpressionId,
+    ) -> MemoizeResult<LogicalExpressionId>;
+
+    /// Finds the representative physical expression ID for a given physical expression ID.
+    ///
+    /// # Parameters
+    /// * `physical_expr_id` - The physical expression ID to find the representative for.
+    ///
+    /// # Returns
+    /// The representative physical expression ID (which may be the same as the input if
+    /// it's already the representative).
+    async fn find_repr_physical_expr(
+        &self,
+        physical_expr_id: PhysicalExpressionId,
+    ) -> MemoizeResult<PhysicalExpressionId>;
+}
+
+#[trait_variant::make(Send)]
+pub trait Materialize {
+    //
+    // ID conversion and materialization operations.
+    //
+
+    /// Gets or creates a goal ID for a given goal.
+    ///
+    /// # Parameters
+    /// * `goal` - The goal to get or create an ID for.
+    ///
+    /// # Returns
+    /// The ID of the goal.
+    async fn get_goal_id(&mut self, goal: &Goal) -> MemoizeResult<GoalId>;
+
+    /// Materializes a goal from its ID.
+    ///
+    /// # Parameters
+    /// * `goal_id` - ID of the goal to materialize.
+    ///
+    /// # Returns
+    /// The materialized goal.
+    async fn materialize_goal(&self, goal_id: GoalId) -> MemoizeResult<Goal>;
+
+    /// Gets or creates a logical expression ID for a given logical expression.
+    ///
+    /// # Parameters
+    /// * `logical_expr` - The logical expression to get or create an ID for.
+    ///
+    /// # Returns
+    /// The ID of the logical expression.
+    async fn get_logical_expr_id(
+        &mut self,
+        logical_expr: &LogicalExpression,
+    ) -> MemoizeResult<LogicalExpressionId>;
+
+    /// Materializes a logical expression from its ID.
+    ///
+    /// # Parameters
+    /// * `logical_expr_id` - ID of the logical expression to materialize.
+    ///
+    /// # Returns
+    /// The materialized logical expression.
+    async fn materialize_logical_expr(
+        &self,
+        logical_expr_id: LogicalExpressionId,
+    ) -> MemoizeResult<LogicalExpression>;
+
+    /// Gets or creates a physical expression ID for a given physical expression.
+    ///
+    /// # Parameters
+    /// * `physical_expr` - The physical expression to get or create an ID for.
+    ///
+    /// # Returns
+    /// The ID of the physical expression.
+    async fn get_physical_expr_id(
+        &mut self,
+        physical_expr: &PhysicalExpression,
+    ) -> MemoizeResult<PhysicalExpressionId>;
+
+    /// Materializes a physical expression from its ID.
+    ///
+    /// # Parameters
+    /// * `physical_expr_id` - ID of the physical expression to materialize.
+    ///
+    /// # Returns
+    /// The materialized physical expression.
+    async fn materialize_physical_expr(
+        &self,
+        physical_expr_id: PhysicalExpressionId,
+    ) -> MemoizeResult<PhysicalExpression>;
+}
+
+/// Core interface for memo-based query optimization.
+///
+/// This trait defines the operations needed to store, retrieve, and manipulate
+/// the memo data structure that powers the dynamic programming approach to
+/// query optimization. The memo stores logical and physical expressions by their IDs,
+/// manages expression properties, and tracks optimization status.
+#[trait_variant::make(Send)]
+pub trait TaskState {
     //
     // Rule and costing status operations.
     //
@@ -413,124 +535,4 @@ pub trait Memoize: Send + Sync + 'static {
         physical_expr_id: PhysicalExpressionId,
         goal_id: GoalId,
     ) -> MemoizeResult<()>;
-
-    //
-    // ID conversion and materialization operations.
-    //
-
-    /// Gets or creates a goal ID for a given goal.
-    ///
-    /// # Parameters
-    /// * `goal` - The goal to get or create an ID for.
-    ///
-    /// # Returns
-    /// The ID of the goal.
-    async fn get_goal_id(&mut self, goal: &Goal) -> MemoizeResult<GoalId>;
-
-    /// Materializes a goal from its ID.
-    ///
-    /// # Parameters
-    /// * `goal_id` - ID of the goal to materialize.
-    ///
-    /// # Returns
-    /// The materialized goal.
-    async fn materialize_goal(&self, goal_id: GoalId) -> MemoizeResult<Goal>;
-
-    /// Gets or creates a logical expression ID for a given logical expression.
-    ///
-    /// # Parameters
-    /// * `logical_expr` - The logical expression to get or create an ID for.
-    ///
-    /// # Returns
-    /// The ID of the logical expression.
-    async fn get_logical_expr_id(
-        &mut self,
-        logical_expr: &LogicalExpression,
-    ) -> MemoizeResult<LogicalExpressionId>;
-
-    /// Materializes a logical expression from its ID.
-    ///
-    /// # Parameters
-    /// * `logical_expr_id` - ID of the logical expression to materialize.
-    ///
-    /// # Returns
-    /// The materialized logical expression.
-    async fn materialize_logical_expr(
-        &self,
-        logical_expr_id: LogicalExpressionId,
-    ) -> MemoizeResult<LogicalExpression>;
-
-    /// Gets or creates a physical expression ID for a given physical expression.
-    ///
-    /// # Parameters
-    /// * `physical_expr` - The physical expression to get or create an ID for.
-    ///
-    /// # Returns
-    /// The ID of the physical expression.
-    async fn get_physical_expr_id(
-        &mut self,
-        physical_expr: &PhysicalExpression,
-    ) -> MemoizeResult<PhysicalExpressionId>;
-
-    /// Materializes a physical expression from its ID.
-    ///
-    /// # Parameters
-    /// * `physical_expr_id` - ID of the physical expression to materialize.
-    ///
-    /// # Returns
-    /// The materialized physical expression.
-    async fn materialize_physical_expr(
-        &self,
-        physical_expr_id: PhysicalExpressionId,
-    ) -> MemoizeResult<PhysicalExpression>;
-
-    //
-    // Representative ID operations.
-    //
-
-    /// Finds the representative group ID for a given group ID.
-    ///
-    /// # Parameters
-    /// * `group_id` - The group ID to find the representative for.
-    ///
-    /// # Returns
-    /// The representative group ID (which may be the same as the input if
-    /// it's already the representative).
-    async fn find_repr_group(&self, group_id: GroupId) -> MemoizeResult<GroupId>;
-
-    /// Finds the representative goal ID for a given goal ID.
-    ///
-    /// # Parameters
-    /// * `goal_id` - The goal ID to find the representative for.
-    ///
-    /// # Returns
-    /// The representative goal ID (which may be the same as the input if
-    /// it's already the representative).
-    async fn find_repr_goal(&self, goal_id: GoalId) -> MemoizeResult<GoalId>;
-
-    /// Finds the representative logical expression ID for a given logical expression ID.
-    ///
-    /// # Parameters
-    /// * `logical_expr_id` - The logical expression ID to find the representative for.
-    ///
-    /// # Returns
-    /// The representative logical expression ID (which may be the same as the input if
-    /// it's already the representative).
-    async fn find_repr_logical_expr(
-        &self,
-        logical_expr_id: LogicalExpressionId,
-    ) -> MemoizeResult<LogicalExpressionId>;
-
-    /// Finds the representative physical expression ID for a given physical expression ID.
-    ///
-    /// # Parameters
-    /// * `physical_expr_id` - The physical expression ID to find the representative for.
-    ///
-    /// # Returns
-    /// The representative physical expression ID (which may be the same as the input if
-    /// it's already the representative).
-    async fn find_repr_physical_expr(
-        &self,
-        physical_expr_id: PhysicalExpressionId,
-    ) -> MemoizeResult<PhysicalExpressionId>;
 }
