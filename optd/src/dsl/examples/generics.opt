@@ -7,9 +7,8 @@ data Physical
 data LogicalProperties
 data PhysicalProperties
 
- // Generic function that takes another function as argument
- fn <A, B, C> compose(f: B -> C, g: A -> B): A -> C = 
-    x: A -> f(g(x))
+// Generic function that takes another function as argument
+fn <A, B, C> compose(f: B -> C, g: A -> B): A -> C = x: A -> f(g(x))
 
 // Generic function that maps over arrays
 fn <T, U> (input: [T]) map(transform: T -> U): [U] = match input

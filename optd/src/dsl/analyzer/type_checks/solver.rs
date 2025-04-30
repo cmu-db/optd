@@ -944,44 +944,44 @@ mod tests {
     #[test]
     fn test_recursive_generic_datatypes() {
         let source = r#"
-    // Generic tree data structure
-    data Tree<T> = 
-        | Node(value: T, left: Tree<T>, right: Tree<T>)
-        \ Leaf(value: T)
+        // Generic tree data structure
+        data Tree<T> = 
+            | Node(value: T, left: Tree<T>, right: Tree<T>)
+            \ Leaf(value: T)
 
-    // Generic function to transform a tree
-    fn <T, U> (tree: Tree<T>) map(transform: T -> U): Tree<U> = match tree
-        | Leaf(value) -> Leaf(transform(value))
-        \ Node(value, left, right) -> 
-            Node(transform(value), left.map(transform), right.map(transform))
+        // Generic function to transform a tree
+        fn <T, U> (tree: Tree<T>) map(transform: T -> U): Tree<U> = match tree
+            | Leaf(value) -> Leaf(transform(value))
+            \ Node(value, left, right) -> 
+                Node(transform(value), left.map(transform), right.map(transform))
 
-    // Generic function to fold a tree
-    fn <T, U> (tree: Tree<T>) fold(f: (T, U, U) -> U, leaf_case: T -> U): U = match tree
-        | Leaf(value) -> leaf_case(value)
-        \ Node(value, left, right) -> 
+        // Generic function to fold a tree
+        fn <T, U> (tree: Tree<T>) fold(f: (T, U, U) -> U, leaf_case: T -> U): U = match tree
+            | Leaf(value) -> leaf_case(value)
+            \ Node(value, left, right) -> 
+                let 
+                    left_result = left.fold(f, leaf_case),
+                    right_result = right.fold(f, leaf_case)
+                in
+                    f(value, left_result, right_result)
+
+        fn main(): I64 = 
             let 
-                left_result = left.fold(f, leaf_case),
-                right_result = right.fold(f, leaf_case)
+                tree = Node(1, 
+                            Node(2, Leaf(3), Leaf(4)), 
+                            Leaf(5)),
+                
+                // Transform tree with map
+                doubled_tree = tree.map(x: I64 -> x * 2),
+                
+                // Fold to get sum
+                sum = doubled_tree.fold(
+                    (value: I64, left: I64, right: I64) -> value + left + right,
+                    value: I64 -> value
+                )
             in
-                f(value, left_result, right_result)
-
-    fn main(): I64 = 
-        let 
-            tree = Node(1, 
-                        Node(2, Leaf(3), Leaf(4)), 
-                        Leaf(5)),
-            
-            // Transform tree with map
-            doubled_tree = tree.map(x: I64 -> x * 2),
-            
-            // Fold to get sum
-            sum = doubled_tree.fold(
-                (value: I64, left: I64, right: I64) -> value + left + right,
-                value: I64 -> value
-            )
-        in
-            sum  // Should return 30 (2 + 4 + 6 + 8 + 10)
-    "#;
+                sum  // Should return 30 (2 + 4 + 6 + 8 + 10)
+        "#;
 
         let result = run_type_inference(source, "recursive_generic_datatypes.opt");
         assert!(
