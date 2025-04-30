@@ -4,12 +4,16 @@
 //! TODO(connor): Explain the distinction between the memo table and the other things that the
 //! optimizer needs to store / remember (task graph state as well).
 
+/// Error and Result defintions.
 mod error;
-mod traits;
-mod types;
-
 pub use error::*;
+
+/// Trait definitions.
+mod traits;
 pub use traits::*;
+
+/// Type definitions.
+mod types;
 pub use types::*;
 
 /// A generic implementation of the Union-Find algorithm.
