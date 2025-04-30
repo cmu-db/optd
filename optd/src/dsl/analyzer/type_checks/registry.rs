@@ -400,17 +400,18 @@ impl TypeRegistry {
     ///
     /// When a generic type is encountered, the function looks for an existing instantiation
     /// for the (constraint_id, generic_id) pair. If none exists, it creates a new ascending
-    /// unknown type and stores it in the instantiated_generics map.
+    /// or descending unknown type and stores it in the instantiated_generics map.
     ///
     /// # Arguments
     ///
     /// * `ty` - The type to instantiate
     /// * `constraint_id` - The ID of the constraint that needs this instantiation
+    /// * `ascending` - Whether unknown types should be created as ascending (true) or descending (false)
     ///
     /// # Returns
     ///
     /// A new type with all generic references replaced with constraint-specific instantiations.
-    pub fn instantiate_type(&mut self, ty: &Type, constraint_id: usize) -> Type {
+    pub fn instantiate_type(&mut self, ty: &Type, constraint_id: usize, ascending: bool) -> Type {
         use TypeKind::*;
 
         let span = ty.span.clone();
@@ -418,7 +419,13 @@ impl TypeRegistry {
         let kind = match &*ty.value {
             Generic(generic_id) => {
                 let key = (constraint_id, *generic_id);
-                let next_id = self.new_unknown_asc();
+
+                let next_id = if ascending {
+                    self.new_unknown_asc()
+                } else {
+                    self.new_unknown_desc()
+                };
+
                 self.instantiated_generics
                     .entry(key)
                     .or_insert(next_id)
@@ -426,29 +433,35 @@ impl TypeRegistry {
             }
 
             // For composite types, recursively instantiate their component types.
-            Array(elem_type) => Array(self.instantiate_type(elem_type, constraint_id)),
+            Array(elem_type) => Array(self.instantiate_type(elem_type, constraint_id, ascending)),
 
             Closure(param_type, return_type) => Closure(
-                self.instantiate_type(param_type, constraint_id),
-                self.instantiate_type(return_type, constraint_id),
+                self.instantiate_type(param_type, constraint_id, !ascending),
+                self.instantiate_type(return_type, constraint_id, ascending),
             ),
 
             Tuple(types) => {
                 let instantiated_types = types
                     .iter()
-                    .map(|t| self.instantiate_type(t, constraint_id))
+                    .map(|t| self.instantiate_type(t, constraint_id, ascending))
                     .collect();
                 Tuple(instantiated_types)
             }
 
             Map(key_type, value_type) => Map(
-                self.instantiate_type(key_type, constraint_id),
-                self.instantiate_type(value_type, constraint_id),
+                self.instantiate_type(key_type, constraint_id, !ascending),
+                self.instantiate_type(value_type, constraint_id, ascending),
             ),
 
-            Optional(inner_type) => Optional(self.instantiate_type(inner_type, constraint_id)),
-            Stored(inner_type) => Stored(self.instantiate_type(inner_type, constraint_id)),
-            Costed(inner_type) => Costed(self.instantiate_type(inner_type, constraint_id)),
+            Optional(inner_type) => {
+                Optional(self.instantiate_type(inner_type, constraint_id, ascending))
+            }
+            Stored(inner_type) => {
+                Stored(self.instantiate_type(inner_type, constraint_id, ascending))
+            }
+            Costed(inner_type) => {
+                Costed(self.instantiate_type(inner_type, constraint_id, ascending))
+            }
 
             // Primitive types, special types, and ADT references don't need instantiation.
             _ => *ty.value.clone(),

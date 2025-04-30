@@ -1,0 +1,40 @@
+data Logical =
+    | Add(left: Logical, right: Logical)
+    | List(bla: [Logical])
+    \ Const(val: I64)
+
+data Physical
+data LogicalProperties
+data PhysicalProperties
+
+ // Generic function that takes another function as argument
+ fn <A, B, C> compose(f: B -> C, g: A -> B): A -> C = 
+    x: A -> f(g(x))
+
+// Generic function that maps over arrays
+fn <T, U> (input: [T]) map(transform: T -> U): [U] = match input
+    | [] -> []
+    \ [x .. xs] -> [transform(x)] ++ xs.map(transform)
+
+// Generic function that filters array elements
+fn <T> (input: [T]) filter(predicate: T -> Bool): [T] = match input
+    | [] -> []
+    \ [x .. xs] -> 
+        if predicate(x) then 
+            [x] ++ xs.filter(predicate)
+        else 
+            xs.filter(predicate)
+
+fn main(): [I64] = 
+    let 
+        numbers = [1, 2, 3, 4, 5, 6],
+        is_greater_two = x: I64 -> x > 2,
+        double = x: I64 -> x * 2,
+        
+        // Compose filter and map
+        process = compose(
+            xs: [I64] -> xs.map(double),
+            xs: [I64] -> xs.filter(is_greater_two)
+        )
+    in
+        process(numbers)
