@@ -1,101 +1,122 @@
 use super::{ForwardResult, MergeResult, OptimizeStateResult, TaskStatus};
 use crate::core::cir::*;
 
+/// The main interface for tracking state needed by the optimizer. This includes the memo table and
+/// state needed for the task graph.
 pub trait OptimizerState: Memo + Materialize + TaskGraphState {}
 
-//
-// Logical expression and group operations.
-//
-//
-// Physical expression and goal operations.
-//
+/// The interface for a `Group` of logical expressions.
+///
+/// Implementors of this trait should be able to track the logical expressions belonging to this
+/// `Group` via [`LogicalExpressionId`], as well as the derived [`LogicalProperties`] and related
+/// [`Goal`]s via [`GoalId`]s.
+pub trait Group {
+    /// Creates a new `Group` from a new [`LogicalExpressionId`].
+    fn new_from_logical_expression(id: LogicalExpressionId) -> Self;
+
+    /// Retrieves an iterator of [`LogicalExpressionId`] contained in the `Group`.
+    fn logical_expressions(&self) -> impl Iterator<Item = LogicalExpressionId>;
+
+    /// Checks if the `Group` contains a logical expression by ID.
+    fn contains_logical_expression(&self, id: LogicalExpressionId) -> bool;
+
+    /// Adds a logical expression to a `Group`.
+    fn add_logical_expression(&mut self, id: LogicalExpressionId);
+
+    /// Removes a logical expression to a `Group`.
+    fn remove_logical_expression(&mut self, id: LogicalExpressionId);
+
+    /// Retrieves the logical properties of a `Group`.
+    fn logical_properties(&self) -> Option<LogicalProperties>;
+
+    /// Replaces the logical properties for a `Group`.
+    fn replace_logical_properties(&mut self, props: LogicalProperties)
+    -> Option<LogicalProperties>;
+
+    /// The IDs of the [`Goal`]s that are dependent on this `Group`.
+    fn goals(&self) -> impl Iterator<Item = GoalId>;
+
+    /// Add a related [`GoalId`] to this `Group`.
+    fn add_goal(&mut self, goal_id: GoalId);
+}
+
+/// The interface for an optimizer memoization (memo) table.
+///
+/// This trait mainly describes operations related to groups, goals, logical and physical
+/// expressions, and finding representative nodes of the union-find substructures.
 #[trait_variant::make(Send)]
 pub trait Memo {
-    /// Retrieves logical properties for a group ID.
-    ///
-    /// # Parameters
-    /// * `group_id` - ID of the group to retrieve properties for.
-    ///
-    /// # Returns
-    /// The properties associated with the group or an error if not found.
-    async fn get_logical_properties(
-        &self,
-        group_id: GroupId,
-    ) -> OptimizeStateResult<Option<LogicalProperties>>;
+    /// The associated type needed for managing `Group` data.
+    type GroupState: Group;
 
-    /// Sets logical properties for a group ID.
-    ///
-    /// # Parameters
-    /// * `group_id` - ID of the group to set properties for.
-    /// * `props` - The logical properties to associate with the group.
-    ///
-    /// # Returns
-    /// A result indicating success or failure of the operation.
-    async fn set_logical_properties(
-        &mut self,
-        group_id: GroupId,
-        props: LogicalProperties,
-    ) -> OptimizeStateResult<()>;
+    /// Retrives the `GroupState` data given the group's ID.
+    async fn get_group(&self, group_id: GroupId) -> &Self::GroupState;
 
-    /// Gets all logical expression IDs in a group (only representative IDs).
-    ///
-    /// # Parameters
-    /// * `group_id` - ID of the group to retrieve expressions from.
-    ///
-    /// # Returns
-    /// A vector of logical expression IDs in the specified group.
-    async fn get_all_logical_exprs(
-        &self,
-        group_id: GroupId,
-    ) -> OptimizeStateResult<Vec<LogicalExpressionId>>;
+    /// Mutably retrives the `GroupState` data given the group's ID.
+    async fn get_group_mut(&mut self, group_id: GroupId) -> &mut Self::GroupState;
 
-    /// Gets any logical expression ID in a group.
-    async fn get_any_logical_expr(
-        &self,
-        group_id: GroupId,
-    ) -> OptimizeStateResult<LogicalExpressionId>;
+    /// Finds the representative group of a given group. The representative is usually tracked via a
+    /// Union-Find data structure.
+    ///
+    /// If the input group is already the representative, then the returned [`GroupId`] is equal to
+    /// the input [`GroupId`].
+    async fn find_repr_group(&self, group_id: GroupId) -> GroupId;
 
-    /// Finds group containing a logical expression ID, if it exists.
+    /// Finds the representative goal of a given goal. The representative is usually tracked via a
+    /// Union-Find data structure.
     ///
-    /// # Parameters
-    /// * `logical_expr_id` - ID of the logical expression to find.
+    /// If the input goal is already the representative, then the returned [`GoalId`] is equal to
+    /// the input [`GoalId`].
+    async fn find_repr_goal(&self, goal_id: GoalId) -> GoalId;
+
+    /// Finds the representative logical expression of a given expression. The representative is
+    /// usually tracked via a Union-Find data structure.
     ///
-    /// # Returns
-    /// The group ID if the expression exists, None otherwise.
-    async fn find_logical_expr_group(
+    /// If the input expression is already the representative, then the returned
+    /// [`LogicalExpressionId`] is equal to the input [`LogicalExpressionId`].
+    async fn find_repr_logical_expr(
         &self,
         logical_expr_id: LogicalExpressionId,
-    ) -> OptimizeStateResult<Option<GroupId>>;
+    ) -> LogicalExpressionId;
 
-    /// Creates a new group with a logical expression ID and properties.
+    /// Finds the representative physical expression of a given expression. The representative is
+    /// usually tracked via a Union-Find data structure.
     ///
-    /// # Parameters
-    /// * `logical_expr_id` - ID of the logical expression to add to the group.
-    /// * `props` - Logical properties for the group.
+    /// If the input expression is already the representative, then the returned
+    /// [`PhysicalExpressionId`] is equal to the input [`PhysicalExpressionId`].
+    async fn find_repr_physical_expr(
+        &self,
+        physical_expr_id: PhysicalExpressionId,
+    ) -> PhysicalExpressionId;
+
+    /// Finds the ID of the representative group containing the given logical expression ID.
     ///
-    /// # Returns
-    /// The ID of the newly created group.
-    async fn create_group(
-        &mut self,
+    /// If there is no `Group` that contains the input logical expression ID, this returns `None`.
+    async fn find_group_of_logical_expression(
+        &self,
         logical_expr_id: LogicalExpressionId,
-    ) -> OptimizeStateResult<GroupId>;
+    ) -> Option<GroupId>;
 
-    /// Merges groups 1 and 2, unifying them under a common representative.
+    /// Creates a new group given a new [`LogicalExpressionId`].
     ///
-    /// May trigger cascading merges of parent groups & goals.
+    /// Returns The ID of the newly created group.
+    async fn create_group(&mut self, logical_expr_id: LogicalExpressionId) -> GroupId;
+
+    /// Merges two groups, unifying them under a common representative group.
     ///
-    /// # Parameters
-    /// * `group_id_1` - ID of the first group to merge.
-    /// * `group_id_2` - ID of the second group to merge.
+    /// This function can trigger cascading (recursive) merges of parent groups & goals.
     ///
+    /// TODO(connor): Clean up
     /// # Returns
     /// Merge results for all affected entities including newly dirtied
     /// transformations, implementations and costings.
+    ///
+    /// Should panic if the groups are equal (instead of returning an option)
     async fn merge_groups(
         &mut self,
         group_id_1: GroupId,
         group_id_2: GroupId,
-    ) -> OptimizeStateResult<Option<MergeResult>>;
+    ) -> OptimizeStateResult<MergeResult>;
 
     /// Gets the best optimized physical expression ID for a goal ID.
     ///
@@ -152,52 +173,6 @@ pub trait Memo {
         &self,
         physical_expr_id: PhysicalExpressionId,
     ) -> OptimizeStateResult<Option<Cost>>;
-
-    /// Finds the representative group ID for a given group ID.
-    ///
-    /// # Parameters
-    /// * `group_id` - The group ID to find the representative for.
-    ///
-    /// # Returns
-    /// The representative group ID (which may be the same as the input if
-    /// it's already the representative).
-    async fn find_repr_group(&self, group_id: GroupId) -> OptimizeStateResult<GroupId>;
-
-    /// Finds the representative goal ID for a given goal ID.
-    ///
-    /// # Parameters
-    /// * `goal_id` - The goal ID to find the representative for.
-    ///
-    /// # Returns
-    /// The representative goal ID (which may be the same as the input if
-    /// it's already the representative).
-    async fn find_repr_goal(&self, goal_id: GoalId) -> OptimizeStateResult<GoalId>;
-
-    /// Finds the representative logical expression ID for a given logical expression ID.
-    ///
-    /// # Parameters
-    /// * `logical_expr_id` - The logical expression ID to find the representative for.
-    ///
-    /// # Returns
-    /// The representative logical expression ID (which may be the same as the input if
-    /// it's already the representative).
-    async fn find_repr_logical_expr(
-        &self,
-        logical_expr_id: LogicalExpressionId,
-    ) -> OptimizeStateResult<LogicalExpressionId>;
-
-    /// Finds the representative physical expression ID for a given physical expression ID.
-    ///
-    /// # Parameters
-    /// * `physical_expr_id` - The physical expression ID to find the representative for.
-    ///
-    /// # Returns
-    /// The representative physical expression ID (which may be the same as the input if
-    /// it's already the representative).
-    async fn find_repr_physical_expr(
-        &self,
-        physical_expr_id: PhysicalExpressionId,
-    ) -> OptimizeStateResult<PhysicalExpressionId>;
 }
 
 #[trait_variant::make(Send)]

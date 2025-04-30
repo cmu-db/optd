@@ -105,6 +105,7 @@ impl GroupState {
     }
 }
 
+/// TODO(connor): Why are the members not part of a goal normally?
 struct GoalState {
     /// The set of members that are part of this goal.
     goal: Goal,
