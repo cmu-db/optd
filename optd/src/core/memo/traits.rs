@@ -5,55 +5,23 @@ use crate::core::cir::*;
 /// state needed for the task graph.
 pub trait OptimizerState: Memo + Materialize + TaskGraphState {}
 
-/// The interface for a `Group` of logical expressions.
-///
-/// Implementors of this trait should be able to track the logical expressions belonging to this
-/// `Group` via [`LogicalExpressionId`], as well as the derived [`LogicalProperties`] and related
-/// [`Goal`]s via [`GoalId`]s.
-pub trait Group {
-    /// Creates a new `Group` from a new [`LogicalExpressionId`].
-    fn new_from_logical_expression(id: LogicalExpressionId) -> Self;
-
-    /// Retrieves an iterator of [`LogicalExpressionId`] contained in the `Group`.
-    fn logical_expressions(&self) -> impl Iterator<Item = LogicalExpressionId>;
-
-    /// Checks if the `Group` contains a logical expression by ID.
-    fn contains_logical_expression(&self, id: LogicalExpressionId) -> bool;
-
-    /// Adds a logical expression to a `Group`.
-    fn add_logical_expression(&mut self, id: LogicalExpressionId);
-
-    /// Removes a logical expression to a `Group`.
-    fn remove_logical_expression(&mut self, id: LogicalExpressionId);
-
-    /// Retrieves the logical properties of a `Group`.
-    fn logical_properties(&self) -> Option<LogicalProperties>;
-
-    /// Replaces the logical properties for a `Group`.
-    fn replace_logical_properties(&mut self, props: LogicalProperties)
-    -> Option<LogicalProperties>;
-
-    /// The IDs of the [`Goal`]s that are dependent on this `Group`.
-    fn goals(&self) -> impl Iterator<Item = GoalId>;
-
-    /// Add a related [`GoalId`] to this `Group`.
-    fn add_goal(&mut self, goal_id: GoalId);
-}
-
 /// The interface for an optimizer memoization (memo) table.
 ///
 /// This trait mainly describes operations related to groups, goals, logical and physical
 /// expressions, and finding representative nodes of the union-find substructures.
 #[trait_variant::make(Send)]
 pub trait Memo {
-    /// The associated type needed for managing `Group` data.
-    type GroupState: Group;
-
     /// Retrives the `GroupState` data given the group's ID.
-    async fn get_group(&self, group_id: GroupId) -> &Self::GroupState;
+    async fn get_group(&self, group_id: GroupId) -> &Group;
 
     /// Mutably retrives the `GroupState` data given the group's ID.
-    async fn get_group_mut(&mut self, group_id: GroupId) -> &mut Self::GroupState;
+    async fn get_group_mut(&mut self, group_id: GroupId) -> &mut Group;
+    
+    /// Retrives the `GroupState` data given the group's ID.
+    async fn get_goal(&self, goal_id: GoalId) -> &Goal;
+
+    /// Mutably retrives the `GroupState` data given the goal's ID.
+    async fn get_goal_mut(&mut self, goal_id: GoalId) -> &mut Goal;
 
     /// Finds the representative group of a given group. The representative is usually tracked via a
     /// Union-Find data structure.
@@ -131,16 +99,6 @@ pub trait Memo {
         goal_id: GoalId,
     ) -> OptimizeStateResult<Option<(PhysicalExpressionId, Cost)>>;
 
-    /// Gets all members of a goal, which can be physical expressions or other goals.
-    ///
-    /// # Parameters
-    /// * `goal_id` - ID of the goal to retrieve members from.
-    ///
-    /// # Returns
-    /// A vector of goal members, each being either a physical expression ID or another goal ID.
-    async fn get_all_goal_members(&self, goal_id: GoalId)
-    -> OptimizeStateResult<Vec<GoalMemberId>>;
-
     /// Adds a member to a goal.
     ///
     /// # Parameters
@@ -149,6 +107,8 @@ pub trait Memo {
     ///
     /// # Returns
     /// True if the member was added to the goal, or false if it already existed.
+    /// 
+    /// TODO(connor): This is clearly doing much more than adding a goal member
     async fn add_goal_member(
         &mut self,
         goal_id: GoalId,

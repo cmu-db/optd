@@ -79,8 +79,8 @@ pub(crate) fn physical_properties_to_value(properties: &PhysicalProperties) -> V
 
 /// Converts a CIR [`Goal`] to a HIR [`Goal`](hir::Goal).
 fn cir_goal_to_hir(goal: &Goal) -> hir::Goal {
-    let group_id = cir_group_id_to_hir(&goal.0);
-    let properties = physical_properties_to_value(&goal.1);
+    let group_id = cir_group_id_to_hir(&goal.group_id);
+    let properties = physical_properties_to_value(&goal.properties);
 
     hir::Goal {
         group_id,

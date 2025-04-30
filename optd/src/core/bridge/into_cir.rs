@@ -6,6 +6,7 @@ use Child::*;
 use CoreData::*;
 use Literal::*;
 use Materializable::*;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 /// Converts a [`Value`] into a [`PartialLogicalPlan`].
@@ -99,7 +100,11 @@ pub(crate) fn hir_group_id_to_cir(hir_group_id: &hir::GroupId) -> GroupId {
 pub(crate) fn hir_goal_to_cir(hir_goal: &hir::Goal) -> Goal {
     let group_id = hir_group_id_to_cir(&hir_goal.group_id);
     let properties = value_to_physical_properties(&hir_goal.properties);
-    Goal(group_id, properties)
+    Goal {
+        group_id,
+        properties,
+        members: HashSet::new(),
+    }
 }
 
 /// Converts a [`Value`] into a fully materialized [`LogicalPlan`].
