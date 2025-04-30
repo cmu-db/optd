@@ -67,9 +67,12 @@ impl TypeRegistry {
                 self.check_subtype_constraint(child, parent, changed)
             }
 
-            Constraint::Call { inner, args, outer } => {
-                self.check_call_constraint(inner, args, outer, changed)
-            }
+            Constraint::Call {
+                id,
+                inner,
+                args,
+                outer,
+            } => self.check_call_constraint(*id, inner, args, outer, changed),
 
             Constraint::Scrutinee { scrutinee, pattern } => {
                 self.check_scrutinee_constraint(scrutinee, pattern, changed)
@@ -103,6 +106,7 @@ impl TypeRegistry {
 
     fn check_call_constraint(
         &mut self,
+        constraint_id: usize,
         inner: &TypedSpan,
         args: &[TypedSpan],
         outer: &TypedSpan,
@@ -114,7 +118,11 @@ impl TypeRegistry {
             TypeKind::Nothing => Ok(()),
 
             TypeKind::Closure(param, ret) => {
-                let (param_len, param_types) = match &**param {
+                // Initiatialize potential generics.
+                let param = self.instantiate_type(param, constraint_id);
+                let ret = self.instantiate_type(ret, constraint_id);
+
+                let (param_len, param_types) = match &*param {
                     TypeKind::Tuple(types) => (types.len(), types.to_vec()),
                     TypeKind::Unit => (0, vec![]),
                     _ => (1, vec![param.clone()]),

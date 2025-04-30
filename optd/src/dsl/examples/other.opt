@@ -7,10 +7,7 @@ data Physical
 data LogicalProperties
 data PhysicalProperties
 
-[cool]
-fn vlaa() =
-    let 
-        v = (x: Const, y: Const) -> x#val,
-        vol = Const(5)
-    in
-        v(vol, vol) 
+fn <I, O> (input: [I]) map(transform: I -> O) = match input
+    | [] -> []
+    \ [x .. xs] -> [transform(x)] ++ xs.map(transform)
+

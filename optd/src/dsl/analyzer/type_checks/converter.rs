@@ -117,7 +117,7 @@ pub(crate) fn type_display(ty: &Type, resolved_unknown: &HashMap<usize, Type>) -
 
         // User types
         Adt(name) => name.to_string(),
-        Generic(name) => name.to_string(),
+        Generic(name) => format!("Gen<#{}>", name.to_string()),
 
         // Composite types
         Array(elem) => format!("[{}]", type_display(elem, resolved_unknown)),

@@ -109,6 +109,7 @@ pub enum Constraint {
     /// This constraint enforces that the function type `inner` can be called with
     /// the arguments `args`, and that the result type matches `outer`.
     Call {
+        id: usize, // To track generics in `solver.rs`.
         inner: TypedSpan,
         args: Vec<TypedSpan>,
         outer: TypedSpan,
@@ -162,7 +163,9 @@ pub struct TypeRegistry {
     /// Maps unknown type IDs to their current inferred concrete types.
     /// Types start at `Nothing`, and get bumped up when needed by the constraint.
     pub resolved_unknown: HashMap<usize, Type>,
-    /// Current ID to use for new Unknown / Generic types.
+    /// Instantiated generic types: (call_constraint_id, generic_id) -> TypeKind.
+    pub instantiated_generics: HashMap<(usize, usize), TypeKind>,
+    /// Current ID to use for new Unknown / Generic / Constraint id.
     pub next_id: usize,
 }
 
@@ -176,6 +179,7 @@ impl TypeRegistry {
             ty_return: None,
             constraints: Vec::new(),
             resolved_unknown: HashMap::new(),
+            instantiated_generics: HashMap::new(),
             next_id: 0,
         }
     }
@@ -346,10 +350,12 @@ impl TypeRegistry {
         args: &[TypedSpan],
     ) {
         self.constraints.push(Constraint::Call {
+            id: self.next_id,
             inner: inner.clone(),
             args: args.to_vec(),
             outer: outer.clone(),
         });
+        self.next_id += 1;
     }
 
     /// Adds a pattern match constraint: `scrutinee >: pattern`
@@ -387,6 +393,71 @@ impl TypeRegistry {
             field: field.clone(),
             outer: outer.clone(),
         });
+    }
+
+    /// Instantiates a type by replacing all generic type references with concrete types
+    /// specific to the given constraint.
+    ///
+    /// When a generic type is encountered, the function looks for an existing instantiation
+    /// for the (constraint_id, generic_id) pair. If none exists, it creates a new ascending
+    /// unknown type and stores it in the instantiated_generics map.
+    ///
+    /// # Arguments
+    ///
+    /// * `ty` - The type to instantiate
+    /// * `constraint_id` - The ID of the constraint that needs this instantiation
+    ///
+    /// # Returns
+    ///
+    /// A new type with all generic references replaced with constraint-specific instantiations.
+    pub fn instantiate_type(&mut self, ty: &Type, constraint_id: usize) -> Type {
+        use TypeKind::*;
+
+        let span = ty.span.clone();
+
+        let kind = match &*ty.value {
+            Generic(generic_id) => {
+                let key = (constraint_id, *generic_id);
+                let next_id = self.new_unknown_asc();
+                self.instantiated_generics
+                    .entry(key)
+                    .or_insert(next_id)
+                    .clone()
+            }
+
+            // For composite types, recursively instantiate their component types.
+            Array(elem_type) => Array(self.instantiate_type(elem_type, constraint_id)),
+
+            Closure(param_type, return_type) => Closure(
+                self.instantiate_type(param_type, constraint_id),
+                self.instantiate_type(return_type, constraint_id),
+            ),
+
+            Tuple(types) => {
+                let instantiated_types = types
+                    .iter()
+                    .map(|t| self.instantiate_type(t, constraint_id))
+                    .collect();
+                Tuple(instantiated_types)
+            }
+
+            Map(key_type, value_type) => Map(
+                self.instantiate_type(key_type, constraint_id),
+                self.instantiate_type(value_type, constraint_id),
+            ),
+
+            Optional(inner_type) => Optional(self.instantiate_type(inner_type, constraint_id)),
+            Stored(inner_type) => Stored(self.instantiate_type(inner_type, constraint_id)),
+            Costed(inner_type) => Costed(self.instantiate_type(inner_type, constraint_id)),
+
+            // Primitive types, special types, and ADT references don't need instantiation.
+            _ => *ty.value.clone(),
+        };
+
+        Type {
+            value: kind.into(),
+            span: span.clone(),
+        }
     }
 
     /// Resolves any Unknown types to their concrete types.
