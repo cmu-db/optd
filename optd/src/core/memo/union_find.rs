@@ -1,3 +1,5 @@
+//! TODO(connor) replace this with a proper third-party crate.
+
 #![allow(dead_code)]
 
 use std::collections::HashMap;
@@ -7,19 +9,19 @@ use std::hash::Hash;
 /// caused by merges
 ///
 /// Implements union-find with path compression for O(α(n)) amortized time complexity
-pub struct Representative<T> {
+pub struct UnionFind<T> {
     parents: HashMap<T, T>,
 }
 
-impl<T> Default for Representative<T> {
+impl<T> Default for UnionFind<T> {
     fn default() -> Self {
-        Representative {
+        UnionFind {
             parents: HashMap::new(),
         }
     }
 }
 
-impl<T: Eq + Hash + Clone> Representative<T> {
+impl<T: Eq + Hash + Clone> UnionFind<T> {
     /// Creates a new empty Representative
     pub(super) fn new() -> Self {
         Self::default()
@@ -83,20 +85,20 @@ mod tests {
 
     #[test]
     fn test_find_nonexistent() {
-        let repr = Representative::<u32>::new();
+        let repr = UnionFind::<u32>::new();
         assert_eq!(repr.find(&42), 42);
     }
 
     #[test]
     fn test_find_self() {
-        let mut repr = Representative::<u32>::new();
+        let mut repr = UnionFind::<u32>::new();
         repr.parents.insert(42, 42);
         assert_eq!(repr.find(&42), 42);
     }
 
     #[test]
     fn test_find_without_compression() {
-        let mut repr = Representative::<u32>::new();
+        let mut repr = UnionFind::<u32>::new();
         repr.parents.insert(1, 2);
         repr.parents.insert(2, 3);
         repr.parents.insert(3, 4);
@@ -112,7 +114,7 @@ mod tests {
 
     #[test]
     fn test_merge_with_compression() {
-        let mut repr = Representative::<u32>::new();
+        let mut repr = UnionFind::<u32>::new();
         repr.parents.insert(1, 2);
         repr.parents.insert(2, 3);
         repr.parents.insert(3, 4);
@@ -128,7 +130,7 @@ mod tests {
 
     #[test]
     fn test_merge_basic() {
-        let mut repr = Representative::<u32>::new();
+        let mut repr = UnionFind::<u32>::new();
         let result = repr.merge(&1, &2);
         assert_eq!(result, 2);
         assert_eq!(repr.find(&1), 2);
@@ -136,7 +138,7 @@ mod tests {
 
     #[test]
     fn test_merge_existing() {
-        let mut repr = Representative::<u32>::new();
+        let mut repr = UnionFind::<u32>::new();
         repr.parents.insert(1, 1);
         repr.parents.insert(2, 2);
 
@@ -147,7 +149,7 @@ mod tests {
 
     #[test]
     fn test_merge_already_merged() {
-        let mut repr = Representative::<u32>::new();
+        let mut repr = UnionFind::<u32>::new();
         repr.parents.insert(1, 2);
         repr.parents.insert(2, 2);
 
@@ -158,7 +160,7 @@ mod tests {
 
     #[test]
     fn test_merge_chains() {
-        let mut repr = Representative::<u32>::new();
+        let mut repr = UnionFind::<u32>::new();
 
         // Create chain 1->2->3
         repr.merge(&1, &2);
@@ -183,7 +185,7 @@ mod tests {
 
     #[test]
     fn test_merge_with_string_keys() {
-        let mut repr = Representative::<String>::new();
+        let mut repr = UnionFind::<String>::new();
 
         let result = repr.merge(&"old".to_string(), &"new".to_string());
         assert_eq!(result, "new");
@@ -192,7 +194,7 @@ mod tests {
 
     #[test]
     fn test_complex_merges() {
-        let mut repr = Representative::<u32>::new();
+        let mut repr = UnionFind::<u32>::new();
 
         // First set of merges
         repr.merge(&1, &2);

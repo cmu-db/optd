@@ -1,9 +1,7 @@
-use super::merge_repr::Representative;
-use super::*;
-use crate::core::cir::Child;
+use super::{union_find::UnionFind, *};
+use crate::core::cir::*;
 use async_recursion::async_recursion;
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque, hash_map::Entry};
 
 /// An in-memory implementation of the memo table.
 #[derive(Default)]
@@ -52,10 +50,10 @@ pub struct MemoryMemo {
     /// The shared next unique id to be used for goals, groups, logical expressions, and physical expressions.
     next_shared_id: i64,
 
-    repr_group: Representative<GroupId>,
-    repr_goal: Representative<GoalId>,
-    repr_logical_expr: Representative<LogicalExpressionId>,
-    repr_physical_expr: Representative<PhysicalExpressionId>,
+    repr_group: UnionFind<GroupId>,
+    repr_goal: UnionFind<GoalId>,
+    repr_logical_expr: UnionFind<LogicalExpressionId>,
+    repr_physical_expr: UnionFind<PhysicalExpressionId>,
 
     transform_dependency: HashMap<LogicalExpressionId, HashMap<TransformationRule, RuleDependency>>,
     implement_dependency:
