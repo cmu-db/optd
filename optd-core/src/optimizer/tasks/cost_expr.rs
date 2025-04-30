@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use optd_dsl::engine::Engine;
 
@@ -23,7 +23,7 @@ pub struct CostExpressionTask {
 
     pub budget: Cost,
 
-    pub optimize_goal_out: Vec<TaskId>,
+    pub optimize_goal_out: HashSet<TaskId>,
 
     pub fork_in: Option<TaskId>,
 }
@@ -40,7 +40,7 @@ impl CostExpressionTask {
             physical_expr_id,
             is_processing,
             budget,
-            optimize_goal_out: Vec::new(),
+            optimize_goal_out: HashSet::new(),
             fork_in: None,
         };
         task.add_subscriber(out);
@@ -48,7 +48,7 @@ impl CostExpressionTask {
     }
 
     pub fn add_subscriber(&mut self, out: TaskId) {
-        self.optimize_goal_out.push(out);
+        self.optimize_goal_out.insert(out);
     }
 
     /// Adds a `ForkLogical` task as a dependency.

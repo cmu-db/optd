@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::{
     cir::{Cost, Goal, GoalId, GoalMemberId, PhysicalExpressionId},
     error::Error,
@@ -18,7 +20,7 @@ pub struct OptimizeGoalTask {
     pub optimize_goal_in: Vec<TaskId>,
     pub explore_group_in: TaskId,
     pub implement_expression_in: Vec<TaskId>,
-    pub cost_expression_in: Vec<TaskId>,
+    pub cost_expression_in: HashSet<TaskId>,
 }
 
 impl OptimizeGoalTask {
@@ -32,7 +34,7 @@ impl OptimizeGoalTask {
             optimize_goal_in: Vec::new(),
             explore_group_in,
             implement_expression_in: Vec::new(),
-            cost_expression_in: Vec::new(),
+            cost_expression_in: HashSet::new(),
         };
         if let Some(out) = out {
             task.add_subscriber(out);
@@ -56,7 +58,7 @@ impl OptimizeGoalTask {
 
     /// Adds a `CostExpression` task as a dependency.
     pub fn add_cost_expr_in(&mut self, task_id: TaskId) {
-        self.cost_expression_in.push(task_id);
+        self.cost_expression_in.insert(task_id);
     }
 
     /// Adds an `OptimizeGoal` task as a dependency.

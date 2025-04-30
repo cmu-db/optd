@@ -111,8 +111,8 @@ pub struct MergePhysicalExprResult {
     /// The new representative physical expression id.
     pub repr_physical_expr: PhysicalExpressionId,
 
-    /// Physical expressions that were stale
-    pub stale_physical_exprs: HashSet<PhysicalExpressionId>,
+    /// The non-representative physical expression id.
+    pub non_repr_physical_exprs: PhysicalExpressionId,
 }
 
 /// Results of merge operations with newly dirtied expressions.

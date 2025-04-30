@@ -790,14 +790,18 @@ impl MemoryMemo {
         self.repr_physical_expr
             .merge(&physical_expr_id, &repr_physical_expr_id);
 
-        let mut stale_physical_exprs = HashSet::new();
-        stale_physical_exprs.insert(physical_expr_id);
+        let subscribers = self.member_subscribers.remove(&GoalMemberId::PhysicalExpressionId(physical_expr_id));
+        if let Some(subscribers) = subscribers {
+            // add the subscribers to the repr physical expr id
+            self.member_subscribers.entry(GoalMemberId::PhysicalExpressionId(repr_physical_expr_id)).or_default().extend(subscribers);
+        }
 
         let mut results = Vec::new();
         results.push(MergePhysicalExprResult {
             repr_physical_expr: repr_physical_expr_id,
-            stale_physical_exprs: stale_physical_exprs,
+            non_repr_physical_exprs: physical_expr_id,
         });
+
 
         let dependent_physical_exprs = self
             .physical_expr_dependent_physical_exprs

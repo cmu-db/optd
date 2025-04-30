@@ -436,15 +436,142 @@ impl<M: Memoize> Optimizer<M> {
         }
 
         for goal_merge in result.goal_merges {
-            let repr_goal_id = goal_merge.new_repr_goal_id;
-            let non_repr_goal_id = goal_merge.non_repr_goal_id;
+            // let repr_goal_id = goal_merge.new_repr_goal_id;
+            // let non_repr_goal_id = goal_merge.non_repr_goal_id;
 
-            let repr_goal_task_id = self.goal_optimization_task_index.get(&repr_goal_id);
+            // let repr_goal_task_id = self.goal_optimization_task_index.get(&repr_goal_id);
+            // let non_repr_goal_task_id = self.goal_optimization_task_index.get(&non_repr_goal_id);
+            // if repr_goal_task_id.is_none() && non_repr_goal_task_id.is_none() {
+            //     // There is no task for the repr goal or the non-repr goal, so we don't need to do anything.
+            //     continue;
+            // }
             // if repr_goal_task_id.is_none() {
             //     // TODO(Sarvesh): we need to create a new optimize goal task for the repr goal.
             //     self.create_optimize_goal_task(repr_goal_id, None).await?;
             // }
-            let repr_goal_task_id = repr_goal_task_id.unwrap();
+            // let repr_goal_task_id = &self
+            //     .goal_optimization_task_index
+            //     .get(&repr_goal_id)
+            //     .unwrap()
+            //     .clone();
+
+            // if !goal_merge.repr_goal_seen_best_expr_before_merge && goal_merge.best_expr.is_some() {
+            //     let (fork_costed_outs, optimize_goal_outs, optimize_plan_outs) = {
+            //         let repr_goal_task = self
+            //             .tasks
+            //             .get_mut(repr_goal_task_id)
+            //             .unwrap()
+            //             .as_optimize_goal_mut();
+            //         (
+            //             repr_goal_task.fork_costed_out.clone(),
+            //             repr_goal_task.optimize_goal_out.clone(),
+            //             repr_goal_task.optimize_plan_out.clone(),
+            //         )
+            //     };
+
+            //     for task_id in fork_costed_outs.iter() {
+            //         let task = self.tasks.get_mut(task_id).unwrap().as_fork_costed_mut();
+            //         task.optimize_goal_in = *repr_goal_task_id;
+            //         self.create_continue_with_costed_task(
+            //             goal_merge.best_expr.unwrap().0.clone(),
+            //             goal_merge.best_expr.unwrap().1.clone(),
+            //             *task_id,
+            //         )
+            //         .await?;
+            //     }
+
+            //     for task_id in optimize_plan_outs.iter() {
+            //         let task = self.tasks.get_mut(task_id).unwrap().as_optimize_plan_mut();
+            //         task.optimize_goal_in = *repr_goal_task_id;
+            //         let tx = task.physical_plan_tx.clone();
+            //         self.emit_best_physical_plan(tx, goal_merge.best_expr.unwrap().0.clone())
+            //             .await?;
+            //     }
+
+            //     for task_id in optimize_goal_outs.iter() {
+            //         let task = self.tasks.get_mut(task_id).unwrap().as_optimize_goal_mut();
+            //         let non_repr_goal_task_id = self
+            //             .goal_optimization_task_index
+            //             .get(&non_repr_goal_id)
+            //             .unwrap()
+            //             .clone();
+            //         let mut to_be_inserted = true;
+            //         for goal_id in task.optimize_goal_in.iter_mut() {
+            //             if goal_id == &non_repr_goal_task_id {
+            //                 *goal_id = *repr_goal_task_id;
+            //                 to_be_inserted = false;
+            //             }
+            //         }
+            //         if to_be_inserted {
+            //             task.optimize_goal_in.push(*repr_goal_task_id);
+            //         }
+            //     }
+            // }
+
+            let forward_result = self
+                .memo
+                .add_goal_member(
+                    goal_merge.new_repr_goal_id,
+                    GoalMemberId::GoalId(goal_merge.non_repr_goal_id),
+                )
+                .await?;
+            if let Some(forward_result) = forward_result {
+                self.handle_forward_result(forward_result).await?;
+            }
+
+            let forward_result = self
+                .memo
+                .add_goal_member(
+                    goal_merge.non_repr_goal_id,
+                    GoalMemberId::GoalId(goal_merge.new_repr_goal_id),
+                )
+                .await?;
+            if let Some(forward_result) = forward_result {
+                self.handle_forward_result(forward_result).await?;
+            }
+        }
+
+        for expr_merge in result.physical_expr_merges {
+            let repr_expr_id = expr_merge.repr_physical_expr;
+            let non_repr_expr_id = expr_merge.non_repr_physical_exprs;
+
+            if let Some(repr_task_id) = self.cost_expression_task_index.get(&repr_expr_id) {
+                // delete all the non-repr ones
+                if let Some(non_repr_task_id) =
+                    self.cost_expression_task_index.get(&non_repr_expr_id)
+                {
+                    // cost expression
+                    let task = self
+                        .tasks
+                        .get_mut(non_repr_task_id)
+                        .unwrap()
+                        .as_cost_expression_mut();
+
+                    for goal_task_id in task.optimize_goal_out.clone().iter() {
+                        if let Some(goal_task) = self.tasks.get_mut(goal_task_id) {
+                            goal_task
+                                .as_optimize_goal_mut()
+                                .cost_expression_in
+                                .remove(non_repr_task_id);
+                            goal_task
+                                .as_optimize_goal_mut()
+                                .cost_expression_in
+                                .insert(*repr_task_id);
+                        }
+                    }
+                    self.try_delete_task(*non_repr_task_id);
+                }
+            } else if let Some(non_repr_task_id) =
+                self.cost_expression_task_index.get(&non_repr_expr_id)
+            {
+                // update the task
+                let task = self
+                    .tasks
+                    .get_mut(non_repr_task_id)
+                    .unwrap()
+                    .as_cost_expression_mut();
+                task.physical_expr_id = repr_expr_id;
+            }
         }
         // for group_merge in result.group_merges {
         //     // For each MergedGroupInfo
