@@ -1,22 +1,25 @@
 use crate::core::cir::*;
 
-/// Type alias for results returned by Memoize trait methods
-pub type MemoizeResult<T> = Result<T, MemoizeError>;
+/// A type alias for results returned by the different memo table trait methods.
+/// 
+/// See the private `traits.rs` module for more information (note that the traits are re-exported).
+pub type OptimizeStateResult<T> = Result<T, OptimizeStateError>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MemoizeError {
-    /// Error indicating that a group ID was not found in the memo.
+/// The possible kinds of errors that optimize state operations can run into.
+#[derive(Debug, Clone, Copy)]
+pub enum OptimizeStateError {
+    /// A [`GroupId`] does not exist in the memo.
     GroupNotFound(GroupId),
 
-    /// Error indicating that a goal ID was not found in the memo.
+    /// A [`GoalId`] does not exist in the memo.
     GoalNotFound(GoalId),
 
-    /// Error indicating that a logical expression ID was not found in the memo.
+    /// A [`LogicalExpressionId`] does not exist in the memo.
     LogicalExprNotFound(LogicalExpressionId),
 
-    /// Error indicating that a physical expression ID was not found in the memo.
+    /// A [`PhysicalExpressionId`] does not exist in the memo.
     PhysicalExprNotFound(PhysicalExpressionId),
 
-    /// Error indicating that there is no logical expression in the group.
+    /// A group does not contain any logical expressions.
     NoLogicalExprInGroup(GroupId),
 }
