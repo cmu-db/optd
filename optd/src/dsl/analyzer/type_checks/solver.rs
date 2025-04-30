@@ -211,30 +211,51 @@ impl TypeRegistry {
     ) -> Result<(), Box<AnalyzerErrorKind>> {
         let inner_resolved = self.resolve_type(&inner.ty);
 
+        // Function to create the standard field access error.
+        let field_error = || {
+            AnalyzerErrorKind::new_invalid_field_access(
+                &inner_resolved,
+                &inner.span,
+                field,
+                self.resolved_unknown.clone(),
+            )
+        };
+
         match &*inner_resolved.value {
             // Wait for the field access to be resolved.
             TypeKind::Nothing => Ok(()),
 
+            // Handle tuple field access with _N pattern.
+            TypeKind::Tuple(types) => {
+                // Parse _N pattern and check if index is valid.
+                match field
+                    .strip_prefix('_')
+                    .and_then(|idx| idx.parse::<usize>().ok())
+                {
+                    Some(index) if index < types.len() => {
+                        let field_ty = &types[index];
+                        self.check_subtype_constraint(
+                            &TypedSpan::new(field_ty.clone(), inner.span.clone()),
+                            outer,
+                            changed,
+                        )
+                    }
+                    _ => Err(field_error()),
+                }
+            }
+
+            // Handle ADT field access.
             TypeKind::Adt(name) => match self.get_product_field_type(name, field) {
                 Some(field_ty) => self.check_subtype_constraint(
                     &TypedSpan::new(field_ty, inner.span.clone()),
                     outer,
                     changed,
                 ),
-                None => Err(AnalyzerErrorKind::new_invalid_field_access(
-                    &inner_resolved,
-                    &inner.span,
-                    field,
-                    self.resolved_unknown.clone(),
-                )),
+                None => Err(field_error()),
             },
 
-            _ => Err(AnalyzerErrorKind::new_invalid_field_access(
-                &inner_resolved,
-                &inner.span,
-                field,
-                self.resolved_unknown.clone(),
-            )),
+            // Any other type cannot have fields accessed.
+            _ => Err(field_error()),
         }
     }
 

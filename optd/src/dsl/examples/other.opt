@@ -7,7 +7,10 @@ data Physical
 data LogicalProperties
 data PhysicalProperties
 
-fn <I, O> (input: [I]) map(transform: I -> O) = match input
+fn <I, O> (input: [I]) map(transform: I -> O): [O] = match input
     | [] -> []
     \ [x .. xs] -> [transform(x)] ++ xs.map(transform)
 
+fn demo() =
+    let input = [1, 2, 3] in
+    input.map(x: I64 -> x + 1)

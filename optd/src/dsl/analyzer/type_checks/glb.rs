@@ -55,6 +55,11 @@ impl TypeRegistry {
                 return self.greatest_lower_bound(type1, &bound_unknown, has_changed);
             }
 
+            // Handle generics.
+            (Generic(id1), Generic(id2)) if id1 == id2 => {
+                return type1.clone();
+            }
+
             // Nothing is the bottom type - GLB with anything is Nothing.
             (Nothing, _) | (_, Nothing) => Nothing,
 
