@@ -1,7 +1,7 @@
 use crate::core::cir::*;
 
 /// A type alias for results returned by the different memo table trait methods.
-/// 
+///
 /// See the private `traits.rs` module for more information (note that the traits are re-exported).
 pub type OptimizeStateResult<T> = Result<T, OptimizeStateError>;
 

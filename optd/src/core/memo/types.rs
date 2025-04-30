@@ -1,37 +1,22 @@
 use crate::core::cir::*;
 use std::collections::{HashMap, HashSet};
 
-/// Status of a rule application or costing operation
+/// The status of rule application or costing operation in the task graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Status {
+pub enum TaskStatus {
     /// There exist ongoing jobs that may generate more expressions or costs from this expression.
     Dirty,
-
     /// Expression is fully explored or costed with no pending jobs that could add anything new.
     Clean,
 }
 
-/// Result of merging two groups.
+/// The result of merging two groups.
 #[derive(Debug)]
 pub struct MergeGroupResult {
     /// ID of the new representative group id.
     pub new_repr_group_id: GroupId,
     /// Groups that were merged along with their expressions.
     pub merged_groups: HashMap<GroupId, Vec<LogicalExpressionId>>,
-}
-
-impl MergeGroupResult {
-    /// Creates a new MergeGroupResult instance.
-    ///
-    /// # Parameters
-    /// * `merged_groups` - Groups that were merged along with their expressions.
-    /// * `new_repr_group_id` - ID of the new representative group id.
-    pub fn new(new_repr_group_id: GroupId) -> Self {
-        Self {
-            new_repr_group_id,
-            merged_groups: HashMap::new(),
-        }
-    }
 }
 
 /// Information about a merged goal, including its ID and expressions
@@ -97,12 +82,12 @@ pub struct ForwardResult {
     pub goals_forwarded: HashSet<GoalId>,
 }
 
-impl ForwardResult {
-    pub fn new(physical_expr_id: PhysicalExpressionId, best_cost: Cost) -> Self {
-        Self {
-            physical_expr_id,
-            best_cost,
-            goals_forwarded: HashSet::new(),
-        }
-    }
-}
+// impl ForwardResult {
+//     pub fn new(physical_expr_id: PhysicalExpressionId, best_cost: Cost) -> Self {
+//         Self {
+//             physical_expr_id,
+//             best_cost,
+//             goals_forwarded: HashSet::new(),
+//         }
+//     }
+// }

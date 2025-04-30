@@ -63,11 +63,11 @@ pub struct MemoryMemo {
 
 struct RuleDependency {
     group_ids: HashSet<GroupId>,
-    status: Status,
+    status: TaskStatus,
 }
 
 impl RuleDependency {
-    fn new(status: Status) -> Self {
+    fn new(status: TaskStatus) -> Self {
         let group_ids = HashSet::new();
         Self { group_ids, status }
     }
@@ -75,11 +75,11 @@ impl RuleDependency {
 
 struct CostDependency {
     goal_ids: HashSet<GoalId>,
-    status: Status,
+    status: TaskStatus,
 }
 
 impl CostDependency {
-    fn new(status: Status) -> Self {
+    fn new(status: TaskStatus) -> Self {
         let goal_ids = HashSet::new();
         Self { goal_ids, status }
     }
@@ -164,7 +164,10 @@ impl Memo for MemoryMemo {
         Ok(group.logical_exprs.iter().cloned().collect())
     }
 
-    async fn get_any_logical_expr(&self, group_id: GroupId) -> OptimizeStateResult<LogicalExpressionId> {
+    async fn get_any_logical_expr(
+        &self,
+        group_id: GroupId,
+    ) -> OptimizeStateResult<LogicalExpressionId> {
         let group_id = self.find_repr_group(group_id).await?;
         let group = self
             .groups
@@ -221,7 +224,10 @@ impl Memo for MemoryMemo {
         Ok(maybe_best_costed)
     }
 
-    async fn get_all_goal_members(&self, goal_id: GoalId) -> OptimizeStateResult<Vec<GoalMemberId>> {
+    async fn get_all_goal_members(
+        &self,
+        goal_id: GoalId,
+    ) -> OptimizeStateResult<Vec<GoalMemberId>> {
         let goal_id = self.find_repr_goal(goal_id).await?;
         let goal_state = self.goals.get(&goal_id).unwrap();
         Ok(goal_state.members.iter().cloned().collect())
@@ -263,10 +269,16 @@ impl Memo for MemoryMemo {
             };
             let mut subscribers = VecDeque::new();
             subscribers.push_back(goal_id);
-            let mut result = ForwardResult::new(physical_expr_id, cost);
+
+            let mut result = ForwardResult {
+                physical_expr_id,
+                best_cost: cost,
+                goals_forwarded: HashSet::new(),
+            };
             // propagate the new cost to all subscribers.
             self.propagate_new_member_cost(subscribers, &mut result)
                 .await?;
+
             if result.goals_forwarded.is_empty() {
                 // No goals were forwarded, so we can return None.
                 Ok(None)
@@ -317,7 +329,12 @@ impl Memo for MemoryMemo {
                 subscribers.extend(subscriber_goal_ids);
             }
 
-            let mut result = ForwardResult::new(physical_expr_id, new_cost);
+            let mut result = ForwardResult {
+                physical_expr_id,
+                best_cost: new_cost,
+                goals_forwarded: HashSet::new(),
+            };
+
             // propagate the new cost to all subscribers.
             self.propagate_new_member_cost(subscribers, &mut result)
                 .await?;
@@ -496,19 +513,19 @@ impl Materialize for MemoryMemo {
     }
 }
 
-impl TaskState for MemoryMemo {
+impl TaskGraphState for MemoryMemo {
     async fn get_transformation_status(
         &self,
         logical_expr_id: LogicalExpressionId,
         rule: &TransformationRule,
-    ) -> OptimizeStateResult<Status> {
+    ) -> OptimizeStateResult<TaskStatus> {
         let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await?;
         let status = self
             .transform_dependency
             .get(&logical_expr_id)
             .and_then(|status_map| status_map.get(rule))
             .map(|dep| dep.status)
-            .unwrap_or(Status::Dirty);
+            .unwrap_or(TaskStatus::Dirty);
         Ok(status)
     }
 
@@ -525,10 +542,10 @@ impl TaskState for MemoryMemo {
         match status_map.entry(rule.clone()) {
             Entry::Occupied(occupied_entry) => {
                 let dep = occupied_entry.into_mut();
-                dep.status = Status::Clean;
+                dep.status = TaskStatus::Clean;
             }
             Entry::Vacant(vacant) => {
-                vacant.insert(RuleDependency::new(Status::Clean));
+                vacant.insert(RuleDependency::new(TaskStatus::Clean));
             }
         }
         Ok(())
@@ -539,7 +556,7 @@ impl TaskState for MemoryMemo {
         logical_expr_id: LogicalExpressionId,
         goal_id: GoalId,
         rule: &ImplementationRule,
-    ) -> OptimizeStateResult<Status> {
+    ) -> OptimizeStateResult<TaskStatus> {
         let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await?;
         let goal_id = self.find_repr_goal(goal_id).await?;
         let status = self
@@ -547,7 +564,7 @@ impl TaskState for MemoryMemo {
             .get(&logical_expr_id)
             .and_then(|status_map| status_map.get(&(goal_id, rule.clone())))
             .map(|dep| dep.status)
-            .unwrap_or(Status::Dirty);
+            .unwrap_or(TaskStatus::Dirty);
         Ok(status)
     }
 
@@ -565,10 +582,10 @@ impl TaskState for MemoryMemo {
         match status_map.entry((goal_id, rule.clone())) {
             Entry::Occupied(occupied_entry) => {
                 let dep = occupied_entry.into_mut();
-                dep.status = Status::Clean;
+                dep.status = TaskStatus::Clean;
             }
             Entry::Vacant(vacant) => {
-                vacant.insert(RuleDependency::new(Status::Clean));
+                vacant.insert(RuleDependency::new(TaskStatus::Clean));
             }
         }
         Ok(())
@@ -577,13 +594,13 @@ impl TaskState for MemoryMemo {
     async fn get_cost_status(
         &self,
         physical_expr_id: PhysicalExpressionId,
-    ) -> OptimizeStateResult<Status> {
+    ) -> OptimizeStateResult<TaskStatus> {
         let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await?;
         let status = self
             .cost_dependency
             .get(&physical_expr_id)
             .map(|dep| dep.status)
-            .unwrap_or(Status::Dirty);
+            .unwrap_or(TaskStatus::Dirty);
         Ok(status)
     }
 
@@ -598,10 +615,10 @@ impl TaskState for MemoryMemo {
         match entry {
             Entry::Occupied(occupied) => {
                 let dep = occupied.into_mut();
-                dep.status = Status::Clean;
+                dep.status = TaskStatus::Clean;
             }
             Entry::Vacant(vacant) => {
-                vacant.insert(CostDependency::new(Status::Clean));
+                vacant.insert(CostDependency::new(TaskStatus::Clean));
             }
         }
 
@@ -627,7 +644,7 @@ impl TaskState for MemoryMemo {
                 dep.group_ids.insert(group_id);
             }
             Entry::Vacant(vacant) => {
-                let mut dep = RuleDependency::new(Status::Dirty);
+                let mut dep = RuleDependency::new(TaskStatus::Dirty);
                 dep.group_ids.insert(group_id);
                 vacant.insert(dep);
             }
@@ -658,7 +675,7 @@ impl TaskState for MemoryMemo {
                 dep.group_ids.insert(group_id);
             }
             Entry::Vacant(vacant) => {
-                let mut dep = RuleDependency::new(Status::Dirty);
+                let mut dep = RuleDependency::new(TaskStatus::Dirty);
                 dep.group_ids.insert(group_id);
                 vacant.insert(dep);
             }
@@ -681,7 +698,7 @@ impl TaskState for MemoryMemo {
                 dep.goal_ids.insert(goal_id);
             }
             Entry::Vacant(vacant) => {
-                let mut dep = CostDependency::new(Status::Dirty);
+                let mut dep = CostDependency::new(TaskStatus::Dirty);
                 dep.goal_ids.insert(goal_id);
                 vacant.insert(dep);
             }
@@ -943,13 +960,15 @@ impl MemoryMemo {
             assert!(old_group_id.is_some());
             group1_state.logical_exprs.insert(logical_expr_id);
         }
-        let mut merge_group_result = MergeGroupResult::new(group_id_1);
-        merge_group_result
-            .merged_groups
-            .insert(group_id_1, group1_exprs);
-        merge_group_result
-            .merged_groups
-            .insert(group_id_2, group_2_exprs);
+
+        let mut merged_groups = HashMap::with_capacity(2);
+        merged_groups.insert(group_id_1, group1_exprs);
+        merged_groups.insert(group_id_2, group_2_exprs);
+
+        let merge_group_result = MergeGroupResult {
+            new_repr_group_id: group_id_1,
+            merged_groups,
+        };
 
         self.repr_group.merge(&group_id_2, &group_id_1);
 
@@ -1100,7 +1119,10 @@ impl MemoryMemo {
     /// Find the representative of a goal member.
     ///
     /// This reduces down to finding representative physical expr or goal id.
-    async fn find_repr_goal_member(&self, member: GoalMemberId) -> OptimizeStateResult<GoalMemberId> {
+    async fn find_repr_goal_member(
+        &self,
+        member: GoalMemberId,
+    ) -> OptimizeStateResult<GoalMemberId> {
         match member {
             GoalMemberId::PhysicalExpressionId(physical_expr_id) => {
                 let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await?;

@@ -1,7 +1,7 @@
-use super::{ForwardResult, OptimizeStateResult, MergeResult, Status};
+use super::{ForwardResult, MergeResult, OptimizeStateResult, TaskStatus};
 use crate::core::cir::*;
 
-pub trait OptimizerState: Memo + Materialize + TaskState {}
+pub trait OptimizerState: Memo + Materialize + TaskGraphState {}
 
 //
 // Logical expression and group operations.
@@ -50,7 +50,10 @@ pub trait Memo {
     ) -> OptimizeStateResult<Vec<LogicalExpressionId>>;
 
     /// Gets any logical expression ID in a group.
-    async fn get_any_logical_expr(&self, group_id: GroupId) -> OptimizeStateResult<LogicalExpressionId>;
+    async fn get_any_logical_expr(
+        &self,
+        group_id: GroupId,
+    ) -> OptimizeStateResult<LogicalExpressionId>;
 
     /// Finds group containing a logical expression ID, if it exists.
     ///
@@ -114,7 +117,8 @@ pub trait Memo {
     ///
     /// # Returns
     /// A vector of goal members, each being either a physical expression ID or another goal ID.
-    async fn get_all_goal_members(&self, goal_id: GoalId) -> OptimizeStateResult<Vec<GoalMemberId>>;
+    async fn get_all_goal_members(&self, goal_id: GoalId)
+    -> OptimizeStateResult<Vec<GoalMemberId>>;
 
     /// Adds a member to a goal.
     ///
@@ -276,7 +280,7 @@ pub trait Materialize {
 /// query optimization. The memo stores logical and physical expressions by their IDs,
 /// manages expression properties, and tracks optimization status.
 #[trait_variant::make(Send)]
-pub trait TaskState {
+pub trait TaskGraphState {
     //
     // Rule and costing status operations.
     //
@@ -294,7 +298,7 @@ pub trait TaskState {
         &self,
         logical_expr_id: LogicalExpressionId,
         rule: &TransformationRule,
-    ) -> OptimizeStateResult<Status>;
+    ) -> OptimizeStateResult<TaskStatus>;
 
     /// Sets the status of a transformation rule as clean on a logical expression ID.
     ///
@@ -322,7 +326,7 @@ pub trait TaskState {
         logical_expr_id: LogicalExpressionId,
         goal_id: GoalId,
         rule: &ImplementationRule,
-    ) -> OptimizeStateResult<Status>;
+    ) -> OptimizeStateResult<TaskStatus>;
 
     /// Sets the status of an implementation rule as clean on a logical expression ID and goal ID.
     ///
@@ -348,14 +352,16 @@ pub trait TaskState {
     async fn get_cost_status(
         &self,
         physical_expr_id: PhysicalExpressionId,
-    ) -> OptimizeStateResult<Status>;
+    ) -> OptimizeStateResult<TaskStatus>;
 
     /// Sets the status of costing a physical expression ID as clean.
     ///
     /// # Parameters
     /// * `physical_expr_id` - ID of the physical expression to update.
-    async fn set_cost_clean(&mut self, physical_expr_id: PhysicalExpressionId)
-    -> OptimizeStateResult<()>;
+    async fn set_cost_clean(
+        &mut self,
+        physical_expr_id: PhysicalExpressionId,
+    ) -> OptimizeStateResult<()>;
 
     /// Adds a dependency between a transformation rule application and a group.
     ///
