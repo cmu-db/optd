@@ -14,12 +14,13 @@
 //! - Efficient key lookup (O(1) via HashMap)
 //! - Basic map operations (get, concat)
 
-use super::hir::ExprMetadata;
-use super::hir::{
-    CoreData, GroupId, Literal, LogicalOp, Materializable, Operator, PhysicalOp, Value,
-};
 use std::collections::HashMap;
 use std::hash::Hash;
+
+use super::{
+    CoreData, ExprMetadata, GroupId, Literal, LogicalOp, Materializable, Operator, PhysicalOp,
+    Value,
+};
 
 /// Map key representation of a logical operator
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -90,7 +91,7 @@ pub enum MapKey {
 /// Custom Map implementation that enforces key type constraints at runtime
 #[derive(Clone, Debug, Default)]
 pub struct Map {
-    inner: HashMap<MapKey, Value>,
+    pub(super) inner: HashMap<MapKey, Value>,
 }
 
 impl Map {

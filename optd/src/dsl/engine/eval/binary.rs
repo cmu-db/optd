@@ -446,7 +446,7 @@ mod tests {
 
     #[test]
     fn test_map_concatenation() {
-        use crate::dsl::analyzer::map::Map;
+        use crate::dsl::analyzer::hir::map::Map;
 
         // Create two maps using Map::from_pairs
         let map1 = Value::new(Map(Map::from_pairs(vec![

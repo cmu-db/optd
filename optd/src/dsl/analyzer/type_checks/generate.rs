@@ -1,11 +1,10 @@
 use super::registry::TypeRegistry;
 use crate::dsl::{
     analyzer::{
-        context::Context,
         errors::AnalyzerErrorKind,
         hir::{
             BinOp, CoreData, Expr, ExprKind, FunKind, HIR, Identifier, LetBinding, MapEntry,
-            MatchArm, Pattern, PatternKind, TypedSpan, UnaryOp, Value,
+            MatchArm, Pattern, PatternKind, TypedSpan, UnaryOp, Value, context::Context,
         },
         type_checks::registry::{Type, TypeKind},
     },
@@ -524,7 +523,6 @@ impl TypeRegistry {
 mod scope_check_tests {
     use super::*;
     use crate::dsl::analyzer::{
-        context::Context,
         errors::AnalyzerErrorKind,
         hir::{
             CoreData, Expr, ExprKind, FunKind, HIR, LetBinding, MatchArm, Pattern, PatternKind,

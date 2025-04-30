@@ -15,13 +15,16 @@
 //! unified representation that can be transformed into optimizer-specific
 //! intermediate representations through the bridge modules.
 
-use super::context::Context;
-use super::map::Map;
 use super::type_checks::registry::Type;
 use crate::catalog::Catalog;
 use crate::dsl::utils::span::Span;
+use context::Context;
+use map::Map;
 use std::fmt::Debug;
 use std::{collections::HashMap, sync::Arc};
+
+pub(crate) mod context;
+pub(crate) mod map;
 
 /// Unique identifier for variables, functions, types, etc.
 pub type Identifier = String;

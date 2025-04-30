@@ -1,16 +1,14 @@
 use crate::{
     catalog::Catalog,
-    dsl::analyzer::{
-        context::Context,
-        hir::{Expr, ExprKind, Goal, GroupId, Value},
-    },
+    dsl::analyzer::hir::{Expr, ExprKind, Goal, GroupId, Value},
 };
 use std::sync::Arc;
 
 mod eval;
-
 mod utils;
 pub use utils::*;
+
+use super::analyzer::hir::context::Context;
 
 /// The engine response type, which can be either a return value with a converter callback
 /// or a yielded group/goal with a continuation for further processing.

@@ -1,10 +1,10 @@
 use super::{binary::eval_binary_op, unary::eval_unary_op};
 use crate::capture;
+use crate::dsl::analyzer::hir::map::Map;
 use crate::dsl::analyzer::hir::{
     BinOp, CoreData, Expr, ExprKind, FunKind, Goal, GroupId, Identifier, LetBinding, Literal,
     LogicalOp, Materializable, PhysicalOp, Udf, UnaryOp, Value,
 };
-use crate::dsl::analyzer::map::Map;
 use crate::dsl::engine::{Continuation, Engine, EngineResponse};
 use ExprKind::*;
 use std::sync::Arc;
@@ -674,6 +674,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
 #[cfg(test)]
 mod tests {
     use crate::catalog::iceberg::memory_catalog;
+    use crate::dsl::analyzer::hir::context::Context;
     use crate::dsl::analyzer::hir::{Goal, GroupId, LetBinding, Materializable, Udf};
     use crate::dsl::engine::Engine;
     use crate::dsl::utils::tests::{
@@ -681,10 +682,7 @@ mod tests {
         ref_expr, struct_val,
     };
     use crate::dsl::{
-        analyzer::{
-            context::Context,
-            hir::{BinOp, CoreData, Expr, ExprKind, FunKind, Literal, Value},
-        },
+        analyzer::hir::{BinOp, CoreData, Expr, ExprKind, FunKind, Literal, Value},
         utils::tests::{
             TestHarness, boolean, evaluate_and_collect, int, lit_expr, lit_val, string,
         },

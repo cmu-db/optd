@@ -95,15 +95,13 @@ impl<O: Clone + Send + 'static> Engine<O> {
 #[cfg(test)]
 mod tests {
     use crate::catalog::iceberg::memory_catalog;
+    use crate::dsl::analyzer::hir::context::Context;
     use crate::dsl::analyzer::hir::{BinOp, LetBinding};
     use crate::dsl::utils::tests::{
         TestHarness, evaluate_and_collect, int, lit_expr, ref_expr, string,
     };
     use crate::dsl::{
-        analyzer::{
-            context::Context,
-            hir::{CoreData, Expr, ExprKind, FunKind, Literal, Value},
-        },
+        analyzer::hir::{CoreData, Expr, ExprKind, FunKind, Literal, Value},
         engine::Engine,
     };
     use ExprKind::*;

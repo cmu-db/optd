@@ -1,11 +1,9 @@
 use crate::dsl::analyzer::errors::AnalyzerErrorKind;
+use crate::dsl::analyzer::hir::context::Context;
 use crate::dsl::analyzer::hir::{Annotation, FunKind, Identifier};
+use crate::dsl::analyzer::hir::{CoreData, TypedSpan, Udf, Value};
 use crate::dsl::analyzer::type_checks::converter::create_function_type;
 use crate::dsl::analyzer::type_checks::registry::{Type, TypeRegistry};
-use crate::dsl::analyzer::{
-    context::Context,
-    hir::{CoreData, TypedSpan, Udf, Value},
-};
 use crate::dsl::parser::ast::Function;
 use crate::dsl::utils::span::Spanned;
 use FunKind::*;
