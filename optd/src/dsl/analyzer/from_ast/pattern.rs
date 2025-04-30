@@ -9,7 +9,7 @@ use crate::dsl::analyzer::hir::{Identifier, MatchArm, Pattern, PatternKind, Type
 use crate::dsl::analyzer::type_checks::registry::TypeKind;
 use crate::dsl::parser::ast::{self, Pattern as AstPattern};
 use crate::dsl::utils::span::Spanned;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 impl ASTConverter {
@@ -20,7 +20,7 @@ impl ASTConverter {
     pub(super) fn convert_match_arms(
         &mut self,
         arms: &[Spanned<ast::MatchArm>],
-        generics: &HashSet<Identifier>,
+        generics: &HashMap<Identifier, usize>,
     ) -> Result<Vec<MatchArm<TypedSpan>>, Box<AnalyzerErrorKind>> {
         arms.iter()
             .map(|arm| {
@@ -97,7 +97,7 @@ mod pattern_tests {
     use crate::dsl::analyzer::hir::{Literal, PatternKind};
     use crate::dsl::parser::ast::{self, Field, Literal as AstLiteral, Pattern as AstPattern};
     use crate::dsl::utils::span::{Span, Spanned};
-    use std::collections::HashSet;
+    use std::collections::HashMap;
 
     // Helper functions to create test patterns
     fn create_test_span() -> Span {
@@ -164,7 +164,7 @@ mod pattern_tests {
 
         // Convert the match arms
         let result = converter
-            .convert_match_arms(&arms, &HashSet::new())
+            .convert_match_arms(&arms, &HashMap::new())
             .expect("Failed to convert match arms");
 
         // Check the converted result
@@ -200,7 +200,7 @@ mod pattern_tests {
         let invalid_arm = create_match_arm(invalid_pattern, invalid_expr);
 
         let invalid_arms = vec![invalid_arm];
-        let result = converter.convert_match_arms(&invalid_arms, &HashSet::new());
+        let result = converter.convert_match_arms(&invalid_arms, &HashMap::new());
         assert!(
             result.is_err(),
             "Expected error for undefined type in match arm"

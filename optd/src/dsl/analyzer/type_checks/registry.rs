@@ -46,7 +46,7 @@ pub enum TypeKind {
 
     // User types.
     Adt(Identifier),
-    Generic(Identifier),
+    Generic(usize), // Generic types, with unique id to distinguish.
 
     // Composite types.
     Array(Type),
@@ -162,8 +162,8 @@ pub struct TypeRegistry {
     /// Maps unknown type IDs to their current inferred concrete types.
     /// Types start at `Nothing`, and get bumped up when needed by the constraint.
     pub resolved_unknown: HashMap<usize, Type>,
-    /// Current ID to use for new Unknown types.
-    pub next_unknown_id: usize,
+    /// Current ID to use for new Unknown / Generic types.
+    pub next_id: usize,
 }
 
 impl TypeRegistry {
@@ -176,7 +176,7 @@ impl TypeRegistry {
             ty_return: None,
             constraints: Vec::new(),
             resolved_unknown: HashMap::new(),
-            next_unknown_id: 0,
+            next_id: 0,
         }
     }
 
@@ -283,8 +283,8 @@ impl TypeRegistry {
     pub fn new_unknown_asc(&mut self) -> TypeKind {
         use TypeKind::*;
 
-        let id = self.next_unknown_id;
-        self.next_unknown_id += 1;
+        let id = self.next_id;
+        self.next_id += 1;
         self.resolved_unknown.insert(id, Nothing.into());
         UnknownAsc(id)
     }
@@ -293,8 +293,8 @@ impl TypeRegistry {
     pub fn new_unknown_desc(&mut self) -> TypeKind {
         use TypeKind::*;
 
-        let id = self.next_unknown_id;
-        self.next_unknown_id += 1;
+        let id = self.next_id;
+        self.next_id += 1;
         self.resolved_unknown.insert(id, Universe.into());
         UnknownDesc(id)
     }

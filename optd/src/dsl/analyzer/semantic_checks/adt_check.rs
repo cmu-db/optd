@@ -209,7 +209,7 @@ mod adt_validation_tests {
             ty_return: None,
             constraints: vec![],
             resolved_unknown: HashMap::new(),
-            next_unknown_id: 0,
+            next_id: 0,
         }
     }
 

@@ -9,7 +9,7 @@ use crate::dsl::analyzer::hir::Identifier;
 use crate::dsl::analyzer::type_checks::registry::{Type, TypeKind};
 use crate::dsl::parser::ast::Type as AstType;
 use crate::dsl::utils::span::Spanned;
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 impl ASTConverter {
     /// Converts an AST type to an HIR type with appropriate variance.
@@ -35,7 +35,7 @@ impl ASTConverter {
     pub(super) fn convert_type(
         &mut self,
         ast_type: &Spanned<AstType>,
-        generics: &HashSet<Identifier>,
+        generics: &HashMap<Identifier, usize>,
         ascending: bool,
     ) -> Result<Type, Box<AnalyzerErrorKind>> {
         use TypeKind::*;
@@ -74,8 +74,8 @@ impl ASTConverter {
                 Costed(self.convert_type(inner_type, generics, ascending)?)
             }
             AstType::Identifier(name) => {
-                if generics.contains(name) {
-                    Generic(name.clone())
+                if let Some(id) = generics.get(name) {
+                    Generic(*id)
                 } else {
                     if !self.registry.subtypes.contains_key(name) {
                         return Err(AnalyzerErrorKind::new_undefined_type(name, &ast_type.span));
@@ -103,7 +103,6 @@ mod types_tests {
     use crate::dsl::analyzer::from_ast::converter::ASTConverter;
     use crate::dsl::parser::ast;
     use crate::dsl::utils::span::{Span, Spanned};
-    use std::collections::HashSet;
 
     // Helper functions
     fn create_test_span() -> Span {
@@ -132,7 +131,7 @@ mod types_tests {
             (AstType::Unit, TypeKind::Unit),
         ];
 
-        let generics = HashSet::new();
+        let generics = HashMap::new();
         let mut converter = ASTConverter::default();
 
         for (ast_type, expected_type) in test_cases {
@@ -146,7 +145,7 @@ mod types_tests {
     #[test]
     fn test_convert_complex_types() {
         let mut converter = ASTConverter::default();
-        let generics = HashSet::new();
+        let generics = HashMap::new();
 
         // Register "TestType" for testing complex types
         let test_adt = create_test_adt("TestType");
@@ -196,7 +195,7 @@ mod types_tests {
     #[test]
     fn test_convert_special_types() {
         let mut converter = ASTConverter::default();
-        let generics = HashSet::new();
+        let generics = HashMap::new();
 
         // Register "TestType" for complex types
         let test_adt = create_test_adt("TestType");
@@ -260,7 +259,7 @@ mod types_tests {
 
         // Test regular ADT identifier with registered type
         let adt_type = AstType::Identifier("MyType".to_string());
-        let generics = HashSet::new();
+        let generics = HashMap::new();
         let result = converter
             .convert_type(&spanned(adt_type), &generics, true)
             .expect("Registered ADT type conversion should succeed");
@@ -276,13 +275,14 @@ mod types_tests {
 
         // Test generic identifier
         let generic_type = AstType::Identifier("T".to_string());
-        let mut generics = HashSet::new();
-        generics.insert("T".to_string());
+        let mut generics = HashMap::new();
+        // Assign ID 42 to the generic "T"
+        generics.insert("T".to_string(), 42);
         let result = converter
             .convert_type(&spanned(generic_type), &generics, true)
             .expect("Generic type conversion should succeed");
         match &*result.value {
-            TypeKind::Generic(name) => assert_eq!(name, "T"),
+            TypeKind::Generic(id) => assert_eq!(*id, 42),
             _ => panic!("Expected Generic type"),
         }
     }
@@ -301,7 +301,7 @@ mod types_tests {
                 .unwrap();
         }
 
-        let generics = HashSet::new();
+        let generics = HashMap::new();
 
         // Valid types should convert successfully
         assert!(
@@ -366,7 +366,7 @@ mod types_tests {
         converter.registry.register_adt(&data_type_adt).unwrap();
         converter.registry.register_adt(&key_type_adt).unwrap();
 
-        let generics = HashSet::new();
+        let generics = HashMap::new();
 
         // Test array with valid type
         let array_type = AstType::Array(spanned(AstType::Identifier("DataType".to_string())));
@@ -448,12 +448,12 @@ mod types_tests {
         let data_type_adt = create_test_adt("DataType");
         converter.registry.register_adt(&data_type_adt).unwrap();
 
-        // Setup generics
-        let mut generics = HashSet::new();
-        generics.insert("T".to_string());
-        generics.insert("U".to_string());
+        // Setup generics with numeric IDs
+        let mut generics = HashMap::new();
+        generics.insert("T".to_string(), 0);
+        generics.insert("U".to_string(), 1);
 
-        // Test generic types (should pass validation because they're in the generics set)
+        // Test generic types (should pass validation because they're in the generics map)
         let generic_type = AstType::Identifier("T".to_string());
         assert!(
             converter
@@ -508,7 +508,7 @@ mod types_tests {
         let data_type_adt = create_test_adt("DataType");
         converter.registry.register_adt(&data_type_adt).unwrap();
 
-        let generics = HashSet::new();
+        let generics = HashMap::new();
 
         // Test Optional with valid type
         let optional_type =

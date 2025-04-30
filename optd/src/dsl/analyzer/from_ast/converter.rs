@@ -9,7 +9,7 @@ use crate::dsl::analyzer::{
 use crate::dsl::parser::ast::Function;
 use crate::dsl::utils::span::Spanned;
 use FunKind::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Converter util struct from AST to HIR<TypedSpan>.
 #[derive(Debug, Clone, Default)]
@@ -55,7 +55,11 @@ impl ASTConverter {
         let generics = func
             .type_params
             .iter()
-            .map(|param| (*param.value).clone())
+            .map(|param| {
+                let id = self.registry.next_id;
+                self.registry.next_id += 1;
+                ((*param.value).clone(), id)
+            })
             .collect();
 
         let params = self.get_parameters(func, &generics)?;
@@ -113,7 +117,7 @@ impl ASTConverter {
     fn get_parameters(
         &mut self,
         func: &Function,
-        generics: &HashSet<Identifier>,
+        generics: &HashMap<Identifier, usize>,
     ) -> Result<Vec<(Identifier, Type)>, Box<AnalyzerErrorKind>> {
         // Start with receiver if it exists.
         let mut param_fields = match &func.receiver {
@@ -439,9 +443,15 @@ mod converter_tests {
         // Verify the return type is a generic
         match &*func_val.unwrap().metadata.ty.value {
             TypeKind::Closure(_, ret_type) => {
-                assert_eq!(**ret_type, TypeKind::Generic(String::from("T")));
+                match &*ret_type.value {
+                    TypeKind::Generic(id) => {
+                        // We expect id to be 0 since "T" should be the first generic parameter
+                        assert_eq!(*id, 0);
+                    }
+                    other => panic!("Expected Generic type, got: {:?}", other),
+                }
             }
-            _ => panic!("Expected closure type"),
+            other => panic!("Expected closure type, got: {:?}", other),
         }
     }
 }
