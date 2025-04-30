@@ -790,10 +790,15 @@ impl MemoryMemo {
         self.repr_physical_expr
             .merge(&physical_expr_id, &repr_physical_expr_id);
 
-        let subscribers = self.member_subscribers.remove(&GoalMemberId::PhysicalExpressionId(physical_expr_id));
+        let subscribers = self
+            .member_subscribers
+            .remove(&GoalMemberId::PhysicalExpressionId(physical_expr_id));
         if let Some(subscribers) = subscribers {
             // add the subscribers to the repr physical expr id
-            self.member_subscribers.entry(GoalMemberId::PhysicalExpressionId(repr_physical_expr_id)).or_default().extend(subscribers);
+            self.member_subscribers
+                .entry(GoalMemberId::PhysicalExpressionId(repr_physical_expr_id))
+                .or_default()
+                .extend(subscribers);
         }
 
         let mut results = Vec::new();
@@ -801,7 +806,6 @@ impl MemoryMemo {
             repr_physical_expr: repr_physical_expr_id,
             non_repr_physical_exprs: physical_expr_id,
         });
-
 
         let dependent_physical_exprs = self
             .physical_expr_dependent_physical_exprs
@@ -893,7 +897,31 @@ impl MemoryMemo {
         };
 
         merged_goal_result.members = goal_1.members.iter().cloned().collect();
-        merged_goal_result.members.extend(goal_2.members.iter().cloned());
+        merged_goal_result
+            .members
+            .extend(goal_2.members.iter().cloned());
+
+        let forward_result = self
+            .add_goal_member(goal_id1, GoalMemberId::GoalId(goal_id2))
+            .await?;
+        if let Some(forward_result) = forward_result {
+            // change the subscribers of goal 2 to now be subscribed to goal 1
+            let subscribers = self
+                .member_subscribers
+                .remove(&GoalMemberId::GoalId(goal_id2));
+            if let Some(subscribers) = subscribers {
+                self.member_subscribers
+                    .entry(GoalMemberId::GoalId(goal_id1))
+                    .or_default()
+                    .extend(&subscribers);
+                let mut temp_forward_result =
+                    ForwardResult::new(forward_result.physical_expr_id, forward_result.best_cost);
+                let vec_deque_subscribers =
+                    VecDeque::from(subscribers.into_iter().collect::<Vec<_>>());
+                self.propagate_new_member_cost(vec_deque_subscribers, &mut temp_forward_result)
+                    .await?;
+            }
+        }
 
         // Now, we need to update all the physical exprs that depend on goal 2 to now depend on goal 1.
         let goal_2_dependent_physical_exprs =

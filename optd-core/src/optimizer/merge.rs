@@ -47,7 +47,8 @@ impl<M: Memoize> Optimizer<M> {
                     }
                 }
                 Task::OptimizePlan(task) => {
-                    panic!("OptimizePlan task should not be deleted");
+                    // panic!("OptimizePlan task should not be deleted");
+                    // TODO(Sarvesh) I guess we can always delete an optimize plan task as it has not subscribers
                 }
                 Task::OptimizeGoal(task) => {
                     for id in task.optimize_goal_out.iter() {
@@ -118,7 +119,7 @@ impl<M: Memoize> Optimizer<M> {
                     self.try_delete_task(task.explore_group_in);
                 }
                 Task::OptimizePlan(optimize_plan_task) => {
-                    panic!("OptimizePlan task should not be deleted");
+                    self.try_delete_task(optimize_plan_task.optimize_goal_in);
                 }
                 Task::OptimizeGoal(task) => {
                     self.goal_optimization_task_index.remove(&task.goal_id);
@@ -508,27 +509,74 @@ impl<M: Memoize> Optimizer<M> {
             //     }
             // }
 
-            let forward_result = self
-                .memo
-                .add_goal_member(
-                    goal_merge.new_repr_goal_id,
-                    GoalMemberId::GoalId(goal_merge.non_repr_goal_id),
-                )
-                .await?;
-            if let Some(forward_result) = forward_result {
-                self.handle_forward_result(forward_result).await?;
+            // let forward_result = self
+            //     .memo
+            //     .add_goal_member(
+            //         goal_merge.new_repr_goal_id,
+            //         GoalMemberId::GoalId(goal_merge.non_repr_goal_id),
+            //     )
+            //     .await?;
+            // if let Some(forward_result) = forward_result {
+            //     self.handle_forward_result(forward_result).await?;
+            // }
+
+            // let forward_result = self
+            //     .memo
+            //     .add_goal_member(
+            //         goal_merge.non_repr_goal_id,
+            //         GoalMemberId::GoalId(goal_merge.new_repr_goal_id),
+            //     )
+            //     .await?;
+            // if let Some(forward_result) = forward_result {
+            //     self.handle_forward_result(forward_result).await?;
+            // }
+            let non_repr_goal_id = goal_merge.non_repr_goal_id;
+            let repr_goal_id = goal_merge.new_repr_goal_id;
+            let non_repr_goal_task_id = self
+                .goal_optimization_task_index
+                .get(&non_repr_goal_id)
+                .unwrap()
+                .clone();
+            let repr_goal_task_id = self
+                .goal_optimization_task_index
+                .get(&repr_goal_id)
+                .unwrap()
+                .clone();
+            // Get the data we need from non_repr_goal_task first
+            let non_repr_goal_out;
+            let non_repr_plan_out;
+            let non_repr_fork_costed_out;
+            {
+                let non_repr_goal_task = self
+                    .tasks
+                    .get_mut(&non_repr_goal_task_id)
+                    .unwrap()
+                    .as_optimize_goal_mut();
+
+                // TODO(Sarvesh) i want to move the outs and replace them with empty vectors without cloning
+                // but mem::take looks ugly, so i'm just going to clone for now
+                non_repr_goal_out = non_repr_goal_task.optimize_goal_out.clone();
+                non_repr_goal_task.optimize_goal_out = Vec::new();
+                non_repr_plan_out = non_repr_goal_task.optimize_plan_out.clone();
+                non_repr_goal_task.optimize_plan_out = Vec::new();
+                non_repr_fork_costed_out = non_repr_goal_task.fork_costed_out.clone();
+                non_repr_goal_task.fork_costed_out = Vec::new();
             }
 
-            let forward_result = self
-                .memo
-                .add_goal_member(
-                    goal_merge.non_repr_goal_id,
-                    GoalMemberId::GoalId(goal_merge.new_repr_goal_id),
-                )
-                .await?;
-            if let Some(forward_result) = forward_result {
-                self.handle_forward_result(forward_result).await?;
-            }
+            // Now update repr_goal_task with the collected data
+            let repr_goal_task = self
+                .tasks
+                .get_mut(&repr_goal_task_id)
+                .unwrap()
+                .as_optimize_goal_mut();
+            repr_goal_task.optimize_goal_out.extend(non_repr_goal_out);
+            repr_goal_task.optimize_plan_out.extend(non_repr_plan_out);
+            repr_goal_task
+                .fork_costed_out
+                .extend(non_repr_fork_costed_out);
+
+            // delete the non-repr goal task
+            self.try_delete_task(non_repr_goal_task_id);
         }
 
         for expr_merge in result.physical_expr_merges {
