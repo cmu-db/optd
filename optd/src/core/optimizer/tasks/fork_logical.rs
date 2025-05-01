@@ -1,12 +1,12 @@
-use optd_dsl::{
+use crate::dsl::{
     analyzer::hir::Value,
     engine::{Continuation, EngineResponse},
 };
 
 use crate::{
-    cir::GroupId,
-    memo::Memoize,
-    optimizer::{EngineMessageKind, Optimizer},
+    core::cir::GroupId,
+    core::memo::Memoize,
+    core::optimizer::{EngineMessageKind, Optimizer},
 };
 
 use super::{SourceTaskId, Task, TaskId};
@@ -54,7 +54,7 @@ impl<M: Memoize> Optimizer<M> {
         group_id: GroupId,
         continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
         out: TaskId,
-    ) -> Result<TaskId, crate::error::Error> {
+    ) -> Result<TaskId, crate::core::error::Error> {
         let task_id = self.next_task_id();
         let (explore_group_in, logical_expr_ids) = self
             .ensure_explore_group_task(group_id, SourceTaskId::ForkLogical(task_id))

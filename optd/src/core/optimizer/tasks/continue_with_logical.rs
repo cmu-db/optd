@@ -1,9 +1,9 @@
 use crate::{
-    bridge::from_cir::partial_logical_to_value,
-    cir::LogicalExpressionId,
-    error::Error,
-    memo::Memoize,
-    optimizer::{JobId, Optimizer},
+    core::bridge::from_cir::partial_logical_to_value,
+    core::cir::LogicalExpressionId,
+    core::error::Error,
+    core::memo::Memoize,
+    core::optimizer::{JobId, Optimizer},
 };
 
 use super::{Task, TaskId};

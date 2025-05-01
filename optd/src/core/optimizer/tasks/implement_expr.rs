@@ -1,16 +1,16 @@
 use std::sync::Arc;
 
-use optd_dsl::engine::Engine;
+use crate::dsl::engine::Engine;
 
 use crate::{
-    bridge::{
+    core::bridge::{
         from_cir::{partial_logical_to_value, physical_properties_to_value},
         into_cir::value_to_partial_physical,
     },
-    cir::{Goal, GoalId, ImplementationRule, LogicalExpressionId},
-    error::Error,
-    memo::{Memoize, Status},
-    optimizer::{EngineMessageKind, JobId, Optimizer, Task},
+    core::cir::{Goal, GoalId, ImplementationRule, LogicalExpressionId},
+    core::error::Error,
+    core::memo::{Memoize, Status},
+    core::optimizer::{EngineMessageKind, JobId, Optimizer, Task},
 };
 
 use super::TaskId;
@@ -108,7 +108,7 @@ impl<M: Memoize> Optimizer<M> {
             .materialize_logical_expr(task.logical_expr_id)
             .await?
             .into();
-        let engine = Engine::new(self.hir_context.clone());
+        let engine = Engine::new(self.hir_context.clone(), self.catalog.clone());
         let engine_tx = self.engine_tx.clone();
         let rule_name = task.rule.clone();
 

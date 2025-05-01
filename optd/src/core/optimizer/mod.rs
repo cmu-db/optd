@@ -1,20 +1,23 @@
-use crate::cir::{
+use crate::catalog::Catalog;
+use crate::core::cir::{
     Cost, Goal, GoalId, GroupId, LogicalProperties, PartialLogicalPlan, PartialPhysicalPlan,
     PhysicalExpressionId, RuleBook,
 };
-use crate::error::Error;
-use crate::memo::Memoize;
+use crate::core::error::Error;
+use crate::core::memo::Memoize;
+use crate::dsl::analyzer::hir::context::Context;
 use EngineMessageKind::*;
 pub use client::{Client, QueryInstance};
 use client::{ClientMessage, QueryInstanceId};
 use futures::StreamExt;
 use futures::channel::mpsc;
 
+use crate::dsl::analyzer::hir::HIR;
+use crate::dsl::analyzer::hir::Value;
+use crate::dsl::engine::{Continuation, EngineResponse};
 use jobs::{Job, JobId};
-use optd_dsl::analyzer::hir::Value;
-use optd_dsl::analyzer::{context::Context, hir::HIR};
-use optd_dsl::engine::{Continuation, EngineResponse};
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 use tasks::{Task, TaskId};
 
 mod client;
@@ -92,7 +95,7 @@ pub struct Optimizer<M: Memoize> {
     memo: M,
     rule_book: RuleBook,
     hir_context: Context,
-
+    catalog: Arc<dyn Catalog>,
     // Message handling.
     /// Sender for sending messages from the engine.
     engine_tx: mpsc::Sender<EngineMessage>,
@@ -135,7 +138,12 @@ impl<M: Memoize> Optimizer<M> {
     /// Create a new optimizer instance with the given memo and HIR context.
     ///
     /// Use `launch` to create and start the optimizer.
-    fn new(memo: M, hir: HIR, client_rx: mpsc::Receiver<ClientMessage>) -> Self {
+    fn new(
+        memo: M,
+        catalog: Arc<dyn Catalog>,
+        hir: HIR,
+        client_rx: mpsc::Receiver<ClientMessage>,
+    ) -> Self {
         let (engine_tx, engine_rx) = mpsc::channel(0);
 
         Optimizer {
@@ -143,7 +151,7 @@ impl<M: Memoize> Optimizer<M> {
             memo,
             rule_book: RuleBook::default(),
             hir_context: hir.context,
-
+            catalog,
             // Message handling.
             engine_tx,
             engine_rx,
@@ -172,12 +180,12 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     /// Launch a new optimizer and return a sender for client communication.
-    pub fn launch(memo: M, hir: HIR) -> Client<M> {
+    pub fn launch(memo: M, catalog: Arc<dyn Catalog>, hir: HIR) -> Client<M> {
         let (client_tx, client_rx) = mpsc::channel(0);
 
         let handle = tokio::spawn(async move {
             // Start the background processing loop.
-            let optimizer = Self::new(memo, hir, client_rx);
+            let optimizer = Self::new(memo, catalog, hir, client_rx);
             // TODO(Alexis): If an error occurs we could restart or reboot the memo.
             // Rather than failing (e.g. memo could be distributed).
             optimizer.run().await.expect("Optimizer failure")
@@ -286,12 +294,34 @@ mod tests {
 
     use super::*;
     use crate::{
-        cir::{
-            Child, GoalMemberId, LogicalExpression, LogicalPlan, Operator, OperatorData,
-            PhysicalExpression, PhysicalPlan, PhysicalProperties, PropertiesData,
+        catalog::CatalogError,
+        core::{
+            cir::{
+                Child, GoalMemberId, LogicalExpression, LogicalPlan, Operator, OperatorData,
+                PhysicalExpression, PhysicalPlan, PhysicalProperties, PropertiesData,
+            },
+            memo::memory::MemoryMemo,
         },
-        memo::memory::MemoryMemo,
     };
+    // #[derive(Debug)]
+    // struct MockCatalog;
+    // impl Catalog for MockCatalog {
+    //     async fn get_table_properties(
+    //         &self,
+    //         _table_name: &str,
+    //     ) -> Result<HashMap<String, String>, CatalogError> {
+    //         todo!()
+    //     }
+
+    //     async fn get_table_columns(&self, _table_name: &str) -> Result<Vec<String>, CatalogError> {
+    //         todo!()
+    //     }
+    // }
+
+    fn mock_catalog() -> Arc<dyn Catalog> {
+        todo!()
+    }
+
     #[tokio::test]
     async fn test_optimizer_with_empty_hir() -> Result<(), Error> {
         let hir = HIR {
@@ -299,13 +329,15 @@ mod tests {
             annotations: HashMap::new(),
         };
 
-        let mut client = Optimizer::launch(memo, hir);
+        let mut memo = MemoryMemo::default();
 
-        let logical_plan = LogicalPlan(Operator::new(
-            "Scan".to_string(),
-            vec![OperatorData::String("t1".into())],
-            vec![],
-        ));
+        let mut client = Optimizer::launch(memo, mock_catalog(), hir);
+
+        let logical_plan = LogicalPlan(Operator {
+            tag: "Scan".to_string(),
+            data: vec![OperatorData::String("t1".into())],
+            children: vec![],
+        });
         let mut query_instance = client.create_query_instance(logical_plan).await?;
 
         // Wait for three secs, should just directly timeout.
@@ -325,12 +357,11 @@ mod tests {
         let mut memo = MemoryMemo::default();
 
         let (no_sort_goal_id, sort_goal_id, scan_group_id) = {
-            let scan = LogicalExpression::new(
-                "Scan".to_string(),
-                vec![OperatorData::String("t1".into())],
-                vec![],
-            );
-
+            let scan = LogicalExpression {
+                tag: "Scan".to_string(),
+                data: vec![OperatorData::String("t1".into())],
+                children: vec![],
+            };
             let logical_expr_id = memo.get_logical_expr_id(&scan).await?;
             let scan_group_id = memo.create_group(logical_expr_id).await?;
 
@@ -344,11 +375,11 @@ mod tests {
         };
 
         let goal_id = {
-            let sort = LogicalExpression::new(
-                "Sort".to_string(),
-                vec![OperatorData::String("t1".into())],
-                vec![Child::Singleton(scan_group_id)],
-            );
+            let sort = LogicalExpression {
+                tag: "Sort".to_string(),
+                data: vec![OperatorData::String("t1".into())],
+                children: vec![Child::Singleton(scan_group_id)],
+            };
             let logical_expr_id = memo.get_logical_expr_id(&sort).await?;
             let sort_group_id = memo.create_group(logical_expr_id).await?;
             let goal_id = memo
@@ -364,11 +395,12 @@ mod tests {
         };
 
         {
-            let table_scan = PhysicalExpression::new(
-                "TableScan".to_string(),
-                vec![OperatorData::String("t1".into())],
-                vec![],
-            );
+            let table_scan = PhysicalExpression {
+                tag: "TableScan".to_string(),
+                data: vec![OperatorData::String("t1".into())],
+                children: vec![],
+            };
+
             let physical_expr_id = memo.get_physical_expr_id(&table_scan).await?;
             let forward_result = memo
                 .add_goal_member(
@@ -391,14 +423,14 @@ mod tests {
         }
 
         let index_scan_expr_id = {
-            let index_scan = PhysicalExpression::new(
-                "IndexScan".to_string(),
-                vec![
+            let index_scan = PhysicalExpression {
+                tag: "IndexScan".to_string(),
+                data: vec![
                     OperatorData::String("t1".into()),
                     OperatorData::String("t1v1".into()),
                 ],
-                vec![],
-            );
+                children: vec![],
+            };
 
             let physical_expr_id = memo.get_physical_expr_id(&index_scan).await?;
             memo.add_goal_member(
@@ -413,11 +445,11 @@ mod tests {
         };
 
         {
-            let physical_sort = PhysicalExpression::new(
-                "EnforceSort".to_string(),
-                vec![OperatorData::String("order_by t1.v1".into())],
-                vec![Child::Singleton(GoalMemberId::GoalId(no_sort_goal_id))],
-            );
+            let physical_sort = PhysicalExpression {
+                tag: "EnforceSort".to_string(),
+                data: vec![OperatorData::String("order_by t1.v1".into())],
+                children: vec![Child::Singleton(GoalMemberId::GoalId(no_sort_goal_id))],
+            };
 
             let physical_expr_id = memo.get_physical_expr_id(&physical_sort).await?;
             memo.add_goal_member(
@@ -434,19 +466,19 @@ mod tests {
             context: Context::default(),
             annotations: HashMap::new(),
         };
-        let mut client = Optimizer::launch(memo, hir);
+        let mut client = Optimizer::launch(memo, mock_catalog(), hir);
 
-        let logical_scan_plan = LogicalPlan(Operator::new(
-            "Scan".to_string(),
-            vec![OperatorData::String("t1".into())],
-            vec![],
-        ));
+        let logical_scan_plan = LogicalPlan(Operator {
+            tag: "Scan".to_string(),
+            data: vec![OperatorData::String("t1".into())],
+            children: vec![],
+        });
 
-        let physical_scan = Arc::new(PhysicalPlan(Operator::new(
-            "TableScan".to_string(),
-            vec![OperatorData::String("t1".into())],
-            vec![],
-        )));
+        let physical_scan = Arc::new(PhysicalPlan(Operator {
+            tag: "TableScan".to_string(),
+            data: vec![OperatorData::String("t1".into())],
+            children: vec![],
+        }));
 
         let mut join_set = JoinSet::new();
 
@@ -462,17 +494,17 @@ mod tests {
             })
         };
 
-        let enforce_sort = Arc::new(PhysicalPlan(Operator::new(
-            "EnforceSort".to_string(),
-            vec![OperatorData::String("order_by t1.v1".into())],
-            vec![Child::Singleton(physical_scan)],
-        )));
+        let enforce_sort = Arc::new(PhysicalPlan(Operator {
+            tag: "EnforceSort".to_string(),
+            data: vec![OperatorData::String("order_by t1.v1".into())],
+            children: vec![Child::Singleton(physical_scan)],
+        }));
 
-        let logical_sort_plan = LogicalPlan(Operator::new(
-            "Sort".to_string(),
-            vec![OperatorData::String("t1".into())],
-            vec![Child::Singleton(Arc::new(logical_scan_plan))],
-        ));
+        let logical_sort_plan = LogicalPlan(Operator {
+            tag: "Sort".to_string(),
+            data: vec![OperatorData::String("t1".into())],
+            children: vec![Child::Singleton(Arc::new(logical_scan_plan))],
+        });
 
         {
             let logical_plan = logical_sort_plan.clone();
@@ -498,20 +530,20 @@ mod tests {
             .await?;
         }
 
-        let index_scan = Arc::new(PhysicalPlan(Operator::new(
-            "IndexScan".to_string(),
-            vec![
+        let index_scan = Arc::new(PhysicalPlan(Operator {
+            tag: "IndexScan".to_string(),
+            data: vec![
                 OperatorData::String("t1".into()),
                 OperatorData::String("t1v1".into()),
             ],
-            vec![],
-        )));
+            children: vec![],
+        }));
 
         let hir = HIR {
             context: Context::default(),
             annotations: HashMap::new(),
         };
-        let mut client = Optimizer::launch(memo, hir);
+        let mut client = Optimizer::launch(memo, mock_catalog(), hir);
 
         {
             let logical_plan = logical_sort_plan.clone();

@@ -1,11 +1,11 @@
 use super::Optimizer;
 use crate::{
-    cir::{
+    core::cir::{
         Child, GoalMemberId, GroupId, LogicalExpression, Operator, PartialLogicalPlan,
         PartialPhysicalPlan, PhysicalExpression,
     },
-    error::Error,
-    memo::Memoize,
+    core::error::Error,
+    core::memo::Memoize,
 };
 use Child::*;
 use std::sync::Arc;
@@ -68,9 +68,11 @@ impl<M: Memoize> Optimizer<M> {
             let child = self.ingest_logical_child(child).await?;
             children.push(child);
         }
-
-        let logical_expr =
-            LogicalExpression::new(operator.tag.clone(), operator.data.clone(), children);
+        let logical_expr = LogicalExpression {
+            tag: operator.tag.clone(),
+            data: operator.data.clone(),
+            children,
+        };
 
         let logical_expr_id = self.memo.get_logical_expr_id(&logical_expr).await?;
 
@@ -115,8 +117,11 @@ impl<M: Memoize> Optimizer<M> {
             children.push(processed_child);
         }
         // Base case: is an expression.
-        let physical_expr =
-            PhysicalExpression::new(operator.tag.clone(), operator.data.clone(), children);
+        let physical_expr = PhysicalExpression {
+            tag: operator.tag.clone(),
+            data: operator.data.clone(),
+            children,
+        };
         let physical_expr_id = self.memo.get_physical_expr_id(&physical_expr).await?;
 
         Ok(GoalMemberId::PhysicalExpressionId(physical_expr_id))

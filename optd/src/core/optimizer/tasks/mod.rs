@@ -20,7 +20,7 @@ use optimize_goal::*;
 use optimize_plan::*;
 use transform_expr::*;
 
-use crate::memo::Memoize;
+use crate::core::memo::Memoize;
 
 use super::Optimizer;
 

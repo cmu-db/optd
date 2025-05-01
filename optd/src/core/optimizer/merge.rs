@@ -2,18 +2,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::{
-    Optimizer,
-    tasks::{SourceTaskId, Task},
-};
+use super::{Optimizer, tasks::Task};
 use crate::{
-    cir::{
-        Cost, GoalId, GoalMemberId, GroupId, ImplementationRule, LogicalExpressionId,
-        TransformationRule,
-    },
-    error::Error,
-    memo::{Memoize, MergeProducts},
-    optimizer::tasks::TaskId,
+    core::cir::{GoalId, GroupId, ImplementationRule, LogicalExpressionId, TransformationRule},
+    core::error::Error,
+    core::memo::{Memoize, MergeProducts},
+    core::optimizer::tasks::TaskId,
 };
 
 impl<M: Memoize> Optimizer<M> {
@@ -26,71 +20,71 @@ impl<M: Memoize> Optimizer<M> {
             match task {
                 Task::ExploreGroup(task) => {
                     for id in task.fork_logical_out.iter() {
-                        if self.tasks.get(id).is_some() {
+                        if self.tasks.contains_key(id) {
                             return;
                         }
                     }
                     for id in task.optimize_goal_out.iter() {
-                        if self.tasks.get(id).is_some() {
+                        if self.tasks.contains_key(id) {
                             return;
                         }
                     }
                 }
                 Task::TransformExpression(task) => {
-                    if self.tasks.get(&task.explore_group_out).is_some() {
+                    if self.tasks.contains_key(&task.explore_group_out) {
                         return;
                     }
                 }
                 Task::ForkLogical(task) => {
-                    if self.tasks.get(&task.out).is_some() {
+                    if self.tasks.contains_key(&task.out) {
                         return;
                     }
                 }
-                Task::OptimizePlan(task) => {
+                Task::OptimizePlan(_) => {
                     // panic!("OptimizePlan task should not be deleted");
                     // TODO(Sarvesh) I guess we can always delete an optimize plan task as it has not subscribers
                 }
                 Task::OptimizeGoal(task) => {
                     for id in task.optimize_goal_out.iter() {
-                        if self.tasks.get(&id).is_some() {
+                        if self.tasks.contains_key(id) {
                             return;
                         }
                     }
                     for id in task.optimize_plan_out.iter() {
-                        if self.tasks.get(&id).is_some() {
+                        if self.tasks.contains_key(id) {
                             return;
                         }
                     }
                     for id in task.fork_costed_out.iter() {
-                        if self.tasks.get(&id).is_some() {
+                        if self.tasks.contains_key(id) {
                             return;
                         }
                     }
                 }
                 Task::ImplementExpression(task) => {
-                    if self.tasks.get(&task.optimize_goal_out).is_some() {
+                    if self.tasks.contains_key(&task.optimize_goal_out) {
                         return;
                     }
                 }
                 Task::CostExpression(task) => {
                     for id in task.optimize_goal_out.iter() {
-                        if self.tasks.get(&id).is_some() {
+                        if self.tasks.contains_key(id) {
                             return;
                         }
                     }
                 }
                 Task::ContinueWithLogical(task) => {
-                    if self.tasks.get(&task.fork_out).is_some() {
+                    if self.tasks.contains_key(&task.fork_out) {
                         return;
                     }
                 }
                 Task::ForkCosted(task) => {
-                    if self.tasks.get(&task.out).is_some() {
+                    if self.tasks.contains_key(&task.out) {
                         return;
                     }
                 }
                 Task::ContinueWithCosted(task) => {
-                    if self.tasks.get(&task.fork_out).is_some() {
+                    if self.tasks.contains_key(&task.fork_out) {
                         return;
                     }
                 }
@@ -108,7 +102,7 @@ impl<M: Memoize> Optimizer<M> {
                     }
                 }
                 Task::TransformExpression(task) => {
-                    for id in task.fork_in {
+                    if let Some(id) = task.fork_in {
                         self.try_delete_task(id);
                     }
                 }
@@ -384,17 +378,15 @@ impl<M: Memoize> Optimizer<M> {
                     self.create_transformation_tasks(*expr, *repr_group_task_id, transformations)
                         .await?;
                 } else {
-                    let mut all_tasks_for_this_expr =
-                        exprs_to_trans_tasks.get(expr).unwrap().clone();
+                    let all_tasks_for_this_expr = exprs_to_trans_tasks.get(expr).unwrap().clone();
                     for rule in self.rule_book.get_transformations().to_vec() {
                         if !all_tasks_for_this_expr.contains_key(&rule) {
-                            let impl_expr_task_id = self
-                                .create_transform_expression_task(
-                                    rule.clone(),
-                                    *expr,
-                                    *repr_group_task_id,
-                                )
-                                .await?;
+                            self.create_transform_expression_task(
+                                rule,
+                                *expr,
+                                *repr_group_task_id,
+                            )
+                            .await?;
                         } else if all_tasks_for_this_expr.get(&rule).unwrap().len() == 1 {
                             let (task_id, task_expr_id) =
                                 all_tasks_for_this_expr.get(&rule).unwrap()[0];
@@ -532,16 +524,19 @@ impl<M: Memoize> Optimizer<M> {
             // }
             let non_repr_goal_id = goal_merge.non_repr_goal_id;
             let repr_goal_id = goal_merge.new_repr_goal_id;
-            let non_repr_goal_task_id = self
-                .goal_optimization_task_index
-                .get(&non_repr_goal_id)
-                .unwrap()
-                .clone();
-            let repr_goal_task_id = self
-                .goal_optimization_task_index
-                .get(&repr_goal_id)
-                .unwrap()
-                .clone();
+            let non_repr_goal_task_id =
+                if let Some(id) = self.goal_optimization_task_index.get(&non_repr_goal_id) {
+                    *id
+                } else {
+                    continue;
+                };
+
+            let repr_goal_task_id =
+                if let Some(id) = self.goal_optimization_task_index.get(&repr_goal_id) {
+                    *id
+                } else {
+                    continue;
+                };
             // Get the data we need from non_repr_goal_task first
             let non_repr_goal_out;
             let non_repr_plan_out;

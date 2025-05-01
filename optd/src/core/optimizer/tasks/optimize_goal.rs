@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 
 use crate::{
-    cir::{Cost, Goal, GoalId, GoalMemberId, PhysicalExpressionId},
-    error::Error,
-    memo::Memoize,
-    optimizer::{Optimizer, Task},
+    core::cir::{Cost, Goal, GoalId, GoalMemberId, PhysicalExpressionId},
+    core::error::Error,
+    core::memo::Memoize,
+    core::optimizer::{Optimizer, Task},
 };
 
 use super::{SourceTaskId, TaskId};

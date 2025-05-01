@@ -1,13 +1,13 @@
 use std::{collections::HashSet, sync::Arc};
 
-use optd_dsl::engine::Engine;
+use crate::dsl::engine::Engine;
 
 use crate::{
-    bridge::{from_cir::partial_physical_to_value, into_cir::value_to_cost},
-    cir::{Cost, PhysicalExpressionId},
-    error::Error,
-    memo::{Memoize, Status},
-    optimizer::{EngineMessageKind, JobId, Optimizer, Task},
+    core::bridge::{from_cir::partial_physical_to_value, into_cir::value_to_cost},
+    core::cir::{Cost, PhysicalExpressionId},
+    core::error::Error,
+    core::memo::{Memoize, Status},
+    core::optimizer::{EngineMessageKind, JobId, Optimizer, Task},
 };
 
 use super::TaskId;
@@ -105,7 +105,7 @@ impl<M: Memoize> Optimizer<M> {
     ) -> Result<(), Error> {
         let physical_expr_id = task.physical_expr_id;
         let plan = self.egest_partial_plan(physical_expr_id).await?;
-        let engine = Engine::new(self.hir_context.clone());
+        let engine = Engine::new(self.hir_context.clone(), self.catalog.clone());
         let engine_tx = self.engine_tx.clone();
         tokio::spawn(async move {
             let response = engine

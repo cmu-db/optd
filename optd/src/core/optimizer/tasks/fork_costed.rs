@@ -1,13 +1,13 @@
-use optd_dsl::{
+use crate::dsl::{
     analyzer::hir::Value,
     engine::{Continuation, EngineResponse},
 };
 
 use crate::{
-    cir::{Cost, GoalId},
-    error::Error,
-    memo::Memoize,
-    optimizer::{EngineMessageKind, Optimizer},
+    core::cir::{Cost, GoalId},
+    core::error::Error,
+    core::memo::Memoize,
+    core::optimizer::{EngineMessageKind, Optimizer},
 };
 
 use super::{SourceTaskId, Task, TaskId};

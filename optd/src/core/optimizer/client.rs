@@ -4,9 +4,9 @@ use futures::{
 };
 
 use crate::{
-    cir::{LogicalPlan, PhysicalPlan},
-    error::Error,
-    memo::Memoize,
+    core::cir::{LogicalPlan, PhysicalPlan},
+    core::error::Error,
+    core::memo::Memoize,
 };
 
 /// Unique identifier for a query instance.

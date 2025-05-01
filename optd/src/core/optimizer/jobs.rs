@@ -1,17 +1,19 @@
 use super::{EngineMessage, Task, TaskId};
 use super::{EngineMessageKind, Optimizer};
-use crate::bridge::from_cir::partial_logical_to_value;
-use crate::bridge::into_cir::{hir_goal_to_cir, hir_group_id_to_cir, value_to_logical_properties};
-use crate::cir::{
+use crate::core::bridge::from_cir::partial_logical_to_value;
+use crate::core::bridge::into_cir::{
+    hir_goal_to_cir, hir_group_id_to_cir, value_to_logical_properties,
+};
+use crate::core::cir::{
     GoalId, GroupId, ImplementationRule, LogicalExpressionId, LogicalProperties,
     PartialLogicalPlan, PhysicalExpressionId, TransformationRule,
 };
-use crate::error::Error;
-use crate::memo::Memoize;
+use crate::core::error::Error;
+use crate::core::memo::Memoize;
+use crate::dsl::engine::{Engine, EngineResponse};
 use EngineMessageKind::*;
 use futures::SinkExt;
 use futures::channel::mpsc;
-use optd_dsl::engine::{Engine, EngineResponse};
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
@@ -244,7 +246,7 @@ impl<M: Memoize> Optimizer<M> {
             .await?
             .into();
 
-        let engine = Engine::new(self.hir_context.clone());
+        let engine = Engine::new(self.hir_context.clone(), self.catalog.clone());
         let engine_tx = self.engine_tx.clone();
 
         tokio::spawn(async move {

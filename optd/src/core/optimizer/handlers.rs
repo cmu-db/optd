@@ -2,19 +2,19 @@ use super::{
     EngineMessageKind, Optimizer, Task, TaskId, client::ClientMessage, tasks::SourceTaskId,
 };
 use crate::{
-    cir::{
+    core::cir::{
         Cost, Goal, GoalId, GoalMemberId, GroupId, LogicalProperties, PartialLogicalPlan,
         PartialPhysicalPlan, PhysicalExpressionId,
     },
-    error::Error,
-    memo::Memoize,
+    core::error::Error,
+    core::memo::Memoize,
 };
 
-use futures::{SinkExt, channel::mpsc::Sender};
-use optd_dsl::{
+use crate::dsl::{
     analyzer::hir::Value,
     engine::{Continuation, EngineResponse},
 };
+use futures::{SinkExt, channel::mpsc::Sender};
 
 impl<M: Memoize> Optimizer<M> {
     /// This method initiates the optimization process for a logical plan by launching

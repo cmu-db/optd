@@ -1,10 +1,10 @@
 use futures::{SinkExt, channel::mpsc};
 
 use crate::{
-    cir::{Goal, LogicalPlan, PhysicalExpressionId, PhysicalPlan, PhysicalProperties},
-    error::Error,
-    memo::Memoize,
-    optimizer::{Optimizer, tasks::SourceTaskId},
+    core::cir::{Goal, LogicalPlan, PhysicalExpressionId, PhysicalPlan, PhysicalProperties},
+    core::error::Error,
+    core::memo::Memoize,
+    core::optimizer::{Optimizer, tasks::SourceTaskId},
 };
 
 use super::{Task, TaskId};

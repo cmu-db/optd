@@ -4,9 +4,11 @@ use async_recursion::async_recursion;
 use futures::future::try_join_all;
 
 use crate::{
-    cir::{Child, GoalMemberId, Operator, PartialPhysicalPlan, PhysicalExpressionId, PhysicalPlan},
-    error::Error,
-    memo::Memoize,
+    core::cir::{
+        Child, GoalMemberId, Operator, PartialPhysicalPlan, PhysicalExpressionId, PhysicalPlan,
+    },
+    core::error::Error,
+    core::memo::Memoize,
 };
 
 use super::Optimizer;
