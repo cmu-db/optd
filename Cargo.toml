@@ -1,5 +1,5 @@
 [workspace]
-members = ["optd"]
+members = ["optd", "optd-cli"]
 resolver = "2"
 
 [workspace.package]
