@@ -1,6 +1,6 @@
 use crate::{
     error::Error,
-    memo::{PropagateCost, Memoize},
+    memo::{Memoize, PropagateCost},
 };
 
 use super::Optimizer;
