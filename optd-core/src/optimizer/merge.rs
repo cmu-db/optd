@@ -12,7 +12,7 @@ use crate::{
         TransformationRule,
     },
     error::Error,
-    memo::{Memoize, MergeResult},
+    memo::{Memoize, MergeProducts},
     optimizer::tasks::TaskId,
 };
 
@@ -171,7 +171,7 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// # Parameters
     /// * `result` - The merge result to handle.
-    pub(super) async fn handle_merge_result(&mut self, result: MergeResult) -> Result<(), Error> {
+    pub(super) async fn handle_merge_result(&mut self, result: MergeProducts) -> Result<(), Error> {
         // <I. Apply group merges>
         for group_merge in result.group_merges {
             let repr_group_id = group_merge.new_repr_group_id;

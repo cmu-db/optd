@@ -131,7 +131,7 @@ impl Memoize for MemoryMemo {
         &mut self,
         group_id_1: GroupId,
         group_id_2: GroupId,
-    ) -> MemoizeResult<Option<MergeResult>> {
+    ) -> MemoizeResult<Option<MergeProducts>> {
         self.merge_groups_helper(group_id_1, group_id_2).await
     }
 
@@ -235,7 +235,7 @@ impl Memoize for MemoryMemo {
         &mut self,
         goal_id: GoalId,
         member: GoalMemberId,
-    ) -> MemoizeResult<Option<ForwardResult>> {
+    ) -> MemoizeResult<Option<PropagateCost>> {
         let goal_id = self.find_repr_goal(goal_id).await?;
         let member = self.find_repr_goal_member(member).await?;
         let goal_state = self.goals.get_mut(&goal_id).unwrap();
@@ -267,7 +267,7 @@ impl Memoize for MemoryMemo {
             };
             let mut subscribers = VecDeque::new();
             subscribers.push_back(goal_id);
-            let mut result = ForwardResult::new(physical_expr_id, cost);
+            let mut result = PropagateCost::new(physical_expr_id, cost);
             // propagate the new cost to all subscribers.
             self.propagate_new_member_cost(subscribers, &mut result)
                 .await?;
@@ -299,7 +299,7 @@ impl Memoize for MemoryMemo {
         &mut self,
         physical_expr_id: PhysicalExpressionId,
         new_cost: Cost,
-    ) -> MemoizeResult<Option<ForwardResult>> {
+    ) -> MemoizeResult<Option<PropagateCost>> {
         let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await?;
         let (_, cost_mut) = self
             .physical_exprs
@@ -321,7 +321,7 @@ impl Memoize for MemoryMemo {
                 subscribers.extend(subscriber_goal_ids);
             }
 
-            let mut result = ForwardResult::new(physical_expr_id, new_cost);
+            let mut result = PropagateCost::new(physical_expr_id, new_cost);
             // propagate the new cost to all subscribers.
             self.propagate_new_member_cost(subscribers, &mut result)
                 .await?;
@@ -779,7 +779,7 @@ impl MemoryMemo {
     async fn merge_physical_exprs(
         &mut self,
         physical_expr_id: PhysicalExpressionId,
-    ) -> MemoizeResult<Vec<MergePhysicalExprResult>> {
+    ) -> MemoizeResult<Vec<PhysicalMergeProduct>> {
         let (physical_expr, cost) = self.physical_exprs.get(&physical_expr_id).unwrap();
         let repr_physical_expr = self
             .create_repr_physical_expr(physical_expr.clone())
@@ -802,7 +802,7 @@ impl MemoryMemo {
         }
 
         let mut results = Vec::new();
-        results.push(MergePhysicalExprResult {
+        results.push(PhysicalMergeProduct {
             repr_physical_expr: repr_physical_expr_id,
             non_repr_physical_exprs: physical_expr_id,
         });
@@ -830,14 +830,14 @@ impl MemoryMemo {
         &mut self,
         goal_id1: GoalId,
         goal_id2: GoalId,
-    ) -> MemoizeResult<(MergeGoalResult, Vec<MergePhysicalExprResult>)> {
+    ) -> MemoizeResult<(GoalMergeProduct, Vec<PhysicalMergeProduct>)> {
         let goal_2 = self.goals.remove(&goal_id2).unwrap();
         let goal_1 = self.goals.get(&goal_id1).unwrap();
         let goal_1_props = &goal_1.goal.1;
         let goal_2_props = &goal_2.goal.1;
         self.repr_goal.merge(&goal_id2, &goal_id1);
 
-        let mut merged_goal_result = MergeGoalResult {
+        let mut merged_goal_result = GoalMergeProduct {
             best_expr: None,
             new_repr_goal_id: goal_id1,
             non_repr_goal_id: goal_id2,
@@ -915,7 +915,7 @@ impl MemoryMemo {
                     .or_default()
                     .extend(&subscribers);
                 let mut temp_forward_result =
-                    ForwardResult::new(forward_result.physical_expr_id, forward_result.best_cost);
+                    PropagateCost::new(forward_result.physical_expr_id, forward_result.best_cost);
                 let vec_deque_subscribers =
                     VecDeque::from(subscribers.into_iter().collect::<Vec<_>>());
                 self.propagate_new_member_cost(vec_deque_subscribers, &mut temp_forward_result)
@@ -944,7 +944,7 @@ impl MemoryMemo {
         &mut self,
         group_id_1: GroupId,
         group_id_2: GroupId,
-    ) -> MemoizeResult<Option<MergeResult>> {
+    ) -> MemoizeResult<Option<MergeProducts>> {
         // our strategy is to always merge group 2 into group 1.
         let group_id_1 = self.find_repr_group(group_id_1).await?;
         let group_id_2 = self.find_repr_group(group_id_2).await?;
@@ -952,7 +952,7 @@ impl MemoryMemo {
         if group_id_1 == group_id_2 {
             return Ok(None);
         }
-        let mut result = MergeResult::default();
+        let mut result = MergeProducts::default();
         let group_2_state = self.groups.remove(&group_id_2).unwrap();
         let group_2_exprs: Vec<LogicalExpressionId> =
             group_2_state.logical_exprs.iter().cloned().collect();
@@ -969,7 +969,7 @@ impl MemoryMemo {
             assert!(old_group_id.is_some());
             group1_state.logical_exprs.insert(logical_expr_id);
         }
-        let mut merge_group_result = MergeGroupResult::new(group_id_1, group_id_2);
+        let mut merge_group_result = GroupMergeProduct::new(group_id_1, group_id_2);
         merge_group_result
             .all_exprs_in_merged_group
             .extend(group1_exprs.iter().cloned());
@@ -1097,7 +1097,7 @@ impl MemoryMemo {
     async fn propagate_new_member_cost(
         &mut self,
         mut subscribers: VecDeque<GoalId>,
-        result: &mut ForwardResult,
+        result: &mut PropagateCost,
     ) -> MemoizeResult<()> {
         while let Some(goal_id) = subscribers.pop_front() {
             let current_best = self.get_best_optimized_physical_expr(goal_id).await?;

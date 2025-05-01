@@ -1,6 +1,6 @@
 use crate::{
     error::Error,
-    memo::{ForwardResult, Memoize},
+    memo::{Memoize, PropagateCost},
 };
 
 use super::Optimizer;
@@ -8,7 +8,7 @@ use super::Optimizer;
 impl<M: Memoize> Optimizer<M> {
     pub(super) async fn handle_forward_result(
         &mut self,
-        result: ForwardResult,
+        result: PropagateCost,
     ) -> Result<(), Error> {
         for goal_id in result.goals_forwarded {
             // Only forward to goals if a task exists for it.
