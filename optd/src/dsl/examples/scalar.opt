@@ -1,0 +1,18 @@
+data LogicalProperties
+data PhysicalProperties
+data Physical
+data Logical =
+	| Add(left: Logical, right: Logical)
+	| Mult(left: Logical, right: Logical)
+  	\ Const(val: I64)
+  
+[transformation]
+fn (op: Logical) mult_commute() = match op
+	| Mult(left, right) -> Mult(right, left)
+  	\ _ -> none
+
+[transformation]
+fn (op: Logical) add_to_mult() = match op
+	| Add(Const(left), Const(right)) -> if left == right then Mult(Const(2), Const(left)) else none
+  	\ _ -> none
+  

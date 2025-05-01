@@ -1,0 +1,35 @@
+data LogicalProperties
+data PhysicalProperties
+data Physical =
+	| PAdd(left: Physical, right: Physical)
+	| PMult(left: Physical, right: Physical)
+  \ PConst(val: I64)
+  
+data Logical =
+	| Add(left: Logical, right: Logical)
+	| Mult(left: Logical, right: Logical)
+  \ Const(val: I64)
+  
+[transformation]
+fn (op: Logical) mult_commute() = match op
+	| Mult(left, right) -> Mult(right, left)
+  \ _ -> none
+
+[transformation]
+fn (op: Logical) add_to_mult() = match op
+	| Add(Const(left), Const(right)) -> if left == right then Mult(Const(2), Const(left)) else none
+  \ _ -> none
+  
+[implementation]
+fn (op: Logical) convert(props: PhysicalProperties?) = match op
+	| Add(left, right) -> PAdd(left.convert(none), right.convert(none))
+	| Mult(left, right) -> PMult(left.convert(none), right.convert(none))
+  \ Const(val) -> PConst(val)
+
+fn (op: Physical) cost(): F64 =
+  match op
+  	| PAdd(left, right) -> 2.0 + left.cost() + right.cost()
+    | PMult(left, right) -> 1.0 + left.cost() + right.cost()
+    \ PConst(_) -> 0.0
+    
+    

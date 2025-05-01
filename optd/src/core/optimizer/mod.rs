@@ -562,4 +562,16 @@ mod tests {
         client.shutdown().await.unwrap();
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_scalar_optimizer() -> Result<(), Error> {
+        // let mut memo = MemoryMemo::default();
+        // let mut client = Optimizer::launch(memo, mock_catalog(), hir);
+
+        // let logical_plan = LogicalPlan(Operator {
+        //     tag: "Scan".to_string(),
+        //     data: vec![OperatorData::String("t1".into())],
+        //     children: vec![],
+        // });
+    }
 }
