@@ -290,6 +290,7 @@ mod tests {
 
     use std::{sync::Arc, time::Duration};
 
+    use async_trait::async_trait;
     use tokio::task::JoinSet;
 
     use super::*;
@@ -303,23 +304,25 @@ mod tests {
             memo::memory::MemoryMemo,
         },
     };
-    // #[derive(Debug)]
-    // struct MockCatalog;
-    // impl Catalog for MockCatalog {
-    //     async fn get_table_properties(
-    //         &self,
-    //         _table_name: &str,
-    //     ) -> Result<HashMap<String, String>, CatalogError> {
-    //         todo!()
-    //     }
+    #[derive(Debug)]
+    struct MockCatalog;
 
-    //     async fn get_table_columns(&self, _table_name: &str) -> Result<Vec<String>, CatalogError> {
-    //         todo!()
-    //     }
-    // }
+    #[async_trait]
+    impl Catalog for MockCatalog {
+        async fn get_table_properties(
+            &self,
+            _table_name: &str,
+        ) -> Result<HashMap<String, String>, CatalogError> {
+            Ok(HashMap::new())
+        }
+
+        async fn get_table_columns(&self, _table_name: &str) -> Result<Vec<String>, CatalogError> {
+            Ok(vec![])
+        }
+    }
 
     fn mock_catalog() -> Arc<dyn Catalog> {
-        todo!()
+        Arc::new(MockCatalog)
     }
 
     #[tokio::test]
