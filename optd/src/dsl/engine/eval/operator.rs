@@ -132,14 +132,12 @@ impl<O: Clone + Send + 'static> Engine<O> {
 #[cfg(test)]
 mod tests {
     use crate::catalog::iceberg::memory_catalog;
+    use crate::dsl::analyzer::hir::context::Context;
     use crate::dsl::engine::Engine;
     use crate::dsl::{
-        analyzer::{
-            context::Context,
-            hir::{
-                BinOp, CoreData, Expr, ExprKind, Goal, GroupId, Literal, LogicalOp, Materializable,
-                Operator, PhysicalOp, Value,
-            },
+        analyzer::hir::{
+            BinOp, CoreData, Expr, ExprKind, Goal, GroupId, Literal, LogicalOp, Materializable,
+            Operator, PhysicalOp, Value,
         },
         utils::tests::{
             TestHarness, create_logical_operator, evaluate_and_collect, int, lit_expr, lit_val,

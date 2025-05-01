@@ -25,8 +25,7 @@
 
 use super::errors::AnalyzerErrorKind;
 use crate::dsl::analyzer::{
-    context::Context,
-    hir::{CoreData, FunKind, HIR, TypedSpan, Value},
+    hir::{CoreData, FunKind, HIR, TypedSpan, Value, context::Context},
     type_checks::registry::TypeRegistry,
 };
 use annotations::validate_annotation;

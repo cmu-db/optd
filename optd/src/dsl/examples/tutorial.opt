@@ -222,23 +222,20 @@ fn <K, V> (pairs: [(K, V)]) to_map(): {K : V} = match pairs
 // -------------------------
 
 // For complex operations or external functionality, the language supports UDFs
-// written in Rust. These are declared with the [udf] annotation:
+// written in Rust.
 
-[udf]
 fn (catalog: Catalog) get_table_schema(name: String): Schema
 
-[udf]
-fn (logical: Logical*) properties: LogicalProperties
+fn (logical: Logical*) properties(): LogicalProperties
 
-[udf]
-fn (costed: Physical$) statistics: CostedProperties
+fn (costed: Physical$) statistics(): CostedProperties
 
 // -------------------------
 // 9. Transformation Rules
 // -------------------------
 
 // The core functionality of OPTD is defining transformation rules.
-// These are annotated with [transform] and convert between logical plans:
+// These are annotated with [transformation] and convert between logical plans:
 
 // Helper function for scalar rewrites.
 fn (expr: Scalar) remap(map: {I64 : I64}): Scalar = 
@@ -269,8 +266,8 @@ fn (expr: Scalar) remap(map: {I64 : I64}): Scalar =
         | Max(expr) -> Max(expr.remap(map))
         \ Avg(expr) -> Avg(expr.remap(map))
 
-[transform]
-fn (expr: Logical*) join_commute: Logical? = match expr
+[transformation]
+fn (expr: Logical*) join_commute(): Logical? = match expr
     | Join(left, right, Inner, predicate) ->
         let 
             left_props = left.properties(),
@@ -290,8 +287,8 @@ fn (expr: Logical*) join_commute: Logical? = match expr
             )
     \ _ -> none
 
-[transform]
-fn (plan: Logical*) join_associativity: Logical? = match plan
+[transformation]
+fn (plan: Logical*) join_associativity(): Logical? = match plan
     | Join(
         Join(a, b, Inner, pred_ab),
         c, 
@@ -329,8 +326,8 @@ fn (plan: Logical*) join_associativity: Logical? = match plan
     
     \ _ -> none
 
-[transform]
-fn (plan: Logical*) eliminate_true_filters: Logical? = match plan
+[transformation]
+fn (plan: Logical*) eliminate_true_filters(): Logical? = match plan
     | Filter(child, BoolLiteral(true)) -> child
     \ _ -> none
 
@@ -339,7 +336,7 @@ fn (plan: Logical*) eliminate_true_filters: Logical? = match plan
 // -------------------------
 
 // Implementation rules convert logical plans to physical plans and are
-// annotated with [implement].
+// annotated with [implementation].
 
 // As opposed to transformations, implementations have to deal with properties.
 // Rules are free to totally rewrite the properties, e.g. deriving the children 
@@ -348,10 +345,9 @@ fn (plan: Logical*) eliminate_true_filters: Logical? = match plan
 // For this purpose the DSL provides a special function that recursively instructs
 // the optimization of bottom layers.
 
-[udf]
 fn (expr: Logical*) optimize(props: PhysicalProperties?): Physical
 
-[implement]
+[implementation]
 fn (expr: Logical*) impl_filter_enforce(props: PhysicalProperties?): Physical? = 
     match expr
         | Filter(child, predicate) -> 
@@ -364,13 +360,13 @@ fn (expr: Logical*) impl_filter_enforce(props: PhysicalProperties?): Physical? =
                     result
         \ _ -> none
 
-[implement]
+[implementation]
 fn (expr: Logical*) impl_filter_passthrough(props: PhysicalProperties?): Physical? =
     match expr
         | Filter(child, predicate) -> PhysFilter(child.optimize(props), predicate)
         \ _ -> none
 
-[implement]
+[implementation]
 fn (expr: Logical*) impl_sort(props: PhysicalProperties?): Physical? = match expr
     | Sort(child, order_by) -> 
         if props == none then // TODO: The incoming `?` syntax will make this cleaner
@@ -386,13 +382,13 @@ fn (expr: Logical*) impl_sort(props: PhysicalProperties?): Physical? = match exp
 // Cost function for physical operators - used by the cost-based optimizer to evaluate 
 // different physical implementation alternatives.
 
-fn (expr: Physical*) cost: F64 = 0
+fn (expr: Physical*) cost(): F64 = 0
 
 // Derive logical properties from a logical plan - propagates schema information and other
 // logical properties (like cardinality estimates, uniqueness, or functional dependencies)
 // through the logical plan.
 
-fn (log: Logical*) derive: LogicalProperties = match log
+fn (log: Logical*) derive(): LogicalProperties = match log
     | Get(table_name) -> Catalog.get_table_schema(table_name)
     | Filter(child, _) -> child.properties()
     | Join(left, right, join_type, _) ->

@@ -1,8 +1,5 @@
-use super::{
-    errors::AnalyzerErrorKind,
-    hir::{ExprMetadata, Identifier, NoMetadata, TypedSpan},
-};
-use crate::dsl::analyzer::hir::Value;
+use super::{ExprMetadata, Identifier, NoMetadata, TypedSpan};
+use crate::dsl::analyzer::{errors::AnalyzerErrorKind, hir::Value};
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,

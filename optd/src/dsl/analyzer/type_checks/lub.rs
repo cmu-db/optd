@@ -53,6 +53,11 @@ impl TypeRegistry {
                 return self.least_upper_bound(type1, &bound_unknown, has_changed);
             }
 
+            // Handle generics.
+            (Generic(id1), Generic(id2)) if id1 == id2 => {
+                return type1.clone();
+            }
+
             // Universe is the top type - LUB(Universe, T) = Universe.
             (Universe, _) | (_, Universe) => Universe,
 

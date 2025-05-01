@@ -1,15 +1,13 @@
 use crate::dsl::analyzer::errors::AnalyzerErrorKind;
+use crate::dsl::analyzer::hir::context::Context;
 use crate::dsl::analyzer::hir::{Annotation, FunKind, Identifier};
+use crate::dsl::analyzer::hir::{CoreData, TypedSpan, Udf, Value};
 use crate::dsl::analyzer::type_checks::converter::create_function_type;
 use crate::dsl::analyzer::type_checks::registry::{Type, TypeRegistry};
-use crate::dsl::analyzer::{
-    context::Context,
-    hir::{CoreData, TypedSpan, Udf, Value},
-};
 use crate::dsl::parser::ast::Function;
 use crate::dsl::utils::span::Spanned;
 use FunKind::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Converter util struct from AST to HIR<TypedSpan>.
 #[derive(Debug, Clone, Default)]
@@ -51,12 +49,34 @@ impl ASTConverter {
             return Err(AnalyzerErrorKind::new_incomplete_function(name, &fn_span));
         }
 
-        // Register the function in the context, while checking for duplicates.
-        let generics = func
-            .type_params
-            .iter()
-            .map(|param| (*param.value).clone())
-            .collect();
+        // Process generic type parameters, checking for duplicates and assigning IDs.
+        let generics = {
+            let mut generics_map = HashMap::new();
+
+            for param in &func.type_params {
+                let param_name = &*param.value;
+
+                // Check for duplicates.
+                if let Some(first_span) = generics_map.get(param_name).map(|(_, span)| span) {
+                    return Err(AnalyzerErrorKind::new_duplicate_identifier(
+                        param_name,
+                        first_span,
+                        &param.span,
+                    ));
+                }
+
+                // Assign ID and store.
+                let id = self.registry.next_id;
+                self.registry.next_id += 1;
+                generics_map.insert(param_name.clone(), (id, param.span.clone()));
+            }
+
+            // Extract the final mapping of param names to IDs.
+            generics_map
+                .into_iter()
+                .map(|(name, (id, _))| (name, id))
+                .collect()
+        };
 
         let params = self.get_parameters(func, &generics)?;
         let param_types = params.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
@@ -113,7 +133,7 @@ impl ASTConverter {
     fn get_parameters(
         &mut self,
         func: &Function,
-        generics: &HashSet<Identifier>,
+        generics: &HashMap<Identifier, usize>,
     ) -> Result<Vec<(Identifier, Type)>, Box<AnalyzerErrorKind>> {
         // Start with receiver if it exists.
         let mut param_fields = match &func.receiver {
@@ -439,9 +459,38 @@ mod converter_tests {
         // Verify the return type is a generic
         match &*func_val.unwrap().metadata.ty.value {
             TypeKind::Closure(_, ret_type) => {
-                assert_eq!(**ret_type, TypeKind::Generic(String::from("T")));
+                match &*ret_type.value {
+                    TypeKind::Generic(id) => {
+                        // We expect id to be 0 since "T" should be the first generic parameter
+                        assert_eq!(*id, 0);
+                    }
+                    other => panic!("Expected Generic type, got: {:?}", other),
+                }
             }
-            _ => panic!("Expected closure type"),
+            other => panic!("Expected closure type, got: {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_reject_duplicate_generic_parameters() {
+        // Create a function with duplicate generic type parameters
+        let func = create_simple_function("duplicate_generics", true);
+        let mut func_val = (*func.value).clone();
+
+        // Add type parameters with a duplicate
+        func_val.type_params = vec![
+            spanned(String::from("T")),
+            spanned(String::from("U")),
+            spanned(String::from("T")), // Duplicate of "T"
+        ];
+
+        let func = spanned(func_val);
+        let module = create_module_with_functions(vec![func]);
+
+        // Run the conversion
+        let result = from_ast(&module, HashMap::new());
+
+        // Verify result is an Error (duplicate generic parameter)
+        assert!(result.is_err());
     }
 }

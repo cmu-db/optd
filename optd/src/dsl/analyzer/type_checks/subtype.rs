@@ -727,39 +727,33 @@ mod tests {
         let mut reg = TypeRegistry::default();
 
         // Generics are only subtypes of themselves (same name)
-        assert!(reg.is_subtype(
-            &Generic("T".to_string()).into(),
-            &Generic("T".to_string()).into()
-        ));
+        assert!(reg.is_subtype(&Generic(0).into(), &Generic(0).into()));
 
         // Different named generics are not subtypes
-        assert!(!reg.is_subtype(
-            &Generic("T".to_string()).into(),
-            &Generic("U".to_string()).into()
-        ));
+        assert!(!reg.is_subtype(&Generic(0).into(), &Generic(1).into()));
 
         // All generics are subtypes of Universe
-        assert!(reg.is_subtype(&Generic("T".to_string()).into(), &Universe.into()));
+        assert!(reg.is_subtype(&Generic(0).into(), &Universe.into()));
 
         // Nothing is a subtype of any generic
-        assert!(reg.is_subtype(&Nothing.into(), &Generic("T".to_string()).into()));
+        assert!(reg.is_subtype(&Nothing.into(), &Generic(0).into()));
 
         // Generic is not a subtype of concrete types
-        assert!(!reg.is_subtype(&Generic("T".to_string()).into(), &I64.into()));
+        assert!(!reg.is_subtype(&Generic(0).into(), &I64.into()));
 
         // Concrete types are not subtypes of generics
-        assert!(!reg.is_subtype(&I64.into(), &Generic("T".to_string()).into()));
+        assert!(!reg.is_subtype(&I64.into(), &Generic(0).into()));
 
         // Test with generic in container types
         assert!(reg.is_subtype(
-            &Array(Generic("T".to_string()).into()).into(),
-            &Array(Generic("T".to_string()).into()).into()
+            &Array(Generic(0).into()).into(),
+            &Array(Generic(0).into()).into()
         ));
 
         // Different generics in container types
         assert!(!reg.is_subtype(
-            &Array(Generic("T".to_string()).into()).into(),
-            &Array(Generic("U".to_string()).into()).into()
+            &Array(Generic(0).into()).into(),
+            &Array(Generic(1).into()).into()
         ));
     }
 

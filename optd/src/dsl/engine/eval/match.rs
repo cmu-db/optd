@@ -1,11 +1,9 @@
 use crate::capture;
+use crate::dsl::analyzer::hir::context::Context;
 use crate::dsl::{
-    analyzer::{
-        context::Context,
-        hir::{
-            CoreData, Expr, LogicalOp, MatchArm, Materializable, Operator, Pattern, PatternKind,
-            PhysicalOp, Value,
-        },
+    analyzer::hir::{
+        CoreData, Expr, LogicalOp, MatchArm, Materializable, Operator, Pattern, PatternKind,
+        PhysicalOp, Value,
     },
     engine::{Continuation, Engine, EngineResponse},
 };
@@ -532,6 +530,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::catalog::iceberg::memory_catalog;
+    use crate::dsl::analyzer::hir::context::Context;
     use crate::dsl::analyzer::hir::{LetBinding, Udf};
     use crate::dsl::engine::Engine;
     use crate::dsl::utils::tests::{
@@ -540,12 +539,9 @@ mod tests {
         operator_pattern, ref_expr, struct_pattern, struct_val,
     };
     use crate::dsl::{
-        analyzer::{
-            context::Context,
-            hir::{
-                BinOp, CoreData, Expr, ExprKind, FunKind, Goal, GroupId, Literal, LogicalOp,
-                Materializable, Operator, Value,
-            },
+        analyzer::hir::{
+            BinOp, CoreData, Expr, ExprKind, FunKind, Goal, GroupId, Literal, LogicalOp,
+            Materializable, Operator, Value,
         },
         utils::tests::{TestHarness, int, lit_expr, pattern_match_expr, string, wildcard_pattern},
     };

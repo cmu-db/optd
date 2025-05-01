@@ -15,7 +15,7 @@ use crate::dsl::parser::ast::{
 };
 use crate::dsl::utils::span::{Span, Spanned};
 use ExprKind::*;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 impl ASTConverter {
@@ -26,7 +26,7 @@ impl ASTConverter {
     pub(super) fn convert_expr(
         &mut self,
         spanned_expr: &Spanned<AstExpr>,
-        generics: &HashSet<Identifier>,
+        generics: &HashMap<Identifier, usize>,
     ) -> Result<Expr<TypedSpan>, Box<AnalyzerErrorKind>> {
         use TypeKind::*;
 
@@ -142,7 +142,7 @@ impl ASTConverter {
         op: &AstBinOp,
         right: &Spanned<AstExpr>,
         span: &Span,
-        generics: &HashSet<Identifier>,
+        generics: &HashMap<Identifier, usize>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         use BinOp::*;
 
@@ -237,7 +237,7 @@ impl ASTConverter {
         &mut self,
         op: &ast::UnaryOp,
         operand: &Spanned<AstExpr>,
-        generics: &HashSet<Identifier>,
+        generics: &HashMap<Identifier, usize>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let hir_operand = self.convert_expr(operand, generics)?;
 
@@ -254,7 +254,7 @@ impl ASTConverter {
         field: &Spanned<ast::Field>,
         init: &Spanned<AstExpr>,
         body: &Spanned<AstExpr>,
-        generics: &HashSet<Identifier>,
+        generics: &HashMap<Identifier, usize>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let hir_init = self.convert_expr(init, generics)?;
         let hir_body = self.convert_expr(body, generics)?;
@@ -271,7 +271,7 @@ impl ASTConverter {
         &mut self,
         scrutinee: &Spanned<AstExpr>,
         arms: &[Spanned<ast::MatchArm>],
-        generics: &HashSet<Identifier>,
+        generics: &HashMap<Identifier, usize>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let hir_scrutinee = self.convert_expr(scrutinee, generics)?;
         let hir_arms = self.convert_match_arms(arms, generics)?;
@@ -284,7 +284,7 @@ impl ASTConverter {
         condition: &Spanned<AstExpr>,
         then_branch: &Spanned<AstExpr>,
         else_branch: &Spanned<AstExpr>,
-        generics: &HashSet<Identifier>,
+        generics: &HashMap<Identifier, usize>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let hir_condition = self.convert_expr(condition, generics)?;
         let hir_then = self.convert_expr(then_branch, generics)?;
@@ -300,7 +300,7 @@ impl ASTConverter {
     fn convert_expr_list(
         &mut self,
         elements: &[Spanned<AstExpr>],
-        generics: &HashSet<Identifier>,
+        generics: &HashMap<Identifier, usize>,
     ) -> Result<Vec<Arc<Expr<TypedSpan>>>, Box<AnalyzerErrorKind>> {
         let mut hir_elements = Vec::with_capacity(elements.len());
 
@@ -315,7 +315,7 @@ impl ASTConverter {
     fn convert_array(
         &mut self,
         elements: &[Spanned<AstExpr>],
-        generics: &HashSet<Identifier>,
+        generics: &HashMap<Identifier, usize>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let hir_elements = self.convert_expr_list(elements, generics)?;
         Ok(CoreExpr(CoreData::Array(hir_elements)))
@@ -324,7 +324,7 @@ impl ASTConverter {
     fn convert_tuple(
         &mut self,
         elements: &[Spanned<AstExpr>],
-        generics: &HashSet<Identifier>,
+        generics: &HashMap<Identifier, usize>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let hir_elements = self.convert_expr_list(elements, generics)?;
         Ok(CoreExpr(CoreData::Tuple(hir_elements)))
@@ -333,7 +333,7 @@ impl ASTConverter {
     fn convert_map(
         &mut self,
         entries: &[(Spanned<AstExpr>, Spanned<AstExpr>)],
-        generics: &HashSet<Identifier>,
+        generics: &HashMap<Identifier, usize>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let mut hir_entries = Vec::with_capacity(entries.len());
 
@@ -382,7 +382,7 @@ impl ASTConverter {
         name: &Spanned<Identifier>,
         args: &[Spanned<AstExpr>],
         span: &Span,
-        generics: &HashSet<Identifier>,
+        generics: &HashMap<Identifier, usize>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         self.validate_constructor(name, span, args.len())?;
 
@@ -394,7 +394,7 @@ impl ASTConverter {
         &mut self,
         params: &[(Identifier, Type)],
         body: &Spanned<AstExpr>,
-        generics: &HashSet<Identifier>,
+        generics: &HashMap<Identifier, usize>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let param_names = params.iter().map(|(name, _)| name.clone()).collect();
         let hir_body = self.convert_expr(body, generics)?;
@@ -409,7 +409,7 @@ impl ASTConverter {
         &mut self,
         expr: &Spanned<AstExpr>,
         op: &PostfixOp,
-        generics: &HashSet<Identifier>,
+        generics: &HashMap<Identifier, usize>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let hir_expr = self.convert_expr(expr, generics)?;
 
@@ -443,7 +443,7 @@ impl ASTConverter {
     fn convert_fail(
         &mut self,
         error_expr: &Spanned<AstExpr>,
-        generics: &HashSet<Identifier>,
+        generics: &HashMap<Identifier, usize>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let hir_error = self.convert_expr(error_expr, generics)?;
 
@@ -453,7 +453,7 @@ impl ASTConverter {
     fn convert_block(
         &mut self,
         block: &Spanned<AstExpr>,
-        generics: &HashSet<Identifier>,
+        generics: &HashMap<Identifier, usize>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let hir_expr = self.convert_expr(block, generics)?;
 
@@ -467,7 +467,6 @@ mod expr_tests {
     use crate::dsl::analyzer::hir::{BinOp, ExprKind, Literal, PatternKind, UnaryOp};
     use crate::dsl::parser::ast::{self, Field};
     use crate::dsl::utils::span::{Span, Spanned};
-    use std::collections::HashSet;
 
     // Helper functions for creating test expressions
     fn create_test_span() -> Span {
@@ -485,7 +484,7 @@ mod expr_tests {
         // Test integer literal
         let int_lit = spanned(AstExpr::Literal(AstLiteral::Int64(42)));
         let result = converter
-            .convert_expr(&int_lit, &HashSet::new())
+            .convert_expr(&int_lit, &HashMap::new())
             .expect("Integer literal conversion should succeed");
 
         match &result.kind {
@@ -499,7 +498,7 @@ mod expr_tests {
         // Test string literal
         let str_lit = spanned(AstExpr::Literal(AstLiteral::String("hello".to_string())));
         let result = converter
-            .convert_expr(&str_lit, &HashSet::new())
+            .convert_expr(&str_lit, &HashMap::new())
             .expect("String literal conversion should succeed");
 
         match &result.kind {
@@ -513,7 +512,7 @@ mod expr_tests {
         // Test boolean literal
         let bool_lit = spanned(AstExpr::Literal(AstLiteral::Bool(true)));
         let result = converter
-            .convert_expr(&bool_lit, &HashSet::new())
+            .convert_expr(&bool_lit, &HashMap::new())
             .expect("Boolean literal conversion should succeed");
 
         match &result.kind {
@@ -530,7 +529,7 @@ mod expr_tests {
             ordered_float::OrderedFloat(float_val),
         )));
         let result = converter
-            .convert_expr(&float_lit, &HashSet::new())
+            .convert_expr(&float_lit, &HashMap::new())
             .expect("Float literal conversion should succeed");
 
         match &result.kind {
@@ -544,7 +543,7 @@ mod expr_tests {
         // Test unit literal
         let unit_lit = spanned(AstExpr::Literal(AstLiteral::Unit));
         let result = converter
-            .convert_expr(&unit_lit, &HashSet::new())
+            .convert_expr(&unit_lit, &HashMap::new())
             .expect("Unit literal conversion should succeed");
 
         match &result.kind {
@@ -562,7 +561,7 @@ mod expr_tests {
 
         let ref_expr = spanned(AstExpr::Ref("variable".to_string()));
         let result = converter
-            .convert_expr(&ref_expr, &HashSet::new())
+            .convert_expr(&ref_expr, &HashMap::new())
             .expect("Reference conversion should succeed");
 
         match &result.kind {
@@ -582,7 +581,7 @@ mod expr_tests {
             let bin_expr = spanned(AstExpr::Binary(left, op, right));
 
             let result = converter
-                .convert_expr(&bin_expr, &HashSet::new())
+                .convert_expr(&bin_expr, &HashMap::new())
                 .expect("Binary operator conversion should succeed");
 
             match &result.kind {
@@ -614,7 +613,7 @@ mod expr_tests {
         let neq_expr = spanned(AstExpr::Binary(left, AstBinOp::Neq, right));
 
         let result = converter
-            .convert_expr(&neq_expr, &HashSet::new())
+            .convert_expr(&neq_expr, &HashMap::new())
             .expect("Not equal operator conversion should succeed");
 
         match &result.kind {
@@ -628,7 +627,7 @@ mod expr_tests {
         let gt_expr = spanned(AstExpr::Binary(left, AstBinOp::Gt, right));
 
         let result = converter
-            .convert_expr(&gt_expr, &HashSet::new())
+            .convert_expr(&gt_expr, &HashMap::new())
             .expect("Greater than operator conversion should succeed");
 
         match &result.kind {
@@ -653,7 +652,7 @@ mod expr_tests {
         let ge_expr = spanned(AstExpr::Binary(left, AstBinOp::Ge, right));
 
         let result = converter
-            .convert_expr(&ge_expr, &HashSet::new())
+            .convert_expr(&ge_expr, &HashMap::new())
             .expect("Greater than or equal operator conversion should succeed");
 
         match &result.kind {
@@ -667,7 +666,7 @@ mod expr_tests {
         let le_expr = spanned(AstExpr::Binary(left, AstBinOp::Le, right));
 
         let result = converter
-            .convert_expr(&le_expr, &HashSet::new())
+            .convert_expr(&le_expr, &HashMap::new())
             .expect("Less than or equal operator conversion should succeed");
 
         match &result.kind {
@@ -685,7 +684,7 @@ mod expr_tests {
         let neg_expr = spanned(AstExpr::Unary(ast::UnaryOp::Neg, operand));
 
         let result = converter
-            .convert_expr(&neg_expr, &HashSet::new())
+            .convert_expr(&neg_expr, &HashMap::new())
             .expect("Negation operator conversion should succeed");
 
         match &result.kind {
@@ -698,7 +697,7 @@ mod expr_tests {
         let not_expr = spanned(AstExpr::Unary(ast::UnaryOp::Not, operand));
 
         let result = converter
-            .convert_expr(&not_expr, &HashSet::new())
+            .convert_expr(&not_expr, &HashMap::new())
             .expect("Not operator conversion should succeed");
 
         match &result.kind {
@@ -722,7 +721,7 @@ mod expr_tests {
 
         let let_expr = spanned(AstExpr::Let(field, init, body));
         let result = converter
-            .convert_expr(&let_expr, &HashSet::new())
+            .convert_expr(&let_expr, &HashMap::new())
             .expect("Let expression conversion should succeed");
 
         match &result.kind {
@@ -741,7 +740,7 @@ mod expr_tests {
 
         let if_expr = spanned(AstExpr::IfThenElse(condition, then_branch, else_branch));
         let result = converter
-            .convert_expr(&if_expr, &HashSet::new())
+            .convert_expr(&if_expr, &HashMap::new())
             .expect("If-then-else expression conversion should succeed");
 
         match &result.kind {
@@ -760,7 +759,7 @@ mod expr_tests {
 
         let array_expr = spanned(AstExpr::Array(vec![elem1, elem2, elem3]));
         let result = converter
-            .convert_expr(&array_expr, &HashSet::new())
+            .convert_expr(&array_expr, &HashMap::new())
             .expect("Array expression conversion should succeed");
 
         match &result.kind {
@@ -781,7 +780,7 @@ mod expr_tests {
 
         let tuple_expr = spanned(AstExpr::Tuple(vec![elem1, elem2, elem3]));
         let result = converter
-            .convert_expr(&tuple_expr, &HashSet::new())
+            .convert_expr(&tuple_expr, &HashMap::new())
             .expect("Tuple expression conversion should succeed");
 
         match &result.kind {
@@ -804,7 +803,7 @@ mod expr_tests {
 
         let map_expr = spanned(AstExpr::Map(vec![(key1, val1), (key2, val2)]));
         let result = converter
-            .convert_expr(&map_expr, &HashSet::new())
+            .convert_expr(&map_expr, &HashMap::new())
             .expect("Map expression conversion should succeed");
 
         match &result.kind {
@@ -847,7 +846,7 @@ mod expr_tests {
             vec![arg1.clone(), arg2.clone()],
         ));
         let result = converter
-            .convert_expr(&constructor_expr, &HashSet::new())
+            .convert_expr(&constructor_expr, &HashMap::new())
             .expect("Constructor expression conversion should succeed");
 
         match &result.kind {
@@ -864,7 +863,7 @@ mod expr_tests {
             vec![arg1, arg2],
         ));
 
-        let result = converter.convert_expr(&unknown_constructor, &HashSet::new());
+        let result = converter.convert_expr(&unknown_constructor, &HashMap::new());
         assert!(
             result.is_err(),
             "Expected error for unknown constructor type"
@@ -918,7 +917,7 @@ mod expr_tests {
         ));
 
         // Test nested constructors - should succeed
-        let result = converter.convert_expr(&container, &HashSet::new());
+        let result = converter.convert_expr(&container, &HashMap::new());
         assert!(
             result.is_ok(),
             "Valid nested constructors should convert successfully"
@@ -943,7 +942,7 @@ mod expr_tests {
         ));
 
         // Should fail due to the invalid type
-        let result = converter.convert_expr(&invalid_container, &HashSet::new());
+        let result = converter.convert_expr(&invalid_container, &HashMap::new());
         assert!(
             result.is_err(),
             "Nested constructor with invalid type should fail"
@@ -996,7 +995,7 @@ mod expr_tests {
         let let_expr = spanned(AstExpr::Let(field, address_constructor, body.clone()));
 
         // Test constructor inside let - should succeed
-        let result = converter.convert_expr(&let_expr, &HashSet::new());
+        let result = converter.convert_expr(&let_expr, &HashMap::new());
         assert!(
             result.is_ok(),
             "Constructor inside let expression should succeed"
@@ -1018,7 +1017,7 @@ mod expr_tests {
         let invalid_let = spanned(AstExpr::Let(field, invalid_constructor, body.clone()));
 
         // Should fail due to the invalid constructor type
-        let result = converter.convert_expr(&invalid_let, &HashSet::new());
+        let result = converter.convert_expr(&invalid_let, &HashMap::new());
         assert!(
             result.is_err(),
             "Let with invalid constructor type should fail"
@@ -1058,7 +1057,7 @@ mod expr_tests {
             vec![arg1.clone(), arg2.clone()],
         ));
 
-        let result = converter.convert_expr(&correct_constructor, &HashSet::new());
+        let result = converter.convert_expr(&correct_constructor, &HashMap::new());
         assert!(
             result.is_ok(),
             "Constructor with correct field count should succeed"
@@ -1070,7 +1069,7 @@ mod expr_tests {
             vec![arg1.clone()],
         ));
 
-        let result = converter.convert_expr(&too_few_args, &HashSet::new());
+        let result = converter.convert_expr(&too_few_args, &HashMap::new());
         assert!(
             result.is_err(),
             "Constructor with too few arguments should fail"
@@ -1083,7 +1082,7 @@ mod expr_tests {
             vec![arg1, arg2, arg3],
         ));
 
-        let result = converter.convert_expr(&too_many_args, &HashSet::new());
+        let result = converter.convert_expr(&too_many_args, &HashMap::new());
         assert!(
             result.is_err(),
             "Constructor with too many arguments should fail"
@@ -1102,7 +1101,7 @@ mod expr_tests {
         let body = spanned(AstExpr::Ref("x".to_string()));
         let closure_expr = spanned(AstExpr::Closure(vec![param], body));
         let result = converter
-            .convert_expr(&closure_expr, &HashSet::new())
+            .convert_expr(&closure_expr, &HashMap::new())
             .expect("Closure expression conversion should succeed");
 
         match &result.kind {
@@ -1127,7 +1126,7 @@ mod expr_tests {
             ast::PostfixOp::Call(vec![arg1, arg2]),
         ));
         let result = converter
-            .convert_expr(&call_expr, &HashSet::new())
+            .convert_expr(&call_expr, &HashMap::new())
             .expect("Function call conversion should succeed");
 
         match &result.kind {
@@ -1147,7 +1146,7 @@ mod expr_tests {
 
         let field_access_expr = spanned(AstExpr::Postfix(obj, ast::PostfixOp::Field(field_name)));
         let result = converter
-            .convert_expr(&field_access_expr, &HashSet::new())
+            .convert_expr(&field_access_expr, &HashMap::new())
             .expect("Field access conversion should succeed");
 
         match &result.kind {
@@ -1176,7 +1175,7 @@ mod expr_tests {
             ast::PostfixOp::Method(method_name, vec![arg]),
         ));
         let result = converter
-            .convert_expr(&method_call_expr, &HashSet::new())
+            .convert_expr(&method_call_expr, &HashMap::new())
             .expect("Method call conversion should succeed");
 
         // Method calls get desugared to function calls with the object as the first argument
@@ -1208,7 +1207,7 @@ mod expr_tests {
         let error_expr = spanned(AstExpr::Literal(AstLiteral::String("error".to_string())));
         let fail_expr = spanned(AstExpr::Fail(error_expr));
         let result = converter
-            .convert_expr(&fail_expr, &HashSet::new())
+            .convert_expr(&fail_expr, &HashMap::new())
             .expect("Fail expression conversion should succeed");
 
         match &result.kind {
@@ -1270,7 +1269,7 @@ mod expr_tests {
 
         let match_expr = spanned(AstExpr::PatternMatch(scrutinee.clone(), vec![arm1, arm2]));
         let result = converter
-            .convert_expr(&match_expr, &HashSet::new())
+            .convert_expr(&match_expr, &HashMap::new())
             .expect("Pattern match conversion should succeed");
 
         match &result.kind {
@@ -1314,7 +1313,7 @@ mod expr_tests {
         });
 
         let match_with_constructor = spanned(AstExpr::PatternMatch(scrutinee.clone(), vec![arm3]));
-        let result = converter.convert_expr(&match_with_constructor, &HashSet::new());
+        let result = converter.convert_expr(&match_with_constructor, &HashMap::new());
         assert!(
             result.is_ok(),
             "Pattern match with valid constructor should succeed"
@@ -1334,7 +1333,7 @@ mod expr_tests {
         });
 
         let invalid_match = spanned(AstExpr::PatternMatch(scrutinee, vec![invalid_arm]));
-        let result = converter.convert_expr(&invalid_match, &HashSet::new());
+        let result = converter.convert_expr(&invalid_match, &HashMap::new());
         assert!(
             result.is_err(),
             "Pattern match with invalid constructor should fail"
@@ -1350,7 +1349,7 @@ mod expr_tests {
         let block_expr = spanned(AstExpr::Block(inner_expr));
 
         let result = converter
-            .convert_expr(&block_expr, &HashSet::new())
+            .convert_expr(&block_expr, &HashMap::new())
             .expect("Block expression conversion should succeed");
 
         // Check that the block is converted to a NewScope expression
@@ -1381,7 +1380,7 @@ mod expr_tests {
 
         // Convert the expression
         let result = converter
-            .convert_expr(&expr, &HashSet::new())
+            .convert_expr(&expr, &HashMap::new())
             .expect("Expression with custom span conversion should succeed");
 
         // Verify the span is preserved

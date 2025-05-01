@@ -56,7 +56,7 @@ impl TypeRegistry {
         }
     }
 
-    /// Checks if a single constraint is satisfied
+    /// Checks if a single constraint is satisfied.
     fn check_constraint(
         &mut self,
         constraint: &Constraint,
@@ -67,9 +67,12 @@ impl TypeRegistry {
                 self.check_subtype_constraint(child, parent, changed)
             }
 
-            Constraint::Call { inner, args, outer } => {
-                self.check_call_constraint(inner, args, outer, changed)
-            }
+            Constraint::Call {
+                id,
+                inner,
+                args,
+                outer,
+            } => self.check_call_constraint(*id, inner, args, outer, changed),
 
             Constraint::Scrutinee { scrutinee, pattern } => {
                 self.check_scrutinee_constraint(scrutinee, pattern, changed)
@@ -103,6 +106,7 @@ impl TypeRegistry {
 
     fn check_call_constraint(
         &mut self,
+        constraint_id: usize,
         inner: &TypedSpan,
         args: &[TypedSpan],
         outer: &TypedSpan,
@@ -114,7 +118,11 @@ impl TypeRegistry {
             TypeKind::Nothing => Ok(()),
 
             TypeKind::Closure(param, ret) => {
-                let (param_len, param_types) = match &**param {
+                // Initiatialize potential generics.
+                let param = self.instantiate_type(param, constraint_id, true);
+                let ret = self.instantiate_type(ret, constraint_id, true);
+
+                let (param_len, param_types) = match &*param {
                     TypeKind::Tuple(types) => (types.len(), types.to_vec()),
                     TypeKind::Unit => (0, vec![]),
                     _ => (1, vec![param.clone()]),
@@ -203,30 +211,51 @@ impl TypeRegistry {
     ) -> Result<(), Box<AnalyzerErrorKind>> {
         let inner_resolved = self.resolve_type(&inner.ty);
 
+        // Function to create the standard field access error.
+        let field_error = || {
+            AnalyzerErrorKind::new_invalid_field_access(
+                &inner_resolved,
+                &inner.span,
+                field,
+                self.resolved_unknown.clone(),
+            )
+        };
+
         match &*inner_resolved.value {
             // Wait for the field access to be resolved.
             TypeKind::Nothing => Ok(()),
 
+            // Handle tuple field access with _N pattern.
+            TypeKind::Tuple(types) => {
+                // Parse _N pattern and check if index is valid.
+                match field
+                    .strip_prefix('_')
+                    .and_then(|idx| idx.parse::<usize>().ok())
+                {
+                    Some(index) if index < types.len() => {
+                        let field_ty = &types[index];
+                        self.check_subtype_constraint(
+                            &TypedSpan::new(field_ty.clone(), inner.span.clone()),
+                            outer,
+                            changed,
+                        )
+                    }
+                    _ => Err(field_error()),
+                }
+            }
+
+            // Handle ADT field access.
             TypeKind::Adt(name) => match self.get_product_field_type(name, field) {
                 Some(field_ty) => self.check_subtype_constraint(
                     &TypedSpan::new(field_ty, inner.span.clone()),
                     outer,
                     changed,
                 ),
-                None => Err(AnalyzerErrorKind::new_invalid_field_access(
-                    &inner_resolved,
-                    &inner.span,
-                    field,
-                    self.resolved_unknown.clone(),
-                )),
+                None => Err(field_error()),
             },
 
-            _ => Err(AnalyzerErrorKind::new_invalid_field_access(
-                &inner_resolved,
-                &inner.span,
-                field,
-                self.resolved_unknown.clone(),
-            )),
+            // Any other type cannot have fields accessed.
+            _ => Err(field_error()),
         }
     }
 
@@ -844,6 +873,170 @@ mod tests {
         assert!(
             result.is_err(),
             "Using string index on array should have failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_basic_generic_function() {
+        let source = r#"
+        // Basic generic function for array mapping
+        fn <T, U> (input: [T]) map(transform: T -> U): [U] = match input
+            | [] -> []
+            \ [x .. xs] -> [transform(x)] ++ xs.map(transform)
+
+        fn main(): [I64] = 
+            let input = [1, 2, 3] in
+            input.map(x: I64 -> x + 1)  // Should return [2, 3, 4]
+        "#;
+
+        let result = run_type_inference(source, "basic_generics.opt");
+        assert!(
+            result.is_ok(),
+            "Basic generic function failed type inference: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_complex_generic_function_composition() {
+        let source = r#"
+        // Generic function that takes another function as argument
+        fn <A, B, C> compose(f: B -> C, g: A -> B): A -> C = 
+            x: A -> f(g(x))
+       
+        // Generic function that maps over arrays
+        fn <T, U> (input: [T]) map(transform: T -> U): [U] = match input
+            | [] -> []
+            \ [x .. xs] -> [transform(x)] ++ xs.map(transform)
+        
+        // Generic function that filters array elements
+        fn <T> (input: [T]) filter(predicate: T -> Bool): [T] = match input
+            | [] -> []
+            \ [x .. xs] -> 
+                if predicate(x) then 
+                    [x] ++ xs.filter(predicate)
+                else 
+                    xs.filter(predicate)
+        
+        fn main(): [I64] = 
+            let 
+                numbers = [1, 2, 3, 4, 5, 6],
+                is_greater_two = x: I64 -> x > 2,
+                double = x: I64 -> x * 2,
+                
+                // Compose filter and map
+                process = compose(
+                    xs: [I64] -> xs.map(double),
+                    xs: [I64] -> xs.filter(is_greater_two)
+                )
+            in
+                process(numbers)
+        "#;
+
+        let result = run_type_inference(source, "complex_generics.opt");
+        assert!(
+            result.is_ok(),
+            "Complex generic function composition failed type inference: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_generic_function_with_recursive_closures() {
+        let source = r#"
+        // Generic functions with recursive closures
+        fn <T, U> memoize(f: T -> U): T -> U =
+            let
+                cache = [] // Simplified cache
+            in
+                (x: T) -> {
+                    // In a real implementation, we would check the cache
+                    // and only compute if needed
+                    f(x)
+                }
+    
+        fn <T> (array: [T]) quicksort(cmp: (T, T) -> I64) =
+            match array
+                | [] -> []
+                \ [pivot .. rest] -> {
+                    let
+                        partition = (arr: [T], pivot: T, cmp: (T, T) -> I64) -> {
+                            let
+                                less = arr.filter(x: T -> cmp(x, pivot) < 0),
+                                greater = arr.filter(x: T -> cmp(x, pivot) >= 0)
+                            in
+                                (less, greater)
+                        },
+                        result = partition(rest, pivot, cmp),
+                        less = result#_0,
+                        greater = result#_1,
+                        sorted_less = less.quicksort(cmp),
+                        sorted_greater = greater.quicksort(cmp)
+                    in
+                        sorted_less ++ [pivot] ++ sorted_greater
+                }
+    
+        fn <T> (array: [T]) filter(predicate: T -> Bool) = match array
+            | [] -> []
+            \ [x .. xs] ->
+                if predicate(x) then
+                    [x] ++ xs.filter(predicate)
+                else
+                    xs.filter(predicate)
+    
+        // Fixed recursive function implementation
+        fn factorial(n: I64): I64 = if n <= 1 then 1 else n * factorial(n - 1)
+    
+        fn main(): I64 =
+            let
+                numbers = [5, 3, 8, 1, 2, 9, 4, 7, 6],
+                compare = (a: I64, b: I64) -> a - b,
+                
+                // Use regular factorial function instead of the Y-combinator approach
+                memoized_factorial = memoize(factorial),
+                
+                // Sort numbers and filter
+                sorted = numbers.quicksort(compare),
+                filtered = sorted.filter(x: I64 -> x > 2),
+                result = memoized_factorial(7)
+            in
+                result
+        "#;
+
+        let result = run_type_inference(source, "generic_recursive_closures.opt");
+        assert!(
+            result.is_ok(),
+            "Generic functions with recursive closures failed type inference: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_generic_type_constraints() {
+        // This should fail since we don't properly support type constraints/bounds yet
+        let source = r#"        
+        // Generic function that assumes numeric operations
+        fn <T> sum(a: T, b: T): T = a + b  // This assumes T supports addition
+        
+        // Generic function that assumes comparison
+        fn <T> max(a: T, b: T): T = 
+            if a > b then a else b  // This assumes T supports comparison
+        
+        fn main(): I64 = 
+            let 
+                sum_int = sum(1, 2),
+                sum_float = sum(1.5, 2.5),
+                
+                max_int = max(5, 3),
+                max_float = max(5.5, 3.5)
+            in
+                sum_int + max_int
+        "#;
+
+        let result = run_type_inference(source, "generic_constraints.opt");
+        assert!(
+            result.is_err(),
+            "Generic type constraints should have failed type inference"
         );
     }
 }

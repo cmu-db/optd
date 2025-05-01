@@ -11,6 +11,19 @@ use crate::dsl::analyzer::{
 };
 use std::sync::Arc;
 
+/// Converts a typed expression to an untyped HIR expression.
+///
+/// Recursively processes each expression node, transforming specific patterns
+/// like structs into operators when appropriate, and handling field access.
+///
+/// # Arguments
+///
+/// * `expr` - The typed expression to convert
+/// * `registry` - Type registry for resolving types and inheritance
+///
+/// # Returns
+///
+/// An untyped expression with equivalent structure
 pub(super) fn convert_expr(expr: &Arc<Expr<TypedSpan>>, registry: &TypeRegistry) -> Arc<Expr> {
     use ExprKind::*;
 
@@ -73,6 +86,19 @@ pub(super) fn convert_expr(expr: &Arc<Expr<TypedSpan>>, registry: &TypeRegistry)
     Expr::new(converted_kind).into()
 }
 
+/// Converts a typed pattern to an untyped HIR pattern.
+///
+/// Processes pattern nodes, transforming structured patterns into operator
+/// patterns when they match logical or physical types.
+///
+/// # Arguments
+///
+/// * `pattern` - The typed pattern to convert
+/// * `registry` - Type registry for resolving types and inheritance
+///
+/// # Returns
+///
+/// An untyped pattern with equivalent structure
 pub(super) fn convert_pattern(pattern: &Pattern<TypedSpan>, registry: &TypeRegistry) -> Pattern {
     use PatternKind::*;
 
@@ -111,6 +137,19 @@ pub(super) fn convert_pattern(pattern: &Pattern<TypedSpan>, registry: &TypeRegis
     Pattern::new(converted_kind)
 }
 
+/// Converts core data expressions to untyped HIR.
+///
+/// Handles special transformation of logical/physical types into operator
+/// representations while preserving other core expressions.
+///
+/// # Arguments
+///
+/// * `core` - The core data expression to convert
+/// * `registry` - Type registry for type resolution
+///
+/// # Returns
+///
+/// Converted core data without type information
 fn convert_core_data_expr(
     core: &CoreData<Arc<Expr<TypedSpan>>, TypedSpan>,
     registry: &TypeRegistry,
@@ -172,6 +211,22 @@ fn convert_core_data_expr(
     }
 }
 
+/// Converts field access expressions into their HIR representation.
+///
+/// This function handles three cases:
+/// 1. Tuple field access using numeric indices or _N pattern
+/// 2. ADT field access, which is converted to an indexed call
+/// 3. Error handling for invalid access on other types
+///
+/// # Arguments
+///
+/// * `expr` - The expression whose field is being accessed
+/// * `field_name` - The name of the field or index being accessed
+/// * `registry` - The type registry for type resolution
+///
+/// # Returns
+///
+/// An `ExprKind` representing the transformed field access
 fn convert_field_access(
     expr: &Arc<Expr<TypedSpan>>,
     field_name: &str,
@@ -180,16 +235,35 @@ fn convert_field_access(
     use ExprKind::*;
 
     let expr_type = registry.resolve_type(&expr.metadata.ty);
-    let struct_name = match &*expr_type.value {
-        TypeKind::Adt(name) => name,
-        _ => panic!("Field access on non-struct type: error in type inference"),
-    };
-    let field_index = find_field_index(struct_name, field_name, registry);
 
-    Call(
-        convert_expr(expr, registry),
-        vec![Expr::new(CoreExpr(CoreData::Literal(Literal::Int64(field_index)))).into()],
-    )
+    match &*expr_type.value {
+        TypeKind::Tuple(_) => {
+            let index = if let Some(index_str) = field_name.strip_prefix('_') {
+                // _N pattern.
+                index_str
+                    .parse::<usize>()
+                    .expect("Type checking should have validated the tuple index")
+            } else {
+                panic!("Invalid tuple field access pattern: {}", field_name)
+            };
+
+            Call(
+                convert_expr(expr, registry),
+                vec![Expr::new(CoreExpr(CoreData::Literal(Literal::Int64(index as i64)))).into()],
+            )
+        }
+
+        TypeKind::Adt(struct_name) => {
+            let field_index = find_field_index(struct_name, field_name, registry);
+
+            Call(
+                convert_expr(expr, registry),
+                vec![Expr::new(CoreExpr(CoreData::Literal(Literal::Int64(field_index)))).into()],
+            )
+        }
+
+        _ => panic!("Field access on non-struct, non-tuple type: error in type inference"),
+    }
 }
 
 #[cfg(test)]
@@ -347,6 +421,61 @@ mod tests {
                 match &args[0].kind {
                     ExprKind::CoreExpr(CoreData::Literal(Literal::Int64(1))) => {}
                     _ => panic!("Expected index 1 for field 'y'"),
+                }
+            }
+            _ => panic!("Expected call expression"),
+        }
+    }
+
+    #[test]
+    fn test_convert_tuple_field_access_underscore_syntax() {
+        let registry = TypeRegistry::new();
+
+        // Create a tuple expression with three elements
+        let tuple_expr = Expr::new_with(
+            ExprKind::CoreExpr(CoreData::Tuple(vec![
+                Arc::new(Expr::new_with(
+                    ExprKind::CoreExpr(CoreData::Literal(Literal::Int64(1))),
+                    TypeKind::I64.into(),
+                    create_test_span(),
+                )),
+                Arc::new(Expr::new_with(
+                    ExprKind::CoreExpr(CoreData::Literal(Literal::String("hello".to_string()))),
+                    TypeKind::String.into(),
+                    create_test_span(),
+                )),
+                Arc::new(Expr::new_with(
+                    ExprKind::CoreExpr(CoreData::Literal(Literal::Bool(true))),
+                    TypeKind::Bool.into(),
+                    create_test_span(),
+                )),
+            ])),
+            TypeKind::Tuple(vec![
+                TypeKind::I64.into(),
+                TypeKind::String.into(),
+                TypeKind::Bool.into(),
+            ])
+            .into(),
+            create_test_span(),
+        );
+
+        // Access the second element (_1) which should be the string "hello"
+        let field_access = Expr::new_with(
+            ExprKind::FieldAccess(Arc::new(tuple_expr), "_1".to_string()),
+            TypeKind::String.into(),
+            create_test_span(),
+        );
+
+        let converted = convert_expr(&Arc::new(field_access), &registry);
+
+        match &converted.kind {
+            ExprKind::Call(_, args) => {
+                assert_eq!(args.len(), 1);
+                match &args[0].kind {
+                    ExprKind::CoreExpr(CoreData::Literal(Literal::Int64(index))) => {
+                        assert_eq!(*index, 1, "Expected index 1 for field '_1'");
+                    }
+                    _ => panic!("Expected literal int index"),
                 }
             }
             _ => panic!("Expected call expression"),
@@ -692,6 +821,106 @@ mod tests {
                 assert_eq!(fields.len(), 2);
             }
             _ => panic!("Expected struct to remain unchanged"),
+        }
+    }
+
+    #[test]
+    fn test_complex_nested_tuple_access() {
+        let registry = TypeRegistry::new();
+
+        // Create a complex nested tuple expression ((1, "a"), (true, 2.5))
+        let inner_tuple1 = Expr::new_with(
+            ExprKind::CoreExpr(CoreData::Tuple(vec![
+                Arc::new(Expr::new_with(
+                    ExprKind::CoreExpr(CoreData::Literal(Literal::Int64(1))),
+                    TypeKind::I64.into(),
+                    create_test_span(),
+                )),
+                Arc::new(Expr::new_with(
+                    ExprKind::CoreExpr(CoreData::Literal(Literal::String("a".to_string()))),
+                    TypeKind::String.into(),
+                    create_test_span(),
+                )),
+            ])),
+            TypeKind::Tuple(vec![TypeKind::I64.into(), TypeKind::String.into()]).into(),
+            create_test_span(),
+        );
+
+        let inner_tuple2 = Expr::new_with(
+            ExprKind::CoreExpr(CoreData::Tuple(vec![
+                Arc::new(Expr::new_with(
+                    ExprKind::CoreExpr(CoreData::Literal(Literal::Bool(true))),
+                    TypeKind::Bool.into(),
+                    create_test_span(),
+                )),
+                Arc::new(Expr::new_with(
+                    ExprKind::CoreExpr(CoreData::Literal(Literal::Float64(2.5))),
+                    TypeKind::F64.into(),
+                    create_test_span(),
+                )),
+            ])),
+            TypeKind::Tuple(vec![TypeKind::Bool.into(), TypeKind::F64.into()]).into(),
+            create_test_span(),
+        );
+
+        let outer_tuple = Expr::new_with(
+            ExprKind::CoreExpr(CoreData::Tuple(vec![
+                Arc::new(inner_tuple1),
+                Arc::new(inner_tuple2),
+            ])),
+            TypeKind::Tuple(vec![
+                TypeKind::Tuple(vec![TypeKind::I64.into(), TypeKind::String.into()]).into(),
+                TypeKind::Tuple(vec![TypeKind::Bool.into(), TypeKind::F64.into()]).into(),
+            ])
+            .into(),
+            create_test_span(),
+        );
+
+        // Access the second element of the first inner tuple: outer._0._1 (should be "a")
+        let field_access1 = Expr::new_with(
+            ExprKind::FieldAccess(
+                Arc::new(Expr::new_with(
+                    ExprKind::FieldAccess(Arc::new(outer_tuple.clone()), "_0".to_string()),
+                    TypeKind::Tuple(vec![TypeKind::I64.into(), TypeKind::String.into()]).into(),
+                    create_test_span(),
+                )),
+                "_1".to_string(),
+            ),
+            TypeKind::String.into(),
+            create_test_span(),
+        );
+
+        let converted1 = convert_expr(&Arc::new(field_access1), &registry);
+
+        match &converted1.kind {
+            ExprKind::Call(func, args) => {
+                assert_eq!(args.len(), 1);
+
+                // Check that the index is 1
+                match &args[0].kind {
+                    ExprKind::CoreExpr(CoreData::Literal(Literal::Int64(index))) => {
+                        assert_eq!(*index, 1);
+                    }
+                    _ => panic!("Expected literal index"),
+                }
+
+                // Check that the function is itself a call (nested field access)
+                match &func.kind {
+                    ExprKind::Call(_, inner_args) => {
+                        assert_eq!(inner_args.len(), 1);
+
+                        // Check that the inner index is 0
+                        match &inner_args[0].kind {
+                            ExprKind::CoreExpr(CoreData::Literal(Literal::Int64(index))) => {
+                                assert_eq!(*index, 0);
+                            }
+                            _ => panic!("Expected literal index"),
+                        }
+                    }
+                    _ => panic!("Expected nested call"),
+                }
+            }
+            _ => panic!("Expected call expression"),
         }
     }
 }
