@@ -1,0 +1,412 @@
+//    ██████╗ ██████╗ ████████╗██████╗ 
+//   ██╔═══██╗██╔══██╗╚══██╔══╝██╔══██╗
+//   ██║   ██║██████╔╝   ██║   ██║  ██║
+//   ██║   ██║██╔═══╝    ██║   ██║  ██║
+//   ╚██████╔╝██║        ██║   ██████╔╝
+//    ╚═════╝ ╚═╝        ╚═╝   ╚═════╝ 
+                                  
+// OPTD DSL Tutorial
+
+// The OPTD DSL allows writing rules on query plans in a higher level declarative language. 
+// It enables the specification of both logical transformations and physical implementations 
+// for query plans, adaptable to any execution engine.
+// 
+// This tutorial will walk you through the core concepts of OPTD and demonstrate how to
+// write effective optimization rules.
+
+// You can compile this tutorial file with:
+// 
+// cargo run -- compile tutorial.opt
+
+// -------------------------
+// 1. Logical Operators
+// -------------------------
+
+// Logical operators form the foundation of the language and represent relational algebra 
+// operations. They are declared using the following syntax:
+
+data Logical = 
+    | Join(left: Logical, right: Logical, type: JoinType, predicate: Scalar)
+    | Filter(child: Logical, predicate: Scalar)
+    | Project(child: Logical, expressions: [Scalar])
+    | Sort(child: Logical, order_by: [Bool]) // true is ascending
+    \ Get(table_name: String)
+
+// -------------------------
+// 2. Type System
+// -------------------------
+
+// The DSL supports five primitive types:
+// - I64 (e.g. 3)
+// - F64 (e.g. 3.14)
+// - String (e.g. "PI")
+// - Unit (e.g. ())
+// - Bool (e.g. true, false)
+// 
+// Additionally, the language supports user-defined types, which can be declared
+// as follows:
+
+data Scalar =
+    | ColumnRef(idx: I64)
+    | Literal =
+        | IntLiteral(value: I64)
+        | StringLiteral(value: String)
+        \ BoolLiteral(value: Bool)
+    | Arithmetic =
+        | Mult(left: Scalar, right: Scalar)
+        | Add(left: Scalar, right: Scalar)
+        | Sub(left: Scalar, right: Scalar)
+        \ Div(left: Scalar, right: Scalar)
+    | Predicate =
+        | And(children: [Scalar])
+        | Or(children: [Scalar])
+        | Not(child: Scalar)
+        \ Equals(left: Scalar, right: Scalar)
+    | Function =
+        | Cast(expr: Scalar, target_type: String)
+        | Substring(str: Scalar, start: Scalar, length: Scalar)
+        \ Concat(args: [Scalar])
+    \ AggregateExpr =
+        | Sum(expr: Scalar)
+        | Count(expr: Scalar)
+        | Min(expr: Scalar)
+        | Max(expr: Scalar)
+        \ Avg(expr: Scalar)
+
+data JoinType =
+    | Inner
+    | Left
+    | Right
+    | Full
+    \ Semi
+
+// To access a field within a data type, we use the `#` syntax.
+// This is to distinguish between the `.` syntax for member function calls.
+// E.g. sum#expr
+
+// -------------------------
+// 3. Type Categories
+// -------------------------
+
+// User-defined types must start with a capital letter and fall into two categories:
+//
+// - Sum types, indicated by "=" (e.g., Scalar, JoinType, Predicate)
+//   These types don't contain attributes directly but specify at least one
+//   subtype alternative.
+//
+// - Product types, or leaf types (e.g., Inner, Left, ColumnRef, And)
+//   These types may contain attributes.
+//
+// All subtypes of sum types inherit from the parent sum type.
+// This means that wherever a Logical type is expected, a Join may 
+// be provided as a valid argument.
+
+// -------------------------
+// 4. Container Types
+// -------------------------
+
+// While the language doesn't support generic type definitions,
+// it does support the following containers:
+// 
+// - Array (e.g., [Element])
+// - Map (e.g., {Key -> Value}) // Note: key must inherit EqHash
+// - Tuple (e.g., (T1, T2, T3, ...))
+//
+// Functions are also first-class values with the following type signature: 
+// (Arg1, Arg2) -> RetType
+
+// All types are immutable and follow standard covariance rules.
+
+// -------------------------
+// 5. Built-in Operators
+// -------------------------
+
+// The language provides several built-in operators:
+//
+// +, -, /, *, >, < for arithmetic types (I64, F64)
+// Concat (++) for Map, Array, String
+// !, &&, || for Bool type
+// ==, != for EqHash types
+// 
+// Note: EqHash types include I64, String, Unit, Bool, as well as 
+// tuples and user-defined types that recursively use only EqHash types.
+// The compiler automatically infers these properties.
+//
+// The language also supports optional types with the syntax Type? and 
+// the `none` constant value.
+
+// -------------------------
+// 6. Special Types
+// -------------------------
+
+// The language requires six special types to function properly:
+// 
+// - Logical: Represents the relational algebra of the query plan
+// - Physical: Represents the execution plan for an engine
+// - LogicalProperties: Available for `stored` logical types
+// - PhysicalProperties: Specific instructions to optimize a logical plan
+// - Statistics: Available for `costed` physical types
+// - Catalog: Empty product type that implements functions to access the catalog
+// 
+// These types evolve throughout the optimization process:
+// 
+// - Logical* (`stored` logical): Provides access to LogicalProperties
+// - Physical*: Provides access to LogicalProperties and PhysicalProperties
+// - Physical$: A costed Physical* with access to statistics and cost
+
+// Let's define these missing types:
+
+data Physical =
+    | Scan(table_name: String)
+    | PhysFilter(child: Physical, predicate: Scalar)
+    | PhysProject(child: Physical, expressions: [Scalar])
+    | PhysSort(child: Physical, order_by: [Bool]) // true is ascending 
+    \ PhysJoin =
+        | HashJoin(
+                build_side: Physical,
+                probe_side: Physical,
+                type: JoinType,
+                predicate: Scalar
+            )
+        | MergeJoin(
+                left: Physical,
+                right: Physical,
+                type: JoinType,
+                predicate: Scalar
+            )
+        \ NestedLoopJoin(
+                outer: Physical,
+                inner: Physical,
+                type: JoinType,
+                predicate: Scalar
+            )
+
+data Catalog
+data LogicalProperties(schema: Schema)
+data PhysicalProperties(order_by: [Bool])  // e.g., define sorting, partitioning, etc.
+data CostedProperties    // e.g., define cost model, statistics, etc.
+data Statistics          // e.g., define histograms, MCVs, etc.
+
+data Schema(columns: [Column])
+data Column(name: String, data_type: String, is_nullable: Bool)
+
+// -------------------------
+// 7. Functions
+// -------------------------
+
+// Functions can be defined in two equivalent ways:
+
+fn example1(arg1: Logical, arg2: I64): I64 = 5 // Call with: example1(arg1, arg2)
+
+// Or as a member function:
+
+fn (arg1: Logical) example2(arg2: I64): I64 = 5 // Call with: arg1.example2(arg2)
+
+// The language also supports generic functions 
+// (also notice the last pattern matching):
+
+fn <E> (list: [E]) len(): I64 = match list
+    | [head .. tail] -> 1 + tail.len()
+    \ [] -> 0
+
+fn <E, F> (list: [E]) map(f: (E) -> F): [F] = match list
+    | [head .. tail] -> [f(head)] ++ tail.map(f)
+    \ [] -> []
+
+fn <K, V> (pairs: [(K, V)]) to_map(): {K : V} = match pairs
+    | [head .. tail] -> {head#_0 : head#_1} ++ tail.to_map()
+    \ [] -> {}
+
+// -------------------------
+// 8. User-Defined Functions (UDFs)
+// -------------------------
+
+// For complex operations or external functionality, the language supports UDFs
+// written in Rust.
+
+fn (catalog: Catalog) get_table_schema(name: String): Schema
+
+fn (logical: Logical*) properties(): LogicalProperties
+
+fn (costed: Physical$) statistics(): CostedProperties
+
+// -------------------------
+// 9. Transformation Rules
+// -------------------------
+
+// The core functionality of OPTD is defining transformation rules.
+// These are annotated with [transformation] and convert between logical plans:
+
+// Helper function for scalar rewrites.
+fn (expr: Scalar) remap(map: {I64 : I64}): Scalar = 
+    match expr
+        | ColumnRef(idx) -> 
+            if map(idx) != none then
+                ColumnRef(map(idx))
+            else
+                ColumnRef(idx)
+        | IntLiteral(value) -> IntLiteral(value)
+        | StringLiteral(value) -> StringLiteral(value)
+        | BoolLiteral(value) -> BoolLiteral(value)
+        | Mult(left, right) -> Mult(left.remap(map), right.remap(map))
+        | Add(left, right) -> Add(left.remap(map), right.remap(map))
+        | Sub(left, right) -> Sub(left.remap(map), right.remap(map))
+        | Div(left, right) -> Div(left.remap(map), right.remap(map))
+        | And(children) -> And(children.map(child -> child.remap(map)))
+        | Or(children) -> Or(children.map(child -> child.remap(map)))
+        | Not(child) -> Not(child.remap(map))
+        | Equals(left, right) -> Equals(left.remap(map), right.remap(map))
+        | Cast(expr, target_type) -> Cast(expr.remap(map), target_type)
+        | Substring(str, start, length) -> 
+            Substring(str.remap(map), start.remap(map), length.remap(map))
+        | Concat(args) -> Concat(args.map(arg -> arg.remap(map)))
+        | Sum(expr) -> Sum(expr.remap(map))
+        | Count(expr) -> Count(expr.remap(map))
+        | Min(expr) -> Min(expr.remap(map))
+        | Max(expr) -> Max(expr.remap(map))
+        \ Avg(expr) -> Avg(expr.remap(map))
+
+[transformation]
+fn (expr: Logical*) join_commute(): Logical? = match expr
+    | Join(left, right, Inner, predicate) ->
+        let 
+            left_props = left.properties(),
+            right_props = right.properties(),
+            left_len = left_props#schema#columns.len(),
+            right_len = right_props#schema#columns.len(),
+            
+            right_indices = 0..right_len,
+            left_indices = 0..left_len,
+            
+            remapping = (left_indices.map(i -> (i, i + right_len)) ++ 
+                right_indices.map(i -> (i + left_len, i))).to_map(),
+        in
+            Project(
+                Join(right, left, Inner, predicate.remap(remapping)),
+                (right_indices ++ left_indices).map(i -> ColumnRef(i))
+            )
+    \ _ -> none
+
+[transformation]
+fn (plan: Logical*) join_associativity(): Logical? = match plan
+    | Join(
+        Join(a, b, Inner, pred_ab),
+        c, 
+        Inner, 
+        pred_bc
+      ) -> 
+        let 
+            a_props = a.properties(),
+            b_props = b.properties(),
+            c_props = c.properties(),
+            
+            a_len = a_props#schema#columns.len(),
+            b_len = b_props#schema#columns.len(),
+            c_len = c_props#schema#columns.len(),
+            
+            b_indices = 0..b_len,
+            c_indices = 0..c_len,
+            
+            pred_bc_remapping = (b_indices.map(i -> (a_len + i, i)) ++
+                c_indices.map(i -> (a_len + b_len + i, b_len + i))).to_map(),
+            
+            remapped_pred_bc = pred_bc.remap(pred_bc_remapping),
+            
+            bc_join = Join(b, c, Inner, remapped_pred_bc),
+            
+            b_indices_after = 0..b_len,
+            c_indices_after = 0..c_len,
+            
+            pred_ab_remapping = (b_indices_after.map(i -> (a_len + i, a_len + i)) ++
+                c_indices_after.map(i -> (a_len + b_len + i, a_len + b_len + i))).to_map(),
+            
+            remapped_pred_ab = pred_ab.remap(pred_ab_remapping)
+        in
+            Join(a, bc_join, Inner, remapped_pred_ab)
+    
+    \ _ -> none
+
+[transformation]
+fn (plan: Logical*) eliminate_true_filters(): Logical? = match plan
+    | Filter(child, BoolLiteral(true)) -> child
+    \ _ -> none
+
+// -------------------------
+// 10. Implementation Rules
+// -------------------------
+
+// Implementation rules convert logical plans to physical plans and are
+// annotated with [implementation].
+
+// As opposed to transformations, implementations have to deal with properties.
+// Rules are free to totally rewrite the properties, e.g. deriving the children 
+// properties, adding new properties required for certain operators (e.g. merge join).
+
+// For this purpose the DSL provides a special function that recursively instructs
+// the optimization of bottom layers.
+
+fn (expr: Logical*) optimize(props: PhysicalProperties?): Physical
+
+[implementation]
+fn (expr: Logical*) impl_filter_enforce(props: PhysicalProperties?): Physical? = 
+    match expr
+        | Filter(child, predicate) -> 
+            let 
+                result = PhysFilter(child.optimize(none), predicate)
+            in
+                if props != none then
+                    PhysSort(result, props#order_by)
+                else
+                    result
+        \ _ -> none
+
+[implementation]
+fn (expr: Logical*) impl_filter_passthrough(props: PhysicalProperties?): Physical? =
+    match expr
+        | Filter(child, predicate) -> PhysFilter(child.optimize(props), predicate)
+        \ _ -> none
+
+[implementation]
+fn (expr: Logical*) impl_sort(props: PhysicalProperties?): Physical? = match expr
+    | Sort(child, order_by) -> 
+        if props == none then // TODO: The incoming `?` syntax will make this cleaner
+            PhysSort(child.optimize(none), order_by)
+        else
+            none
+    \ _ -> none
+
+// -------------------------
+// 11. Other Required Functions
+// -------------------------
+
+// Cost function for physical operators - used by the cost-based optimizer to evaluate 
+// different physical implementation alternatives.
+
+fn (expr: Physical*) cost(): F64 = 0
+
+// Derive logical properties from a logical plan - propagates schema information and other
+// logical properties (like cardinality estimates, uniqueness, or functional dependencies)
+// through the logical plan.
+
+fn (log: Logical*) derive(): LogicalProperties = match log
+    | Get(table_name) -> Catalog.get_table_schema(table_name)
+    | Filter(child, _) -> child.properties()
+    | Join(left, right, join_type, _) ->
+        let 
+            left_props = left.properties(),
+            right_props = right.properties(),
+            left_schema = left_props#schema,
+            right_schema = right_props#schema,
+            combined_columns = left_schema#columns ++ right_schema#columns
+        in
+            LogicalProperties(Schema(combined_columns))
+    | Project(child, expressions) ->
+        let 
+            child_props = child.properties(),
+            child_schema = child_props#schema,
+            child_columns = child_schema#columns,
+            
+            new_columns = [] // TODO: Some remapping code here.
+        in
+            LogicalProperties(Schema(new_columns))
+    \ Sort(child, _) -> child.properties()

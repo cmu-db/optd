@@ -1,4 +1,5 @@
-pub use optd_core as core;
-pub use optd_dsl as dsl;
+pub(crate) mod utils;
 
 pub mod catalog;
+pub mod core;
+pub mod dsl;
