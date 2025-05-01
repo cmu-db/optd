@@ -45,7 +45,7 @@ pub enum Status {
 
 /// Result of merging two groups.
 #[derive(Debug)]
-pub struct MergeGroupResult {
+pub struct GroupMergeProduct {
     /// ID of the new representative group id.
     pub new_repr_group_id: GroupId,
     pub old_non_repr_group_id: GroupId,
@@ -63,7 +63,7 @@ pub struct MergeGroupResult {
     pub new_repr_group_exprs: HashSet<LogicalExpressionId>,
 }
 
-impl MergeGroupResult {
+impl GroupMergeProduct {
     /// Creates a new MergeGroupResult instance.
     ///
     /// # Parameters
@@ -82,7 +82,7 @@ impl MergeGroupResult {
 
 /// Result of merging two goals.
 #[derive(Debug)]
-pub struct MergeGoalResult {
+pub struct GoalMergeProduct {
     /// The best costed expression for all merged goals combined.
     pub best_expr: Option<(PhysicalExpressionId, Cost)>,
 
@@ -107,7 +107,7 @@ pub struct MergeGoalResult {
 
 /// Result of merging two cost expressions.
 #[derive(Debug)]
-pub struct MergePhysicalExprResult {
+pub struct PhysicalMergeProduct {
     /// The new representative physical expression id.
     pub repr_physical_expr: PhysicalExpressionId,
 
@@ -117,15 +117,15 @@ pub struct MergePhysicalExprResult {
 
 /// Results of merge operations with newly dirtied expressions.
 #[derive(Debug, Default)]
-pub struct MergeResult {
+pub struct MergeProducts {
     /// Group merge results.
-    pub group_merges: Vec<MergeGroupResult>,
+    pub group_merges: Vec<GroupMergeProduct>,
 
     /// Goal merge results.
-    pub goal_merges: Vec<MergeGoalResult>,
+    pub goal_merges: Vec<GoalMergeProduct>,
 
     /// Physical expression merge results.
-    pub physical_expr_merges: Vec<MergePhysicalExprResult>,
+    pub physical_expr_merges: Vec<PhysicalMergeProduct>,
     // /// Transformations that were marked as dirty and need new application.
     // pub dirty_transformations: Vec<(LogicalExpressionId, TransformationRule)>,
 
@@ -136,13 +136,13 @@ pub struct MergeResult {
     // pub dirty_costings: Vec<PhysicalExpressionId>,
 }
 
-pub struct ForwardResult {
+pub struct PropagateCost {
     pub physical_expr_id: PhysicalExpressionId,
     pub best_cost: Cost,
     pub goals_forwarded: HashSet<GoalId>,
 }
 
-impl ForwardResult {
+impl PropagateCost {
     pub fn new(physical_expr_id: PhysicalExpressionId, best_cost: Cost) -> Self {
         Self {
             physical_expr_id,
@@ -245,7 +245,7 @@ pub trait Memoize: Send + Sync + 'static {
         &mut self,
         group_id_1: GroupId,
         group_id_2: GroupId,
-    ) -> MemoizeResult<Option<MergeResult>>;
+    ) -> MemoizeResult<Option<MergeProducts>>;
 
     //
     // Physical expression and goal operations.
@@ -285,7 +285,7 @@ pub trait Memoize: Send + Sync + 'static {
         &mut self,
         goal_id: GoalId,
         member: GoalMemberId,
-    ) -> MemoizeResult<Option<ForwardResult>>;
+    ) -> MemoizeResult<Option<PropagateCost>>;
 
     /// Updates the cost of a physical expression ID.
     ///
@@ -299,7 +299,7 @@ pub trait Memoize: Send + Sync + 'static {
         &mut self,
         physical_expr_id: PhysicalExpressionId,
         new_cost: Cost,
-    ) -> MemoizeResult<Option<ForwardResult>>;
+    ) -> MemoizeResult<Option<PropagateCost>>;
 
     async fn get_physical_expr_cost(
         &self,
