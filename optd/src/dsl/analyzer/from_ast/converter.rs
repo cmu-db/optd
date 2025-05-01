@@ -49,16 +49,34 @@ impl ASTConverter {
             return Err(AnalyzerErrorKind::new_incomplete_function(name, &fn_span));
         }
 
-        // Register the function in the context, while checking for duplicates.
-        let generics = func
-            .type_params
-            .iter()
-            .map(|param| {
+        // Process generic type parameters, checking for duplicates and assigning IDs.
+        let generics = {
+            let mut generics_map = HashMap::new();
+
+            for param in &func.type_params {
+                let param_name = &*param.value;
+
+                // Check for duplicates.
+                if let Some(first_span) = generics_map.get(param_name).map(|(_, span)| span) {
+                    return Err(AnalyzerErrorKind::new_duplicate_identifier(
+                        param_name,
+                        first_span,
+                        &param.span,
+                    ));
+                }
+
+                // Assign ID and store.
                 let id = self.registry.next_id;
                 self.registry.next_id += 1;
-                ((*param.value).clone(), id)
-            })
-            .collect();
+                generics_map.insert(param_name.clone(), (id, param.span.clone()));
+            }
+
+            // Extract the final mapping of param names to IDs.
+            generics_map
+                .into_iter()
+                .map(|(name, (id, _))| (name, id))
+                .collect()
+        };
 
         let params = self.get_parameters(func, &generics)?;
         let param_types = params.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
@@ -451,5 +469,28 @@ mod converter_tests {
             }
             other => panic!("Expected closure type, got: {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_reject_duplicate_generic_parameters() {
+        // Create a function with duplicate generic type parameters
+        let func = create_simple_function("duplicate_generics", true);
+        let mut func_val = (*func.value).clone();
+
+        // Add type parameters with a duplicate
+        func_val.type_params = vec![
+            spanned(String::from("T")),
+            spanned(String::from("U")),
+            spanned(String::from("T")), // Duplicate of "T"
+        ];
+
+        let func = spanned(func_val);
+        let module = create_module_with_functions(vec![func]);
+
+        // Run the conversion
+        let result = from_ast(&module, HashMap::new());
+
+        // Verify result is an Error (duplicate generic parameter)
+        assert!(result.is_err());
     }
 }
