@@ -84,6 +84,9 @@ pub enum EngineMessageKind {
     /// Associate logical properties with a group.
     /// Note: logical property are on-demand computed.
     NewProperties(GroupId, LogicalProperties),
+
+    /// Indicates a no-op. Used for handling cases where the engine should not be sent the generated message.
+    Empty,
 }
 
 /// The central access point to the optimizer.
@@ -142,6 +145,7 @@ impl<M: Memoize> Optimizer<M> {
         memo: M,
         catalog: Arc<dyn Catalog>,
         hir: HIR,
+        rule_book: RuleBook,
         client_rx: mpsc::Receiver<ClientMessage>,
     ) -> Self {
         let (engine_tx, engine_rx) = mpsc::channel(0);
@@ -149,7 +153,7 @@ impl<M: Memoize> Optimizer<M> {
         Optimizer {
             // Core components.
             memo,
-            rule_book: RuleBook::default(),
+            rule_book,
             hir_context: hir.context,
             catalog,
             // Message handling.
@@ -180,12 +184,12 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     /// Launch a new optimizer and return a sender for client communication.
-    pub fn launch(memo: M, catalog: Arc<dyn Catalog>, hir: HIR) -> Client<M> {
+    pub fn launch(memo: M, catalog: Arc<dyn Catalog>, hir: HIR, rule_book: RuleBook) -> Client<M> {
         let (client_tx, client_rx) = mpsc::channel(0);
 
         let handle = tokio::spawn(async move {
             // Start the background processing loop.
-            let optimizer = Self::new(memo, catalog, hir, client_rx);
+            let optimizer = Self::new(memo, catalog, hir, rule_book, client_rx);
             // TODO(Alexis): If an error occurs we could restart or reboot the memo.
             // Rather than failing (e.g. memo could be distributed).
             optimizer.run().await.expect("Optimizer failure")
@@ -197,60 +201,78 @@ impl<M: Memoize> Optimizer<M> {
     /// Run the optimizer's main processing loop.
     async fn run(mut self) -> Result<M, Error> {
         loop {
+            println!("Running optimizer");
             tokio::select! {
                 Some(request) = self.client_rx.next() => {
+                    println!("Received client request");
                     let is_shutdown = self.process_client_request(request).await?;
                     if is_shutdown {
                         break Ok(self.memo);
                     }
+                    // Launch pending jobs according to a policy (currently FIFO).
+                    self.launch_runnable_jobs().await?;
                 },
                 Some(message) = self.engine_rx.next() => {
                     let EngineMessage {
                         job_id,
                         kind,
                     } = message;
-                    let _job = self.running_jobs.remove(&job_id).unwrap();
+                    println!("Received engine message");
                     // Process the next message in the channel.
                     match kind {
                         NewLogicalPartial(plan, group_id) => {
+                            println!("Received new logical partial plan for group {:?}, plan {:?}", group_id, plan);
                             if self.get_related_task(message.job_id).is_some() {
                                 self.process_new_logical_partial(plan, group_id).await?;
                                 self.complete_job(job_id).await?;
                             }
                         }
                         NewPhysicalPartial(plan, goal_id) => {
+                            println!("Received new physical partial plan for goal {:?}, plan {:?}", goal_id, plan);
                             if let Some(task_id) = self.get_related_task(job_id) {
+                                println!("Received new physical partial plan for goal {:?}, task_id {:?}, plan {:?}", goal_id, task_id, plan);
                                 self.process_new_physical_partial(plan, goal_id, task_id).await?;
                                 self.complete_job(job_id).await?;
                             }
                         }
                         NewCostedPhysical(expression_id, cost) => {
+                            println!("Received new costed physical for expression {:?}, cost {:?}", expression_id, cost);
                             if self.get_related_task(job_id).is_some() {
                                 self.process_new_costed_physical(expression_id, cost).await?;
                                 self.complete_job(job_id).await?;
                             }
                         }
                         SubscribeGroup(group_id, continuation) => {
+                            println!("Received subscribe group for group {:?}", group_id);
                             if let Some(task_id) = self.get_related_task(job_id) {
                                 self.process_group_subscription(group_id, continuation, task_id).await?;
                                 self.complete_job(job_id).await?;
                             }
                         }
                         SubscribeGoal(goal, continuation) => {
+                            println!("Received subscribe goal for goal {:?}", goal);
                             if let Some(task_id) = self.get_related_task(job_id) {
                                 self.process_goal_subscription(&goal, continuation, task_id).await?;
                                 self.complete_job(job_id).await?;
                             }
                         }
                         RetrieveProperties(group_id, sender) => {
+                            println!("Received retrieve properties for group {:?}, sender {:?}", group_id, sender);
                             self.process_retrieve_properties(group_id, sender).await?;
                         }
                         NewProperties(group_id, properties) => {
+                            println!("Received new properties for group {:?}, properties {:?}", group_id, properties);
                             self.process_new_properties(group_id, properties).await?;
-                            self.complete_job(job_id).await?;
+                        }
+                        Empty => {
+                            // Empty messages are syntactic sugar for the engine code and should not do anything.
+                            //TODO(Sarvesh): remove this type
+                            // panic!("Received Empty message. This should not happen.");
+                            println!("Received empty message for job {:?}, task {:?}", job_id, self.get_related_task(job_id));
                         }
                     };
 
+                    let _job = self.running_jobs.remove(&job_id);
                     // Launch pending jobs according to a policy (currently FIFO).
                     self.launch_runnable_jobs().await?;
                 },
@@ -278,9 +300,17 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     fn get_related_task(&self, job_id: JobId) -> Option<TaskId> {
+        println!("Getting related task for job {:?}", job_id);
+        println!("Running jobs: {:?}", self.running_jobs);
         self.running_jobs.get(&job_id).and_then(|job| match job {
-            Job::Task(task_id) => Some(*task_id),
-            Job::Derive(_) => None,
+            Job::Task(task_id) => {
+                println!("Task job {:?} has related task {:?}", job_id, task_id);
+                Some(*task_id)
+            }
+            Job::Derive(_) => {
+                println!("Derive job {:?} has no related task", job_id);
+                None
+            }
         })
     }
 }
@@ -288,7 +318,7 @@ impl<M: Memoize> Optimizer<M> {
 #[cfg(test)]
 mod tests {
 
-    use std::{sync::Arc, time::Duration};
+    use std::{path::PathBuf, sync::Arc, time::Duration};
 
     use async_trait::async_trait;
     use tokio::task::JoinSet;
@@ -297,9 +327,11 @@ mod tests {
     use crate::{
         catalog::CatalogError,
         core::cir::{
-            Child, GoalMemberId, LogicalExpression, LogicalPlan, Operator, OperatorData,
-            PhysicalExpression, PhysicalPlan, PhysicalProperties, PropertiesData,
+            Child, GoalMemberId, ImplementationRule, LogicalExpression, LogicalPlan, Operator,
+            OperatorData, PhysicalExpression, PhysicalPlan, PhysicalProperties, PropertiesData,
+            TransformationRule,
         },
+        dsl::compile::{Config, compile_hir},
         memo::memory::MemoryMemo,
     };
     #[derive(Debug)]
@@ -332,7 +364,7 @@ mod tests {
 
         let memo = MemoryMemo::default();
 
-        let mut client = Optimizer::launch(memo, mock_catalog(), hir);
+        let mut client = Optimizer::launch(memo, mock_catalog(), hir, RuleBook::default());
 
         let logical_plan = LogicalPlan(Operator {
             tag: "Scan".to_string(),
@@ -467,7 +499,7 @@ mod tests {
             context: Context::default(),
             annotations: HashMap::new(),
         };
-        let mut client = Optimizer::launch(memo, mock_catalog(), hir);
+        let mut client = Optimizer::launch(memo, mock_catalog(), hir, RuleBook::default());
 
         let logical_scan_plan = LogicalPlan(Operator {
             tag: "Scan".to_string(),
@@ -544,7 +576,7 @@ mod tests {
             context: Context::default(),
             annotations: HashMap::new(),
         };
-        let mut client = Optimizer::launch(memo, mock_catalog(), hir);
+        let mut client = Optimizer::launch(memo, mock_catalog(), hir, RuleBook::default());
 
         {
             let logical_plan = logical_sort_plan.clone();
@@ -563,14 +595,63 @@ mod tests {
 
     #[tokio::test]
     async fn test_scalar_optimizer() -> Result<(), Error> {
-        // let mut memo = MemoryMemo::default();
-        // let mut client = Optimizer::launch(memo, mock_catalog(), hir);
+        println!("Starting test");
+        // Append the required core type declarations to each test program.
+        let file_path = PathBuf::from(
+            "/Users/sarveshtandon/Development/optd/optd/src/dsl/examples/scalar_impl.opt",
+        );
 
-        // let logical_plan = LogicalPlan(Operator {
-        //     tag: "Scan".to_string(),
-        //     data: vec![OperatorData::String("t1".into())],
+        let config = Config::new(file_path);
+        let udfs = HashMap::new();
+        let hir = compile_hir(config, udfs).expect("Failed to compile hir");
+
+        let mut rule_book = RuleBook::default();
+        rule_book.add_transformation(TransformationRule("mult_commute".to_string()));
+        rule_book.add_transformation(TransformationRule("add_to_mult".to_string()));
+        rule_book.add_implementation(ImplementationRule("convert".to_string()));
+
+        let mut client = Optimizer::launch(MemoryMemo::default(), mock_catalog(), hir, rule_book);
+
+        let leaf_node1 = LogicalPlan(Operator {
+            tag: "Const".to_string(),
+            data: vec![OperatorData::Int64(1)],
+            children: vec![],
+        });
+        // let leaf_node2 = LogicalPlan(Operator {
+        //     tag: "Const".to_string(),
+        //     data: vec![OperatorData::Int64(2)],
         //     children: vec![],
         // });
-        todo!()
+
+        // let add_node = LogicalPlan(Operator {
+        //     tag: "Add".to_string(),
+        //     data: vec![],
+        //     children: vec![
+        //         Child::Singleton(Arc::new(leaf_node1)),
+        //         Child::Singleton(Arc::new(leaf_node2)),
+        //     ],
+        // });
+
+        // let leaf_node3 = LogicalPlan(Operator {
+        //     tag: "Const".to_string(),
+        //     data: vec![OperatorData::Int64(3)],
+        //     children: vec![],
+        // });
+
+        // let logical_plan = LogicalPlan(Operator {
+        //     tag: "Add".to_string(),
+        //     data: vec![],
+        //     children: vec![
+        //         Child::Singleton(Arc::new(add_node)),
+        //         Child::Singleton(Arc::new(leaf_node3)),
+        //     ],
+        // });
+        println!("Creating query instance");
+        let mut query_instance = client.create_query_instance(leaf_node1).await.unwrap();
+        println!("Query instance created");
+        let physical_plan = query_instance.recv_best_plan().await.unwrap();
+        println!("Best plan: {:?}", physical_plan);
+
+        Ok(())
     }
 }

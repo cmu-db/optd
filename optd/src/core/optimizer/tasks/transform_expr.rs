@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::dsl::analyzer::hir::CoreData;
 use crate::dsl::engine::Engine;
 
 use crate::{
@@ -111,16 +112,17 @@ impl<M: Memoize> Optimizer<M> {
                 .launch_rule(
                     &rule_name.0,
                     vec![partial_logical_to_value(&plan)],
-                    Arc::new(move |value| {
-                        let plan = value_to_partial_logical(&value);
-
-                        Box::pin(
-                            async move { EngineMessageKind::NewLogicalPartial(plan, group_id) },
-                        )
+                    Arc::new(move |value| match &value.data {
+                        CoreData::None => Box::pin(async move { EngineMessageKind::Empty }),
+                        _ => {
+                            let plan = value_to_partial_logical(&value);
+                            Box::pin(async move {
+                                EngineMessageKind::NewLogicalPartial(plan, group_id)
+                            })
+                        }
                     }),
                 )
                 .await;
-
             Self::send_engine_response(job_id, engine_tx, response).await;
         });
 

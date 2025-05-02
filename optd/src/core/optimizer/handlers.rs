@@ -113,12 +113,15 @@ impl<M: Memoize> Optimizer<M> {
         goal_id: GoalId,
         _task_id: TaskId,
     ) -> Result<(), Error> {
+        println!(
+            "Processing new physical partial plan for goal {:?}",
+            goal_id
+        );
         let goal_id = self.memo.find_repr_goal(goal_id).await?;
 
         let member = self.ingest_physical_plan(&plan).await?;
 
         let forward_result = self.memo.add_goal_member(goal_id, member).await?;
-
         match member {
             GoalMemberId::PhysicalExpressionId(physical_expr_id) => {
                 self.ensure_cost_expression_task(physical_expr_id, Cost(f64::MAX), _task_id)

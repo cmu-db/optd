@@ -79,7 +79,9 @@ impl<M: Memoize> Client<M> {
             physical_plan_tx,
             id_tx,
         };
+        println!("Sending message to optimizer");
         self.tx.send(message).await?;
+        println!("Sent message to optimizer");
         let id = id_rx.await?;
 
         Ok(QueryInstance {

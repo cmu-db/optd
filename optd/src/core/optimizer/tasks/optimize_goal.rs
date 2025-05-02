@@ -75,13 +75,16 @@ impl<M: Memoize> Optimizer<M> {
     ) -> Result<(TaskId, Option<(PhysicalExpressionId, Cost)>), Error> {
         // Need Box::pin to avoid an infinite sized future.
         let result = Box::pin(async {
+            println!("Ensuring optimize goal task {:?}", goal_id);
             if let Some(task_id) = self.goal_optimization_task_index.get(&goal_id) {
+                println!("Found task id {:?}", task_id);
                 let task = self.tasks.get_mut(task_id).unwrap();
                 let optimize_goal_task = task.as_optimize_goal_mut();
                 optimize_goal_task.add_subscriber(out);
                 let best_optimized = self.memo.get_best_optimized_physical_expr(goal_id).await?;
                 Ok((*task_id, best_optimized))
             } else {
+                println!("Creating optimize goal task {:?}", goal_id);
                 self.create_optimize_goal_task(goal_id, Some(out)).await
             }
         })
@@ -96,15 +99,16 @@ impl<M: Memoize> Optimizer<M> {
         let task_id = self.next_task_id();
 
         let Goal(group_id, _) = self.memo.materialize_goal(goal_id).await?;
+        println!("Materialized goal {:?}", group_id);
         let (explore_group_in, logical_expressions) = self
             .ensure_explore_group_task(group_id, SourceTaskId::OptimizeGoal(task_id))
             .await?;
-
+        println!("Ensured explore group task {:#?}, logical expressions {:#?}", explore_group_in, logical_expressions);
         let mut task = OptimizeGoalTask::new(goal_id, out, explore_group_in);
-
+        println!("Created optimize goal task {:?}", task_id);
         // Creates implementation tasks for all logical expressions in the group.
         let implementations = self.rule_book.get_implementations().to_vec();
-
+        println!("Got implementations {:#?}", implementations);
         for expr_id in logical_expressions {
             for rule in &implementations {
                 let impl_expr_task_id = self
@@ -113,7 +117,7 @@ impl<M: Memoize> Optimizer<M> {
                 task.add_implement_expr_in(impl_expr_task_id);
             }
         }
-
+        println!("Added implement expr in {:#?}", task.implement_expression_in);
         // Process all goal members: physical expressions and subgoals.
         let goal_members = self.memo.get_all_goal_members(goal_id).await?;
         for member in goal_members {

@@ -55,27 +55,32 @@ impl<M: Memoize> Optimizer<M> {
         physical_plan_tx: mpsc::Sender<PhysicalPlan>,
     ) -> Result<TaskId, Error> {
         let task_id = self.next_task_id();
-
+        println!("Creating optimize plan task");
         let group_id = self
             .ingest_logical_plan(&logical_plan.clone().into())
             .await?;
+        println!("Ingested logical plan {:?}", group_id);
         let goal_id = self
             .memo
             .get_goal_id(&Goal(group_id, PhysicalProperties(None)))
             .await?;
-
+        println!("Got goal id {:?}", goal_id);
         let (optimize_goal_in, best_costed) = self
             .ensure_optimize_goal_task(goal_id, SourceTaskId::OptimizePlan(task_id))
             .await?;
-
+        println!(
+            "Ensured optimize goal task {:?}, {:?}",
+            optimize_goal_in, best_costed
+        );
         let task = OptimizePlanTask::new(logical_plan, physical_plan_tx, optimize_goal_in);
-
+        println!("Created optimize plan task");
         if let Some((physical_expr_id, _)) = best_costed {
             self.emit_best_physical_plan(task.physical_plan_tx.clone(), physical_expr_id)
                 .await?;
         }
 
         self.tasks.insert(task_id, Task::OptimizePlan(task));
+        println!("Inserted optimize plan task {:?}", task_id);
         Ok(task_id)
     }
 }

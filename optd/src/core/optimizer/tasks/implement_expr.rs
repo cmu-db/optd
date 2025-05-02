@@ -78,6 +78,7 @@ impl<M: Memoize> Optimizer<M> {
         self.tasks.insert(task_id, Task::ImplementExpression(task));
 
         if is_dirty {
+            println!("Scheduling task job {:?}", task_id);
             self.schedule_task_job(task_id);
         }
         Ok(task_id)
@@ -112,6 +113,10 @@ impl<M: Memoize> Optimizer<M> {
         let engine_tx = self.engine_tx.clone();
         let rule_name = task.rule.clone();
 
+        println!(
+            "Launching implement rule: {:?}, for goal: {:?}, for expr: {:?}, with partial logical: {:#?}",
+            rule_name, goal_id, task.logical_expr_id, plan
+        );
         tokio::spawn(async move {
             let response = engine
                 .launch_rule(
@@ -122,6 +127,7 @@ impl<M: Memoize> Optimizer<M> {
                     ],
                     Arc::new(move |value| {
                         let plan = value_to_partial_physical(&value);
+                        println!("Received implement rule response: {:#?}", plan);
                         Box::pin(
                             async move { EngineMessageKind::NewPhysicalPartial(plan, goal_id) },
                         )

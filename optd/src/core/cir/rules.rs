@@ -18,4 +18,12 @@ impl RuleBook {
     pub fn get_implementations(&self) -> &[ImplementationRule] {
         &self.implementations
     }
+
+    pub fn add_transformation(&mut self, rule: TransformationRule) {
+        self.transformations.push(rule);
+    }
+
+    pub fn add_implementation(&mut self, rule: ImplementationRule) {
+        self.implementations.push(rule);
+    }
 }

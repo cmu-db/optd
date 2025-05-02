@@ -37,6 +37,7 @@ pub enum JobRoot {
 ///
 /// Each variant represents a specific optimization operation that can be
 /// performed asynchronously and independently.
+#[derive(Debug, Clone)]
 pub enum Job {
     /// Executes a job associated with a task.
     Task(TaskId),
@@ -104,6 +105,7 @@ impl<M: Memoize> Optimizer<M> {
     /// # Returns
     /// * `Result<(), Error>` - Success or error during job launching.
     pub(super) async fn launch_runnable_jobs(&mut self) -> Result<(), Error> {
+        println!("Launching runnable jobs");
         // Launch jobs only if we're below the maximum concurrent jobs limit, in FIFO order.
         while self.running_jobs.len() < self.max_concurrent_jobs {
             let Some(job_id) = self.runnable_queue.pop_front() else {
@@ -112,21 +114,30 @@ impl<M: Memoize> Optimizer<M> {
             };
 
             let job = self.runnable_jobs.remove(&job_id).unwrap();
+            println!(
+                "Removing job {:?} from runnable jobs, job {:?}",
+                job_id, job
+            );
+            self.running_jobs.insert(job_id, job.clone());
 
             match job {
                 Job::Task(task_id) => {
+                    println!("Launching task job {:?}", task_id);
                     // Move the job from pending to running.
                     let related_task = self.tasks.get(&task_id).unwrap();
 
                     // Dispatch & execute the job in a new co-routine.
                     match related_task {
                         Task::ImplementExpression(task) => {
+                            println!("Launching implementation job {:?}", task);
                             self.execute_implementation_rule(task, job_id).await?;
                         }
                         Task::TransformExpression(task) => {
+                            println!("Launching transformation job {:?}", task);
                             self.execute_transformation_rule(task, job_id).await?;
                         }
                         Task::CostExpression(task) => {
+                            println!("Launching cost job {:?}", task);
                             self.execute_cost_expression(task, job_id).await?;
                         }
                         Task::ContinueWithLogical(task) => {
@@ -144,7 +155,6 @@ impl<M: Memoize> Optimizer<M> {
                     self.derive_logical_properties(group_id, job_id).await?;
                 }
             }
-            self.running_jobs.insert(job_id, job);
         }
 
         Ok(())
