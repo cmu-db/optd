@@ -10,7 +10,7 @@ use crate::{
     core::cir::{Goal, GoalId, ImplementationRule, LogicalExpressionId},
     core::error::Error,
     core::optimizer::{EngineMessageKind, JobId, Optimizer, Task},
-    memo::{Memoize, Status},
+    memo::{Memoize, TaskStatus},
 };
 
 use super::TaskId;
@@ -72,7 +72,7 @@ impl<M: Memoize> Optimizer<M> {
             .memo
             .get_implementation_status(logical_expr_id, goal_id, &rule)
             .await?
-            == Status::Dirty;
+            == TaskStatus::Dirty;
 
         let task = ImplementExpressionTask::new(rule, is_dirty, logical_expr_id, goal_id, out);
         self.tasks.insert(task_id, Task::ImplementExpression(task));

@@ -168,11 +168,11 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn handle_merge_result(&mut self, result: MergeProducts) -> Result<(), Error> {
         // <I. Apply group merges>
         for group_merge in result.group_merges {
-            let repr_group_id = group_merge.new_repr_group_id;
-            let non_repr_group_id = group_merge.old_non_repr_group_id;
+            let repr_group_id = group_merge.repr_group_id;
+            let non_repr_group_id = group_merge.non_repr_group_id;
             let all_exprs = group_merge.all_exprs_in_merged_group;
-            let new_repr_group_exprs = group_merge.new_repr_group_exprs;
-            let old_non_repr_group_exprs = group_merge.old_non_repr_group_exprs;
+            let new_repr_group_exprs = group_merge.repr_group_exprs;
+            let old_non_repr_group_exprs = group_merge.non_repr_group_exprs;
 
             let repr_group_task_id = self.group_exploration_task_index.get(&repr_group_id);
             let non_repr_group_task_id = self.group_exploration_task_index.get(&non_repr_group_id);
@@ -521,7 +521,7 @@ impl<M: Memoize> Optimizer<M> {
             //     self.handle_forward_result(forward_result).await?;
             // }
             let non_repr_goal_id = goal_merge.non_repr_goal_id;
-            let repr_goal_id = goal_merge.new_repr_goal_id;
+            let repr_goal_id = goal_merge.repr_goal_id;
             let non_repr_goal_task_id =
                 if let Some(id) = self.goal_optimization_task_index.get(&non_repr_goal_id) {
                     *id

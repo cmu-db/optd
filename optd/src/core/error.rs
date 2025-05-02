@@ -1,4 +1,4 @@
-use crate::memo::MemoizeError;
+use crate::memo::MemoError;
 use futures::channel::{mpsc, oneshot::Canceled};
 
 /// all optd-core errors, defined in there respective modules,
@@ -8,7 +8,7 @@ use futures::channel::{mpsc, oneshot::Canceled};
 pub enum Error {
     Placeholder,
     Channel(Box<dyn std::error::Error + Send + Sync>),
-    Memo(MemoizeError),
+    Memo(MemoError),
 }
 
 impl From<mpsc::SendError> for Error {
@@ -23,8 +23,8 @@ impl From<Canceled> for Error {
     }
 }
 
-impl From<MemoizeError> for Error {
-    fn from(value: MemoizeError) -> Self {
+impl From<MemoError> for Error {
+    fn from(value: MemoError) -> Self {
         Error::Memo(value)
     }
 }

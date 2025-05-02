@@ -7,7 +7,7 @@ use crate::{
     core::cir::{Cost, PhysicalExpressionId},
     core::error::Error,
     core::optimizer::{EngineMessageKind, JobId, Optimizer, Task},
-    memo::{Memoize, Status},
+    memo::{Memoize, TaskStatus},
 };
 
 use super::TaskId;
@@ -79,7 +79,7 @@ impl<M: Memoize> Optimizer<M> {
             Ok(*task_id)
         } else {
             let task_id = self.next_task_id();
-            let is_dirty = self.memo.get_cost_status(physical_expr_id).await? == Status::Dirty;
+            let is_dirty = self.memo.get_cost_status(physical_expr_id).await? == TaskStatus::Dirty;
             let task =
                 CostExpressionTask::new(physical_expr_id, is_dirty, budget, optimize_goal_out);
 

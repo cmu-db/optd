@@ -7,7 +7,7 @@ use crate::{
     core::cir::{LogicalExpressionId, PartialLogicalPlan, TransformationRule},
     core::error::Error,
     core::optimizer::{EngineMessageKind, JobId, Optimizer, Task},
-    memo::{Memoize, Status},
+    memo::{Memoize, TaskStatus},
 };
 
 use super::TaskId;
@@ -71,7 +71,7 @@ impl<M: Memoize> Optimizer<M> {
             .memo
             .get_transformation_status(logical_expr_id, &rule)
             .await?
-            == Status::Dirty;
+            == TaskStatus::Dirty;
         let task = TransformExpressionTask::new(rule, false, logical_expr_id, out);
 
         self.tasks.insert(task_id, Task::TransformExpression(task));
