@@ -1,6 +1,6 @@
 use crate::{
     core::error::Error,
-    core::memo::{Memoize, PropagateCost},
+    core::memo::{Memoize, PropagateBestExpression},
 };
 
 use super::Optimizer;
@@ -8,9 +8,9 @@ use super::Optimizer;
 impl<M: Memoize> Optimizer<M> {
     pub(super) async fn handle_forward_result(
         &mut self,
-        result: PropagateCost,
+        result: PropagateBestExpression,
     ) -> Result<(), Error> {
-        for goal_id in result.goals_forwarded {
+        for goal_id in result.goals_propagated_to {
             // Only forward to goals if a task exists for it.
             if let Some(task_id) = self.goal_optimization_task_index.get(&goal_id) {
                 // Emit the best physical plan to all dependent `OptimizePlan` tasks.

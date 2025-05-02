@@ -134,18 +134,27 @@ pub struct MergeProducts {
     // pub dirty_costings: Vec<PhysicalExpressionId>,
 }
 
-pub struct PropagateCost {
+/// A type representing the information that needs to sent to the scheduler to propagate the best
+/// physical expression for a goal.
+///
+/// The reason we need this is because the memo table will have propagated the best physical
+/// expression for this goal within the memo table already, and the task graph scheduler needs to be
+/// notified of the changes that have happened.
+pub struct PropagateBestExpression {
+    /// The ID of the best physical expression for a goal.
     pub physical_expr_id: PhysicalExpressionId,
+    /// The cost of the best expression.
     pub best_cost: Cost,
-    pub goals_forwarded: HashSet<GoalId>,
+    /// The goals that the memo table has already propagated this best expression to.
+    pub goals_propagated_to: HashSet<GoalId>,
 }
 
-impl PropagateCost {
+impl PropagateBestExpression {
     pub fn new(physical_expr_id: PhysicalExpressionId, best_cost: Cost) -> Self {
         Self {
             physical_expr_id,
             best_cost,
-            goals_forwarded: HashSet::new(),
+            goals_propagated_to: HashSet::new(),
         }
     }
 }
@@ -283,7 +292,7 @@ pub trait Memoize: Send + Sync + 'static {
         &mut self,
         goal_id: GoalId,
         member: GoalMemberId,
-    ) -> MemoizeResult<Option<PropagateCost>>;
+    ) -> MemoizeResult<Option<PropagateBestExpression>>;
 
     /// Updates the cost of a physical expression ID.
     ///
@@ -297,7 +306,7 @@ pub trait Memoize: Send + Sync + 'static {
         &mut self,
         physical_expr_id: PhysicalExpressionId,
         new_cost: Cost,
-    ) -> MemoizeResult<Option<PropagateCost>>;
+    ) -> MemoizeResult<Option<PropagateBestExpression>>;
 
     async fn get_physical_expr_cost(
         &self,

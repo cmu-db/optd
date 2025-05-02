@@ -421,8 +421,8 @@ mod tests {
 
             assert_eq!(result.best_cost, Cost(40.0));
             assert_eq!(result.physical_expr_id, physical_expr_id);
-            assert_eq!(result.goals_forwarded.len(), 1);
-            assert!(result.goals_forwarded.contains(&no_sort_goal_id));
+            assert_eq!(result.goals_propagated_to.len(), 1);
+            assert!(result.goals_propagated_to.contains(&no_sort_goal_id));
         }
 
         let index_scan_expr_id = {
@@ -573,5 +573,6 @@ mod tests {
         //     data: vec![OperatorData::String("t1".into())],
         //     children: vec![],
         // });
+        todo!()
     }
 }

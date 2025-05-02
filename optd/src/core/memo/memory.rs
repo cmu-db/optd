@@ -235,7 +235,7 @@ impl Memoize for MemoryMemo {
         &mut self,
         goal_id: GoalId,
         member: GoalMemberId,
-    ) -> MemoizeResult<Option<PropagateCost>> {
+    ) -> MemoizeResult<Option<PropagateBestExpression>> {
         let goal_id = self.find_repr_goal(goal_id).await?;
         let member = self.find_repr_goal_member(member).await?;
         let goal_state = self.goals.get_mut(&goal_id).unwrap();
@@ -267,11 +267,11 @@ impl Memoize for MemoryMemo {
             };
             let mut subscribers = VecDeque::new();
             subscribers.push_back(goal_id);
-            let mut result = PropagateCost::new(physical_expr_id, cost);
+            let mut result = PropagateBestExpression::new(physical_expr_id, cost);
             // propagate the new cost to all subscribers.
             self.propagate_new_member_cost(subscribers, &mut result)
                 .await?;
-            if result.goals_forwarded.is_empty() {
+            if result.goals_propagated_to.is_empty() {
                 // No goals were forwarded, so we can return None.
                 Ok(None)
             } else {
@@ -299,7 +299,7 @@ impl Memoize for MemoryMemo {
         &mut self,
         physical_expr_id: PhysicalExpressionId,
         new_cost: Cost,
-    ) -> MemoizeResult<Option<PropagateCost>> {
+    ) -> MemoizeResult<Option<PropagateBestExpression>> {
         let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await?;
         let (_, cost_mut) = self
             .physical_exprs
@@ -321,11 +321,11 @@ impl Memoize for MemoryMemo {
                 subscribers.extend(subscriber_goal_ids);
             }
 
-            let mut result = PropagateCost::new(physical_expr_id, new_cost);
+            let mut result = PropagateBestExpression::new(physical_expr_id, new_cost);
             // propagate the new cost to all subscribers.
             self.propagate_new_member_cost(subscribers, &mut result)
                 .await?;
-            if result.goals_forwarded.is_empty() {
+            if result.goals_propagated_to.is_empty() {
                 // No goals were forwarded, so we can return None.
                 Ok(None)
             } else {
@@ -915,7 +915,7 @@ impl MemoryMemo {
                     .or_default()
                     .extend(&subscribers);
                 let mut temp_forward_result =
-                    PropagateCost::new(forward_result.physical_expr_id, forward_result.best_cost);
+                    PropagateBestExpression::new(forward_result.physical_expr_id, forward_result.best_cost);
                 let vec_deque_subscribers =
                     VecDeque::from(subscribers.into_iter().collect::<Vec<_>>());
                 self.propagate_new_member_cost(vec_deque_subscribers, &mut temp_forward_result)
@@ -1097,7 +1097,7 @@ impl MemoryMemo {
     async fn propagate_new_member_cost(
         &mut self,
         mut subscribers: VecDeque<GoalId>,
-        result: &mut PropagateCost,
+        result: &mut PropagateBestExpression,
     ) -> MemoizeResult<()> {
         while let Some(goal_id) = subscribers.pop_front() {
             let current_best = self.get_best_optimized_physical_expr(goal_id).await?;
@@ -1111,7 +1111,7 @@ impl MemoryMemo {
                 self.best_optimized_physical_expr_index
                     .insert(goal_id, (result.physical_expr_id, result.best_cost));
 
-                result.goals_forwarded.insert(goal_id);
+                result.goals_propagated_to.insert(goal_id);
 
                 // keep propagating the new cost to all subscribers.
                 if let Some(subscriber_goal_ids) = self
