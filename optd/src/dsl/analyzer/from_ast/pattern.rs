@@ -6,7 +6,7 @@
 use super::converter::ASTConverter;
 use crate::dsl::analyzer::errors::AnalyzerErrorKind;
 use crate::dsl::analyzer::hir::{Identifier, MatchArm, Pattern, PatternKind, TypedSpan};
-use crate::dsl::analyzer::type_checks::registry::TypeKind;
+use crate::dsl::analyzer::type_checks::registry::{Generic, TypeKind};
 use crate::dsl::parser::ast::{self, Pattern as AstPattern};
 use crate::dsl::utils::span::Spanned;
 use std::collections::HashMap;
@@ -20,7 +20,7 @@ impl ASTConverter {
     pub(super) fn convert_match_arms(
         &mut self,
         arms: &[Spanned<ast::MatchArm>],
-        generics: &HashMap<Identifier, usize>,
+        generics: &HashMap<Identifier, Generic>,
     ) -> Result<Vec<MatchArm<TypedSpan>>, Box<AnalyzerErrorKind>> {
         arms.iter()
             .map(|arm| {

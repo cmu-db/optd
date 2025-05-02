@@ -1,4 +1,5 @@
 use super::registry::{Type, TypeKind};
+use crate::dsl::analyzer::type_checks::registry::Generic;
 use crate::dsl::parser::ast::Type as AstType;
 use crate::dsl::utils::span::{OptionalSpanned, Spanned};
 use std::collections::HashMap;
@@ -117,7 +118,16 @@ pub(crate) fn type_display(ty: &Type, resolved_unknown: &HashMap<usize, Type>) -
 
         // User types
         Adt(name) => name.to_string(),
-        Generic(name) => format!("Gen<#{}>", name),
+        Gen(Generic(id, bound)) => match bound {
+            Some(bound_type) => {
+                format!(
+                    "Gen<#{}: {}>",
+                    id,
+                    type_display(bound_type, resolved_unknown)
+                )
+            }
+            Option::None => format!("Gen<#{}>", id),
+        },
 
         // Composite types
         Array(elem) => format!("[{}]", type_display(elem, resolved_unknown)),

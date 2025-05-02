@@ -6,7 +6,7 @@
 use super::converter::ASTConverter;
 use crate::dsl::analyzer::errors::AnalyzerErrorKind;
 use crate::dsl::analyzer::hir::Identifier;
-use crate::dsl::analyzer::type_checks::registry::{Type, TypeKind};
+use crate::dsl::analyzer::type_checks::registry::{Generic, Type, TypeKind};
 use crate::dsl::parser::ast::Type as AstType;
 use crate::dsl::utils::span::Spanned;
 use std::collections::HashMap;
@@ -35,7 +35,7 @@ impl ASTConverter {
     pub(super) fn convert_type(
         &mut self,
         ast_type: &Spanned<AstType>,
-        generics: &HashMap<Identifier, usize>,
+        generics: &HashMap<Identifier, Generic>,
         ascending: bool,
     ) -> Result<Type, Box<AnalyzerErrorKind>> {
         use TypeKind::*;
@@ -74,8 +74,8 @@ impl ASTConverter {
                 Costed(self.convert_type(inner_type, generics, ascending)?)
             }
             AstType::Identifier(name) => {
-                if let Some(id) = generics.get(name) {
-                    Generic(*id)
+                if let Some(generic) = generics.get(name) {
+                    Gen(generic.clone())
                 } else {
                     if !self.registry.subtypes.contains_key(name) {
                         return Err(AnalyzerErrorKind::new_undefined_type(name, &ast_type.span));
@@ -277,12 +277,12 @@ mod types_tests {
         let generic_type = AstType::Identifier("T".to_string());
         let mut generics = HashMap::new();
         // Assign ID 42 to the generic "T"
-        generics.insert("T".to_string(), 42);
+        generics.insert("T".to_string(), Generic(42, None));
         let result = converter
             .convert_type(&spanned(generic_type), &generics, true)
             .expect("Generic type conversion should succeed");
         match &*result.value {
-            TypeKind::Generic(id) => assert_eq!(*id, 42),
+            TypeKind::Gen(generic) => assert_eq!(generic.0, 42),
             _ => panic!("Expected Generic type"),
         }
     }
@@ -450,8 +450,8 @@ mod types_tests {
 
         // Setup generics with numeric IDs
         let mut generics = HashMap::new();
-        generics.insert("T".to_string(), 0);
-        generics.insert("U".to_string(), 1);
+        generics.insert("T".to_string(), Generic(0, None));
+        generics.insert("U".to_string(), Generic(1, None));
 
         // Test generic types (should pass validation because they're in the generics map)
         let generic_type = AstType::Identifier("T".to_string());

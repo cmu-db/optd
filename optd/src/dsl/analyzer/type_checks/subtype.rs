@@ -1,5 +1,5 @@
 use super::registry::{LOGICAL_TYPE, PHYSICAL_TYPE, Type, TypeRegistry};
-use crate::dsl::analyzer::type_checks::registry::TypeKind;
+use crate::dsl::analyzer::type_checks::registry::{Generic, TypeKind};
 use std::collections::HashSet;
 
 impl TypeRegistry {
@@ -131,9 +131,26 @@ impl TypeRegistry {
                 self.is_subtype_inner(child, &self.resolve_type(parent), memo, has_changed)
             }
 
-            // Generics only match if they have strictly the same name.
-            // Bounded generics are not yet supported.
-            (Generic(gen1), Generic(gen2)) if gen1 == gen2 => true,
+            // Generics only match if they have strictly the same name,
+            // or if their bounds are compatible.
+            (Gen(Generic(id1, bound1)), Gen(Generic(id2, bound2))) => {
+                if id1 == id2 {
+                    true
+                } else if let (Some(b1), Some(b2)) = (bound1, bound2) {
+                    self.is_subtype_inner(b1, b2, memo, has_changed)
+                } else {
+                    false
+                }
+            }
+
+            // A type is a subtype of a bounded generic if it's a subtype of the bound,
+            // and vice versa.
+            (_, Gen(Generic(_, Some(bound)))) => {
+                self.is_subtype_inner(child, bound, memo, has_changed)
+            }
+            (Gen(Generic(_, Some(bound))), _) => {
+                self.is_subtype_inner(bound, parent, memo, has_changed)
+            }
 
             // Stored and Costed type handling.
             (Stored(child_inner), Stored(parent_inner)) => {
@@ -723,38 +740,57 @@ mod tests {
     }
 
     #[test]
-    fn test_generic_subtyping() {
+    fn test_generic_subtyping_with_bounds() {
         let mut reg = TypeRegistry::default();
 
-        // Generics are only subtypes of themselves (same name)
-        assert!(reg.is_subtype(&Generic(0).into(), &Generic(0).into()));
+        // Set up a type hierarchy for testing
+        let animal = create_product_adt("Animal", vec![]);
+        let dog = create_product_adt("Dog", vec![]);
+        let cat = create_product_adt("Cat", vec![]);
 
-        // Different named generics are not subtypes
-        assert!(!reg.is_subtype(&Generic(0).into(), &Generic(1).into()));
+        let animals_enum = create_sum_adt("Animals", vec![animal, dog.clone(), cat.clone()]);
+        reg.register_adt(&animals_enum).unwrap();
 
-        // All generics are subtypes of Universe
-        assert!(reg.is_subtype(&Generic(0).into(), &Universe.into()));
+        // Create generic types with and without bounds - using unique IDs
+        let generic_1 = Gen(Generic(1, Option::None)).into();
+        let generic_2 = Gen(Generic(2, Option::None)).into();
 
-        // Nothing is a subtype of any generic
-        assert!(reg.is_subtype(&Nothing.into(), &Generic(0).into()));
+        // Create bounded generics with *unique* IDs - bounds must be ADTs only
+        let generic_3_animals = Gen(Generic(3, Some(Adt("Animals".to_string()).into()))).into();
+        let generic_4_animals = Gen(Generic(4, Some(Adt("Animals".to_string()).into()))).into();
+        let generic_5_dog = Gen(Generic(5, Some(Adt("Dog".to_string()).into()))).into();
 
-        // Generic is not a subtype of concrete types
-        assert!(!reg.is_subtype(&Generic(0).into(), &I64.into()));
+        // Test 1: Same generic ID is a subtype of itself
+        assert!(reg.is_subtype(&generic_1, &generic_1));
+        assert!(reg.is_subtype(&generic_3_animals, &generic_3_animals));
 
-        // Concrete types are not subtypes of generics
-        assert!(!reg.is_subtype(&I64.into(), &Generic(0).into()));
+        // Test 2: Different generic IDs with compatible bounds
+        // Gen<5: Dog> <: Gen<4: Animals> because Dog <: Animals
+        assert!(reg.is_subtype(&generic_5_dog, &generic_4_animals));
 
-        // Test with generic in container types
-        assert!(reg.is_subtype(
-            &Array(Generic(0).into()).into(),
-            &Array(Generic(0).into()).into()
-        ));
+        // Test 3: Different generic IDs with incompatible bounds
+        // Gen<4: Animals> !<: Gen<5: Dog> because Animals !<: Dog
+        assert!(!reg.is_subtype(&generic_4_animals, &generic_5_dog));
 
-        // Different generics in container types
-        assert!(!reg.is_subtype(
-            &Array(Generic(0).into()).into(),
-            &Array(Generic(1).into()).into()
-        ));
+        // Test 4: Different generic IDs with no bounds are never subtypes
+        assert!(!reg.is_subtype(&generic_1, &generic_2));
+
+        // Test 5: Concrete type vs generic with bound
+        let dog_type = Adt("Dog".to_string()).into();
+        let animals_type = Adt("Animals".to_string()).into();
+
+        // Dog <: Gen<4: Animals> because Dog <: Animals
+        assert!(reg.is_subtype(&dog_type, &generic_4_animals));
+
+        // Animals !<: Gen<5: Dog> because Animals !<: Dog
+        assert!(!reg.is_subtype(&animals_type, &generic_5_dog));
+
+        // Test 6: Generic with bound vs concrete type (bidirectional check)
+        // Gen<5: Dog> <: Animals because Dog <: Animals
+        assert!(reg.is_subtype(&generic_5_dog, &animals_type));
+
+        // Gen<4: Animals> !<: Dog because Animals !<: Dog
+        assert!(!reg.is_subtype(&generic_4_animals, &dog_type));
     }
 
     #[test]

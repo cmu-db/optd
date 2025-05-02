@@ -1,5 +1,8 @@
 use super::registry::{Type, TypeRegistry};
-use crate::dsl::analyzer::{hir::Identifier, type_checks::registry::TypeKind};
+use crate::dsl::analyzer::{
+    hir::Identifier,
+    type_checks::registry::{Generic, TypeKind},
+};
 use std::collections::HashSet;
 
 impl TypeRegistry {
@@ -10,19 +13,25 @@ impl TypeRegistry {
     /// 1. Primitive types check for equality.
     /// 2. For container types (Array, Tuple, etc.), it applies covariance rules.
     /// 3. For function (and Map) types, it uses contravariance for parameters and covariance for return types.
-    /// 4. For native trait types (Concat, EqHash, Arithmetic), the result is the trait only if both types
+    /// 4. For generic types:
+    ///    - For the same generic type parameter (same ID), the LUB is that generic parameter.
+    ///    - For different generic type parameters with bounds, we create a new generic type parameter
+    ///      with the LUB of their bounds as its bound.
+    ///    - For a generic with bound and a concrete type, if the generic bound is a supertype of the
+    ///      concrete type, the generic is the LUB.
+    /// 5. For native trait types (Concat, EqHash, Arithmetic), the result is the trait only if both types
     ///    implement it, and at least one of the types is the trait itself.
-    /// 5. For ADT types, it finds the closest common supertype in the type hierarchy.
-    /// 6. For wrapper types:
+    /// 6. For ADT types, it finds the closest common supertype in the type hierarchy.
+    /// 7. For wrapper types:
     ///    - Optional preserves the wrapper and computes LUB of inner types
     ///    - None and Optional(T) yields Optional(T)
     ///    - None and non-Optional T yields Optional(T)
     ///    - For Stored/Costed: Costed is considered more specific than Stored, and
     ///      either wrapper can be removed when comparing with non-wrapped types
-    /// 7. Map types can be viewed as functions from keys to optional values, and
+    /// 8. Map types can be viewed as functions from keys to optional values, and
     ///    Arrays as functions from indices to values, with appropriate type conversions.
-    /// 8. Nothing is the bottom type, Universe it the top type; LUB(Nothing, T) = T and LUB(Universe, T) = Universe.
-    /// 9. If no meaningful upper bound exists, Universe is returned.
+    /// 9. Nothing is the bottom type, Universe it the top type; LUB(Nothing, T) = T and LUB(Universe, T) = Universe.
+    /// 10. If no meaningful upper bound exists, Universe is returned.
     ///
     /// # Arguments
     ///
@@ -54,8 +63,34 @@ impl TypeRegistry {
             }
 
             // Handle generics.
-            (Generic(id1), Generic(id2)) if id1 == id2 => {
+            // Case 1: Same generics - they're identical types.
+            (Gen(Generic(id1, _)), Gen(Generic(id2, _))) if id1 == id2 => {
                 return type1.clone();
+            }
+
+            // Case 2: Different generic IDs with bounds - compute LUB of bounds.
+            (Gen(Generic(_, Some(bound1))), Gen(Generic(_, Some(bound2)))) => {
+                let lub_bound = self.least_upper_bound(bound1, bound2, has_changed);
+                if matches!(*lub_bound.value, Universe) {
+                    Universe // Normalize to Universe rather than `Gen(#id): Universe`.
+                } else {
+                    let new_gen = Gen(Generic(self.next_id, Some(lub_bound)));
+                    self.next_id += 1;
+                    new_gen
+                }
+            }
+
+            // Case 3: Generic with bound vs concrete type - check if supertype.
+            // If the concrete type is a subtype of the bound, the generic is the LUB
+            (Gen(Generic(_, Some(bound))), _)
+                if self.is_subtype_infer(type2, bound, has_changed) =>
+            {
+                return type1.clone();
+            }
+            (_, Gen(Generic(_, Some(bound))))
+                if self.is_subtype_infer(type1, bound, has_changed) =>
+            {
+                return type2.clone();
             }
 
             // Universe is the top type - LUB(Universe, T) = Universe.

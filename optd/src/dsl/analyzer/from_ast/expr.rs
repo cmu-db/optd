@@ -9,7 +9,7 @@ use crate::dsl::analyzer::hir::{
     BinOp, CoreData, Expr, ExprKind, FunKind, Identifier, LetBinding, Literal, TypedSpan, UnaryOp,
 };
 use crate::dsl::analyzer::type_checks::converter::create_function_type;
-use crate::dsl::analyzer::type_checks::registry::{Type, TypeKind};
+use crate::dsl::analyzer::type_checks::registry::{Generic, Type, TypeKind};
 use crate::dsl::parser::ast::{
     self, BinOp as AstBinOp, Expr as AstExpr, Literal as AstLiteral, PostfixOp,
 };
@@ -26,7 +26,7 @@ impl ASTConverter {
     pub(super) fn convert_expr(
         &mut self,
         spanned_expr: &Spanned<AstExpr>,
-        generics: &HashMap<Identifier, usize>,
+        generics: &HashMap<Identifier, Generic>,
     ) -> Result<Expr<TypedSpan>, Box<AnalyzerErrorKind>> {
         use TypeKind::*;
 
@@ -142,7 +142,7 @@ impl ASTConverter {
         op: &AstBinOp,
         right: &Spanned<AstExpr>,
         span: &Span,
-        generics: &HashMap<Identifier, usize>,
+        generics: &HashMap<Identifier, Generic>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         use BinOp::*;
 
@@ -237,7 +237,7 @@ impl ASTConverter {
         &mut self,
         op: &ast::UnaryOp,
         operand: &Spanned<AstExpr>,
-        generics: &HashMap<Identifier, usize>,
+        generics: &HashMap<Identifier, Generic>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let hir_operand = self.convert_expr(operand, generics)?;
 
@@ -254,7 +254,7 @@ impl ASTConverter {
         field: &Spanned<ast::Field>,
         init: &Spanned<AstExpr>,
         body: &Spanned<AstExpr>,
-        generics: &HashMap<Identifier, usize>,
+        generics: &HashMap<Identifier, Generic>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let hir_init = self.convert_expr(init, generics)?;
         let hir_body = self.convert_expr(body, generics)?;
@@ -271,7 +271,7 @@ impl ASTConverter {
         &mut self,
         scrutinee: &Spanned<AstExpr>,
         arms: &[Spanned<ast::MatchArm>],
-        generics: &HashMap<Identifier, usize>,
+        generics: &HashMap<Identifier, Generic>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let hir_scrutinee = self.convert_expr(scrutinee, generics)?;
         let hir_arms = self.convert_match_arms(arms, generics)?;
@@ -284,7 +284,7 @@ impl ASTConverter {
         condition: &Spanned<AstExpr>,
         then_branch: &Spanned<AstExpr>,
         else_branch: &Spanned<AstExpr>,
-        generics: &HashMap<Identifier, usize>,
+        generics: &HashMap<Identifier, Generic>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let hir_condition = self.convert_expr(condition, generics)?;
         let hir_then = self.convert_expr(then_branch, generics)?;
@@ -300,7 +300,7 @@ impl ASTConverter {
     fn convert_expr_list(
         &mut self,
         elements: &[Spanned<AstExpr>],
-        generics: &HashMap<Identifier, usize>,
+        generics: &HashMap<Identifier, Generic>,
     ) -> Result<Vec<Arc<Expr<TypedSpan>>>, Box<AnalyzerErrorKind>> {
         let mut hir_elements = Vec::with_capacity(elements.len());
 
@@ -315,7 +315,7 @@ impl ASTConverter {
     fn convert_array(
         &mut self,
         elements: &[Spanned<AstExpr>],
-        generics: &HashMap<Identifier, usize>,
+        generics: &HashMap<Identifier, Generic>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let hir_elements = self.convert_expr_list(elements, generics)?;
         Ok(CoreExpr(CoreData::Array(hir_elements)))
@@ -324,7 +324,7 @@ impl ASTConverter {
     fn convert_tuple(
         &mut self,
         elements: &[Spanned<AstExpr>],
-        generics: &HashMap<Identifier, usize>,
+        generics: &HashMap<Identifier, Generic>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let hir_elements = self.convert_expr_list(elements, generics)?;
         Ok(CoreExpr(CoreData::Tuple(hir_elements)))
@@ -333,7 +333,7 @@ impl ASTConverter {
     fn convert_map(
         &mut self,
         entries: &[(Spanned<AstExpr>, Spanned<AstExpr>)],
-        generics: &HashMap<Identifier, usize>,
+        generics: &HashMap<Identifier, Generic>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let mut hir_entries = Vec::with_capacity(entries.len());
 
@@ -382,7 +382,7 @@ impl ASTConverter {
         name: &Spanned<Identifier>,
         args: &[Spanned<AstExpr>],
         span: &Span,
-        generics: &HashMap<Identifier, usize>,
+        generics: &HashMap<Identifier, Generic>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         self.validate_constructor(name, span, args.len())?;
 
@@ -394,7 +394,7 @@ impl ASTConverter {
         &mut self,
         params: &[(Identifier, Type)],
         body: &Spanned<AstExpr>,
-        generics: &HashMap<Identifier, usize>,
+        generics: &HashMap<Identifier, Generic>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let param_names = params.iter().map(|(name, _)| name.clone()).collect();
         let hir_body = self.convert_expr(body, generics)?;
@@ -409,7 +409,7 @@ impl ASTConverter {
         &mut self,
         expr: &Spanned<AstExpr>,
         op: &PostfixOp,
-        generics: &HashMap<Identifier, usize>,
+        generics: &HashMap<Identifier, Generic>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let hir_expr = self.convert_expr(expr, generics)?;
 
@@ -443,7 +443,7 @@ impl ASTConverter {
     fn convert_fail(
         &mut self,
         error_expr: &Spanned<AstExpr>,
-        generics: &HashMap<Identifier, usize>,
+        generics: &HashMap<Identifier, Generic>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let hir_error = self.convert_expr(error_expr, generics)?;
 
@@ -453,7 +453,7 @@ impl ASTConverter {
     fn convert_block(
         &mut self,
         block: &Spanned<AstExpr>,
-        generics: &HashMap<Identifier, usize>,
+        generics: &HashMap<Identifier, Generic>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let hir_expr = self.convert_expr(block, generics)?;
 

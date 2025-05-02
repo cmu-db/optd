@@ -46,7 +46,7 @@ pub enum TypeKind {
 
     // User types.
     Adt(Identifier),
-    Generic(usize), // Generic types, with unique id to distinguish.
+    Gen(Generic),
 
     // Composite types.
     Array(Type),
@@ -64,6 +64,10 @@ pub enum TypeKind {
     EqHash,     // For types that support equality and hashing.
     Arithmetic, // For types that support arithmetic operations.
 }
+
+/// Represents a generic type with an optional bound.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Generic(pub usize, pub Option<Type>);
 
 /// Represents a type, potentially with span information.
 ///
@@ -417,8 +421,8 @@ impl TypeRegistry {
         let span = ty.span.clone();
 
         let kind = match &*ty.value {
-            Generic(generic_id) => {
-                let key = (constraint_id, *generic_id);
+            Gen(Generic(id, bound)) => {
+                let key = (constraint_id, *id);
 
                 let next_id = if ascending {
                     self.new_unknown_asc()
