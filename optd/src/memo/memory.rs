@@ -50,10 +50,10 @@ pub struct MemoryMemo {
     /// The shared next unique id to be used for goals, groups, logical expressions, and physical expressions.
     next_shared_id: i64,
 
-    repr_group: Representative<GroupId>,
-    repr_goal: Representative<GoalId>,
-    repr_logical_expr: Representative<LogicalExpressionId>,
-    repr_physical_expr: Representative<PhysicalExpressionId>,
+    repr_group: UnionFind<GroupId>,
+    repr_goal: UnionFind<GoalId>,
+    repr_logical_expr: UnionFind<LogicalExpressionId>,
+    repr_physical_expr: UnionFind<PhysicalExpressionId>,
 
     transform_dependency: HashMap<LogicalExpressionId, HashMap<TransformationRule, RuleDependency>>,
     implement_dependency:
