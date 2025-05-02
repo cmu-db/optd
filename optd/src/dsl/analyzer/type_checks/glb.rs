@@ -1,5 +1,5 @@
 use super::registry::{Type, TypeRegistry};
-use crate::dsl::analyzer::type_checks::registry::{Generic, TypeKind};
+use crate::dsl::analyzer::type_checks::registry::TypeKind;
 
 impl TypeRegistry {
     /// Finds the greatest lower bound (GLB) of two types.
@@ -13,12 +13,8 @@ impl TypeRegistry {
     /// 4. For ADTs, it finds the more specific of the two types if one is a subtype of the other, given
     ///    the absence of multiple inheritance within ADTs.
     /// 5. For generic types:
-    ///    - For the same generic type parameter (same ID), the GLB is that generic parameter.
-    ///    - For different generic type parameters with bounds, the GLB is computed based on bound compatibility.
-    ///      Bounds are ADTs only.
-    ///    - For a generic with bound and a concrete type:
-    ///      * If the concrete type satisfies the bound (T <: B), the concrete type is the GLB.
-    ///      * If the bound satisfies the concrete type (B <: T), the generic is the GLB (bidirectional bound checking).
+    ///    - If either type is generic, check if one is a subtype of the other and return the subtype.
+    ///    - If no subtype relationship exists, return Nothing.
     /// 6. For wrapper types:
     ///    - Optional(T) and Optional(U) yields Optional(GLB(T, U)).
     ///    - Optional(T) and U yields GLB(T, U).
@@ -63,20 +59,14 @@ impl TypeRegistry {
             }
 
             // Generic types: just check if one is a subtype of the other.
-            (Gen(Generic(id1, _)), Gen(Generic(id2, _))) if id1 == id2 => {
-                return type1.clone();
-            }
-            (Gen(Generic(_, Some(bound))), _) => {
-                if self.is_subtype_infer(type2, bound, has_changed) {
+            (Gen(_), _) | (_, Gen(_)) => {
+                if self.is_subtype_infer(type1, type2, has_changed) {
+                    return type1.clone();
+                } else if self.is_subtype_infer(type2, type1, has_changed) {
                     return type2.clone();
                 } else {
-                    return type1.clone();
+                    return Nothing.into();
                 }
-            }
-            (other, Gen(Generic(_, Some(bound))))
-                if self.is_subtype_infer(type1, bound, has_changed) =>
-            {
-                other.clone()
             }
 
             // Nothing is the bottom type - GLB with anything is Nothing.
@@ -256,7 +246,7 @@ impl TypeRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dsl::analyzer::type_checks::lub::tests::setup_type_hierarchy;
+    use crate::dsl::analyzer::type_checks::{lub::tests::setup_type_hierarchy, registry::Generic};
     use TypeKind::*;
 
     /// Helper function to simplify GLB assertions
@@ -752,7 +742,6 @@ mod tests {
         // Create generic types with ADT bounds
         let generic_1_mammals = Gen(Generic(1, Some(mammals_type.clone()))).into();
         let generic_2_dog = Gen(Generic(2, Some(dog_type.clone()))).into();
-        let generic_3_mammals = Gen(Generic(3, Some(mammals_type.clone()))).into();
 
         // Test case 1: Same generic ID is its own GLB
         assert_glb_eq(
@@ -762,26 +751,7 @@ mod tests {
             Gen(Generic(1, Some(mammals_type.clone()))),
         );
 
-        // Test case 2: Different generics with compatible bounds (bidirectional)
-        // Dog <: Mammals, so generic with Dog bound is more specific
-        assert_glb_eq(
-            &mut reg,
-            &generic_1_mammals,
-            &generic_2_dog,
-            *generic_2_dog.value.clone(),
-        );
-
-        // Test case 3: Different generics with same bounds
-        assert_glb_eq(
-            &mut reg,
-            &generic_1_mammals,
-            &generic_3_mammals,
-            *generic_3_mammals.value.clone(),
-        ); // Second one is chosen
-
-        // Test case 4: Between concrete types and generic types with bounds.
-        // When Dog <: Mammals, and we have Generic<Mammals>, the GLB should be Dog
-        // because Dog is more specific than Generic<Mammals>.
+        // Test case 2: Dog <: Mammals, so Dog is more specific
         assert_glb_eq(
             &mut reg,
             &dog_type,
@@ -789,8 +759,18 @@ mod tests {
             Adt("Dog".to_string()),
         );
 
-        // When Animals >: Mammals, and we have Generic<Mammals>, the GLB should be Generic<Mammals>
-        // because Generic<Mammals> is more specific than Animals.
+        // Test case 3: Generic with Dog bound is more specific than Generic with Mammals bound
+        assert_glb_eq(
+            &mut reg,
+            &generic_1_mammals,
+            &generic_2_dog,
+            Gen(Generic(2, Some(dog_type.clone()))),
+        );
+
+        // Test case 4: No relationship between Cat and generic with Dog bound
+        assert_glb_nothing(&mut reg, &cat_type, &generic_2_dog);
+
+        // Test case 5: Animals >: Mammals, so generic with Mammals bound is more specific
         assert_glb_eq(
             &mut reg,
             &animals_type,
@@ -798,14 +778,21 @@ mod tests {
             Gen(Generic(1, Some(mammals_type.clone()))),
         );
 
-        // Case 4.3: No relationship - Dog and Cat
-        assert_glb_nothing(&mut reg, &cat_type, &generic_2_dog);
+        // Test case 6: Generic with no bound
+        let generic_unbounded = Gen(Generic(10, Option::None)).into();
 
-        // Test case 5: Invalid generic bounds (non-ADT)
-        let invalid_generic = Gen(Generic(4, Some(I64.into()))).into();
-        assert_glb_nothing(&mut reg, &dog_type, &invalid_generic);
+        // Test unbounded generic with another type - just use subtype checks
+        assert_glb_nothing(&mut reg, &generic_unbounded, &dog_type);
 
-        // Test case 6: Container types with generics
+        // Test unbounded generic with itself
+        assert_glb_eq(
+            &mut reg,
+            &generic_unbounded,
+            &generic_unbounded,
+            Gen(Generic(10, Option::None)),
+        );
+
+        // Test case 7: Container types with generics
         let array_generic_mammals = Array(generic_1_mammals.clone()).into();
         let array_dog = Array(dog_type.clone()).into();
 
@@ -816,7 +803,7 @@ mod tests {
             Array(dog_type.clone()),
         );
 
-        // Test case 7: Complex types with generics
+        // Test case 8: Complex types with generics
         let map_generic_mammals_dog = Map(generic_1_mammals.clone(), dog_type.clone()).into();
         let map_animals_dog = Map(animals_type.clone(), dog_type.clone()).into();
 
@@ -827,7 +814,7 @@ mod tests {
             Map(animals_type.clone(), dog_type.clone()),
         );
 
-        // Test case 8: Optional with generics
+        // Test case 9: Optional with generics
         let optional_generic_mammals = Optional(generic_1_mammals.clone()).into();
         let optional_dog = Optional(dog_type.clone()).into();
 
@@ -836,29 +823,6 @@ mod tests {
             &optional_generic_mammals,
             &optional_dog,
             Optional(dog_type.clone()),
-        );
-    }
-
-    #[test]
-    fn test_greatest_lower_bound_generic_with_no_bounds() {
-        let mut reg = setup_type_hierarchy();
-
-        // Set up ADT types for testing
-        let dog_type = Adt("Dog".to_string()).into();
-
-        // Create unbounded generic
-        let generic_unbounded = Gen(Generic(1, Option::None)).into();
-
-        // Test unbounded generic with concrete type
-        // Since there's no bound, no relationship can be established
-        assert_glb_nothing(&mut reg, &generic_unbounded, &dog_type);
-
-        // Test unbounded generic with itself
-        assert_glb_eq(
-            &mut reg,
-            &generic_unbounded,
-            &generic_unbounded,
-            Gen(Generic(1, Option::None)),
         );
     }
 }

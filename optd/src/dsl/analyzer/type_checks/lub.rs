@@ -1,8 +1,5 @@
 use super::registry::{Type, TypeRegistry};
-use crate::dsl::analyzer::{
-    hir::Identifier,
-    type_checks::registry::{Generic, TypeKind},
-};
+use crate::dsl::analyzer::{hir::Identifier, type_checks::registry::TypeKind};
 use std::collections::HashSet;
 
 impl TypeRegistry {
@@ -14,11 +11,8 @@ impl TypeRegistry {
     /// 2. For container types (Array, Tuple, etc.), it applies covariance rules.
     /// 3. For function (and Map) types, it uses contravariance for parameters and covariance for return types.
     /// 4. For generic types:
-    ///    - For the same generic type parameter (same ID), the LUB is that generic parameter.
-    ///    - For different generic type parameters with bounds, we create a new generic type parameter
-    ///      with the LUB of their bounds as its bound.
-    ///    - For a generic with bound and a concrete type, if the generic bound is a supertype of the
-    ///      concrete type, the generic is the LUB.
+    ///    - If either type is generic, check if one is a supertype of the other and return the supertype.
+    ///    - If no supertype relationship exists between the generics, return Universe.
     /// 5. For native trait types (Concat, EqHash, Arithmetic), the result is the trait only if both types
     ///    implement it, and at least one of the types is the trait itself.
     /// 6. For ADT types, it finds the closest common supertype in the type hierarchy.
@@ -62,35 +56,15 @@ impl TypeRegistry {
                 return self.least_upper_bound(type1, &bound_unknown, has_changed);
             }
 
-            // Handle generics.
-            // Case 1: Same generics - they're identical types.
-            (Gen(Generic(id1, _)), Gen(Generic(id2, _))) if id1 == id2 => {
-                return type1.clone();
-            }
-
-            // Case 2: Different generic IDs with bounds - compute LUB of bounds.
-            (Gen(Generic(_, Some(bound1))), Gen(Generic(_, Some(bound2)))) => {
-                let lub_bound = self.least_upper_bound(bound1, bound2, has_changed);
-                if matches!(*lub_bound.value, Universe) {
-                    Universe // Normalize to Universe rather than `Gen(#id): Universe`.
+            // Generic types: just check if one is a supertype of the other.
+            (Gen(_), _) | (_, Gen(_)) => {
+                if self.is_subtype_infer(type1, type2, has_changed) {
+                    return type2.clone();
+                } else if self.is_subtype_infer(type2, type1, has_changed) {
+                    return type1.clone();
                 } else {
-                    let new_gen = Gen(Generic(self.next_id, Some(lub_bound)));
-                    self.next_id += 1;
-                    new_gen
+                    return Universe.into();
                 }
-            }
-
-            // Case 3: Generic with bound vs concrete type - check if supertype.
-            // If the concrete type is a subtype of the bound, the generic is the LUB
-            (Gen(Generic(_, Some(bound))), _)
-                if self.is_subtype_infer(type2, bound, has_changed) =>
-            {
-                return type1.clone();
-            }
-            (_, Gen(Generic(_, Some(bound))))
-                if self.is_subtype_infer(type1, bound, has_changed) =>
-            {
-                return type2.clone();
             }
 
             // Universe is the top type - LUB(Universe, T) = Universe.
@@ -323,8 +297,9 @@ impl TypeRegistry {
 pub mod tests {
     use super::*;
     use crate::dsl::{
-        analyzer::type_checks::registry::type_registry_tests::{
-            create_product_adt, create_sum_adt,
+        analyzer::type_checks::registry::{
+            Generic,
+            type_registry_tests::{create_product_adt, create_sum_adt},
         },
         parser::ast::Type as AstType,
     };
@@ -1014,6 +989,114 @@ pub mod tests {
                 I64.into(),
                 Optional(Adt("Mammals".to_string()).into()).into(),
             ),
+        );
+    }
+
+    #[test]
+    fn test_generic_lub() {
+        let mut reg = setup_type_hierarchy();
+
+        // Set up ADT types for testing
+        let dog_type: Type = Adt("Dog".to_string()).into();
+        let cat_type = Adt("Cat".to_string()).into();
+        let mammals_type: Type = Adt("Mammals".to_string()).into();
+        let animals_type = Adt("Animals".to_string()).into();
+
+        // Create generic types with ADT bounds
+        let generic_1_mammals = Gen(Generic(1, Some(mammals_type.clone()))).into();
+        let generic_2_dog = Gen(Generic(2, Some(dog_type.clone()))).into();
+        let generic_3_mammals = Gen(Generic(3, Some(mammals_type.clone()))).into();
+
+        // Test case 1: Same generic ID is its own LUB
+        assert_lub_eq(
+            &mut reg,
+            &generic_1_mammals,
+            &generic_1_mammals,
+            Gen(Generic(1, Some(mammals_type.clone()))),
+        );
+
+        // Test case 2: Dog <: Mammals, so Mammals is the LUB
+        assert_lub_eq(
+            &mut reg,
+            &dog_type,
+            &generic_1_mammals,
+            Gen(Generic(1, Some(mammals_type.clone()))),
+        );
+
+        // Test case 3: Generic with Mammals bound is more general than Generic with Dog bound
+        assert_lub_eq(
+            &mut reg,
+            &generic_1_mammals,
+            &generic_2_dog,
+            Gen(Generic(1, Some(mammals_type.clone()))),
+        );
+
+        // Test case 4: Different generics with same bounds
+        // This depends on is_subtype_infer implementation
+        let mut has_changed = false;
+        let result =
+            reg.least_upper_bound(&generic_1_mammals, &generic_3_mammals, &mut has_changed);
+
+        // Since these have the same bounds but different IDs, one of them should be returned
+        // based on the implementation of is_subtype_infer
+        assert!(result == generic_1_mammals || result == generic_3_mammals);
+
+        // Test case 5: No relationship between Cat and generic with Dog bound
+        assert_lub_universe(&mut reg, &cat_type, &generic_2_dog);
+
+        // Test case 6: Animals >: Mammals, so Animals is more general
+        assert_lub_eq(
+            &mut reg,
+            &animals_type,
+            &generic_1_mammals,
+            *animals_type.value.clone(),
+        );
+
+        // Test case 7: Generic with no bound
+        let generic_unbounded = Gen(Generic(10, Option::None)).into();
+
+        // Test unbounded generic with another type - just use subtype checks
+        assert_lub_universe(&mut reg, &generic_unbounded, &dog_type);
+
+        // Test unbounded generic with itself
+        assert_lub_eq(
+            &mut reg,
+            &generic_unbounded,
+            &generic_unbounded,
+            Gen(Generic(10, Option::None)),
+        );
+
+        // Test case 8: Container types with generics
+        let array_generic_mammals = Array(generic_1_mammals.clone()).into();
+        let array_dog = Array(dog_type.clone()).into();
+
+        assert_lub_eq(
+            &mut reg,
+            &array_generic_mammals,
+            &array_dog,
+            Array(generic_1_mammals.clone()),
+        );
+
+        // Test case 9: Complex types with generics
+        let map_generic_mammals_dog = Map(generic_1_mammals.clone(), dog_type.clone()).into();
+        let map_animals_dog = Map(animals_type.clone(), dog_type.clone()).into();
+
+        assert_lub_eq(
+            &mut reg,
+            &map_generic_mammals_dog,
+            &map_animals_dog,
+            Map(generic_1_mammals.clone(), dog_type.clone()),
+        );
+
+        // Test case 10: Optional with generics
+        let optional_generic_mammals = Optional(generic_1_mammals.clone()).into();
+        let optional_dog = Optional(dog_type.clone()).into();
+
+        assert_lub_eq(
+            &mut reg,
+            &optional_generic_mammals,
+            &optional_dog,
+            Optional(generic_1_mammals.clone()),
         );
     }
 }

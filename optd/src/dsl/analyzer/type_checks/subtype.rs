@@ -794,6 +794,50 @@ mod tests {
     }
 
     #[test]
+    fn test_container_generic_subtyping() {
+        let mut reg = TypeRegistry::default();
+
+        // Set up a type hierarchy for testing
+        let animal = create_product_adt("Animal", vec![]);
+        let dog = create_product_adt("Dog", vec![]);
+        let cat = create_product_adt("Cat", vec![]);
+
+        let animals_enum = create_sum_adt("Animals", vec![animal, dog.clone(), cat.clone()]);
+        reg.register_adt(&animals_enum).unwrap();
+
+        // Create generic types with bounds
+        let generic_animals: Type = Gen(Generic(1, Some(Adt("Animals".to_string()).into()))).into();
+        let generic_dog: Type = Gen(Generic(2, Some(Adt("Dog".to_string()).into()))).into();
+
+        // Test container types with generics
+
+        // Array<Gen<Dog>> <: Array<Gen<Animals>> because Gen<Dog> <: Gen<Animals>
+        assert!(reg.is_subtype(
+            &Array(generic_dog.clone()).into(),
+            &Array(generic_animals.clone()).into()
+        ));
+
+        // Map<String, Gen<Dog>> <: Map<String, Gen<Animals>> because Gen<Dog> <: Gen<Animals>
+        assert!(reg.is_subtype(
+            &Map(String.into(), generic_dog.clone()).into(),
+            &Map(String.into(), generic_animals.clone()).into()
+        ));
+
+        // Map<Gen<Animals>, String> <: Map<Gen<Dog>, String> because Gen<Dog> <: Gen<Animals>
+        // (contravariance for Map keys)
+        assert!(reg.is_subtype(
+            &Map(generic_animals.clone(), String.into()).into(),
+            &Map(generic_dog.clone(), String.into()).into()
+        ));
+
+        // Function with generics: (Gen<Animals> -> String) <: (Gen<Dog> -> String)
+        assert!(reg.is_subtype(
+            &Closure(generic_animals.clone(), String.into()).into(),
+            &Closure(generic_dog.clone(), String.into()).into()
+        ));
+    }
+
+    #[test]
     fn test_none_subtyping() {
         let mut reg = TypeRegistry::default();
 
