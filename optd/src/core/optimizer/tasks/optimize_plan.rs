@@ -1,9 +1,7 @@
 use futures::{SinkExt, channel::mpsc};
 
 use crate::{
-    core::cir::{Goal, LogicalPlan, PhysicalExpressionId, PhysicalPlan, PhysicalProperties},
-    core::error::Error,
-    core::optimizer::{Optimizer, tasks::SourceTaskId},
+    core::{cir::{Cost, Goal, LogicalPlan, PhysicalExpressionId, PhysicalPlan, PhysicalProperties}, error::Error, optimizer::{tasks::SourceTaskId, Optimizer}},
     memo::Memoize,
 };
 
@@ -16,7 +14,7 @@ pub struct OptimizePlanTask {
     pub logical_plan: LogicalPlan,
 
     /// Channel to send the optimized physical plan back to the caller.
-    pub physical_plan_tx: mpsc::Sender<PhysicalPlan>,
+    pub physical_plan_tx: mpsc::Sender<(PhysicalPlan, Cost)>,
 
     /// The only dependency to get the best plans from.
     pub optimize_goal_in: TaskId,
@@ -25,7 +23,7 @@ pub struct OptimizePlanTask {
 impl OptimizePlanTask {
     pub fn new(
         logical_plan: LogicalPlan,
-        physical_plan_tx: mpsc::Sender<PhysicalPlan>,
+        physical_plan_tx: mpsc::Sender<(PhysicalPlan, Cost)>,
         optimize_goal_in: TaskId,
     ) -> Self {
         Self {
@@ -39,12 +37,13 @@ impl OptimizePlanTask {
 impl<M: Memoize> Optimizer<M> {
     pub async fn emit_best_physical_plan(
         &mut self,
-        mut physical_plan_tx: mpsc::Sender<PhysicalPlan>,
+        mut physical_plan_tx: mpsc::Sender<(PhysicalPlan, Cost)>,
+        cost: Cost,
         physical_expr_id: PhysicalExpressionId,
     ) -> Result<(), Error> {
         let physical_plan = self.egest_best_plan(physical_expr_id).await?.unwrap();
         tokio::spawn(async move {
-            physical_plan_tx.send(physical_plan).await.unwrap();
+            physical_plan_tx.send((physical_plan, cost)).await.unwrap();
         });
         Ok(())
     }
@@ -52,7 +51,7 @@ impl<M: Memoize> Optimizer<M> {
     pub async fn create_optimize_plan_task(
         &mut self,
         logical_plan: LogicalPlan,
-        physical_plan_tx: mpsc::Sender<PhysicalPlan>,
+        physical_plan_tx: mpsc::Sender<(PhysicalPlan, Cost)>,
     ) -> Result<TaskId, Error> {
         let task_id = self.next_task_id();
         println!("Creating optimize plan task");
@@ -74,8 +73,9 @@ impl<M: Memoize> Optimizer<M> {
         );
         let task = OptimizePlanTask::new(logical_plan, physical_plan_tx, optimize_goal_in);
         println!("Created optimize plan task");
-        if let Some((physical_expr_id, _)) = best_costed {
-            self.emit_best_physical_plan(task.physical_plan_tx.clone(), physical_expr_id)
+        if let Some((physical_expr_id, cost)) = best_costed {
+            println!("Emitting best physical plan for {:?}, cost {:?}", physical_expr_id, cost);
+            self.emit_best_physical_plan(task.physical_plan_tx.clone(), cost, physical_expr_id)
                 .await?;
         }
 

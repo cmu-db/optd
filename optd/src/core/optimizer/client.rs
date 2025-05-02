@@ -4,8 +4,7 @@ use futures::{
 };
 
 use crate::{
-    core::cir::{LogicalPlan, PhysicalPlan},
-    core::error::Error,
+    core::{cir::{Cost, LogicalPlan, PhysicalPlan}, error::Error},
     memo::Memoize,
 };
 
@@ -18,7 +17,7 @@ pub struct QueryInstance {
     id: QueryInstanceId,
     logical_plan: LogicalPlan,
     client_tx: mpsc::Sender<ClientMessage>,
-    physical_plan_rx: mpsc::Receiver<PhysicalPlan>,
+    physical_plan_rx: mpsc::Receiver<(PhysicalPlan, Cost)>,
 }
 
 impl QueryInstance {
@@ -33,7 +32,7 @@ impl QueryInstance {
     }
 
     /// Receives the best physical plan for this query instance.
-    pub async fn recv_best_plan(&mut self) -> Result<PhysicalPlan, Error> {
+    pub async fn recv_best_plan(&mut self) -> Result<(PhysicalPlan, Cost), Error> {
         let physical_plan = self
             .physical_plan_rx
             .next()
@@ -106,7 +105,7 @@ pub enum ClientMessage {
         /// The logical plan to be ingested.
         logical_plan: LogicalPlan,
 
-        physical_plan_tx: mpsc::Sender<PhysicalPlan>,
+        physical_plan_tx: mpsc::Sender<(PhysicalPlan, Cost)>,
         /// The channel to send the query instance ID back to the caller.
         id_tx: oneshot::Sender<QueryInstanceId>,
     },

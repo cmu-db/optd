@@ -23,6 +23,7 @@ impl<M: Memoize> Optimizer<M> {
                     let task = self.tasks.get(task_id).unwrap().as_optimize_plan();
                     self.emit_best_physical_plan(
                         task.physical_plan_tx.clone(),
+                        result.best_cost,
                         result.physical_expr_id,
                     )
                     .await?;

@@ -520,7 +520,7 @@ mod tests {
             let mut query_instance = client.create_query_instance(logical_plan).await.unwrap();
             let expected = physical_scan.clone();
             join_set.spawn(async move {
-                let physical_plan = query_instance.recv_best_plan().await.unwrap();
+                let (physical_plan, _) = query_instance.recv_best_plan().await.unwrap();
                 println!("Best plan: {:?}", physical_plan);
 
                 assert_eq!(&physical_plan, expected.as_ref());
@@ -544,7 +544,7 @@ mod tests {
             let mut query_instance = client.create_query_instance(logical_plan).await.unwrap();
             let expected = enforce_sort.clone();
             join_set.spawn(async move {
-                let physical_plan = query_instance.recv_best_plan().await.unwrap();
+                let (physical_plan, _) = query_instance.recv_best_plan().await.unwrap();
 
                 assert_eq!(&physical_plan, expected.as_ref());
             })
@@ -583,7 +583,7 @@ mod tests {
             let mut query_instance = client.create_query_instance(logical_plan).await.unwrap();
             let expected = index_scan;
             tokio::spawn(async move {
-                let physical_plan = query_instance.recv_best_plan().await.unwrap();
+                let (physical_plan, _) = query_instance.recv_best_plan().await.unwrap();
 
                 assert_eq!(&physical_plan, expected.as_ref());
             })
@@ -648,6 +648,130 @@ mod tests {
         // });
         println!("Creating query instance");
         let mut query_instance = client.create_query_instance(leaf_node1).await.unwrap();
+        println!("Query instance created");
+        let physical_plan = query_instance.recv_best_plan().await.unwrap();
+        println!("Best plan: {:?}", physical_plan);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_scalar_optimizer2() -> Result<(), Error> {
+        println!("Starting test");
+        // Append the required core type declarations to each test program.
+        let file_path = PathBuf::from(
+            "/Users/sarveshtandon/Development/optd/optd/src/dsl/examples/scalar_impl.opt",
+        );
+
+        let config = Config::new(file_path);
+        let udfs = HashMap::new();
+        let hir = compile_hir(config, udfs).expect("Failed to compile hir");
+
+        let mut rule_book = RuleBook::default();
+        rule_book.add_transformation(TransformationRule("mult_commute".to_string()));
+        rule_book.add_transformation(TransformationRule("add_to_mult".to_string()));
+        rule_book.add_implementation(ImplementationRule("convert".to_string()));
+
+        let mut client = Optimizer::launch(MemoryMemo::default(), mock_catalog(), hir, rule_book);
+
+        let leaf_node1 = LogicalPlan(Operator {
+            tag: "Const".to_string(),
+            data: vec![OperatorData::Int64(10)],
+            children: vec![],
+        });
+        let leaf_node2 = LogicalPlan(Operator {
+            tag: "Const".to_string(),
+            data: vec![OperatorData::Int64(20)],
+            children: vec![],
+        });
+
+        let add_node = LogicalPlan(Operator {
+            tag: "Add".to_string(),
+            data: vec![],
+            children: vec![
+                Child::Singleton(Arc::new(leaf_node1)),
+                Child::Singleton(Arc::new(leaf_node2)),
+            ],
+        });
+
+        // let leaf_node3 = LogicalPlan(Operator {
+        //     tag: "Const".to_string(),
+        //     data: vec![OperatorData::Int64(3)],
+        //     children: vec![],
+        // });
+
+        // let logical_plan = LogicalPlan(Operator {
+        //     tag: "Add".to_string(),
+        //     data: vec![],
+        //     children: vec![
+        //         Child::Singleton(Arc::new(add_node)),
+        //         Child::Singleton(Arc::new(leaf_node3)),
+        //     ],
+        // });
+        println!("Creating query instance");
+        let mut query_instance = client.create_query_instance(add_node).await.unwrap();
+        println!("Query instance created");
+        let physical_plan = query_instance.recv_best_plan().await.unwrap();
+        println!("Best plan: {:?}", physical_plan);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_scalar_optimizer3() -> Result<(), Error> {
+        println!("Starting test");
+        // Append the required core type declarations to each test program.
+        let file_path = PathBuf::from(
+            "/Users/sarveshtandon/Development/optd/optd/src/dsl/examples/scalar_impl.opt",
+        );
+
+        let config = Config::new(file_path);
+        let udfs = HashMap::new();
+        let hir = compile_hir(config, udfs).expect("Failed to compile hir");
+
+        let mut rule_book = RuleBook::default();
+        rule_book.add_transformation(TransformationRule("mult_commute".to_string()));
+        rule_book.add_transformation(TransformationRule("add_to_mult".to_string()));
+        rule_book.add_implementation(ImplementationRule("convert".to_string()));
+
+        let mut client = Optimizer::launch(MemoryMemo::default(), mock_catalog(), hir, rule_book);
+
+        let leaf_node1 = LogicalPlan(Operator {
+            tag: "Const".to_string(),
+            data: vec![OperatorData::Int64(10)],
+            children: vec![],
+        });
+        let leaf_node2 = LogicalPlan(Operator {
+            tag: "Const".to_string(),
+            data: vec![OperatorData::Int64(20)],
+            children: vec![],
+        });
+
+        let add_node = LogicalPlan(Operator {
+            tag: "Add".to_string(),
+            data: vec![],
+            children: vec![
+                Child::Singleton(Arc::new(leaf_node1)),
+                Child::Singleton(Arc::new(leaf_node2)),
+            ],
+        });
+
+        // let leaf_node3 = LogicalPlan(Operator {
+        //     tag: "Const".to_string(),
+        //     data: vec![OperatorData::Int64(3)],
+        //     children: vec![],
+        // });
+
+        // let logical_plan = LogicalPlan(Operator {
+        //     tag: "Add".to_string(),
+        //     data: vec![],
+        //     children: vec![
+        //         Child::Singleton(Arc::new(add_node)),
+        //         Child::Singleton(Arc::new(leaf_node3)),
+        //     ],
+        // });
+        println!("Creating query instance");
+        let mut query_instance = client.create_query_instance(add_node).await.unwrap();
         println!("Query instance created");
         let physical_plan = query_instance.recv_best_plan().await.unwrap();
         println!("Best plan: {:?}", physical_plan);
