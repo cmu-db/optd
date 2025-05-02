@@ -2,7 +2,7 @@ use crate::{
     core::bridge::from_cir::costed_physical_to_value,
     core::cir::{Cost, PhysicalExpressionId},
     core::error::Error,
-    core::memo::Memoize,
+    memo::Memoize,
     core::optimizer::{JobId, Optimizer},
 };
 

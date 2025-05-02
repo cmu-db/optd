@@ -8,7 +8,7 @@ use crate::{
         Child, GoalMemberId, Operator, PartialPhysicalPlan, PhysicalExpressionId, PhysicalPlan,
     },
     core::error::Error,
-    core::memo::Memoize,
+    memo::Memoize,
 };
 
 use super::Optimizer;

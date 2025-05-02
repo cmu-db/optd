@@ -7,7 +7,7 @@ use crate::{
         PartialPhysicalPlan, PhysicalExpressionId,
     },
     core::error::Error,
-    core::memo::Memoize,
+    memo::Memoize,
 };
 
 use crate::dsl::{

@@ -6,7 +6,7 @@ use crate::dsl::{
 use crate::{
     core::cir::{Cost, GoalId},
     core::error::Error,
-    core::memo::Memoize,
+    memo::Memoize,
     core::optimizer::{EngineMessageKind, Optimizer},
 };
 

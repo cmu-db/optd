@@ -1,7 +1,7 @@
 use crate::{
     core::cir::{GroupId, LogicalExpressionId},
     core::error::Error,
-    core::memo::Memoize,
+    memo::Memoize,
     core::optimizer::Optimizer,
 };
 

@@ -4,8 +4,8 @@ use crate::core::cir::{
     PhysicalExpressionId, RuleBook,
 };
 use crate::core::error::Error;
-use crate::core::memo::Memoize;
 use crate::dsl::analyzer::hir::context::Context;
+use crate::memo::Memoize;
 use EngineMessageKind::*;
 pub use client::{Client, QueryInstance};
 use client::{ClientMessage, QueryInstanceId};
@@ -296,13 +296,11 @@ mod tests {
     use super::*;
     use crate::{
         catalog::CatalogError,
-        core::{
-            cir::{
-                Child, GoalMemberId, LogicalExpression, LogicalPlan, Operator, OperatorData,
-                PhysicalExpression, PhysicalPlan, PhysicalProperties, PropertiesData,
-            },
-            memo::memory::MemoryMemo,
+        core::cir::{
+            Child, GoalMemberId, LogicalExpression, LogicalPlan, Operator, OperatorData,
+            PhysicalExpression, PhysicalPlan, PhysicalProperties, PropertiesData,
         },
+        memo::memory::MemoryMemo,
     };
     #[derive(Debug)]
     struct MockCatalog;

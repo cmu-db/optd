@@ -6,8 +6,8 @@ use super::{Optimizer, tasks::Task};
 use crate::{
     core::cir::{GoalId, GroupId, ImplementationRule, LogicalExpressionId, TransformationRule},
     core::error::Error,
-    core::memo::{Memoize, MergeProducts},
     core::optimizer::tasks::TaskId,
+    memo::{Memoize, MergeProducts},
 };
 
 impl<M: Memoize> Optimizer<M> {
@@ -381,12 +381,8 @@ impl<M: Memoize> Optimizer<M> {
                     let all_tasks_for_this_expr = exprs_to_trans_tasks.get(expr).unwrap().clone();
                     for rule in self.rule_book.get_transformations().to_vec() {
                         if !all_tasks_for_this_expr.contains_key(&rule) {
-                            self.create_transform_expression_task(
-                                rule,
-                                *expr,
-                                *repr_group_task_id,
-                            )
-                            .await?;
+                            self.create_transform_expression_task(rule, *expr, *repr_group_task_id)
+                                .await?;
                         } else if all_tasks_for_this_expr.get(&rule).unwrap().len() == 1 {
                             let (task_id, task_expr_id) =
                                 all_tasks_for_this_expr.get(&rule).unwrap()[0];

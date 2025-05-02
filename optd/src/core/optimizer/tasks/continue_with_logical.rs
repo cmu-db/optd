@@ -2,7 +2,7 @@ use crate::{
     core::bridge::from_cir::partial_logical_to_value,
     core::cir::LogicalExpressionId,
     core::error::Error,
-    core::memo::Memoize,
+    memo::Memoize,
     core::optimizer::{JobId, Optimizer},
 };
 

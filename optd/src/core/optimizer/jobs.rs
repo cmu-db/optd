@@ -9,8 +9,8 @@ use crate::core::cir::{
     PartialLogicalPlan, PhysicalExpressionId, TransformationRule,
 };
 use crate::core::error::Error;
-use crate::core::memo::Memoize;
 use crate::dsl::engine::{Engine, EngineResponse};
+use crate::memo::Memoize;
 use EngineMessageKind::*;
 use futures::SinkExt;
 use futures::channel::mpsc;

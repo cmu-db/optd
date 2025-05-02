@@ -5,7 +5,7 @@ use crate::dsl::{
 
 use crate::{
     core::cir::GroupId,
-    core::memo::Memoize,
+    memo::Memoize,
     core::optimizer::{EngineMessageKind, Optimizer},
 };
 

@@ -1,6 +1,6 @@
 use futures::channel::{mpsc, oneshot::Canceled};
 
-use crate::core::memo::MemoizeError;
+use crate::memo::MemoizeError;
 
 /// all optd-core errors, defined in there respective modules,
 /// but everyone uses this common Error type for simplicity.

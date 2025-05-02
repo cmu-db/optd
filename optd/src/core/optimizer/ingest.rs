@@ -5,7 +5,7 @@ use crate::{
         PartialPhysicalPlan, PhysicalExpression,
     },
     core::error::Error,
-    core::memo::Memoize,
+    memo::Memoize,
 };
 use Child::*;
 use std::sync::Arc;

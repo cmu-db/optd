@@ -6,7 +6,7 @@ use futures::{
 use crate::{
     core::cir::{LogicalPlan, PhysicalPlan},
     core::error::Error,
-    core::memo::Memoize,
+    memo::Memoize,
 };
 
 /// Unique identifier for a query instance.
