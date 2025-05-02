@@ -119,7 +119,7 @@ pub fn function_parser()
 
     // Parse type parameter with optional bound
     let type_param_parser =
-        type_ident_parser.then(just(Token::Colon).ignore_then(type_ident_parser).or_not());
+        type_ident_parser.then(just(Token::Colon).ignore_then(type_parser()).or_not());
 
     // Parse optional generic type parameters like <A, B: Bound, C>
     let type_params = delimited_parser(
@@ -314,7 +314,7 @@ mod tests {
             assert_eq!(*type_param.value, "T");
             assert!(bound.is_some());
             if let Some(bound_val) = bound {
-                assert_eq!(*bound_val.value, "Comparable".to_string());
+                assert_eq!(*bound_val.value, Type::Identifier("Comparable".to_string()));
             }
 
             // Check parameters
@@ -406,7 +406,7 @@ mod tests {
             assert_eq!(*k_param.value, "K");
             assert!(k_bound.is_some());
             if let Some(bound) = k_bound {
-                assert_eq!(*bound.value, "Hashable".to_string());
+                assert_eq!(*bound.value, Type::Identifier("Hashable".to_string()));
             }
 
             // Check V parameter with no bound
@@ -503,7 +503,7 @@ mod tests {
             assert_eq!(*a_param.value, "A");
             assert!(a_bound.is_some());
             if let Some(bound) = a_bound {
-                assert_eq!(*bound.value, "Serializable".to_string());
+                assert_eq!(*bound.value, Type::Identifier("Serializable".to_string()));
             }
 
             // Check B parameter with Printable bound
@@ -511,7 +511,7 @@ mod tests {
             assert_eq!(*b_param.value, "B");
             assert!(b_bound.is_some());
             if let Some(bound) = b_bound {
-                assert_eq!(*bound.value, "Printable".to_string());
+                assert_eq!(*bound.value, Type::Identifier("Printable".to_string()));
             }
 
             // Check C parameter with no bound
@@ -902,7 +902,7 @@ mod tests {
             assert_eq!(*a_param.value, "A");
             assert!(a_bound.is_some());
             if let Some(bound) = a_bound {
-                assert_eq!(*bound.value, "Serializable".to_string());
+                assert_eq!(*bound.value, Type::Identifier("Serializable".to_string()));
             }
 
             // Check B parameter with no bound
@@ -915,7 +915,7 @@ mod tests {
             assert_eq!(*c_param.value, "C");
             assert!(c_bound.is_some());
             if let Some(bound) = c_bound {
-                assert_eq!(*bound.value, "Printable".to_string());
+                assert_eq!(*bound.value, Type::Identifier("Printable".to_string()));
             }
 
             // Check parameterss

@@ -3,7 +3,7 @@ use crate::dsl::analyzer::hir::context::Context;
 use crate::dsl::analyzer::hir::{Annotation, FunKind, Identifier};
 use crate::dsl::analyzer::hir::{CoreData, TypedSpan, Udf, Value};
 use crate::dsl::analyzer::type_checks::converter::create_function_type;
-use crate::dsl::analyzer::type_checks::registry::{Generic, Type, TypeKind, TypeRegistry};
+use crate::dsl::analyzer::type_checks::registry::{Generic, Type, TypeRegistry};
 use crate::dsl::parser::ast::Function;
 use crate::dsl::utils::span::Spanned;
 use FunKind::*;
@@ -68,13 +68,7 @@ impl ASTConverter {
                 // Convert and check bound.
                 let bound_ty = bound
                     .clone()
-                    .map(|b| {
-                        if !self.registry.subtypes.contains_key(&*b.value) {
-                            Err(AnalyzerErrorKind::new_undefined_type(name, &b.span))
-                        } else {
-                            Ok(TypeKind::Adt(name.clone()).into())
-                        }
-                    })
+                    .map(|b| self.convert_type(&b, &HashMap::new(), true))
                     .transpose()?;
 
                 // Assign ID and store.
