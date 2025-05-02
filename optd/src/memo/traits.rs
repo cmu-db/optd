@@ -1,6 +1,44 @@
 use super::{MemoResult, MergeProducts, PropagateBestExpression, TaskStatus};
 use crate::core::cir::*;
 
+/// A helper trait to help facilitate finding the representative IDs of elements.
+#[trait_variant::make(Send)]
+pub trait Representative {
+    /// Finds the representative group of a given group. The representative is usually tracked via a
+    /// Union-Find data structure.
+    ///
+    /// If the input group is already the representative, then the returned [`GroupId`] is equal to
+    /// the input [`GroupId`].
+    async fn find_repr_group(&self, group_id: GroupId) -> GroupId;
+
+    /// Finds the representative goal of a given goal. The representative is usually tracked via a
+    /// Union-Find data structure.
+    ///
+    /// If the input goal is already the representative, then the returned [`GoalId`] is equal to
+    /// the input [`GoalId`].
+    async fn find_repr_goal(&self, goal_id: GoalId) -> GoalId;
+
+    /// Finds the representative logical expression of a given expression. The representative is
+    /// usually tracked via a Union-Find data structure.
+    ///
+    /// If the input expression is already the representative, then the returned
+    /// [`LogicalExpressionId`] is equal to the input [`LogicalExpressionId`].
+    async fn find_repr_logical_expr(
+        &self,
+        logical_expr_id: LogicalExpressionId,
+    ) -> LogicalExpressionId;
+
+    /// Finds the representative physical expression of a given expression. The representative is
+    /// usually tracked via a Union-Find data structure.
+    ///
+    /// If the input expression is already the representative, then the returned
+    /// [`PhysicalExpressionId`] is equal to the input [`PhysicalExpressionId`].
+    async fn find_repr_physical_expr(
+        &self,
+        physical_expr_id: PhysicalExpressionId,
+    ) -> PhysicalExpressionId;
+}
+
 /// Core interface for memo-based query optimization.
 ///
 /// This trait defines the operations needed to store, retrieve, and manipulate
@@ -8,7 +46,7 @@ use crate::core::cir::*;
 /// query optimization. The memo stores logical and physical expressions by their IDs,
 /// manages expression properties, and tracks optimization status.
 #[trait_variant::make(Send)]
-pub trait Memoize: Send + Sync + 'static {
+pub trait Memoize: Representative + Sync {
     //
     // Logical expression and group operations.
     //
@@ -349,54 +387,4 @@ pub trait Memoize: Send + Sync + 'static {
         &self,
         physical_expr_id: PhysicalExpressionId,
     ) -> MemoResult<PhysicalExpression>;
-
-    //
-    // Representative ID operations.
-    //
-
-    /// Finds the representative group ID for a given group ID.
-    ///
-    /// # Parameters
-    /// * `group_id` - The group ID to find the representative for.
-    ///
-    /// # Returns
-    /// The representative group ID (which may be the same as the input if
-    /// it's already the representative).
-    async fn find_repr_group(&self, group_id: GroupId) -> MemoResult<GroupId>;
-
-    /// Finds the representative goal ID for a given goal ID.
-    ///
-    /// # Parameters
-    /// * `goal_id` - The goal ID to find the representative for.
-    ///
-    /// # Returns
-    /// The representative goal ID (which may be the same as the input if
-    /// it's already the representative).
-    async fn find_repr_goal(&self, goal_id: GoalId) -> MemoResult<GoalId>;
-
-    /// Finds the representative logical expression ID for a given logical expression ID.
-    ///
-    /// # Parameters
-    /// * `logical_expr_id` - The logical expression ID to find the representative for.
-    ///
-    /// # Returns
-    /// The representative logical expression ID (which may be the same as the input if
-    /// it's already the representative).
-    async fn find_repr_logical_expr(
-        &self,
-        logical_expr_id: LogicalExpressionId,
-    ) -> MemoResult<LogicalExpressionId>;
-
-    /// Finds the representative physical expression ID for a given physical expression ID.
-    ///
-    /// # Parameters
-    /// * `physical_expr_id` - The physical expression ID to find the representative for.
-    ///
-    /// # Returns
-    /// The representative physical expression ID (which may be the same as the input if
-    /// it's already the representative).
-    async fn find_repr_physical_expr(
-        &self,
-        physical_expr_id: PhysicalExpressionId,
-    ) -> MemoResult<PhysicalExpressionId>;
 }

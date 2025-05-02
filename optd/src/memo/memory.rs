@@ -120,6 +120,30 @@ impl GoalState {
     }
 }
 
+impl Representative for MemoryMemo {
+    async fn find_repr_group(&self, group_id: GroupId) -> GroupId {
+        self.repr_group.find(&group_id)
+    }
+
+    async fn find_repr_goal(&self, goal_id: GoalId) -> GoalId {
+        self.repr_goal.find(&goal_id)
+    }
+
+    async fn find_repr_logical_expr(
+        &self,
+        logical_expr_id: LogicalExpressionId,
+    ) -> LogicalExpressionId {
+        self.repr_logical_expr.find(&logical_expr_id)
+    }
+
+    async fn find_repr_physical_expr(
+        &self,
+        physical_expr_id: PhysicalExpressionId,
+    ) -> PhysicalExpressionId {
+        self.repr_physical_expr.find(&physical_expr_id)
+    }
+}
+
 impl Memoize for MemoryMemo {
     async fn merge_groups(
         &mut self,
@@ -133,7 +157,7 @@ impl Memoize for MemoryMemo {
         &self,
         group_id: GroupId,
     ) -> MemoResult<Option<LogicalProperties>> {
-        let group_id = self.find_repr_group(group_id).await?;
+        let group_id = self.find_repr_group(group_id).await;
         let group = self
             .groups
             .get(&group_id)
@@ -147,7 +171,7 @@ impl Memoize for MemoryMemo {
         group_id: GroupId,
         props: LogicalProperties,
     ) -> MemoResult<()> {
-        let group_id = self.find_repr_group(group_id).await?;
+        let group_id = self.find_repr_group(group_id).await;
         let group = self
             .groups
             .get_mut(&group_id)
@@ -161,7 +185,7 @@ impl Memoize for MemoryMemo {
         &self,
         group_id: GroupId,
     ) -> MemoResult<Vec<LogicalExpressionId>> {
-        let group_id = self.find_repr_group(group_id).await?;
+        let group_id = self.find_repr_group(group_id).await;
         let group = self
             .groups
             .get(&group_id)
@@ -171,7 +195,7 @@ impl Memoize for MemoryMemo {
     }
 
     async fn get_any_logical_expr(&self, group_id: GroupId) -> MemoResult<LogicalExpressionId> {
-        let group_id = self.find_repr_group(group_id).await?;
+        let group_id = self.find_repr_group(group_id).await;
         let group = self
             .groups
             .get(&group_id)
@@ -189,7 +213,7 @@ impl Memoize for MemoryMemo {
         &self,
         logical_expr_id: LogicalExpressionId,
     ) -> MemoResult<Option<GroupId>> {
-        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await?;
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await;
         let maybe_group_id = self.logical_expr_group_index.get(&logical_expr_id).cloned();
         Ok(maybe_group_id)
     }
@@ -208,7 +232,7 @@ impl Memoize for MemoryMemo {
         &self,
         goal_id: GoalId,
     ) -> MemoResult<Option<(PhysicalExpressionId, Cost)>> {
-        let goal_id = self.find_repr_goal(goal_id).await?;
+        let goal_id = self.find_repr_goal(goal_id).await;
         let maybe_best_costed = self
             .best_optimized_physical_expr_index
             .get(&goal_id)
@@ -217,7 +241,7 @@ impl Memoize for MemoryMemo {
     }
 
     async fn get_all_goal_members(&self, goal_id: GoalId) -> MemoResult<Vec<GoalMemberId>> {
-        let goal_id = self.find_repr_goal(goal_id).await?;
+        let goal_id = self.find_repr_goal(goal_id).await;
         let goal_state = self.goals.get(&goal_id).unwrap();
         Ok(goal_state.members.iter().cloned().collect())
     }
@@ -227,7 +251,7 @@ impl Memoize for MemoryMemo {
         goal_id: GoalId,
         member: GoalMemberId,
     ) -> MemoResult<Option<PropagateBestExpression>> {
-        let goal_id = self.find_repr_goal(goal_id).await?;
+        let goal_id = self.find_repr_goal(goal_id).await;
         let member = self.find_repr_goal_member(member).await?;
         let goal_state = self.goals.get_mut(&goal_id).unwrap();
 
@@ -278,7 +302,7 @@ impl Memoize for MemoryMemo {
         &self,
         physical_expr_id: PhysicalExpressionId,
     ) -> MemoResult<Option<Cost>> {
-        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await?;
+        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await;
         let (_, maybe_cost) = self
             .physical_exprs
             .get(&physical_expr_id)
@@ -291,7 +315,7 @@ impl Memoize for MemoryMemo {
         physical_expr_id: PhysicalExpressionId,
         new_cost: Cost,
     ) -> MemoResult<Option<PropagateBestExpression>> {
-        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await?;
+        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await;
         let (_, cost_mut) = self
             .physical_exprs
             .get_mut(&physical_expr_id)
@@ -333,7 +357,7 @@ impl Memoize for MemoryMemo {
         logical_expr_id: LogicalExpressionId,
         rule: &TransformationRule,
     ) -> MemoResult<TaskStatus> {
-        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await?;
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await;
         let status = self
             .transform_dependency
             .get(&logical_expr_id)
@@ -348,7 +372,7 @@ impl Memoize for MemoryMemo {
         logical_expr_id: LogicalExpressionId,
         rule: &TransformationRule,
     ) -> MemoResult<()> {
-        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await?;
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await;
         let status_map = self
             .transform_dependency
             .entry(logical_expr_id)
@@ -371,8 +395,8 @@ impl Memoize for MemoryMemo {
         goal_id: GoalId,
         rule: &ImplementationRule,
     ) -> MemoResult<TaskStatus> {
-        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await?;
-        let goal_id = self.find_repr_goal(goal_id).await?;
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await;
+        let goal_id = self.find_repr_goal(goal_id).await;
         let status = self
             .implement_dependency
             .get(&logical_expr_id)
@@ -388,7 +412,7 @@ impl Memoize for MemoryMemo {
         goal_id: GoalId,
         rule: &ImplementationRule,
     ) -> MemoResult<()> {
-        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await?;
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await;
         let status_map = self
             .implement_dependency
             .entry(logical_expr_id)
@@ -409,7 +433,7 @@ impl Memoize for MemoryMemo {
         &self,
         physical_expr_id: PhysicalExpressionId,
     ) -> MemoResult<TaskStatus> {
-        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await?;
+        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await;
         let status = self
             .cost_dependency
             .get(&physical_expr_id)
@@ -419,7 +443,7 @@ impl Memoize for MemoryMemo {
     }
 
     async fn set_cost_clean(&mut self, physical_expr_id: PhysicalExpressionId) -> MemoResult<()> {
-        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await?;
+        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await;
 
         let entry = self.cost_dependency.entry(physical_expr_id);
 
@@ -442,8 +466,8 @@ impl Memoize for MemoryMemo {
         rule: &TransformationRule,
         group_id: GroupId,
     ) -> MemoResult<()> {
-        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await?;
-        let group_id = self.find_repr_group(group_id).await?;
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await;
+        let group_id = self.find_repr_group(group_id).await;
         let status_map = self
             .transform_dependency
             .entry(logical_expr_id)
@@ -471,9 +495,9 @@ impl Memoize for MemoryMemo {
         rule: &ImplementationRule,
         group_id: GroupId,
     ) -> MemoResult<()> {
-        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await?;
-        let group_id = self.find_repr_group(group_id).await?;
-        let goal_id = self.find_repr_goal(goal_id).await?;
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await;
+        let group_id = self.find_repr_group(group_id).await;
+        let goal_id = self.find_repr_goal(goal_id).await;
 
         let status_map = self
             .implement_dependency
@@ -500,8 +524,8 @@ impl Memoize for MemoryMemo {
         physical_expr_id: PhysicalExpressionId,
         goal_id: GoalId,
     ) -> MemoResult<()> {
-        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await?;
-        let goal_id = self.find_repr_goal(goal_id).await?;
+        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await;
+        let goal_id = self.find_repr_goal(goal_id).await;
 
         match self.cost_dependency.entry(physical_expr_id) {
             Entry::Occupied(occupied) => {
@@ -582,7 +606,7 @@ impl Memoize for MemoryMemo {
         &self,
         logical_expr_id: LogicalExpressionId,
     ) -> MemoResult<LogicalExpression> {
-        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await?;
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await;
         let logical_expr = self
             .logical_exprs
             .get(&logical_expr_id)
@@ -644,38 +668,12 @@ impl Memoize for MemoryMemo {
         &self,
         physical_expr_id: PhysicalExpressionId,
     ) -> MemoResult<PhysicalExpression> {
-        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await?;
+        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await;
         let (physical_expr, _) = self
             .physical_exprs
             .get(&physical_expr_id)
             .ok_or(MemoError::PhysicalExprNotFound(physical_expr_id))?;
         Ok(physical_expr.clone())
-    }
-
-    async fn find_repr_group(&self, group_id: GroupId) -> MemoResult<GroupId> {
-        let repr_group_id = self.repr_group.find(&group_id);
-        Ok(repr_group_id)
-    }
-
-    async fn find_repr_goal(&self, goal_id: GoalId) -> MemoResult<GoalId> {
-        let repr_goal_id = self.repr_goal.find(&goal_id);
-        Ok(repr_goal_id)
-    }
-
-    async fn find_repr_logical_expr(
-        &self,
-        logical_expr_id: LogicalExpressionId,
-    ) -> MemoResult<LogicalExpressionId> {
-        let repr_expr_id = self.repr_logical_expr.find(&logical_expr_id);
-        Ok(repr_expr_id)
-    }
-
-    async fn find_repr_physical_expr(
-        &self,
-        physical_expr_id: PhysicalExpressionId,
-    ) -> MemoResult<PhysicalExpressionId> {
-        let repr_expr_id = self.repr_physical_expr.find(&physical_expr_id);
-        Ok(repr_expr_id)
     }
 }
 
@@ -691,7 +689,7 @@ impl MemoryMemo {
         for child in repr_logical_expr.children.iter() {
             match child {
                 Child::Singleton(group_id) => {
-                    let repr_group_id = self.find_repr_group(*group_id).await?;
+                    let repr_group_id = self.find_repr_group(*group_id).await;
                     new_children.push(Child::Singleton(repr_group_id));
                 }
                 Child::VarLength(group_ids) => {
@@ -707,7 +705,7 @@ impl MemoryMemo {
                     let new_group_ids = futures::future::join_all(new_group_ids)
                         .await
                         .into_iter()
-                        .collect::<Result<Vec<_>, _>>()?;
+                        .collect();
 
                     new_children.push(Child::VarLength(new_group_ids));
                 }
@@ -729,7 +727,7 @@ impl MemoryMemo {
             match child {
                 Child::Singleton(goal_member_id) => {
                     if let GoalMemberId::GoalId(goal_id) = goal_member_id {
-                        let repr_goal_id = self.find_repr_goal(*goal_id).await?;
+                        let repr_goal_id = self.find_repr_goal(*goal_id).await;
                         new_children.push(Child::Singleton(GoalMemberId::GoalId(repr_goal_id)));
                     } else {
                         new_children.push(Child::Singleton(*goal_member_id));
@@ -740,12 +738,12 @@ impl MemoryMemo {
                     for goal_member_id in goal_member_ids.iter() {
                         match goal_member_id {
                             GoalMemberId::GoalId(goal_id) => {
-                                let repr_goal_id = self.find_repr_goal(*goal_id).await?;
+                                let repr_goal_id = self.find_repr_goal(*goal_id).await;
                                 new_goal_member_ids.push(GoalMemberId::GoalId(repr_goal_id));
                             }
                             GoalMemberId::PhysicalExpressionId(physical_expr_id) => {
                                 let repr_physical_expr_id =
-                                    self.find_repr_physical_expr(*physical_expr_id).await?;
+                                    self.find_repr_physical_expr(*physical_expr_id).await;
                                 new_goal_member_ids.push(GoalMemberId::PhysicalExpressionId(
                                     repr_physical_expr_id,
                                 ));
@@ -933,8 +931,8 @@ impl MemoryMemo {
         group_id_2: GroupId,
     ) -> MemoResult<Option<MergeProducts>> {
         // our strategy is to always merge group 2 into group 1.
-        let group_id_1 = self.find_repr_group(group_id_1).await?;
-        let group_id_2 = self.find_repr_group(group_id_2).await?;
+        let group_id_1 = self.find_repr_group(group_id_1).await;
+        let group_id_2 = self.find_repr_group(group_id_2).await;
 
         if group_id_1 == group_id_2 {
             return Ok(None);
@@ -1121,11 +1119,11 @@ impl MemoryMemo {
     async fn find_repr_goal_member(&self, member: GoalMemberId) -> MemoResult<GoalMemberId> {
         match member {
             GoalMemberId::PhysicalExpressionId(physical_expr_id) => {
-                let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await?;
+                let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await;
                 Ok(GoalMemberId::PhysicalExpressionId(physical_expr_id))
             }
             GoalMemberId::GoalId(goal_id) => {
-                let goal_id = self.find_repr_goal(goal_id).await?;
+                let goal_id = self.find_repr_goal(goal_id).await;
                 Ok(GoalMemberId::GoalId(goal_id))
             }
         }
