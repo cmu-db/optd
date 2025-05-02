@@ -39,6 +39,45 @@ pub trait Representative {
     ) -> PhysicalExpressionId;
 }
 
+/// A helper trait to help facilitate the materialization and creation of objects in the memo table.
+#[trait_variant::make(Send)]
+pub trait Materialize {
+    /// Retrieves the ID of a [`Goal`]. If the [`Goal`] does not already exist in the memo table,
+    /// creates a new [`Goal`] and returns a fresh [`GoalId`].
+    async fn get_goal_id(&mut self, goal: &Goal) -> MemoResult<GoalId>;
+
+    /// Materializes a [`Goal`] from its [`GoalId`].
+    async fn materialize_goal(&self, goal_id: GoalId) -> MemoResult<Goal>;
+
+    /// Retrieves the ID of a [`LogicalExpression`]. If the [`LogicalExpression`] does not already
+    /// exist in the memo table, creates a new [`LogicalExpression`] and returns a fresh
+    /// [`LogicalExpressionId`].
+    async fn get_logical_expr_id(
+        &mut self,
+        logical_expr: &LogicalExpression,
+    ) -> MemoResult<LogicalExpressionId>;
+
+    /// Materializes a [`LogicalExpression`] from its [`LogicalExpressionId`].
+    async fn materialize_logical_expr(
+        &self,
+        logical_expr_id: LogicalExpressionId,
+    ) -> MemoResult<LogicalExpression>;
+
+    /// Retrieves the ID of a [`PhysicalExpression`]. If the [`PhysicalExpression`] does not already
+    /// exist in the memo table, creates a new [`PhysicalExpression`] and returns a fresh
+    /// [`PhysicalExpressionId`].
+    async fn get_physical_expr_id(
+        &mut self,
+        physical_expr: &PhysicalExpression,
+    ) -> MemoResult<PhysicalExpressionId>;
+
+    /// Materializes a [`PhysicalExpression`] from its [`PhysicalExpressionId`].
+    async fn materialize_physical_expr(
+        &self,
+        physical_expr_id: PhysicalExpressionId,
+    ) -> MemoResult<PhysicalExpression>;
+}
+
 /// Core interface for memo-based query optimization.
 ///
 /// This trait defines the operations needed to store, retrieve, and manipulate
@@ -317,74 +356,4 @@ pub trait Memoize: Representative + Sync {
         physical_expr_id: PhysicalExpressionId,
         goal_id: GoalId,
     ) -> MemoResult<()>;
-
-    //
-    // ID conversion and materialization operations.
-    //
-
-    /// Gets or creates a goal ID for a given goal.
-    ///
-    /// # Parameters
-    /// * `goal` - The goal to get or create an ID for.
-    ///
-    /// # Returns
-    /// The ID of the goal.
-    async fn get_goal_id(&mut self, goal: &Goal) -> MemoResult<GoalId>;
-
-    /// Materializes a goal from its ID.
-    ///
-    /// # Parameters
-    /// * `goal_id` - ID of the goal to materialize.
-    ///
-    /// # Returns
-    /// The materialized goal.
-    async fn materialize_goal(&self, goal_id: GoalId) -> MemoResult<Goal>;
-
-    /// Gets or creates a logical expression ID for a given logical expression.
-    ///
-    /// # Parameters
-    /// * `logical_expr` - The logical expression to get or create an ID for.
-    ///
-    /// # Returns
-    /// The ID of the logical expression.
-    async fn get_logical_expr_id(
-        &mut self,
-        logical_expr: &LogicalExpression,
-    ) -> MemoResult<LogicalExpressionId>;
-
-    /// Materializes a logical expression from its ID.
-    ///
-    /// # Parameters
-    /// * `logical_expr_id` - ID of the logical expression to materialize.
-    ///
-    /// # Returns
-    /// The materialized logical expression.
-    async fn materialize_logical_expr(
-        &self,
-        logical_expr_id: LogicalExpressionId,
-    ) -> MemoResult<LogicalExpression>;
-
-    /// Gets or creates a physical expression ID for a given physical expression.
-    ///
-    /// # Parameters
-    /// * `physical_expr` - The physical expression to get or create an ID for.
-    ///
-    /// # Returns
-    /// The ID of the physical expression.
-    async fn get_physical_expr_id(
-        &mut self,
-        physical_expr: &PhysicalExpression,
-    ) -> MemoResult<PhysicalExpressionId>;
-
-    /// Materializes a physical expression from its ID.
-    ///
-    /// # Parameters
-    /// * `physical_expr_id` - ID of the physical expression to materialize.
-    ///
-    /// # Returns
-    /// The materialized physical expression.
-    async fn materialize_physical_expr(
-        &self,
-        physical_expr_id: PhysicalExpressionId,
-    ) -> MemoResult<PhysicalExpression>;
 }
