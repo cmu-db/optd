@@ -1,11 +1,11 @@
 use crate::{
     core::error::Error,
-    memo::{Memoize, PropagateBestExpression},
+    memo::{Memo, PropagateBestExpression},
 };
 
 use super::Optimizer;
 
-impl<M: Memoize> Optimizer<M> {
+impl<M: Memo> Optimizer<M> {
     pub(super) async fn handle_forward_result(
         &mut self,
         result: PropagateBestExpression,

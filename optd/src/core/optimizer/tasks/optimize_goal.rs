@@ -4,7 +4,7 @@ use crate::{
     core::cir::{Cost, Goal, GoalId, GoalMemberId, PhysicalExpressionId},
     core::error::Error,
     core::optimizer::{Optimizer, Task},
-    memo::Memoize,
+    memo::Memo,
 };
 
 use super::{SourceTaskId, TaskId};
@@ -67,7 +67,7 @@ impl OptimizeGoalTask {
     }
 }
 
-impl<M: Memoize> Optimizer<M> {
+impl<M: Memo> Optimizer<M> {
     pub async fn ensure_optimize_goal_task(
         &mut self,
         goal_id: GoalId,

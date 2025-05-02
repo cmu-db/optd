@@ -7,7 +7,7 @@ use crate::{
         PartialPhysicalPlan, PhysicalExpressionId,
     },
     core::error::Error,
-    memo::Memoize,
+    memo::Memo,
 };
 
 use crate::dsl::{
@@ -16,7 +16,7 @@ use crate::dsl::{
 };
 use futures::{SinkExt, channel::mpsc::Sender};
 
-impl<M: Memoize> Optimizer<M> {
+impl<M: Memo> Optimizer<M> {
     /// This method initiates the optimization process for a logical plan by launching
     /// an optimization task. It may need dependencies.
     ///

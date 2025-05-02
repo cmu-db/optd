@@ -5,12 +5,12 @@ use crate::{
         PartialPhysicalPlan, PhysicalExpression,
     },
     core::error::Error,
-    memo::Memoize,
+    memo::Memo,
 };
 use Child::*;
 use std::sync::Arc;
 
-impl<M: Memoize> Optimizer<M> {
+impl<M: Memo> Optimizer<M> {
     /// Ingests a logical plan into the memo.
     ///
     /// Returns the group id of the root logical expression.

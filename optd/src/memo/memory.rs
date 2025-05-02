@@ -280,7 +280,7 @@ impl Materialize for MemoryMemo {
     }
 }
 
-impl Memoize for MemoryMemo {
+impl Memo for MemoryMemo {
     async fn merge_groups(
         &mut self,
         group_id_1: GroupId,

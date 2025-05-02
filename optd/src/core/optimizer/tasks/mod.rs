@@ -20,7 +20,7 @@ use optimize_goal::*;
 use optimize_plan::*;
 use transform_expr::*;
 
-use crate::memo::Memoize;
+use crate::memo::Memo;
 
 use super::Optimizer;
 
@@ -85,7 +85,7 @@ pub enum Task {
     ContinueWithCosted(ContinueWithCostedTask),
 }
 
-impl<M: Memoize> Optimizer<M> {
+impl<M: Memo> Optimizer<M> {
     pub fn get_task(&self, task_id: TaskId) -> &Task {
         self.tasks.get(&task_id).unwrap()
     }

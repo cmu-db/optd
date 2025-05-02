@@ -7,7 +7,7 @@ use crate::{
     core::cir::{LogicalExpressionId, PartialLogicalPlan, TransformationRule},
     core::error::Error,
     core::optimizer::{EngineMessageKind, JobId, Optimizer, Task},
-    memo::{Memoize, TaskStatus},
+    memo::{Memo, TaskStatus},
 };
 
 use super::TaskId;
@@ -52,7 +52,7 @@ impl TransformExpressionTask {
     }
 }
 
-impl<M: Memoize> Optimizer<M> {
+impl<M: Memo> Optimizer<M> {
     /// Creates a task to start applying a transformation rule to a logical expression.
     ///
     /// This task generates alternative logical expressions that are

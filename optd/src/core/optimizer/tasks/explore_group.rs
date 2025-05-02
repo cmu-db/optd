@@ -2,7 +2,7 @@ use crate::{
     core::cir::{GroupId, LogicalExpressionId},
     core::error::Error,
     core::optimizer::Optimizer,
-    memo::Memoize,
+    memo::Memo,
 };
 
 use super::{SourceTaskId, Task, TaskId};
@@ -45,7 +45,7 @@ impl ExploreGroupTask {
     }
 }
 
-impl<M: Memoize> Optimizer<M> {
+impl<M: Memo> Optimizer<M> {
     // Creates the `ExploreGroup` task if it does not exist and get all current logical expressions.
     pub async fn ensure_explore_group_task(
         &mut self,

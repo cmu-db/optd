@@ -3,7 +3,7 @@ use crate::{
     core::cir::{Cost, PhysicalExpressionId},
     core::error::Error,
     core::optimizer::{JobId, Optimizer},
-    memo::Memoize,
+    memo::Memo,
 };
 
 use super::{Task, TaskId};
@@ -31,7 +31,7 @@ impl ContinueWithCostedTask {
     }
 }
 
-impl<M: Memoize> Optimizer<M> {
+impl<M: Memo> Optimizer<M> {
     pub async fn create_continue_with_costed_task(
         &mut self,
         physical_expr_id: PhysicalExpressionId,

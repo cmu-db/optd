@@ -4,7 +4,7 @@ use crate::{
     core::cir::{Goal, LogicalPlan, PhysicalExpressionId, PhysicalPlan, PhysicalProperties},
     core::error::Error,
     core::optimizer::{Optimizer, tasks::SourceTaskId},
-    memo::Memoize,
+    memo::Memo,
 };
 
 use super::{Task, TaskId};
@@ -36,7 +36,7 @@ impl OptimizePlanTask {
     }
 }
 
-impl<M: Memoize> Optimizer<M> {
+impl<M: Memo> Optimizer<M> {
     pub async fn emit_best_physical_plan(
         &mut self,
         mut physical_plan_tx: mpsc::Sender<PhysicalPlan>,

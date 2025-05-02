@@ -10,7 +10,7 @@ use crate::core::cir::{
 };
 use crate::core::error::Error;
 use crate::dsl::engine::{Engine, EngineResponse};
-use crate::memo::Memoize;
+use crate::memo::Memo;
 use EngineMessageKind::*;
 use futures::SinkExt;
 use futures::channel::mpsc;
@@ -47,7 +47,7 @@ pub enum Job {
     Derive(GroupId),
 }
 
-impl<M: Memoize> Optimizer<M> {
+impl<M: Memo> Optimizer<M> {
     //
     // Job Scheduling and Management
     //

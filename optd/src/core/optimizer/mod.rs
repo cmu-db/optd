@@ -2,7 +2,7 @@ use crate::catalog::Catalog;
 use crate::core::cir::*;
 use crate::core::error::Error;
 use crate::dsl::analyzer::hir::context::Context;
-use crate::memo::Memoize;
+use crate::memo::Memo;
 use EngineMessageKind::*;
 pub use client::{Client, QueryInstance};
 use client::{ClientMessage, QueryInstanceId};
@@ -87,7 +87,7 @@ pub enum EngineMessageKind {
 ///
 /// Provides the interface to submit logical plans for optimization and receive
 /// optimized physical plans in return.
-pub struct Optimizer<M: Memoize> {
+pub struct Optimizer<M: Memo> {
     // Core components.
     memo: M,
     rule_book: RuleBook,
@@ -131,7 +131,7 @@ pub struct Optimizer<M: Memoize> {
     cost_expression_task_index: HashMap<PhysicalExpressionId, TaskId>,
 }
 
-impl<M: Memoize> Optimizer<M> {
+impl<M: Memo> Optimizer<M> {
     /// Create a new optimizer instance with the given memo and HIR context.
     ///
     /// Use `launch` to create and start the optimizer.

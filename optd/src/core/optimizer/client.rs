@@ -6,7 +6,7 @@ use futures::{
 use crate::{
     core::cir::{LogicalPlan, PhysicalPlan},
     core::error::Error,
-    memo::Memoize,
+    memo::Memo,
 };
 
 /// Unique identifier for a query instance.
@@ -57,12 +57,12 @@ impl Drop for QueryInstance {
     }
 }
 
-pub struct Client<M: Memoize> {
+pub struct Client<M: Memo> {
     tx: mpsc::Sender<ClientMessage>,
     handle: tokio::task::JoinHandle<M>,
 }
 
-impl<M: Memoize> Client<M> {
+impl<M: Memo> Client<M> {
     pub fn new(tx: mpsc::Sender<ClientMessage>, handle: tokio::task::JoinHandle<M>) -> Self {
         Self { tx, handle }
     }

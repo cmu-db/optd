@@ -83,7 +83,7 @@ pub trait Materialize {
 /// This trait mainly describes operations related to groups, goals, logical and physical
 /// expressions, and finding representative nodes of the union-find substructures.
 #[trait_variant::make(Send)]
-pub trait Memoize: Representative + Materialize + TaskGraphState + Sync + 'static {
+pub trait Memo: Representative + Materialize + TaskGraphState + Sync + 'static {
     /// Retrieves logical properties for a group ID.
     ///
     /// # Parameters

@@ -6,7 +6,7 @@ use crate::dsl::{
 use crate::{
     core::cir::GroupId,
     core::optimizer::{EngineMessageKind, Optimizer},
-    memo::Memoize,
+    memo::Memo,
 };
 
 use super::{SourceTaskId, Task, TaskId};
@@ -41,7 +41,7 @@ impl ForkLogicalTask {
     }
 }
 
-impl<M: Memoize> Optimizer<M> {
+impl<M: Memo> Optimizer<M> {
     /// Creates a task to fork the logical plan for further exploration.
     ///
     /// This task generates alternative logical expressions that are

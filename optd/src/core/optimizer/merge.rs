@@ -7,10 +7,10 @@ use crate::{
     core::cir::{GoalId, GroupId, ImplementationRule, LogicalExpressionId, TransformationRule},
     core::error::Error,
     core::optimizer::tasks::TaskId,
-    memo::{Memoize, MergeProducts},
+    memo::{Memo, MergeProducts},
 };
 
-impl<M: Memoize> Optimizer<M> {
+impl<M: Memo> Optimizer<M> {
     /// Recursively deletes tasks that are no longer needed.
     /// Confirms before deletion that the task is not subscribed to by any other task by checking if the parent tasks (the outs) exist in the task index.
     /// If the parent task is not found in the task index, then the given task is safely deleted. Else, we do not delete the task.
@@ -361,8 +361,7 @@ impl<M: Memoize> Optimizer<M> {
             {
                 let task = self.tasks.get(task_id).unwrap().as_transform_expression();
                 let logical_expr_id = task.logical_expr_id;
-                let repr_logical_expr_id =
-                    self.memo.find_repr_logical_expr(logical_expr_id).await;
+                let repr_logical_expr_id = self.memo.find_repr_logical_expr(logical_expr_id).await;
                 exprs_to_trans_tasks
                     .entry(repr_logical_expr_id)
                     .or_insert_with(HashMap::new)

@@ -7,7 +7,7 @@ use crate::{
     core::cir::{Cost, GoalId},
     core::error::Error,
     core::optimizer::{EngineMessageKind, Optimizer},
-    memo::Memoize,
+    memo::Memo,
 };
 
 use super::{SourceTaskId, Task, TaskId};
@@ -49,7 +49,7 @@ impl ForkCostedTask {
     }
 }
 
-impl<M: Memoize> Optimizer<M> {
+impl<M: Memo> Optimizer<M> {
     pub(crate) async fn create_fork_costed_task(
         &mut self,
         goal_id: GoalId,

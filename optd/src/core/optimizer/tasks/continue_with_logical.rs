@@ -3,7 +3,7 @@ use crate::{
     core::cir::LogicalExpressionId,
     core::error::Error,
     core::optimizer::{JobId, Optimizer},
-    memo::Memoize,
+    memo::Memo,
 };
 
 use super::{Task, TaskId};
@@ -29,7 +29,7 @@ impl ContinueWithLogicalTask {
     }
 }
 
-impl<M: Memoize> Optimizer<M> {
+impl<M: Memo> Optimizer<M> {
     /// Creates a `ContinueWithLogical` task.
     pub(crate) async fn create_continue_with_logical_task(
         &mut self,

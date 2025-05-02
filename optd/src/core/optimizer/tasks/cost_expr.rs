@@ -7,7 +7,7 @@ use crate::{
     core::cir::{Cost, PhysicalExpressionId},
     core::error::Error,
     core::optimizer::{EngineMessageKind, JobId, Optimizer, Task},
-    memo::{Memoize, TaskStatus},
+    memo::{Memo, TaskStatus},
 };
 
 use super::TaskId;
@@ -57,7 +57,7 @@ impl CostExpressionTask {
     }
 }
 
-impl<M: Memoize> Optimizer<M> {
+impl<M: Memo> Optimizer<M> {
     /// Ensures a cost expression task exists and sets up a parent-child relationship.
     ///
     /// This is used when a task needs to cost a physical expression as part of its work.

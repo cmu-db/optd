@@ -10,7 +10,7 @@ use crate::{
     core::cir::{Goal, GoalId, ImplementationRule, LogicalExpressionId},
     core::error::Error,
     core::optimizer::{EngineMessageKind, JobId, Optimizer, Task},
-    memo::{Memoize, TaskStatus},
+    memo::{Memo, TaskStatus},
 };
 
 use super::TaskId;
@@ -59,7 +59,7 @@ impl ImplementExpressionTask {
     }
 }
 
-impl<M: Memoize> Optimizer<M> {
+impl<M: Memo> Optimizer<M> {
     pub(crate) async fn create_implement_expression_task(
         &mut self,
         rule: ImplementationRule,

@@ -8,12 +8,12 @@ use crate::{
         Child, GoalMemberId, Operator, PartialPhysicalPlan, PhysicalExpressionId, PhysicalPlan,
     },
     core::error::Error,
-    memo::Memoize,
+    memo::Memo,
 };
 
 use super::Optimizer;
 
-impl<M: Memoize> Optimizer<M> {
+impl<M: Memo> Optimizer<M> {
     /// Recursively transforms a physical expression ID in the memo into a complete physical plan.
     ///
     /// This function retrieves the physical expression from the memo and recursively
