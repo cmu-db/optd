@@ -379,7 +379,9 @@ impl<M: Memoize> Optimizer<M> {
                         .await?;
                 } else {
                     let all_tasks_for_this_expr = exprs_to_trans_tasks.get(expr).unwrap().clone();
-                    for rule in self.rule_book.get_transformations().to_vec() {
+
+                    let transformations = self.rule_book.get_transformations().to_vec();
+                    for rule in transformations {
                         if !all_tasks_for_this_expr.contains_key(&rule) {
                             self.create_transform_expression_task(rule, *expr, *repr_group_task_id)
                                 .await?;

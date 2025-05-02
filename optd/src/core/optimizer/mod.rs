@@ -330,7 +330,7 @@ mod tests {
             annotations: HashMap::new(),
         };
 
-        let mut memo = MemoryMemo::default();
+        let memo = MemoryMemo::default();
 
         let mut client = Optimizer::launch(memo, mock_catalog(), hir);
 
