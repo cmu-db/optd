@@ -28,14 +28,13 @@
 //! cargo run --bin optd-cli -- compile path/to/example.opt --mock-udfs hello get_schema world
 //! ```
 
-use std::collections::HashMap;
-
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use optd::catalog::Catalog;
 use optd::dsl::analyzer::hir::{CoreData, Udf, Value};
 use optd::dsl::compile::{Config, compile_hir};
 use optd::dsl::utils::errors::{CompileError, Diagnose};
+use std::collections::HashMap;
 
 #[derive(Parser)]
 #[command(
