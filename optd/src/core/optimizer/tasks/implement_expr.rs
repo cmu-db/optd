@@ -9,8 +9,8 @@ use crate::{
     },
     core::cir::{Goal, GoalId, ImplementationRule, LogicalExpressionId},
     core::error::Error,
-    memo::{Memoize, Status},
     core::optimizer::{EngineMessageKind, JobId, Optimizer, Task},
+    memo::{Memoize, Status},
 };
 
 use super::TaskId;

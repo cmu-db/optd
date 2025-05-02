@@ -6,8 +6,8 @@ use crate::{
     core::bridge::{from_cir::partial_logical_to_value, into_cir::value_to_partial_logical},
     core::cir::{LogicalExpressionId, PartialLogicalPlan, TransformationRule},
     core::error::Error,
-    memo::{Memoize, Status},
     core::optimizer::{EngineMessageKind, JobId, Optimizer, Task},
+    memo::{Memoize, Status},
 };
 
 use super::TaskId;

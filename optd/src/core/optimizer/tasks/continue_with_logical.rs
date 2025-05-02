@@ -2,8 +2,8 @@ use crate::{
     core::bridge::from_cir::partial_logical_to_value,
     core::cir::LogicalExpressionId,
     core::error::Error,
-    memo::Memoize,
     core::optimizer::{JobId, Optimizer},
+    memo::Memoize,
 };
 
 use super::{Task, TaskId};

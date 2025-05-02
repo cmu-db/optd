@@ -5,8 +5,8 @@ use crate::dsl::{
 
 use crate::{
     core::cir::GroupId,
-    memo::Memoize,
     core::optimizer::{EngineMessageKind, Optimizer},
+    memo::Memoize,
 };
 
 use super::{SourceTaskId, Task, TaskId};

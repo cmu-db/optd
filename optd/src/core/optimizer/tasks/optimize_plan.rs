@@ -3,8 +3,8 @@ use futures::{SinkExt, channel::mpsc};
 use crate::{
     core::cir::{Goal, LogicalPlan, PhysicalExpressionId, PhysicalPlan, PhysicalProperties},
     core::error::Error,
-    memo::Memoize,
     core::optimizer::{Optimizer, tasks::SourceTaskId},
+    memo::Memoize,
 };
 
 use super::{Task, TaskId};

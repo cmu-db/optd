@@ -2,8 +2,8 @@ use crate::{
     core::bridge::from_cir::costed_physical_to_value,
     core::cir::{Cost, PhysicalExpressionId},
     core::error::Error,
-    memo::Memoize,
     core::optimizer::{JobId, Optimizer},
+    memo::Memoize,
 };
 
 use super::{Task, TaskId};

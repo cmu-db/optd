@@ -6,8 +6,8 @@ use crate::{
     core::bridge::{from_cir::partial_physical_to_value, into_cir::value_to_cost},
     core::cir::{Cost, PhysicalExpressionId},
     core::error::Error,
-    memo::{Memoize, Status},
     core::optimizer::{EngineMessageKind, JobId, Optimizer, Task},
+    memo::{Memoize, Status},
 };
 
 use super::TaskId;

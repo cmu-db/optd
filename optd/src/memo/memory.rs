@@ -914,8 +914,10 @@ impl MemoryMemo {
                     .entry(GoalMemberId::GoalId(goal_id1))
                     .or_default()
                     .extend(&subscribers);
-                let mut temp_forward_result =
-                    PropagateBestExpression::new(forward_result.physical_expr_id, forward_result.best_cost);
+                let mut temp_forward_result = PropagateBestExpression::new(
+                    forward_result.physical_expr_id,
+                    forward_result.best_cost,
+                );
                 let vec_deque_subscribers =
                     VecDeque::from(subscribers.into_iter().collect::<Vec<_>>());
                 self.propagate_new_member_cost(vec_deque_subscribers, &mut temp_forward_result)

@@ -1,8 +1,8 @@
 use crate::{
     core::cir::{GroupId, LogicalExpressionId},
     core::error::Error,
-    memo::Memoize,
     core::optimizer::Optimizer,
+    memo::Memoize,
 };
 
 use super::{SourceTaskId, Task, TaskId};

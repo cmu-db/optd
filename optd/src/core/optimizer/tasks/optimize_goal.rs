@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use crate::{
     core::cir::{Cost, Goal, GoalId, GoalMemberId, PhysicalExpressionId},
     core::error::Error,
-    memo::Memoize,
     core::optimizer::{Optimizer, Task},
+    memo::Memoize,
 };
 
 use super::{SourceTaskId, TaskId};
