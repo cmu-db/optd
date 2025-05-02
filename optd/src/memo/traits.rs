@@ -78,18 +78,12 @@ pub trait Materialize {
     ) -> MemoResult<PhysicalExpression>;
 }
 
-/// Core interface for memo-based query optimization.
+/// The interface for an optimizer memoization (memo) table.
 ///
-/// This trait defines the operations needed to store, retrieve, and manipulate
-/// the memo data structure that powers the dynamic programming approach to
-/// query optimization. The memo stores logical and physical expressions by their IDs,
-/// manages expression properties, and tracks optimization status.
+/// This trait mainly describes operations related to groups, goals, logical and physical
+/// expressions, and finding representative nodes of the union-find substructures.
 #[trait_variant::make(Send)]
-pub trait Memoize: Representative + Sync {
-    //
-    // Logical expression and group operations.
-    //
-
+pub trait Memoize: Representative + Materialize + TaskGraphState + Sync + 'static {
     /// Retrieves logical properties for a group ID.
     ///
     /// # Parameters
@@ -228,11 +222,13 @@ pub trait Memoize: Representative + Sync {
         &self,
         physical_expr_id: PhysicalExpressionId,
     ) -> MemoResult<Option<Cost>>;
+}
 
-    //
-    // Rule and costing status operations.
-    //
-
+/// Rule and costing status operations.
+///
+/// TODO(connor): Clean up docs.
+#[trait_variant::make(Send)]
+pub trait TaskGraphState {
     /// Checks the status of applying a transformation rule on a logical expression ID.
     ///
     /// # Parameters

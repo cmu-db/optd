@@ -487,196 +487,6 @@ impl Memoize for MemoryMemo {
             Ok(None)
         }
     }
-
-    async fn get_transformation_status(
-        &self,
-        logical_expr_id: LogicalExpressionId,
-        rule: &TransformationRule,
-    ) -> MemoResult<TaskStatus> {
-        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await;
-        let status = self
-            .transform_dependency
-            .get(&logical_expr_id)
-            .and_then(|status_map| status_map.get(rule))
-            .map(|dep| dep.status)
-            .unwrap_or(TaskStatus::Dirty);
-        Ok(status)
-    }
-
-    async fn set_transformation_clean(
-        &mut self,
-        logical_expr_id: LogicalExpressionId,
-        rule: &TransformationRule,
-    ) -> MemoResult<()> {
-        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await;
-        let status_map = self
-            .transform_dependency
-            .entry(logical_expr_id)
-            .or_default();
-        match status_map.entry(rule.clone()) {
-            Entry::Occupied(occupied_entry) => {
-                let dep = occupied_entry.into_mut();
-                dep.status = TaskStatus::Clean;
-            }
-            Entry::Vacant(vacant) => {
-                vacant.insert(RuleDependency::new(TaskStatus::Clean));
-            }
-        }
-        Ok(())
-    }
-
-    async fn get_implementation_status(
-        &self,
-        logical_expr_id: LogicalExpressionId,
-        goal_id: GoalId,
-        rule: &ImplementationRule,
-    ) -> MemoResult<TaskStatus> {
-        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await;
-        let goal_id = self.find_repr_goal(goal_id).await;
-        let status = self
-            .implement_dependency
-            .get(&logical_expr_id)
-            .and_then(|status_map| status_map.get(&(goal_id, rule.clone())))
-            .map(|dep| dep.status)
-            .unwrap_or(TaskStatus::Dirty);
-        Ok(status)
-    }
-
-    async fn set_implementation_clean(
-        &mut self,
-        logical_expr_id: LogicalExpressionId,
-        goal_id: GoalId,
-        rule: &ImplementationRule,
-    ) -> MemoResult<()> {
-        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await;
-        let status_map = self
-            .implement_dependency
-            .entry(logical_expr_id)
-            .or_default();
-        match status_map.entry((goal_id, rule.clone())) {
-            Entry::Occupied(occupied_entry) => {
-                let dep = occupied_entry.into_mut();
-                dep.status = TaskStatus::Clean;
-            }
-            Entry::Vacant(vacant) => {
-                vacant.insert(RuleDependency::new(TaskStatus::Clean));
-            }
-        }
-        Ok(())
-    }
-
-    async fn get_cost_status(
-        &self,
-        physical_expr_id: PhysicalExpressionId,
-    ) -> MemoResult<TaskStatus> {
-        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await;
-        let status = self
-            .cost_dependency
-            .get(&physical_expr_id)
-            .map(|dep| dep.status)
-            .unwrap_or(TaskStatus::Dirty);
-        Ok(status)
-    }
-
-    async fn set_cost_clean(&mut self, physical_expr_id: PhysicalExpressionId) -> MemoResult<()> {
-        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await;
-
-        let entry = self.cost_dependency.entry(physical_expr_id);
-
-        match entry {
-            Entry::Occupied(occupied) => {
-                let dep = occupied.into_mut();
-                dep.status = TaskStatus::Clean;
-            }
-            Entry::Vacant(vacant) => {
-                vacant.insert(CostDependency::new(TaskStatus::Clean));
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn add_transformation_dependency(
-        &mut self,
-        logical_expr_id: LogicalExpressionId,
-        rule: &TransformationRule,
-        group_id: GroupId,
-    ) -> MemoResult<()> {
-        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await;
-        let group_id = self.find_repr_group(group_id).await;
-        let status_map = self
-            .transform_dependency
-            .entry(logical_expr_id)
-            .or_default();
-
-        match status_map.entry(rule.clone()) {
-            Entry::Occupied(occupied_entry) => {
-                let dep = occupied_entry.into_mut();
-                dep.group_ids.insert(group_id);
-            }
-            Entry::Vacant(vacant) => {
-                let mut dep = RuleDependency::new(TaskStatus::Dirty);
-                dep.group_ids.insert(group_id);
-                vacant.insert(dep);
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn add_implementation_dependency(
-        &mut self,
-        logical_expr_id: LogicalExpressionId,
-        goal_id: GoalId,
-        rule: &ImplementationRule,
-        group_id: GroupId,
-    ) -> MemoResult<()> {
-        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await;
-        let group_id = self.find_repr_group(group_id).await;
-        let goal_id = self.find_repr_goal(goal_id).await;
-
-        let status_map = self
-            .implement_dependency
-            .entry(logical_expr_id)
-            .or_default();
-
-        match status_map.entry((goal_id, rule.clone())) {
-            Entry::Occupied(occupied) => {
-                let dep = occupied.into_mut();
-                dep.group_ids.insert(group_id);
-            }
-            Entry::Vacant(vacant) => {
-                let mut dep = RuleDependency::new(TaskStatus::Dirty);
-                dep.group_ids.insert(group_id);
-                vacant.insert(dep);
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn add_cost_dependency(
-        &mut self,
-        physical_expr_id: PhysicalExpressionId,
-        goal_id: GoalId,
-    ) -> MemoResult<()> {
-        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await;
-        let goal_id = self.find_repr_goal(goal_id).await;
-
-        match self.cost_dependency.entry(physical_expr_id) {
-            Entry::Occupied(occupied) => {
-                let dep = occupied.into_mut();
-                dep.goal_ids.insert(goal_id);
-            }
-            Entry::Vacant(vacant) => {
-                let mut dep = CostDependency::new(TaskStatus::Dirty);
-                dep.goal_ids.insert(goal_id);
-                vacant.insert(dep);
-            }
-        }
-
-        Ok(())
-    }
 }
 
 impl MemoryMemo {
@@ -1129,5 +939,197 @@ impl MemoryMemo {
                 Ok(GoalMemberId::GoalId(goal_id))
             }
         }
+    }
+}
+
+impl TaskGraphState for MemoryMemo {
+    async fn get_transformation_status(
+        &self,
+        logical_expr_id: LogicalExpressionId,
+        rule: &TransformationRule,
+    ) -> MemoResult<TaskStatus> {
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await;
+        let status = self
+            .transform_dependency
+            .get(&logical_expr_id)
+            .and_then(|status_map| status_map.get(rule))
+            .map(|dep| dep.status)
+            .unwrap_or(TaskStatus::Dirty);
+        Ok(status)
+    }
+
+    async fn set_transformation_clean(
+        &mut self,
+        logical_expr_id: LogicalExpressionId,
+        rule: &TransformationRule,
+    ) -> MemoResult<()> {
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await;
+        let status_map = self
+            .transform_dependency
+            .entry(logical_expr_id)
+            .or_default();
+        match status_map.entry(rule.clone()) {
+            Entry::Occupied(occupied_entry) => {
+                let dep = occupied_entry.into_mut();
+                dep.status = TaskStatus::Clean;
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(RuleDependency::new(TaskStatus::Clean));
+            }
+        }
+        Ok(())
+    }
+
+    async fn get_implementation_status(
+        &self,
+        logical_expr_id: LogicalExpressionId,
+        goal_id: GoalId,
+        rule: &ImplementationRule,
+    ) -> MemoResult<TaskStatus> {
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await;
+        let goal_id = self.find_repr_goal(goal_id).await;
+        let status = self
+            .implement_dependency
+            .get(&logical_expr_id)
+            .and_then(|status_map| status_map.get(&(goal_id, rule.clone())))
+            .map(|dep| dep.status)
+            .unwrap_or(TaskStatus::Dirty);
+        Ok(status)
+    }
+
+    async fn set_implementation_clean(
+        &mut self,
+        logical_expr_id: LogicalExpressionId,
+        goal_id: GoalId,
+        rule: &ImplementationRule,
+    ) -> MemoResult<()> {
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await;
+        let status_map = self
+            .implement_dependency
+            .entry(logical_expr_id)
+            .or_default();
+        match status_map.entry((goal_id, rule.clone())) {
+            Entry::Occupied(occupied_entry) => {
+                let dep = occupied_entry.into_mut();
+                dep.status = TaskStatus::Clean;
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(RuleDependency::new(TaskStatus::Clean));
+            }
+        }
+        Ok(())
+    }
+
+    async fn get_cost_status(
+        &self,
+        physical_expr_id: PhysicalExpressionId,
+    ) -> MemoResult<TaskStatus> {
+        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await;
+        let status = self
+            .cost_dependency
+            .get(&physical_expr_id)
+            .map(|dep| dep.status)
+            .unwrap_or(TaskStatus::Dirty);
+        Ok(status)
+    }
+
+    async fn set_cost_clean(&mut self, physical_expr_id: PhysicalExpressionId) -> MemoResult<()> {
+        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await;
+
+        let entry = self.cost_dependency.entry(physical_expr_id);
+
+        match entry {
+            Entry::Occupied(occupied) => {
+                let dep = occupied.into_mut();
+                dep.status = TaskStatus::Clean;
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(CostDependency::new(TaskStatus::Clean));
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn add_transformation_dependency(
+        &mut self,
+        logical_expr_id: LogicalExpressionId,
+        rule: &TransformationRule,
+        group_id: GroupId,
+    ) -> MemoResult<()> {
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await;
+        let group_id = self.find_repr_group(group_id).await;
+        let status_map = self
+            .transform_dependency
+            .entry(logical_expr_id)
+            .or_default();
+
+        match status_map.entry(rule.clone()) {
+            Entry::Occupied(occupied_entry) => {
+                let dep = occupied_entry.into_mut();
+                dep.group_ids.insert(group_id);
+            }
+            Entry::Vacant(vacant) => {
+                let mut dep = RuleDependency::new(TaskStatus::Dirty);
+                dep.group_ids.insert(group_id);
+                vacant.insert(dep);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn add_implementation_dependency(
+        &mut self,
+        logical_expr_id: LogicalExpressionId,
+        goal_id: GoalId,
+        rule: &ImplementationRule,
+        group_id: GroupId,
+    ) -> MemoResult<()> {
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await;
+        let group_id = self.find_repr_group(group_id).await;
+        let goal_id = self.find_repr_goal(goal_id).await;
+
+        let status_map = self
+            .implement_dependency
+            .entry(logical_expr_id)
+            .or_default();
+
+        match status_map.entry((goal_id, rule.clone())) {
+            Entry::Occupied(occupied) => {
+                let dep = occupied.into_mut();
+                dep.group_ids.insert(group_id);
+            }
+            Entry::Vacant(vacant) => {
+                let mut dep = RuleDependency::new(TaskStatus::Dirty);
+                dep.group_ids.insert(group_id);
+                vacant.insert(dep);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn add_cost_dependency(
+        &mut self,
+        physical_expr_id: PhysicalExpressionId,
+        goal_id: GoalId,
+    ) -> MemoResult<()> {
+        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await;
+        let goal_id = self.find_repr_goal(goal_id).await;
+
+        match self.cost_dependency.entry(physical_expr_id) {
+            Entry::Occupied(occupied) => {
+                let dep = occupied.into_mut();
+                dep.goal_ids.insert(goal_id);
+            }
+            Entry::Vacant(vacant) => {
+                let mut dep = CostDependency::new(TaskStatus::Dirty);
+                dep.goal_ids.insert(goal_id);
+                vacant.insert(dep);
+            }
+        }
+
+        Ok(())
     }
 }

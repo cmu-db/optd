@@ -362,7 +362,7 @@ impl<M: Memoize> Optimizer<M> {
                 let task = self.tasks.get(task_id).unwrap().as_transform_expression();
                 let logical_expr_id = task.logical_expr_id;
                 let repr_logical_expr_id =
-                    self.memo.find_repr_logical_expr(logical_expr_id).await?;
+                    self.memo.find_repr_logical_expr(logical_expr_id).await;
                 exprs_to_trans_tasks
                     .entry(repr_logical_expr_id)
                     .or_insert_with(HashMap::new)

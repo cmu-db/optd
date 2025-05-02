@@ -1,8 +1,5 @@
 use crate::catalog::Catalog;
-use crate::core::cir::{
-    Cost, Goal, GoalId, GroupId, LogicalProperties, PartialLogicalPlan, PartialPhysicalPlan,
-    PhysicalExpressionId, RuleBook,
-};
+use crate::core::cir::*;
 use crate::core::error::Error;
 use crate::dsl::analyzer::hir::context::Context;
 use crate::memo::Memoize;
@@ -287,12 +284,6 @@ impl<M: Memoize> Optimizer<M> {
 
 #[cfg(test)]
 mod tests {
-
-    use std::{sync::Arc, time::Duration};
-
-    use async_trait::async_trait;
-    use tokio::task::JoinSet;
-
     use super::*;
     use crate::{
         catalog::CatalogError,
@@ -300,8 +291,12 @@ mod tests {
             Child, GoalMemberId, LogicalExpression, LogicalPlan, Operator, OperatorData,
             PhysicalExpression, PhysicalPlan, PhysicalProperties, PropertiesData,
         },
-        memo::memory::MemoryMemo,
+        memo::{Materialize, memory::MemoryMemo},
     };
+    use async_trait::async_trait;
+    use std::{sync::Arc, time::Duration};
+    use tokio::task::JoinSet;
+
     #[derive(Debug)]
     struct MockCatalog;
 

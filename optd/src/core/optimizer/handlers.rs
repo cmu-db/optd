@@ -113,7 +113,7 @@ impl<M: Memoize> Optimizer<M> {
         goal_id: GoalId,
         _task_id: TaskId,
     ) -> Result<(), Error> {
-        let goal_id = self.memo.find_repr_goal(goal_id).await?;
+        let goal_id = self.memo.find_repr_goal(goal_id).await;
 
         let member = self.ingest_physical_plan(&plan).await?;
 
