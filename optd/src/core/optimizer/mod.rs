@@ -738,7 +738,7 @@ mod tests {
 
         let leaf_node1 = LogicalPlan(Operator {
             tag: "Const".to_string(),
-            data: vec![OperatorData::Int64(10)],
+            data: vec![OperatorData::Int64(20)],
             children: vec![],
         });
         let leaf_node2 = LogicalPlan(Operator {
@@ -773,8 +773,10 @@ mod tests {
         println!("Creating query instance");
         let mut query_instance = client.create_query_instance(add_node).await.unwrap();
         println!("Query instance created");
-        let physical_plan = query_instance.recv_best_plan().await.unwrap();
-        println!("Best plan: {:?}", physical_plan);
+        loop {
+            let physical_plan = query_instance.recv_best_plan().await.unwrap();
+            println!("Best plan: {:?}", physical_plan);
+        }
 
         Ok(())
     }

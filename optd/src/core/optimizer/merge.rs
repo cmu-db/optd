@@ -974,7 +974,7 @@ impl<M: Memoize> Optimizer<M> {
         //         fork_costed_task.add_continue_in(continue_with_costed_task_id);
         //     }
         // }
-        todo!()
+        Ok(())
     }
 
     async fn create_implementation_tasks(
