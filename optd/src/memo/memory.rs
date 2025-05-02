@@ -1,13 +1,7 @@
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet, VecDeque};
-
-use async_recursion::async_recursion;
-
-use crate::core::cir::Child;
-
-use super::Memoize;
-use super::merge_repr::Representative;
 use super::*;
+use crate::core::cir::*;
+use async_recursion::async_recursion;
+use std::collections::{HashMap, HashSet, VecDeque, hash_map::Entry};
 
 /// An in-memory implementation of the memo table.
 #[derive(Default)]

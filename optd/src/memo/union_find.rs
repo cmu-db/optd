@@ -1,27 +1,17 @@
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 use std::hash::Hash;
 
 /// A specialized Union-Find data structure for tracking group or goal representatives
 /// caused by merges
 ///
-/// Implements union-find with path compression for O(α(n)) amortized time complexity
+/// Implements union-find with path compression for O(log n) amortized time complexity.
 pub struct Representative<T> {
     parents: HashMap<T, T>,
 }
 
-impl<T> Default for Representative<T> {
-    fn default() -> Self {
-        Representative {
-            parents: HashMap::new(),
-        }
-    }
-}
-
 impl<T: Eq + Hash + Clone> Representative<T> {
     /// Creates a new empty Representative
-    pub(super) fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 
@@ -29,7 +19,7 @@ impl<T: Eq + Hash + Clone> Representative<T> {
     /// If `x` doesn't exist, returns `x` as its own representative
     ///
     /// This is a non-mutating find operation that does not perform path compression
-    pub(super) fn find(&self, x: &T) -> T {
+    pub fn find(&self, x: &T) -> T {
         match self.parents.get(x) {
             Some(parent) if parent == x => parent.clone(),
             Some(parent) => self.find(parent),
@@ -41,7 +31,7 @@ impl<T: Eq + Hash + Clone> Representative<T> {
     /// If either element doesn't exist, it's automatically added
     ///
     /// This operation performs path compression during the merge
-    pub(super) fn merge(&mut self, old: &T, new: &T) -> T {
+    pub fn merge(&mut self, old: &T, new: &T) -> T {
         // Ensure both elements exist
         self.parents.entry(old.clone()).or_insert(old.clone());
         self.parents.entry(new.clone()).or_insert(new.clone());
@@ -74,6 +64,14 @@ impl<T: Eq + Hash + Clone> Representative<T> {
         let root = self.find_with_compression(&parent);
         self.parents.insert(x.clone(), root.clone());
         root
+    }
+}
+
+impl<T> Default for Representative<T> {
+    fn default() -> Self {
+        Representative {
+            parents: HashMap::new(),
+        }
     }
 }
 
