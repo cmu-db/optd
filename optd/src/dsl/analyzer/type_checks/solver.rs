@@ -623,7 +623,7 @@ mod tests {
                 | BoolLiteral(value: Bool)
                 \ StringLiteral(value: String)
             | BinaryOp = 
-                | Arithmetic = 
+                | Arith = 
                     | Add(left: Expression, right: Expression)
                     | Subtract(left: Expression, right: Expression)
                     | Multiply(left: Expression, right: Expression)

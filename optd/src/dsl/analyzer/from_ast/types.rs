@@ -6,7 +6,7 @@
 use super::converter::ASTConverter;
 use crate::dsl::analyzer::errors::AnalyzerErrorKind;
 use crate::dsl::analyzer::hir::Identifier;
-use crate::dsl::analyzer::type_checks::registry::{Generic, Type, TypeKind};
+use crate::dsl::analyzer::type_checks::registry::{Generic, RESERVED_TYPE_MAP, Type, TypeKind};
 use crate::dsl::parser::ast::Type as AstType;
 use crate::dsl::utils::span::Spanned;
 use std::collections::HashMap;
@@ -76,6 +76,8 @@ impl ASTConverter {
             AstType::Identifier(name) => {
                 if let Some(generic) = generics.get(name) {
                     Gen(generic.clone())
+                } else if let Some(type_kind) = RESERVED_TYPE_MAP.get(name) {
+                    type_kind.clone()
                 } else {
                     if !self.registry.subtypes.contains_key(name) {
                         return Err(AnalyzerErrorKind::new_undefined_type(name, &ast_type.span));

@@ -1,5 +1,5 @@
 use super::registry::{Type, TypeKind};
-use crate::dsl::analyzer::type_checks::registry::Generic;
+use crate::dsl::analyzer::type_checks::registry::{Generic, RESERVED_TYPE_MAP};
 use crate::dsl::parser::ast::Type as AstType;
 use crate::dsl::utils::span::{OptionalSpanned, Spanned};
 use std::collections::HashMap;
@@ -21,7 +21,13 @@ pub(crate) fn convert_ast_type(ast_ty: Spanned<AstType>) -> Type {
 
     let span = ast_ty.span;
     let kind = match *ast_ty.value {
-        AstType::Identifier(name) => Adt(name),
+        AstType::Identifier(name) => {
+            if let Some(type_kind) = RESERVED_TYPE_MAP.get(&name) {
+                type_kind.clone()
+            } else {
+                Adt(name.clone())
+            }
+        }
         AstType::Int64 => I64,
         AstType::String => String,
         AstType::Bool => Bool,
