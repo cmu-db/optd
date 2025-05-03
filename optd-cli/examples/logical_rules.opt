@@ -1,0 +1,281 @@
+data Physical
+data PhysicalProperties
+data Statistics
+data LogicalProperties
+
+data Logical =
+  | Add(left: Logical, right: Logical)
+  | Sub(left: Logical, right: Logical)
+  | Mult(left: Logical, right: Logical)
+  | Div(left: Logical, right: Logical)
+  | Pow(base: Logical, exponent: Logical)
+  | Neg(expr: Logical)
+  | Max(left: Logical, right: Logical)
+  | Min(left: Logical, right: Logical)
+  \ Const(val: I64)
+
+fn recursive_power(base: I64, exp: I64): I64 =
+  if exp == 0 then 
+    1
+  else if exp == 1 then 
+    base
+  else 
+    base * recursive_power(base, exp - 1)
+
+fn (op: Logical) evaluate(): I64 = match op
+  | Add(left, right) -> left.evaluate() + right.evaluate()
+  | Sub(left, right) -> left.evaluate() - right.evaluate()
+  | Mult(left, right) -> left.evaluate() * right.evaluate()
+  | Div(left, right) -> 
+      let r = right.evaluate() in
+      if r == 0 then 
+        fail("cannot div by zero")
+      else 
+        left.evaluate() / r
+  | Pow(base, exp) -> 
+      let 
+        b = base.evaluate(),
+        e = exp.evaluate()
+      in
+        if e < 0 then fail("negative exponent") else recursive_power(b, e)
+  | Neg(expr) -> -expr.evaluate()
+  | Max(left, right) -> 
+      let 
+        l = left.evaluate(),
+        r = right.evaluate()
+      in
+        if l > r then l else r
+  | Min(left, right) -> 
+      let 
+        l = left.evaluate(),
+        r = right.evaluate()
+      in
+        if l < r then l else r
+  \ Const(val) -> val
+
+fn (op: Logical) mult_commute(): Logical? = match op
+  | Mult(left, right) -> Mult(right, left)
+  \ _ -> none
+
+fn (op: Logical) add_commute(): Logical? = match op
+  | Add(left, right) -> Add(right, left)
+  \ _ -> none
+
+fn (op: Logical) const_fold_add(): Logical? = match op
+  | Add(Const(a), Const(b)) -> Const(a + b)
+  \ _ -> none
+
+fn (op: Logical) const_fold_mult(): Logical? = match op
+  | Mult(Const(a), Const(b)) -> Const(a * b)
+  \ _ -> none
+
+fn (op: Logical) const_fold_sub(): Logical? = match op
+  | Sub(Const(a), Const(b)) -> Const(a - b)
+  \ _ -> none
+
+fn (op: Logical) const_fold_div(): Logical? = match op
+  | Div(Const(a), Const(b)) -> 
+      if b == 0 then none else Const(a / b)
+  \ _ -> none
+
+fn (op: Logical) mult_by_zero(): Logical? = match op
+  | Mult(_, Const(0)) -> Const(0)
+  | Mult(Const(0), _) -> Const(0)
+  \ _ -> none
+
+fn (op: Logical) mult_by_one(): Logical? = match op
+  | Mult(expr, Const(1)) -> expr
+  | Mult(Const(1), expr) -> expr
+  \ _ -> none
+
+fn (op: Logical) add_by_zero(): Logical? = match op
+  | Add(expr, Const(0)) -> expr
+  | Add(Const(0), expr) -> expr
+  \ _ -> none
+
+fn (op: Logical) double_neg(): Logical? = match op
+  | Neg(Neg(expr)) -> expr
+  \ _ -> none
+
+fn (op: Logical) pow_zero(): Logical? = match op
+  | Pow(_, Const(0)) -> Const(1)
+  \ _ -> none
+
+fn (op: Logical) pow_one(): Logical? = match op
+  | Pow(base, Const(1)) -> base
+  \ _ -> none
+
+fn (op: Logical) distributive(): Logical? = match op
+  | Mult(factor, Add(left, right)) -> 
+      Add(Mult(factor, left), Mult(factor, right))
+  | Mult(Add(left, right), factor) -> 
+      Add(Mult(left, factor), Mult(right, factor))
+  \ _ -> none
+
+fn (op: Logical) sub_to_add(): Logical? = match op
+  | Sub(left, right) -> Add(left, Neg(right))
+  \ _ -> none
+
+fn (op: Logical) same_minmax(): Logical? = match op
+  | Min(expr1, expr2) -> if expr1 == expr2 then expr1 else none
+  | Max(expr1, expr2) -> if expr1 == expr2 then expr1 else none
+  \ _ -> none
+
+fn (op: Logical) const_fold_minmax(): Logical? = match op
+  | Min(Const(a), Const(b)) -> Const(if a < b then a else b)
+  | Max(Const(a), Const(b)) -> Const(if a > b then a else b)
+  \ _ -> none
+
+fn (op: Logical) nested_minmax(): Logical? = match op
+  | Min(Min(a, b), c) -> Min(a, Min(b, c))
+  | Max(Max(a, b), c) -> Max(a, Max(b, c))
+  \ _ -> none
+
+[run]
+fn build_calculator_expr() =
+  let
+    const2 = Const(2),
+    const3 = Const(3),
+    const4 = Const(4),
+    addition = Add(const2, const3),
+    multiplication = Mult(addition, const4)
+  in
+    multiplication.evaluate()
+
+[run]
+fn run_mult_commute() =
+  let
+    const5 = Const(5),
+    const10 = Const(10),
+    mult = Mult(const5, const10)
+  in
+    mult_commute(mult)
+
+[run]
+fn run_add_commute() =
+  let
+    const7 = Const(7),
+    const12 = Const(12),
+    addition = Add(const7, const12)
+  in
+    add_commute(addition)
+
+[run]
+fn run_const_fold_add() =
+  let
+    const5 = Const(5),
+    const8 = Const(8),
+    addition = Add(const5, const8)
+  in
+    const_fold_add(addition)
+
+[run]
+fn run_const_fold_mult() =
+  let
+    const6 = Const(6),
+    const9 = Const(9),
+    multiplication = Mult(const6, const9)
+  in
+    const_fold_mult(multiplication)
+
+[run]
+fn run_mult_by_zero() =
+  let
+    const0 = Const(0),
+    const42 = Const(42),
+    multiplication = Mult(const42, const0)
+  in
+    mult_by_zero(multiplication)
+
+[run]
+fn run_mult_by_one() =
+  let
+    const1 = Const(1),
+    const25 = Const(25),
+    multiplication = Mult(const1, const25)
+  in
+    mult_by_one(multiplication)
+
+[run]
+fn run_add_by_zero() =
+  let
+    const0 = Const(0),
+    const17 = Const(17),
+    addition = Add(const17, const0)
+  in
+    add_by_zero(addition)
+
+[run]
+fn run_double_neg() =
+  let
+    const13 = Const(13),
+    neg1 = Neg(const13),
+    neg2 = Neg(neg1)
+  in
+    double_neg(neg2)
+
+[run]
+fn run_distributive() =
+  let
+    const2 = Const(2),
+    const3 = Const(3),
+    const4 = Const(4),
+    addition = Add(const3, const4),
+    multiplication = Mult(const2, addition)
+  in
+    distributive(multiplication)
+
+[run]
+fn run_sub_to_add() =
+  let
+    const8 = Const(8),
+    const3 = Const(3),
+    subtraction = Sub(const8, const3)
+  in
+    sub_to_add(subtraction)
+
+// [run]
+// fn run_same_minmax() =
+//   let
+//     const5 = Const(5),
+//     min_op = Min(const5, const5)
+//   in
+//     same_minmax(min_op)
+
+[run]
+fn run_const_fold_minmax() =
+  let
+    const8 = Const(8),
+    const15 = Const(15),
+    min_op = Min(const8, const15)
+  in
+    const_fold_minmax(min_op)
+
+[run]
+fn run_nested_minmax() =
+  let
+    const3 = Const(3),
+    const6 = Const(6),
+    const9 = Const(9),
+    inner_min = Min(const3, const6),
+    outer_min = Min(inner_min, const9)
+  in
+    nested_minmax(outer_min)
+
+[run]
+fn run_pow_zero() =
+  let
+    const7 = Const(7),
+    const0 = Const(0),
+    pow_zero_expr = Pow(const7, const0)
+  in
+    pow_zero(pow_zero_expr)
+
+[run]
+fn run_division_by_zero() =
+  let
+    const5 = Const(5),
+    const0 = Const(0),
+    division = Div(const5, const0)
+  in
+    division.evaluate()
