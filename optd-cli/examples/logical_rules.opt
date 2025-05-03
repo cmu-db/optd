@@ -206,7 +206,7 @@ fn run_add_by_zero() =
     add_by_zero(addition)
 
 [run]
-fn (logical: Logical) run_double_neg() =
+fn run_double_neg() =
   let
     const13 = Const(13),
     neg1 = Neg(const13),
