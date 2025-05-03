@@ -4,10 +4,6 @@ version = "0.1.0"
 edition = "2024"
 repository = "https://github.com/cmu-db/optd"
 
-[[bin]]
-name = "optd-cli"
-path = "src/dsl/cli/main.rs"
-
 [dependencies]
 ariadne = "0.5.1"
 async-recursion = "1.1.1"
