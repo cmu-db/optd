@@ -52,7 +52,6 @@ pub enum TypeKind {
     Unit,
     Universe, // All types are subtypes of Universe.
     Nothing,  // Inherits all types.
-    None,     // Inherits all optionals.
 
     // Unknown types.
     UnknownAsc(usize),  // Strictly ascending types.

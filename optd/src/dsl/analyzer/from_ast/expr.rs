@@ -107,7 +107,7 @@ impl ASTConverter {
                 self.convert_fail(error_expr, generics)?
             }
             AstExpr::None => {
-                ty = None.into();
+                ty = Optional(ty).into();
                 CoreExpr(CoreData::None)
             }
             AstExpr::Block(block) => self.convert_block(block, generics)?,

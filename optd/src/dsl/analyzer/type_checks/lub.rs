@@ -18,8 +18,6 @@ impl TypeRegistry {
     /// 6. For ADT types, it finds the closest common supertype in the type hierarchy.
     /// 7. For wrapper types:
     ///    - Optional preserves the wrapper and computes LUB of inner types
-    ///    - None and Optional(T) yields Optional(T)
-    ///    - None and non-Optional T yields Optional(T)
     ///    - For Stored/Costed: Costed is considered more specific than Stored, and
     ///      either wrapper can be removed when comparing with non-wrapped types
     /// 8. Map types can be viewed as functions from keys to optional values, and
@@ -75,12 +73,9 @@ impl TypeRegistry {
             (other, Nothing) => other.clone(),
 
             // Primitive types - check for equality.
-            (I64, I64)
-            | (String, String)
-            | (F64, F64)
-            | (Bool, Bool)
-            | (Unit, Unit)
-            | (None, None) => *type1.value.clone(),
+            (I64, I64) | (String, String) | (F64, F64) | (Bool, Bool) | (Unit, Unit) => {
+                *type1.value.clone()
+            }
 
             // Array covariance: LUB(Array<T1>, Array<T2>) = Array<LUB(T1, T2)>.
             (Array(elem1), Array(elem2)) => {
@@ -109,11 +104,8 @@ impl TypeRegistry {
                 let lub_inner = self.least_upper_bound(inner1, inner2, has_changed);
                 Optional(lub_inner)
             }
-            (None, Optional(inner)) | (Optional(inner), None) => Optional(inner.clone()),
             (Optional(inner), _) => Optional(self.least_upper_bound(inner, type2, has_changed)),
             (_, Optional(inner)) => Optional(self.least_upper_bound(type1, inner, has_changed)),
-            (None, _) => Optional(type2.clone()),
-            (_, None) => Optional(type1.clone()),
 
             // Stored type handling.
             (Stored(inner1), Stored(inner2)) => {
@@ -776,22 +768,6 @@ pub mod tests {
             &Optional(Adt("Dog".to_string()).into()).into(),
             &Optional(Adt("Eagle".to_string()).into()).into(),
             Optional(Adt("Animals".to_string()).into()),
-        );
-
-        // None and Optional ADT
-        assert_lub_eq(
-            &mut reg,
-            &None.into(),
-            &Optional(Adt("Dog".to_string()).into()).into(),
-            Optional(Adt("Dog".to_string()).into()),
-        );
-
-        // None and ADT type
-        assert_lub_eq(
-            &mut reg,
-            &None.into(),
-            &Adt("Dog".to_string()).into(),
-            Optional(Adt("Dog".to_string()).into()),
         );
 
         // ADT and Optional related ADT

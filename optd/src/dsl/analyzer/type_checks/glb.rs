@@ -18,7 +18,6 @@ impl TypeRegistry {
     /// 6. For wrapper types:
     ///    - Optional(T) and Optional(U) yields Optional(GLB(T, U)).
     ///    - Optional(T) and U yields GLB(T, U).
-    ///    - None is the GLB of None and any Optional type.
     ///    - For Stored/Costed: Costed is more specific than Stored, so mixed operations yield Costed.
     /// 7. For compatibility between collections and functions:
     ///    - Map and Function: returns the more specific type if one is a subtype of the other,
@@ -77,12 +76,9 @@ impl TypeRegistry {
             (other, Universe) => other.clone(),
 
             // Primitive types - check for equality.
-            (I64, I64)
-            | (String, String)
-            | (F64, F64)
-            | (Bool, Bool)
-            | (Unit, Unit)
-            | (None, None) => *type1.value.clone(),
+            (I64, I64) | (String, String) | (F64, F64) | (Bool, Bool) | (Unit, Unit) => {
+                *type1.value.clone()
+            }
 
             // Array covariance: GLB(Array<T1>, Array<T2>) = Array<GLB(T1, T2)>.
             (Array(elem1), Array(elem2)) => {
@@ -111,7 +107,6 @@ impl TypeRegistry {
                 let glb_inner = self.greatest_lower_bound(inner1, inner2, has_changed);
                 Optional(glb_inner)
             }
-            (None, Optional(_)) | (Optional(_), None) => None,
             (Optional(inner), _) => {
                 return self.greatest_lower_bound(inner, type2, has_changed);
             }
@@ -550,17 +545,6 @@ mod tests {
             &Optional(Adt("Car".to_string()).into()).into(),
             Optional(Nothing.into()),
         );
-
-        // None and Optional
-        assert_glb_eq(
-            &mut reg,
-            &None.into(),
-            &Optional(Adt("Dog".to_string()).into()).into(),
-            None,
-        );
-
-        // None and None
-        assert_glb_eq(&mut reg, &None.into(), &None.into(), None);
 
         // Optional and base type
         assert_glb_eq(

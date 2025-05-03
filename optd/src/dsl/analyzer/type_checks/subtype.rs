@@ -225,8 +225,6 @@ impl TypeRegistry {
             (Optional(child_ty), Optional(parent_ty)) => {
                 self.is_subtype_inner(child_ty, parent_ty, memo, has_changed)
             }
-            // None <: Optional[Nothing].
-            (None, Optional(_)) => true,
             // Likewise, T <: Optional[T].
             (_, Optional(parent_inner)) => {
                 self.is_subtype_inner(child, parent_inner, memo, has_changed)
@@ -244,7 +242,6 @@ impl TypeRegistry {
             (String, EqHash) => true,
             (Bool, EqHash) => true,
             (Unit, EqHash) => true,
-            (None, EqHash) => true,
             (Optional(inner), EqHash) => {
                 self.is_subtype_inner(inner, &EqHash.into(), memo, has_changed)
             }
@@ -838,32 +835,6 @@ mod tests {
     }
 
     #[test]
-    fn test_none_subtyping() {
-        let mut reg = TypeRegistry::default();
-
-        // Test None as a subtype of any Optional type
-        assert!(reg.is_subtype(&None.into(), &Optional(I64.into()).into()));
-        assert!(reg.is_subtype(&None.into(), &Optional(String.into()).into()));
-        assert!(reg.is_subtype(&None.into(), &Optional(Bool.into()).into()));
-        assert!(reg.is_subtype(&None.into(), &Optional(F64.into()).into()));
-        assert!(reg.is_subtype(&None.into(), &Optional(Unit.into()).into()));
-
-        // Test None with complex Optional types
-        assert!(reg.is_subtype(&None.into(), &Optional(Array(I64.into()).into()).into()));
-
-        // Test that None is not a subtype of non-Optional types
-        assert!(!reg.is_subtype(&None.into(), &I64.into()));
-        assert!(!reg.is_subtype(&None.into(), &String.into()));
-
-        // None is still a subtype of Universe (as all types are)
-        assert!(reg.is_subtype(&None.into(), &Universe.into()));
-
-        // None is not equal to Nothing
-        assert!(!reg.is_subtype(&None.into(), &Nothing.into()));
-        assert!(reg.is_subtype(&Nothing.into(), &None.into()));
-    }
-
-    #[test]
     fn test_type_optional_subtyping() {
         let mut reg = TypeRegistry::default();
 
@@ -1008,7 +979,6 @@ mod tests {
         assert!(!reg.is_subtype(&Bool.into(), &Concat.into()));
         assert!(!reg.is_subtype(&F64.into(), &Concat.into()));
         assert!(!reg.is_subtype(&Unit.into(), &Concat.into()));
-        assert!(!reg.is_subtype(&None.into(), &Concat.into()));
         assert!(!reg.is_subtype(
             &Tuple(vec![I64.into(), String.into()]).into(),
             &Concat.into()
@@ -1035,7 +1005,6 @@ mod tests {
         assert!(reg.is_subtype(&String.into(), &EqHash.into()));
         assert!(reg.is_subtype(&Bool.into(), &EqHash.into()));
         assert!(reg.is_subtype(&Unit.into(), &EqHash.into()));
-        assert!(reg.is_subtype(&None.into(), &EqHash.into()));
 
         // Test tuple types with all EqHash elements
         assert!(reg.is_subtype(
@@ -1075,7 +1044,6 @@ mod tests {
         assert!(!reg.is_subtype(&String.into(), &Arithmetic.into()));
         assert!(!reg.is_subtype(&Bool.into(), &Arithmetic.into()));
         assert!(!reg.is_subtype(&Unit.into(), &Arithmetic.into()));
-        assert!(!reg.is_subtype(&None.into(), &Arithmetic.into()));
         assert!(!reg.is_subtype(
             &Tuple(vec![I64.into(), F64.into()]).into(),
             &Arithmetic.into()

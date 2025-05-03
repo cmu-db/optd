@@ -106,18 +106,17 @@ pub(crate) fn type_display(ty: &Type, resolved_unknown: &HashMap<usize, Type>) -
         Unit => "()".to_string(),
         Universe => "Universe".to_string(),
         Nothing => "Nothing".to_string(),
-        None => "None".to_string(),
 
         // Unknown types
         UnknownAsc(id) => {
             format!(
-                "≧{{{}}}",
+                "≧`{}`",
                 type_display(resolved_unknown.get(id).unwrap(), resolved_unknown)
             )
         }
         UnknownDesc(id) => {
             format!(
-                "≦{{{}}}",
+                "≦`{}`",
                 type_display(resolved_unknown.get(id).unwrap(), resolved_unknown)
             )
         }
