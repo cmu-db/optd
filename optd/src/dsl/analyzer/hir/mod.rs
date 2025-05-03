@@ -24,6 +24,7 @@ use std::fmt::Debug;
 use std::{collections::HashMap, sync::Arc};
 
 pub(crate) mod context;
+mod display;
 pub(crate) mod map;
 
 /// Unique identifier for variables, functions, types, etc.
