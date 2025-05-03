@@ -3,7 +3,7 @@ use crate::dsl::analyzer::hir::context::Context;
 use crate::dsl::analyzer::hir::{Annotation, FunKind, Identifier};
 use crate::dsl::analyzer::hir::{CoreData, TypedSpan, Udf, Value};
 use crate::dsl::analyzer::type_checks::converter::create_function_type;
-use crate::dsl::analyzer::type_checks::registry::{Type, TypeRegistry};
+use crate::dsl::analyzer::type_checks::registry::{Generic, Type, TypeRegistry};
 use crate::dsl::parser::ast::Function;
 use crate::dsl::utils::span::Spanned;
 use FunKind::*;
@@ -53,7 +53,7 @@ impl ASTConverter {
         let generics = {
             let mut generics_map = HashMap::new();
 
-            for param in &func.type_params {
+            for (param, bound) in &func.type_params {
                 let param_name = &*param.value;
 
                 // Check for duplicates.
@@ -65,16 +65,25 @@ impl ASTConverter {
                     ));
                 }
 
+                // Convert and check bound.
+                let bound_ty = bound
+                    .clone()
+                    .map(|b| self.convert_type(&b, &HashMap::new(), true))
+                    .transpose()?;
+
                 // Assign ID and store.
                 let id = self.registry.next_id;
                 self.registry.next_id += 1;
-                generics_map.insert(param_name.clone(), (id, param.span.clone()));
+                generics_map.insert(
+                    param_name.clone(),
+                    (Generic(id, bound_ty), param.span.clone()),
+                );
             }
 
             // Extract the final mapping of param names to IDs.
             generics_map
                 .into_iter()
-                .map(|(name, (id, _))| (name, id))
+                .map(|(name, (generic, _))| (name, generic))
                 .collect()
         };
 
@@ -133,7 +142,7 @@ impl ASTConverter {
     fn get_parameters(
         &mut self,
         func: &Function,
-        generics: &HashMap<Identifier, usize>,
+        generics: &HashMap<Identifier, Generic>,
     ) -> Result<Vec<(Identifier, Type)>, Box<AnalyzerErrorKind>> {
         // Start with receiver if it exists.
         let mut param_fields = match &func.receiver {
@@ -171,7 +180,7 @@ mod converter_tests {
     use crate::catalog::Catalog;
     use crate::dsl::analyzer::from_ast::from_ast;
     use crate::dsl::analyzer::hir::{CoreData, FunKind};
-    use crate::dsl::analyzer::type_checks::registry::TypeKind;
+    use crate::dsl::analyzer::type_checks::registry::{Generic, TypeKind};
     use crate::dsl::parser::ast::{self, Adt, Function, Item, Module, Type as AstType};
     use crate::dsl::utils::span::{Span, Spanned};
 
@@ -437,7 +446,10 @@ mod converter_tests {
         let mut func_val = (*func.value).clone();
 
         // Add type parameters
-        func_val.type_params = vec![spanned(String::from("T")), spanned(String::from("U"))];
+        func_val.type_params = vec![
+            (spanned(String::from("T")), None),
+            (spanned(String::from("U")), None),
+        ];
 
         // Modify the return type to use a generic
         func_val.return_type = spanned(AstType::Identifier(String::from("T")));
@@ -460,7 +472,7 @@ mod converter_tests {
         match &*func_val.unwrap().metadata.ty.value {
             TypeKind::Closure(_, ret_type) => {
                 match &*ret_type.value {
-                    TypeKind::Generic(id) => {
+                    TypeKind::Gen(Generic(id, _)) => {
                         // We expect id to be 0 since "T" should be the first generic parameter
                         assert_eq!(*id, 0);
                     }
@@ -479,9 +491,9 @@ mod converter_tests {
 
         // Add type parameters with a duplicate
         func_val.type_params = vec![
-            spanned(String::from("T")),
-            spanned(String::from("U")),
-            spanned(String::from("T")), // Duplicate of "T"
+            (spanned(String::from("T")), None),
+            (spanned(String::from("U")), None),
+            (spanned(String::from("T")), None), // Duplicate of "T"
         ];
 
         let func = spanned(func_val);

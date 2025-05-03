@@ -16,7 +16,7 @@
 
 // You can compile this tutorial file with:
 // 
-// cargo run -- compile tutorial.opt
+// cargo run --bin optd-cli -- compile [path] --mock-udfs map get_table_schema properties statistics optimize
 
 // -------------------------
 // 1. Logical Operators
@@ -52,7 +52,7 @@ data Scalar =
         | IntLiteral(value: I64)
         | StringLiteral(value: String)
         \ BoolLiteral(value: Bool)
-    | Arithmetic =
+    | Arith =
         | Mult(left: Scalar, right: Scalar)
         | Add(left: Scalar, right: Scalar)
         | Sub(left: Scalar, right: Scalar)
@@ -65,7 +65,7 @@ data Scalar =
     | Function =
         | Cast(expr: Scalar, target_type: String)
         | Substring(str: Scalar, start: Scalar, length: Scalar)
-        \ Concat(args: [Scalar])
+        \ Concatenate(args: [Scalar])
     \ AggregateExpr =
         | Sum(expr: Scalar)
         | Count(expr: Scalar)
@@ -213,7 +213,7 @@ fn <E, F> (list: [E]) map(f: (E) -> F): [F] = match list
     | [head .. tail] -> [f(head)] ++ tail.map(f)
     \ [] -> []
 
-fn <K, V> (pairs: [(K, V)]) to_map(): {K : V} = match pairs
+fn <K: EqHash, V> (pairs: [(K, V)]) to_map(): {K : V} = match pairs
     | [head .. tail] -> {head#_0 : head#_1} ++ tail.to_map()
     \ [] -> {}
 
@@ -238,33 +238,33 @@ fn (costed: Physical$) statistics(): CostedProperties
 // These are annotated with [transformation] and convert between logical plans:
 
 // Helper function for scalar rewrites.
-fn (expr: Scalar) remap(map: {I64 : I64}): Scalar = 
+fn (expr: Scalar) remap(bindings: {I64 : I64}): Scalar = 
     match expr
         | ColumnRef(idx) -> 
-            if map(idx) != none then
-                ColumnRef(map(idx))
+            if bindings(idx) != none then // TODO: Fix none bug... Should not be a type! Rather Option<Nothing>.
+                ColumnRef(0) // TODO: Add ! once we have the `!` syntax.
             else
                 ColumnRef(idx)
         | IntLiteral(value) -> IntLiteral(value)
         | StringLiteral(value) -> StringLiteral(value)
         | BoolLiteral(value) -> BoolLiteral(value)
-        | Mult(left, right) -> Mult(left.remap(map), right.remap(map))
-        | Add(left, right) -> Add(left.remap(map), right.remap(map))
-        | Sub(left, right) -> Sub(left.remap(map), right.remap(map))
-        | Div(left, right) -> Div(left.remap(map), right.remap(map))
-        | And(children) -> And(children.map(child -> child.remap(map)))
-        | Or(children) -> Or(children.map(child -> child.remap(map)))
-        | Not(child) -> Not(child.remap(map))
-        | Equals(left, right) -> Equals(left.remap(map), right.remap(map))
-        | Cast(expr, target_type) -> Cast(expr.remap(map), target_type)
+        | Mult(left, right) -> Mult(left.remap(bindings), right.remap(bindings))
+        | Add(left, right) -> Add(left.remap(bindings), right.remap(bindings))
+        | Sub(left, right) -> Sub(left.remap(bindings), right.remap(bindings))
+        | Div(left, right) -> Div(left.remap(bindings), right.remap(bindings))
+        | And(children) -> And(children.map(child: Scalar -> child.remap(bindings)))
+        | Or(children) -> Or(children.map(child: Scalar -> child.remap(bindings)))
+        | Not(child) -> Not(child.remap(bindings))
+        | Equals(left, right) -> Equals(left.remap(bindings), right.remap(bindings))
+        | Cast(expr, target_type) -> Cast(expr.remap(bindings), target_type)
         | Substring(str, start, length) -> 
-            Substring(str.remap(map), start.remap(map), length.remap(map))
-        | Concat(args) -> Concat(args.map(arg -> arg.remap(map)))
-        | Sum(expr) -> Sum(expr.remap(map))
-        | Count(expr) -> Count(expr.remap(map))
-        | Min(expr) -> Min(expr.remap(map))
-        | Max(expr) -> Max(expr.remap(map))
-        \ Avg(expr) -> Avg(expr.remap(map))
+            Substring(str.remap(bindings), start.remap(bindings), length.remap(bindings))
+        | Concatenate(args) -> Concatenate(args.map(arg: Scalar -> arg.remap(bindings)))
+        | Sum(expr) -> Sum(expr.remap(bindings))
+        | Count(expr) -> Count(expr.remap(bindings))
+        | Min(expr) -> Min(expr.remap(bindings))
+        | Max(expr) -> Max(expr.remap(bindings))
+        \ Avg(expr) -> Avg(expr.remap(bindings))
 
 [transformation]
 fn (expr: Logical*) join_commute(): Logical? = match expr

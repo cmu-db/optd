@@ -147,6 +147,11 @@ pub enum AnalyzerErrorKind {
         // To be able to call display function of Type
         unknowns: HashMap<usize, Type>,
     },
+
+    ReservedType {
+        name: String,
+        span: Span,
+    },
 }
 
 impl AnalyzerErrorKind {
@@ -339,7 +344,6 @@ impl AnalyzerErrorKind {
         .into()
     }
 
-    // New constructor for array decomposition errors
     pub fn new_invalid_array_decomposition(
         scrutinee_span: &Span,
         pattern_span: &Span,
@@ -351,6 +355,14 @@ impl AnalyzerErrorKind {
             pattern_span: pattern_span.clone(),
             scrutinee_type: scrutinee_type.clone(),
             unknowns,
+        }
+        .into()
+    }
+
+    pub fn new_reserved_type(name: &str, span: &Span) -> Box<Self> {
+        Self::ReservedType {
+            name: name.to_string(),
+            span: span.clone(),
         }
         .into()
     }
@@ -504,13 +516,18 @@ impl Diagnose for Box<AnalyzerError> {
                     ),
                 )
             },
-            // Handler for the new InvalidArrayDecomposition error
             InvalidArrayDecomposition {
                 scrutinee_span,
                 pattern_span,
                 scrutinee_type,
                 unknowns,
             } => self.build_array_decomp_error_report(scrutinee_span, pattern_span, scrutinee_type, unknowns),
+            ReservedType { name, span } => self.build_single_span_report(
+                span,
+                &format!("Reserved type name: '{}'", name),
+                &format!("'{}' is a reserved type name", name),
+                "Choose a different name for your type. Reserved type names are used internally by the system",
+            ),
         }
     }
 
@@ -537,6 +554,7 @@ impl Diagnose for Box<AnalyzerError> {
             InvalidTransformation { span, .. } => span,
             InvalidImplementation { span, .. } => span,
             InvalidArrayDecomposition { pattern_span, .. } => pattern_span, // Use pattern span as primary
+            ReservedType { span, .. } => span, // New case for ReservedType
         };
 
         (span.src_file.clone(), Source::from(self.src_code.clone()))
