@@ -1316,4 +1316,143 @@ mod tests {
             "Generic type constraints should have failed type inference"
         );
     }
+
+    #[test]
+    fn test_generic_with_supertype_bound() {
+        let source = r#"
+        // Small ADT type hierarchy
+        data Animal = 
+           | Mammal = 
+               | Dog(name: String)
+               \ Cat(name: String)
+           \ Bird(name: String)
+       
+       // Generic function with a bound requiring type to be an Animal
+       fn <E: Animal> describe(entity: E): String = 
+           match entity
+               | Dog(name) -> name ++ " is a dog"
+               | Cat(name) -> name ++ " is a cat"
+               \ Bird(name) -> name ++ " is a bird"
+       
+       
+       fn main(): String = 
+           let 
+               // Create specific animal types
+               dog = Dog("Rex"),
+               cat = Cat("Whiskers"),
+               bird = Bird("Tweety"),
+           in        
+               describe(dog)
+       
+        "#;
+
+        let result = run_type_inference(source, "generic_with_supertype_bound.opt");
+        assert!(
+            result.is_ok(),
+            "Generic function with supertype bound failed type inference: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_pairs_to_map() {
+        let source = r#"
+        // Convert array of key-value pairs to a map
+        fn <K: EqHash, V> (pairs: [(K, V)]) to_map(): {K: V} = match pairs
+            | [head .. tail] -> {head#_0: head#_1} ++ tail.to_map()
+            \ [] -> {}
+        
+        fn main(): {String : I64} = 
+        let 
+            // Create pairs and convert to map
+            pairs = [("a", 1), ("b", 2), ("c", 3)],
+            map = pairs.to_map(),
+        in
+            map
+        "#;
+
+        let result = run_type_inference(source, "simple_to_map.opt");
+        assert!(
+            result.is_ok(),
+            "Basic pairs to map conversion failed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_pairs_to_map_without_eqhash() {
+        let source = r#"
+        // Convert array of key-value pairs to a map, but missing EqHash bound
+        fn <K, V> (pairs: [(K, V)]) to_map(): {K: V} = match pairs
+            | [head .. tail] -> {head#_0: head#_1} ++ tail.to_map()
+            \ [] -> {}
+        
+        fn main(): {String: I64} = 
+            let 
+                // Create pairs and convert to map
+                pairs = [("a", 1), ("b", 2), ("c", 3)],
+                map = pairs.to_map()
+            in
+                map
+        "#;
+
+        let result = run_type_inference(source, "missing_eqhash.opt");
+        assert!(
+            result.is_err(),
+            "Map creation without EqHash bound should have failed"
+        );
+    }
+
+    #[test]
+    fn test_with_exact_source() {
+        let source = r#"
+        // Convert array of key-value pairs to a map with EqHash constraint
+        fn <K: EqHash, V> (pairs: [(K, V)]) to_map(): {K: V} = match pairs
+            | [head .. tail] -> {head#_0: head#_1} ++ tail.to_map()
+            \ [] -> {}
+            
+        // Simple filter function for arrays
+        fn <T> (array: [T]) filter(pred: T -> Bool): [T] = match array
+            | [] -> []
+            \ [x .. xs] ->
+                if pred(x) then [x] ++ xs.filter(pred)
+                else xs.filter(pred)
+                
+        // Simple map function
+        fn <T, U> (array: [T]) map(f: T -> U): [U] = match array
+            | [] -> []
+            \ [x .. xs] -> [f(x)] ++ xs.map(f)
+            
+        // Data type for our test
+        data User(name: String, age: I64)
+        
+        fn main(): {String: I64} =
+            let
+                // Create some users
+                users = [
+                    User("Alice", 25),
+                    User("Bob", 17),
+                    User("Charlie", 30),
+                    User("Diana", 15)
+                ],
+                
+                // Filter for adults
+                adults = users.filter((u: User) -> u#age >= 18),
+                
+                // Create name -> age map
+                name_age_pairs = adults.map((u: User) -> (u#name, u#age)),
+                
+                // Convert to map
+                age_map = name_age_pairs.to_map()
+            in
+                age_map
+        "#;
+
+        let result = run_type_inference(source, "exact_source_test.opt");
+        assert!(
+            result.is_ok(),
+            "Type inference with exact source code failed: {:?}",
+            result
+        );
+    }
 }
