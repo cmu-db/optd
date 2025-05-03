@@ -46,7 +46,7 @@ use crate::dsl::{
     analyzer::{
         errors::AnalyzerErrorKind,
         hir::{Identifier, Pattern, PatternKind, TypedSpan},
-        type_checks::registry::TypeKind,
+        type_checks::registry::{Generic, TypeKind},
     },
     utils::span::Span,
 };
@@ -191,23 +191,29 @@ impl TypeRegistry {
     /// This method handles generics by creating unique type instantiations for each
     /// constraint context. When encountering a generic type, it either retrieves an
     /// existing instantiation or creates a new one based on the variance direction.
+    /// If the generic has a bound, it ensures the instantiated type satisfies that bound.
     ///
     /// # Arguments
     ///
     /// * `ty` - The type to instantiate
     /// * `constraint_id` - The ID of the constraint that needs this instantiation
+    /// * `span` - The span where the expression occurs for error reporting
     /// * `ascending` - Whether unknown types should be created as ascending (true) or descending (false)
     ///
     /// # Returns
     ///
-    /// A new type with all generic references replaced with constraint-specific instantiations.
-    fn instantiate_type(&mut self, ty: &Type, constraint_id: usize, ascending: bool) -> Type {
+    /// A Result containing either the instantiated type or an error if bound constraints cannot be satisfied.
+    fn instantiate_type(
+        &mut self,
+        ty: &Type,
+        constraint_id: usize,
+        span: &Span,
+        ascending: bool,
+    ) -> Result<Type, Box<AnalyzerErrorKind>> {
         use TypeKind::*;
 
-        let span = ty.span.clone();
-
         let kind = match &*ty.value {
-            Gen(generic) => {
+            Gen(generic @ Generic(_, bound)) => {
                 // Try to find an existing instantiation for this generic in this constraint.
                 let existing = self
                     .instantiated_generics
@@ -231,53 +237,64 @@ impl TypeRegistry {
 
                     // Get or create the vector for this constraint_id.
                     let entry = self.instantiated_generics.entry(constraint_id).or_default();
-
-                    // Add the new instantiation.
                     entry.push((generic.clone(), next_id.clone()));
+
+                    // Check the bound constraint.
+                    if let Some(bound) = bound {
+                        let next_id_ty: Type = next_id.clone().into();
+                        self.check_subtype_constraint(
+                            &TypedSpan::new(next_id_ty, span.clone()),
+                            bound,
+                            &mut false, // The unknown type appears no-where else as it has been introduced here.
+                        )
+                        .unwrap();
+                    }
 
                     next_id
                 }
             }
 
             // For composite types, recursively instantiate their component types.
-            Array(elem_type) => Array(self.instantiate_type(elem_type, constraint_id, ascending)),
+            Array(elem_type) => {
+                Array(self.instantiate_type(elem_type, constraint_id, span, ascending)?)
+            }
 
             Closure(param_type, return_type) => Closure(
-                self.instantiate_type(param_type, constraint_id, !ascending),
-                self.instantiate_type(return_type, constraint_id, ascending),
+                self.instantiate_type(param_type, constraint_id, span, !ascending)?,
+                self.instantiate_type(return_type, constraint_id, span, ascending)?,
             ),
 
             Tuple(types) => {
                 let instantiated_types = types
                     .iter()
-                    .map(|t| self.instantiate_type(t, constraint_id, ascending))
-                    .collect();
+                    .map(|t| self.instantiate_type(t, constraint_id, span, ascending))
+                    .collect::<Result<Vec<_>, _>>()?;
                 Tuple(instantiated_types)
             }
 
             Map(key_type, value_type) => Map(
-                self.instantiate_type(key_type, constraint_id, !ascending),
-                self.instantiate_type(value_type, constraint_id, ascending),
+                self.instantiate_type(key_type, constraint_id, span, !ascending)?,
+                self.instantiate_type(value_type, constraint_id, span, ascending)?,
             ),
 
             Optional(inner_type) => {
-                Optional(self.instantiate_type(inner_type, constraint_id, ascending))
+                Optional(self.instantiate_type(inner_type, constraint_id, span, ascending)?)
             }
             Stored(inner_type) => {
-                Stored(self.instantiate_type(inner_type, constraint_id, ascending))
+                Stored(self.instantiate_type(inner_type, constraint_id, span, ascending)?)
             }
             Costed(inner_type) => {
-                Costed(self.instantiate_type(inner_type, constraint_id, ascending))
+                Costed(self.instantiate_type(inner_type, constraint_id, span, ascending)?)
             }
 
             // Primitive types, special types, and ADT references don't need instantiation.
             _ => *ty.value.clone(),
         };
 
-        Type {
+        Ok(Type {
             value: kind.into(),
-            span: span.clone(),
-        }
+            span: ty.span.clone(),
+        })
     }
 
     /// Checks a function call constraint, ensuring parameter and return types match.
@@ -313,13 +330,26 @@ impl TypeRegistry {
 
             TypeKind::Closure(param, ret) => {
                 // Instantiate potential generics.
-                let param = self.instantiate_type(param, constraint_id, true);
-                let ret = self.instantiate_type(ret, constraint_id, true);
+                let ret = self.instantiate_type(ret, constraint_id, &inner.span, true)?;
 
-                let (param_len, param_types) = match &*param {
-                    TypeKind::Tuple(types) => (types.len(), types.to_vec()),
+                let (param_len, param_types) = match &*param.value {
+                    TypeKind::Tuple(types) => {
+                        let instantiated_types = types
+                            .iter()
+                            .zip(args.iter())
+                            .map(|(param_type, arg)| {
+                                self.instantiate_type(param_type, constraint_id, &arg.span, true)
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+
+                        (types.len(), instantiated_types)
+                    }
                     TypeKind::Unit => (0, vec![]),
-                    _ => (1, vec![param.clone()]),
+                    _ => {
+                        let param_inst =
+                            self.instantiate_type(param, constraint_id, &args[0].span, true)?;
+                        (1, vec![param_inst])
+                    }
                 };
 
                 if param_len != args.len() {
