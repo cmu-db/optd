@@ -318,7 +318,7 @@ impl<M: Memoize> Optimizer<M> {
 #[cfg(test)]
 mod tests {
 
-    use std::{path::PathBuf, sync::Arc, time::Duration};
+    use std::{fs::File, io::Write, path::PathBuf, sync::Arc, time::Duration};
 
     use async_trait::async_trait;
     use tokio::task::JoinSet;
@@ -656,7 +656,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_scalar_optimizer2() -> Result<(), Error> {
+    async fn test_scalar_optimizer_goal_forwarding() -> Result<(), Error> {
         println!("Starting test");
         // Append the required core type declarations to each test program.
         let file_path = PathBuf::from(
@@ -718,7 +718,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_scalar_optimizer3() -> Result<(), Error> {
+    async fn test_scalar_optimizer_group_merge() -> Result<(), Error> {
         println!("Starting test");
         // Append the required core type declarations to each test program.
         let file_path = PathBuf::from(
@@ -770,14 +770,84 @@ mod tests {
         //         Child::Singleton(Arc::new(leaf_node3)),
         //     ],
         // });
+        // print to output file
+        let mut file = File::create("output.txt").unwrap();
+        file.write_all(b"Creating query instance\n").unwrap();
+        file.write_all(format!("add_node: {:#?}\n", add_node).as_bytes()).unwrap();
+
+        println!("Creating query instance");
+        let mut query_instance = client.create_query_instance(add_node).await.unwrap();
+        println!("Query instance created\n\n\n\n\n\n\n\n\n");
+        loop {
+            let physical_plan = query_instance.recv_best_plan().await.unwrap();
+            println!(
+                "Best plan cost: {:?}\n Plan: {:#?}\n\n",
+                physical_plan.1, physical_plan.0
+            );
+            file.write_all(format!("Best plan cost: {:?}\n Plan: {:#?}\n\n", physical_plan.1, physical_plan.0).as_bytes()).unwrap();
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_scalar_optimizer_identity() -> Result<(), Error> {
+        println!("Starting test");
+        // Append the required core type declarations to each test program.
+        let file_path = PathBuf::from(
+            "/Users/sarveshtandon/Development/optd/optd/src/dsl/examples/scalar_impl.opt",
+        );
+
+        let config = Config::new(file_path);
+        let udfs = HashMap::new();
+        let hir = compile_hir(config, udfs).expect("Failed to compile hir");
+
+        let mut rule_book = RuleBook::default();
+        rule_book.add_transformation(TransformationRule("mult_commute".to_string()));
+        rule_book.add_transformation(TransformationRule("add_to_mult".to_string()));
+        rule_book.add_implementation(ImplementationRule("convert".to_string()));
+
+        let mut client = Optimizer::launch(MemoryMemo::default(), mock_catalog(), hir, rule_book);
+
+        let leaf_node1 = LogicalPlan(Operator {
+            tag: "Const".to_string(),
+            data: vec![OperatorData::Int64(0)],
+            children: vec![],
+        });
+        let leaf_node2 = LogicalPlan(Operator {
+            tag: "Const".to_string(),
+            data: vec![OperatorData::Int64(20)],
+            children: vec![],
+        });
+
+        let add_node = LogicalPlan(Operator {
+            tag: "Add".to_string(),
+            data: vec![],
+            children: vec![
+                Child::Singleton(Arc::new(leaf_node1)),
+                Child::Singleton(Arc::new(leaf_node2)),
+            ],
+        });
+
+        // let leaf_node3 = LogicalPlan(Operator {
+        //     tag: "Const".to_string(),
+        //     data: vec![OperatorData::Int64(3)],
+        //     children: vec![],
+        // });
+
+        // let logical_plan = LogicalPlan(Operator {
+        //     tag: "Add".to_string(),
+        //     data: vec![],
+        //     children: vec![
+        //         Child::Singleton(Arc::new(add_node)),
+        //         Child::Singleton(Arc::new(leaf_node3)),
+        //     ],
+        // });
         println!("Creating query instance");
         let mut query_instance = client.create_query_instance(add_node).await.unwrap();
         println!("Query instance created");
-        loop {
-            let physical_plan = query_instance.recv_best_plan().await.unwrap();
-            println!("Best plan: {:?}", physical_plan);
-        }
-
+        let physical_plan = query_instance.recv_best_plan().await.unwrap();
+        println!("Best plan: {:?}", physical_plan);
         Ok(())
     }
 }

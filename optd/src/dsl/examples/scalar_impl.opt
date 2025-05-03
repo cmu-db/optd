@@ -19,7 +19,7 @@ fn (op: Logical) mult_commute() = match op
 fn (op: Logical) add_to_mult() = match op
 	| Add(Const(left), Const(right)) -> if left == right then Mult(Const(2), Const(left)) else none
   \ _ -> none
-  
+
 [implementation]
 fn (op: Logical) convert(props: PhysicalProperties?) = match op
 	| Add(left, right) -> PAdd(left.convert(none), right.convert(none))

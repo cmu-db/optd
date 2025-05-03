@@ -1,0 +1,107 @@
+Creating query instance
+add_node: LogicalPlan(
+    Operator {
+        tag: "Add",
+        data: [],
+        children: [
+            Singleton(
+                LogicalPlan(
+                    Operator {
+                        tag: "Const",
+                        data: [
+                            Int64(
+                                20,
+                            ),
+                        ],
+                        children: [],
+                    },
+                ),
+            ),
+            Singleton(
+                LogicalPlan(
+                    Operator {
+                        tag: "Const",
+                        data: [
+                            Int64(
+                                20,
+                            ),
+                        ],
+                        children: [],
+                    },
+                ),
+            ),
+        ],
+    },
+)
+Best plan cost: Cost(2.0)
+ Plan: PhysicalPlan(
+    Operator {
+        tag: "PAdd",
+        data: [],
+        children: [
+            Singleton(
+                PhysicalPlan(
+                    Operator {
+                        tag: "PConst",
+                        data: [
+                            Int64(
+                                20,
+                            ),
+                        ],
+                        children: [],
+                    },
+                ),
+            ),
+            Singleton(
+                PhysicalPlan(
+                    Operator {
+                        tag: "PConst",
+                        data: [
+                            Int64(
+                                20,
+                            ),
+                        ],
+                        children: [],
+                    },
+                ),
+            ),
+        ],
+    },
+)
+
+Best plan cost: Cost(1.0)
+ Plan: PhysicalPlan(
+    Operator {
+        tag: "PMult",
+        data: [],
+        children: [
+            Singleton(
+                PhysicalPlan(
+                    Operator {
+                        tag: "PConst",
+                        data: [
+                            Int64(
+                                2,
+                            ),
+                        ],
+                        children: [],
+                    },
+                ),
+            ),
+            Singleton(
+                PhysicalPlan(
+                    Operator {
+                        tag: "PConst",
+                        data: [
+                            Int64(
+                                20,
+                            ),
+                        ],
+                        children: [],
+                    },
+                ),
+            ),
+        ],
+    },
+)
+
