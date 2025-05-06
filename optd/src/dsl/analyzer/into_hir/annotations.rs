@@ -27,6 +27,14 @@ pub static IMPLEMENTATION_SIGNATURE_TYPE: Lazy<Type> = Lazy::new(|| {
 
 pub const IMPLEMENTATION_ANNOTATION: &str = "implementation";
 
+pub static RUN_SIGNATURE_TYPE: Lazy<Type> = Lazy::new(|| {
+    use TypeKind::*;
+    let param_type = Unit.into();
+    Closure(param_type, Universe.into()).into()
+});
+
+pub const RUN_ANNOTATION: &str = "run";
+
 /// Validates that a function's type matches the expected signature for a given annotation
 ///
 /// # Arguments
@@ -48,18 +56,33 @@ pub(super) fn validate_annotation(
     match annotation {
         TRANSFORMATION_ANNOTATION => {
             if !registry.is_subtype(function_type, &TRANSFORMATION_SIGNATURE_TYPE) {
-                return Err(AnalyzerErrorKind::new_invalid_transformation(
+                return Err(AnalyzerErrorKind::new_invalid_annotation(
                     function_span,
+                    TRANSFORMATION_ANNOTATION,
                     function_type,
+                    &TRANSFORMATION_SIGNATURE_TYPE,
                     registry.resolved_unknown.clone(),
                 ));
             }
         }
         IMPLEMENTATION_ANNOTATION => {
             if !registry.is_subtype(function_type, &IMPLEMENTATION_SIGNATURE_TYPE) {
-                return Err(AnalyzerErrorKind::new_invalid_implementation(
+                return Err(AnalyzerErrorKind::new_invalid_annotation(
                     function_span,
+                    IMPLEMENTATION_ANNOTATION,
                     function_type,
+                    &IMPLEMENTATION_SIGNATURE_TYPE,
+                    registry.resolved_unknown.clone(),
+                ));
+            }
+        }
+        RUN_ANNOTATION => {
+            if !registry.is_subtype(function_type, &RUN_SIGNATURE_TYPE) {
+                return Err(AnalyzerErrorKind::new_invalid_annotation(
+                    function_span,
+                    RUN_ANNOTATION,
+                    function_type,
+                    &RUN_SIGNATURE_TYPE,
                     registry.resolved_unknown.clone(),
                 ));
             }
@@ -248,6 +271,43 @@ mod tests {
 
         let result = validate_annotation(
             IMPLEMENTATION_ANNOTATION,
+            &function_type,
+            &create_test_span(),
+            &mut registry,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_run_annotation_success() {
+        let mut registry = TypeRegistry::new();
+
+        // Create a valid run function type
+        let function_type =
+            TypeKind::Closure(TypeKind::Unit.into(), TypeKind::Universe.into()).into();
+
+        let result = validate_annotation(
+            RUN_ANNOTATION,
+            &function_type,
+            &create_test_span(),
+            &mut registry,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_run_annotation_failure_wrong_param() {
+        let mut registry = TypeRegistry::new();
+
+        // Create an invalid function type (wrong parameter type)
+        let function_type = TypeKind::Closure(
+            TypeKind::I64.into(), // Wrong parameter type, should be Unit
+            TypeKind::Universe.into(),
+        )
+        .into();
+
+        let result = validate_annotation(
+            RUN_ANNOTATION,
             &function_type,
             &create_test_span(),
             &mut registry,

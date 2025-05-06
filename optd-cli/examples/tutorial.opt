@@ -184,7 +184,6 @@ data Physical =
 data Catalog
 data LogicalProperties(schema: Schema)
 data PhysicalProperties(order_by: [Bool])  // e.g., define sorting, partitioning, etc.
-data CostedProperties    // e.g., define cost model, statistics, etc.
 data Statistics          // e.g., define histograms, MCVs, etc.
 
 data Schema(columns: [Column])
@@ -196,7 +195,7 @@ data Column(name: String, data_type: String, is_nullable: Bool)
 
 // Functions can be defined in two equivalent ways:
 
-fn example1(arg1: Logical, arg2: I64): I64 = 5 // Call with: example1(arg1, arg2)
+fn example1(arg1: Logical, arg2: I64) = 5 // Call with: example1(arg1, arg2)
 
 // Or as a member function:
 
@@ -389,7 +388,7 @@ fn (expr: Physical*) cost(): F64 = 0
 // through the logical plan.
 
 fn (log: Logical*) derive(): LogicalProperties = match log
-    | Get(table_name) -> Catalog.get_table_schema(table_name)
+    | Get(table_name) -> catalog.get_table_schema(table_name)
     | Filter(child, _) -> child.properties()
     | Join(left, right, join_type, _) ->
         let 
