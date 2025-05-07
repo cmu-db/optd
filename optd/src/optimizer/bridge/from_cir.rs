@@ -1,8 +1,10 @@
 //! Converts optd's type representations (CIR) into DSL [`Value`]s (HIR).
 
-use crate::core::cir::*;
-use crate::dsl::analyzer::hir::{
-    self, CoreData, Literal, LogicalOp, Materializable, Operator, PhysicalOp, Value,
+use crate::{
+    cir::{Child, Cost, Goal, GroupId, LogicalProperties, OperatorData, PartialLogicalPlan, PartialPhysicalPlan, PhysicalProperties, PropertiesData},
+    dsl::analyzer::hir::{
+        self, CoreData, Literal, LogicalOp, Materializable, Operator, PhysicalOp, Value,
+    },
 };
 use CoreData::*;
 use Literal::*;

@@ -1,8 +1,12 @@
 //! Converts HIR [`Value`]s into optd's type representations (CIR).
 
-use crate::core::cir::*;
-use crate::dsl::analyzer::hir::{self, CoreData, Literal, Materializable, Value};
-use Child::*;
+use crate::{
+    cir::{
+        Child, Cost, Goal, GroupId, LogicalPlan, LogicalProperties, Operator, OperatorData,
+        PartialLogicalPlan, PartialPhysicalPlan, PhysicalProperties, PropertiesData,
+    },
+    dsl::analyzer::hir::{self, CoreData, Literal, Materializable, Value},
+};
 use CoreData::*;
 use Literal::*;
 use Materializable::*;
@@ -136,13 +140,13 @@ where
     values
         .iter()
         .map(|value| match &value.data {
-            Array(elements) => VarLength(
+            Array(elements) => Child::VarLength(
                 elements
                     .iter()
                     .map(|elem| Arc::new(converter(elem)))
                     .collect(),
             ),
-            _ => Singleton(Arc::new(converter(value))),
+            _ => Child::Singleton(Arc::new(converter(value))),
         })
         .collect()
 }

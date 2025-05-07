@@ -1,32 +1,20 @@
-use crate::core::{
-    cir::{
-        Cost, Goal, GoalId, GoalMemberId, GroupId, ImplementationRule, LogicalExpression,
-        LogicalExpressionId, LogicalProperties, PhysicalExpression, PhysicalExpressionId,
-        TransformationRule,
-    },
-    error::Error,
+use crate::cir::{
+    Cost, Goal, GoalId, GoalMemberId, GroupId, LogicalExpression, LogicalExpressionId,
+    LogicalProperties, PhysicalExpression, PhysicalExpressionId,
 };
 
-/// Type alias for results returned by Memoize trait methods
-pub type MemoizeResult<T> = Result<T, Error>;
+use super::errors::MemoError;
 
-/// Status of a rule application or costing operation
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Status {
-    /// There exist ongoing jobs that may generate more expressions or costs from this expression.
-    Dirty,
+/// Type alias for results returned by Memo trait methods.
+pub type MemoResult<T> = Result<T, MemoError>;
 
-    /// Expression is fully explored or costed with no pending jobs that could add anything new.
-    Clean,
-}
-
-/// Information about a merged group, including its ID and expressions
+/// Information about a merged group, including its ID and expressions.
 #[derive(Debug)]
 pub struct MergedGroupInfo {
-    /// ID of the merged group
+    /// ID of the merged group.
     pub group_id: GroupId,
 
-    /// All logical expressions in this group
+    /// All logical expressions in this group.
     pub expressions: Vec<LogicalExpressionId>,
 }
 
@@ -40,16 +28,16 @@ pub struct MergeGroupResult {
     pub new_repr_group_id: GroupId,
 }
 
-/// Information about a merged goal, including its ID and expressions
+/// Information about a merged goal, including its ID and expressions.
 #[derive(Debug)]
 pub struct MergedGoalInfo {
-    /// ID of the merged goal
+    /// ID of the merged goal.
     pub goal_id: GoalId,
 
-    /// The best costed expression for this goal, if any
+    /// The best costed expression for this goal, if any.
     pub best_expr: Option<(PhysicalExpressionId, Cost)>,
 
-    /// All members in this goal, which can be physical expressions or references to other goals
+    /// All members in this goal, which can be physical expressions or references to other goals.
     pub members: Vec<GoalMemberId>,
 }
 
@@ -71,15 +59,6 @@ pub struct MergeResult {
 
     /// Goal merge results.
     pub goal_merges: Vec<MergeGoalResult>,
-
-    /// Transformations that were marked as dirty and need new application.
-    pub dirty_transformations: Vec<(LogicalExpressionId, TransformationRule)>,
-
-    /// Implementations that were marked as dirty and need new application.
-    pub dirty_implementations: Vec<(LogicalExpressionId, GoalId, ImplementationRule)>,
-
-    /// Costings that were marked as dirty and need recomputation.
-    pub dirty_costings: Vec<PhysicalExpressionId>,
 }
 
 /// Core interface for memo-based query optimization.
@@ -89,7 +68,7 @@ pub struct MergeResult {
 /// query optimization. The memo stores logical and physical expressions by their IDs,
 /// manages expression properties, and tracks optimization status.
 #[trait_variant::make(Send)]
-pub trait Memoize: Send + Sync + 'static {
+pub trait Memo: Send + Sync + 'static {
     //
     // Logical expression and group operations.
     //
@@ -101,7 +80,7 @@ pub trait Memoize: Send + Sync + 'static {
     ///
     /// # Returns
     /// The properties associated with the group or an error if not found.
-    async fn get_logical_properties(&self, group_id: GroupId) -> MemoizeResult<LogicalProperties>;
+    async fn get_logical_properties(&self, group_id: GroupId) -> MemoResult<LogicalProperties>;
 
     /// Gets all logical expression IDs in a group (only representative IDs).
     ///
@@ -113,7 +92,7 @@ pub trait Memoize: Send + Sync + 'static {
     async fn get_all_logical_exprs(
         &self,
         group_id: GroupId,
-    ) -> MemoizeResult<Vec<LogicalExpressionId>>;
+    ) -> MemoResult<Vec<LogicalExpressionId>>;
 
     /// Finds group containing a logical expression ID, if it exists.
     ///
@@ -125,7 +104,7 @@ pub trait Memoize: Send + Sync + 'static {
     async fn find_logical_expr_group(
         &self,
         logical_expr_id: LogicalExpressionId,
-    ) -> MemoizeResult<Option<GroupId>>;
+    ) -> MemoResult<Option<GroupId>>;
 
     /// Creates a new group with a logical expression ID and properties.
     ///
@@ -139,7 +118,7 @@ pub trait Memoize: Send + Sync + 'static {
         &mut self,
         logical_expr_id: LogicalExpressionId,
         props: &LogicalProperties,
-    ) -> MemoizeResult<GroupId>;
+    ) -> MemoResult<GroupId>;
 
     /// Merges groups 1 and 2, unifying them under a common representative.
     ///
@@ -156,7 +135,7 @@ pub trait Memoize: Send + Sync + 'static {
         &mut self,
         group_id_1: GroupId,
         group_id_2: GroupId,
-    ) -> MemoizeResult<MergeResult>;
+    ) -> MemoResult<MergeResult>;
 
     //
     // Physical expression and goal operations.
@@ -173,7 +152,7 @@ pub trait Memoize: Send + Sync + 'static {
     async fn get_best_optimized_physical_expr(
         &self,
         goal_id: GoalId,
-    ) -> MemoizeResult<Option<(PhysicalExpressionId, Cost)>>;
+    ) -> MemoResult<Option<(PhysicalExpressionId, Cost)>>;
 
     /// Gets all physical expression IDs in a goal (only representative IDs).
     ///
@@ -185,7 +164,7 @@ pub trait Memoize: Send + Sync + 'static {
     async fn get_all_physical_exprs(
         &self,
         goal_id: GoalId,
-    ) -> MemoizeResult<Vec<PhysicalExpressionId>>;
+    ) -> MemoResult<Vec<PhysicalExpressionId>>;
 
     /// Gets all members of a goal, which can be physical expressions or other goals.
     ///
@@ -194,7 +173,7 @@ pub trait Memoize: Send + Sync + 'static {
     ///
     /// # Returns
     /// A vector of goal members, each being either a physical expression ID or another goal ID.
-    async fn get_all_goal_members(&self, goal_id: GoalId) -> MemoizeResult<Vec<GoalMemberId>>;
+    async fn get_all_goal_members(&self, goal_id: GoalId) -> MemoResult<Vec<GoalMemberId>>;
 
     /// Adds a member to a goal.
     ///
@@ -204,11 +183,7 @@ pub trait Memoize: Send + Sync + 'static {
     ///
     /// # Returns
     /// True if the member was added to the goal, or false if it already existed.
-    async fn add_goal_member(
-        &mut self,
-        goal_id: GoalId,
-        member: GoalMemberId,
-    ) -> MemoizeResult<bool>;
+    async fn add_goal_member(&mut self, goal_id: GoalId, member: GoalMemberId) -> MemoResult<bool>;
 
     /// Updates the cost of a physical expression ID.
     ///
@@ -222,136 +197,7 @@ pub trait Memoize: Send + Sync + 'static {
         &mut self,
         physical_expr_id: PhysicalExpressionId,
         new_cost: Cost,
-    ) -> MemoizeResult<bool>;
-
-    //
-    // Rule and costing status operations.
-    //
-
-    /// Checks the status of applying a transformation rule on a logical expression ID.
-    ///
-    /// # Parameters
-    /// * `logical_expr_id` - ID of the logical expression to check.
-    /// * `rule` - Transformation rule to check status for.
-    ///
-    /// # Returns
-    /// `Status::Dirty` if there are ongoing events that may affect the transformation,
-    /// `Status::Clean` if the transformation does not need to be re-evaluated.
-    async fn get_transformation_status(
-        &self,
-        logical_expr_id: LogicalExpressionId,
-        rule: &TransformationRule,
-    ) -> MemoizeResult<Status>;
-
-    /// Sets the status of a transformation rule as clean on a logical expression ID.
-    ///
-    /// # Parameters
-    /// * `logical_expr_id` - ID of the logical expression to update.
-    /// * `rule` - Transformation rule to set status for.
-    async fn set_transformation_clean(
-        &mut self,
-        logical_expr_id: LogicalExpressionId,
-        rule: &TransformationRule,
-    ) -> MemoizeResult<()>;
-
-    /// Checks the status of applying an implementation rule on a logical expression ID and goal ID.
-    ///
-    /// # Parameters
-    /// * `logical_expr_id` - ID of the logical expression to check.
-    /// * `goal_id` - ID of the goal to check against.
-    /// * `rule` - Implementation rule to check status for.
-    ///
-    /// # Returns
-    /// `Status::Dirty` if there are ongoing events that may affect the implementation,
-    /// `Status::Clean` if the implementation does not need to be re-evaluated.
-    async fn get_implementation_status(
-        &self,
-        logical_expr_id: LogicalExpressionId,
-        goal_id: GoalId,
-        rule: &ImplementationRule,
-    ) -> MemoizeResult<Status>;
-
-    /// Sets the status of an implementation rule as clean on a logical expression ID and goal ID.
-    ///
-    /// # Parameters
-    /// * `logical_expr_id` - ID of the logical expression to update.
-    /// * `goal_id` - ID of the goal to update against.
-    /// * `rule` - Implementation rule to set status for.
-    async fn set_implementation_clean(
-        &mut self,
-        logical_expr_id: LogicalExpressionId,
-        goal_id: GoalId,
-        rule: &ImplementationRule,
-    ) -> MemoizeResult<()>;
-
-    /// Checks the status of costing a physical expression ID.
-    ///
-    /// # Parameters
-    /// * `physical_expr_id` - ID of the physical expression to check.
-    ///
-    /// # Returns
-    /// `Status::Dirty` if there are ongoing events that may affect the costing,
-    /// `Status::Clean` if the costing does not need to be re-evaluated.
-    async fn get_cost_status(
-        &self,
-        physical_expr_id: PhysicalExpressionId,
-    ) -> MemoizeResult<Status>;
-
-    /// Sets the status of costing a physical expression ID as clean.
-    ///
-    /// # Parameters
-    /// * `physical_expr_id` - ID of the physical expression to update.
-    async fn set_cost_clean(&mut self, physical_expr_id: PhysicalExpressionId)
-    -> MemoizeResult<()>;
-
-    /// Adds a dependency between a transformation rule application and a group.
-    ///
-    /// This registers that the application of the transformation rule on the logical expression
-    /// depends on the group. When the group changes, the transformation status should be set to dirty.
-    ///
-    /// # Parameters
-    /// * `logical_expr_id` - ID of the logical expression the rule is applied to.
-    /// * `rule` - Transformation rule that depends on the group.
-    /// * `group_id` - ID of the group that the transformation depends on.
-    async fn add_transformation_dependency(
-        &mut self,
-        logical_expr_id: LogicalExpressionId,
-        rule: &TransformationRule,
-        group_id: GroupId,
-    ) -> MemoizeResult<()>;
-
-    /// Adds a dependency between an implementation rule application and a group.
-    ///
-    /// This registers that the application of the implementation rule on the logical expression
-    /// for a specific goal depends on the group. When the group changes, the implementation status
-    /// should be set to dirty.
-    ///
-    /// # Parameters
-    /// * `logical_expr_id` - ID of the logical expression the rule is applied to.
-    /// * `goal_id` - ID of the goal the implementation targets.
-    /// * `rule` - Implementation rule that depends on the group.
-    /// * `group_id` - ID of the group that the implementation depends on.
-    async fn add_implementation_dependency(
-        &mut self,
-        logical_expr_id: LogicalExpressionId,
-        goal_id: GoalId,
-        rule: &ImplementationRule,
-        group_id: GroupId,
-    ) -> MemoizeResult<()>;
-
-    /// Adds a dependency between costing a physical expression and a goal.
-    ///
-    /// This registers that the costing of the physical expression depends on the goal.
-    /// When the goal changes, the costing status should be set to dirty.
-    ///
-    /// # Parameters
-    /// * `physical_expr_id` - ID of the physical expression to cost.
-    /// * `goal_id` - ID of the goal that the costing depends on.
-    async fn add_cost_dependency(
-        &mut self,
-        physical_expr_id: PhysicalExpressionId,
-        goal_id: GoalId,
-    ) -> MemoizeResult<()>;
+    ) -> MemoResult<bool>;
 
     //
     // ID conversion and materialization operations.
@@ -364,7 +210,7 @@ pub trait Memoize: Send + Sync + 'static {
     ///
     /// # Returns
     /// The ID of the goal.
-    async fn get_goal_id(&mut self, goal: &Goal) -> MemoizeResult<GoalId>;
+    async fn get_goal_id(&mut self, goal: &Goal) -> MemoResult<GoalId>;
 
     /// Materializes a goal from its ID.
     ///
@@ -373,7 +219,7 @@ pub trait Memoize: Send + Sync + 'static {
     ///
     /// # Returns
     /// The materialized goal.
-    async fn materialize_goal(&self, goal_id: GoalId) -> MemoizeResult<Goal>;
+    async fn materialize_goal(&self, goal_id: GoalId) -> MemoResult<Goal>;
 
     /// Gets or creates a logical expression ID for a given logical expression.
     ///
@@ -385,7 +231,7 @@ pub trait Memoize: Send + Sync + 'static {
     async fn get_logical_expr_id(
         &mut self,
         logical_expr: &LogicalExpression,
-    ) -> MemoizeResult<LogicalExpressionId>;
+    ) -> MemoResult<LogicalExpressionId>;
 
     /// Materializes a logical expression from its ID.
     ///
@@ -397,7 +243,7 @@ pub trait Memoize: Send + Sync + 'static {
     async fn materialize_logical_expr(
         &self,
         logical_expr_id: LogicalExpressionId,
-    ) -> MemoizeResult<LogicalExpression>;
+    ) -> MemoResult<LogicalExpression>;
 
     /// Gets or creates a physical expression ID for a given physical expression.
     ///
@@ -409,7 +255,7 @@ pub trait Memoize: Send + Sync + 'static {
     async fn get_physical_expr_id(
         &mut self,
         physical_expr: &PhysicalExpression,
-    ) -> MemoizeResult<PhysicalExpressionId>;
+    ) -> MemoResult<PhysicalExpressionId>;
 
     /// Materializes a physical expression from its ID.
     ///
@@ -421,7 +267,7 @@ pub trait Memoize: Send + Sync + 'static {
     async fn materialize_physical_expr(
         &self,
         physical_expr_id: PhysicalExpressionId,
-    ) -> MemoizeResult<PhysicalExpression>;
+    ) -> MemoResult<PhysicalExpression>;
 
     //
     // Representative ID operations.
@@ -435,7 +281,7 @@ pub trait Memoize: Send + Sync + 'static {
     /// # Returns
     /// The representative group ID (which may be the same as the input if
     /// it's already the representative).
-    async fn find_repr_group(&self, group_id: GroupId) -> MemoizeResult<GroupId>;
+    async fn find_repr_group_id(&self, group_id: GroupId) -> MemoResult<GroupId>;
 
     /// Finds the representative goal ID for a given goal ID.
     ///
@@ -445,7 +291,7 @@ pub trait Memoize: Send + Sync + 'static {
     /// # Returns
     /// The representative goal ID (which may be the same as the input if
     /// it's already the representative).
-    async fn find_repr_goal(&self, goal_id: GoalId) -> MemoizeResult<GoalId>;
+    async fn find_repr_goal_id(&self, goal_id: GoalId) -> MemoResult<GoalId>;
 
     /// Finds the representative logical expression ID for a given logical expression ID.
     ///
@@ -455,10 +301,10 @@ pub trait Memoize: Send + Sync + 'static {
     /// # Returns
     /// The representative logical expression ID (which may be the same as the input if
     /// it's already the representative).
-    async fn find_repr_logical_expr(
+    async fn find_repr_logical_expr_id(
         &self,
         logical_expr_id: LogicalExpressionId,
-    ) -> MemoizeResult<LogicalExpressionId>;
+    ) -> MemoResult<LogicalExpressionId>;
 
     /// Finds the representative physical expression ID for a given physical expression ID.
     ///
@@ -468,8 +314,8 @@ pub trait Memoize: Send + Sync + 'static {
     /// # Returns
     /// The representative physical expression ID (which may be the same as the input if
     /// it's already the representative).
-    async fn find_repr_physical_expr(
+    async fn find_repr_physical_expr_id(
         &self,
         physical_expr_id: PhysicalExpressionId,
-    ) -> MemoizeResult<PhysicalExpressionId>;
+    ) -> MemoResult<PhysicalExpressionId>;
 }
