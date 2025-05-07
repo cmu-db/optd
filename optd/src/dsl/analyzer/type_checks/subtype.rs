@@ -1,5 +1,5 @@
 use super::registry::{LOGICAL_TYPE, PHYSICAL_TYPE, Type, TypeRegistry};
-use crate::dsl::analyzer::type_checks::registry::TypeKind;
+use crate::dsl::analyzer::type_checks::registry::{Generic, TypeKind};
 use std::collections::HashSet;
 
 impl TypeRegistry {
@@ -131,9 +131,26 @@ impl TypeRegistry {
                 self.is_subtype_inner(child, &self.resolve_type(parent), memo, has_changed)
             }
 
-            // Generics only match if they have strictly the same name.
-            // Bounded generics are not yet supported.
-            (Generic(gen1), Generic(gen2)) if gen1 == gen2 => true,
+            // Generics only match if they have strictly the same name,
+            // or if their bounds are compatible.
+            (Gen(Generic(id1, bound1)), Gen(Generic(id2, bound2))) => {
+                if id1 == id2 {
+                    true
+                } else if let (Some(b1), Some(b2)) = (bound1, bound2) {
+                    self.is_subtype_inner(b1, b2, memo, has_changed)
+                } else {
+                    false
+                }
+            }
+
+            // A type is a subtype of a bounded generic if it's a subtype of the bound,
+            // and vice versa.
+            (_, Gen(Generic(_, Some(bound)))) => {
+                self.is_subtype_inner(child, bound, memo, has_changed)
+            }
+            (Gen(Generic(_, Some(bound))), _) => {
+                self.is_subtype_inner(bound, parent, memo, has_changed)
+            }
 
             // Stored and Costed type handling.
             (Stored(child_inner), Stored(parent_inner)) => {
@@ -208,8 +225,6 @@ impl TypeRegistry {
             (Optional(child_ty), Optional(parent_ty)) => {
                 self.is_subtype_inner(child_ty, parent_ty, memo, has_changed)
             }
-            // None <: Optional[Nothing].
-            (None, Optional(_)) => true,
             // Likewise, T <: Optional[T].
             (_, Optional(parent_inner)) => {
                 self.is_subtype_inner(child, parent_inner, memo, has_changed)
@@ -227,7 +242,6 @@ impl TypeRegistry {
             (String, EqHash) => true,
             (Bool, EqHash) => true,
             (Unit, EqHash) => true,
-            (None, EqHash) => true,
             (Optional(inner), EqHash) => {
                 self.is_subtype_inner(inner, &EqHash.into(), memo, has_changed)
             }
@@ -723,64 +737,101 @@ mod tests {
     }
 
     #[test]
-    fn test_generic_subtyping() {
+    fn test_generic_subtyping_with_bounds() {
         let mut reg = TypeRegistry::default();
 
-        // Generics are only subtypes of themselves (same name)
-        assert!(reg.is_subtype(&Generic(0).into(), &Generic(0).into()));
+        // Set up a type hierarchy for testing
+        let animal = create_product_adt("Animal", vec![]);
+        let dog = create_product_adt("Dog", vec![]);
+        let cat = create_product_adt("Cat", vec![]);
 
-        // Different named generics are not subtypes
-        assert!(!reg.is_subtype(&Generic(0).into(), &Generic(1).into()));
+        let animals_enum = create_sum_adt("Animals", vec![animal, dog.clone(), cat.clone()]);
+        reg.register_adt(&animals_enum).unwrap();
 
-        // All generics are subtypes of Universe
-        assert!(reg.is_subtype(&Generic(0).into(), &Universe.into()));
+        // Create generic types with and without bounds - using unique IDs
+        let generic_1 = Gen(Generic(1, Option::None)).into();
+        let generic_2 = Gen(Generic(2, Option::None)).into();
 
-        // Nothing is a subtype of any generic
-        assert!(reg.is_subtype(&Nothing.into(), &Generic(0).into()));
+        // Create bounded generics with *unique* IDs - bounds must be ADTs only
+        let generic_3_animals = Gen(Generic(3, Some(Adt("Animals".to_string()).into()))).into();
+        let generic_4_animals = Gen(Generic(4, Some(Adt("Animals".to_string()).into()))).into();
+        let generic_5_dog = Gen(Generic(5, Some(Adt("Dog".to_string()).into()))).into();
 
-        // Generic is not a subtype of concrete types
-        assert!(!reg.is_subtype(&Generic(0).into(), &I64.into()));
+        // Test 1: Same generic ID is a subtype of itself
+        assert!(reg.is_subtype(&generic_1, &generic_1));
+        assert!(reg.is_subtype(&generic_3_animals, &generic_3_animals));
 
-        // Concrete types are not subtypes of generics
-        assert!(!reg.is_subtype(&I64.into(), &Generic(0).into()));
+        // Test 2: Different generic IDs with compatible bounds
+        // Gen<5: Dog> <: Gen<4: Animals> because Dog <: Animals
+        assert!(reg.is_subtype(&generic_5_dog, &generic_4_animals));
 
-        // Test with generic in container types
-        assert!(reg.is_subtype(
-            &Array(Generic(0).into()).into(),
-            &Array(Generic(0).into()).into()
-        ));
+        // Test 3: Different generic IDs with incompatible bounds
+        // Gen<4: Animals> !<: Gen<5: Dog> because Animals !<: Dog
+        assert!(!reg.is_subtype(&generic_4_animals, &generic_5_dog));
 
-        // Different generics in container types
-        assert!(!reg.is_subtype(
-            &Array(Generic(0).into()).into(),
-            &Array(Generic(1).into()).into()
-        ));
+        // Test 4: Different generic IDs with no bounds are never subtypes
+        assert!(!reg.is_subtype(&generic_1, &generic_2));
+
+        // Test 5: Concrete type vs generic with bound
+        let dog_type = Adt("Dog".to_string()).into();
+        let animals_type = Adt("Animals".to_string()).into();
+
+        // Dog <: Gen<4: Animals> because Dog <: Animals
+        assert!(reg.is_subtype(&dog_type, &generic_4_animals));
+
+        // Animals !<: Gen<5: Dog> because Animals !<: Dog
+        assert!(!reg.is_subtype(&animals_type, &generic_5_dog));
+
+        // Test 6: Generic with bound vs concrete type (bidirectional check)
+        // Gen<5: Dog> <: Animals because Dog <: Animals
+        assert!(reg.is_subtype(&generic_5_dog, &animals_type));
+
+        // Gen<4: Animals> !<: Dog because Animals !<: Dog
+        assert!(!reg.is_subtype(&generic_4_animals, &dog_type));
     }
 
     #[test]
-    fn test_none_subtyping() {
+    fn test_container_generic_subtyping() {
         let mut reg = TypeRegistry::default();
 
-        // Test None as a subtype of any Optional type
-        assert!(reg.is_subtype(&None.into(), &Optional(I64.into()).into()));
-        assert!(reg.is_subtype(&None.into(), &Optional(String.into()).into()));
-        assert!(reg.is_subtype(&None.into(), &Optional(Bool.into()).into()));
-        assert!(reg.is_subtype(&None.into(), &Optional(F64.into()).into()));
-        assert!(reg.is_subtype(&None.into(), &Optional(Unit.into()).into()));
+        // Set up a type hierarchy for testing
+        let animal = create_product_adt("Animal", vec![]);
+        let dog = create_product_adt("Dog", vec![]);
+        let cat = create_product_adt("Cat", vec![]);
 
-        // Test None with complex Optional types
-        assert!(reg.is_subtype(&None.into(), &Optional(Array(I64.into()).into()).into()));
+        let animals_enum = create_sum_adt("Animals", vec![animal, dog.clone(), cat.clone()]);
+        reg.register_adt(&animals_enum).unwrap();
 
-        // Test that None is not a subtype of non-Optional types
-        assert!(!reg.is_subtype(&None.into(), &I64.into()));
-        assert!(!reg.is_subtype(&None.into(), &String.into()));
+        // Create generic types with bounds
+        let generic_animals: Type = Gen(Generic(1, Some(Adt("Animals".to_string()).into()))).into();
+        let generic_dog: Type = Gen(Generic(2, Some(Adt("Dog".to_string()).into()))).into();
 
-        // None is still a subtype of Universe (as all types are)
-        assert!(reg.is_subtype(&None.into(), &Universe.into()));
+        // Test container types with generics
 
-        // None is not equal to Nothing
-        assert!(!reg.is_subtype(&None.into(), &Nothing.into()));
-        assert!(reg.is_subtype(&Nothing.into(), &None.into()));
+        // Array<Gen<Dog>> <: Array<Gen<Animals>> because Gen<Dog> <: Gen<Animals>
+        assert!(reg.is_subtype(
+            &Array(generic_dog.clone()).into(),
+            &Array(generic_animals.clone()).into()
+        ));
+
+        // Map<String, Gen<Dog>> <: Map<String, Gen<Animals>> because Gen<Dog> <: Gen<Animals>
+        assert!(reg.is_subtype(
+            &Map(String.into(), generic_dog.clone()).into(),
+            &Map(String.into(), generic_animals.clone()).into()
+        ));
+
+        // Map<Gen<Animals>, String> <: Map<Gen<Dog>, String> because Gen<Dog> <: Gen<Animals>
+        // (contravariance for Map keys)
+        assert!(reg.is_subtype(
+            &Map(generic_animals.clone(), String.into()).into(),
+            &Map(generic_dog.clone(), String.into()).into()
+        ));
+
+        // Function with generics: (Gen<Animals> -> String) <: (Gen<Dog> -> String)
+        assert!(reg.is_subtype(
+            &Closure(generic_animals.clone(), String.into()).into(),
+            &Closure(generic_dog.clone(), String.into()).into()
+        ));
     }
 
     #[test]
@@ -928,7 +979,6 @@ mod tests {
         assert!(!reg.is_subtype(&Bool.into(), &Concat.into()));
         assert!(!reg.is_subtype(&F64.into(), &Concat.into()));
         assert!(!reg.is_subtype(&Unit.into(), &Concat.into()));
-        assert!(!reg.is_subtype(&None.into(), &Concat.into()));
         assert!(!reg.is_subtype(
             &Tuple(vec![I64.into(), String.into()]).into(),
             &Concat.into()
@@ -955,7 +1005,6 @@ mod tests {
         assert!(reg.is_subtype(&String.into(), &EqHash.into()));
         assert!(reg.is_subtype(&Bool.into(), &EqHash.into()));
         assert!(reg.is_subtype(&Unit.into(), &EqHash.into()));
-        assert!(reg.is_subtype(&None.into(), &EqHash.into()));
 
         // Test tuple types with all EqHash elements
         assert!(reg.is_subtype(
@@ -995,7 +1044,6 @@ mod tests {
         assert!(!reg.is_subtype(&String.into(), &Arithmetic.into()));
         assert!(!reg.is_subtype(&Bool.into(), &Arithmetic.into()));
         assert!(!reg.is_subtype(&Unit.into(), &Arithmetic.into()));
-        assert!(!reg.is_subtype(&None.into(), &Arithmetic.into()));
         assert!(!reg.is_subtype(
             &Tuple(vec![I64.into(), F64.into()]).into(),
             &Arithmetic.into()

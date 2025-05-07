@@ -1,9 +1,52 @@
+//! # Type Inference and Constraint Solving
+//!
+//! This module implements the type inference system for our DSL. Type inference
+//! is crucial for both ergonomics and correctness in the optimizer, as it allows
+//! the engine to know which types are `Logical` or `Physical` (which behave
+//! differently), and to verify if field accesses and function calls are valid.
+//!
+//! ## Type Inference Strategy
+//!
+//! The type inference works in three phases:
+//!
+//! 1. **Initial Type Creation**: During the `AST -> HIR<TypedSpan>` transformation,
+//!    we create and add all implicit and explicit type information from the program
+//!    (e.g., literals like `1` or `"hello"`, function annotations, etc.). For unknown
+//!    types, we generate a new ID and assign the type to either `UnknownDesc` (for
+//!    closure parameters and map keys) or `UnknownAsc` (for everything else).
+//!
+//! 2. **Constraint Generation**: Constraints are generated in the `generate.rs` file,
+//!    which also performs scope-checking. Constraints indicate subtype relationships,
+//!    field accesses, and function calls. For example, `let a: Logical = expr` generates
+//!    the constraint `Logical :> typeof(expr)`.
+//!
+//! 3. **Constraint Solving**: The final step uses a constraint solver that iteratively
+//!    refines unknown types until reaching a fixed point where no more refinements
+//!    can be made.
+//!
+//! ## Constraint Solving Algorithm
+//!
+//! The constraint solving algorithm makes monotonic progress by tracking whether any
+//! types changed during each iteration and continuing until reaching a fixed point.
+//! Unknown types are refined according to their variance:
+//!
+//! - `UnknownAsc`: These types start at `Nothing` and ascend up the type hierarchy
+//!   as needed. When encountered as a parent, they are updated to the least upper
+//!   bound (LUB) of themselves and the child type.
+//!
+//! - `UnknownDesc`: These types start at `Universe` and descend down the type
+//!   hierarchy as needed. When encountered as a child, they are updated to the
+//!   greatest lower bound (GLB) of themselves and the parent type.
+//!
+//! The solver continues until no more changes can be made, at which point it either
+//! reports success or returns the most relevant type error.
+
 use super::registry::{Constraint, Type, TypeRegistry};
 use crate::dsl::{
     analyzer::{
         errors::AnalyzerErrorKind,
         hir::{Identifier, Pattern, PatternKind, TypedSpan},
-        type_checks::registry::TypeKind,
+        type_checks::registry::{Generic, TypeKind},
     },
     utils::span::Span,
 };
@@ -12,9 +55,19 @@ use std::mem;
 impl TypeRegistry {
     /// Resolves all collected constraints and fills in the concrete types.
     ///
-    /// This method iterates through all constraints, checking subtype relationships
-    /// and refining unknown types until either all constraints are satisfied or
-    /// a constraint cannot be satisfied and no more progress can be made.
+    /// This method implements the main constraint solving algorithm, iterating through
+    /// all constraints and refining unknown types until either all constraints are
+    /// satisfied or we reach a fixed point where no more progress can be made.
+    ///
+    /// # Algorithm
+    ///
+    /// 1. The algorithm iteratively processes all constraints, tracking whether any
+    ///    type refinements were made in each iteration.
+    /// 2. For each constraint, we attempt to satisfy it by refining unknown types.
+    /// 3. We continue until reaching a fixed point (no more changes) or until all
+    ///    constraints are satisfied.
+    /// 4. If constraints remain unsatisfied at the fixed point, we return the most
+    ///    relevant type error.
     ///
     /// # Returns
     ///
@@ -56,7 +109,20 @@ impl TypeRegistry {
         }
     }
 
-    /// Checks if a single constraint is satisfied.
+    /// Checks if a single constraint is satisfied, potentially refining unknown types.
+    ///
+    /// This method dispatches to type-specific constraint checkers based on the
+    /// constraint kind (subtype, call, scrutinee, or field access).
+    ///
+    /// # Arguments
+    ///
+    /// * `constraint` - The constraint to check
+    /// * `changed` - Mutable flag that is set to true if any types were refined
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if the constraint is satisfied or could be satisfied through refinement.
+    /// * `Err(error)` if the constraint cannot be satisfied.
     fn check_constraint(
         &mut self,
         constraint: &Constraint,
@@ -86,6 +152,21 @@ impl TypeRegistry {
         }
     }
 
+    /// Checks if a subtyping constraint is satisfied, refining unknown types if needed.
+    ///
+    /// This method verifies that `child` is a subtype of `parent_ty`, potentially
+    /// refining unknown types to satisfy this relationship.
+    ///
+    /// # Arguments
+    ///
+    /// * `child` - The child type with its source location
+    /// * `parent_ty` - The parent type
+    /// * `changed` - Mutable flag that is set to true if any types were refined
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if the subtyping relationship is satisfied or could be satisfied.
+    /// * `Err(error)` if the subtyping relationship cannot be satisfied.
     fn check_subtype_constraint(
         &mut self,
         child: &TypedSpan,
@@ -104,6 +185,136 @@ impl TypeRegistry {
             })
     }
 
+    /// Instantiates a type by replacing all generic type references with concrete types
+    /// specific to the given constraint.
+    ///
+    /// This method handles generics by creating unique type instantiations for each
+    /// constraint context. When encountering a generic type, it either retrieves an
+    /// existing instantiation or creates a new one based on the variance direction.
+    /// If the generic has a bound, it ensures the instantiated type satisfies that bound.
+    ///
+    /// # Arguments
+    ///
+    /// * `ty` - The type to instantiate
+    /// * `constraint_id` - The ID of the constraint that needs this instantiation
+    /// * `span` - The span where the expression occurs for error reporting
+    /// * `ascending` - Whether unknown types should be created as ascending (true) or descending (false)
+    ///
+    /// # Returns
+    ///
+    /// A Result containing either the instantiated type or an error if bound constraints cannot be satisfied.
+    fn instantiate_type(
+        &mut self,
+        ty: &Type,
+        constraint_id: usize,
+        span: &Span,
+        ascending: bool,
+    ) -> Result<Type, Box<AnalyzerErrorKind>> {
+        use TypeKind::*;
+
+        let kind = match &*ty.value {
+            Gen(generic @ Generic(_, bound)) => {
+                // Try to find an existing instantiation for this generic in this constraint.
+                let existing = self
+                    .instantiated_generics
+                    .get(&constraint_id)
+                    .and_then(|vec| {
+                        vec.iter()
+                            .find(|(g, _)| g == generic)
+                            .map(|(_, ty)| ty.clone())
+                    });
+
+                // If found, return the existing instantiation.
+                if let Some(existing_type) = existing {
+                    existing_type
+                } else {
+                    // Otherwise, create a new instantiation.
+                    let next_id = if ascending {
+                        self.new_unknown_asc()
+                    } else {
+                        self.new_unknown_desc()
+                    };
+
+                    // Get or create the vector for this constraint_id.
+                    let entry = self.instantiated_generics.entry(constraint_id).or_default();
+                    entry.push((generic.clone(), next_id.clone()));
+
+                    // Check the bound constraint.
+                    if let Some(bound) = bound {
+                        let next_id_ty: Type = next_id.clone().into();
+                        self.check_subtype_constraint(
+                            &TypedSpan::new(next_id_ty, span.clone()),
+                            bound,
+                            &mut false, // The unknown type appears no-where else as it has been introduced here.
+                        )
+                        .unwrap();
+                    }
+
+                    next_id
+                }
+            }
+
+            // For composite types, recursively instantiate their component types.
+            Array(elem_type) => {
+                Array(self.instantiate_type(elem_type, constraint_id, span, ascending)?)
+            }
+
+            Closure(param_type, return_type) => Closure(
+                self.instantiate_type(param_type, constraint_id, span, !ascending)?,
+                self.instantiate_type(return_type, constraint_id, span, ascending)?,
+            ),
+
+            Tuple(types) => {
+                let instantiated_types = types
+                    .iter()
+                    .map(|t| self.instantiate_type(t, constraint_id, span, ascending))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Tuple(instantiated_types)
+            }
+
+            Map(key_type, value_type) => Map(
+                self.instantiate_type(key_type, constraint_id, span, !ascending)?,
+                self.instantiate_type(value_type, constraint_id, span, ascending)?,
+            ),
+
+            Optional(inner_type) => {
+                Optional(self.instantiate_type(inner_type, constraint_id, span, ascending)?)
+            }
+            Stored(inner_type) => {
+                Stored(self.instantiate_type(inner_type, constraint_id, span, ascending)?)
+            }
+            Costed(inner_type) => {
+                Costed(self.instantiate_type(inner_type, constraint_id, span, ascending)?)
+            }
+
+            // Primitive types, special types, and ADT references don't need instantiation.
+            _ => *ty.value.clone(),
+        };
+
+        Ok(Type {
+            value: kind.into(),
+            span: ty.span.clone(),
+        })
+    }
+
+    /// Checks a function call constraint, ensuring parameter and return types match.
+    ///
+    /// This method handles function calls, array indexing, and map lookups by verifying
+    /// that the arguments match the expected parameter types and that the return type
+    /// is compatible with the expected output type.
+    ///
+    /// # Arguments
+    ///
+    /// * `constraint_id` - The ID of the constraint for instantiating generic functions
+    /// * `inner` - The function/container being called/indexed
+    /// * `args` - The arguments/indices provided to the call
+    /// * `outer` - The expected return type
+    /// * `changed` - Mutable flag that is set to true if any types were refined
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if the call constraint is satisfied or could be satisfied.
+    /// * `Err(error)` if the call constraint cannot be satisfied.
     fn check_call_constraint(
         &mut self,
         constraint_id: usize,
@@ -118,14 +329,27 @@ impl TypeRegistry {
             TypeKind::Nothing => Ok(()),
 
             TypeKind::Closure(param, ret) => {
-                // Initiatialize potential generics.
-                let param = self.instantiate_type(param, constraint_id, true);
-                let ret = self.instantiate_type(ret, constraint_id, true);
+                // Instantiate potential generics.
+                let ret = self.instantiate_type(ret, constraint_id, &inner.span, true)?;
 
-                let (param_len, param_types) = match &*param {
-                    TypeKind::Tuple(types) => (types.len(), types.to_vec()),
+                let (param_len, param_types) = match &*param.value {
+                    TypeKind::Tuple(types) => {
+                        let instantiated_types = types
+                            .iter()
+                            .zip(args.iter())
+                            .map(|(param_type, arg)| {
+                                self.instantiate_type(param_type, constraint_id, &arg.span, true)
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+
+                        (types.len(), instantiated_types)
+                    }
                     TypeKind::Unit => (0, vec![]),
-                    _ => (1, vec![param.clone()]),
+                    _ => {
+                        let param_inst =
+                            self.instantiate_type(param, constraint_id, &args[0].span, true)?;
+                        (1, vec![param_inst])
+                    }
                 };
 
                 if param_len != args.len() {
@@ -173,6 +397,26 @@ impl TypeRegistry {
         }
     }
 
+    /// Helper method for checking indexing operations on arrays and maps.
+    ///
+    /// This method verifies that an indexing operation is valid by checking that:
+    /// 1. Exactly one argument/index is provided
+    /// 2. The index type matches the expected key type
+    /// 3. The resulting element type (wrapped in Optional) is compatible with the expected output
+    ///
+    /// # Arguments
+    ///
+    /// * `span` - The source location of the indexing operation
+    /// * `args` - The arguments/indices provided (should be exactly one)
+    /// * `key_type` - The expected type of the index
+    /// * `elem_type` - The type of elements in the container
+    /// * `outer_ty` - The expected output type
+    /// * `changed` - Mutable flag that is set to true if any types were refined
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if the indexing constraint is satisfied or could be satisfied.
+    /// * `Err(error)` if the indexing constraint cannot be satisfied.
     fn check_indexable(
         &mut self,
         span: &Span,
@@ -202,6 +446,23 @@ impl TypeRegistry {
         )
     }
 
+    /// Checks a field access constraint, ensuring the field exists and has the correct type.
+    ///
+    /// This method verifies field access on ADTs and tuples by checking that:
+    /// 1. For ADTs: the field exists and its type is compatible with the expected output
+    /// 2. For tuples: the _N syntax is used with a valid index, and the type matches
+    ///
+    /// # Arguments
+    ///
+    /// * `inner` - The object whose field is being accessed
+    /// * `field` - The name of the field being accessed
+    /// * `outer` - The expected type of the field
+    /// * `changed` - Mutable flag that is set to true if any types were refined
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if the field access constraint is satisfied or could be satisfied.
+    /// * `Err(error)` if the field access constraint cannot be satisfied.
     fn check_field_access_constraint(
         &mut self,
         inner: &TypedSpan,
@@ -259,6 +520,22 @@ impl TypeRegistry {
         }
     }
 
+    /// Checks a pattern matching constraint, ensuring the scrutinee matches the pattern.
+    ///
+    /// This method handles various pattern matching constructs including binding,
+    /// struct destructuring, array decomposition, and wildcards by ensuring type
+    /// compatibility between the scrutinee and pattern.
+    ///
+    /// # Arguments
+    ///
+    /// * `scrutinee` - The expression being matched
+    /// * `pattern` - The pattern to match against
+    /// * `changed` - Mutable flag that is set to true if any types were refined
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if the pattern matching constraint is satisfied or could be satisfied.
+    /// * `Err(error)` if the pattern matching constraint cannot be satisfied.
     fn check_scrutinee_constraint(
         &mut self,
         scrutinee: &TypedSpan,
@@ -322,7 +599,7 @@ impl TypeRegistry {
                 // First check scrutinee against wildcard type.
                 self.check_subtype_constraint(scrutinee, &pattern.metadata.ty, changed)?;
 
-                // Then check wildcard pattern against scrutinee type
+                // Then check wildcard pattern against scrutinee type.
                 self.check_subtype_constraint(&pattern.metadata, &scrutinee_ty, changed)
             }
         }
@@ -623,7 +900,7 @@ mod tests {
                 | BoolLiteral(value: Bool)
                 \ StringLiteral(value: String)
             | BinaryOp = 
-                | Arithmetic = 
+                | Arith = 
                     | Add(left: Expression, right: Expression)
                     | Subtract(left: Expression, right: Expression)
                     | Multiply(left: Expression, right: Expression)
@@ -1037,6 +1314,145 @@ mod tests {
         assert!(
             result.is_err(),
             "Generic type constraints should have failed type inference"
+        );
+    }
+
+    #[test]
+    fn test_generic_with_supertype_bound() {
+        let source = r#"
+        // Small ADT type hierarchy
+        data Animal = 
+           | Mammal = 
+               | Dog(name: String)
+               \ Cat(name: String)
+           \ Bird(name: String)
+       
+       // Generic function with a bound requiring type to be an Animal
+       fn <E: Animal> describe(entity: E): String = 
+           match entity
+               | Dog(name) -> name ++ " is a dog"
+               | Cat(name) -> name ++ " is a cat"
+               \ Bird(name) -> name ++ " is a bird"
+       
+       
+       fn main(): String = 
+           let 
+               // Create specific animal types
+               dog = Dog("Rex"),
+               cat = Cat("Whiskers"),
+               bird = Bird("Tweety"),
+           in        
+               describe(dog)
+       
+        "#;
+
+        let result = run_type_inference(source, "generic_with_supertype_bound.opt");
+        assert!(
+            result.is_ok(),
+            "Generic function with supertype bound failed type inference: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_pairs_to_map() {
+        let source = r#"
+        // Convert array of key-value pairs to a map
+        fn <K: EqHash, V> (pairs: [(K, V)]) to_map(): {K: V} = match pairs
+            | [head .. tail] -> {head#_0: head#_1} ++ tail.to_map()
+            \ [] -> {}
+        
+        fn main(): {String : I64} = 
+        let 
+            // Create pairs and convert to map
+            pairs = [("a", 1), ("b", 2), ("c", 3)],
+            map = pairs.to_map(),
+        in
+            map
+        "#;
+
+        let result = run_type_inference(source, "simple_to_map.opt");
+        assert!(
+            result.is_ok(),
+            "Basic pairs to map conversion failed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_pairs_to_map_without_eqhash() {
+        let source = r#"
+        // Convert array of key-value pairs to a map, but missing EqHash bound
+        fn <K, V> (pairs: [(K, V)]) to_map(): {K: V} = match pairs
+            | [head .. tail] -> {head#_0: head#_1} ++ tail.to_map()
+            \ [] -> {}
+        
+        fn main(): {String: I64} = 
+            let 
+                // Create pairs and convert to map
+                pairs = [("a", 1), ("b", 2), ("c", 3)],
+                map = pairs.to_map()
+            in
+                map
+        "#;
+
+        let result = run_type_inference(source, "missing_eqhash.opt");
+        assert!(
+            result.is_err(),
+            "Map creation without EqHash bound should have failed"
+        );
+    }
+
+    #[test]
+    fn test_with_exact_source() {
+        let source = r#"
+        // Convert array of key-value pairs to a map with EqHash constraint
+        fn <K: EqHash, V> (pairs: [(K, V)]) to_map(): {K: V} = match pairs
+            | [head .. tail] -> {head#_0: head#_1} ++ tail.to_map()
+            \ [] -> {}
+            
+        // Simple filter function for arrays
+        fn <T> (array: [T]) filter(pred: T -> Bool): [T] = match array
+            | [] -> []
+            \ [x .. xs] ->
+                if pred(x) then [x] ++ xs.filter(pred)
+                else xs.filter(pred)
+                
+        // Simple map function
+        fn <T, U> (array: [T]) map(f: T -> U): [U] = match array
+            | [] -> []
+            \ [x .. xs] -> [f(x)] ++ xs.map(f)
+            
+        // Data type for our test
+        data User(name: String, age: I64)
+        
+        fn main(): {String: I64} =
+            let
+                // Create some users
+                users = [
+                    User("Alice", 25),
+                    User("Bob", 17),
+                    User("Charlie", 30),
+                    User("Diana", 15)
+                ],
+                
+                // Filter for adults
+                adults = users.filter((u: User) -> u#age >= 18),
+                
+                // Create name -> age map
+                name_age_pairs = adults.map((u: User) -> (u#name, u#age)),
+                
+                // Convert to map
+                age_map = name_age_pairs.to_map()
+            in
+                age_map
+        "#;
+
+        let result = run_type_inference(source, "exact_source_test.opt");
+        assert!(
+            result.is_ok(),
+            "Type inference with exact source code failed: {:?}",
+            result
         );
     }
 }

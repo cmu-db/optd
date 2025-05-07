@@ -24,12 +24,14 @@ use chumsky::{
 ///
 /// 1. Regular functions with implementation:
 ///    ```ignore
-///    [annotations] fn <TypeParam1, TypeParam2> (receiver): name(params): ReturnType = body
+///    [annotations]
+///     fn <TypeParam1: Bound1, TypeParam2: Bound2> (receiver): name(params): ReturnType = body
 ///    ```
 ///
 /// 2. Extern functions (declarations without implementation):
 ///    ```ignore
-///    [annotations] fn <TypeParam1, TypeParam2> (receiver): name(params): ReturnType
+///    [annotations]
+///     fn <TypeParam1: Bound1, TypeParam2: Bound2> (receiver): name(params): ReturnType
 ///    ```
 ///
 /// # Components
@@ -38,10 +40,11 @@ use chumsky::{
 ///   - Used to mark special properties or behaviors
 ///   - Example: `[rust]` might indicate the function is implemented in Rust
 ///
-/// * `<TypeParams>`: Optional generic type parameters
+/// * `<TypeParams>`: Optional generic type parameters with optional bounds
 ///   - Enclosed in angle brackets
 ///   - Used for generic functions
 ///   - Example: `<T, U>` for type parameters T and U
+///   - Example with bounds: `<T: Bound, U: Bound2>` for constrained type parameters
 ///
 /// * `(receiver)`: Optional receiver parameter for method-style functions
 ///   - Similar to `self` in Rust or `this` in other languages
@@ -75,9 +78,14 @@ use chumsky::{
 /// fn <T> identity(x: T): T = x
 /// ```
 ///
-/// Extern function with generic parameters:
+/// Generic function with bound:
 /// ```ignore
-/// [rust] fn <K, V> native_map_get(map: {K: V}, key: K): V?
+/// fn <T: Comparable> max(a: T, b: T): T = if a > b then a else b
+/// ```
+///
+/// Extern function with generic parameters and bounds:
+/// ```ignore
+/// [rust] fn <K: Hashable, V> native_map_get(map: {K: V}, key: K): V?
 /// ```
 ///
 /// # Error Recovery
@@ -109,9 +117,13 @@ pub fn function_parser()
     let ident_parser = select! { Token::TermIdent(name) => name }.map_with_span(Spanned::new);
     let type_ident_parser = select! { Token::TypeIdent(name) => name }.map_with_span(Spanned::new);
 
-    // Parse optional generic type parameters like <A, B, C>
+    // Parse type parameter with optional bound
+    let type_param_parser =
+        type_ident_parser.then(just(Token::Colon).ignore_then(type_parser()).or_not());
+
+    // Parse optional generic type parameters like <A, B: Bound, C>
     let type_params = delimited_parser(
-        type_ident_parser
+        type_param_parser
             .separated_by(just(Token::Comma))
             .allow_trailing(),
         Token::Less,
@@ -264,7 +276,9 @@ mod tests {
 
             // Check type parameters
             assert_eq!(func.value.type_params.len(), 1);
-            assert_eq!(*func.value.type_params[0].value, "T");
+            let (type_param, bound) = &func.value.type_params[0];
+            assert_eq!(*type_param.value, "T");
+            assert!(bound.is_none());
 
             // Check parameter
             assert!(func.value.params.is_some());
@@ -273,6 +287,47 @@ mod tests {
             assert_eq!(*params[0].value.name.value, "x");
             assert!(
                 matches!(*params[0].clone().value.ty.value, Type::Identifier(name) if name == "T")
+            );
+
+            // Check return type
+            assert!(matches!(*func.value.return_type.value, Type::Identifier(name) if name == "T"));
+
+            // Check body
+            assert!(func.value.body.is_some());
+        }
+    }
+
+    #[test]
+    fn test_generic_function_with_bounds() {
+        let input = "fn <T: Comparable> max(a: T, b: T): T = if a > b then a else b";
+        let (result, errors) = parse_function(input);
+
+        assert!(result.is_some(), "Expected successful parse");
+        assert!(errors.is_empty(), "Expected no errors");
+
+        if let Some(func) = result {
+            assert_eq!(*func.value.name.value, "max");
+
+            // Check type parameters
+            assert_eq!(func.value.type_params.len(), 1);
+            let (type_param, bound) = &func.value.type_params[0];
+            assert_eq!(*type_param.value, "T");
+            assert!(bound.is_some());
+            if let Some(bound_val) = bound {
+                assert_eq!(*bound_val.value, Type::Identifier("Comparable".to_string()));
+            }
+
+            // Check parameters
+            assert!(func.value.params.is_some());
+            let params = func.value.params.as_ref().unwrap();
+            assert_eq!(params.len(), 2);
+            assert_eq!(*params[0].value.name.value, "a");
+            assert!(
+                matches!(*params[0].clone().value.ty.value, Type::Identifier(name) if name == "T")
+            );
+            assert_eq!(*params[1].value.name.value, "b");
+            assert!(
+                matches!(*params[1].clone().value.ty.value, Type::Identifier(name) if name == "T")
             );
 
             // Check return type
@@ -296,8 +351,68 @@ mod tests {
 
             // Check type parameters
             assert_eq!(func.value.type_params.len(), 2);
-            assert_eq!(*func.value.type_params[0].value, "K");
-            assert_eq!(*func.value.type_params[1].value, "V");
+            let (k_param, k_bound) = &func.value.type_params[0];
+            let (v_param, v_bound) = &func.value.type_params[1];
+            assert_eq!(*k_param.value, "K");
+            assert_eq!(*v_param.value, "V");
+            assert!(k_bound.is_none());
+            assert!(v_bound.is_none());
+
+            // Check parameters
+            assert!(func.value.params.is_some());
+            let params = func.value.params.as_ref().unwrap();
+            assert_eq!(params.len(), 2);
+
+            // Check first parameter (map: {K: V})
+            assert_eq!(*params[0].value.name.value, "map");
+            if let Type::Map(key_ty, val_ty) = &*params[0].value.ty.value {
+                assert!(matches!(*key_ty.clone().value, Type::Identifier(name) if name == "K"));
+                assert!(matches!(*val_ty.clone().value, Type::Identifier(name) if name == "V"));
+            } else {
+                panic!("Expected Map type for first parameter");
+            }
+
+            // Check second parameter (key: K)
+            assert_eq!(*params[1].value.name.value, "key");
+            assert!(
+                matches!(*params[1].clone().value.ty.value, Type::Identifier(name) if name == "K")
+            );
+
+            // Check return type (V?)
+            if let Type::Questioned(inner) = &*func.value.return_type.value {
+                assert!(matches!(*inner.clone().value, Type::Identifier(name) if name == "V"));
+            } else {
+                panic!("Expected Optional return type");
+            }
+        }
+    }
+
+    #[test]
+    fn test_generic_function_multiple_type_params_with_bounds() {
+        let input = "fn <K: Hashable, V> mapGet(map: {K: V}, key: K): V? = map.get(key)";
+        let (result, errors) = parse_function(input);
+
+        assert!(result.is_some(), "Expected successful parse");
+        assert!(errors.is_empty(), "Expected no errors");
+
+        if let Some(func) = result {
+            assert_eq!(*func.value.name.value, "mapGet");
+
+            // Check type parameters
+            assert_eq!(func.value.type_params.len(), 2);
+
+            // Check K parameter with Hashable bound
+            let (k_param, k_bound) = &func.value.type_params[0];
+            assert_eq!(*k_param.value, "K");
+            assert!(k_bound.is_some());
+            if let Some(bound) = k_bound {
+                assert_eq!(*bound.value, Type::Identifier("Hashable".to_string()));
+            }
+
+            // Check V parameter with no bound
+            let (v_param, v_bound) = &func.value.type_params[1];
+            assert_eq!(*v_param.value, "V");
+            assert!(v_bound.is_none());
 
             // Check parameters
             assert!(func.value.params.is_some());
@@ -341,9 +456,68 @@ mod tests {
 
             // Check type parameters
             assert_eq!(func.value.type_params.len(), 3);
-            assert_eq!(*func.value.type_params[0].value, "A");
-            assert_eq!(*func.value.type_params[1].value, "B");
-            assert_eq!(*func.value.type_params[2].value, "C");
+            assert_eq!(*func.value.type_params[0].0.value, "A");
+            assert_eq!(*func.value.type_params[1].0.value, "B");
+            assert_eq!(*func.value.type_params[2].0.value, "C");
+            assert!(func.value.type_params[0].1.is_none());
+            assert!(func.value.type_params[1].1.is_none());
+            assert!(func.value.type_params[2].1.is_none());
+
+            // Check parameters
+            assert!(func.value.params.is_some());
+            let params = func.value.params.as_ref().unwrap();
+            assert_eq!(params.len(), 2);
+            assert_eq!(*params[0].value.name.value, "a");
+            assert!(
+                matches!(*params[0].clone().value.ty.value, Type::Identifier(name) if name == "A")
+            );
+            assert_eq!(*params[1].value.name.value, "b");
+            assert!(
+                matches!(*params[1].clone().value.ty.value, Type::Identifier(name) if name == "B")
+            );
+
+            // Check return type
+            assert!(matches!(*func.value.return_type.value, Type::Identifier(name) if name == "C"));
+
+            // Check body is None
+            assert!(func.value.body.is_none());
+        }
+    }
+
+    #[test]
+    fn test_generic_extern_function_with_bounds() {
+        let input = "fn <A: Serializable, B: Printable, C> externalFunc(a: A, b: B): C";
+        let (result, errors) = parse_function(input);
+
+        assert!(result.is_some(), "Expected successful parse");
+        assert!(errors.is_empty(), "Expected no errors");
+
+        if let Some(func) = result {
+            assert_eq!(*func.value.name.value, "externalFunc");
+
+            // Check type parameters with bounds
+            assert_eq!(func.value.type_params.len(), 3);
+
+            // Check A parameter with Serializable bound
+            let (a_param, a_bound) = &func.value.type_params[0];
+            assert_eq!(*a_param.value, "A");
+            assert!(a_bound.is_some());
+            if let Some(bound) = a_bound {
+                assert_eq!(*bound.value, Type::Identifier("Serializable".to_string()));
+            }
+
+            // Check B parameter with Printable bound
+            let (b_param, b_bound) = &func.value.type_params[1];
+            assert_eq!(*b_param.value, "B");
+            assert!(b_bound.is_some());
+            if let Some(bound) = b_bound {
+                assert_eq!(*bound.value, Type::Identifier("Printable".to_string()));
+            }
+
+            // Check C parameter with no bound
+            let (c_param, c_bound) = &func.value.type_params[2];
+            assert_eq!(*c_param.value, "C");
+            assert!(c_bound.is_none());
 
             // Check parameters
             assert!(func.value.params.is_some());
@@ -706,6 +880,54 @@ mod tests {
             assert!(matches!(*params[1].value.ty.value, Type::Int64));
             assert!(matches!(*func.value.return_type.value, Type::Int64));
             assert!(func.value.body.is_none()); // Extern function has no body
+        }
+    }
+
+    #[test]
+    fn test_mixed_bounds_and_no_bounds() {
+        let input = "fn <A: Serializable, B, C: Printable> process(a: A, b: B, c: C): B = b";
+        let (result, errors) = parse_function(input);
+
+        assert!(result.is_some(), "Expected successful parse");
+        assert!(errors.is_empty(), "Expected no errors");
+
+        if let Some(func) = result {
+            assert_eq!(*func.value.name.value, "process");
+
+            // Check type parameters with mixed bounds
+            assert_eq!(func.value.type_params.len(), 3);
+
+            // Check A parameter with Serializable bound
+            let (a_param, a_bound) = &func.value.type_params[0];
+            assert_eq!(*a_param.value, "A");
+            assert!(a_bound.is_some());
+            if let Some(bound) = a_bound {
+                assert_eq!(*bound.value, Type::Identifier("Serializable".to_string()));
+            }
+
+            // Check B parameter with no bound
+            let (b_param, b_bound) = &func.value.type_params[1];
+            assert_eq!(*b_param.value, "B");
+            assert!(b_bound.is_none());
+
+            // Check C parameter with Printable bound
+            let (c_param, c_bound) = &func.value.type_params[2];
+            assert_eq!(*c_param.value, "C");
+            assert!(c_bound.is_some());
+            if let Some(bound) = c_bound {
+                assert_eq!(*bound.value, Type::Identifier("Printable".to_string()));
+            }
+
+            // Check parameterss
+            assert!(func.value.params.is_some());
+            let params = func.value.params.as_ref().unwrap();
+            assert_eq!(params.len(), 3);
+
+            // Check return type
+            assert!(matches!(*func.value.return_type.value, Type::Identifier(name) if name == "B"));
+
+            // Check body is present for regular function
+            assert!(func.value.body.is_some());
         }
     }
 }

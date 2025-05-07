@@ -3,6 +3,7 @@ use crate::dsl::analyzer::hir::{Identifier, Pattern, TypedSpan};
 use crate::dsl::parser::ast::{Adt, Field};
 use crate::dsl::utils::span::{OptionalSpanned, Span};
 use Adt::*;
+use once_cell::sync::Lazy;
 use std::collections::BTreeMap;
 use std::hash::Hasher;
 use std::{
@@ -22,6 +23,19 @@ pub const PHYSICAL_PROPS: &str = "PhysicalProperties";
 
 pub const CORE_TYPES: [&str; 4] = [LOGICAL_TYPE, PHYSICAL_TYPE, LOGICAL_PROPS, PHYSICAL_PROPS];
 
+// Reserved ADT type instances.
+pub const ARITHMERIC_TYPE: &str = "Arithmetic";
+pub const CONCAT_TYPE: &str = "Concat";
+pub const EQHASH_TYPE: &str = "EqHash";
+
+pub static RESERVED_TYPE_MAP: Lazy<HashMap<String, TypeKind>> = Lazy::new(|| {
+    let mut map = HashMap::new();
+    map.insert(CONCAT_TYPE.to_string(), TypeKind::Concat);
+    map.insert(EQHASH_TYPE.to_string(), TypeKind::EqHash);
+    map.insert(ARITHMERIC_TYPE.to_string(), TypeKind::Arithmetic);
+    map
+});
+
 /// Represents the core structure of a type without metadata.
 ///
 /// This enum contains both primitive types (like Int64, String) and complex types
@@ -38,7 +52,6 @@ pub enum TypeKind {
     Unit,
     Universe, // All types are subtypes of Universe.
     Nothing,  // Inherits all types.
-    None,     // Inherits all optionals.
 
     // Unknown types.
     UnknownAsc(usize),  // Strictly ascending types.
@@ -46,7 +59,7 @@ pub enum TypeKind {
 
     // User types.
     Adt(Identifier),
-    Generic(usize), // Generic types, with unique id to distinguish.
+    Gen(Generic),
 
     // Composite types.
     Array(Type),
@@ -64,6 +77,10 @@ pub enum TypeKind {
     EqHash,     // For types that support equality and hashing.
     Arithmetic, // For types that support arithmetic operations.
 }
+
+/// Represents a generic type with an optional bound.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Generic(pub usize, pub Option<Type>);
 
 /// Represents a type, potentially with span information.
 ///
@@ -163,8 +180,8 @@ pub struct TypeRegistry {
     /// Maps unknown type IDs to their current inferred concrete types.
     /// Types start at `Nothing`, and get bumped up when needed by the constraint.
     pub resolved_unknown: HashMap<usize, Type>,
-    /// Instantiated generic types: (call_constraint_id, generic_id) -> TypeKind.
-    pub instantiated_generics: HashMap<(usize, usize), TypeKind>,
+    /// Instantiated generic types: call_constraint_id -> Vec<(Generic, TypeKind)>.
+    pub instantiated_generics: HashMap<usize, Vec<(Generic, TypeKind)>>,
     /// Current ID to use for new Unknown / Generic / Constraint id.
     pub next_id: usize,
 }
@@ -198,20 +215,27 @@ impl TypeRegistry {
     ///
     /// `Ok(())` if registration is successful, or a `AnalyzerErrorKind` if a duplicate name is found.
     pub fn register_adt(&mut self, adt: &Adt) -> Result<(), Box<AnalyzerErrorKind>> {
+        let check_name_validity = |name, span, registry: &TypeRegistry| {
+            if RESERVED_TYPE_MAP.contains_key(name) {
+                return Err(AnalyzerErrorKind::new_reserved_type(name, span));
+            }
+
+            if let Some(existing_span) = registry.spans.get(name) {
+                return Err(AnalyzerErrorKind::new_duplicate_adt(
+                    name,
+                    existing_span,
+                    span,
+                ));
+            }
+
+            Ok(())
+        };
+
         match adt {
             Product { name, fields } => {
                 let type_name = name.value.as_ref().clone();
+                check_name_validity(&type_name, &name.span, self)?;
 
-                // Check for duplicate ADT names.
-                if let Some(existing_span) = self.spans.get(&type_name) {
-                    return Err(AnalyzerErrorKind::new_duplicate_adt(
-                        &type_name,
-                        existing_span,
-                        &name.span,
-                    ));
-                }
-
-                // Register the ADT fields.
                 self.product_fields.insert(
                     type_name.clone(),
                     fields.iter().map(|field| *field.value.clone()).collect(),
@@ -224,22 +248,13 @@ impl TypeRegistry {
             }
             Sum { name, variants } => {
                 let enum_name = name.value.as_ref().clone();
-
-                // Check for duplicate ADT names.
-                if let Some(existing_span) = self.spans.get(&enum_name) {
-                    return Err(AnalyzerErrorKind::new_duplicate_adt(
-                        &enum_name,
-                        existing_span,
-                        &name.span,
-                    ));
-                }
+                check_name_validity(&enum_name, &name.span, self)?;
 
                 self.spans.insert(enum_name.clone(), name.clone().span);
                 self.subtypes.entry(enum_name.clone()).or_default();
 
                 for variant in variants {
                     let variant_adt = variant.value.as_ref();
-                    // Register each variant.
                     self.register_adt(variant_adt)?;
 
                     let variant_name = match variant_adt {
@@ -247,7 +262,6 @@ impl TypeRegistry {
                         Sum { name, .. } => name.value.as_ref(),
                     };
 
-                    // Add variant as a subtype of the enum.
                     if let Some(children) = self.subtypes.get_mut(&enum_name) {
                         children.insert(variant_name.clone());
                     }
@@ -395,84 +409,6 @@ impl TypeRegistry {
         });
     }
 
-    /// Instantiates a type by replacing all generic type references with concrete types
-    /// specific to the given constraint.
-    ///
-    /// When a generic type is encountered, the function looks for an existing instantiation
-    /// for the (constraint_id, generic_id) pair. If none exists, it creates a new ascending
-    /// or descending unknown type and stores it in the instantiated_generics map.
-    ///
-    /// # Arguments
-    ///
-    /// * `ty` - The type to instantiate
-    /// * `constraint_id` - The ID of the constraint that needs this instantiation
-    /// * `ascending` - Whether unknown types should be created as ascending (true) or descending (false)
-    ///
-    /// # Returns
-    ///
-    /// A new type with all generic references replaced with constraint-specific instantiations.
-    pub fn instantiate_type(&mut self, ty: &Type, constraint_id: usize, ascending: bool) -> Type {
-        use TypeKind::*;
-
-        let span = ty.span.clone();
-
-        let kind = match &*ty.value {
-            Generic(generic_id) => {
-                let key = (constraint_id, *generic_id);
-
-                let next_id = if ascending {
-                    self.new_unknown_asc()
-                } else {
-                    self.new_unknown_desc()
-                };
-
-                self.instantiated_generics
-                    .entry(key)
-                    .or_insert(next_id)
-                    .clone()
-            }
-
-            // For composite types, recursively instantiate their component types.
-            Array(elem_type) => Array(self.instantiate_type(elem_type, constraint_id, ascending)),
-
-            Closure(param_type, return_type) => Closure(
-                self.instantiate_type(param_type, constraint_id, !ascending),
-                self.instantiate_type(return_type, constraint_id, ascending),
-            ),
-
-            Tuple(types) => {
-                let instantiated_types = types
-                    .iter()
-                    .map(|t| self.instantiate_type(t, constraint_id, ascending))
-                    .collect();
-                Tuple(instantiated_types)
-            }
-
-            Map(key_type, value_type) => Map(
-                self.instantiate_type(key_type, constraint_id, !ascending),
-                self.instantiate_type(value_type, constraint_id, ascending),
-            ),
-
-            Optional(inner_type) => {
-                Optional(self.instantiate_type(inner_type, constraint_id, ascending))
-            }
-            Stored(inner_type) => {
-                Stored(self.instantiate_type(inner_type, constraint_id, ascending))
-            }
-            Costed(inner_type) => {
-                Costed(self.instantiate_type(inner_type, constraint_id, ascending))
-            }
-
-            // Primitive types, special types, and ADT references don't need instantiation.
-            _ => *ty.value.clone(),
-        };
-
-        Type {
-            value: kind.into(),
-            span: span.clone(),
-        }
-    }
-
     /// Resolves any Unknown types to their concrete types.
     ///
     /// This method checks if a type is an Unknown variant and replaces it
@@ -558,5 +494,42 @@ pub mod type_registry_tests {
 
         let result = registry.register_adt(&car2);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reserved_type_detection() {
+        let mut registry = TypeRegistry::default();
+
+        // Try to register an ADT with a reserved name
+        let concat_type = create_product_adt(CONCAT_TYPE, vec![]);
+        let result = registry.register_adt(&concat_type);
+        assert!(result.is_err());
+
+        if let Err(err) = result {
+            match *err {
+                AnalyzerErrorKind::ReservedType { name, .. } => {
+                    assert_eq!(name, CONCAT_TYPE);
+                }
+                _ => panic!("Expected ReservedType error"),
+            }
+        }
+
+        // Also try with Arithmetic
+        let arithmetic_type = create_product_adt(ARITHMERIC_TYPE, vec![]);
+        let result = registry.register_adt(&arithmetic_type);
+        assert!(result.is_err());
+
+        if let Err(err) = result {
+            match *err {
+                AnalyzerErrorKind::ReservedType { name, .. } => {
+                    assert_eq!(name, ARITHMERIC_TYPE);
+                }
+                _ => panic!("Expected ReservedType error"),
+            }
+        }
+
+        // Normal type registration should still work
+        let valid_type = create_product_adt("ValidType", vec![]);
+        assert!(registry.register_adt(&valid_type).is_ok());
     }
 }

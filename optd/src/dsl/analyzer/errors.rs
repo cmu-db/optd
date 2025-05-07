@@ -1,9 +1,6 @@
 use super::{hir::Identifier, type_checks::registry::Type};
 use crate::dsl::{
-    analyzer::{
-        into_hir::annotations::{IMPLEMENTATION_SIGNATURE_TYPE, TRANSFORMATION_SIGNATURE_TYPE},
-        type_checks::converter::type_display,
-    },
+    analyzer::type_checks::converter::type_display,
     utils::{
         errors::Diagnose,
         span::{Span, Spanned},
@@ -126,16 +123,11 @@ pub enum AnalyzerErrorKind {
         unknowns: HashMap<usize, Type>,
     },
 
-    InvalidTransformation {
+    InvalidAnnotation {
         span: Span,
-        actual_signature: Type,
-        // To be able to call display function of Type.
-        unknowns: HashMap<usize, Type>,
-    },
-
-    InvalidImplementation {
-        span: Span,
-        actual_signature: Type,
+        annotation_name: String,
+        actual_type: Type,
+        expected_type: Type,
         // To be able to call display function of Type.
         unknowns: HashMap<usize, Type>,
     },
@@ -146,6 +138,11 @@ pub enum AnalyzerErrorKind {
         scrutinee_type: Type,
         // To be able to call display function of Type
         unknowns: HashMap<usize, Type>,
+    },
+
+    ReservedType {
+        name: String,
+        span: Span,
     },
 }
 
@@ -313,33 +310,23 @@ impl AnalyzerErrorKind {
         .into()
     }
 
-    pub fn new_invalid_transformation(
+    pub fn new_invalid_annotation(
         span: &Span,
-        actual_signature: &Type,
+        annotation_name: &str,
+        actual_type: &Type,
+        expected_type: &Type,
         unknowns: HashMap<usize, Type>,
     ) -> Box<Self> {
-        Self::InvalidTransformation {
+        Self::InvalidAnnotation {
             span: span.clone(),
-            actual_signature: actual_signature.clone(),
+            annotation_name: annotation_name.to_string(),
+            actual_type: actual_type.clone(),
+            expected_type: expected_type.clone(),
             unknowns,
         }
         .into()
     }
 
-    pub fn new_invalid_implementation(
-        span: &Span,
-        actual_signature: &Type,
-        unknowns: HashMap<usize, Type>,
-    ) -> Box<Self> {
-        Self::InvalidImplementation {
-            span: span.clone(),
-            actual_signature: actual_signature.clone(),
-            unknowns,
-        }
-        .into()
-    }
-
-    // New constructor for array decomposition errors
     pub fn new_invalid_array_decomposition(
         scrutinee_span: &Span,
         pattern_span: &Span,
@@ -351,6 +338,14 @@ impl AnalyzerErrorKind {
             pattern_span: pattern_span.clone(),
             scrutinee_type: scrutinee_type.clone(),
             unknowns,
+        }
+        .into()
+    }
+
+    pub fn new_reserved_type(name: &str, span: &Span) -> Box<Self> {
+        Self::ReservedType {
+            name: name.to_string(),
+            span: span.clone(),
         }
         .into()
     }
@@ -468,49 +463,38 @@ impl Diagnose for Box<AnalyzerError> {
                 "Only functions, maps, and arrays can be called",
             ),
             InvalidFieldAccess { object, span, field, unknowns } => self.build_invalid_field_access_report(object, span, field, unknowns),
-            InvalidTransformation {
+            InvalidAnnotation {
                 span,
-                actual_signature,
+                annotation_name,
+                actual_type,
+                expected_type,
                 unknowns,
             } => {
                 self.build_single_span_report(
                     span,
-                    "Invalid transformation function signature",
+                    &format!("Invalid '{}' function signature", annotation_name),
                     &format!(
                         "Found: '{}'",
-                        type_display(actual_signature, unknowns)
+                        type_display(actual_type, unknowns)
                     ),
                     &format!(
                         "Expected a subtype of: '{}'",
-                        type_display(&TRANSFORMATION_SIGNATURE_TYPE, unknowns)
+                        type_display(expected_type, unknowns)
                     ),
                 )
             },
-            InvalidImplementation {
-                span,
-                actual_signature,
-                unknowns,
-            } => {
-                self.build_single_span_report(
-                    span,
-                    "Invalid implementation function signature",
-                    &format!(
-                        "Found: '{}'",
-                        type_display(actual_signature, unknowns)
-                    ),
-                    &format!(
-                        "Expected a subtype of: '{}'", 
-                        type_display(&IMPLEMENTATION_SIGNATURE_TYPE, unknowns)
-                    ),
-                )
-            },
-            // Handler for the new InvalidArrayDecomposition error
             InvalidArrayDecomposition {
                 scrutinee_span,
                 pattern_span,
                 scrutinee_type,
                 unknowns,
             } => self.build_array_decomp_error_report(scrutinee_span, pattern_span, scrutinee_type, unknowns),
+            ReservedType { name, span } => self.build_single_span_report(
+                span,
+                &format!("Reserved type name: '{}'", name),
+                &format!("'{}' is a reserved type name", name),
+                "Choose a different name for your type. Reserved type names are used internally by the system",
+            ),
         }
     }
 
@@ -534,9 +518,9 @@ impl Diagnose for Box<AnalyzerError> {
             ArgumentNumberMismatch { span, .. } => span,
             InvalidCallReceiver { span, .. } => span,
             InvalidFieldAccess { span, .. } => span,
-            InvalidTransformation { span, .. } => span,
-            InvalidImplementation { span, .. } => span,
-            InvalidArrayDecomposition { pattern_span, .. } => pattern_span, // Use pattern span as primary
+            InvalidAnnotation { span, .. } => span,
+            InvalidArrayDecomposition { pattern_span, .. } => pattern_span,
+            ReservedType { span, .. } => span,
         };
 
         (span.src_file.clone(), Source::from(self.src_code.clone()))

@@ -1,0 +1,45 @@
+data Logical
+data Physical
+data LogicalProperties
+data PhysicalProperties
+
+// Convert array of key-value pairs to a map with EqHash constraint
+fn <K: EqHash, V> (pairs: [(K, V)]) to_map(): {K: V} = match pairs
+| [head .. tail] -> {head#_0: head#_1} ++ tail.to_map()
+\ [] -> {}
+
+// Simple filter function for arrays
+fn <T> (array: [T]) filter(pred: T -> Bool): [T] = match array
+| [] -> []
+\ [x .. xs] -> 
+    if pred(x) then [x] ++ xs.filter(pred)
+    else xs.filter(pred)
+
+// Simple map function
+fn <T, U> (array: [T]) map(f: T -> U): [U] = match array
+| [] -> []
+\ [x .. xs] -> [f(x)] ++ xs.map(f)
+
+// Data type for our test
+data User(name: String, age: I64)
+
+fn main(): {String: I64} = 
+let
+    // Create some users
+    users = [
+        User("Alice", 25),
+        User("Bob", 17),
+        User("Charlie", 30),
+        User("Diana", 15)
+    ],
+    
+    // Filter for adults
+    adults = users.filter((u: User) -> u#age >= 18),
+    
+    // Create name -> age map
+    name_age_pairs = adults.map((u: User) -> (u#name, u#age)),
+    
+    // Convert to map
+    age_map = name_age_pairs.to_map()
+in
+    age_map

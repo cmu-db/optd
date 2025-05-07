@@ -553,7 +553,10 @@ mod scope_check_tests {
         let fun_val = Value {
             data: CoreData::Function(FunKind::Closure(params, Arc::new(body))),
             metadata: TypedSpan {
-                ty: create_function_type(&vec![TypeKind::None.into(); len], &TypeKind::None.into()),
+                ty: create_function_type(
+                    &vec![TypeKind::Nothing.into(); len],
+                    &TypeKind::Nothing.into(),
+                ),
                 span: create_test_span(),
             },
         };
@@ -757,7 +760,7 @@ mod scope_check_tests {
                     create_test_span(),
                 )),
             ))),
-            TypeKind::Closure(TypeKind::None.into(), TypeKind::None.into()).into(),
+            TypeKind::Closure(TypeKind::Nothing.into(), TypeKind::Nothing.into()).into(),
             create_test_span(),
         );
 
