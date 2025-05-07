@@ -23,8 +23,8 @@ mod errors;
 mod handlers;
 mod hir_cir;
 mod jobs;
-// mod merge;
 mod memo_io;
+mod merge;
 mod tasks;
 
 /// Default maximum number of concurrent jobs to run in the optimizer.
