@@ -91,10 +91,7 @@ pub trait Memo: Representative + Materialize + TaskGraphState + Sync + 'static {
     ///
     /// # Returns
     /// The properties associated with the group or an error if not found.
-    async fn get_logical_properties(
-        &self,
-        group_id: GroupId,
-    ) -> MemoResult<Option<LogicalProperties>>;
+    async fn get_logical_properties(&self, group_id: GroupId) -> MemoResult<LogicalProperties>;
 
     /// Sets logical properties for a group ID.
     ///
@@ -145,7 +142,11 @@ pub trait Memo: Representative + Materialize + TaskGraphState + Sync + 'static {
     ///
     /// # Returns
     /// The ID of the newly created group.
-    async fn create_group(&mut self, logical_expr_id: LogicalExpressionId) -> MemoResult<GroupId>;
+    async fn create_group(
+        &mut self,
+        logical_expr_id: LogicalExpressionId,
+        props: &LogicalProperties,
+    ) -> MemoResult<GroupId>;
 
     /// Merges groups 1 and 2, unifying them under a common representative.
     ///

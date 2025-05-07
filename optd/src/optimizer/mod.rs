@@ -19,12 +19,12 @@ use std::{
 use tasks::{Task, TaskId};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
-mod hir_cir;
-// mod egest;
-// mod handlers;
 mod errors;
+mod handlers;
+mod hir_cir;
 mod jobs;
 // mod merge;
+mod memo_io;
 mod tasks;
 
 /// Default maximum number of concurrent jobs to run in the optimizer.

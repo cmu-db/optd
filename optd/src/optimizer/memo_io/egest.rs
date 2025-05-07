@@ -1,9 +1,13 @@
-use crate::cir::{Child, GoalMemberId};
+use crate::{
+    cir::{Child, GoalMemberId, Operator, PartialPhysicalPlan, PhysicalExpressionId, PhysicalPlan},
+    memo::Memo,
+    optimizer::{Optimizer, errors::OptimizeError},
+};
 use async_recursion::async_recursion;
 use futures::future::try_join_all;
 use std::sync::Arc;
 
-impl<M: Memoize> Optimizer<M> {
+impl<M: Memo> Optimizer<M> {
     /// Recursively transforms a physical expression ID in the memo into a complete physical plan.
     ///
     /// This function retrieves the physical expression from the memo and recursively
@@ -17,11 +21,15 @@ impl<M: Memoize> Optimizer<M> {
     /// * `Ok(None)` if any goal ID lacks a best expression ID.
     /// * `Err(Error)` if a memo operation fails.
     #[async_recursion]
-    pub(super) async fn egest_best_plan(
+    pub async fn egest_best_plan(
         &self,
         expression_id: PhysicalExpressionId,
-    ) -> Result<Option<PhysicalPlan>, Error> {
-        let expression = self.memo.materialize_physical_expr(expression_id).await?;
+    ) -> Result<Option<PhysicalPlan>, OptimizeError> {
+        let expression = self
+            .memo
+            .materialize_physical_expr(expression_id)
+            .await
+            .map_err(OptimizeError::MemoError)?;
 
         let child_results = try_join_all(
             expression
@@ -54,11 +62,15 @@ impl<M: Memoize> Optimizer<M> {
     /// # Returns
     /// * `PartialPhysicalPlan` - The materialized partial plan.
     /// * `Err(Error)` if a memo operation fails.
-    pub(super) async fn egest_partial_plan(
+    pub async fn egest_partial_plan(
         &self,
         expression_id: PhysicalExpressionId,
-    ) -> Result<PartialPhysicalPlan, Error> {
-        let expression = self.memo.materialize_physical_expr(expression_id).await?;
+    ) -> Result<PartialPhysicalPlan, OptimizeError> {
+        let expression = self
+            .memo
+            .materialize_physical_expr(expression_id)
+            .await
+            .map_err(OptimizeError::MemoError)?;
 
         let children = try_join_all(
             expression
@@ -78,7 +90,9 @@ impl<M: Memoize> Optimizer<M> {
     async fn egest_child_plan(
         &self,
         child: &Child<GoalMemberId>,
-    ) -> Result<Option<Child<Arc<PhysicalPlan>>>, Error> {
+    ) -> Result<Option<Child<Arc<PhysicalPlan>>>, OptimizeError> {
+        use Child::*;
+
         match child {
             Singleton(member) => {
                 let plan = match self.process_goal_member(*member).await? {
@@ -109,15 +123,21 @@ impl<M: Memoize> Optimizer<M> {
     async fn process_goal_member(
         &self,
         member: GoalMemberId,
-    ) -> Result<Option<PhysicalPlan>, Error> {
+    ) -> Result<Option<PhysicalPlan>, OptimizeError> {
+        use GoalMemberId::*;
+
         match member {
-            GoalMemberId::PhysicalExpressionId(expr_id) => self.egest_best_plan(expr_id).await,
+            PhysicalExpressionId(expr_id) => self.egest_best_plan(expr_id).await,
             GoalId(goal_id) => {
-                let (best_expr_id, _) =
-                    match self.memo.get_best_optimized_physical_expr(goal_id).await? {
-                        Some(expr) => expr,
-                        None => return Ok(None),
-                    };
+                let (best_expr_id, _) = match self
+                    .memo
+                    .get_best_optimized_physical_expr(goal_id)
+                    .await
+                    .map_err(OptimizeError::MemoError)?
+                {
+                    Some(expr) => expr,
+                    None => return Ok(None),
+                };
 
                 self.egest_best_plan(best_expr_id).await
             }
@@ -127,15 +147,25 @@ impl<M: Memoize> Optimizer<M> {
     async fn egest_partial_child(
         &self,
         child: Child<GoalMemberId>,
-    ) -> Result<Child<Arc<PartialPhysicalPlan>>, Error> {
+    ) -> Result<Child<Arc<PartialPhysicalPlan>>, OptimizeError> {
+        use Child::*;
+
         match child {
             Singleton(member) => match member {
                 GoalMemberId::GoalId(goal_id) => {
-                    let goal = self.memo.materialize_goal(goal_id).await?;
+                    let goal = self
+                        .memo
+                        .materialize_goal(goal_id)
+                        .await
+                        .map_err(OptimizeError::MemoError)?;
                     Ok(Singleton(PartialPhysicalPlan::UnMaterialized(goal).into()))
                 }
                 GoalMemberId::PhysicalExpressionId(expr_id) => {
-                    let expr = self.memo.materialize_physical_expr(expr_id).await?;
+                    let expr = self
+                        .memo
+                        .materialize_physical_expr(expr_id)
+                        .await
+                        .map_err(OptimizeError::MemoError)?;
 
                     let children = try_join_all(
                         expr.children
@@ -157,11 +187,19 @@ impl<M: Memoize> Optimizer<M> {
                 let goals = try_join_all(members.into_iter().map(|member| async move {
                     match member {
                         GoalMemberId::GoalId(goal_id) => {
-                            let goal = self.memo.materialize_goal(goal_id).await?;
+                            let goal = self
+                                .memo
+                                .materialize_goal(goal_id)
+                                .await
+                                .map_err(OptimizeError::MemoError)?;
                             Ok(PartialPhysicalPlan::UnMaterialized(goal).into())
                         }
                         GoalMemberId::PhysicalExpressionId(expr_id) => {
-                            let expr = self.memo.materialize_physical_expr(expr_id).await?;
+                            let expr = self
+                                .memo
+                                .materialize_physical_expr(expr_id)
+                                .await
+                                .map_err(OptimizeError::MemoError)?;
 
                             let children = try_join_all(
                                 expr.children

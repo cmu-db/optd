@@ -1,28 +1,23 @@
-use super::{memo::Memoize, Optimizer};
 use crate::{
     cir::{
-        expressions::{LogicalExpression, LogicalExpressionId, PhysicalExpression},
-        goal::GoalMemberId,
-        group::GroupId,
-        operators::{Child, Operator},
-        plans::{PartialLogicalPlan, PartialPhysicalPlan},
+        Child, GoalMemberId, GroupId, LogicalExpression, LogicalExpressionId, Operator,
+        PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpression,
     },
-    error::Error,
+    memo::Memo,
+    optimizer::{Optimizer, errors::OptimizeError},
 };
 use async_recursion::async_recursion;
 use std::sync::Arc;
-use Child::*;
-use LogicalIngest::*;
 
 /// Result type for logical plan probing.
-pub(super) enum LogicalIngest {
+pub enum LogicalIngest {
     /// Plan was successfully found in the memo.
     Found(GroupId),
     /// Plan requires groups to be created for missing expressions.
     Missing(Vec<LogicalExpressionId>),
 }
 
-impl<M: Memoize> Optimizer<M> {
+impl<M: Memo> Optimizer<M> {
     /// Probes for a logical plan in the memo.
     ///
     /// Logical plans need property derivation which occurs asynchronously
@@ -33,10 +28,12 @@ impl<M: Memoize> Optimizer<M> {
     /// # Returns
     /// - `Found(group_id)`: Plan exists in the memo.
     /// - `Missing(expressions)`: Expressions needing property derivation.
-    pub(super) async fn probe_ingest_logical_plan(
+    pub async fn probe_ingest_logical_plan(
         &mut self,
         logical_plan: &PartialLogicalPlan,
-    ) -> Result<LogicalIngest, Error> {
+    ) -> Result<LogicalIngest, OptimizeError> {
+        use LogicalIngest::*;
+
         match logical_plan {
             PartialLogicalPlan::Materialized(operator) => {
                 self.probe_ingest_logical_operator(operator).await
@@ -58,17 +55,21 @@ impl<M: Memoize> Optimizer<M> {
     /// The goal member identifier corresponding to the physical plan,
     /// which can be either a physical expression ID or a goal ID.
     #[async_recursion]
-    pub(super) async fn probe_ingest_physical_plan(
+    pub async fn probe_ingest_physical_plan(
         &mut self,
         physical_plan: &PartialPhysicalPlan,
-    ) -> Result<GoalMemberId, Error> {
+    ) -> Result<GoalMemberId, OptimizeError> {
         match physical_plan {
             PartialPhysicalPlan::Materialized(operator) => {
                 self.probe_ingest_physical_operator(operator).await
             }
             PartialPhysicalPlan::UnMaterialized(goal) => {
                 // Base case: is a goal.
-                let goal_id = self.memo.get_goal_id(goal).await?;
+                let goal_id = self
+                    .memo
+                    .get_goal_id(goal)
+                    .await
+                    .map_err(OptimizeError::MemoError)?;
                 Ok(GoalMemberId::GoalId(goal_id))
             }
         }
@@ -77,7 +78,10 @@ impl<M: Memoize> Optimizer<M> {
     async fn probe_ingest_logical_operator(
         &mut self,
         operator: &Operator<Arc<PartialLogicalPlan>>,
-    ) -> Result<LogicalIngest, Error> {
+    ) -> Result<LogicalIngest, OptimizeError> {
+        use Child::*;
+        use LogicalIngest::*;
+
         // Sequentially process the children ingestion.
         let mut children_results = Vec::with_capacity(operator.children.len());
         for child in &operator.children {
@@ -122,13 +126,18 @@ impl<M: Memoize> Optimizer<M> {
             data: operator.data.clone(),
             children,
         };
-        let logical_expression_id = self.memo.get_logical_expr_id(&logical_expression).await?;
+        let logical_expression_id = self
+            .memo
+            .get_logical_expr_id(&logical_expression)
+            .await
+            .map_err(OptimizeError::MemoError)?;
 
         // Base case: check if the expression already exists in the memo.
         match self
             .memo
             .find_logical_expr_group(logical_expression_id)
-            .await?
+            .await
+            .map_err(OptimizeError::MemoError)?
         {
             Some(group_id) => Ok(Found(group_id)),
             None => Ok(Missing(vec![logical_expression_id])),
@@ -139,7 +148,9 @@ impl<M: Memoize> Optimizer<M> {
     async fn probe_ingest_logical_child(
         &mut self,
         child: &Child<Arc<PartialLogicalPlan>>,
-    ) -> Result<Child<LogicalIngest>, Error> {
+    ) -> Result<Child<LogicalIngest>, OptimizeError> {
+        use Child::*;
+
         match child {
             Singleton(plan) => {
                 let result = self.probe_ingest_logical_plan(plan).await?;
@@ -159,7 +170,7 @@ impl<M: Memoize> Optimizer<M> {
     async fn probe_ingest_physical_operator(
         &mut self,
         operator: &Operator<Arc<PartialPhysicalPlan>>,
-    ) -> Result<GoalMemberId, Error> {
+    ) -> Result<GoalMemberId, OptimizeError> {
         // Sequentially process the children ingestion.
         let mut children = Vec::with_capacity(operator.children.len());
         for child in &operator.children {
@@ -173,7 +184,11 @@ impl<M: Memoize> Optimizer<M> {
             data: operator.data.clone(),
             children,
         };
-        let expression_id = self.memo.get_physical_expr_id(&expression).await?;
+        let expression_id = self
+            .memo
+            .get_physical_expr_id(&expression)
+            .await
+            .map_err(OptimizeError::MemoError)?;
 
         Ok(GoalMemberId::PhysicalExpressionId(expression_id))
     }
@@ -181,7 +196,9 @@ impl<M: Memoize> Optimizer<M> {
     async fn process_physical_child(
         &mut self,
         child: &Child<Arc<PartialPhysicalPlan>>,
-    ) -> Result<Child<GoalMemberId>, Error> {
+    ) -> Result<Child<GoalMemberId>, OptimizeError> {
+        use Child::*;
+
         match child {
             Singleton(plan) => {
                 let member = self.probe_ingest_physical_plan(plan).await?;

@@ -88,7 +88,7 @@ impl CostDependency {
 /// State of a group in the memo structure.
 struct GroupState {
     /// The logical properties of the group, might be `None` if it hasn't been derived yet.
-    properties: Option<LogicalProperties>,
+    properties: LogicalProperties,
     logical_exprs: HashSet<LogicalExpressionId>,
     goals: HashSet<GoalId>,
 }
@@ -98,7 +98,7 @@ impl GroupState {
         let mut logical_exprs = HashSet::new();
         logical_exprs.insert(logical_expr_id);
         Self {
-            properties: None,
+            properties: LogicalProperties(None),
             logical_exprs,
             goals: HashSet::new(),
         }
@@ -289,10 +289,7 @@ impl Memo for MemoryMemo {
         self.merge_groups_helper(group_id_1, group_id_2).await
     }
 
-    async fn get_logical_properties(
-        &self,
-        group_id: GroupId,
-    ) -> MemoResult<Option<LogicalProperties>> {
+    async fn get_logical_properties(&self, group_id: GroupId) -> MemoResult<LogicalProperties> {
         let group_id = self.find_repr_group(group_id).await;
         let group = self
             .groups
@@ -313,7 +310,7 @@ impl Memo for MemoryMemo {
             .get_mut(&group_id)
             .ok_or(MemoError::GroupNotFound(group_id))?;
 
-        group.properties = Some(props);
+        group.properties = props;
         Ok(())
     }
 
@@ -354,7 +351,11 @@ impl Memo for MemoryMemo {
         Ok(maybe_group_id)
     }
 
-    async fn create_group(&mut self, logical_expr_id: LogicalExpressionId) -> MemoResult<GroupId> {
+    async fn create_group(
+        &mut self,
+        logical_expr_id: LogicalExpressionId,
+        props: &LogicalProperties,
+    ) -> MemoResult<GroupId> {
         let group_id = self.next_group_id();
         let group = GroupState::new(logical_expr_id);
         self.groups.insert(group_id, group);
