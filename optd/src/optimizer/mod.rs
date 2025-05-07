@@ -1,30 +1,32 @@
-/*use OptimizerMessage::*;
-use futures::StreamExt;
-use futures::channel::oneshot;
-use futures::{
-    SinkExt,
-    channel::mpsc::{self, Receiver, Sender},
+use crate::{
+    catalog::Catalog,
+    cir::{
+        Cost, Goal, GoalId, GroupId, LogicalExpressionId, LogicalPlan, LogicalProperties,
+        PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpressionId, PhysicalPlan, RuleBook,
+    },
+    dsl::{
+        analyzer::hir::{HIR, Value, context::Context},
+        engine::{Continuation, EngineResponse},
+    },
+    memo::Memo,
 };
+use errors::OptimizeError;
 use jobs::{Job, JobId};
-use std::collections::{HashMap, HashSet, VecDeque};
-use tasks::{Task, TaskId};
-
-use crate::cir::{
-    Cost, Goal, GoalId, GroupId, LogicalExpressionId, LogicalProperties, PartialLogicalPlan,
-    PartialPhysicalPlan, PhysicalExpressionId, RuleBook,
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    sync::Arc,
 };
-use crate::dsl::analyzer::hir::HIR;
-use crate::dsl::analyzer::hir::context::Context;
-use crate::memo::traits::Memo;*/
+use tasks::{Task, TaskId};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 
-mod bridge;
+mod hir_cir;
 // mod egest;
 // mod handlers;
-// mod jobs;
+mod errors;
+mod jobs;
 // mod merge;
 mod tasks;
 
-/*
 /// Default maximum number of concurrent jobs to run in the optimizer.
 const DEFAULT_MAX_CONCURRENT_JOBS: usize = 1000;
 
@@ -35,7 +37,6 @@ const DEFAULT_MAX_CONCURRENT_JOBS: usize = 1000;
 pub struct OptimizeRequest {
     /// The logical plan to optimize.
     pub plan: LogicalPlan,
-
     /// Channel for receiving optimized physical plans.
     ///
     /// Streams results back as they become available, allowing clients to:
@@ -51,27 +52,28 @@ pub struct OptimizeRequest {
 enum OptimizerMessage {
     /// Process an optimization request.
     OptimizeRequestWrapper(OptimizeRequest, TaskId),
-
     /// New logical plan alternative for a group from applying transformation rules.
     NewLogicalPartial(PartialLogicalPlan, GroupId, JobId),
-
     /// New physical implementation for a goal, awaiting recursive optimization.
     NewPhysicalPartial(PartialPhysicalPlan, GoalId, JobId),
-
     /// Fully optimized physical expression with complete costing.
     NewCostedPhysical(PhysicalExpressionId, Cost, JobId),
-
     /// Create a new group with the provided logical properties.
     CreateGroup(LogicalExpressionId, LogicalProperties, JobId),
-
     /// Subscribe to logical expressions in a specific group.
-    SubscribeGroup(GroupId, LogicalPlanContinuation, JobId),
-
+    SubscribeGroup(
+        GroupId,
+        Continuation<Value, EngineResponse<OptimizerMessage>>,
+        JobId,
+    ),
     /// Subscribe to costed physical expressions for a goal.
-    SubscribeGoal(Goal, CostedPhysicalPlanContinuation, JobId),
-
+    SubscribeGoal(
+        Goal,
+        Continuation<Value, EngineResponse<OptimizerMessage>>,
+        JobId,
+    ),
     /// Retrieve logical properties for a specific group.
-    RetrieveProperties(GroupId, oneshot::Sender<LogicalProperties>),
+    RetrieveProperties(GroupId, Sender<LogicalProperties>),
 }
 
 /// A message that is waiting for dependencies before it can be processed.
@@ -92,6 +94,7 @@ struct PendingMessage {
 pub struct Optimizer<M: Memo> {
     // Core components.
     memo: M,
+    catalog: Arc<dyn Catalog>,
     rule_book: RuleBook,
     hir_context: Context,
 
@@ -129,6 +132,7 @@ impl<M: Memo> Optimizer<M> {
     fn new(
         memo: M,
         hir: HIR,
+        catalog: Arc<dyn Catalog>,
         message_tx: Sender<OptimizerMessage>,
         message_rx: Receiver<OptimizerMessage>,
         optimize_rx: Receiver<OptimizeRequest>,
@@ -136,6 +140,7 @@ impl<M: Memo> Optimizer<M> {
         Self {
             // Core components.
             memo,
+            catalog,
             rule_book: RuleBook::default(),
             hir_context: hir.context,
 
@@ -168,14 +173,22 @@ impl<M: Memo> Optimizer<M> {
     }
 
     /// Launch a new optimizer and return a sender for client communication.
-    pub fn launch(memo: M, hir: HIR) -> Sender<OptimizeRequest> {
+    pub fn launch(memo: M, catalog: Arc<dyn Catalog>, hir: HIR) -> Sender<OptimizeRequest> {
         let (message_tx, message_rx) = mpsc::channel(0);
         let (optimize_tx, optimize_rx) = mpsc::channel(0);
 
         // Start the background processing loop.
-        let optimizer = Self::new(memo, hir, message_tx.clone(), message_rx, optimize_rx);
+        let optimizer = Self::new(
+            memo,
+            hir,
+            catalog,
+            message_tx.clone(),
+            message_rx,
+            optimize_rx,
+        );
+
         tokio::spawn(async move {
-            // TODO(Alexis): If an error occurs we could restart or reboot the memo.
+            // TODO: If an error occurs we could restart or reboot the memo.
             // Rather than failing (e.g. memo could be distributed).
             optimizer.run().await.expect("Optimizer failure");
         });
@@ -184,11 +197,13 @@ impl<M: Memo> Optimizer<M> {
     }
 
     /// Run the optimizer's main processing loop.
-    async fn run(mut self) -> Result<(), Error> {
+    async fn run(mut self) -> Result<(), OptimizeError> {
+        use OptimizerMessage::*;
+
         loop {
             tokio::select! {
-                Some(request) = self.optimize_rx.next() => {
-                    let OptimizeRequest { plan, response_tx } = request.clone();
+                Some(request) = self.optimize_rx.recv() => {
+                    /*let OptimizeRequest { plan, response_tx } = request.clone();
                     let task_id = self.launch_optimize_plan_task(plan, response_tx).await;
                     let mut message_tx = self.message_tx.clone();
 
@@ -200,61 +215,60 @@ impl<M: Memo> Optimizer<M> {
                                 .await
                                 .expect("Failed to forward optimize request");
                         }
-                    );
+                    );*/
                 },
-                Some(message) = self.message_rx.next() => {
+                Some(message) = self.message_rx.recv() => {
                     // Process the next message in the channel.
                     match message {
                         OptimizeRequestWrapper(request, task_id_opt) => {
-                            self.process_optimize_request(request.plan, request.response_tx, task_id_opt).await?;
+                            //self.process_optimize_request(request.plan, request.response_tx, task_id_opt).await?;
                         }
                         NewLogicalPartial(plan, group_id, job_id) => {
-                            if self.get_related_task(job_id).is_some() {
+                            /*if self.get_related_task(job_id).is_some() {
                                 self.process_new_logical_partial(plan, group_id, job_id).await?;
                                 self.complete_job(job_id).await?;
-                            }
+                            }*/
                         }
                         NewPhysicalPartial(plan, goal_id, job_id) => {
-                            if self.get_related_task(job_id).is_some() {
+                            /*if self.get_related_task(job_id).is_some() {
                                 self.process_new_physical_partial(plan, goal_id, job_id).await?;
                                 self.complete_job(job_id).await?;
-                            }
+                            }*/
                         }
                         NewCostedPhysical(expression_id, cost, job_id) => {
-                            if self.get_related_task(job_id).is_some() {
+                            /*if self.get_related_task(job_id).is_some() {
                                 self.process_new_costed_physical(expression_id, cost).await?;
                                 self.complete_job(job_id).await?;
-                            }
+                            }*/
                         }
                         CreateGroup( expression_id, properties, job_id) => {
-                            if self.get_related_task(job_id).is_some() {
+                            /*if self.get_related_task(job_id).is_some() {
                                 self.process_create_group(expression_id, &properties, job_id).await?;
                                 self.complete_job(job_id).await?;
-                            }
+                            }*/
                         }
                         SubscribeGroup(group_id, continuation, job_id) => {
-                            if self.get_related_task(job_id).is_some() {
+                            /*if self.get_related_task(job_id).is_some() {
                                 self.process_group_subscription(group_id, continuation, job_id).await?;
                                 self.complete_job(job_id).await?;
-                            }
+                            }*/
                         }
                         SubscribeGoal(goal, continuation, job_id) => {
-                            if self.get_related_task(job_id).is_some() {
+                            /*if self.get_related_task(job_id).is_some() {
                                 self.process_goal_subscription(&goal, continuation, job_id).await?;
                                 self.complete_job(job_id).await?;
-                            }
+                            }*/
                         }
                         RetrieveProperties(group_id, sender) => {
-                            self.process_retrieve_properties(group_id, sender).await?;
+                            //self.process_retrieve_properties(group_id, sender).await?;
                         }
                     };
 
                     // Launch pending jobs according to a policy (currently FIFO).
-                    self.launch_pending_jobs().await?;
+                    // self.launch_pending_jobs().await?;
                 },
                 else => break Ok(()),
             }
         }
     }
 }
-*/
