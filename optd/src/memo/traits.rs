@@ -400,3 +400,44 @@ pub trait Memoize: Send + Sync + 'static {
         physical_expr_id: PhysicalExpressionId,
     ) -> MemoResult<PhysicalExpressionId>;
 }
+
+#[cfg(test)]
+pub mod tests {
+    use crate::core::cir::OperatorData;
+    use super::*;
+
+    pub async fn lookup_or_insert(memo: &mut impl Memoize, data: i64, children: Vec<GroupId>) -> GroupId {
+        let expr = LogicalExpression {
+            tag: data.to_string(),
+            data: vec![OperatorData::Int64(data)],
+            children: children.iter().map(|g| Child::Singleton(*g)).collect(),
+        };
+
+        let eid = memo.get_logical_expr_id(&expr).await.unwrap();
+        match memo.find_logical_expr_group(eid).await.unwrap() {
+            None => { memo.create_group(eid).await.unwrap() }
+            Some(g) => { g }
+        }
+    }
+
+    pub async fn insert_into_group(memo: &mut impl Memoize, data: i64, children: Vec<GroupId>, gid: GroupId) -> GroupId {
+        let g = lookup_or_insert(memo, data, children).await;
+        memo.merge_groups(g, gid).await.unwrap();
+        g
+    }
+
+    pub async fn retrieve(memo: &impl Memoize, gid: GroupId) -> Vec<i64> {
+        let eids = memo.get_all_logical_exprs(gid).await.unwrap();
+
+        // collect and sort data in expressions
+        let mut data = vec![];
+        for eid in eids {
+            let expr = memo.materialize_logical_expr(eid).await.unwrap();
+            if let OperatorData::Int64(v) = expr.data[0] {
+                data.push(v);
+            }
+        };
+        data.sort();
+        data
+    }
+}
