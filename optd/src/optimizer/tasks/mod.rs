@@ -13,17 +13,18 @@ use std::collections::HashSet;
 use tokio::sync::mpsc::Sender;
 
 mod launch;
+mod manage;
 
 /// Unique identifier for tasks in the optimization system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct TaskId(pub i64);
+pub(crate) struct TaskId(pub i64);
 
 /// A task represents a higher-level objective in the optimization process.
 ///
 /// Tasks are composed of one or more jobs and may depend on other tasks.
 /// They represent structured, potentially hierarchical components of the
 /// optimization process.
-pub(super) struct Task {
+pub(crate) struct Task {
     /// The specific kind of task.
     pub kind: TaskKind,
 
@@ -35,7 +36,7 @@ pub(super) struct Task {
 ///
 /// Each variant represents a structured component of the optimization process
 /// that may launch multiple jobs and coordinate their execution.
-pub(super) enum TaskKind {
+pub(crate) enum TaskKind {
     OptimizePlan(OptimizePlanTask),
     OptimizeGoal(OptimizeGoalTask),
     ExploreGroup(ExploreGroupTask),
@@ -53,7 +54,7 @@ pub(super) enum TaskKind {
 //=============================================================================
 
 /// Top-level task to optimize a logical plan.
-pub(super) struct OptimizePlanTask {
+pub(crate) struct OptimizePlanTask {
     /// The logical plan to be optimized.
     pub plan: LogicalPlan,
 
@@ -65,7 +66,7 @@ pub(super) struct OptimizePlanTask {
 }
 
 /// Task to optimize a specific goal.
-pub(super) struct OptimizeGoalTask {
+pub(crate) struct OptimizeGoalTask {
     /// The goal to optimize.
     pub goal_id: GoalId,
 
@@ -91,7 +92,7 @@ pub(super) struct OptimizeGoalTask {
 }
 
 /// Task to explore expressions in a logical group.
-pub(super) struct ExploreGroupTask {
+pub(crate) struct ExploreGroupTask {
     /// The group to explore.
     pub group_id: GroupId,
 
@@ -108,7 +109,7 @@ pub(super) struct ExploreGroupTask {
 }
 
 /// Task to apply a specific transformation rule to a logical expression.
-pub(super) struct TransformExpressionTask {
+pub(crate) struct TransformExpressionTask {
     /// The transformation rule to apply.
     pub rule: TransformationRule,
     /// The logical expression to transform.
@@ -125,7 +126,7 @@ pub(super) struct TransformExpressionTask {
 }
 
 /// Task to implement a logical expression into a physical expression.
-pub(super) struct ImplementExpressionTask {
+pub(crate) struct ImplementExpressionTask {
     /// The implementation rule to apply.
     pub rule: ImplementationRule,
     /// The logical expression to implement.
@@ -142,7 +143,7 @@ pub(super) struct ImplementExpressionTask {
 }
 
 /// Task to cost a physical expression.
-pub(super) struct CostExpressionTask {
+pub(crate) struct CostExpressionTask {
     /// The physical expression to cost.
     pub expression_id: PhysicalExpressionId,
     /// The current upper bound on the allowed cost budget.
@@ -159,7 +160,7 @@ pub(super) struct CostExpressionTask {
 }
 
 /// Task to fork the logical optimization process.
-pub(super) struct ForkLogicalTask {
+pub(crate) struct ForkLogicalTask {
     /// The fork continuation.
     pub continuation: Continuation<Value, EngineResponse<OptimizerMessage>>,
 
@@ -177,7 +178,7 @@ pub(super) struct ForkLogicalTask {
 }
 
 /// Task to fork the costed optimization process.
-pub(super) struct ForkCostedTask {
+pub(crate) struct ForkCostedTask {
     /// The fork continuation.
     pub continuation: Continuation<Value, EngineResponse<OptimizerMessage>>,
     /// The current upper bound on the allowed cost budget.
@@ -196,7 +197,7 @@ pub(super) struct ForkCostedTask {
 }
 
 /// Task to continue with a logical expression.
-pub(super) struct ContinueWithLogicalTask {
+pub(crate) struct ContinueWithLogicalTask {
     /// The logical expression to continue with.
     pub expr_id: LogicalExpressionId,
 
@@ -207,7 +208,7 @@ pub(super) struct ContinueWithLogicalTask {
 }
 
 /// Task to continue with a costed expression.
-pub(super) struct ContinueWithCostedTask {
+pub(crate) struct ContinueWithCostedTask {
     /// The physical expression to continue with.
     pub expr_id: PhysicalExpressionId,
 

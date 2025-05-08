@@ -151,7 +151,7 @@ async fn run_functions_in_parallel(hir: &HIR, functions: Vec<String>) -> Vec<Fun
                 Arc::new(|value| Box::pin(async move { value }));
 
             // Launch the function with an empty vector of arguments.
-            let result = engine.launch_rule(&name, vec![], result_handler).await;
+            let result = engine.launch(&name, vec![], result_handler).await;
             FunctionResult { name, result }
         });
     }

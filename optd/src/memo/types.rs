@@ -1,16 +1,6 @@
 use crate::cir::*;
 use std::collections::HashSet;
 
-/// The status of rule application or costing operation in the task graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TaskStatus {
-    /// There exist ongoing jobs that may generate more expressions or costs from this expression.
-    Dirty,
-
-    /// Expression is fully explored or costed with no pending jobs that could add anything new.
-    Clean,
-}
-
 /// The result of merging two groups.
 ///
 /// TODO(sarvesh): More detailed docs.
@@ -113,40 +103,4 @@ pub struct MergeProducts {
 
     /// Physical expression merge results.
     pub physical_expr_merges: Vec<PhysicalMergeProduct>,
-    //
-    // /// Transformations that were marked as dirty and need new application.
-    // pub dirty_transformations: Vec<(LogicalExpressionId, TransformationRule)>,
-
-    // /// Implementations that were marked as dirty and need new application.
-    // pub dirty_implementations: Vec<(LogicalExpressionId, GoalId, ImplementationRule)>,
-
-    // /// Costings that were marked as dirty and need recomputation.
-    // pub dirty_costings: Vec<PhysicalExpressionId>,
-}
-
-/// A type representing the information that needs to sent to the scheduler to propagate the best
-/// physical expression for a goal.
-///
-/// The reason we need this is because the memo table will have propagated the best physical
-/// expression for this goal within the memo table already, and the task graph scheduler needs to be
-/// notified of the changes that have happened.
-pub struct PropagateBestExpression {
-    /// The ID of the best physical expression for a goal.
-    pub physical_expr_id: PhysicalExpressionId,
-
-    /// The cost of the best expression.
-    pub best_cost: Cost,
-
-    /// The goals that the memo table has already propagated this best expression to.
-    pub goals_propagated_to: HashSet<GoalId>,
-}
-
-impl PropagateBestExpression {
-    pub fn new(physical_expr_id: PhysicalExpressionId, best_cost: Cost) -> Self {
-        Self {
-            physical_expr_id,
-            best_cost,
-            goals_propagated_to: HashSet::new(),
-        }
-    }
 }

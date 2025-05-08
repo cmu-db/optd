@@ -1,7 +1,7 @@
-use super::{OptimizerMessage, TaskId};
+use super::{EngineProduct, TaskId};
 use crate::{
     cir::{
-        Cost, GoalId, GroupId, ImplementationRule, LogicalExpressionId, PhysicalExpressionId,
+        GoalId, GroupId, ImplementationRule, LogicalExpressionId, PhysicalExpressionId,
         TransformationRule,
     },
     dsl::{
@@ -10,12 +10,12 @@ use crate::{
     },
 };
 
-pub(super) mod execute;
-pub(super) mod manage;
+pub(crate) mod execute;
+pub(crate) mod manage;
 
 /// Unique identifier for jobs in the optimization system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct JobId(pub i64);
+pub(crate) struct JobId(pub i64);
 
 /// A job represents a discrete unit of work within the optimization process.
 ///
@@ -23,50 +23,55 @@ pub(super) struct JobId(pub i64);
 /// completing the task. Multiple jobs may be launched by a single task, and all
 /// jobs must complete before a task is considered (temporarily) finished.
 #[derive(Clone)]
-pub(super) struct Job(pub TaskId, pub JobKind);
+pub(crate) struct Job(pub TaskId, pub JobKind);
 
 /// Represents a continuation for processing logical expressions.
 #[derive(Clone)]
-pub(super) struct LogicalContinuation(Continuation<Value, EngineResponse<OptimizerMessage>>);
+pub(crate) struct LogicalContinuation(Continuation<Value, EngineResponse<EngineProduct>>);
 
 /// Represents a continuation for processing costed physical expressions.
 #[derive(Clone)]
-pub(super) struct CostedContinuation(Continuation<Value, EngineResponse<OptimizerMessage>>);
+pub(crate) struct CostedContinuation(Continuation<Value, EngineResponse<EngineProduct>>);
 
 /// Enumeration of different types of jobs in the optimizer.
 ///
 /// Each variant represents a specific optimization operation that can be
 /// performed asynchronously and independently.
 #[derive(Clone)]
-pub(super) enum JobKind {
+pub(crate) enum JobKind {
     /// Derives logical properties for a logical expression.
     ///
     /// This job computes schema, cardinality estimates, and other
     /// statistical properties of a logical expression.
-    DeriveLogicalProperties(LogicalExpressionId),
+    Derive(LogicalExpressionId),
+
     /// Starts applying a transformation rule to a logical expression.
     ///
     /// This job generates alternative logical expressions that are
     /// semantically equivalent to the original.
-    StartTransformationRule(TransformationRule, LogicalExpressionId, GroupId),
+    Transform(TransformationRule, LogicalExpressionId, GroupId),
+
     /// Starts applying an implementation rule to a logical expression and properties.
     ///
     /// This job generates physical implementations of a logical expression
     /// based on specific implementation strategies.
-    StartImplementationRule(ImplementationRule, LogicalExpressionId, GoalId),
+    Implement(ImplementationRule, LogicalExpressionId, GoalId),
+
     /// Starts computing the cost of a physical expression.
     ///
     /// This job estimates the execution cost of a physical implementation
     /// to aid in selecting the optimal plan.
-    StartCostExpression(PhysicalExpressionId),
+    Cost(PhysicalExpressionId),
+
     /// Continues processing with a logical expression result.
     ///
     /// This job represents a continuation-passing-style callback for
     /// handling the result of a logical expression operation.
     ContinueWithLogical(LogicalExpressionId, LogicalContinuation),
+
     /// Continues processing with an optimized expression result.
     ///
     /// This job represents a continuation-passing-style callback for
     /// handling the result of an optimized physical expression operation.
-    ContinueWithCostedPhysical(PhysicalExpressionId, Cost, CostedContinuation),
+    ContinueWithCosted(PhysicalExpressionId, CostedContinuation),
 }

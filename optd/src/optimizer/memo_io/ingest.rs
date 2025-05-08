@@ -10,7 +10,7 @@ use async_recursion::async_recursion;
 use std::sync::Arc;
 
 /// Result type for logical plan probing.
-pub enum LogicalIngest {
+pub(crate) enum LogicalIngest {
     /// Plan was successfully found in the memo.
     Found(GroupId),
     /// Plan requires groups to be created for missing expressions.
@@ -28,7 +28,7 @@ impl<M: Memo> Optimizer<M> {
     /// # Returns
     /// - `Found(group_id)`: Plan exists in the memo.
     /// - `Missing(expressions)`: Expressions needing property derivation.
-    pub async fn probe_ingest_logical_plan(
+    pub(crate) async fn probe_ingest_logical_plan(
         &mut self,
         logical_plan: &PartialLogicalPlan,
     ) -> Result<LogicalIngest, OptimizeError> {
@@ -55,7 +55,7 @@ impl<M: Memo> Optimizer<M> {
     /// The goal member identifier corresponding to the physical plan,
     /// which can be either a physical expression ID or a goal ID.
     #[async_recursion]
-    pub async fn probe_ingest_physical_plan(
+    pub(crate) async fn probe_ingest_physical_plan(
         &mut self,
         physical_plan: &PartialPhysicalPlan,
     ) -> Result<GoalMemberId, OptimizeError> {

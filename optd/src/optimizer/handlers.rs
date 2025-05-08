@@ -5,12 +5,15 @@ use super::{
 };
 use crate::{
     cir::{
-        Cost, Goal, GoalId, GroupId, LogicalExpressionId, LogicalPlan, LogicalProperties,
-        PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpressionId, PhysicalPlan,
-        PhysicalProperties,
+        Cost, Goal, GoalId, GoalMemberId, GroupId, LogicalExpressionId, LogicalPlan,
+        LogicalProperties, PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpressionId,
+        PhysicalPlan, PhysicalProperties,
     },
     memo::Memo,
-    optimizer::memo_io::LogicalIngest,
+    optimizer::{
+        EngineProduct, OptimizeRequest, OptimizerMessage, PendingMessage, jobs::JobKind,
+        memo_io::LogicalIngest,
+    },
 };
 use tokio::sync::mpsc::Sender;
 
@@ -21,7 +24,7 @@ impl<M: Memo> Optimizer<M> {
     /// # Parameters
     /// * `plan` - The logical plan to optimize.
     /// * `response_tx` - Channel to send the resulting physical plan.
-    /// * `task_id` - ID of the task that initiated this request.
+    /// * `optimize_plan_task_id` - ID of the task that initiated this request.
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during processing.
@@ -29,11 +32,13 @@ impl<M: Memo> Optimizer<M> {
         &mut self,
         plan: LogicalPlan,
         response_tx: Sender<PhysicalPlan>,
-        task_id: TaskId,
+        optimize_plan_task_id: TaskId,
     ) -> Result<(), OptimizeError> {
+        use JobKind::*;
         use LogicalIngest::*;
+        use OptimizerMessage::*;
 
-        /*match self.probe_ingest_logical_plan(&plan.clone().into()).await? {
+        match self.probe_ingest_logical_plan(&plan.clone().into()).await? {
             Found(group_id) => {
                 // The goal represents what we want to achieve: optimize the root group
                 // with no specific physical properties required.
@@ -44,9 +49,9 @@ impl<M: Memo> Optimizer<M> {
                     .await
                     .map_err(OptimizeError::MemoError)?;
 
-                // This ensures the task will be notified when optimized expressions
-                // for this goal are found.
-                self.subscribe_task_to_goal(goal_id, task_id).await?;
+                // Launch the corresponding task now that we know the goal_id.
+                self.launch_optimize_plan_task(optimize_plan_task_id, plan, response_tx, goal_id)
+                    .await?;
             }
             Missing(logical_exprs) => {
                 // Store the request as a pending message that will be processed
@@ -55,18 +60,16 @@ impl<M: Memo> Optimizer<M> {
                     .iter()
                     .cloned()
                     .map(|logical_expr_id| {
-                        self.schedule_job(task_id, DeriveLogicalProperties(logical_expr_id))
+                        self.schedule_job(optimize_plan_task_id, Derive(logical_expr_id))
                     })
                     .collect();
 
-                let pending_message = PendingMessage {
-                    message: OptimizeRequestWrapper(OptimizeRequest { plan, response_tx }, task_id),
+                self.pending_messages.push(PendingMessage::new(
+                    Request(OptimizeRequest { plan, response_tx }, optimize_plan_task_id),
                     pending_dependencies,
-                };
-
-                self.pending_messages.push(pending_message);
+                ));
             }
-        }*/
+        }
 
         Ok(())
     }
@@ -87,11 +90,26 @@ impl<M: Memo> Optimizer<M> {
         group_id: GroupId,
         job_id: JobId,
     ) -> Result<(), OptimizeError> {
-        /*let group_id = self.memo.find_repr_group(group_id).await?;
+        use EngineProduct::*;
+        use JobKind::*;
+        use LogicalIngest::*;
+        use OptimizerMessage::*;
+
+        let group_id = self
+            .memo
+            .find_repr_group(group_id)
+            .await
+            .map_err(OptimizeError::MemoError)?;
+
         match self.probe_ingest_logical_plan(&plan).await? {
             Found(new_group_id) if new_group_id != group_id => {
                 // Atomically perform the merge in the memo and process all results.
-                let merge_results = self.memo.merge_groups(group_id, new_group_id).await?;
+                let merge_results = self
+                    .memo
+                    .merge_groups(group_id, new_group_id)
+                    .await
+                    .map_err(OptimizeError::MemoError)?;
+
                 self.handle_merge_result(merge_results).await?;
             }
             Found(_) => {
@@ -100,23 +118,21 @@ impl<M: Memo> Optimizer<M> {
             Missing(logical_exprs) => {
                 // Store the request as a pending message that will be processed
                 // once all create task dependencies are resolved.
-                let related_task_id = self.running_jobs[&job_id].0;
+                let related_task_id = self.get_related_task_id(job_id);
                 let pending_dependencies = logical_exprs
                     .iter()
                     .cloned()
                     .map(|logical_expr_id| {
-                        self.schedule_job(related_task_id, DeriveLogicalProperties(logical_expr_id))
+                        self.schedule_job(related_task_id, Derive(logical_expr_id))
                     })
                     .collect();
 
-                let pending_message = PendingMessage {
-                    message: NewLogicalPartial(plan, group_id, job_id),
+                self.pending_messages.push(PendingMessage::new(
+                    Product(NewLogicalPartial(plan, group_id), job_id),
                     pending_dependencies,
-                };
-
-                self.pending_messages.push(pending_message);
+                ));
             }
-        }*/
+        }
 
         Ok(())
     }
@@ -137,22 +153,35 @@ impl<M: Memo> Optimizer<M> {
         goal_id: GoalId,
         job_id: JobId,
     ) -> Result<(), OptimizeError> {
-        /*let goal_id = self.memo.find_repr_goal(goal_id).await?;
+        use GoalMemberId::*;
+
+        let goal_id = self
+            .memo
+            .find_repr_goal(goal_id)
+            .await
+            .map_err(OptimizeError::MemoError)?;
 
         let member = self.probe_ingest_physical_plan(&plan).await?;
-        let is_new = self.memo.add_goal_member(goal_id, member).await?;
+        let is_new = self
+            .memo
+            .add_goal_member(goal_id, member)
+            .await
+            .map_err(OptimizeError::MemoError)?;
 
         if is_new {
+            let parent_task_id = self.get_related_task_id(job_id);
+
             match member {
-                GoalMemberId::PhysicalExpressionId(expression_id) => {
-                    let parent_task_id = self.running_jobs[&job_id].0;
-                    // TODO(Alexis): Needs to ensure cost expression task exists and then subs.
+                PhysicalExpressionId(expression_id) => {
+                    // TODO(Alexis): Ensure cost expression task exists and then subs.
                 }
-                GoalMemberId::GoalId(_) => {
-                    // TODO(Alexis); Need to launch a new implement
+                GoalId(_) => {
+                    // TODO(Alexis): Ensure goal optimize task exists and then subs.
                 }
             }
-        }*/
+
+            // TODO(Alexis): Propagate new best costs here.
+        }
 
         Ok(())
     }
@@ -343,7 +372,7 @@ impl<M: Memo> Optimizer<M> {
     }
 
     /// Retrieves the logical properties for the given group from the memo
-    /// and sends them back to the requestor through the provided oneshot channel.
+    /// and sends them back to the requestor through the provided channel.
     ///
     /// # Parameters
     /// * `group_id` - ID of the group to retrieve properties for.

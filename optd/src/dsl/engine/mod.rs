@@ -113,7 +113,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
         })
     }
 
-    /// Launches a rule application with the given values and transformation.
+    /// Launches a function application with the given values and transformation.
     ///
     /// # Parameters
     /// * `self` - The evaluation engine (owned).
@@ -123,7 +123,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
     ///
     /// # Returns
     /// The result of the rule application.
-    pub async fn launch_rule(
+    pub async fn launch(
         self,
         name: &str,
         values: Vec<Value>,

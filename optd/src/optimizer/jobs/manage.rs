@@ -1,7 +1,7 @@
 use super::{Job, JobId};
 use crate::{
     memo::Memo,
-    optimizer::{Optimizer, Task, TaskId, errors::OptimizeError, jobs::JobKind},
+    optimizer::{Optimizer, TaskId, errors::OptimizeError, jobs::JobKind},
 };
 
 impl<M: Memo> Optimizer<M> {
@@ -17,7 +17,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * The ID of the created job.
-    pub(super) fn schedule_job(&mut self, task_id: TaskId, kind: JobKind) -> JobId {
+    pub(crate) fn schedule_job(&mut self, task_id: TaskId, kind: JobKind) -> JobId {
         // Generate a new job ID.
         let job_id = self.next_job_id;
         self.next_job_id.0 += 1;
@@ -40,19 +40,19 @@ impl<M: Memo> Optimizer<M> {
     /// Launches all pending jobs until either the maximum concurrent job limit is
     /// reached or there are no more jobs to launch.
     ///
-    /// Jobs are launched in FIFO order from the job schedule queue if the number
+    /// Jobs are launched in LIFO order from the job schedule queue if the number
     /// of currently running jobs is below the maximum concurrent jobs limit.
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during job launching.
-    pub(super) async fn launch_pending_jobs(&mut self) -> Result<(), OptimizeError> {
+    pub(crate) async fn launch_pending_jobs(&mut self) -> Result<(), OptimizeError> {
         use JobKind::*;
 
-        // Launch jobs only if we're below the maximum concurrent jobs limit, in FIFO order.
+        // Launch jobs only if we're below the maximum concurrent jobs limit, in LIFO order.
         while self.running_jobs.len() < self.max_concurrent_jobs
             && !self.job_schedule_queue.is_empty()
         {
-            let job_id = self.job_schedule_queue.pop_front().unwrap();
+            let job_id = self.job_schedule_queue.pop_back().unwrap();
 
             // Move the job from pending to running.
             let job = self.pending_jobs.remove(&job_id).unwrap();
@@ -60,28 +60,28 @@ impl<M: Memo> Optimizer<M> {
 
             // Dispatch & execute the job in a new co-routine.
             match job.1 {
-                DeriveLogicalProperties(logical_expr_id) => {
-                    /*self.derive_logical_properties(logical_expr_id, job_id)
-                    .await?;*/
+                Derive(logical_expr_id) => {
+                    self.derive_logical_properties(logical_expr_id, job_id)
+                        .await?;
                 }
-                StartTransformationRule(rule_name, logical_expr_id, group_id) => {
-                    /*self.execute_transformation_rule(rule_name, logical_expr_id, group_id, job_id)
-                    .await?;*/
+                Transform(rule_name, logical_expr_id, group_id) => {
+                    self.execute_transformation_rule(rule_name, logical_expr_id, group_id, job_id)
+                        .await?;
                 }
-                StartImplementationRule(rule_name, expression_id, goal_id) => {
-                    /*self.execute_implementation_rule(rule_name, expression_id, goal_id, job_id)
-                    .await?;*/
+                Implement(rule_name, expression_id, goal_id) => {
+                    self.execute_implementation_rule(rule_name, expression_id, goal_id, job_id)
+                        .await?;
                 }
-                StartCostExpression(expression_id) => {
-                    /*self.execute_cost_expression(expression_id, job_id).await?;*/
+                Cost(expression_id) => {
+                    self.execute_cost_expression(expression_id, job_id).await?;
                 }
-                ContinueWithLogical(logical_expr_id, k) => {
-                    /*self.execute_continue_with_logical(logical_expr_id, k)
-                    .await?;*/
+                ContinueWithLogical(expression_id, k) => {
+                    self.execute_continue_with_logical(expression_id, k, job_id)
+                        .await?;
                 }
-                ContinueWithCostedPhysical(expression_id, cost, k) => {
-                    /*self.execute_continue_with_optimized(expression_id, cost, k)
-                    .await?;*/
+                ContinueWithCosted(expression_id, k) => {
+                    self.execute_continue_with_costed(expression_id, k, job_id)
+                        .await?;
                 }
             }
         }
@@ -100,7 +100,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during job completion.
-    pub(super) async fn complete_job(&mut self, job_id: JobId) -> Result<(), OptimizeError> {
+    pub(crate) async fn complete_job(&mut self, job_id: JobId) -> Result<(), OptimizeError> {
         // Remove the job from the running jobs.
         let Job(task_id, _) = self.running_jobs.remove(&job_id).unwrap();
 
@@ -113,15 +113,15 @@ impl<M: Memo> Optimizer<M> {
         Ok(())
     }
 
-    /// Retrieves the task associated with a specific job.
+    /// Retrieves the task id associated with a specific job id.
     ///
     /// # Parameters
     /// * `job_id` - The ID of the job to find the related task for.
     ///
     /// # Returns
-    /// * `Option<&Task>` - The task associated with the job, if found.
-    pub(super) fn get_related_task(&self, job_id: JobId) -> Option<&Task> {
+    /// * `TaskId` - The task id associated with the job id.
+    pub(crate) fn get_related_task_id(&self, job_id: JobId) -> TaskId {
         let Job(task_id, _) = self.running_jobs.get(&job_id).unwrap();
-        self.tasks.get(task_id)
+        *task_id
     }
 }

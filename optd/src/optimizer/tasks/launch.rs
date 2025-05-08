@@ -1,5 +1,5 @@
 use super::{
-    CostExpressionTask, ImplementExpressionTask, OptimizePlanTask, TaskId, TaskKind,
+    CostExpressionTask, ImplementExpressionTask, OptimizePlanTask, Task, TaskId, TaskKind,
     TransformExpressionTask,
 };
 use crate::{
@@ -10,55 +10,104 @@ use crate::{
     memo::Memo,
     optimizer::{Optimizer, errors::OptimizeError},
 };
-use futures::channel::mpsc::Sender;
+use tokio::sync::mpsc::{self, Receiver, Sender};
 
 impl<M: Memo> Optimizer<M> {
-    /// Launches a new task to optimize a logical plan into a physical plan.
+    /// Creates a new task to optimize a logical plan into a physical plan.
     ///
-    /// This method creates and registers a task that will optimize the provided logical
-    /// plan into a physical plan. The optimized plan will be sent back through the provided
-    /// response channel every time a better plan is found.
-    pub(super) async fn launch_optimize_plan_task(
+    /// This function only allocates a task ID and does not yet launch the task
+    /// until we know the corresponding goal that has to be optimized.
+    pub(crate) fn create_optimize_plan_task(&mut self) -> TaskId {
+        self.next_task_id()
+    }
+
+    /// Launches the task to optimize a logical plan into a physical plan.
+    ///
+    /// This function assumes the goal_id is known and that the logical plan has been
+    /// properly ingested.
+    ///
+    /// # Parameters
+    ///
+    /// * `task_id`: The ID of the task to be launched.
+    /// * `plan`: The logical plan to be optimized.
+    /// * `response_tx`: The channel to send the optimized physical plan.
+    /// * `goal_id`: The goal ID that this task is optimizing for.
+    pub(crate) async fn launch_optimize_plan_task(
         &mut self,
+        task_id: TaskId,
         plan: LogicalPlan,
         response_tx: Sender<PhysicalPlan>,
-    ) -> TaskId {
-        todo!()
+        goal_id: GoalId,
+    ) -> Result<(), OptimizeError> {
+        use TaskKind::*;
+
+        // Launch goal optimize task if needed, and get its ID.
+        let goal_optimize_task_id = self.ensure_goal_optimize_task(goal_id).await?;
+        let goal_optimize_task = self
+            .get_optimize_goal_task_mut(goal_optimize_task_id)
+            .unwrap();
+
+        // Register task and connect in graph.
+        let optimize_plan_task = OptimizePlanTask {
+            plan,
+            response_tx,
+            optimize_goal_in: goal_optimize_task_id,
+        };
+
+        goal_optimize_task.optimize_plan_out.insert(task_id);
+        self.add_task(task_id, Task::new(OptimizePlan(optimize_plan_task)));
+
+        Ok(())
     }
 
-    /// Ensures a group exploration task exists and sets up a parent-child relationship.
-    ///
-    /// This is used when a task needs to explore all possible expressions in a group
+    /// Ensures a group exploration task exists and returns its id.
     /// as part of its work. If an exploration task already exists, we reuse it.
-    pub(super) async fn ensure_group_exploration_task(
+    ///
+    /// # Parameters
+    ///
+    /// * `group_id`: The ID of the group to be explored.
+    ///
+    /// # Returns
+    ///
+    /// * `TaskId`: The ID of the task that was created or reused.
+    pub(crate) async fn ensure_group_exploration_task(
         &mut self,
         group_id: GroupId,
-        parent_task_id: TaskId,
-    ) -> Result<(), OptimizeError> {
+    ) -> Result<TaskId, OptimizeError> {
         todo!()
     }
 
-    /// Ensures a goal optimization task exists and sets up a parent-child relationship.
-    ///
-    /// This is used when a task needs to optimize a goal as part of its work.
+    /// Ensures a goal optimization task exists and and returns its id.
     /// If an optimization task already exists, we reuse it.
-    pub(super) async fn ensure_goal_optimize_task(
+    ///
+    /// # Parameters
+    ///
+    /// * `goal_id`: The ID of the goal to be optimized.
+    ///
+    /// # Returns
+    ///
+    /// * `TaskId`: The ID of the task that was created or reused.
+    pub(crate) async fn ensure_goal_optimize_task(
         &mut self,
         goal_id: GoalId,
-        parent_task_id: TaskId,
-    ) -> Result<(), OptimizeError> {
+    ) -> Result<TaskId, OptimizeError> {
         todo!()
     }
 
-    /// Ensures a cost expression task exists and sets up a parent-child relationship.
-    ///
-    /// This is used when a task needs to cost a physical expression as part of its work.
+    /// Ensures a cost expression task exists and and returns its id.
     /// If a costing task already exists, we reuse it.
-    pub(super) async fn ensure_cost_expression_task(
+    ///
+    /// # Parameters
+    ///
+    /// * `expression_id`: The ID of the expression to be costed.
+    ///
+    /// # Returns
+    ///
+    /// * `TaskId`: The ID of the task that was created or reused.
+    pub(crate) async fn ensure_cost_expression_task(
         &mut self,
         expression_id: PhysicalExpressionId,
-        parent_task_id: TaskId,
-    ) -> Result<(), OptimizeError> {
+    ) -> Result<TaskId, OptimizeError> {
         todo!()
     }
 
@@ -76,7 +125,6 @@ impl<M: Memo> Optimizer<M> {
         rule: TransformationRule,
         expression_id: LogicalExpressionId,
         group_id: GroupId,
-        parent_task_id: TaskId,
     ) -> Result<TaskId, OptimizeError> {
         todo!()
     }
@@ -93,7 +141,6 @@ impl<M: Memo> Optimizer<M> {
         rule: ImplementationRule,
         expression_id: LogicalExpressionId,
         goal_id: GoalId,
-        parent_task_id: TaskId,
     ) -> Result<TaskId, OptimizeError> {
         todo!()
     }
@@ -105,7 +152,6 @@ impl<M: Memo> Optimizer<M> {
     async fn launch_group_exploration_task(
         &mut self,
         group_id: GroupId,
-        parent_task_id: TaskId,
     ) -> Result<TaskId, OptimizeError> {
         todo!()
     }
@@ -117,7 +163,6 @@ impl<M: Memo> Optimizer<M> {
     async fn launch_goal_optimize_task(
         &mut self,
         goal_id: GoalId,
-        parent_task_id: TaskId,
     ) -> Result<TaskId, OptimizeError> {
         todo!()
     }

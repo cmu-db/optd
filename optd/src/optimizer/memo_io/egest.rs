@@ -17,11 +17,11 @@ impl<M: Memo> Optimizer<M> {
     /// * `expression_id` - ID of the physical expression to transform into a complete plan.
     ///
     /// # Returns
-    /// * `Ok(Some(PhysicalPlan))` if all child plans were successfully constructed from their IDs.
+    /// * `Ok(Some(PhysicalPlan))` if all children plans were successfully constructed from their IDs.
     /// * `Ok(None)` if any goal ID lacks a best expression ID.
     /// * `Err(Error)` if a memo operation fails.
     #[async_recursion]
-    pub async fn egest_best_plan(
+    pub(crate) async fn egest_best_plan(
         &self,
         expression_id: PhysicalExpressionId,
     ) -> Result<Option<PhysicalPlan>, OptimizeError> {
@@ -39,7 +39,7 @@ impl<M: Memo> Optimizer<M> {
         )
         .await?;
 
-        let child_plans = match child_results.into_iter().collect::<Option<Vec<_>>>() {
+        let child_plans = match child_results.into_iter().collect() {
             Some(plans) => plans,
             None => return Ok(None),
         };
@@ -62,7 +62,7 @@ impl<M: Memo> Optimizer<M> {
     /// # Returns
     /// * `PartialPhysicalPlan` - The materialized partial plan.
     /// * `Err(Error)` if a memo operation fails.
-    pub async fn egest_partial_plan(
+    pub(crate) async fn egest_partial_plan(
         &self,
         expression_id: PhysicalExpressionId,
     ) -> Result<PartialPhysicalPlan, OptimizeError> {
