@@ -1131,3 +1131,77 @@ impl MemoryMemo {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::memo::tests::*;
+    use super::*;
+
+    #[tokio::test]
+    async fn test_lookup_same() {
+        let mut memo = MemoryMemo::default();
+
+        let g0 = lookup_or_insert(&mut memo, 0, Vec::new()).await;
+        let g1 = lookup_or_insert(&mut memo, 0, Vec::new()).await;
+
+        assert_eq!(g0, g1);
+    }
+
+    #[tokio::test]
+    async fn test_lookup_different() {
+        let mut memo = MemoryMemo::default();
+
+        let g0 = lookup_or_insert(&mut memo, 0, Vec::new()).await;
+        let g1 = lookup_or_insert(&mut memo, 1, Vec::new()).await;
+
+        assert_ne!(g0, g1);
+    }
+
+    #[tokio::test]
+    async fn test_add_to_group() {
+        let mut memo = MemoryMemo::default();
+
+        let g0 = lookup_or_insert(&mut memo, 0, Vec::new()).await;
+        insert_into_group(&mut memo, 1, Vec::new(), g0).await;
+
+        assert_eq!(retrieve(&memo, g0).await, vec![0, 1]);
+    }
+
+    #[tokio::test]
+    async fn test_merge() {
+        let mut memo = MemoryMemo::default();
+
+        let g0 = lookup_or_insert(&mut memo, 0, Vec::new()).await;
+        insert_into_group(&mut memo, 1, Vec::new(), g0).await;
+        let g2 = lookup_or_insert(&mut memo, 2, Vec::new()).await;
+        insert_into_group(&mut memo, 3, Vec::new(), g2).await;
+        let g4 = insert_into_group(&mut memo, 0, Vec::new(), g2).await;
+
+        assert_eq!(retrieve(&memo, g4).await, vec![0, 1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn test_recursive_merge() {
+        let mut memo = MemoryMemo::default();
+
+        let g0 = lookup_or_insert(&mut memo, 0, Vec::new()).await;
+        let g1 = insert_into_group(&mut memo, 1, Vec::new(), g0).await;
+        let g4 = lookup_or_insert(&mut memo, 4, vec![g1]).await;
+        insert_into_group(&mut memo, 5, Vec::new(), g4).await;
+
+        let g2 = lookup_or_insert(&mut memo, 2, Vec::new()).await;
+        let g3 = insert_into_group(&mut memo, 3, Vec::new(), g2).await;
+        let g5 = lookup_or_insert(&mut memo, 4, vec![g3]).await;
+        insert_into_group(&mut memo, 6, Vec::new(), g5).await;
+
+        // trigger recursive merge
+        let g6 = insert_into_group(&mut memo, 1, Vec::new(), g3).await;
+
+        assert_eq!(retrieve(&memo, g6).await, vec![0, 1, 2, 3]);
+
+        // get merged upper group
+        let g7 = lookup_or_insert(&mut memo, 4, vec![g6]).await;
+
+        assert_eq!(retrieve(&memo, g7).await, vec![4, 5, 6]);
+    }
+}
