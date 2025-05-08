@@ -5,9 +5,9 @@ use super::{
 };
 use crate::{
     cir::{
-        Cost, Goal, GoalId, GoalMemberId, GroupId, LogicalExpressionId, LogicalPlan,
-        LogicalProperties, PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpressionId,
-        PhysicalPlan, PhysicalProperties,
+        Cost, Goal, GoalId, GroupId, LogicalExpressionId, LogicalPlan, LogicalProperties,
+        PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpressionId, PhysicalPlan,
+        PhysicalProperties,
     },
     memo::Memo,
     optimizer::{
@@ -149,41 +149,11 @@ impl<M: Memo> Optimizer<M> {
     /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_new_physical_partial(
         &mut self,
-        plan: PartialPhysicalPlan,
-        goal_id: GoalId,
-        job_id: JobId,
+        _plan: PartialPhysicalPlan,
+        _goal_id: GoalId,
+        _job_id: JobId,
     ) -> Result<(), OptimizeError> {
-        use GoalMemberId::*;
-
-        let goal_id = self
-            .memo
-            .find_repr_goal(goal_id)
-            .await
-            .map_err(OptimizeError::MemoError)?;
-
-        let member = self.probe_ingest_physical_plan(&plan).await?;
-        let is_new = self
-            .memo
-            .add_goal_member(goal_id, member)
-            .await
-            .map_err(OptimizeError::MemoError)?;
-
-        if is_new {
-            let parent_task_id = self.get_related_task_id(job_id);
-
-            match member {
-                PhysicalExpressionId(expression_id) => {
-                    // TODO(Alexis): Ensure cost expression task exists and then subs.
-                }
-                GoalId(_) => {
-                    // TODO(Alexis): Ensure goal optimize task exists and then subs.
-                }
-            }
-
-            // TODO(Alexis): Propagate new best costs here.
-        }
-
-        Ok(())
+        todo!()
     }
 
     /// This method handles fully optimized physical expressions with cost information.
@@ -200,24 +170,10 @@ impl<M: Memo> Optimizer<M> {
     /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_new_costed_physical(
         &mut self,
-        expression_id: PhysicalExpressionId,
-        cost: Cost,
+        _expression_id: PhysicalExpressionId,
+        _cost: Cost,
     ) -> Result<(), OptimizeError> {
-        /*let expression_id = self.memo.find_repr_physical_expr(expression_id).await?;
-        let new_best = self
-            .memo
-            .update_physical_expr_cost(expression_id, cost)
-            .await?;
-
-        // If this is the new best expression found so far for this goal,
-        // schedule continuation jobs for all subscribers and send to clients.
-        if new_best {
-            // TODO(Alexis): Needs to send to parents.
-            // self.schedule_optimized_continuations(goal_id, expression_id, cost);
-            // self.egest_to_subscribers(goal_id, expression_id).await?;
-        }*/
-
-        Ok(())
+        todo!()
     }
 
     /// This method handles group creation for expressions with derived properties
@@ -260,57 +216,10 @@ impl<M: Memo> Optimizer<M> {
         continuation: LogicalContinuation,
         job_id: JobId,
     ) -> Result<(), OptimizeError> {
-        let related_task_id = self.running_jobs[&job_id].0;
-
-        // Register the continuation and notify the memo about the dependency to ensure the
-        // operation corresponding to the task gets invalidated when the group has new expressions.
-        /*match &mut self.tasks.get_mut(&related_task_id).unwrap().kind {
-            TransformExpression(TransformExpressionTask {
-                rule,
-                expression_id,
-                continuations,
-                ..
-            }) => {
-                continuations
-                    .entry(group_id)
-                    .or_default()
-                    .push(continuation.clone());
-
-                self.memo
-                    .add_transformation_dependency(*expression_id, rule, group_id)
-                    .await?;
-            }
-            ImplementExpression(ImplementExpressionTask {
-                rule,
-                expression_id,
-                goal_id,
-                continuations,
-                ..
-            }) => {
-                continuations
-                    .entry(group_id)
-                    .or_default()
-                    .push(continuation.clone());
-
-                self.memo
-                    .add_implementation_dependency(*expression_id, *goal_id, rule, group_id)
-                    .await?;
-            }
-            _ => panic!("Task type cannot produce group subscription."),
-        }
-
-        // Subscribe to future expressions and bootstrap with existing ones.
-        let expressions = self
-            .subscribe_task_to_group(group_id, related_task_id)
-            .await?;
-
-        for expression_id in expressions {
-            self.schedule_job(
-                related_task_id,
-                ContinueWithLogical(expression_id, continuation.clone()),
-            );
-        }*/
-
+        // TODO(Alexis): Do this next.
+        // Need to create a ForkLogicalTask, connect to parent.
+        // Then ensure exploration of the group, and connect. (MAKE TASK in tasks.rs)
+        // Then, spawn a bunch of ContinueWithLogical tasks from the new task.
         Ok(())
     }
 
@@ -326,49 +235,11 @@ impl<M: Memo> Optimizer<M> {
     /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_goal_subscription(
         &mut self,
-        goal: &Goal,
-        continuation: CostedContinuation,
-        job_id: JobId,
+        _goal: &Goal,
+        _continuation: CostedContinuation,
+        _job_id: JobId,
     ) -> Result<(), OptimizeError> {
-        let related_task_id = self.running_jobs[&job_id].0;
-        let goal_id = self
-            .memo
-            .get_goal_id(goal)
-            .await
-            .map_err(OptimizeError::MemoError)?;
-
-        // Register the continuation and notify the memo about the dependency to ensure the
-        // operation corresponding to the task gets invalidated when the goal has a new optimum.
-        /*match &mut self.tasks.get_mut(&related_task_id).unwrap().kind {
-            CostExpression(CostExpressionTask {
-                expression_id,
-                continuations,
-                ..
-            }) => {
-                continuations
-                    .entry(goal_id)
-                    .or_default()
-                    .push(continuation.clone());
-
-                self.memo
-                    .add_cost_dependency(*expression_id, goal_id)
-                    .await?;
-            }
-            _ => panic!("Only cost tasks can subscribe to goals."),
-        }
-
-        // Subscribe to future optimized expressions and bootstrap with current best.
-        if let Some((best_expr_id, cost)) = self
-            .subscribe_task_to_goal(goal_id, related_task_id)
-            .await?
-        {
-            self.schedule_job(
-                related_task_id,
-                ContinueWithCostedPhysical(best_expr_id, cost, continuation),
-            );
-        }*/
-
-        Ok(())
+        todo!()
     }
 
     /// Retrieves the logical properties for the given group from the memo
