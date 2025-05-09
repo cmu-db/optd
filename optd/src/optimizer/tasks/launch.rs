@@ -2,12 +2,15 @@ use std::collections::HashSet;
 
 use super::{OptimizePlanTask, Task, TaskId, TaskKind};
 use crate::{
-    cir::{GoalId, GroupId, LogicalPlan, PhysicalExpressionId, PhysicalPlan},
+    cir::{
+        GoalId, GroupId, LogicalExpressionId, LogicalPlan, PhysicalExpressionId, PhysicalPlan,
+        TransformationRule,
+    },
     memo::Memo,
     optimizer::{
         Optimizer,
         errors::OptimizeError,
-        jobs::LogicalContinuation,
+        jobs::{JobKind, LogicalContinuation},
         tasks::{
             ContinueWithLogicalTask, ExploreGroupTask, ForkLogicalTask, TransformExpressionTask,
         },
@@ -87,15 +90,11 @@ impl<M: Memo> Optimizer<M> {
             .map_err(OptimizeError::MemoError)?
             .iter()
             .map(|expression_id| {
-                let id = self.next_task_id();
-                let task = ContinueWithLogicalTask {
-                    expr_id: *expression_id,
-                    fork_out: fork_task_id,
-                    fork_in: None,
-                };
-
-                self.add_task(id, Task::new(ContinueWithLogical(task)));
-                id
+                self.launch_continue_with_logical_task(
+                    *expression_id,
+                    fork_task_id,
+                    continuation.clone(),
+                )
             })
             .collect();
 
@@ -114,6 +113,72 @@ impl<M: Memo> Optimizer<M> {
         self.add_task(fork_task_id, Task::new(ForkLogical(fork_logical_task)));
 
         Ok(())
+    }
+
+    /// Helper method to launch a task for continuing with a logical expression.
+    ///
+    /// # Parameters
+    /// * `expr_id`: The ID of the logical expression to continue with.
+    /// * `fork_out`: The ID of the fork task that this continue task feeds into.
+    /// * `continuation`: The logical continuation to be used.
+    ///
+    /// # Returns
+    /// * `TaskId`: The ID of the created continue task.
+    fn launch_continue_with_logical_task(
+        &mut self,
+        expr_id: LogicalExpressionId,
+        fork_out: TaskId,
+        continuation: LogicalContinuation,
+    ) -> TaskId {
+        use TaskKind::*;
+
+        let task_id = self.next_task_id();
+        let task = ContinueWithLogicalTask {
+            expr_id,
+            fork_out,
+            fork_in: None,
+        };
+
+        self.add_task(task_id, Task::new(ContinueWithLogical(task)));
+        self.schedule_job(task_id, JobKind::ContinueWithLogical(expr_id, continuation));
+
+        task_id
+    }
+
+    /// Helper method to launch a task for transforming a logical expression with a rule.
+    ///
+    /// # Parameters
+    /// * `expr_id`: The ID of the logical expression to transform.
+    /// * `rule`: The transformation rule to apply.
+    /// * `explore_group_out`: The ID of the exploration task that this transformation feeds into.
+    /// * `group_id`: The ID of the group that this transformation belongs to.
+    ///
+    /// # Returns
+    /// * `TaskId`: The ID of the created transform task.
+    fn launch_transform_expression_task(
+        &mut self,
+        expr_id: LogicalExpressionId,
+        rule: TransformationRule,
+        explore_group_out: TaskId,
+        group_id: GroupId,
+    ) -> TaskId {
+        use TaskKind::*;
+
+        let task_id = self.next_task_id();
+        let task = TransformExpressionTask {
+            rule: rule.clone(),
+            expression_id: expr_id,
+            explore_group_out,
+            fork_in: None,
+        };
+
+        self.add_task(task_id, Task::new(TransformExpression(task)));
+        self.schedule_job(
+            task_id,
+            JobKind::TransformExpression(rule, expr_id, group_id),
+        );
+
+        task_id
     }
 
     /// Ensures a group exploration task exists and returns its id.
@@ -165,14 +230,12 @@ impl<M: Memo> Optimizer<M> {
         let mut transform_expr_in = HashSet::new();
         for &expression_id in &logical_expressions {
             for rule in &transformations {
-                let task_id = self.next_task_id();
-                let task = TransformExpressionTask {
-                    rule: rule.clone(),
+                let task_id = self.launch_transform_expression_task(
                     expression_id,
-                    explore_group_out: exploration_task_id,
-                    fork_in: None,
-                };
-                self.add_task(task_id, Task::new(TransformExpression(task)));
+                    rule.clone(),
+                    exploration_task_id,
+                    group_id,
+                );
                 transform_expr_in.insert(task_id);
             }
         }

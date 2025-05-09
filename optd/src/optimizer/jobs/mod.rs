@@ -49,19 +49,19 @@ pub(crate) enum JobKind {
     ///
     /// This job generates alternative logical expressions that are
     /// semantically equivalent to the original.
-    Transform(TransformationRule, LogicalExpressionId, GroupId),
+    TransformExpression(TransformationRule, LogicalExpressionId, GroupId),
 
     /// Starts applying an implementation rule to a logical expression and properties.
     ///
     /// This job generates physical implementations of a logical expression
     /// based on specific implementation strategies.
-    Implement(ImplementationRule, LogicalExpressionId, GoalId),
+    ImplementExpression(ImplementationRule, LogicalExpressionId, GoalId),
 
     /// Starts computing the cost of a physical expression.
     ///
     /// This job estimates the execution cost of a physical implementation
     /// to aid in selecting the optimal plan.
-    Cost(PhysicalExpressionId),
+    CostExpression(PhysicalExpressionId),
 
     /// Continues processing with a logical expression result.
     ///

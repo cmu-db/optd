@@ -64,15 +64,15 @@ impl<M: Memo> Optimizer<M> {
                     self.derive_logical_properties(logical_expr_id, job_id)
                         .await?;
                 }
-                Transform(rule_name, logical_expr_id, group_id) => {
+                TransformExpression(rule_name, logical_expr_id, group_id) => {
                     self.execute_transformation_rule(rule_name, logical_expr_id, group_id, job_id)
                         .await?;
                 }
-                Implement(rule_name, expression_id, goal_id) => {
+                ImplementExpression(rule_name, expression_id, goal_id) => {
                     self.execute_implementation_rule(rule_name, expression_id, goal_id, job_id)
                         .await?;
                 }
-                Cost(expression_id) => {
+                CostExpression(expression_id) => {
                     self.execute_cost_expression(expression_id, job_id).await?;
                 }
                 ContinueWithLogical(expression_id, k) => {
