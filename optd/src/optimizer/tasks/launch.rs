@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use super::{OptimizePlanTask, Task, TaskId, TaskKind};
 use crate::{
     cir::{GoalId, GroupId, LogicalPlan, PhysicalExpressionId, PhysicalPlan},
@@ -6,7 +8,9 @@ use crate::{
         Optimizer,
         errors::OptimizeError,
         jobs::LogicalContinuation,
-        tasks::{ContinueWithLogicalTask, ForkLogicalTask},
+        tasks::{
+            ContinueWithLogicalTask, ExploreGroupTask, ForkLogicalTask, TransformExpressionTask,
+        },
     },
 };
 use tokio::sync::mpsc::Sender;
@@ -26,7 +30,6 @@ impl<M: Memo> Optimizer<M> {
     /// properly ingested.
     ///
     /// # Parameters
-    ///
     /// * `task_id`: The ID of the task to be launched.
     /// * `plan`: The logical plan to be optimized.
     /// * `response_tx`: The channel to send the optimized physical plan.
@@ -59,6 +62,12 @@ impl<M: Memo> Optimizer<M> {
         Ok(())
     }
 
+    /// Launches the task to explore a group of logical expressions.
+    ///
+    /// # Parameters
+    /// * `group_id`: The ID of the group to be explored.
+    /// * `continuation`: The logical continuation to be used.
+    /// * `parent_task_id`: The ID of the parent task.
     pub(crate) async fn launch_fork_logical_task(
         &mut self,
         group_id: GroupId,
@@ -108,35 +117,96 @@ impl<M: Memo> Optimizer<M> {
     }
 
     /// Ensures a group exploration task exists and returns its id.
-    /// as part of its work. If an exploration task already exists, we reuse it.
+    /// If an exploration task already exists, we reuse it.
+    ///
+    /// This function does the following:
+    /// 1. Finds the representative group for the given group ID
+    /// 2. Checks if an exploration task already exists for this group
+    /// 3. If not, creates a new exploration task and associated transform expression tasks
     ///
     /// # Parameters
-    ///
     /// * `group_id`: The ID of the group to be explored.
     ///
     /// # Returns
-    ///
     /// * `TaskId`: The ID of the task that was created or reused.
     async fn ensure_group_exploration_task(
         &mut self,
         group_id: GroupId,
     ) -> Result<TaskId, OptimizeError> {
-        todo!()
+        use TaskKind::*;
+
+        // Find the representative group for the given group ID.
+        let group_repr = self
+            .memo
+            .find_repr_group(group_id)
+            .await
+            .map_err(OptimizeError::MemoError)?;
+
+        // Check if we already have an exploration task for this group.
+        if let Some(task_id) = self.group_exploration_task_index.get(&group_repr) {
+            return Ok(*task_id);
+        }
+
+        let exploration_task_id = self.next_task_id();
+
+        // Create transform expression tasks for each logical expression and rule combination.
+        let logical_expressions = self
+            .memo
+            .get_all_logical_exprs(group_repr)
+            .await
+            .map_err(OptimizeError::MemoError)?;
+        let transformations: Vec<_> = self
+            .rule_book
+            .get_transformations()
+            .iter()
+            .cloned()
+            .collect();
+
+        let mut transform_expr_in = HashSet::new();
+        for &expression_id in &logical_expressions {
+            for rule in &transformations {
+                let task_id = self.next_task_id();
+                let task = TransformExpressionTask {
+                    rule: rule.clone(),
+                    expression_id,
+                    explore_group_out: exploration_task_id,
+                    fork_in: None,
+                };
+                self.add_task(task_id, Task::new(TransformExpression(task)));
+                transform_expr_in.insert(task_id);
+            }
+        }
+
+        // Create the exploration task.
+        let exploration_task = ExploreGroupTask {
+            group_id,
+            optimize_goal_out: HashSet::new(),
+            fork_logical_out: HashSet::new(),
+            transform_expr_in,
+        };
+
+        // Register the task in the manager and index.
+        self.add_task(
+            exploration_task_id,
+            Task::new(ExploreGroup(exploration_task)),
+        );
+        self.group_exploration_task_index
+            .insert(group_repr, exploration_task_id);
+
+        Ok(exploration_task_id)
     }
 
     /// Ensures a goal optimization task exists and and returns its id.
     /// If an optimization task already exists, we reuse it.
     ///
     /// # Parameters
-    ///
     /// * `goal_id`: The ID of the goal to be optimized.
     ///
     /// # Returns
-    ///
     /// * `TaskId`: The ID of the task that was created or reused.
     async fn ensure_goal_optimize_task(
         &mut self,
-        goal_id: GoalId,
+        _goal_id: GoalId,
     ) -> Result<TaskId, OptimizeError> {
         todo!()
     }
@@ -145,11 +215,9 @@ impl<M: Memo> Optimizer<M> {
     /// If a costing task already exists, we reuse it.
     ///
     /// # Parameters
-    ///
     /// * `expression_id`: The ID of the expression to be costed.
     ///
     /// # Returns
-    ///
     /// * `TaskId`: The ID of the task that was created or reused.
     async fn ensure_cost_expression_task(
         &mut self,
