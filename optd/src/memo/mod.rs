@@ -32,7 +32,7 @@ pub struct MergeGoalProduct {
 }
 
 /// Results of merge operations, including group and goal merges.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct MergeProducts {
     /// Group merge results.
     pub group_merges: Vec<MergeGroupProduct>,

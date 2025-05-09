@@ -4,7 +4,7 @@ use crate::cir::{
     LogicalProperties, PhysicalExpression, PhysicalExpressionId,
 };
 use futures::future::try_join_all;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use union_find::UnionFind;
 
 mod materialize;
@@ -17,9 +17,6 @@ pub struct MemoryMemo {
     // Groups.
     /// Key is always a representative ID.
     group_info: HashMap<GroupId, GroupInfo>,
-    /// To speed up lookups, we maintain a mapping from logical expression IDs to group IDs.
-    /// Since this is an index, both key and value are representative IDs.
-    logical_id_to_group_index: HashMap<LogicalExpressionId, GroupId>,
 
     // Goals.
     /// Key is always a representative ID.
@@ -44,6 +41,13 @@ pub struct MemoryMemo {
     /// are never cleaned up. We leave this problem for later.
     physical_expr_to_id: HashMap<PhysicalExpression, PhysicalExpressionId>,
 
+    // Indexes: only deal with representative IDs, but speeds up most queries.
+    /// To speed up expr->group lookup, we maintain a mapping from logical expression IDs to group IDs.
+    logical_id_to_group_index: HashMap<LogicalExpressionId, GroupId>,
+    /// To speed up recursive merges, we maintain a mapping from group IDs to all logical expression IDs
+    /// that contain a reference to this group.
+    group_referencing_exprs_index: HashMap<GroupId, HashSet<LogicalExpressionId>>,
+
     /// The shared next unique id to be used for goals, groups, logical expressions, and physical expressions.
     next_shared_id: i64,
 
@@ -57,6 +61,7 @@ pub struct MemoryMemo {
 /// Information about a group:
 /// - All logical expressions in this group
 /// - Logical properties of this group
+#[derive(Clone)]
 struct GroupInfo {
     expressions: Vec<LogicalExpressionId>,
     logical_properties: LogicalProperties,
@@ -125,6 +130,8 @@ impl Memo for MemoryMemo {
         };
 
         self.group_info.insert(group_id, group_info);
+        self.logical_id_to_group_index
+            .insert(logical_expr_id, group_id);
         Ok(group_id)
     }
 
@@ -133,6 +140,80 @@ impl Memo for MemoryMemo {
         group_id_1: GroupId,
         group_id_2: GroupId,
     ) -> MemoResult<MergeProducts> {
+        // Get both representative group informations.
+        let group_id_1 = self.find_repr_group_id(group_id_1).await?;
+        let group_id_2 = self.find_repr_group_id(group_id_2).await?;
+
+        if group_id_1 == group_id_2 {
+            return Ok(MergeProducts::default());
+        }
+
+        // Perform the merge by creating a new group.
+        let new_group_id = GroupId(self.next_shared_id());
+
+        let group_info_1 = self
+            .group_info
+            .get(&group_id_1)
+            .ok_or(MemoError::GroupNotFound(group_id_1))?;
+        let group_info_2 = self
+            .group_info
+            .get(&group_id_2)
+            .ok_or(MemoError::GroupNotFound(group_id_2))?;
+
+        // Logical properties should always be the same when merging groups, or something
+        // is wrong in the optimizer or rule definitions.
+        debug_assert!(group_info_1.logical_properties == group_info_2.logical_properties);
+
+        // First, get all logical expression IDs in both groups (reprs and dedup-ed).
+        let expr_ids_1 = self.get_all_logical_exprs(group_id_1).await?;
+        let expr_ids_2 = self.get_all_logical_exprs(group_id_2).await?;
+
+        let mut all_expr_ids = HashSet::with_capacity(expr_ids_1.len() + expr_ids_2.len());
+        all_expr_ids.extend(expr_ids_1.iter().copied());
+        all_expr_ids.extend(expr_ids_2.iter().copied());
+
+        let all_expr_ids = all_expr_ids.into_iter().collect();
+
+        // Second, create a new group with the merged logical expressions,
+        // and the same logical properties.
+        let new_group_info = GroupInfo {
+            expressions: all_expr_ids,
+            logical_properties: group_info_1.logical_properties.clone(),
+        };
+        self.group_info.insert(new_group_id, new_group_info);
+
+        // Update union-find structures.
+        self.repr_group_id.merge(&group_id_1, &new_group_id);
+        self.repr_group_id.merge(&group_id_2, &new_group_id);
+
+        // Remove the old groups from the group info.
+        self.group_info.remove(&group_id_1);
+        self.group_info.remove(&group_id_2);
+
+        // Adapt the logical expression to group index (automatically deletes the old ones).
+        self.group_info[&new_group_id]
+            .expressions
+            .iter()
+            .for_each(|&expr_id| {
+                self.logical_id_to_group_index.insert(expr_id, new_group_id);
+            });
+
+        // Update group_referencing_exprs_index by taking the old entries, combining them,
+        // and inserting the result as a new entry.
+        let expr_set_1 = self
+            .group_referencing_exprs_index
+            .remove(&group_id_1)
+            .unwrap_or_default();
+        let expr_set_2 = self
+            .group_referencing_exprs_index
+            .remove(&group_id_2)
+            .unwrap_or_default();
+
+        let mut merged_set = expr_set_1;
+        merged_set.extend(expr_set_2);
+        self.group_referencing_exprs_index
+            .insert(new_group_id, merged_set);
+
         todo!()
     }
 

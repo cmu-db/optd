@@ -140,8 +140,7 @@ pub trait Memo: Representative + Materialize + Sync + 'static {
     /// * `group_id_2` - ID of the second group to merge.
     ///
     /// # Returns
-    /// Merge results for all affected entities including newly dirtied
-    /// transformations, implementations and costings.
+    /// Merge results for all affected entities.
     async fn merge_groups(
         &mut self,
         group_id_1: GroupId,

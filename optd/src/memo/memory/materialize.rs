@@ -1,7 +1,9 @@
+use std::collections::HashSet;
+
 use super::MemoryMemo;
 use crate::{
     cir::{
-        Goal, GoalId, LogicalExpression, LogicalExpressionId, PhysicalExpression,
+        Child, Goal, GoalId, LogicalExpression, LogicalExpressionId, PhysicalExpression,
         PhysicalExpressionId,
     },
     memo::{Materialize, MemoError, Representative, error::MemoResult},
@@ -32,11 +34,31 @@ impl Materialize for MemoryMemo {
         &mut self,
         logical_expr: &LogicalExpression,
     ) -> MemoResult<LogicalExpressionId> {
+        use Child::*;
+
+        // Check if the logical expression already exists in the memo table.
         if let Some(&expr_id) = self.logical_expr_to_id.get(logical_expr) {
             return Ok(self.find_repr_logical_expr_id(expr_id).await?);
         }
 
+        // If it doesn't exist, create a new ID for the logical expression.
         let expr_id = LogicalExpressionId(self.next_shared_id());
+
+        // For each group ID within the expression, find its representative and
+        // update the group references index.
+        let all_group_ids = logical_expr.children.iter().flat_map(|child| match child {
+            Singleton(group_id) => vec![*group_id],
+            VarLength(group_ids) => group_ids.clone(),
+        });
+
+        for group_id in all_group_ids {
+            let repr_group_id = self.find_repr_group_id(group_id).await?;
+            self.group_referencing_exprs_index
+                .entry(repr_group_id)
+                .or_insert_with(HashSet::new)
+                .insert(expr_id);
+        }
+
         self.id_to_logical_expr
             .insert(expr_id, logical_expr.clone());
         self.logical_expr_to_id
