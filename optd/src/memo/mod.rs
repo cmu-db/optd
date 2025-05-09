@@ -10,47 +10,24 @@ pub(crate) mod traits;
 
 pub(crate) use error::MemoError;
 
-/// Information about a merged group, including its ID and expressions
-#[derive(Debug)]
-pub struct MergedGroupInfo {
-    /// ID of the merged group
-    pub group_id: GroupId,
-
-    /// All logical expressions in this group
-    pub expressions: Vec<LogicalExpressionId>,
-}
-
 /// Result of merging two groups.
 #[derive(Debug)]
 pub struct MergeGroupProduct {
-    /// Groups that were merged along with their expressions.
-    pub merged_groups: Vec<MergedGroupInfo>,
-
     /// ID of the new representative group id.
     pub new_repr_group_id: GroupId,
-}
 
-/// Information about a merged goal, including its ID and expressions
-#[derive(Debug)]
-pub struct MergedGoalInfo {
-    /// ID of the merged goal
-    pub goal_id: GoalId,
-
-    /// The best costed expression for this goal, if any
-    pub best_expr: Option<(PhysicalExpressionId, Cost)>,
-
-    /// All members in this goal, which can be physical expressions or references to other goals
-    pub members: Vec<GoalMemberId>,
+    /// Groups that were merged along with their expressions.
+    pub merged_groups: Vec<GroupId>,
 }
 
 /// Result of merging two goals.
 #[derive(Debug)]
 pub struct MergeGoalProduct {
-    /// Goals that were merged along with their potential best costed expression.
-    pub merged_goals: Vec<MergedGoalInfo>,
-
     /// ID of the new representative goal id.
     pub new_repr_goal_id: GoalId,
+
+    /// Goals that were merged along with their potential best costed expression.
+    pub merged_goals: Vec<GoalId>,
 }
 
 /// Results of merge operations, including group and goal merges.

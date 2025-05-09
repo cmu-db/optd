@@ -1,7 +1,7 @@
 use super::{Optimizer, errors::OptimizeError};
 use crate::{
     cir::GroupId,
-    memo::{Memo, MergeProducts, MergedGroupInfo},
+    memo::{Memo, MergeProducts},
 };
 
 /*
@@ -39,80 +39,80 @@ impl<M: Memo> Optimizer<M> {
         &mut self,
         result: MergeProducts,
     ) -> Result<(), OptimizeError> {
-        // First, handle all the group merges.
-        for group_merge in result.group_merges {
-            let all_exprs_by_group = group_merge.merged_groups;
-            let new_repr_group_id = group_merge.new_repr_group_id;
+        /*     // First, handle all the group merges.
+                for group_merge in result.group_merges {
+                    let all_exprs_by_group = group_merge.merged_groups;
+                    let new_repr_group_id = group_merge.new_repr_group_id;
 
-            // 1. For each group, schedule expressions from all OTHER groups,
-            // ignoring any potential duplicates due to merges for now.
-            for (i, current_group_info) in all_exprs_by_group.iter().enumerate() {
-                let other_groups_exprs: Vec<_> = all_exprs_by_group
-                    .iter()
-                    .enumerate()
-                    .filter(|(j, _)| *j != i) // Filter out the current group.
-                    .flat_map(|(_, group_info)| &group_info.expressions)
-                    .copied()
-                    .collect();
+                    // 1. For each group, schedule expressions from all OTHER groups,
+                    // ignoring any potential duplicates due to merges for now.
+                    for (i, current_group_info) in all_exprs_by_group.iter().enumerate() {
+                        let other_groups_exprs: Vec<_> = all_exprs_by_group
+                            .iter()
+                            .enumerate()
+                            .filter(|(j, _)| *j != i) // Filter out the current group.
+                            .flat_map(|(_, group_info)| &group_info)
+                            .copied()
+                            .collect();
 
-                /*self.schedule_logical_continuations(
-                    current_group_info.group_id,
-                    &other_groups_exprs,
-                );*/
-            }
+                        /*self.schedule_logical_continuations(
+                            current_group_info.group_id,
+                            &other_groups_exprs,
+                        );*/
+                    }
 
-            // 2. Handle exploration tasks for the merged groups.
-            self.merge_exploration_tasks(&all_exprs_by_group, new_repr_group_id)
-                .await;
+                    // 2. Handle exploration tasks for the merged groups.
+                    self.merge_exploration_tasks(&all_exprs_by_group, new_repr_group_id)
+                        .await;
 
-            // 3. Merge subscribers.
-        }
+                    // 3. Merge subscribers.
+                }
 
-        // Second, handle all the goal merges.
-        for goal_merge in result.goal_merges {
-            let all_exprs_by_goal = &goal_merge.merged_goals;
+                // Second, handle all the goal merges.
+                for goal_merge in result.goal_merges {
+                    let all_exprs_by_goal = &goal_merge.merged_goals;
 
-            // 1. For each goal, schedule the best expression from all OTHER goals only if it is
-            // better than the current best expression for the goal.
-            for (i, current_goal_info) in all_exprs_by_goal.iter().enumerate() {
-                let current_cost = current_goal_info.best_expr.as_ref().map(|(_, cost)| cost);
+                    // 1. For each goal, schedule the best expression from all OTHER goals only if it is
+                    // better than the current best expression for the goal.
+                    for (i, current_goal_info) in all_exprs_by_goal.iter().enumerate() {
+                        let current_cost = current_goal_info.best_expr.as_ref().map(|(_, cost)| cost);
 
-                let best_from_others = all_exprs_by_goal
-                    .iter()
-                    .enumerate()
-                    .filter(|(j, _)| *j != i) // Filter out the current goal.
-                    .filter_map(|(_, goal_info)| goal_info.best_expr)
-                    .filter(|(_, cost)| current_cost.map_or(true, |current| cost < current))
-                    .fold(None, |acc, (expr_id, cost)| match acc {
-                        None => Some((expr_id, cost)),
-                        Some((_, acc_cost)) if cost < acc_cost => Some((expr_id, cost)),
-                        Some(_) => acc,
-                    });
+                        let best_from_others = all_exprs_by_goal
+                            .iter()
+                            .enumerate()
+                            .filter(|(j, _)| *j != i) // Filter out the current goal.
+                            .filter_map(|(_, goal_info)| goal_info.best_expr)
+                            .filter(|(_, cost)| current_cost.map_or(true, |current| cost < current))
+                            .fold(None, |acc, (expr_id, cost)| match acc {
+                                None => Some((expr_id, cost)),
+                                Some((_, acc_cost)) if cost < acc_cost => Some((expr_id, cost)),
+                                Some(_) => acc,
+                            });
 
-                /*if let Some((best_expr_id, best_cost)) = best_from_others {
-                    self.schedule_optimized_continuations(
-                        current_goal_info.goal_id,
-                        best_expr_id,
-                        best_cost,
-                    );
-                    self.egest_to_subscribers(current_goal_info.goal_id, best_expr_id)
-                        .await?;
-                }*/
-            }
+                        /*if let Some((best_expr_id, best_cost)) = best_from_others {
+                            self.schedule_optimized_continuations(
+                                current_goal_info.goal_id,
+                                best_expr_id,
+                                best_cost,
+                            );
+                            self.egest_to_subscribers(current_goal_info.goal_id, best_expr_id)
+                                .await?;
+                        }*/
+                    }
 
-            // 2. Handling costing tasks for the merged goals.
-            /*self.merge_optimization_tasks(&all_exprs_by_goal, goal_merge.new_repr_goal_id)
-            .await;*/
+                    // 2. Handling costing tasks for the merged goals.
+                    /*self.merge_optimization_tasks(&all_exprs_by_goal, goal_merge.new_repr_goal_id)
+                    .await;*/
 
-            // 3. Merge subscribers.
-        }
+                    // 3. Merge subscribers.
+                }
 
-        // Third, launch the newly dirty stuff if needed.
-
+                // Third, launch the newly dirty stuff if needed.
+        */
         Ok(())
     }
 
-    /// Helper method to merge exploration tasks for merged groups.
+    /*/// Helper method to merge exploration tasks for merged groups.
     ///
     /// # Parameters
     /// * `all_exprs_by_group` - All groups and their expressions that were merged.
@@ -122,7 +122,7 @@ impl<M: Memo> Optimizer<M> {
         all_exprs_by_group: &[MergedGroupInfo],
         new_repr_group_id: GroupId,
     ) {
-        // Collect all task IDs associated with the merged groups.
+              // Collect all task IDs associated with the merged groups.
         let exploring_tasks: Vec<_> = all_exprs_by_group
             .iter()
             .filter_map(|group_info| {
@@ -167,7 +167,7 @@ impl<M: Memo> Optimizer<M> {
                     .insert(new_repr_group_id, *primary_task_id);
             }
         }
-    }
+    }*/
 
     /*/// Helper method to merge optimization tasks for merged goals.
     async fn merge_optimization_tasks(
