@@ -13,19 +13,35 @@ mod union_find;
 
 /// An in-memory implementation of the memo table.
 #[derive(Default)]
-pub(crate) struct MemoryMemo {
-    /// Groups.
-    groups: HashMap<GroupId, GroupInfo>,
+pub struct MemoryMemo {
+    // Groups.
+    /// Key is always a representative ID.
+    group_info: HashMap<GroupId, GroupInfo>,
+    /// To speed up lookups, we maintain a mapping from logical expression IDs to group IDs.
+    /// Since this is an index, both key and value are representative IDs.
+    logical_id_to_group_index: HashMap<LogicalExpressionId, GroupId>,
 
     // Goals.
+    /// Key is always a representative ID.
     id_to_goal: HashMap<GoalId, Goal>,
+    /// Each unique goal is mapped to a unique id, that may not be representative.
+    /// This is used to speed up lookups, however it also means that the entries
+    /// are never cleaned up. We leave this problem for later.
     goal_to_id: HashMap<Goal, GoalId>,
 
     // Expressions.
+    /// Key is always a representative ID.
     id_to_logical_expr: HashMap<LogicalExpressionId, LogicalExpression>,
+    /// Each unique expression is mapped to a unique id, that may not be representative.
+    /// This is used to speed up lookups, however it also means that the entries
+    /// are never cleaned up. We leave this problem for later.
     logical_expr_to_id: HashMap<LogicalExpression, LogicalExpressionId>,
 
+    /// Key is always a representative ID.
     id_to_physical_expr: HashMap<PhysicalExpressionId, PhysicalExpression>,
+    /// Each unique expression is mapped to a unique id, that may not be representative.
+    /// This is used to speed up lookups, however it also means that the entries
+    /// are never cleaned up. We leave this problem for later.
     physical_expr_to_id: HashMap<PhysicalExpression, PhysicalExpressionId>,
 
     /// The shared next unique id to be used for goals, groups, logical expressions, and physical expressions.
@@ -58,7 +74,7 @@ impl Memo for MemoryMemo {
     async fn get_logical_properties(&self, group_id: GroupId) -> MemoResult<LogicalProperties> {
         let group_id = self.find_repr_group_id(group_id).await?;
         Ok(self
-            .groups
+            .group_info
             .get(&group_id)
             .ok_or(MemoError::GroupNotFound(group_id))?
             .logical_properties
@@ -72,7 +88,7 @@ impl Memo for MemoryMemo {
         // Extract the vector of logical expression IDs from the group.
         let group_id = self.find_repr_group_id(group_id).await?;
         let expr_ids = self
-            .groups
+            .group_info
             .get(&group_id)
             .ok_or(MemoError::GroupNotFound(group_id))?
             .expressions
@@ -90,7 +106,11 @@ impl Memo for MemoryMemo {
         &self,
         logical_expr_id: LogicalExpressionId,
     ) -> MemoResult<Option<GroupId>> {
-        todo!()
+        let repr_logical_expr_id = self.find_repr_logical_expr_id(logical_expr_id).await?;
+        Ok(self
+            .logical_id_to_group_index
+            .get(&repr_logical_expr_id)
+            .copied())
     }
 
     async fn create_group(
@@ -104,7 +124,7 @@ impl Memo for MemoryMemo {
             logical_properties: props.clone(),
         };
 
-        self.groups.insert(group_id, group_info);
+        self.group_info.insert(group_id, group_info);
         Ok(group_id)
     }
 
@@ -118,30 +138,34 @@ impl Memo for MemoryMemo {
 
     async fn get_best_optimized_physical_expr(
         &self,
-        goal_id: GoalId,
+        _goal_id: GoalId,
     ) -> MemoResult<Option<(PhysicalExpressionId, Cost)>> {
         todo!()
     }
 
-    async fn get_all_goal_members(&self, goal_id: GoalId) -> MemoResult<Vec<GoalMemberId>> {
+    async fn get_all_goal_members(&self, _goal_id: GoalId) -> MemoResult<Vec<GoalMemberId>> {
         todo!()
     }
 
-    async fn add_goal_member(&mut self, goal_id: GoalId, member: GoalMemberId) -> MemoResult<bool> {
+    async fn add_goal_member(
+        &mut self,
+        _goal_id: GoalId,
+        _member: GoalMemberId,
+    ) -> MemoResult<bool> {
         todo!()
     }
 
     async fn update_physical_expr_cost(
         &mut self,
-        physical_expr_id: PhysicalExpressionId,
-        new_cost: Cost,
+        _physical_expr_id: PhysicalExpressionId,
+        _new_cost: Cost,
     ) -> MemoResult<bool> {
         todo!()
     }
 
     async fn get_physical_expr_cost(
         &self,
-        physical_expr_id: PhysicalExpressionId,
+        _physical_expr_id: PhysicalExpressionId,
     ) -> MemoResult<Option<Cost>> {
         todo!()
     }

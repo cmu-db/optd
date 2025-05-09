@@ -5,10 +5,11 @@ use crate::cir::{
 use error::MemoResult;
 
 pub(crate) mod error;
-pub(crate) mod memory;
+pub mod memory;
 pub(crate) mod traits;
 
 pub(crate) use error::MemoError;
+pub use memory::MemoryMemo;
 
 /// Result of merging two groups.
 #[derive(Debug)]
