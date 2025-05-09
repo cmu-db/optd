@@ -147,7 +147,7 @@ pub struct Optimizer<M: Memo> {
     // Task indexing.
     group_exploration_task_index: HashMap<GroupId, TaskId>,
     goal_optimization_task_index: HashMap<GoalId, TaskId>,
-    cost_expression_task_index: HashMap<PhysicalExpressionId, TaskId>,
+    _cost_expression_task_index: HashMap<PhysicalExpressionId, TaskId>,
 }
 
 impl<M: Memo> Optimizer<M> {
@@ -190,7 +190,7 @@ impl<M: Memo> Optimizer<M> {
             // Task indexing.
             group_exploration_task_index: HashMap::new(),
             goal_optimization_task_index: HashMap::new(),
-            cost_expression_task_index: HashMap::new(),
+            _cost_expression_task_index: HashMap::new(),
         }
     }
 

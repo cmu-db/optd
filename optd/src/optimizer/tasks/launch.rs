@@ -1,10 +1,8 @@
-use std::collections::HashSet;
-
 use super::{OptimizePlanTask, Task, TaskId, TaskKind};
 use crate::{
     cir::{
-        GoalId, GroupId, LogicalExpressionId, LogicalPlan, PhysicalExpressionId, PhysicalPlan,
-        TransformationRule,
+        Goal, GoalId, GroupId, LogicalExpressionId, LogicalPlan, PhysicalExpressionId,
+        PhysicalPlan, TransformationRule,
     },
     memo::Memo,
     optimizer::{
@@ -12,10 +10,12 @@ use crate::{
         errors::OptimizeError,
         jobs::{JobKind, LogicalContinuation},
         tasks::{
-            ContinueWithLogicalTask, ExploreGroupTask, ForkLogicalTask, TransformExpressionTask,
+            ContinueWithLogicalTask, ExploreGroupTask, ForkLogicalTask, OptimizeGoalTask,
+            TransformExpressionTask,
         },
     },
 };
+use std::collections::HashSet;
 use tokio::sync::mpsc::Sender;
 
 impl<M: Memo> Optimizer<M> {
@@ -47,7 +47,7 @@ impl<M: Memo> Optimizer<M> {
         use TaskKind::*;
 
         // Launch goal optimize task if needed, and get its ID.
-        let goal_optimize_task_id = self.ensure_goal_optimize_task(goal_id).await?;
+        let goal_optimize_task_id = self.ensure_optimize_goal_task(goal_id).await?;
         let goal_optimize_task = self
             .get_optimize_goal_task_mut(goal_optimize_task_id)
             .unwrap();
@@ -267,11 +267,55 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `TaskId`: The ID of the task that was created or reused.
-    async fn ensure_goal_optimize_task(
+    async fn ensure_optimize_goal_task(
         &mut self,
-        _goal_id: GoalId,
+        goal_id: GoalId,
     ) -> Result<TaskId, OptimizeError> {
-        todo!()
+        use TaskKind::*;
+
+        // Find the representative group for the given goal ID.
+        let goal_repr = self
+            .memo
+            .find_repr_goal(goal_id)
+            .await
+            .map_err(OptimizeError::MemoError)?;
+
+        // Check if we already have an optimization task for this goal.
+        if let Some(task_id) = self.goal_optimization_task_index.get(&goal_repr) {
+            return Ok(*task_id);
+        }
+
+        let goal_optimize_task_id = self.next_task_id();
+
+        // TODO(Alexis): Materialize the goal and only explore the group - for now.
+        // This is sufficient to support logical->logical transformation.
+        let Goal(group_id, _) = self
+            .memo
+            .materialize_goal(goal_id)
+            .await
+            .map_err(OptimizeError::MemoError)?;
+        let explore_group_in = self.ensure_group_exploration_task(group_id).await?;
+
+        let goal_optimize_task = OptimizeGoalTask {
+            goal_id,
+            optimize_plan_out: HashSet::new(),
+            optimize_goal_out: HashSet::new(),
+            fork_costed_out: HashSet::new(),
+            optimize_goal_in: HashSet::new(),
+            explore_group_in,
+            implement_expression_in: HashSet::new(),
+            cost_expression_in: HashSet::new(),
+        };
+
+        // Register the task in the manager and index.
+        self.add_task(
+            goal_optimize_task_id,
+            Task::new(OptimizeGoal(goal_optimize_task)),
+        );
+        self.goal_optimization_task_index
+            .insert(goal_repr, goal_optimize_task_id);
+
+        Ok(goal_optimize_task_id)
     }
 
     /// Ensures a cost expression task exists and and returns its id.
@@ -282,6 +326,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `TaskId`: The ID of the task that was created or reused.
+    #[allow(dead_code)]
     async fn ensure_cost_expression_task(
         &mut self,
         _expression_id: PhysicalExpressionId,

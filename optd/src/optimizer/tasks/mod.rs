@@ -1,16 +1,10 @@
 use super::{
-    JobId, OptimizerMessage,
+    JobId,
     jobs::{CostedContinuation, LogicalContinuation},
 };
-use crate::{
-    cir::{
-        Cost, GoalId, GroupId, ImplementationRule, LogicalExpressionId, LogicalPlan,
-        PhysicalExpressionId, PhysicalPlan, TransformationRule,
-    },
-    dsl::{
-        analyzer::hir::Value,
-        engine::{Continuation, EngineResponse},
-    },
+use crate::cir::{
+    Cost, GoalId, GroupId, ImplementationRule, LogicalExpressionId, LogicalPlan,
+    PhysicalExpressionId, PhysicalPlan, TransformationRule,
 };
 use std::collections::HashSet;
 use tokio::sync::mpsc::Sender;
