@@ -216,11 +216,9 @@ impl<M: Memo> Optimizer<M> {
         continuation: LogicalContinuation,
         job_id: JobId,
     ) -> Result<(), OptimizeError> {
-        // TODO(Alexis): Do this next.
-        // Need to create a ForkLogicalTask, connect to parent.
-        // Then ensure exploration of the group, and connect. (MAKE TASK in tasks.rs)
-        // Then, spawn a bunch of ContinueWithLogical tasks from the new task.
-        Ok(())
+        let parent_task_id = self.get_related_task_id(job_id);
+        self.launch_fork_logical_task(group_id, continuation, parent_task_id)
+            .await
     }
 
     /// Registers a continuation for receiving optimized physical expressions for a goal.

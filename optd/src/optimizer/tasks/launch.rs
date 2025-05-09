@@ -1,16 +1,15 @@
-use super::{
-    CostExpressionTask, ImplementExpressionTask, OptimizePlanTask, Task, TaskId, TaskKind,
-    TransformExpressionTask,
-};
+use super::{OptimizePlanTask, Task, TaskId, TaskKind};
 use crate::{
-    cir::{
-        Goal, GoalId, GoalMemberId, GroupId, ImplementationRule, LogicalExpressionId, LogicalPlan,
-        PhysicalExpressionId, PhysicalPlan, TransformationRule,
-    },
+    cir::{GoalId, GroupId, LogicalPlan, PhysicalExpressionId, PhysicalPlan},
     memo::Memo,
-    optimizer::{Optimizer, errors::OptimizeError},
+    optimizer::{
+        Optimizer,
+        errors::OptimizeError,
+        jobs::LogicalContinuation,
+        tasks::{ContinueWithLogicalTask, ForkLogicalTask},
+    },
 };
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::mpsc::Sender;
 
 impl<M: Memo> Optimizer<M> {
     /// Creates a new task to optimize a logical plan into a physical plan.
@@ -60,6 +59,54 @@ impl<M: Memo> Optimizer<M> {
         Ok(())
     }
 
+    pub(crate) async fn launch_fork_logical_task(
+        &mut self,
+        group_id: GroupId,
+        continuation: LogicalContinuation,
+        parent_task_id: TaskId,
+    ) -> Result<(), OptimizeError> {
+        use TaskKind::*;
+
+        let explore_group_in = self.ensure_group_exploration_task(group_id).await?;
+        let fork_task_id = self.next_task_id();
+
+        // Spawn all continuations.
+        let continue_with_logical_in = self
+            .memo
+            .get_all_logical_exprs(group_id)
+            .await
+            .map_err(OptimizeError::MemoError)?
+            .iter()
+            .map(|expression_id| {
+                let id = self.next_task_id();
+                let task = ContinueWithLogicalTask {
+                    expr_id: *expression_id,
+                    fork_out: fork_task_id,
+                    fork_in: None,
+                };
+
+                self.add_task(id, Task::new(ContinueWithLogical(task)));
+                id
+            })
+            .collect();
+
+        // Create the task and add it to the task manager.
+        let fork_logical_task = ForkLogicalTask {
+            continuation,
+            out: parent_task_id,
+            explore_group_in,
+            continue_with_logical_in,
+        };
+        self.get_explore_group_task_mut(explore_group_in)
+            .unwrap()
+            .fork_logical_out
+            .insert(fork_task_id);
+
+        self.add_task(fork_task_id, Task::new(ForkLogical(fork_logical_task)));
+
+        Ok(())
+    }
+
     /// Ensures a group exploration task exists and returns its id.
     /// as part of its work. If an exploration task already exists, we reuse it.
     ///
@@ -70,7 +117,7 @@ impl<M: Memo> Optimizer<M> {
     /// # Returns
     ///
     /// * `TaskId`: The ID of the task that was created or reused.
-    pub(crate) async fn ensure_group_exploration_task(
+    async fn ensure_group_exploration_task(
         &mut self,
         group_id: GroupId,
     ) -> Result<TaskId, OptimizeError> {
@@ -87,7 +134,7 @@ impl<M: Memo> Optimizer<M> {
     /// # Returns
     ///
     /// * `TaskId`: The ID of the task that was created or reused.
-    pub(crate) async fn ensure_goal_optimize_task(
+    async fn ensure_goal_optimize_task(
         &mut self,
         goal_id: GoalId,
     ) -> Result<TaskId, OptimizeError> {
@@ -104,65 +151,9 @@ impl<M: Memo> Optimizer<M> {
     /// # Returns
     ///
     /// * `TaskId`: The ID of the task that was created or reused.
-    pub(crate) async fn ensure_cost_expression_task(
+    async fn ensure_cost_expression_task(
         &mut self,
-        expression_id: PhysicalExpressionId,
-    ) -> Result<TaskId, OptimizeError> {
-        todo!()
-    }
-
-    //-------------------------------------------------------------------------
-    // Internal task launching methods
-    //-------------------------------------------------------------------------
-
-    /// Launches a task to start applying a transformation rule to a logical expression.
-    ///
-    /// This task generates alternative logical expressions that are
-    /// semantically equivalent to the original. It maintains a set of continuations
-    /// that will be notified of the transformation results.
-    async fn launch_transform_expression_task(
-        &mut self,
-        rule: TransformationRule,
-        expression_id: LogicalExpressionId,
-        group_id: GroupId,
-    ) -> Result<TaskId, OptimizeError> {
-        todo!()
-    }
-
-    /// Launches a task to start applying an implementation rule to a logical expression.
-    ///
-    /// This task generates physical implementations from a logical expression
-    /// using a specified implementation strategy. It maintains a set of continuations
-    /// that will be notified of the implementation results.
-    ///
-    /// Only schedules the starting job if the implementation is marked as dirty in the memo.
-    async fn launch_implement_expression_task(
-        &mut self,
-        rule: ImplementationRule,
-        expression_id: LogicalExpressionId,
-        goal_id: GoalId,
-    ) -> Result<TaskId, OptimizeError> {
-        todo!()
-    }
-
-    /// Launches a new task to explore all possible transformations for a logical group.
-    ///
-    /// This schedules jobs to apply all available transformation rules to all
-    /// logical expressions in the group.
-    async fn launch_group_exploration_task(
-        &mut self,
-        group_id: GroupId,
-    ) -> Result<TaskId, OptimizeError> {
-        todo!()
-    }
-
-    /// Launches a new task to optimize a goal.
-    ///
-    /// This method creates and manages the tasks needed to optimize a goal by
-    /// ensuring group exploration, launching implementation tasks, and processing goal members.
-    async fn launch_goal_optimize_task(
-        &mut self,
-        goal_id: GoalId,
+        _expression_id: PhysicalExpressionId,
     ) -> Result<TaskId, OptimizeError> {
         todo!()
     }

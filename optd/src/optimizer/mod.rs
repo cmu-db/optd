@@ -84,7 +84,7 @@ enum OptimizerMessage {
 
 impl OptimizerMessage {
     /// Create a new request message with the given plan and task ID.
-    pub(crate) fn request(plan: OptimizeRequest, task_id: TaskId) -> Self {
+    pub fn request(plan: OptimizeRequest, task_id: TaskId) -> Self {
         Self::Request(plan, task_id)
     }
 

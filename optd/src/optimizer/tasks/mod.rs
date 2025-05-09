@@ -1,4 +1,7 @@
-use super::{JobId, OptimizerMessage};
+use super::{
+    JobId, OptimizerMessage,
+    jobs::{CostedContinuation, LogicalContinuation},
+};
 use crate::{
     cir::{
         Cost, GoalId, GroupId, ImplementationRule, LogicalExpressionId, LogicalPlan,
@@ -162,7 +165,7 @@ pub(crate) struct CostExpressionTask {
 /// Task to fork the logical optimization process.
 pub(crate) struct ForkLogicalTask {
     /// The fork continuation.
-    pub continuation: Continuation<Value, EngineResponse<OptimizerMessage>>,
+    pub continuation: LogicalContinuation,
 
     /// `ContinueWithLogicalTask` | `TransformExpressionTask
     /// | `ImplementExpressionTask` that gets fed by the output of
@@ -180,7 +183,7 @@ pub(crate) struct ForkLogicalTask {
 /// Task to fork the costed optimization process.
 pub(crate) struct ForkCostedTask {
     /// The fork continuation.
-    pub continuation: Continuation<Value, EngineResponse<OptimizerMessage>>,
+    pub continuation: CostedContinuation,
     /// The current upper bound on the allowed cost budget.
     pub budget: Cost,
 
