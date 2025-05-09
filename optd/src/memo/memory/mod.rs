@@ -98,7 +98,14 @@ impl Memo for MemoryMemo {
         logical_expr_id: LogicalExpressionId,
         props: &LogicalProperties,
     ) -> MemoResult<GroupId> {
-        todo!()
+        let group_id = GroupId(self.next_shared_id());
+        let group_info = GroupInfo {
+            expressions: vec![logical_expr_id],
+            logical_properties: props.clone(),
+        };
+
+        self.groups.insert(group_id, group_info);
+        Ok(group_id)
     }
 
     async fn merge_groups(
