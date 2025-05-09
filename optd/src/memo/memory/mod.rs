@@ -1,4 +1,4 @@
-use super::{Memo, MergeProducts, error::MemoResult};
+use super::{Memo, MemoError, MergeProducts, Representative, error::MemoResult};
 use crate::cir::{
     Cost, Goal, GoalId, GoalMemberId, GroupId, LogicalExpression, LogicalExpressionId,
     LogicalProperties, PhysicalExpression, PhysicalExpressionId,
@@ -39,8 +39,10 @@ pub(crate) struct MemoryMemo {
 
 /// Information about a group:
 /// - All logical expressions in this group
+/// - Logical properties of this group
 struct GroupInfo {
     expressions: Vec<LogicalExpressionId>,
+    logical_properties: LogicalProperties,
 }
 
 impl MemoryMemo {
@@ -53,7 +55,13 @@ impl MemoryMemo {
 
 impl Memo for MemoryMemo {
     async fn get_logical_properties(&self, group_id: GroupId) -> MemoResult<LogicalProperties> {
-        todo!()
+        let group_id = self.find_repr_group_id(group_id).await?;
+        Ok(self
+            .groups
+            .get(&group_id)
+            .ok_or(MemoError::GroupNotFound(group_id))?
+            .logical_properties
+            .clone())
     }
 
     async fn get_all_logical_exprs(
