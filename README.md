@@ -6,7 +6,6 @@ Query Optimizer Service
 
 TODO:
 
-3. Write task launchers / ensurers.
 4. Handle * for retrieve properties. (nice testground) -> DOES NOT NEED CHANGE IN CIR! Get all expr, just add group id in it.
 5. Merge results
 6. Memo implement
