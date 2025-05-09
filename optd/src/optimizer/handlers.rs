@@ -97,7 +97,7 @@ impl<M: Memo> Optimizer<M> {
 
         let group_id = self
             .memo
-            .find_repr_group(group_id)
+            .find_repr_group_id(group_id)
             .await
             .map_err(OptimizeError::MemoError)?;
 

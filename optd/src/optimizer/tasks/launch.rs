@@ -203,7 +203,7 @@ impl<M: Memo> Optimizer<M> {
         // Find the representative group for the given group ID.
         let group_repr = self
             .memo
-            .find_repr_group(group_id)
+            .find_repr_group_id(group_id)
             .await
             .map_err(OptimizeError::MemoError)?;
 
@@ -276,7 +276,7 @@ impl<M: Memo> Optimizer<M> {
         // Find the representative group for the given goal ID.
         let goal_repr = self
             .memo
-            .find_repr_goal(goal_id)
+            .find_repr_goal_id(goal_id)
             .await
             .map_err(OptimizeError::MemoError)?;
 

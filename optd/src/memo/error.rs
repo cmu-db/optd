@@ -1,8 +1,6 @@
 use crate::cir::*;
 
 /// A type alias for results returned by the different memo table trait methods.
-///
-/// See the private `traits.rs` module for more information (note that the traits are re-exported).
 pub type MemoResult<T> = Result<T, MemoError>;
 
 /// The possible kinds of errors that memo table and task graph state operations can run into.
@@ -19,7 +17,4 @@ pub enum MemoError {
 
     /// A [`PhysicalExpressionId`] does not exist in the memo.
     PhysicalExprNotFound(PhysicalExpressionId),
-
-    /// A group does not contain any logical expressions.
-    NoLogicalExprInGroup(GroupId),
 }

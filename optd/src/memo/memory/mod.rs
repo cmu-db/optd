@@ -1,14 +1,32 @@
-use super::{
-    Materialize, Memo, MergeProducts, Representative, error::MemoResult, union_find::UnionFind,
-};
+use super::{Memo, MergeProducts, error::MemoResult};
 use crate::cir::{
     Cost, Goal, GoalId, GoalMemberId, GroupId, LogicalExpression, LogicalExpressionId,
     LogicalProperties, PhysicalExpression, PhysicalExpressionId,
 };
+use std::collections::HashMap;
+use union_find::UnionFind;
+
+mod materialize;
+mod representative;
+mod union_find;
 
 /// An in-memory implementation of the memo table.
 #[derive(Default)]
 pub(crate) struct MemoryMemo {
+    /// Groups.
+    groups: HashMap<GroupId, GroupInfo>,
+
+    // Goals.
+    id_to_goal: HashMap<GoalId, Goal>,
+    goal_to_id: HashMap<Goal, GoalId>,
+
+    // Expressions.
+    id_to_logical_expr: HashMap<LogicalExpressionId, LogicalExpression>,
+    logical_expr_to_id: HashMap<LogicalExpression, LogicalExpressionId>,
+
+    id_to_physical_expr: HashMap<PhysicalExpressionId, PhysicalExpression>,
+    physical_expr_to_id: HashMap<PhysicalExpression, PhysicalExpressionId>,
+
     /// The shared next unique id to be used for goals, groups, logical expressions, and physical expressions.
     next_shared_id: i64,
 
@@ -19,65 +37,17 @@ pub(crate) struct MemoryMemo {
     repr_physical_expr_id: UnionFind<PhysicalExpressionId>,
 }
 
-impl Representative for MemoryMemo {
-    async fn find_repr_group(&self, group_id: GroupId) -> MemoResult<GroupId> {
-        todo!()
-    }
-
-    async fn find_repr_goal(&self, goal_id: GoalId) -> MemoResult<GoalId> {
-        todo!()
-    }
-
-    async fn find_repr_logical_expr(
-        &self,
-        logical_expr_id: LogicalExpressionId,
-    ) -> MemoResult<LogicalExpressionId> {
-        todo!()
-    }
-
-    async fn find_repr_physical_expr(
-        &self,
-        physical_expr_id: PhysicalExpressionId,
-    ) -> MemoResult<PhysicalExpressionId> {
-        todo!()
-    }
+/// Information about a group:
+/// - All logical expressions in this group
+struct GroupInfo {
+    expressions: Vec<LogicalExpressionId>,
 }
 
-impl Materialize for MemoryMemo {
-    async fn get_goal_id(&mut self, goal: &Goal) -> MemoResult<GoalId> {
-        todo!()
-    }
-
-    async fn materialize_goal(&self, goal_id: GoalId) -> MemoResult<Goal> {
-        todo!()
-    }
-
-    async fn get_logical_expr_id(
-        &mut self,
-        logical_expr: &LogicalExpression,
-    ) -> MemoResult<LogicalExpressionId> {
-        todo!()
-    }
-
-    async fn materialize_logical_expr(
-        &self,
-        logical_expr_id: LogicalExpressionId,
-    ) -> MemoResult<LogicalExpression> {
-        todo!()
-    }
-
-    async fn get_physical_expr_id(
-        &mut self,
-        physical_expr: &PhysicalExpression,
-    ) -> MemoResult<PhysicalExpressionId> {
-        todo!()
-    }
-
-    async fn materialize_physical_expr(
-        &self,
-        physical_expr_id: PhysicalExpressionId,
-    ) -> MemoResult<PhysicalExpression> {
-        todo!()
+impl MemoryMemo {
+    fn next_shared_id(&mut self) -> i64 {
+        let id = self.next_shared_id;
+        self.next_shared_id += 1;
+        id
     }
 }
 
