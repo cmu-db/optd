@@ -3,6 +3,7 @@ use crate::cir::{
     Cost, Goal, GoalId, GoalMemberId, GroupId, LogicalExpression, LogicalExpressionId,
     LogicalProperties, PhysicalExpression, PhysicalExpressionId,
 };
+use futures::future::try_join_all;
 use std::collections::HashMap;
 use union_find::UnionFind;
 
@@ -68,7 +69,21 @@ impl Memo for MemoryMemo {
         &self,
         group_id: GroupId,
     ) -> MemoResult<Vec<LogicalExpressionId>> {
-        todo!()
+        // Extract the vector of logical expression IDs from the group.
+        let group_id = self.find_repr_group_id(group_id).await?;
+        let expr_ids = self
+            .groups
+            .get(&group_id)
+            .ok_or(MemoError::GroupNotFound(group_id))?
+            .expressions
+            .clone();
+
+        // Update the vector with the representative IDs.
+        let futures = expr_ids
+            .into_iter()
+            .map(|expr_id| async move { self.find_repr_logical_expr_id(expr_id).await });
+
+        Ok(try_join_all(futures).await?)
     }
 
     async fn find_logical_expr_group(
