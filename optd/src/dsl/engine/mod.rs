@@ -1,3 +1,4 @@
+use super::{analyzer::hir::context::Context, utils::retriever::Retriever};
 use crate::{
     catalog::Catalog,
     dsl::analyzer::hir::{Expr, ExprKind, Goal, GroupId, Value},
@@ -6,9 +7,8 @@ use std::sync::Arc;
 
 mod eval;
 mod utils;
-pub use utils::*;
 
-use super::analyzer::hir::context::Context;
+pub use utils::*;
 
 /// The engine response type, which can be either a return value with a converter callback
 /// or a yielded group/goal with a continuation for further processing.
@@ -31,15 +31,18 @@ pub struct Engine<O: Clone + Send + 'static> {
     pub(crate) context: Context,
     /// The catalog containing all table metadata and statistics.
     pub(crate) catalog: Arc<dyn Catalog>,
+    /// The retriever for retrieving properties of groups.
+    pub(crate) retriever: Arc<dyn Retriever>,
     /// The continuation to return from the current function scope.
     pub(crate) fun_return: Option<Continuation<Value, EngineResponse<O>>>,
 }
 
 impl<O: Clone + Send + 'static> Engine<O> {
     /// Creates a new engine with the given context and expander.
-    pub fn new(context: Context, catalog: Arc<dyn Catalog>) -> Self {
+    pub fn new(context: Context, catalog: Arc<dyn Catalog>, retriever: Arc<dyn Retriever>) -> Self {
         Self {
             context,
+            retriever,
             catalog,
             fun_return: None,
         }
@@ -49,6 +52,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
     pub fn with_new_context(self, context: Context) -> Self {
         Self {
             context,
+            retriever: self.retriever,
             catalog: self.catalog,
             fun_return: self.fun_return,
         }
@@ -58,6 +62,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
     pub fn with_new_return(self, fun_return: Continuation<Value, EngineResponse<O>>) -> Self {
         Self {
             context: self.context,
+            retriever: self.retriever,
             catalog: self.catalog,
             fun_return: Some(fun_return),
         }

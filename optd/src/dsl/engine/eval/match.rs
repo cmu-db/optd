@@ -533,6 +533,7 @@ mod tests {
     use crate::dsl::analyzer::hir::context::Context;
     use crate::dsl::analyzer::hir::{LetBinding, Udf};
     use crate::dsl::engine::Engine;
+    use crate::dsl::utils::retriever::MockRetriever;
     use crate::dsl::utils::tests::{
         array_decomp_pattern, array_val, bind_pattern, create_logical_operator,
         create_physical_operator, evaluate_and_collect, lit_val, literal_pattern, match_arm,
@@ -554,7 +555,8 @@ mod tests {
         let harness = TestHarness::new();
         let ctx = Context::default();
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // Create a match expression: match 42 { 42 => "matched", _ => "not matched" }
         let match_expr = pattern_match_expr(
@@ -583,7 +585,8 @@ mod tests {
         let harness = TestHarness::new();
         let ctx = Context::default();
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // Create a match expression:
         // match 42 {
@@ -668,7 +671,7 @@ mod tests {
         ctx.bind(
             "length".to_string(),
             Value::new(CoreData::Function(FunKind::Udf(Udf {
-                func: |args, _catalog| match &args[0].data {
+                func: |args, _catalog, _deriver| match &args[0].data {
                     CoreData::Array(elements) => {
                         Value::new(CoreData::Literal(int(elements.len() as i64)))
                     }
@@ -678,7 +681,8 @@ mod tests {
         );
 
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // Evaluate the expression
         let results = evaluate_and_collect(match_expr, engine, harness).await;
@@ -698,7 +702,8 @@ mod tests {
         let harness = TestHarness::new();
         let ctx = Context::default();
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // Create a struct value Point { x: 10, y: 20 }
         let struct_expr = Arc::new(Expr::new(CoreVal(struct_val(
@@ -746,7 +751,8 @@ mod tests {
         let harness = TestHarness::new();
         let ctx = Context::default();
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // Create a logical operator: LogicalJoin { joinType: "inner", condition: "x = y" } [TableScan("orders"), TableScan("lineitem")]
         let op = Operator {
@@ -926,7 +932,8 @@ mod tests {
 
         let ctx = Context::default();
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // Evaluate the expression
         let results = evaluate_and_collect(match_expr, engine, harness).await;
@@ -978,7 +985,7 @@ mod tests {
         // Create a to_string function
         let to_string_fn = Arc::new(Expr::new(CoreVal(Value::new(CoreData::Function(
             FunKind::Udf(Udf {
-                func: |args, _catalog| match &args[0].data {
+                func: |args, _catalog, _deriver| match &args[0].data {
                     CoreData::Literal(lit) => {
                         Value::new(CoreData::Literal(string(&format!("{:?}", lit))))
                     }
@@ -1054,7 +1061,8 @@ mod tests {
 
         let ctx = Context::default();
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // Evaluate the expression
         let results = evaluate_and_collect(match_expr, engine, harness).await;
@@ -1090,7 +1098,7 @@ mod tests {
         ctx.bind(
             "to_string".to_string(),
             Value::new(CoreData::Function(FunKind::Udf(Udf {
-                func: |args, _catalog| match &args[0].data {
+                func: |args, _catalog, _deriver| match &args[0].data {
                     CoreData::Literal(Literal::Int64(i)) => {
                         Value::new(CoreData::Literal(string(&i.to_string())))
                     }
@@ -1100,7 +1108,8 @@ mod tests {
         );
 
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // Create a struct value Point { x: 30, y: 40 }
         let struct_expr = Arc::new(Expr::new(CoreVal(struct_val(
@@ -1223,7 +1232,7 @@ mod tests {
         ctx.bind(
             "to_string".to_string(),
             Value::new(CoreData::Function(FunKind::Udf(Udf {
-                func: |args, _catalog| match &args[0].data {
+                func: |args, _catalog, _deriver| match &args[0].data {
                     CoreData::Literal(lit) => {
                         Value::new(CoreData::Literal(string(&format!("{:?}", lit))))
                     }
@@ -1234,7 +1243,8 @@ mod tests {
         );
 
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // Create a deeply nested operator:
         // Project [col1, col2] (
@@ -1482,7 +1492,8 @@ mod tests {
 
         let ctx = Context::default();
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // Evaluate the expression
         let results = evaluate_and_collect(match_expr, engine, harness).await;

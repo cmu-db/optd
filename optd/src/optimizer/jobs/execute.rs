@@ -39,7 +39,11 @@ impl<M: Memo> Optimizer<M> {
     ) -> Result<(), OptimizeError> {
         use EngineProduct::*;
 
-        let engine = Engine::new(self.hir_context.clone(), self.catalog.clone());
+        let engine = Engine::new(
+            self.hir_context.clone(),
+            self.catalog.clone(),
+            self.retriever.clone(),
+        );
         let plan = partial_logical_to_value(
             &self
                 .memo
@@ -88,7 +92,7 @@ impl<M: Memo> Optimizer<M> {
     ) -> Result<(), OptimizeError> {
         use EngineProduct::*;
 
-        let engine = Engine::new(self.hir_context.clone(), self.catalog.clone());
+        let engine = self.init_engine();
         let plan = partial_logical_to_value(
             &self
                 .memo
@@ -137,7 +141,7 @@ impl<M: Memo> Optimizer<M> {
     ) -> Result<(), OptimizeError> {
         use EngineProduct::*;
 
-        let engine = Engine::new(self.hir_context.clone(), self.catalog.clone());
+        let engine = self.init_engine();
         let plan = partial_logical_to_value(
             &self
                 .memo
@@ -189,7 +193,7 @@ impl<M: Memo> Optimizer<M> {
     ) -> Result<(), OptimizeError> {
         use EngineProduct::*;
 
-        let engine = Engine::new(self.hir_context.clone(), self.catalog.clone());
+        let engine = self.init_engine();
         let plan = partial_physical_to_value(&self.egest_partial_plan(expression_id).await?);
 
         let message_tx = self.message_tx.clone();
@@ -303,5 +307,14 @@ impl<M: Memo> Optimizer<M> {
             .send(msg)
             .await
             .expect("Failed to send message - channel closed");
+    }
+
+    /// Helper function to create a new engine instance.
+    fn init_engine(&self) -> Engine<EngineProduct> {
+        Engine::new(
+            self.hir_context.clone(),
+            self.catalog.clone(),
+            self.retriever.clone(),
+        )
     }
 }

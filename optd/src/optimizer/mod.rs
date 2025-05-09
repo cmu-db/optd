@@ -9,6 +9,7 @@ use crate::{
 };
 use errors::OptimizeError;
 use jobs::{CostedContinuation, Job, JobId, LogicalContinuation};
+use retriever::OptimizerRetriever;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
@@ -22,6 +23,7 @@ mod hir_cir;
 mod jobs;
 mod memo_io;
 mod merge;
+mod retriever;
 mod tasks;
 
 /// Default maximum number of concurrent jobs to run in the optimizer.
@@ -63,9 +65,6 @@ enum EngineProduct {
 
     /// Subscribe to costed physical expressions for a goal.
     SubscribeGoal(Goal, CostedContinuation),
-
-    /// Retrieve logical properties for a specific group.
-    RetrieveProperties(GroupId, Sender<LogicalProperties>),
 }
 
 /// Messages passed within the optimization system.
@@ -75,6 +74,9 @@ enum EngineProduct {
 enum OptimizerMessage {
     /// Client request to optimize a plan.
     Request(OptimizeRequest, TaskId),
+
+    /// Request to retrieve the properties of a group.
+    Retrieve(GroupId, Sender<LogicalProperties>),
 
     /// Product from an optimization engine component.
     Product(EngineProduct, JobId),
@@ -121,6 +123,7 @@ pub struct Optimizer<M: Memo> {
     // Core components.
     memo: M,
     catalog: Arc<dyn Catalog>,
+    retriever: Arc<OptimizerRetriever>,
     rule_book: RuleBook,
     hir_context: Context,
 
@@ -163,6 +166,7 @@ impl<M: Memo> Optimizer<M> {
             // Core components.
             memo,
             catalog,
+            retriever: Arc::new(OptimizerRetriever::new(message_tx.clone())),
             rule_book: RuleBook::default(),
             hir_context: hir.context,
 
@@ -240,6 +244,9 @@ impl<M: Memo> Optimizer<M> {
                     match message {
                         Request(OptimizeRequest { plan, response_tx }, task_id) =>
                                 self.process_optimize_request(plan, response_tx, task_id).await?,
+                        Retrieve(group_id, response_tx) => {
+                            self.process_retrieve_properties(group_id, response_tx).await?;
+                        }
                         Product(product, job_id) => match product {
                             NewLogicalPartial(plan, group_id) => {
                                 self.process_new_logical_partial(plan, group_id, job_id).await?;
@@ -258,9 +265,6 @@ impl<M: Memo> Optimizer<M> {
                             }
                             SubscribeGoal(goal, continuation) => {
                                 self.process_goal_subscription(&goal, continuation, job_id).await?;
-                            }
-                            RetrieveProperties(group_id, sender) => {
-                                self.process_retrieve_properties(group_id, sender).await?;
                             }
                         }
                     };
