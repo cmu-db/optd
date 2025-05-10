@@ -40,6 +40,7 @@ use optd::dsl::analyzer::hir::{CoreData, HIR, Udf, Value};
 use optd::dsl::compile::{Config, compile_hir};
 use optd::dsl::engine::{Continuation, Engine, EngineResponse};
 use optd::dsl::utils::errors::{CompileError, Diagnose};
+use optd::dsl::utils::retriever::{MockRetriever, Retriever};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
@@ -66,7 +67,11 @@ enum Commands {
 }
 
 /// A unimplemented user-defined function.
-pub fn unimplemented_udf(_args: &[Value], _catalog: &dyn Catalog) -> Value {
+pub fn unimplemented_udf(
+    _args: &[Value],
+    _catalog: &dyn Catalog,
+    _retriever: &dyn Retriever,
+) -> Value {
     println!("This user-defined function is unimplemented!");
     Value::new(CoreData::<Value>::None)
 }
@@ -139,10 +144,11 @@ fn run_all_functions(hir: &HIR) -> Result<(), Vec<CompileError>> {
 
 async fn run_functions_in_parallel(hir: &HIR, functions: Vec<String>) -> Vec<FunctionResult> {
     let catalog = Arc::new(memory_catalog());
+    let retriever = Arc::new(MockRetriever::new());
     let mut set = JoinSet::new();
 
     for function_name in functions {
-        let engine = Engine::new(hir.context.clone(), catalog.clone());
+        let engine = Engine::new(hir.context.clone(), catalog.clone(), retriever.clone());
         let name = function_name.clone();
 
         set.spawn(async move {
@@ -151,7 +157,7 @@ async fn run_functions_in_parallel(hir: &HIR, functions: Vec<String>) -> Vec<Fun
                 Arc::new(|value| Box::pin(async move { value }));
 
             // Launch the function with an empty vector of arguments.
-            let result = engine.launch_rule(&name, vec![], result_handler).await;
+            let result = engine.launch(&name, vec![], result_handler).await;
             FunctionResult { name, result }
         });
     }

@@ -17,6 +17,7 @@
 
 use super::type_checks::registry::Type;
 use crate::catalog::Catalog;
+use crate::dsl::utils::retriever::Retriever;
 use crate::dsl::utils::span::Span;
 use context::Context;
 use map::Map;
@@ -76,12 +77,17 @@ pub struct Udf {
     /// The function pointer to the user-defined function.
     ///
     /// Note that [`Value`]s passed to and returned from this UDF do not have associated metadata.
-    pub func: fn(&[Value], &dyn Catalog) -> Value,
+    pub func: fn(&[Value], &dyn Catalog, &dyn Retriever) -> Value,
 }
 
 impl Udf {
-    pub fn call(&self, values: &[Value], catalog: &dyn Catalog) -> Value {
-        (self.func)(values, catalog)
+    pub fn call(
+        &self,
+        values: &[Value],
+        catalog: &dyn Catalog,
+        retriever: &dyn Retriever,
+    ) -> Value {
+        (self.func)(values, catalog, retriever)
     }
 }
 

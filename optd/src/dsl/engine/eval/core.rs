@@ -97,6 +97,7 @@ mod tests {
     use crate::catalog::iceberg::memory_catalog;
     use crate::dsl::analyzer::hir::context::Context;
     use crate::dsl::analyzer::hir::{BinOp, LetBinding};
+    use crate::dsl::utils::retriever::MockRetriever;
     use crate::dsl::utils::tests::{
         TestHarness, evaluate_and_collect, int, lit_expr, ref_expr, string,
     };
@@ -112,7 +113,8 @@ mod tests {
     async fn test_literal_evaluation() {
         let ctx = Context::default();
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
         let harness = TestHarness::new();
 
         // Create a literal expression
@@ -135,7 +137,8 @@ mod tests {
         let harness = TestHarness::new();
         let ctx = Context::default();
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // Create an array expression with values to evaluate
         let array_expr = Arc::new(Expr::new(CoreExpr(CoreData::Array(vec![
@@ -174,7 +177,8 @@ mod tests {
         let harness = TestHarness::new();
         let ctx = Context::default();
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // Create a tuple expression with mixed types
         let tuple_expr = Arc::new(Expr::new(CoreExpr(CoreData::Tuple(vec![
@@ -213,7 +217,8 @@ mod tests {
         let harness = TestHarness::new();
         let ctx = Context::default();
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // Create a struct expression
         let struct_expr = Arc::new(Expr::new(CoreExpr(CoreData::Struct(
@@ -248,7 +253,8 @@ mod tests {
         let harness = TestHarness::new();
         let ctx = Context::default();
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // Create a function expression (just a simple closure)
         let fn_expr = Arc::new(Expr::new(CoreExpr(CoreData::Function(FunKind::Closure(
@@ -274,7 +280,8 @@ mod tests {
         let harness = TestHarness::new();
         let ctx = Context::default();
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // Create a null expression
         let null_expr = Arc::new(Expr::new(CoreExpr(CoreData::None)));
@@ -329,7 +336,8 @@ mod tests {
         ctx.bind("fail_fn".to_string(), fail_fn);
         ctx.bind("main_fn".to_string(), main_fn);
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // This should not run the addition, but should escape to the function return with the error message
         let call_expr = Arc::new(Expr::new(Call(ref_expr("main_fn"), vec![])));

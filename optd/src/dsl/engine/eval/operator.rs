@@ -134,6 +134,7 @@ mod tests {
     use crate::catalog::iceberg::memory_catalog;
     use crate::dsl::analyzer::hir::context::Context;
     use crate::dsl::engine::Engine;
+    use crate::dsl::utils::retriever::MockRetriever;
     use crate::dsl::{
         analyzer::hir::{
             BinOp, CoreData, Expr, ExprKind, Goal, GroupId, Literal, LogicalOp, Materializable,
@@ -153,7 +154,8 @@ mod tests {
         let harness = TestHarness::new();
         let ctx = Context::default();
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // Create a materialized logical operator expression with nested expressions to evaluate
         let log_op = LogicalOp::logical(Operator {
@@ -227,7 +229,8 @@ mod tests {
         let harness = TestHarness::new();
         let ctx = Context::default();
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // Create an unmaterialized logical operator with a group ID
         let group_id = GroupId(42);
@@ -257,7 +260,8 @@ mod tests {
         let harness = TestHarness::new();
         let ctx = Context::default();
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // Create a materialized physical operator expression with nested expressions to evaluate
         let phys_op = PhysicalOp::physical(Operator {
@@ -331,7 +335,8 @@ mod tests {
         let harness = TestHarness::new();
         let ctx = Context::default();
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // Create an unmaterialized physical operator with a goal
         let goal = Goal {
@@ -374,7 +379,8 @@ mod tests {
         let harness = TestHarness::new();
         let ctx = Context::default();
         let catalog = Arc::new(memory_catalog());
-        let engine = Engine::new(ctx, catalog);
+        let retriever = Arc::new(MockRetriever::new());
+        let engine = Engine::new(ctx, catalog, retriever);
 
         // Create a Join operator with two Scan operators as children
         let scan1 = Arc::new(Expr::new(CoreVal(create_logical_operator(
