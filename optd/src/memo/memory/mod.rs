@@ -488,4 +488,70 @@ pub mod tests {
         // Verify the final group structure contains all expressions through direct queries
         assert_eq!(retrieve(&memo, g6).await, vec![10, 20, 30, 40]);
     }
+
+    #[tokio::test]
+    async fn test_simple_cascade() {
+        let mut memo = MemoryMemo::default();
+
+        // Create leaf nodes
+        let a = lookup_or_insert(&mut memo, 1, vec![]).await;
+        let b = lookup_or_insert(&mut memo, 2, vec![]).await;
+
+        // Create identical expressions that differ only in which leaf they reference
+        let c = lookup_or_insert(&mut memo, 10, vec![a]).await;
+        let d = lookup_or_insert(&mut memo, 10, vec![b]).await;
+
+        // Create expressions that reference c and d
+        let e = lookup_or_insert(&mut memo, 20, vec![c]).await;
+        let f = lookup_or_insert(&mut memo, 20, vec![d]).await;
+
+        // Verify initial state
+        assert_ne!(c, d, "c and d should be different before merge");
+        assert_ne!(e, f, "e and f should be different before merge");
+
+        // Merge a and b
+        let merge_result = memo.merge_groups(a, b).await.unwrap();
+
+        // Should have exactly 3 merge records (a+b, c+d, e+f)
+        assert_eq!(merge_result.group_merges.len(), 3, "Expected 3 merges");
+
+        // Find the merge records
+        let ab_merge = merge_result
+            .group_merges
+            .iter()
+            .find(|m| m.merged_groups.contains(&a) && m.merged_groups.contains(&b))
+            .expect("Should have a merge record for a and b");
+
+        let cd_merge = merge_result
+            .group_merges
+            .iter()
+            .find(|m| m.merged_groups.contains(&c) && m.merged_groups.contains(&d))
+            .expect("Should have a merge record for c and d");
+
+        let ef_merge = merge_result
+            .group_merges
+            .iter()
+            .find(|m| m.merged_groups.contains(&e) && m.merged_groups.contains(&f))
+            .expect("Should have a merge record for e and f");
+
+        // Verify each merge has exactly 2 groups
+        assert_eq!(ab_merge.merged_groups.len(), 2);
+        assert_eq!(cd_merge.merged_groups.len(), 2);
+        assert_eq!(ef_merge.merged_groups.len(), 2);
+
+        // Verify final state
+        let final_c = memo.find_repr_group_id(c).await.unwrap();
+        let final_d = memo.find_repr_group_id(d).await.unwrap();
+        let final_e = memo.find_repr_group_id(e).await.unwrap();
+        let final_f = memo.find_repr_group_id(f).await.unwrap();
+
+        assert_eq!(
+            final_c, final_d,
+            "c and d should have same representative after merge"
+        );
+        assert_eq!(
+            final_e, final_f,
+            "e and f should have same representative after merge"
+        );
+    }
 }
