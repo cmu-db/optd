@@ -3,10 +3,10 @@ use crate::cir::{
     LogicalProperties, PhysicalExpression, PhysicalExpressionId,
 };
 use error::MemoResult;
+use std::collections::HashSet;
 
 pub(crate) mod error;
 pub mod memory;
-pub(crate) mod traits;
 
 pub(crate) use error::MemoError;
 pub use memory::MemoryMemo;
@@ -139,11 +139,11 @@ pub trait Memo: Representative + Materialize + Sync + 'static {
     /// * `group_id` - ID of the group to retrieve expressions from.
     ///
     /// # Returns
-    /// A vector of logical expression IDs in the specified group.
+    /// A set of logical expression IDs in the specified group.
     async fn get_all_logical_exprs(
         &self,
         group_id: GroupId,
-    ) -> MemoResult<Vec<LogicalExpressionId>>;
+    ) -> MemoResult<HashSet<LogicalExpressionId>>;
 
     /// Finds group containing a logical expression ID, if it exists.
     ///

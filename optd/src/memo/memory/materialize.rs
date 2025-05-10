@@ -97,13 +97,13 @@ impl Materialize for MemoryMemo {
 
 // Remapping helpers to get canonical expressions, goals, etc.
 impl MemoryMemo {
-    async fn remap_goal(&mut self, goal: &Goal) -> MemoResult<Goal> {
+    pub(super) async fn remap_goal(&mut self, goal: &Goal) -> MemoResult<Goal> {
         let Goal(group_id, logical_expr) = goal;
         let group_id = self.find_repr_group_id(*group_id).await?;
         Ok(Goal(group_id, logical_expr.clone()))
     }
 
-    async fn remap_logical_expr(
+    pub(super) async fn remap_logical_expr(
         &mut self,
         logical_expr: &LogicalExpression,
     ) -> MemoResult<LogicalExpression> {
