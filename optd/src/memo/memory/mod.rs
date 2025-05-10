@@ -1,10 +1,7 @@
 use super::{Memo, MemoError, MergeProducts, Representative, error::MemoResult};
-use crate::{
-    cir::{
-        Cost, Goal, GoalId, GoalMemberId, GroupId, LogicalExpression, LogicalExpressionId,
-        LogicalProperties, PhysicalExpression, PhysicalExpressionId,
-    },
-    memo::{Materialize, MergeGroupProduct},
+use crate::cir::{
+    Cost, Goal, GoalId, GoalMemberId, GroupId, LogicalExpression, LogicalExpressionId,
+    LogicalProperties, PhysicalExpressionId,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -12,6 +9,7 @@ use std::{
 };
 use union_find::UnionFind;
 
+mod helpers;
 mod materialize;
 mod representative;
 mod union_find;
@@ -59,14 +57,6 @@ pub struct MemoryMemo {
 struct GroupInfo {
     expressions: HashSet<LogicalExpressionId>,
     logical_properties: LogicalProperties,
-}
-
-impl MemoryMemo {
-    fn next_shared_id(&mut self) -> i64 {
-        let id = self.next_shared_id;
-        self.next_shared_id += 1;
-        id
-    }
 }
 
 impl Memo for MemoryMemo {
@@ -130,13 +120,41 @@ impl Memo for MemoryMemo {
 
     /// Merges equivalent groups in the memo structure.
     ///
-    /// This function handles the cascading nature of group merges in a query optimizer memo:
-    /// 1. When groups are merged, we create a new representative group
-    /// 2. Logical expressions that reference merged groups need to be remapped
-    /// 3. After remapping, previously distinct expressions may become equivalent
-    /// 4. These newly equivalent expressions trigger additional group merges
+    /// This function implements a critical operation in query optimization: merging equivalent
+    /// expression groups within the memo structure. When two groups are found to be equivalent,
+    /// this function creates a new representative group and handles all the cascading effects.
     ///
-    /// The implementation uses an iterative approach to process all merges.
+    /// # Algorithm
+    ///
+    /// Merging groups has complex cascading effects because expressions in the memo reference
+    /// groups by their IDs:
+    ///
+    /// 1. When groups A and B are merged into a new group C, all expressions that reference
+    ///    group A or B need to be updated to reference group C instead.
+    ///
+    /// 2. After this update, expressions that were previously distinct might become identical.
+    ///    This happens when the only difference between expressions was that one referenced
+    ///    group A and the other referenced group B.
+    ///
+    /// 3. When expressions become identical, their containing groups also need to be merged,
+    ///    creating a cascading effect.
+    ///
+    /// To handle this complexity, we use an iterative approach:
+    /// - We maintain a queue of group pairs that need to be merged.
+    /// - For each pair, we create a new representative group.
+    /// - We update all expressions that reference the merged groups.
+    /// - If this creates new equivalences, we add the affected groups to the merge queue.
+    /// - We continue until no more merges are needed.
+    ///
+    /// This approach ensures that all cascading effects are properly handled and the memo
+    /// structure remains consistent after the merge.
+    ///
+    /// # Parameters
+    /// * `group_id_1` - ID of the first group to merge.
+    /// * `group_id_2` - ID of the second group to merge.
+    ///
+    /// # Returns
+    /// Detailed results of all merges performed, including cascading merges.
     async fn merge_groups(
         &mut self,
         group_id_1: GroupId,
@@ -158,123 +176,18 @@ impl Memo for MemoryMemo {
                     continue;
                 }
 
-                // Otherwise, we create new group with a fresh ID.
-                let new_group_id = GroupId(self.next_shared_id());
+                // Perform the group merge, creating a new representative
+                let (new_group_id, merge_product) =
+                    self.merge_group_pair(group_id_1, group_id_2).await?;
+                merge_results.group_merges.push(merge_product);
 
-                let group_info_1 = self
-                    .group_info
-                    .get(&group_id_1)
-                    .ok_or(MemoError::GroupNotFound(group_id_1))?;
-                let group_info_2 = self
-                    .group_info
-                    .get(&group_id_2)
-                    .ok_or(MemoError::GroupNotFound(group_id_2))?;
+                // Process expressions that reference the merged groups,
+                // which may trigger additional group merges.
+                let new_pending_merges = self
+                    .process_referencing_expressions(group_id_1, group_id_2, new_group_id)
+                    .await?;
 
-                // Verify logical properties match (should be the case for equivalent groups),
-                // unless the user defined unconsistent rules.
-                debug_assert!(group_info_1.logical_properties == group_info_2.logical_properties);
-
-                // Combine all expressions from both groups.
-                let expr_ids_1 = self.get_all_logical_exprs(group_id_1).await?;
-                let expr_ids_2 = self.get_all_logical_exprs(group_id_2).await?;
-                let mut all_expr_ids = HashSet::with_capacity(expr_ids_1.len() + expr_ids_2.len());
-                all_expr_ids.extend(expr_ids_1.iter().copied());
-                all_expr_ids.extend(expr_ids_2.iter().copied());
-
-                // Create and save new group.
-                let new_group_info = GroupInfo {
-                    expressions: all_expr_ids,
-                    logical_properties: group_info_1.logical_properties.clone(),
-                };
-                self.group_info.insert(new_group_id, new_group_info);
-
-                // Update all metadata structures to point to the new group.
-                self.repr_group_id.merge(&group_id_1, &new_group_id);
-                self.repr_group_id.merge(&group_id_2, &new_group_id);
-
-                self.group_info.remove(&group_id_1);
-                self.group_info.remove(&group_id_2);
-
-                self.group_info[&new_group_id]
-                    .expressions
-                    .iter()
-                    .for_each(|&expr_id| {
-                        self.logical_id_to_group_index.insert(expr_id, new_group_id);
-                    });
-
-                // Merge the lists of expressions that reference these groups.
-                let expr_set_1: HashSet<_> = self
-                    .group_referencing_exprs_index
-                    .remove(&group_id_1)
-                    .unwrap_or_default()
-                    .iter()
-                    .map(|id| self.repr_logical_expr_id.find(id))
-                    .collect();
-                let expr_set_2: HashSet<_> = self
-                    .group_referencing_exprs_index
-                    .remove(&group_id_2)
-                    .unwrap_or_default()
-                    .iter()
-                    .map(|id| self.repr_logical_expr_id.find(id))
-                    .collect();
-                let mut referenced_exprs = expr_set_1;
-                referenced_exprs.extend(expr_set_2);
-                self.group_referencing_exprs_index
-                    .insert(new_group_id, referenced_exprs.clone());
-
-                // Record this merge operation.
-                merge_results.group_merges.push(MergeGroupProduct {
-                    new_repr_group_id: new_group_id,
-                    merged_groups: vec![group_id_1, group_id_2],
-                });
-
-                // Process cascading effects on expressions that referenced the merged groups.
-                for reference_id in referenced_exprs {
-                    // Remap the expression to use updated group references.
-                    let prev_expr = self.materialize_logical_expr(reference_id).await?;
-                    let new_expr = self.remap_logical_expr(&prev_expr).await?;
-                    let new_id = self.get_logical_expr_id(&new_expr).await?;
-
-                    if new_id != reference_id {
-                        // If remapping created a different expression, update the union-find, and clear
-                        // all old references to the old expression ID (except in group->expr index).
-                        self.id_to_logical_expr.remove(&reference_id);
-                        self.logical_expr_to_id.remove(&prev_expr);
-
-                        let reference_group_opt =
-                            self.find_logical_expr_group(reference_id).await?;
-                        let new_group_opt = self.find_logical_expr_group(new_id).await?;
-
-                        if let Some(reference_group) = reference_group_opt {
-                            let group_info = self
-                                .group_info
-                                .get_mut(&reference_group)
-                                .ok_or(MemoError::GroupNotFound(reference_group))?;
-
-                            group_info.expressions.remove(&reference_id);
-                            group_info.expressions.insert(new_id);
-
-                            self.logical_id_to_group_index.remove(&reference_id);
-                            if new_group_opt.is_none() {
-                                self.logical_id_to_group_index
-                                    .insert(new_id, reference_group);
-                            }
-                        }
-
-                        self.repr_logical_expr_id.merge(&reference_id, &new_id);
-
-                        match (new_group_opt, reference_group_opt) {
-                            // Two different groups now contain equivalent expressions - merge them.
-                            (Some(new_group), Some(reference_group))
-                                if new_group != reference_group =>
-                            {
-                                pending_merges.push((new_group, reference_group));
-                            }
-
-                            _ => {} // Other cases don't require action.
-                        }
-                    }
-                }
+                pending_merges.extend(new_pending_merges);
             }
         }
 
