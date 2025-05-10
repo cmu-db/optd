@@ -1,9 +1,12 @@
 use super::MemoryMemo;
 use crate::{
     cir::{GroupId, LogicalExpression, LogicalExpressionId},
-    memo::{Materialize, Memo, MemoError, MergeGroupProduct, error::MemoResult, memory::GroupInfo},
+    memo::{
+        Materialize, Memo, MemoError, MergeGroupProduct, MergeProducts, Representative,
+        error::MemoResult, memory::GroupInfo,
+    },
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 impl MemoryMemo {
     pub(super) fn next_shared_id(&mut self) -> i64 {
@@ -239,5 +242,56 @@ impl MemoryMemo {
         }
 
         Ok(new_pending_merges)
+    }
+
+    /// Consolidates merge operations into a comprehensive result.
+    ///
+    /// This function takes a list of individual merge operations and consolidates them
+    /// into a complete picture of which groups were merged into each final representative.
+    /// It handles cases where past representatives themselves are merged into newer ones.
+    ///
+    /// # Parameters
+    /// * `merge_operations` - List of all individual merge operations.
+    ///
+    /// # Returns
+    /// Consolidated merge results.
+    pub(super) async fn consolidate_merge_results(
+        &self,
+        merge_operations: Vec<MergeGroupProduct>,
+    ) -> MemoResult<MergeProducts> {
+        // Collect operations into a map from representative to all merged groups.
+        let mut consolidated_map: HashMap<GroupId, HashSet<GroupId>> = HashMap::new();
+
+        for op in merge_operations {
+            let current_repr = self.find_repr_group_id(op.new_repr_group_id).await?;
+
+            consolidated_map
+                .entry(current_repr)
+                .or_default()
+                .extend(op.merged_groups.iter().copied());
+
+            if op.new_repr_group_id != current_repr {
+                consolidated_map
+                    .entry(current_repr)
+                    .or_default()
+                    .insert(op.new_repr_group_id);
+            }
+        }
+
+        // Build the final list of merge products from the consolidated map.
+        let group_merges = consolidated_map
+            .into_iter()
+            .filter_map(|(repr, groups)| {
+                (!groups.is_empty()).then(|| MergeGroupProduct {
+                    new_repr_group_id: repr,
+                    merged_groups: groups.into_iter().collect(),
+                })
+            })
+            .collect();
+
+        Ok(MergeProducts {
+            group_merges,
+            goal_merges: vec![],
+        })
     }
 }

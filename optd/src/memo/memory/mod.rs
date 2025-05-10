@@ -160,7 +160,7 @@ impl Memo for MemoryMemo {
         group_id_1: GroupId,
         group_id_2: GroupId,
     ) -> MemoResult<MergeProducts> {
-        let mut merge_results = MergeProducts::default();
+        let mut merge_operations = vec![];
         let mut pending_merges = vec![(group_id_1, group_id_2)];
 
         while !pending_merges.is_empty() {
@@ -179,7 +179,7 @@ impl Memo for MemoryMemo {
                 // Perform the group merge, creating a new representative
                 let (new_group_id, merge_product) =
                     self.merge_group_pair(group_id_1, group_id_2).await?;
-                merge_results.group_merges.push(merge_product);
+                merge_operations.push(merge_product);
 
                 // Process expressions that reference the merged groups,
                 // which may trigger additional group merges.
@@ -191,7 +191,9 @@ impl Memo for MemoryMemo {
             }
         }
 
-        Ok(merge_results)
+        // Consolidate the merge results by replacing the incremental merges
+        // with consolidated results that show the full picture.
+        self.consolidate_merge_results(merge_operations).await
     }
 
     async fn get_best_optimized_physical_expr(

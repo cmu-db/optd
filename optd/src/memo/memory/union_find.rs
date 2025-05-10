@@ -10,11 +10,6 @@ pub struct UnionFind<T> {
 }
 
 impl<T: Eq + Hash + Clone> UnionFind<T> {
-    /// Creates a new empty Representative
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Finds the representative of the set containing `x`
     /// If `x` doesn't exist, returns `x` as its own representative
     ///
@@ -81,20 +76,20 @@ mod tests {
 
     #[test]
     fn test_find_nonexistent() {
-        let repr = UnionFind::<u32>::new();
+        let repr = UnionFind::<u32>::default();
         assert_eq!(repr.find(&42), 42);
     }
 
     #[test]
     fn test_find_self() {
-        let mut repr = UnionFind::<u32>::new();
+        let mut repr = UnionFind::<u32>::default();
         repr.parents.insert(42, 42);
         assert_eq!(repr.find(&42), 42);
     }
 
     #[test]
     fn test_find_without_compression() {
-        let mut repr = UnionFind::<u32>::new();
+        let mut repr = UnionFind::<u32>::default();
         repr.parents.insert(1, 2);
         repr.parents.insert(2, 3);
         repr.parents.insert(3, 4);
@@ -110,7 +105,7 @@ mod tests {
 
     #[test]
     fn test_merge_with_compression() {
-        let mut repr = UnionFind::<u32>::new();
+        let mut repr = UnionFind::<u32>::default();
         repr.parents.insert(1, 2);
         repr.parents.insert(2, 3);
         repr.parents.insert(3, 4);
@@ -126,7 +121,7 @@ mod tests {
 
     #[test]
     fn test_merge_basic() {
-        let mut repr = UnionFind::<u32>::new();
+        let mut repr = UnionFind::<u32>::default();
         let result = repr.merge(&1, &2);
         assert_eq!(result, 2);
         assert_eq!(repr.find(&1), 2);
@@ -134,7 +129,7 @@ mod tests {
 
     #[test]
     fn test_merge_existing() {
-        let mut repr = UnionFind::<u32>::new();
+        let mut repr = UnionFind::<u32>::default();
         repr.parents.insert(1, 1);
         repr.parents.insert(2, 2);
 
@@ -145,7 +140,7 @@ mod tests {
 
     #[test]
     fn test_merge_already_merged() {
-        let mut repr = UnionFind::<u32>::new();
+        let mut repr = UnionFind::<u32>::default();
         repr.parents.insert(1, 2);
         repr.parents.insert(2, 2);
 
@@ -156,7 +151,7 @@ mod tests {
 
     #[test]
     fn test_merge_chains() {
-        let mut repr = UnionFind::<u32>::new();
+        let mut repr = UnionFind::<u32>::default();
 
         // Create chain 1->2->3
         repr.merge(&1, &2);
@@ -181,7 +176,7 @@ mod tests {
 
     #[test]
     fn test_merge_with_string_keys() {
-        let mut repr = UnionFind::<String>::new();
+        let mut repr = UnionFind::<String>::default();
 
         let result = repr.merge(&"old".to_string(), &"new".to_string());
         assert_eq!(result, "new");
@@ -190,7 +185,7 @@ mod tests {
 
     #[test]
     fn test_complex_merges() {
-        let mut repr = UnionFind::<u32>::new();
+        let mut repr = UnionFind::<u32>::default();
 
         // First set of merges
         repr.merge(&1, &2);
