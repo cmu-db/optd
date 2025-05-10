@@ -271,7 +271,7 @@ pub mod tests {
     pub async fn retrieve(memo: &impl Memo, gid: GroupId) -> Vec<i64> {
         let eids = memo.get_all_logical_exprs(gid).await.unwrap();
 
-        // Collect and sort data in expressions.
+        // Collect and sort data in expressions
         let mut data = vec![];
         for eid in eids {
             let expr = memo.materialize_logical_expr(eid).await.unwrap();
@@ -336,17 +336,58 @@ pub mod tests {
         // g5: 4(g2), 6()
 
         let g0 = lookup_or_insert(&mut memo, 0, vec![]).await;
-        let g0 = insert_into_group(&mut memo, 1, vec![], g0).await;
+        insert_into_group(&mut memo, 1, vec![], g0).await;
         let g4 = lookup_or_insert(&mut memo, 4, vec![g0]).await;
         insert_into_group(&mut memo, 5, vec![], g4).await;
 
         let g2 = lookup_or_insert(&mut memo, 2, vec![]).await;
-        let g2 = insert_into_group(&mut memo, 3, vec![], g2).await;
+        insert_into_group(&mut memo, 3, vec![], g2).await;
         let g5 = lookup_or_insert(&mut memo, 4, vec![g2]).await;
         insert_into_group(&mut memo, 6, vec![], g5).await;
 
-        // Trigger recursive merge.
-        let g6 = insert_into_group(&mut memo, 1, vec![], g2).await;
+        let g0 = memo.find_repr_group_id(g0).await.unwrap();
+        let g2 = memo.find_repr_group_id(g2).await.unwrap();
+        let g4 = memo.find_repr_group_id(g4).await.unwrap();
+        let g5 = memo.find_repr_group_id(g5).await.unwrap();
+
+        // Try to merge g0 and g2
+        let merge_result = memo.merge_groups(g0, g2).await.unwrap();
+
+        // There should be exactly 2 merge records (one for base level, one for recursive)
+        assert_eq!(merge_result.group_merges.len(), 2);
+
+        // Find the base level merge (g0 + g2)
+        let base_merge = merge_result
+            .group_merges
+            .iter()
+            .find(|m| m.merged_groups.contains(&g0) && m.merged_groups.contains(&g2))
+            .expect("Should have a merge record for g0 and g2");
+
+        // Find the recursive merge (g4 + g5)
+        let upper_merge = merge_result
+            .group_merges
+            .iter()
+            .find(|m| m.merged_groups.contains(&g4) && m.merged_groups.contains(&g5))
+            .expect("Should have a merge record for g4 and g5");
+
+        // Get the new representative IDs
+        let g6 = base_merge.new_repr_group_id;
+        let g7 = upper_merge.new_repr_group_id;
+
+        // Verify that each record has ONLY the current representatives that were merged
+        let base_groups = &base_merge.merged_groups;
+        assert!(base_groups.contains(&g0));
+        assert!(base_groups.contains(&g2));
+        assert_eq!(base_groups.len(), 2); // Only g0 and g2
+
+        let upper_groups = &upper_merge.merged_groups;
+        assert!(upper_groups.contains(&g4));
+        assert!(upper_groups.contains(&g5));
+        assert_eq!(upper_groups.len(), 2); // Only g4 and g5
+
+        // Verify group content through direct queries
+        assert_eq!(retrieve(&memo, g6).await, vec![0, 1, 2, 3]);
+        assert_eq!(retrieve(&memo, g7).await, vec![4, 5, 6]);
 
         assert_eq!(retrieve(&memo, g6).await, vec![0, 1, 2, 3]);
 
@@ -354,5 +395,97 @@ pub mod tests {
         let g7 = lookup_or_insert(&mut memo, 4, vec![g6]).await;
 
         assert_eq!(retrieve(&memo, g7).await, vec![4, 5, 6]);
+    }
+
+    #[tokio::test]
+    async fn test_simple_merge_consolidation() {
+        let mut memo = MemoryMemo::default();
+
+        // Create three groups
+        let g0 = lookup_or_insert(&mut memo, 0, vec![]).await;
+        let g1 = lookup_or_insert(&mut memo, 1, vec![]).await;
+        let g2 = lookup_or_insert(&mut memo, 2, vec![]).await;
+
+        // Merge g0 and g1
+        let merge_result1 = memo.merge_groups(g0, g1).await.unwrap();
+        assert_eq!(merge_result1.group_merges.len(), 1);
+
+        let g3 = merge_result1.group_merges[0].new_repr_group_id;
+
+        // Verify the merged groups in the first result
+        let merged_groups1 = &merge_result1.group_merges[0].merged_groups;
+        assert!(merged_groups1.contains(&g0));
+        assert!(merged_groups1.contains(&g1));
+        assert_eq!(merged_groups1.len(), 2);
+
+        // Merge g3 and g2
+        let merge_result2 = memo.merge_groups(g3, g2).await.unwrap();
+        assert_eq!(merge_result2.group_merges.len(), 1);
+
+        // Get the new representative
+        let g4 = merge_result2.group_merges[0].new_repr_group_id;
+
+        // Verify the merge result only includes the current representatives
+        // that were merged (g3 and g2), not groups from previous merges
+        let merged_groups2 = &merge_result2.group_merges[0].merged_groups;
+        assert!(!merged_groups2.contains(&g0)); // Should not include already merged groups
+        assert!(!merged_groups2.contains(&g1)); // Should not include already merged groups
+        assert!(merged_groups2.contains(&g2)); // Current representative being merged
+        assert!(merged_groups2.contains(&g3)); // Current representative being merged
+        assert_eq!(merged_groups2.len(), 2); // Only g2 and g3
+
+        // Verify the final group structure through direct queries
+        assert_eq!(retrieve(&memo, g4).await, vec![0, 1, 2]);
+    }
+
+    #[tokio::test]
+    async fn test_complex_merge_chain_consolidation() {
+        let mut memo = MemoryMemo::default();
+
+        // Create a complex chain of merges
+        // First create 4 base groups
+        let g0 = lookup_or_insert(&mut memo, 10, vec![]).await;
+        let g1 = lookup_or_insert(&mut memo, 20, vec![]).await;
+        let g2 = lookup_or_insert(&mut memo, 30, vec![]).await;
+        let g3 = lookup_or_insert(&mut memo, 40, vec![]).await;
+
+        // Merge g0+g1 -> g4
+        let result1 = memo.merge_groups(g0, g1).await.unwrap();
+        assert_eq!(result1.group_merges.len(), 1);
+        assert_eq!(result1.group_merges[0].merged_groups.len(), 2);
+        assert!(result1.group_merges[0].merged_groups.contains(&g0));
+        assert!(result1.group_merges[0].merged_groups.contains(&g1));
+        let g4 = result1.group_merges[0].new_repr_group_id;
+
+        // Merge g2+g3 -> g5
+        let result2 = memo.merge_groups(g2, g3).await.unwrap();
+        assert_eq!(result2.group_merges.len(), 1);
+        assert_eq!(result2.group_merges[0].merged_groups.len(), 2);
+        assert!(result2.group_merges[0].merged_groups.contains(&g2));
+        assert!(result2.group_merges[0].merged_groups.contains(&g3));
+        let g5 = result2.group_merges[0].new_repr_group_id;
+
+        // Now merge g4+g5
+        let final_result = memo.merge_groups(g4, g5).await.unwrap();
+
+        // Should have 1 merge record for only the current representatives
+        assert_eq!(final_result.group_merges.len(), 1);
+
+        // Get the final representative
+        let g6 = final_result.group_merges[0].new_repr_group_id;
+
+        // Verify the merge result only includes the current representatives
+        // that were merged (g4 and g5), not groups from previous merges
+        let merged_groups = &final_result.group_merges[0].merged_groups;
+        assert!(!merged_groups.contains(&g0)); // Should not include already merged groups
+        assert!(!merged_groups.contains(&g1)); // Should not include already merged groups
+        assert!(!merged_groups.contains(&g2)); // Should not include already merged groups
+        assert!(!merged_groups.contains(&g3)); // Should not include already merged groups
+        assert!(merged_groups.contains(&g4)); // Current representative being merged
+        assert!(merged_groups.contains(&g5)); // Current representative being merged
+        assert_eq!(merged_groups.len(), 2); // Only g4 and g5
+
+        // Verify the final group structure contains all expressions through direct queries
+        assert_eq!(retrieve(&memo, g6).await, vec![10, 20, 30, 40]);
     }
 }

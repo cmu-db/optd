@@ -103,7 +103,7 @@ impl MemoryMemo {
         Ok(Goal(group_id, logical_expr.clone()))
     }
 
-    pub(super)async fn remap_logical_expr(
+    pub(super) async fn remap_logical_expr(
         &mut self,
         logical_expr: &LogicalExpression,
     ) -> MemoResult<LogicalExpression> {
