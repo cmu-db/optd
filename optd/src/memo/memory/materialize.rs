@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use super::MemoryMemo;
 use crate::{
     cir::{
@@ -8,13 +6,17 @@ use crate::{
     },
     memo::{Materialize, MemoError, Representative, error::MemoResult},
 };
+use std::collections::HashSet;
 
 impl Materialize for MemoryMemo {
     async fn get_goal_id(&mut self, goal: &Goal) -> MemoResult<GoalId> {
-        if let Some(&goal_id) = self.goal_to_id.get(goal) {
-            return Ok(self.find_repr_goal_id(goal_id).await?);
+        // Check if the goal is already in the memo table.
+        let goal = self.remap_goal(goal).await?;
+        if let Some(&goal_id) = self.goal_to_id.get(&goal) {
+            return Ok(goal_id);
         }
 
+        // Otherwise, create a new entry in the memo table.
         let goal_id = GoalId(self.next_shared_id());
         self.id_to_goal.insert(goal_id, goal.clone());
         self.goal_to_id.insert(goal.clone(), goal_id);
@@ -36,33 +38,33 @@ impl Materialize for MemoryMemo {
     ) -> MemoResult<LogicalExpressionId> {
         use Child::*;
 
-        // Check if the logical expression already exists in the memo table.
-        if let Some(&expr_id) = self.logical_expr_to_id.get(logical_expr) {
-            return Ok(self.find_repr_logical_expr_id(expr_id).await?);
+        // Check if the expression is already in the memo table.
+        let remapped_expr = self.remap_logical_expr(logical_expr).await?;
+        if let Some(&expr_id) = self.logical_expr_to_id.get(&remapped_expr) {
+            return Ok(expr_id);
         }
 
-        // If it doesn't exist, create a new ID for the logical expression.
+        // Otherwise, create a new entry in the memo table.
         let expr_id = LogicalExpressionId(self.next_shared_id());
-
-        // For each group ID within the expression, find its representative and
-        // update the group references index.
-        let all_group_ids = logical_expr.children.iter().flat_map(|child| match child {
-            Singleton(group_id) => vec![*group_id],
-            VarLength(group_ids) => group_ids.clone(),
-        });
-
-        for group_id in all_group_ids {
-            let repr_group_id = self.find_repr_group_id(group_id).await?;
-            self.group_referencing_exprs_index
-                .entry(repr_group_id)
-                .or_insert_with(HashSet::new)
-                .insert(expr_id);
-        }
-
         self.id_to_logical_expr
-            .insert(expr_id, logical_expr.clone());
+            .insert(expr_id, remapped_expr.clone());
         self.logical_expr_to_id
-            .insert(logical_expr.clone(), expr_id);
+            .insert(remapped_expr.clone(), expr_id);
+
+        // Update the logical expression to group index.
+        remapped_expr
+            .children
+            .iter()
+            .flat_map(|child| match child {
+                Singleton(group_id) => vec![*group_id],
+                VarLength(group_ids) => group_ids.clone(),
+            })
+            .for_each(|group_id| {
+                self.group_referencing_exprs_index
+                    .entry(group_id)
+                    .or_insert_with(HashSet::new)
+                    .insert(expr_id);
+            });
 
         Ok(expr_id)
     }
@@ -80,29 +82,56 @@ impl Materialize for MemoryMemo {
 
     async fn get_physical_expr_id(
         &mut self,
-        physical_expr: &PhysicalExpression,
+        _physical_expr: &PhysicalExpression,
     ) -> MemoResult<PhysicalExpressionId> {
-        if let Some(&expr_id) = self.physical_expr_to_id.get(physical_expr) {
-            return Ok(self.find_repr_physical_expr_id(expr_id).await?);
-        }
-
-        let expr_id = PhysicalExpressionId(self.next_shared_id());
-        self.id_to_physical_expr
-            .insert(expr_id, physical_expr.clone());
-        self.physical_expr_to_id
-            .insert(physical_expr.clone(), expr_id);
-
-        Ok(expr_id)
+        todo!()
     }
 
     async fn materialize_physical_expr(
         &self,
-        physical_expr_id: PhysicalExpressionId,
+        _physical_expr_id: PhysicalExpressionId,
     ) -> MemoResult<PhysicalExpression> {
-        let repr_expr_id = self.find_repr_physical_expr_id(physical_expr_id).await?;
-        self.id_to_physical_expr
-            .get(&repr_expr_id)
-            .ok_or(MemoError::PhysicalExprNotFound(repr_expr_id))
-            .cloned()
+        todo!()
+    }
+}
+
+// Remapping helpers to get canonical expressions, goals, etc.
+impl MemoryMemo {
+    async fn remap_goal(&mut self, goal: &Goal) -> MemoResult<Goal> {
+        let Goal(group_id, logical_expr) = goal;
+        let group_id = self.find_repr_group_id(*group_id).await?;
+        Ok(Goal(group_id, logical_expr.clone()))
+    }
+
+    async fn remap_logical_expr(
+        &mut self,
+        logical_expr: &LogicalExpression,
+    ) -> MemoResult<LogicalExpression> {
+        use Child::*;
+
+        let mut remapped_children = Vec::with_capacity(logical_expr.children.len());
+
+        for child in &logical_expr.children {
+            let remapped = match child {
+                Singleton(group_id) => {
+                    let repr = self.find_repr_group_id(*group_id).await?;
+                    Singleton(repr)
+                }
+                VarLength(group_ids) => {
+                    let mut reprs = Vec::with_capacity(group_ids.len());
+                    for group_id in group_ids {
+                        reprs.push(self.find_repr_group_id(*group_id).await?);
+                    }
+                    VarLength(reprs)
+                }
+            };
+            remapped_children.push(remapped);
+        }
+
+        Ok(LogicalExpression {
+            tag: logical_expr.tag.clone(),
+            data: logical_expr.data.clone(),
+            children: remapped_children,
+        })
     }
 }

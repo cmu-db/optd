@@ -21,25 +21,19 @@ pub struct MemoryMemo {
     // Goals.
     /// Key is always a representative ID.
     id_to_goal: HashMap<GoalId, Goal>,
-    /// Each unique goal is mapped to a unique id, that may not be representative.
-    /// This is used to speed up lookups, however it also means that the entries
-    /// are never cleaned up. We leave this problem for later.
+    /// Each representative goal is mapped to its id, for faster lookups.
     goal_to_id: HashMap<Goal, GoalId>,
 
     // Expressions.
     /// Key is always a representative ID.
     id_to_logical_expr: HashMap<LogicalExpressionId, LogicalExpression>,
-    /// Each unique expression is mapped to a unique id, that may not be representative.
-    /// This is used to speed up lookups, however it also means that the entries
-    /// are never cleaned up. We leave this problem for later.
+    /// Each representantive expression is mapped to its id, for faster lookups.
     logical_expr_to_id: HashMap<LogicalExpression, LogicalExpressionId>,
 
     /// Key is always a representative ID.
-    id_to_physical_expr: HashMap<PhysicalExpressionId, PhysicalExpression>,
-    /// Each unique expression is mapped to a unique id, that may not be representative.
-    /// This is used to speed up lookups, however it also means that the entries
-    /// are never cleaned up. We leave this problem for later.
-    physical_expr_to_id: HashMap<PhysicalExpression, PhysicalExpressionId>,
+    _id_to_physical_expr: HashMap<PhysicalExpressionId, PhysicalExpression>,
+    /// Each representative expression is mapped to its id, for faster lookups.
+    _physical_expr_to_id: HashMap<PhysicalExpression, PhysicalExpressionId>,
 
     // Indexes: only deal with representative IDs, but speeds up most queries.
     /// To speed up expr->group lookup, we maintain a mapping from logical expression IDs to group IDs.
@@ -51,7 +45,7 @@ pub struct MemoryMemo {
     /// The shared next unique id to be used for goals, groups, logical expressions, and physical expressions.
     next_shared_id: i64,
 
-    /// Representatives of groups, goals, and expression ids.
+    /// Representatives of groups, goals, and expression ids, so that we can process old IDs.
     repr_group_id: UnionFind<GroupId>,
     repr_goal_id: UnionFind<GoalId>,
     repr_logical_expr_id: UnionFind<LogicalExpressionId>,
@@ -59,8 +53,8 @@ pub struct MemoryMemo {
 }
 
 /// Information about a group:
-/// - All logical expressions in this group
-/// - Logical properties of this group
+/// - All logical expressions in this group (always representative IDs).
+/// - Logical properties of this group.
 #[derive(Clone)]
 struct GroupInfo {
     expressions: Vec<LogicalExpressionId>,
@@ -90,21 +84,13 @@ impl Memo for MemoryMemo {
         &self,
         group_id: GroupId,
     ) -> MemoResult<Vec<LogicalExpressionId>> {
-        // Extract the vector of logical expression IDs from the group.
         let group_id = self.find_repr_group_id(group_id).await?;
-        let expr_ids = self
+        Ok(self
             .group_info
             .get(&group_id)
             .ok_or(MemoError::GroupNotFound(group_id))?
             .expressions
-            .clone();
-
-        // Update the vector with the representative IDs.
-        let futures = expr_ids
-            .into_iter()
-            .map(|expr_id| async move { self.find_repr_logical_expr_id(expr_id).await });
-
-        Ok(try_join_all(futures).await?)
+            .clone())
     }
 
     async fn find_logical_expr_group(
@@ -123,6 +109,13 @@ impl Memo for MemoryMemo {
         logical_expr_id: LogicalExpressionId,
         props: &LogicalProperties,
     ) -> MemoResult<GroupId> {
+        debug_assert!(
+            self.logical_id_to_group_index
+                .get(&logical_expr_id)
+                .is_none(),
+            "Logical expression ID already exists in a group."
+        );
+
         let group_id = GroupId(self.next_shared_id());
         let group_info = GroupInfo {
             expressions: vec![logical_expr_id],
