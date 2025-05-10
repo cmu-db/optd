@@ -35,16 +35,11 @@ pub struct MemoryMemo {
     /// Each representantive expression is mapped to its id, for faster lookups.
     logical_expr_to_id: HashMap<LogicalExpression, LogicalExpressionId>,
 
-    /// Key is always a representative ID.
-    _id_to_physical_expr: HashMap<PhysicalExpressionId, PhysicalExpression>,
-    /// Each representative expression is mapped to its id, for faster lookups.
-    _physical_expr_to_id: HashMap<PhysicalExpression, PhysicalExpressionId>,
-
     // Indexes: only deal with representative IDs, but speeds up most queries.
     /// To speed up expr->group lookup, we maintain a mapping from logical expression IDs to group IDs.
     logical_id_to_group_index: HashMap<LogicalExpressionId, GroupId>,
     /// To speed up recursive merges, we maintain a mapping from group IDs to all logical expression IDs
-    /// that contain a reference to this group.
+    /// that contain a reference to this group. The value logical_expr_ids may *NOT* be a representative ID.
     group_referencing_exprs_index: HashMap<GroupId, HashSet<LogicalExpressionId>>,
 
     /// The shared next unique id to be used for goals, groups, logical expressions, and physical expressions.
@@ -60,7 +55,7 @@ pub struct MemoryMemo {
 /// Information about a group:
 /// - All logical expressions in this group (always representative IDs).
 /// - Logical properties of this group.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct GroupInfo {
     expressions: HashSet<LogicalExpressionId>,
     logical_properties: LogicalProperties,
@@ -208,14 +203,20 @@ impl Memo for MemoryMemo {
                     });
 
                 // Merge the lists of expressions that reference these groups.
-                let expr_set_1 = self
+                let expr_set_1: HashSet<_> = self
                     .group_referencing_exprs_index
                     .remove(&group_id_1)
-                    .unwrap_or_default();
-                let expr_set_2 = self
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|id| self.repr_logical_expr_id.find(id))
+                    .collect();
+                let expr_set_2: HashSet<_> = self
                     .group_referencing_exprs_index
                     .remove(&group_id_2)
-                    .unwrap_or_default();
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|id| self.repr_logical_expr_id.find(id))
+                    .collect();
                 let mut referenced_exprs = expr_set_1;
                 referenced_exprs.extend(expr_set_2);
                 self.group_referencing_exprs_index
@@ -235,31 +236,41 @@ impl Memo for MemoryMemo {
                     let new_id = self.get_logical_expr_id(&new_expr).await?;
 
                     if new_id != reference_id {
-                        // If remapping created a different expression, update the union-find.
-                        self.repr_logical_expr_id.merge(&reference_id, &new_id);
+                        // If remapping created a different expression, update the union-find, and clear
+                        // all old references to the old expression ID (except in group->expr index).
+                        self.id_to_logical_expr.remove(&reference_id);
+                        self.logical_expr_to_id.remove(&prev_expr);
 
-                        // Check if this causes groups to merge.
-                        let new_group = self.find_logical_expr_group(new_id).await?;
-                        let reference_group = self.find_logical_expr_group(reference_id).await?;
+                        let reference_group_opt =
+                            self.find_logical_expr_group(reference_id).await?;
+                        let new_group_opt = self.find_logical_expr_group(new_id).await?;
 
-                        match (new_group, reference_group) {
-                            (Some(new_group), Some(reference_group))
-                                if new_group != reference_group =>
-                            {
-                                // Two different groups now contain equivalent expressions - merge them.
-                                pending_merges.push((new_group, reference_group));
-                            }
-                            (None, Some(reference_group)) => {
-                                // Expression changed but group stays the same - update the group info.
-                                let group_info = self
-                                    .group_info
-                                    .get_mut(&reference_group)
-                                    .ok_or(MemoError::GroupNotFound(reference_group))?;
-                                group_info.expressions.remove(&reference_id);
-                                group_info.expressions.insert(new_id);
+                        if let Some(reference_group) = reference_group_opt {
+                            let group_info = self
+                                .group_info
+                                .get_mut(&reference_group)
+                                .ok_or(MemoError::GroupNotFound(reference_group))?;
+
+                            group_info.expressions.remove(&reference_id);
+                            group_info.expressions.insert(new_id);
+
+                            self.logical_id_to_group_index.remove(&reference_id);
+                            if new_group_opt.is_none() {
                                 self.logical_id_to_group_index
                                     .insert(new_id, reference_group);
                             }
+                        }
+
+                        self.repr_logical_expr_id.merge(&reference_id, &new_id);
+
+                        match (new_group_opt, reference_group_opt) {
+                            // Two different groups now contain equivalent expressions - merge them.
+                            (Some(new_group), Some(reference_group))
+                                if new_group != reference_group =>
+                            {
+                                pending_merges.push((new_group, reference_group));
+                            }
+
                             _ => {} // Other cases don't require action.
                         }
                     }
@@ -302,5 +313,131 @@ impl Memo for MemoryMemo {
         _physical_expr_id: PhysicalExpressionId,
     ) -> MemoResult<Option<Cost>> {
         todo!()
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use crate::cir::{Child, OperatorData};
+
+    pub async fn lookup_or_insert(
+        memo: &mut impl Memo,
+        data: i64,
+        children: Vec<GroupId>,
+    ) -> GroupId {
+        let expr = LogicalExpression {
+            tag: data.to_string(),
+            data: vec![OperatorData::Int64(data)],
+            children: children.iter().map(|g| Child::Singleton(*g)).collect(),
+        };
+
+        let eid = memo.get_logical_expr_id(&expr).await.unwrap();
+        match memo.find_logical_expr_group(eid).await.unwrap() {
+            None => memo
+                .create_group(eid, &LogicalProperties(None))
+                .await
+                .unwrap(),
+            Some(g) => g,
+        }
+    }
+
+    pub async fn insert_into_group(
+        memo: &mut impl Memo,
+        data: i64,
+        children: Vec<GroupId>,
+        gid: GroupId,
+    ) -> GroupId {
+        let g = lookup_or_insert(memo, data, children).await;
+        memo.merge_groups(g, gid).await.unwrap();
+        g
+    }
+
+    pub async fn retrieve(memo: &impl Memo, gid: GroupId) -> Vec<i64> {
+        let eids = memo.get_all_logical_exprs(gid).await.unwrap();
+
+        // Collect and sort data in expressions.
+        let mut data = vec![];
+        for eid in eids {
+            let expr = memo.materialize_logical_expr(eid).await.unwrap();
+            if let OperatorData::Int64(v) = expr.data[0] {
+                data.push(v);
+            }
+        }
+        data.sort();
+        data
+    }
+
+    #[tokio::test]
+    async fn test_lookup_same() {
+        let mut memo = MemoryMemo::default();
+
+        let g0 = lookup_or_insert(&mut memo, 0, vec![]).await;
+        let g1 = lookup_or_insert(&mut memo, 0, vec![]).await;
+
+        assert_eq!(g0, g1);
+    }
+
+    #[tokio::test]
+    async fn test_lookup_different() {
+        let mut memo = MemoryMemo::default();
+
+        let g0 = lookup_or_insert(&mut memo, 0, vec![]).await;
+        let g1 = lookup_or_insert(&mut memo, 1, vec![]).await;
+
+        assert_ne!(g0, g1);
+    }
+
+    #[tokio::test]
+    async fn test_add_to_group() {
+        let mut memo = MemoryMemo::default();
+
+        let g0 = lookup_or_insert(&mut memo, 0, vec![]).await;
+        insert_into_group(&mut memo, 1, vec![], g0).await;
+
+        assert_eq!(retrieve(&memo, g0).await, vec![0, 1]);
+    }
+
+    #[tokio::test]
+    async fn test_merge() {
+        let mut memo = MemoryMemo::default();
+
+        let g0 = lookup_or_insert(&mut memo, 0, vec![]).await;
+        insert_into_group(&mut memo, 1, vec![], g0).await;
+        let g2 = lookup_or_insert(&mut memo, 2, vec![]).await;
+        insert_into_group(&mut memo, 3, vec![], g2).await;
+        let g4 = insert_into_group(&mut memo, 0, vec![], g2).await;
+
+        assert_eq!(retrieve(&memo, g4).await, vec![0, 1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn test_recursive_merge() {
+        let mut memo = MemoryMemo::default();
+
+        // g0: 0(), 1()
+        // g4: 4(g0), 5()
+        // g2: 2(), 3(), 1()
+        // g5: 4(g2), 6()
+
+        let g0 = lookup_or_insert(&mut memo, 0, vec![]).await;
+        let g0 = insert_into_group(&mut memo, 1, vec![], g0).await;
+        let g4 = lookup_or_insert(&mut memo, 4, vec![g0]).await;
+        insert_into_group(&mut memo, 5, vec![], g4).await;
+
+        let g2 = lookup_or_insert(&mut memo, 2, vec![]).await;
+        let g2 = insert_into_group(&mut memo, 3, vec![], g2).await;
+        let g5 = lookup_or_insert(&mut memo, 4, vec![g2]).await;
+        insert_into_group(&mut memo, 6, vec![], g5).await;
+
+        // Trigger recursive merge.
+        let g6 = insert_into_group(&mut memo, 1, vec![], g2).await;
+
+        assert_eq!(retrieve(&memo, g6).await, vec![0, 1, 2, 3]);
+
+        // Get merged upper group.
+        let g7 = lookup_or_insert(&mut memo, 4, vec![g6]).await;
+
+        assert_eq!(retrieve(&memo, g7).await, vec![4, 5, 6]);
     }
 }
