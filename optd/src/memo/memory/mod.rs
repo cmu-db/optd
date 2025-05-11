@@ -99,6 +99,8 @@ impl Memo for MemoryMemo {
         logical_expr_id: LogicalExpressionId,
         props: &LogicalProperties,
     ) -> MemoResult<GroupId> {
+        let logical_expr_id = self.find_repr_logical_expr_id(logical_expr_id).await?;
+
         debug_assert!(
             self.logical_id_to_group_index
                 .get(&logical_expr_id)

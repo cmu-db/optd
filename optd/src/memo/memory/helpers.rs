@@ -156,13 +156,15 @@ impl MemoryMemo {
                 .get_mut(&old_group)
                 .ok_or(MemoError::GroupNotFound(old_group))?;
 
-            // Replace old expression with new in the group.
+            // Always remove the old expression from the group.
             group_info.expressions.remove(&old_id);
-            group_info.expressions.insert(new_id);
-
-            // Update logical_id_to_group_index.
             self.logical_id_to_group_index.remove(&old_id);
+
+            // Only add the new expression if it is not already in the group.
+            // We do not want to add the same logical expression to two groups.
+            // The merge will handle that, if it is needed.
             if new_group_opt.is_none() {
+                group_info.expressions.insert(new_id);
                 self.logical_id_to_group_index.insert(new_id, old_group);
             }
         }
