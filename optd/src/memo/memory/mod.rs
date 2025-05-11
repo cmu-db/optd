@@ -554,4 +554,53 @@ pub mod tests {
             "e and f should have same representative after merge"
         );
     }
+
+    #[tokio::test]
+    async fn test_duplicate_expr_after_merge() {
+        let mut memo = MemoryMemo::default();
+
+        // 1. Create first group with expressions 174, 175
+        let g1 = lookup_or_insert(&mut memo, 174, vec![]).await;
+        insert_into_group(&mut memo, 175, vec![], g1).await;
+
+        // 2. Create second group with expressions 176, 177
+        let g2 = lookup_or_insert(&mut memo, 176, vec![]).await;
+        insert_into_group(&mut memo, 177, vec![], g2).await;
+
+        // 3. Create third group with expressions 178, 179
+        let g3 = lookup_or_insert(&mut memo, 178, vec![]).await;
+        insert_into_group(&mut memo, 179, vec![], g3).await;
+
+        // Verify initial state
+        assert_eq!(retrieve(&memo, g1).await, vec![174, 175]);
+        assert_eq!(retrieve(&memo, g2).await, vec![176, 177]);
+        assert_eq!(retrieve(&memo, g3).await, vec![178, 179]);
+
+        // 4. Merge first and second groups (174, 176)
+        memo.merge_groups(g1, g2).await.unwrap();
+
+        // Get the representative of the merged group
+        let merged_g1_g2 = memo.find_repr_group_id(g1).await.unwrap();
+
+        // Verify merged state
+        let merged_exprs = retrieve(&memo, merged_g1_g2).await;
+        assert_eq!(merged_exprs, vec![174, 175, 176, 177]);
+
+        // 5. Merge third group with merged group (178, 174)
+        memo.merge_groups(g3, merged_g1_g2).await.unwrap();
+
+        // Find the final representative group
+        let final_group = memo.find_repr_group_id(g3).await.unwrap();
+
+        // Retrieve expressions in the final group
+        let final_exprs = retrieve(&memo, final_group).await;
+
+        // This is where the bug manifests - expression 178 appears twice
+        // The assert will fail if the bug is present
+        assert_eq!(
+            final_exprs,
+            vec![174, 175, 176, 177, 178, 179],
+            "Merged group should contain exactly one copy of each expression"
+        );
+    }
 }
