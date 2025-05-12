@@ -1,7 +1,4 @@
-use super::{
-    JobId,
-    jobs::{CostedContinuation, LogicalContinuation},
-};
+use super::jobs::{CostedContinuation, LogicalContinuation};
 use crate::cir::{
     Cost, GoalId, GroupId, ImplementationRule, LogicalExpressionId, LogicalPlan,
     PhysicalExpressionId, PhysicalPlan, TransformationRule,
@@ -19,24 +16,10 @@ pub(crate) struct TaskId(pub i64);
 
 /// A task represents a higher-level objective in the optimization process.
 ///
-/// Tasks are composed of one or more jobs and may depend on other tasks.
 /// They represent structured, potentially hierarchical components of the
 /// optimization process.
 #[derive(Clone)]
-pub(crate) struct Task {
-    /// The specific kind of task.
-    pub kind: TaskKind,
-
-    /// Set of job IDs that is depending on.
-    pub uncompleted_jobs: HashSet<JobId>,
-}
-
-/// Enumeration of different types of tasks in the optimizer.
-///
-/// Each variant represents a structured component of the optimization process
-/// that may launch multiple jobs and coordinate their execution.
-#[derive(Clone)]
-pub(crate) enum TaskKind {
+pub(crate) enum Task {
     OptimizePlan(OptimizePlanTask),
     OptimizeGoal(OptimizeGoalTask),
     ExploreGroup(ExploreGroupTask),
@@ -121,7 +104,8 @@ pub(crate) struct ExploreGroupTask {
 #[derive(Clone)]
 pub(crate) struct TransformExpressionTask {
     /// The transformation rule to apply.
-    pub rule: TransformationRule,
+    /// NOTE: Variable not used but kept for observability.
+    pub _rule: TransformationRule,
     /// The logical expression to transform.
     pub expression_id: LogicalExpressionId,
 
@@ -237,14 +221,4 @@ pub(crate) struct ContinueWithCostedTask {
     pub fork_out: TaskId,
     /// Potential `ForkCostedTask` fork spawned off from this task.
     pub fork_in: Option<TaskId>,
-}
-
-impl Task {
-    /// Creates a new task with the specified kind and empty job set.
-    fn new(kind: TaskKind) -> Self {
-        Self {
-            kind,
-            uncompleted_jobs: HashSet::new(),
-        }
-    }
 }

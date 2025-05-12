@@ -1,7 +1,7 @@
 use super::{
     ContinueWithCostedTask, ContinueWithLogicalTask, CostExpressionTask, ExploreGroupTask,
     ForkCostedTask, ForkLogicalTask, ImplementExpressionTask, OptimizeGoalTask, OptimizePlanTask,
-    Task, TaskId, TaskKind, TransformExpressionTask,
+    Task, TaskId, TransformExpressionTask,
 };
 use crate::{memo::Memo, optimizer::Optimizer};
 
@@ -38,8 +38,8 @@ impl<M: Memo> Optimizer<M> {
     /// Get a task as an OptimizePlanTask by its ID.
     #[allow(dead_code)]
     pub(crate) fn get_optimize_plan_task(&self, task_id: TaskId) -> Option<&OptimizePlanTask> {
-        self.get_task(task_id).and_then(|task| match &task.kind {
-            TaskKind::OptimizePlan(task) => Some(task),
+        self.get_task(task_id).and_then(|task| match &task {
+            Task::OptimizePlan(task) => Some(task),
             _ => None,
         })
     }
@@ -47,16 +47,16 @@ impl<M: Memo> Optimizer<M> {
     /// Get a task as an OptimizeGoalTask by its ID.
     #[allow(dead_code)]
     pub(crate) fn get_optimize_goal_task(&self, task_id: TaskId) -> Option<&OptimizeGoalTask> {
-        self.get_task(task_id).and_then(|task| match &task.kind {
-            TaskKind::OptimizeGoal(task) => Some(task),
+        self.get_task(task_id).and_then(|task| match &task {
+            Task::OptimizeGoal(task) => Some(task),
             _ => None,
         })
     }
 
     /// Get a task as an ExploreGroupTask by its ID.
     pub(crate) fn get_explore_group_task(&self, task_id: TaskId) -> Option<&ExploreGroupTask> {
-        self.get_task(task_id).and_then(|task| match &task.kind {
-            TaskKind::ExploreGroup(task) => Some(task),
+        self.get_task(task_id).and_then(|task| match &task {
+            Task::ExploreGroup(task) => Some(task),
             _ => None,
         })
     }
@@ -67,8 +67,8 @@ impl<M: Memo> Optimizer<M> {
         &self,
         task_id: TaskId,
     ) -> Option<&ImplementExpressionTask> {
-        self.get_task(task_id).and_then(|task| match &task.kind {
-            TaskKind::ImplementExpression(task) => Some(task),
+        self.get_task(task_id).and_then(|task| match &task {
+            Task::ImplementExpression(task) => Some(task),
             _ => None,
         })
     }
@@ -78,8 +78,8 @@ impl<M: Memo> Optimizer<M> {
         &self,
         task_id: TaskId,
     ) -> Option<&TransformExpressionTask> {
-        self.get_task(task_id).and_then(|task| match &task.kind {
-            TaskKind::TransformExpression(task) => Some(task),
+        self.get_task(task_id).and_then(|task| match &task {
+            Task::TransformExpression(task) => Some(task),
             _ => None,
         })
     }
@@ -87,16 +87,16 @@ impl<M: Memo> Optimizer<M> {
     /// Get a task as a CostExpressionTask by its ID.
     #[allow(dead_code)]
     pub(crate) fn get_cost_expression_task(&self, task_id: TaskId) -> Option<&CostExpressionTask> {
-        self.get_task(task_id).and_then(|task| match &task.kind {
-            TaskKind::CostExpression(task) => Some(task),
+        self.get_task(task_id).and_then(|task| match &task {
+            Task::CostExpression(task) => Some(task),
             _ => None,
         })
     }
 
     /// Get a task as a ForkLogicalTask by its ID.
     pub(crate) fn get_fork_logical_task(&self, task_id: TaskId) -> Option<&ForkLogicalTask> {
-        self.get_task(task_id).and_then(|task| match &task.kind {
-            TaskKind::ForkLogical(task) => Some(task),
+        self.get_task(task_id).and_then(|task| match &task {
+            Task::ForkLogical(task) => Some(task),
             _ => None,
         })
     }
@@ -104,8 +104,8 @@ impl<M: Memo> Optimizer<M> {
     /// Get a task as a ForkCostedTask by its ID.
     #[allow(dead_code)]
     pub(crate) fn get_fork_costed_task(&self, task_id: TaskId) -> Option<&ForkCostedTask> {
-        self.get_task(task_id).and_then(|task| match &task.kind {
-            TaskKind::ForkCosted(task) => Some(task),
+        self.get_task(task_id).and_then(|task| match &task {
+            Task::ForkCosted(task) => Some(task),
             _ => None,
         })
     }
@@ -115,8 +115,8 @@ impl<M: Memo> Optimizer<M> {
         &self,
         task_id: TaskId,
     ) -> Option<&ContinueWithLogicalTask> {
-        self.get_task(task_id).and_then(|task| match &task.kind {
-            TaskKind::ContinueWithLogical(task) => Some(task),
+        self.get_task(task_id).and_then(|task| match &task {
+            Task::ContinueWithLogical(task) => Some(task),
             _ => None,
         })
     }
@@ -127,8 +127,8 @@ impl<M: Memo> Optimizer<M> {
         &self,
         task_id: TaskId,
     ) -> Option<&ContinueWithCostedTask> {
-        self.get_task(task_id).and_then(|task| match &task.kind {
-            TaskKind::ContinueWithCosted(task) => Some(task),
+        self.get_task(task_id).and_then(|task| match &task {
+            Task::ContinueWithCosted(task) => Some(task),
             _ => None,
         })
     }
@@ -141,11 +141,10 @@ impl<M: Memo> Optimizer<M> {
         &mut self,
         task_id: TaskId,
     ) -> Option<&mut OptimizePlanTask> {
-        self.get_task_mut(task_id)
-            .and_then(|task| match &mut task.kind {
-                TaskKind::OptimizePlan(task) => Some(task),
-                _ => None,
-            })
+        self.get_task_mut(task_id).and_then(|task| match task {
+            Task::OptimizePlan(task) => Some(task),
+            _ => None,
+        })
     }
 
     /// Get a mutable task as an OptimizeGoalTask by its ID.
@@ -153,11 +152,10 @@ impl<M: Memo> Optimizer<M> {
         &mut self,
         task_id: TaskId,
     ) -> Option<&mut OptimizeGoalTask> {
-        self.get_task_mut(task_id)
-            .and_then(|task| match &mut task.kind {
-                TaskKind::OptimizeGoal(task) => Some(task),
-                _ => None,
-            })
+        self.get_task_mut(task_id).and_then(|task| match task {
+            Task::OptimizeGoal(task) => Some(task),
+            _ => None,
+        })
     }
 
     /// Get a mutable task as an ExploreGroupTask by its ID.
@@ -165,11 +163,10 @@ impl<M: Memo> Optimizer<M> {
         &mut self,
         task_id: TaskId,
     ) -> Option<&mut ExploreGroupTask> {
-        self.get_task_mut(task_id)
-            .and_then(|task| match &mut task.kind {
-                TaskKind::ExploreGroup(task) => Some(task),
-                _ => None,
-            })
+        self.get_task_mut(task_id).and_then(|task| match task {
+            Task::ExploreGroup(task) => Some(task),
+            _ => None,
+        })
     }
 
     /// Get a mutable task as an ImplementExpressionTask by its ID.
@@ -178,11 +175,10 @@ impl<M: Memo> Optimizer<M> {
         &mut self,
         task_id: TaskId,
     ) -> Option<&mut ImplementExpressionTask> {
-        self.get_task_mut(task_id)
-            .and_then(|task| match &mut task.kind {
-                TaskKind::ImplementExpression(task) => Some(task),
-                _ => None,
-            })
+        self.get_task_mut(task_id).and_then(|task| match task {
+            Task::ImplementExpression(task) => Some(task),
+            _ => None,
+        })
     }
 
     /// Get a mutable task as a TransformExpressionTask by its ID.
@@ -190,11 +186,10 @@ impl<M: Memo> Optimizer<M> {
         &mut self,
         task_id: TaskId,
     ) -> Option<&mut TransformExpressionTask> {
-        self.get_task_mut(task_id)
-            .and_then(|task| match &mut task.kind {
-                TaskKind::TransformExpression(task) => Some(task),
-                _ => None,
-            })
+        self.get_task_mut(task_id).and_then(|task| match task {
+            Task::TransformExpression(task) => Some(task),
+            _ => None,
+        })
     }
 
     /// Get a mutable task as a CostExpressionTask by its ID.
@@ -203,11 +198,10 @@ impl<M: Memo> Optimizer<M> {
         &mut self,
         task_id: TaskId,
     ) -> Option<&mut CostExpressionTask> {
-        self.get_task_mut(task_id)
-            .and_then(|task| match &mut task.kind {
-                TaskKind::CostExpression(task) => Some(task),
-                _ => None,
-            })
+        self.get_task_mut(task_id).and_then(|task| match task {
+            Task::CostExpression(task) => Some(task),
+            _ => None,
+        })
     }
 
     /// Get a mutable task as a ForkLogicalTask by its ID.
@@ -215,11 +209,10 @@ impl<M: Memo> Optimizer<M> {
         &mut self,
         task_id: TaskId,
     ) -> Option<&mut ForkLogicalTask> {
-        self.get_task_mut(task_id)
-            .and_then(|task| match &mut task.kind {
-                TaskKind::ForkLogical(task) => Some(task),
-                _ => None,
-            })
+        self.get_task_mut(task_id).and_then(|task| match task {
+            Task::ForkLogical(task) => Some(task),
+            _ => None,
+        })
     }
 
     /// Get a mutable task as a ForkCostedTask by its ID.
@@ -228,11 +221,10 @@ impl<M: Memo> Optimizer<M> {
         &mut self,
         task_id: TaskId,
     ) -> Option<&mut ForkCostedTask> {
-        self.get_task_mut(task_id)
-            .and_then(|task| match &mut task.kind {
-                TaskKind::ForkCosted(task) => Some(task),
-                _ => None,
-            })
+        self.get_task_mut(task_id).and_then(|task| match task {
+            Task::ForkCosted(task) => Some(task),
+            _ => None,
+        })
     }
 
     /// Get a mutable task as a ContinueWithLogicalTask by its ID.
@@ -240,11 +232,10 @@ impl<M: Memo> Optimizer<M> {
         &mut self,
         task_id: TaskId,
     ) -> Option<&mut ContinueWithLogicalTask> {
-        self.get_task_mut(task_id)
-            .and_then(|task| match &mut task.kind {
-                TaskKind::ContinueWithLogical(task) => Some(task),
-                _ => None,
-            })
+        self.get_task_mut(task_id).and_then(|task| match task {
+            Task::ContinueWithLogical(task) => Some(task),
+            _ => None,
+        })
     }
 
     /// Get a mutable task as a ContinueWithCostedTask by its ID.
@@ -253,10 +244,9 @@ impl<M: Memo> Optimizer<M> {
         &mut self,
         task_id: TaskId,
     ) -> Option<&mut ContinueWithCostedTask> {
-        self.get_task_mut(task_id)
-            .and_then(|task| match &mut task.kind {
-                TaskKind::ContinueWithCosted(task) => Some(task),
-                _ => None,
-            })
+        self.get_task_mut(task_id).and_then(|task| match task {
+            Task::ContinueWithCosted(task) => Some(task),
+            _ => None,
+        })
     }
 }

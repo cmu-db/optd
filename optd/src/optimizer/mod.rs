@@ -235,7 +235,7 @@ impl<M: Memo> Optimizer<M> {
                         async move {
                             message_tx.send(Request(request, task_id))
                                 .await
-                                .expect("Failed to forward optimize request");
+                                .expect("Failed to forward optimize request - channel closed");
                         }
                     );
                 },
@@ -247,25 +247,33 @@ impl<M: Memo> Optimizer<M> {
                         Retrieve(group_id, response_tx) => {
                             self.process_retrieve_properties(group_id, response_tx).await?;
                         }
-                        Product(product, job_id) => match product {
-                            NewLogicalPartial(plan, group_id) => {
-                                self.process_new_logical_partial(plan, group_id, job_id).await?;
+                        Product(product, job_id) => {
+                            let task_id = self.get_related_task_id(job_id);
+                            // Only process the product if the task is still active.
+                            if self.get_task(task_id).is_some() {
+                                match product {
+                                    NewLogicalPartial(plan, group_id) => {
+                                        self.process_new_logical_partial(plan, group_id, job_id).await?;
+                                    }
+                                    NewPhysicalPartial(plan, goal_id) => {
+                                        self.process_new_physical_partial(plan, goal_id, job_id).await?;
+                                    }
+                                    NewCostedPhysical(expression_id, cost) => {
+                                        self.process_new_costed_physical(expression_id, cost).await?;
+                                    }
+                                    CreateGroup(expression_id, properties) => {
+                                        self.process_create_group(expression_id, &properties, job_id).await?;
+                                    }
+                                    SubscribeGroup(group_id, continuation) => {
+                                        self.process_group_subscription(group_id, continuation, job_id).await?;
+                                    }
+                                    SubscribeGoal(goal, continuation) => {
+                                        self.process_goal_subscription(&goal, continuation, job_id).await?;
+                                    }
+                                }
                             }
-                            NewPhysicalPartial(plan, goal_id) => {
-                                self.process_new_physical_partial(plan, goal_id, job_id).await?;
-                            }
-                            NewCostedPhysical(expression_id, cost) => {
-                                self.process_new_costed_physical(expression_id, cost).await?;
-                            }
-                            CreateGroup(expression_id, properties) => {
-                                self.process_create_group(expression_id, &properties, job_id).await?;
-                            }
-                            SubscribeGroup(group_id, continuation) => {
-                                self.process_group_subscription(group_id, continuation, job_id).await?;
-                            }
-                            SubscribeGoal(goal, continuation) => {
-                                self.process_goal_subscription(&goal, continuation, job_id).await?;
-                            }
+
+                            self.running_jobs.remove(&job_id);
                         }
                     };
 

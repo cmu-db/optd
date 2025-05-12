@@ -1,7 +1,7 @@
 use super::TaskId;
 use crate::{
     memo::Memo,
-    optimizer::{Optimizer, tasks::TaskKind},
+    optimizer::{Optimizer, tasks::Task},
 };
 
 impl<M: Memo> Optimizer<M> {
@@ -14,10 +14,10 @@ impl<M: Memo> Optimizer<M> {
     /// # Parameters
     /// * `task_id` - ID of the task to delete.
     pub(crate) fn delete_task(&mut self, task_id: TaskId) {
-        use TaskKind::*;
+        use Task::*;
 
         let task = self.get_task(task_id).cloned().unwrap();
-        match &task.kind {
+        match &task {
             TransformExpression(task) => {
                 let explore_task = self
                     .get_explore_group_task_mut(task.explore_group_out)

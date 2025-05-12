@@ -1,4 +1,4 @@
-use super::{OptimizePlanTask, Task, TaskId, TaskKind};
+use super::{OptimizePlanTask, Task, TaskId};
 use crate::{
     cir::{
         Goal, GoalId, GroupId, LogicalExpressionId, LogicalPlan, PhysicalExpressionId,
@@ -44,7 +44,7 @@ impl<M: Memo> Optimizer<M> {
         response_tx: Sender<PhysicalPlan>,
         goal_id: GoalId,
     ) -> Result<(), OptimizeError> {
-        use TaskKind::*;
+        use Task::*;
 
         // Launch goal optimize task if needed, and get its ID.
         let goal_optimize_task_id = self.ensure_optimize_goal_task(goal_id).await?;
@@ -62,7 +62,7 @@ impl<M: Memo> Optimizer<M> {
             .optimize_plan_out
             .insert(task_id);
 
-        self.add_task(task_id, Task::new(OptimizePlan(optimize_plan_task)));
+        self.add_task(task_id, OptimizePlan(optimize_plan_task));
 
         Ok(())
     }
@@ -79,7 +79,7 @@ impl<M: Memo> Optimizer<M> {
         continuation: LogicalContinuation,
         parent_task_id: TaskId,
     ) -> Result<(), OptimizeError> {
-        use TaskKind::*;
+        use Task::*;
 
         let fork_task_id = self.next_task_id();
 
@@ -109,7 +109,7 @@ impl<M: Memo> Optimizer<M> {
             .fork_logical_out
             .insert(fork_task_id);
 
-        self.add_task(fork_task_id, Task::new(ForkLogical(fork_logical_task)));
+        self.add_task(fork_task_id, ForkLogical(fork_logical_task));
 
         Ok(())
     }
@@ -129,7 +129,7 @@ impl<M: Memo> Optimizer<M> {
         fork_out: TaskId,
         continuation: LogicalContinuation,
     ) -> TaskId {
-        use TaskKind::*;
+        use Task::*;
 
         let task_id = self.next_task_id();
         let task = ContinueWithLogicalTask {
@@ -138,7 +138,7 @@ impl<M: Memo> Optimizer<M> {
             fork_in: None,
         };
 
-        self.add_task(task_id, Task::new(ContinueWithLogical(task)));
+        self.add_task(task_id, ContinueWithLogical(task));
         self.schedule_job(
             task_id,
             JobKind::ContinueWithLogical(expression_id, continuation),
@@ -164,17 +164,17 @@ impl<M: Memo> Optimizer<M> {
         explore_group_out: TaskId,
         group_id: GroupId,
     ) -> TaskId {
-        use TaskKind::*;
+        use Task::*;
 
         let task_id = self.next_task_id();
         let task = TransformExpressionTask {
-            rule: rule.clone(),
+            _rule: rule.clone(),
             expression_id: expr_id,
             explore_group_out,
             fork_in: None,
         };
 
-        self.add_task(task_id, Task::new(TransformExpression(task)));
+        self.add_task(task_id, TransformExpression(task));
         self.schedule_job(
             task_id,
             JobKind::TransformExpression(rule, expr_id, group_id),
@@ -263,7 +263,7 @@ impl<M: Memo> Optimizer<M> {
         &mut self,
         group_id: GroupId,
     ) -> Result<TaskId, OptimizeError> {
-        use TaskKind::*;
+        use Task::*;
 
         // Find the representative group for the given group ID.
         let group_repr = self
@@ -298,10 +298,7 @@ impl<M: Memo> Optimizer<M> {
         };
 
         // Register the task in the manager and index.
-        self.add_task(
-            exploration_task_id,
-            Task::new(ExploreGroup(exploration_task)),
-        );
+        self.add_task(exploration_task_id, ExploreGroup(exploration_task));
         self.group_exploration_task_index
             .insert(group_repr, exploration_task_id);
 
@@ -320,7 +317,7 @@ impl<M: Memo> Optimizer<M> {
         &mut self,
         goal_id: GoalId,
     ) -> Result<TaskId, OptimizeError> {
-        use TaskKind::*;
+        use Task::*;
 
         // Find the representative goal for the given goal ID.
         let goal_repr = self
@@ -363,10 +360,7 @@ impl<M: Memo> Optimizer<M> {
             .insert(goal_optimize_task_id);
 
         // Register the task in the manager and index.
-        self.add_task(
-            goal_optimize_task_id,
-            Task::new(OptimizeGoal(goal_optimize_task)),
-        );
+        self.add_task(goal_optimize_task_id, OptimizeGoal(goal_optimize_task));
         self.goal_optimization_task_index
             .insert(goal_repr, goal_optimize_task_id);
 

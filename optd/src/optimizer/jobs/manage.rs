@@ -8,9 +8,7 @@ impl<M: Memo> Optimizer<M> {
     /// Schedules a new job and associates it with a task.
     ///
     /// This method creates a job of the specified kind, associates it with
-    /// the given task, adds it to the pending jobs collection, and updates
-    /// the task's uncompleted jobs set.
-    ///
+    /// the given task and adds it to the pending jobs collection.
     /// # Parameters
     /// * `task_id` - The ID of the task that's launching this job.
     /// * `kind` - The kind of job to create.
@@ -26,13 +24,6 @@ impl<M: Memo> Optimizer<M> {
         let job = Job(task_id, kind);
         self.pending_jobs.insert(job_id, job);
         self.job_schedule_queue.push_back(job_id);
-
-        // Add job to task's uncompleted jobs set.
-        self.tasks
-            .get_mut(&task_id)
-            .unwrap()
-            .uncompleted_jobs
-            .insert(job_id);
 
         job_id
     }
@@ -85,28 +76,6 @@ impl<M: Memo> Optimizer<M> {
                 }
             }
         }
-
-        Ok(())
-    }
-
-    /// Marks a job as completed and updates related task status.
-    ///
-    /// This method removes the job from running jobs, updates the task's
-    /// uncompleted jobs set, and marks the task as clean if it has no more
-    /// uncompleted jobs.
-    ///
-    /// # Parameters
-    /// * `job_id` - The ID of the job to mark as completed.
-    ///
-    /// # Returns
-    /// * `Result<(), Error>` - Success or error during job completion.
-    pub(crate) async fn complete_job(&mut self, job_id: JobId) -> Result<(), OptimizeError> {
-        // Remove the job from the running jobs.
-        let Job(task_id, _) = self.running_jobs.remove(&job_id).unwrap();
-
-        // Remove the job from the task's uncompleted jobs set.
-        let task = self.tasks.get_mut(&task_id).unwrap();
-        task.uncompleted_jobs.remove(&job_id);
 
         Ok(())
     }
