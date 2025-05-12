@@ -4,15 +4,34 @@ use crate::memo::{Memo, MergeGroupProduct, MergeProducts};
 mod helpers;
 
 impl<M: Memo> Optimizer<M> {
-    /// Helper method to handle different types of merge results.
+    /// Processes merge results by updating the task graph to reflect merges in the memo.
     ///
-    /// This method processes the results of group and goal merges, updating the
-    /// internal task graph accordingly. Specifically it:
+    /// When groups are merged in the memo, multiple exploration tasks may now refer to
+    /// the same underlying group. This method handles the task graph updates required
+    /// by such merges. For each merged group, it:
     ///
-    /// TODO(Alexis): Document. Basically: dedup, update, and consolidate.
+    /// 1. **Deduplicates**: For each affected exploration task, removes duplicate logical
+    ///    expressions that now map to the same representative, cleaning up or updating
+    ///    related transform and continuation tasks.
+    ///
+    /// 2. **Updates**: Sends any new logical expressions to each task, creating appropriate
+    ///    transform tasks (for the principal task) and continuation tasks (for all tasks).
+    ///
+    /// 3. **Consolidates**: Merges all secondary tasks into a principal task by transferring
+    ///    their dependencies and updating references, ensuring a clean 1:1 mapping between
+    ///    groups and exploration tasks.
+    ///
+    /// 4. **Re-indexes**: Updates the group exploration index to point to the principal task
+    ///    for the new group ID.
+    ///
+    /// After processing, each merged group will have exactly one exploration task associated
+    /// with it, containing all logical expressions from the original groups with no duplicates.
     ///
     /// # Parameters
-    /// * `result` - The merge result to handle.
+    /// * `result` - The merge result to handle, containing information about merged groups.
+    ///
+    /// # Returns
+    /// * `Result<(), OptimizeError>` - Success or an error that occurred during processing.
     pub(super) async fn handle_merge_result(
         &mut self,
         result: MergeProducts,
