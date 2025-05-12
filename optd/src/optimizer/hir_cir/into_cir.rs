@@ -102,32 +102,6 @@ pub fn hir_goal_to_cir(hir_goal: &hir::Goal) -> Goal {
     Goal(group_id, properties)
 }
 
-/// Converts a [`Value`] into a fully materialized [`LogicalPlan`].
-///
-/// We use this function when materializing a logical expression for use in properties.
-///
-/// # Panics
-///
-/// Panics if the [`Value`] is not a [`Logical`] variant or if the [`Logical`] variant is not a
-/// [`Materialized`] variant.
-pub fn value_to_logical(value: &Value) -> LogicalPlan {
-    use Materializable::*;
-
-    match &value.data {
-        CoreData::Logical(logical_op) => match logical_op {
-            UnMaterialized(_) => {
-                panic!("Cannot convert UnMaterialized LogicalOperator to LogicalPlan")
-            }
-            Materialized(log_op) => LogicalPlan(Operator {
-                tag: log_op.operator.tag.clone(),
-                data: convert_values_to_operator_data(&log_op.operator.data),
-                children: convert_values_to_children(&log_op.operator.children, value_to_logical),
-            }),
-        },
-        _ => panic!("Expected Logical CoreData variant, found: {:?}", value.data),
-    }
-}
-
 /// A generic function to convert a slice of [`Value`]s into a vector of mapped results via the
 /// input `converter` function.
 fn convert_values_to_children<T, F>(values: &[Value], converter: F) -> Vec<Child<Arc<T>>>
