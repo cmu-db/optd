@@ -103,7 +103,7 @@ impl MemoryMemo {
 
         // Create merge product record
         let merge_product = MergeGroupProduct {
-            new_repr_group_id: new_group_id,
+            new_group_id,
             merged_groups: vec![group_id_1, group_id_2],
         };
 
@@ -265,18 +265,18 @@ impl MemoryMemo {
         let mut consolidated_map: HashMap<GroupId, HashSet<GroupId>> = HashMap::new();
 
         for op in merge_operations {
-            let current_repr = self.find_repr_group_id(op.new_repr_group_id).await?;
+            let current_repr = self.find_repr_group_id(op.new_group_id).await?;
 
             consolidated_map
                 .entry(current_repr)
                 .or_default()
                 .extend(op.merged_groups.iter().copied());
 
-            if op.new_repr_group_id != current_repr {
+            if op.new_group_id != current_repr {
                 consolidated_map
                     .entry(current_repr)
                     .or_default()
-                    .insert(op.new_repr_group_id);
+                    .insert(op.new_group_id);
             }
         }
 
@@ -285,7 +285,7 @@ impl MemoryMemo {
             .into_iter()
             .filter_map(|(repr, groups)| {
                 (!groups.is_empty()).then(|| MergeGroupProduct {
-                    new_repr_group_id: repr,
+                    new_group_id: repr,
                     merged_groups: groups.into_iter().collect(),
                 })
             })

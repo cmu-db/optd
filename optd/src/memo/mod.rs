@@ -14,20 +14,20 @@ pub use memory::MemoryMemo;
 /// Result of merging two groups.
 #[derive(Debug)]
 pub struct MergeGroupProduct {
-    /// ID of the new representative group id.
-    pub new_repr_group_id: GroupId,
+    /// ID of the new group.
+    pub new_group_id: GroupId,
 
-    /// Groups that were merged along with their expressions.
+    /// Groups that were merged.
     pub merged_groups: Vec<GroupId>,
 }
 
 /// Result of merging two goals.
 #[derive(Debug)]
 pub struct MergeGoalProduct {
-    /// ID of the new representative goal id.
-    pub new_repr_goal_id: GoalId,
+    /// ID of the new goal.
+    pub new_goal_id: GoalId,
 
-    /// Goals that were merged along with their potential best costed expression.
+    /// Goals that were merged.
     pub merged_goals: Vec<GoalId>,
 }
 

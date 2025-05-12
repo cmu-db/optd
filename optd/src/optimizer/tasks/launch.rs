@@ -79,15 +79,15 @@ impl<M: Memo> Optimizer<M> {
     ) -> Result<(), OptimizeError> {
         use TaskKind::*;
 
-        let explore_group_in = self.ensure_group_exploration_task(group_id).await?;
         let fork_task_id = self.next_task_id();
 
+        let explore_group_in = self.ensure_group_exploration_task(group_id).await?;
+        let explore_group_task = self.get_explore_group_task(explore_group_in).unwrap();
+
         // Spawn all continuations.
-        let continue_with_logical_in = self
-            .memo
-            .get_all_logical_exprs(group_id)
-            .await
-            .map_err(OptimizeError::MemoError)?
+        let continue_with_logical_in = explore_group_task
+            .dispatched_exprs
+            .clone()
             .iter()
             .map(|expression_id| {
                 self.launch_continue_with_logical_task(
@@ -118,7 +118,7 @@ impl<M: Memo> Optimizer<M> {
     /// Helper method to launch a task for continuing with a logical expression.
     ///
     /// # Parameters
-    /// * `expr_id`: The ID of the logical expression to continue with.
+    /// * `expression_id`: The ID of the logical expression to continue with.
     /// * `fork_out`: The ID of the fork task that this continue task feeds into.
     /// * `continuation`: The logical continuation to be used.
     ///
@@ -126,7 +126,7 @@ impl<M: Memo> Optimizer<M> {
     /// * `TaskId`: The ID of the created continue task.
     fn launch_continue_with_logical_task(
         &mut self,
-        expr_id: LogicalExpressionId,
+        expression_id: LogicalExpressionId,
         fork_out: TaskId,
         continuation: LogicalContinuation,
     ) -> TaskId {
@@ -134,13 +134,16 @@ impl<M: Memo> Optimizer<M> {
 
         let task_id = self.next_task_id();
         let task = ContinueWithLogicalTask {
-            expr_id,
+            expression_id,
             fork_out,
             fork_in: None,
         };
 
         self.add_task(task_id, Task::new(ContinueWithLogical(task)));
-        self.schedule_job(task_id, JobKind::ContinueWithLogical(expr_id, continuation));
+        self.schedule_job(
+            task_id,
+            JobKind::ContinueWithLogical(expression_id, continuation),
+        );
 
         task_id
     }
@@ -243,6 +246,7 @@ impl<M: Memo> Optimizer<M> {
         // Create the exploration task.
         let exploration_task = ExploreGroupTask {
             group_id,
+            dispatched_exprs: logical_expressions,
             optimize_goal_out: HashSet::new(),
             fork_logical_out: HashSet::new(),
             transform_expr_in,

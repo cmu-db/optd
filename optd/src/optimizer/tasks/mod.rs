@@ -9,6 +9,7 @@ use crate::cir::{
 use std::collections::HashSet;
 use tokio::sync::mpsc::Sender;
 
+mod delete;
 mod launch;
 mod manage;
 
@@ -21,6 +22,7 @@ pub(crate) struct TaskId(pub i64);
 /// Tasks are composed of one or more jobs and may depend on other tasks.
 /// They represent structured, potentially hierarchical components of the
 /// optimization process.
+#[derive(Clone)]
 pub(crate) struct Task {
     /// The specific kind of task.
     pub kind: TaskKind,
@@ -33,6 +35,7 @@ pub(crate) struct Task {
 ///
 /// Each variant represents a structured component of the optimization process
 /// that may launch multiple jobs and coordinate their execution.
+#[derive(Clone)]
 pub(crate) enum TaskKind {
     OptimizePlan(OptimizePlanTask),
     OptimizeGoal(OptimizeGoalTask),
@@ -51,6 +54,7 @@ pub(crate) enum TaskKind {
 //=============================================================================
 
 /// Top-level task to optimize a logical plan.
+#[derive(Clone)]
 pub(crate) struct OptimizePlanTask {
     /// The logical plan to be optimized.
     pub plan: LogicalPlan,
@@ -63,6 +67,7 @@ pub(crate) struct OptimizePlanTask {
 }
 
 /// Task to optimize a specific goal.
+#[derive(Clone)]
 pub(crate) struct OptimizeGoalTask {
     /// The goal to optimize.
     pub goal_id: GoalId,
@@ -89,9 +94,12 @@ pub(crate) struct OptimizeGoalTask {
 }
 
 /// Task to explore expressions in a logical group.
+#[derive(Clone)]
 pub(crate) struct ExploreGroupTask {
     /// The group to explore.
     pub group_id: GroupId,
+    /// All dispatched logical expressions in the group.
+    pub dispatched_exprs: HashSet<LogicalExpressionId>,
 
     // Output tasks that get fed by the output of this task.
     /// `OptimizeGoalTask` optimization tasks depending on this group to get
@@ -106,6 +114,7 @@ pub(crate) struct ExploreGroupTask {
 }
 
 /// Task to apply a specific transformation rule to a logical expression.
+#[derive(Clone)]
 pub(crate) struct TransformExpressionTask {
     /// The transformation rule to apply.
     pub rule: TransformationRule,
@@ -123,6 +132,7 @@ pub(crate) struct TransformExpressionTask {
 }
 
 /// Task to implement a logical expression into a physical expression.
+#[derive(Clone)]
 pub(crate) struct ImplementExpressionTask {
     /// The implementation rule to apply.
     pub rule: ImplementationRule,
@@ -140,6 +150,7 @@ pub(crate) struct ImplementExpressionTask {
 }
 
 /// Task to cost a physical expression.
+#[derive(Clone)]
 pub(crate) struct CostExpressionTask {
     /// The physical expression to cost.
     pub expression_id: PhysicalExpressionId,
@@ -157,6 +168,7 @@ pub(crate) struct CostExpressionTask {
 }
 
 /// Task to fork the logical optimization process.
+#[derive(Clone)]
 pub(crate) struct ForkLogicalTask {
     /// The fork continuation.
     pub continuation: LogicalContinuation,
@@ -175,6 +187,7 @@ pub(crate) struct ForkLogicalTask {
 }
 
 /// Task to fork the costed optimization process.
+#[derive(Clone)]
 pub(crate) struct ForkCostedTask {
     /// The fork continuation.
     pub continuation: CostedContinuation,
@@ -194,9 +207,10 @@ pub(crate) struct ForkCostedTask {
 }
 
 /// Task to continue with a logical expression.
+#[derive(Clone)]
 pub(crate) struct ContinueWithLogicalTask {
     /// The logical expression to continue with.
-    pub expr_id: LogicalExpressionId,
+    pub expression_id: LogicalExpressionId,
 
     /// `ForkLogicalTask` that gets fed by the output of this continuation.
     pub fork_out: TaskId,
@@ -205,9 +219,10 @@ pub(crate) struct ContinueWithLogicalTask {
 }
 
 /// Task to continue with a costed expression.
+#[derive(Clone)]
 pub(crate) struct ContinueWithCostedTask {
     /// The physical expression to continue with.
-    pub expr_id: PhysicalExpressionId,
+    pub expression_id: PhysicalExpressionId,
 
     /// `ForkCostedTask` that gets fed by the output of this continuation.
     pub fork_out: TaskId,

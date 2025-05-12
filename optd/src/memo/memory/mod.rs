@@ -373,8 +373,8 @@ pub mod tests {
             .expect("Should have a merge record for g4 and g5");
 
         // Get the new representative IDs
-        let g6 = base_merge.new_repr_group_id;
-        let g7 = upper_merge.new_repr_group_id;
+        let g6 = base_merge.new_group_id;
+        let g7 = upper_merge.new_group_id;
 
         // Verify that each record has ONLY the current representatives that were merged
         let base_groups = &base_merge.merged_groups;
@@ -412,7 +412,7 @@ pub mod tests {
         let merge_result1 = memo.merge_groups(g0, g1).await.unwrap();
         assert_eq!(merge_result1.group_merges.len(), 1);
 
-        let g3 = merge_result1.group_merges[0].new_repr_group_id;
+        let g3 = merge_result1.group_merges[0].new_group_id;
 
         // Verify the merged groups in the first result
         let merged_groups1 = &merge_result1.group_merges[0].merged_groups;
@@ -425,7 +425,7 @@ pub mod tests {
         assert_eq!(merge_result2.group_merges.len(), 1);
 
         // Get the new representative
-        let g4 = merge_result2.group_merges[0].new_repr_group_id;
+        let g4 = merge_result2.group_merges[0].new_group_id;
 
         // Verify the merge result only includes the current representatives
         // that were merged (g3 and g2), not groups from previous merges
@@ -457,7 +457,7 @@ pub mod tests {
         assert_eq!(result1.group_merges[0].merged_groups.len(), 2);
         assert!(result1.group_merges[0].merged_groups.contains(&g0));
         assert!(result1.group_merges[0].merged_groups.contains(&g1));
-        let g4 = result1.group_merges[0].new_repr_group_id;
+        let g4 = result1.group_merges[0].new_group_id;
 
         // Merge g2+g3 -> g5
         let result2 = memo.merge_groups(g2, g3).await.unwrap();
@@ -465,7 +465,7 @@ pub mod tests {
         assert_eq!(result2.group_merges[0].merged_groups.len(), 2);
         assert!(result2.group_merges[0].merged_groups.contains(&g2));
         assert!(result2.group_merges[0].merged_groups.contains(&g3));
-        let g5 = result2.group_merges[0].new_repr_group_id;
+        let g5 = result2.group_merges[0].new_group_id;
 
         // Now merge g4+g5
         let final_result = memo.merge_groups(g4, g5).await.unwrap();
@@ -474,7 +474,7 @@ pub mod tests {
         assert_eq!(final_result.group_merges.len(), 1);
 
         // Get the final representative
-        let g6 = final_result.group_merges[0].new_repr_group_id;
+        let g6 = final_result.group_merges[0].new_group_id;
 
         // Verify the merge result only includes the current representatives
         // that were merged (g4 and g5), not groups from previous merges
