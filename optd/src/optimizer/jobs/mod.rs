@@ -55,12 +55,14 @@ pub(crate) enum JobKind {
     ///
     /// This job generates physical implementations of a logical expression
     /// based on specific implementation strategies.
+    #[allow(dead_code)]
     ImplementExpression(ImplementationRule, LogicalExpressionId, GoalId),
 
     /// Starts computing the cost of a physical expression.
     ///
     /// This job estimates the execution cost of a physical implementation
     /// to aid in selecting the optimal plan.
+    #[allow(dead_code)]
     CostExpression(PhysicalExpressionId),
 
     /// Continues processing with a logical expression result.
@@ -73,5 +75,6 @@ pub(crate) enum JobKind {
     ///
     /// This job represents a continuation-passing-style callback for
     /// handling the result of an optimized physical expression operation.
+    #[allow(dead_code)]
     ContinueWithCosted(PhysicalExpressionId, CostedContinuation),
 }

@@ -7,17 +7,64 @@ use crate::{
 };
 
 impl<M: Memo> Optimizer<M> {
+    /// Consolidate a group exploration task into a principal task.
+    ///
+    /// - A merge in the memo may cause several group exploration tasks to refer to
+    ///   the same underlying group. This function consolidates all such secondary
+    ///   tasks into a principal one.
+    ///
+    /// - This involves:
+    ///   - Moving all outgoing fork and goal tasks from secondary to principal.
+    ///   - Updating each such task's `explore_group_in` to point to the principal.
+    ///   - Deleting the secondary task.
+    ///
+    /// # Arguments
+    /// * `principal_task_id` - The ID of the task to retain as canonical.
+    /// * `secondary_task_ids` - All other task IDs to merge into the principal.
+    pub(super) async fn consolidate_group_explore(
+        &mut self,
+        principal_task_id: TaskId,
+        secondary_task_ids: &[TaskId],
+    ) {
+        secondary_task_ids.iter().for_each(|&task_id| {
+            let task = self.get_explore_group_task_mut(task_id).unwrap();
+
+            // Move out the task sets before deletion.
+            let fork_tasks = std::mem::take(&mut task.fork_logical_out);
+            let goal_tasks = std::mem::take(&mut task.optimize_goal_out);
+
+            self.delete_task(task_id);
+
+            fork_tasks.into_iter().for_each(|fork_id| {
+                let fork_task = self.get_fork_logical_task_mut(fork_id).unwrap();
+                fork_task.explore_group_in = principal_task_id;
+            });
+
+            goal_tasks.into_iter().for_each(|goal_id| {
+                let goal_task = self.get_optimize_goal_task_mut(goal_id).unwrap();
+                goal_task.explore_group_in = principal_task_id;
+            });
+        });
+    }
+
     /// Deduplicate dispatched expressions for a group exploration task.
     ///
-    /// - Logical expressions may be merged in the memo, so multiple dispatched expressions may now
-    ///   point to the same representative. We want to avoid redundant work.
-    /// - This function ensures we only explore unique representatives and prunes redundant transform
-    ///   and continuation tasks.
+    /// - During optimization, logical expressions in a group may get merged
+    ///   in the memo structure. As a result, multiple expressions in the same
+    ///   group might now resolve to the same canonical form.
+    ///
+    /// - This function:
+    ///   - Maps each expression to its current representative.
+    ///   - Identifies and prunes redundant (duplicate) expressions.
+    ///   - Updates or deletes related transform and fork/continuation tasks
+    ///     accordingly.
+    ///
+    /// # Arguments
+    /// * `task_id` - The ID of the group exploration task to deduplicate.
     pub(super) async fn dedup_group_explore(
         &mut self,
         task_id: TaskId,
     ) -> Result<(), OptimizeError> {
-        // Take ownership and clone to avoid conflicts with mutable borrow.
         let task = self.get_explore_group_task_mut(task_id).unwrap();
         let old_exprs = std::mem::take(&mut task.dispatched_exprs);
         let transform_ids: Vec<_> = task.transform_expr_in.iter().copied().collect();
@@ -31,7 +78,7 @@ impl<M: Memo> Optimizer<M> {
 
             for (&expr_id, &repr_id) in &expr_to_repr {
                 if !seen.insert(repr_id) {
-                    dups.push(expr_id); // We've already seen this repr, so prune the original expr.
+                    dups.push(expr_id);
                 }
             }
 
@@ -42,7 +89,6 @@ impl<M: Memo> Optimizer<M> {
         self.process_fork_tasks(&fork_ids, &expr_to_repr, &to_delete);
 
         let task = self.get_explore_group_task_mut(task_id).unwrap();
-        // Update the task with the deduplicated expressions.
         task.dispatched_exprs = unique_reprs;
 
         Ok(())
@@ -66,9 +112,6 @@ impl<M: Memo> Optimizer<M> {
     }
 
     /// Update or delete transform tasks based on deduplicated expressions.
-    ///
-    /// - If the expression was deduplicated away, remove the task.
-    /// - Otherwise, update it to the new representative ID.
     fn process_transform_tasks(
         &mut self,
         tasks: &[TaskId],
@@ -92,9 +135,6 @@ impl<M: Memo> Optimizer<M> {
     }
 
     /// Update or delete continuation tasks spawned by fork tasks.
-    ///
-    /// - Continuation tasks rely on dispatched expressions; if deduplicated, remove them.
-    /// - Otherwise, update them to reflect their canonical expression.
     fn process_fork_tasks<'a>(
         &mut self,
         tasks: &[TaskId],
@@ -106,7 +146,7 @@ impl<M: Memo> Optimizer<M> {
                 .get_fork_logical_task(task_id)
                 .unwrap()
                 .continue_with_logical_in
-                .clone(); // Clone to avoid borrow conflicts when mutating `self`.
+                .clone(); // Clone to avoid mutable borrow conflict.
 
             for cont_id in continue_ids {
                 let expr_id = self

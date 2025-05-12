@@ -40,12 +40,16 @@ pub(crate) enum TaskKind {
     OptimizePlan(OptimizePlanTask),
     OptimizeGoal(OptimizeGoalTask),
     ExploreGroup(ExploreGroupTask),
+    #[allow(dead_code)]
     ImplementExpression(ImplementExpressionTask),
     TransformExpression(TransformExpressionTask),
+    #[allow(dead_code)]
     CostExpression(CostExpressionTask),
     ForkLogical(ForkLogicalTask),
+    #[allow(dead_code)]
     ForkCosted(ForkCostedTask),
     ContinueWithLogical(ContinueWithLogicalTask),
+    #[allow(dead_code)]
     ContinueWithCosted(ContinueWithCostedTask),
 }
 
@@ -133,6 +137,7 @@ pub(crate) struct TransformExpressionTask {
 
 /// Task to implement a logical expression into a physical expression.
 #[derive(Clone)]
+#[allow(dead_code)]
 pub(crate) struct ImplementExpressionTask {
     /// The implementation rule to apply.
     pub rule: ImplementationRule,
@@ -151,6 +156,7 @@ pub(crate) struct ImplementExpressionTask {
 
 /// Task to cost a physical expression.
 #[derive(Clone)]
+#[allow(dead_code)]
 pub(crate) struct CostExpressionTask {
     /// The physical expression to cost.
     pub expression_id: PhysicalExpressionId,
@@ -188,6 +194,7 @@ pub(crate) struct ForkLogicalTask {
 
 /// Task to fork the costed optimization process.
 #[derive(Clone)]
+#[allow(dead_code)]
 pub(crate) struct ForkCostedTask {
     /// The fork continuation.
     pub continuation: CostedContinuation,
@@ -220,6 +227,7 @@ pub(crate) struct ContinueWithLogicalTask {
 
 /// Task to continue with a costed expression.
 #[derive(Clone)]
+#[allow(dead_code)]
 pub(crate) struct ContinueWithCostedTask {
     /// The physical expression to continue with.
     pub expression_id: PhysicalExpressionId,

@@ -108,8 +108,6 @@ impl<M: Memo> Optimizer<M> {
         let task = self.tasks.get_mut(&task_id).unwrap();
         task.uncompleted_jobs.remove(&job_id);
 
-        // TODO(Alexis): Cleanup the parentless tasks to free up resources.
-
         Ok(())
     }
 

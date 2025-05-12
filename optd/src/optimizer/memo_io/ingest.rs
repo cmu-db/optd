@@ -167,6 +167,7 @@ impl<M: Memo> Optimizer<M> {
         }
     }
 
+    #[allow(dead_code)]
     async fn probe_ingest_physical_operator(
         &mut self,
         operator: &Operator<Arc<PartialPhysicalPlan>>,

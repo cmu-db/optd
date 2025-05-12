@@ -1,8 +1,7 @@
-use super::{Optimizer, errors::OptimizeError, tasks::TaskId};
+use super::{Optimizer, errors::OptimizeError};
 use crate::memo::{Memo, MergeGroupProduct, MergeProducts};
-use std::collections::{HashMap, HashSet};
 
-mod dedup;
+mod helpers;
 
 impl<M: Memo> Optimizer<M> {
     /// Helper method to handle different types of merge results.
@@ -10,7 +9,7 @@ impl<M: Memo> Optimizer<M> {
     /// This method processes the results of group and goal merges, updating the
     /// internal task graph accordingly. Specifically it:
     ///
-    /// 1. TODO(Alexis): Document.
+    /// TODO(Alexis): Document. Basically: dedup, update, and consolidate.
     ///
     /// # Parameters
     /// * `result` - The merge result to handle.
@@ -30,32 +29,25 @@ impl<M: Memo> Optimizer<M> {
                 .filter_map(|group_id| self.group_exploration_task_index.get(group_id).copied())
                 .collect();
 
-            if group_explore_tasks.is_empty() {
-                continue; // No tasks exist, nothing to do.
+            if !group_explore_tasks.is_empty() {
+                // Step 1: Start by deduplicating all transform & continue tasks given
+                // potentially merged logical expressions.
+                for task_id in &group_explore_tasks {
+                    self.dedup_group_explore(*task_id).await?;
+                }
+
+                // Step 2: Send *new* logical expressions to each task.
+
+                // Step 3: Consolidate all dependent tasks into the new "representative" task.
+                let (principal_task_id, secondary_task_ids) =
+                    group_explore_tasks.split_first().unwrap();
+                self.consolidate_group_explore(*principal_task_id, secondary_task_ids)
+                    .await;
+
+                // Step 4: Update the index to point to the new representative task.
+                self.group_exploration_task_index
+                    .insert(new_group_id, *principal_task_id);
             }
-
-            for task_id in &group_explore_tasks {
-                self.dedup_group_explore(*task_id).await?;
-            }
-
-            let (principal_task_id, secondary_task_ids) =
-                group_explore_tasks.split_first().unwrap();
-
-            let mut fork_logical_tasks = HashSet::new();
-            let mut optimize_goal_tasks = HashSet::new();
-
-            for &task_id in secondary_task_ids {
-                let task = self.get_explore_group_task_mut(task_id).unwrap();
-                let forks = std::mem::take(&mut task.fork_logical_out);
-                fork_logical_tasks.extend(forks);
-            }
-            for &task_id in secondary_task_ids {
-                let task = self.get_explore_group_task_mut(task_id).unwrap();
-                let goals = std::mem::take(&mut task.optimize_goal_out);
-                optimize_goal_tasks.extend(goals);
-            }
-
-            // TODO: LATER DO NOT TOUCH
         }
 
         Ok(())

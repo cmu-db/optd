@@ -21,6 +21,7 @@ impl<M: Memo> Optimizer<M> {
     /// * `Ok(None)` if any goal ID lacks a best expression ID.
     /// * `Err(Error)` if a memo operation fails.
     #[async_recursion]
+    #[allow(dead_code)]
     pub(crate) async fn egest_best_plan(
         &self,
         expression_id: PhysicalExpressionId,
