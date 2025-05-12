@@ -182,7 +182,8 @@ pub(crate) struct ForkLogicalTask {
     /// `ContinueWithLogicalTask` | `TransformExpressionTask
     /// | `ImplementExpressionTask` that gets fed by the output of
     /// this task.
-    pub out: TaskId,
+    /// NOTE: This variable is not used be kept for consistency.
+    pub _out: TaskId,
 
     // Input tasks that feed this task.
     /// `ExploreGroupTask` the corresponding group exploration task producing

@@ -48,9 +48,6 @@ impl<M: Memo> Optimizer<M> {
 
         // Launch goal optimize task if needed, and get its ID.
         let goal_optimize_task_id = self.ensure_optimize_goal_task(goal_id).await?;
-        let goal_optimize_task = self
-            .get_optimize_goal_task_mut(goal_optimize_task_id)
-            .unwrap();
 
         // Register task and connect in graph.
         let optimize_plan_task = OptimizePlanTask {
@@ -59,7 +56,12 @@ impl<M: Memo> Optimizer<M> {
             optimize_goal_in: goal_optimize_task_id,
         };
 
-        goal_optimize_task.optimize_plan_out.insert(task_id);
+        // Add this task to the goal's outgoing edges.
+        self.get_optimize_goal_task_mut(goal_optimize_task_id)
+            .unwrap()
+            .optimize_plan_out
+            .insert(task_id);
+
         self.add_task(task_id, Task::new(OptimizePlan(optimize_plan_task)));
 
         Ok(())
@@ -81,30 +83,27 @@ impl<M: Memo> Optimizer<M> {
 
         let fork_task_id = self.next_task_id();
 
+        // Launch the group exploration task if needed, and get its ID.
         let explore_group_in = self.ensure_group_exploration_task(group_id).await?;
-        let explore_group_task = self.get_explore_group_task(explore_group_in).unwrap();
 
-        // Spawn all continuations.
-        let continue_with_logical_in = explore_group_task
+        // Create continuation tasks for all expressions.
+        let expressions = self
+            .get_explore_group_task(explore_group_in)
+            .unwrap()
             .dispatched_exprs
-            .clone()
-            .iter()
-            .map(|expression_id| {
-                self.launch_continue_with_logical_task(
-                    *expression_id,
-                    fork_task_id,
-                    continuation.clone(),
-                )
-            })
-            .collect();
+            .clone();
+        let continue_with_logical_in =
+            self.create_logical_cont_tasks(&expressions, fork_task_id, &continuation);
 
-        // Create the task and add it to the task manager.
+        // Create the fork task.
         let fork_logical_task = ForkLogicalTask {
             continuation,
-            out: parent_task_id,
+            _out: parent_task_id,
             explore_group_in,
             continue_with_logical_in,
         };
+
+        // Add the fork task to the exploration task's outgoing edges.
         self.get_explore_group_task_mut(explore_group_in)
             .unwrap()
             .fork_logical_out
@@ -115,7 +114,7 @@ impl<M: Memo> Optimizer<M> {
         Ok(())
     }
 
-    /// Helper method to launch a task for continuing with a logical expression.
+    /// Method to launch a task for continuing with a logical expression.
     ///
     /// # Parameters
     /// * `expression_id`: The ID of the logical expression to continue with.
@@ -124,7 +123,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `TaskId`: The ID of the created continue task.
-    fn launch_continue_with_logical_task(
+    pub(crate) fn launch_continue_with_logical_task(
         &mut self,
         expression_id: LogicalExpressionId,
         fork_out: TaskId,
@@ -148,7 +147,7 @@ impl<M: Memo> Optimizer<M> {
         task_id
     }
 
-    /// Helper method to launch a task for transforming a logical expression with a rule.
+    /// Method to launch a task for transforming a logical expression with a rule.
     ///
     /// # Parameters
     /// * `expr_id`: The ID of the logical expression to transform.
@@ -158,7 +157,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `TaskId`: The ID of the created transform task.
-    fn launch_transform_expression_task(
+    pub(crate) fn launch_transform_expression_task(
         &mut self,
         expr_id: LogicalExpressionId,
         rule: TransformationRule,
@@ -182,6 +181,69 @@ impl<M: Memo> Optimizer<M> {
         );
 
         task_id
+    }
+
+    /// Creates transform tasks for a set of logical expressions.
+    ///
+    /// # Arguments
+    /// * `expressions` - The logical expressions to transform
+    /// * `group_id` - The group ID these expressions belong to
+    /// * `explore_task_id` - The exploration task that these transforms feed into
+    ///
+    /// # Returns
+    /// * `HashSet<TaskId>` - The IDs of all created transform tasks
+    pub(crate) fn create_transform_tasks(
+        &mut self,
+        expressions: &HashSet<LogicalExpressionId>,
+        group_id: GroupId,
+        explore_task_id: TaskId,
+    ) -> HashSet<TaskId> {
+        let transformations: Vec<_> = self
+            .rule_book
+            .get_transformations()
+            .iter()
+            .cloned()
+            .collect();
+
+        let mut transform_tasks = HashSet::new();
+        for &expr_id in expressions {
+            for rule in &transformations {
+                let task_id = self.launch_transform_expression_task(
+                    expr_id,
+                    rule.clone(),
+                    explore_task_id,
+                    group_id,
+                );
+                transform_tasks.insert(task_id);
+            }
+        }
+
+        transform_tasks
+    }
+
+    /// Creates logical continuation tasks for a fork task and a set of expressions.
+    ///
+    /// # Arguments
+    /// * `expressions` - The logical expressions to continue with
+    /// * `fork_task_id` - The fork task that these continuations feed into
+    /// * `continuation` - The continuation to apply
+    ///
+    /// # Returns
+    /// * `HashSet<TaskId>` - The IDs of all created continuation tasks
+    pub(crate) fn create_logical_cont_tasks(
+        &mut self,
+        expressions: &HashSet<LogicalExpressionId>,
+        fork_task_id: TaskId,
+        continuation: &LogicalContinuation,
+    ) -> HashSet<TaskId> {
+        let mut continuation_tasks = HashSet::new();
+        for &expr_id in expressions {
+            let task_id =
+                self.launch_continue_with_logical_task(expr_id, fork_task_id, continuation.clone());
+            continuation_tasks.insert(task_id);
+        }
+
+        continuation_tasks
     }
 
     /// Ensures a group exploration task exists and returns its id.
@@ -223,25 +285,8 @@ impl<M: Memo> Optimizer<M> {
             .get_all_logical_exprs(group_repr)
             .await
             .map_err(OptimizeError::MemoError)?;
-        let transformations: Vec<_> = self
-            .rule_book
-            .get_transformations()
-            .iter()
-            .cloned()
-            .collect();
-
-        let mut transform_expr_in = HashSet::new();
-        for &expression_id in &logical_expressions {
-            for rule in &transformations {
-                let task_id = self.launch_transform_expression_task(
-                    expression_id,
-                    rule.clone(),
-                    exploration_task_id,
-                    group_id,
-                );
-                transform_expr_in.insert(task_id);
-            }
-        }
+        let transform_expr_in =
+            self.create_transform_tasks(&logical_expressions, group_id, exploration_task_id);
 
         // Create the exploration task.
         let exploration_task = ExploreGroupTask {
@@ -277,7 +322,7 @@ impl<M: Memo> Optimizer<M> {
     ) -> Result<TaskId, OptimizeError> {
         use TaskKind::*;
 
-        // Find the representative group for the given goal ID.
+        // Find the representative goal for the given goal ID.
         let goal_repr = self
             .memo
             .find_repr_goal_id(goal_id)
@@ -310,6 +355,12 @@ impl<M: Memo> Optimizer<M> {
             implement_expression_in: HashSet::new(),
             cost_expression_in: HashSet::new(),
         };
+
+        // Add this task to the exploration task's outgoing edges.
+        self.get_explore_group_task_mut(explore_group_in)
+            .unwrap()
+            .optimize_goal_out
+            .insert(goal_optimize_task_id);
 
         // Register the task in the manager and index.
         self.add_task(

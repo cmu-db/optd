@@ -1,12 +1,82 @@
-use std::collections::{HashMap, HashSet};
-
 use crate::{
     cir::LogicalExpressionId,
     memo::Memo,
     optimizer::{Optimizer, errors::OptimizeError, tasks::TaskId},
 };
+use std::collections::{HashMap, HashSet};
 
 impl<M: Memo> Optimizer<M> {
+    /// Update a group exploration task with new logical expressions, if any.
+    ///
+    /// This function performs the following:
+    /// 1. Computes newly discovered expressions by subtracting existing ones.
+    /// 2. For each fork task in the group, launches continuation tasks for each new expression.
+    /// 3. If the task is the principal, launches transform tasks for each new expression and rule.
+    /// 4. Updates the task's dispatched expressions with the full input set.
+    ///
+    /// # Arguments
+    /// * `task_id` - The ID of the group exploration task to update.
+    /// * `all_logical_exprs` - The complete set of logical expressions known for this group.
+    /// * `principal` - Whether this task is the principal one (responsible for launching transforms).
+    pub(super) async fn update_group_explore(
+        &mut self,
+        task_id: TaskId,
+        all_logical_exprs: &HashSet<LogicalExpressionId>,
+        principal: bool,
+    ) -> Result<(), OptimizeError> {
+        let new_exprs = self.compute_new_expressions(task_id, all_logical_exprs);
+
+        if !new_exprs.is_empty() {
+            let (group_id, fork_tasks) = {
+                let task = self.get_explore_group_task(task_id).unwrap();
+                (task.group_id, task.fork_logical_out.clone())
+            };
+
+            for &fork_task_id in &fork_tasks {
+                let continuation = self
+                    .get_fork_logical_task(fork_task_id)
+                    .unwrap()
+                    .continuation
+                    .clone();
+
+                let continuation_tasks =
+                    self.create_logical_cont_tasks(&new_exprs, fork_task_id, &continuation);
+
+                self.get_fork_logical_task_mut(fork_task_id)
+                    .unwrap()
+                    .continue_with_logical_in
+                    .extend(continuation_tasks);
+            }
+
+            if principal {
+                let transform_tasks = self.create_transform_tasks(&new_exprs, group_id, task_id);
+                self.get_explore_group_task_mut(task_id)
+                    .unwrap()
+                    .transform_expr_in
+                    .extend(transform_tasks);
+            }
+
+            self.get_explore_group_task_mut(task_id)
+                .unwrap()
+                .dispatched_exprs = all_logical_exprs.clone();
+        }
+
+        Ok(())
+    }
+
+    /// Compute new expressions for a group exploration task.
+    fn compute_new_expressions(
+        &self,
+        task_id: TaskId,
+        all_exprs: &HashSet<LogicalExpressionId>,
+    ) -> HashSet<LogicalExpressionId> {
+        let task = self.get_explore_group_task(task_id).unwrap();
+        all_exprs
+            .difference(&task.dispatched_exprs)
+            .copied()
+            .collect()
+    }
+
     /// Consolidate a group exploration task into a principal task.
     ///
     /// - A merge in the memo may cause several group exploration tasks to refer to
