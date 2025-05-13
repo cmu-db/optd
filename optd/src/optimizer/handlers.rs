@@ -1,14 +1,9 @@
 use super::{
     JobId, Optimizer, TaskId,
-    errors::OptimizeError,
     jobs::{CostedContinuation, LogicalContinuation},
 };
 use crate::{
-    cir::{
-        Cost, Goal, GoalId, GroupId, LogicalExpressionId, LogicalPlan, LogicalProperties,
-        PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpressionId, PhysicalPlan,
-        PhysicalProperties,
-    },
+    cir::*,
     memo::Memo,
     optimizer::{
         EngineProduct, OptimizeRequest, OptimizerMessage, PendingMessage, jobs::JobKind,
@@ -33,7 +28,7 @@ impl<M: Memo> Optimizer<M> {
         plan: LogicalPlan,
         physical_tx: Sender<PhysicalPlan>,
         optimize_plan_task_id: TaskId,
-    ) -> Result<(), OptimizeError> {
+    ) -> Result<(), M::MemoError> {
         use JobKind::*;
         use LogicalIngest::*;
         use OptimizerMessage::*;
@@ -43,11 +38,7 @@ impl<M: Memo> Optimizer<M> {
                 // The goal represents what we want to achieve: optimize the root group
                 // with no specific physical properties required.
                 let goal = Goal(group_id, PhysicalProperties(None));
-                let goal_id = self
-                    .memo
-                    .get_goal_id(&goal)
-                    .await
-                    .map_err(OptimizeError::MemoError)?;
+                let goal_id = self.memo.get_goal_id(&goal).await?;
 
                 // Launch the corresponding task now that we know the goal_id.
                 self.launch_optimize_plan_task(optimize_plan_task_id, plan, physical_tx, goal_id)
@@ -89,26 +80,18 @@ impl<M: Memo> Optimizer<M> {
         plan: PartialLogicalPlan,
         group_id: GroupId,
         job_id: JobId,
-    ) -> Result<(), OptimizeError> {
+    ) -> Result<(), M::MemoError> {
         use EngineProduct::*;
         use JobKind::*;
         use LogicalIngest::*;
         use OptimizerMessage::*;
 
-        let group_id = self
-            .memo
-            .find_repr_group_id(group_id)
-            .await
-            .map_err(OptimizeError::MemoError)?;
+        let group_id = self.memo.find_repr_group_id(group_id).await?;
 
         match self.probe_ingest_logical_plan(&plan).await? {
             Found(new_group_id) if new_group_id != group_id => {
                 // Atomically perform the merge in the memo and process all results.
-                let merge_results = self
-                    .memo
-                    .merge_groups(group_id, new_group_id)
-                    .await
-                    .map_err(OptimizeError::MemoError)?;
+                let merge_results = self.memo.merge_groups(group_id, new_group_id).await?;
 
                 self.handle_merge_result(merge_results).await?;
             }
@@ -152,7 +135,7 @@ impl<M: Memo> Optimizer<M> {
         _plan: PartialPhysicalPlan,
         _goal_id: GoalId,
         _job_id: JobId,
-    ) -> Result<(), OptimizeError> {
+    ) -> Result<(), M::MemoError> {
         todo!()
     }
 
@@ -172,7 +155,7 @@ impl<M: Memo> Optimizer<M> {
         &mut self,
         _expression_id: PhysicalExpressionId,
         _cost: Cost,
-    ) -> Result<(), OptimizeError> {
+    ) -> Result<(), M::MemoError> {
         todo!()
     }
 
@@ -191,11 +174,8 @@ impl<M: Memo> Optimizer<M> {
         expression_id: LogicalExpressionId,
         properties: &LogicalProperties,
         job_id: JobId,
-    ) -> Result<(), OptimizeError> {
-        self.memo
-            .create_group(expression_id, properties)
-            .await
-            .map_err(OptimizeError::MemoError)?;
+    ) -> Result<(), M::MemoError> {
+        self.memo.create_group(expression_id, properties).await?;
         self.resolve_dependencies(job_id).await;
         Ok(())
     }
@@ -215,7 +195,7 @@ impl<M: Memo> Optimizer<M> {
         group_id: GroupId,
         continuation: LogicalContinuation,
         job_id: JobId,
-    ) -> Result<(), OptimizeError> {
+    ) -> Result<(), M::MemoError> {
         let parent_task_id = self.get_related_task_id(job_id);
         self.launch_fork_logical_task(group_id, continuation, parent_task_id)
             .await
@@ -236,7 +216,7 @@ impl<M: Memo> Optimizer<M> {
         _goal: &Goal,
         _continuation: CostedContinuation,
         _job_id: JobId,
-    ) -> Result<(), OptimizeError> {
+    ) -> Result<(), M::MemoError> {
         todo!()
     }
 
@@ -253,12 +233,8 @@ impl<M: Memo> Optimizer<M> {
         &mut self,
         group_id: GroupId,
         sender: Sender<LogicalProperties>,
-    ) -> Result<(), OptimizeError> {
-        let props = self
-            .memo
-            .get_logical_properties(group_id)
-            .await
-            .map_err(OptimizeError::MemoError)?;
+    ) -> Result<(), M::MemoError> {
+        let props = self.memo.get_logical_properties(group_id).await?;
 
         // We don't want to make a job out of this, as it is merely a way to unblock
         // an existing pending job. We send it to the channel without blocking the

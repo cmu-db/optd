@@ -1,7 +1,7 @@
 use crate::{
     cir::LogicalExpressionId,
     memo::Memo,
-    optimizer::{Optimizer, errors::OptimizeError, tasks::TaskId},
+    optimizer::{Optimizer, tasks::TaskId},
 };
 use hashbrown::{HashMap, HashSet};
 
@@ -23,7 +23,7 @@ impl<M: Memo> Optimizer<M> {
         task_id: TaskId,
         all_logical_exprs: &HashSet<LogicalExpressionId>,
         principal: bool,
-    ) -> Result<(), OptimizeError> {
+    ) -> Result<(), M::MemoError> {
         let new_exprs = self.compute_new_expressions(task_id, all_logical_exprs);
 
         if !new_exprs.is_empty() {
@@ -134,7 +134,7 @@ impl<M: Memo> Optimizer<M> {
     pub(super) async fn dedup_group_explore(
         &mut self,
         task_id: TaskId,
-    ) -> Result<(), OptimizeError> {
+    ) -> Result<(), M::MemoError> {
         let task = self.get_explore_group_task_mut(task_id).unwrap();
         let old_exprs = std::mem::take(&mut task.dispatched_exprs);
         let transform_ids: Vec<_> = task.transform_expr_in.iter().copied().collect();
@@ -168,14 +168,10 @@ impl<M: Memo> Optimizer<M> {
     async fn map_to_representatives(
         &mut self,
         exprs: &HashSet<LogicalExpressionId>,
-    ) -> Result<HashMap<LogicalExpressionId, LogicalExpressionId>, OptimizeError> {
+    ) -> Result<HashMap<LogicalExpressionId, LogicalExpressionId>, M::MemoError> {
         let mut expr_to_repr = HashMap::with_capacity(exprs.len());
         for expr_id in exprs {
-            let repr_id = self
-                .memo
-                .find_repr_logical_expr_id(*expr_id)
-                .await
-                .map_err(OptimizeError::MemoError)?;
+            let repr_id = self.memo.find_repr_logical_expr_id(*expr_id).await?;
             expr_to_repr.insert(*expr_id, repr_id);
         }
         Ok(expr_to_repr)

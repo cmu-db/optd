@@ -1,23 +1,13 @@
 use crate::{
     catalog::Catalog,
-    cir::{
-        Cost, Goal, GoalId, GroupId, LogicalExpressionId, LogicalPlan, LogicalProperties,
-        PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpressionId, PhysicalPlan, RuleBook,
-    },
+    cir::*,
     dsl::analyzer::hir::{HIR, context::Context},
     memo::Memo,
 };
-use errors::OptimizeError;
-use jobs::{CostedContinuation, Job, JobId, LogicalContinuation};
-use retriever::OptimizerRetriever;
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    sync::Arc,
-};
-use tasks::{Task, TaskId};
+use hashbrown::{HashMap, HashSet};
+use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
-mod errors;
 mod handlers;
 mod hir_cir;
 mod jobs;
@@ -27,6 +17,10 @@ mod retriever;
 mod tasks;
 #[cfg(test)]
 mod testing;
+
+use jobs::{CostedContinuation, Job, JobId, LogicalContinuation};
+use retriever::OptimizerRetriever;
+use tasks::{Task, TaskId};
 
 /// Default maximum number of concurrent jobs to run in the optimizer.
 const DEFAULT_MAX_CONCURRENT_JOBS: usize = 1000;
@@ -221,7 +215,7 @@ impl<M: Memo> Optimizer<M> {
     }
 
     /// Run the optimizer's main processing loop.
-    async fn run(mut self) -> Result<(), OptimizeError> {
+    async fn run(mut self) -> Result<(), M::MemoError> {
         use EngineProduct::*;
         use OptimizerMessage::*;
 

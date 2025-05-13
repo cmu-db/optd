@@ -1,14 +1,10 @@
 use super::{CostedContinuation, JobId, LogicalContinuation};
 use crate::{
-    cir::{
-        Goal, GoalId, GroupId, ImplementationRule, LogicalExpressionId, PhysicalExpressionId,
-        TransformationRule,
-    },
+    cir::*,
     dsl::engine::{Engine, EngineResponse},
     memo::Memo,
     optimizer::{
         EngineProduct, Optimizer, OptimizerMessage,
-        errors::OptimizeError,
         hir_cir::{
             from_cir::{
                 partial_logical_to_value, partial_physical_to_value, physical_properties_to_value,
@@ -36,7 +32,7 @@ impl<M: Memo> Optimizer<M> {
         &self,
         expression_id: LogicalExpressionId,
         job_id: JobId,
-    ) -> Result<(), OptimizeError> {
+    ) -> Result<(), M::MemoError> {
         use EngineProduct::*;
 
         let engine = Engine::new(
@@ -48,8 +44,7 @@ impl<M: Memo> Optimizer<M> {
             &self
                 .memo
                 .materialize_logical_expr(expression_id)
-                .await
-                .map_err(OptimizeError::MemoError)?
+                .await?
                 .into(),
         );
 
@@ -89,7 +84,7 @@ impl<M: Memo> Optimizer<M> {
         expression_id: LogicalExpressionId,
         group_id: GroupId,
         job_id: JobId,
-    ) -> Result<(), OptimizeError> {
+    ) -> Result<(), M::MemoError> {
         use EngineProduct::*;
 
         let engine = self.init_engine();
@@ -97,8 +92,7 @@ impl<M: Memo> Optimizer<M> {
             &self
                 .memo
                 .materialize_logical_expr(expression_id)
-                .await
-                .map_err(OptimizeError::MemoError)?
+                .await?
                 .into(),
         );
 
@@ -138,7 +132,7 @@ impl<M: Memo> Optimizer<M> {
         expression_id: LogicalExpressionId,
         goal_id: GoalId,
         job_id: JobId,
-    ) -> Result<(), OptimizeError> {
+    ) -> Result<(), M::MemoError> {
         use EngineProduct::*;
 
         let engine = self.init_engine();
@@ -146,16 +140,11 @@ impl<M: Memo> Optimizer<M> {
             &self
                 .memo
                 .materialize_logical_expr(expression_id)
-                .await
-                .map_err(OptimizeError::MemoError)?
+                .await?
                 .into(),
         );
 
-        let Goal(_, physical_props) = self
-            .memo
-            .materialize_goal(goal_id)
-            .await
-            .map_err(OptimizeError::MemoError)?;
+        let Goal(_, physical_props) = self.memo.materialize_goal(goal_id).await?;
         let properties = physical_properties_to_value(&physical_props);
 
         let message_tx = self.message_tx.clone();
@@ -190,7 +179,7 @@ impl<M: Memo> Optimizer<M> {
         &self,
         expression_id: PhysicalExpressionId,
         job_id: JobId,
-    ) -> Result<(), OptimizeError> {
+    ) -> Result<(), M::MemoError> {
         use EngineProduct::*;
 
         let engine = self.init_engine();
@@ -229,13 +218,12 @@ impl<M: Memo> Optimizer<M> {
         expression_id: LogicalExpressionId,
         k: LogicalContinuation,
         job_id: JobId,
-    ) -> Result<(), OptimizeError> {
+    ) -> Result<(), M::MemoError> {
         let plan = partial_logical_to_value(
             &self
                 .memo
                 .materialize_logical_expr(expression_id)
-                .await
-                .map_err(OptimizeError::MemoError)?
+                .await?
                 .into(),
         );
 
@@ -262,7 +250,7 @@ impl<M: Memo> Optimizer<M> {
         expression_id: PhysicalExpressionId,
         k: CostedContinuation,
         job_id: JobId,
-    ) -> Result<(), OptimizeError> {
+    ) -> Result<(), M::MemoError> {
         let plan = partial_physical_to_value(&self.egest_partial_plan(expression_id).await?);
 
         let message_tx = self.message_tx.clone();

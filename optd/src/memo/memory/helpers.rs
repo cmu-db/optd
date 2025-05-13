@@ -1,22 +1,41 @@
-use super::MemoryMemo;
+//! Helper functions related to the in-memory memo table implementation.
+
+use super::{Infallible, MemoryMemo};
 use crate::{
-    cir::{GroupId, LogicalExpression, LogicalExpressionId},
+    cir::*,
     memo::{
-        Materialize, Memo, MemoError, MergeGroupProduct, MergeProducts, Representative,
-        error::MemoResult, memory::GroupInfo,
+        Materialize, Memo, MergeGroupProduct, MergeProducts, Representative, memory::GroupInfo,
     },
 };
 use hashbrown::{HashMap, HashSet};
 
 impl MemoryMemo {
-    pub(super) fn next_shared_id(&mut self) -> i64 {
+    pub(super) fn next_group_id(&mut self) -> GroupId {
         let id = self.next_shared_id;
         self.next_shared_id += 1;
-        id
+        GroupId(id)
     }
 
-    /// Gets the set of logical expression IDs that reference a group,
-    /// mapped to their representatives.
+    pub(super) fn next_goal_id(&mut self) -> GoalId {
+        let id = self.next_shared_id;
+        self.next_shared_id += 1;
+        GoalId(id)
+    }
+
+    pub(super) fn next_logical_expression_id(&mut self) -> LogicalExpressionId {
+        let id = self.next_shared_id;
+        self.next_shared_id += 1;
+        LogicalExpressionId(id)
+    }
+
+    pub(super) fn next_physical_expression_id(&mut self) -> PhysicalExpressionId {
+        let id = self.next_shared_id;
+        self.next_shared_id += 1;
+        PhysicalExpressionId(id)
+    }
+
+    /// Gets the set of [`LogicalExpressionId`] that reference a group, mapped to their
+    /// representatives.
     fn get_referencing_expr_set(&mut self, group_id: GroupId) -> HashSet<LogicalExpressionId> {
         self.group_referencing_exprs_index
             .remove(&group_id)
@@ -25,18 +44,101 @@ impl MemoryMemo {
             .map(|id| self.repr_logical_expr_id.find(id))
             .collect()
     }
+}
 
-    /// Merges a pair of groups, creating a new representative group that combines their expressions.
+/// Helper functions for the in-memory memo table implementation.
+///
+/// We split this out into a separate trait in order to have access to the associated error type.
+///
+/// See the implementation itself for the documentation of each helper method.
+pub trait MemoryMemoHelpers: Memo {
+    async fn remap_goal(&self, goal: &Goal) -> Result<Goal, Infallible>;
+
+    async fn remap_logical_expr(
+        &self,
+        logical_expr: &LogicalExpression,
+    ) -> Result<LogicalExpression, Infallible>;
+
+    async fn merge_group_pair(
+        &mut self,
+        group_id_1: GroupId,
+        group_id_2: GroupId,
+    ) -> Result<(GroupId, MergeGroupProduct), Infallible>;
+
+    async fn handle_expression_change(
+        &mut self,
+        old_id: LogicalExpressionId,
+        new_id: LogicalExpressionId,
+        prev_expr: LogicalExpression,
+    ) -> Result<Option<(GroupId, GroupId)>, Infallible>;
+
+    async fn process_referencing_expressions(
+        &mut self,
+        group_id_1: GroupId,
+        group_id_2: GroupId,
+        new_group_id: GroupId,
+    ) -> Result<Vec<(GroupId, GroupId)>, Infallible>;
+
+    async fn consolidate_merge_results(
+        &self,
+        merge_operations: Vec<MergeGroupProduct>,
+    ) -> Result<MergeProducts, Infallible>;
+}
+
+impl MemoryMemoHelpers for MemoryMemo {
+    async fn remap_goal(&self, goal: &Goal) -> Result<Goal, Infallible> {
+        let Goal(group_id, logical_expr) = goal;
+        let group_id = self.find_repr_group_id(*group_id).await?;
+        Ok(Goal(group_id, logical_expr.clone()))
+    }
+
+    async fn remap_logical_expr(
+        &self,
+        logical_expr: &LogicalExpression,
+    ) -> Result<LogicalExpression, Infallible> {
+        use Child::*;
+
+        let mut remapped_children = Vec::with_capacity(logical_expr.children.len());
+
+        for child in &logical_expr.children {
+            let remapped = match child {
+                Singleton(group_id) => {
+                    let repr = self.find_repr_group_id(*group_id).await?;
+                    Singleton(repr)
+                }
+                VarLength(group_ids) => {
+                    let mut reprs = Vec::with_capacity(group_ids.len());
+                    for group_id in group_ids {
+                        reprs.push(self.find_repr_group_id(*group_id).await?);
+                    }
+                    VarLength(reprs)
+                }
+            };
+            remapped_children.push(remapped);
+        }
+
+        Ok(LogicalExpression {
+            tag: logical_expr.tag.clone(),
+            data: logical_expr.data.clone(),
+            children: remapped_children,
+        })
+    }
+
+    /// Merges a pair of groups, creating a new representative group that combines their
+    /// expressions.
+    ///
+    /// Returns the new representative group ID and a record of the merge operation.
+    ///
+    /// # Algorithm
     ///
     /// In the memo structure, when two groups are found to be equivalent, we need to create
     /// a new representative group that combines their expressions and properties. This function
     /// handles that core operation.
     ///
-    /// # Algorithm
-    ///
     /// The merging process involves several steps:
     /// 1. Create a new group ID to serve as the new representative.
-    /// 2. Verify that the logical properties of both groups match (they should for equivalent groups).
+    /// 2. Verify that the logical properties of both groups match (they should for equivalent
+    ///    groups).
     /// 3. Combine all the logical expressions from both groups.
     /// 4. Create a new group info entry with the combined expressions.
     /// 5. Update the union-find structure to point both original groups to the new representative.
@@ -44,28 +146,30 @@ impl MemoryMemo {
     /// 7. Update the logical expression to group mappings.
     ///
     /// # Parameters
+    ///
     /// * `group_id_1` - ID of the first group to merge.
     /// * `group_id_2` - ID of the second group to merge.
     ///
-    /// # Returns
-    /// The new representative group ID and a record of the merge operation.
-    pub(super) async fn merge_group_pair(
+    /// # Panics
+    ///
+    /// Panics if either of the input [`GroupId`]s are not found in the memo table.
+    async fn merge_group_pair(
         &mut self,
         group_id_1: GroupId,
         group_id_2: GroupId,
-    ) -> MemoResult<(GroupId, MergeGroupProduct)> {
+    ) -> Result<(GroupId, MergeGroupProduct), Infallible> {
         // Create new group with a fresh ID.
-        let new_group_id = GroupId(self.next_shared_id());
+        let new_group_id = self.next_group_id();
 
         // Get group info for both groups.
         let group_info_1 = self
             .group_info
             .get(&group_id_1)
-            .ok_or(MemoError::GroupNotFound(group_id_1))?;
+            .unwrap_or_else(|| panic!("{:?} not found in memo table", group_id_1));
         let group_info_2 = self
             .group_info
             .get(&group_id_2)
-            .ok_or(MemoError::GroupNotFound(group_id_2))?;
+            .unwrap_or_else(|| panic!("{:?} not found in memo table", group_id_2));
 
         // Verify logical properties match (should be the case for equivalent groups)
         // Unless there is a bug in the rules.
@@ -135,12 +239,12 @@ impl MemoryMemo {
     /// # Returns
     /// An Option containing a pair of groups to merge, if the old and new expressions
     /// are in different groups.
-    pub(super) async fn handle_expression_change(
+    async fn handle_expression_change(
         &mut self,
         old_id: LogicalExpressionId,
         new_id: LogicalExpressionId,
         prev_expr: LogicalExpression,
-    ) -> MemoResult<Option<(GroupId, GroupId)>> {
+    ) -> Result<Option<(GroupId, GroupId)>, Infallible> {
         // Remove old expression from data structures.
         self.id_to_logical_expr.remove(&old_id);
         self.logical_expr_to_id.remove(&prev_expr);
@@ -154,7 +258,7 @@ impl MemoryMemo {
             let group_info = self
                 .group_info
                 .get_mut(&old_group)
-                .ok_or(MemoError::GroupNotFound(old_group))?;
+                .unwrap_or_else(|| panic!("{:?} not found in memo table", old_group));
 
             // Always remove the old expression from the group.
             group_info.expressions.remove(&old_id);
@@ -205,12 +309,12 @@ impl MemoryMemo {
     ///
     /// # Returns
     /// A vector of group pairs that need to be merged due to new equivalences.
-    pub(super) async fn process_referencing_expressions(
+    async fn process_referencing_expressions(
         &mut self,
         group_id_1: GroupId,
         group_id_2: GroupId,
         new_group_id: GroupId,
-    ) -> MemoResult<Vec<(GroupId, GroupId)>> {
+    ) -> Result<Vec<(GroupId, GroupId)>, Infallible> {
         // Collect expressions referencing the merged groups.
         let expr_set_1 = self.get_referencing_expr_set(group_id_1);
         let expr_set_2 = self.get_referencing_expr_set(group_id_2);
@@ -257,10 +361,10 @@ impl MemoryMemo {
     ///
     /// # Returns
     /// Consolidated merge results.
-    pub(super) async fn consolidate_merge_results(
+    async fn consolidate_merge_results(
         &self,
         merge_operations: Vec<MergeGroupProduct>,
-    ) -> MemoResult<MergeProducts> {
+    ) -> Result<MergeProducts, Infallible> {
         // Collect operations into a map from representative to all merged groups.
         let mut consolidated_map: HashMap<GroupId, HashSet<GroupId>> = HashMap::new();
 
