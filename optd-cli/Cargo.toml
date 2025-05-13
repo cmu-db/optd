@@ -7,6 +7,6 @@ repository.workspace = true
 [dependencies]
 optd = { path = "../optd" }
 
-clap = { version = "4.5.37", features = ["derive"] }
+clap = { version = "4.5.38", features = ["derive"] }
 colored = "3.0.0"
-tokio = "1.44.2"
+tokio = "1.45.0"
