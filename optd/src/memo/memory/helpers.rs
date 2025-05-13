@@ -173,7 +173,7 @@ impl MemoryMemoHelpers for MemoryMemo {
 
         // Verify logical properties match (should be the case for equivalent groups)
         // Unless there is a bug in the rules.
-        debug_assert!(group_info_1.logical_properties == group_info_2.logical_properties);
+        assert!(group_info_1.logical_properties == group_info_2.logical_properties);
 
         // Combine expressions from both groups.
         let expr_ids_1 = self.get_all_logical_exprs(group_id_1).await?;

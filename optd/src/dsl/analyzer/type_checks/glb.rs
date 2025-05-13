@@ -221,13 +221,13 @@ impl TypeRegistry {
         let result = glb_kind.into();
 
         // Verify post-condition in debug mode only
-        debug_assert!(
+        assert!(
             self.is_subtype(&result, type1),
             "GLB post-condition failed: {:?} is not a subtype of {:?}",
             result,
             type1
         );
-        debug_assert!(
+        assert!(
             self.is_subtype(&result, type2),
             "GLB post-condition failed: {:?} is not a subtype of {:?}",
             result,

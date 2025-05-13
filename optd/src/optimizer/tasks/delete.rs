@@ -58,8 +58,8 @@ impl<M: Memo> Optimizer<M> {
             }
 
             ExploreGroup(task) => {
-                debug_assert!(task.fork_logical_out.is_empty());
-                debug_assert!(task.optimize_goal_out.is_empty());
+                assert!(task.fork_logical_out.is_empty());
+                assert!(task.optimize_goal_out.is_empty());
 
                 self.group_exploration_task_index
                     .retain(|_, &mut v| v != task_id);

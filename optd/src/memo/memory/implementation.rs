@@ -53,7 +53,7 @@ impl Memo for MemoryMemo {
     ) -> Result<GroupId, Infallible> {
         let logical_expr_id = self.find_repr_logical_expr_id(logical_expr_id).await?;
 
-        debug_assert!(
+        assert!(
             !self
                 .logical_id_to_group_index
                 .contains_key(&logical_expr_id),
