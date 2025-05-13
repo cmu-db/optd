@@ -1,4 +1,4 @@
-use super::{Optimizer, errors::OptimizeError};
+use super::Optimizer;
 use crate::memo::{Memo, MergeGroupProduct, MergeProducts};
 
 mod helpers;
@@ -35,7 +35,7 @@ impl<M: Memo> Optimizer<M> {
     pub(super) async fn handle_merge_result(
         &mut self,
         result: MergeProducts,
-    ) -> Result<(), OptimizeError> {
+    ) -> Result<(), M::MemoError> {
         for MergeGroupProduct {
             new_group_id,
             merged_groups,
@@ -49,11 +49,7 @@ impl<M: Memo> Optimizer<M> {
                 .collect();
 
             if !group_explore_tasks.is_empty() {
-                let all_logical_exprs = self
-                    .memo
-                    .get_all_logical_exprs(new_group_id)
-                    .await
-                    .map_err(OptimizeError::MemoError)?;
+                let all_logical_exprs = self.memo.get_all_logical_exprs(new_group_id).await?;
 
                 let (principal_task_id, secondary_task_ids) =
                     group_explore_tasks.split_first().unwrap();

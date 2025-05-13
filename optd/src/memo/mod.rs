@@ -38,7 +38,7 @@ pub struct MergeProducts {
 /// Base trait defining a shared implemention-defined error type for all memo-related traits.
 pub trait MemoBase {
     /// The error type used throughout all memo-related traits.
-    type MemoError: Debug;
+    type MemoError: Debug + Send;
 }
 
 /// A helper trait to help facilitate the materialization and creation of objects in the memo table.

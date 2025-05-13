@@ -1,13 +1,9 @@
 use super::{OptimizePlanTask, Task, TaskId};
 use crate::{
-    cir::{
-        Goal, GoalId, GroupId, LogicalExpressionId, LogicalPlan, PhysicalExpressionId,
-        PhysicalPlan, TransformationRule,
-    },
+    cir::*,
     memo::Memo,
     optimizer::{
         Optimizer,
-        errors::OptimizeError,
         jobs::{JobKind, LogicalContinuation},
         tasks::{
             ContinueWithLogicalTask, ExploreGroupTask, ForkLogicalTask, OptimizeGoalTask,
@@ -43,7 +39,7 @@ impl<M: Memo> Optimizer<M> {
         plan: LogicalPlan,
         response_tx: Sender<PhysicalPlan>,
         goal_id: GoalId,
-    ) -> Result<(), OptimizeError> {
+    ) -> Result<(), M::MemoError> {
         use Task::*;
 
         // Launch goal optimize task if needed, and get its ID.
@@ -78,7 +74,7 @@ impl<M: Memo> Optimizer<M> {
         group_id: GroupId,
         continuation: LogicalContinuation,
         parent_task_id: TaskId,
-    ) -> Result<(), OptimizeError> {
+    ) -> Result<(), M::MemoError> {
         use Task::*;
 
         let fork_task_id = self.next_task_id();
@@ -257,15 +253,11 @@ impl<M: Memo> Optimizer<M> {
     async fn ensure_group_exploration_task(
         &mut self,
         group_id: GroupId,
-    ) -> Result<TaskId, OptimizeError> {
+    ) -> Result<TaskId, M::MemoError> {
         use Task::*;
 
         // Find the representative group for the given group ID.
-        let group_repr = self
-            .memo
-            .find_repr_group_id(group_id)
-            .await
-            .map_err(OptimizeError::MemoError)?;
+        let group_repr = self.memo.find_repr_group_id(group_id).await?;
 
         // Check if we already have an exploration task for this group.
         if let Some(task_id) = self.group_exploration_task_index.get(&group_repr) {
@@ -275,11 +267,7 @@ impl<M: Memo> Optimizer<M> {
         let exploration_task_id = self.next_task_id();
 
         // Create transform expression tasks for each logical expression and rule combination.
-        let logical_expressions = self
-            .memo
-            .get_all_logical_exprs(group_repr)
-            .await
-            .map_err(OptimizeError::MemoError)?;
+        let logical_expressions = self.memo.get_all_logical_exprs(group_repr).await?;
         let transform_expr_in =
             self.create_transform_tasks(&logical_expressions, group_id, exploration_task_id);
 
@@ -308,18 +296,11 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `TaskId`: The ID of the task that was created or reused.
-    async fn ensure_optimize_goal_task(
-        &mut self,
-        goal_id: GoalId,
-    ) -> Result<TaskId, OptimizeError> {
+    async fn ensure_optimize_goal_task(&mut self, goal_id: GoalId) -> Result<TaskId, M::MemoError> {
         use Task::*;
 
         // Find the representative goal for the given goal ID.
-        let goal_repr = self
-            .memo
-            .find_repr_goal_id(goal_id)
-            .await
-            .map_err(OptimizeError::MemoError)?;
+        let goal_repr = self.memo.find_repr_goal_id(goal_id).await?;
 
         // Check if we already have an optimization task for this goal.
         if let Some(task_id) = self.goal_optimization_task_index.get(&goal_repr) {
@@ -330,11 +311,7 @@ impl<M: Memo> Optimizer<M> {
 
         // TODO(Alexis): Materialize the goal and only explore the group - for now.
         // This is sufficient to support logical->logical transformation.
-        let Goal(group_id, _) = self
-            .memo
-            .materialize_goal(goal_id)
-            .await
-            .map_err(OptimizeError::MemoError)?;
+        let Goal(group_id, _) = self.memo.materialize_goal(goal_id).await?;
         let explore_group_in = self.ensure_group_exploration_task(group_id).await?;
 
         let goal_optimize_task = OptimizeGoalTask {
@@ -374,7 +351,7 @@ impl<M: Memo> Optimizer<M> {
     async fn ensure_cost_expression_task(
         &mut self,
         _expression_id: PhysicalExpressionId,
-    ) -> Result<TaskId, OptimizeError> {
+    ) -> Result<TaskId, M::MemoError> {
         todo!()
     }
 }

@@ -1,11 +1,4 @@
-use crate::{
-    cir::{
-        Child, GoalMemberId, GroupId, LogicalExpression, LogicalExpressionId, Operator,
-        PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpression,
-    },
-    memo::Memo,
-    optimizer::{Optimizer, errors::OptimizeError},
-};
+use crate::{cir::*, memo::Memo, optimizer::Optimizer};
 use async_recursion::async_recursion;
 use std::sync::Arc;
 
@@ -31,7 +24,7 @@ impl<M: Memo> Optimizer<M> {
     pub(crate) async fn probe_ingest_logical_plan(
         &mut self,
         logical_plan: &PartialLogicalPlan,
-    ) -> Result<LogicalIngest, OptimizeError> {
+    ) -> Result<LogicalIngest, M::MemoError> {
         use LogicalIngest::*;
 
         match logical_plan {
@@ -58,18 +51,14 @@ impl<M: Memo> Optimizer<M> {
     pub(crate) async fn probe_ingest_physical_plan(
         &mut self,
         physical_plan: &PartialPhysicalPlan,
-    ) -> Result<GoalMemberId, OptimizeError> {
+    ) -> Result<GoalMemberId, M::MemoError> {
         match physical_plan {
             PartialPhysicalPlan::Materialized(operator) => {
                 self.probe_ingest_physical_operator(operator).await
             }
             PartialPhysicalPlan::UnMaterialized(goal) => {
                 // Base case: is a goal.
-                let goal_id = self
-                    .memo
-                    .get_goal_id(goal)
-                    .await
-                    .map_err(OptimizeError::MemoError)?;
+                let goal_id = self.memo.get_goal_id(goal).await?;
                 Ok(GoalMemberId::GoalId(goal_id))
             }
         }
@@ -78,7 +67,7 @@ impl<M: Memo> Optimizer<M> {
     async fn probe_ingest_logical_operator(
         &mut self,
         operator: &Operator<Arc<PartialLogicalPlan>>,
-    ) -> Result<LogicalIngest, OptimizeError> {
+    ) -> Result<LogicalIngest, M::MemoError> {
         use Child::*;
         use LogicalIngest::*;
 
@@ -126,18 +115,13 @@ impl<M: Memo> Optimizer<M> {
             data: operator.data.clone(),
             children,
         };
-        let logical_expression_id = self
-            .memo
-            .get_logical_expr_id(&logical_expression)
-            .await
-            .map_err(OptimizeError::MemoError)?;
+        let logical_expression_id = self.memo.get_logical_expr_id(&logical_expression).await?;
 
         // Base case: check if the expression already exists in the memo.
         match self
             .memo
             .find_logical_expr_group(logical_expression_id)
-            .await
-            .map_err(OptimizeError::MemoError)?
+            .await?
         {
             Some(group_id) => Ok(Found(group_id)),
             None => Ok(Missing(vec![logical_expression_id])),
@@ -148,7 +132,7 @@ impl<M: Memo> Optimizer<M> {
     async fn probe_ingest_logical_child(
         &mut self,
         child: &Child<Arc<PartialLogicalPlan>>,
-    ) -> Result<Child<LogicalIngest>, OptimizeError> {
+    ) -> Result<Child<LogicalIngest>, M::MemoError> {
         use Child::*;
 
         match child {
@@ -171,7 +155,7 @@ impl<M: Memo> Optimizer<M> {
     async fn probe_ingest_physical_operator(
         &mut self,
         operator: &Operator<Arc<PartialPhysicalPlan>>,
-    ) -> Result<GoalMemberId, OptimizeError> {
+    ) -> Result<GoalMemberId, M::MemoError> {
         // Sequentially process the children ingestion.
         let mut children = Vec::with_capacity(operator.children.len());
         for child in &operator.children {
@@ -185,11 +169,7 @@ impl<M: Memo> Optimizer<M> {
             data: operator.data.clone(),
             children,
         };
-        let expression_id = self
-            .memo
-            .get_physical_expr_id(&expression)
-            .await
-            .map_err(OptimizeError::MemoError)?;
+        let expression_id = self.memo.get_physical_expr_id(&expression).await?;
 
         Ok(GoalMemberId::PhysicalExpressionId(expression_id))
     }
@@ -197,7 +177,7 @@ impl<M: Memo> Optimizer<M> {
     async fn process_physical_child(
         &mut self,
         child: &Child<Arc<PartialPhysicalPlan>>,
-    ) -> Result<Child<GoalMemberId>, OptimizeError> {
+    ) -> Result<Child<GoalMemberId>, M::MemoError> {
         use Child::*;
 
         match child {
