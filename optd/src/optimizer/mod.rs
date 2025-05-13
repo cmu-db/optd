@@ -25,8 +25,6 @@ mod memo_io;
 mod merge;
 mod retriever;
 mod tasks;
-#[cfg(test)]
-mod testing;
 
 /// Default maximum number of concurrent jobs to run in the optimizer.
 const DEFAULT_MAX_CONCURRENT_JOBS: usize = 1000;
