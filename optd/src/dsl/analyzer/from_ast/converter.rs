@@ -182,6 +182,7 @@ mod converter_tests {
     use crate::dsl::analyzer::hir::{CoreData, FunKind};
     use crate::dsl::analyzer::type_checks::registry::{Generic, TypeKind};
     use crate::dsl::parser::ast::{self, Adt, Function, Item, Module, Type as AstType};
+    use crate::dsl::utils::retriever::Retriever;
     use crate::dsl::utils::span::{Span, Spanned};
 
     // Helper functions to create test items
@@ -381,7 +382,11 @@ mod converter_tests {
         let ext_func = create_simple_function("external_function", false);
         let module = create_module_with_functions(vec![ext_func]);
 
-        pub fn external_function(_args: &[Value], _catalog: &dyn Catalog) -> Value {
+        pub fn external_function(
+            _args: &[Value],
+            _catalog: &dyn Catalog,
+            _retriever: &dyn Retriever,
+        ) -> Value {
             println!("Hello from UDF!");
             Value::new(CoreData::<Value>::None)
         }

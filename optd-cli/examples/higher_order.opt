@@ -1,7 +1,7 @@
 data Logical =
     | Operation = 
         | Binary = 
-            | Arithmetic = 
+            | Arith = 
                 | Add(left: Logical, right: Logical)
                 | Mul(left: Logical, right: Logical)
                 | Div(left: Logical, right: Logical)

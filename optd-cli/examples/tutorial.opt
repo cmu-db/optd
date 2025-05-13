@@ -227,7 +227,7 @@ fn (catalog: Catalog) get_table_schema(name: String): Schema
 
 fn (logical: Logical*) properties(): LogicalProperties
 
-fn (costed: Physical$) statistics(): CostedProperties
+fn (costed: Physical$) statistics(): Statistics
 
 // -------------------------
 // 9. Transformation Rules
@@ -239,11 +239,11 @@ fn (costed: Physical$) statistics(): CostedProperties
 // Helper function for scalar rewrites.
 fn (expr: Scalar) remap(bindings: {I64 : I64}): Scalar = 
     match expr
-        | ColumnRef(idx) -> 
-            if bindings(idx) != none then // TODO: Fix none bug... Should not be a type! Rather Option<Nothing>.
-                ColumnRef(0) // TODO: Add ! once we have the `!` syntax.
-            else
-                ColumnRef(idx)
+        | ColumnRef(idx) -> ColumnRef(0)
+            // if bindings(idx) != none then // TODO: Fix EQ inference: just require EqHash & adapt engine.
+            //    ColumnRef(0) // TODO: Add ! once we have the `!` syntax.
+            // else
+               // ColumnRef(idx)
         | IntLiteral(value) -> IntLiteral(value)
         | StringLiteral(value) -> StringLiteral(value)
         | BoolLiteral(value) -> BoolLiteral(value)
@@ -277,12 +277,12 @@ fn (expr: Logical*) join_commute(): Logical? = match expr
             right_indices = 0..right_len,
             left_indices = 0..left_len,
             
-            remapping = (left_indices.map(i -> (i, i + right_len)) ++ 
-                right_indices.map(i -> (i + left_len, i))).to_map(),
+            remapping = (left_indices.map((i: I64) -> (i, i + right_len)) ++ 
+                right_indices.map((i: I64) -> (i + left_len, i))).to_map(),
         in
             Project(
                 Join(right, left, Inner, predicate.remap(remapping)),
-                (right_indices ++ left_indices).map(i -> ColumnRef(i))
+                (right_indices ++ left_indices).map((i: I64) -> ColumnRef(i))
             )
     \ _ -> none
 
@@ -306,8 +306,8 @@ fn (plan: Logical*) join_associativity(): Logical? = match plan
             b_indices = 0..b_len,
             c_indices = 0..c_len,
             
-            pred_bc_remapping = (b_indices.map(i -> (a_len + i, i)) ++
-                c_indices.map(i -> (a_len + b_len + i, b_len + i))).to_map(),
+            pred_bc_remapping = (b_indices.map((i: I64) -> (a_len + i, i)) ++
+                c_indices.map((i: I64) -> (a_len + b_len + i, b_len + i))).to_map(),
             
             remapped_pred_bc = pred_bc.remap(pred_bc_remapping),
             
@@ -316,8 +316,8 @@ fn (plan: Logical*) join_associativity(): Logical? = match plan
             b_indices_after = 0..b_len,
             c_indices_after = 0..c_len,
             
-            pred_ab_remapping = (b_indices_after.map(i -> (a_len + i, a_len + i)) ++
-                c_indices_after.map(i -> (a_len + b_len + i, a_len + b_len + i))).to_map(),
+            pred_ab_remapping = (b_indices_after.map((i: I64) -> (a_len + i, a_len + i)) ++
+                c_indices_after.map((i: I64) -> (a_len + b_len + i, a_len + b_len + i))).to_map(),
             
             remapped_pred_ab = pred_ab.remap(pred_ab_remapping)
         in
@@ -353,10 +353,11 @@ fn (expr: Logical*) impl_filter_enforce(props: PhysicalProperties?): Physical? =
             let 
                 result = PhysFilter(child.optimize(none), predicate)
             in
-                if props != none then
-                    PhysSort(result, props#order_by)
-                else
-                    result
+                result
+                // if props != none then
+                    // PhysSort(result, props#order_by) // TODO: same ! problem
+                // else
+                //    result
         \ _ -> none
 
 [implementation]
@@ -365,14 +366,14 @@ fn (expr: Logical*) impl_filter_passthrough(props: PhysicalProperties?): Physica
         | Filter(child, predicate) -> PhysFilter(child.optimize(props), predicate)
         \ _ -> none
 
-[implementation]
-fn (expr: Logical*) impl_sort(props: PhysicalProperties?): Physical? = match expr
-    | Sort(child, order_by) -> 
-        if props == none then // TODO: The incoming `?` syntax will make this cleaner
-            PhysSort(child.optimize(none), order_by)
-        else
-            none
-    \ _ -> none
+// [implementation]
+// fn (expr: Logical*) impl_sort(props: PhysicalProperties?): Physical? = match expr
+//     | Sort(child, order_by) -> 
+//         if props == none then // TODO: The incoming `?` syntax will make this cleaner. Also == problem for now.
+//             PhysSort(child.optimize(none), order_by)
+//         else
+//             none
+//     \ _ -> none
 
 // -------------------------
 // 11. Other Required Functions
@@ -381,14 +382,14 @@ fn (expr: Logical*) impl_sort(props: PhysicalProperties?): Physical? = match exp
 // Cost function for physical operators - used by the cost-based optimizer to evaluate 
 // different physical implementation alternatives.
 
-fn (expr: Physical*) cost(): F64 = 0
+fn (expr: Physical*) cost(): F64 = 0.0
 
 // Derive logical properties from a logical plan - propagates schema information and other
 // logical properties (like cardinality estimates, uniqueness, or functional dependencies)
 // through the logical plan.
 
-fn (log: Logical*) derive(): LogicalProperties = match log
-    | Get(table_name) -> catalog.get_table_schema(table_name)
+fn (log: Logical*) derive(): LogicalProperties? = match log
+    | Get(table_name) -> LogicalProperties(Catalog.get_table_schema(table_name))
     | Filter(child, _) -> child.properties()
     | Join(left, right, join_type, _) ->
         let 

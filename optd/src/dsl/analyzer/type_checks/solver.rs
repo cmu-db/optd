@@ -470,7 +470,17 @@ impl TypeRegistry {
         outer: &Type,
         changed: &mut bool,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
-        let inner_resolved = self.resolve_type(&inner.ty);
+        use TypeKind::*;
+
+        let mut inner_resolved = self.resolve_type(&inner.ty);
+
+        // Unwrap stored (*) type if needed.
+        let is_stored = if let Stored(inner) = *inner_resolved.value {
+            inner_resolved = inner;
+            true
+        } else {
+            false
+        };
 
         // Function to create the standard field access error.
         let field_error = || {
@@ -484,19 +494,24 @@ impl TypeRegistry {
 
         match &*inner_resolved.value {
             // Wait for the field access to be resolved.
-            TypeKind::Nothing => Ok(()),
+            Nothing => Ok(()),
 
             // Handle tuple field access with _N pattern.
-            TypeKind::Tuple(types) => {
+            Tuple(types) => {
                 // Parse _N pattern and check if index is valid.
                 match field
                     .strip_prefix('_')
                     .and_then(|idx| idx.parse::<usize>().ok())
                 {
                     Some(index) if index < types.len() => {
-                        let field_ty = &types[index];
+                        let field_type = types[index].clone();
+                        let field_type = if is_stored {
+                            Stored(field_type).into()
+                        } else {
+                            field_type
+                        };
                         self.check_subtype_constraint(
-                            &TypedSpan::new(field_ty.clone(), inner.span.clone()),
+                            &TypedSpan::new(field_type.clone(), inner.span.clone()),
                             outer,
                             changed,
                         )
@@ -506,12 +521,19 @@ impl TypeRegistry {
             }
 
             // Handle ADT field access.
-            TypeKind::Adt(name) => match self.get_product_field_type(name, field) {
-                Some(field_ty) => self.check_subtype_constraint(
-                    &TypedSpan::new(field_ty, inner.span.clone()),
-                    outer,
-                    changed,
-                ),
+            Adt(name) => match self.get_product_field_type(name, field) {
+                Some(field_type) => {
+                    let field_type = if is_stored {
+                        Stored(field_type).into()
+                    } else {
+                        field_type
+                    };
+                    self.check_subtype_constraint(
+                        &TypedSpan::new(field_type, inner.span.clone()),
+                        outer,
+                        changed,
+                    )
+                }
                 None => Err(field_error()),
             },
 
@@ -551,6 +573,9 @@ impl TypeRegistry {
             return Ok(());
         }
 
+        // Unwrap stored (*) type if needed.
+        let is_stored = matches!(*scrutinee_ty.value, Stored(_));
+
         match &pattern.kind {
             Bind(_, sub_pattern) => {
                 self.check_scrutinee_constraint(scrutinee, sub_pattern, changed)
@@ -562,13 +587,26 @@ impl TypeRegistry {
                     .enumerate()
                     .try_for_each(|(i, field_pat)| {
                         let field_type = self.get_product_field_type_by_index(name, i).unwrap();
+                        let field_type = if is_stored && matches!(*field_type.value, Adt(_)) {
+                            Stored(field_type).into()
+                        } else {
+                            field_type
+                        };
                         let field_scrutinee =
                             TypedSpan::new(field_type, field_pat.metadata.span.clone());
 
                         self.check_scrutinee_constraint(&field_scrutinee, field_pat, changed)
                     })?;
 
-                self.check_subtype_constraint(&pattern.metadata, &scrutinee.ty, changed)
+                let pattern_typespan = if is_stored {
+                    TypedSpan::new(
+                        Stored(pattern.metadata.ty.clone()).into(),
+                        pattern.metadata.span.clone(),
+                    )
+                } else {
+                    pattern.metadata.clone()
+                };
+                self.check_subtype_constraint(&pattern_typespan, &scrutinee.ty, changed)
             }
 
             Operator(_) => panic!("Operators may not be in the HIR yet"),
@@ -1452,6 +1490,117 @@ mod tests {
         assert!(
             result.is_ok(),
             "Type inference with exact source code failed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_stored_type_pattern_matching() {
+        let source = r#"
+        // Define our own test types to work with stored annotations
+        data TestNode = 
+            | NodeJoin(left: TestNode, right: TestNode, type: I64, predicate: I64)
+            | NodeFilter(child: TestNode, predicate: I64)
+            \ NodeGet(name: String)
+            
+        data NodeProperties(schema: I64, columns: [I64])
+        
+        // Count function to replace len()
+        fn count_elements(arr: [I64]): I64 = match arr
+            | [] -> 0
+            \ [x .. rest] -> 1 + count_elements(rest)
+        
+        // Function that requires stored type
+        fn (node: TestNode*) get_properties(): NodeProperties = NodeProperties(42, [1, 2, 3])
+        
+        // Test function using pattern matching on stored type
+        fn process_stored_node(node: TestNode*): I64 = match node
+            | NodeJoin(left, right, type, predicate) -> {
+                // Inside the pattern, left and right should maintain stored status
+                let 
+                    left_props = left.get_properties(),
+                    right_props = right.get_properties(),
+                    left_schema = left_props#schema,
+                    right_schema = right_props#schema,
+                    
+                    // We should be able to access these properties
+                    result = left_schema + right_schema + type
+                in
+                    result
+            }
+            | NodeFilter(child, predicate) -> {
+                // Child should be stored and have access to properties
+                let 
+                    child_props = child.get_properties(),
+                    // Use our custom count function instead of len()
+                    column_count = count_elements(child_props#columns)
+                in
+                    column_count + predicate
+            }
+            \ NodeGet(name) -> 0
+        "#;
+
+        let result = run_type_inference(source, "stored_type_pattern_matching.opt");
+        assert!(
+            result.is_ok(),
+            "Stored type pattern matching failed type inference: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_stored_type_field_method_access() {
+        let source = r#"
+        // Define nested types with stored annotation possibilities
+        data Container(inner: TestExpr)
+        
+        data TestExpr = 
+            | TestJoin(left: TestExpr, right: TestExpr, jtype: String)
+            | TestFilter(child: TestExpr, condition: String)
+            \ TestGet(table: String)
+        
+        data TestProps(name: String, field_count: I64)
+        
+        // Method available for stored TestExpr
+        fn (expr: TestExpr*) get_props(): TestProps = 
+            match expr
+                | TestGet(table) -> TestProps(table, 3)
+                | TestFilter(child, _) -> child.get_props()
+                \ TestJoin(left, right, _) -> TestProps("join", 5)
+        
+        // Function demonstrating field access followed by method call on stored field
+        fn process_container(container: Container*): String = 
+            // Access the 'inner' field which is a stored TestExpr,
+            // then call the get_props() method on it that requires it to be stored
+            let props = container#inner.get_props() in
+            "Container with " ++ props#name
+        
+        // Function using stored types in a more complex scenario
+        fn process_join(join: TestJoin*): String = 
+            // Field access followed by method call
+            let 
+                // Access left and right fields which are stored TestExpr
+                left_props = join#left.get_props(),
+                right_props = join#right.get_props(),
+                
+                // Field access on the results
+                left_name = left_props#name,
+                right_name = right_props#name,
+                
+                // Field access followed by method call in nested expression
+                join_type = if join#jtype == "inner" then
+                                // Field access + method call in one expression
+                                join#left.get_props()#name
+                            else
+                                join#right.get_props()#name
+            in
+                "Join(" ++ left_name ++ ", " ++ right_name ++ ", " ++ join_type ++ ")"
+        "#;
+
+        let result = run_type_inference(source, "stored_type_field_method_access.opt");
+        assert!(
+            result.is_ok(),
+            "Stored type field access with method call failed type inference: {:?}",
             result
         );
     }

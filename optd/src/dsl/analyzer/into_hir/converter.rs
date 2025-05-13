@@ -234,7 +234,12 @@ fn convert_field_access(
 ) -> ExprKind {
     use ExprKind::*;
 
-    let expr_type = registry.resolve_type(&expr.metadata.ty);
+    let mut expr_type = registry.resolve_type(&expr.metadata.ty);
+
+    // Unwrap stored type if necessary.
+    while let TypeKind::Stored(inner_type) = *expr_type.value {
+        expr_type = inner_type;
+    }
 
     match &*expr_type.value {
         TypeKind::Tuple(_) => {
@@ -262,7 +267,10 @@ fn convert_field_access(
             )
         }
 
-        _ => panic!("Field access on non-struct, non-tuple type: error in type inference"),
+        _ => panic!(
+            "Field access on non-struct, non-tuple type: {:?}",
+            expr_type
+        ),
     }
 }
 

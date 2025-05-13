@@ -200,13 +200,13 @@ impl TypeRegistry {
         let result = lub_kind.into();
 
         // Verify post-condition in debug mode only
-        debug_assert!(
+        assert!(
             self.is_subtype(type1, &result),
             "LUB post-condition failed: {:?} is not a subtype of {:?}",
             type1,
             result
         );
-        debug_assert!(
+        assert!(
             self.is_subtype(type2, &result),
             "LUB post-condition failed: {:?} is not a subtype of {:?}",
             type2,
