@@ -34,9 +34,9 @@ impl MemoryMemo {
         PhysicalExpressionId(id)
     }
 
-    /// Gets the set of [`LogicalExpressionId`] that reference a group, mapped to their
+    /// Takes the set of [`LogicalExpressionId`] that reference a group, mapped to their
     /// representatives.
-    fn get_referencing_expr_set(&mut self, group_id: GroupId) -> HashSet<LogicalExpressionId> {
+    fn take_referencing_expr_set(&mut self, group_id: GroupId) -> HashSet<LogicalExpressionId> {
         self.group_referencing_exprs_index
             .remove(&group_id)
             .unwrap_or_default()
@@ -314,8 +314,8 @@ impl MemoryMemoHelpers for MemoryMemo {
         new_group_id: GroupId,
     ) -> Result<Vec<(GroupId, GroupId)>, Infallible> {
         // Collect expressions referencing the merged groups.
-        let expr_set_1 = self.get_referencing_expr_set(group_id_1);
-        let expr_set_2 = self.get_referencing_expr_set(group_id_2);
+        let expr_set_1 = self.take_referencing_expr_set(group_id_1);
+        let expr_set_2 = self.take_referencing_expr_set(group_id_2);
 
         // Combine into a single set.
         let mut referenced_exprs = expr_set_1;
