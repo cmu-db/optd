@@ -29,7 +29,7 @@ impl Materialize for MemoryMemo {
         Ok(self
             .id_to_goal
             .get(&repr_goal_id)
-            .expect(&format!("{:?} not found in memo table", repr_goal_id))
+            .unwrap_or_else(|| panic!("{:?} not found in memo table", repr_goal_id))
             .clone())
     }
 
@@ -78,7 +78,7 @@ impl Materialize for MemoryMemo {
         Ok(self
             .id_to_logical_expr
             .get(&repr_expr_id)
-            .expect(&format!("{:?} not found in memo table", repr_expr_id))
+            .unwrap_or_else(|| panic!("{:?} not found in memo table", repr_expr_id))
             .clone())
     }
 

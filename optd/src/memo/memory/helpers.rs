@@ -165,11 +165,11 @@ impl MemoryMemoHelpers for MemoryMemo {
         let group_info_1 = self
             .group_info
             .get(&group_id_1)
-            .expect(&format!("{:?} not found in memo table", group_id_1));
+            .unwrap_or_else(|| panic!("{:?} not found in memo table", group_id_1));
         let group_info_2 = self
             .group_info
             .get(&group_id_2)
-            .expect(&format!("{:?} not found in memo table", group_id_2));
+            .unwrap_or_else(|| panic!("{:?} not found in memo table", group_id_2));
 
         // Verify logical properties match (should be the case for equivalent groups)
         // Unless there is a bug in the rules.
@@ -258,7 +258,7 @@ impl MemoryMemoHelpers for MemoryMemo {
             let group_info = self
                 .group_info
                 .get_mut(&old_group)
-                .expect(&format!("{:?} not found in memo table", old_group));
+                .unwrap_or_else(|| panic!("{:?} not found in memo table", old_group));
 
             // Always remove the old expression from the group.
             group_info.expressions.remove(&old_id);

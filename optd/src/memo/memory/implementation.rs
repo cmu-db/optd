@@ -15,7 +15,7 @@ impl Memo for MemoryMemo {
         Ok(self
             .group_info
             .get(&group_id)
-            .expect(&format!("{:?} not found in memo table", group_id))
+            .unwrap_or_else(|| panic!("{:?} not found in memo table", group_id))
             .logical_properties
             .clone())
     }
@@ -28,7 +28,7 @@ impl Memo for MemoryMemo {
         Ok(self
             .group_info
             .get(&group_id)
-            .expect(&format!("{:?} not found in memo table", group_id))
+            .unwrap_or_else(|| panic!("{:?} not found in memo table", group_id))
             .expressions
             .clone())
     }
