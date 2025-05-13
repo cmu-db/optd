@@ -1,5 +1,7 @@
 //! The main implementation of the in-memory memo table.
 
+use std::collections::VecDeque;
+
 use super::{
     Infallible, Memo, MemoryMemo, MergeProducts, Representative, helpers::MemoryMemoHelpers,
 };
@@ -113,34 +115,28 @@ impl Memo for MemoryMemo {
         group_id_2: GroupId,
     ) -> Result<MergeProducts, Infallible> {
         let mut merge_operations = vec![];
-        let mut pending_merges = vec![(group_id_1, group_id_2)];
+        let mut pending_merges = VecDeque::from(vec![(group_id_1, group_id_2)]);
 
-        while !pending_merges.is_empty() {
-            // Take ownership of the current pending merges, to avoid
-            // borrowing issues with the mutable reference in the loop.
-            let current_merges = std::mem::take(&mut pending_merges);
-
-            for (g1, g2) in current_merges {
-                // Find current representatives - skip if already merged.
-                let group_id_1 = self.find_repr_group_id(g1).await?;
-                let group_id_2 = self.find_repr_group_id(g2).await?;
-                if group_id_1 == group_id_2 {
-                    continue;
-                }
-
-                // Perform the group merge, creating a new representative
-                let (new_group_id, merge_product) =
-                    self.merge_group_pair(group_id_1, group_id_2).await?;
-                merge_operations.push(merge_product);
-
-                // Process expressions that reference the merged groups,
-                // which may trigger additional group merges.
-                let new_pending_merges = self
-                    .process_referencing_expressions(group_id_1, group_id_2, new_group_id)
-                    .await?;
-
-                pending_merges.extend(new_pending_merges);
+        while let Some((g1, g2)) = pending_merges.pop_front() {
+            // Find current representatives - skip if already merged.
+            let group_id_1 = self.find_repr_group_id(g1).await?;
+            let group_id_2 = self.find_repr_group_id(g2).await?;
+            if group_id_1 == group_id_2 {
+                continue;
             }
+
+            // Perform the group merge, creating a new representative
+            let (new_group_id, merge_product) =
+                self.merge_group_pair(group_id_1, group_id_2).await?;
+            merge_operations.push(merge_product);
+
+            // Process expressions that reference the merged groups,
+            // which may trigger additional group merges.
+            let new_pending_merges = self
+                .process_referencing_expressions(group_id_1, group_id_2, new_group_id)
+                .await?;
+
+            pending_merges.extend(new_pending_merges);
         }
 
         // Consolidate the merge results by replacing the incremental merges
