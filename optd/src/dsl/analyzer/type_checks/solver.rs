@@ -470,7 +470,17 @@ impl TypeRegistry {
         outer: &Type,
         changed: &mut bool,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
-        let inner_resolved = self.resolve_type(&inner.ty);
+        use TypeKind::*;
+
+        let mut inner_resolved = self.resolve_type(&inner.ty);
+
+        // Unwrap stored (*) type if needed.
+        let is_stored = if let Stored(inner) = *inner_resolved.value {
+            inner_resolved = inner;
+            true
+        } else {
+            false
+        };
 
         // Function to create the standard field access error.
         let field_error = || {
@@ -484,19 +494,24 @@ impl TypeRegistry {
 
         match &*inner_resolved.value {
             // Wait for the field access to be resolved.
-            TypeKind::Nothing => Ok(()),
+            Nothing => Ok(()),
 
             // Handle tuple field access with _N pattern.
-            TypeKind::Tuple(types) => {
+            Tuple(types) => {
                 // Parse _N pattern and check if index is valid.
                 match field
                     .strip_prefix('_')
                     .and_then(|idx| idx.parse::<usize>().ok())
                 {
                     Some(index) if index < types.len() => {
-                        let field_ty = &types[index];
+                        let field_type = types[index].clone();
+                        let field_type = if is_stored {
+                            Stored(field_type).into()
+                        } else {
+                            field_type
+                        };
                         self.check_subtype_constraint(
-                            &TypedSpan::new(field_ty.clone(), inner.span.clone()),
+                            &TypedSpan::new(field_type.clone(), inner.span.clone()),
                             outer,
                             changed,
                         )
@@ -506,12 +521,19 @@ impl TypeRegistry {
             }
 
             // Handle ADT field access.
-            TypeKind::Adt(name) => match self.get_product_field_type(name, field) {
-                Some(field_ty) => self.check_subtype_constraint(
-                    &TypedSpan::new(field_ty, inner.span.clone()),
-                    outer,
-                    changed,
-                ),
+            Adt(name) => match self.get_product_field_type(name, field) {
+                Some(field_type) => {
+                    let field_type = if is_stored {
+                        Stored(field_type).into()
+                    } else {
+                        field_type
+                    };
+                    self.check_subtype_constraint(
+                        &TypedSpan::new(field_type, inner.span.clone()),
+                        outer,
+                        changed,
+                    )
+                }
                 None => Err(field_error()),
             },
 
@@ -551,6 +573,9 @@ impl TypeRegistry {
             return Ok(());
         }
 
+        // Unwrap stored (*) type if needed.
+        let is_stored = matches!(*scrutinee_ty.value, Stored(_));
+
         match &pattern.kind {
             Bind(_, sub_pattern) => {
                 self.check_scrutinee_constraint(scrutinee, sub_pattern, changed)
@@ -562,13 +587,26 @@ impl TypeRegistry {
                     .enumerate()
                     .try_for_each(|(i, field_pat)| {
                         let field_type = self.get_product_field_type_by_index(name, i).unwrap();
+                        let field_type = if is_stored && matches!(*field_type.value, Adt(_)) {
+                            Stored(field_type).into()
+                        } else {
+                            field_type
+                        };
                         let field_scrutinee =
                             TypedSpan::new(field_type, field_pat.metadata.span.clone());
 
                         self.check_scrutinee_constraint(&field_scrutinee, field_pat, changed)
                     })?;
 
-                self.check_subtype_constraint(&pattern.metadata, &scrutinee.ty, changed)
+                let pattern_typespan = if is_stored {
+                    TypedSpan::new(
+                        Stored(pattern.metadata.ty.clone()).into(),
+                        pattern.metadata.span.clone(),
+                    )
+                } else {
+                    pattern.metadata.clone()
+                };
+                self.check_subtype_constraint(&pattern_typespan, &scrutinee.ty, changed)
             }
 
             Operator(_) => panic!("Operators may not be in the HIR yet"),

@@ -152,6 +152,15 @@ impl TypeRegistry {
                 self.is_subtype_inner(bound, parent, memo, has_changed)
             }
 
+            // Optional type covariance: Optional[T] <: Optional[U] if T <: U.
+            (Optional(child_ty), Optional(parent_ty)) => {
+                self.is_subtype_inner(child_ty, parent_ty, memo, has_changed)
+            }
+            // Likewise, T <: Optional[T].
+            (_, Optional(parent_inner)) => {
+                self.is_subtype_inner(child, parent_inner, memo, has_changed)
+            }
+
             // Stored and Costed type handling.
             (Stored(child_inner), Stored(parent_inner)) => {
                 self.is_subtype_inner(child_inner, parent_inner, memo, has_changed)
@@ -219,15 +228,6 @@ impl TypeRegistry {
             (Closure(child_param, child_ret), Closure(parent_param, parent_ret)) => {
                 self.is_subtype_inner(parent_param, child_param, memo, has_changed)
                     && self.is_subtype_inner(child_ret, parent_ret, memo, has_changed)
-            }
-
-            // Optional type covariance: Optional[T] <: Optional[U] if T <: U.
-            (Optional(child_ty), Optional(parent_ty)) => {
-                self.is_subtype_inner(child_ty, parent_ty, memo, has_changed)
-            }
-            // Likewise, T <: Optional[T].
-            (_, Optional(parent_inner)) => {
-                self.is_subtype_inner(child, parent_inner, memo, has_changed)
             }
 
             // Native trait subtyping relationships
