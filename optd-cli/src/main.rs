@@ -43,7 +43,7 @@ use optd::dsl::utils::errors::{CompileError, Diagnose};
 use optd::dsl::utils::retriever::{MockRetriever, Retriever};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::runtime::Runtime;
+use tokio::runtime::Builder;
 use tokio::task::JoinSet;
 
 #[derive(Parser)]
@@ -127,7 +127,13 @@ fn run_all_functions(hir: &HIR) -> Result<(), Vec<CompileError>> {
     println!("Found {} functions to run", functions.len());
 
     // Create a multi-threaded runtime for parallel execution.
-    let runtime = Runtime::new().unwrap();
+    // TODO: We increase the stack size by x64 to avoid stack overflow
+    // given the lack of tail recursion in the engine (yet...)
+    let runtime = Builder::new_multi_thread()
+        .thread_stack_size(128 * 1024 * 1024)
+        .enable_all()
+        .build()
+        .unwrap();
     let function_results = runtime.block_on(run_functions_in_parallel(hir, functions));
 
     // Process and display function results.
