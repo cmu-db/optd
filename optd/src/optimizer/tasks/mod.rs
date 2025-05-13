@@ -48,8 +48,6 @@ pub(crate) struct OptimizePlanTask {
 
     /// Channel to send the optimized physical plans back.
     pub physical_tx: Sender<PhysicalPlan>,
-    /// Channel to send the equivalent logical plans back.
-    pub logical_tx: Sender<LogicalPlan>,
 
     /// The only dependency to get the best plans from.
     pub optimize_goal_in: TaskId,
