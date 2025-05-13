@@ -3,7 +3,7 @@ use crate::{
     memo::Memo,
     optimizer::{Optimizer, errors::OptimizeError, tasks::TaskId},
 };
-use std::collections::{HashMap, HashSet};
+use hashbrown::{HashMap, HashSet};
 
 impl<M: Memo> Optimizer<M> {
     /// Update a group exploration task with new logical expressions, if any.

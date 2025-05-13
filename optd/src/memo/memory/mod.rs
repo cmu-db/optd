@@ -3,10 +3,8 @@ use crate::cir::{
     Cost, Goal, GoalId, GoalMemberId, GroupId, LogicalExpression, LogicalExpressionId,
     LogicalProperties, PhysicalExpressionId,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    vec,
-};
+use hashbrown::{HashMap, HashSet};
+use std::vec;
 use union_find::UnionFind;
 
 mod helpers;

@@ -3,12 +3,12 @@ use crate::cir::{
     LogicalProperties, PhysicalExpression, PhysicalExpressionId,
 };
 use error::MemoResult;
-use std::collections::HashSet;
 
 pub(crate) mod error;
 pub mod memory;
 
 pub(crate) use error::MemoError;
+use hashbrown::HashSet;
 pub use memory::MemoryMemo;
 
 /// Result of merging two groups.

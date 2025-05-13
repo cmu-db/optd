@@ -6,7 +6,7 @@ use crate::{
         error::MemoResult, memory::GroupInfo,
     },
 };
-use std::collections::{HashMap, HashSet};
+use hashbrown::{HashMap, HashSet};
 
 impl MemoryMemo {
     pub(super) fn next_shared_id(&mut self) -> i64 {

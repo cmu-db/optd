@@ -15,7 +15,7 @@ use crate::{
         },
     },
 };
-use std::collections::HashSet;
+use hashbrown::HashSet;
 use tokio::sync::mpsc::Sender;
 
 impl<M: Memo> Optimizer<M> {

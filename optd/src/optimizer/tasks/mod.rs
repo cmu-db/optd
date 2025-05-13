@@ -3,7 +3,7 @@ use crate::cir::{
     Cost, GoalId, GroupId, ImplementationRule, LogicalExpressionId, LogicalPlan,
     PhysicalExpressionId, PhysicalPlan, TransformationRule,
 };
-use std::collections::HashSet;
+use hashbrown::HashSet;
 use tokio::sync::mpsc::Sender;
 
 mod delete;
