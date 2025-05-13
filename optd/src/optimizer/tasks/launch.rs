@@ -198,14 +198,9 @@ impl<M: Memo> Optimizer<M> {
         group_id: GroupId,
         explore_task_id: TaskId,
     ) -> HashSet<TaskId> {
-        let transformations: Vec<_> = self
-            .rule_book
-            .get_transformations()
-            .iter()
-            .cloned()
-            .collect();
-
+        let transformations = self.rule_book.get_transformations().to_vec();
         let mut transform_tasks = HashSet::new();
+
         for &expr_id in expressions {
             for rule in &transformations {
                 let task_id = self.launch_transform_expression_task(

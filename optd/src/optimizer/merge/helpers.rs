@@ -186,7 +186,7 @@ impl<M: Memo> Optimizer<M> {
         &mut self,
         tasks: &[TaskId],
         expr_to_repr: &HashMap<LogicalExpressionId, LogicalExpressionId>,
-        to_delete: &Vec<LogicalExpressionId>,
+        to_delete: &[LogicalExpressionId],
     ) {
         for &task_id in tasks {
             let expr_id = self
@@ -205,11 +205,11 @@ impl<M: Memo> Optimizer<M> {
     }
 
     /// Update or delete continuation tasks spawned by fork tasks.
-    fn process_fork_tasks<'a>(
+    fn process_fork_tasks(
         &mut self,
         tasks: &[TaskId],
         expr_to_repr: &HashMap<LogicalExpressionId, LogicalExpressionId>,
-        to_delete: &Vec<LogicalExpressionId>,
+        to_delete: &[LogicalExpressionId],
     ) {
         for &task_id in tasks {
             let continue_ids = self

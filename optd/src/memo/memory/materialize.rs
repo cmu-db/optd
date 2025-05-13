@@ -6,7 +6,6 @@ use crate::{
     },
     memo::{Materialize, MemoError, Representative, error::MemoResult},
 };
-use std::collections::HashSet;
 
 impl Materialize for MemoryMemo {
     async fn get_goal_id(&mut self, goal: &Goal) -> MemoResult<GoalId> {
@@ -62,7 +61,7 @@ impl Materialize for MemoryMemo {
             .for_each(|group_id| {
                 self.group_referencing_exprs_index
                     .entry(group_id)
-                    .or_insert_with(HashSet::new)
+                    .or_default()
                     .insert(expr_id);
             });
 

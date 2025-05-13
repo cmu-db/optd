@@ -67,7 +67,7 @@ impl<M: Memo> Optimizer<M> {
                 )
                 .await;
 
-            Self::process_engine_response(job_id, message_tx, response)
+            Self::process_engine_response(job_id, message_tx, response).await;
         });
 
         Ok(())
@@ -116,7 +116,7 @@ impl<M: Memo> Optimizer<M> {
                 )
                 .await;
 
-            Self::process_engine_response(job_id, message_tx, response)
+            Self::process_engine_response(job_id, message_tx, response).await;
         });
 
         Ok(())
@@ -172,7 +172,7 @@ impl<M: Memo> Optimizer<M> {
                 )
                 .await;
 
-            Self::process_engine_response(job_id, message_tx, response)
+            Self::process_engine_response(job_id, message_tx, response).await;
         });
 
         Ok(())
@@ -210,7 +210,7 @@ impl<M: Memo> Optimizer<M> {
                 )
                 .await;
 
-            Self::process_engine_response(job_id, message_tx, response)
+            Self::process_engine_response(job_id, message_tx, response).await;
         });
 
         Ok(())
@@ -242,7 +242,7 @@ impl<M: Memo> Optimizer<M> {
         let message_tx = self.message_tx.clone();
         tokio::spawn(async move {
             let response = k.0(plan).await;
-            Self::process_engine_response(job_id, message_tx, response)
+            Self::process_engine_response(job_id, message_tx, response).await;
         });
 
         Ok(())
@@ -268,7 +268,7 @@ impl<M: Memo> Optimizer<M> {
         let message_tx = self.message_tx.clone();
         tokio::spawn(async move {
             let response = k.0(plan).await;
-            Self::process_engine_response(job_id, message_tx, response)
+            Self::process_engine_response(job_id, message_tx, response).await;
         });
 
         Ok(())

@@ -102,9 +102,9 @@ impl Memo for MemoryMemo {
         let logical_expr_id = self.find_repr_logical_expr_id(logical_expr_id).await?;
 
         debug_assert!(
-            self.logical_id_to_group_index
-                .get(&logical_expr_id)
-                .is_none(),
+            !self
+                .logical_id_to_group_index
+                .contains_key(&logical_expr_id),
             "Logical expression ID already exists in a group."
         );
 
