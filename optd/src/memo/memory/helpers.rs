@@ -178,9 +178,7 @@ impl MemoryMemoHelpers for MemoryMemo {
         // Combine expressions from both groups.
         let expr_ids_1 = self.get_all_logical_exprs(group_id_1).await?;
         let expr_ids_2 = self.get_all_logical_exprs(group_id_2).await?;
-        let mut all_expr_ids = HashSet::with_capacity(expr_ids_1.len() + expr_ids_2.len());
-        all_expr_ids.extend(expr_ids_1.iter().copied());
-        all_expr_ids.extend(expr_ids_2.iter().copied());
+        let all_expr_ids = expr_ids_1.union(&expr_ids_2).copied().collect();
 
         // Create and save new group.
         let new_group_info = GroupInfo {
