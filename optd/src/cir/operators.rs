@@ -2,7 +2,7 @@ use ordered_float::OrderedFloat;
 
 /// Represents an operator in the query plan.
 ///
-/// This generic and unified operator structure can represent logical operations, 
+/// This generic and unified operator structure can represent logical operations,
 /// and physical operations, simplifying the type hierarchy.
 ///
 /// # Type Parameters

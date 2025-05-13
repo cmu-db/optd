@@ -1,4 +1,8 @@
-use std::collections::HashMap;
+//! A custom union-find implementation for the in-memory memo table.
+//!
+//! TODO: clean up this implementation to use rank by size or use a 3rd-party crate.
+
+use hashbrown::HashMap;
 use std::hash::Hash;
 
 /// A specialized Union-Find data structure for tracking group or goal representatives

@@ -1,7 +1,7 @@
 use super::{Job, JobId};
 use crate::{
     memo::Memo,
-    optimizer::{Optimizer, TaskId, errors::OptimizeError, jobs::JobKind},
+    optimizer::{Optimizer, TaskId, jobs::JobKind},
 };
 
 impl<M: Memo> Optimizer<M> {
@@ -36,7 +36,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during job launching.
-    pub(crate) async fn launch_pending_jobs(&mut self) -> Result<(), OptimizeError> {
+    pub(crate) async fn launch_pending_jobs(&mut self) -> Result<(), M::MemoError> {
         use JobKind::*;
 
         // Launch jobs only if we're below the maximum concurrent jobs limit, in LIFO order.
