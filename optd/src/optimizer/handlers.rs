@@ -18,7 +18,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Parameters
     /// * `plan` - The logical plan to optimize.
-    /// * `response_tx` - Channel to send the resulting physical plan.
+    /// * `physical_tx` - Channel to send the resulting physical plan.
     /// * `optimize_plan_task_id` - ID of the task that initiated this request.
     ///
     /// # Returns
@@ -26,7 +26,7 @@ impl<M: Memo> Optimizer<M> {
     pub(super) async fn process_optimize_request(
         &mut self,
         plan: LogicalPlan,
-        response_tx: Sender<PhysicalPlan>,
+        physical_tx: Sender<PhysicalPlan>,
         optimize_plan_task_id: TaskId,
     ) -> Result<(), M::MemoError> {
         use JobKind::*;
@@ -41,7 +41,7 @@ impl<M: Memo> Optimizer<M> {
                 let goal_id = self.memo.get_goal_id(&goal).await?;
 
                 // Launch the corresponding task now that we know the goal_id.
-                self.launch_optimize_plan_task(optimize_plan_task_id, plan, response_tx, goal_id)
+                self.launch_optimize_plan_task(optimize_plan_task_id, plan, physical_tx, goal_id)
                     .await?;
             }
             Missing(logical_exprs) => {
@@ -56,7 +56,7 @@ impl<M: Memo> Optimizer<M> {
                     .collect();
 
                 self.pending_messages.push(PendingMessage::new(
-                    Request(OptimizeRequest { plan, response_tx }, optimize_plan_task_id),
+                    Request(OptimizeRequest { plan, physical_tx }, optimize_plan_task_id),
                     pending_dependencies,
                 ));
             }

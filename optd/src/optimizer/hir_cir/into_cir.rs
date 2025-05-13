@@ -30,6 +30,32 @@ pub fn value_to_partial_logical(value: &Value) -> PartialLogicalPlan {
     }
 }
 
+/// Converts a [`Value`] into a fully materialized [`LogicalPlan`].
+///
+/// We use this function when materializing a logical expression for use in properties.
+///
+/// # Panics
+///
+/// Panics if the [`Value`] is not a [`Logical`] variant or if the [`Logical`] variant is not a
+/// [`Materialized`] variant.
+pub fn value_to_logical(value: &Value) -> LogicalPlan {
+    use Materializable::*;
+
+    match &value.data {
+        CoreData::Logical(logical_op) => match logical_op {
+            UnMaterialized(_) => {
+                panic!("Cannot convert UnMaterialized LogicalOperator to LogicalPlan")
+            }
+            Materialized(log_op) => LogicalPlan(Operator {
+                tag: log_op.operator.tag.clone(),
+                data: convert_values_to_operator_data(&log_op.operator.data),
+                children: convert_values_to_children(&log_op.operator.children, value_to_logical),
+            }),
+        },
+        _ => panic!("Expected Logical CoreData variant, found: {:?}", value.data),
+    }
+}
+
 /// Converts a [`Value`] into a [`PartialPhysicalPlan`].
 ///
 /// # Panics

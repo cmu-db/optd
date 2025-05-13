@@ -138,9 +138,10 @@ fn build_calculator_expr() =
     const3 = Const(3),
     const4 = Const(4),
     addition = Add(const2, const3),
-    multiplication = Mult(addition, const4)
+    multiplication = Mult(addition, const4),
+    pow = Pow(multiplication, Const(10)),
   in
-    multiplication.evaluate()
+    pow.evaluate()
 
 [run]
 fn run_mult_commute() =
