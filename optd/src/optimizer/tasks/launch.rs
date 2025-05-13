@@ -35,13 +35,15 @@ impl<M: Memo> Optimizer<M> {
     /// # Parameters
     /// * `task_id`: The ID of the task to be launched.
     /// * `plan`: The logical plan to be optimized.
-    /// * `response_tx`: The channel to send the optimized physical plan.
+    /// * `physical_tx`: The channel to send the optimized physical plan.
+    /// * `logical_tx`: The channel to send the optimized logical plan.
     /// * `goal_id`: The goal ID that this task is optimizing for.
     pub(crate) async fn launch_optimize_plan_task(
         &mut self,
         task_id: TaskId,
         plan: LogicalPlan,
-        response_tx: Sender<PhysicalPlan>,
+        physical_tx: Sender<PhysicalPlan>,
+        logical_tx: Sender<LogicalPlan>,
         goal_id: GoalId,
     ) -> Result<(), OptimizeError> {
         use Task::*;
@@ -52,7 +54,8 @@ impl<M: Memo> Optimizer<M> {
         // Register task and connect in graph.
         let optimize_plan_task = OptimizePlanTask {
             plan,
-            response_tx,
+            physical_tx,
+            logical_tx,
             optimize_goal_in: goal_optimize_task_id,
         };
 

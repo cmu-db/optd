@@ -25,6 +25,8 @@ mod memo_io;
 mod merge;
 mod retriever;
 mod tasks;
+#[cfg(test)]
+mod testing;
 
 /// Default maximum number of concurrent jobs to run in the optimizer.
 const DEFAULT_MAX_CONCURRENT_JOBS: usize = 1000;
@@ -42,7 +44,10 @@ pub struct OptimizeRequest {
     /// Streams results back as they become available, allowing clients to:
     /// * Receive progressively better plans during optimization.
     /// * Terminate early when a "good enough" plan is found.
-    pub response_tx: Sender<PhysicalPlan>,
+    pub physical_tx: Sender<PhysicalPlan>,
+
+    /// Channel for receiving equivalent logical plans. 
+    pub logical_tx: Sender<LogicalPlan>,
 }
 
 /// Products produced by optimization engine components
@@ -242,8 +247,8 @@ impl<M: Memo> Optimizer<M> {
                 Some(message) = self.message_rx.recv() => {
                     // Process the next message in the channel.
                     match message {
-                        Request(OptimizeRequest { plan, response_tx }, task_id) =>
-                                self.process_optimize_request(plan, response_tx, task_id).await?,
+                        Request(OptimizeRequest { plan, physical_tx, logical_tx }, task_id) =>
+                                self.process_optimize_request(plan, physical_tx, logical_tx, task_id).await?,
                         Retrieve(group_id, response_tx) => {
                             self.process_retrieve_properties(group_id, response_tx).await?;
                         }
