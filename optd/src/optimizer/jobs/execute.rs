@@ -1,7 +1,10 @@
 use super::{CostedContinuation, JobId, LogicalContinuation};
 use crate::{
     cir::*,
-    dsl::engine::{Engine, EngineResponse},
+    dsl::{
+        analyzer::hir::{CoreData, Value},
+        engine::{Engine, EngineResponse},
+    },
     memo::Memo,
     optimizer::{
         EngineProduct, Optimizer, OptimizerMessage,
@@ -85,7 +88,9 @@ impl<M: Memo> Optimizer<M> {
         group_id: GroupId,
         job_id: JobId,
     ) -> Result<(), M::MemoError> {
+        use CoreData::*;
         use EngineProduct::*;
+        use EngineResponse::*;
 
         let engine = self.init_engine();
         let plan = partial_logical_to_value(
@@ -110,7 +115,10 @@ impl<M: Memo> Optimizer<M> {
                 )
                 .await;
 
-            Self::process_engine_response(job_id, message_tx, response).await;
+            // A none result means the rule was not applicable.
+            if !matches!(response, Return(Value { data: None, .. }, _)) {
+                Self::process_engine_response(job_id, message_tx, response).await;
+            }
         });
 
         Ok(())
@@ -219,6 +227,9 @@ impl<M: Memo> Optimizer<M> {
         k: LogicalContinuation,
         job_id: JobId,
     ) -> Result<(), M::MemoError> {
+        use CoreData::*;
+        use EngineResponse::*;
+
         let plan = partial_logical_to_value(
             &self
                 .memo
@@ -230,7 +241,11 @@ impl<M: Memo> Optimizer<M> {
         let message_tx = self.message_tx.clone();
         tokio::spawn(async move {
             let response = k.0(plan).await;
-            Self::process_engine_response(job_id, message_tx, response).await;
+
+            // A none result means the rule was not applicable.
+            if !matches!(response, Return(Value { data: None, .. }, _)) {
+                Self::process_engine_response(job_id, message_tx, response).await;
+            }
         });
 
         Ok(())

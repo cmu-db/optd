@@ -33,7 +33,7 @@ impl Retriever for OptimizerRetriever {
     async fn get_properties(&self, group_id: GroupId) -> Value {
         use OptimizerMessage::*;
 
-        let (response_tx, mut response_rx) = mpsc::channel(0);
+        let (response_tx, mut response_rx) = mpsc::channel(1);
 
         self.message_tx
             .send(Retrieve(hir_group_id_to_cir(&group_id), response_tx))

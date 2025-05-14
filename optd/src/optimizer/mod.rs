@@ -5,11 +5,12 @@ use crate::{
     memo::Memo,
 };
 use hashbrown::{HashMap, HashSet};
+use hir_cir::extract_rulebook_from_hir;
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 mod handlers;
-mod hir_cir;
+pub mod hir_cir;
 mod jobs;
 mod memo_io;
 mod merge;
@@ -77,11 +78,6 @@ enum OptimizerMessage {
 }
 
 impl OptimizerMessage {
-    /// Create a new request message with the given plan and task ID.
-    pub fn request(plan: OptimizeRequest, task_id: TaskId) -> Self {
-        Self::Request(plan, task_id)
-    }
-
     /// Create a new product message with the given engine product and job ID.
     pub(super) fn product(product: EngineProduct, job_id: JobId) -> Self {
         Self::Product(product, job_id)
@@ -161,7 +157,7 @@ impl<M: Memo> Optimizer<M> {
             memo,
             catalog,
             retriever: Arc::new(OptimizerRetriever::new(message_tx.clone())),
-            rule_book: RuleBook::default(),
+            rule_book: extract_rulebook_from_hir(&hir),
             hir_context: hir.context,
 
             // Message handling.
@@ -190,8 +186,8 @@ impl<M: Memo> Optimizer<M> {
 
     /// Launch a new optimizer and return a sender for client communication.
     pub fn launch(memo: M, catalog: Arc<dyn Catalog>, hir: HIR) -> Sender<OptimizeRequest> {
-        let (message_tx, message_rx) = mpsc::channel(0);
-        let (optimize_tx, optimize_rx) = mpsc::channel(0);
+        let (message_tx, message_rx) = mpsc::channel(1);
+        let (optimize_tx, optimize_rx) = mpsc::channel(1);
 
         // Start the background processing loop.
         let optimizer = Self::new(
@@ -220,7 +216,8 @@ impl<M: Memo> Optimizer<M> {
         loop {
             tokio::select! {
                 Some(request) = self.optimize_rx.recv() => {
-                    let task_id = self.create_optimize_plan_task();
+                    let task_id = self.create_optimize_plan_task(request.plan.clone(),
+                        request.physical_tx.clone());
                     let message_tx = self.message_tx.clone();
 
                     // Forward the optimization request to the message processing loop
@@ -243,6 +240,7 @@ impl<M: Memo> Optimizer<M> {
                         }
                         Product(product, job_id) => {
                             let task_id = self.get_related_task_id(job_id);
+
                             // Only process the product if the task is still active.
                             if self.get_task(task_id).is_some() {
                                 match product {
@@ -267,7 +265,10 @@ impl<M: Memo> Optimizer<M> {
                                 }
                             }
 
-                            self.running_jobs.remove(&job_id);
+                            // A job is guaranteed to be terminated, unless it has been added to the pending queue.
+                            if !self.pending_messages.iter().any(|msg| matches!(msg.message, Product(_, j) if j == job_id)) {
+                                self.running_jobs.remove(&job_id);
+                            }
                         }
                     };
 

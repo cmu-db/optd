@@ -53,12 +53,9 @@ impl Memo for MemoryMemo {
     ) -> Result<GroupId, Infallible> {
         let logical_expr_id = self.find_repr_logical_expr_id(logical_expr_id).await?;
 
-        assert!(
-            !self
-                .logical_id_to_group_index
-                .contains_key(&logical_expr_id),
-            "Logical expression ID already exists in a group."
-        );
+        if let Some(group_id) = self.logical_id_to_group_index.get(&logical_expr_id) {
+            return Ok(*group_id);
+        }
 
         let group_id = self.next_group_id();
         let group_info = GroupInfo {
@@ -114,6 +111,8 @@ impl Memo for MemoryMemo {
         group_id_1: GroupId,
         group_id_2: GroupId,
     ) -> Result<MergeProducts, Infallible> {
+        println!("Merging: {:?} and {:?}", group_id_1, group_id_2);
+
         let mut merge_operations = vec![];
         let mut pending_merges = VecDeque::from(vec![(group_id_1, group_id_2)]);
 
