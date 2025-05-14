@@ -286,11 +286,6 @@ impl MemoryMemoHelper for MemoryMemo {
 
             // Only add the new expression to the old expression's group if it does not exist in any
             // group yet.
-            // TODO(connor) make sense of these docs.
-            // Since we are effectively adding an identical expression into this group, we
-            // technically will have 2
-            // We do not want to add the same logical expression to two groups.
-            // The merge will handle that, if it is needed.
             if new_group_opt.is_none() {
                 group_info.expressions.insert(new_id);
                 self.logical_id_to_group_index.insert(new_id, old_group);
