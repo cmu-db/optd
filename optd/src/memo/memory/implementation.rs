@@ -6,7 +6,7 @@ use super::{
     Infallible, Memo, MemoryMemo, MergeProducts, Representative, helpers::MemoryMemoHelper,
 };
 use crate::{cir::*, memo::memory::GroupInfo};
-use hashbrown::HashSet;
+use hashbrown::{HashMap, HashSet};
 
 impl Memo for MemoryMemo {
     async fn get_logical_properties(
@@ -60,6 +60,7 @@ impl Memo for MemoryMemo {
         let group_id = self.next_group_id();
         let group_info = GroupInfo {
             expressions: HashSet::from([logical_expr_id]),
+            goals: HashMap::new(),
             logical_properties: props.clone(),
         };
 

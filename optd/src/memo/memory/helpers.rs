@@ -64,10 +64,17 @@ impl MemoryMemo {
 ///
 /// See the implementation itself for the documentation of each helper method.
 pub trait MemoryMemoHelper: Memo {
+    async fn find_repr_goal_member_id(&self, id: GoalMemberId) -> Result<GoalMemberId, Infallible>;
+
     async fn remap_logical_expr<'a>(
         &self,
         logical_expr: &'a LogicalExpression,
     ) -> Result<Cow<'a, LogicalExpression>, Infallible>;
+
+    async fn remap_physical_expr<'a>(
+        &self,
+        physical_expr: &'a PhysicalExpression,
+    ) -> Result<Cow<'a, PhysicalExpression>, Infallible>;
 
     async fn remap_goal<'a>(&self, goal: &'a Goal) -> Result<Cow<'a, Goal>, Infallible>;
 
@@ -98,6 +105,25 @@ pub trait MemoryMemoHelper: Memo {
 }
 
 impl MemoryMemoHelper for MemoryMemo {
+    /// Finds the representative ID for a given [`GoalMemberId`].
+    ///
+    /// This handles both variants of `GoalMemberId` by finding the appropriate representative
+    /// based on whether it's a Goal or PhysicalExpr.
+    async fn find_repr_goal_member_id(&self, id: GoalMemberId) -> Result<GoalMemberId, Infallible> {
+        use GoalMemberId::*;
+
+        match id {
+            GoalId(goal_id) => {
+                let repr_goal_id = self.find_repr_goal_id(goal_id).await?;
+                Ok(GoalId(repr_goal_id))
+            }
+            PhysicalExpressionId(expr_id) => {
+                let repr_expr_id = self.find_repr_physical_expr_id(expr_id).await?;
+                Ok(PhysicalExpressionId(repr_expr_id))
+            }
+        }
+    }
+
     /// Remaps the children of a logical expression such that they are all identified by their
     /// representative IDs.
     ///
@@ -144,6 +170,55 @@ impl MemoryMemoHelper for MemoryMemo {
             })
         } else {
             Cow::Borrowed(logical_expr)
+        })
+    }
+
+    /// Remaps the children of a physical expression such that they are all identified by their
+    /// representative IDs.
+    ///
+    /// For example, if a physical expression has a child goal with [`GoalMemberId`] 3, but the
+    /// representative of goal 3 is [`GoalMemberId`] 42, then the output expression will be the input
+    /// physical expression with a child goal of 42.
+    ///
+    /// If no remapping needs to occur, this returns the same [`PhysicalExpression`] object via the
+    /// [`Cow`]. Otherwise, this function will create a new owned [`PhysicalExpression`].
+    async fn remap_physical_expr<'a>(
+        &self,
+        physical_expr: &'a PhysicalExpression,
+    ) -> Result<Cow<'a, PhysicalExpression>, Infallible> {
+        use Child::*;
+
+        let mut needs_remapping = false;
+        let mut remapped_children = Vec::with_capacity(physical_expr.children.len());
+
+        for child in &physical_expr.children {
+            let remapped = match child {
+                Singleton(goal_id) => {
+                    let repr = self.find_repr_goal_member_id(*goal_id).await?;
+                    needs_remapping |= repr != *goal_id;
+                    Singleton(repr)
+                }
+                VarLength(goal_ids) => {
+                    let mut reprs = Vec::with_capacity(goal_ids.len());
+                    for goal_id in goal_ids {
+                        let repr = self.find_repr_goal_member_id(*goal_id).await?;
+                        needs_remapping |= repr != *goal_id;
+                        reprs.push(repr);
+                    }
+                    VarLength(reprs)
+                }
+            };
+            remapped_children.push(remapped);
+        }
+
+        Ok(if needs_remapping {
+            Cow::Owned(PhysicalExpression {
+                tag: physical_expr.tag.clone(),
+                data: physical_expr.data.clone(),
+                children: remapped_children,
+            })
+        } else {
+            Cow::Borrowed(physical_expr)
         })
     }
 
@@ -227,6 +302,7 @@ impl MemoryMemoHelper for MemoryMemo {
         // Create and save the new group.
         let new_group_info = GroupInfo {
             expressions: all_exprs,
+            goals: HashMap::new(), // TODO(Alexis): this will be used to trigger the goal merge process.
             logical_properties: group1_info.logical_properties,
         };
         self.group_info.insert(new_group_id, new_group_info);
@@ -414,6 +490,7 @@ impl MemoryMemoHelper for MemoryMemo {
         Ok(MergeProducts {
             group_merges,
             goal_merges: vec![],
+            expr_merges: vec![],
         })
     }
 }

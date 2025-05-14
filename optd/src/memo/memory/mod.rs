@@ -41,12 +41,24 @@ pub struct MemoryMemo {
     /// Each representative expression is mapped to its id, for faster lookups.
     logical_expr_to_id: HashMap<LogicalExpression, LogicalExpressionId>,
 
+    /// Key is always a representative ID.
+    id_to_physical_expr: HashMap<PhysicalExpressionId, PhysicalExpression>,
+    /// The cost of each representative physical expression, if available.
+    id_to_cost: HashMap<PhysicalExpressionId, Option<Cost>>,
+    /// Each representative expression is mapped to its id, for faster lookups.
+    physical_expr_to_id: HashMap<PhysicalExpression, PhysicalExpressionId>,
+
     // Indexes: only deal with representative IDs, but speeds up most queries.
     /// To speed up expr->group lookup, we maintain a mapping from logical expression IDs to group IDs.
     logical_id_to_group_index: HashMap<LogicalExpressionId, GroupId>,
     /// To speed up recursive merges, we maintain a mapping from group IDs to all logical expression IDs
-    /// that contain a reference to this group. The value logical_expr_ids may *NOT* be a representative ID.
+    /// that contain a reference to this group.
+    /// The value logical_expr_ids may *NOT* be a representative ID.
     group_referencing_exprs_index: HashMap<GroupId, HashSet<LogicalExpressionId>>,
+    /// To speed up recursive merges, we maintain a mapping from goal member IDs to all goal member IDs
+    /// that contain a reference to this goal member.
+    /// The value physical_expr_ids may *NOT* be a representative ID.
+    goal_member_referencing_exprs_index: HashMap<GoalMemberId, HashSet<PhysicalExpressionId>>,
 
     /// The shared next unique id to be used for goals, groups, logical expressions, and physical expressions.
     next_shared_id: i64,
@@ -60,9 +72,11 @@ pub struct MemoryMemo {
 
 /// Information about a group:
 /// - All logical expressions in this group (always representative IDs).
+/// - All goals that have this group as objective, for each physical properties.
 /// - Logical properties of this group.
 #[derive(Clone, Debug)]
 struct GroupInfo {
     expressions: HashSet<LogicalExpressionId>,
+    goals: HashMap<PhysicalProperties, GoalId>,
     logical_properties: LogicalProperties,
 }

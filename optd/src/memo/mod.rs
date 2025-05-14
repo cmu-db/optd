@@ -25,6 +25,16 @@ pub struct MergeGoalProduct {
     pub merged_goals: Vec<GoalId>,
 }
 
+/// Result of merging two physical expressions.
+#[derive(Debug)]
+pub struct MergePhysicalExprProduct {
+    /// ID of the new physical expression.
+    pub new_physical_expr_id: PhysicalExpressionId,
+
+    /// Physical expressions that were merged.
+    pub merged_physical_exprs: Vec<PhysicalExpressionId>,
+}
+
 /// Results of merge operations, including group and goal merges.
 #[derive(Debug, Default)]
 pub struct MergeProducts {
@@ -33,6 +43,9 @@ pub struct MergeProducts {
 
     /// Goal merge results.
     pub goal_merges: Vec<MergeGoalProduct>,
+
+    /// Physical expression merge results.
+    pub expr_merges: Vec<MergePhysicalExprProduct>,
 }
 
 /// Base trait defining a shared implemention-defined error type for all memo-related traits.
