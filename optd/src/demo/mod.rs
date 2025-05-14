@@ -42,7 +42,7 @@ async fn run_demo() {
         .await
         .unwrap();
 
-    // Timeout after 5 seconds.
+    // Timeout after 2 seconds.
     let timeout_duration = Duration::from_secs(2);
     let result = timeout(timeout_duration, async {
         while let Some(response) = rx.recv().await {

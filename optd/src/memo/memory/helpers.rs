@@ -393,8 +393,6 @@ impl MemoryMemoHelpers for MemoryMemo {
             })
             .collect();
 
-        println!("Consolidated merge products: {:?}", self.group_info);
-
         Ok(MergeProducts {
             group_merges,
             goal_merges: vec![],

@@ -11,15 +11,14 @@ data Logical =
   \ Const(val: I64)
 
 fn input(): Logical = 
-  // complex input
     Add(
         Mult(
-        Sub(Const(1), Const(2)),
-        Div(Const(3), Const(4))
+            Sub(Const(1), Const(2)),
+            Div(Const(3), Const(4))
         ),
         Mult(
-        Sub(Const(5), Const(6)),
-        Div(Const(7), Const(8))
+            Sub(Const(5), Const(6)),
+            Div(Const(7), Const(8))
         )
     )
 
