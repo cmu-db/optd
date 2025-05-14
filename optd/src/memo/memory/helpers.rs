@@ -8,6 +8,7 @@ use crate::{
     },
 };
 use hashbrown::{HashMap, HashSet};
+use std::borrow::Cow;
 
 impl MemoryMemo {
     pub(super) fn next_group_id(&mut self) -> GroupId {
@@ -63,12 +64,12 @@ impl MemoryMemo {
 ///
 /// See the implementation itself for the documentation of each helper method.
 pub trait MemoryMemoHelper: Memo {
-    async fn remap_goal(&self, goal: &Goal) -> Result<Goal, Infallible>;
-
-    async fn remap_logical_expr(
+    async fn remap_logical_expr<'a>(
         &self,
-        logical_expr: &LogicalExpression,
-    ) -> Result<LogicalExpression, Infallible>;
+        logical_expr: &'a LogicalExpression,
+    ) -> Result<Cow<'a, LogicalExpression>, Infallible>;
+
+    async fn remap_goal<'a>(&self, goal: &'a Goal) -> Result<Cow<'a, Goal>, Infallible>;
 
     async fn merge_group_pair(
         &mut self,
@@ -103,24 +104,31 @@ impl MemoryMemoHelper for MemoryMemo {
     /// For example, if a logical expression has a child group with [`GroupId`] 3, but the
     /// representative of group 3 is [`GroupId`] 42, then the output expression will be the input
     /// logical expression with a child group of 42.
-    async fn remap_logical_expr(
+    ///
+    /// If no remapping needs to occur, this returns the same [`LogicalExpression`] object via the
+    /// [`Cow`]. Otherwise, this function will create a new owned [`LogicalExpression`].
+    async fn remap_logical_expr<'a>(
         &self,
-        logical_expr: &LogicalExpression,
-    ) -> Result<LogicalExpression, Infallible> {
+        logical_expr: &'a LogicalExpression,
+    ) -> Result<Cow<'a, LogicalExpression>, Infallible> {
         use Child::*;
 
+        let mut needs_remapping = false;
         let mut remapped_children = Vec::with_capacity(logical_expr.children.len());
 
         for child in &logical_expr.children {
             let remapped = match child {
                 Singleton(group_id) => {
                     let repr = self.find_repr_group_id(*group_id).await?;
+                    needs_remapping |= repr != *group_id;
                     Singleton(repr)
                 }
                 VarLength(group_ids) => {
                     let mut reprs = Vec::with_capacity(group_ids.len());
                     for group_id in group_ids {
-                        reprs.push(self.find_repr_group_id(*group_id).await?);
+                        let repr = self.find_repr_group_id(*group_id).await?;
+                        needs_remapping |= repr != *group_id;
+                        reprs.push(repr);
                     }
                     VarLength(reprs)
                 }
@@ -128,10 +136,14 @@ impl MemoryMemoHelper for MemoryMemo {
             remapped_children.push(remapped);
         }
 
-        Ok(LogicalExpression {
-            tag: logical_expr.tag.clone(),
-            data: logical_expr.data.clone(),
-            children: remapped_children,
+        Ok(if needs_remapping {
+            Cow::Owned(LogicalExpression {
+                tag: logical_expr.tag.clone(),
+                data: logical_expr.data.clone(),
+                children: remapped_children,
+            })
+        } else {
+            Cow::Borrowed(logical_expr)
         })
     }
 
@@ -139,10 +151,19 @@ impl MemoryMemoHelper for MemoryMemo {
     ///
     /// For example, if the [`Goal`] has a [`GroupID`] of 3, but the representative of group 3 is
     /// [`GroupId`] 42, then this goal's inner ID is remapped to `Goal(GroupId(42), properties)`.
-    async fn remap_goal(&self, goal: &Goal) -> Result<Goal, Infallible> {
+    ///
+    /// If no remapping needs to occur, this returns the same [`Goal`] object via the [`Cow`].
+    /// Otherwise, this function will create a new owned [`Goal`].
+    async fn remap_goal<'a>(&self, goal: &'a Goal) -> Result<Cow<'a, Goal>, Infallible> {
         let Goal(group_id, physical_properties) = goal;
-        let group_id = self.find_repr_group_id(*group_id).await?;
-        Ok(Goal(group_id, physical_properties.clone()))
+        let repr_group_id = self.find_repr_group_id(*group_id).await?;
+
+        // Only create a new `Goal` if it needs to be remapped.
+        Ok(if group_id == &repr_group_id {
+            Cow::Borrowed(goal)
+        } else {
+            Cow::Owned(Goal(repr_group_id, physical_properties.clone()))
+        })
     }
 
     /// Merges a pair of groups, creating a new representative group that combines their logical
@@ -225,6 +246,7 @@ impl MemoryMemoHelper for MemoryMemo {
     /// in different groups.
     ///
     /// # Parameters
+    ///
     /// * `old_id` - ID of the expression before remapping.
     /// * `new_id` - ID of the expression after remapping.
     /// * `prev_expr` - The expression before remapping.
@@ -266,7 +288,7 @@ impl MemoryMemoHelper for MemoryMemo {
             // group yet.
             // TODO(connor) make sense of these docs.
             // Since we are effectively adding an identical expression into this group, we
-            // technically will have 2 
+            // technically will have 2
             // We do not want to add the same logical expression to two groups.
             // The merge will handle that, if it is needed.
             if new_group_opt.is_none() {
@@ -291,9 +313,16 @@ impl MemoryMemoHelper for MemoryMemo {
 
     /// Processes expressions that reference the merged groups.
     ///
-    /// When groups are merged, expressions that reference them need to be updated.
-    /// This function handles that update process and identifies any new equivalences
-    /// that result.
+    /// Returns the group pairs that need to be merged due to new equivalences.
+    ///
+    /// When groups are merged, expressions that reference them need to be updated. This function
+    /// handles that update process and identifies any new equivalences that result.
+    ///
+    /// # Parameters
+    ///
+    /// * `group_id_1` - ID of the first merged group.
+    /// * `group_id_2` - ID of the second merged group.
+    /// * `new_group_id` - ID of the new representative group.
     ///
     /// # Algorithm
     ///
@@ -305,14 +334,6 @@ impl MemoryMemoHelper for MemoryMemo {
     ///    b. Check if the remapped expression is different from the original.
     ///    c. If different, handle the change and check for new equivalences.
     /// 4. Return any new group pairs that need to be merged.
-    ///
-    /// # Parameters
-    /// * `group_id_1` - ID of the first merged group.
-    /// * `group_id_2` - ID of the second merged group.
-    /// * `new_group_id` - ID of the new representative group.
-    ///
-    /// # Returns
-    /// A vector of group pairs that need to be merged due to new equivalences.
     async fn process_referencing_expressions(
         &mut self,
         group_id_1: GroupId,
@@ -323,8 +344,6 @@ impl MemoryMemoHelper for MemoryMemo {
         // new group.
         self.merge_referencing_exprs(group_id_1, group_id_2, new_group_id);
 
-        let mut new_pending_merges = Vec::new();
-
         // We need to clone here because we are modifying our `self` state inside the loop.
         // TODO: This is an inefficiency. This referencing index shouldn't be modified in the loop
         // below, but the borrow checker has no way of knowing that.
@@ -333,6 +352,8 @@ impl MemoryMemoHelper for MemoryMemo {
             .get(&new_group_id)
             .expect("we just created this referencing entry")
             .clone();
+
+        let mut new_pending_merges = Vec::new();
 
         // Process each expression that referenced the merged groups.
         for reference_id in referencing_expressions {
