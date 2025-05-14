@@ -1,0 +1,58 @@
+data Physical
+data PhysicalProperties
+data Statistics
+data LogicalProperties
+
+data Logical =
+  | Add(left: Logical, right: Logical)
+  | Sub(left: Logical, right: Logical)
+  | Mult(left: Logical, right: Logical)
+  | Div(left: Logical, right: Logical)
+  \ Const(val: I64)
+
+fn input(): Logical = 
+    Add(
+        Mult(
+            Sub(Const(1), Const(2)),
+            Div(Const(3), Const(4))
+        ),
+        Mult(
+            Sub(Const(5), Const(6)),
+            Div(Const(7), Const(8))
+        )
+    )
+
+// TODO(Alexis): This should be $ really, make costing and derive consistent with each other.
+// Also, be careful of not forking in there! And make it a required function in analyzer.
+fn derive(op: Logical) = LogicalProperties
+
+[transformation]
+fn (op: Logical*) mult_commute(): Logical? = match op
+  | Mult(left, right) -> Mult(right, left)
+  \ _ -> none
+
+[transformation]
+fn (op: Logical*) add_commute(): Logical? = match op
+  | Add(left, right) -> Add(right, left)
+  \ _ -> none
+
+[transformation]
+fn (op: Logical*) const_fold_add(): Logical? = match op
+  | Add(Const(a), Const(b)) -> Const(a + b)
+  \ _ -> none
+
+[transformation]
+fn (op: Logical*) const_fold_mult(): Logical? = match op
+  | Mult(Const(a), Const(b)) -> Const(a * b)
+  \ _ -> none
+
+[transformation]
+fn (op: Logical*) const_fold_sub(): Logical? = match op
+  | Sub(Const(a), Const(b)) -> Const(a - b)
+  \ _ -> none
+
+[transformation]
+fn (op: Logical*) const_fold_div(): Logical? = match op
+  | Div(Const(a), Const(b)) -> 
+      if b == 0 then none else Const(a / b)
+  \ _ -> none

@@ -17,10 +17,28 @@ use tokio::sync::mpsc::Sender;
 impl<M: Memo> Optimizer<M> {
     /// Creates a new task to optimize a logical plan into a physical plan.
     ///
-    /// This function only allocates a task ID and does not yet launch the task
-    /// until we know the corresponding goal that has to be optimized.
-    pub(crate) fn create_optimize_plan_task(&mut self) -> TaskId {
-        self.next_task_id()
+    /// This function only allocates a task ID and registes it, but does not yet
+    /// launch the task until we know the corresponding goal that has to be optimized.
+    ///
+    /// # Parameters
+    /// * `plan`: The logical plan to be optimized.
+    /// * `physical_tx`: The channel to send the optimized physical plans back.
+    pub(crate) fn create_optimize_plan_task(
+        &mut self,
+        plan: LogicalPlan,
+        physical_tx: Sender<PhysicalPlan>,
+    ) -> TaskId {
+        use Task::*;
+
+        let task_id = self.next_task_id();
+        let optimize_plan_task = OptimizePlanTask {
+            plan,
+            physical_tx,
+            optimize_goal_in: None,
+        };
+        self.add_task(task_id, OptimizePlan(optimize_plan_task));
+
+        task_id
     }
 
     /// Launches the task to optimize a logical plan into a physical plan.
@@ -30,35 +48,24 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Parameters
     /// * `task_id`: The ID of the task to be launched.
-    /// * `plan`: The logical plan to be optimized.
-    /// * `physical_tx`: The channel to send the optimized physical plan.
     /// * `goal_id`: The goal ID that this task is optimizing for.
     pub(crate) async fn launch_optimize_plan_task(
         &mut self,
         task_id: TaskId,
-        plan: LogicalPlan,
-        physical_tx: Sender<PhysicalPlan>,
         goal_id: GoalId,
     ) -> Result<(), M::MemoError> {
-        use Task::*;
-
         // Launch goal optimize task if needed, and get its ID.
         let goal_optimize_task_id = self.ensure_optimize_goal_task(goal_id).await?;
 
         // Register task and connect in graph.
-        let optimize_plan_task = OptimizePlanTask {
-            plan,
-            physical_tx,
-            optimize_goal_in: goal_optimize_task_id,
-        };
+        let optimize_plan_task = self.get_optimize_plan_task_mut(task_id).unwrap();
+        optimize_plan_task.optimize_goal_in = Some(goal_optimize_task_id);
 
         // Add this task to the goal's outgoing edges.
         self.get_optimize_goal_task_mut(goal_optimize_task_id)
             .unwrap()
             .optimize_plan_out
             .insert(task_id);
-
-        self.add_task(task_id, OptimizePlan(optimize_plan_task));
 
         Ok(())
     }

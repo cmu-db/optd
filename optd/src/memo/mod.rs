@@ -161,13 +161,14 @@ pub trait Memo: Representative + Materialize + Sync + 'static {
     ) -> Result<Option<GroupId>, Self::MemoError>;
 
     /// Creates a new group with a logical expression ID and properties.
+    /// If it already exists, return the existing representative group ID.
     ///
     /// # Parameters
     /// * `logical_expr_id` - ID of the logical expression to add to the group.
     /// * `props` - Logical properties for the group.
     ///
     /// # Returns
-    /// The ID of the newly created group.
+    /// The ID of the group.
     async fn create_group(
         &mut self,
         logical_expr_id: LogicalExpressionId,

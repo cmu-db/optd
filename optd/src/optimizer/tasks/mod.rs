@@ -50,7 +50,7 @@ pub(crate) struct OptimizePlanTask {
     pub physical_tx: Sender<PhysicalPlan>,
 
     /// The only dependency to get the best plans from.
-    pub optimize_goal_in: TaskId,
+    pub optimize_goal_in: Option<TaskId>, // Some once the input plan is ingested.
 }
 
 /// Task to optimize a specific goal.

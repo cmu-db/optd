@@ -6,8 +6,8 @@ pub struct ImplementationRule(pub String);
 
 #[derive(Debug, Default)]
 pub struct RuleBook {
-    transformations: Vec<TransformationRule>,
-    implementations: Vec<ImplementationRule>,
+    pub transformations: Vec<TransformationRule>,
+    pub implementations: Vec<ImplementationRule>,
 }
 
 impl RuleBook {

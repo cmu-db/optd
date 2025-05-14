@@ -41,7 +41,7 @@ impl<M: Memo> Optimizer<M> {
                 let goal_id = self.memo.get_goal_id(&goal).await?;
 
                 // Launch the corresponding task now that we know the goal_id.
-                self.launch_optimize_plan_task(optimize_plan_task_id, plan, physical_tx, goal_id)
+                self.launch_optimize_plan_task(optimize_plan_task_id, goal_id)
                     .await?;
             }
             Missing(logical_exprs) => {
