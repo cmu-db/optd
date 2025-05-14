@@ -38,7 +38,7 @@ pub struct MemoryMemo {
     // Expressions.
     /// Key is always a representative ID.
     id_to_logical_expr: HashMap<LogicalExpressionId, LogicalExpression>,
-    /// Each representantive expression is mapped to its id, for faster lookups.
+    /// Each representative expression is mapped to its id, for faster lookups.
     logical_expr_to_id: HashMap<LogicalExpression, LogicalExpressionId>,
 
     // Indexes: only deal with representative IDs, but speeds up most queries.

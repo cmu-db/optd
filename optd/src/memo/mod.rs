@@ -44,13 +44,6 @@ pub trait MemoBase {
 /// A helper trait to help facilitate the materialization and creation of objects in the memo table.
 #[trait_variant::make(Send)]
 pub trait Materialize: MemoBase {
-    /// Retrieves the ID of a [`Goal`]. If the [`Goal`] does not already exist in the memo table,
-    /// creates a new [`Goal`] and returns a fresh [`GoalId`].
-    async fn get_goal_id(&mut self, goal: &Goal) -> Result<GoalId, Self::MemoError>;
-
-    /// Materializes a [`Goal`] from its [`GoalId`].
-    async fn materialize_goal(&self, goal_id: GoalId) -> Result<Goal, Self::MemoError>;
-
     /// Retrieves the ID of a [`LogicalExpression`]. If the [`LogicalExpression`] does not already
     /// exist in the memo table, creates a new [`LogicalExpression`] and returns a fresh
     /// [`LogicalExpressionId`].
@@ -64,6 +57,13 @@ pub trait Materialize: MemoBase {
         &self,
         logical_expr_id: LogicalExpressionId,
     ) -> Result<LogicalExpression, Self::MemoError>;
+
+    /// Retrieves the ID of a [`Goal`]. If the [`Goal`] does not already exist in the memo table,
+    /// creates a new [`Goal`] and returns a fresh [`GoalId`].
+    async fn get_goal_id(&mut self, goal: &Goal) -> Result<GoalId, Self::MemoError>;
+
+    /// Materializes a [`Goal`] from its [`GoalId`].
+    async fn materialize_goal(&self, goal_id: GoalId) -> Result<Goal, Self::MemoError>;
 
     /// Retrieves the ID of a [`PhysicalExpression`]. If the [`PhysicalExpression`] does not already
     /// exist in the memo table, creates a new [`PhysicalExpression`] and returns a fresh
