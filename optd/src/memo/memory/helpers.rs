@@ -34,15 +34,26 @@ impl MemoryMemo {
         PhysicalExpressionId(id)
     }
 
-    /// Takes the set of [`LogicalExpressionId`] that reference a group, mapped to their
-    /// representatives.
-    fn take_referencing_expr_set(&mut self, group_id: GroupId) -> HashSet<LogicalExpressionId> {
+    /// Merges the two sets of logical expressions that reference the two groups into a single set
+    /// of expressions under a new [`GroupId`].
+    ///
+    /// If a group does not exist, then the set of expressions referencing it is the empty set.
+    fn merge_referencing_exprs(&mut self, group1: GroupId, group2: GroupId, new_group: GroupId) {
+        // Remove the entries for the original two groups that we want to merge.
+        let exprs1 = self
+            .group_referencing_exprs_index
+            .remove(&group1)
+            .unwrap_or_default();
+        let exprs2 = self
+            .group_referencing_exprs_index
+            .remove(&group2)
+            .unwrap_or_default();
+
+        let new_set = exprs1.union(&exprs2).copied().collect();
+
+        // Update the index for the new group / set of logical expressions.
         self.group_referencing_exprs_index
-            .remove(&group_id)
-            .unwrap_or_default()
-            .iter()
-            .map(|id| self.repr_logical_expr_id.find(id))
-            .collect()
+            .insert(new_group, new_set);
     }
 }
 
@@ -51,7 +62,7 @@ impl MemoryMemo {
 /// We split this out into a separate trait in order to have access to the associated error type.
 ///
 /// See the implementation itself for the documentation of each helper method.
-pub trait MemoryMemoHelpers: Memo {
+pub trait MemoryMemoHelper: Memo {
     async fn remap_goal(&self, goal: &Goal) -> Result<Goal, Infallible>;
 
     async fn remap_logical_expr(
@@ -85,13 +96,13 @@ pub trait MemoryMemoHelpers: Memo {
     ) -> Result<MergeProducts, Infallible>;
 }
 
-impl MemoryMemoHelpers for MemoryMemo {
-    async fn remap_goal(&self, goal: &Goal) -> Result<Goal, Infallible> {
-        let Goal(group_id, logical_expr) = goal;
-        let group_id = self.find_repr_group_id(*group_id).await?;
-        Ok(Goal(group_id, logical_expr.clone()))
-    }
-
+impl MemoryMemoHelper for MemoryMemo {
+    /// Remaps the children of a logical expression such that they are all identified by their
+    /// representative IDs.
+    ///
+    /// For example, if a logical expression has a child group with [`GroupId`] 3, but the
+    /// representative of group 3 is [`GroupId`] 42, then the output expression will be the input
+    /// logical expression with a child group of 42.
     async fn remap_logical_expr(
         &self,
         logical_expr: &LogicalExpression,
@@ -124,31 +135,28 @@ impl MemoryMemoHelpers for MemoryMemo {
         })
     }
 
-    /// Merges a pair of groups, creating a new representative group that combines their
+    /// Remaps the [`GroupId`] component of a [`Goal`] to its representative [`GroupId`].
+    ///
+    /// For example, if the [`Goal`] has a [`GroupID`] of 3, but the representative of group 3 is
+    /// [`GroupId`] 42, then this goal's inner ID is remapped to `Goal(GroupId(42), properties)`.
+    async fn remap_goal(&self, goal: &Goal) -> Result<Goal, Infallible> {
+        let Goal(group_id, physical_properties) = goal;
+        let group_id = self.find_repr_group_id(*group_id).await?;
+        Ok(Goal(group_id, physical_properties.clone()))
+    }
+
+    /// Merges a pair of groups, creating a new representative group that combines their logical
     /// expressions.
     ///
     /// Returns the new representative group ID and a record of the merge operation.
     ///
-    /// # Algorithm
+    /// In the memo structure, when two groups are found to be equivalent, we need to create a new
+    /// representative group that combines their expressions and properties. This function handles
+    /// that core operation.
     ///
-    /// In the memo structure, when two groups are found to be equivalent, we need to create
-    /// a new representative group that combines their expressions and properties. This function
-    /// handles that core operation.
-    ///
-    /// The merging process involves several steps:
-    /// 1. Create a new group ID to serve as the new representative.
-    /// 2. Verify that the logical properties of both groups match (they should for equivalent
-    ///    groups).
-    /// 3. Combine all the logical expressions from both groups.
-    /// 4. Create a new group info entry with the combined expressions.
-    /// 5. Update the union-find structure to point both original groups to the new representative.
-    /// 6. Clean up the old group info entries.
-    /// 7. Update the logical expression to group mappings.
-    ///
-    /// # Parameters
-    ///
-    /// * `group_id_1` - ID of the first group to merge.
-    /// * `group_id_2` - ID of the second group to merge.
+    /// When groups are merged, various data structures need to be updated. This function updates
+    /// the [`GroupInfo`] entries index, the union-find data structures that track representatives,
+    /// and the index mapping logical expression IDs to groups.
     ///
     /// # Panics
     ///
@@ -158,52 +166,51 @@ impl MemoryMemoHelpers for MemoryMemo {
         group_id_1: GroupId,
         group_id_2: GroupId,
     ) -> Result<(GroupId, MergeGroupProduct), Infallible> {
-        // Create new group with a fresh ID.
+        // Create a new group with a fresh ID.
         let new_group_id = self.next_group_id();
 
-        // Get group info for both groups.
-        let group_info_1 = self
+        // Take out the `GroupInfo` for both groups.
+        let group1_info = self
             .group_info
-            .get(&group_id_1)
+            .remove(&group_id_1)
             .unwrap_or_else(|| panic!("{:?} not found in memo table", group_id_1));
-        let group_info_2 = self
+        let group2_info = self
             .group_info
-            .get(&group_id_2)
+            .remove(&group_id_2)
             .unwrap_or_else(|| panic!("{:?} not found in memo table", group_id_2));
 
-        // Verify logical properties match (should be the case for equivalent groups)
-        // Unless there is a bug in the rules.
-        assert!(group_info_1.logical_properties == group_info_2.logical_properties);
+        // Verify that the logical properties match. This should be the case for equivalent groups,
+        // unless there is a bug in the rules.
+        assert_eq!(
+            group1_info.logical_properties, group2_info.logical_properties,
+            "Tried to merge groups that do not have the same logical properties. \
+                There may be a bug in the rules"
+        );
 
         // Combine expressions from both groups.
-        let expr_ids_1 = self.get_all_logical_exprs(group_id_1).await?;
-        let expr_ids_2 = self.get_all_logical_exprs(group_id_2).await?;
-        let all_expr_ids = expr_ids_1.union(&expr_ids_2).copied().collect();
+        let all_exprs: HashSet<_> = group1_info
+            .expressions
+            .union(&group2_info.expressions)
+            .copied()
+            .collect();
 
-        // Create and save new group.
-        let new_group_info = GroupInfo {
-            expressions: all_expr_ids,
-            logical_properties: group_info_1.logical_properties.clone(),
-        };
-        self.group_info.insert(new_group_id, new_group_info);
-
-        // Update union-find structure.
+        // Update the union-find structure.
         self.repr_group_id.merge(&group_id_1, &new_group_id);
         self.repr_group_id.merge(&group_id_2, &new_group_id);
 
-        // Clean up old group info.
-        self.group_info.remove(&group_id_1);
-        self.group_info.remove(&group_id_2);
-
         // Update logical expression to group index.
-        self.group_info[&new_group_id]
-            .expressions
-            .iter()
-            .for_each(|&expr_id| {
-                self.logical_id_to_group_index.insert(expr_id, new_group_id);
-            });
+        for &expr_id in &all_exprs {
+            self.logical_id_to_group_index.insert(expr_id, new_group_id);
+        }
 
-        // Create merge product record
+        // Create and save the new group.
+        let new_group_info = GroupInfo {
+            expressions: all_exprs,
+            logical_properties: group1_info.logical_properties,
+        };
+        self.group_info.insert(new_group_id, new_group_info);
+
+        // Create a merge product record.
         let merge_product = MergeGroupProduct {
             new_group_id,
             merged_groups: vec![group_id_1, group_id_2],
@@ -214,55 +221,52 @@ impl MemoryMemoHelpers for MemoryMemo {
 
     /// Handles changes to an expression after remapping.
     ///
-    /// When an expression is remapped due to groups it references being merged,
-    /// various data structures need to be updated. This function handles those
-    /// updates and identifies any new group merges that are needed.
-    ///
-    /// # Algorithm
-    ///
-    /// The process involves several steps:
-    /// 1. Remove the old expression from the relevant data structures.
-    /// 2. Identify the groups that contain the old and new expressions.
-    /// 3. Update the group info to replace the old expression with the new one.
-    /// 4. Update the logical expression to group index.
-    /// 5. Update the union-find structure to point the old expression ID to the new one.
-    /// 6. Check if the old and new expressions are in different groups.
-    /// 7. If they are, return those groups as a pair that needs to be merged.
+    /// Returns an optional pair of groups which we need to merge if the old and new expressions are
+    /// in different groups.
     ///
     /// # Parameters
     /// * `old_id` - ID of the expression before remapping.
     /// * `new_id` - ID of the expression after remapping.
     /// * `prev_expr` - The expression before remapping.
     ///
-    /// # Returns
-    /// An Option containing a pair of groups to merge, if the old and new expressions
-    /// are in different groups.
+    /// When an expression is remapped due to groups it references being merged, various data
+    /// structures need to be updated. This function modifies the indexes mapping logical expression
+    /// IDs, the index mapping logical expression ID to group, the union-find data structures
+    /// that track representatives, and the group info entries.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the [`LogicalExpressionId`] `old_id` does not belong to a real group.
     async fn handle_expression_change(
         &mut self,
         old_id: LogicalExpressionId,
         new_id: LogicalExpressionId,
         prev_expr: LogicalExpression,
     ) -> Result<Option<(GroupId, GroupId)>, Infallible> {
-        // Remove old expression from data structures.
+        // Remove the old expression from the logical expression indexes.
         self.id_to_logical_expr.remove(&old_id);
         self.logical_expr_to_id.remove(&prev_expr);
 
-        // Get groups for old and new expressions.
+        // Get the groups that contain the old and new expressions.
         let old_group_opt = self.find_logical_expr_group(old_id).await?;
         let new_group_opt = self.find_logical_expr_group(new_id).await?;
 
-        // Update group info if old expression was in a group.
+        // Update the [`GroupInfo`] if the old expression was in a group.
         if let Some(old_group) = old_group_opt {
             let group_info = self
                 .group_info
                 .get_mut(&old_group)
                 .unwrap_or_else(|| panic!("{:?} not found in memo table", old_group));
 
-            // Always remove the old expression from the group.
+            // Remove the old expression from the group.
             group_info.expressions.remove(&old_id);
             self.logical_id_to_group_index.remove(&old_id);
 
-            // Only add the new expression if it is not already in the group.
+            // Only add the new expression to the old expression's group if it does not exist in any
+            // group yet.
+            // TODO(connor) make sense of these docs.
+            // Since we are effectively adding an identical expression into this group, we
+            // technically will have 2 
             // We do not want to add the same logical expression to two groups.
             // The merge will handle that, if it is needed.
             if new_group_opt.is_none() {
@@ -271,10 +275,12 @@ impl MemoryMemoHelpers for MemoryMemo {
             }
         }
 
-        // Update representative ID for the expression.
+        // Update the representative ID for the expression.
         self.repr_logical_expr_id.merge(&old_id, &new_id);
 
         // If the new and old expressions are in different groups, they need to be merged.
+        // FIXME: Refactor this to use let-chains once it is stabilized in 1.88 (June 26, 2025)
+        // https://github.com/rust-lang/rust/pull/132833#issuecomment-2824515215
         match (new_group_opt, old_group_opt) {
             (Some(new_group), Some(old_group)) if new_group != old_group => {
                 Ok(Some((new_group, old_group)))
@@ -313,29 +319,30 @@ impl MemoryMemoHelpers for MemoryMemo {
         group_id_2: GroupId,
         new_group_id: GroupId,
     ) -> Result<Vec<(GroupId, GroupId)>, Infallible> {
-        // Collect expressions referencing the merged groups.
-        let expr_set_1 = self.take_referencing_expr_set(group_id_1);
-        let expr_set_2 = self.take_referencing_expr_set(group_id_2);
-
-        // Combine into a single set.
-        let mut referenced_exprs = expr_set_1;
-        referenced_exprs.extend(expr_set_2);
-
-        // Update the index for the new group.
-        self.group_referencing_exprs_index
-            .insert(new_group_id, referenced_exprs.clone());
+        // Merge the set of expressions that reference these two groups into one that references the
+        // new group.
+        self.merge_referencing_exprs(group_id_1, group_id_2, new_group_id);
 
         let mut new_pending_merges = Vec::new();
 
+        // We need to clone here because we are modifying our `self` state inside the loop.
+        // TODO: This is an inefficiency. This referencing index shouldn't be modified in the loop
+        // below, but the borrow checker has no way of knowing that.
+        let referencing_expressions = self
+            .group_referencing_exprs_index
+            .get(&new_group_id)
+            .expect("we just created this referencing entry")
+            .clone();
+
         // Process each expression that referenced the merged groups.
-        for reference_id in referenced_exprs {
+        for reference_id in referencing_expressions {
             // Remap the expression to use updated group references.
             let prev_expr = self.materialize_logical_expr(reference_id).await?;
             let new_expr = self.remap_logical_expr(&prev_expr).await?;
             let new_id = self.get_logical_expr_id(&new_expr).await?;
 
+            // If remapping created a different expression, handle the changes.
             if new_id != reference_id {
-                // If remapping created a different expression, handle the changes.
                 let merge_pair = self
                     .handle_expression_change(reference_id, new_id, prev_expr)
                     .await?;
@@ -350,15 +357,10 @@ impl MemoryMemoHelpers for MemoryMemo {
 
     /// Consolidates merge operations into a comprehensive result.
     ///
-    /// This function takes a list of individual merge operations and consolidates them
-    /// into a complete picture of which groups were merged into each final representative.
-    /// It handles cases where past representatives themselves are merged into newer ones.
+    /// This function takes a list of individual merge operations and consolidates them into a
+    /// complete picture of which groups were merged into each final representative.
     ///
-    /// # Parameters
-    /// * `merge_operations` - List of all individual merge operations.
-    ///
-    /// # Returns
-    /// Consolidated merge results.
+    /// It also handles cases where past representatives themselves are merged into newer ones.
     async fn consolidate_merge_results(
         &self,
         merge_operations: Vec<MergeGroupProduct>,

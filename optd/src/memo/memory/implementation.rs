@@ -3,7 +3,7 @@
 use std::collections::VecDeque;
 
 use super::{
-    Infallible, Memo, MemoryMemo, MergeProducts, Representative, helpers::MemoryMemoHelpers,
+    Infallible, Memo, MemoryMemo, MergeProducts, Representative, helpers::MemoryMemoHelper,
 };
 use crate::{cir::*, memo::memory::GroupInfo};
 use hashbrown::HashSet;

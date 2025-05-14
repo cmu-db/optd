@@ -2,7 +2,7 @@
 //!
 //! See the documentation for [`Materialize`] for more information.
 
-use super::{Infallible, MemoryMemo, helpers::MemoryMemoHelpers};
+use super::{Infallible, MemoryMemo, helpers::MemoryMemoHelper};
 use crate::{
     cir::*,
     memo::{Materialize, Representative},
