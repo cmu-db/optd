@@ -32,6 +32,8 @@ pub struct MemoryMemo {
     // Goals.
     /// Key is always a representative ID.
     id_to_goal: HashMap<GoalId, Goal>,
+    /// The members (physical expressions & sub-goals) inside each goal.
+    id_to_goal_members: HashMap<GoalId, HashSet<GoalMemberId>>,
     /// Each representative goal is mapped to its id, for faster lookups.
     goal_to_id: HashMap<Goal, GoalId>,
 
@@ -55,10 +57,13 @@ pub struct MemoryMemo {
     /// that contain a reference to this group.
     /// The value logical_expr_ids may *NOT* be a representative ID.
     group_referencing_exprs_index: HashMap<GroupId, HashSet<LogicalExpressionId>>,
+
     /// To speed up recursive merges, we maintain a mapping from goal member IDs to all goal member IDs
     /// that contain a reference to this goal member.
     /// The value physical_expr_ids may *NOT* be a representative ID.
     goal_member_referencing_exprs_index: HashMap<GoalMemberId, HashSet<PhysicalExpressionId>>,
+    /// Similar idea for sub-goals.
+    goal_member_to_goals_index: HashMap<GoalMemberId, HashSet<GoalId>>,
 
     /// The shared next unique id to be used for goals, groups, logical expressions, and physical expressions.
     next_shared_id: i64,

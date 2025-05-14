@@ -160,10 +160,33 @@ impl Memo for MemoryMemo {
 
     async fn add_goal_member(
         &mut self,
-        _goal_id: GoalId,
-        _member: GoalMemberId,
+        goal_id: GoalId,
+        member_id: GoalMemberId,
     ) -> Result<bool, Infallible> {
-        todo!()
+        let repr_goal_id = self.find_repr_goal_id(goal_id).await?;
+        let repr_member_id = self.find_repr_goal_member_id(member_id).await?;
+
+        // Check if the member is already in the goal (fast path).
+        if self
+            .id_to_goal_members
+            .get(&repr_goal_id)
+            .unwrap_or_else(|| panic!("{:?} not found in memo table", repr_goal_id))
+            .contains(&repr_member_id)
+        {
+            return Ok(false);
+        }
+
+        // Otherwise, add the member to the goal (slow path).
+        self.id_to_goal_members
+            .get_mut(&repr_goal_id)
+            .unwrap_or_else(|| panic!("{:?} not found in memo table", repr_goal_id))
+            .insert(repr_member_id);
+        self.goal_member_to_goals_index
+            .entry(repr_member_id)
+            .or_default()
+            .insert(repr_goal_id);
+
+        Ok(false)
     }
 
     async fn update_physical_expr_cost(
@@ -176,9 +199,14 @@ impl Memo for MemoryMemo {
 
     async fn get_physical_expr_cost(
         &self,
-        _physical_expr_id: PhysicalExpressionId,
+        physical_expr_id: PhysicalExpressionId,
     ) -> Result<Option<Cost>, Infallible> {
-        todo!()
+        let repr_physical_expr_id = self.find_repr_physical_expr_id(physical_expr_id).await?;
+        Ok(self
+            .id_to_cost
+            .get(&repr_physical_expr_id)
+            .unwrap_or_else(|| panic!("{:?} not found in memo table", repr_physical_expr_id))
+            .clone())
     }
 }
 

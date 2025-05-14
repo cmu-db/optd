@@ -237,14 +237,14 @@ pub trait Memo: Representative + Materialize + Sync + 'static {
     ///
     /// # Parameters
     /// * `goal_id` - ID of the goal to add the member to.
-    /// * `member` - The member to add, either a physical expression ID or another goal ID.
+    /// * `member_id` - The member to add, either a physical expression ID or another goal ID.
     ///
     /// # Returns
     /// True if the member was added to the goal, or false if it already existed.
     async fn add_goal_member(
         &mut self,
         goal_id: GoalId,
-        member: GoalMemberId,
+        member_id: GoalMemberId,
     ) -> Result<bool, Self::MemoError>;
 
     /// Updates the cost of a physical expression ID.

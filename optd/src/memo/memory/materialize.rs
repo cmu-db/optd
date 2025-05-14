@@ -7,6 +7,7 @@ use crate::{
     cir::*,
     memo::{Materialize, Representative},
 };
+use hashbrown::HashSet;
 
 impl Materialize for MemoryMemo {
     async fn get_logical_expr_id(
@@ -70,6 +71,7 @@ impl Materialize for MemoryMemo {
         // Otherwise, create a new entry in the memo table (slow path).
         let goal_id = self.next_goal_id();
         self.id_to_goal.insert(goal_id, goal.clone().into_owned());
+        self.id_to_goal_members.insert(goal_id, HashSet::new());
         self.goal_to_id.insert(goal.clone().into_owned(), goal_id);
 
         // Connect the goal to its group.
