@@ -179,18 +179,16 @@ impl Memo for MemoryMemo {
     ) -> Result<HashSet<GoalMemberId>, Infallible> {
         let repr_goal_id = self.find_repr_goal_id(goal_id).await?;
 
-        // Get all members and map each to its representative ID.
-        let mut result = HashSet::new();
-        for member_id in &self
+        let members = self
             .goal_info
             .get(&repr_goal_id)
             .expect("Goal not found in memo table")
             .members
-        {
-            result.insert(self.find_repr_goal_member_id(*member_id).await?);
-        }
+            .iter()
+            .map(|&member_id| self.find_repr_goal_member_id(member_id))
+            .collect();
 
-        Ok(result)
+        Ok(members)
     }
 
     async fn add_goal_member(
@@ -198,16 +196,23 @@ impl Memo for MemoryMemo {
         goal_id: GoalId,
         member_id: GoalMemberId,
     ) -> Result<bool, Infallible> {
-        let repr_goal_id = self.find_repr_goal_id(goal_id).await?;
-        let repr_member_id = self.find_repr_goal_member_id(member_id).await?;
+        // We call `get_all_goal_members` to ensure we only have the representative IDs
+        // in the set. This is important because members may have been merged with another.
+        let mut current_members = self.get_all_goal_members(goal_id).await?;
 
-        self.goal_info
-            .get_mut(&repr_goal_id)
-            .expect("Goal not found in memo table")
-            .members
-            .insert(repr_member_id);
+        let repr_member_id = self.find_repr_goal_member_id(member_id);
+        let added = current_members.insert(repr_member_id);
 
-        Ok(false)
+        if added {
+            let repr_goal_id = self.find_repr_goal_id(goal_id).await?;
+            self.goal_info
+                .get_mut(&repr_goal_id)
+                .expect("Goal not found in memo table")
+                .members
+                .insert(repr_member_id);
+        }
+
+        Ok(added)
     }
 }
 

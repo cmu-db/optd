@@ -68,7 +68,7 @@ impl MemoryMemo {
 ///
 /// See the implementation itself for the documentation of each helper method.
 pub trait MemoryMemoHelper: Memo {
-    async fn find_repr_goal_member_id(&self, id: GoalMemberId) -> Result<GoalMemberId, Infallible>;
+    fn find_repr_goal_member_id(&self, id: GoalMemberId) -> GoalMemberId;
 
     async fn remap_logical_expr<'a>(
         &self,
@@ -118,17 +118,17 @@ impl MemoryMemoHelper for MemoryMemo {
     ///
     /// This handles both variants of `GoalMemberId` by finding the appropriate representative
     /// based on whether it's a Goal or PhysicalExpr.
-    async fn find_repr_goal_member_id(&self, id: GoalMemberId) -> Result<GoalMemberId, Infallible> {
+    fn find_repr_goal_member_id(&self, id: GoalMemberId) -> GoalMemberId {
         use GoalMemberId::*;
 
         match id {
             GoalId(goal_id) => {
-                let repr_goal_id = self.find_repr_goal_id(goal_id).await?;
-                Ok(GoalId(repr_goal_id))
+                let repr_goal_id = self.repr_goal_id.find(&goal_id);
+                GoalId(repr_goal_id)
             }
             PhysicalExpressionId(expr_id) => {
-                let repr_expr_id = self.find_repr_physical_expr_id(expr_id).await?;
-                Ok(PhysicalExpressionId(repr_expr_id))
+                let repr_expr_id = self.repr_physical_expr_id.find(&expr_id);
+                PhysicalExpressionId(repr_expr_id)
             }
         }
     }
@@ -198,27 +198,33 @@ impl MemoryMemoHelper for MemoryMemo {
         use Child::*;
 
         let mut needs_remapping = false;
-        let mut remapped_children = Vec::with_capacity(physical_expr.children.len());
 
-        for child in &physical_expr.children {
-            let remapped = match child {
+        let remapped_children = physical_expr
+            .children
+            .iter()
+            .map(|child| match child {
                 Singleton(goal_id) => {
-                    let repr = self.find_repr_goal_member_id(*goal_id).await?;
-                    needs_remapping |= repr != *goal_id;
+                    let repr = self.find_repr_goal_member_id(*goal_id);
+                    if repr != *goal_id {
+                        needs_remapping = true;
+                    }
                     Singleton(repr)
                 }
                 VarLength(goal_ids) => {
-                    let mut reprs = Vec::with_capacity(goal_ids.len());
-                    for goal_id in goal_ids {
-                        let repr = self.find_repr_goal_member_id(*goal_id).await?;
-                        needs_remapping |= repr != *goal_id;
-                        reprs.push(repr);
-                    }
+                    let reprs: Vec<_> = goal_ids
+                        .iter()
+                        .map(|id| {
+                            let repr = self.find_repr_goal_member_id(*id);
+                            if repr != *id {
+                                needs_remapping = true;
+                            }
+                            repr
+                        })
+                        .collect();
                     VarLength(reprs)
                 }
-            };
-            remapped_children.push(remapped);
-        }
+            })
+            .collect();
 
         Ok(if needs_remapping {
             Cow::Owned(PhysicalExpression {
@@ -527,18 +533,59 @@ impl MemoryMemoHelper for MemoryMemo {
         &mut self,
         group_merges: &[MergeGroupProduct],
     ) -> Result<Vec<MergeGoalProduct>, Infallible> {
-        let mut merge_products = Vec::new();
+        let mut goal_merges = Vec::new();
 
-        for (goal_id, goal_info) in self.goal_info.iter() {
-            let repr_goal_id = self.find_repr_goal_id(*goal_id).await?;
-            if repr_goal_id != *goal_id {
-                merge_products.push(MergeGoalProduct {
-                    new_goal_id: repr_goal_id,
-                    merged_goals: vec![*goal_id],
+        for merge_product in group_merges {
+            let new_group_id = merge_product.new_group_id;
+            let group_info = self.group_info.get_mut(&new_group_id).unwrap();
+
+            // Take related goals to the group to avoid borrowing issues.
+            let related_goals = std::mem::take(&mut group_info.goals);
+            let mut updated_goals = HashMap::new();
+
+            for (physical_props, merged_goals) in related_goals {
+                // Create a new representative goal for this physical property.
+                let new_goal = Goal(new_group_id, physical_props.clone());
+                let new_goal_id = self.get_goal_id(&new_goal).await?;
+
+                // Process each goal being merged.
+                for &old_goal_id in &merged_goals {
+                    // Remove old goal info and extend new goal with its members.
+                    let old_goal_info = self.goal_info.remove(&old_goal_id).unwrap();
+                    let new_goal_info = self.goal_info.get_mut(&new_goal_id).unwrap();
+
+                    new_goal_info.members.extend(old_goal_info.members);
+                    self.goal_to_id.remove(&old_goal_info.goal);
+
+                    // Update referencing expressions index.
+                    let refs = self
+                        .goal_member_referencing_exprs_index
+                        .remove(&GoalMemberId::GoalId(old_goal_id))
+                        .unwrap_or_default();
+
+                    self.goal_member_referencing_exprs_index
+                        .entry(GoalMemberId::GoalId(new_goal_id))
+                        .or_default()
+                        .extend(refs);
+
+                    // Update the union-find structure for goal representatives.
+                    self.repr_goal_id.merge(&old_goal_id, &new_goal_id);
+                }
+
+                // Update the goals mapping for this physical property.
+                updated_goals.insert(physical_props, vec![new_goal_id]);
+
+                // Record the merge operation.
+                goal_merges.push(MergeGoalProduct {
+                    new_goal_id,
+                    merged_goals,
                 });
             }
+
+            // Update the group's goals with the consolidated mapping.
+            self.group_info.get_mut(&new_group_id).unwrap().goals = updated_goals;
         }
 
-        Ok(merge_products)
+        Ok(goal_merges)
     }
 }

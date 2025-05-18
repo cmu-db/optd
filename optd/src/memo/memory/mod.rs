@@ -54,7 +54,7 @@ pub struct MemoryMemo {
     /// that contain a reference to this group.
     /// The value logical_expr_ids may *NOT* be a representative ID.
     group_referencing_exprs_index: HashMap<GroupId, HashSet<LogicalExpressionId>>,
-    /// To speed up recursive merges, we maintain a mapping from goal member IDs to all goal member IDs
+    /// To speed up recursive merges, we maintain a mapping from goal member IDs to all physical expression IDs
     /// that contain a reference to this goal member.
     /// The value physical_expr_ids may *NOT* be a representative ID.
     goal_member_referencing_exprs_index: HashMap<GoalMemberId, HashSet<PhysicalExpressionId>>,
