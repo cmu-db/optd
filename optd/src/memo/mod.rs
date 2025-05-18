@@ -207,7 +207,7 @@ pub trait Memo: Representative + Materialize + Sync + 'static {
     //
     // Physical expression and goal operations.
     //
-    
+
     /// Gets all members of a goal, which can be physical expressions or other goals.
     ///
     /// # Parameters
