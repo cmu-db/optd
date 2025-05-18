@@ -214,11 +214,11 @@ pub trait Memo: Representative + Materialize + Sync + 'static {
     /// * `goal_id` - ID of the goal to retrieve members from.
     ///
     /// # Returns
-    /// A vector of goal members, each being either a physical expression ID or another goal ID.
+    /// A set of goal members, each being either a physical expression ID or another goal ID.
     async fn get_all_goal_members(
         &self,
         goal_id: GoalId,
-    ) -> Result<Vec<GoalMemberId>, Self::MemoError>;
+    ) -> Result<HashSet<GoalMemberId>, Self::MemoError>;
 
     /// Adds a member to a goal.
     ///

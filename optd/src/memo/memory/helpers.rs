@@ -35,21 +35,25 @@ impl MemoryMemo {
         PhysicalExpressionId(id)
     }
 
+    /// Takes the set of [`LogicalExpressionId`] that reference a group, mapped to their
+    /// representatives.
+    fn take_referencing_expr_set(&mut self, group_id: GroupId) -> HashSet<LogicalExpressionId> {
+        self.group_referencing_exprs_index
+            .remove(&group_id)
+            .unwrap_or_default()
+            .iter()
+            .map(|id| self.repr_logical_expr_id.find(id))
+            .collect()
+    }
+
     /// Merges the two sets of logical expressions that reference the two groups into a single set
     /// of expressions under a new [`GroupId`].
     ///
     /// If a group does not exist, then the set of expressions referencing it is the empty set.
     fn merge_referencing_exprs(&mut self, group1: GroupId, group2: GroupId, new_group: GroupId) {
         // Remove the entries for the original two groups that we want to merge.
-        let exprs1 = self
-            .group_referencing_exprs_index
-            .remove(&group1)
-            .unwrap_or_default();
-        let exprs2 = self
-            .group_referencing_exprs_index
-            .remove(&group2)
-            .unwrap_or_default();
-
+        let exprs1 = self.take_referencing_expr_set(group1);
+        let exprs2 = self.take_referencing_expr_set(group2);
         let new_set = exprs1.union(&exprs2).copied().collect();
 
         // Update the index for the new group / set of logical expressions.

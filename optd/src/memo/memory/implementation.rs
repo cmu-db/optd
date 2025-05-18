@@ -111,8 +111,6 @@ impl Memo for MemoryMemo {
         group_id_1: GroupId,
         group_id_2: GroupId,
     ) -> Result<MergeProducts, Infallible> {
-        println!("Merging: {:?} and {:?}", group_id_1, group_id_2);
-
         let mut merge_operations = vec![];
         let mut pending_merges = VecDeque::from(vec![(group_id_1, group_id_2)]);
 
@@ -124,7 +122,7 @@ impl Memo for MemoryMemo {
                 continue;
             }
 
-            // Perform the group merge, creating a new representative
+            // Perform the group merge, creating a new representative.
             let (new_group_id, merge_product) =
                 self.merge_group_pair(group_id_1, group_id_2).await?;
             merge_operations.push(merge_product);
@@ -145,9 +143,22 @@ impl Memo for MemoryMemo {
 
     async fn get_all_goal_members(
         &self,
-        _goal_id: GoalId,
-    ) -> Result<Vec<GoalMemberId>, Infallible> {
-        todo!()
+        goal_id: GoalId,
+    ) -> Result<HashSet<GoalMemberId>, Infallible> {
+        let repr_goal_id = self.find_repr_goal_id(goal_id).await?;
+
+        // Get all members and map each to its representative ID.
+        let mut result = HashSet::new();
+        for member_id in &self
+            .goal_info
+            .get(&repr_goal_id)
+            .expect("Goal not found in memo table")
+            .members
+        {
+            result.insert(self.find_repr_goal_member_id(*member_id).await?);
+        }
+
+        Ok(result)
     }
 
     async fn add_goal_member(
@@ -158,25 +169,11 @@ impl Memo for MemoryMemo {
         let repr_goal_id = self.find_repr_goal_id(goal_id).await?;
         let repr_member_id = self.find_repr_goal_member_id(member_id).await?;
 
-        // Check if the member is already in the goal (fast path).
-        if self
-            .id_to_goal_members
-            .get(&repr_goal_id)
-            .unwrap_or_else(|| panic!("{:?} not found in memo table", repr_goal_id))
-            .contains(&repr_member_id)
-        {
-            return Ok(false);
-        }
-
-        // Otherwise, add the member to the goal (slow path).
-        self.id_to_goal_members
+        self.goal_info
             .get_mut(&repr_goal_id)
-            .unwrap_or_else(|| panic!("{:?} not found in memo table", repr_goal_id))
+            .expect("Goal not found in memo table")
+            .members
             .insert(repr_member_id);
-        self.goal_member_to_goals_index
-            .entry(repr_member_id)
-            .or_default()
-            .insert(repr_goal_id);
 
         Ok(false)
     }

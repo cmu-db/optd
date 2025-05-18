@@ -2,7 +2,7 @@
 //!
 //! See the documentation for [`Materialize`] for more information.
 
-use super::{Infallible, MemoryMemo, helpers::MemoryMemoHelper};
+use super::{GoalInfo, Infallible, MemoryMemo, helpers::MemoryMemoHelper};
 use crate::{
     cir::*,
     memo::{Materialize, Representative},
@@ -70,8 +70,12 @@ impl Materialize for MemoryMemo {
 
         // Otherwise, create a new entry in the memo table (slow path).
         let goal_id = self.next_goal_id();
-        self.id_to_goal.insert(goal_id, goal.clone().into_owned());
-        self.id_to_goal_members.insert(goal_id, HashSet::new());
+        let goal_info = GoalInfo {
+            goal: goal.as_ref().clone(),
+            members: HashSet::new(),
+        };
+
+        self.goal_info.insert(goal_id, goal_info);
         self.goal_to_id.insert(goal.clone().into_owned(), goal_id);
 
         // Connect the goal to its group.
@@ -88,9 +92,10 @@ impl Materialize for MemoryMemo {
     async fn materialize_goal(&self, goal_id: GoalId) -> Result<Goal, Infallible> {
         let repr_goal_id = self.find_repr_goal_id(goal_id).await?;
         Ok(self
-            .id_to_goal
+            .goal_info
             .get(&repr_goal_id)
-            .unwrap_or_else(|| panic!("{:?} not found in memo table", repr_goal_id))
+            .expect("Goal not found in memo table")
+            .goal
             .clone())
     }
 
@@ -127,7 +132,6 @@ impl Materialize for MemoryMemo {
         // Update the physical expression ID indexes.
         self.id_to_physical_expr
             .insert(expr_id, remapped_expr.clone().into_owned());
-        self.id_to_cost.insert(expr_id, None);
         self.physical_expr_to_id
             .insert(remapped_expr.into_owned(), expr_id);
 

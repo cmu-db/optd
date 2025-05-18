@@ -31,9 +31,7 @@ pub struct MemoryMemo {
 
     // Goals.
     /// Key is always a representative ID.
-    id_to_goal: HashMap<GoalId, Goal>,
-    /// The members (physical expressions & sub-goals) inside each goal.
-    id_to_goal_members: HashMap<GoalId, HashSet<GoalMemberId>>,
+    goal_info: HashMap<GoalId, GoalInfo>,
     /// Each representative goal is mapped to its id, for faster lookups.
     goal_to_id: HashMap<Goal, GoalId>,
 
@@ -45,25 +43,21 @@ pub struct MemoryMemo {
 
     /// Key is always a representative ID.
     id_to_physical_expr: HashMap<PhysicalExpressionId, PhysicalExpression>,
-    /// The cost of each representative physical expression, if available.
-    id_to_cost: HashMap<PhysicalExpressionId, Option<Cost>>,
     /// Each representative expression is mapped to its id, for faster lookups.
     physical_expr_to_id: HashMap<PhysicalExpression, PhysicalExpressionId>,
 
     // Indexes: only deal with representative IDs, but speeds up most queries.
     /// To speed up expr->group lookup, we maintain a mapping from logical expression IDs to group IDs.
     logical_id_to_group_index: HashMap<LogicalExpressionId, GroupId>,
+
     /// To speed up recursive merges, we maintain a mapping from group IDs to all logical expression IDs
     /// that contain a reference to this group.
     /// The value logical_expr_ids may *NOT* be a representative ID.
     group_referencing_exprs_index: HashMap<GroupId, HashSet<LogicalExpressionId>>,
-
     /// To speed up recursive merges, we maintain a mapping from goal member IDs to all goal member IDs
     /// that contain a reference to this goal member.
     /// The value physical_expr_ids may *NOT* be a representative ID.
     goal_member_referencing_exprs_index: HashMap<GoalMemberId, HashSet<PhysicalExpressionId>>,
-    /// Similar idea for sub-goals.
-    goal_member_to_goals_index: HashMap<GoalMemberId, HashSet<GoalId>>,
 
     /// The shared next unique id to be used for goals, groups, logical expressions, and physical expressions.
     next_shared_id: i64,
@@ -84,4 +78,15 @@ struct GroupInfo {
     expressions: HashSet<LogicalExpressionId>,
     goals: HashMap<PhysicalProperties, GoalId>,
     logical_properties: LogicalProperties,
+}
+
+/// Information about a goal:
+/// - The goal (group + properties), always representative.
+/// - The members of the goal (physical expression IDs or other (sub)goal IDs), may *NOT* be representative.
+#[derive(Clone, Debug)]
+struct GoalInfo {
+    /// The goal (group + properties)
+    goal: Goal,
+    /// The members of the goal (physical expression IDs or other sub-goal IDs).
+    members: HashSet<GoalMemberId>,
 }
