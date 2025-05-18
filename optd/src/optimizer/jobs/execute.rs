@@ -1,4 +1,4 @@
-use super::{CostedContinuation, JobId, LogicalContinuation};
+use super::{JobId, LogicalContinuation};
 use crate::{
     cir::*,
     dsl::{
@@ -9,12 +9,10 @@ use crate::{
     optimizer::{
         EngineProduct, Optimizer, OptimizerMessage,
         hir_cir::{
-            from_cir::{
-                partial_logical_to_value, partial_physical_to_value, physical_properties_to_value,
-            },
+            from_cir::{partial_logical_to_value, physical_properties_to_value},
             into_cir::{
-                hir_goal_to_cir, hir_group_id_to_cir, value_to_cost, value_to_logical_properties,
-                value_to_partial_logical, value_to_partial_physical,
+                hir_group_id_to_cir, value_to_logical_properties, value_to_partial_logical,
+                value_to_partial_physical,
             },
         },
     },
@@ -175,44 +173,6 @@ impl<M: Memo> Optimizer<M> {
         Ok(())
     }
 
-    /// Executes a job to compute the cost of a physical expression.
-    ///
-    /// This creates an engine instance and launches the cost calculation process
-    /// for the specified physical expression.
-    ///
-    /// # Parameters
-    /// * `expression_id`: The ID of the physical expression to cost.
-    /// * `job_id`: The ID of the job to be executed.
-    pub(super) async fn execute_cost_expression(
-        &self,
-        expression_id: PhysicalExpressionId,
-        job_id: JobId,
-    ) -> Result<(), M::MemoError> {
-        use EngineProduct::*;
-
-        let engine = self.init_engine();
-        let plan = partial_physical_to_value(&self.egest_partial_plan(expression_id).await?);
-
-        let message_tx = self.message_tx.clone();
-        tokio::spawn(async move {
-            let response = engine
-                .launch(
-                    "cost",
-                    vec![plan],
-                    Arc::new(move |cost| {
-                        Box::pin(
-                            async move { NewCostedPhysical(expression_id, value_to_cost(&cost)) },
-                        )
-                    }),
-                )
-                .await;
-
-            Self::process_engine_response(job_id, message_tx, response).await;
-        });
-
-        Ok(())
-    }
-
     /// Executes a job to continue processing with a logical expression result.
     ///
     /// This materializes the logical expression and passes it to the continuation.
@@ -251,32 +211,6 @@ impl<M: Memo> Optimizer<M> {
         Ok(())
     }
 
-    /// Executes a job to continue processing with an optimized physical expression result.
-    ///
-    /// This materializes the physical expression and passes it along with its cost
-    /// to the continuation.
-    ///
-    /// # Parameters
-    /// * `expression_id`: The ID of the physical expression to continue with.
-    /// * `k`: The continuation function to be called with the materialized plan.
-    /// * `job_id`: The ID of the job to be executed.
-    pub(super) async fn execute_continue_with_costed(
-        &self,
-        expression_id: PhysicalExpressionId,
-        k: CostedContinuation,
-        job_id: JobId,
-    ) -> Result<(), M::MemoError> {
-        let plan = partial_physical_to_value(&self.egest_partial_plan(expression_id).await?);
-
-        let message_tx = self.message_tx.clone();
-        tokio::spawn(async move {
-            let response = k.0(plan).await;
-            Self::process_engine_response(job_id, message_tx, response).await;
-        });
-
-        Ok(())
-    }
-
     /// Helper function to process the engine response and send it to the optimizer.
     ///
     /// Handles `YieldGroup` and `YieldGoal` responses by sending subscription messages
@@ -300,10 +234,7 @@ impl<M: Memo> Optimizer<M> {
                 SubscribeGroup(hir_group_id_to_cir(&group_id), LogicalContinuation(k)),
                 job_id,
             ),
-            YieldGoal(goal, k) => OptimizerMessage::product(
-                SubscribeGoal(hir_goal_to_cir(&goal), CostedContinuation(k)),
-                job_id,
-            ),
+            YieldGoal(_, _) => todo!("Decide what to do here depending on the cost model"),
         };
 
         engine_tx

@@ -1,12 +1,11 @@
 //! The main implementation of the in-memory memo table.
 
-use std::collections::VecDeque;
-
 use super::{
     Infallible, Memo, MemoryMemo, MergeProducts, Representative, helpers::MemoryMemoHelper,
 };
 use crate::{cir::*, memo::memory::GroupInfo};
 use hashbrown::{HashMap, HashSet};
+use std::collections::VecDeque;
 
 impl Memo for MemoryMemo {
     async fn get_logical_properties(
@@ -144,13 +143,6 @@ impl Memo for MemoryMemo {
         self.consolidate_merge_results(merge_operations).await
     }
 
-    async fn get_best_optimized_physical_expr(
-        &self,
-        _goal_id: GoalId,
-    ) -> Result<Option<(PhysicalExpressionId, Cost)>, Infallible> {
-        todo!()
-    }
-
     async fn get_all_goal_members(
         &self,
         _goal_id: GoalId,
@@ -187,26 +179,6 @@ impl Memo for MemoryMemo {
             .insert(repr_goal_id);
 
         Ok(false)
-    }
-
-    async fn update_physical_expr_cost(
-        &mut self,
-        _physical_expr_id: PhysicalExpressionId,
-        _new_cost: Cost,
-    ) -> Result<bool, Infallible> {
-        todo!()
-    }
-
-    async fn get_physical_expr_cost(
-        &self,
-        physical_expr_id: PhysicalExpressionId,
-    ) -> Result<Option<Cost>, Infallible> {
-        let repr_physical_expr_id = self.find_repr_physical_expr_id(physical_expr_id).await?;
-        Ok(self
-            .id_to_cost
-            .get(&repr_physical_expr_id)
-            .unwrap_or_else(|| panic!("{:?} not found in memo table", repr_physical_expr_id))
-            .clone())
     }
 }
 

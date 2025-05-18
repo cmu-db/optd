@@ -359,6 +359,6 @@ impl<M: Memo> Optimizer<M> {
         &mut self,
         _expression_id: PhysicalExpressionId,
     ) -> Result<TaskId, M::MemoError> {
-        todo!()
+        todo!("What do we decide to do with costing is an open question");
     }
 }

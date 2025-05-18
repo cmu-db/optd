@@ -1,7 +1,4 @@
-use super::{
-    JobId, Optimizer, TaskId,
-    jobs::{CostedContinuation, LogicalContinuation},
-};
+use super::{JobId, Optimizer, TaskId, jobs::LogicalContinuation};
 use crate::{
     cir::*,
     memo::Memo,
@@ -139,26 +136,6 @@ impl<M: Memo> Optimizer<M> {
         todo!()
     }
 
-    /// This method handles fully optimized physical expressions with cost information.
-    ///
-    /// When a new optimized expression is found, it's added to the memo. If it becomes
-    /// the new best expression for its goal, continuations are notified and and clients
-    /// receive the corresponding egested plan.
-    ///
-    /// # Parameters
-    /// * `expression_id` - ID of the physical expression to process.
-    /// * `cost` - Cost information for the expression.
-    ///
-    /// # Returns
-    /// * `Result<(), Error>` - Success or error during processing.
-    pub(super) async fn process_new_costed_physical(
-        &mut self,
-        _expression_id: PhysicalExpressionId,
-        _cost: Cost,
-    ) -> Result<(), M::MemoError> {
-        todo!()
-    }
-
     /// This method handles group creation for expressions with derived properties
     /// and updates any pending messages that depend on this group.
     ///
@@ -199,25 +176,6 @@ impl<M: Memo> Optimizer<M> {
         let parent_task_id = self.get_related_task_id(job_id);
         self.launch_fork_logical_task(group_id, continuation, parent_task_id)
             .await
-    }
-
-    /// Registers a continuation for receiving optimized physical expressions for a goal.
-    /// The continuation will be notified about the best existing expression and any better ones found.
-    ///
-    /// # Parameters
-    /// * `goal` - The goal to subscribe to.
-    /// * `continuation` - Continuation to call when new optimized expressions are found.
-    /// * `job_id` - ID of the job that initiated this request.
-    ///
-    /// # Returns
-    /// * `Result<(), Error>` - Success or error during processing.
-    pub(super) async fn process_goal_subscription(
-        &mut self,
-        _goal: &Goal,
-        _continuation: CostedContinuation,
-        _job_id: JobId,
-    ) -> Result<(), M::MemoError> {
-        todo!()
     }
 
     /// Retrieves the logical properties for the given group from the memo

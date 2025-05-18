@@ -17,7 +17,7 @@ mod merge;
 mod retriever;
 mod tasks;
 
-use jobs::{CostedContinuation, Job, JobId, LogicalContinuation};
+use jobs::{Job, JobId, LogicalContinuation};
 use retriever::OptimizerRetriever;
 use tasks::{Task, TaskId};
 
@@ -49,17 +49,11 @@ enum EngineProduct {
     /// New physical implementation for a goal, awaiting recursive optimization.
     NewPhysicalPartial(PartialPhysicalPlan, GoalId),
 
-    /// Fully optimized physical expression with complete costing.
-    NewCostedPhysical(PhysicalExpressionId, Cost),
-
     /// Create a new group with the provided logical properties.
     CreateGroup(LogicalExpressionId, LogicalProperties),
 
     /// Subscribe to logical expressions in a specific group.
     SubscribeGroup(GroupId, LogicalContinuation),
-
-    /// Subscribe to costed physical expressions for a goal.
-    SubscribeGoal(Goal, CostedContinuation),
 }
 
 /// Messages passed within the optimization system.
@@ -250,17 +244,11 @@ impl<M: Memo> Optimizer<M> {
                                     NewPhysicalPartial(plan, goal_id) => {
                                         self.process_new_physical_partial(plan, goal_id, job_id).await?;
                                     }
-                                    NewCostedPhysical(expression_id, cost) => {
-                                        self.process_new_costed_physical(expression_id, cost).await?;
-                                    }
                                     CreateGroup(expression_id, properties) => {
                                         self.process_create_group(expression_id, &properties, job_id).await?;
                                     }
                                     SubscribeGroup(group_id, continuation) => {
                                         self.process_group_subscription(group_id, continuation, job_id).await?;
-                                    }
-                                    SubscribeGoal(goal, continuation) => {
-                                        self.process_goal_subscription(&goal, continuation, job_id).await?;
                                     }
                                 }
                             }

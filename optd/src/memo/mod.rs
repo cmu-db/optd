@@ -207,20 +207,7 @@ pub trait Memo: Representative + Materialize + Sync + 'static {
     //
     // Physical expression and goal operations.
     //
-
-    /// Gets the best optimized physical expression ID for a goal ID.
-    ///
-    /// # Parameters
-    /// * `goal_id` - ID of the goal to retrieve the best expression for.
-    ///
-    /// # Returns
-    /// The ID of the lowest-cost physical implementation found so far for the goal,
-    /// along with its cost. Returns None if no optimized expression exists.
-    async fn get_best_optimized_physical_expr(
-        &self,
-        goal_id: GoalId,
-    ) -> Result<Option<(PhysicalExpressionId, Cost)>, Self::MemoError>;
-
+    
     /// Gets all members of a goal, which can be physical expressions or other goals.
     ///
     /// # Parameters
@@ -246,30 +233,4 @@ pub trait Memo: Representative + Materialize + Sync + 'static {
         goal_id: GoalId,
         member_id: GoalMemberId,
     ) -> Result<bool, Self::MemoError>;
-
-    /// Updates the cost of a physical expression ID.
-    ///
-    /// # Parameters
-    /// * `physical_expr_id` - ID of the physical expression to update.
-    /// * `new_cost` - New cost to assign to the physical expression.
-    ///
-    /// # Returns
-    /// Whether the cost of the expression has improved.
-    async fn update_physical_expr_cost(
-        &mut self,
-        physical_expr_id: PhysicalExpressionId,
-        new_cost: Cost,
-    ) -> Result<bool, Self::MemoError>;
-
-    /// Gets the cost of a physical expression ID.
-    ///
-    /// # Parameters
-    /// * `physical_expr_id` - ID of the physical expression to retrieve the cost for.
-    ///
-    /// # Returns
-    /// The cost of the physical expression, or None if it doesn't exist.
-    async fn get_physical_expr_cost(
-        &self,
-        physical_expr_id: PhysicalExpressionId,
-    ) -> Result<Option<Cost>, Self::MemoError>;
 }

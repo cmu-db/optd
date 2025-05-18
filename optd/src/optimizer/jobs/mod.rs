@@ -1,9 +1,6 @@
 use super::{EngineProduct, TaskId};
 use crate::{
-    cir::{
-        GoalId, GroupId, ImplementationRule, LogicalExpressionId, PhysicalExpressionId,
-        TransformationRule,
-    },
+    cir::{GoalId, GroupId, ImplementationRule, LogicalExpressionId, TransformationRule},
     dsl::{
         analyzer::hir::Value,
         engine::{Continuation, EngineResponse},
@@ -29,10 +26,6 @@ pub(crate) struct Job(pub TaskId, pub JobKind);
 #[derive(Clone)]
 pub(crate) struct LogicalContinuation(Continuation<Value, EngineResponse<EngineProduct>>);
 
-/// Represents a continuation for processing costed physical expressions.
-#[derive(Clone)]
-pub(crate) struct CostedContinuation(Continuation<Value, EngineResponse<EngineProduct>>);
-
 /// Enumeration of different types of jobs in the optimizer.
 ///
 /// Each variant represents a specific optimization operation that can be
@@ -55,26 +48,11 @@ pub(crate) enum JobKind {
     ///
     /// This job generates physical implementations of a logical expression
     /// based on specific implementation strategies.
-    #[allow(dead_code)]
     ImplementExpression(ImplementationRule, LogicalExpressionId, GoalId),
-
-    /// Starts computing the cost of a physical expression.
-    ///
-    /// This job estimates the execution cost of a physical implementation
-    /// to aid in selecting the optimal plan.
-    #[allow(dead_code)]
-    CostExpression(PhysicalExpressionId),
 
     /// Continues processing with a logical expression result.
     ///
     /// This job represents a continuation-passing-style callback for
     /// handling the result of a logical expression operation.
     ContinueWithLogical(LogicalExpressionId, LogicalContinuation),
-
-    /// Continues processing with an optimized expression result.
-    ///
-    /// This job represents a continuation-passing-style callback for
-    /// handling the result of an optimized physical expression operation.
-    #[allow(dead_code)]
-    ContinueWithCosted(PhysicalExpressionId, CostedContinuation),
 }
