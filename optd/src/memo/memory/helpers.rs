@@ -4,7 +4,8 @@ use super::{Infallible, MemoryMemo};
 use crate::{
     cir::*,
     memo::{
-        Materialize, Memo, MergeGoalProduct, MergeGroupProduct, Representative, memory::GroupInfo,
+        Materialize, Memo, MergeGoalProduct, MergeGroupProduct, MergePhysicalExprProduct,
+        Representative, memory::GroupInfo,
     },
 };
 use hashbrown::{HashMap, HashSet};
@@ -107,10 +108,15 @@ pub trait MemoryMemoHelper: Memo {
         merge_operations: Vec<MergeGroupProduct>,
     ) -> Result<Vec<MergeGroupProduct>, Infallible>;
 
-    async fn process_goal_merges(
+    async fn merge_dependent_goals(
         &mut self,
         group_merges: &[MergeGroupProduct],
     ) -> Result<Vec<MergeGoalProduct>, Infallible>;
+
+    async fn merge_dependent_physical_exprs(
+        &mut self,
+        goal_merges: &[MergeGoalProduct],
+    ) -> Result<Vec<MergePhysicalExprProduct>, Infallible>;
 }
 
 impl MemoryMemoHelper for MemoryMemo {
@@ -519,8 +525,8 @@ impl MemoryMemoHelper for MemoryMemo {
 
     /// Processes goal merges and returns the results.
     ///
-    /// This function consolidates the merge operations for goals and returns a list of
-    /// `MergeGoalProduct` instances representing the merged goals.
+    /// This function performs the merge operations for goals based on the merged groups and
+    /// returns a list of `MergeGoalProduct` instances representing the merged goals.
     ///
     /// # Parameters
     ///
@@ -529,7 +535,7 @@ impl MemoryMemoHelper for MemoryMemo {
     /// # Returns
     ///
     /// A vector of `MergeGoalProduct` instances representing the merged goals.
-    async fn process_goal_merges(
+    async fn merge_dependent_goals(
         &mut self,
         group_merges: &[MergeGroupProduct],
     ) -> Result<Vec<MergeGoalProduct>, Infallible> {
@@ -587,5 +593,25 @@ impl MemoryMemoHelper for MemoryMemo {
         }
 
         Ok(goal_merges)
+    }
+
+    /// Processes physical expression merges and returns the results.
+    ///
+    /// This function performs the merge operations for physical expressions based on
+    /// the merged goals and returns a list of `MergePhysicalExprProduct` instances
+    /// representing the merged physical expressions.
+    ///
+    /// # Parameters
+    ///
+    /// * `goal_merges` - A slice of `MergeGoalProduct` instances representing the merged goals.
+    ///
+    /// # Returns
+    ///
+    /// A vector of `MergePhysicalExprProduct` instances representing the merged physical expressions.
+    async fn merge_dependent_physical_exprs(
+        &mut self,
+        goal_merges: &[MergeGoalProduct],
+    ) -> Result<Vec<MergePhysicalExprProduct>, Infallible> {
+        Ok(vec![])
     }
 }

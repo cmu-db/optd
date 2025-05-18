@@ -164,12 +164,16 @@ impl Memo for MemoryMemo {
         // Now handle goal merges: we do not need to pass any extra parameters as
         // the goals to merge are gathered in the `goals` member of each new
         // representative group.
-        let goal_merges = self.process_goal_merges(&group_merges).await?;
+        let goal_merges = self.merge_dependent_goals(&group_merges).await?;
+
+        // Finally, we need to recursively merge the physical expressions that are
+        // dependent on the merged goals (and the recursively merged expressions themselves).
+        let expr_merges = self.merge_dependent_physical_exprs(&goal_merges).await?;
 
         Ok(MergeProducts {
             group_merges,
             goal_merges,
-            expr_merges: vec![], // TODO(Alexis): Implement expression merges.
+            expr_merges,
         })
     }
 
