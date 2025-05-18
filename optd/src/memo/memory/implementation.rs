@@ -90,11 +90,30 @@ impl Memo for MemoryMemo {
     /// 3. When expressions become identical, their containing groups also need to be merged,
     ///    creating a cascading effect.
     ///
+    /// 4. After all logical groups have been merged, we need to identify and merge all goals
+    /// that have become equivalent. Goals are considered equivalent when they reference the
+    /// same group and share identical logical properties.
+    ///
+    /// 5. When goals are merged, this triggers a cascading effect on physical expressions:
+    /// - Physical expressions that reference merged goals need updating.
+    /// - This may cause previously distinct physical expressions to become identical.
+    /// - These newly identical expressions must then be merged.
+    /// - Each merge may create more identical expressions, continuing the chain reaction
+    /// until the entire structure is consistent.
+    ///
     /// To handle this complexity, we use an iterative approach:
+    /// PHASE 1: LOGICAL
     /// - We maintain a queue of group pairs that need to be merged.
     /// - For each pair, we create a new representative group.
     /// - We update all expressions that reference the merged groups.
     /// - If this creates new equivalences, we add the affected groups to the merge queue.
+    /// - We continue until no more merges are needed.
+    /// PHASE 2: PHYSICAL
+    /// - We inspect the result of logical merges, and identify the goals to merge in
+    ///  the corresponding group_info of the new representative group.
+    /// - For each group, we create a new representative goal.
+    /// - We update all expressions that reference the merged goals.
+    /// - If this creates new equivalences, we add the affected goals to the merge queue.
     /// - We continue until no more merges are needed.
     ///
     /// This approach ensures that all cascading effects are properly handled and the memo
@@ -136,9 +155,22 @@ impl Memo for MemoryMemo {
             pending_merges.extend(new_pending_merges);
         }
 
-        // Consolidate the merge results by replacing the incremental merges
+        // Consolidate the merge products by replacing the incremental merges
         // with consolidated results that show the full picture.
-        self.consolidate_merge_results(merge_operations).await
+        let group_merges = self
+            .consolidate_merge_group_products(merge_operations)
+            .await?;
+
+        // Now handle goal merges: we do not need to pass any extra parameters as
+        // the goals to merge are gathered in the `goals` member of each new
+        // representative group.
+        let goal_merges = self.process_goal_merges(&group_merges).await?;
+
+        Ok(MergeProducts {
+            group_merges,
+            goal_merges,
+            expr_merges: vec![], // TODO(Alexis): Implement expression merges.
+        })
     }
 
     async fn get_all_goal_members(

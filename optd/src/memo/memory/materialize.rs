@@ -84,7 +84,7 @@ impl Materialize for MemoryMemo {
             .get_mut(&group_id)
             .expect("Group not found in memo table")
             .goals
-            .insert(props, goal_id);
+            .insert(props, vec![goal_id]);
 
         Ok(goal_id)
     }

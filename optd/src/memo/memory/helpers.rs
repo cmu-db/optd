@@ -4,7 +4,7 @@ use super::{Infallible, MemoryMemo};
 use crate::{
     cir::*,
     memo::{
-        Materialize, Memo, MergeGroupProduct, MergeProducts, Representative, memory::GroupInfo,
+        Materialize, Memo, MergeGoalProduct, MergeGroupProduct, Representative, memory::GroupInfo,
     },
 };
 use hashbrown::{HashMap, HashSet};
@@ -102,10 +102,15 @@ pub trait MemoryMemoHelper: Memo {
         new_group_id: GroupId,
     ) -> Result<Vec<(GroupId, GroupId)>, Infallible>;
 
-    async fn consolidate_merge_results(
+    async fn consolidate_merge_group_products(
         &self,
         merge_operations: Vec<MergeGroupProduct>,
-    ) -> Result<MergeProducts, Infallible>;
+    ) -> Result<Vec<MergeGroupProduct>, Infallible>;
+
+    async fn process_goal_merges(
+        &mut self,
+        group_merges: &[MergeGroupProduct],
+    ) -> Result<Vec<MergeGoalProduct>, Infallible>;
 }
 
 impl MemoryMemoHelper for MemoryMemo {
@@ -294,6 +299,18 @@ impl MemoryMemoHelper for MemoryMemo {
             .copied()
             .collect();
 
+        // Combine goals from both groups.
+        let all_goals: HashMap<_, Vec<_>> = group1_info
+            .goals
+            .into_iter()
+            .chain(group2_info.goals)
+            .fold(HashMap::new(), |mut acc, (props, mut goals)| {
+                acc.entry(props)
+                    .and_modify(|existing_goals| existing_goals.append(&mut goals))
+                    .or_insert(goals);
+                acc
+            });
+
         // Update the union-find structure.
         self.repr_group_id.merge(&group_id_1, &new_group_id);
         self.repr_group_id.merge(&group_id_2, &new_group_id);
@@ -306,7 +323,7 @@ impl MemoryMemoHelper for MemoryMemo {
         // Create and save the new group.
         let new_group_info = GroupInfo {
             expressions: all_exprs,
-            goals: HashMap::new(), // TODO(Alexis): this will be used to trigger the goal merge process.
+            goals: all_goals,
             logical_properties: group1_info.logical_properties,
         };
         self.group_info.insert(new_group_id, new_group_info);
@@ -451,16 +468,16 @@ impl MemoryMemoHelper for MemoryMemo {
         Ok(new_pending_merges)
     }
 
-    /// Consolidates merge operations into a comprehensive result.
+    /// Consolidates merge group operations into a comprehensive result.
     ///
-    /// This function takes a list of individual merge operations and consolidates them into a
-    /// complete picture of which groups were merged into each final representative.
+    /// This function takes a list of individual group merge operations and consolidates
+    /// them into a complete picture of which groups were merged into each final representative.
     ///
     /// It also handles cases where past representatives themselves are merged into newer ones.
-    async fn consolidate_merge_results(
+    async fn consolidate_merge_group_products(
         &self,
         merge_operations: Vec<MergeGroupProduct>,
-    ) -> Result<MergeProducts, Infallible> {
+    ) -> Result<Vec<MergeGroupProduct>, Infallible> {
         // Collect operations into a map from representative to all merged groups.
         let mut consolidated_map: HashMap<GroupId, HashSet<GroupId>> = HashMap::new();
 
@@ -491,10 +508,37 @@ impl MemoryMemoHelper for MemoryMemo {
             })
             .collect();
 
-        Ok(MergeProducts {
-            group_merges,
-            goal_merges: vec![],
-            expr_merges: vec![],
-        })
+        Ok(group_merges)
+    }
+
+    /// Processes goal merges and returns the results.
+    ///
+    /// This function consolidates the merge operations for goals and returns a list of
+    /// `MergeGoalProduct` instances representing the merged goals.
+    ///
+    /// # Parameters
+    ///
+    /// * `group_merges` - A slice of `MergeGroupProduct` instances representing the merged groups.
+    ///
+    /// # Returns
+    ///
+    /// A vector of `MergeGoalProduct` instances representing the merged goals.
+    async fn process_goal_merges(
+        &mut self,
+        group_merges: &[MergeGroupProduct],
+    ) -> Result<Vec<MergeGoalProduct>, Infallible> {
+        let mut merge_products = Vec::new();
+
+        for (goal_id, goal_info) in self.goal_info.iter() {
+            let repr_goal_id = self.find_repr_goal_id(*goal_id).await?;
+            if repr_goal_id != *goal_id {
+                merge_products.push(MergeGoalProduct {
+                    new_goal_id: repr_goal_id,
+                    merged_goals: vec![*goal_id],
+                });
+            }
+        }
+
+        Ok(merge_products)
     }
 }

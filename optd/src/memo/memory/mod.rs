@@ -76,7 +76,10 @@ pub struct MemoryMemo {
 #[derive(Clone, Debug)]
 struct GroupInfo {
     expressions: HashSet<LogicalExpressionId>,
-    goals: HashMap<PhysicalProperties, GoalId>,
+    // We make the key a Vec<GoalId> so that we can accumulate
+    // goals to merge while merging groups. Outside of merging,
+    // the value is always a single goal.
+    goals: HashMap<PhysicalProperties, Vec<GoalId>>,
     logical_properties: LogicalProperties,
 }
 
@@ -85,8 +88,6 @@ struct GroupInfo {
 /// - The members of the goal (physical expression IDs or other (sub)goal IDs), may *NOT* be representative.
 #[derive(Clone, Debug)]
 struct GoalInfo {
-    /// The goal (group + properties)
     goal: Goal,
-    /// The members of the goal (physical expression IDs or other sub-goal IDs).
     members: HashSet<GoalMemberId>,
 }
