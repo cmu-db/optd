@@ -108,6 +108,7 @@ impl Memo for MemoryMemo {
     /// - We update all expressions that reference the merged groups.
     /// - If this creates new equivalences, we add the affected groups to the merge queue.
     /// - We continue until no more merges are needed.
+    /// 
     /// PHASE 2: PHYSICAL
     /// - We inspect the result of logical merges, and identify the goals to merge in
     ///  the corresponding group_info of the new representative group.
@@ -149,7 +150,7 @@ impl Memo for MemoryMemo {
             // Process expressions that reference the merged groups,
             // which may trigger additional group merges.
             let new_pending_merges = self
-                .process_referencing_expressions(group_id_1, group_id_2, new_group_id)
+                .process_referencing_logical_exprs(group_id_1, group_id_2, new_group_id)
                 .await?;
 
             pending_merges.extend(new_pending_merges);
