@@ -35,37 +35,6 @@ impl MemoryMemo {
         self.next_shared_id += 1;
         PhysicalExpressionId(id)
     }
-
-    /// Takes the set of [`LogicalExpressionId`] that reference a group, mapped to their
-    /// representatives.
-    fn take_referencing_expr_set(&mut self, group_id: GroupId) -> HashSet<LogicalExpressionId> {
-        self.group_referencing_exprs_index
-            .remove(&group_id)
-            .unwrap_or_default()
-            .iter()
-            .map(|id| self.repr_logical_expr_id.find(id))
-            .collect()
-    }
-
-    /// Merges the two sets of logical expressions that reference the two groups into a single set
-    /// of expressions under a new [`GroupId`].
-    ///
-    /// If a group does not exist, then the set of expressions referencing it is the empty set.
-    fn merge_referencing_logical_exprs(
-        &mut self,
-        group1: GroupId,
-        group2: GroupId,
-        new_group: GroupId,
-    ) {
-        // Remove the entries for the original two groups that we want to merge.
-        let exprs1 = self.take_referencing_expr_set(group1);
-        let exprs2 = self.take_referencing_expr_set(group2);
-        let new_set = exprs1.union(&exprs2).copied().collect();
-
-        // Update the index for the new group / set of logical expressions.
-        self.group_referencing_exprs_index
-            .insert(new_group, new_set);
-    }
 }
 
 /// Helper functions for the in-memory memo table implementation.
@@ -456,7 +425,19 @@ impl MemoryMemoHelper for MemoryMemo {
     ) -> Result<Vec<(GroupId, GroupId)>, Infallible> {
         // Merge the set of expressions that reference these two groups into one
         // that references the new group.
-        self.merge_referencing_logical_exprs(group_id_1, group_id_2, new_group_id);
+        let exprs1 = self
+            .group_referencing_exprs_index
+            .remove(&group_id_1)
+            .unwrap_or_default();
+        let exprs2 = self
+            .group_referencing_exprs_index
+            .remove(&group_id_2)
+            .unwrap_or_default();
+        let new_set = exprs1.union(&exprs2).copied().collect();
+
+        // Update the index for the new group / set of logical expressions.
+        self.group_referencing_exprs_index
+            .insert(new_group_id, new_set);
 
         // We need to clone here because we are modifying our `self` state inside the loop.
         // TODO: This is an inefficiency. This referencing index shouldn't be modified in the loop
