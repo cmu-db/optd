@@ -21,7 +21,7 @@ fn input(): Logical =
             Div(Const(3), Const(4))
         ),
         Mult(
-            Sub(Const(5), Const(6)),
+            Sub(Const(1), Const(2)),
             Div(Const(7), Const(8))
         )
     )
