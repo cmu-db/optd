@@ -63,8 +63,8 @@ impl<M: Memo> Optimizer<M> {
                     self.execute_implementation_rule(rule_name, expression_id, goal_id, job_id)
                         .await?;
                 }
-                ContinueWithLogical(expression_id, k) => {
-                    self.execute_continue_with_logical(expression_id, k, job_id)
+                ContinueWithLogical(expression_id, group_id, k) => {
+                    self.execute_continue_with_logical(expression_id, group_id, k, job_id)
                         .await?;
                 }
             }

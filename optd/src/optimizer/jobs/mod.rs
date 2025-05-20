@@ -54,5 +54,5 @@ pub(crate) enum JobKind {
     ///
     /// This job represents a continuation-passing-style callback for
     /// handling the result of a logical expression operation.
-    ContinueWithLogical(LogicalExpressionId, LogicalContinuation),
+    ContinueWithLogical(LogicalExpressionId, GroupId, LogicalContinuation),
 }

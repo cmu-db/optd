@@ -96,7 +96,7 @@ impl<M: Memo> Optimizer<M> {
             .dispatched_exprs
             .clone();
         let continue_with_logical_in =
-            self.create_logical_cont_tasks(&expressions, fork_task_id, &continuation);
+            self.create_logical_cont_tasks(&expressions, group_id, fork_task_id, &continuation);
 
         // Create the fork task.
         let fork_logical_task = ForkLogicalTask {
@@ -121,6 +121,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Parameters
     /// * `expression_id`: The ID of the logical expression to continue with.
+    /// * `group_id`: The ID of the group that this expression belongs to.
     /// * `fork_out`: The ID of the fork task that this continue task feeds into.
     /// * `continuation`: The logical continuation to be used.
     ///
@@ -129,6 +130,7 @@ impl<M: Memo> Optimizer<M> {
     pub(crate) fn launch_continue_with_logical_task(
         &mut self,
         expression_id: LogicalExpressionId,
+        group_id: GroupId,
         fork_out: TaskId,
         continuation: LogicalContinuation,
     ) -> TaskId {
@@ -144,7 +146,7 @@ impl<M: Memo> Optimizer<M> {
         self.add_task(task_id, ContinueWithLogical(task));
         self.schedule_job(
             task_id,
-            JobKind::ContinueWithLogical(expression_id, continuation),
+            JobKind::ContinueWithLogical(expression_id, group_id, continuation),
         );
 
         task_id
@@ -223,6 +225,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Arguments
     /// * `expressions` - The logical expressions to continue with
+    /// * `group_id` - The group ID these expressions belong to
     /// * `fork_task_id` - The fork task that these continuations feed into
     /// * `continuation` - The continuation to apply
     ///
@@ -231,13 +234,18 @@ impl<M: Memo> Optimizer<M> {
     pub(crate) fn create_logical_cont_tasks(
         &mut self,
         expressions: &HashSet<LogicalExpressionId>,
+        group_id: GroupId,
         fork_task_id: TaskId,
         continuation: &LogicalContinuation,
     ) -> HashSet<TaskId> {
         let mut continuation_tasks = HashSet::new();
         for &expr_id in expressions {
-            let task_id =
-                self.launch_continue_with_logical_task(expr_id, fork_task_id, continuation.clone());
+            let task_id = self.launch_continue_with_logical_task(
+                expr_id,
+                group_id,
+                fork_task_id,
+                continuation.clone(),
+            );
             continuation_tasks.insert(task_id);
         }
 

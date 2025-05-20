@@ -21,7 +21,8 @@ use crate::dsl::utils::retriever::Retriever;
 use crate::dsl::utils::span::Span;
 use context::Context;
 use map::Map;
-use std::fmt::Debug;
+use std::fmt::{self, Debug};
+use std::pin::Pin;
 use std::{collections::HashMap, sync::Arc};
 
 pub(crate) mod context;
@@ -72,22 +73,33 @@ impl TypedSpan {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Udf {
-    /// The function pointer to the user-defined function.
-    ///
-    /// Note that [`Value`]s passed to and returned from this UDF do not have associated metadata.
-    pub func: fn(&[Value], &dyn Catalog, &dyn Retriever) -> Value,
+    pub func: Arc<
+        dyn Fn(
+                Vec<Value>,
+                Arc<dyn Catalog>,
+                Arc<dyn Retriever>,
+            ) -> Pin<Box<dyn Future<Output = Value> + Send>>
+            + Send
+            + Sync,
+    >,
+}
+
+impl fmt::Debug for Udf {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[udf]")
+    }
 }
 
 impl Udf {
-    pub fn call(
+    pub async fn call(
         &self,
         values: &[Value],
-        catalog: &dyn Catalog,
-        retriever: &dyn Retriever,
+        catalog: Arc<dyn Catalog>,
+        retriever: Arc<dyn Retriever>,
     ) -> Value {
-        (self.func)(values, catalog, retriever)
+        (self.func)(values.to_vec(), catalog, retriever).await
     }
 }
 

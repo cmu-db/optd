@@ -1,10 +1,10 @@
 use crate::{
-    catalog::iceberg::memory_catalog,
+    catalog::{Catalog, iceberg::memory_catalog},
     dsl::{
-        analyzer::hir::Value,
+        analyzer::hir::{CoreData, LogicalOp, Materializable, Udf, Value},
         compile::{Config, compile_hir},
         engine::{Continuation, Engine, EngineResponse},
-        utils::retriever::MockRetriever,
+        utils::retriever::{MockRetriever, Retriever},
     },
     memo::MemoryMemo,
     optimizer::{OptimizeRequest, Optimizer, hir_cir::into_cir::value_to_logical},
@@ -12,10 +12,39 @@ use crate::{
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{sync::mpsc, time::timeout};
 
+pub async fn properties(
+    args: Vec<Value>,
+    _catalog: Arc<dyn Catalog>,
+    retriever: Arc<dyn Retriever>,
+) -> Value {
+    let arg = args[0].clone();
+    let group_id = match &arg.data {
+        CoreData::Logical(Materializable::Materialized(LogicalOp { group_id, .. })) => {
+            group_id.unwrap()
+        }
+        CoreData::Logical(Materializable::UnMaterialized(group_id)) => *group_id,
+        _ => panic!("Expected a logical plan"),
+    };
+
+    retriever.get_properties(group_id).await
+}
+
 async fn run_demo() {
     // Compile the HIR.
     let config = Config::new("src/demo/demo.opt".into());
-    let udfs = HashMap::new();
+
+    // Create a properties UDF.
+    let properties_udf = Udf {
+        func: Arc::new(|args, catalog, retriever| {
+            Box::pin(async move { properties(args, catalog, retriever).await })
+        }),
+    };
+
+    // Create the UDFs HashMap.
+    let mut udfs = HashMap::new();
+    udfs.insert("properties".to_string(), properties_udf);
+
+    // Compile with the config and UDFs.
     let hir = compile_hir(config, udfs).unwrap();
 
     // Create necessary components.

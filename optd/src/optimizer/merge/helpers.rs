@@ -39,8 +39,12 @@ impl<M: Memo> Optimizer<M> {
                     .continuation
                     .clone();
 
-                let continuation_tasks =
-                    self.create_logical_cont_tasks(&new_exprs, fork_task_id, &continuation);
+                let continuation_tasks = self.create_logical_cont_tasks(
+                    &new_exprs,
+                    group_id,
+                    fork_task_id,
+                    &continuation,
+                );
 
                 self.get_fork_logical_task_mut(fork_task_id)
                     .unwrap()

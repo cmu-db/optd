@@ -4,34 +4,57 @@ use crate::cir::*;
 use crate::dsl::analyzer::hir::{
     self, CoreData, Literal, LogicalOp, Materializable, Operator, PhysicalOp, Value,
 };
-use std::sync::Arc;
 
-/// Converts a [`PartialLogicalPlan`] into a [`Value`].
-pub fn partial_logical_to_value(plan: &PartialLogicalPlan) -> Value {
+/// Converts a [`PartialLogicalPlan`] into a [`Value`], optionally associating it with a [`GroupId`].
+///
+/// If the plan is unmaterialized, it will be represented as a [`Value`] containing a group reference.
+/// If the plan is materialized, the resulting [`Value`] contains the operator data, and may include
+/// a group ID if provided.
+pub fn partial_logical_to_value(plan: &PartialLogicalPlan, group_id: Option<GroupId>) -> Value {
+    use Child::*;
     use Materializable::*;
 
     match plan {
-        PartialLogicalPlan::UnMaterialized(group_id) => {
-            // For unmaterialized logical operators, we create a `Value` with the group ID.
-            Value::new(CoreData::Logical(UnMaterialized(hir::GroupId(group_id.0))))
+        PartialLogicalPlan::UnMaterialized(gid) => {
+            // Represent unmaterialized logical operators using their group ID.
+            Value::new(CoreData::Logical(UnMaterialized(hir::GroupId(gid.0))))
         }
         PartialLogicalPlan::Materialized(node) => {
-            // For materialized logical operators, we create a `Value` with the operator data.
+            // Convert each child to a Value recursively.
+            let children: Vec<Value> = node
+                .children
+                .iter()
+                .map(|child| match child {
+                    Singleton(item) => partial_logical_to_value(item, None),
+                    VarLength(items) => Value::new(CoreData::Array(
+                        items
+                            .iter()
+                            .map(|item| partial_logical_to_value(item, None))
+                            .collect(),
+                    )),
+                })
+                .collect();
+
             let operator = Operator {
                 tag: node.tag.clone(),
                 data: convert_operator_data_to_values(&node.data),
-                children: convert_children_to_values(&node.children, partial_logical_to_value),
+                children,
             };
 
-            Value::new(CoreData::Logical(Materialized(LogicalOp::logical(
-                operator,
-            ))))
+            let logical_op = if let Some(gid) = group_id {
+                LogicalOp::stored_logical(operator, cir_group_id_to_hir(&gid))
+            } else {
+                LogicalOp::logical(operator)
+            };
+
+            Value::new(CoreData::Logical(Materialized(logical_op)))
         }
     }
 }
 
 /// Converts a [`PartialPhysicalPlan`] into a [`Value`].
 pub fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
+    use Child::*;
     use Materializable::*;
 
     match plan {
@@ -45,7 +68,19 @@ pub fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
             let operator = Operator {
                 tag: node.tag.clone(),
                 data: convert_operator_data_to_values(&node.data),
-                children: convert_children_to_values(&node.children, partial_physical_to_value),
+                children: node
+                    .children
+                    .iter()
+                    .map(|child| match child {
+                        Singleton(item) => partial_physical_to_value(item),
+                        VarLength(items) => Value::new(CoreData::Array(
+                            items
+                                .iter()
+                                .map(|item| partial_physical_to_value(item))
+                                .collect(),
+                        )),
+                    })
+                    .collect(),
             };
 
             Value::new(CoreData::Physical(Materialized(PhysicalOp::physical(
@@ -85,23 +120,6 @@ fn cir_goal_to_hir(goal: &Goal) -> hir::Goal {
 /// Converts a CIR [`GroupId`] to a HIR [`GroupId`](hir::GroupId).
 fn cir_group_id_to_hir(group_id: &GroupId) -> hir::GroupId {
     hir::GroupId(group_id.0)
-}
-
-/// A generic function to convert a slice of children into a vector of [`Value`]s.
-fn convert_children_to_values<T, F>(children: &[Child<Arc<T>>], converter: F) -> Vec<Value>
-where
-    F: Fn(&T) -> Value,
-    T: 'static,
-{
-    children
-        .iter()
-        .map(|child| match child {
-            Child::Singleton(item) => converter(item),
-            Child::VarLength(items) => Value::new(CoreData::Array(
-                items.iter().map(|item| converter(item)).collect(),
-            )),
-        })
-        .collect()
 }
 
 /// Converts a slice of [`OperatorData`] into a vector of [`Value`]s.

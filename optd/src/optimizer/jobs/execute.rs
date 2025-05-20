@@ -47,6 +47,11 @@ impl<M: Memo> Optimizer<M> {
                 .materialize_logical_expr(expression_id)
                 .await?
                 .into(),
+            None, // FIXME: This is correct, however in the DSL right now the parameters
+                  // of the derive function is a *, to allow its children to be * too. However,
+                  // since the group is not yet created, it isn't really stored yet it.
+                  // Hence, the input should be a different type, and ideally be made consistent
+                  // with how costing is handled (i.e. with $ and *).
         );
 
         let message_tx = self.message_tx.clone();
@@ -97,6 +102,7 @@ impl<M: Memo> Optimizer<M> {
                 .materialize_logical_expr(expression_id)
                 .await?
                 .into(),
+            Some(group_id),
         );
 
         let message_tx = self.message_tx.clone();
@@ -141,6 +147,9 @@ impl<M: Memo> Optimizer<M> {
     ) -> Result<(), M::MemoError> {
         use EngineProduct::*;
 
+        let Goal(group_id, physical_props) = self.memo.materialize_goal(goal_id).await?;
+        let properties = physical_properties_to_value(&physical_props);
+
         let engine = self.init_engine();
         let plan = partial_logical_to_value(
             &self
@@ -148,10 +157,8 @@ impl<M: Memo> Optimizer<M> {
                 .materialize_logical_expr(expression_id)
                 .await?
                 .into(),
+            Some(group_id),
         );
-
-        let Goal(_, physical_props) = self.memo.materialize_goal(goal_id).await?;
-        let properties = physical_properties_to_value(&physical_props);
 
         let message_tx = self.message_tx.clone();
         tokio::spawn(async move {
@@ -179,11 +186,13 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Parameters
     /// * `expression_id`: The ID of the logical expression to continue with.
+    /// * `group_id`: The ID of the group to which the expression belongs.
     /// * `k`: The continuation function to be called with the materialized plan.
     /// * `job_id`: The ID of the job to be executed.
     pub(super) async fn execute_continue_with_logical(
         &self,
         expression_id: LogicalExpressionId,
+        group_id: GroupId,
         k: LogicalContinuation,
         job_id: JobId,
     ) -> Result<(), M::MemoError> {
@@ -196,6 +205,7 @@ impl<M: Memo> Optimizer<M> {
                 .materialize_logical_expr(expression_id)
                 .await?
                 .into(),
+            Some(group_id),
         );
 
         let message_tx = self.message_tx.clone();

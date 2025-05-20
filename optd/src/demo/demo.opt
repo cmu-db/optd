@@ -1,7 +1,9 @@
 data Physical
 data PhysicalProperties
 data Statistics
-data LogicalProperties
+// Taking folded here is not the most interesting property,
+// but it ensures they are the same for all expressions in the same group.
+data LogicalProperties(folded: I64)
 
 data Logical =
   | Add(left: Logical, right: Logical)
@@ -10,6 +12,8 @@ data Logical =
   | Div(left: Logical, right: Logical)
   \ Const(val: I64)
 
+// This will be the input plan that will be optimized.
+// Result is: ((1 - 2) * (3 / 4)) + ((5 - 6) * (7 / 8)) = 0
 fn input(): Logical = 
     Add(
         Mult(
@@ -22,9 +26,21 @@ fn input(): Logical =
         )
     )
 
-// TODO(Alexis): This should be $ really, make costing and derive consistent with each other.
+// External function to allow the retrieval of properties.
+fn properties(op: Logical*): LogicalProperties
+
+// FIXME: This should be $ really (or other), make costing and derive consistent with each other.
 // Also, be careful of not forking in there! And make it a required function in analyzer.
-fn derive(op: Logical) = LogicalProperties
+fn derive(op: Logical*) = match op
+  | Add(left, right) -> 
+      LogicalProperties(left.properties()#folded + right.properties()#folded)
+  | Sub(left, right) ->
+      LogicalProperties(left.properties()#folded - right.properties()#folded)
+  | Mult(left, right) ->
+      LogicalProperties(left.properties()#folded * right.properties()#folded)
+  | Div(left, right) ->
+      LogicalProperties(left.properties()#folded / right.properties()#folded)
+  \ Const(val) -> LogicalProperties(val)
 
 [transformation]
 fn (op: Logical*) mult_commute(): Logical? = match op

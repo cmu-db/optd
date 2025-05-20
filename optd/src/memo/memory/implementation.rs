@@ -171,6 +171,8 @@ impl Memo for MemoryMemo {
         // dependent on the merged goals (and the recursively merged expressions themselves).
         let expr_merges = self.merge_dependent_physical_exprs(&goal_merges).await?;
 
+        println!("Group_info: {:?}", self.group_info);
+
         Ok(MergeProducts {
             group_merges,
             goal_merges,
