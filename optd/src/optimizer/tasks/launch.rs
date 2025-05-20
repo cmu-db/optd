@@ -6,8 +6,8 @@ use crate::{
         Optimizer,
         jobs::{JobKind, LogicalContinuation},
         tasks::{
-            ContinueWithLogicalTask, ExploreGroupTask, ForkLogicalTask, OptimizeGoalTask,
-            TransformExpressionTask,
+            ContinueWithLogicalTask, ExploreGroupTask, ForkLogicalTask, ImplementExpressionTask,
+            OptimizeGoalTask, TransformExpressionTask,
         },
     },
 };
@@ -188,6 +188,42 @@ impl<M: Memo> Optimizer<M> {
         task_id
     }
 
+    /// Method to launch a task for implementing a logical expression with a rule.
+    ///
+    /// # Parameters
+    /// * `expr_id`: The ID of the logical expression to implement.
+    /// * `rule`: The implementation rule to apply.
+    /// * `optimize_goal_out`: The ID of the optimization task that this implementation feeds into.
+    /// * `goal_id`: The ID of the goal that this implementation belongs to.
+    ///
+    /// # Returns
+    /// * `TaskId`: The ID of the created implement task.
+    pub(crate) fn launch_implement_expression_task(
+        &mut self,
+        expr_id: LogicalExpressionId,
+        rule: ImplementationRule,
+        optimize_goal_out: TaskId,
+        goal_id: GoalId,
+    ) -> TaskId {
+        use Task::*;
+
+        let task_id = self.next_task_id();
+        let task = ImplementExpressionTask {
+            rule: rule.clone(),
+            expression_id: expr_id,
+            optimize_goal_out,
+            fork_in: None,
+        };
+
+        self.add_task(task_id, ImplementExpression(task));
+        self.schedule_job(
+            task_id,
+            JobKind::ImplementExpression(rule, expr_id, goal_id),
+        );
+
+        task_id
+    }
+
     /// Creates transform tasks for a set of logical expressions.
     ///
     /// # Arguments
@@ -219,6 +255,39 @@ impl<M: Memo> Optimizer<M> {
         }
 
         transform_tasks
+    }
+
+    /// Creates implement tasks for a set of logical expressions.
+    ///
+    /// # Arguments
+    /// * `expressions` - The logical expressions to implement
+    /// * `goal_id` - The goal ID to implement for
+    /// * `optimize_task_id` - The optimization task that these transforms feed into
+    ///
+    /// # Returns
+    /// * `HashSet<TaskId>` - The IDs of all created implement tasks
+    pub(crate) fn create_implement_tasks(
+        &mut self,
+        expressions: &HashSet<LogicalExpressionId>,
+        goal_id: GoalId,
+        optimize_task_id: TaskId,
+    ) -> HashSet<TaskId> {
+        let implementations = self.rule_book.get_implementations().to_vec();
+        let mut implement_tasks = HashSet::new();
+
+        for &expr_id in expressions {
+            for rule in &implementations {
+                let task_id = self.launch_implement_expression_task(
+                    expr_id,
+                    rule.clone(),
+                    optimize_task_id,
+                    goal_id,
+                );
+                implement_tasks.insert(task_id);
+            }
+        }
+
+        implement_tasks
     }
 
     /// Creates logical continuation tasks for a fork task and a set of expressions.
@@ -324,20 +393,23 @@ impl<M: Memo> Optimizer<M> {
 
         let goal_optimize_task_id = self.next_task_id();
 
-        // TODO(Alexis): Materialize the goal and only explore the group - for now.
-        // This is sufficient to support logical->logical transformation.
         let Goal(group_id, _) = self.memo.materialize_goal(goal_id).await?;
         let explore_group_in = self.ensure_group_exploration_task(group_id).await?;
+
+        // Launch all implementation tasks.
+        let expressions = self.memo.get_all_logical_exprs(group_id).await?;
+        let implement_expression_in =
+            self.create_implement_tasks(&expressions, goal_id, goal_optimize_task_id);
 
         let goal_optimize_task = OptimizeGoalTask {
             goal_id,
             optimize_plan_out: HashSet::new(),
-            optimize_goal_out: HashSet::new(),
+            optimize_goal_out: HashSet::new(), // filled below to avoid infinite recursion
             fork_costed_out: HashSet::new(),
-            optimize_goal_in: HashSet::new(),
+            optimize_goal_in: HashSet::new(), // filled below to avoid infinite recursion
             explore_group_in,
-            implement_expression_in: HashSet::new(),
-            cost_expression_in: HashSet::new(),
+            implement_expression_in,
+            cost_expression_in: HashSet::new(), // TODO: design proper costing
         };
 
         // Add this task to the exploration task's outgoing edges.
@@ -351,22 +423,36 @@ impl<M: Memo> Optimizer<M> {
         self.goal_optimization_task_index
             .insert(goal_repr, goal_optimize_task_id);
 
-        Ok(goal_optimize_task_id)
-    }
+        // Ensure sub-goals are getting explored too, we do this after registering
+        // the task to avoid infinite recursion.
+        let sub_goals = self
+            .memo
+            .get_all_goal_members(goal_id)
+            .await?
+            .into_iter()
+            .filter_map(|member_id| match member_id {
+                GoalMemberId::GoalId(sub_goal_id) => Some(sub_goal_id),
+                _ => None,
+            });
 
-    /// Ensures a cost expression task exists and and returns its id.
-    /// If a costing task already exists, we reuse it.
-    ///
-    /// # Parameters
-    /// * `expression_id`: The ID of the expression to be costed.
-    ///
-    /// # Returns
-    /// * `TaskId`: The ID of the task that was created or reused.
-    #[allow(dead_code)]
-    async fn ensure_cost_expression_task(
-        &mut self,
-        _expression_id: PhysicalExpressionId,
-    ) -> Result<TaskId, M::MemoError> {
-        todo!("What do we decide to do with costing is an open question");
+        // Launch optimization tasks for each subgoal and establish links.
+        let mut subgoal_task_ids = HashSet::new();
+        for sub_goal_id in sub_goals {
+            let sub_goal_task_id = self.ensure_optimize_goal_task(sub_goal_id).await?;
+            subgoal_task_ids.insert(sub_goal_task_id);
+
+            // Add current task to subgoal's outgoing edges.
+            self.get_optimize_goal_task_mut(sub_goal_task_id)
+                .unwrap()
+                .optimize_goal_out
+                .insert(goal_optimize_task_id);
+        }
+
+        // Update the parent task with links to subgoals.
+        self.get_optimize_goal_task_mut(goal_optimize_task_id)
+            .unwrap()
+            .optimize_goal_in = subgoal_task_ids;
+
+        Ok(goal_optimize_task_id)
     }
 }
