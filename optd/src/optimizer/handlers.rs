@@ -123,6 +123,7 @@ impl<M: Memo> Optimizer<M> {
     /// # Parameters
     /// * `plan` - The partial physical plan to process.
     /// * `goal_id` - ID of the goal associated with this plan.
+    /// * `job_id` - ID of the job that generated this plan.
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during processing.
@@ -130,11 +131,37 @@ impl<M: Memo> Optimizer<M> {
         &mut self,
         plan: PartialPhysicalPlan,
         goal_id: GoalId,
+        job_id: JobId,
     ) -> Result<(), M::MemoError> {
+        use GoalMemberId::*;
+
         let goal_id = self.memo.find_repr_goal_id(goal_id).await?;
+        let related_task_id = self.get_related_task_id(job_id);
+
         let member_id = self.probe_ingest_physical_plan(&plan).await?;
-        // TODO: Here we would launch costing tasks based on the design.
-        self.memo.add_goal_member(goal_id, member_id).await?;
+        let added = self.memo.add_goal_member(goal_id, member_id).await?;
+
+        match member_id {
+            PhysicalExpressionId(_) => {
+                // TODO: Here we would launch costing tasks based on the design.
+            }
+            GoalId(goal_id) => {
+                if added {
+                    // Optimize the new sub-goal and add to task graph.
+                    let sub_optimize_task_id = self.ensure_optimize_goal_task(goal_id).await?;
+
+                    self.get_optimize_goal_task_mut(sub_optimize_task_id)
+                        .unwrap()
+                        .optimize_goal_out
+                        .insert(related_task_id);
+                    self.get_optimize_goal_task_mut(related_task_id)
+                        .unwrap()
+                        .optimize_goal_in
+                        .insert(sub_optimize_task_id);
+                }
+            }
+        }
+
         Ok(())
     }
 

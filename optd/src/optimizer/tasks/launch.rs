@@ -334,7 +334,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `TaskId`: The ID of the task that was created or reused.
-    async fn ensure_group_exploration_task(
+    pub(crate) async fn ensure_group_exploration_task(
         &mut self,
         group_id: GroupId,
     ) -> Result<TaskId, M::MemoError> {
@@ -380,7 +380,10 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `TaskId`: The ID of the task that was created or reused.
-    async fn ensure_optimize_goal_task(&mut self, goal_id: GoalId) -> Result<TaskId, M::MemoError> {
+    pub(crate) async fn ensure_optimize_goal_task(
+        &mut self,
+        goal_id: GoalId,
+    ) -> Result<TaskId, M::MemoError> {
         use Task::*;
 
         // Find the representative goal for the given goal ID.

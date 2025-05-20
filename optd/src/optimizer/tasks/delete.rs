@@ -78,7 +78,6 @@ impl<M: Memo> Optimizer<M> {
                 }
             }
             OptimizeGoal(task) => {
-                assert!(task.fork_costed_out.is_empty());
                 assert!(task.optimize_goal_out.is_empty());
                 assert!(task.optimize_plan_out.is_empty());
 
