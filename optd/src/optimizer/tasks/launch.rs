@@ -11,6 +11,7 @@ use crate::{
         },
     },
 };
+use async_recursion::async_recursion;
 use hashbrown::HashSet;
 use tokio::sync::mpsc::Sender;
 
@@ -380,6 +381,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `TaskId`: The ID of the task that was created or reused.
+    #[async_recursion]
     pub(crate) async fn ensure_optimize_goal_task(
         &mut self,
         goal_id: GoalId,
