@@ -28,7 +28,16 @@ impl<M: Memo> Optimizer<M> {
                     self.delete_task(fork_id);
                 }
             }
+            ImplementExpression(implement_expression_task) => {
+                let optimize_goal_task = self
+                    .get_optimize_goal_task_mut(implement_expression_task.optimize_goal_out)
+                    .unwrap();
+                optimize_goal_task.implement_expression_in.remove(&task_id);
 
+                if let Some(fork_id) = implement_expression_task.fork_in {
+                    self.delete_task(fork_id);
+                }
+            }
             ContinueWithLogical(task) => {
                 let fork_task = self.get_fork_logical_task_mut(task.fork_out).unwrap();
                 fork_task.continue_with_logical_in.remove(&task_id);
@@ -37,12 +46,12 @@ impl<M: Memo> Optimizer<M> {
                     self.delete_task(fork_id);
                 }
             }
-
             ForkLogical(task) => {
                 let explore_task = self
                     .get_explore_group_task_mut(task.explore_group_in)
                     .unwrap();
                 explore_task.fork_logical_out.remove(&task_id);
+
                 // Delete explore task if it has no more purpose.
                 if explore_task.fork_logical_out.is_empty()
                     && explore_task.optimize_goal_out.is_empty()
@@ -56,7 +65,6 @@ impl<M: Memo> Optimizer<M> {
                     self.delete_task(continue_id);
                 }
             }
-
             ExploreGroup(task) => {
                 assert!(task.fork_logical_out.is_empty());
                 assert!(task.optimize_goal_out.is_empty());
@@ -69,10 +77,21 @@ impl<M: Memo> Optimizer<M> {
                     self.delete_task(transform_id);
                 }
             }
+            OptimizeGoal(task) => {
+                assert!(task.fork_costed_out.is_empty());
+                assert!(task.optimize_goal_out.is_empty());
+                assert!(task.optimize_plan_out.is_empty());
 
-            _ => {
-                todo!();
+                self.goal_optimization_task_index
+                    .retain(|_, &mut v| v != task_id);
+
+                let implement_tasks: Vec<_> =
+                    task.implement_expression_in.iter().copied().collect();
+                for implement_id in implement_tasks {
+                    self.delete_task(implement_id);
+                }
             }
+            OptimizePlan(_) => todo!(),
         }
 
         // Finally, remove the task from the task collection.

@@ -18,7 +18,7 @@ impl<M: Memo> Optimizer<M> {
     /// * `task_id` - The ID of the group exploration task to update.
     /// * `all_logical_exprs` - The complete set of logical expressions known for this group.
     /// * `principal` - Whether this task is the principal one (responsible for launching transforms).
-    pub(super) async fn update_group_explore(
+    pub(super) async fn update_tasks(
         &mut self,
         task_id: TaskId,
         all_logical_exprs: &HashSet<LogicalExpressionId>,
@@ -121,7 +121,7 @@ impl<M: Memo> Optimizer<M> {
         });
     }
 
-    /// Deduplicate dispatched expressions for a group exploration task.
+    /// Deduplicate dispatched expressions for a group.
     ///
     /// - During optimization, logical expressions in a group may get merged
     ///   in the memo structure. As a result, multiple expressions in the same
@@ -130,12 +130,12 @@ impl<M: Memo> Optimizer<M> {
     /// - This function:
     ///   - Maps each expression to its current representative.
     ///   - Identifies and prunes redundant (duplicate) expressions.
-    ///   - Updates or deletes related transform and fork/continuation tasks
-    ///     accordingly.
+    ///   - Updates or deletes related transform, implement and continuation
+    ///     tasks accordingly.
     ///
     /// # Arguments
     /// * `task_id` - The ID of the group exploration task to deduplicate.
-    pub(super) async fn dedup_group_explore(
+    pub(super) async fn dedup_tasks(
         &mut self,
         task_id: TaskId,
     ) -> Result<(), M::MemoError> {
@@ -143,6 +143,7 @@ impl<M: Memo> Optimizer<M> {
         let old_exprs = std::mem::take(&mut task.dispatched_exprs);
         let transform_ids: Vec<_> = task.transform_expr_in.iter().copied().collect();
         let fork_ids: Vec<_> = task.fork_logical_out.iter().copied().collect();
+        let optimize_ids: Vec<_> = task.optimize_goal_out.iter().copied().collect();
 
         let expr_to_repr = self.map_to_representatives(&old_exprs).await?;
 
@@ -159,8 +160,9 @@ impl<M: Memo> Optimizer<M> {
             (seen, dups)
         };
 
-        self.process_transform_tasks(&transform_ids, &expr_to_repr, &to_delete);
-        self.process_fork_tasks(&fork_ids, &expr_to_repr, &to_delete);
+        self.dedup_transform_tasks(&transform_ids, &expr_to_repr, &to_delete);
+        self.dedup_continue_tasks(&fork_ids, &expr_to_repr, &to_delete);
+        self.dedup_implement_tasks(&optimize_ids, &expr_to_repr, &to_delete);
 
         let task = self.get_explore_group_task_mut(task_id).unwrap();
         task.dispatched_exprs = unique_reprs;
@@ -182,22 +184,22 @@ impl<M: Memo> Optimizer<M> {
     }
 
     /// Update or delete transform tasks based on deduplicated expressions.
-    fn process_transform_tasks(
+    fn dedup_transform_tasks(
         &mut self,
-        tasks: &[TaskId],
+        transform_ids: &[TaskId],
         expr_to_repr: &HashMap<LogicalExpressionId, LogicalExpressionId>,
         to_delete: &[LogicalExpressionId],
     ) {
-        for &task_id in tasks {
+        for &transform_id in transform_ids {
             let expr_id = self
-                .get_transform_expression_task(task_id)
+                .get_transform_expression_task(transform_id)
                 .unwrap()
                 .expression_id;
 
             if to_delete.contains(&expr_id) {
-                self.delete_task(task_id);
+                self.delete_task(transform_id);
             } else {
-                self.get_transform_expression_task_mut(task_id)
+                self.get_transform_expression_task_mut(transform_id)
                     .unwrap()
                     .expression_id = expr_to_repr[&expr_id];
             }
@@ -205,15 +207,15 @@ impl<M: Memo> Optimizer<M> {
     }
 
     /// Update or delete continuation tasks spawned by fork tasks.
-    fn process_fork_tasks(
+    fn dedup_continue_tasks(
         &mut self,
-        tasks: &[TaskId],
+        fork_ids: &[TaskId],
         expr_to_repr: &HashMap<LogicalExpressionId, LogicalExpressionId>,
         to_delete: &[LogicalExpressionId],
     ) {
-        for &task_id in tasks {
+        for &fork_id in fork_ids {
             let continue_ids = self
-                .get_fork_logical_task(task_id)
+                .get_fork_logical_task(fork_id)
                 .unwrap()
                 .continue_with_logical_in
                 .clone(); // Clone to avoid mutable borrow conflict.
@@ -228,6 +230,37 @@ impl<M: Memo> Optimizer<M> {
                     self.delete_task(cont_id);
                 } else {
                     self.get_continue_with_logical_task_mut(cont_id)
+                        .unwrap()
+                        .expression_id = expr_to_repr[&expr_id];
+                }
+            }
+        }
+    }
+
+    /// Update or delete implement tasks based on deduplicated expressions.
+    fn dedup_implement_tasks(
+        &mut self,
+        optimize_goals: &[TaskId],
+        expr_to_repr: &HashMap<LogicalExpressionId, LogicalExpressionId>,
+        to_delete: &[LogicalExpressionId],
+    ) {
+        for &optimize_goal in optimize_goals {
+            let implement_ids = self
+                .get_optimize_goal_task(optimize_goal)
+                .unwrap()
+                .implement_expression_in
+                .clone(); // Clone to avoid mutable borrow conflict.
+
+            for implement_id in implement_ids {
+                let expr_id = self
+                    .get_implement_expression_task(implement_id)
+                    .unwrap()
+                    .expression_id;
+
+                if to_delete.contains(&expr_id) {
+                    self.delete_task(implement_id);
+                } else {
+                    self.get_implement_expression_task_mut(implement_id)
                         .unwrap()
                         .expression_id = expr_to_repr[&expr_id];
                 }

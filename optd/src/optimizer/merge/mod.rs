@@ -15,7 +15,8 @@ impl<M: Memo> Optimizer<M> {
     ///    related transform and continuation tasks.
     ///
     /// 2. **Updates**: Sends any new logical expressions to each task, creating appropriate
-    ///    transform tasks (for the principal task) and continuation tasks (for all tasks).
+    ///    transform & implement tasks (for the principal task) and continuation tasks
+    ///    (for all tasks).
     ///
     /// 3. **Consolidates**: Merges all secondary tasks into a principal task by transferring
     ///    their dependencies and updating references, ensuring a clean 1:1 mapping between
@@ -55,12 +56,12 @@ impl<M: Memo> Optimizer<M> {
                     group_explore_tasks.split_first().unwrap();
 
                 for task_id in &group_explore_tasks {
-                    // Step 1: Start by deduplicating all transform & continue tasks given
-                    // potentially merged logical expressions.
-                    self.dedup_group_explore(*task_id).await?;
+                    // Step 1: Start by deduplicating all transform, implement & continue tasks
+                    // given potentially merged logical expressions.
+                    self.dedup_tasks(*task_id).await?;
                     // Step 2: Send *new* logical expressions to each task.
                     let is_principal = task_id == principal_task_id;
-                    self.update_group_explore(*task_id, &all_logical_exprs, is_principal)
+                    self.update_tasks(*task_id, &all_logical_exprs, is_principal)
                         .await?;
                 }
 
