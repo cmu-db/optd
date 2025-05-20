@@ -123,17 +123,19 @@ impl<M: Memo> Optimizer<M> {
     /// # Parameters
     /// * `plan` - The partial physical plan to process.
     /// * `goal_id` - ID of the goal associated with this plan.
-    /// * `job_id` - ID of the job that generated this plan.
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_new_physical_partial(
         &mut self,
-        _plan: PartialPhysicalPlan,
-        _goal_id: GoalId,
-        _job_id: JobId,
+        plan: PartialPhysicalPlan,
+        goal_id: GoalId,
     ) -> Result<(), M::MemoError> {
-        todo!()
+        let goal_id = self.memo.find_repr_goal_id(goal_id).await?;
+        let member_id = self.probe_ingest_physical_plan(&plan).await?;
+        // TODO: Here we would launch costing tasks based on the design.
+        self.memo.add_goal_member(goal_id, member_id).await?;
+        Ok(())
     }
 
     /// This method handles group creation for expressions with derived properties

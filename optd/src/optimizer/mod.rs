@@ -242,7 +242,7 @@ impl<M: Memo> Optimizer<M> {
                                         self.process_new_logical_partial(plan, group_id, job_id).await?;
                                     }
                                     NewPhysicalPartial(plan, goal_id) => {
-                                        self.process_new_physical_partial(plan, goal_id, job_id).await?;
+                                        self.process_new_physical_partial(plan, goal_id).await?;
                                     }
                                     CreateGroup(expression_id, properties) => {
                                         self.process_create_group(expression_id, &properties, job_id).await?;
