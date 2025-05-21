@@ -7,10 +7,13 @@ use crate::{
         utils::retriever::{MockRetriever, Retriever},
     },
     memo::MemoryMemo,
-    optimizer::{OptimizeRequest, Optimizer, hir_cir::into_cir::value_to_logical},
+    optimizer::{ClientRequest, OptimizeRequest, Optimizer, hir_cir::into_cir::value_to_logical},
 };
 use std::{collections::HashMap, sync::Arc, time::Duration};
-use tokio::{sync::mpsc, time::timeout};
+use tokio::{
+    sync::mpsc,
+    time::{sleep, timeout},
+};
 
 pub async fn properties(
     args: Vec<Value>,
@@ -64,15 +67,15 @@ async fn run_demo() {
     let optimize_channel = Optimizer::launch(memo, catalog, hir);
     let (tx, mut rx) = mpsc::channel(1);
     optimize_channel
-        .send(OptimizeRequest {
-            plan: logical_plan,
-            physical_tx: tx,
-        })
+        .send(ClientRequest::Optimize(OptimizeRequest {
+            plan: logical_plan.clone(),
+            physical_tx: tx.clone(),
+        }))
         .await
         .unwrap();
 
-    // Timeout after 2 seconds.
-    let timeout_duration = Duration::from_secs(2);
+    // Timeout after 5 seconds.
+    let timeout_duration = Duration::from_secs(5);
     let result = timeout(timeout_duration, async {
         while let Some(response) = rx.recv().await {
             println!("Received response: {:?}", response);
@@ -84,6 +87,13 @@ async fn run_demo() {
         Ok(_) => println!("Finished receiving responses."),
         Err(_) => println!("Timed out after 5 seconds."),
     }
+
+    // Dump the memo (debug utility).
+    optimize_channel
+        .send(ClientRequest::DumpMemo)
+        .await
+        .unwrap();
+    sleep(Duration::from_secs(10)).await;
 }
 
 #[cfg(test)]

@@ -1,4 +1,3 @@
-data Physical
 data PhysicalProperties
 data Statistics
 // Taking folded here is not the most interesting property,
@@ -11,6 +10,13 @@ data Logical =
   | Mult(left: Logical, right: Logical)
   | Div(left: Logical, right: Logical)
   \ Const(val: I64)
+
+data Physical =
+  | PhysicalAdd(left: Physical, right: Physical)
+  | PhysicalSub(left: Physical, right: Physical)
+  | PhysicalMult(left: Physical, right: Physical)
+  | PhysicalDiv(left: Physical, right: Physical)
+  \ PhysicalConst(val: I64)
 
 // This will be the input plan that will be optimized.
 // Result is: ((1 - 2) * (3 / 4)) + ((5 - 6) * (7 / 8)) = 0
@@ -72,3 +78,11 @@ fn (op: Logical*) const_fold_div(): Logical? = match op
   | Div(Const(a), Const(b)) -> 
       if b == 0 then none else Const(a / b)
   \ _ -> none
+
+[implementation]
+fn (op: Logical*) to_physical(props: PhysicalProperties?) = match op
+  | Add(left, right) -> PhysicalAdd(left.to_physical(props), right.to_physical(props))
+  | Sub(left, right) -> PhysicalSub(left.to_physical(props), right.to_physical(props))
+  | Mult(left, right) -> PhysicalMult(left.to_physical(props), right.to_physical(props))
+  | Div(left, right) -> PhysicalDiv(left.to_physical(props), right.to_physical(props))
+  \ Const(val) -> PhysicalConst(val)

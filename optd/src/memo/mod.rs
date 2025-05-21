@@ -137,6 +137,9 @@ pub trait Representative: MemoBase {
 /// expressions, and finding representative nodes of the union-find substructures.
 #[trait_variant::make(Send)]
 pub trait Memo: Representative + Materialize + Sync + 'static {
+    /// Prints the contents of the memo table to the console for debugging purposes.
+    async fn debug_dump(&self) -> Result<(), Self::MemoError>;
+
     /// Retrieves logical properties for a group ID.
     ///
     /// # Parameters

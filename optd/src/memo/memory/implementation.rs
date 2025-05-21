@@ -8,6 +8,84 @@ use hashbrown::{HashMap, HashSet};
 use std::collections::VecDeque;
 
 impl Memo for MemoryMemo {
+    async fn debug_dump(&self) -> Result<(), Infallible> {
+        println!("\n===== MEMO TABLE DUMP =====");
+        println!("---- GROUPS ----");
+
+        // Get all group IDs and sort them for consistent output.
+        let mut group_ids: Vec<_> = self.group_info.keys().copied().collect();
+        group_ids.sort_by_key(|id| id.0);
+
+        for group_id in group_ids {
+            println!("Group {:?}:", group_id);
+
+            // Print logical properties.
+            let group_info = self.group_info.get(&group_id).unwrap();
+            println!("  Properties: {:?}", group_info.logical_properties);
+
+            // Print expressions in group.
+            println!("  Expressions:");
+            for expr_id in &group_info.expressions {
+                let expr = self.id_to_logical_expr.get(expr_id).unwrap();
+                let repr_id = self.find_repr_logical_expr_id(*expr_id).await;
+                println!("    {:?} [{:?}]: {:?}", expr_id, repr_id, expr);
+            }
+
+            // Print goals in this group (if any).
+            if !group_info.goals.is_empty() {
+                println!("  Goals:");
+                for (props, goal_ids) in &group_info.goals {
+                    for goal_id in goal_ids {
+                        println!("    Goal {:?} with properties: {:?}", goal_id, props);
+                    }
+                }
+            }
+        }
+
+        println!("---- GOALS ----");
+
+        // Get all goal IDs and sort them.
+        let mut goal_ids: Vec<_> = self.goal_info.keys().copied().collect();
+        goal_ids.sort_by_key(|id| id.0);
+
+        for goal_id in goal_ids {
+            println!("Goal {:?}:", goal_id);
+
+            // Print goal definition.
+            let goal_info = self.goal_info.get(&goal_id).unwrap();
+            println!("  Definition: {:?}", goal_info.goal);
+
+            // Print members.
+            println!("  Members:");
+            for member in &goal_info.members {
+                match member {
+                    GoalMemberId::GoalId(sub_goal_id) => {
+                        println!("    Sub-goal: {:?}", sub_goal_id);
+                    }
+                    GoalMemberId::PhysicalExpressionId(phys_id) => {
+                        let expr = self.id_to_physical_expr.get(phys_id).unwrap();
+                        println!("    Physical expr {:?}: {:?}", phys_id, expr);
+                    }
+                }
+            }
+        }
+
+        println!("---- PHYSICAL EXPRESSIONS ----");
+
+        // Get all physical expression IDs and sort them
+        let mut phys_expr_ids: Vec<_> = self.id_to_physical_expr.keys().copied().collect();
+        phys_expr_ids.sort_by_key(|id| id.0);
+
+        for phys_id in phys_expr_ids {
+            let expr = self.id_to_physical_expr.get(&phys_id).unwrap();
+            println!("Physical expr {:?}: {:?}", phys_id, expr);
+        }
+
+        println!("===== END MEMO TABLE DUMP =====");
+
+        Ok(())
+    }
+
     async fn get_logical_properties(
         &self,
         group_id: GroupId,
@@ -170,8 +248,6 @@ impl Memo for MemoryMemo {
         // Finally, we need to recursively merge the physical expressions that are
         // dependent on the merged goals (and the recursively merged expressions themselves).
         let expr_merges = self.merge_dependent_physical_exprs(&goal_merges).await?;
-
-        println!("Group_info: {:?}", self.group_info);
 
         Ok(MergeProducts {
             group_merges,
