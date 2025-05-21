@@ -425,14 +425,20 @@ impl MemoryMemoHelper for MemoryMemo {
     ) -> Result<Vec<(GroupId, GroupId)>, Infallible> {
         // Merge the set of expressions that reference these two groups into one
         // that references the new group.
-        let exprs1 = self
+        let exprs1: HashSet<LogicalExpressionId> = self
             .group_referencing_exprs_index
             .remove(&group_id_1)
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .into_iter()
+            .map(|id| self.repr_logical_expr_id.find(&id))
+            .collect();
         let exprs2 = self
             .group_referencing_exprs_index
             .remove(&group_id_2)
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .into_iter()
+            .map(|id| self.repr_logical_expr_id.find(&id))
+            .collect();
         let new_set = exprs1.union(&exprs2).copied().collect();
 
         // Update the index for the new group / set of logical expressions.
