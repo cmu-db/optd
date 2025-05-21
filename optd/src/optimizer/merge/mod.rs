@@ -1,10 +1,28 @@
 use super::Optimizer;
-use crate::memo::{Memo, MergeGroupProduct, MergeProducts};
+use crate::memo::{Memo, MergeGoalProduct, MergeGroupProduct, MergeProducts};
 
 mod helpers;
 
 impl<M: Memo> Optimizer<M> {
     /// Processes merge results by updating the task graph to reflect merges in the memo.
+    ///
+    /// This function handles both group merges and goal merges by delegating to specialized
+    /// handlers for each type of merge.
+    ///
+    /// # Parameters
+    /// * `result` - The merge result to handle, containing information about merged groups and goals.
+    ///
+    /// # Returns
+    /// * `Result<(), OptimizeError>` - Success or an error that occurred during processing.
+    pub(super) async fn handle_merge_result(
+        &mut self,
+        result: MergeProducts,
+    ) -> Result<(), M::MemoError> {
+        self.handle_group_merges(&result.group_merges).await?;
+        self.handle_goal_merges(&result.goal_merges).await
+    }
+
+    /// Handles merges of logical groups by updating the task graph.
     ///
     /// When groups are merged in the memo, multiple exploration tasks may now refer to
     /// the same underlying group. This method handles the task graph updates required
@@ -28,18 +46,18 @@ impl<M: Memo> Optimizer<M> {
     /// with it, containing all logical expressions from the original groups with no duplicates.
     ///
     /// # Parameters
-    /// * `result` - The merge result to handle, containing information about merged groups.
+    /// * `group_merges` - A slice of group merge products to handle.
     ///
     /// # Returns
     /// * `Result<(), OptimizeError>` - Success or an error that occurred during processing.
-    pub(super) async fn handle_merge_result(
+    async fn handle_group_merges(
         &mut self,
-        result: MergeProducts,
+        group_merges: &[MergeGroupProduct],
     ) -> Result<(), M::MemoError> {
         for MergeGroupProduct {
             new_group_id,
             merged_groups,
-        } in result.group_merges
+        } in group_merges
         {
             // For each merged group, get all group exploration tasks.
             // We don't need to check for the new group ID since it is guaranteed to be new.
@@ -49,7 +67,7 @@ impl<M: Memo> Optimizer<M> {
                 .collect();
 
             if !group_explore_tasks.is_empty() {
-                let all_logical_exprs = self.memo.get_all_logical_exprs(new_group_id).await?;
+                let all_logical_exprs = self.memo.get_all_logical_exprs(*new_group_id).await?;
 
                 let (principal_task_id, secondary_task_ids) =
                     group_explore_tasks.split_first().unwrap();
@@ -70,7 +88,64 @@ impl<M: Memo> Optimizer<M> {
 
                 // Step 4: Set the index to point to the new representative task.
                 self.group_exploration_task_index
-                    .insert(new_group_id, *principal_task_id);
+                    .insert(*new_group_id, *principal_task_id);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handles merges of optimization goals by updating the task graph.
+    ///
+    /// When goals are merged in the memo, multiple optimization tasks may now refer to
+    /// the same underlying goal. This method handles the task graph updates required
+    /// by such merges. For each merged goal, it:
+    ///
+    /// 1. **Consolidates**: Merges all secondary tasks into a principal task by transferring
+    ///    their dependencies (incoming and outgoing optimization tasks and plan tasks) and
+    ///    updating references, ensuring a clean 1:1 mapping between goals and optimization tasks.
+    ///
+    /// 2. **Re-indexes**: Updates the goal optimization index to point to the principal task
+    ///    for the new goal ID.
+    ///
+    /// After processing, each merged goal will have exactly one optimization task associated
+    /// with it, with all dependencies properly redirected to it.
+    ///
+    /// # Parameters
+    /// * `goal_merges` - A slice of goal merge products to handle.
+    ///
+    /// # Returns
+    /// * `Result<(), OptimizeError>` - Success or an error that occurred during processing.
+    async fn handle_goal_merges(
+        &mut self,
+        goal_merges: &[MergeGoalProduct],
+    ) -> Result<(), M::MemoError> {
+        for MergeGoalProduct {
+            new_goal_id,
+            merged_goals,
+        } in goal_merges
+        {
+            // For each merged goal, get all goal optimization tasks.
+            // We don't need to check for the new goal ID since it is guaranteed to be new.
+            let goal_optimize_tasks: Vec<_> = merged_goals
+                .iter()
+                .filter_map(|goal_id| self.goal_optimization_task_index.get(goal_id).copied())
+                .collect();
+
+            if !goal_optimize_tasks.is_empty() {
+                let (principal_task_id, secondary_task_ids) =
+                    goal_optimize_tasks.split_first().unwrap();
+
+                // *NOTE*: Deduplication and updates of implementation tasks have already been
+                // handled in the `handle_group_merges` method, so we don't need to do it here.
+
+                // Step 1: Consolidate all dependent tasks into the new "representative" task.
+                self.consolidate_goal_optimize(*principal_task_id, secondary_task_ids)
+                    .await;
+
+                // Step 2: Set the index to point to the new representative task.
+                self.goal_optimization_task_index
+                    .insert(*new_goal_id, *principal_task_id);
             }
         }
 

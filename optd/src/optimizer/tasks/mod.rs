@@ -58,8 +58,6 @@ pub(crate) struct OptimizeGoalTask {
     /// `OptimizeGoalTask` parent goals that this task is simultaneously
     /// producing for.
     pub optimize_goal_out: HashSet<TaskId>,
-    /// `ForkCostedTask` subscribed to this goal.
-    pub fork_costed_out: HashSet<TaskId>,
 
     // Input tasks that feed this task.
     /// `OptimizeGoalTask` member (children) goals producing for this goal.
@@ -69,8 +67,6 @@ pub(crate) struct OptimizeGoalTask {
     pub explore_group_in: TaskId,
     /// `ImplementExpressionTask` rules that are implementing logical expressions.
     pub implement_expression_in: HashSet<TaskId>,
-    /// `CostExpressionTask` costing of physical expressions.
-    pub cost_expression_in: HashSet<TaskId>,
 }
 
 /// Task to explore expressions in a logical group.

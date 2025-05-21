@@ -410,11 +410,9 @@ impl<M: Memo> Optimizer<M> {
             goal_id,
             optimize_plan_out: HashSet::new(),
             optimize_goal_out: HashSet::new(), // filled below to avoid infinite recursion
-            fork_costed_out: HashSet::new(),
-            optimize_goal_in: HashSet::new(), // filled below to avoid infinite recursion
+            optimize_goal_in: HashSet::new(),  // filled below to avoid infinite recursion
             explore_group_in,
             implement_expression_in,
-            cost_expression_in: HashSet::new(), // TODO: design proper costing
         };
 
         // Add this task to the exploration task's outgoing edges.

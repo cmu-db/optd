@@ -146,6 +146,65 @@ impl<M: Memo> Optimizer<M> {
                 let goal_task = self.get_optimize_goal_task_mut(goal_id).unwrap();
                 goal_task.explore_group_in = principal_task_id;
             });
+
+            // *NOTE*: No need to consolidate transformations as all missing
+            // expressions have already been added during the update phase.
+        });
+    }
+
+    /// Consolidate a goal optimization task into a principal task.
+    ///
+    /// - Similar to the group exploration consolidation, a merge in the memo may cause
+    ///   several goal optimization tasks to refer to the same underlying goal. This function
+    ///   consolidates all such secondary tasks into a principal one.
+    ///
+    /// - This involves:
+    ///   - Moving all outgoing optimize goal tasks, incoming optimize goal tasks, and
+    ///     optimize plan tasks from secondary to principal.
+    ///   - Updating each such task's references to point to the principal task.
+    ///   - Deleting the secondary tasks.
+    ///
+    /// # Arguments
+    /// * `principal_task_id` - The ID of the task to retain as canonical.
+    /// * `secondary_task_ids` - All other task IDs to merge into the principal.
+    pub(super) async fn consolidate_goal_optimize(
+        &mut self,
+        principal_task_id: TaskId,
+        secondary_task_ids: &[TaskId],
+    ) {
+        secondary_task_ids.iter().for_each(|&task_id| {
+            let task = self.get_optimize_goal_task_mut(task_id).unwrap();
+
+            // Move out the task sets before deletion.
+            let optimize_out_tasks = std::mem::take(&mut task.optimize_goal_out);
+            let optimize_in_tasks = std::mem::take(&mut task.optimize_goal_in);
+            let optimize_plan_tasks = std::mem::take(&mut task.optimize_plan_out);
+
+            self.delete_task(task_id);
+
+            optimize_out_tasks.into_iter().for_each(|optimize_id| {
+                let optimize_goal_task = self.get_optimize_goal_task_mut(optimize_id).unwrap();
+                optimize_goal_task.optimize_goal_in.remove(&task_id);
+                optimize_goal_task
+                    .optimize_goal_in
+                    .insert(principal_task_id);
+            });
+
+            optimize_in_tasks.into_iter().for_each(|optimize_id| {
+                let optimize_goal_task = self.get_optimize_goal_task_mut(optimize_id).unwrap();
+                optimize_goal_task.optimize_goal_out.remove(&task_id);
+                optimize_goal_task
+                    .optimize_goal_out
+                    .insert(principal_task_id);
+            });
+
+            optimize_plan_tasks.into_iter().for_each(|optimize_id| {
+                let optimize_plan_task = self.get_optimize_plan_task_mut(optimize_id).unwrap();
+                optimize_plan_task.optimize_goal_in = Some(principal_task_id);
+            });
+
+            // *NOTE*: No need to consolidate implementations as all missing
+            // expressions have already been added during the update phase.
         });
     }
 
