@@ -73,17 +73,14 @@ impl TypedSpan {
     }
 }
 
+/// Type aliases for user-defined functions (UDFs).
+type UdfFutureOutput = Pin<Box<dyn Future<Output = Value> + Send>>;
+type UdfFunction =
+    dyn Fn(Vec<Value>, Arc<dyn Catalog>, Arc<dyn Retriever>) -> UdfFutureOutput + Send + Sync;
+
 #[derive(Clone)]
 pub struct Udf {
-    pub func: Arc<
-        dyn Fn(
-                Vec<Value>,
-                Arc<dyn Catalog>,
-                Arc<dyn Retriever>,
-            ) -> Pin<Box<dyn Future<Output = Value> + Send>>
-            + Send
-            + Sync,
-    >,
+    pub func: Arc<UdfFunction>,
 }
 
 impl fmt::Debug for Udf {

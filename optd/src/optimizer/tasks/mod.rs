@@ -112,7 +112,8 @@ pub(crate) struct TransformExpressionTask {
 #[derive(Clone)]
 pub(crate) struct ImplementExpressionTask {
     /// The implementation rule to apply.
-    pub rule: ImplementationRule,
+    /// NOTE: Variable not used but kept for observability.
+    pub _rule: ImplementationRule,
     /// The logical expression to implement.
     pub expression_id: LogicalExpressionId,
 

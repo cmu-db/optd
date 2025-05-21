@@ -13,11 +13,13 @@ impl<M: Memo> Optimizer<M> {
     /// 2. For each fork task in the group, launches continuation tasks for each new expression.
     /// 3. If the task is the principal, launches transform tasks for each new expression and rule.
     /// 4. For all related optimize goal tasks, launch implement tasks for each new expression.
+    ///
     /// *NOTE*: This happens before merging goals. While this might be slightly inefficient, as
-    /// we might implement twice for the same "soon-to-be" merged goals. However it keeps the code
-    /// cleaner and easier to understand. Also, the performance impact is negligible, as once we
-    /// merge the goals, we effectively delete the implement tasks and its associated jobs will
-    /// *not* be launched.
+    ///         we might implement twice for the same "soon-to-be" merged goals. However it keeps
+    ///         the code cleaner and easier to understand. Also, the performance impact is negligible,
+    ///         as once we merge the goals, we effectively delete the implement tasks and its
+    ///         associated jobs will *not* be launched.
+    ///
     /// 5. Updates the task's dispatched expressions with the full input set.
     ///
     /// # Arguments

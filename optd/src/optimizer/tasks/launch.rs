@@ -210,7 +210,7 @@ impl<M: Memo> Optimizer<M> {
 
         let task_id = self.next_task_id();
         let task = ImplementExpressionTask {
-            rule: rule.clone(),
+            _rule: rule.clone(),
             expression_id: expr_id,
             optimize_goal_out,
             fork_in: None,
