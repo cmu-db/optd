@@ -15,8 +15,7 @@ impl<M: Memo> Optimizer<M> {
     ///    related transform and continuation tasks.
     ///
     /// 2. **Updates**: Sends any new logical expressions to each task, creating appropriate
-    ///    transform & implement tasks (for the principal task) and continuation tasks
-    ///    (for all tasks).
+    ///    transform (for the principal task), implement and continuation tasks (for all tasks).
     ///
     /// 3. **Consolidates**: Merges all secondary tasks into a principal task by transferring
     ///    their dependencies and updating references, ensuring a clean 1:1 mapping between

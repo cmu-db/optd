@@ -12,7 +12,13 @@ impl<M: Memo> Optimizer<M> {
     /// 1. Computes newly discovered expressions by subtracting existing ones.
     /// 2. For each fork task in the group, launches continuation tasks for each new expression.
     /// 3. If the task is the principal, launches transform tasks for each new expression and rule.
-    /// 4. Updates the task's dispatched expressions with the full input set.
+    /// 4. For all related optimize goal tasks, launch implement tasks for each new expression.
+    /// *NOTE*: This happens before merging goals. While this might be slightly inefficient, as
+    /// we might implement twice for the same "soon-to-be" merged goals. However it keeps the code
+    /// cleaner and easier to understand. Also, the performance impact is negligible, as once we
+    /// merge the goals, we effectively delete the implement tasks and its associated jobs will
+    /// *not* be launched.
+    /// 5. Updates the task's dispatched expressions with the full input set.
     ///
     /// # Arguments
     /// * `task_id` - The ID of the group exploration task to update.
@@ -26,44 +32,66 @@ impl<M: Memo> Optimizer<M> {
     ) -> Result<(), M::MemoError> {
         let new_exprs = self.compute_new_expressions(task_id, all_logical_exprs);
 
-        if !new_exprs.is_empty() {
-            let (group_id, fork_tasks) = {
-                let task = self.get_explore_group_task(task_id).unwrap();
-                (task.group_id, task.fork_logical_out.clone())
-            };
+        if new_exprs.is_empty() {
+            return Ok(());
+        }
 
-            for &fork_task_id in &fork_tasks {
-                let continuation = self
-                    .get_fork_logical_task(fork_task_id)
-                    .unwrap()
-                    .continuation
-                    .clone();
+        let (group_id, fork_tasks, optimize_goal_tasks) = {
+            let task = self.get_explore_group_task(task_id).unwrap();
+            (
+                task.group_id,
+                task.fork_logical_out.clone(),
+                task.optimize_goal_out.clone(),
+            )
+        };
 
-                let continuation_tasks = self.create_logical_cont_tasks(
-                    &new_exprs,
-                    group_id,
-                    fork_task_id,
-                    &continuation,
-                );
+        // For each fork task, create continuation tasks for each new expression.
+        fork_tasks.iter().for_each(|&fork_task_id| {
+            let continuation = self
+                .get_fork_logical_task(fork_task_id)
+                .unwrap()
+                .continuation
+                .clone();
 
-                self.get_fork_logical_task_mut(fork_task_id)
-                    .unwrap()
-                    .continue_with_logical_in
-                    .extend(continuation_tasks);
-            }
+            let continuation_tasks =
+                self.create_logical_cont_tasks(&new_exprs, group_id, fork_task_id, &continuation);
 
-            if principal {
-                let transform_tasks = self.create_transform_tasks(&new_exprs, group_id, task_id);
-                self.get_explore_group_task_mut(task_id)
-                    .unwrap()
-                    .transform_expr_in
-                    .extend(transform_tasks);
-            }
+            self.get_fork_logical_task_mut(fork_task_id)
+                .unwrap()
+                .continue_with_logical_in
+                .extend(continuation_tasks);
+        });
+
+        // For each optimize goal task, create implement tasks for each new expression.
+        optimize_goal_tasks.iter().for_each(|&optimize_goal_id| {
+            let goal_id = self
+                .get_optimize_goal_task(optimize_goal_id)
+                .unwrap()
+                .goal_id;
+
+            let implement_tasks =
+                self.create_implement_tasks(&new_exprs, goal_id, optimize_goal_id);
+
+            self.get_optimize_goal_task_mut(optimize_goal_id)
+                .unwrap()
+                .implement_expression_in
+                .extend(implement_tasks);
+        });
+
+        // For the principal task, create transform tasks for each new expression.
+        // We could always do it, but this is a straightforward optimization.
+        if principal {
+            let transform_tasks = self.create_transform_tasks(&new_exprs, group_id, task_id);
 
             self.get_explore_group_task_mut(task_id)
                 .unwrap()
-                .dispatched_exprs = all_logical_exprs.clone();
+                .transform_expr_in
+                .extend(transform_tasks);
         }
+
+        self.get_explore_group_task_mut(task_id)
+            .unwrap()
+            .dispatched_exprs = all_logical_exprs.clone();
 
         Ok(())
     }
@@ -135,10 +163,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Arguments
     /// * `task_id` - The ID of the group exploration task to deduplicate.
-    pub(super) async fn dedup_tasks(
-        &mut self,
-        task_id: TaskId,
-    ) -> Result<(), M::MemoError> {
+    pub(super) async fn dedup_tasks(&mut self, task_id: TaskId) -> Result<(), M::MemoError> {
         let task = self.get_explore_group_task_mut(task_id).unwrap();
         let old_exprs = std::mem::take(&mut task.dispatched_exprs);
         let transform_ids: Vec<_> = task.transform_expr_in.iter().copied().collect();
