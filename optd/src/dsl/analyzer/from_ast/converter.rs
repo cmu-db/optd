@@ -177,13 +177,12 @@ impl ASTConverter {
 #[cfg(test)]
 mod converter_tests {
     use super::*;
-    use crate::catalog::Catalog;
     use crate::dsl::analyzer::from_ast::from_ast;
     use crate::dsl::analyzer::hir::{CoreData, FunKind};
     use crate::dsl::analyzer::type_checks::registry::{Generic, TypeKind};
     use crate::dsl::parser::ast::{self, Adt, Function, Item, Module, Type as AstType};
-    use crate::dsl::utils::retriever::Retriever;
     use crate::dsl::utils::span::{Span, Spanned};
+    use std::sync::Arc;
 
     // Helper functions to create test items
     fn create_test_span() -> Span {
@@ -382,19 +381,15 @@ mod converter_tests {
         let ext_func = create_simple_function("external_function", false);
         let module = create_module_with_functions(vec![ext_func]);
 
-        pub fn external_function(
-            _args: &[Value],
-            _catalog: &dyn Catalog,
-            _retriever: &dyn Retriever,
-        ) -> Value {
-            println!("Hello from UDF!");
-            Value::new(CoreData::<Value>::None)
-        }
-
         // Link the dummy function.
         let mut udfs = HashMap::new();
         let udf = Udf {
-            func: external_function,
+            func: Arc::new(|_, _, _| {
+                Box::pin(async move {
+                    println!("Hello from UDF!");
+                    Value::new(CoreData::None)
+                })
+            }),
         };
         udfs.insert("external_function".to_string(), udf);
 
@@ -408,13 +403,6 @@ mod converter_tests {
         // Check that the function is in the context.
         let func_val = hir.context.lookup("external_function");
         assert!(func_val.is_some());
-
-        // Verify it is the same function pointer.
-        if let CoreData::Function(FunKind::Udf(udf)) = &func_val.unwrap().data {
-            assert_eq!(udf.func as usize, external_function as usize);
-        } else {
-            panic!("Expected UDF function");
-        }
     }
 
     #[test]

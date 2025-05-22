@@ -17,14 +17,24 @@ mod merge;
 mod retriever;
 mod tasks;
 
-use jobs::{CostedContinuation, Job, JobId, LogicalContinuation};
+use jobs::{Job, JobId, LogicalContinuation};
 use retriever::OptimizerRetriever;
 use tasks::{Task, TaskId};
 
 /// Default maximum number of concurrent jobs to run in the optimizer.
 const DEFAULT_MAX_CONCURRENT_JOBS: usize = 1000;
 
-/// External client request to optimize a query in the optimizer.
+/// External client requests that can be sent to the optimizer.
+#[derive(Clone, Debug)]
+pub enum ClientRequest {
+    /// Request to optimize a logical plan into a physical plan.
+    Optimize(OptimizeRequest),
+
+    /// Request to dump the contents of the memo for debugging purposes.
+    DumpMemo,
+}
+
+/// Request to optimize a query in the optimizer.
 ///
 /// Defines the public API for submitting a query and receiving execution plans.
 #[derive(Clone, Debug)]
@@ -49,17 +59,11 @@ enum EngineProduct {
     /// New physical implementation for a goal, awaiting recursive optimization.
     NewPhysicalPartial(PartialPhysicalPlan, GoalId),
 
-    /// Fully optimized physical expression with complete costing.
-    NewCostedPhysical(PhysicalExpressionId, Cost),
-
     /// Create a new group with the provided logical properties.
     CreateGroup(LogicalExpressionId, LogicalProperties),
 
     /// Subscribe to logical expressions in a specific group.
     SubscribeGroup(GroupId, LogicalContinuation),
-
-    /// Subscribe to costed physical expressions for a goal.
-    SubscribeGoal(Goal, CostedContinuation),
 }
 
 /// Messages passed within the optimization system.
@@ -67,7 +71,7 @@ enum EngineProduct {
 /// Each message represents either a client request or the result of completed work,
 /// allowing the optimizer to track which tasks are progressing.
 enum OptimizerMessage {
-    /// Client request to optimize a plan.
+    /// Client request to the optimizer.
     Request(OptimizeRequest, TaskId),
 
     /// Request to retrieve the properties of a group.
@@ -121,7 +125,7 @@ pub struct Optimizer<M: Memo> {
     pending_messages: Vec<PendingMessage>,
     message_tx: Sender<OptimizerMessage>,
     message_rx: Receiver<OptimizerMessage>,
-    optimize_rx: Receiver<OptimizeRequest>,
+    client_rx: Receiver<ClientRequest>,
 
     // Task management.
     tasks: HashMap<TaskId, Task>,
@@ -150,7 +154,7 @@ impl<M: Memo> Optimizer<M> {
         catalog: Arc<dyn Catalog>,
         message_tx: Sender<OptimizerMessage>,
         message_rx: Receiver<OptimizerMessage>,
-        optimize_rx: Receiver<OptimizeRequest>,
+        client_rx: Receiver<ClientRequest>,
     ) -> Self {
         Self {
             // Core components.
@@ -164,7 +168,7 @@ impl<M: Memo> Optimizer<M> {
             pending_messages: Vec::new(),
             message_tx,
             message_rx,
-            optimize_rx,
+            client_rx,
 
             // Task management.
             tasks: HashMap::new(),
@@ -185,9 +189,9 @@ impl<M: Memo> Optimizer<M> {
     }
 
     /// Launch a new optimizer and return a sender for client communication.
-    pub fn launch(memo: M, catalog: Arc<dyn Catalog>, hir: HIR) -> Sender<OptimizeRequest> {
+    pub fn launch(memo: M, catalog: Arc<dyn Catalog>, hir: HIR) -> Sender<ClientRequest> {
         let (message_tx, message_rx) = mpsc::channel(1);
-        let (optimize_tx, optimize_rx) = mpsc::channel(1);
+        let (client_tx, client_rx) = mpsc::channel(1);
 
         // Start the background processing loop.
         let optimizer = Self::new(
@@ -196,7 +200,7 @@ impl<M: Memo> Optimizer<M> {
             catalog,
             message_tx.clone(),
             message_rx,
-            optimize_rx,
+            client_rx,
         );
 
         tokio::spawn(async move {
@@ -205,30 +209,40 @@ impl<M: Memo> Optimizer<M> {
             optimizer.run().await.expect("Optimizer failure");
         });
 
-        optimize_tx
+        client_tx
     }
 
     /// Run the optimizer's main processing loop.
     async fn run(mut self) -> Result<(), M::MemoError> {
+        use ClientRequest::*;
         use EngineProduct::*;
         use OptimizerMessage::*;
 
         loop {
             tokio::select! {
-                Some(request) = self.optimize_rx.recv() => {
-                    let task_id = self.create_optimize_plan_task(request.plan.clone(),
-                        request.physical_tx.clone());
+                Some(client_request) = self.client_rx.recv() => {
                     let message_tx = self.message_tx.clone();
 
-                    // Forward the optimization request to the message processing loop
-                    // in a new coroutine to avoid a deadlock.
-                    tokio::spawn(
-                        async move {
-                            message_tx.send(Request(request, task_id))
-                                .await
-                                .expect("Failed to forward optimize request - channel closed");
+                    match client_request {
+                        Optimize(optimize_request) => {
+                            // Create a task for the optimization request.
+                            let task_id = self.create_optimize_plan_task(
+                                optimize_request.plan.clone(),
+                                optimize_request.physical_tx.clone()
+                            );
+
+                            // Forward the client request to the message processing loop
+                            // in a new coroutine to avoid a deadlock.
+                            tokio::spawn(async move {
+                                message_tx.send(Request(optimize_request, task_id))
+                                    .await
+                                    .expect("Failed to forward client request - channel closed");
+                            });
+                        },
+                        DumpMemo => {
+                            self.memo.debug_dump().await?;
                         }
-                    );
+                    }
                 },
                 Some(message) = self.message_rx.recv() => {
                     // Process the next message in the channel.
@@ -237,7 +251,7 @@ impl<M: Memo> Optimizer<M> {
                                 self.process_optimize_request(plan, physical_tx, task_id).await?,
                         Retrieve(group_id, response_tx) => {
                             self.process_retrieve_properties(group_id, response_tx).await?;
-                        }
+                        },
                         Product(product, job_id) => {
                             let task_id = self.get_related_task_id(job_id);
 
@@ -250,17 +264,11 @@ impl<M: Memo> Optimizer<M> {
                                     NewPhysicalPartial(plan, goal_id) => {
                                         self.process_new_physical_partial(plan, goal_id, job_id).await?;
                                     }
-                                    NewCostedPhysical(expression_id, cost) => {
-                                        self.process_new_costed_physical(expression_id, cost).await?;
-                                    }
                                     CreateGroup(expression_id, properties) => {
                                         self.process_create_group(expression_id, &properties, job_id).await?;
                                     }
                                     SubscribeGroup(group_id, continuation) => {
                                         self.process_group_subscription(group_id, continuation, job_id).await?;
-                                    }
-                                    SubscribeGoal(goal, continuation) => {
-                                        self.process_goal_subscription(&goal, continuation, job_id).await?;
                                     }
                                 }
                             }

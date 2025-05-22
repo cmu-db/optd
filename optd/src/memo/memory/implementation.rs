@@ -1,14 +1,91 @@
 //! The main implementation of the in-memory memo table.
 
-use std::collections::VecDeque;
-
 use super::{
     Infallible, Memo, MemoryMemo, MergeProducts, Representative, helpers::MemoryMemoHelper,
 };
 use crate::{cir::*, memo::memory::GroupInfo};
-use hashbrown::HashSet;
+use hashbrown::{HashMap, HashSet};
+use std::collections::VecDeque;
 
 impl Memo for MemoryMemo {
+    async fn debug_dump(&self) -> Result<(), Infallible> {
+        println!("\n===== MEMO TABLE DUMP =====");
+        println!("---- GROUPS ----");
+
+        // Get all group IDs and sort them for consistent output.
+        let mut group_ids: Vec<_> = self.group_info.keys().copied().collect();
+        group_ids.sort_by_key(|id| id.0);
+
+        for group_id in group_ids {
+            println!("Group {:?}:", group_id);
+
+            // Print logical properties.
+            let group_info = self.group_info.get(&group_id).unwrap();
+            println!("  Properties: {:?}", group_info.logical_properties);
+
+            // Print expressions in group.
+            println!("  Expressions:");
+            for expr_id in &group_info.expressions {
+                let expr = self.id_to_logical_expr.get(expr_id).unwrap();
+                let repr_id = self.find_repr_logical_expr_id(*expr_id).await;
+                println!("    {:?} [{:?}]: {:?}", expr_id, repr_id, expr);
+            }
+
+            // Print goals in this group (if any).
+            if !group_info.goals.is_empty() {
+                println!("  Goals:");
+                for (props, goal_ids) in &group_info.goals {
+                    for goal_id in goal_ids {
+                        println!("    Goal {:?} with properties: {:?}", goal_id, props);
+                    }
+                }
+            }
+        }
+
+        println!("---- GOALS ----");
+
+        // Get all goal IDs and sort them.
+        let mut goal_ids: Vec<_> = self.goal_info.keys().copied().collect();
+        goal_ids.sort_by_key(|id| id.0);
+
+        for goal_id in goal_ids {
+            println!("Goal {:?}:", goal_id);
+
+            // Print goal definition.
+            let goal_info = self.goal_info.get(&goal_id).unwrap();
+            println!("  Definition: {:?}", goal_info.goal);
+
+            // Print members.
+            println!("  Members:");
+            for member in &goal_info.members {
+                match member {
+                    GoalMemberId::GoalId(sub_goal_id) => {
+                        println!("    Sub-goal: {:?}", sub_goal_id);
+                    }
+                    GoalMemberId::PhysicalExpressionId(phys_id) => {
+                        let expr = self.id_to_physical_expr.get(phys_id).unwrap();
+                        println!("    Physical expr {:?}: {:?}", phys_id, expr);
+                    }
+                }
+            }
+        }
+
+        println!("---- PHYSICAL EXPRESSIONS ----");
+
+        // Get all physical expression IDs and sort them
+        let mut phys_expr_ids: Vec<_> = self.id_to_physical_expr.keys().copied().collect();
+        phys_expr_ids.sort_by_key(|id| id.0);
+
+        for phys_id in phys_expr_ids {
+            let expr = self.id_to_physical_expr.get(&phys_id).unwrap();
+            println!("Physical expr {:?}: {:?}", phys_id, expr);
+        }
+
+        println!("===== END MEMO TABLE DUMP =====");
+
+        Ok(())
+    }
+
     async fn get_logical_properties(
         &self,
         group_id: GroupId,
@@ -60,6 +137,7 @@ impl Memo for MemoryMemo {
         let group_id = self.next_group_id();
         let group_info = GroupInfo {
             expressions: HashSet::from([logical_expr_id]),
+            goals: HashMap::new(),
             logical_properties: props.clone(),
         };
 
@@ -90,11 +168,31 @@ impl Memo for MemoryMemo {
     /// 3. When expressions become identical, their containing groups also need to be merged,
     ///    creating a cascading effect.
     ///
+    /// 4. After all logical groups have been merged, we need to identify and merge all goals
+    ///    that have become equivalent. Goals are considered equivalent when they reference the
+    ///    same group and share identical logical properties.
+    ///
+    /// 5. When goals are merged, this triggers a cascading effect on physical expressions:
+    /// - Physical expressions that reference merged goals need updating.
+    /// - This may cause previously distinct physical expressions to become identical.
+    /// - These newly identical expressions must then be merged.
+    /// - Each merge may create more identical expressions, continuing the chain reaction
+    ///   until the entire structure is consistent.
+    ///
     /// To handle this complexity, we use an iterative approach:
+    /// PHASE 1: LOGICAL
     /// - We maintain a queue of group pairs that need to be merged.
     /// - For each pair, we create a new representative group.
     /// - We update all expressions that reference the merged groups.
     /// - If this creates new equivalences, we add the affected groups to the merge queue.
+    /// - We continue until no more merges are needed.
+    ///
+    /// PHASE 2: PHYSICAL
+    /// - We inspect the result of logical merges, and identify the goals to merge in
+    ///   the corresponding group_info of the new representative group.
+    /// - For each group, we create a new representative goal.
+    /// - We update all expressions that reference the merged goals.
+    /// - If this creates new equivalences, we add the affected goals to the merge queue.
     /// - We continue until no more merges are needed.
     ///
     /// This approach ensures that all cascading effects are properly handled and the memo
@@ -111,8 +209,6 @@ impl Memo for MemoryMemo {
         group_id_1: GroupId,
         group_id_2: GroupId,
     ) -> Result<MergeProducts, Infallible> {
-        println!("Merging: {:?} and {:?}", group_id_1, group_id_2);
-
         let mut merge_operations = vec![];
         let mut pending_merges = VecDeque::from(vec![(group_id_1, group_id_2)]);
 
@@ -124,7 +220,7 @@ impl Memo for MemoryMemo {
                 continue;
             }
 
-            // Perform the group merge, creating a new representative
+            // Perform the group merge, creating a new representative.
             let (new_group_id, merge_product) =
                 self.merge_group_pair(group_id_1, group_id_2).await?;
             merge_operations.push(merge_product);
@@ -132,59 +228,84 @@ impl Memo for MemoryMemo {
             // Process expressions that reference the merged groups,
             // which may trigger additional group merges.
             let new_pending_merges = self
-                .process_referencing_expressions(group_id_1, group_id_2, new_group_id)
+                .process_referencing_logical_exprs(group_id_1, group_id_2, new_group_id)
                 .await?;
 
             pending_merges.extend(new_pending_merges);
         }
 
-        // Consolidate the merge results by replacing the incremental merges
+        // Consolidate the merge products by replacing the incremental merges
         // with consolidated results that show the full picture.
-        self.consolidate_merge_results(merge_operations).await
-    }
+        let group_merges = self
+            .consolidate_merge_group_products(merge_operations)
+            .await?;
 
-    async fn get_best_optimized_physical_expr(
-        &self,
-        _goal_id: GoalId,
-    ) -> Result<Option<(PhysicalExpressionId, Cost)>, Infallible> {
-        todo!()
+        // Now handle goal merges: we do not need to pass any extra parameters as
+        // the goals to merge are gathered in the `goals` member of each new
+        // representative group.
+        let goal_merges = self.merge_dependent_goals(&group_merges).await?;
+
+        // Finally, we need to recursively merge the physical expressions that are
+        // dependent on the merged goals (and the recursively merged expressions themselves).
+        let expr_merges = self.merge_dependent_physical_exprs(&goal_merges).await?;
+
+        Ok(MergeProducts {
+            group_merges,
+            goal_merges,
+            expr_merges,
+        })
     }
 
     async fn get_all_goal_members(
         &self,
-        _goal_id: GoalId,
-    ) -> Result<Vec<GoalMemberId>, Infallible> {
-        todo!()
+        goal_id: GoalId,
+    ) -> Result<HashSet<GoalMemberId>, Infallible> {
+        let repr_goal_id = self.find_repr_goal_id(goal_id).await?;
+
+        let members = self
+            .goal_info
+            .get(&repr_goal_id)
+            .expect("Goal not found in memo table")
+            .members
+            .iter()
+            .map(|&member_id| self.find_repr_goal_member_id(member_id))
+            .collect();
+
+        Ok(members)
     }
 
     async fn add_goal_member(
         &mut self,
-        _goal_id: GoalId,
-        _member: GoalMemberId,
+        goal_id: GoalId,
+        member_id: GoalMemberId,
     ) -> Result<bool, Infallible> {
-        todo!()
-    }
+        // We call `get_all_goal_members` to ensure we only have the representative IDs
+        // in the set. This is important because members may have been merged with another.
+        let mut current_members = self.get_all_goal_members(goal_id).await?;
 
-    async fn update_physical_expr_cost(
-        &mut self,
-        _physical_expr_id: PhysicalExpressionId,
-        _new_cost: Cost,
-    ) -> Result<bool, Infallible> {
-        todo!()
-    }
+        let repr_member_id = self.find_repr_goal_member_id(member_id);
+        let added = current_members.insert(repr_member_id);
 
-    async fn get_physical_expr_cost(
-        &self,
-        _physical_expr_id: PhysicalExpressionId,
-    ) -> Result<Option<Cost>, Infallible> {
-        todo!()
+        if added {
+            let repr_goal_id = self.find_repr_goal_id(goal_id).await?;
+            self.goal_info
+                .get_mut(&repr_goal_id)
+                .expect("Goal not found in memo table")
+                .members
+                .insert(repr_member_id);
+        }
+
+        Ok(added)
     }
 }
 
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::cir::{Child, OperatorData};
+    use crate::{
+        cir::{Child, OperatorData},
+        memo::Materialize,
+    };
 
     pub async fn lookup_or_insert(
         memo: &mut impl Memo,
@@ -274,6 +395,28 @@ pub mod tests {
         let g4 = insert_into_group(&mut memo, 0, vec![], g2).await;
 
         assert_eq!(retrieve(&memo, g4).await, vec![0, 1, 2, 3]);
+    }
+
+    async fn create_goal(
+        memo: &mut MemoryMemo,
+        group_id: GroupId,
+        props: PhysicalProperties,
+    ) -> GoalId {
+        let goal = Goal(group_id, props);
+        memo.get_goal_id(&goal).await.unwrap()
+    }
+
+    async fn create_physical_expr(
+        memo: &mut MemoryMemo,
+        tag: &str,
+        children: Vec<GoalMemberId>,
+    ) -> PhysicalExpressionId {
+        let expr = PhysicalExpression {
+            tag: tag.to_string(),
+            data: vec![],
+            children: children.into_iter().map(Child::Singleton).collect(),
+        };
+        memo.get_physical_expr_id(&expr).await.unwrap()
     }
 
     #[tokio::test]
@@ -551,6 +694,229 @@ pub mod tests {
             final_exprs,
             vec![174, 175, 176, 177, 178, 179],
             "Merged group should contain exactly one copy of each expression"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_goal_merge() {
+        let mut memo = MemoryMemo::default();
+
+        // Create two groups.
+        let g1 = lookup_or_insert(&mut memo, 1, vec![]).await;
+        let g2 = lookup_or_insert(&mut memo, 2, vec![]).await;
+
+        // Create goals with the same properties.
+        let props = PhysicalProperties(None);
+        let goal1 = create_goal(&mut memo, g1, props.clone()).await;
+        let goal2 = create_goal(&mut memo, g2, props).await;
+
+        // Add a member to each goal.
+        let p1 = create_physical_expr(&mut memo, "a", vec![]).await;
+        let p2 = create_physical_expr(&mut memo, "b", vec![]).await;
+
+        memo.add_goal_member(goal1, GoalMemberId::PhysicalExpressionId(p1))
+            .await
+            .unwrap();
+        memo.add_goal_member(goal2, GoalMemberId::PhysicalExpressionId(p2))
+            .await
+            .unwrap();
+
+        // Merge the groups.
+        let merge_result = memo.merge_groups(g1, g2).await.unwrap();
+
+        // Verify goal merges in the result.
+        assert!(
+            !merge_result.goal_merges.is_empty(),
+            "Goal merges should not be empty"
+        );
+
+        // Get the new goal and verify members.
+        let new_goal_id = merge_result.goal_merges[0].new_goal_id;
+        let members = memo.get_all_goal_members(new_goal_id).await.unwrap();
+
+        assert_eq!(members.len(), 2, "Merged goal should have two members");
+        assert!(members.contains(&GoalMemberId::PhysicalExpressionId(p1)));
+        assert!(members.contains(&GoalMemberId::PhysicalExpressionId(p2)));
+
+        // Verify representatives.
+        assert_eq!(memo.find_repr_goal_id(goal1).await.unwrap(), new_goal_id);
+        assert_eq!(memo.find_repr_goal_id(goal2).await.unwrap(), new_goal_id);
+    }
+
+    #[tokio::test]
+    async fn test_physical_expr_merge() {
+        let mut memo = MemoryMemo::default();
+
+        // Create two groups and goals.
+        let g1 = lookup_or_insert(&mut memo, 1, vec![]).await;
+        let g2 = lookup_or_insert(&mut memo, 2, vec![]).await;
+
+        let props = PhysicalProperties(None);
+        let goal1 = create_goal(&mut memo, g1, props.clone()).await;
+        let goal2 = create_goal(&mut memo, g2, props).await;
+
+        // Create physical expressions referencing these goals.
+        let p1 = create_physical_expr(&mut memo, "op", vec![GoalMemberId::GoalId(goal1)]).await;
+        let p2 = create_physical_expr(&mut memo, "op", vec![GoalMemberId::GoalId(goal2)]).await;
+
+        // Verify they're different before merge.
+        assert_ne!(p1, p2);
+
+        // Merge the groups.
+        let merge_result = memo.merge_groups(g1, g2).await.unwrap();
+
+        // Verify physical expression merges in the result.
+        assert!(
+            !merge_result.expr_merges.is_empty(),
+            "Physical expr merges should not be empty"
+        );
+
+        // Get the new physical expression id.
+        let new_expr_id = merge_result.expr_merges[0].new_physical_expr_id;
+
+        // Verify representatives.
+        assert_eq!(
+            memo.find_repr_physical_expr_id(p1).await.unwrap(),
+            new_expr_id
+        );
+        assert_eq!(
+            memo.find_repr_physical_expr_id(p2).await.unwrap(),
+            new_expr_id
+        );
+    }
+
+    #[tokio::test]
+    async fn test_recursive_physical_expr_merge() {
+        let mut memo = MemoryMemo::default();
+
+        // Create groups.
+        let g1 = lookup_or_insert(&mut memo, 1, vec![]).await;
+        let g2 = lookup_or_insert(&mut memo, 2, vec![]).await;
+
+        // Create goals.
+        let props = PhysicalProperties(None);
+        let goal1 = create_goal(&mut memo, g1, props.clone()).await;
+        let goal2 = create_goal(&mut memo, g2, props.clone()).await;
+
+        // Create first level physical expressions.
+        let p1 = create_physical_expr(&mut memo, "op1", vec![GoalMemberId::GoalId(goal1)]).await;
+        let p2 = create_physical_expr(&mut memo, "op1", vec![GoalMemberId::GoalId(goal2)]).await;
+
+        // Create second level physical expressions.
+        let p3 = create_physical_expr(
+            &mut memo,
+            "op2",
+            vec![GoalMemberId::PhysicalExpressionId(p1)],
+        )
+        .await;
+        let p4 = create_physical_expr(
+            &mut memo,
+            "op2",
+            vec![GoalMemberId::PhysicalExpressionId(p2)],
+        )
+        .await;
+
+        // Merge the groups.
+        let merge_result = memo.merge_groups(g1, g2).await.unwrap();
+
+        // There should be multiple levels of physical expr merges.
+        assert!(
+            merge_result.expr_merges.len() >= 2,
+            "Should have at least 2 levels of physical expr merges"
+        );
+
+        // Verify representatives for both levels.
+        let p1_repr = memo.find_repr_physical_expr_id(p1).await.unwrap();
+        let p2_repr = memo.find_repr_physical_expr_id(p2).await.unwrap();
+        let p3_repr = memo.find_repr_physical_expr_id(p3).await.unwrap();
+        let p4_repr = memo.find_repr_physical_expr_id(p4).await.unwrap();
+
+        assert_eq!(
+            p1_repr, p2_repr,
+            "First level expressions should share representative"
+        );
+        assert_eq!(
+            p3_repr, p4_repr,
+            "Second level expressions should share representative"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_merge_products_completeness() {
+        let mut memo = MemoryMemo::default();
+
+        // Create a three-level structure.
+        let g1 = super::tests::lookup_or_insert(&mut memo, 1, vec![]).await;
+        let g2 = super::tests::lookup_or_insert(&mut memo, 2, vec![]).await;
+
+        let props = PhysicalProperties(None);
+        let goal1 = create_goal(&mut memo, g1, props.clone()).await;
+        let goal2 = create_goal(&mut memo, g2, props.clone()).await;
+
+        // Level 1
+        let p1 = create_physical_expr(&mut memo, "leaf1", vec![GoalMemberId::GoalId(goal1)]).await;
+        let p2 = create_physical_expr(&mut memo, "leaf1", vec![GoalMemberId::GoalId(goal2)]).await;
+
+        // Level 2
+        let p3 = create_physical_expr(
+            &mut memo,
+            "mid1",
+            vec![GoalMemberId::PhysicalExpressionId(p1)],
+        )
+        .await;
+        let p4 = create_physical_expr(
+            &mut memo,
+            "mid1",
+            vec![GoalMemberId::PhysicalExpressionId(p2)],
+        )
+        .await;
+
+        // Level 3
+        let p5 = create_physical_expr(
+            &mut memo,
+            "top1",
+            vec![GoalMemberId::PhysicalExpressionId(p3)],
+        )
+        .await;
+        let p6 = create_physical_expr(
+            &mut memo,
+            "top1",
+            vec![GoalMemberId::PhysicalExpressionId(p4)],
+        )
+        .await;
+
+        // Merge the groups.
+        let merge_result = memo.merge_groups(g1, g2).await.unwrap();
+
+        // Verify structure of the merge products.
+        assert_eq!(
+            merge_result.group_merges.len(),
+            1,
+            "Should have 1 group merge"
+        );
+        assert_eq!(
+            merge_result.goal_merges.len(),
+            1,
+            "Should have 1 goal merge"
+        );
+        assert_eq!(
+            merge_result.expr_merges.len(),
+            3,
+            "Should have 3 expression merges for the three levels"
+        );
+
+        // Verify all expressions share the same representatives at their respective levels.
+        assert_eq!(
+            memo.find_repr_physical_expr_id(p1).await.unwrap(),
+            memo.find_repr_physical_expr_id(p2).await.unwrap(),
+        );
+        assert_eq!(
+            memo.find_repr_physical_expr_id(p3).await.unwrap(),
+            memo.find_repr_physical_expr_id(p4).await.unwrap(),
+        );
+        assert_eq!(
+            memo.find_repr_physical_expr_id(p5).await.unwrap(),
+            memo.find_repr_physical_expr_id(p6).await.unwrap(),
         );
     }
 }

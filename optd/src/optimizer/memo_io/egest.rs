@@ -7,6 +7,7 @@ use async_recursion::async_recursion;
 use futures::future::try_join_all;
 use std::sync::Arc;
 
+// TODO: Until costing is resolved, this file is not used (and just left here for reference)
 impl<M: Memo> Optimizer<M> {
     /// Recursively transforms a physical expression ID in the memo into a complete physical plan.
     ///
@@ -21,7 +22,6 @@ impl<M: Memo> Optimizer<M> {
     /// * `Ok(None)` if any goal ID lacks a best expression ID.
     /// * `Err(Error)` if a memo operation fails.
     #[async_recursion]
-    #[allow(dead_code)]
     pub(crate) async fn egest_best_plan(
         &self,
         expression_id: PhysicalExpressionId,

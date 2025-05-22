@@ -25,6 +25,16 @@ pub struct MergeGoalProduct {
     pub merged_goals: Vec<GoalId>,
 }
 
+/// Result of merging two physical expressions.
+#[derive(Debug)]
+pub struct MergePhysicalExprProduct {
+    /// ID of the new physical expression.
+    pub new_physical_expr_id: PhysicalExpressionId,
+
+    /// Physical expressions that were merged.
+    pub merged_physical_exprs: Vec<PhysicalExpressionId>,
+}
+
 /// Results of merge operations, including group and goal merges.
 #[derive(Debug, Default)]
 pub struct MergeProducts {
@@ -33,6 +43,9 @@ pub struct MergeProducts {
 
     /// Goal merge results.
     pub goal_merges: Vec<MergeGoalProduct>,
+
+    /// Physical expression merge results.
+    pub expr_merges: Vec<MergePhysicalExprProduct>,
 }
 
 /// Base trait defining a shared implemention-defined error type for all memo-related traits.
@@ -124,6 +137,9 @@ pub trait Representative: MemoBase {
 /// expressions, and finding representative nodes of the union-find substructures.
 #[trait_variant::make(Send)]
 pub trait Memo: Representative + Materialize + Sync + 'static {
+    /// Prints the contents of the memo table to the console for debugging purposes.
+    async fn debug_dump(&self) -> Result<(), Self::MemoError>;
+
     /// Retrieves logical properties for a group ID.
     ///
     /// # Parameters
@@ -195,68 +211,29 @@ pub trait Memo: Representative + Materialize + Sync + 'static {
     // Physical expression and goal operations.
     //
 
-    /// Gets the best optimized physical expression ID for a goal ID.
-    ///
-    /// # Parameters
-    /// * `goal_id` - ID of the goal to retrieve the best expression for.
-    ///
-    /// # Returns
-    /// The ID of the lowest-cost physical implementation found so far for the goal,
-    /// along with its cost. Returns None if no optimized expression exists.
-    async fn get_best_optimized_physical_expr(
-        &self,
-        goal_id: GoalId,
-    ) -> Result<Option<(PhysicalExpressionId, Cost)>, Self::MemoError>;
-
     /// Gets all members of a goal, which can be physical expressions or other goals.
     ///
     /// # Parameters
     /// * `goal_id` - ID of the goal to retrieve members from.
     ///
     /// # Returns
-    /// A vector of goal members, each being either a physical expression ID or another goal ID.
+    /// A set of goal members, each being either a physical expression ID or another goal ID.
     async fn get_all_goal_members(
         &self,
         goal_id: GoalId,
-    ) -> Result<Vec<GoalMemberId>, Self::MemoError>;
+    ) -> Result<HashSet<GoalMemberId>, Self::MemoError>;
 
     /// Adds a member to a goal.
     ///
     /// # Parameters
     /// * `goal_id` - ID of the goal to add the member to.
-    /// * `member` - The member to add, either a physical expression ID or another goal ID.
+    /// * `member_id` - The member to add, either a physical expression ID or another goal ID.
     ///
     /// # Returns
     /// True if the member was added to the goal, or false if it already existed.
     async fn add_goal_member(
         &mut self,
         goal_id: GoalId,
-        member: GoalMemberId,
+        member_id: GoalMemberId,
     ) -> Result<bool, Self::MemoError>;
-
-    /// Updates the cost of a physical expression ID.
-    ///
-    /// # Parameters
-    /// * `physical_expr_id` - ID of the physical expression to update.
-    /// * `new_cost` - New cost to assign to the physical expression.
-    ///
-    /// # Returns
-    /// Whether the cost of the expression has improved.
-    async fn update_physical_expr_cost(
-        &mut self,
-        physical_expr_id: PhysicalExpressionId,
-        new_cost: Cost,
-    ) -> Result<bool, Self::MemoError>;
-
-    /// Gets the cost of a physical expression ID.
-    ///
-    /// # Parameters
-    /// * `physical_expr_id` - ID of the physical expression to retrieve the cost for.
-    ///
-    /// # Returns
-    /// The cost of the physical expression, or None if it doesn't exist.
-    async fn get_physical_expr_cost(
-        &self,
-        physical_expr_id: PhysicalExpressionId,
-    ) -> Result<Option<Cost>, Self::MemoError>;
 }

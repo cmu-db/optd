@@ -4,11 +4,12 @@ use super::{Infallible, MemoryMemo};
 use crate::{
     cir::*,
     memo::{
-        Materialize, Memo, MergeGroupProduct, MergeProducts, Representative, memory::GroupInfo,
+        Materialize, Memo, MergeGoalProduct, MergeGroupProduct, MergePhysicalExprProduct,
+        Representative, memory::GroupInfo,
     },
 };
 use hashbrown::{HashMap, HashSet};
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::VecDeque};
 
 impl MemoryMemo {
     pub(super) fn next_group_id(&mut self) -> GroupId {
@@ -35,21 +36,25 @@ impl MemoryMemo {
         PhysicalExpressionId(id)
     }
 
+    /// Takes the set of [`LogicalExpressionId`] that reference a group, mapped to their
+    /// representatives.
+    fn take_referencing_expr_set(&mut self, group_id: GroupId) -> HashSet<LogicalExpressionId> {
+        self.group_referencing_exprs_index
+            .remove(&group_id)
+            .unwrap_or_default()
+            .iter()
+            .map(|id| self.repr_logical_expr_id.find(id))
+            .collect()
+    }
+
     /// Merges the two sets of logical expressions that reference the two groups into a single set
     /// of expressions under a new [`GroupId`].
     ///
     /// If a group does not exist, then the set of expressions referencing it is the empty set.
     fn merge_referencing_exprs(&mut self, group1: GroupId, group2: GroupId, new_group: GroupId) {
         // Remove the entries for the original two groups that we want to merge.
-        let exprs1 = self
-            .group_referencing_exprs_index
-            .remove(&group1)
-            .unwrap_or_default();
-        let exprs2 = self
-            .group_referencing_exprs_index
-            .remove(&group2)
-            .unwrap_or_default();
-
+        let exprs1 = self.take_referencing_expr_set(group1);
+        let exprs2 = self.take_referencing_expr_set(group2);
         let new_set = exprs1.union(&exprs2).copied().collect();
 
         // Update the index for the new group / set of logical expressions.
@@ -64,10 +69,17 @@ impl MemoryMemo {
 ///
 /// See the implementation itself for the documentation of each helper method.
 pub trait MemoryMemoHelper: Memo {
+    fn find_repr_goal_member_id(&self, id: GoalMemberId) -> GoalMemberId;
+
     async fn remap_logical_expr<'a>(
         &self,
         logical_expr: &'a LogicalExpression,
     ) -> Result<Cow<'a, LogicalExpression>, Infallible>;
+
+    async fn remap_physical_expr<'a>(
+        &self,
+        physical_expr: &'a PhysicalExpression,
+    ) -> Result<Cow<'a, PhysicalExpression>, Infallible>;
 
     async fn remap_goal<'a>(&self, goal: &'a Goal) -> Result<Cow<'a, Goal>, Infallible>;
 
@@ -84,20 +96,54 @@ pub trait MemoryMemoHelper: Memo {
         prev_expr: LogicalExpression,
     ) -> Result<Option<(GroupId, GroupId)>, Infallible>;
 
-    async fn process_referencing_expressions(
+    async fn process_referencing_logical_exprs(
         &mut self,
         group_id_1: GroupId,
         group_id_2: GroupId,
         new_group_id: GroupId,
     ) -> Result<Vec<(GroupId, GroupId)>, Infallible>;
 
-    async fn consolidate_merge_results(
+    async fn consolidate_merge_group_products(
         &self,
         merge_operations: Vec<MergeGroupProduct>,
-    ) -> Result<MergeProducts, Infallible>;
+    ) -> Result<Vec<MergeGroupProduct>, Infallible>;
+
+    async fn merge_dependent_goals(
+        &mut self,
+        group_merges: &[MergeGroupProduct],
+    ) -> Result<Vec<MergeGoalProduct>, Infallible>;
+
+    async fn consolidate_merge_physical_expr_products(
+        &self,
+        merge_operations: Vec<MergePhysicalExprProduct>,
+    ) -> Result<Vec<MergePhysicalExprProduct>, Infallible>;
+
+    async fn merge_dependent_physical_exprs(
+        &mut self,
+        goal_merges: &[MergeGoalProduct],
+    ) -> Result<Vec<MergePhysicalExprProduct>, Infallible>;
 }
 
 impl MemoryMemoHelper for MemoryMemo {
+    /// Finds the representative ID for a given [`GoalMemberId`].
+    ///
+    /// This handles both variants of `GoalMemberId` by finding the appropriate representative
+    /// based on whether it's a Goal or PhysicalExpr.
+    fn find_repr_goal_member_id(&self, id: GoalMemberId) -> GoalMemberId {
+        use GoalMemberId::*;
+
+        match id {
+            GoalId(goal_id) => {
+                let repr_goal_id = self.repr_goal_id.find(&goal_id);
+                GoalId(repr_goal_id)
+            }
+            PhysicalExpressionId(expr_id) => {
+                let repr_expr_id = self.repr_physical_expr_id.find(&expr_id);
+                PhysicalExpressionId(repr_expr_id)
+            }
+        }
+    }
+
     /// Remaps the children of a logical expression such that they are all identified by their
     /// representative IDs.
     ///
@@ -144,6 +190,61 @@ impl MemoryMemoHelper for MemoryMemo {
             })
         } else {
             Cow::Borrowed(logical_expr)
+        })
+    }
+
+    /// Remaps the children of a physical expression such that they are all identified by their
+    /// representative IDs.
+    ///
+    /// For example, if a physical expression has a child goal with [`GoalMemberId`] 3, but the
+    /// representative of goal 3 is [`GoalMemberId`] 42, then the output expression will be the input
+    /// physical expression with a child goal of 42.
+    ///
+    /// If no remapping needs to occur, this returns the same [`PhysicalExpression`] object via the
+    /// [`Cow`]. Otherwise, this function will create a new owned [`PhysicalExpression`].
+    async fn remap_physical_expr<'a>(
+        &self,
+        physical_expr: &'a PhysicalExpression,
+    ) -> Result<Cow<'a, PhysicalExpression>, Infallible> {
+        use Child::*;
+
+        let mut needs_remapping = false;
+
+        let remapped_children = physical_expr
+            .children
+            .iter()
+            .map(|child| match child {
+                Singleton(goal_id) => {
+                    let repr = self.find_repr_goal_member_id(*goal_id);
+                    if repr != *goal_id {
+                        needs_remapping = true;
+                    }
+                    Singleton(repr)
+                }
+                VarLength(goal_ids) => {
+                    let reprs: Vec<_> = goal_ids
+                        .iter()
+                        .map(|id| {
+                            let repr = self.find_repr_goal_member_id(*id);
+                            if repr != *id {
+                                needs_remapping = true;
+                            }
+                            repr
+                        })
+                        .collect();
+                    VarLength(reprs)
+                }
+            })
+            .collect();
+
+        Ok(if needs_remapping {
+            Cow::Owned(PhysicalExpression {
+                tag: physical_expr.tag.clone(),
+                data: physical_expr.data.clone(),
+                children: remapped_children,
+            })
+        } else {
+            Cow::Borrowed(physical_expr)
         })
     }
 
@@ -215,6 +316,18 @@ impl MemoryMemoHelper for MemoryMemo {
             .copied()
             .collect();
 
+        // Combine goals from both groups.
+        let all_goals: HashMap<_, Vec<_>> = group1_info
+            .goals
+            .into_iter()
+            .chain(group2_info.goals)
+            .fold(HashMap::new(), |mut acc, (props, mut goals)| {
+                acc.entry(props)
+                    .and_modify(|existing_goals| existing_goals.append(&mut goals))
+                    .or_insert(goals);
+                acc
+            });
+
         // Update the union-find structure.
         self.repr_group_id.merge(&group_id_1, &new_group_id);
         self.repr_group_id.merge(&group_id_2, &new_group_id);
@@ -227,6 +340,7 @@ impl MemoryMemoHelper for MemoryMemo {
         // Create and save the new group.
         let new_group_info = GroupInfo {
             expressions: all_exprs,
+            goals: all_goals,
             logical_properties: group1_info.logical_properties,
         };
         self.group_info.insert(new_group_id, new_group_info);
@@ -306,7 +420,7 @@ impl MemoryMemoHelper for MemoryMemo {
         }
     }
 
-    /// Processes expressions that reference the merged groups.
+    /// Processes logical expressions that reference the merged groups.
     ///
     /// Returns the group pairs that need to be merged due to new equivalences.
     ///
@@ -329,14 +443,14 @@ impl MemoryMemoHelper for MemoryMemo {
     ///    b. Check if the remapped expression is different from the original.
     ///    c. If different, handle the change and check for new equivalences.
     /// 4. Return any new group pairs that need to be merged.
-    async fn process_referencing_expressions(
+    async fn process_referencing_logical_exprs(
         &mut self,
         group_id_1: GroupId,
         group_id_2: GroupId,
         new_group_id: GroupId,
     ) -> Result<Vec<(GroupId, GroupId)>, Infallible> {
-        // Merge the set of expressions that reference these two groups into one that references the
-        // new group.
+        // Merge the set of expressions that reference these two groups into one
+        // that references the new group.
         self.merge_referencing_exprs(group_id_1, group_id_2, new_group_id);
 
         // We need to clone here because we are modifying our `self` state inside the loop.
@@ -371,16 +485,16 @@ impl MemoryMemoHelper for MemoryMemo {
         Ok(new_pending_merges)
     }
 
-    /// Consolidates merge operations into a comprehensive result.
+    /// Consolidates merge group operations into a comprehensive result.
     ///
-    /// This function takes a list of individual merge operations and consolidates them into a
-    /// complete picture of which groups were merged into each final representative.
+    /// This function takes a list of individual group merge operations and consolidates
+    /// them into a complete picture of which groups were merged into each final representative.
     ///
     /// It also handles cases where past representatives themselves are merged into newer ones.
-    async fn consolidate_merge_results(
+    async fn consolidate_merge_group_products(
         &self,
         merge_operations: Vec<MergeGroupProduct>,
-    ) -> Result<MergeProducts, Infallible> {
+    ) -> Result<Vec<MergeGroupProduct>, Infallible> {
         // Collect operations into a map from representative to all merged groups.
         let mut consolidated_map: HashMap<GroupId, HashSet<GroupId>> = HashMap::new();
 
@@ -411,9 +525,200 @@ impl MemoryMemoHelper for MemoryMemo {
             })
             .collect();
 
-        Ok(MergeProducts {
-            group_merges,
-            goal_merges: vec![],
-        })
+        Ok(group_merges)
+    }
+
+    /// Processes goal merges and returns the results.
+    ///
+    /// This function performs the merge operations for goals based on the merged groups and
+    /// returns a list of `MergeGoalProduct` instances representing the merged goals.
+    ///
+    /// # Parameters
+    ///
+    /// * `group_merges` - A slice of `MergeGroupProduct` instances representing the merged groups.
+    ///
+    /// # Returns
+    ///
+    /// A vector of `MergeGoalProduct` instances representing the merged goals.
+    async fn merge_dependent_goals(
+        &mut self,
+        group_merges: &[MergeGroupProduct],
+    ) -> Result<Vec<MergeGoalProduct>, Infallible> {
+        let mut goal_merges = Vec::new();
+
+        for merge_product in group_merges {
+            let new_group_id = merge_product.new_group_id;
+            let group_info = self.group_info.get_mut(&new_group_id).unwrap();
+
+            // Take related goals to the group to avoid borrowing issues.
+            let related_goals = std::mem::take(&mut group_info.goals);
+            let mut updated_goals = HashMap::new();
+
+            for (physical_props, merged_goals) in related_goals {
+                // Create a new representative goal for this physical property.
+                let new_goal = Goal(new_group_id, physical_props.clone());
+                let new_goal_id = self.get_goal_id(&new_goal).await?;
+
+                // Process each goal being merged.
+                for &old_goal_id in &merged_goals {
+                    // Remove old goal info and extend new goal with its members.
+                    let old_goal_info = self.goal_info.remove(&old_goal_id).unwrap();
+                    let new_goal_info = self.goal_info.get_mut(&new_goal_id).unwrap();
+
+                    new_goal_info.members.extend(old_goal_info.members);
+                    self.goal_to_id.remove(&old_goal_info.goal);
+
+                    // Update referencing expressions index.
+                    let refs = self
+                        .goal_member_referencing_exprs_index
+                        .remove(&GoalMemberId::GoalId(old_goal_id))
+                        .unwrap_or_default();
+
+                    self.goal_member_referencing_exprs_index
+                        .entry(GoalMemberId::GoalId(new_goal_id))
+                        .or_default()
+                        .extend(refs);
+
+                    // Update the union-find structure for goal representatives.
+                    self.repr_goal_id.merge(&old_goal_id, &new_goal_id);
+                }
+
+                // Update the goals mapping for this physical property.
+                updated_goals.insert(physical_props, vec![new_goal_id]);
+
+                // Record the merge operation.
+                goal_merges.push(MergeGoalProduct {
+                    new_goal_id,
+                    merged_goals,
+                });
+            }
+
+            // Update the group's goals with the consolidated mapping.
+            self.group_info.get_mut(&new_group_id).unwrap().goals = updated_goals;
+        }
+
+        Ok(goal_merges)
+    }
+
+    /// Consolidates merge physical expression operations into a comprehensive result.
+    ///
+    /// This function takes a list of individual physical expression merge operations
+    /// and consolidates them into a complete picture of which physical expressions
+    /// were merged into each final representative.
+    ///
+    /// It also handles cases where past representatives themselves are merged into newer ones.
+    async fn consolidate_merge_physical_expr_products(
+        &self,
+        merge_operations: Vec<MergePhysicalExprProduct>,
+    ) -> Result<Vec<MergePhysicalExprProduct>, Infallible> {
+        // Collect operations into a map from representative to all merged physical expressions.
+        let mut consolidated_map: HashMap<PhysicalExpressionId, HashSet<PhysicalExpressionId>> =
+            HashMap::new();
+
+        for op in merge_operations {
+            let current_repr = self.repr_physical_expr_id.find(&op.new_physical_expr_id);
+
+            consolidated_map
+                .entry(current_repr)
+                .or_default()
+                .extend(op.merged_physical_exprs.iter().copied());
+
+            if op.new_physical_expr_id != current_repr {
+                consolidated_map
+                    .entry(current_repr)
+                    .or_default()
+                    .insert(op.new_physical_expr_id);
+            }
+        }
+
+        // Build the final list of merge products from the consolidated map.
+        let physical_expr_merges = consolidated_map
+            .into_iter()
+            .filter_map(|(repr, exprs)| {
+                (!exprs.is_empty()).then(|| MergePhysicalExprProduct {
+                    new_physical_expr_id: repr,
+                    merged_physical_exprs: exprs.into_iter().collect(),
+                })
+            })
+            .collect();
+
+        Ok(physical_expr_merges)
+    }
+
+    /// Processes physical expression merges and returns the results.
+    ///
+    /// This function performs the merge operations for physical expressions based on
+    /// the merged goals and returns a list of `MergePhysicalExprProduct` instances
+    /// representing the merged physical expressions.
+    ///
+    /// # Parameters
+    ///
+    /// * `goal_merges` - A slice of `MergeGoalProduct` instances representing the merged goals.
+    ///
+    /// # Returns
+    ///
+    /// A vector of `MergePhysicalExprProduct` instances representing the merged physical expressions.
+    async fn merge_dependent_physical_exprs(
+        &mut self,
+        goal_merges: &[MergeGoalProduct],
+    ) -> Result<Vec<MergePhysicalExprProduct>, Infallible> {
+        let mut physical_expr_merges = Vec::new();
+        let mut pending_dependencies = VecDeque::new();
+
+        // Initialize pending dependencies with the input goal merges.
+        for goal_merge in goal_merges {
+            pending_dependencies.push_back(GoalMemberId::GoalId(goal_merge.new_goal_id));
+        }
+
+        // Process dependencies in a loop to handle cascading merges.
+        while let Some(current_dependency) = pending_dependencies.pop_front() {
+            let referencing_exprs = self
+                .goal_member_referencing_exprs_index
+                .get(&current_dependency)
+                .cloned()
+                .unwrap_or_default();
+
+            // Process each expression that references this dependency.
+            for reference_id in referencing_exprs {
+                // Remap the expression to use updated member references.
+                let prev_expr = self.materialize_physical_expr(reference_id).await?;
+                let new_expr = self.remap_physical_expr(&prev_expr).await?;
+                let new_id = self.get_physical_expr_id(&new_expr).await?;
+
+                if reference_id != new_id {
+                    // Remove old expression from indexes.
+                    self.id_to_physical_expr.remove(&reference_id);
+                    self.physical_expr_to_id.remove(&prev_expr);
+
+                    // Update the goal member referencing expressions index
+                    // for the new physical expr.
+                    let old_refs = self
+                        .goal_member_referencing_exprs_index
+                        .remove(&GoalMemberId::PhysicalExpressionId(reference_id))
+                        .unwrap_or_default();
+                    self.goal_member_referencing_exprs_index
+                        .entry(GoalMemberId::PhysicalExpressionId(new_id))
+                        .or_default()
+                        .extend(old_refs);
+
+                    // Update the representative ID for the expression.
+                    self.repr_physical_expr_id.merge(&reference_id, &new_id);
+
+                    // This handles cascading effects where merging
+                    // one expression affects others.
+                    pending_dependencies.push_back(GoalMemberId::PhysicalExpressionId(new_id));
+
+                    // Record the merge.
+                    physical_expr_merges.push(MergePhysicalExprProduct {
+                        new_physical_expr_id: new_id,
+                        merged_physical_exprs: vec![reference_id],
+                    });
+                }
+            }
+        }
+
+        // Consolidate the merge products to ensure no duplicates.
+        self.consolidate_merge_physical_expr_products(physical_expr_merges)
+            .await
     }
 }

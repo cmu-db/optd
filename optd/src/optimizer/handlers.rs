@@ -1,7 +1,4 @@
-use super::{
-    JobId, Optimizer, TaskId,
-    jobs::{CostedContinuation, LogicalContinuation},
-};
+use super::{JobId, Optimizer, TaskId, jobs::LogicalContinuation};
 use crate::{
     cir::*,
     memo::Memo,
@@ -132,31 +129,40 @@ impl<M: Memo> Optimizer<M> {
     /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_new_physical_partial(
         &mut self,
-        _plan: PartialPhysicalPlan,
-        _goal_id: GoalId,
-        _job_id: JobId,
+        plan: PartialPhysicalPlan,
+        goal_id: GoalId,
+        job_id: JobId,
     ) -> Result<(), M::MemoError> {
-        todo!()
-    }
+        use GoalMemberId::*;
 
-    /// This method handles fully optimized physical expressions with cost information.
-    ///
-    /// When a new optimized expression is found, it's added to the memo. If it becomes
-    /// the new best expression for its goal, continuations are notified and and clients
-    /// receive the corresponding egested plan.
-    ///
-    /// # Parameters
-    /// * `expression_id` - ID of the physical expression to process.
-    /// * `cost` - Cost information for the expression.
-    ///
-    /// # Returns
-    /// * `Result<(), Error>` - Success or error during processing.
-    pub(super) async fn process_new_costed_physical(
-        &mut self,
-        _expression_id: PhysicalExpressionId,
-        _cost: Cost,
-    ) -> Result<(), M::MemoError> {
-        todo!()
+        let goal_id = self.memo.find_repr_goal_id(goal_id).await?;
+        let related_task_id = self.get_related_task_id(job_id);
+
+        let member_id = self.probe_ingest_physical_plan(&plan).await?;
+        let added = self.memo.add_goal_member(goal_id, member_id).await?;
+
+        match member_id {
+            PhysicalExpressionId(_) => {
+                // TODO: Here we would launch costing tasks based on the design.
+            }
+            GoalId(goal_id) => {
+                if added {
+                    // Optimize the new sub-goal and add to task graph.
+                    let sub_optimize_task_id = self.ensure_optimize_goal_task(goal_id).await?;
+
+                    self.get_optimize_goal_task_mut(sub_optimize_task_id)
+                        .unwrap()
+                        .optimize_goal_out
+                        .insert(related_task_id);
+                    self.get_optimize_goal_task_mut(related_task_id)
+                        .unwrap()
+                        .optimize_goal_in
+                        .insert(sub_optimize_task_id);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// This method handles group creation for expressions with derived properties
@@ -199,25 +205,6 @@ impl<M: Memo> Optimizer<M> {
         let parent_task_id = self.get_related_task_id(job_id);
         self.launch_fork_logical_task(group_id, continuation, parent_task_id)
             .await
-    }
-
-    /// Registers a continuation for receiving optimized physical expressions for a goal.
-    /// The continuation will be notified about the best existing expression and any better ones found.
-    ///
-    /// # Parameters
-    /// * `goal` - The goal to subscribe to.
-    /// * `continuation` - Continuation to call when new optimized expressions are found.
-    /// * `job_id` - ID of the job that initiated this request.
-    ///
-    /// # Returns
-    /// * `Result<(), Error>` - Success or error during processing.
-    pub(super) async fn process_goal_subscription(
-        &mut self,
-        _goal: &Goal,
-        _continuation: CostedContinuation,
-        _job_id: JobId,
-    ) -> Result<(), M::MemoError> {
-        todo!()
     }
 
     /// Retrieves the logical properties for the given group from the memo

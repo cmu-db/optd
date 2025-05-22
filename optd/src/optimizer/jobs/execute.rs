@@ -1,4 +1,4 @@
-use super::{CostedContinuation, JobId, LogicalContinuation};
+use super::{JobId, LogicalContinuation};
 use crate::{
     cir::*,
     dsl::{
@@ -9,12 +9,10 @@ use crate::{
     optimizer::{
         EngineProduct, Optimizer, OptimizerMessage,
         hir_cir::{
-            from_cir::{
-                partial_logical_to_value, partial_physical_to_value, physical_properties_to_value,
-            },
+            from_cir::{partial_logical_to_value, physical_properties_to_value},
             into_cir::{
-                hir_goal_to_cir, hir_group_id_to_cir, value_to_cost, value_to_logical_properties,
-                value_to_partial_logical, value_to_partial_physical,
+                hir_group_id_to_cir, value_to_logical_properties, value_to_partial_logical,
+                value_to_partial_physical,
             },
         },
     },
@@ -49,6 +47,11 @@ impl<M: Memo> Optimizer<M> {
                 .materialize_logical_expr(expression_id)
                 .await?
                 .into(),
+            None, // FIXME: This is correct, however in the DSL right now the parameters
+                  // of the derive function is a *, to allow its children to be * too. However,
+                  // since the group is not yet created, it isn't really stored yet it.
+                  // Hence, the input should be a different type, and ideally be made consistent
+                  // with how costing is handled (i.e. with $ and *).
         );
 
         let message_tx = self.message_tx.clone();
@@ -99,6 +102,7 @@ impl<M: Memo> Optimizer<M> {
                 .materialize_logical_expr(expression_id)
                 .await?
                 .into(),
+            Some(group_id),
         );
 
         let message_tx = self.message_tx.clone();
@@ -143,6 +147,9 @@ impl<M: Memo> Optimizer<M> {
     ) -> Result<(), M::MemoError> {
         use EngineProduct::*;
 
+        let Goal(group_id, physical_props) = self.memo.materialize_goal(goal_id).await?;
+        let properties = physical_properties_to_value(&physical_props);
+
         let engine = self.init_engine();
         let plan = partial_logical_to_value(
             &self
@@ -150,10 +157,8 @@ impl<M: Memo> Optimizer<M> {
                 .materialize_logical_expr(expression_id)
                 .await?
                 .into(),
+            Some(group_id),
         );
-
-        let Goal(_, physical_props) = self.memo.materialize_goal(goal_id).await?;
-        let properties = physical_properties_to_value(&physical_props);
 
         let message_tx = self.message_tx.clone();
         tokio::spawn(async move {
@@ -175,55 +180,19 @@ impl<M: Memo> Optimizer<M> {
         Ok(())
     }
 
-    /// Executes a job to compute the cost of a physical expression.
-    ///
-    /// This creates an engine instance and launches the cost calculation process
-    /// for the specified physical expression.
-    ///
-    /// # Parameters
-    /// * `expression_id`: The ID of the physical expression to cost.
-    /// * `job_id`: The ID of the job to be executed.
-    pub(super) async fn execute_cost_expression(
-        &self,
-        expression_id: PhysicalExpressionId,
-        job_id: JobId,
-    ) -> Result<(), M::MemoError> {
-        use EngineProduct::*;
-
-        let engine = self.init_engine();
-        let plan = partial_physical_to_value(&self.egest_partial_plan(expression_id).await?);
-
-        let message_tx = self.message_tx.clone();
-        tokio::spawn(async move {
-            let response = engine
-                .launch(
-                    "cost",
-                    vec![plan],
-                    Arc::new(move |cost| {
-                        Box::pin(
-                            async move { NewCostedPhysical(expression_id, value_to_cost(&cost)) },
-                        )
-                    }),
-                )
-                .await;
-
-            Self::process_engine_response(job_id, message_tx, response).await;
-        });
-
-        Ok(())
-    }
-
     /// Executes a job to continue processing with a logical expression result.
     ///
     /// This materializes the logical expression and passes it to the continuation.
     ///
     /// # Parameters
     /// * `expression_id`: The ID of the logical expression to continue with.
+    /// * `group_id`: The ID of the group to which the expression belongs.
     /// * `k`: The continuation function to be called with the materialized plan.
     /// * `job_id`: The ID of the job to be executed.
     pub(super) async fn execute_continue_with_logical(
         &self,
         expression_id: LogicalExpressionId,
+        group_id: GroupId,
         k: LogicalContinuation,
         job_id: JobId,
     ) -> Result<(), M::MemoError> {
@@ -236,6 +205,7 @@ impl<M: Memo> Optimizer<M> {
                 .materialize_logical_expr(expression_id)
                 .await?
                 .into(),
+            Some(group_id),
         );
 
         let message_tx = self.message_tx.clone();
@@ -246,32 +216,6 @@ impl<M: Memo> Optimizer<M> {
             if !matches!(response, Return(Value { data: None, .. }, _)) {
                 Self::process_engine_response(job_id, message_tx, response).await;
             }
-        });
-
-        Ok(())
-    }
-
-    /// Executes a job to continue processing with an optimized physical expression result.
-    ///
-    /// This materializes the physical expression and passes it along with its cost
-    /// to the continuation.
-    ///
-    /// # Parameters
-    /// * `expression_id`: The ID of the physical expression to continue with.
-    /// * `k`: The continuation function to be called with the materialized plan.
-    /// * `job_id`: The ID of the job to be executed.
-    pub(super) async fn execute_continue_with_costed(
-        &self,
-        expression_id: PhysicalExpressionId,
-        k: CostedContinuation,
-        job_id: JobId,
-    ) -> Result<(), M::MemoError> {
-        let plan = partial_physical_to_value(&self.egest_partial_plan(expression_id).await?);
-
-        let message_tx = self.message_tx.clone();
-        tokio::spawn(async move {
-            let response = k.0(plan).await;
-            Self::process_engine_response(job_id, message_tx, response).await;
         });
 
         Ok(())
@@ -300,10 +244,7 @@ impl<M: Memo> Optimizer<M> {
                 SubscribeGroup(hir_group_id_to_cir(&group_id), LogicalContinuation(k)),
                 job_id,
             ),
-            YieldGoal(goal, k) => OptimizerMessage::product(
-                SubscribeGoal(hir_goal_to_cir(&goal), CostedContinuation(k)),
-                job_id,
-            ),
+            YieldGoal(_, _) => todo!("Decide what to do here depending on the cost model"),
         };
 
         engine_tx
