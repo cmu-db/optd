@@ -260,3 +260,6 @@ pub trait Memo: Representative + Materialize + Sync + 'static {
         physical_expr_id: PhysicalExpressionId,
     ) -> Result<Option<Cost>, Self::MemoError>;
 }
+
+#[cfg(test)]
+mod fuzz;
