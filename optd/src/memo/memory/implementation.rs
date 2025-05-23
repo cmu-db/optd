@@ -697,6 +697,17 @@ pub mod tests {
     }
 
     #[tokio::test]
+    async fn test_logical_fuzzing() {
+        let data = FuzzData::new(1000, 100, true, 12345);
+        data.shuffle(2, true);
+
+        let memo = MemoryMemo::default();
+        let mut fuzzer = Fuzzer::new(memo);
+        fuzzer.add(&data).await;
+        fuzzer.check(&data).await;
+    }
+
+    #[tokio::test]
     async fn test_goal_merge() {
         let mut memo = MemoryMemo::default();
 
@@ -917,16 +928,5 @@ pub mod tests {
             memo.find_repr_physical_expr_id(p5).await.unwrap(),
             memo.find_repr_physical_expr_id(p6).await.unwrap(),
         );
-    }
-
-    #[tokio::test]
-    async fn test_fuzz() {
-        let data = FuzzData::new(100, 10, true, 12345);
-        data.shuffle(2, true);
-
-        let memo = MemoryMemo::default();
-        let mut fuzzer = Fuzzer::new(memo);
-        fuzzer.add(&data).await;
-        fuzzer.check(&data).await;
     }
 }

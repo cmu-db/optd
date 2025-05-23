@@ -6,20 +6,20 @@ use rand::rngs::StdRng;
 use std::cmp::max;
 use std::collections::HashSet;
 
-#[derive(Clone)]
-pub struct FuzzExpression {
+#[derive(Clone, Debug)]
+pub(crate) struct FuzzExpression {
     pub op: usize,
     pub children: Vec<usize>,
 }
 
-#[derive(Clone)]
-pub struct FuzzGroup {
+#[derive(Clone, Debug)]
+pub(crate) struct FuzzGroup {
     pub exprs: Vec<usize>,
     pub id: usize,
 }
 
-#[derive(Clone)]
-pub struct FuzzData {
+#[derive(Clone, Debug)]
+pub(crate) struct FuzzData {
     pub exprs: Vec<FuzzExpression>,
     pub groups: Vec<FuzzGroup>,
     pub entry: usize,
