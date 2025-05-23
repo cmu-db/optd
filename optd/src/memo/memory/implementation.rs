@@ -302,10 +302,9 @@ impl Memo for MemoryMemo {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::{
-        cir::{Child, OperatorData},
-        memo::Materialize,
-    };
+    use crate::cir::{Child, OperatorData};
+    use crate::memo::Materialize;
+    use crate::memo::fuzz::{FuzzData, Fuzzer};
 
     pub async fn lookup_or_insert(
         memo: &mut impl Memo,
@@ -695,6 +694,17 @@ pub mod tests {
             vec![174, 175, 176, 177, 178, 179],
             "Merged group should contain exactly one copy of each expression"
         );
+    }
+
+    #[tokio::test]
+    async fn test_logical_fuzzing() {
+        let data = FuzzData::new(1000, 100, true, 12345);
+        data.shuffle(2, true);
+
+        let memo = MemoryMemo::default();
+        let mut fuzzer = Fuzzer::new(memo);
+        fuzzer.add(&data).await;
+        fuzzer.check(&data).await;
     }
 
     #[tokio::test]
