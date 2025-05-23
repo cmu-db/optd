@@ -671,12 +671,16 @@ mod tests {
         ctx.bind(
             "length".to_string(),
             Value::new(CoreData::Function(FunKind::Udf(Udf {
-                func: |args, _catalog, _deriver| match &args[0].data {
-                    CoreData::Array(elements) => {
-                        Value::new(CoreData::Literal(int(elements.len() as i64)))
-                    }
-                    _ => panic!("Expected array"),
-                },
+                func: Arc::new(|args, _catalog, _retriever| {
+                    Box::pin(async move {
+                        match &args[0].data {
+                            CoreData::Array(elements) => {
+                                Value::new(CoreData::Literal(int(elements.len() as i64)))
+                            }
+                            _ => panic!("Expected array"),
+                        }
+                    })
+                }),
             }))),
         );
 
@@ -985,12 +989,16 @@ mod tests {
         // Create a to_string function
         let to_string_fn = Arc::new(Expr::new(CoreVal(Value::new(CoreData::Function(
             FunKind::Udf(Udf {
-                func: |args, _catalog, _deriver| match &args[0].data {
-                    CoreData::Literal(lit) => {
-                        Value::new(CoreData::Literal(string(&format!("{:?}", lit))))
-                    }
-                    _ => Value::new(CoreData::Literal(string("<non-literal>"))),
-                },
+                func: Arc::new(|args, _catalog, _retriever| {
+                    Box::pin(async move {
+                        match &args[0].data {
+                            CoreData::Literal(lit) => {
+                                Value::new(CoreData::Literal(string(&format!("{:?}", lit))))
+                            }
+                            _ => Value::new(CoreData::Literal(string("<non-literal>"))),
+                        }
+                    })
+                }),
             }),
         )))));
 
@@ -1098,12 +1106,16 @@ mod tests {
         ctx.bind(
             "to_string".to_string(),
             Value::new(CoreData::Function(FunKind::Udf(Udf {
-                func: |args, _catalog, _deriver| match &args[0].data {
-                    CoreData::Literal(Literal::Int64(i)) => {
-                        Value::new(CoreData::Literal(string(&i.to_string())))
-                    }
-                    _ => panic!("Expected integer literal"),
-                },
+                func: Arc::new(|args, _catalog, _retriever| {
+                    Box::pin(async move {
+                        match &args[0].data {
+                            CoreData::Literal(Literal::Int64(i)) => {
+                                Value::new(CoreData::Literal(string(&i.to_string())))
+                            }
+                            _ => panic!("Expected integer literal"),
+                        }
+                    })
+                }),
             }))),
         );
 
@@ -1232,13 +1244,17 @@ mod tests {
         ctx.bind(
             "to_string".to_string(),
             Value::new(CoreData::Function(FunKind::Udf(Udf {
-                func: |args, _catalog, _deriver| match &args[0].data {
-                    CoreData::Literal(lit) => {
-                        Value::new(CoreData::Literal(string(&format!("{:?}", lit))))
-                    }
-                    CoreData::Array(_) => Value::new(CoreData::Literal(string("<array>"))),
-                    _ => Value::new(CoreData::Literal(string("<unknown>"))),
-                },
+                func: Arc::new(|args, _catalog, _retriever| {
+                    Box::pin(async move {
+                        match &args[0].data {
+                            CoreData::Literal(lit) => {
+                                Value::new(CoreData::Literal(string(&format!("{:?}", lit))))
+                            }
+                            CoreData::Array(_) => Value::new(CoreData::Literal(string("<array>"))),
+                            _ => Value::new(CoreData::Literal(string("<unknown>"))),
+                        }
+                    })
+                }),
             }))),
         );
 

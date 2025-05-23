@@ -1,7 +1,6 @@
 use super::{
-    ContinueWithCostedTask, ContinueWithLogicalTask, CostExpressionTask, ExploreGroupTask,
-    ForkCostedTask, ForkLogicalTask, ImplementExpressionTask, OptimizeGoalTask, OptimizePlanTask,
-    Task, TaskId, TransformExpressionTask,
+    ContinueWithLogicalTask, ExploreGroupTask, ForkLogicalTask, ImplementExpressionTask,
+    OptimizeGoalTask, OptimizePlanTask, Task, TaskId, TransformExpressionTask,
 };
 use crate::{memo::Memo, optimizer::Optimizer};
 
@@ -36,7 +35,6 @@ impl<M: Memo> Optimizer<M> {
     // Direct task type access by ID - immutable versions
 
     /// Get a task as an OptimizePlanTask by its ID.
-    #[allow(dead_code)]
     pub(crate) fn get_optimize_plan_task(&self, task_id: TaskId) -> Option<&OptimizePlanTask> {
         self.get_task(task_id).and_then(|task| match &task {
             Task::OptimizePlan(task) => Some(task),
@@ -45,7 +43,6 @@ impl<M: Memo> Optimizer<M> {
     }
 
     /// Get a task as an OptimizeGoalTask by its ID.
-    #[allow(dead_code)]
     pub(crate) fn get_optimize_goal_task(&self, task_id: TaskId) -> Option<&OptimizeGoalTask> {
         self.get_task(task_id).and_then(|task| match &task {
             Task::OptimizeGoal(task) => Some(task),
@@ -62,7 +59,6 @@ impl<M: Memo> Optimizer<M> {
     }
 
     /// Get a task as an ImplementExpressionTask by its ID.
-    #[allow(dead_code)]
     pub(crate) fn get_implement_expression_task(
         &self,
         task_id: TaskId,
@@ -84,28 +80,10 @@ impl<M: Memo> Optimizer<M> {
         })
     }
 
-    /// Get a task as a CostExpressionTask by its ID.
-    #[allow(dead_code)]
-    pub(crate) fn get_cost_expression_task(&self, task_id: TaskId) -> Option<&CostExpressionTask> {
-        self.get_task(task_id).and_then(|task| match &task {
-            Task::CostExpression(task) => Some(task),
-            _ => None,
-        })
-    }
-
     /// Get a task as a ForkLogicalTask by its ID.
     pub(crate) fn get_fork_logical_task(&self, task_id: TaskId) -> Option<&ForkLogicalTask> {
         self.get_task(task_id).and_then(|task| match &task {
             Task::ForkLogical(task) => Some(task),
-            _ => None,
-        })
-    }
-
-    /// Get a task as a ForkCostedTask by its ID.
-    #[allow(dead_code)]
-    pub(crate) fn get_fork_costed_task(&self, task_id: TaskId) -> Option<&ForkCostedTask> {
-        self.get_task(task_id).and_then(|task| match &task {
-            Task::ForkCosted(task) => Some(task),
             _ => None,
         })
     }
@@ -121,22 +99,9 @@ impl<M: Memo> Optimizer<M> {
         })
     }
 
-    /// Get a task as a ContinueWithCostedTask by its ID.
-    #[allow(dead_code)]
-    pub(crate) fn get_continue_with_costed_task(
-        &self,
-        task_id: TaskId,
-    ) -> Option<&ContinueWithCostedTask> {
-        self.get_task(task_id).and_then(|task| match &task {
-            Task::ContinueWithCosted(task) => Some(task),
-            _ => None,
-        })
-    }
-
     // Direct task type access by ID - mutable versions
 
     /// Get a mutable task as an OptimizePlanTask by its ID.
-    #[allow(dead_code)]
     pub(crate) fn get_optimize_plan_task_mut(
         &mut self,
         task_id: TaskId,
@@ -170,7 +135,6 @@ impl<M: Memo> Optimizer<M> {
     }
 
     /// Get a mutable task as an ImplementExpressionTask by its ID.
-    #[allow(dead_code)]
     pub(crate) fn get_implement_expression_task_mut(
         &mut self,
         task_id: TaskId,
@@ -192,18 +156,6 @@ impl<M: Memo> Optimizer<M> {
         })
     }
 
-    /// Get a mutable task as a CostExpressionTask by its ID.
-    #[allow(dead_code)]
-    pub(crate) fn get_cost_expression_task_mut(
-        &mut self,
-        task_id: TaskId,
-    ) -> Option<&mut CostExpressionTask> {
-        self.get_task_mut(task_id).and_then(|task| match task {
-            Task::CostExpression(task) => Some(task),
-            _ => None,
-        })
-    }
-
     /// Get a mutable task as a ForkLogicalTask by its ID.
     pub(crate) fn get_fork_logical_task_mut(
         &mut self,
@@ -215,18 +167,6 @@ impl<M: Memo> Optimizer<M> {
         })
     }
 
-    /// Get a mutable task as a ForkCostedTask by its ID.
-    #[allow(dead_code)]
-    pub(crate) fn get_fork_costed_task_mut(
-        &mut self,
-        task_id: TaskId,
-    ) -> Option<&mut ForkCostedTask> {
-        self.get_task_mut(task_id).and_then(|task| match task {
-            Task::ForkCosted(task) => Some(task),
-            _ => None,
-        })
-    }
-
     /// Get a mutable task as a ContinueWithLogicalTask by its ID.
     pub(crate) fn get_continue_with_logical_task_mut(
         &mut self,
@@ -234,18 +174,6 @@ impl<M: Memo> Optimizer<M> {
     ) -> Option<&mut ContinueWithLogicalTask> {
         self.get_task_mut(task_id).and_then(|task| match task {
             Task::ContinueWithLogical(task) => Some(task),
-            _ => None,
-        })
-    }
-
-    /// Get a mutable task as a ContinueWithCostedTask by its ID.
-    #[allow(dead_code)]
-    pub(crate) fn get_continue_with_costed_task_mut(
-        &mut self,
-        task_id: TaskId,
-    ) -> Option<&mut ContinueWithCostedTask> {
-        self.get_task_mut(task_id).and_then(|task| match task {
-            Task::ContinueWithCosted(task) => Some(task),
             _ => None,
         })
     }

@@ -1,7 +1,7 @@
-use super::jobs::{CostedContinuation, LogicalContinuation};
+use super::jobs::LogicalContinuation;
 use crate::cir::{
-    Cost, GoalId, GroupId, ImplementationRule, LogicalExpressionId, LogicalPlan,
-    PhysicalExpressionId, PhysicalPlan, TransformationRule,
+    GoalId, GroupId, ImplementationRule, LogicalExpressionId, LogicalPlan, PhysicalPlan,
+    TransformationRule,
 };
 use hashbrown::HashSet;
 use tokio::sync::mpsc::Sender;
@@ -23,17 +23,10 @@ pub(crate) enum Task {
     OptimizePlan(OptimizePlanTask),
     OptimizeGoal(OptimizeGoalTask),
     ExploreGroup(ExploreGroupTask),
-    #[allow(dead_code)]
     ImplementExpression(ImplementExpressionTask),
     TransformExpression(TransformExpressionTask),
-    #[allow(dead_code)]
-    CostExpression(CostExpressionTask),
     ForkLogical(ForkLogicalTask),
-    #[allow(dead_code)]
-    ForkCosted(ForkCostedTask),
     ContinueWithLogical(ContinueWithLogicalTask),
-    #[allow(dead_code)]
-    ContinueWithCosted(ContinueWithCostedTask),
 }
 
 //=============================================================================
@@ -65,8 +58,6 @@ pub(crate) struct OptimizeGoalTask {
     /// `OptimizeGoalTask` parent goals that this task is simultaneously
     /// producing for.
     pub optimize_goal_out: HashSet<TaskId>,
-    /// `ForkCostedTask` subscribed to this goal.
-    pub fork_costed_out: HashSet<TaskId>,
 
     // Input tasks that feed this task.
     /// `OptimizeGoalTask` member (children) goals producing for this goal.
@@ -76,8 +67,6 @@ pub(crate) struct OptimizeGoalTask {
     pub explore_group_in: TaskId,
     /// `ImplementExpressionTask` rules that are implementing logical expressions.
     pub implement_expression_in: HashSet<TaskId>,
-    /// `CostExpressionTask` costing of physical expressions.
-    pub cost_expression_in: HashSet<TaskId>,
 }
 
 /// Task to explore expressions in a logical group.
@@ -121,10 +110,10 @@ pub(crate) struct TransformExpressionTask {
 
 /// Task to implement a logical expression into a physical expression.
 #[derive(Clone)]
-#[allow(dead_code)]
 pub(crate) struct ImplementExpressionTask {
     /// The implementation rule to apply.
-    pub rule: ImplementationRule,
+    /// NOTE: Variable not used but kept for observability.
+    pub _rule: ImplementationRule,
     /// The logical expression to implement.
     pub expression_id: LogicalExpressionId,
 
@@ -135,25 +124,6 @@ pub(crate) struct ImplementExpressionTask {
     // Input tasks that feed this task.
     /// `ForkLogicalTask` logical fork points encountered during the
     /// implementation.
-    pub fork_in: Option<TaskId>,
-}
-
-/// Task to cost a physical expression.
-#[derive(Clone)]
-#[allow(dead_code)]
-pub(crate) struct CostExpressionTask {
-    /// The physical expression to cost.
-    pub expression_id: PhysicalExpressionId,
-    /// The current upper bound on the allowed cost budget.
-    pub budget: Cost,
-
-    // Output tasks that get fed by the output of this task.
-    /// `OptimizeGoalTask` corresponding goal optimization task.
-    pub optimize_goal_out: HashSet<TaskId>,
-
-    // Input tasks that feed this task.
-    /// `ForkCostedTask` cost fork points encountered during the
-    /// costing.
     pub fork_in: Option<TaskId>,
 }
 
@@ -177,27 +147,6 @@ pub(crate) struct ForkLogicalTask {
     pub continue_with_logical_in: HashSet<TaskId>,
 }
 
-/// Task to fork the costed optimization process.
-#[derive(Clone)]
-#[allow(dead_code)]
-pub(crate) struct ForkCostedTask {
-    /// The fork continuation.
-    pub continuation: CostedContinuation,
-    /// The current upper bound on the allowed cost budget.
-    pub budget: Cost,
-
-    /// `ContinueWithCostedTask` | `CostExpressionTask` that gets fed by the
-    /// output of this task.
-    pub out: TaskId,
-
-    // Input tasks that feed this task.
-    /// `OptimizeGoalTask` corresponding goal optimization task producing
-    /// costed expressions.
-    pub optimize_goal_in: TaskId,
-    /// `ContinueWithCosted` tasks spawned off and producing for this task.
-    pub continue_with_costed_in: HashSet<TaskId>,
-}
-
 /// Task to continue with a logical expression.
 #[derive(Clone)]
 pub(crate) struct ContinueWithLogicalTask {
@@ -207,18 +156,5 @@ pub(crate) struct ContinueWithLogicalTask {
     /// `ForkLogicalTask` that gets fed by the output of this continuation.
     pub fork_out: TaskId,
     /// Potential `ForkLogicalTask` fork spawned off from this task.
-    pub fork_in: Option<TaskId>,
-}
-
-/// Task to continue with a costed expression.
-#[derive(Clone)]
-#[allow(dead_code)]
-pub(crate) struct ContinueWithCostedTask {
-    /// The physical expression to continue with.
-    pub expression_id: PhysicalExpressionId,
-
-    /// `ForkCostedTask` that gets fed by the output of this continuation.
-    pub fork_out: TaskId,
-    /// Potential `ForkCostedTask` fork spawned off from this task.
     pub fork_in: Option<TaskId>,
 }

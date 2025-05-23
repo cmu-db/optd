@@ -1,12 +1,10 @@
-
-use rand::rngs::StdRng;
+use crate::cir::{Child, GroupId, LogicalExpression, LogicalProperties, OperatorData};
+use crate::memo::Memo;
 use rand::distributions::WeightedIndex;
 use rand::prelude::*;
+use rand::rngs::StdRng;
 use std::cmp::max;
 use std::collections::HashSet;
-use std::time::Instant;
-use crate::cir::{LogicalExpression, LogicalProperties, OperatorData, GroupId, Child};
-use crate::memo::{Memo,Materialize};
 
 #[derive(Clone)]
 pub struct FuzzExpression {
@@ -34,8 +32,6 @@ impl FuzzData {
         // FIXME: MAGIC NUMBERS
         let weights = [10, 30, 30]; // distribution operator arity
         let proximity = 4; // proximity factor (1 for no proximity preference)
-
-        let start = Instant::now();
 
         let mut memo = FuzzData {
             exprs: Vec::new(),
@@ -97,7 +93,10 @@ impl FuzzData {
 
             if ngen > 0 {
                 let group_id = memo.groups.len();
-                memo.groups.push(FuzzGroup { exprs: exprs, id: group_id });
+                memo.groups.push(FuzzGroup {
+                    exprs,
+                    id: group_id,
+                });
 
                 // While we don't have enough groups, collect operands for future expressions
                 if group_id < ngroups && dag {
@@ -141,22 +140,24 @@ impl FuzzData {
                     v
                 } else {
                     // don't trigger merge 1,2,3,4,5,6,7 --> 1,2,3 - 3,4,5, - 5,6,7
-                    g.exprs[chunk-1..].to_vec()
+                    g.exprs[chunk - 1..].to_vec()
                 };
                 groups[i].exprs = upd;
-                groups.push(FuzzGroup { exprs: rest, id: gid })
+                groups.push(FuzzGroup {
+                    exprs: rest,
+                    id: gid,
+                })
             }
-            i = i+1;
+            i = i + 1;
         }
 
         FuzzData {
             exprs: self.exprs.clone(),
-            groups: groups,
+            groups,
             entry: self.entry,
         }
     }
 }
-
 
 pub struct Fuzzer<M: Memo> {
     memo: M,
@@ -181,9 +182,24 @@ impl<M: Memo> Fuzzer<M> {
                 let e = &memo.exprs[*j];
 
                 let expr = match e.op {
-                    0 => LogicalExpression { tag: "Scan".to_string(), data: vec![OperatorData::Int64(*j as i64)], children: vec![] },
-                    1 => LogicalExpression { tag: "Filter".to_string(), data: vec![OperatorData::Int64(*j as i64)], children: vec![Child::Singleton(self.group_ids[e.children[0]])] },
-                    2 => LogicalExpression { tag: "Filter".to_string(), data: vec![OperatorData::Int64(*j as i64)], children: vec![Child::Singleton(self.group_ids[e.children[0]]), Child::Singleton(self.group_ids[e.children[1]])] },
+                    0 => LogicalExpression {
+                        tag: "Scan".to_string(),
+                        data: vec![OperatorData::Int64(*j as i64)],
+                        children: vec![],
+                    },
+                    1 => LogicalExpression {
+                        tag: "Filter".to_string(),
+                        data: vec![OperatorData::Int64(*j as i64)],
+                        children: vec![Child::Singleton(self.group_ids[e.children[0]])],
+                    },
+                    2 => LogicalExpression {
+                        tag: "Filter".to_string(),
+                        data: vec![OperatorData::Int64(*j as i64)],
+                        children: vec![
+                            Child::Singleton(self.group_ids[e.children[0]]),
+                            Child::Singleton(self.group_ids[e.children[1]]),
+                        ],
+                    },
                     _ => unreachable!(),
                 };
 
@@ -191,7 +207,10 @@ impl<M: Memo> Fuzzer<M> {
                 let gid = match self.memo.find_logical_expr_group(eid).await.unwrap() {
                     None => {
                         // new expression, create a (temporary) group
-                        self.memo.create_group(eid, &LogicalProperties(None)).await.unwrap()
+                        self.memo
+                            .create_group(eid, &LogicalProperties(None))
+                            .await
+                            .unwrap()
                     }
                     Some(id) => {
                         // expression already existed, just use its group
@@ -218,7 +237,11 @@ impl<M: Memo> Fuzzer<M> {
     pub async fn check(&mut self, memo: &FuzzData) {
         let mut _tot = 0;
         for g in 0..memo.groups.len() {
-            let group_expressions = self.memo.get_all_logical_exprs(self.group_ids[g]).await.unwrap();
+            let group_expressions = self
+                .memo
+                .get_all_logical_exprs(self.group_ids[g])
+                .await
+                .unwrap();
 
             // do something with it
             let mut ids = vec![];

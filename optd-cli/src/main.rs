@@ -34,13 +34,12 @@
 
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use optd::catalog::Catalog;
 use optd::catalog::iceberg::memory_catalog;
 use optd::dsl::analyzer::hir::{CoreData, HIR, Udf, Value};
 use optd::dsl::compile::{Config, compile_hir};
 use optd::dsl::engine::{Continuation, Engine, EngineResponse};
 use optd::dsl::utils::errors::{CompileError, Diagnose};
-use optd::dsl::utils::retriever::{MockRetriever, Retriever};
+use optd::dsl::utils::retriever::MockRetriever;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::runtime::Builder;
@@ -66,22 +65,17 @@ enum Commands {
     RunFunctions(Config),
 }
 
-/// A unimplemented user-defined function.
-pub fn unimplemented_udf(
-    _args: &[Value],
-    _catalog: &dyn Catalog,
-    _retriever: &dyn Retriever,
-) -> Value {
-    println!("This user-defined function is unimplemented!");
-    Value::new(CoreData::<Value>::None)
-}
-
 fn main() -> Result<(), Vec<CompileError>> {
     let cli = Cli::parse();
 
     let mut udfs = HashMap::new();
     let udf = Udf {
-        func: unimplemented_udf,
+        func: Arc::new(|_, _, _| {
+            Box::pin(async move {
+                println!("This user-defined function is unimplemented!");
+                Value::new(CoreData::<Value>::None)
+            })
+        }),
     };
     udfs.insert("unimplemented_udf".to_string(), udf.clone());
 

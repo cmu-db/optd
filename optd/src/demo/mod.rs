@@ -1,21 +1,53 @@
 use crate::{
-    catalog::iceberg::memory_catalog,
+    catalog::{Catalog, iceberg::memory_catalog},
     dsl::{
-        analyzer::hir::Value,
+        analyzer::hir::{CoreData, LogicalOp, Materializable, Udf, Value},
         compile::{Config, compile_hir},
         engine::{Continuation, Engine, EngineResponse},
-        utils::retriever::MockRetriever,
+        utils::retriever::{MockRetriever, Retriever},
     },
     memo::MemoryMemo,
-    optimizer::{OptimizeRequest, Optimizer, hir_cir::into_cir::value_to_logical},
+    optimizer::{ClientRequest, OptimizeRequest, Optimizer, hir_cir::into_cir::value_to_logical},
 };
 use std::{collections::HashMap, sync::Arc, time::Duration};
-use tokio::{sync::mpsc, time::timeout};
+use tokio::{
+    sync::mpsc,
+    time::{sleep, timeout},
+};
+
+pub async fn properties(
+    args: Vec<Value>,
+    _catalog: Arc<dyn Catalog>,
+    retriever: Arc<dyn Retriever>,
+) -> Value {
+    let arg = args[0].clone();
+    let group_id = match &arg.data {
+        CoreData::Logical(Materializable::Materialized(LogicalOp { group_id, .. })) => {
+            group_id.unwrap()
+        }
+        CoreData::Logical(Materializable::UnMaterialized(group_id)) => *group_id,
+        _ => panic!("Expected a logical plan"),
+    };
+
+    retriever.get_properties(group_id).await
+}
 
 async fn run_demo() {
     // Compile the HIR.
     let config = Config::new("src/demo/demo.opt".into());
-    let udfs = HashMap::new();
+
+    // Create a properties UDF.
+    let properties_udf = Udf {
+        func: Arc::new(|args, catalog, retriever| {
+            Box::pin(async move { properties(args, catalog, retriever).await })
+        }),
+    };
+
+    // Create the UDFs HashMap.
+    let mut udfs = HashMap::new();
+    udfs.insert("properties".to_string(), properties_udf);
+
+    // Compile with the config and UDFs.
     let hir = compile_hir(config, udfs).unwrap();
 
     // Create necessary components.
@@ -35,15 +67,15 @@ async fn run_demo() {
     let optimize_channel = Optimizer::launch(memo, catalog, hir);
     let (tx, mut rx) = mpsc::channel(1);
     optimize_channel
-        .send(OptimizeRequest {
-            plan: logical_plan,
-            physical_tx: tx,
-        })
+        .send(ClientRequest::Optimize(OptimizeRequest {
+            plan: logical_plan.clone(),
+            physical_tx: tx.clone(),
+        }))
         .await
         .unwrap();
 
-    // Timeout after 2 seconds.
-    let timeout_duration = Duration::from_secs(2);
+    // Timeout after 5 seconds.
+    let timeout_duration = Duration::from_secs(5);
     let result = timeout(timeout_duration, async {
         while let Some(response) = rx.recv().await {
             println!("Received response: {:?}", response);
@@ -55,6 +87,13 @@ async fn run_demo() {
         Ok(_) => println!("Finished receiving responses."),
         Err(_) => println!("Timed out after 5 seconds."),
     }
+
+    // Dump the memo (debug utility).
+    optimize_channel
+        .send(ClientRequest::DumpMemo)
+        .await
+        .unwrap();
+    sleep(Duration::from_secs(10)).await;
 }
 
 #[cfg(test)]

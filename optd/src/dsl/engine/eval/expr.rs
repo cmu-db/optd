@@ -588,7 +588,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
             Arc::new(move |arg_values| {
                 Box::pin(capture!([udf, catalog, deriver, k], async move {
                     // Call the UDF with the argument values.
-                    let result = udf.call(&arg_values, catalog.as_ref(), deriver.as_ref());
+                    let result = udf.call(&arg_values, catalog, deriver).await;
 
                     // Pass the result to the continuation.
                     k(result).await
@@ -1143,18 +1143,22 @@ mod tests {
 
         // Define a Rust UDF that calculates the sum of array elements
         let sum_function = Value::new(CoreData::Function(FunKind::Udf(Udf {
-            func: |args, _catalog, _deriver| match &args[0].data {
-                CoreData::Array(elements) => {
-                    let mut sum = 0;
-                    for elem in elements {
-                        if let CoreData::Literal(Literal::Int64(value)) = &elem.data {
-                            sum += value;
+            func: Arc::new(|args, _catalog, _retriever| {
+                Box::pin(async move {
+                    match &args[0].data {
+                        CoreData::Array(elements) => {
+                            let mut sum: i64 = 0;
+                            for elem in elements {
+                                if let CoreData::Literal(Literal::Int64(value)) = &elem.data {
+                                    sum += value;
+                                }
+                            }
+                            Value::new(CoreData::Literal(Literal::Int64(sum)))
                         }
+                        _ => panic!("Expected array argument"),
                     }
-                    Value::new(CoreData::Literal(Literal::Int64(sum)))
-                }
-                _ => panic!("Expected array argument"),
-            },
+                })
+            }),
         })));
 
         ctx.bind("sum".to_string(), sum_function);
@@ -1271,16 +1275,18 @@ mod tests {
         ctx.bind(
             "get".to_string(),
             Value::new(CoreData::Function(FunKind::Udf(Udf {
-                func: |args, _catalog, _deriver| {
-                    if args.len() != 2 {
-                        panic!("get function requires 2 arguments");
-                    }
+                func: Arc::new(|args, _catalog, _retriever| {
+                    Box::pin(async move {
+                        if args.len() != 2 {
+                            panic!("get function requires 2 arguments");
+                        }
 
-                    match &args[0].data {
-                        CoreData::Map(map) => map.get(&args[1]),
-                        _ => panic!("First argument must be a map"),
-                    }
-                },
+                        match &args[0].data {
+                            CoreData::Map(map) => map.get(&args[1]),
+                            _ => panic!("First argument must be a map"),
+                        }
+                    })
+                }),
             }))),
         );
 
