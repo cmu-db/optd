@@ -4,7 +4,7 @@
 
 optd is a high-performance, extensible optimizer-as-a-service, built to support research in cardinality estimation, adaptive planning, AI-driven optimization, and parallelism. It serves as both a prototype system and a foundation for building production-ready optimizers.
 
-## ✨ Core Features
+## Core Features
 
 **🔍 Flexible Search Strategy**: Unlike traditional recursive sub-plan optimizers, optd supports broader, non-recursive search spaces for faster and better plan discovery.
 
@@ -83,7 +83,7 @@ cargo run --bin optd-cli -- compile path/to/file.opt --mock-udfs map get_table_s
 cargo run --bin optd-cli -- run-functions path/to/file.opt
 ```
 
-## 🧮 TODO: How to Perform Costing
+## TODO: How to Perform Costing
 
 Physical expressions need to be costed. Their children are either goals or other physical expressions (called goal members). Let's take the following example: `EXPR(goal_1, sub_expr_2)`. To cost that expression, we have multiple approaches:
 
