@@ -1,20 +1,20 @@
-# optd
+# 🚀 optd
 
 [![codecov](https://codecov.io/gh/cmu-db/optd/graph/badge.svg?token=FYM7I3R3GZ)](https://codecov.io/gh/cmu-db/optd)
 
 optd is a high-performance, extensible optimizer-as-a-service, built to support research in cardinality estimation, adaptive planning, AI-driven optimization, and parallelism. It serves as both a prototype system and a foundation for building production-ready optimizers.
 
-## Core Features
+## ✨ Core Features
 
-**Flexible Search Strategy**: Unlike traditional recursive sub-plan optimizers, optd supports broader, non-recursive search spaces for faster and better plan discovery.
+**🔍 Flexible Search Strategy**: Unlike traditional recursive sub-plan optimizers, optd supports broader, non-recursive search spaces for faster and better plan discovery.
 
-**Parallelism**:
+**⚡ Parallelism**:
 - *Inter-query*: Optimize multiple queries in parallel while sharing computation
 - *Intra-query*: Explore a single plan's search space using many threads
 
-**Persistent Memoization**: The optimizer acts like a database—plans and statistics are stored and reused, enabling adaptivity through feedback from prior executions.
+**💾 Persistent Memoization**: The optimizer acts like a database—plans and statistics are stored and reused, enabling adaptivity through feedback from prior executions.
 
-**Rule DSL**: Define transformation rules in a high-level, expressive DSL. Our rule engine is Turing complete, enabling compact definitions of complex transformations like join order enumeration.
+**📝 Rule DSL**: Define transformation rules in a high-level, expressive DSL. Our rule engine is Turing complete, enabling compact definitions of complex transformations like join order enumeration.
 
 **Example Data Type Definition**:
 ```
@@ -50,13 +50,13 @@ fn (expr: Logical*) join_commute(): Logical? = match expr
     \ _ -> none
 ```
 
-**Pluggable Scheduling**: Apply rules using customizable scheduling strategies—from heuristics to AI-guided decisions.
+**🔧 Pluggable Scheduling**: Apply rules using customizable scheduling strategies—from heuristics to AI-guided decisions.
 
-**Explainability**: Track rule application history for better debugging and plan introspection.
+**🔍 Explainability**: Track rule application history for better debugging and plan introspection.
 
-**Extensibility**: Define custom operators and inherit existing rules. Designed to integrate with standards like Substrait, with a smoother UX than systems like Calcite.
+**🔌 Extensibility**: Define custom operators and inherit existing rules. Designed to integrate with standards like Substrait, with a smoother UX than systems like Calcite.
 
-## Usage
+## 🛠️ Usage
 
 optd is currently under development. The costing mechanism is still being implemented, but there is a small demo available. The DSL tooling is more mature.
 
@@ -83,7 +83,7 @@ cargo run --bin optd-cli -- compile path/to/file.opt --mock-udfs map get_table_s
 cargo run --bin optd-cli -- run-functions path/to/file.opt
 ```
 
-## TODO: How to Perform Costing
+## 🧮 TODO: How to Perform Costing
 
 Physical expressions need to be costed. Their children are either goals or other physical expressions (called goal members). Let's take the following example: `EXPR(goal_1, sub_expr_2)`. To cost that expression, we have multiple approaches:
 
@@ -130,4 +130,6 @@ This approach is excellent because:
 
 **Only caveat**: Cost pruning has no built-in mechanism, but you can instrument the scheduler.
 
-**Contact**: Please reach out to aschlome@cs.cmu.edu for more information about this.
+---
+
+**📧 Contact**: Please reach out to aschlome@cs.cmu.edu for more information about this.
