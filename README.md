@@ -115,7 +115,7 @@ Recursively optimally cost `goal_1` and `sub_expr_2`. This approach is challengi
 ### Approach 2: Explore All Possibilities
 Explore all possibilities and rely on the scheduler to avoid combinatorial explosion. This is more in line with what we do for transformations and implementations. We can define a costing function in the DSL with the following signature:
 
-```rust
+```
 fn (plan: Physical*) cost(): (f64, Statistics)
 ```
 
@@ -127,12 +127,12 @@ When we encounter a goal, we expand it and materialize all physical expressions 
 
 ### Approach 3: Final Approach (Best of All Worlds)
 
-```rust
+```
 // This is a UDF/external function, similar to optimize for implementations
 fn (plan: Physical) into_costed(cost: f64, stats: Statistics)
 ```
 
-```rust
+```
 fn (plan: Physical*) cost(): Physical$
 ```
 
