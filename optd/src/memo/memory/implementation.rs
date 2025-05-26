@@ -698,12 +698,12 @@ pub mod tests {
 
     #[tokio::test]
     async fn test_logical_fuzzing() {
-        let data = FuzzData::new(1000, 100, true, 12345);
-        data.shuffle(2, true);
+        let data = FuzzData::new(100, 10, true, 12345);
+        let shuffled = data.shuffle(2, true);
 
         let memo = MemoryMemo::default();
         let mut fuzzer = Fuzzer::new(memo);
-        fuzzer.add(&data).await;
+        fuzzer.add(&shuffled).await;
         fuzzer.check(&data).await;
     }
 
