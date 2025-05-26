@@ -58,48 +58,29 @@ fn (expr: Logical*) join_commute(): Logical? = match expr
 
 ## Usage
 
+optd is currently under development. The costing mechanism is still being implemented, but there is a small demo available. The DSL tooling is more mature.
+
+### Running the Demo
+
+```bash
+# Run the demo test (located in optd/src/demo/mod.rs)
+cargo test test_optimizer_demo -- --nocapture
+```
+
 ### CLI Tool
 
-The optd-cli provides a command-line interface for the Optimizer DSL compiler:
-
 ```bash
-# Compile a DSL file (parse and analyze)
-optd-cli compile path/to/file.opt
+# Compile a DSL file
+cargo run --bin optd-cli -- compile path/to/file.opt
 
-# Compile with verbose output
-optd-cli compile path/to/file.opt --verbose
-
-# Print intermediate representations
-optd-cli compile path/to/file.opt --verbose --show-ast --show-typedspan-hir --show-hir
+# Compile with verbose output and show intermediate representations
+cargo run --bin optd-cli -- compile path/to/file.opt --verbose --show-ast --show-hir
 
 # Compile with mock UDFs for testing
-optd-cli compile path/to/file.opt --mock-udfs map get_table_schema properties statistics optimize
+cargo run --bin optd-cli -- compile path/to/file.opt --mock-udfs map get_table_schema properties statistics optimize
 
 # Run functions marked with [run] annotation
-optd-cli run-functions path/to/file.opt
-
-# Get help
-optd-cli --help
-optd-cli compile --help
-```
-
-### Development
-
-When developing, you can run through cargo:
-
-```bash
-cargo run --bin optd-cli -- compile path/to/example.opt
-cargo run --bin optd-cli -- compile path/to/example.opt --verbose
-cargo run --bin optd-cli -- compile path/to/example.opt --verbose --show-ast --show-hir
-cargo run --bin optd-cli -- compile path/to/example.opt --mock-udfs hello get_schema world
-cargo run --bin optd-cli -- run-functions path/to/example.opt
-```
-
-### DSL Tutorial
-
-You can compile the tutorial file with:
-```bash
-cargo run --bin optd-cli -- compile [path] --mock-udfs map get_table_schema properties statistics optimize
+cargo run --bin optd-cli -- run-functions path/to/file.opt
 ```
 
 ## TODO: How to Perform Costing
