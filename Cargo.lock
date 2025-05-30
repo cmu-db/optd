@@ -2020,6 +2020,7 @@ dependencies = [
  "iceberg-catalog-memory",
  "once_cell",
  "ordered-float 5.0.0",
+ "rand 0.8.5",
  "tempfile",
  "tokio",
  "trait-variant",

@@ -237,3 +237,6 @@ pub trait Memo: Representative + Materialize + Sync + 'static {
         member_id: GoalMemberId,
     ) -> Result<bool, Self::MemoError>;
 }
+
+#[cfg(test)]
+mod fuzz;
