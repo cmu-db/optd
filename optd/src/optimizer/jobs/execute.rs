@@ -19,6 +19,7 @@ use crate::{
 };
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
+use tracing::Instrument;
 
 impl<M: Memo> Optimizer<M> {
     /// Executes a job to derive logical properties for a logical expression.
@@ -29,6 +30,7 @@ impl<M: Memo> Optimizer<M> {
     /// # Parameters
     /// * `expression_id`: The ID of the logical expression to derive properties for.
     /// * `job_id`: The ID of the job to be executed.
+    #[tracing::instrument(skip(self), fields(job_id, expr_id = ?expression_id), target="optd::optimizer::jobs")]
     pub(super) async fn derive_logical_properties(
         &self,
         expression_id: LogicalExpressionId,
@@ -54,22 +56,28 @@ impl<M: Memo> Optimizer<M> {
                   // with how costing is handled (i.e. with $ and *).
         );
 
+        tracing::debug!(target: "optd::optimizer::jobs", "Launching DSL engine for 'derive'");
         let message_tx = self.message_tx.clone();
-        tokio::spawn(async move {
-            let response = engine
-                .launch(
-                    "derive",
-                    vec![plan],
-                    Arc::new(move |logical_props| {
-                        Box::pin(async move {
-                            CreateGroup(expression_id, value_to_logical_properties(&logical_props))
-                        })
-                    }),
-                )
-                .await;
+        tokio::spawn(
+            async move {
+                let response = engine
+                    .launch(
+                        "derive",
+                        vec![plan],
+                        Arc::new(move |logical_props| {
+                            Box::pin(async move {
+                                CreateGroup(
+                                    expression_id,
+                                    value_to_logical_properties(&logical_props),
+                                )
+                            })
+                        }),
+                    )
+                    .await;
 
-            Self::process_engine_response(job_id, message_tx, response).await;
-        });
+                Self::process_engine_response(job_id, message_tx, response).await;
+            }
+            .instrument(tracing::debug_span!(target: "optd::optimizer::jobs", "derive_job_execution", job_id = ?job_id, expression_id = ?expression_id)));
 
         Ok(())
     }
@@ -84,6 +92,7 @@ impl<M: Memo> Optimizer<M> {
     /// * `expression_id`: The ID of the logical expression to transform.
     /// * `group_id`: The ID of the group to which the transformed expression belongs.
     /// * `job_id`: The ID of the job to be executed.
+    #[tracing::instrument(skip(self), fields(job_id, rule = %rule_name.0, expr_id = ?expression_id, group_id = ?group_id), target="optd::optimizer::jobs")]
     pub(super) async fn execute_transformation_rule(
         &self,
         rule_name: TransformationRule,
@@ -105,25 +114,31 @@ impl<M: Memo> Optimizer<M> {
             Some(group_id),
         );
 
+        tracing::debug!(target: "optd::optimizer::jobs", "Launching DSL engine for transformation rule '{}'", rule_name.0);
         let message_tx = self.message_tx.clone();
-        tokio::spawn(async move {
-            let response = engine
-                .launch(
-                    &rule_name.0,
-                    vec![plan],
-                    Arc::new(move |output| {
-                        Box::pin(async move {
-                            NewLogicalPartial(value_to_partial_logical(&output), group_id)
-                        })
-                    }),
-                )
-                .await;
+        let rule_name_clone = rule_name.0.clone();
+        tokio::spawn(
+            async move {
+                let response = engine
+                    .launch(
+                        &rule_name.0,
+                        vec![plan],
+                        Arc::new(move |output| {
+                            Box::pin(async move {
+                                NewLogicalPartial(value_to_partial_logical(&output), group_id)
+                            })
+                        }),
+                    )
+                    .await;
 
-            // A none result means the rule was not applicable.
-            if !matches!(response, Return(Value { data: None, .. }, _)) {
-                Self::process_engine_response(job_id, message_tx, response).await;
+                // A none result means the rule was not applicable.
+                if !matches!(response, Return(Value { data: None, .. }, _)) {
+                    Self::process_engine_response(job_id, message_tx, response).await;
+                } else {
+                    tracing::debug!(target: "optd::optimizer::rules", rule_name=%rule_name.0, "Rule not applicable or returned None");
+                }
             }
-        });
+            .instrument(tracing::debug_span!(target: "optd::optimizer::jobs", "transform_job_execution", job_id = ?job_id, rule_name = %rule_name_clone)));
 
         Ok(())
     }
@@ -138,6 +153,7 @@ impl<M: Memo> Optimizer<M> {
     /// * `expression_id`: The ID of the logical expression to implement.
     /// * `goal_id`: The ID of the goal to which the implementation belongs.
     /// * `job_id`: The ID of the job to be executed.
+    #[tracing::instrument(skip(self), fields(job_id, rule = %rule_name.0, expr_id = ?expression_id, goal_id = ?goal_id), target="optd::optimizer::jobs")]
     pub(super) async fn execute_implementation_rule(
         &self,
         rule_name: ImplementationRule,
@@ -160,22 +176,26 @@ impl<M: Memo> Optimizer<M> {
             Some(group_id),
         );
 
+        tracing::debug!(target: "optd::optimizer::jobs", "Launching DSL engine for implementation rule '{}'", rule_name.0);
         let message_tx = self.message_tx.clone();
-        tokio::spawn(async move {
-            let response = engine
-                .launch(
-                    &rule_name.0,
-                    vec![plan, properties],
-                    Arc::new(move |plan| {
-                        Box::pin(async move {
-                            NewPhysicalPartial(value_to_partial_physical(&plan), goal_id)
-                        })
-                    }),
-                )
-                .await;
+        let rule_name_clone = rule_name.0.clone();
+        tokio::spawn(
+            async move {
+                let response = engine
+                    .launch(
+                        &rule_name.0,
+                        vec![plan, properties],
+                        Arc::new(move |plan| {
+                            Box::pin(async move {
+                                NewPhysicalPartial(value_to_partial_physical(&plan), goal_id)
+                            })
+                        }),
+                    )
+                    .await;
 
-            Self::process_engine_response(job_id, message_tx, response).await;
-        });
+                Self::process_engine_response(job_id, message_tx, response).await;
+            }
+            .instrument(tracing::debug_span!(target: "optd::optimizer::jobs", "implement_job_execution", job_id = ?job_id, rule_name = %rule_name_clone)));
 
         Ok(())
     }
@@ -189,6 +209,7 @@ impl<M: Memo> Optimizer<M> {
     /// * `group_id`: The ID of the group to which the expression belongs.
     /// * `k`: The continuation function to be called with the materialized plan.
     /// * `job_id`: The ID of the job to be executed.
+    #[tracing::instrument(skip(self, k), fields(job_id, expr_id = ?expression_id, group_id = ?group_id), target="optd::optimizer::jobs")]
     pub(super) async fn execute_continue_with_logical(
         &self,
         expression_id: LogicalExpressionId,
@@ -208,15 +229,20 @@ impl<M: Memo> Optimizer<M> {
             Some(group_id),
         );
 
+        tracing::debug!(target: "optd::optimizer::jobs", "Executing logical continuation");
         let message_tx = self.message_tx.clone();
-        tokio::spawn(async move {
-            let response = k.0(plan).await;
+        tokio::spawn(
+            async move {
+                let response = k.0(plan).await;
 
-            // A none result means the rule was not applicable.
-            if !matches!(response, Return(Value { data: None, .. }, _)) {
-                Self::process_engine_response(job_id, message_tx, response).await;
+                // A none result means the rule was not applicable.
+                if !matches!(response, Return(Value { data: None, .. }, _)) {
+                    Self::process_engine_response(job_id, message_tx, response).await;
+                } else {
+                    tracing::debug!(target: "optd::optimizer::jobs", "Logical continuation returned None or was not applicable");
+                }
             }
-        });
+            .instrument(tracing::debug_span!(target: "optd::optimizer::jobs", "continue_logical_job_execution", job_id = ?job_id)));
 
         Ok(())
     }
@@ -235,6 +261,7 @@ impl<M: Memo> Optimizer<M> {
         engine_tx: Sender<OptimizerMessage>,
         response: EngineResponse<EngineProduct>,
     ) {
+        tracing::trace!(target: "optd::optimizer::jobs", job_id = ?job_id, "Processing engine response");
         use EngineProduct::*;
         use EngineResponse::*;
 
@@ -247,10 +274,9 @@ impl<M: Memo> Optimizer<M> {
             YieldGoal(_, _) => todo!("Decide what to do here depending on the cost model"),
         };
 
-        engine_tx
-            .send(msg)
-            .await
-            .expect("Failed to send message - channel closed");
+        if let Err(e) = engine_tx.send(msg).await {
+            tracing::error!(target: "optd::optimizer::jobs", job_id = ?job_id, "Failed to send optimizer message from job: {}", e);
+        }
     }
 
     /// Helper function to create a new engine instance.

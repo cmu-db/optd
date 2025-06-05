@@ -14,6 +14,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), OptimizeError>` - Success or an error that occurred during processing.
+    #[tracing::instrument(skip(self, result), target = "optd::optimizer::merge")]
     pub(super) async fn handle_merge_result(
         &mut self,
         result: MergeProducts,
@@ -50,6 +51,11 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), OptimizeError>` - Success or an error that occurred during processing.
+    #[tracing::instrument(
+        skip(self, group_merges),
+        name = "handle_group_merges",
+        target = "optd::optimizer::merge"
+    )]
     async fn handle_group_merges(
         &mut self,
         group_merges: &[MergeGroupProduct],
@@ -59,6 +65,7 @@ impl<M: Memo> Optimizer<M> {
             merged_groups,
         } in group_merges
         {
+            tracing::debug!(target: "optd::optimizer::merge", new_group_id = ?new_group_id, num_merged_groups = merged_groups.len(), "Processing group merge product");
             // For each merged group, get all group exploration tasks.
             // We don't need to check for the new group ID since it is guaranteed to be new.
             let group_explore_tasks: Vec<_> = merged_groups
@@ -67,6 +74,7 @@ impl<M: Memo> Optimizer<M> {
                 .collect();
 
             if !group_explore_tasks.is_empty() {
+                tracing::debug!(target: "optd::optimizer::merge", new_group_id = ?new_group_id, num_related_explore_tasks = group_explore_tasks.len(), "Found related group exploration tasks");
                 let all_logical_exprs = self.memo.get_all_logical_exprs(*new_group_id).await?;
 
                 let (principal_task_id, secondary_task_ids) =
@@ -78,11 +86,13 @@ impl<M: Memo> Optimizer<M> {
                     self.dedup_tasks(*task_id).await?;
                     // Step 2: Send *new* logical expressions to each task.
                     let is_principal = task_id == principal_task_id;
+                    tracing::debug!(target: "optd::optimizer::merge", task_id = ?task_id, is_principal, "Updating task with new expressions from merged group");
                     self.update_tasks(*task_id, &all_logical_exprs, is_principal)
                         .await?;
                 }
 
                 // Step 3: Consolidate all dependent tasks into the new "representative" task.
+                tracing::debug!(target: "optd::optimizer::merge", principal_task_id = ?principal_task_id, num_secondary_tasks = secondary_task_ids.len(), "Consolidating group exploration tasks");
                 self.consolidate_group_explore(*principal_task_id, secondary_task_ids)
                     .await;
 
@@ -116,6 +126,11 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), OptimizeError>` - Success or an error that occurred during processing.
+    #[tracing::instrument(
+        skip(self, goal_merges),
+        name = "handle_goal_merges",
+        target = "optd::optimizer::merge"
+    )]
     async fn handle_goal_merges(
         &mut self,
         goal_merges: &[MergeGoalProduct],
@@ -125,6 +140,7 @@ impl<M: Memo> Optimizer<M> {
             merged_goals,
         } in goal_merges
         {
+            tracing::debug!(target: "optd::optimizer::merge", new_goal_id = ?new_goal_id, num_merged_goals = merged_goals.len(), "Processing goal merge product");
             // For each merged goal, get all goal optimization tasks.
             // We don't need to check for the new goal ID since it is guaranteed to be new.
             let goal_optimize_tasks: Vec<_> = merged_goals
@@ -133,6 +149,7 @@ impl<M: Memo> Optimizer<M> {
                 .collect();
 
             if !goal_optimize_tasks.is_empty() {
+                tracing::debug!(target: "optd::optimizer::merge", new_goal_id = ?new_goal_id, num_related_optimize_tasks = goal_optimize_tasks.len(), "Found related goal optimization tasks");
                 let (principal_task_id, secondary_task_ids) =
                     goal_optimize_tasks.split_first().unwrap();
 
@@ -140,6 +157,7 @@ impl<M: Memo> Optimizer<M> {
                 // handled in the `handle_group_merges` method, so we don't need to do it here.
 
                 // Step 1: Consolidate all dependent tasks into the new "representative" task.
+                tracing::debug!(target: "optd::optimizer::merge", principal_task_id = ?principal_task_id, num_secondary_tasks = secondary_task_ids.len(), "Consolidating goal optimization tasks");
                 self.consolidate_goal_optimize(*principal_task_id, secondary_task_ids)
                     .await;
 
