@@ -11,6 +11,7 @@ use Materializable::*;
 use PatternKind::*;
 use futures::future::BoxFuture;
 use std::sync::Arc;
+use tracing::instrument;
 
 /// A type representing a match result, which is a value and an optional context.
 ///
@@ -28,14 +29,18 @@ impl<O: Clone + Send + 'static> Engine<O> {
     /// * `expr` - The expression to match against patterns.
     /// * `match_arms` - The list of pattern-expression pairs to try.
     /// * `k` - The continuation to receive evaluation results.
-    #[tracing::instrument(level = "trace", skip(self, expr, match_arms, k), fields(num_arms = match_arms.len()), target = "optd::dsl::engine")]
+    #[instrument(
+        level = "trace",
+        skip_all,
+        fields(num_arms = match_arms.len()),
+        target = "optd::dsl::engine::eval"
+    )]
     pub(crate) async fn evaluate_pattern_match(
         self,
         expr: Arc<Expr>,
         match_arms: Vec<MatchArm>,
         k: Continuation<Value, EngineResponse<O>>,
     ) -> EngineResponse<O> {
-        tracing::debug!(target: "optd::dsl::engine", "Starting pattern match evaluation");
         let engine = self.clone();
 
         if match_arms.is_empty() {
@@ -47,7 +52,11 @@ impl<O: Clone + Send + 'static> Engine<O> {
             expr,
             Arc::new(move |value| {
                 Box::pin(capture!([match_arms, engine, k], async move {
-                    tracing::trace!(target: "optd::dsl::engine", value_type = ?std::mem::discriminant(&value.data), "Expression evaluated, trying match arms");
+                    tracing::trace!(
+                        target: "optd::dsl::engine::eval",
+                        value_type = ?std::mem::discriminant(&value.data),
+                        "Expression evaluated, trying match arms"
+                    );
                     // Try to match against each arm in order.
                     engine.try_match_arms(value, match_arms, k).await
                 }))
@@ -121,10 +130,10 @@ impl<O: Clone + Send + 'static> Engine<O> {
 /// * `pattern` - The pattern to match.
 /// * `ctx` - The current context to extend with bindings.
 /// * `k` - The continuation to receive the match result.
-#[tracing::instrument(level = "trace", skip(value, pattern, ctx, k), fields(
+#[instrument(level = "trace", skip_all, fields(
     pattern_type = %format!("{:?}", std::mem::discriminant(&pattern.kind)).split('(').next().unwrap_or("Unknown"),
     value_type = %format!("{:?}", std::mem::discriminant(&value.data)).split('(').next().unwrap_or("Unknown")
-), target = "optd::dsl::engine")]
+), target = "optd::dsl::engine::eval")]
 fn match_pattern<O>(
     value: Value,
     pattern: Pattern,
@@ -135,29 +144,15 @@ where
     O: Clone + Send + 'static,
 {
     Box::pin(async move {
-        tracing::trace!(target: "optd::dsl::engine", "Starting pattern match");
-
         match (pattern.kind, &value.data) {
             // Simple patterns.
-            (Wildcard, _) => {
-                tracing::trace!(target: "optd::dsl::engine", "Wildcard pattern matched");
-                k((value, Some(ctx))).await
-            }
+            (Wildcard, _) => k((value, Some(ctx))).await,
             (Literal(pattern_lit), CoreData::Literal(value_lit)) => {
                 let matches = pattern_lit == *value_lit;
-                tracing::trace!(target: "optd::dsl::engine",
-                    pattern_literal = ?pattern_lit,
-                    value_literal = ?value_lit,
-                    matches = matches,
-                    "Literal pattern match result"
-                );
                 let context_opt = matches.then_some(ctx);
                 k((value, context_opt)).await
             }
-            (EmptyArray, CoreData::Array(arr)) if arr.is_empty() => {
-                tracing::trace!(target: "optd::dsl::engine", "Empty array pattern matched");
-                k((value, Some(ctx))).await
-            }
+            (EmptyArray, CoreData::Array(arr)) if arr.is_empty() => k((value, Some(ctx))).await,
 
             // Complex patterns.
             (Bind(ident, inner_pattern), _) => {
