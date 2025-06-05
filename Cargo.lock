@@ -2023,7 +2023,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
- "tracing-subscriber",
  "tracing-test",
  "trait-variant",
 ]
