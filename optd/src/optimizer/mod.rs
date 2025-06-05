@@ -213,18 +213,24 @@ impl<M: Memo> Optimizer<M> {
     }
 
     /// Run the optimizer's main processing loop.
+    #[tracing::instrument(skip(self))]
     async fn run(mut self) -> Result<(), M::MemoError> {
         use ClientRequest::*;
         use EngineProduct::*;
         use OptimizerMessage::*;
 
+        tracing::info!("Optimizer starting run loop");
+
         loop {
             tokio::select! {
                 Some(client_request) = self.client_rx.recv() => {
+                    tracing::info!(request_type = %std::any::type_name_of_val(&client_request), "Processing client request");
+
                     let message_tx = self.message_tx.clone();
 
                     match client_request {
                         Optimize(optimize_request) => {
+                            tracing::info!(plan_root_op = %optimize_request.plan.0.tag, "Processing optimize request");
                             // Create a task for the optimization request.
                             let task_id = self.create_optimize_plan_task(
                                 optimize_request.plan.clone(),
@@ -240,42 +246,56 @@ impl<M: Memo> Optimizer<M> {
                             });
                         },
                         DumpMemo => {
+                            tracing::info!("Processing dump memo request");
                             self.memo.debug_dump().await?;
                         }
                     }
                 },
                 Some(message) = self.message_rx.recv() => {
+                    tracing::debug!(message_type = %std::any::type_name_of_val(&message), "Processing optimizer message");
+
                     // Process the next message in the channel.
                     match message {
-                        Request(OptimizeRequest { plan, physical_tx }, task_id) =>
-                                self.process_optimize_request(plan, physical_tx, task_id).await?,
+                        Request(OptimizeRequest { plan, physical_tx }, task_id) => {
+                            tracing::info!(task_id = ?task_id, plan_root_op = %plan.0.tag, "Processing optimize request");
+                            self.process_optimize_request(plan, physical_tx, task_id).await?;
+                        },
                         Retrieve(group_id, response_tx) => {
+                            tracing::debug!(group_id = ?group_id, "Processing retrieve properties request");
                             self.process_retrieve_properties(group_id, response_tx).await?;
                         },
                         Product(product, job_id) => {
+                            tracing::debug!(job_id = ?job_id, product_type = %std::any::type_name_of_val(&product), "Processing job product");
                             let task_id = self.get_related_task_id(job_id);
 
                             // Only process the product if the task is still active.
                             if self.get_task(task_id).is_some() {
                                 match product {
                                     NewLogicalPartial(plan, group_id) => {
+                                        tracing::debug!(group_id = ?group_id, "Processing new logical partial");
                                         self.process_new_logical_partial(plan, group_id, job_id).await?;
                                     }
                                     NewPhysicalPartial(plan, goal_id) => {
+                                        tracing::debug!(goal_id = ?goal_id, "Processing new physical partial");
                                         self.process_new_physical_partial(plan, goal_id, job_id).await?;
                                     }
                                     CreateGroup(expression_id, properties) => {
+                                        tracing::debug!(expression_id = ?expression_id, "Processing create group");
                                         self.process_create_group(expression_id, &properties, job_id).await?;
                                     }
                                     SubscribeGroup(group_id, continuation) => {
+                                        tracing::debug!(group_id = ?group_id, "Processing group subscription");
                                         self.process_group_subscription(group_id, continuation, job_id).await?;
                                     }
                                 }
+                            } else {
+                                tracing::debug!(task_id = ?task_id, "Skipping product processing - task no longer active");
                             }
 
                             // A job is guaranteed to be terminated, unless it has been added to the pending queue.
                             if !self.pending_messages.iter().any(|msg| matches!(msg.message, Product(_, j) if j == job_id)) {
                                 self.running_jobs.remove(&job_id);
+                                tracing::debug!(job_id = ?job_id, "Job completed and removed from running jobs");
                             }
                         }
                     };
@@ -283,7 +303,10 @@ impl<M: Memo> Optimizer<M> {
                     // Launch pending jobs according to a policy (currently LIFO).
                     self.launch_pending_jobs().await?;
                 },
-                else => break Ok(()),
+                else => {
+                    tracing::info!("Optimizer run loop finished - all channels closed");
+                    break Ok(());
+                }
             }
         }
     }
