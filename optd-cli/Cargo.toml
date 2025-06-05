@@ -11,4 +11,4 @@ clap = { version = "4.5.38", features = ["derive"] }
 colored = "3.0.0"
 tokio = "1.45.0"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "ansi"] }

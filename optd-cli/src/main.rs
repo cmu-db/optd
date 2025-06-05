@@ -45,7 +45,7 @@ use std::sync::Arc;
 use tokio::runtime::Builder;
 use tokio::task::JoinSet;
 use tracing::Instrument;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 #[derive(Parser)]
 #[command(
@@ -69,9 +69,12 @@ enum Commands {
 
 fn main() -> Result<(), Vec<CompileError>> {
     // Initialize tracing subscriber
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info")); // Default to info level if RUST_LOG not set
-    fmt().with_env_filter(filter).init();
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")); // Default to info level if RUST_LOG not set
+    fmt()
+        .with_env_filter(filter)
+        .pretty()
+        .with_ansi(true)
+        .init();
 
     tracing::info!("optd-cli starting up");
     let cli = Cli::parse();
@@ -163,7 +166,10 @@ async fn run_functions_in_parallel(hir: &HIR, functions: Vec<String>) -> Vec<Fun
     let retriever = Arc::new(MockRetriever::new());
     let mut set = JoinSet::new();
 
-    tracing::info!(num_functions = functions.len(), "Spawning functions for parallel execution");
+    tracing::info!(
+        num_functions = functions.len(),
+        "Spawning functions for parallel execution"
+    );
     for function_name in functions {
         let engine = Engine::new(hir.context.clone(), catalog.clone(), retriever.clone());
         let name = function_name.clone();
@@ -180,7 +186,7 @@ async fn run_functions_in_parallel(hir: &HIR, functions: Vec<String>) -> Vec<Fun
                 tracing::info!(function_name = %name, "Function launch completed");
                 FunctionResult { name, result }
             }
-            .instrument(tracing::info_span!("run_function", function_name = %function_name))
+            .instrument(tracing::info_span!("run_function", function_name = %function_name)),
         );
     }
 
