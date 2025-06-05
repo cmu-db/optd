@@ -21,6 +21,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
     /// * `then_expr` - The expression to evaluate if condition is true.
     /// * `else_expr` - The expression to evaluate if condition is false.
     /// * `k` - The continuation to receive evaluation results.
+    #[tracing::instrument(skip(self, cond, then_expr, else_expr, k), target = "optd::dsl::engine")]
     pub(crate) async fn evaluate_if_then_else(
         self,
         cond: Arc<Expr>,
@@ -28,6 +29,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
         else_expr: Arc<Expr>,
         k: Continuation<Value, EngineResponse<O>>,
     ) -> EngineResponse<O> {
+        tracing::trace!(target: "optd::dsl::engine", "Evaluating if-then-else condition");
         let engine = self.clone();
 
         self.evaluate(
@@ -36,9 +38,12 @@ impl<O: Clone + Send + 'static> Engine<O> {
                 Box::pin(capture!([then_expr, engine, else_expr, k], async move {
                     match value.data {
                         CoreData::Literal(Literal::Bool(b)) => {
+                            tracing::debug!(target: "optd::dsl::engine", condition_result = b, "Condition evaluated");
                             if b {
+                                tracing::trace!(target: "optd::dsl::engine", "Taking then branch");
                                 engine.evaluate(then_expr, k).await
                             } else {
+                                tracing::trace!(target: "optd::dsl::engine", "Taking else branch");
                                 engine.evaluate(else_expr, k).await
                             }
                         }
@@ -60,12 +65,14 @@ impl<O: Clone + Send + 'static> Engine<O> {
     /// * `binding` - The binding to evaluate and bind to the context.
     /// * `after` - The expression to evaluate in the updated context.
     /// * `k` - The continuation to receive evaluation results.
+    #[tracing::instrument(skip(self, binding, after, k), fields(binding_name = %binding.name), target = "optd::dsl::engine")]
     pub(crate) async fn evaluate_let_binding(
         self,
         binding: LetBinding,
         after: Arc<Expr>,
         k: Continuation<Value, EngineResponse<O>>,
     ) -> EngineResponse<O> {
+        tracing::trace!(target: "optd::dsl::engine", "Evaluating let binding expression");
         let engine = self.clone();
         let LetBinding { name, expr, .. } = binding;
 
@@ -73,6 +80,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
             expr,
             Arc::new(move |value| {
                 Box::pin(capture!([name, engine, after, k], async move {
+                    tracing::debug!(target: "optd::dsl::engine", binding_name = %name, "Binding value to context");
                     // Create updated context with the new binding.
                     let mut new_ctx = engine.context.clone();
                     new_ctx.bind(name, value);
@@ -202,38 +210,49 @@ impl<O: Clone + Send + 'static> Engine<O> {
     /// * `called` - The called expression to evaluate.
     /// * `args` - The argument expressions to evaluate.
     /// * `k` - The continuation to receive evaluation results.
+    #[tracing::instrument(skip(self, called, args, k), fields(num_args = args.len()), target = "optd::dsl::engine")]
     pub(crate) async fn evaluate_call(
         self,
         called: Arc<Expr>,
         args: Vec<Arc<Expr>>,
         k: Continuation<Value, EngineResponse<O>>,
     ) -> EngineResponse<O> {
+        tracing::trace!(target: "optd::dsl::engine", "Evaluating call expression");
         let engine = self.clone();
 
         self.evaluate(
             called,
             Arc::new(move |called_value| {
                 Box::pin(capture!([args, engine, k], async move {
+                    tracing::debug!(target: "optd::dsl::engine", called_type = ?std::mem::discriminant(&called_value.data), "Call target evaluated");
                     match called_value.data {
                         // Handle function calls.
                         CoreData::Function(FunKind::Closure(params, body)) => {
+                            tracing::trace!(target: "optd::dsl::engine", num_params = params.len(), "Calling closure");
                             engine.evaluate_closure_call(params, body, args, k).await
                         }
                         CoreData::Function(FunKind::Udf(udf)) => {
+                            tracing::trace!(target: "optd::dsl::engine", "Calling Rust UDF");
                             engine.evaluate_rust_udf_call(udf, args, k).await
                         }
 
                         // Handle collection indexing.
                         CoreData::Array(_) | CoreData::Tuple(_) | CoreData::Struct(_, _) => {
+                            tracing::trace!(target: "optd::dsl::engine", "Performing indexed access on collection");
                             engine.evaluate_indexed_access(called_value, args, k).await
                         }
-                        CoreData::Map(_) => engine.evaluate_map_lookup(called_value, args, k).await,
+                        CoreData::Map(_) => {
+                            tracing::trace!(target: "optd::dsl::engine", "Performing map lookup");
+                            engine.evaluate_map_lookup(called_value, args, k).await
+                        },
 
                         // Handle operator field accesses.
                         CoreData::Logical(op) => {
+                            tracing::trace!(target: "optd::dsl::engine", "Accessing logical operator field");
                             engine.evaluate_logical_operator_access(op, args, k).await
                         }
                         CoreData::Physical(op) => {
+                            tracing::trace!(target: "optd::dsl::engine", "Accessing physical operator field");
                             engine.evaluate_physical_operator_access(op, args, k).await
                         }
 
