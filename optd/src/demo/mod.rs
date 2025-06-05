@@ -100,6 +100,7 @@ async fn run_demo() {
 #[cfg(test)]
 mod demo {
     use super::*;
+    // TODO Consider remove tracing_subscriber dependency in optd when we have a proper cli.
     #[cfg(feature = "subscriber")]
     use tracing_subscriber::{EnvFilter, fmt};
 

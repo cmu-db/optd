@@ -69,7 +69,8 @@ enum Commands {
 
 fn main() -> Result<(), Vec<CompileError>> {
     // Initialize tracing subscriber
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("optd=info,optd_cli=info"));
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("optd=info,optd_cli=info"));
     fmt()
         .with_env_filter(filter)
         .pretty()
@@ -92,7 +93,8 @@ fn main() -> Result<(), Vec<CompileError>> {
 
     match cli.command {
         Commands::Compile(config) => {
-            let compile_span = tracing::info_span!(target: "optd_cli", "compile_file", path = %config.path_str());
+            let compile_span =
+                tracing::info_span!(target: "optd_cli", "compile_file", path = %config.path_str());
             let _guard = compile_span.enter();
             tracing::info!("Starting compilation");
             for mock_udf in config.mock_udfs() {
