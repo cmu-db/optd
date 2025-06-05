@@ -23,13 +23,22 @@ impl<M: Memo> Optimizer<M> {
     }
 
     /// Add a new task.
+    #[tracing::instrument(level = "debug", skip(self, task), fields(task_id = ?task_id, task_type = %task.task_type()), target = "optd::optimizer::tasks")]
     pub(crate) fn add_task(&mut self, task_id: TaskId, task: Task) {
+        tracing::trace!(target: "optd::optimizer::tasks", "Adding task to manager");
         self.tasks.insert(task_id, task);
     }
 
     /// Remove a task.
+    #[tracing::instrument(level = "debug", skip(self), fields(task_id = ?task_id), target = "optd::optimizer::tasks")]
     pub(crate) fn remove_task(&mut self, task_id: TaskId) -> Option<Task> {
-        self.tasks.remove(&task_id)
+        let task = self.tasks.remove(&task_id);
+        if let Some(ref task) = task {
+            tracing::debug!(target: "optd::optimizer::tasks", task_type = %task.task_type(), "Task removed from manager");
+        } else {
+            tracing::warn!(target: "optd::optimizer::tasks", "Attempted to remove non-existent task");
+        }
+        task
     }
 
     // Direct task type access by ID - immutable versions

@@ -8,6 +8,7 @@ use hashbrown::{HashMap, HashSet};
 use hir_cir::extract_rulebook_from_hir;
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::mpsc::{self, Receiver, Sender};
+use tracing::Instrument;
 
 mod handlers;
 pub mod hir_cir;
@@ -203,56 +204,97 @@ impl<M: Memo> Optimizer<M> {
             client_rx,
         );
 
-        tokio::spawn(async move {
-            // TODO: If an error occurs we could restart or reboot the memo.
-            // Rather than failing (e.g. memo could be distributed).
-            optimizer.run().await.expect("Optimizer failure");
-        });
+        tokio::spawn(
+            async move {
+                // TODO: If an error occurs we could restart or reboot the memo.
+                // Rather than failing (e.g. memo could be distributed).
+                optimizer.run().await.expect("Optimizer failure");
+            }
+            .instrument(tracing::info_span!(target: "optd::optimizer", "optimizer_thread")),
+        );
 
         client_tx
     }
 
     /// Run the optimizer's main processing loop.
+    #[tracing::instrument(
+        level = "debug",
+        name = "optimizer_run_loop",
+        skip(self),
+        target = "optd::optimizer"
+    )]
     async fn run(mut self) -> Result<(), M::MemoError> {
         use ClientRequest::*;
         use EngineProduct::*;
-        use OptimizerMessage::*;
+        use OptimizerMessage as OmMsg; // Alias to avoid conflict with tracing::debug!
 
         loop {
             tokio::select! {
                 Some(client_request) = self.client_rx.recv() => {
+                    let req_span = tracing::info_span!(target: "optd::optimizer", "process_client_request");
+
                     let message_tx = self.message_tx.clone();
 
                     match client_request {
                         Optimize(optimize_request) => {
+                            // Add plan_root_op for better context
+                            let plan_root_op = optimize_request.plan.0.tag.clone();
+                            req_span.record("plan_root_op", tracing::field::display(&plan_root_op));
+
                             // Create a task for the optimization request.
                             let task_id = self.create_optimize_plan_task(
                                 optimize_request.plan.clone(),
                                 optimize_request.physical_tx.clone()
                             );
+                            req_span.record("request_type", tracing::field::display("Optimize"));
+                            req_span.record("client_task_id", tracing::field::debug(task_id));
 
                             // Forward the client request to the message processing loop
-                            // in a new coroutine to avoid a deadlock.
-                            tokio::spawn(async move {
-                                message_tx.send(Request(optimize_request, task_id))
-                                    .await
-                                    .expect("Failed to forward client request - channel closed");
-                            });
+                            // in a new
+                            tokio::spawn(
+                                async move {
+                                    if let Err(e) = message_tx.send(OmMsg::Request(optimize_request, task_id)).await {
+                                        tracing::error!(target: "optd::optimizer", "Failed to forward client request: {}", e);
+                                    }
+                                }.instrument(req_span)  // Instrumenting the spawn to ensure its logs are associated with the parent request span.
+
+                            );
                         },
                         DumpMemo => {
-                            self.memo.debug_dump().await?;
+                            req_span.record("request_type", tracing::field::display("DumpMemo"));
+                            async {
+                                    tracing::info!(target: "optd::optimizer", "Processing dump memo request");
+                                    self.memo.debug_dump().await
+                                }
+                                .instrument(req_span)
+                                .await?;
                         }
                     }
                 },
                 Some(message) = self.message_rx.recv() => {
+                    let msg_span = tracing::info_span!(target: "optd::optimizer", "process_optimizer_message", message_type = %std::any::type_name_of_val(&message));
+                    let _guard = msg_span.enter();
+                    tracing::debug!(target: "optd::optimizer", "Received optimizer message");
+
                     // Process the next message in the channel.
                     match message {
-                        Request(OptimizeRequest { plan, physical_tx }, task_id) =>
-                                self.process_optimize_request(plan, physical_tx, task_id).await?,
-                        Retrieve(group_id, response_tx) => {
+                        OmMsg::Request(OptimizeRequest { plan, physical_tx }, task_id) => {
+                            // Add plan_root_op for better context
+                            let plan_root_op = plan.0.tag.clone();
+                            msg_span.record("task_id", tracing::field::debug(task_id));
+                            msg_span.record("plan_root_op", tracing::field::display(&plan_root_op));
+                            tracing::debug!(target: "optd::optimizer", "Processing optimize request from internal queue");
+                            self.process_optimize_request(plan, physical_tx, task_id).await?;
+                        },
+                        OmMsg::Retrieve(group_id, response_tx) => {
+                            msg_span.record("group_id", tracing::field::debug(group_id));
+                            tracing::debug!(target: "optd::optimizer", "Processing retrieve properties request");
                             self.process_retrieve_properties(group_id, response_tx).await?;
                         },
-                        Product(product, job_id) => {
+                        OmMsg::Product(product, job_id) => {
+                            msg_span.record("job_id", tracing::field::debug(job_id));
+                            msg_span.record("product_type", tracing::field::display(std::any::type_name_of_val(&product)));
+                            tracing::debug!(target: "optd::optimizer", "Processing job product");
                             let task_id = self.get_related_task_id(job_id);
 
                             // Only process the product if the task is still active.
@@ -271,19 +313,25 @@ impl<M: Memo> Optimizer<M> {
                                         self.process_group_subscription(group_id, continuation, job_id).await?;
                                     }
                                 }
+                            } else {
+                                tracing::warn!(target: "optd::optimizer", task_id = ?task_id, "Task processing skipped as it's no longer active");
                             }
 
                             // A job is guaranteed to be terminated, unless it has been added to the pending queue.
-                            if !self.pending_messages.iter().any(|msg| matches!(msg.message, Product(_, j) if j == job_id)) {
+                            if !self.pending_messages.iter().any(|msg| matches!(msg.message, OmMsg::Product(_, j) if j == job_id)) {
                                 self.running_jobs.remove(&job_id);
+                                tracing::debug!(target: "optd::optimizer::jobs", job_id = ?job_id, "Job completed and removed from running jobs");
                             }
                         }
                     };
 
                     // Launch pending jobs according to a policy (currently LIFO).
-                    self.launch_pending_jobs().await?;
+                    self.launch_pending_jobs().instrument(tracing::debug_span!(target:"optd::optimizer", "launch_pending_jobs_dispatch")).await?;
                 },
-                else => break Ok(()),
+                else => {
+                    tracing::info!(target: "optd::optimizer", "Optimizer run loop finished - all channels closed");
+                    break Ok(());
+                }
             }
         }
     }

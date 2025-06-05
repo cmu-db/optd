@@ -11,6 +11,7 @@ use Materializable::*;
 use PatternKind::*;
 use futures::future::BoxFuture;
 use std::sync::Arc;
+use tracing::instrument;
 
 /// A type representing a match result, which is a value and an optional context.
 ///
@@ -28,6 +29,12 @@ impl<O: Clone + Send + 'static> Engine<O> {
     /// * `expr` - The expression to match against patterns.
     /// * `match_arms` - The list of pattern-expression pairs to try.
     /// * `k` - The continuation to receive evaluation results.
+    #[instrument(
+        level = "trace",
+        skip_all,
+        fields(num_arms = match_arms.len()),
+        target = "optd::dsl::engine::eval"
+    )]
     pub(crate) async fn evaluate_pattern_match(
         self,
         expr: Arc<Expr>,
@@ -45,6 +52,11 @@ impl<O: Clone + Send + 'static> Engine<O> {
             expr,
             Arc::new(move |value| {
                 Box::pin(capture!([match_arms, engine, k], async move {
+                    tracing::trace!(
+                        target: "optd::dsl::engine::eval",
+                        value_type = ?std::mem::discriminant(&value.data),
+                        "Expression evaluated, trying match arms"
+                    );
                     // Try to match against each arm in order.
                     engine.try_match_arms(value, match_arms, k).await
                 }))
@@ -118,6 +130,10 @@ impl<O: Clone + Send + 'static> Engine<O> {
 /// * `pattern` - The pattern to match.
 /// * `ctx` - The current context to extend with bindings.
 /// * `k` - The continuation to receive the match result.
+#[instrument(level = "trace", skip_all, fields(
+    pattern_type = %format!("{:?}", std::mem::discriminant(&pattern.kind)).split('(').next().unwrap_or("Unknown"),
+    value_type = %format!("{:?}", std::mem::discriminant(&value.data)).split('(').next().unwrap_or("Unknown")
+), target = "optd::dsl::engine::eval")]
 fn match_pattern<O>(
     value: Value,
     pattern: Pattern,
@@ -132,24 +148,48 @@ where
             // Simple patterns.
             (Wildcard, _) => k((value, Some(ctx))).await,
             (Literal(pattern_lit), CoreData::Literal(value_lit)) => {
-                let context_opt = (pattern_lit == *value_lit).then_some(ctx);
+                let matches = pattern_lit == *value_lit;
+                let context_opt = matches.then_some(ctx);
                 k((value, context_opt)).await
             }
             (EmptyArray, CoreData::Array(arr)) if arr.is_empty() => k((value, Some(ctx))).await,
 
             // Complex patterns.
             (Bind(ident, inner_pattern), _) => {
+                tracing::debug!(target: "optd::dsl::engine",
+                    binding_name = %ident,
+                    inner_pattern_type = %format!("{:?}", std::mem::discriminant(&inner_pattern.kind)).split('(').next().unwrap_or("Unknown"),
+                    "Processing bind pattern"
+                );
                 match_bind_pattern(value.clone(), ident, *inner_pattern, ctx, k).await
             }
             (ArrayDecomp(head_pat, tail_pat), CoreData::Array(arr)) => {
+                tracing::debug!(target: "optd::dsl::engine",
+                    array_length = arr.len(),
+                    "Processing array decomposition pattern"
+                );
                 if arr.is_empty() {
+                    tracing::trace!(target: "optd::dsl::engine", "Array decomposition failed: empty array");
                     return k((value, None)).await;
                 }
 
                 match_array_pattern(*head_pat, *tail_pat, arr, ctx, k).await
             }
             (Struct(pat_name, pat_fields), CoreData::Struct(val_name, val_fields)) => {
-                if pat_name != *val_name || pat_fields.len() != val_fields.len() {
+                let name_matches = pat_name == *val_name;
+                let field_count_matches = pat_fields.len() == val_fields.len();
+                tracing::debug!(target: "optd::dsl::engine",
+                    pattern_struct_name = %pat_name,
+                    value_struct_name = %val_name,
+                    pattern_field_count = pat_fields.len(),
+                    value_field_count = val_fields.len(),
+                    name_matches = name_matches,
+                    field_count_matches = field_count_matches,
+                    "Processing struct pattern"
+                );
+
+                if !name_matches || !field_count_matches {
+                    tracing::trace!(target: "optd::dsl::engine", "Struct pattern match failed: name or field count mismatch");
                     return k((value, None)).await;
                 }
 
@@ -158,10 +198,26 @@ where
 
             // Materialized logical operators
             (Operator(op_pattern), CoreData::Logical(Materialized(log_op))) => {
-                if op_pattern.tag != log_op.operator.tag
-                    || op_pattern.data.len() != log_op.operator.data.len()
-                    || op_pattern.children.len() != log_op.operator.children.len()
-                {
+                let tag_matches = op_pattern.tag == log_op.operator.tag;
+                let data_count_matches = op_pattern.data.len() == log_op.operator.data.len();
+                let children_count_matches =
+                    op_pattern.children.len() == log_op.operator.children.len();
+
+                tracing::debug!(target: "optd::dsl::engine",
+                    pattern_tag = %op_pattern.tag,
+                    operator_tag = %log_op.operator.tag,
+                    pattern_data_count = op_pattern.data.len(),
+                    operator_data_count = log_op.operator.data.len(),
+                    pattern_children_count = op_pattern.children.len(),
+                    operator_children_count = log_op.operator.children.len(),
+                    tag_matches = tag_matches,
+                    data_count_matches = data_count_matches,
+                    children_count_matches = children_count_matches,
+                    "Processing materialized logical operator pattern"
+                );
+
+                if !tag_matches || !data_count_matches || !children_count_matches {
+                    tracing::trace!(target: "optd::dsl::engine", "Materialized logical operator pattern match failed");
                     return k((value, None)).await;
                 }
 
@@ -170,10 +226,26 @@ where
 
             // Materialized physical operators
             (Operator(op_pattern), CoreData::Physical(Materialized(phys_op))) => {
-                if op_pattern.tag != phys_op.operator.tag
-                    || op_pattern.data.len() != phys_op.operator.data.len()
-                    || op_pattern.children.len() != phys_op.operator.children.len()
-                {
+                let tag_matches = op_pattern.tag == phys_op.operator.tag;
+                let data_count_matches = op_pattern.data.len() == phys_op.operator.data.len();
+                let children_count_matches =
+                    op_pattern.children.len() == phys_op.operator.children.len();
+
+                tracing::debug!(target: "optd::dsl::engine",
+                    pattern_tag = %op_pattern.tag,
+                    operator_tag = %phys_op.operator.tag,
+                    pattern_data_count = op_pattern.data.len(),
+                    operator_data_count = phys_op.operator.data.len(),
+                    pattern_children_count = op_pattern.children.len(),
+                    operator_children_count = phys_op.operator.children.len(),
+                    tag_matches = tag_matches,
+                    data_count_matches = data_count_matches,
+                    children_count_matches = children_count_matches,
+                    "Processing materialized physical operator pattern"
+                );
+
+                if !tag_matches || !data_count_matches || !children_count_matches {
+                    tracing::trace!(target: "optd::dsl::engine", "Materialized physical operator pattern match failed");
                     return k((value, None)).await;
                 }
 
@@ -183,11 +255,17 @@ where
 
             // Unmaterialized logical operators
             (Operator(op_pattern), CoreData::Logical(UnMaterialized(group_id))) => {
+                tracing::debug!(target: "optd::dsl::engine",
+                    group_id = ?group_id,
+                    pattern_tag = %op_pattern.tag,
+                    "Processing unmaterialized logical operator pattern - yielding group"
+                );
                 // Yield the group id back to the caller and provide a callback to match expanded value against the pattern.
                 EngineResponse::YieldGroup(
                     *group_id,
                     Arc::new(move |expanded_value| {
                         Box::pin(capture!([op_pattern, ctx, k], async move {
+                            tracing::trace!(target: "optd::dsl::engine", "Continuing pattern match with expanded group value");
                             match_pattern(
                                 expanded_value,
                                 Pattern::new(Operator(op_pattern)),
@@ -202,11 +280,17 @@ where
 
             // Unmaterialized physical operators
             (Operator(op_pattern), CoreData::Physical(UnMaterialized(goal))) => {
+                tracing::debug!(target: "optd::dsl::engine",
+                    goal = ?goal,
+                    pattern_tag = %op_pattern.tag,
+                    "Processing unmaterialized physical operator pattern - yielding goal"
+                );
                 // Yield the goal back to the caller and provide a callback to match expanded value against the pattern.
                 EngineResponse::YieldGoal(
                     goal.clone(),
                     Arc::new(move |expanded_value| {
                         Box::pin(capture!([op_pattern, ctx, k], async move {
+                            tracing::trace!(target: "optd::dsl::engine", "Continuing pattern match with expanded goal value");
                             match_pattern(
                                 expanded_value,
                                 Pattern::new(Operator(op_pattern)),
@@ -220,12 +304,19 @@ where
             }
 
             // No match for other combinations.
-            _ => k((value, None)).await,
+            _ => {
+                tracing::trace!(target: "optd::dsl::engine", "No pattern match found for value/pattern combination");
+                k((value, None)).await
+            }
         }
     })
 }
 
 /// Matches a binding pattern.
+#[tracing::instrument(level = "trace", skip(value, inner_pattern, ctx, k), fields(
+    binding_name = %ident,
+    inner_pattern_type = %format!("{:?}", std::mem::discriminant(&inner_pattern.kind)).split('(').next().unwrap_or("Unknown")
+), target = "optd::dsl::engine")]
 async fn match_bind_pattern<O>(
     value: Value,
     ident: String,
@@ -236,6 +327,8 @@ async fn match_bind_pattern<O>(
 where
     O: Clone + Send + 'static,
 {
+    tracing::trace!(target: "optd::dsl::engine", "Starting bind pattern match");
+
     // First check if the inner pattern matches without binding.
     match_pattern(
         value,
@@ -245,10 +338,18 @@ where
             Box::pin(capture!([ident, k], async move {
                 // Only bind if the inner pattern matched.
                 if let Some(mut ctx) = ctx_opt {
+                    tracing::debug!(target: "optd::dsl::engine",
+                        binding_name = %ident,
+                        "Inner pattern matched, creating binding"
+                    );
                     // Create a new context with the binding.
                     ctx.bind(ident.clone(), matched_value.clone());
                     k((matched_value, Some(ctx))).await
                 } else {
+                    tracing::trace!(target: "optd::dsl::engine",
+                        binding_name = %ident,
+                        "Inner pattern didn't match, bind pattern failed"
+                    );
                     // Inner pattern didn't match, propagate failure.
                     k((matched_value, None)).await
                 }
@@ -259,6 +360,11 @@ where
 }
 
 /// Matches an array decomposition pattern.
+#[tracing::instrument(level = "trace", skip(head_pattern, tail_pattern, arr, ctx, k), fields(
+    array_length = arr.len(),
+    head_pattern_type = %format!("{:?}", std::mem::discriminant(&head_pattern.kind)).split('(').next().unwrap_or("Unknown"),
+    tail_pattern_type = %format!("{:?}", std::mem::discriminant(&tail_pattern.kind)).split('(').next().unwrap_or("Unknown")
+), target = "optd::dsl::engine")]
 async fn match_array_pattern<O>(
     head_pattern: Pattern,
     tail_pattern: Pattern,
@@ -269,10 +375,19 @@ async fn match_array_pattern<O>(
 where
     O: Clone + Send + 'static,
 {
+    tracing::trace!(target: "optd::dsl::engine", "Starting array decomposition pattern match");
+
     // Split array into head and tail.
     let head = arr[0].clone();
     let tail_elements = arr[1..].to_vec();
+    let tail_length = tail_elements.len();
     let tail = Value::new(CoreData::Array(tail_elements));
+
+    tracing::trace!(target: "optd::dsl::engine",
+        head_element_type = %format!("{:?}", std::mem::discriminant(&head.data)).split('(').next().unwrap_or("Unknown"),
+        tail_length = tail_length,
+        "Split array into head and tail for pattern matching"
+    );
 
     // Create components to match sequentially.
     let patterns = vec![head_pattern, tail_pattern];
@@ -287,6 +402,13 @@ where
             Box::pin(capture!([ctx, k], async move {
                 // Check if all parts matched successfully.
                 let all_matched = results.iter().all(|(_, ctx_opt)| ctx_opt.is_some());
+
+                tracing::trace!(target: "optd::dsl::engine",
+                    head_matched = results[0].1.is_some(),
+                    tail_matched = results[1].1.is_some(),
+                    all_matched = all_matched,
+                    "Array decomposition pattern match results"
+                );
 
                 // All matched or not, get the matched values.
                 let head_value = results[0].0.clone();
@@ -313,9 +435,11 @@ where
                             acc_ctx
                         });
 
+                    tracing::debug!(target: "optd::dsl::engine", "Array decomposition pattern matched successfully");
                     // Return the new array with the combined context.
                     k((new_array, Some(combined_ctx))).await
                 } else {
+                    tracing::trace!(target: "optd::dsl::engine", "Array decomposition pattern match failed");
                     // Return the new array but with None context since match failed.
                     k((new_array, None)).await
                 }
@@ -326,6 +450,10 @@ where
 }
 
 /// Matches a struct pattern.
+#[tracing::instrument(level = "trace", skip(field_patterns, field_values, ctx, k), fields(
+    struct_name = %pat_name,
+    field_count = field_patterns.len()
+), target = "optd::dsl::engine")]
 async fn match_struct_pattern<O>(
     pat_name: String,
     field_patterns: Vec<Pattern>,
@@ -336,6 +464,8 @@ async fn match_struct_pattern<O>(
 where
     O: Clone + Send + 'static,
 {
+    tracing::trace!(target: "optd::dsl::engine", "Starting struct pattern match");
+
     // Match fields sequentially.
     match_components(
         field_patterns,
@@ -346,9 +476,17 @@ where
                 // Check if all fields matched successfully.
                 let all_matched = results.iter().all(|(_, ctx_opt)| ctx_opt.is_some());
 
+                tracing::trace!(target: "optd::dsl::engine",
+                    struct_name = %pat_name,
+                    fields_matched = results.iter().filter(|(_, ctx_opt)| ctx_opt.is_some()).count(),
+                    total_fields = results.len(),
+                    all_matched = all_matched,
+                    "Struct pattern field match results"
+                );
+
                 // Reconstruct struct with matched field values.
                 let matched_values = results.iter().map(|(v, _)| v.clone()).collect();
-                let new_struct = Value::new(CoreData::Struct(pat_name, matched_values));
+                let new_struct = Value::new(CoreData::Struct(pat_name.clone(), matched_values));
 
                 if all_matched {
                     // Combine contexts by folding over the results, starting with the base context.
@@ -360,9 +498,17 @@ where
                             acc_ctx
                         });
 
+                    tracing::debug!(target: "optd::dsl::engine",
+                        struct_name = %pat_name,
+                        "Struct pattern matched successfully"
+                    );
                     // Return the new struct with the combined context.
                     k((new_struct, Some(combined_ctx))).await
                 } else {
+                    tracing::trace!(target: "optd::dsl::engine",
+                        struct_name = %pat_name,
+                        "Struct pattern match failed"
+                    );
                     // Return the new struct but with None context since match failed.
                     k((new_struct, None)).await
                 }

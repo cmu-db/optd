@@ -44,6 +44,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::runtime::Builder;
 use tokio::task::JoinSet;
+use tracing::{Instrument, instrument};
+use tracing_subscriber::{EnvFilter, fmt};
 
 #[derive(Parser)]
 #[command(
@@ -66,10 +68,20 @@ enum Commands {
 }
 
 fn main() -> Result<(), Vec<CompileError>> {
+    // Initialize tracing subscriber
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("optd=info,optd::cli=info"));
+    fmt()
+        .with_env_filter(filter)
+        .pretty()
+        .with_ansi(true)
+        .init();
+
+    tracing::info!(target: "optd::cli", "optd-cli starting up");
     let cli = Cli::parse();
 
     let mut udfs = HashMap::new();
-    let udf = Udf {
+    let unimplemented_udf = Udf {
         func: Arc::new(|_, _, _| {
             Box::pin(async move {
                 println!("This user-defined function is unimplemented!");
@@ -77,24 +89,32 @@ fn main() -> Result<(), Vec<CompileError>> {
             })
         }),
     };
-    udfs.insert("unimplemented_udf".to_string(), udf.clone());
+    udfs.insert("unimplemented_udf".to_string(), unimplemented_udf.clone());
 
     match cli.command {
         Commands::Compile(config) => {
+            let compile_span =
+                tracing::info_span!(target: "optd::cli", "compile_file", path = %config.path_str());
+            let _guard = compile_span.enter();
+            tracing::info!("Starting compilation");
             for mock_udf in config.mock_udfs() {
-                udfs.insert(mock_udf.to_string(), udf.clone());
+                udfs.insert(mock_udf.to_string(), unimplemented_udf.clone());
             }
 
             let _ = compile_hir(config, udfs).unwrap_or_else(|errors| handle_errors(&errors));
+            tracing::info!("Compilation completed successfully");
             Ok(())
         }
         Commands::RunFunctions(config) => {
-            // TODO(Connor): Add support for running functions with real UDFs.
+            let run_span = tracing::info_span!(target: "optd::cli", "run_dsl_functions", path = %config.path_str());
+            let _guard = run_span.enter();
+            tracing::info!("Starting function execution");
             for mock_udf in config.mock_udfs() {
-                udfs.insert(mock_udf.to_string(), udf.clone());
+                udfs.insert(mock_udf.to_string(), unimplemented_udf.clone());
             }
 
             let hir = compile_hir(config, udfs).unwrap_or_else(|errors| handle_errors(&errors));
+            tracing::info!("Compilation successful, proceeding to run functions");
 
             run_all_functions(&hir)
         }
@@ -108,17 +128,25 @@ struct FunctionResult {
 }
 
 /// Run all functions found in the HIR, marked with [run].
+#[instrument(
+    level = "info",
+    skip(hir),
+    target = "optd::cli",
+    name = "run_all_functions"
+)]
 fn run_all_functions(hir: &HIR) -> Result<(), Vec<CompileError>> {
     println!("\n{} {}\n", "•".green(), "Running functions...".green());
 
-    let functions = find_functions(hir);
+    let functions_to_run = find_functions(hir);
+    tracing::info!(target: "optd::cli", num_functions = functions_to_run.len(), "Found functions to run");
 
-    if functions.is_empty() {
+    if functions_to_run.is_empty() {
         println!("No functions found annotated with [run]");
+        tracing::warn!(target: "optd::cli", "No functions found annotated with [run]");
         return Ok(());
     }
 
-    println!("Found {} functions to run", functions.len());
+    println!("Found {} functions to run", functions_to_run.len());
 
     // Create a multi-threaded runtime for parallel execution.
     // TODO: We increase the stack size by x64 to avoid stack overflow
@@ -128,7 +156,8 @@ fn run_all_functions(hir: &HIR) -> Result<(), Vec<CompileError>> {
         .enable_all()
         .build()
         .unwrap();
-    let function_results = runtime.block_on(run_functions_in_parallel(hir, functions));
+    tracing::debug!(target: "optd::cli", "Tokio runtime initialized for function execution");
+    let function_results = runtime.block_on(run_functions_in_parallel(hir, functions_to_run));
 
     // Process and display function results.
     let success_count = process_function_results(function_results);
@@ -138,6 +167,7 @@ fn run_all_functions(hir: &HIR) -> Result<(), Vec<CompileError>> {
         "Execution Results:".yellow(),
         format!("{} functions executed", success_count).yellow()
     );
+    tracing::info!(target: "optd::cli", success_count, "Function execution finished");
 
     Ok(())
 }
@@ -147,25 +177,36 @@ async fn run_functions_in_parallel(hir: &HIR, functions: Vec<String>) -> Vec<Fun
     let retriever = Arc::new(MockRetriever::new());
     let mut set = JoinSet::new();
 
+    tracing::debug!(
+        target: "optd::cli",
+        num_functions = functions.len(),
+        "Spawning functions for parallel execution"
+    );
     for function_name in functions {
         let engine = Engine::new(hir.context.clone(), catalog.clone(), retriever.clone());
         let name = function_name.clone();
 
-        set.spawn(async move {
-            // Create a continuation that returns itself.
-            let result_handler: Continuation<Value, Value> =
-                Arc::new(|value| Box::pin(async move { value }));
+        set.spawn(
+            async move {
+                // Create a continuation that returns itself.
+                let result_handler: Continuation<Value, Value> =
+                    Arc::new(|value| Box::pin(async move { value }));
 
-            // Launch the function with an empty vector of arguments.
-            let result = engine.launch(&name, vec![], result_handler).await;
-            FunctionResult { name, result }
-        });
+                tracing::debug!(target: "optd::cli", function_name = %name, "Launching function");
+                // Launch the function with an empty vector of arguments.
+                let result = engine.launch(&name, vec![], result_handler).await;
+                tracing::debug!(target: "optd::cli", function_name = %name, "Function launch completed");
+                FunctionResult { name, result }
+            }
+            .instrument(tracing::info_span!(target: "optd::cli", "run_dsl_function", function_name = %function_name)),
+        );
     }
 
     // Collect all function results.
     let mut results = Vec::new();
     while let Some(result) = set.join_next().await {
         if let Ok(function_result) = result {
+            tracing::debug!(target: "optd::cli", function_name = %function_result.name, "Function task completed");
             results.push(function_result);
         }
     }
@@ -174,20 +215,24 @@ async fn run_functions_in_parallel(hir: &HIR, functions: Vec<String>) -> Vec<Fun
 }
 
 /// Process function results and display them.
+#[instrument(level = "info", skip(function_results), target = "optd::cli")]
 fn process_function_results(function_results: Vec<FunctionResult>) -> usize {
     let mut success_count = 0;
 
     for function_result in function_results {
-        println!("\n{} {}", "Function:".blue(), function_result.name);
+        println!("\n{} {}", "Function:".blue(), &function_result.name);
 
         match function_result.result {
             EngineResponse::Return(value, _) => {
+                tracing::trace!(target: "optd::cli", function_name = %function_result.name, "Function returned a value");
                 // Check if the result is a failure.
                 if matches!(value.data, CoreData::Fail(_)) {
+                    tracing::warn!(target: "optd::cli", function_name = %function_result.name, "Function failed: {}", value);
                     println!("  {}: Function failed: {}", "Error".red(), value);
                 } else {
                     println!("  {}: {}", "Result".green(), value);
                     success_count += 1;
+                    tracing::debug!(target: "optd::cli", function_name = %function_result.name, "Function succeeded. Result: {}", value);
                 }
             }
             _ => unreachable!(), // For now, unless we add a special UDF that builds a group / goal.
@@ -214,6 +259,7 @@ fn find_functions(hir: &HIR) -> Vec<String> {
 
 /// Display error details and exit the program.
 fn handle_errors(errors: &[CompileError]) -> ! {
+    tracing::error!(target: "optd::cli", num_errors = errors.len(), "Compilation failed");
     eprintln!(
         "\n{} {}\n",
         "•".yellow(),

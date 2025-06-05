@@ -14,6 +14,7 @@ use tokio::{
     sync::mpsc,
     time::{sleep, timeout},
 };
+use tracing::instrument;
 
 pub async fn properties(
     args: Vec<Value>,
@@ -31,7 +32,7 @@ pub async fn properties(
 
     retriever.get_properties(group_id).await
 }
-
+#[instrument(target = "optd::demo", level = "info", name = "run_demo")]
 async fn run_demo() {
     // Compile the HIR.
     let config = Config::new("src/demo/demo.opt".into());
@@ -100,6 +101,7 @@ async fn run_demo() {
 mod demo {
     use super::*;
 
+    #[tracing_test::traced_test]
     #[tokio::test]
     async fn test_optimizer_demo() {
         run_demo().await

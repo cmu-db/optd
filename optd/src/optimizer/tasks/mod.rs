@@ -158,3 +158,18 @@ pub(crate) struct ContinueWithLogicalTask {
     /// Potential `ForkLogicalTask` fork spawned off from this task.
     pub fork_in: Option<TaskId>,
 }
+
+impl Task {
+    /// Returns a string representation of the task type for logging purposes.
+    pub(crate) fn task_type(&self) -> &'static str {
+        match self {
+            Task::OptimizePlan(_) => "OptimizePlan",
+            Task::OptimizeGoal(_) => "OptimizeGoal",
+            Task::ExploreGroup(_) => "ExploreGroup",
+            Task::ImplementExpression(_) => "ImplementExpression",
+            Task::TransformExpression(_) => "TransformExpression",
+            Task::ForkLogical(_) => "ForkLogical",
+            Task::ContinueWithLogical(_) => "ContinueWithLogical",
+        }
+    }
+}

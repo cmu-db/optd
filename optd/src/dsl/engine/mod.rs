@@ -75,6 +75,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
     /// * `self` - The evaluation engine (owned).
     /// * `expr` - The expression to evaluate.
     /// * `k` - The continuation to receive each evaluation result.
+    #[tracing::instrument(level = "trace", skip(self, expr, k), fields(expr_kind = %format!("{:?}", expr.kind).split('(').next().unwrap_or("Unknown")), target="optd::dsl::engine")]
     pub fn evaluate(
         self,
         expr: Arc<Expr>,
@@ -83,6 +84,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
         use ExprKind::*;
 
         Box::pin(async move {
+            tracing::trace!(target: "optd::dsl::engine", "Evaluating expression");
             match &expr.as_ref().kind {
                 PatternMatch(sub_expr, match_arms) => {
                     self.evaluate_pattern_match(sub_expr.clone(), match_arms.clone(), k)
@@ -128,12 +130,14 @@ impl<O: Clone + Send + 'static> Engine<O> {
     ///
     /// # Returns
     /// The result of the rule application.
+    #[tracing::instrument(level = "info", skip(self, values, return_k), fields(function_name = %name, num_args = values.len()), target="optd::dsl::engine")]
     pub async fn launch(
         self,
         name: &str,
         values: Vec<Value>,
         return_k: Continuation<Value, O>,
     ) -> EngineResponse<O> {
+        tracing::debug!(target: "optd::dsl::engine", "Launching DSL function");
         let rule_call = self.create_rule_call(name, values);
 
         self.evaluate(

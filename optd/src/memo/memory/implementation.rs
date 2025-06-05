@@ -8,6 +8,7 @@ use hashbrown::{HashMap, HashSet};
 use std::collections::VecDeque;
 
 impl Memo for MemoryMemo {
+    #[tracing::instrument(level = "info", skip(self), target = "optd::memo")]
     async fn debug_dump(&self) -> Result<(), Infallible> {
         println!("\n===== MEMO TABLE DUMP =====");
         println!("---- GROUPS ----");
@@ -86,32 +87,44 @@ impl Memo for MemoryMemo {
         Ok(())
     }
 
+    #[tracing::instrument(level = "debug", skip(self), fields(group_id = ?group_id), target = "optd::memo")]
     async fn get_logical_properties(
         &self,
         group_id: GroupId,
     ) -> Result<LogicalProperties, Infallible> {
         let group_id = self.find_repr_group_id(group_id).await?;
-        Ok(self
+        tracing::trace!(target: "optd::memo", repr_group_id = ?group_id, "Found representative group for properties lookup");
+
+        let properties = self
             .group_info
             .get(&group_id)
             .unwrap_or_else(|| panic!("{:?} not found in memo table", group_id))
             .logical_properties
-            .clone())
+            .clone();
+
+        tracing::debug!(target: "optd::memo", properties = ?properties, "Retrieved logical properties");
+        Ok(properties)
     }
 
+    #[tracing::instrument(level = "debug", skip(self), fields(group_id = ?group_id), target = "optd::memo")]
     async fn get_all_logical_exprs(
         &self,
         group_id: GroupId,
     ) -> Result<HashSet<LogicalExpressionId>, Infallible> {
         let group_id = self.find_repr_group_id(group_id).await?;
-        Ok(self
+        tracing::trace!(target: "optd::memo", repr_group_id = ?group_id, "Found representative group for expressions lookup");
+
+        let expressions = self
             .group_info
             .get(&group_id)
             .unwrap_or_else(|| panic!("{:?} not found in memo table", group_id))
             .expressions
-            .clone())
-    }
+            .clone();
 
+        tracing::debug!(target: "optd::memo", num_expressions = expressions.len(), "Retrieved logical expressions from group");
+        Ok(expressions)
+    }
+    #[tracing::instrument(level = "trace", skip(self), fields(logical_expr_id = ?logical_expr_id), target = "optd::memo")]
     async fn find_logical_expr_group(
         &self,
         logical_expr_id: LogicalExpressionId,
@@ -123,18 +136,23 @@ impl Memo for MemoryMemo {
             .copied())
     }
 
+    #[tracing::instrument(level = "debug", skip(self, props), fields(logical_expr_id = ?logical_expr_id, properties = ?props), target = "optd::memo")]
     async fn create_group(
         &mut self,
         logical_expr_id: LogicalExpressionId,
         props: &LogicalProperties,
     ) -> Result<GroupId, Infallible> {
         let logical_expr_id = self.find_repr_logical_expr_id(logical_expr_id).await?;
+        tracing::trace!(target: "optd::memo", repr_logical_expr_id = ?logical_expr_id, "Found representative for logical expression");
 
         if let Some(group_id) = self.logical_id_to_group_index.get(&logical_expr_id) {
+            tracing::debug!(target: "optd::memo", existing_group_id = ?group_id, "Expression already belongs to existing group");
             return Ok(*group_id);
         }
 
         let group_id = self.next_group_id();
+        tracing::debug!(target: "optd::memo", group_id = ?group_id, "Creating new group");
+
         let group_info = GroupInfo {
             expressions: HashSet::from([logical_expr_id]),
             goals: HashMap::new(),
@@ -144,6 +162,8 @@ impl Memo for MemoryMemo {
         self.group_info.insert(group_id, group_info);
         self.logical_id_to_group_index
             .insert(logical_expr_id, group_id);
+
+        tracing::trace!(target: "optd::memo", "Group created and indexed");
         Ok(group_id)
     }
 
@@ -204,6 +224,7 @@ impl Memo for MemoryMemo {
     ///
     /// # Returns
     /// Detailed results of all merges performed, including cascading merges.
+    #[tracing::instrument(level = "info", skip(self), fields(group_id_1 = ?group_id_1, group_id_2 = ?group_id_2), target = "optd::memo")]
     async fn merge_groups(
         &mut self,
         group_id_1: GroupId,
@@ -216,14 +237,19 @@ impl Memo for MemoryMemo {
             // Find current representatives - skip if already merged.
             let group_id_1 = self.find_repr_group_id(g1).await?;
             let group_id_2 = self.find_repr_group_id(g2).await?;
+            tracing::trace!(target: "optd::memo", repr_g1 = ?group_id_1, repr_g2 = ?group_id_2, "Found representative groups");
+
             if group_id_1 == group_id_2 {
+                tracing::trace!(target: "optd::memo", "Groups already merged, skipping");
                 continue;
             }
 
             // Perform the group merge, creating a new representative.
+            tracing::debug!(target: "optd::memo", "Performing group pair merge");
             let (new_group_id, merge_product) =
                 self.merge_group_pair(group_id_1, group_id_2).await?;
             merge_operations.push(merge_product);
+            tracing::debug!(target: "optd::memo", new_group_id = ?new_group_id, "Group pair merged");
 
             // Process expressions that reference the merged groups,
             // which may trigger additional group merges.
@@ -231,11 +257,13 @@ impl Memo for MemoryMemo {
                 .process_referencing_logical_exprs(group_id_1, group_id_2, new_group_id)
                 .await?;
 
+            tracing::trace!(target: "optd::memo", num_new_pending = new_pending_merges.len(), "Found additional merges to process");
             pending_merges.extend(new_pending_merges);
         }
 
         // Consolidate the merge products by replacing the incremental merges
         // with consolidated results that show the full picture.
+        tracing::debug!(target: "optd::memo", num_merge_operations = merge_operations.len(), "Consolidating merge products");
         let group_merges = self
             .consolidate_merge_group_products(merge_operations)
             .await?;
@@ -243,11 +271,19 @@ impl Memo for MemoryMemo {
         // Now handle goal merges: we do not need to pass any extra parameters as
         // the goals to merge are gathered in the `goals` member of each new
         // representative group.
+        tracing::debug!(target: "optd::memo", num_group_merges = group_merges.len(), "Processing dependent goal merges");
         let goal_merges = self.merge_dependent_goals(&group_merges).await?;
 
         // Finally, we need to recursively merge the physical expressions that are
         // dependent on the merged goals (and the recursively merged expressions themselves).
+        tracing::debug!(target: "optd::memo", num_goal_merges = goal_merges.len(), "Processing dependent physical expression merges");
         let expr_merges = self.merge_dependent_physical_exprs(&goal_merges).await?;
+
+        tracing::info!(target: "optd::memo",
+            num_group_merges = group_merges.len(),
+            num_goal_merges = goal_merges.len(),
+            num_expr_merges = expr_merges.len(),
+            "Group merge operation completed");
 
         Ok(MergeProducts {
             group_merges,
@@ -256,13 +292,15 @@ impl Memo for MemoryMemo {
         })
     }
 
+    #[tracing::instrument(level = "debug", skip(self), fields(goal_id = ?goal_id), target = "optd::memo")]
     async fn get_all_goal_members(
         &self,
         goal_id: GoalId,
     ) -> Result<HashSet<GoalMemberId>, Infallible> {
         let repr_goal_id = self.find_repr_goal_id(goal_id).await?;
+        tracing::trace!(target: "optd::memo", repr_goal_id = ?repr_goal_id, "Found representative goal");
 
-        let members = self
+        let members: HashSet<GoalMemberId> = self
             .goal_info
             .get(&repr_goal_id)
             .expect("Goal not found in memo table")
@@ -271,9 +309,11 @@ impl Memo for MemoryMemo {
             .map(|&member_id| self.find_repr_goal_member_id(member_id))
             .collect();
 
+        tracing::debug!(target: "optd::memo", num_members = members.len(), "Retrieved goal members");
         Ok(members)
     }
 
+    #[tracing::instrument(level = "debug", skip(self), fields(goal_id = ?goal_id, member_id = ?member_id), target = "optd::memo")]
     async fn add_goal_member(
         &mut self,
         goal_id: GoalId,
@@ -284,15 +324,21 @@ impl Memo for MemoryMemo {
         let mut current_members = self.get_all_goal_members(goal_id).await?;
 
         let repr_member_id = self.find_repr_goal_member_id(member_id);
+        tracing::trace!(target: "optd::memo", repr_member_id = ?repr_member_id, "Found representative member ID");
+
         let added = current_members.insert(repr_member_id);
 
         if added {
             let repr_goal_id = self.find_repr_goal_id(goal_id).await?;
+            tracing::debug!(target: "optd::memo", repr_goal_id = ?repr_goal_id, "Adding new member to goal");
             self.goal_info
                 .get_mut(&repr_goal_id)
                 .expect("Goal not found in memo table")
                 .members
                 .insert(repr_member_id);
+            tracing::info!(target: "optd::memo", "Goal member added successfully");
+        } else {
+            tracing::debug!(target: "optd::memo", "Member already exists in goal");
         }
 
         Ok(added)

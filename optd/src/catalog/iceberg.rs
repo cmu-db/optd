@@ -26,6 +26,12 @@ impl<C: IcebergCatalog> OptdIcebergCatalog<C> {
     }
 
     /// Retrieves a [`Table`] from the catalog.
+    #[tracing::instrument(
+        level = "debug",
+        skip_all,
+        fields(table_name = %table_name),
+        target = "optd::catalog"
+    )]
     async fn get_table(&self, table_name: &str) -> Result<Table, CatalogError> {
         let namespace_ident = NamespaceIdent::new(DEFAULT_NAMESPACE.to_string());
         let table_ident = TableIdent::new(namespace_ident, table_name.to_string());

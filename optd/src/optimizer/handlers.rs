@@ -8,6 +8,7 @@ use crate::{
     },
 };
 use tokio::sync::mpsc::Sender;
+use tracing::{Instrument, Level};
 
 impl<M: Memo> Optimizer<M> {
     /// This method initiates the optimization process for a logical plan by launching
@@ -20,6 +21,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during processing.
+    #[tracing::instrument(level = "info", skip(self, plan, physical_tx), fields(task_id = ?optimize_plan_task_id, plan_root_op = %plan.0.tag), target="optd::optimizer::handlers")]
     pub(super) async fn process_optimize_request(
         &mut self,
         plan: LogicalPlan,
@@ -28,11 +30,11 @@ impl<M: Memo> Optimizer<M> {
     ) -> Result<(), M::MemoError> {
         use JobKind::*;
         use LogicalIngest::*;
-        use OptimizerMessage::*;
 
         match self.probe_ingest_logical_plan(&plan.clone().into()).await? {
             Found(group_id) => {
                 // The goal represents what we want to achieve: optimize the root group
+                tracing::debug!(target: "optd::optimizer::handlers", group_id = ?group_id, "Plan found in memo, launching optimize plan task");
                 // with no specific physical properties required.
                 let goal = Goal(group_id, PhysicalProperties(None));
                 let goal_id = self.memo.get_goal_id(&goal).await?;
@@ -42,6 +44,7 @@ impl<M: Memo> Optimizer<M> {
                     .await?;
             }
             Missing(logical_exprs) => {
+                tracing::debug!(target: "optd::optimizer::handlers", num_missing_exprs = logical_exprs.len(), "Plan not fully in memo, scheduling derive jobs");
                 // Store the request as a pending message that will be processed
                 // once all create task dependencies are resolved.
                 let pending_dependencies = logical_exprs
@@ -50,10 +53,14 @@ impl<M: Memo> Optimizer<M> {
                     .map(|logical_expr_id| {
                         self.schedule_job(optimize_plan_task_id, Derive(logical_expr_id))
                     })
-                    .collect();
+                    .collect::<hashbrown::HashSet<_>>();
 
+                tracing::event!(target: "optd::optimizer::handlers", Level::DEBUG, num_dependencies = pending_dependencies.len(), "Request for optimize_plan_task pending");
                 self.pending_messages.push(PendingMessage::new(
-                    Request(OptimizeRequest { plan, physical_tx }, optimize_plan_task_id),
+                    OptimizerMessage::Request(
+                        OptimizeRequest { plan, physical_tx },
+                        optimize_plan_task_id,
+                    ),
                     pending_dependencies,
                 ));
             }
@@ -72,6 +79,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during processing.
+    #[tracing::instrument(level = "info", skip(self, plan), fields(target_group_id = ?group_id, job_id = ?job_id, plan_type = %std::any::type_name_of_val(&plan)), target="optd::optimizer::handlers")]
     pub(super) async fn process_new_logical_partial(
         &mut self,
         plan: PartialLogicalPlan,
@@ -81,34 +89,40 @@ impl<M: Memo> Optimizer<M> {
         use EngineProduct::*;
         use JobKind::*;
         use LogicalIngest::*;
-        use OptimizerMessage::*;
 
         let group_id = self.memo.find_repr_group_id(group_id).await?;
+        tracing::debug!(target: "optd::optimizer::handlers", "Processing new logical partial for group {}", group_id.0);
 
         match self.probe_ingest_logical_plan(&plan).await? {
             Found(new_group_id) if new_group_id != group_id => {
                 // Atomically perform the merge in the memo and process all results.
+                tracing::debug!(target: "optd::optimizer::handlers", "Merging group {} into {}", new_group_id.0, group_id.0);
                 let merge_results = self.memo.merge_groups(group_id, new_group_id).await?;
-
                 self.handle_merge_result(merge_results).await?;
             }
             Found(_) => {
+                tracing::debug!(target: "optd::optimizer::handlers", "New logical partial already exists in group or an equivalent group, no action needed.");
                 // Group already exists, nothing to merge or do.
             }
             Missing(logical_exprs) => {
+                tracing::debug!(target: "optd::optimizer::handlers", num_missing_exprs = logical_exprs.len(), "New logical partial requires deriving properties for new expressions.");
                 // Store the request as a pending message that will be processed
                 // once all create task dependencies are resolved.
                 let related_task_id = self.get_related_task_id(job_id);
                 let pending_dependencies = logical_exprs
                     .iter()
                     .cloned()
-                    .map(|logical_expr_id| {
-                        self.schedule_job(related_task_id, Derive(logical_expr_id))
-                    })
-                    .collect();
+                    .map(
+                        |logical_expr_id| {
+                            tracing::trace!(target: "optd::optimizer::handlers", "Scheduling Derive job for expr_id={:?} due to new logical partial, task_id={:?}", logical_expr_id, related_task_id);
+                            self.schedule_job(related_task_id, Derive(logical_expr_id))
+                        }
+                    )
+                    .collect::<hashbrown::HashSet<_>>();
 
+                tracing::event!(target: "optd::optimizer::handlers", Level::DEBUG, num_dependencies = pending_dependencies.len(), "NewLogicalPartial processing pending");
                 self.pending_messages.push(PendingMessage::new(
-                    Product(NewLogicalPartial(plan, group_id), job_id),
+                    OptimizerMessage::Product(NewLogicalPartial(plan, group_id), job_id),
                     pending_dependencies,
                 ));
             }
@@ -127,6 +141,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during processing.
+    #[tracing::instrument(level = "info", skip(self, plan), fields(target_goal_id = ?goal_id, job_id = ?job_id, plan_type = %std::any::type_name_of_val(&plan)), target="optd::optimizer::handlers")]
     pub(super) async fn process_new_physical_partial(
         &mut self,
         plan: PartialPhysicalPlan,
@@ -138,14 +153,17 @@ impl<M: Memo> Optimizer<M> {
         let goal_id = self.memo.find_repr_goal_id(goal_id).await?;
         let related_task_id = self.get_related_task_id(job_id);
 
+        tracing::debug!(target: "optd::optimizer::handlers", "Processing new physical partial for goal {}", goal_id.0);
         let member_id = self.probe_ingest_physical_plan(&plan).await?;
         let added = self.memo.add_goal_member(goal_id, member_id).await?;
+        tracing::debug!(target: "optd::optimizer::handlers", ?member_id, added_to_goal = added, "Processed physical plan into goal member");
 
         match member_id {
             PhysicalExpressionId(_) => {
                 // TODO: Here we would launch costing tasks based on the design.
             }
             GoalId(goal_id) => {
+                tracing::debug!(target: "optd::optimizer::handlers", sub_goal_id = ?goal_id, "New physical partial resulted in a sub-goal");
                 if added {
                     // Optimize the new sub-goal and add to task graph.
                     let sub_optimize_task_id = self.ensure_optimize_goal_task(goal_id).await?;
@@ -175,12 +193,14 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during processing.
+    #[tracing::instrument(level = "info", skip(self, properties), fields(expr_id = ?expression_id, job_id = ?job_id), target="optd::optimizer::handlers")]
     pub(super) async fn process_create_group(
         &mut self,
         expression_id: LogicalExpressionId,
         properties: &LogicalProperties,
         job_id: JobId,
     ) -> Result<(), M::MemoError> {
+        tracing::debug!(target: "optd::optimizer::handlers", "Creating group for expression");
         self.memo.create_group(expression_id, properties).await?;
         self.resolve_dependencies(job_id).await;
         Ok(())
@@ -196,6 +216,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during processing.
+    #[tracing::instrument(level = "info", skip(self, continuation), fields(target_group_id = ?group_id, job_id = ?job_id), target="optd::optimizer::handlers")]
     pub(super) async fn process_group_subscription(
         &mut self,
         group_id: GroupId,
@@ -203,6 +224,7 @@ impl<M: Memo> Optimizer<M> {
         job_id: JobId,
     ) -> Result<(), M::MemoError> {
         let parent_task_id = self.get_related_task_id(job_id);
+        tracing::debug!(target: "optd::optimizer::handlers", "Processing group subscription for parent task {:?}", parent_task_id);
         self.launch_fork_logical_task(group_id, continuation, parent_task_id)
             .await
     }
@@ -216,22 +238,30 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during processing.
+    #[tracing::instrument(level = "info", skip(self, sender), fields(target_group_id = ?group_id), target="optd::optimizer::handlers")]
     pub(super) async fn process_retrieve_properties(
         &mut self,
         group_id: GroupId,
         sender: Sender<LogicalProperties>,
     ) -> Result<(), M::MemoError> {
         let props = self.memo.get_logical_properties(group_id).await?;
+        tracing::debug!(target: "optd::optimizer::handlers", "Retrieved properties for group, sending to requester");
 
         // We don't want to make a job out of this, as it is merely a way to unblock
         // an existing pending job. We send it to the channel without blocking the
         // main co-routine.
+        let span = tracing::debug_span!(
+            target: "optd::optimizer::handlers",
+            "send_properties_job",
+            group_id = ?group_id
+        );
         tokio::spawn(async move {
             sender
                 .send(props)
-                .await
-                .expect("Failed to send properties - channel closed.");
-        });
+                .await.unwrap_or_else(|e| {
+                    tracing::warn!(target: "optd::optimizer::handlers", "Failed to send properties - channel closed: {}", e);
+                });
+            }.instrument(span));
 
         Ok(())
     }
@@ -244,6 +274,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Parameters
     /// * `completed_job_id` - ID of the completed job.
+    #[tracing::instrument(level = "debug", skip(self), fields(completed_job_id = ?completed_job_id), target="optd::optimizer::handlers")]
     async fn resolve_dependencies(&mut self, completed_job_id: JobId) {
         // Update dependencies and collect ready messages.
         let ready_indices: Vec<_> = self
@@ -257,18 +288,23 @@ impl<M: Memo> Optimizer<M> {
             .collect();
 
         // Process all ready messages (in reverse order to avoid index issues when removing).
-        for i in ready_indices.iter().rev() {
-            let pending = self.pending_messages.swap_remove(*i);
+        if !ready_indices.is_empty() {
+            tracing::debug!(target: "optd::optimizer::handlers", num_ready_messages = ready_indices.len(), "Processing messages with resolved dependencies");
+            for i in ready_indices.iter().rev() {
+                let pending = self.pending_messages.swap_remove(*i);
+                let msg_type_name = std::any::type_name_of_val(&pending.message);
+                tracing::trace!(target: "optd::optimizer::handlers", "Re-scheduling message of type: {}", msg_type_name);
 
-            // Re-send the message to be processed in a new co-routine to not block the
-            // main co-routine.
-            let message_tx = self.message_tx.clone();
-            tokio::spawn(async move {
-                message_tx
-                    .send(pending.message)
-                    .await
-                    .expect("Failed to re-send ready message - channel closed.");
-            });
+                // Re-send the message to be processed in a new co-routine to not block the
+                // main co-routine.
+                let span = tracing::debug_span!(target: "optd::optimizer::handlers", "re-schedule_pending_message");
+                let message_tx = self.message_tx.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = message_tx.send(pending.message).await {
+                        tracing::error!(target: "optd::optimizer::handlers", "Failed to re-send ready message - channel closed: {}", e);
+                    }
+                }.instrument(span));
+            }
         }
     }
 }
