@@ -8,7 +8,7 @@ use crate::{
     },
 };
 use tokio::sync::mpsc::Sender;
-use tracing::Level;
+use tracing::{Level, Instrument};
 
 impl<M: Memo> Optimizer<M> {
     /// This method initiates the optimization process for a logical plan by launching
@@ -250,13 +250,14 @@ impl<M: Memo> Optimizer<M> {
         // We don't want to make a job out of this, as it is merely a way to unblock
         // an existing pending job. We send it to the channel without blocking the
         // main co-routine.
+        let span = tracing::debug_span!(target: "optd::optimizer::handlers", "send_properties_response");
         tokio::spawn(async move {
             sender
                 .send(props)
                 .await.unwrap_or_else(|e| {
                     tracing::warn!(target: "optd::optimizer", "Failed to send properties - channel closed: {}", e);
                 });
-        });
+            }.instrument(span));
 
         Ok(())
     }
@@ -292,12 +293,13 @@ impl<M: Memo> Optimizer<M> {
 
                 // Re-send the message to be processed in a new co-routine to not block the
                 // main co-routine.
+                let span = tracing::debug_span!(target: "optd::optimizer::jobs", "re-schedule_pending_message");
                 let message_tx = self.message_tx.clone();
                 tokio::spawn(async move {
                     if let Err(e) = message_tx.send(pending.message).await {
                         tracing::error!(target: "optd::optimizer", "Failed to re-send ready message - channel closed: {}", e);
                     }
-                });
+                }.instrument(span));
             }
         }
     }
