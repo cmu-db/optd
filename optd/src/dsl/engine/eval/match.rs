@@ -205,7 +205,8 @@ where
             (Operator(op_pattern), CoreData::Logical(Materialized(log_op))) => {
                 let tag_matches = op_pattern.tag == log_op.operator.tag;
                 let data_count_matches = op_pattern.data.len() == log_op.operator.data.len();
-                let children_count_matches = op_pattern.children.len() == log_op.operator.children.len();
+                let children_count_matches =
+                    op_pattern.children.len() == log_op.operator.children.len();
 
                 tracing::debug!(target: "optd::dsl::engine",
                     pattern_tag = %op_pattern.tag,
@@ -232,7 +233,8 @@ where
             (Operator(op_pattern), CoreData::Physical(Materialized(phys_op))) => {
                 let tag_matches = op_pattern.tag == phys_op.operator.tag;
                 let data_count_matches = op_pattern.data.len() == phys_op.operator.data.len();
-                let children_count_matches = op_pattern.children.len() == phys_op.operator.children.len();
+                let children_count_matches =
+                    op_pattern.children.len() == phys_op.operator.children.len();
 
                 tracing::debug!(target: "optd::dsl::engine",
                     pattern_tag = %op_pattern.tag,

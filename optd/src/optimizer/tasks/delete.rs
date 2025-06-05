@@ -109,7 +109,7 @@ impl<M: Memo> Optimizer<M> {
             OptimizePlan(_) => {
                 tracing::warn!(target: "optd::optimizer::tasks", "OptimizePlan task deletion not yet implemented");
                 todo!()
-            },
+            }
         }
 
         // Finally, remove the task from the task collection.

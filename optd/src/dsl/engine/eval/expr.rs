@@ -21,7 +21,11 @@ impl<O: Clone + Send + 'static> Engine<O> {
     /// * `then_expr` - The expression to evaluate if condition is true.
     /// * `else_expr` - The expression to evaluate if condition is false.
     /// * `k` - The continuation to receive evaluation results.
-    #[tracing::instrument(level = "trace", skip(self, cond, then_expr, else_expr, k), target = "optd::dsl::engine")]
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, cond, then_expr, else_expr, k),
+        target = "optd::dsl::engine"
+    )]
     pub(crate) async fn evaluate_if_then_else(
         self,
         cond: Arc<Expr>,

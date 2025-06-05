@@ -214,7 +214,12 @@ impl<M: Memo> Optimizer<M> {
     }
 
     /// Run the optimizer's main processing loop.
-    #[tracing::instrument(level = "info", name = "optimizer_run_loop", skip(self), target = "optd::optimizer")]
+    #[tracing::instrument(
+        level = "info",
+        name = "optimizer_run_loop",
+        skip(self),
+        target = "optd::optimizer"
+    )]
     async fn run(mut self) -> Result<(), M::MemoError> {
         use ClientRequest::*;
         use EngineProduct::*;

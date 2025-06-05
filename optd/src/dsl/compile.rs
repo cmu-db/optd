@@ -318,7 +318,11 @@ pub fn registry_check(
 /// 2. Building type constraints based on the annotated TypedSpan nodes.
 /// 3. Resolving these constraints to infer concrete types.
 /// 4. Transforming the typed HIR into its final form.
-#[tracing::instrument(level = "info", skip(source, hir, registry), target = "optd::dsl::compile")]
+#[tracing::instrument(
+    level = "info",
+    skip(source, hir, registry),
+    target = "optd::dsl::compile"
+)]
 pub fn infer(
     source: &str,
     hir: HIR<TypedSpan>,
