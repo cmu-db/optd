@@ -26,6 +26,13 @@ impl<M: Memo> Optimizer<M> {
     /// * `task_id` - The ID of the group exploration task to update.
     /// * `all_logical_exprs` - The complete set of logical expressions known for this group.
     /// * `principal` - Whether this task is the principal one (responsible for launching transforms).
+    #[tracing::instrument(
+        level = "debug",
+        skip_all,
+        name = "update_tasks_for_merged_group",
+        fields(task_id = ?task_id, principal),
+        target = "optd::optimizer::merge"
+    )]
     pub(super) async fn update_tasks(
         &mut self,
         task_id: TaskId,
@@ -37,6 +44,11 @@ impl<M: Memo> Optimizer<M> {
         if new_exprs.is_empty() {
             return Ok(());
         }
+        tracing::debug!(
+            target: "optd::optimizer::merge",
+            num_new_exprs = new_exprs.len(),
+            "Updating task with new expressions"
+        );
 
         let (group_id, fork_tasks, optimize_goal_tasks) = {
             let task = self.get_explore_group_task(task_id).unwrap();
@@ -58,6 +70,10 @@ impl<M: Memo> Optimizer<M> {
             let continuation_tasks =
                 self.create_logical_cont_tasks(&new_exprs, group_id, fork_task_id, &continuation);
 
+            tracing::trace!(
+                target: "optd::optimizer::merge",
+                "Adding {} continuation tasks to fork task {}", continuation_tasks.len(), fork_task_id.0
+            );
             self.get_fork_logical_task_mut(fork_task_id)
                 .unwrap()
                 .continue_with_logical_in
@@ -74,6 +90,10 @@ impl<M: Memo> Optimizer<M> {
             let implement_tasks =
                 self.create_implement_tasks(&new_exprs, goal_id, optimize_goal_id);
 
+            tracing::trace!(
+                target: "optd::optimizer::merge",
+                "Adding {} implement tasks to optimize goal task {}", implement_tasks.len(), optimize_goal_id.0
+            );
             self.get_optimize_goal_task_mut(optimize_goal_id)
                 .unwrap()
                 .implement_expression_in
@@ -85,6 +105,10 @@ impl<M: Memo> Optimizer<M> {
         if principal {
             let transform_tasks = self.create_transform_tasks(&new_exprs, group_id, task_id);
 
+            tracing::trace!(
+                target: "optd::optimizer::merge",
+                "Adding {} transform tasks to explore group task {}", transform_tasks.len(), task_id.0
+            );
             self.get_explore_group_task_mut(task_id)
                 .unwrap()
                 .transform_expr_in
@@ -125,6 +149,13 @@ impl<M: Memo> Optimizer<M> {
     /// # Arguments
     /// * `principal_task_id` - The ID of the task to retain as canonical.
     /// * `secondary_task_ids` - All other task IDs to merge into the principal.
+    #[tracing::instrument(
+        level = "debug",
+        skip_all,
+        name = "consolidate_explore_group_tasks",
+        fields(principal_task_id = ?principal_task_id, num_secondaries = secondary_task_ids.len()),
+        target = "optd::optimizer::merge"
+    )]
     pub(super) async fn consolidate_group_explore(
         &mut self,
         principal_task_id: TaskId,
@@ -137,6 +168,10 @@ impl<M: Memo> Optimizer<M> {
             let fork_tasks = std::mem::take(&mut task.fork_logical_out);
             let goal_tasks = std::mem::take(&mut task.optimize_goal_out);
 
+            tracing::trace!(
+                target: "optd::optimizer::merge",
+                "Deleting secondary explore group task {} and moving {} fork and {} goal tasks", task_id.0, fork_tasks.len(), goal_tasks.len()
+            );
             self.delete_task(task_id);
 
             fork_tasks.into_iter().for_each(|fork_id| {
@@ -169,6 +204,13 @@ impl<M: Memo> Optimizer<M> {
     /// # Arguments
     /// * `principal_task_id` - The ID of the task to retain as canonical.
     /// * `secondary_task_ids` - All other task IDs to merge into the principal.
+    #[tracing::instrument(
+        level = "debug",
+        skip_all,
+        name = "consolidate_optimize_goal_tasks",
+        fields(principal_task_id = ?principal_task_id, num_secondaries = secondary_task_ids.len()),
+        target = "optd::optimizer::merge"
+    )]
     pub(super) async fn consolidate_goal_optimize(
         &mut self,
         principal_task_id: TaskId,
@@ -182,6 +224,10 @@ impl<M: Memo> Optimizer<M> {
             let optimize_in_tasks = std::mem::take(&mut task.optimize_goal_in);
             let optimize_plan_tasks = std::mem::take(&mut task.optimize_plan_out);
 
+            tracing::trace!(
+                target: "optd::optimizer::merge",
+                "Deleting secondary optimize goal task {} and moving dependencies", task_id.0
+            );
             self.delete_task(task_id);
 
             optimize_out_tasks.into_iter().for_each(|optimize_id| {
@@ -224,6 +270,13 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Arguments
     /// * `task_id` - The ID of the group exploration task to deduplicate.
+    #[tracing::instrument(
+        level = "debug",
+        skip_all,
+        name = "deduplicate_group_tasks",
+        fields(task_id = ?task_id),
+        target = "optd::optimizer::merge"
+    )]
     pub(super) async fn dedup_tasks(&mut self, task_id: TaskId) -> Result<(), M::MemoError> {
         let task = self.get_explore_group_task_mut(task_id).unwrap();
         let old_exprs = std::mem::take(&mut task.dispatched_exprs);
@@ -243,6 +296,10 @@ impl<M: Memo> Optimizer<M> {
                 }
             }
 
+            tracing::trace!(
+                target: "optd::optimizer::merge",
+                "Deduplicating tasks: {} unique expressions, {} duplicates to delete", seen.len(), dups.len()
+            );
             (seen, dups)
         };
 

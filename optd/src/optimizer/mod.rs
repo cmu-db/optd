@@ -204,18 +204,21 @@ impl<M: Memo> Optimizer<M> {
             client_rx,
         );
 
-        tokio::spawn(async move {
-            // TODO: If an error occurs we could restart or reboot the memo.
-            // Rather than failing (e.g. memo could be distributed).
-            optimizer.run().await.expect("Optimizer failure");
-        });
+        tokio::spawn(
+            async move {
+                // TODO: If an error occurs we could restart or reboot the memo.
+                // Rather than failing (e.g. memo could be distributed).
+                optimizer.run().await.expect("Optimizer failure");
+            }
+            .instrument(tracing::info_span!(target: "optd::optimizer", "optimizer_thread")),
+        );
 
         client_tx
     }
 
     /// Run the optimizer's main processing loop.
     #[tracing::instrument(
-        level = "info",
+        level = "debug",
         name = "optimizer_run_loop",
         skip(self),
         target = "optd::optimizer"
@@ -225,12 +228,10 @@ impl<M: Memo> Optimizer<M> {
         use EngineProduct::*;
         use OptimizerMessage as OmMsg; // Alias to avoid conflict with tracing::debug!
 
-        tracing::info!("Optimizer starting run loop");
-
         loop {
             tokio::select! {
                 Some(client_request) = self.client_rx.recv() => {
-                    let req_span = tracing::info_span!(target: "optd::optimizer", "process_client_request", request_type = %std::any::type_name_of_val(&client_request));
+                    let req_span = tracing::info_span!(target: "optd::optimizer", "process_client_request");
 
                     let message_tx = self.message_tx.clone();
 
@@ -238,14 +239,15 @@ impl<M: Memo> Optimizer<M> {
                         Optimize(optimize_request) => {
                             // Add plan_root_op for better context
                             let plan_root_op = optimize_request.plan.0.tag.clone();
-                            req_span.record("plan_root_op", &tracing::field::display(&plan_root_op));
+                            req_span.record("plan_root_op", tracing::field::display(&plan_root_op));
 
                             // Create a task for the optimization request.
                             let task_id = self.create_optimize_plan_task(
                                 optimize_request.plan.clone(),
                                 optimize_request.physical_tx.clone()
                             );
-                            req_span.record("client_task_id", &tracing::field::debug(task_id));
+                            req_span.record("request_type", tracing::field::display("Optimize"));
+                            req_span.record("client_task_id", tracing::field::debug(task_id));
 
                             // Forward the client request to the message processing loop
                             // in a new
@@ -259,6 +261,7 @@ impl<M: Memo> Optimizer<M> {
                             );
                         },
                         DumpMemo => {
+                            req_span.record("request_type", tracing::field::display("DumpMemo"));
                             async {
                                     tracing::info!(target: "optd::optimizer", "Processing dump memo request");
                                     self.memo.debug_dump().await
@@ -269,7 +272,7 @@ impl<M: Memo> Optimizer<M> {
                     }
                 },
                 Some(message) = self.message_rx.recv() => {
-                    let msg_span = tracing::debug_span!(target: "optd::optimizer", "process_optimizer_message", message_type = %std::any::type_name_of_val(&message));
+                    let msg_span = tracing::info_span!(target: "optd::optimizer", "process_optimizer_message", message_type = %std::any::type_name_of_val(&message));
                     let _guard = msg_span.enter();
                     tracing::debug!(target: "optd::optimizer", "Received optimizer message");
 
@@ -278,19 +281,19 @@ impl<M: Memo> Optimizer<M> {
                         OmMsg::Request(OptimizeRequest { plan, physical_tx }, task_id) => {
                             // Add plan_root_op for better context
                             let plan_root_op = plan.0.tag.clone();
-                            msg_span.record("task_id", &tracing::field::debug(task_id));
-                            msg_span.record("plan_root_op", &tracing::field::display(&plan_root_op));
+                            msg_span.record("task_id", tracing::field::debug(task_id));
+                            msg_span.record("plan_root_op", tracing::field::display(&plan_root_op));
                             tracing::debug!(target: "optd::optimizer", "Processing optimize request from internal queue");
                             self.process_optimize_request(plan, physical_tx, task_id).await?;
                         },
                         OmMsg::Retrieve(group_id, response_tx) => {
-                            msg_span.record("group_id", &tracing::field::debug(group_id));
+                            msg_span.record("group_id", tracing::field::debug(group_id));
                             tracing::debug!(target: "optd::optimizer", "Processing retrieve properties request");
                             self.process_retrieve_properties(group_id, response_tx).await?;
                         },
                         OmMsg::Product(product, job_id) => {
-                            msg_span.record("job_id", &tracing::field::debug(job_id));
-                            msg_span.record("product_type", &tracing::field::display(std::any::type_name_of_val(&product)));
+                            msg_span.record("job_id", tracing::field::debug(job_id));
+                            msg_span.record("product_type", tracing::field::display(std::any::type_name_of_val(&product)));
                             tracing::debug!(target: "optd::optimizer", "Processing job product");
                             let task_id = self.get_related_task_id(job_id);
 

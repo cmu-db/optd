@@ -10,7 +10,6 @@ use std::collections::VecDeque;
 impl Memo for MemoryMemo {
     #[tracing::instrument(level = "info", skip(self), target = "optd::memo")]
     async fn debug_dump(&self) -> Result<(), Infallible> {
-        tracing::info!(target: "optd::memo", "Starting memo table debug dump");
         println!("\n===== MEMO TABLE DUMP =====");
         println!("---- GROUPS ----");
 
@@ -84,7 +83,6 @@ impl Memo for MemoryMemo {
         }
 
         println!("===== END MEMO TABLE DUMP =====");
-        tracing::info!(target: "optd::memo", "Memo table debug dump completed");
 
         Ok(())
     }
@@ -138,14 +136,14 @@ impl Memo for MemoryMemo {
             .copied())
     }
 
-    #[tracing::instrument(level = "info", skip(self, props), fields(logical_expr_id = ?logical_expr_id, properties = ?props), target = "optd::memo")]
+    #[tracing::instrument(level = "debug", skip(self, props), fields(logical_expr_id = ?logical_expr_id, properties = ?props), target = "optd::memo")]
     async fn create_group(
         &mut self,
         logical_expr_id: LogicalExpressionId,
         props: &LogicalProperties,
     ) -> Result<GroupId, Infallible> {
         let logical_expr_id = self.find_repr_logical_expr_id(logical_expr_id).await?;
-        tracing::trace!(target: "optd::memo", repr_logical_expr_id = ?logical_expr_id, "Found representative logical expression");
+        tracing::trace!(target: "optd::memo", repr_logical_expr_id = ?logical_expr_id, "Found representative for logical expression");
 
         if let Some(group_id) = self.logical_id_to_group_index.get(&logical_expr_id) {
             tracing::debug!(target: "optd::memo", existing_group_id = ?group_id, "Expression already belongs to existing group");
@@ -153,7 +151,7 @@ impl Memo for MemoryMemo {
         }
 
         let group_id = self.next_group_id();
-        tracing::info!(target: "optd::memo", group_id = ?group_id, "Creating new group");
+        tracing::debug!(target: "optd::memo", group_id = ?group_id, "Creating new group");
 
         let group_info = GroupInfo {
             expressions: HashSet::from([logical_expr_id]),
@@ -165,7 +163,7 @@ impl Memo for MemoryMemo {
         self.logical_id_to_group_index
             .insert(logical_expr_id, group_id);
 
-        tracing::debug!(target: "optd::memo", "Group created and indexed");
+        tracing::trace!(target: "optd::memo", "Group created and indexed");
         Ok(group_id)
     }
 
@@ -232,8 +230,6 @@ impl Memo for MemoryMemo {
         group_id_1: GroupId,
         group_id_2: GroupId,
     ) -> Result<MergeProducts, Infallible> {
-        tracing::info!(target: "optd::memo", "Starting group merge operation");
-
         let mut merge_operations = vec![];
         let mut pending_merges = VecDeque::from(vec![(group_id_1, group_id_2)]);
 

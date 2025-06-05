@@ -23,9 +23,9 @@ impl<M: Memo> Optimizer<M> {
     }
 
     /// Add a new task.
-    #[tracing::instrument(level = "debug", skip(self, task), fields(task_id = ?task_id), target = "optd::optimizer::tasks")]
+    #[tracing::instrument(level = "debug", skip(self, task), fields(task_id = ?task_id, task_type = %task.task_type()), target = "optd::optimizer::tasks")]
     pub(crate) fn add_task(&mut self, task_id: TaskId, task: Task) {
-        tracing::trace!(target: "optd::optimizer::tasks", task_type = %task.task_type(), "Adding task to manager");
+        tracing::trace!(target: "optd::optimizer::tasks", "Adding task to manager");
         self.tasks.insert(task_id, task);
     }
 

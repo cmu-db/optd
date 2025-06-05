@@ -83,7 +83,6 @@ pub struct Verbosity {
 ), target = "optd::dsl::compile")]
 pub fn compile_hir(config: Config, udfs: HashMap<String, Udf>) -> Result<HIR, Vec<CompileError>> {
     let source_path = config.path_str();
-    tracing::info!(target: "optd::dsl::compile", "Starting DSL compilation");
 
     // If we cannot find the file we can't compile anything, so exit immediately.
     let source = fs::read_to_string(&config.path).unwrap_or_else(|e| {
@@ -198,7 +197,6 @@ pub fn compile_hir(config: Config, udfs: HashMap<String, Udf>) -> Result<HIR, Ve
         println!("\n{}", "Compilation completed successfully!".green().bold());
     }
 
-    tracing::info!(target: "optd::dsl::compile", "DSL compilation completed successfully");
     Ok(hir)
 }
 

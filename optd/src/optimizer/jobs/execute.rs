@@ -30,7 +30,6 @@ impl<M: Memo> Optimizer<M> {
     /// # Parameters
     /// * `expression_id`: The ID of the logical expression to derive properties for.
     /// * `job_id`: The ID of the job to be executed.
-    #[tracing::instrument(level = "debug", skip(self), fields(job_id, expr_id = ?expression_id), target="optd::optimizer::jobs")]
     pub(super) async fn derive_logical_properties(
         &self,
         expression_id: LogicalExpressionId,
@@ -58,6 +57,7 @@ impl<M: Memo> Optimizer<M> {
 
         tracing::debug!(target: "optd::optimizer::jobs", "Launching DSL engine for 'derive'");
         let message_tx = self.message_tx.clone();
+        let span = tracing::debug_span!(target: "optd::optimizer::jobs", "derive_job", job_id = ?job_id, expression_id = ?expression_id);
         tokio::spawn(
             async move {
                 let response = engine
@@ -77,7 +77,8 @@ impl<M: Memo> Optimizer<M> {
 
                 Self::process_engine_response(job_id, message_tx, response).await;
             }
-            .instrument(tracing::debug_span!(target: "optd::optimizer::jobs", "derive_job_execution", job_id = ?job_id, expression_id = ?expression_id)));
+            .instrument(span),
+        );
 
         Ok(())
     }
@@ -92,7 +93,6 @@ impl<M: Memo> Optimizer<M> {
     /// * `expression_id`: The ID of the logical expression to transform.
     /// * `group_id`: The ID of the group to which the transformed expression belongs.
     /// * `job_id`: The ID of the job to be executed.
-    #[tracing::instrument(level = "debug", skip(self), fields(job_id, rule = %rule_name.0, expr_id = ?expression_id, group_id = ?group_id), target="optd::optimizer::jobs")]
     pub(super) async fn execute_transformation_rule(
         &self,
         rule_name: TransformationRule,
@@ -117,6 +117,7 @@ impl<M: Memo> Optimizer<M> {
         tracing::debug!(target: "optd::optimizer::jobs", "Launching DSL engine for transformation rule '{}'", rule_name.0);
         let message_tx = self.message_tx.clone();
         let rule_name_clone = rule_name.0.clone();
+        let span = tracing::debug_span!(target: "optd::optimizer::jobs", "transform_job", job_id = ?job_id, rule_name = %rule_name_clone);
         tokio::spawn(
             async move {
                 let response = engine
@@ -138,7 +139,8 @@ impl<M: Memo> Optimizer<M> {
                     tracing::debug!(target: "optd::optimizer::rules", rule_name=%rule_name.0, "Rule not applicable or returned None");
                 }
             }
-            .instrument(tracing::debug_span!(target: "optd::optimizer::jobs", "transform_job_execution", job_id = ?job_id, rule_name = %rule_name_clone)));
+            .instrument(span),
+        );
 
         Ok(())
     }
@@ -153,7 +155,6 @@ impl<M: Memo> Optimizer<M> {
     /// * `expression_id`: The ID of the logical expression to implement.
     /// * `goal_id`: The ID of the goal to which the implementation belongs.
     /// * `job_id`: The ID of the job to be executed.
-    #[tracing::instrument(level = "debug", skip(self), fields(job_id, rule = %rule_name.0, expr_id = ?expression_id, goal_id = ?goal_id), target="optd::optimizer::jobs")]
     pub(super) async fn execute_implementation_rule(
         &self,
         rule_name: ImplementationRule,
@@ -179,6 +180,7 @@ impl<M: Memo> Optimizer<M> {
         tracing::debug!(target: "optd::optimizer::jobs", "Launching DSL engine for implementation rule '{}'", rule_name.0);
         let message_tx = self.message_tx.clone();
         let rule_name_clone = rule_name.0.clone();
+        let span = tracing::debug_span!(target: "optd::optimizer::jobs", "implement_job", job_id = ?job_id, rule_name = %rule_name_clone);
         tokio::spawn(
             async move {
                 let response = engine
@@ -195,7 +197,8 @@ impl<M: Memo> Optimizer<M> {
 
                 Self::process_engine_response(job_id, message_tx, response).await;
             }
-            .instrument(tracing::debug_span!(target: "optd::optimizer::jobs", "implement_job_execution", job_id = ?job_id, rule_name = %rule_name_clone)));
+            .instrument(span),
+        );
 
         Ok(())
     }
@@ -209,7 +212,6 @@ impl<M: Memo> Optimizer<M> {
     /// * `group_id`: The ID of the group to which the expression belongs.
     /// * `k`: The continuation function to be called with the materialized plan.
     /// * `job_id`: The ID of the job to be executed.
-    #[tracing::instrument(level = "debug", skip(self, k), fields(job_id, expr_id = ?expression_id, group_id = ?group_id), target="optd::optimizer::jobs")]
     pub(super) async fn execute_continue_with_logical(
         &self,
         expression_id: LogicalExpressionId,
@@ -231,6 +233,7 @@ impl<M: Memo> Optimizer<M> {
 
         tracing::debug!(target: "optd::optimizer::jobs", "Executing logical continuation");
         let message_tx = self.message_tx.clone();
+        let span = tracing::debug_span!(target: "optd::optimizer::jobs", "continue_logical_job", job_id = ?job_id);
         tokio::spawn(
             async move {
                 let response = k.0(plan).await;
@@ -242,7 +245,8 @@ impl<M: Memo> Optimizer<M> {
                     tracing::debug!(target: "optd::optimizer::jobs", "Logical continuation returned None or was not applicable");
                 }
             }
-            .instrument(tracing::debug_span!(target: "optd::optimizer::jobs", "continue_logical_job_execution", job_id = ?job_id)));
+            .instrument(span),
+        );
 
         Ok(())
     }

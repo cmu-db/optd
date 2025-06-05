@@ -130,7 +130,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
     ///
     /// # Returns
     /// The result of the rule application.
-    #[tracing::instrument(level = "debug", skip(self, values, return_k), fields(function_name = %name, num_args = values.len()), target="optd::dsl::engine")]
+    #[tracing::instrument(level = "info", skip(self, values, return_k), fields(function_name = %name, num_args = values.len()), target="optd::dsl::engine")]
     pub async fn launch(
         self,
         name: &str,
