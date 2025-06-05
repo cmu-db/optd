@@ -24,6 +24,7 @@ impl<M: Memo> Optimizer<M> {
     /// # Parameters
     /// * `plan`: The logical plan to be optimized.
     /// * `physical_tx`: The channel to send the optimized physical plans back.
+    #[tracing::instrument(skip(self, plan, physical_tx), fields(plan_root_op = %plan.0.tag), target = "optd::optimizer::tasks")]
     pub(crate) fn create_optimize_plan_task(
         &mut self,
         plan: LogicalPlan,
@@ -32,6 +33,8 @@ impl<M: Memo> Optimizer<M> {
         use Task::*;
 
         let task_id = self.next_task_id();
+        tracing::info!(target: "optd::optimizer::tasks", task_id = ?task_id, task_type = "OptimizePlan", "Task created");
+
         let optimize_plan_task = OptimizePlanTask {
             plan,
             physical_tx,
@@ -50,13 +53,17 @@ impl<M: Memo> Optimizer<M> {
     /// # Parameters
     /// * `task_id`: The ID of the task to be launched.
     /// * `goal_id`: The goal ID that this task is optimizing for.
+    #[tracing::instrument(skip(self), fields(task_id = ?task_id, goal_id = ?goal_id), target = "optd::optimizer::tasks")]
     pub(crate) async fn launch_optimize_plan_task(
         &mut self,
         task_id: TaskId,
         goal_id: GoalId,
     ) -> Result<(), M::MemoError> {
+        tracing::debug!(target: "optd::optimizer::tasks", "Launching optimize plan task");
+
         // Launch goal optimize task if needed, and get its ID.
         let goal_optimize_task_id = self.ensure_optimize_goal_task(goal_id).await?;
+        tracing::debug!(target: "optd::optimizer::tasks", goal_optimize_task_id = ?goal_optimize_task_id, "Goal optimize task ensured");
 
         // Register task and connect in graph.
         let optimize_plan_task = self.get_optimize_plan_task_mut(task_id).unwrap();
@@ -68,6 +75,7 @@ impl<M: Memo> Optimizer<M> {
             .optimize_plan_out
             .insert(task_id);
 
+        tracing::info!(target: "optd::optimizer::tasks", "Optimize plan task launched and connected to goal task");
         Ok(())
     }
 
@@ -77,6 +85,7 @@ impl<M: Memo> Optimizer<M> {
     /// * `group_id`: The ID of the group to be explored.
     /// * `continuation`: The logical continuation to be used.
     /// * `parent_task_id`: The ID of the parent task.
+    #[tracing::instrument(skip(self, continuation), fields(group_id = ?group_id, parent_task_id = ?parent_task_id), target = "optd::optimizer::tasks")]
     pub(crate) async fn launch_fork_logical_task(
         &mut self,
         group_id: GroupId,
@@ -86,9 +95,11 @@ impl<M: Memo> Optimizer<M> {
         use Task::*;
 
         let fork_task_id = self.next_task_id();
+        tracing::info!(target: "optd::optimizer::tasks", task_id = ?fork_task_id, task_type = "ForkLogical", "Task created");
 
         // Launch the group exploration task if needed, and get its ID.
         let explore_group_in = self.ensure_group_exploration_task(group_id).await?;
+        tracing::debug!(target: "optd::optimizer::tasks", explore_group_in = ?explore_group_in, "Group exploration task ensured");
 
         // Create continuation tasks for all expressions.
         let expressions = self
@@ -98,6 +109,7 @@ impl<M: Memo> Optimizer<M> {
             .clone();
         let continue_with_logical_in =
             self.create_logical_cont_tasks(&expressions, group_id, fork_task_id, &continuation);
+        tracing::debug!(target: "optd::optimizer::tasks", num_expressions = expressions.len(), num_continuation_tasks = continue_with_logical_in.len(), "Continuation tasks created");
 
         // Create the fork task.
         let fork_logical_task = ForkLogicalTask {
@@ -114,6 +126,7 @@ impl<M: Memo> Optimizer<M> {
             .insert(fork_task_id);
 
         self.add_task(fork_task_id, ForkLogical(fork_logical_task));
+        tracing::info!(target: "optd::optimizer::tasks", "Fork logical task launched and connected");
 
         Ok(())
     }
@@ -128,6 +141,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `TaskId`: The ID of the created continue task.
+    #[tracing::instrument(skip(self, continuation), fields(expr_id = ?expression_id, group_id = ?group_id, fork_out = ?fork_out), target = "optd::optimizer::tasks")]
     pub(crate) fn launch_continue_with_logical_task(
         &mut self,
         expression_id: LogicalExpressionId,
@@ -138,6 +152,8 @@ impl<M: Memo> Optimizer<M> {
         use Task::*;
 
         let task_id = self.next_task_id();
+        tracing::info!(target: "optd::optimizer::tasks", task_id = ?task_id, task_type = "ContinueWithLogical", "Task created");
+
         let task = ContinueWithLogicalTask {
             expression_id,
             fork_out,
@@ -149,6 +165,7 @@ impl<M: Memo> Optimizer<M> {
             task_id,
             JobKind::ContinueWithLogical(expression_id, group_id, continuation),
         );
+        tracing::debug!(target: "optd::optimizer::tasks", "Continue with logical task launched and job scheduled");
 
         task_id
     }
@@ -163,6 +180,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `TaskId`: The ID of the created transform task.
+    #[tracing::instrument(skip(self), fields(expr_id = ?expr_id, rule = %rule.0, explore_group_out = ?explore_group_out, group_id = ?group_id), target = "optd::optimizer::tasks")]
     pub(crate) fn launch_transform_expression_task(
         &mut self,
         expr_id: LogicalExpressionId,
@@ -173,6 +191,8 @@ impl<M: Memo> Optimizer<M> {
         use Task::*;
 
         let task_id = self.next_task_id();
+        tracing::info!(target: "optd::optimizer::tasks", task_id = ?task_id, task_type = "TransformExpression", "Task created");
+
         let task = TransformExpressionTask {
             _rule: rule.clone(),
             expression_id: expr_id,
@@ -185,6 +205,7 @@ impl<M: Memo> Optimizer<M> {
             task_id,
             JobKind::TransformExpression(rule, expr_id, group_id),
         );
+        tracing::debug!(target: "optd::optimizer::tasks", "Transform expression task launched and job scheduled");
 
         task_id
     }
@@ -199,6 +220,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `TaskId`: The ID of the created implement task.
+    #[tracing::instrument(skip(self), fields(expr_id = ?expr_id, rule = %rule.0, optimize_goal_out = ?optimize_goal_out, goal_id = ?goal_id), target = "optd::optimizer::tasks")]
     pub(crate) fn launch_implement_expression_task(
         &mut self,
         expr_id: LogicalExpressionId,
@@ -209,6 +231,8 @@ impl<M: Memo> Optimizer<M> {
         use Task::*;
 
         let task_id = self.next_task_id();
+        tracing::info!(target: "optd::optimizer::tasks", task_id = ?task_id, task_type = "ImplementExpression", "Task created");
+
         let task = ImplementExpressionTask {
             _rule: rule.clone(),
             expression_id: expr_id,
@@ -221,6 +245,7 @@ impl<M: Memo> Optimizer<M> {
             task_id,
             JobKind::ImplementExpression(rule, expr_id, goal_id),
         );
+        tracing::debug!(target: "optd::optimizer::tasks", "Implement expression task launched and job scheduled");
 
         task_id
     }
@@ -234,6 +259,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `HashSet<TaskId>` - The IDs of all created transform tasks
+    #[tracing::instrument(skip(self, expressions), fields(num_expressions = expressions.len(), group_id = ?group_id, explore_task_id = ?explore_task_id), target = "optd::optimizer::tasks")]
     pub(crate) fn create_transform_tasks(
         &mut self,
         expressions: &HashSet<LogicalExpressionId>,
@@ -242,6 +268,8 @@ impl<M: Memo> Optimizer<M> {
     ) -> HashSet<TaskId> {
         let transformations = self.rule_book.get_transformations().to_vec();
         let mut transform_tasks = HashSet::new();
+
+        tracing::debug!(target: "optd::optimizer::tasks", num_rules = transformations.len(), "Creating transform tasks for expressions");
 
         for &expr_id in expressions {
             for rule in &transformations {
@@ -255,6 +283,7 @@ impl<M: Memo> Optimizer<M> {
             }
         }
 
+        tracing::info!(target: "optd::optimizer::tasks", num_tasks_created = transform_tasks.len(), "Transform tasks created");
         transform_tasks
     }
 
@@ -267,6 +296,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `HashSet<TaskId>` - The IDs of all created implement tasks
+    #[tracing::instrument(skip(self, expressions), fields(num_expressions = expressions.len(), goal_id = ?goal_id, optimize_task_id = ?optimize_task_id), target = "optd::optimizer::tasks")]
     pub(crate) fn create_implement_tasks(
         &mut self,
         expressions: &HashSet<LogicalExpressionId>,
@@ -275,6 +305,8 @@ impl<M: Memo> Optimizer<M> {
     ) -> HashSet<TaskId> {
         let implementations = self.rule_book.get_implementations().to_vec();
         let mut implement_tasks = HashSet::new();
+
+        tracing::debug!(target: "optd::optimizer::tasks", num_rules = implementations.len(), "Creating implement tasks for expressions");
 
         for &expr_id in expressions {
             for rule in &implementations {
@@ -288,6 +320,7 @@ impl<M: Memo> Optimizer<M> {
             }
         }
 
+        tracing::info!(target: "optd::optimizer::tasks", num_tasks_created = implement_tasks.len(), "Implement tasks created");
         implement_tasks
     }
 
@@ -335,6 +368,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `TaskId`: The ID of the task that was created or reused.
+    #[tracing::instrument(skip(self), fields(group_id = ?group_id), target = "optd::optimizer::tasks")]
     pub(crate) async fn ensure_group_exploration_task(
         &mut self,
         group_id: GroupId,
@@ -343,16 +377,21 @@ impl<M: Memo> Optimizer<M> {
 
         // Find the representative group for the given group ID.
         let group_repr = self.memo.find_repr_group_id(group_id).await?;
+        tracing::debug!(target: "optd::optimizer::tasks", group_repr = ?group_repr, "Found representative group");
 
         // Check if we already have an exploration task for this group.
         if let Some(task_id) = self.group_exploration_task_index.get(&group_repr) {
+            tracing::debug!(target: "optd::optimizer::tasks", task_id = ?task_id, "Reusing existing group exploration task");
             return Ok(*task_id);
         }
 
         let exploration_task_id = self.next_task_id();
+        tracing::info!(target: "optd::optimizer::tasks", task_id = ?exploration_task_id, task_type = "ExploreGroup", "Creating new group exploration task");
 
         // Create transform expression tasks for each logical expression and rule combination.
         let logical_expressions = self.memo.get_all_logical_exprs(group_repr).await?;
+        tracing::debug!(target: "optd::optimizer::tasks", num_expressions = logical_expressions.len(), "Retrieved logical expressions for group");
+
         let transform_expr_in =
             self.create_transform_tasks(&logical_expressions, group_id, exploration_task_id);
 
@@ -370,6 +409,7 @@ impl<M: Memo> Optimizer<M> {
         self.group_exploration_task_index
             .insert(group_repr, exploration_task_id);
 
+        tracing::info!(target: "optd::optimizer::tasks", "Group exploration task created and indexed");
         Ok(exploration_task_id)
     }
 
@@ -382,6 +422,7 @@ impl<M: Memo> Optimizer<M> {
     /// # Returns
     /// * `TaskId`: The ID of the task that was created or reused.
     #[async_recursion]
+    #[tracing::instrument(skip(self), fields(goal_id = ?goal_id), target = "optd::optimizer::tasks")]
     pub(crate) async fn ensure_optimize_goal_task(
         &mut self,
         goal_id: GoalId,
@@ -390,19 +431,27 @@ impl<M: Memo> Optimizer<M> {
 
         // Find the representative goal for the given goal ID.
         let goal_repr = self.memo.find_repr_goal_id(goal_id).await?;
+        tracing::debug!(target: "optd::optimizer::tasks", goal_repr = ?goal_repr, "Found representative goal");
 
         // Check if we already have an optimization task for this goal.
         if let Some(task_id) = self.goal_optimization_task_index.get(&goal_repr) {
+            tracing::debug!(target: "optd::optimizer::tasks", task_id = ?task_id, "Reusing existing goal optimization task");
             return Ok(*task_id);
         }
 
         let goal_optimize_task_id = self.next_task_id();
+        tracing::info!(target: "optd::optimizer::tasks", task_id = ?goal_optimize_task_id, task_type = "OptimizeGoal", "Creating new goal optimization task");
 
         let Goal(group_id, _) = self.memo.materialize_goal(goal_id).await?;
+        tracing::debug!(target: "optd::optimizer::tasks", group_id = ?group_id, "Materialized goal to get group");
+
         let explore_group_in = self.ensure_group_exploration_task(group_id).await?;
+        tracing::debug!(target: "optd::optimizer::tasks", explore_group_in = ?explore_group_in, "Group exploration task ensured");
 
         // Launch all implementation tasks.
         let expressions = self.memo.get_all_logical_exprs(group_id).await?;
+        tracing::debug!(target: "optd::optimizer::tasks", num_expressions = expressions.len(), "Retrieved expressions for implementation");
+
         let implement_expression_in =
             self.create_implement_tasks(&expressions, goal_id, goal_optimize_task_id);
 
@@ -425,6 +474,7 @@ impl<M: Memo> Optimizer<M> {
         self.add_task(goal_optimize_task_id, OptimizeGoal(goal_optimize_task));
         self.goal_optimization_task_index
             .insert(goal_repr, goal_optimize_task_id);
+        tracing::debug!(target: "optd::optimizer::tasks", "Goal optimization task registered and indexed");
 
         // Ensure sub-goals are getting explored too, we do this after registering
         // the task to avoid infinite recursion.
@@ -436,11 +486,15 @@ impl<M: Memo> Optimizer<M> {
             .filter_map(|member_id| match member_id {
                 GoalMemberId::GoalId(sub_goal_id) => Some(sub_goal_id),
                 _ => None,
-            });
+            })
+            .collect::<Vec<_>>();
+
+        tracing::debug!(target: "optd::optimizer::tasks", num_subgoals = sub_goals.len(), "Found sub-goals to optimize");
 
         // Launch optimization tasks for each subgoal and establish links.
         let mut subgoal_task_ids = HashSet::new();
         for sub_goal_id in sub_goals {
+            tracing::trace!(target: "optd::optimizer::tasks", sub_goal_id = ?sub_goal_id, "Ensuring sub-goal optimization task");
             let sub_goal_task_id = self.ensure_optimize_goal_task(sub_goal_id).await?;
             subgoal_task_ids.insert(sub_goal_task_id);
 
@@ -452,10 +506,12 @@ impl<M: Memo> Optimizer<M> {
         }
 
         // Update the parent task with links to subgoals.
+        let num_subgoals = subgoal_task_ids.len();
         self.get_optimize_goal_task_mut(goal_optimize_task_id)
             .unwrap()
             .optimize_goal_in = subgoal_task_ids;
 
+        tracing::info!(target: "optd::optimizer::tasks", num_subgoals, "Goal optimization task created with sub-goal dependencies");
         Ok(goal_optimize_task_id)
     }
 }
