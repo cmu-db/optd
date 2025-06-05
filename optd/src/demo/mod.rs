@@ -101,6 +101,7 @@ async fn run_demo() {
 mod demo {
     use super::*;
 
+    #[tracing_test::traced_test]
     #[tokio::test]
     async fn test_optimizer_demo() {
         run_demo().await

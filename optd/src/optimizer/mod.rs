@@ -259,10 +259,12 @@ impl<M: Memo> Optimizer<M> {
                             );
                         },
                         DumpMemo => {
-                            let _guard = req_span.enter(); // Enter span for synchronous part
-                            tracing::info!(target: "optd::optimizer", "Processing dump memo request");
-                            self.memo.debug_dump().await?; // This is async, span context might be lost if not handled.
-                                                          // ? If debug_dump itself needs instrumentation.
+                            async {
+                                    tracing::info!(target: "optd::optimizer", "Processing dump memo request");
+                                    self.memo.debug_dump().await
+                                }
+                                .instrument(req_span)
+                                .await?;
                         }
                     }
                 },

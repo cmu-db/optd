@@ -8,7 +8,7 @@ use crate::{
     },
 };
 use tokio::sync::mpsc::Sender;
-use tracing::{Level, Instrument};
+use tracing::{Instrument, Level};
 
 impl<M: Memo> Optimizer<M> {
     /// This method initiates the optimization process for a logical plan by launching
@@ -250,7 +250,8 @@ impl<M: Memo> Optimizer<M> {
         // We don't want to make a job out of this, as it is merely a way to unblock
         // an existing pending job. We send it to the channel without blocking the
         // main co-routine.
-        let span = tracing::debug_span!(target: "optd::optimizer::handlers", "send_properties_response");
+        let span =
+            tracing::debug_span!(target: "optd::optimizer::handlers", "send_properties_response");
         tokio::spawn(async move {
             sender
                 .send(props)
