@@ -14,6 +14,7 @@ use tokio::{
     sync::mpsc,
     time::{sleep, timeout},
 };
+use tracing::instrument;
 
 pub async fn properties(
     args: Vec<Value>,
@@ -31,7 +32,7 @@ pub async fn properties(
 
     retriever.get_properties(group_id).await
 }
-
+#[instrument(name = "run_demo")]
 async fn run_demo() {
     // Compile the HIR.
     let config = Config::new("src/demo/demo.opt".into());
@@ -99,9 +100,21 @@ async fn run_demo() {
 #[cfg(test)]
 mod demo {
     use super::*;
+    #[cfg(feature = "subscriber")]
+    use tracing_subscriber::{EnvFilter, fmt};
 
     #[tokio::test]
     async fn test_optimizer_demo() {
+        #[cfg(feature = "subscriber")]
+        {
+            let filter =
+                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+            fmt()
+                .with_env_filter(filter)
+                .pretty()
+                .with_ansi(true)
+                .init();
+        }
         run_demo().await
     }
 }
