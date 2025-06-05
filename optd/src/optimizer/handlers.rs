@@ -21,7 +21,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during processing.
-    #[tracing::instrument(skip(self, plan, physical_tx), fields(task_id = ?optimize_plan_task_id, plan_root_op = %plan.0.tag), target="optd::optimizer::handlers")]
+    #[tracing::instrument(level = "debug", skip(self, plan, physical_tx), fields(task_id = ?optimize_plan_task_id, plan_root_op = %plan.0.tag), target="optd::optimizer::handlers")]
     pub(super) async fn process_optimize_request(
         &mut self,
         plan: LogicalPlan,
@@ -79,7 +79,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during processing.
-    #[tracing::instrument(skip(self, plan), fields(target_group_id = ?group_id, job_id = ?job_id, plan_type = %std::any::type_name_of_val(&plan)), target="optd::optimizer::handlers")]
+    #[tracing::instrument(level = "debug", skip(self, plan), fields(target_group_id = ?group_id, job_id = ?job_id, plan_type = %std::any::type_name_of_val(&plan)), target="optd::optimizer::handlers")]
     pub(super) async fn process_new_logical_partial(
         &mut self,
         plan: PartialLogicalPlan,
@@ -141,7 +141,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during processing.
-    #[tracing::instrument(skip(self, plan), fields(target_goal_id = ?goal_id, job_id = ?job_id, plan_type = %std::any::type_name_of_val(&plan)), target="optd::optimizer::handlers")]
+    #[tracing::instrument(level = "debug", skip(self, plan), fields(target_goal_id = ?goal_id, job_id = ?job_id, plan_type = %std::any::type_name_of_val(&plan)), target="optd::optimizer::handlers")]
     pub(super) async fn process_new_physical_partial(
         &mut self,
         plan: PartialPhysicalPlan,
@@ -193,7 +193,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during processing.
-    #[tracing::instrument(skip(self, properties), fields(expr_id = ?expression_id, job_id = ?job_id), target="optd::optimizer::handlers")]
+    #[tracing::instrument(level = "debug", skip(self, properties), fields(expr_id = ?expression_id, job_id = ?job_id), target="optd::optimizer::handlers")]
     pub(super) async fn process_create_group(
         &mut self,
         expression_id: LogicalExpressionId,
@@ -216,7 +216,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during processing.
-    #[tracing::instrument(skip(self, continuation), fields(target_group_id = ?group_id, job_id = ?job_id), target="optd::optimizer::handlers")]
+    #[tracing::instrument(level = "debug", skip(self, continuation), fields(target_group_id = ?group_id, job_id = ?job_id), target="optd::optimizer::handlers")]
     pub(super) async fn process_group_subscription(
         &mut self,
         group_id: GroupId,
@@ -238,7 +238,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during processing.
-    #[tracing::instrument(skip(self, sender), fields(target_group_id = ?group_id), target="optd::optimizer::handlers")]
+    #[tracing::instrument(level = "debug", skip(self, sender), fields(target_group_id = ?group_id), target="optd::optimizer::handlers")]
     pub(super) async fn process_retrieve_properties(
         &mut self,
         group_id: GroupId,
@@ -269,7 +269,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Parameters
     /// * `completed_job_id` - ID of the completed job.
-    #[tracing::instrument(skip(self), fields(completed_job_id = ?completed_job_id), target="optd::optimizer::jobs")]
+    #[tracing::instrument(level = "debug", skip(self), fields(completed_job_id = ?completed_job_id), target="optd::optimizer::jobs")]
     async fn resolve_dependencies(&mut self, completed_job_id: JobId) {
         // Update dependencies and collect ready messages.
         let ready_indices: Vec<_> = self

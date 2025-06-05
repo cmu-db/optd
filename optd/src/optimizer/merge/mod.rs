@@ -14,7 +14,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), OptimizeError>` - Success or an error that occurred during processing.
-    #[tracing::instrument(skip(self, result), target = "optd::optimizer::merge")]
+    #[tracing::instrument(level = "info", skip(self, result), target = "optd::optimizer::merge")]
     pub(super) async fn handle_merge_result(
         &mut self,
         result: MergeProducts,
@@ -52,6 +52,7 @@ impl<M: Memo> Optimizer<M> {
     /// # Returns
     /// * `Result<(), OptimizeError>` - Success or an error that occurred during processing.
     #[tracing::instrument(
+        level = "info",
         skip(self, group_merges),
         name = "handle_group_merges",
         target = "optd::optimizer::merge"
@@ -127,6 +128,7 @@ impl<M: Memo> Optimizer<M> {
     /// # Returns
     /// * `Result<(), OptimizeError>` - Success or an error that occurred during processing.
     #[tracing::instrument(
+        level = "info",
         skip(self, goal_merges),
         name = "handle_goal_merges",
         target = "optd::optimizer::merge"

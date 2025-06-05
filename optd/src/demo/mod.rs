@@ -32,7 +32,7 @@ pub async fn properties(
 
     retriever.get_properties(group_id).await
 }
-#[instrument(name = "run_demo")]
+#[instrument(level = "info", name = "run_demo")]
 async fn run_demo() {
     // Compile the HIR.
     let config = Config::new("src/demo/demo.opt".into());

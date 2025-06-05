@@ -24,7 +24,7 @@ impl<M: Memo> Optimizer<M> {
     /// # Parameters
     /// * `plan`: The logical plan to be optimized.
     /// * `physical_tx`: The channel to send the optimized physical plans back.
-    #[tracing::instrument(skip(self, plan, physical_tx), fields(plan_root_op = %plan.0.tag), target = "optd::optimizer::tasks")]
+    #[tracing::instrument(level = "debug", skip(self, plan, physical_tx), fields(plan_root_op = %plan.0.tag), target = "optd::optimizer::tasks")]
     pub(crate) fn create_optimize_plan_task(
         &mut self,
         plan: LogicalPlan,
@@ -53,7 +53,7 @@ impl<M: Memo> Optimizer<M> {
     /// # Parameters
     /// * `task_id`: The ID of the task to be launched.
     /// * `goal_id`: The goal ID that this task is optimizing for.
-    #[tracing::instrument(skip(self), fields(task_id = ?task_id, goal_id = ?goal_id), target = "optd::optimizer::tasks")]
+    #[tracing::instrument(level = "debug", skip(self), fields(task_id = ?task_id, goal_id = ?goal_id), target = "optd::optimizer::tasks")]
     pub(crate) async fn launch_optimize_plan_task(
         &mut self,
         task_id: TaskId,
@@ -85,7 +85,7 @@ impl<M: Memo> Optimizer<M> {
     /// * `group_id`: The ID of the group to be explored.
     /// * `continuation`: The logical continuation to be used.
     /// * `parent_task_id`: The ID of the parent task.
-    #[tracing::instrument(skip(self, continuation), fields(group_id = ?group_id, parent_task_id = ?parent_task_id), target = "optd::optimizer::tasks")]
+    #[tracing::instrument(level = "debug", skip(self, continuation), fields(group_id = ?group_id, parent_task_id = ?parent_task_id), target = "optd::optimizer::tasks")]
     pub(crate) async fn launch_fork_logical_task(
         &mut self,
         group_id: GroupId,
@@ -141,7 +141,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `TaskId`: The ID of the created continue task.
-    #[tracing::instrument(skip(self, continuation), fields(expr_id = ?expression_id, group_id = ?group_id, fork_out = ?fork_out), target = "optd::optimizer::tasks")]
+    #[tracing::instrument(level = "debug", skip(self, continuation), fields(expr_id = ?expression_id, group_id = ?group_id, fork_out = ?fork_out), target = "optd::optimizer::tasks")]
     pub(crate) fn launch_continue_with_logical_task(
         &mut self,
         expression_id: LogicalExpressionId,
@@ -180,7 +180,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `TaskId`: The ID of the created transform task.
-    #[tracing::instrument(skip(self), fields(expr_id = ?expr_id, rule = %rule.0, explore_group_out = ?explore_group_out, group_id = ?group_id), target = "optd::optimizer::tasks")]
+    #[tracing::instrument(level = "debug", skip(self), fields(expr_id = ?expr_id, rule = %rule.0, explore_group_out = ?explore_group_out, group_id = ?group_id), target = "optd::optimizer::tasks")]
     pub(crate) fn launch_transform_expression_task(
         &mut self,
         expr_id: LogicalExpressionId,
@@ -220,7 +220,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `TaskId`: The ID of the created implement task.
-    #[tracing::instrument(skip(self), fields(expr_id = ?expr_id, rule = %rule.0, optimize_goal_out = ?optimize_goal_out, goal_id = ?goal_id), target = "optd::optimizer::tasks")]
+    #[tracing::instrument(level = "debug", skip(self), fields(expr_id = ?expr_id, rule = %rule.0, optimize_goal_out = ?optimize_goal_out, goal_id = ?goal_id), target = "optd::optimizer::tasks")]
     pub(crate) fn launch_implement_expression_task(
         &mut self,
         expr_id: LogicalExpressionId,
@@ -259,7 +259,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `HashSet<TaskId>` - The IDs of all created transform tasks
-    #[tracing::instrument(skip(self, expressions), fields(num_expressions = expressions.len(), group_id = ?group_id, explore_task_id = ?explore_task_id), target = "optd::optimizer::tasks")]
+    #[tracing::instrument(level = "debug", skip(self, expressions), fields(num_expressions = expressions.len(), group_id = ?group_id, explore_task_id = ?explore_task_id), target = "optd::optimizer::tasks")]
     pub(crate) fn create_transform_tasks(
         &mut self,
         expressions: &HashSet<LogicalExpressionId>,
@@ -296,7 +296,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `HashSet<TaskId>` - The IDs of all created implement tasks
-    #[tracing::instrument(skip(self, expressions), fields(num_expressions = expressions.len(), goal_id = ?goal_id, optimize_task_id = ?optimize_task_id), target = "optd::optimizer::tasks")]
+    #[tracing::instrument(level = "debug", skip(self, expressions), fields(num_expressions = expressions.len(), goal_id = ?goal_id, optimize_task_id = ?optimize_task_id), target = "optd::optimizer::tasks")]
     pub(crate) fn create_implement_tasks(
         &mut self,
         expressions: &HashSet<LogicalExpressionId>,
@@ -368,7 +368,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `TaskId`: The ID of the task that was created or reused.
-    #[tracing::instrument(skip(self), fields(group_id = ?group_id), target = "optd::optimizer::tasks")]
+    #[tracing::instrument(level = "debug", skip(self), fields(group_id = ?group_id), target = "optd::optimizer::tasks")]
     pub(crate) async fn ensure_group_exploration_task(
         &mut self,
         group_id: GroupId,
@@ -422,7 +422,7 @@ impl<M: Memo> Optimizer<M> {
     /// # Returns
     /// * `TaskId`: The ID of the task that was created or reused.
     #[async_recursion]
-    #[tracing::instrument(skip(self), fields(goal_id = ?goal_id), target = "optd::optimizer::tasks")]
+    #[tracing::instrument(level = "debug", skip(self), fields(goal_id = ?goal_id), target = "optd::optimizer::tasks")]
     pub(crate) async fn ensure_optimize_goal_task(
         &mut self,
         goal_id: GoalId,

@@ -30,7 +30,7 @@ impl<M: Memo> Optimizer<M> {
     /// # Parameters
     /// * `expression_id`: The ID of the logical expression to derive properties for.
     /// * `job_id`: The ID of the job to be executed.
-    #[tracing::instrument(skip(self), fields(job_id, expr_id = ?expression_id), target="optd::optimizer::jobs")]
+    #[tracing::instrument(level = "debug", skip(self), fields(job_id, expr_id = ?expression_id), target="optd::optimizer::jobs")]
     pub(super) async fn derive_logical_properties(
         &self,
         expression_id: LogicalExpressionId,
@@ -92,7 +92,7 @@ impl<M: Memo> Optimizer<M> {
     /// * `expression_id`: The ID of the logical expression to transform.
     /// * `group_id`: The ID of the group to which the transformed expression belongs.
     /// * `job_id`: The ID of the job to be executed.
-    #[tracing::instrument(skip(self), fields(job_id, rule = %rule_name.0, expr_id = ?expression_id, group_id = ?group_id), target="optd::optimizer::jobs")]
+    #[tracing::instrument(level = "debug", skip(self), fields(job_id, rule = %rule_name.0, expr_id = ?expression_id, group_id = ?group_id), target="optd::optimizer::jobs")]
     pub(super) async fn execute_transformation_rule(
         &self,
         rule_name: TransformationRule,
@@ -153,7 +153,7 @@ impl<M: Memo> Optimizer<M> {
     /// * `expression_id`: The ID of the logical expression to implement.
     /// * `goal_id`: The ID of the goal to which the implementation belongs.
     /// * `job_id`: The ID of the job to be executed.
-    #[tracing::instrument(skip(self), fields(job_id, rule = %rule_name.0, expr_id = ?expression_id, goal_id = ?goal_id), target="optd::optimizer::jobs")]
+    #[tracing::instrument(level = "debug", skip(self), fields(job_id, rule = %rule_name.0, expr_id = ?expression_id, goal_id = ?goal_id), target="optd::optimizer::jobs")]
     pub(super) async fn execute_implementation_rule(
         &self,
         rule_name: ImplementationRule,
@@ -209,7 +209,7 @@ impl<M: Memo> Optimizer<M> {
     /// * `group_id`: The ID of the group to which the expression belongs.
     /// * `k`: The continuation function to be called with the materialized plan.
     /// * `job_id`: The ID of the job to be executed.
-    #[tracing::instrument(skip(self, k), fields(job_id, expr_id = ?expression_id, group_id = ?group_id), target="optd::optimizer::jobs")]
+    #[tracing::instrument(level = "debug", skip(self, k), fields(job_id, expr_id = ?expression_id, group_id = ?group_id), target="optd::optimizer::jobs")]
     pub(super) async fn execute_continue_with_logical(
         &self,
         expression_id: LogicalExpressionId,

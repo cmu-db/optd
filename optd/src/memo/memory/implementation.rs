@@ -8,7 +8,7 @@ use hashbrown::{HashMap, HashSet};
 use std::collections::VecDeque;
 
 impl Memo for MemoryMemo {
-    #[tracing::instrument(skip(self), target = "optd::memo")]
+    #[tracing::instrument(level = "info", skip(self), target = "optd::memo")]
     async fn debug_dump(&self) -> Result<(), Infallible> {
         tracing::info!(target: "optd::memo", "Starting memo table debug dump");
         println!("\n===== MEMO TABLE DUMP =====");
@@ -89,7 +89,7 @@ impl Memo for MemoryMemo {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self), fields(group_id = ?group_id), target = "optd::memo")]
+    #[tracing::instrument(level = "debug", skip(self), fields(group_id = ?group_id), target = "optd::memo")]
     async fn get_logical_properties(
         &self,
         group_id: GroupId,
@@ -108,7 +108,7 @@ impl Memo for MemoryMemo {
         Ok(properties)
     }
 
-    #[tracing::instrument(skip(self), fields(group_id = ?group_id), target = "optd::memo")]
+    #[tracing::instrument(level = "debug", skip(self), fields(group_id = ?group_id), target = "optd::memo")]
     async fn get_all_logical_exprs(
         &self,
         group_id: GroupId,
@@ -138,7 +138,7 @@ impl Memo for MemoryMemo {
             .copied())
     }
 
-    #[tracing::instrument(skip(self, props), fields(logical_expr_id = ?logical_expr_id, properties = ?props), target = "optd::memo")]
+    #[tracing::instrument(level = "info", skip(self, props), fields(logical_expr_id = ?logical_expr_id, properties = ?props), target = "optd::memo")]
     async fn create_group(
         &mut self,
         logical_expr_id: LogicalExpressionId,
@@ -226,7 +226,7 @@ impl Memo for MemoryMemo {
     ///
     /// # Returns
     /// Detailed results of all merges performed, including cascading merges.
-    #[tracing::instrument(skip(self), fields(group_id_1 = ?group_id_1, group_id_2 = ?group_id_2), target = "optd::memo")]
+    #[tracing::instrument(level = "info", skip(self), fields(group_id_1 = ?group_id_1, group_id_2 = ?group_id_2), target = "optd::memo")]
     async fn merge_groups(
         &mut self,
         group_id_1: GroupId,
@@ -296,7 +296,7 @@ impl Memo for MemoryMemo {
         })
     }
 
-    #[tracing::instrument(skip(self), fields(goal_id = ?goal_id), target = "optd::memo")]
+    #[tracing::instrument(level = "debug", skip(self), fields(goal_id = ?goal_id), target = "optd::memo")]
     async fn get_all_goal_members(
         &self,
         goal_id: GoalId,
@@ -317,7 +317,7 @@ impl Memo for MemoryMemo {
         Ok(members)
     }
 
-    #[tracing::instrument(skip(self), fields(goal_id = ?goal_id, member_id = ?member_id), target = "optd::memo")]
+    #[tracing::instrument(level = "debug", skip(self), fields(goal_id = ?goal_id, member_id = ?member_id), target = "optd::memo")]
     async fn add_goal_member(
         &mut self,
         goal_id: GoalId,

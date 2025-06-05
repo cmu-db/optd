@@ -214,7 +214,7 @@ impl<M: Memo> Optimizer<M> {
     }
 
     /// Run the optimizer's main processing loop.
-    #[tracing::instrument(name = "optimizer_run_loop", skip(self), target = "optd::optimizer")]
+    #[tracing::instrument(level = "info", name = "optimizer_run_loop", skip(self), target = "optd::optimizer")]
     async fn run(mut self) -> Result<(), M::MemoError> {
         use ClientRequest::*;
         use EngineProduct::*;
@@ -264,7 +264,7 @@ impl<M: Memo> Optimizer<M> {
                 Some(message) = self.message_rx.recv() => {
                     let msg_span = tracing::debug_span!(target: "optd::optimizer", "process_optimizer_message", message_type = %std::any::type_name_of_val(&message));
                     let _guard = msg_span.enter();
-                    tracing::debug!("Received optimizer message");
+                    tracing::debug!(target: "optd::optimizer", "Received optimizer message");
 
                     // Process the next message in the channel.
                     match message {
@@ -273,7 +273,7 @@ impl<M: Memo> Optimizer<M> {
                             let plan_root_op = plan.0.tag.clone();
                             msg_span.record("task_id", &tracing::field::debug(task_id));
                             msg_span.record("plan_root_op", &tracing::field::display(&plan_root_op));
-                            tracing::info!(target: "optd::optimizer", "Processing optimize request from internal queue");
+                            tracing::debug!(target: "optd::optimizer", "Processing optimize request from internal queue");
                             self.process_optimize_request(plan, physical_tx, task_id).await?;
                         },
                         OmMsg::Retrieve(group_id, response_tx) => {

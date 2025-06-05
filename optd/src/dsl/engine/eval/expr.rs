@@ -21,7 +21,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
     /// * `then_expr` - The expression to evaluate if condition is true.
     /// * `else_expr` - The expression to evaluate if condition is false.
     /// * `k` - The continuation to receive evaluation results.
-    #[tracing::instrument(skip(self, cond, then_expr, else_expr, k), target = "optd::dsl::engine")]
+    #[tracing::instrument(level = "trace", skip(self, cond, then_expr, else_expr, k), target = "optd::dsl::engine")]
     pub(crate) async fn evaluate_if_then_else(
         self,
         cond: Arc<Expr>,
@@ -65,7 +65,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
     /// * `binding` - The binding to evaluate and bind to the context.
     /// * `after` - The expression to evaluate in the updated context.
     /// * `k` - The continuation to receive evaluation results.
-    #[tracing::instrument(skip(self, binding, after, k), fields(binding_name = %binding.name), target = "optd::dsl::engine")]
+    #[tracing::instrument(level = "trace", skip(self, binding, after, k), fields(binding_name = %binding.name), target = "optd::dsl::engine")]
     pub(crate) async fn evaluate_let_binding(
         self,
         binding: LetBinding,
@@ -210,7 +210,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
     /// * `called` - The called expression to evaluate.
     /// * `args` - The argument expressions to evaluate.
     /// * `k` - The continuation to receive evaluation results.
-    #[tracing::instrument(skip(self, called, args, k), fields(num_args = args.len()), target = "optd::dsl::engine")]
+    #[tracing::instrument(level = "trace", skip(self, called, args, k), fields(num_args = args.len()), target = "optd::dsl::engine")]
     pub(crate) async fn evaluate_call(
         self,
         called: Arc<Expr>,

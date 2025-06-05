@@ -28,7 +28,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
     /// * `expr` - The expression to match against patterns.
     /// * `match_arms` - The list of pattern-expression pairs to try.
     /// * `k` - The continuation to receive evaluation results.
-    #[tracing::instrument(skip(self, expr, match_arms, k), fields(num_arms = match_arms.len()), target = "optd::dsl::engine")]
+    #[tracing::instrument(level = "trace", skip(self, expr, match_arms, k), fields(num_arms = match_arms.len()), target = "optd::dsl::engine")]
     pub(crate) async fn evaluate_pattern_match(
         self,
         expr: Arc<Expr>,
@@ -121,7 +121,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
 /// * `pattern` - The pattern to match.
 /// * `ctx` - The current context to extend with bindings.
 /// * `k` - The continuation to receive the match result.
-#[tracing::instrument(skip(value, pattern, ctx, k), fields(
+#[tracing::instrument(level = "trace", skip(value, pattern, ctx, k), fields(
     pattern_type = %format!("{:?}", std::mem::discriminant(&pattern.kind)).split('(').next().unwrap_or("Unknown"),
     value_type = %format!("{:?}", std::mem::discriminant(&value.data)).split('(').next().unwrap_or("Unknown")
 ), target = "optd::dsl::engine")]
@@ -316,7 +316,7 @@ where
 }
 
 /// Matches a binding pattern.
-#[tracing::instrument(skip(value, inner_pattern, ctx, k), fields(
+#[tracing::instrument(level = "trace", skip(value, inner_pattern, ctx, k), fields(
     binding_name = %ident,
     inner_pattern_type = %format!("{:?}", std::mem::discriminant(&inner_pattern.kind)).split('(').next().unwrap_or("Unknown")
 ), target = "optd::dsl::engine")]
@@ -363,7 +363,7 @@ where
 }
 
 /// Matches an array decomposition pattern.
-#[tracing::instrument(skip(head_pattern, tail_pattern, arr, ctx, k), fields(
+#[tracing::instrument(level = "trace", skip(head_pattern, tail_pattern, arr, ctx, k), fields(
     array_length = arr.len(),
     head_pattern_type = %format!("{:?}", std::mem::discriminant(&head_pattern.kind)).split('(').next().unwrap_or("Unknown"),
     tail_pattern_type = %format!("{:?}", std::mem::discriminant(&tail_pattern.kind)).split('(').next().unwrap_or("Unknown")
@@ -453,7 +453,7 @@ where
 }
 
 /// Matches a struct pattern.
-#[tracing::instrument(skip(field_patterns, field_values, ctx, k), fields(
+#[tracing::instrument(level = "trace", skip(field_patterns, field_values, ctx, k), fields(
     struct_name = %pat_name,
     field_count = field_patterns.len()
 ), target = "optd::dsl::engine")]

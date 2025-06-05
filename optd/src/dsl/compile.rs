@@ -77,7 +77,7 @@ pub struct Verbosity {
 }
 
 /// Compiles a file into the [`HIR`].
-#[tracing::instrument(skip(config, udfs), fields(
+#[tracing::instrument(level = "info", skip(config, udfs), fields(
     source_path = %config.path_str(),
     udf_count = udfs.len()
 ), target = "optd::dsl::compile")]
@@ -206,7 +206,7 @@ pub fn compile_hir(config: Config, udfs: HashMap<String, Udf>) -> Result<HIR, Ve
 ///
 /// This function performs lexing and parsing stages of compilation,
 /// returning either the parsed AST Module or collected errors.
-#[tracing::instrument(skip(source, config), fields(
+#[tracing::instrument(level = "info", skip(source, config), fields(
     source_length = source.len(),
     source_path = %config.path_str()
 ), target = "optd::dsl::compile")]
@@ -276,7 +276,7 @@ pub fn parse(source: &str, config: &Config) -> Result<Module, Vec<CompileError>>
 ///
 /// This function performs semantic analysis on the AST and converts it
 /// to a typed High-level Intermediate Representation (HIR).
-#[tracing::instrument(skip(source, ast, udfs), fields(
+#[tracing::instrument(level = "info", skip(source, ast, udfs), fields(
     udf_count = udfs.len()
 ), target = "optd::dsl::compile")]
 pub fn ast_to_hir(
@@ -318,7 +318,7 @@ pub fn registry_check(
 /// 2. Building type constraints based on the annotated TypedSpan nodes.
 /// 3. Resolving these constraints to infer concrete types.
 /// 4. Transforming the typed HIR into its final form.
-#[tracing::instrument(skip(source, hir, registry), target = "optd::dsl::compile")]
+#[tracing::instrument(level = "info", skip(source, hir, registry), target = "optd::dsl::compile")]
 pub fn infer(
     source: &str,
     hir: HIR<TypedSpan>,

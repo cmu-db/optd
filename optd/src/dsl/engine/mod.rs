@@ -75,7 +75,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
     /// * `self` - The evaluation engine (owned).
     /// * `expr` - The expression to evaluate.
     /// * `k` - The continuation to receive each evaluation result.
-    #[tracing::instrument(skip(self, expr, k), fields(expr_kind = %format!("{:?}", expr.kind).split('(').next().unwrap_or("Unknown")), target="optd::dsl::engine")]
+    #[tracing::instrument(level = "trace", skip(self, expr, k), fields(expr_kind = %format!("{:?}", expr.kind).split('(').next().unwrap_or("Unknown")), target="optd::dsl::engine")]
     pub fn evaluate(
         self,
         expr: Arc<Expr>,
@@ -130,7 +130,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
     ///
     /// # Returns
     /// The result of the rule application.
-    #[tracing::instrument(skip(self, values, return_k), fields(function_name = %name, num_args = values.len()), target="optd::dsl::engine")]
+    #[tracing::instrument(level = "debug", skip(self, values, return_k), fields(function_name = %name, num_args = values.len()), target="optd::dsl::engine")]
     pub async fn launch(
         self,
         name: &str,

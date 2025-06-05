@@ -13,7 +13,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Parameters
     /// * `task_id` - ID of the task to delete.
-    #[tracing::instrument(skip(self), fields(task_id = ?task_id), target = "optd::optimizer::tasks")]
+    #[tracing::instrument(level = "debug", skip(self), fields(task_id = ?task_id), target = "optd::optimizer::tasks")]
     pub(crate) fn delete_task(&mut self, task_id: TaskId) {
         use Task::*;
 
