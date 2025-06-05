@@ -100,22 +100,9 @@ async fn run_demo() {
 #[cfg(test)]
 mod demo {
     use super::*;
-    // TODO Consider remove tracing_subscriber dependency in optd when we have a proper cli.
-    #[cfg(feature = "subscriber")]
-    use tracing_subscriber::{EnvFilter, fmt};
 
     #[tokio::test]
     async fn test_optimizer_demo() {
-        #[cfg(feature = "subscriber")]
-        {
-            let filter =
-                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-            fmt()
-                .with_env_filter(filter)
-                .pretty()
-                .with_ansi(true)
-                .init();
-        }
         run_demo().await
     }
 }
