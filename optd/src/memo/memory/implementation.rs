@@ -124,7 +124,7 @@ impl Memo for MemoryMemo {
         tracing::debug!(target: "optd::memo", num_expressions = expressions.len(), "Retrieved logical expressions from group");
         Ok(expressions)
     }
-
+    #[tracing::instrument(level = "trace", skip(self), fields(logical_expr_id = ?logical_expr_id), target = "optd::memo")]
     async fn find_logical_expr_group(
         &self,
         logical_expr_id: LogicalExpressionId,

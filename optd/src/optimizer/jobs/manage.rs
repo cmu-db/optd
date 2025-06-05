@@ -15,6 +15,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * The ID of the created job.
+    #[tracing::instrument(level = "debug", skip(self, kind), fields(task_id = ?task_id, job_kind = %std::any::type_name_of_val(&kind)), target = "optd::optimizer::tasks")]
     pub(crate) fn schedule_job(&mut self, task_id: TaskId, kind: JobKind) -> JobId {
         // Generate a new job ID.
         let job_id = self.next_job_id;
@@ -24,6 +25,7 @@ impl<M: Memo> Optimizer<M> {
         let job = Job(task_id, kind);
         self.pending_jobs.insert(job_id, job);
         self.job_schedule_queue.push_back(job_id);
+        tracing::debug!(target: "optd::optimizer::tasks", job_id = ?job_id, "Job scheduled");
 
         job_id
     }
@@ -36,6 +38,7 @@ impl<M: Memo> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during job launching.
+    #[tracing::instrument(level = "trace", skip(self), target = "optd::optimizer::tasks")]
     pub(crate) async fn launch_pending_jobs(&mut self) -> Result<(), M::MemoError> {
         use JobKind::*;
 
@@ -44,6 +47,7 @@ impl<M: Memo> Optimizer<M> {
             && !self.job_schedule_queue.is_empty()
         {
             let job_id = self.job_schedule_queue.pop_back().unwrap();
+            tracing::trace!(target: "optd::optimizer::tasks", job_id = ?job_id, "Launching pending job");
 
             // Move the job from pending to running.
             let job = self.pending_jobs.remove(&job_id).unwrap();
