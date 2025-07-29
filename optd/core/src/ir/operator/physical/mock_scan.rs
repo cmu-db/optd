@@ -53,9 +53,10 @@ impl std::hash::Hash for MockSpec {
 }
 
 define_node!(
-    MockScan {
+    MockScan, MockScanBorrowed {
         properties: OperatorProperties,
         metadata: MockScanMetadata {
+            id: usize,
             spec: MockSpec,
         },
         inputs: {
@@ -64,13 +65,27 @@ define_node!(
         }
     }
 );
-impl_operator_conversion!(MockScan);
+impl_operator_conversion!(MockScan, MockScanBorrowed);
 
 impl MockScan {
-    pub fn with_mock_spec(spec: MockSpec) -> Self {
+    pub fn with_mock_spec(id: usize, spec: MockSpec) -> Self {
         Self {
-            meta: MockScanMetadata { spec },
+            meta: MockScanMetadata { id, spec },
             common: IRCommon::empty(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ir::convert::IntoOperator;
+
+    use super::*;
+
+    #[test]
+    fn mock_scan_exp_it_works() {
+        let m1 = MockScan::with_mock_spec(1, MockSpec::default()).into_operator();
+        let x = m1.as_ref().try_bind_ref_experimental::<MockScan>().unwrap();
+        assert_eq!(&1, x.id());
     }
 }

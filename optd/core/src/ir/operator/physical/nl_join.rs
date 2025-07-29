@@ -8,7 +8,7 @@ use crate::ir::{
 };
 
 define_node!(
-    PhysicalNLJoin  {
+    PhysicalNLJoin, PhysicalNLJoinBorrowed  {
         properties: OperatorProperties,
         metadata: PhysicalNLJoinJoinMetadata {
             join_type: JoinType,
@@ -19,7 +19,7 @@ define_node!(
         }
     }
 );
-impl_operator_conversion!(PhysicalNLJoin);
+impl_operator_conversion!(PhysicalNLJoin, PhysicalNLJoinBorrowed);
 
 impl PhysicalNLJoin {
     pub fn new(

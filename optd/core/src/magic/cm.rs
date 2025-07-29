@@ -65,12 +65,12 @@ mod tests {
 
         let m1 = {
             let spec = MockSpec::new_test_only(vec![0, 1], 100.);
-            MockScan::with_mock_spec(spec).into_operator()
+            MockScan::with_mock_spec(1, spec).into_operator()
         };
 
         let m2 = {
             let spec = MockSpec::new_test_only(vec![2, 3], 100.);
-            MockScan::with_mock_spec(spec).into_operator()
+            MockScan::with_mock_spec(2, spec).into_operator()
         };
 
         let join_cond = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();

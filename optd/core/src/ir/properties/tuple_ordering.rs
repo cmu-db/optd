@@ -172,8 +172,8 @@ mod tests {
             (Column(1), TupleOrderingDirection::Desc),
         ]);
 
-        let t1 =
-            MockScan::with_mock_spec(MockSpec::new_test_only(vec![0, 1, 2], 100.)).into_operator();
+        let t1 = MockScan::with_mock_spec(1, MockSpec::new_test_only(vec![0, 1, 2], 100.))
+            .into_operator();
         let exact_enforcer = EnforcerSort::new(required.clone(), t1.clone()).into_operator();
         let res = exact_enforcer.try_satisfy(&required, &ctx).unwrap();
         assert_eq!(res.len(), 1);
@@ -197,14 +197,14 @@ mod tests {
     #[test]
     fn physical_nljoin_try_satisfy_ordering() {
         let ctx = IRContext::with_empty_magic();
-        let t1 =
-            MockScan::with_mock_spec(MockSpec::new_test_only(vec![0, 1], 100.)).into_operator();
-        let t2 =
-            MockScan::with_mock_spec(MockSpec::new_test_only(vec![2, 3], 100.)).into_operator();
+        let m1 =
+            MockScan::with_mock_spec(1, MockSpec::new_test_only(vec![0, 1], 100.)).into_operator();
+        let m2 =
+            MockScan::with_mock_spec(2, MockSpec::new_test_only(vec![2, 3], 100.)).into_operator();
         let join_cond = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();
-        let join1 = PhysicalNLJoin::new(JoinType::Inner, t1.clone(), t2.clone(), join_cond.clone())
+        let join1 = PhysicalNLJoin::new(JoinType::Inner, m1.clone(), m2.clone(), join_cond.clone())
             .into_operator();
-        let join2 = join1.clone_with_inputs(Some(Arc::new([t2, t1])), None);
+        let join2 = join1.clone_with_inputs(Some(Arc::new([m2, m1])), None);
 
         // Both satisfy the empty ordering.
         let empty = TupleOrdering::default();

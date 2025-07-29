@@ -8,7 +8,7 @@ use crate::ir::{
 };
 
 define_node!(
-    Assign {
+    Assign, AssignBorrowed {
         properties: ScalarProperties,
         metadata: AssignMetadata {
             assignee: Column,
@@ -19,7 +19,7 @@ define_node!(
         }
     }
 );
-impl_scalar_conversion!(Assign);
+impl_scalar_conversion!(Assign, AssignBorrowed);
 
 impl Assign {
     pub fn new(assignee: Column, expr: Arc<Scalar>) -> Self {

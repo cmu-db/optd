@@ -7,7 +7,7 @@ use crate::ir::{
 };
 
 define_node!(
-    BinaryOp {
+    BinaryOp, BinaryOpBorrowed {
         properties: ScalarProperties,
         metadata: BinaryOpMetadata {
             op_kind: BinaryOpKind,
@@ -18,7 +18,7 @@ define_node!(
         }
     }
 );
-impl_scalar_conversion!(BinaryOp);
+impl_scalar_conversion!(BinaryOp, BinaryOpBorrowed);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BinaryOpKind {

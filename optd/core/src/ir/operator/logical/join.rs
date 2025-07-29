@@ -7,7 +7,7 @@ use crate::ir::{
 };
 
 define_node!(
-    LogicalJoin  {
+    LogicalJoin, LogicalJoinBorrowed {
         properties: OperatorProperties,
         metadata: LogicalJoinMetadata {
             join_type: JoinType,
@@ -18,9 +18,9 @@ define_node!(
         }
     }
 );
-impl_operator_conversion!(LogicalJoin);
+impl_operator_conversion!(LogicalJoin, LogicalJoinBorrowed);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum JoinType {
     Inner,
     Left,

@@ -8,7 +8,7 @@ use crate::ir::{
 };
 
 define_node!(
-    ProjectionList  {
+    ProjectionList, ProjectionListBorrowed  {
         properties: ScalarProperties,
         metadata: ProjectionListMetadata {},
         inputs: {
@@ -17,7 +17,7 @@ define_node!(
         },
     },
 );
-impl_scalar_conversion!(ProjectionList);
+impl_scalar_conversion!(ProjectionList, ProjectionListBorrowed);
 
 impl ProjectionList {
     pub fn new(members: Arc<[Arc<Scalar>]>) -> Self {

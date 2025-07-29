@@ -7,7 +7,7 @@ use crate::ir::{
 };
 
 define_node!(
-    EnforcerSort {
+    EnforcerSort, EnforcerSortRef {
         properties: OperatorProperties,
         metadata: EnforcerSortMetadata {
             tuple_ordering: TupleOrdering,
@@ -18,7 +18,7 @@ define_node!(
         }
     }
 );
-impl_operator_conversion!(EnforcerSort);
+impl_operator_conversion!(EnforcerSort, EnforcerSortRef);
 
 impl EnforcerSort {
     pub fn new(tuple_ordering: TupleOrdering, input: Arc<Operator>) -> Self {

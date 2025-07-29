@@ -11,7 +11,7 @@ use crate::ir::{
 };
 
 define_node!(
-    LogicalOrderBy {
+    LogicalOrderBy, LogicalOrderByBorrowed {
         properties: OperatorProperties,
         metadata: LogicalOrderByMetadata {
             directions: BitBox,
@@ -88,7 +88,8 @@ mod tests {
             ),
         ];
         let order_by = LogicalOrderBy::new(
-            MockScan::with_mock_spec(MockSpec::new_test_only(vec![0, 1, 2], 100.)).into_operator(),
+            MockScan::with_mock_spec(1, MockSpec::new_test_only(vec![0, 1, 2], 100.))
+                .into_operator(),
             ordered_exprs,
         );
 
@@ -122,7 +123,8 @@ mod tests {
             ),
         ];
         let order_by = LogicalOrderBy::new(
-            MockScan::with_mock_spec(MockSpec::new_test_only(vec![0, 1, 2], 100.)).into_operator(),
+            MockScan::with_mock_spec(1, MockSpec::new_test_only(vec![0, 1, 2], 100.))
+                .into_operator(),
             ordered_exprs,
         );
 

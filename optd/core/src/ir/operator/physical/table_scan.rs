@@ -9,7 +9,7 @@ use crate::ir::{
 };
 
 define_node!(
-    PhysicalTableScan {
+    PhysicalTableScan, PhysicalTableScanBorrowed {
         properties: OperatorProperties,
         metadata: PhysicalTableScanMetadata {
             table_id: DataSourceId,
@@ -20,7 +20,7 @@ define_node!(
         }
     }
 );
-impl_operator_conversion!(PhysicalTableScan);
+impl_operator_conversion!(PhysicalTableScan, PhysicalTableScanBorrowed);
 
 impl PhysicalTableScan {
     pub fn new(table_id: DataSourceId, projection_list: Arc<Scalar>) -> Self {

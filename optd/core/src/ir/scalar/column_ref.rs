@@ -5,7 +5,8 @@ use crate::ir::{
 };
 
 define_node!(
-    ColumnRef {
+    /// A reference to a [`Column`].
+    ColumnRef, ColumnRefBorrowed {
         properties: ScalarProperties,
         metadata: ColumnRefMetadata {
             column: Column,
@@ -16,7 +17,7 @@ define_node!(
         }
     }
 );
-impl_scalar_conversion!(ColumnRef);
+impl_scalar_conversion!(ColumnRef, ColumnRefBorrowed);
 
 impl ColumnRef {
     pub fn new(column: Column) -> Self {

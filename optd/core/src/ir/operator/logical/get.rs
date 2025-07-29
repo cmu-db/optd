@@ -9,7 +9,7 @@ use crate::ir::{
 };
 
 define_node!(
-    LogicalGet {
+    LogicalGet, LogicalGetBorrowed {
         properties: OperatorProperties,
         metadata: LogicalGetMetadata {
             table_id: DataSourceId,
@@ -20,7 +20,7 @@ define_node!(
         }
     }
 );
-impl_operator_conversion!(LogicalGet);
+impl_operator_conversion!(LogicalGet, LogicalGetBorrowed);
 
 impl LogicalGet {
     pub fn new(table_id: DataSourceId, projection_list: Arc<Scalar>) -> Self {
