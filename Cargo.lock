@@ -42,6 +42,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "optd-catalog"
+version = "0.1.0"
+
+[[package]]
 name = "optd-core"
 version = "0.1.0"
 dependencies = [
