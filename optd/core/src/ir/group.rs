@@ -1,77 +1,47 @@
-/// Uniquely identifies an equivalent class in the optimizer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct GroupId(pub i64);
-
 use std::sync::Arc;
 
 use crate::ir::{
-    IRCommon, Operator, OperatorKind, Scalar, ScalarKind,
-    convert::{IntoOperator, IntoScalar, TryFromOperator, TryFromScalar},
+    IRCommon,
+    macros::{define_node, impl_operator_conversion},
+    properties::OperatorProperties,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct GroupMetadata<T> {
-    pub group_id: GroupId,
-    pub normalized: Arc<T>,
-}
+/// Uniquely identifies an equivalent class in the optimizer.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GroupId(pub i64);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Group<T> {
-    metadata: GroupMetadata<T>,
-}
-
-impl<T> Group<T> {
-    pub fn normalized(&self) -> &Arc<T> {
-        &self.metadata.normalized
-    }
-
-    pub fn group_id(&self) -> &GroupId {
-        &self.metadata.group_id
-    }
-
-    pub fn from_raw_parts(metadata: GroupMetadata<T>) -> Self {
-        Group { metadata }
+impl std::fmt::Display for GroupId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "G{}", self.0)
     }
 }
 
-pub type OperatorGroup = Group<Operator>;
-pub type OperatorGroupMetadata = GroupMetadata<Operator>;
-
-pub type ScalarGroup = Group<Scalar>;
-pub type ScalarGroupMetadata = GroupMetadata<Scalar>;
-
-impl IntoOperator for OperatorGroup {
-    fn into_operator(self) -> Arc<Operator> {
-        Arc::new(Operator {
-            kind: OperatorKind::Group(self.metadata),
-            common: IRCommon::empty(),
-        })
+impl std::fmt::Debug for GroupId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "G{}", self.0)
     }
 }
 
-impl TryFromOperator for OperatorGroup {
-    fn try_from_operator(operator: Operator) -> Result<Self, OperatorKind> {
-        match operator.kind {
-            OperatorKind::Group(meta) => Ok(Group::from_raw_parts(meta)),
-            kind => Err(kind),
+define_node!(
+    Group, GroupBorrowed {
+        properties: OperatorProperties,
+        metadata: GroupMetadata {
+            group_id: GroupId,
+        },
+        inputs: {
+            operators: [],
+            scalars: [],
         }
     }
-}
+);
 
-impl IntoScalar for ScalarGroup {
-    fn into_scalar(self) -> Arc<Scalar> {
-        Arc::new(Scalar {
-            kind: ScalarKind::Group(self.metadata),
-            common: IRCommon::empty(),
-        })
-    }
-}
+impl_operator_conversion!(Group, GroupBorrowed);
 
-impl TryFromScalar for ScalarGroup {
-    fn try_from_scalar(scalar: Scalar) -> Result<Self, ScalarKind> {
-        match scalar.kind {
-            ScalarKind::Group(meta) => Ok(Group::from_raw_parts(meta)),
-            kind => Err(kind),
+impl Group {
+    pub fn new(group_id: GroupId, properties: Arc<OperatorProperties>) -> Self {
+        Self {
+            meta: GroupMetadata { group_id },
+            common: IRCommon::with_properties_only(properties),
         }
     }
 }

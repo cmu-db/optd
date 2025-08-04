@@ -1,11 +1,13 @@
 use std::sync::{Arc, LazyLock};
 
+pub mod builder;
 pub mod catalog;
 mod column;
 mod context;
 pub mod convert;
 pub mod cost;
 mod data_type;
+pub mod explain;
 mod group;
 mod macros;
 pub mod operator;
@@ -65,6 +67,14 @@ impl<P: Default> IRCommon<P> {
 
     pub fn with_input_operators_only(operators: Arc<[Arc<Operator>]>) -> Self {
         Self::new(operators, Self::empty_input_scalars())
+    }
+
+    pub fn with_properties_only(properties: Arc<P>) -> Self {
+        Self {
+            input_operators: Self::empty_input_operators(),
+            input_scalars: Self::empty_input_scalars(),
+            properties,
+        }
     }
 }
 

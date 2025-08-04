@@ -1,11 +1,16 @@
+use std::sync::Arc;
+
+use pretty_xmlish::Pretty;
+
 use crate::ir::{
     Column, ColumnSet, IRCommon,
     cost::Cost,
+    explain::Explain,
     macros::{define_node, impl_operator_conversion},
     properties::{Cardinality, OperatorProperties, OutputColumns, TupleOrdering},
 };
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone)]
 pub struct MockSpec {
     pub mocked_output_columns: OutputColumns,
     pub mocked_card: Cardinality,
@@ -21,6 +26,26 @@ impl Default for MockSpec {
             mocked_operator_cost: Some(Cost::new(0.)),
             mocked_provided_ordering: Default::default(),
         }
+    }
+}
+
+impl std::fmt::Debug for MockSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<private>")
+    }
+}
+
+impl Explain for MockScanBorrowed<'_> {
+    fn explain<'a>(
+        &self,
+        _ctx: &crate::ir::IRContext,
+        _option: &crate::ir::explain::ExplainOption,
+    ) -> pretty_xmlish::Pretty<'a> {
+        let columns = self.spec().mocked_output_columns.set();
+        let mut fields = Vec::with_capacity(2);
+        fields.push((".columns", Pretty::debug(columns)));
+        fields.push((".mock_id", Pretty::display(self.mock_id())));
+        Pretty::childless_record("MockScan", fields)
     }
 }
 
@@ -47,6 +72,11 @@ impl MockSpec {
     }
 }
 
+impl PartialEq for MockSpec {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
 impl Eq for MockSpec {}
 impl std::hash::Hash for MockSpec {
     fn hash<H: std::hash::Hasher>(&self, _state: &mut H) {}
@@ -56,8 +86,8 @@ define_node!(
     MockScan, MockScanBorrowed {
         properties: OperatorProperties,
         metadata: MockScanMetadata {
-            id: usize,
-            spec: MockSpec,
+            mock_id: usize,
+            spec: Arc<MockSpec>,
         },
         inputs: {
             operators: [],
@@ -70,22 +100,11 @@ impl_operator_conversion!(MockScan, MockScanBorrowed);
 impl MockScan {
     pub fn with_mock_spec(id: usize, spec: MockSpec) -> Self {
         Self {
-            meta: MockScanMetadata { id, spec },
+            meta: MockScanMetadata {
+                mock_id: id,
+                spec: Arc::new(spec),
+            },
             common: IRCommon::empty(),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::ir::convert::IntoOperator;
-
-    use super::*;
-
-    #[test]
-    fn mock_scan_exp_it_works() {
-        let m1 = MockScan::with_mock_spec(1, MockSpec::default()).into_operator();
-        let x = m1.as_ref().try_bind_ref_experimental::<MockScan>().unwrap();
-        assert_eq!(&1, x.id());
     }
 }

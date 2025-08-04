@@ -14,6 +14,15 @@ pub enum TupleOrderingDirection {
     Desc,
 }
 
+impl std::fmt::Display for TupleOrderingDirection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TupleOrderingDirection::Asc => write!(f, "ASC"),
+            TupleOrderingDirection::Desc => write!(f, "DESC"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TupleOrdering(Arc<TupleOrderingInner>);
 
@@ -33,6 +42,12 @@ impl PartialOrd for TupleOrdering {
             // Neither is a prefix of the other, they're incomparable
             None
         }
+    }
+}
+
+impl std::fmt::Display for TupleOrdering {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
     }
 }
 
@@ -125,7 +140,9 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
     ) -> Option<std::sync::Arc<[TupleOrdering]>> {
         match &self.kind {
             OperatorKind::Group(_) => None,
-            OperatorKind::LogicalGet(_) | OperatorKind::LogicalJoin(_) => {
+            OperatorKind::LogicalGet(_)
+            | OperatorKind::LogicalJoin(_)
+            | OperatorKind::LogicalSelect(_) => {
                 assert_eq!(self.kind.category(), OperatorCategory::Logical);
                 None
             }
@@ -137,13 +154,21 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
                 ordering.is_empty().then_some(Arc::new([]))
             }
             OperatorKind::PhysicalNLJoin(meta) => {
-                let join = PhysicalNLJoin::from_raw_parts(meta.clone(), self.common.clone());
+                let join = PhysicalNLJoinBorrowed::from_raw_parts(meta, &self.common);
 
                 let output_from_outer = join.outer().get_property::<OutputColumns>(ctx);
                 ordering
                     .iter_columns()
                     .all(|col| output_from_outer.set().contains(col))
                     .then(|| vec![ordering.clone(), TupleOrdering::default()].into())
+            }
+            OperatorKind::PhysicalFilter(meta) => {
+                let filter = PhysicalFilterBorrowed::from_raw_parts(meta, &self.common);
+                let output_from_input = filter.input().get_property::<OutputColumns>(ctx);
+                ordering
+                    .iter_columns()
+                    .all(|col| output_from_input.set().contains(col))
+                    .then(|| vec![ordering.clone()].into())
             }
             #[cfg(test)]
             OperatorKind::MockScan(meta) => {

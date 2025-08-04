@@ -13,12 +13,11 @@ pub use literal::*;
 
 pub use projection_list::*;
 
-use crate::ir::{IRCommon, Operator, ScalarGroupMetadata, properties::ScalarProperties};
+use crate::ir::{IRCommon, Operator, explain::Explain, properties::ScalarProperties};
 
 /// The scalar type and its associated metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ScalarKind {
-    Group(ScalarGroupMetadata),
     Literal(LiteralMetadata),
     ColumnRef(ColumnRefMetadata),
     Assign(AssignMetadata),
@@ -54,6 +53,28 @@ impl Scalar {
         Self {
             kind: self.kind.clone(),
             common: IRCommon::new(operators, scalars),
+        }
+    }
+}
+
+impl Explain for Scalar {
+    fn explain<'a>(
+        &self,
+        ctx: &super::IRContext,
+        option: &super::explain::ExplainOption,
+    ) -> pretty_xmlish::Pretty<'a> {
+        match &self.kind {
+            ScalarKind::Literal(meta) => {
+                LiteralBorrowed::from_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            ScalarKind::ColumnRef(meta) => {
+                ColumnRefBorrowed::from_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            ScalarKind::Assign(_) => todo!(),
+            ScalarKind::ProjectionList(_) => todo!(),
+            ScalarKind::BinaryOp(meta) => {
+                BinaryOpBorrowed::from_raw_parts(meta, &self.common).explain(ctx, option)
+            }
         }
     }
 }

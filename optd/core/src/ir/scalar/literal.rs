@@ -1,12 +1,15 @@
+use pretty_xmlish::Pretty;
+
 use crate::ir::{
     IRCommon, ScalarValue,
+    explain::Explain,
     macros::{define_node, impl_scalar_conversion},
     properties::ScalarProperties,
 };
 
 define_node!(
     /// A literal that holds an [`ScalarValue`].
-    Literal, LiteralRef {
+    Literal, LiteralBorrowed {
         properties: ScalarProperties,
         metadata: LiteralMetadata {
             value: ScalarValue,
@@ -17,7 +20,7 @@ define_node!(
         }
     }
 );
-impl_scalar_conversion!(Literal, LiteralRef);
+impl_scalar_conversion!(Literal, LiteralBorrowed);
 
 impl Literal {
     pub fn new(value: ScalarValue) -> Self {
@@ -35,5 +38,15 @@ impl Literal {
 
     pub fn int32(v: impl Into<Option<i32>>) -> Self {
         Self::new(ScalarValue::Int32(v.into()))
+    }
+}
+
+impl Explain for LiteralBorrowed<'_> {
+    fn explain<'a>(
+        &self,
+        _ctx: &crate::ir::IRContext,
+        _option: &crate::ir::explain::ExplainOption,
+    ) -> pretty_xmlish::Pretty<'a> {
+        Pretty::display(self.value())
     }
 }

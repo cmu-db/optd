@@ -119,9 +119,9 @@ mod tests {
             .try_bind_ref_experimental::<MockScan>()
             .unwrap();
 
-        assert_eq!(&1, a_ref.id());
-        assert_eq!(&2, b_ref.id());
-        assert_eq!(&3, c_ref.id(),);
+        assert_eq!(&1, a_ref.mock_id());
+        assert_eq!(&2, b_ref.mock_id());
+        assert_eq!(&3, c_ref.mock_id(),);
         assert_eq!(
             &ScalarValue::Boolean(Some(false)),
             new_upper
