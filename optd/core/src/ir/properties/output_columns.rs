@@ -24,9 +24,9 @@ impl PropertyMarker for OutputColumns {}
 impl Derive<OutputColumns> for crate::ir::Operator {
     fn derive_by_compute(&self, ctx: &crate::ir::context::IRContext) -> OutputColumns {
         match &self.kind {
-            OperatorKind::Group(meta) => {
+            OperatorKind::Group(_) => {
                 // Always derive a placeholder using the normalized expression.
-                meta.normalized.derive_by_compute(ctx)
+                panic!("Right now group's properties should always be set.")
             }
             OperatorKind::LogicalGet(meta) => {
                 LogicalGet::from_raw_parts(meta.clone(), self.common.clone()).derive_by_compute(ctx)
@@ -36,8 +36,10 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                     .derive_by_compute(ctx)
             }
             OperatorKind::LogicalJoin(_)
-            | OperatorKind::EnforcerSort(_)
-            | OperatorKind::PhysicalNLJoin(_) => {
+            | OperatorKind::PhysicalNLJoin(_)
+            | OperatorKind::LogicalSelect(_)
+            | OperatorKind::PhysicalFilter(_)
+            | OperatorKind::EnforcerSort(_) => {
                 let set = self
                     .input_operators()
                     .iter()

@@ -81,8 +81,22 @@ mod tests {
             .try_bind_ref::<PhysicalNLJoin>()
             .unwrap();
 
-        assert_eq!(&1, nl_join.outer().try_bind_ref::<MockScan>().unwrap().id());
-        assert_eq!(&2, nl_join.inner().try_bind_ref::<MockScan>().unwrap().id());
+        assert_eq!(
+            &1,
+            nl_join
+                .outer()
+                .try_bind_ref::<MockScan>()
+                .unwrap()
+                .mock_id()
+        );
+        assert_eq!(
+            &2,
+            nl_join
+                .inner()
+                .try_bind_ref::<MockScan>()
+                .unwrap()
+                .mock_id()
+        );
         assert_eq!(&JoinType::Inner, nl_join.join_type());
         assert_eq!(
             &ScalarValue::Boolean(Some(true)),

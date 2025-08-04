@@ -94,8 +94,8 @@ mod tests {
             .try_bind_ref_experimental::<MockScan>()
             .unwrap();
 
-        assert_eq!(new_outer.id(), &2);
-        assert_eq!(new_inner.id(), &1);
+        assert_eq!(new_outer.mock_id(), &2);
+        assert_eq!(new_inner.mock_id(), &1);
 
         let left_outer_join =
             LogicalJoin::new(JoinType::Left, m_outer, m_inner, join_cond).into_operator();

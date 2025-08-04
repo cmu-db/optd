@@ -18,10 +18,10 @@ impl CostModel for MagicCostModel {
     ) -> Option<crate::ir::cost::Cost> {
         use crate::ir::OperatorKind;
         match &op.kind {
-            // Here we choose to not assign a cost to logical operators.
             OperatorKind::Group(_) => None,
             OperatorKind::LogicalGet(_) => None,
             OperatorKind::LogicalJoin(_) => None,
+            OperatorKind::LogicalSelect(_) => None,
             OperatorKind::EnforcerSort(_) => {
                 let input_card = op.input_operators()[0].get_property::<Cardinality>(ctx);
                 let cost = Cost::UNIT * input_card.as_f64() * input_card.as_f64().ln_1p().max(1.0);
@@ -32,7 +32,7 @@ impl CostModel for MagicCostModel {
                 Some(Cost::UNIT * card * 2f64)
             }
             OperatorKind::PhysicalNLJoin(meta) => {
-                let join = PhysicalNLJoin::from_raw_parts(meta.clone(), op.common.clone());
+                let join = PhysicalNLJoinBorrowed::from_raw_parts(meta, &op.common);
                 let outer_card = join.outer().get_property::<Cardinality>(ctx);
                 let inner_card = join.inner().get_property::<Cardinality>(ctx);
                 let cost = outer_card.as_f64()
@@ -40,6 +40,12 @@ impl CostModel for MagicCostModel {
                     * MagicCostModel::MAGIC_COMPUTATION_FACTOR
                     * Cost::UNIT
                     + outer_card * Cost::UNIT;
+                Some(cost)
+            }
+            OperatorKind::PhysicalFilter(meta) => {
+                let filter = PhysicalFilterBorrowed::from_raw_parts(meta, &op.common);
+                let input_card = filter.input().get_property::<Cardinality>(ctx);
+                let cost = input_card.as_f64() * Self::MAGIC_COMPUTATION_FACTOR * Cost::UNIT;
                 Some(cost)
             }
             #[cfg(test)]

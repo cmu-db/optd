@@ -48,7 +48,7 @@ impl<T: Eq + Hash + Clone> UnionFind<T> {
     }
 
     /// Internal method that finds the representative with path compression
-    fn find_with_compression(&mut self, x: &T) -> T {
+    pub fn find_with_compression(&mut self, x: &T) -> T {
         let parent = self.parents.get(x).cloned().unwrap_or(x.clone());
 
         if &parent == x {
@@ -75,20 +75,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_find_nonexistent() {
+    fn find_nonexistent() {
         let repr = UnionFind::<u32>::default();
         assert_eq!(repr.find(&42), 42);
     }
 
     #[test]
-    fn test_find_self() {
+    fn find_self() {
         let mut repr = UnionFind::<u32>::default();
         repr.parents.insert(42, 42);
         assert_eq!(repr.find(&42), 42);
     }
 
     #[test]
-    fn test_find_without_compression() {
+    fn find_without_compression() {
         let mut repr = UnionFind::<u32>::default();
         repr.parents.insert(1, 2);
         repr.parents.insert(2, 3);
@@ -104,7 +104,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_with_compression() {
+    fn merge_with_compression() {
         let mut repr = UnionFind::<u32>::default();
         repr.parents.insert(1, 1);
         repr.parents.insert(2, 1);
@@ -120,7 +120,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_basic() {
+    fn merge_basic() {
         let mut repr = UnionFind::<u32>::default();
         let result = repr.merge(&1, &2);
         assert_eq!(result, 1);
@@ -128,7 +128,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_existing() {
+    fn merge_existing() {
         let mut repr = UnionFind::<u32>::default();
         repr.parents.insert(1, 1);
         repr.parents.insert(2, 2);
@@ -139,7 +139,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_already_merged() {
+    fn merge_already_merged() {
         let mut repr = UnionFind::<u32>::default();
         repr.parents.insert(1, 2);
         repr.parents.insert(2, 2);
@@ -150,7 +150,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_chains() {
+    fn merge_chains() {
         let mut repr = UnionFind::<u32>::default();
 
         // Create chain 1->2->3
@@ -175,7 +175,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_with_string_keys() {
+    fn merge_with_string_keys() {
         let mut repr = UnionFind::<String>::default();
 
         let result = repr.merge(&"old".to_string(), &"new".to_string());
@@ -184,7 +184,7 @@ mod tests {
     }
 
     #[test]
-    fn test_complex_merges() {
+    fn complex_merges() {
         let mut repr = UnionFind::<u32>::default();
 
         // First set of merges
