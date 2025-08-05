@@ -9,7 +9,6 @@ use crate::ir::{
 };
 
 /// Creates a mock scan operator.
-#[cfg(test)]
 pub fn mock_scan(id: usize, columns: Vec<i64>, card: f64) -> Arc<Operator> {
     use crate::ir::operator::{MockScan, MockSpec};
 

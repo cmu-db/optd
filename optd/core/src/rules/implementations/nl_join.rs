@@ -5,17 +5,17 @@ use crate::ir::{
     rule::{OperatorPattern, Rule},
 };
 
-pub struct LogicalJoinAsPhysicalNLJoin {
+pub struct LogicalJoinAsPhysicalNLJoinRule {
     pattern: OperatorPattern,
 }
 
-impl Default for LogicalJoinAsPhysicalNLJoin {
+impl Default for LogicalJoinAsPhysicalNLJoinRule {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl LogicalJoinAsPhysicalNLJoin {
+impl LogicalJoinAsPhysicalNLJoinRule {
     pub fn new() -> Self {
         let pattern =
             OperatorPattern::with_top_matches(|kind| matches!(kind, OperatorKind::LogicalJoin(_)));
@@ -23,7 +23,7 @@ impl LogicalJoinAsPhysicalNLJoin {
     }
 }
 
-impl Rule for LogicalJoinAsPhysicalNLJoin {
+impl Rule for LogicalJoinAsPhysicalNLJoinRule {
     fn name(&self) -> &'static str {
         "logical_join_as_physical_nl_join"
     }
@@ -38,7 +38,7 @@ impl Rule for LogicalJoinAsPhysicalNLJoin {
     ) -> Result<Vec<std::sync::Arc<crate::ir::Operator>>, ()> {
         let join = operator.try_bind_ref::<LogicalJoin>().unwrap();
         let nl_join = PhysicalNLJoin::new(
-            join.join_type().clone(),
+            *join.join_type(),
             join.outer().clone(),
             join.inner().clone(),
             join.join_cond().clone(),
@@ -71,7 +71,7 @@ mod tests {
         )
         .into_operator();
 
-        let rule = LogicalJoinAsPhysicalNLJoin::new();
+        let rule = LogicalJoinAsPhysicalNLJoinRule::new();
         assert!(rule.pattern.matches_without_expand(&inner_join));
         let nl_join = rule
             .transform(&inner_join)

@@ -21,8 +21,14 @@ pub use context::IRContext;
 pub use data_type::DataType;
 pub use group::*;
 pub use operator::{Operator, OperatorCategory, OperatorKind};
+use pretty_xmlish::Pretty;
 pub use scalar::{Scalar, ScalarKind};
 pub use value::ScalarValue;
+
+use crate::ir::{
+    explain::{Explain, ExplainOption},
+    properties::OperatorProperties,
+};
 
 /// The portion of the IR shared by all nodes.
 #[derive(Debug)]
@@ -69,12 +75,60 @@ impl<P: Default> IRCommon<P> {
         Self::new(operators, Self::empty_input_scalars())
     }
 
-    pub fn with_properties_only(properties: Arc<P>) -> Self {
+    pub(crate) fn new_with_properties(
+        input_operators: Arc<[Arc<Operator>]>,
+        input_scalars: Arc<[Arc<Scalar>]>,
+        properties: Arc<P>,
+    ) -> Self {
+        Self {
+            input_operators,
+            input_scalars,
+            properties,
+        }
+    }
+
+    pub(crate) fn with_properties_only(properties: Arc<P>) -> Self {
         Self {
             input_operators: Self::empty_input_operators(),
             input_scalars: Self::empty_input_scalars(),
             properties,
         }
+    }
+
+    pub fn explain_input_operators<'a>(
+        &self,
+        ctx: &IRContext,
+        option: &ExplainOption,
+    ) -> Vec<Pretty<'a>> {
+        self.input_operators
+            .iter()
+            .map(|input_op| input_op.explain(ctx, option))
+            .collect()
+    }
+}
+
+impl IRCommon<OperatorProperties> {
+    pub fn explain_operator_properties<'a>(
+        &self,
+        _ctx: &IRContext,
+        _option: &ExplainOption,
+    ) -> Vec<(&'static str, Pretty<'a>)> {
+        let mut fields = Vec::with_capacity(2);
+        let cardinality = self
+            .properties
+            .cardinality
+            .get()
+            .map(|x| format!("{:.2}", x.as_f64()))
+            .unwrap_or("?".to_string());
+        let output_columns = self
+            .properties
+            .output_columns
+            .get()
+            .map(|x| format!("{x}"))
+            .unwrap_or("?".to_string());
+        fields.push(("(.output_columns)", Pretty::display(&output_columns)));
+        fields.push(("(.cardinality)", Pretty::display(&cardinality)));
+        fields
     }
 }
 

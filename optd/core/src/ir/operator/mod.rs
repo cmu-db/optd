@@ -17,19 +17,16 @@ pub mod join {
     pub use super::logical::join::JoinType;
 }
 
-#[cfg(test)]
 pub use physical::mock_scan::*;
-use pretty_xmlish::Pretty;
 
 use crate::ir::explain::Explain;
 use crate::ir::properties::OperatorProperties;
-use crate::ir::{GroupMetadata, IRCommon, Scalar};
+use crate::ir::{GroupBorrowed, GroupId, GroupMetadata, IRCommon, Scalar};
 
 /// The operator type and its associated metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OperatorKind {
     Group(GroupMetadata),
-    #[cfg(test)]
     MockScan(MockScanMetadata),
     LogicalGet(LogicalGetMetadata),
     LogicalJoin(LogicalJoinMetadata),
@@ -61,7 +58,6 @@ impl OperatorKind {
     pub fn maybe_produce_columns(&self) -> bool {
         match self {
             OperatorKind::LogicalGet(_) | OperatorKind::PhysicalTableScan(_) => true,
-            #[cfg(test)]
             OperatorKind::MockScan(_) => true,
             _other => false,
         }
@@ -70,6 +66,7 @@ impl OperatorKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Operator {
+    pub group_id: Option<GroupId>,
     /// The operator type and associated metadata.
     pub kind: OperatorKind,
     /// The input operators and scalars.
@@ -77,6 +74,17 @@ pub struct Operator {
 }
 
 impl Operator {
+    pub fn from_raw_parts(
+        group_id: Option<GroupId>,
+        kind: OperatorKind,
+        common: IRCommon<OperatorProperties>,
+    ) -> Self {
+        Self {
+            group_id,
+            kind,
+            common,
+        }
+    }
     /// Gets the slice to the input operators.
     pub fn input_operators(&self) -> &[Arc<Operator>] {
         &self.common.input_operators
@@ -101,6 +109,7 @@ impl Operator {
             input_operators.unwrap_or_else(|| self.common.input_operators.clone());
         let input_scalars = input_scalars.unwrap_or_else(|| self.common.input_scalars.clone());
         Self {
+            group_id: None,
             kind: self.kind.clone(),
             common: IRCommon::new(input_operators, input_scalars),
         }
@@ -114,8 +123,9 @@ impl Explain for Operator {
         option: &super::explain::ExplainOption,
     ) -> pretty_xmlish::Pretty<'a> {
         match &self.kind {
-            OperatorKind::Group(meta) => Pretty::display(&meta.group_id),
-            #[cfg(test)]
+            OperatorKind::Group(meta) => {
+                GroupBorrowed::from_raw_parts(meta, &self.common).explain(ctx, option)
+            }
             OperatorKind::MockScan(meta) => {
                 MockScanBorrowed::from_raw_parts(meta, &self.common).explain(ctx, option)
             }

@@ -1,12 +1,13 @@
 mod cardinality;
 mod output_columns;
-pub mod required;
+mod required;
 mod tuple_ordering;
 
 use std::sync::{Arc, OnceLock};
 
 pub use cardinality::*;
 pub use output_columns::OutputColumns;
+pub use required::Required;
 pub use tuple_ordering::*;
 
 use crate::ir::context::IRContext;

@@ -52,12 +52,8 @@ impl Explain for LogicalJoinBorrowed<'_> {
         let mut fields = Vec::with_capacity(3);
         fields.push((".join_type", Pretty::debug(self.join_type())));
         fields.push((".join_cond", self.join_cond().explain(ctx, option)));
-        let children = self
-            .common
-            .input_operators
-            .iter()
-            .map(|input_op| input_op.explain(ctx, option))
-            .collect();
+        fields.extend(self.common.explain_operator_properties(ctx, option));
+        let children = self.common.explain_input_operators(ctx, option);
         Pretty::simple_record("LogicalJoin", fields, children)
     }
 }

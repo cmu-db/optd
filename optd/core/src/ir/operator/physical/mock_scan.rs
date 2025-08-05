@@ -38,13 +38,12 @@ impl std::fmt::Debug for MockSpec {
 impl Explain for MockScanBorrowed<'_> {
     fn explain<'a>(
         &self,
-        _ctx: &crate::ir::IRContext,
-        _option: &crate::ir::explain::ExplainOption,
+        ctx: &crate::ir::IRContext,
+        option: &crate::ir::explain::ExplainOption,
     ) -> pretty_xmlish::Pretty<'a> {
-        let columns = self.spec().mocked_output_columns.set();
         let mut fields = Vec::with_capacity(2);
-        fields.push((".columns", Pretty::debug(columns)));
         fields.push((".mock_id", Pretty::display(self.mock_id())));
+        fields.extend(self.common.explain_operator_properties(ctx, option));
         Pretty::childless_record("MockScan", fields)
     }
 }
@@ -57,6 +56,7 @@ impl MockSpec {
         Self {
             mocked_output_columns,
             mocked_card,
+            mocked_operator_cost: Some(Cost::UNIT * card * 1.1),
             ..Default::default()
         }
     }

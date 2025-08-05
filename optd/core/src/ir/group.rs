@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
+use pretty_xmlish::Pretty;
+
 use crate::ir::{
     IRCommon,
+    explain::Explain,
     macros::{define_node, impl_operator_conversion},
     properties::OperatorProperties,
 };
@@ -43,5 +46,16 @@ impl Group {
             meta: GroupMetadata { group_id },
             common: IRCommon::with_properties_only(properties),
         }
+    }
+}
+
+impl Explain for GroupBorrowed<'_> {
+    fn explain<'a>(
+        &self,
+        _ctx: &super::IRContext,
+        _option: &super::explain::ExplainOption,
+    ) -> Pretty<'a> {
+        let fields = vec![(".group_id", Pretty::display(self.group_id()))];
+        Pretty::childless_record("Group", fields)
     }
 }

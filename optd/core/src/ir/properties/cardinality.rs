@@ -11,7 +11,7 @@ pub struct Cardinality {
     card: f64,
 }
 
-pub trait CardinalityEstimator {
+pub trait CardinalityEstimator: Send + Sync + 'static {
     fn estimate(&self, op: &Operator, ctx: &IRContext) -> Cardinality;
 }
 
@@ -44,11 +44,10 @@ impl Derive<Cardinality> for crate::ir::Operator {
     }
 
     fn derive(&self, ctx: &crate::ir::context::IRContext) -> Cardinality {
-        self.common
+        *self.common
             .properties
             .cardinality
             .get_or_init(|| self.derive_by_compute(ctx))
-            .clone()
     }
 }
 

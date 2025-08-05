@@ -23,7 +23,7 @@ impl std::fmt::Display for TupleOrderingDirection {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, PartialEq, Eq, Hash, Default)]
 pub struct TupleOrdering(Arc<TupleOrderingInner>);
 
 impl PartialOrd for TupleOrdering {
@@ -46,6 +46,12 @@ impl PartialOrd for TupleOrdering {
 }
 
 impl std::fmt::Display for TupleOrdering {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
+    }
+}
+
+impl std::fmt::Debug for TupleOrdering {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_list().entries(self.iter()).finish()
     }
@@ -96,7 +102,7 @@ impl TupleOrdering {
     }
 
     /// Gets an ordered iterator over [`Column`] specified in the ordering.
-    pub fn iter_columns<'a>(&'a self) -> impl Iterator<Item = &'a Column> {
+    pub fn iter_columns(&self) -> impl Iterator<Item = &Column> {
         self.0.columns.iter()
     }
 
@@ -126,6 +132,7 @@ impl<'a> Iterator for Iter<'a> {
             .then(|| TupleOrderingDirection::Asc)
             .unwrap_or(TupleOrderingDirection::Desc);
 
+        self.index += 1;
         Some((column, direction))
     }
 }
@@ -170,7 +177,6 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
                     .all(|col| output_from_input.set().contains(col))
                     .then(|| vec![ordering.clone()].into())
             }
-            #[cfg(test)]
             OperatorKind::MockScan(meta) => {
                 (&meta.spec.mocked_provided_ordering >= ordering).then_some(Arc::new([]))
             }
