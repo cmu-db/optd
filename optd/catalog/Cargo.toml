@@ -4,3 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+datafusion = "=49.0.0"
+sqlx = { version = "=0.8.6", features = ["sqlite"] }
+parking_lot = "=0.12.4"
+glob = "0.3.2"
+url = "2.5.4"
+async-trait = "0.1.88"
+
+[dependencies.uuid]
+version = "1.17.0"
+# Lets you generate random UUIDs
+features = ["v4"]
