@@ -33,7 +33,7 @@ pub enum OperatorKind {
     LogicalSelect(LogicalSelectMetadata),
     EnforcerSort(EnforcerSortMetadata),
     PhysicalTableScan(PhysicalTableScanMetadata),
-    PhysicalNLJoin(PhysicalNLJoinJoinMetadata),
+    PhysicalNLJoin(PhysicalNLJoinMetadata),
     PhysicalFilter(PhysicalFilterMetadata),
 }
 

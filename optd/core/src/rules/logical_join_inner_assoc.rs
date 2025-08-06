@@ -1,7 +1,8 @@
 use crate::ir::{
-    OperatorKind,
+    IRContext, OperatorKind,
     convert::IntoOperator,
     operator::{LogicalJoin, join::JoinType},
+    properties::{GetProperty, OutputColumns},
     rule::{OperatorPattern, Rule},
 };
 
@@ -39,6 +40,7 @@ impl Rule for LogicalJoinInnerAssocRule {
     fn transform(
         &self,
         operator: &crate::ir::Operator,
+        ctx: &IRContext,
     ) -> Result<Vec<std::sync::Arc<crate::ir::Operator>>, ()> {
         // ((a JOIN b, cond_low) JOIN c, cond_up) → (a JOIN (b JOIN c, cond_up), cond_low)
         let join_upper = operator.try_bind_ref_experimental::<LogicalJoin>().unwrap();
@@ -52,6 +54,16 @@ impl Rule for LogicalJoinInnerAssocRule {
         let a = join_lower.outer().clone();
         let b = join_lower.inner().clone();
         let c = join_upper.inner().clone();
+
+        let new_lower_columns =
+            b.get_property::<OutputColumns>(ctx).set() & c.get_property::<OutputColumns>(ctx).set();
+        if join_upper
+            .join_cond()
+            .used_columns()
+            .is_superset(&new_lower_columns)
+        {
+            return Ok(vec![]);
+        }
 
         let new_join_upper = LogicalJoin::new(
             JoinType::Inner,
@@ -95,9 +107,10 @@ mod tests {
         )
         .into_operator();
 
+        let ctx = IRContext::with_empty_magic();
         let rule = LogicalJoinInnerAssocRule::new();
         assert!(rule.pattern.matches_without_expand(&inner_joins));
-        let res = rule.transform(&inner_joins).unwrap().pop().unwrap();
+        let res = rule.transform(&inner_joins, &ctx).unwrap().pop().unwrap();
         let new_upper = res.try_bind_ref_experimental::<LogicalJoin>().unwrap();
         let a_ref = new_upper
             .outer()

@@ -52,10 +52,11 @@ impl Group {
 impl Explain for GroupBorrowed<'_> {
     fn explain<'a>(
         &self,
-        _ctx: &super::IRContext,
-        _option: &super::explain::ExplainOption,
+        ctx: &super::IRContext,
+        option: &super::explain::ExplainOption,
     ) -> Pretty<'a> {
-        let fields = vec![(".group_id", Pretty::display(self.group_id()))];
+        let mut fields = vec![(".group_id", Pretty::display(self.group_id()))];
+        fields.extend(self.common.explain_operator_properties(ctx, option));
         Pretty::childless_record("Group", fields)
     }
 }

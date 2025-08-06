@@ -35,6 +35,7 @@ impl Rule for LogicalGetAsPhysicalTableScanRule {
     fn transform(
         &self,
         operator: &crate::ir::Operator,
+        _ctx: &crate::ir::IRContext,
     ) -> Result<Vec<std::sync::Arc<crate::ir::Operator>>, ()> {
         let get = operator.try_bind_ref::<LogicalGet>().unwrap();
         let table_scan = PhysicalTableScan::new(*get.table_id(), get.projection_list().clone());

@@ -44,7 +44,8 @@ impl Derive<Cardinality> for crate::ir::Operator {
     }
 
     fn derive(&self, ctx: &crate::ir::context::IRContext) -> Cardinality {
-        *self.common
+        *self
+            .common
             .properties
             .cardinality
             .get_or_init(|| self.derive_by_compute(ctx))

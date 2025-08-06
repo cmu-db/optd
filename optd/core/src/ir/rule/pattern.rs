@@ -33,14 +33,14 @@ impl OperatorPattern {
         &self.input_operator_patterns
     }
 
-    pub fn top_matches(&self, operator: &Operator) -> bool {
-        (self.matches)(&operator.kind)
+    pub fn top_matches(&self, kind: &OperatorKind) -> bool {
+        (self.matches)(kind)
     }
 
     pub fn matches_without_expand(&self, operator: &Operator) -> bool {
         let input_ops = operator.input_operators();
         self.input_operator_patterns.iter().fold(
-            self.top_matches(operator),
+            self.top_matches(&operator.kind),
             |prev_matches, (i, input_pattern)| {
                 let Some(input_op) = &input_ops.get(*i) else {
                     return false;

@@ -13,7 +13,7 @@ use crate::ir::{
 define_node!(
     PhysicalNLJoin, PhysicalNLJoinBorrowed  {
         properties: OperatorProperties,
-        metadata: PhysicalNLJoinJoinMetadata {
+        metadata: PhysicalNLJoinMetadata {
             join_type: JoinType,
         },
         inputs: {
@@ -32,7 +32,7 @@ impl PhysicalNLJoin {
         join_cond: Arc<Scalar>,
     ) -> Self {
         Self {
-            meta: PhysicalNLJoinJoinMetadata { join_type },
+            meta: PhysicalNLJoinMetadata { join_type },
             common: IRCommon::new(Arc::new([outer, inner]), Arc::new([join_cond])),
         }
     }

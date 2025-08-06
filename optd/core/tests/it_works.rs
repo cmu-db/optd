@@ -14,7 +14,6 @@ use optd_core::{
     },
     rules,
 };
-use tracing::Level;
 
 async fn optimize_plan(
     opt: Arc<Cascades>,
@@ -58,26 +57,33 @@ async fn integration() -> Result<(), Box<dyn std::error::Error>> {
     // console_subscriber::init();
     tracing_subscriber::fmt()
         .without_time()
-        .with_max_level(Level::INFO)
+        .with_max_level(tracing::Level::INFO)
         // .with_target(false) // Optional: also remove target
         .compact() // Optional: use compact format
         .init();
-    let m1 = mock_scan(1, vec![1, 2], 10.);
-    let m2 = mock_scan(2, vec![3, 4], 20.);
+    let m1 = mock_scan(1, vec![1, 2, 3], 10.);
+    let m2 = mock_scan(2, vec![4, 5], 20.);
+    let m3 = mock_scan(3, vec![6, 7], 30.);
     let required = Arc::new(Required {
         tuple_ordering: TupleOrdering::from_iter([(Column(3), TupleOrderingDirection::Asc)]),
     });
-    let join_m1_m2 = m1.clone().logical_join(
-        m2.clone(),
-        column_ref(Column(1)).equal(column_ref(Column(3))),
-        JoinType::Inner,
-    );
+    let join_m1_m2 = m1
+        .logical_join(
+            m2,
+            column_ref(Column(1)).equal(column_ref(Column(4))),
+            JoinType::Inner,
+        )
+        .logical_join(
+            m3,
+            column_ref(Column(2)).equal(column_ref(Column(6))),
+            JoinType::Inner,
+        );
 
     let ctx = IRContext::with_empty_magic();
     let rule_set = RuleSet::builder()
         .add_rule(rules::LogicalJoinAsPhysicalNLJoinRule::new())
         .add_rule(rules::LogicalJoinInnerCommuteRule::new())
-        // .add_rule(rules::LogicalJoinInnerAssocRule::new())
+        .add_rule(rules::LogicalJoinInnerAssocRule::new())
         .build();
     let opt = Arc::new(Cascades::new(ctx, rule_set));
 

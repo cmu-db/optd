@@ -3,7 +3,7 @@ mod set;
 
 use std::sync::Arc;
 
-use crate::ir::Operator;
+use crate::ir::{IRContext, Operator};
 pub use pattern::{OperatorMatchFunc, OperatorPattern};
 pub use set::{RuleSet, RuleSetBuilder};
 
@@ -15,5 +15,6 @@ pub trait Rule: 'static + Send + Sync {
     fn pattern(&self) -> &OperatorPattern;
     /// Performs the transformation on `operator`.
     /// A rule may produce zero or more new plans as part of the transformation.
-    fn transform(&self, operator: &Operator) -> Result<Vec<Arc<Operator>>, ()>;
+    // TODO(yuchen): use custom error type.
+    fn transform(&self, operator: &Operator, ctx: &IRContext) -> Result<Vec<Arc<Operator>>, ()>;
 }

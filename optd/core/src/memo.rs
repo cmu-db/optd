@@ -6,7 +6,7 @@ use std::{
 
 use itertools::Itertools;
 use tokio::sync::watch;
-use tracing::{instrument, trace};
+use tracing::{info, instrument, trace};
 
 use crate::{
     ir::{
@@ -67,7 +67,7 @@ impl std::fmt::Debug for MemoGroupExpr {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Id(i64);
+pub struct Id(pub(crate) i64);
 
 impl std::fmt::Display for Id {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -187,7 +187,7 @@ impl MemoTable {
         let res = self.insert_operator(operator.clone());
         let into_group_id = self.id_to_group_ids.find(&into_group_id);
         res.inspect(|expr| {
-            trace!(id = %expr.id(), "obtain new expr");
+            info!(id = %expr.id(), "obtain new expr");
             let group = self.groups.get(&into_group_id).unwrap();
             self.id_to_group_ids
                 .merge(&into_group_id, &GroupId::from(expr.id()));
@@ -233,8 +233,8 @@ impl MemoTable {
             .map(|op| {
                 self.insert_operator(op.clone())
                     .map(|first_expr| {
-                        trace!(id = %first_expr.id(), "obtain new expr");
                         let group_id = GroupId::from(first_expr.id());
+                        info!(id = %first_expr.id(), "extra group created");
                         let memo_group = MemoGroup::new(first_expr, op.properties().clone());
                         let res = self.groups.insert(group_id, memo_group);
                         assert!(res.is_none());
@@ -299,7 +299,7 @@ impl MemoTable {
                 let group_id = GroupId::from(self.id_allocator.next_id());
                 vacant.insert(group_id);
                 self.scalar_id_to_key.insert(group_id, scalar);
-                trace!("got new scalar with {:?}", group_id);
+                info!(%group_id, "obtained new scalar expr");
                 Ok(group_id)
             }
         }
@@ -383,7 +383,7 @@ impl MemoTable {
     ///
     /// **Note:** This operation may trigger additional group merges recursively.
     fn merge_group(&mut self, into_group_id: GroupId, from_group_id: GroupId) {
-        trace!("merging {} <- {}", into_group_id, from_group_id);
+        info!("merging {} <- {}", into_group_id, from_group_id);
         if into_group_id == from_group_id {
             return;
         }
@@ -459,7 +459,7 @@ impl MemoTable {
             });
             group_exprs.clear();
         }
-        trace!(?pending_group_merges);
+        info!(?pending_group_merges);
         for (into_group_id, from_group_id) in pending_group_merges {
             let into_group_id = self.id_to_group_ids.find(&into_group_id);
             let from_group_id = self.id_to_group_ids.find(&from_group_id);
@@ -479,6 +479,8 @@ impl MemoTable {
         println!("======== MEMO DUMP BEGIN ========");
         println!("\n[operators]");
         println!("group_ids = {:?}", self.groups.keys());
+        println!("total_group_count = {}", self.groups.keys().len());
+        println!("total_operator_count = {}", self.operator_dedup.len());
         for (group_id, group) in &self.groups {
             let state = group.exploration.borrow();
             assert_eq!(group_id, &group.group_id);

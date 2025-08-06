@@ -4,7 +4,7 @@ mod column_ref;
 mod literal;
 mod projection_list;
 
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 pub use assign::*;
 pub use binary_op::*;
@@ -13,7 +13,7 @@ pub use literal::*;
 
 pub use projection_list::*;
 
-use crate::ir::{IRCommon, Operator, explain::Explain, properties::ScalarProperties};
+use crate::ir::{ColumnSet, IRCommon, Operator, explain::Explain, properties::ScalarProperties};
 
 /// The scalar type and its associated metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -53,6 +53,19 @@ impl Scalar {
         Self {
             kind: self.kind.clone(),
             common: IRCommon::new(operators, scalars),
+        }
+    }
+
+    pub fn used_columns(&self) -> ColumnSet {
+        match &self.kind {
+            ScalarKind::Literal(_) => HashSet::new(),
+            ScalarKind::ColumnRef(meta) => HashSet::from_iter(std::iter::once(meta.column)),
+            ScalarKind::BinaryOp(_) => self
+                .input_scalars()
+                .iter()
+                .fold(HashSet::new(), |x, y| &x & &y.used_columns()),
+            ScalarKind::Assign(_) => todo!(),
+            ScalarKind::ProjectionList(_) => todo!(),
         }
     }
 }

@@ -1,5 +1,6 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
+use itertools::Itertools;
 use tokio::sync::watch;
 use tracing::{info, instrument, trace};
 
@@ -8,7 +9,7 @@ use crate::{
         Group, GroupId, IRCommon, IRContext, Operator,
         convert::IntoOperator,
         properties::{OperatorProperties, Required, TrySatisfy},
-        rule::{Rule, RuleSet},
+        rule::{OperatorPattern, Rule, RuleSet},
     },
     memo::{CostedExpr, Exploration, MemoGroupExpr, MemoTable, Optimization, Status, WithId},
     rules::EnforceTupleOrderingRule,
@@ -154,7 +155,7 @@ impl Cascades {
         rx
     }
 
-    #[instrument(skip_all)]
+    #[instrument(name = "enforce", skip_all)]
     pub async fn explore_enforcers(
         &self,
         group_id: GroupId,
@@ -163,12 +164,21 @@ impl Cascades {
     ) {
         let group = Group::new(group_id, properties.clone()).into_operator();
         let enforcer_rule = EnforceTupleOrderingRule::new(required.tuple_ordering.clone());
-        let new_enforcers = enforcer_rule.transform(&group).unwrap();
-        info!(num_new_enforcers = new_enforcers.len());
-        let mut writer = self.memo.write().await;
-        for op in new_enforcers {
-            let _ = writer.insert_operator_into_group(op, group_id);
+        let new_enforcers = enforcer_rule.transform(&group, &self.ctx).unwrap();
+        let total_produced = new_enforcers.len();
+        let mut newly_produced = 0;
+        {
+            let mut writer = self.memo.write().await;
+            for op in new_enforcers {
+                if writer.insert_operator_into_group(op, group_id).is_ok() {
+                    newly_produced += 1;
+                }
+            }
         }
+        info!(
+            rule = enforcer_rule.name(),
+            total_produced, newly_produced, "applied"
+        )
     }
 
     // clippy: the compiler cannot derive `Send` bounds when using `async fn`. (alternative: pinbox.)
@@ -190,24 +200,23 @@ impl Cascades {
                 drop(writer);
                 let not_started = tx.send_if_modified(|state| {
                     let not_started = state.status == Status::NotStarted;
-                    if not_started {
-                        state.status = Status::InProgress;
-                    }
+                    not_started.then(|| state.status = Status::InProgress);
                     not_started
                 });
                 (tx, not_started)
             };
-
+            let rx = tx.subscribe();
             if not_started {
                 let required = required.clone();
-                let tx = tx.clone();
-                tokio::spawn(async move { self.optimize_group(group_id, required, tx).await });
+                tokio::spawn(
+                    async move { Box::pin(self.optimize_group(group_id, required, tx)).await },
+                );
             }
-            tx.subscribe()
+            rx
         }
     }
 
-    #[instrument(skip(self, required, tx), fields(required = %required))]
+    #[instrument(parent = None, skip(self, required, tx), fields(required = %required))]
     pub async fn optimize_group(
         self: Arc<Self>,
         group_id: GroupId,
@@ -332,32 +341,33 @@ impl Cascades {
         rx
     }
 
-    pub async fn spawn_explore_group(
+    // clippy: the compiler cannot derive `Send` bounds when using `async fn`. (alternative: pinbox.)
+    #[allow(clippy::manual_async_fn)]
+    pub fn spawn_explore_group(
         self: Arc<Self>,
         group_id: GroupId,
-    ) -> watch::Receiver<Exploration> {
-        let (tx, not_started) = {
-            let reader = self.memo.read().await;
-            let tx = &reader.get_memo_group(&group_id).exploration;
-            let not_started = tx.send_if_modified(|state| {
-                let not_started = state.status == Status::NotStarted;
-                not_started.then(|| state.status = Status::InProgress);
-                not_started
-            });
-            (tx.clone(), not_started)
-        };
+    ) -> impl Future<Output = watch::Receiver<Exploration>> + Send {
+        async move {
+            let (tx, not_started) = {
+                let reader = self.memo.read().await;
+                let tx = &reader.get_memo_group(&group_id).exploration.clone();
+                let not_started = tx.send_if_modified(|state| {
+                    let not_started = state.status == Status::NotStarted;
+                    not_started.then(|| state.status = Status::InProgress);
+                    not_started
+                });
+                (tx.clone(), not_started)
+            };
+            let rx = tx.subscribe();
 
-        let rx = tx.subscribe();
-        if not_started {
-            let cascades = self.clone();
-            tokio::spawn(async move {
-                cascades.explore_group(group_id, tx).await;
-            });
+            if not_started {
+                tokio::spawn(async move { Box::pin(self.explore_group(group_id, tx)).await });
+            }
+            rx
         }
-        rx
     }
 
-    #[instrument(skip(self, tx))]
+    #[instrument(parent = None, skip(self, tx))]
     pub async fn explore_group(self: Arc<Self>, group_id: GroupId, tx: watch::Sender<Exploration>) {
         let properties = tx.borrow().properties.clone();
         let mut index = 0;
@@ -391,7 +401,7 @@ impl Cascades {
     }
 
     #[instrument(name = "expr", skip_all, fields(id = %expr.id()))]
-    pub async fn explore_expr(
+    pub async fn explore_expr_without_expansion(
         self: &Arc<Self>,
         group_id: GroupId,
         expr: WithId<Arc<MemoGroupExpr>>,
@@ -404,17 +414,155 @@ impl Cascades {
 
         for rule in self.rule_set.iter() {
             if rule.pattern().matches_without_expand(&operator) {
-                let new_operators = rule.transform(&operator).unwrap();
+                info!(rule = rule.name(), "matched");
+                let new_operators = rule.transform(&operator, &self.ctx).unwrap();
+                let total_produced = new_operators.len();
+                let mut newly_produced = 0;
                 {
                     let mut writer = self.memo.write().await;
                     for op in new_operators {
-                        let _ = writer.insert_operator_into_group(op, group_id);
+                        if writer.insert_operator_into_group(op, group_id).is_ok() {
+                            newly_produced += 1;
+                        }
                     }
                 }
+                info!(
+                    rule = rule.name(),
+                    total_produced, newly_produced, "applied"
+                )
             }
         }
     }
-}
 
-#[cfg(test)]
-mod tests {}
+    #[instrument(name = "expr", skip_all, fields(id = %expr.id()))]
+    pub async fn explore_expr(
+        self: &Arc<Self>,
+        group_id: GroupId,
+        expr: WithId<Arc<MemoGroupExpr>>,
+        properties: &Arc<OperatorProperties>,
+    ) {
+        for rule in self.rule_set.iter() {
+            let all_bindings = self
+                .explore_all_bindings(group_id, &expr, properties, rule.pattern())
+                .await;
+
+            let bindings_count = all_bindings.as_ref().map(|v| v.len()).unwrap_or(0);
+            info!(rule = rule.name(), %bindings_count, "matched");
+
+            if bindings_count > 0 {
+                let mut total_produced = 0;
+                let mut newly_produced = 0;
+                for binding in all_bindings.iter().flatten() {
+                    let new_operators = rule.transform(binding, &self.ctx).unwrap();
+                    total_produced += new_operators.len();
+                    {
+                        let mut writer = self.memo.write().await;
+                        for op in new_operators {
+                            if writer
+                                .insert_operator_into_group(op.clone(), group_id)
+                                .is_ok()
+                            {
+                                newly_produced += 1;
+                            }
+                        }
+                    }
+                }
+                info!(
+                    rule = rule.name(),
+                    total_produced, newly_produced, "applied"
+                )
+            }
+        }
+    }
+
+    #[instrument(skip_all, fields(top = %expr.id()))]
+    pub async fn explore_all_bindings(
+        self: &Arc<Self>,
+        group_id: GroupId,
+        expr: &WithId<Arc<MemoGroupExpr>>,
+        properties: &Arc<OperatorProperties>,
+        pattern: &OperatorPattern,
+    ) -> Option<Vec<Arc<Operator>>> {
+        let input_group_ids = expr.key().input_operators();
+        let input_scalars = expr.key().input_scalars();
+        if !pattern.top_matches(expr.key().kind()) {
+            return None;
+        }
+        let input_patterns = pattern.input_operator_patterns();
+        let mut input_bindings_map: HashMap<usize, Vec<_>> =
+            HashMap::with_capacity(input_patterns.len());
+        for (index, input_pattern) in input_patterns {
+            // early return if input length mismatch.
+            let input_group_id = input_group_ids.get(*index)?;
+
+            let rx = self.get_all_group_exprs_in(*input_group_id).await;
+            let input_exprs = rx.borrow().exprs.clone();
+            let input_properties = rx.borrow().properties.clone();
+            assert_eq!(rx.borrow().status, Status::Complete);
+
+            let input_bindings = input_bindings_map.entry(*index).or_default();
+            for input_expr in input_exprs {
+                let cascades = self.clone();
+                let fut = Box::pin(cascades.explore_all_bindings(
+                    *input_group_id,
+                    &input_expr,
+                    &input_properties,
+                    input_pattern,
+                ));
+                if let Some(input_bindings_from_expr) = fut.await {
+                    input_bindings.extend(input_bindings_from_expr);
+                }
+            }
+            if input_bindings.is_empty() {
+                return None;
+            }
+        }
+
+        let (input_choices, input_scalars) = {
+            let reader = self.memo.read().await;
+            let input_choices = input_group_ids
+                .iter()
+                .enumerate()
+                .map(|(i, input_group_id)| {
+                    match input_bindings_map.remove(&i) {
+                        Some(v) => v,
+                        None => {
+                            // get group
+
+                            let properties = reader
+                                .get_memo_group(input_group_id)
+                                .exploration
+                                .borrow()
+                                .properties
+                                .clone();
+                            vec![Group::new(*input_group_id, properties).into_operator()]
+                        }
+                    }
+                })
+                .collect_vec();
+            let input_scalars = input_scalars
+                .iter()
+                .map(|group_id| reader.get_scalar(group_id).unwrap())
+                .collect::<Arc<[_]>>();
+            (input_choices, input_scalars)
+        };
+
+        Some(
+            input_choices
+                .into_iter()
+                .multi_cartesian_product()
+                .map(|input_operators| {
+                    Arc::new(Operator::from_raw_parts(
+                        Some(group_id),
+                        expr.key().kind().clone(),
+                        IRCommon::new_with_properties(
+                            input_operators.into(),
+                            input_scalars.clone(),
+                            properties.clone(),
+                        ),
+                    ))
+                })
+                .collect_vec(),
+        )
+    }
+}
