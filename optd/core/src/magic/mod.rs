@@ -81,7 +81,7 @@ impl IRContext {
 
         let mut create_numbered_table = |table_name: String, width: usize, row_count: usize| {
             let iter = (1..=width)
-                .map(|column_no| (format!("{}.v{}", table_name, column_no), DataType::Int32));
+                .map(|column_no| (format!("{table_name}.v{column_no}"), DataType::Int32));
             let schema = Arc::new(SchemaDescription::from_iter(iter));
             let table_id = catalog.try_create_table(table_name, schema).unwrap();
             catalog.set_table_row_count(table_id, row_count);

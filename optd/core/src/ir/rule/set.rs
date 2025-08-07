@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::ir::rule::Rule;
 
+#[derive(Default)]
 pub struct RuleSet {
     rules: Arc<[Arc<dyn super::Rule>]>,
 }

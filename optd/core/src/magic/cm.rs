@@ -48,7 +48,6 @@ impl CostModel for MagicCostModel {
                 let cost = input_card.as_f64() * Self::MAGIC_COMPUTATION_FACTOR * Cost::UNIT;
                 Some(cost)
             }
-            #[cfg(test)]
             OperatorKind::MockScan(meta) => meta.spec.mocked_operator_cost,
         }
     }
@@ -102,7 +101,7 @@ mod tests {
 
         let op1_cost = ctx.cm.compute_total_cost(&op1, &ctx).unwrap();
         let op2_cost = ctx.cm.compute_total_cost(&op2, &ctx).unwrap();
-        println!("cost1: {:?}, cost2: {:?}", op1_cost, op2_cost);
+        println!("cost1: {op1_cost:?}, cost2: {op2_cost:?}");
         assert!(op1_cost > op2_cost);
     }
 }

@@ -1,3 +1,4 @@
+pub mod cascades;
 pub mod ir;
 pub mod magic;
 pub mod memo;

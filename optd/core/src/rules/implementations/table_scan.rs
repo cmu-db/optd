@@ -5,17 +5,17 @@ use crate::ir::{
     rule::{OperatorPattern, Rule},
 };
 
-pub struct LogicalGetAsPhysicalTableScan {
+pub struct LogicalGetAsPhysicalTableScanRule {
     pattern: OperatorPattern,
 }
 
-impl Default for LogicalGetAsPhysicalTableScan {
+impl Default for LogicalGetAsPhysicalTableScanRule {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl LogicalGetAsPhysicalTableScan {
+impl LogicalGetAsPhysicalTableScanRule {
     pub fn new() -> Self {
         let pattern =
             OperatorPattern::with_top_matches(|kind| matches!(kind, OperatorKind::LogicalGet(_)));
@@ -23,7 +23,7 @@ impl LogicalGetAsPhysicalTableScan {
     }
 }
 
-impl Rule for LogicalGetAsPhysicalTableScan {
+impl Rule for LogicalGetAsPhysicalTableScanRule {
     fn name(&self) -> &'static str {
         "logical_get_as_physical_table_scan"
     }
@@ -35,6 +35,7 @@ impl Rule for LogicalGetAsPhysicalTableScan {
     fn transform(
         &self,
         operator: &crate::ir::Operator,
+        _ctx: &crate::ir::IRContext,
     ) -> Result<Vec<std::sync::Arc<crate::ir::Operator>>, ()> {
         let get = operator.try_bind_ref::<LogicalGet>().unwrap();
         let table_scan = PhysicalTableScan::new(*get.table_id(), get.projection_list().clone());

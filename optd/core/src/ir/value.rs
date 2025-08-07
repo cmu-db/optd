@@ -14,8 +14,8 @@ impl std::fmt::Display for ScalarValue {
             type_name: &str,
         ) -> std::fmt::Result {
             match optional {
-                Some(v) => write!(f, "{}::{}", v, type_name),
-                None => write!(f, "null::{}", type_name),
+                Some(v) => write!(f, "{v}::{type_name}"),
+                None => write!(f, "null::{type_name}"),
             }
         }
 

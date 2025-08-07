@@ -95,7 +95,6 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
             OperatorKind::EnforcerSort(_) => {
                 op.input_operators()[0].get_property::<Cardinality>(ctx)
             }
-            #[cfg(test)]
             OperatorKind::MockScan(meta) => meta.spec.mocked_card,
         }
     }

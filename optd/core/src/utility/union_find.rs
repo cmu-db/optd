@@ -201,8 +201,7 @@ mod tests {
             assert_eq!(
                 repr.find(&i),
                 1,
-                "Element {} should have representative 4",
-                i
+                "Element {i} should have representative 4"
             );
         }
 
@@ -218,8 +217,7 @@ mod tests {
             assert_eq!(
                 repr.find(&i),
                 1,
-                "After final merge, element {} should have representative 8",
-                i
+                "After final merge, element {i} should have representative 8"
             );
         }
     }
