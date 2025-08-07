@@ -22,6 +22,7 @@ pub struct Cascades {
 }
 
 impl Cascades {
+    /// Creates a new Cascades optimizer instance.
     pub fn new(ctx: IRContext, rule_set: RuleSet) -> Self {
         Self {
             memo: tokio::sync::RwLock::new(MemoTable::new(ctx.clone())),
@@ -30,6 +31,7 @@ impl Cascades {
         }
     }
 
+    /// Optimizes a query plan to find the lowest-cost execution plan that satisfies the requirement.
     pub async fn optimize(
         self: &Arc<Self>,
         plan: &Arc<Operator>,
@@ -62,6 +64,7 @@ impl Cascades {
         Some(best_plan)
     }
 
+    /// Recursively extracts the best query plan from a costed expression.
     fn extract_best_group_expr(
         self: &Arc<Self>,
         best_root: &CostedExpr,
