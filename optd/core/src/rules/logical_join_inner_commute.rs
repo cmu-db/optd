@@ -41,6 +41,7 @@ impl Rule for LogicalJoinInnerCommuteRule {
     fn transform(
         &self,
         operator: &crate::ir::Operator,
+        _ctx: &crate::ir::IRContext,
     ) -> Result<Vec<std::sync::Arc<crate::ir::Operator>>, ()> {
         let join = operator.try_bind_ref::<LogicalJoin>().unwrap();
         assert_eq!(join.join_type(), &JoinType::Inner);
@@ -60,6 +61,7 @@ impl Rule for LogicalJoinInnerCommuteRule {
 #[cfg(test)]
 mod tests {
     use crate::ir::{
+        IRContext,
         convert::IntoScalar,
         operator::{MockScan, MockSpec},
         scalar::Literal,
@@ -82,7 +84,8 @@ mod tests {
 
         let rule = LogicalJoinInnerCommuteRule::new();
         assert!(rule.pattern.matches_without_expand(&inner_join));
-        let res = rule.transform(&inner_join).unwrap().pop().unwrap();
+        let ctx = IRContext::with_empty_magic();
+        let res = rule.transform(&inner_join, &ctx).unwrap().pop().unwrap();
         let commuted = res.try_bind_ref_experimental::<LogicalJoin>().unwrap();
 
         let new_outer = commuted

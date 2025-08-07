@@ -13,6 +13,11 @@ tokio = { version = "1.47.0", features = [
     "sync",
     "macros",
     "parking_lot",
+    "tracing",
 ] }
 tracing = "0.1.41"
+
+[dev-dependencies]
+console-subscriber = "0.4.1"
 tracing-test = "0.2.5"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }

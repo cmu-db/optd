@@ -5,17 +5,17 @@ use crate::ir::{
     rule::{OperatorPattern, Rule},
 };
 
-pub struct LogicalJoinAsPhysicalNLJoin {
+pub struct LogicalJoinAsPhysicalNLJoinRule {
     pattern: OperatorPattern,
 }
 
-impl Default for LogicalJoinAsPhysicalNLJoin {
+impl Default for LogicalJoinAsPhysicalNLJoinRule {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl LogicalJoinAsPhysicalNLJoin {
+impl LogicalJoinAsPhysicalNLJoinRule {
     pub fn new() -> Self {
         let pattern =
             OperatorPattern::with_top_matches(|kind| matches!(kind, OperatorKind::LogicalJoin(_)));
@@ -23,7 +23,7 @@ impl LogicalJoinAsPhysicalNLJoin {
     }
 }
 
-impl Rule for LogicalJoinAsPhysicalNLJoin {
+impl Rule for LogicalJoinAsPhysicalNLJoinRule {
     fn name(&self) -> &'static str {
         "logical_join_as_physical_nl_join"
     }
@@ -35,10 +35,11 @@ impl Rule for LogicalJoinAsPhysicalNLJoin {
     fn transform(
         &self,
         operator: &crate::ir::Operator,
+        _ctx: &crate::ir::IRContext,
     ) -> Result<Vec<std::sync::Arc<crate::ir::Operator>>, ()> {
         let join = operator.try_bind_ref::<LogicalJoin>().unwrap();
         let nl_join = PhysicalNLJoin::new(
-            join.join_type().clone(),
+            *join.join_type(),
             join.outer().clone(),
             join.inner().clone(),
             join.join_cond().clone(),
@@ -50,7 +51,7 @@ impl Rule for LogicalJoinAsPhysicalNLJoin {
 #[cfg(test)]
 mod tests {
     use crate::ir::{
-        ScalarValue,
+        IRContext, ScalarValue,
         convert::IntoScalar,
         operator::{MockScan, MockSpec, join::JoinType},
         scalar::Literal,
@@ -60,6 +61,7 @@ mod tests {
 
     #[test]
     fn logical_join_as_physical_nl_join_behavior() {
+        let ctx = IRContext::with_empty_magic();
         let m_outer = MockScan::with_mock_spec(1, MockSpec::default()).into_operator();
         let m_inner = MockScan::with_mock_spec(2, MockSpec::default()).into_operator();
         let join_cond = Literal::boolean(true).into_scalar();
@@ -71,10 +73,10 @@ mod tests {
         )
         .into_operator();
 
-        let rule = LogicalJoinAsPhysicalNLJoin::new();
+        let rule = LogicalJoinAsPhysicalNLJoinRule::new();
         assert!(rule.pattern.matches_without_expand(&inner_join));
         let nl_join = rule
-            .transform(&inner_join)
+            .transform(&inner_join, &ctx)
             .unwrap()
             .pop()
             .unwrap()

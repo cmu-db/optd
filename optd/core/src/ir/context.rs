@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::ir::{catalog::Catalog, cost::CostModel, properties::CardinalityEstimator};
 
+#[derive(Clone)]
 pub struct IRContext {
     /// An accessor to the catalog interface.
     pub cat: Arc<dyn Catalog>,

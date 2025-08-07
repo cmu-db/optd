@@ -295,6 +295,7 @@ macro_rules! impl_operator_conversion {
         impl crate::ir::convert::IntoOperator for $node_name {
             fn into_operator(self) -> std::sync::Arc<crate::ir::Operator> {
                 std::sync::Arc::new(crate::ir::Operator {
+                    group_id: None,
                     kind: crate::ir::OperatorKind::$node_name(self.meta),
                     common: self.common,
                 })

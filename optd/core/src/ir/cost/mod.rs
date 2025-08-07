@@ -5,11 +5,21 @@ pub struct Cost {
     c: f64,
 }
 
+impl std::fmt::Display for Cost {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "${:.2}", self.c)
+    }
+}
+
 impl Cost {
     pub const ZERO: Self = Self::new(0.);
     pub const UNIT: Self = Self::new(1.);
     pub const fn new(c: f64) -> Self {
         Self { c }
+    }
+
+    pub fn as_f64(&self) -> f64 {
+        self.c
     }
 }
 
@@ -61,7 +71,7 @@ impl std::ops::Mul<Cost> for f64 {
     }
 }
 
-pub trait CostModel {
+pub trait CostModel: Send + Sync + 'static {
     fn compute_operator_cost(&self, op: &Operator, ctx: &IRContext) -> Option<Cost>;
     fn compute_total_with_input_costs(
         &self,

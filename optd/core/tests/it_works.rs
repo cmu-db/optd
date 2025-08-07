@@ -1,24 +1,92 @@
 use std::sync::Arc;
 
-use optd_core::ir::{
-    Column,
-    catalog::DataSourceId,
-    convert::{IntoOperator, IntoScalar},
-    operator::LogicalGet,
-    scalar::*,
+use itertools::Itertools;
+
+use optd_core::{
+    cascades::Cascades,
+    ir::{
+        Column, IRContext, Operator,
+        builder::*,
+        explain::quick_explain,
+        operator::join::JoinType,
+        properties::{Required, TupleOrdering, TupleOrderingDirection},
+        rule::RuleSet,
+    },
+    rules,
 };
 
-#[test]
-fn it_works() {
-    let op = LogicalGet::new(
-        DataSourceId(1),
-        ProjectionList::new(Arc::new([
-            Assign::new(Column(0), ColumnRef::new(Column(0)).into_scalar()).into_scalar(),
-            Assign::new(Column(1), ColumnRef::new(Column(1)).into_scalar()).into_scalar(),
-        ]))
-        .into_scalar(),
-    )
-    .into_operator();
-    assert_eq!(op.input_operators().len(), 0);
-    assert_eq!(op.input_scalars().len(), 1);
+async fn optimize_plan(
+    opt: Arc<Cascades>,
+    initial_plan: &Arc<Operator>,
+    required: Arc<Required>,
+) -> Option<Arc<Operator>> {
+    println!("available rules:");
+    for rule in opt.rule_set.iter() {
+        println!("- {}", rule.name());
+    }
+    println!("\n MEMO BEFORE OPT");
+    opt.memo.read().await.dump();
+    let optimized = opt.optimize(initial_plan, required.clone()).await;
+    let initial_explained = quick_explain(initial_plan, &opt.ctx);
+    let optimized = optimized.unwrap();
+    let optimized_explained = quick_explain(&optimized, &opt.ctx);
+
+    let initial_explained = initial_explained.split('\n').collect::<Vec<&str>>();
+    let optimized_explained = optimized_explained.split('\n').collect::<Vec<&str>>();
+    let initial_len = initial_explained[0].len();
+
+    println!("\nMEMO AFTER OPT");
+    opt.memo.read().await.dump();
+
+    println!("\nEXPLAIN (root_requirement: {}):", required);
+    std::iter::once(format!("{:<initial_len$}", "initial plan:").as_str())
+        .chain(initial_explained)
+        .zip_longest(std::iter::once("final plan:").chain(optimized_explained))
+        .for_each(|res| match res {
+            itertools::EitherOrBoth::Both(l, r) => println!("{l}       {r}"),
+            itertools::EitherOrBoth::Left(l) => println!("{l}"),
+            itertools::EitherOrBoth::Right(r) => {
+                println!("{}       {r}", " ".repeat(initial_len))
+            }
+        });
+    Some(optimized)
+}
+
+#[tokio::test]
+async fn integration() -> Result<(), Box<dyn std::error::Error>> {
+    // console_subscriber::init();
+    tracing_subscriber::fmt()
+        .without_time()
+        .with_max_level(tracing::Level::INFO)
+        // .with_target(false) // Optional: also remove target
+        .compact() // Optional: use compact format
+        .init();
+    let m1 = mock_scan(1, vec![1, 2, 3], 10.);
+    let m2 = mock_scan(2, vec![4, 5], 20.);
+    let m3 = mock_scan(3, vec![6, 7], 30.);
+    let required = Arc::new(Required {
+        tuple_ordering: TupleOrdering::from_iter([(Column(4), TupleOrderingDirection::Asc)]),
+    });
+    let join_m1_m2 = m1
+        .logical_join(
+            m2,
+            column_ref(Column(1)).equal(column_ref(Column(4))),
+            JoinType::Inner,
+        )
+        .logical_join(
+            m3,
+            column_ref(Column(2)).equal(column_ref(Column(6))),
+            JoinType::Inner,
+        );
+
+    let ctx = IRContext::with_empty_magic();
+    let rule_set = RuleSet::builder()
+        .add_rule(rules::LogicalJoinAsPhysicalNLJoinRule::new())
+        .add_rule(rules::LogicalJoinInnerCommuteRule::new())
+        .add_rule(rules::LogicalJoinInnerAssocRule::new())
+        .build();
+    let opt = Arc::new(Cascades::new(ctx, rule_set));
+
+    optimize_plan(opt, &join_m1_m2, required).await.unwrap();
+    Ok(())
 }

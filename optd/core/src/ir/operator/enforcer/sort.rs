@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use pretty_xmlish::Pretty;
+
 use crate::ir::{
     IRCommon, Operator,
     explain::Explain,
@@ -33,9 +35,16 @@ impl EnforcerSort {
 impl Explain for EnforcerSortBorrowed<'_> {
     fn explain<'a>(
         &self,
-        _ctx: &crate::ir::IRContext,
-        _option: &crate::ir::explain::ExplainOption,
-    ) -> pretty_xmlish::Pretty<'a> {
-        todo!()
+        ctx: &crate::ir::IRContext,
+        option: &crate::ir::explain::ExplainOption,
+    ) -> Pretty<'a> {
+        let mut fields = Vec::with_capacity(1);
+        fields.push(("tuple_ordering", Pretty::display(self.tuple_ordering())));
+
+        let metadata = self.common.explain_operator_properties(ctx, option);
+        fields.extend(metadata);
+        let children = self.common.explain_input_operators(ctx, option);
+
+        Pretty::simple_record("EnforcerSort", fields, children)
     }
 }

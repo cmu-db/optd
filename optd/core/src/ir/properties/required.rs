@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::ir::{
     Operator,
     context::IRContext,
@@ -6,23 +8,33 @@ use crate::ir::{
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Required {
-    tuple_ordering: TupleOrdering,
+    pub tuple_ordering: TupleOrdering,
 }
 
-impl PropertyMarker for Required {}
+impl std::fmt::Display for Required {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_map()
+            .entry(&"tuple_ordering", &self.tuple_ordering)
+            .finish()
+    }
+}
 
-impl crate::ir::properties::TrySatisfy<Required> for Operator {
+impl PropertyMarker for Arc<Required> {}
+
+impl crate::ir::properties::TrySatisfy<Arc<Required>> for Operator {
     fn try_satisfy(
         &self,
-        property: &Required,
+        property: &Arc<Required>,
         ctx: &IRContext,
-    ) -> Option<std::sync::Arc<[Required]>> {
+    ) -> Option<std::sync::Arc<[Arc<Required>]>> {
         self.try_satisfy(&property.tuple_ordering, ctx)
             .map(|inputs_required| {
                 inputs_required
                     .iter()
-                    .map(|p| Required {
-                        tuple_ordering: p.clone(),
+                    .map(|p| {
+                        Arc::new(Required {
+                            tuple_ordering: p.clone(),
+                        })
                     })
                     .collect()
             })

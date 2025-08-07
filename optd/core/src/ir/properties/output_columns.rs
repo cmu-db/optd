@@ -1,5 +1,7 @@
 use std::{collections::HashSet, sync::Arc};
 
+use itertools::Itertools;
+
 use crate::ir::{
     ColumnSet, OperatorKind,
     operator::{LogicalGet, PhysicalTableScan},
@@ -16,6 +18,12 @@ impl OutputColumns {
 
     pub fn set(&self) -> &ColumnSet {
         &self.0
+    }
+}
+
+impl std::fmt::Display for OutputColumns {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_set().entries(self.set().iter().sorted()).finish()
     }
 }
 
@@ -50,7 +58,6 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                     });
                 OutputColumns::from_column_set(set)
             }
-            #[cfg(test)]
             OperatorKind::MockScan(meta) => meta.spec.mocked_output_columns.clone(),
         }
     }

@@ -8,7 +8,7 @@ pub trait Explain {
 
 #[derive(Default)]
 pub struct ExplainOption {
-    pub show_output_columns: bool,
+    pub verbose: bool,
 }
 
 pub fn quick_explain<T>(v: impl AsRef<T>, ctx: &IRContext) -> String

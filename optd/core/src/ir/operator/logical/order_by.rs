@@ -48,7 +48,7 @@ impl LogicalOrderBy {
             .iter()
             .map(|expr| {
                 expr.try_bind_ref::<ColumnRef>()
-                    .map(|column_ref| column_ref.column().clone())
+                    .map(|column_ref| *column_ref.column())
                     .map_err(|_| expr.clone())
             })
             .partition_result();
