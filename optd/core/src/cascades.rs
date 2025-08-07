@@ -62,7 +62,7 @@ impl Cascades {
         Some(best_plan)
     }
 
-    pub fn extract_best_group_expr(
+    fn extract_best_group_expr(
         self: &Arc<Self>,
         best_root: &CostedExpr,
         group_id: GroupId,
@@ -115,22 +115,17 @@ impl Cascades {
         })
     }
 
-    pub async fn insert_new_operator(self: &Arc<Self>, plan: &Arc<Operator>) -> GroupId {
+    async fn insert_new_operator(self: &Arc<Self>, plan: &Arc<Operator>) -> GroupId {
         let mut writer = self.memo.write().await;
         writer
             .insert_new_operator(plan.clone())
             .unwrap_or_else(|group_id| group_id)
     }
-    pub async fn get_property_of(self: &Arc<Self>, group_id: GroupId) -> Arc<OperatorProperties> {
-        let reader = self.memo.read().await;
-        let group = reader.get_memo_group(&group_id);
-        group.exploration.borrow().properties.clone()
-    }
 }
 
 // Optimization.
 impl Cascades {
-    pub async fn find_best_costed_expr_for(
+    async fn find_best_costed_expr_for(
         self: &Arc<Self>,
         group_id: GroupId,
         required: Arc<Required>,
@@ -156,7 +151,7 @@ impl Cascades {
     }
 
     #[instrument(name = "enforce", skip_all)]
-    pub async fn explore_enforcers(
+    async fn explore_enforcers(
         &self,
         group_id: GroupId,
         required: &Arc<Required>,
@@ -183,7 +178,7 @@ impl Cascades {
 
     // clippy: the compiler cannot derive `Send` bounds when using `async fn`. (alternative: pinbox.)
     #[allow(clippy::manual_async_fn)]
-    pub fn spawn_optimize_group(
+    fn spawn_optimize_group(
         self: Arc<Self>,
         group_id: GroupId,
         required: Arc<Required>,
@@ -217,7 +212,7 @@ impl Cascades {
     }
 
     #[instrument(parent = None, skip(self, required, tx), fields(required = %required))]
-    pub async fn optimize_group(
+    async fn optimize_group(
         self: Arc<Self>,
         group_id: GroupId,
         required: Arc<Required>,
@@ -266,7 +261,7 @@ impl Cascades {
     }
 
     #[instrument(name = "expr", skip_all, fields(id = %expr.id()))]
-    pub async fn optimize_expr(
+    async fn optimize_expr(
         self: &Arc<Self>,
         group_id: GroupId,
         required: &Arc<Required>,
@@ -324,7 +319,7 @@ impl Cascades {
 
 // Exploration.
 impl Cascades {
-    pub async fn get_all_group_exprs_in(
+    async fn get_all_group_exprs_in(
         self: &Arc<Self>,
         group_id: GroupId,
     ) -> watch::Receiver<Exploration> {
@@ -343,7 +338,7 @@ impl Cascades {
 
     // clippy: the compiler cannot derive `Send` bounds when using `async fn`. (alternative: pinbox.)
     #[allow(clippy::manual_async_fn)]
-    pub fn spawn_explore_group(
+    fn spawn_explore_group(
         self: Arc<Self>,
         group_id: GroupId,
     ) -> impl Future<Output = watch::Receiver<Exploration>> + Send {
@@ -368,7 +363,7 @@ impl Cascades {
     }
 
     #[instrument(parent = None, skip(self, tx))]
-    pub async fn explore_group(self: Arc<Self>, group_id: GroupId, tx: watch::Sender<Exploration>) {
+    async fn explore_group(self: Arc<Self>, group_id: GroupId, tx: watch::Sender<Exploration>) {
         let properties = tx.borrow().properties.clone();
         let mut index = 0;
 
@@ -401,41 +396,7 @@ impl Cascades {
     }
 
     #[instrument(name = "expr", skip_all, fields(id = %expr.id()))]
-    pub async fn explore_expr_without_expansion(
-        self: &Arc<Self>,
-        group_id: GroupId,
-        expr: WithId<Arc<MemoGroupExpr>>,
-        properties: &Arc<OperatorProperties>,
-    ) {
-        let operator = {
-            let reader = self.memo.read().await;
-            reader.get_operator_one_level(expr.key(), properties.clone(), group_id)
-        };
-
-        for rule in self.rule_set.iter() {
-            if rule.pattern().matches_without_expand(&operator) {
-                info!(rule = rule.name(), "matched");
-                let new_operators = rule.transform(&operator, &self.ctx).unwrap();
-                let total_produced = new_operators.len();
-                let mut newly_produced = 0;
-                {
-                    let mut writer = self.memo.write().await;
-                    for op in new_operators {
-                        if writer.insert_operator_into_group(op, group_id).is_ok() {
-                            newly_produced += 1;
-                        }
-                    }
-                }
-                info!(
-                    rule = rule.name(),
-                    total_produced, newly_produced, "applied"
-                )
-            }
-        }
-    }
-
-    #[instrument(name = "expr", skip_all, fields(id = %expr.id()))]
-    pub async fn explore_expr(
+    async fn explore_expr(
         self: &Arc<Self>,
         group_id: GroupId,
         expr: WithId<Arc<MemoGroupExpr>>,
@@ -476,7 +437,7 @@ impl Cascades {
     }
 
     #[instrument(skip_all, fields(top = %expr.id()))]
-    pub async fn explore_all_bindings(
+    async fn explore_all_bindings(
         self: &Arc<Self>,
         group_id: GroupId,
         expr: &WithId<Arc<MemoGroupExpr>>,
