@@ -65,7 +65,7 @@ async fn integration() -> Result<(), Box<dyn std::error::Error>> {
     let m2 = mock_scan(2, vec![4, 5], 20.);
     let m3 = mock_scan(3, vec![6, 7], 30.);
     let required = Arc::new(Required {
-        tuple_ordering: TupleOrdering::from_iter([(Column(3), TupleOrderingDirection::Asc)]),
+        tuple_ordering: TupleOrdering::from_iter([(Column(4), TupleOrderingDirection::Asc)]),
     });
     let join_m1_m2 = m1
         .logical_join(

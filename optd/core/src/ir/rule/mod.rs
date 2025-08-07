@@ -16,5 +16,6 @@ pub trait Rule: 'static + Send + Sync {
     /// Performs the transformation on `operator`.
     /// A rule may produce zero or more new plans as part of the transformation.
     // TODO(yuchen): use custom error type.
+    #[allow(clippy::result_unit_err)]
     fn transform(&self, operator: &Operator, ctx: &IRContext) -> Result<Vec<Arc<Operator>>, ()>;
 }

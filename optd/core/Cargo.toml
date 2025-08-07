@@ -13,6 +13,7 @@ tokio = { version = "1.47.0", features = [
     "sync",
     "macros",
     "parking_lot",
+    "tracing",
 ] }
 tracing = "0.1.41"
 
