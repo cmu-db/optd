@@ -1,3 +1,15 @@
 [workspace]
 resolver = "3"
-members = [ "optd/catalog","optd/core"]
+members = ["cli", "connectors/datafusion", "optd/catalog", "optd/core"]
+
+# By default, only compiles the `optd-core` crate.
+default-members = ["optd/core"]
+
+[workspace.dependencies]
+
+optd-datafusion = { path = "connectors/datafusion" }
+
+tokio = { version = "1.47", features = ["macros", "rt", "sync"] }
+
+# DataFusion dependencies
+datafusion = { version = "49.0.0", default-features = false }

@@ -1,3 +1,11 @@
+
+# rust
 /target
-*.db
+
+# optd memo dump
 *.memo
+
+# datafusion
+.history
+
+*.db
