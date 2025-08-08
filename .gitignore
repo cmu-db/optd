@@ -1,2 +1,9 @@
+
+# rust
 /target
+
+# optd memo dump
 *.memo
+
+# datafusion
+.history
