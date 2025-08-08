@@ -57,10 +57,10 @@ impl Rule for LogicalJoinInnerAssocRule {
 
         let new_lower_columns =
             b.get_property::<OutputColumns>(ctx).set() & c.get_property::<OutputColumns>(ctx).set();
-        if join_upper
+        if !join_upper
             .join_cond()
             .used_columns()
-            .is_superset(&new_lower_columns)
+            .is_subset(&new_lower_columns)
         {
             return Ok(vec![]);
         }
