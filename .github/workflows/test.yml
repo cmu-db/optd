@@ -28,11 +28,11 @@ jobs:
         # toolchain
         toolchain: [stable, beta]
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # tag=v4.2.2
+      - uses: actions/checkout@v4
         with:
           submodules: true
       - name: Install ${{ matrix.toolchain }}
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # branch=master
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
       - name: cargo generate-lockfile
@@ -51,41 +51,20 @@ jobs:
     # require. This will pickup issues where this create relies on functionality that was introduced
     # later than the actual version specified (e.g., when we choose just a major version, but a
     # method was added after this version).
-    #
-    # This particular check can be difficult to get to succeed as often transitive dependencies may
-    # be incorrectly specified (e.g., a dependency specifies 1.0 but really requires 1.1.5). There
-    # is an alternative flag available -Zdirect-minimal-versions that uses the minimal versions for
-    # direct dependencies of this crate, while selecting the maximal versions for the transitive
-    # dependencies. Alternatively, you can add a line in your Cargo.toml to artificially increase
-    # the minimal dependency, which you do with e.g.:
-    # ```toml
-    # # for minimal-versions
-    # [target.'cfg(any())'.dependencies]
-    # openssl = { version = "0.10.55", optional = true } # needed to allow foo to build with -Zminimal-versions
-    # ```
-    # The optional = true is necessary in case that dependency isn't otherwise transitively required
-    # by your library, and the target bit is so that this dependency edge never actually affects
-    # Cargo build order. See also
-    # https://github.com/jonhoo/fantoccini/blob/fde336472b712bc7ebf5b4e772023a7ba71b2262/Cargo.toml#L47-L49.
-    # This action is run on ubuntu with the stable toolchain, as it is not expected to fail
     runs-on: ubuntu-latest
     name: ubuntu / stable / minimal-versions
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # tag=v4.2.2
+      - uses: actions/checkout@v4
         with:
           submodules: true
       - name: Install stable
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # branch=master
-        with:
-          toolchain: stable
-      - name: Install nightly for -Zminimal-versions
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # branch=master
-        with:
-          toolchain: nightly
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install nightly for -Z direct-minimal-versions
+        uses: dtolnay/rust-toolchain@nightly
       - name: rustup default stable
         run: rustup default stable
-      - name: cargo update -Zminimal-versions
-        run: cargo +nightly update -Zminimal-versions
+      - name: cargo update -Z direct-minimal-versions
+        run: cargo +nightly update -Z direct-minimal-versions
       - name: cargo test
         run: cargo test --locked --all-features --all-targets
   os-check:
@@ -100,16 +79,14 @@ jobs:
       # if your project needs OpenSSL, uncomment this to fix Windows builds.
       # it's commented out by default as the install command takes 5-10m.
       # - run: echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append
-      #   if: runner.os == 'Windows'
+      #   if: runner.os == Windows
       # - run: vcpkg install openssl:x64-windows-static-md
-      #   if: runner.os == 'Windows'
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # tag=v4.2.2
+      #   if: runner.os == Windows
+      - uses: actions/checkout@v4
         with:
           submodules: true
       - name: Install stable
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # branch=master
-        with:
-          toolchain: stable
+        uses: dtolnay/rust-toolchain@stable
       - name: cargo generate-lockfile
         if: hashFiles('Cargo.lock') == ''
         run: cargo generate-lockfile
@@ -140,18 +117,15 @@ jobs:
     runs-on: ubuntu-latest
     name: ubuntu / stable / coverage
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # tag=v4.2.2
+      - uses: actions/checkout@v4
         with:
           submodules: true
       - name: Install stable
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # branch=master
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
           components: llvm-tools-preview
       - name: cargo install cargo-llvm-cov
-        uses: taiki-e/install-action@0eee80d37f55e834144deec670972c19e81a85b0 # tag=v2.56.0
-        with:
-          tool: cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
       - name: cargo generate-lockfile
         if: hashFiles('Cargo.lock') == ''
         run: cargo generate-lockfile
@@ -160,7 +134,7 @@ jobs:
       - name: Record Rust version
         run: echo "RUST=$(rustc --version)" >> "$GITHUB_ENV"
       - name: Upload to codecov.io
-        uses: codecov/codecov-action@18283e04ce6e62d37312384ff67231eb8fd56d24 # tag=v5.4.3
+        uses: codecov/codecov-action@v5
         with:
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
