@@ -1,5 +1,5 @@
 [workspace]
-resolver = "3"
+resolver = "2"
 members = ["cli", "connectors/datafusion", "optd/catalog", "optd/core"]
 
 # By default, only compiles the `optd-core` crate.
@@ -13,3 +13,8 @@ tokio = { version = "1.47", features = ["macros", "rt", "sync"] }
 
 # DataFusion dependencies
 datafusion = { version = "49.0.0", default-features = false }
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+repository = "https://github.com/yliang412/optd"

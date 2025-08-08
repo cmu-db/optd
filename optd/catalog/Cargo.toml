@@ -1,6 +1,7 @@
 [package]
 name = "optd-catalog"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
 
 [dependencies]
