@@ -198,11 +198,7 @@ mod tests {
 
         // All should now point to 1
         for i in 1..=6 {
-            assert_eq!(
-                repr.find(&i),
-                1,
-                "Element {i} should have representative 4"
-            );
+            assert_eq!(repr.find(&i), 1, "Element {i} should have representative 4");
         }
 
         // Another element joins
