@@ -1,7 +1,7 @@
 use crate::ir::{
     Operator,
     context::IRContext,
-    properties::{Derive, PropertyMarker},
+    properties::{Derive, GetProperty, PropertyMarker},
 };
 
 /// The number of tuples that can be produced by an [`Operator`].
@@ -36,19 +36,30 @@ impl Cardinality {
     }
 }
 
-impl PropertyMarker for Cardinality {}
+impl PropertyMarker for Cardinality {
+    type Output = Self;
+}
 
 impl Derive<Cardinality> for crate::ir::Operator {
-    fn derive_by_compute(&self, ctx: &crate::ir::context::IRContext) -> Cardinality {
+    fn derive_by_compute(&self, ctx: &IRContext) -> <Cardinality as PropertyMarker>::Output {
         ctx.card.estimate(self, ctx)
     }
 
-    fn derive(&self, ctx: &crate::ir::context::IRContext) -> Cardinality {
+    fn derive(
+        &self,
+        ctx: &crate::ir::context::IRContext,
+    ) -> <Cardinality as PropertyMarker>::Output {
         *self
             .common
             .properties
             .cardinality
-            .get_or_init(|| self.derive_by_compute(ctx))
+            .get_or_init(|| <Operator as Derive<Cardinality>>::derive_by_compute(self, ctx))
+    }
+}
+
+impl crate::ir::Operator {
+    pub fn cardinality(&self, ctx: &crate::ir::context::IRContext) -> Cardinality {
+        self.get_property::<Cardinality>(ctx)
     }
 }
 

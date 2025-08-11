@@ -78,15 +78,15 @@ impl Explain for Scalar {
     ) -> pretty_xmlish::Pretty<'a> {
         match &self.kind {
             ScalarKind::Literal(meta) => {
-                LiteralBorrowed::from_raw_parts(meta, &self.common).explain(ctx, option)
+                Literal::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             ScalarKind::ColumnRef(meta) => {
-                ColumnRefBorrowed::from_raw_parts(meta, &self.common).explain(ctx, option)
+                ColumnRef::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             ScalarKind::Assign(_) => todo!(),
             ScalarKind::ProjectionList(_) => todo!(),
             ScalarKind::BinaryOp(meta) => {
-                BinaryOpBorrowed::from_raw_parts(meta, &self.common).explain(ctx, option)
+                BinaryOp::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
         }
     }

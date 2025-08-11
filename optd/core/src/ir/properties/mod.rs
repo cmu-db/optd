@@ -21,18 +21,20 @@ pub struct OperatorProperties {
 #[derive(Debug, Default)]
 pub struct ScalarProperties;
 
-pub trait PropertyMarker {}
+pub trait PropertyMarker {
+    type Output;
+}
 
 pub trait Derive<P: PropertyMarker> {
-    fn derive_by_compute(&self, ctx: &IRContext) -> P;
+    fn derive_by_compute(&self, ctx: &IRContext) -> P::Output;
 
-    fn derive(&self, ctx: &IRContext) -> P {
+    fn derive(&self, ctx: &IRContext) -> P::Output {
         self.derive_by_compute(ctx)
     }
 }
 
 pub trait GetProperty {
-    fn get_property<P>(&self, ctx: &IRContext) -> P
+    fn get_property<P>(&self, ctx: &IRContext) -> P::Output
     where
         Self: Derive<P>,
         P: PropertyMarker,
@@ -41,6 +43,8 @@ pub trait GetProperty {
     }
 }
 
-pub trait TrySatisfy<P: PropertyMarker> {
+impl GetProperty for crate::ir::Operator {}
+
+pub trait TrySatisfy<P> {
     fn try_satisfy(&self, property: &P, ctx: &IRContext) -> Option<Arc<[P]>>;
 }

@@ -31,21 +31,13 @@ impl PhysicalTableScan {
     }
 }
 
-impl Derive<OutputColumns> for PhysicalTableScan {
+impl Derive<OutputColumns> for PhysicalTableScanBorrowed<'_> {
     fn derive_by_compute(&self, _ctx: &crate::ir::context::IRContext) -> OutputColumns {
         let projections = self
             .projection_list()
             .try_borrow::<ProjectionList>()
             .unwrap();
         OutputColumns::from_column_set(projections.get_all_assignees().collect())
-    }
-
-    fn derive(&self, ctx: &crate::ir::context::IRContext) -> OutputColumns {
-        self.common
-            .properties
-            .output_columns
-            .get_or_init(|| self.derive_by_compute(ctx))
-            .clone()
     }
 }
 

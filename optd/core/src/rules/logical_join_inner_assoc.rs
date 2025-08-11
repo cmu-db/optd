@@ -1,8 +1,6 @@
 use crate::ir::{
     IRContext, OperatorKind,
-    convert::IntoOperator,
     operator::{LogicalJoin, join::JoinType},
-    properties::{GetProperty, OutputColumns},
     rule::{OperatorPattern, Rule},
 };
 
@@ -52,27 +50,20 @@ impl Rule for LogicalJoinInnerAssocRule {
         let b = join_lower.inner().clone();
         let c = join_upper.inner().clone();
 
-        let new_lower_columns =
-            b.get_property::<OutputColumns>(ctx).set() & c.get_property::<OutputColumns>(ctx).set();
         if !join_upper
             .join_cond()
             .used_columns()
-            .is_subset(&new_lower_columns)
+            .is_subset(&(&*b.output_columns(ctx) & &*c.output_columns(ctx)))
         {
             return Ok(vec![]);
         }
 
-        let new_join_upper = LogicalJoin::new(
-            JoinType::Inner,
-            a,
-            {
-                LogicalJoin::new(JoinType::Inner, b, c, join_upper.join_cond().clone())
-                    .into_operator()
-            },
+        let new_join_upper = a.logical_join(
+            b.logical_join(c, join_upper.join_cond().clone(), JoinType::Inner),
             join_lower.join_cond().clone(),
+            JoinType::Inner,
         );
-
-        Ok(vec![new_join_upper.into_operator()])
+        Ok(vec![new_join_upper])
     }
 }
 

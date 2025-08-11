@@ -38,7 +38,7 @@ async fn optimize_plan(
     println!("\nMEMO AFTER OPT");
     opt.memo.read().await.dump();
 
-    println!("\nEXPLAIN (root_requirement: {}):", required);
+    println!("\nEXPLAIN (root_requirement: {required}):");
     std::iter::once(format!("{:<initial_len$}", "initial plan:").as_str())
         .chain(initial_explained)
         .zip_longest(std::iter::once("final plan:").chain(optimized_explained))
