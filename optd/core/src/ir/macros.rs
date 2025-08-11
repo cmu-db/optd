@@ -133,6 +133,14 @@ macro_rules! generate_common_node {
                 }
             }
 
+            /// Constructs the operator from raw metadata and IR inputs.
+            pub fn borrow_raw_parts<'ir>(meta: &'ir $metadata_type, common: &'ir crate::ir::IRCommon<$props_type>) -> $ref_name<'ir> {
+                $ref_name {
+                    meta,
+                    common,
+                }
+            }
+
             /// Gets a slice to the input operators.
             pub fn input_operators(&self) -> &[std::sync::Arc<crate::ir::Operator>] {
                 &self.common.input_operators
@@ -144,15 +152,7 @@ macro_rules! generate_common_node {
             }
         }
 
-        impl<'ir> $ref_name<'ir> {
-            /// Constructs the operator from raw metadata and IR inputs.
-            pub fn from_raw_parts(meta: &'ir $metadata_type, common: &'ir crate::ir::IRCommon<$props_type>) -> Self {
-                Self {
-                    meta,
-                    common,
-                }
-            }
-        }
+
     };
 }
 
@@ -264,7 +264,7 @@ macro_rules! impl_scalar_conversion {
             ) -> Result<Self, &'a crate::ir::ScalarKind> {
                 match &scalar.kind {
                     crate::ir::ScalarKind::$node_name(meta) => {
-                        Ok($ref_name::from_raw_parts(meta, &scalar.common))
+                        Ok($node_name::borrow_raw_parts(meta, &scalar.common))
                     }
                     other_kind => Err(other_kind),
                 }
@@ -308,7 +308,7 @@ macro_rules! impl_operator_conversion {
             ) -> Result<Self, &'a crate::ir::OperatorKind> {
                 match &operator.kind {
                     crate::ir::OperatorKind::$node_name(meta) => {
-                        Ok($ref_name::from_raw_parts(meta, &operator.common))
+                        Ok($node_name::borrow_raw_parts(meta, &operator.common))
                     }
                     other_kind => Err(other_kind),
                 }

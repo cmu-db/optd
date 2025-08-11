@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, ops::Deref, sync::Arc};
 
 use itertools::Itertools;
 
@@ -16,32 +16,44 @@ impl OutputColumns {
         Self(Arc::new(set))
     }
 
-    pub fn set(&self) -> &ColumnSet {
-        &self.0
+    // pub fn set(&self) -> &ColumnSet {
+    //     &self.0
+    // }
+}
+
+impl std::ops::Deref for OutputColumns {
+    type Target = ColumnSet;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.deref()
     }
 }
 
 impl std::fmt::Display for OutputColumns {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_set().entries(self.set().iter().sorted()).finish()
+        f.debug_set().entries(self.deref().iter().sorted()).finish()
     }
 }
 
-impl PropertyMarker for OutputColumns {}
+impl PropertyMarker for OutputColumns {
+    type Output = Self;
+}
 
 impl Derive<OutputColumns> for crate::ir::Operator {
-    fn derive_by_compute(&self, ctx: &crate::ir::context::IRContext) -> OutputColumns {
+    fn derive_by_compute(
+        &self,
+        ctx: &crate::ir::IRContext,
+    ) -> <OutputColumns as PropertyMarker>::Output {
         match &self.kind {
             OperatorKind::Group(_) => {
                 // Always derive a placeholder using the normalized expression.
                 panic!("Right now group's properties should always be set.")
             }
             OperatorKind::LogicalGet(meta) => {
-                LogicalGet::from_raw_parts(meta.clone(), self.common.clone()).derive_by_compute(ctx)
+                LogicalGet::borrow_raw_parts(meta, &self.common).derive(ctx)
             }
             OperatorKind::PhysicalTableScan(meta) => {
-                PhysicalTableScan::from_raw_parts(meta.clone(), self.common.clone())
-                    .derive_by_compute(ctx)
+                PhysicalTableScan::borrow_raw_parts(meta, &self.common).derive(ctx)
             }
             OperatorKind::LogicalJoin(_)
             | OperatorKind::PhysicalNLJoin(_)
@@ -52,8 +64,7 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                     .input_operators()
                     .iter()
                     .fold(HashSet::new(), |mut set, op| {
-                        let output_from_child: OutputColumns = op.derive(ctx);
-                        set.extend(output_from_child.set());
+                        set.extend(&*op.output_columns(ctx));
                         set
                     });
                 OutputColumns::from_column_set(set)
@@ -62,13 +73,20 @@ impl Derive<OutputColumns> for crate::ir::Operator {
         }
     }
 
-    fn derive(&self, ctx: &crate::ir::context::IRContext) -> OutputColumns {
+    fn derive(
+        &self,
+        ctx: &crate::ir::context::IRContext,
+    ) -> <OutputColumns as PropertyMarker>::Output {
         self.common
             .properties
             .output_columns
-            .get_or_init(|| self.derive_by_compute(ctx))
+            .get_or_init(|| <Self as Derive<OutputColumns>>::derive_by_compute(self, ctx))
             .clone()
     }
 }
 
-impl GetProperty for crate::ir::Operator {}
+impl crate::ir::Operator {
+    pub fn output_columns(&self, ctx: &crate::ir::context::IRContext) -> OutputColumns {
+        self.get_property::<OutputColumns>(ctx)
+    }
+}

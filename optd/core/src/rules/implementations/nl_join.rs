@@ -37,7 +37,7 @@ impl Rule for LogicalJoinAsPhysicalNLJoinRule {
         operator: &crate::ir::Operator,
         _ctx: &crate::ir::IRContext,
     ) -> Result<Vec<std::sync::Arc<crate::ir::Operator>>, ()> {
-        let join = operator.try_bind_ref::<LogicalJoin>().unwrap();
+        let join = operator.try_borrow::<LogicalJoin>().unwrap();
         let nl_join = PhysicalNLJoin::new(
             *join.join_type(),
             join.outer().clone(),
@@ -75,38 +75,22 @@ mod tests {
 
         let rule = LogicalJoinAsPhysicalNLJoinRule::new();
         assert!(rule.pattern.matches_without_expand(&inner_join));
-        let nl_join = rule
-            .transform(&inner_join, &ctx)
-            .unwrap()
-            .pop()
-            .unwrap()
-            .try_bind_ref::<PhysicalNLJoin>()
-            .unwrap();
+        let after = rule.transform(&inner_join, &ctx).unwrap().pop().unwrap();
+
+        let nl_join = after.try_borrow::<PhysicalNLJoin>().unwrap();
 
         assert_eq!(
             &1,
-            nl_join
-                .outer()
-                .try_bind_ref::<MockScan>()
-                .unwrap()
-                .mock_id()
+            nl_join.outer().try_borrow::<MockScan>().unwrap().mock_id()
         );
         assert_eq!(
             &2,
-            nl_join
-                .inner()
-                .try_bind_ref::<MockScan>()
-                .unwrap()
-                .mock_id()
+            nl_join.inner().try_borrow::<MockScan>().unwrap().mock_id()
         );
         assert_eq!(&JoinType::Inner, nl_join.join_type());
         assert_eq!(
             &ScalarValue::Boolean(Some(true)),
-            nl_join
-                .join_cond()
-                .try_bind_ref::<Literal>()
-                .unwrap()
-                .value()
+            nl_join.join_cond().try_borrow::<Literal>().unwrap().value()
         );
     }
 }

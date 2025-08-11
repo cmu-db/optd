@@ -26,11 +26,7 @@ impl Operator {
         T::try_from_operator(self)
     }
 
-    pub fn try_bind_ref<T: TryFromOperator>(&self) -> Result<T, OperatorKind> {
-        T::try_from_operator(self.clone())
-    }
-
-    pub fn try_bind_ref_experimental<O>(
+    pub fn try_borrow<O>(
         &self,
     ) -> Result<<O as TryBorrowOperatorMarker<'_>>::BorrowedType, &OperatorKind>
     where
@@ -64,11 +60,7 @@ impl Scalar {
         T::try_from_scalar(self)
     }
 
-    pub fn try_bind_ref<T: TryFromScalar>(&self) -> Result<T, ScalarKind> {
-        T::try_from_scalar(self.clone())
-    }
-
-    pub fn try_bind_ref_experimental<S>(
+    pub fn try_borrow<S>(
         &self,
     ) -> Result<<S as TryBorrowScalarMarker<'_>>::BorrowedType, &ScalarKind>
     where

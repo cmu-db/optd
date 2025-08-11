@@ -3,10 +3,7 @@ use std::sync::Arc;
 use bitvec::{boxed::BitBox, vec::BitVec};
 
 use crate::ir::operator::*;
-use crate::ir::{
-    Column, Operator, OperatorCategory, OperatorKind,
-    properties::{GetProperty, OutputColumns},
-};
+use crate::ir::{Column, Operator, OperatorCategory, OperatorKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TupleOrderingDirection {
@@ -137,7 +134,9 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
-impl crate::ir::properties::PropertyMarker for TupleOrdering {}
+impl crate::ir::properties::PropertyMarker for TupleOrdering {
+    type Output = Self;
+}
 
 impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
     fn try_satisfy(
@@ -161,20 +160,20 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
                 ordering.is_empty().then_some(Arc::new([]))
             }
             OperatorKind::PhysicalNLJoin(meta) => {
-                let join = PhysicalNLJoinBorrowed::from_raw_parts(meta, &self.common);
+                let join = PhysicalNLJoin::borrow_raw_parts(meta, &self.common);
 
-                let output_from_outer = join.outer().get_property::<OutputColumns>(ctx);
+                let output_from_outer = join.outer().output_columns(ctx);
                 ordering
                     .iter_columns()
-                    .all(|col| output_from_outer.set().contains(col))
+                    .all(|col| (*output_from_outer).contains(col))
                     .then(|| vec![ordering.clone(), TupleOrdering::default()].into())
             }
             OperatorKind::PhysicalFilter(meta) => {
-                let filter = PhysicalFilterBorrowed::from_raw_parts(meta, &self.common);
-                let output_from_input = filter.input().get_property::<OutputColumns>(ctx);
+                let filter = PhysicalFilter::borrow_raw_parts(meta, &self.common);
+                let output_from_input = filter.input().output_columns(ctx);
                 ordering
                     .iter_columns()
-                    .all(|col| output_from_input.set().contains(col))
+                    .all(|col| (*output_from_input).contains(col))
                     .then(|| vec![ordering.clone()].into())
             }
             OperatorKind::MockScan(meta) => {

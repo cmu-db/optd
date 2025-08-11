@@ -1,6 +1,6 @@
 use crate::ir::{
     operator::*,
-    properties::{Cardinality, CardinalityEstimator, GetProperty},
+    properties::{Cardinality, CardinalityEstimator},
     scalar::*,
 };
 
@@ -33,8 +33,8 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                 Cardinality::with_count_lossy(exact_row_count)
             }
             OperatorKind::LogicalJoin(meta) => {
-                let join = LogicalJoinBorrowed::from_raw_parts(meta, &op.common);
-                let selectivity = if let Ok(literal) = join.join_cond().try_bind_ref::<Literal>() {
+                let join = LogicalJoin::borrow_raw_parts(meta, &op.common);
+                let selectivity = if let Ok(literal) = join.join_cond().try_borrow::<Literal>() {
                     match literal.value() {
                         crate::ir::ScalarValue::Boolean(Some(true)) => 1.,
                         crate::ir::ScalarValue::Boolean(_) => 0.,
@@ -43,13 +43,13 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                 } else {
                     MagicCardinalityEstimator::MAGIC_JOIN_COND_SELECTIVITY
                 };
-                let left_card = join.outer().get_property::<Cardinality>(ctx);
-                let right_card = join.inner().get_property::<Cardinality>(ctx);
+                let left_card = join.outer().cardinality(ctx);
+                let right_card = join.inner().cardinality(ctx);
                 selectivity * left_card * right_card
             }
             OperatorKind::PhysicalNLJoin(meta) => {
-                let join = PhysicalNLJoinBorrowed::from_raw_parts(meta, &op.common);
-                let selectivity = if let Ok(literal) = join.join_cond().try_bind_ref::<Literal>() {
+                let join = PhysicalNLJoin::borrow_raw_parts(meta, &op.common);
+                let selectivity = if let Ok(literal) = join.join_cond().try_borrow::<Literal>() {
                     match literal.value() {
                         crate::ir::ScalarValue::Boolean(Some(true)) => 1.,
                         crate::ir::ScalarValue::Boolean(_) => 0.,
@@ -58,14 +58,13 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                 } else {
                     MagicCardinalityEstimator::MAGIC_JOIN_COND_SELECTIVITY
                 };
-                let left_card = join.outer().get_property::<Cardinality>(ctx);
-                let right_card = join.inner().get_property::<Cardinality>(ctx);
+                let left_card = join.outer().cardinality(ctx);
+                let right_card = join.inner().cardinality(ctx);
                 selectivity * left_card * right_card
             }
             OperatorKind::LogicalSelect(meta) => {
-                let filter = LogicalSelectBorrowed::from_raw_parts(meta, &op.common);
-                let selectivity = if let Ok(literal) = filter.predicate().try_bind_ref::<Literal>()
-                {
+                let filter = LogicalSelect::borrow_raw_parts(meta, &op.common);
+                let selectivity = if let Ok(literal) = filter.predicate().try_borrow::<Literal>() {
                     match literal.value() {
                         crate::ir::ScalarValue::Boolean(Some(true)) => 1.,
                         crate::ir::ScalarValue::Boolean(_) => 0.,
@@ -75,12 +74,11 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                     Self::MAGIC_PREDICATE_SELECTIVITY
                 };
 
-                selectivity * op.input_operators()[0].get_property::<Cardinality>(ctx)
+                selectivity * filter.input().cardinality(ctx)
             }
             OperatorKind::PhysicalFilter(meta) => {
-                let filter = PhysicalFilterBorrowed::from_raw_parts(meta, &op.common);
-                let selectivity = if let Ok(literal) = filter.predicate().try_bind_ref::<Literal>()
-                {
+                let filter = PhysicalFilter::borrow_raw_parts(meta, &op.common);
+                let selectivity = if let Ok(literal) = filter.predicate().try_borrow::<Literal>() {
                     match literal.value() {
                         crate::ir::ScalarValue::Boolean(Some(true)) => 1.,
                         crate::ir::ScalarValue::Boolean(_) => 0.,
@@ -90,11 +88,11 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                     Self::MAGIC_PREDICATE_SELECTIVITY
                 };
 
-                selectivity * op.input_operators()[0].get_property::<Cardinality>(ctx)
+                selectivity * filter.input().cardinality(ctx)
             }
-            OperatorKind::EnforcerSort(_) => {
-                op.input_operators()[0].get_property::<Cardinality>(ctx)
-            }
+            OperatorKind::EnforcerSort(meta) => EnforcerSort::borrow_raw_parts(meta, &op.common)
+                .input()
+                .cardinality(ctx),
             OperatorKind::MockScan(meta) => meta.spec.mocked_card,
         }
     }

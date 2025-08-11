@@ -43,7 +43,7 @@ impl Rule for LogicalJoinInnerCommuteRule {
         operator: &crate::ir::Operator,
         _ctx: &crate::ir::IRContext,
     ) -> Result<Vec<std::sync::Arc<crate::ir::Operator>>, ()> {
-        let join = operator.try_bind_ref::<LogicalJoin>().unwrap();
+        let join = operator.try_borrow::<LogicalJoin>().unwrap();
         assert_eq!(join.join_type(), &JoinType::Inner);
 
         let new_outer = join.inner().clone();
@@ -86,16 +86,10 @@ mod tests {
         assert!(rule.pattern.matches_without_expand(&inner_join));
         let ctx = IRContext::with_empty_magic();
         let res = rule.transform(&inner_join, &ctx).unwrap().pop().unwrap();
-        let commuted = res.try_bind_ref_experimental::<LogicalJoin>().unwrap();
+        let commuted = res.try_borrow::<LogicalJoin>().unwrap();
 
-        let new_outer = commuted
-            .outer()
-            .try_bind_ref_experimental::<MockScan>()
-            .unwrap();
-        let new_inner = commuted
-            .inner()
-            .try_bind_ref_experimental::<MockScan>()
-            .unwrap();
+        let new_outer = commuted.outer().try_borrow::<MockScan>().unwrap();
+        let new_inner = commuted.inner().try_borrow::<MockScan>().unwrap();
 
         assert_eq!(new_outer.mock_id(), &2);
         assert_eq!(new_inner.mock_id(), &1);

@@ -1,7 +1,6 @@
 use crate::ir::{
     cost::{Cost, CostModel},
     operator::*,
-    properties::{Cardinality, GetProperty},
 };
 
 pub struct MagicCostModel;
@@ -23,18 +22,18 @@ impl CostModel for MagicCostModel {
             OperatorKind::LogicalJoin(_) => None,
             OperatorKind::LogicalSelect(_) => None,
             OperatorKind::EnforcerSort(_) => {
-                let input_card = op.input_operators()[0].get_property::<Cardinality>(ctx);
+                let input_card = op.input_operators()[0].cardinality(ctx);
                 let cost = Cost::UNIT * input_card.as_f64() * input_card.as_f64().ln_1p().max(1.0);
                 Some(cost)
             }
             OperatorKind::PhysicalTableScan(_) => {
-                let card = op.get_property::<Cardinality>(ctx);
+                let card = op.cardinality(ctx);
                 Some(Cost::UNIT * card * 2f64)
             }
             OperatorKind::PhysicalNLJoin(meta) => {
-                let join = PhysicalNLJoinBorrowed::from_raw_parts(meta, &op.common);
-                let outer_card = join.outer().get_property::<Cardinality>(ctx);
-                let inner_card = join.inner().get_property::<Cardinality>(ctx);
+                let join = PhysicalNLJoin::borrow_raw_parts(meta, &op.common);
+                let outer_card = join.outer().cardinality(ctx);
+                let inner_card = join.inner().cardinality(ctx);
                 let cost = outer_card.as_f64()
                     * inner_card.as_f64()
                     * MagicCostModel::MAGIC_COMPUTATION_FACTOR
@@ -43,8 +42,8 @@ impl CostModel for MagicCostModel {
                 Some(cost)
             }
             OperatorKind::PhysicalFilter(meta) => {
-                let filter = PhysicalFilterBorrowed::from_raw_parts(meta, &op.common);
-                let input_card = filter.input().get_property::<Cardinality>(ctx);
+                let filter = PhysicalFilter::borrow_raw_parts(meta, &op.common);
+                let input_card = filter.input().cardinality(ctx);
                 let cost = input_card.as_f64() * Self::MAGIC_COMPUTATION_FACTOR * Cost::UNIT;
                 Some(cost)
             }
