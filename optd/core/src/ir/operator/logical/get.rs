@@ -31,21 +31,13 @@ impl LogicalGet {
     }
 }
 
-impl Derive<OutputColumns> for LogicalGet {
+impl Derive<OutputColumns> for LogicalGetBorrowed<'_> {
     fn derive_by_compute(&self, _ctx: &crate::ir::context::IRContext) -> OutputColumns {
         let projections = self
             .projection_list()
-            .try_bind_ref::<ProjectionList>()
+            .try_borrow::<ProjectionList>()
             .expect("projection_list should typecheck");
         OutputColumns::from_column_set(projections.get_all_assignees().collect())
-    }
-
-    fn derive(&self, ctx: &crate::ir::context::IRContext) -> OutputColumns {
-        self.common
-            .properties
-            .output_columns
-            .get_or_init(|| self.derive_by_compute(ctx))
-            .clone()
     }
 }
 
@@ -68,7 +60,7 @@ impl LogicalGet {
 
 #[cfg(test)]
 mod tests {
-    use crate::ir::{Column, context::IRContext, convert::IntoOperator, properties::GetProperty};
+    use crate::ir::{Column, context::IRContext, convert::IntoOperator};
 
     use super::*;
 
@@ -76,11 +68,11 @@ mod tests {
     fn logical_get_construct_and_access() {
         let ctx = IRContext::with_course_tables();
         let op = LogicalGet::mock(vec![0, 1]).into_operator();
-        let output_columns = op.get_property::<OutputColumns>(&ctx);
-        let set = output_columns.set();
+        let output_columns = op.output_columns(&ctx);
+        let set = &*output_columns;
         assert_eq!(set.len(), 2);
         assert!(set.contains(&Column(0)));
         assert!(set.contains(&Column(1)));
-        assert!(op.try_bind_ref::<LogicalGet>().is_ok());
+        assert!(op.try_borrow::<LogicalGet>().is_ok());
     }
 }

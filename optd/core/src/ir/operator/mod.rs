@@ -21,7 +21,7 @@ pub use physical::mock_scan::*;
 
 use crate::ir::explain::Explain;
 use crate::ir::properties::OperatorProperties;
-use crate::ir::{GroupBorrowed, GroupId, GroupMetadata, IRCommon, Scalar};
+use crate::ir::{Group, GroupId, GroupMetadata, IRCommon, Scalar};
 
 /// The operator type and its associated metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -124,27 +124,27 @@ impl Explain for Operator {
     ) -> pretty_xmlish::Pretty<'a> {
         match &self.kind {
             OperatorKind::Group(meta) => {
-                GroupBorrowed::from_raw_parts(meta, &self.common).explain(ctx, option)
+                Group::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             OperatorKind::MockScan(meta) => {
-                MockScanBorrowed::from_raw_parts(meta, &self.common).explain(ctx, option)
+                MockScan::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             OperatorKind::LogicalGet(_) => todo!(),
             OperatorKind::LogicalJoin(meta) => {
-                LogicalJoinBorrowed::from_raw_parts(meta, &self.common).explain(ctx, option)
+                LogicalJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             OperatorKind::LogicalSelect(meta) => {
-                LogicalSelectBorrowed::from_raw_parts(meta, &self.common).explain(ctx, option)
+                LogicalSelect::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             OperatorKind::EnforcerSort(meta) => {
-                EnforcerSortBorrowed::from_raw_parts(meta, &self.common).explain(ctx, option)
+                EnforcerSort::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             OperatorKind::PhysicalTableScan(_) => todo!(),
             OperatorKind::PhysicalNLJoin(meta) => {
-                PhysicalNLJoinBorrowed::from_raw_parts(meta, &self.common).explain(ctx, option)
+                PhysicalNLJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             OperatorKind::PhysicalFilter(meta) => {
-                PhysicalFilterBorrowed::from_raw_parts(meta, &self.common).explain(ctx, option)
+                PhysicalFilter::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
         }
     }

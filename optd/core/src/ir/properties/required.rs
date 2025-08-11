@@ -19,7 +19,9 @@ impl std::fmt::Display for Required {
     }
 }
 
-impl PropertyMarker for Arc<Required> {}
+impl PropertyMarker for Arc<Required> {
+    type Output = Self;
+}
 
 impl crate::ir::properties::TrySatisfy<Arc<Required>> for Operator {
     fn try_satisfy(

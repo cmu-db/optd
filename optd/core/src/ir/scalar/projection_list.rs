@@ -26,10 +26,12 @@ impl ProjectionList {
             common: IRCommon::with_input_scalars_only(members),
         }
     }
+}
 
+impl ProjectionListBorrowed<'_> {
     pub fn get_all_assignees(&self) -> impl Iterator<Item = Column> {
         self.members().iter().map(|member| {
-            let assign = member.try_bind_ref::<Assign>().unwrap();
+            let assign = member.try_borrow::<Assign>().unwrap();
             *assign.assignee()
         })
     }

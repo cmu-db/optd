@@ -1,8 +1,6 @@
 use crate::ir::{
     IRContext, OperatorKind,
-    convert::IntoOperator,
     operator::{LogicalJoin, join::JoinType},
-    properties::{GetProperty, OutputColumns},
     rule::{OperatorPattern, Rule},
 };
 
@@ -43,39 +41,29 @@ impl Rule for LogicalJoinInnerAssocRule {
         ctx: &IRContext,
     ) -> Result<Vec<std::sync::Arc<crate::ir::Operator>>, ()> {
         // ((a JOIN b, cond_low) JOIN c, cond_up) → (a JOIN (b JOIN c, cond_up), cond_low)
-        let join_upper = operator.try_bind_ref_experimental::<LogicalJoin>().unwrap();
+        let join_upper = operator.try_borrow::<LogicalJoin>().unwrap();
         assert_eq!(join_upper.join_type(), &JoinType::Inner);
-        let join_lower = join_upper
-            .outer()
-            .try_bind_ref_experimental::<LogicalJoin>()
-            .unwrap();
+        let join_lower = join_upper.outer().try_borrow::<LogicalJoin>().unwrap();
         assert_eq!(join_lower.join_type(), &JoinType::Inner);
 
         let a = join_lower.outer().clone();
         let b = join_lower.inner().clone();
         let c = join_upper.inner().clone();
 
-        let new_lower_columns =
-            b.get_property::<OutputColumns>(ctx).set() & c.get_property::<OutputColumns>(ctx).set();
         if !join_upper
             .join_cond()
             .used_columns()
-            .is_subset(&new_lower_columns)
+            .is_subset(&(&*b.output_columns(ctx) & &*c.output_columns(ctx)))
         {
             return Ok(vec![]);
         }
 
-        let new_join_upper = LogicalJoin::new(
-            JoinType::Inner,
-            a,
-            {
-                LogicalJoin::new(JoinType::Inner, b, c, join_upper.join_cond().clone())
-                    .into_operator()
-            },
+        let new_join_upper = a.logical_join(
+            b.logical_join(c, join_upper.join_cond().clone(), JoinType::Inner),
             join_lower.join_cond().clone(),
+            JoinType::Inner,
         );
-
-        Ok(vec![new_join_upper.into_operator()])
+        Ok(vec![new_join_upper])
     }
 }
 
@@ -83,7 +71,7 @@ impl Rule for LogicalJoinInnerAssocRule {
 mod tests {
     use crate::ir::{
         ScalarValue,
-        convert::IntoScalar,
+        convert::{IntoOperator, IntoScalar},
         operator::{MockScan, MockSpec},
         scalar::Literal,
     };
@@ -111,26 +99,12 @@ mod tests {
         let rule = LogicalJoinInnerAssocRule::new();
         assert!(rule.pattern.matches_without_expand(&inner_joins));
         let res = rule.transform(&inner_joins, &ctx).unwrap().pop().unwrap();
-        let new_upper = res.try_bind_ref_experimental::<LogicalJoin>().unwrap();
-        let a_ref = new_upper
-            .outer()
-            .try_bind_ref_experimental::<MockScan>()
-            .unwrap();
+        let new_upper = res.try_borrow::<LogicalJoin>().unwrap();
+        let a_ref = new_upper.outer().try_borrow::<MockScan>().unwrap();
 
-        let new_lower = new_upper
-            .inner()
-            .try_bind_ref_experimental::<LogicalJoin>()
-            .unwrap();
-
-        let b_ref = new_lower
-            .outer()
-            .try_bind_ref_experimental::<MockScan>()
-            .unwrap();
-
-        let c_ref = new_lower
-            .inner()
-            .try_bind_ref_experimental::<MockScan>()
-            .unwrap();
+        let new_lower = new_upper.inner().try_borrow::<LogicalJoin>().unwrap();
+        let b_ref = new_lower.outer().try_borrow::<MockScan>().unwrap();
+        let c_ref = new_lower.inner().try_borrow::<MockScan>().unwrap();
 
         assert_eq!(&1, a_ref.mock_id());
         assert_eq!(&2, b_ref.mock_id());
@@ -139,7 +113,7 @@ mod tests {
             &ScalarValue::Boolean(Some(false)),
             new_upper
                 .join_cond()
-                .try_bind_ref_experimental::<Literal>()
+                .try_borrow::<Literal>()
                 .unwrap()
                 .value()
         );
@@ -148,7 +122,7 @@ mod tests {
             &ScalarValue::Boolean(Some(true)),
             new_lower
                 .join_cond()
-                .try_bind_ref_experimental::<Literal>()
+                .try_borrow::<Literal>()
                 .unwrap()
                 .value()
         );

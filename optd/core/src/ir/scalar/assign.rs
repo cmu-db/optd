@@ -31,7 +31,7 @@ impl Assign {
 
     pub fn is_passthrough(&self) -> bool {
         self.expr()
-            .try_bind_ref::<ColumnRef>()
+            .try_borrow::<ColumnRef>()
             .is_ok_and(|column_ref| column_ref.column() == self.assignee())
     }
 }
