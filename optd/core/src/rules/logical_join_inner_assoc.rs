@@ -71,7 +71,7 @@ impl Rule for LogicalJoinInnerAssocRule {
 mod tests {
     use crate::ir::{
         ScalarValue,
-        convert::IntoScalar,
+        convert::{IntoOperator, IntoScalar},
         operator::{MockScan, MockSpec},
         scalar::Literal,
     };
