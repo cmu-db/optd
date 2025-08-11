@@ -35,7 +35,7 @@ impl Derive<OutputColumns> for PhysicalTableScan {
     fn derive_by_compute(&self, _ctx: &crate::ir::context::IRContext) -> OutputColumns {
         let projections = self
             .projection_list()
-            .try_bind_ref::<ProjectionList>()
+            .try_borrow::<ProjectionList>()
             .unwrap();
         OutputColumns::from_column_set(projections.get_all_assignees().collect())
     }

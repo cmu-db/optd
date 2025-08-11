@@ -35,7 +35,7 @@ impl Derive<OutputColumns> for LogicalGet {
     fn derive_by_compute(&self, _ctx: &crate::ir::context::IRContext) -> OutputColumns {
         let projections = self
             .projection_list()
-            .try_bind_ref::<ProjectionList>()
+            .try_borrow::<ProjectionList>()
             .expect("projection_list should typecheck");
         OutputColumns::from_column_set(projections.get_all_assignees().collect())
     }
@@ -81,6 +81,6 @@ mod tests {
         assert_eq!(set.len(), 2);
         assert!(set.contains(&Column(0)));
         assert!(set.contains(&Column(1)));
-        assert!(op.try_bind_ref::<LogicalGet>().is_ok());
+        assert!(op.try_borrow::<LogicalGet>().is_ok());
     }
 }

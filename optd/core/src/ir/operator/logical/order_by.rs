@@ -47,7 +47,7 @@ impl LogicalOrderBy {
             .exprs()
             .iter()
             .map(|expr| {
-                expr.try_bind_ref::<ColumnRef>()
+                expr.try_borrow::<ColumnRef>()
                     .map(|column_ref| *column_ref.column())
                     .map_err(|_| expr.clone())
             })
@@ -131,6 +131,6 @@ mod tests {
         let res = order_by.try_extract_tuple_ordering().unwrap_err();
 
         assert_eq!(res.len(), 1);
-        res[0].try_bind_ref::<BinaryOp>().unwrap();
+        assert!(res[0].try_borrow::<BinaryOp>().is_ok())
     }
 }

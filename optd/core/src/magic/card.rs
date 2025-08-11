@@ -34,7 +34,7 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
             }
             OperatorKind::LogicalJoin(meta) => {
                 let join = LogicalJoinBorrowed::from_raw_parts(meta, &op.common);
-                let selectivity = if let Ok(literal) = join.join_cond().try_bind_ref::<Literal>() {
+                let selectivity = if let Ok(literal) = join.join_cond().try_borrow::<Literal>() {
                     match literal.value() {
                         crate::ir::ScalarValue::Boolean(Some(true)) => 1.,
                         crate::ir::ScalarValue::Boolean(_) => 0.,
@@ -49,7 +49,7 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
             }
             OperatorKind::PhysicalNLJoin(meta) => {
                 let join = PhysicalNLJoinBorrowed::from_raw_parts(meta, &op.common);
-                let selectivity = if let Ok(literal) = join.join_cond().try_bind_ref::<Literal>() {
+                let selectivity = if let Ok(literal) = join.join_cond().try_borrow::<Literal>() {
                     match literal.value() {
                         crate::ir::ScalarValue::Boolean(Some(true)) => 1.,
                         crate::ir::ScalarValue::Boolean(_) => 0.,
@@ -64,8 +64,7 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
             }
             OperatorKind::LogicalSelect(meta) => {
                 let filter = LogicalSelectBorrowed::from_raw_parts(meta, &op.common);
-                let selectivity = if let Ok(literal) = filter.predicate().try_bind_ref::<Literal>()
-                {
+                let selectivity = if let Ok(literal) = filter.predicate().try_borrow::<Literal>() {
                     match literal.value() {
                         crate::ir::ScalarValue::Boolean(Some(true)) => 1.,
                         crate::ir::ScalarValue::Boolean(_) => 0.,
@@ -79,8 +78,7 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
             }
             OperatorKind::PhysicalFilter(meta) => {
                 let filter = PhysicalFilterBorrowed::from_raw_parts(meta, &op.common);
-                let selectivity = if let Ok(literal) = filter.predicate().try_bind_ref::<Literal>()
-                {
+                let selectivity = if let Ok(literal) = filter.predicate().try_borrow::<Literal>() {
                     match literal.value() {
                         crate::ir::ScalarValue::Boolean(Some(true)) => 1.,
                         crate::ir::ScalarValue::Boolean(_) => 0.,

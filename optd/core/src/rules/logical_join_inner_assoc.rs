@@ -43,12 +43,9 @@ impl Rule for LogicalJoinInnerAssocRule {
         ctx: &IRContext,
     ) -> Result<Vec<std::sync::Arc<crate::ir::Operator>>, ()> {
         // ((a JOIN b, cond_low) JOIN c, cond_up) → (a JOIN (b JOIN c, cond_up), cond_low)
-        let join_upper = operator.try_bind_ref_experimental::<LogicalJoin>().unwrap();
+        let join_upper = operator.try_borrow::<LogicalJoin>().unwrap();
         assert_eq!(join_upper.join_type(), &JoinType::Inner);
-        let join_lower = join_upper
-            .outer()
-            .try_bind_ref_experimental::<LogicalJoin>()
-            .unwrap();
+        let join_lower = join_upper.outer().try_borrow::<LogicalJoin>().unwrap();
         assert_eq!(join_lower.join_type(), &JoinType::Inner);
 
         let a = join_lower.outer().clone();
@@ -111,26 +108,12 @@ mod tests {
         let rule = LogicalJoinInnerAssocRule::new();
         assert!(rule.pattern.matches_without_expand(&inner_joins));
         let res = rule.transform(&inner_joins, &ctx).unwrap().pop().unwrap();
-        let new_upper = res.try_bind_ref_experimental::<LogicalJoin>().unwrap();
-        let a_ref = new_upper
-            .outer()
-            .try_bind_ref_experimental::<MockScan>()
-            .unwrap();
+        let new_upper = res.try_borrow::<LogicalJoin>().unwrap();
+        let a_ref = new_upper.outer().try_borrow::<MockScan>().unwrap();
 
-        let new_lower = new_upper
-            .inner()
-            .try_bind_ref_experimental::<LogicalJoin>()
-            .unwrap();
-
-        let b_ref = new_lower
-            .outer()
-            .try_bind_ref_experimental::<MockScan>()
-            .unwrap();
-
-        let c_ref = new_lower
-            .inner()
-            .try_bind_ref_experimental::<MockScan>()
-            .unwrap();
+        let new_lower = new_upper.inner().try_borrow::<LogicalJoin>().unwrap();
+        let b_ref = new_lower.outer().try_borrow::<MockScan>().unwrap();
+        let c_ref = new_lower.inner().try_borrow::<MockScan>().unwrap();
 
         assert_eq!(&1, a_ref.mock_id());
         assert_eq!(&2, b_ref.mock_id());
@@ -139,7 +122,7 @@ mod tests {
             &ScalarValue::Boolean(Some(false)),
             new_upper
                 .join_cond()
-                .try_bind_ref_experimental::<Literal>()
+                .try_borrow::<Literal>()
                 .unwrap()
                 .value()
         );
@@ -148,7 +131,7 @@ mod tests {
             &ScalarValue::Boolean(Some(true)),
             new_lower
                 .join_cond()
-                .try_bind_ref_experimental::<Literal>()
+                .try_borrow::<Literal>()
                 .unwrap()
                 .value()
         );
