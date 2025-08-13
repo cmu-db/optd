@@ -5,5 +5,9 @@
 # optd memo dump
 *.memo
 
+populate.sql
+data/
+
+
 # datafusion
 .history

@@ -61,13 +61,27 @@ async fn integration() -> Result<(), Box<dyn std::error::Error>> {
         // .with_target(false) // Optional: also remove target
         .compact() // Optional: use compact format
         .init();
+
+    // CREATE TABLE m1(v1 int, v2 int, v3 int);
+    // CREATE TABLE m2(v4 int, v5 int);
+    // CREATE TABLE m3(v6 int, v7 int);
+    // INSERT INTO m1 VALUES ... ;
+    // 10
+    // INSERT INTO m2 VALUES ... ;
+    // 1000
+    // INSERT INTO m3 VALUES ... ;
+    // 20
+    // SELECT * FROM m1
+    // INNER JOIN m2 ON m1.v1 = m2.v4
+    // INNER JOIN m3 ON m1.v2 = m3.v6
+    // WHERE m3.v7 = 445 AND m1.v3 = 799 ORDER BY v4;
     let m1 = mock_scan(1, vec![1, 2, 3], 10.);
-    let m2 = mock_scan(2, vec![4, 5], 20.);
-    let m3 = mock_scan(3, vec![6, 7], 30.);
+    let m2 = mock_scan(2, vec![4, 5], 1000.);
+    let m3 = mock_scan(3, vec![6, 7], 20.);
     let required = Arc::new(Required {
         tuple_ordering: TupleOrdering::from_iter([(Column(4), TupleOrderingDirection::Asc)]),
     });
-    let join_m1_m2 = m1
+    let join_m1_m2_and_m3 = m1
         .logical_join(
             m2,
             column_ref(Column(1)).equal(column_ref(Column(4))),
@@ -77,16 +91,23 @@ async fn integration() -> Result<(), Box<dyn std::error::Error>> {
             m3,
             column_ref(Column(2)).equal(column_ref(Column(6))),
             JoinType::Inner,
-        );
+        )
+        .logical_select(boolean(true))
+        .logical_select(column_ref(Column(7)).equal(int32(445)))
+        .logical_select(column_ref(Column(3)).equal(int32(799)));
 
     let ctx = IRContext::with_empty_magic();
     let rule_set = RuleSet::builder()
         .add_rule(rules::LogicalJoinAsPhysicalNLJoinRule::new())
+        .add_rule(rules::LogicalSelectAsPhysicalFilterRule::new())
+        .add_rule(rules::LogicalSelectJoinTransposeRule::new())
         .add_rule(rules::LogicalJoinInnerCommuteRule::new())
         .add_rule(rules::LogicalJoinInnerAssocRule::new())
         .build();
     let opt = Arc::new(Cascades::new(ctx, rule_set));
 
-    optimize_plan(opt, &join_m1_m2, required).await.unwrap();
+    optimize_plan(opt, &join_m1_m2_and_m3, required)
+        .await
+        .unwrap();
     Ok(())
 }

@@ -17,7 +17,7 @@ tokio = { workspace = true, features = [
     "tracing",
 ] }
 
-tracing = "0.1.41"
+tracing = { workspace = true }
 
 [dev-dependencies]
 console-subscriber = "0.4.1"

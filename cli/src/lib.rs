@@ -1,12 +1,31 @@
-use datafusion::prelude::{DataFrame, SessionContext};
+use std::sync::Arc;
+
+use datafusion::{
+    execution::{SessionStateBuilder, runtime_env::RuntimeEnv},
+    prelude::{DataFrame, SessionConfig, SessionContext},
+};
 use datafusion_cli::cli_context::CliSessionContext;
+use optd_datafusion::SessionStateBuilderOptdExt;
 
 pub struct OptdCliSessionContext {
     inner: SessionContext,
 }
 
 impl OptdCliSessionContext {
-    pub fn new(inner: SessionContext) -> Self {
+    pub fn new_with_config_rt(config: SessionConfig, runtime: Arc<RuntimeEnv>) -> Self {
+        let state = SessionStateBuilder::new()
+            .with_config(config)
+            .with_runtime_env(runtime)
+            .with_default_features()
+            // .with_optimizer_rules(Vec::new())
+            .with_optd_planner()
+            .build();
+        let inner = SessionContext::new_with_state(state);
+        Self { inner }
+    }
+
+    pub fn enable_url_table(self) -> Self {
+        let inner = self.inner.enable_url_table();
         Self { inner }
     }
 

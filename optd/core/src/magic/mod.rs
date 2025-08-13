@@ -37,8 +37,8 @@ impl IRContext {
         let mut catalog = MagicCatalog::default();
         let course = {
             let schema = Arc::new(SchemaDescription::from_iter([
-                ("course.id".to_string(), DataType::Int32),
-                ("course.credit".to_string(), DataType::Int32),
+                ("course.id".to_string(), DataType::Int32, false),
+                ("course.credit".to_string(), DataType::Int32, false),
             ]));
 
             catalog
@@ -49,9 +49,9 @@ impl IRContext {
 
         let schedule = {
             let schema = Arc::new(SchemaDescription::from_iter([
-                ("schedule.day_of_week".to_string(), DataType::Int32),
-                ("schedule.course_id".to_string(), DataType::Int32),
-                ("schedule.has_lecture".to_string(), DataType::Boolean),
+                ("schedule.day_of_week".to_string(), DataType::Int32, false),
+                ("schedule.course_id".to_string(), DataType::Int32, false),
+                ("schedule.has_lecture".to_string(), DataType::Boolean, false),
             ]));
 
             catalog
@@ -62,10 +62,10 @@ impl IRContext {
 
         let staff = {
             let schema = Arc::new(SchemaDescription::from_iter([
-                ("staff.id".to_string(), DataType::Int32),
-                ("staff.oh_day_of_week".to_string(), DataType::Int32),
-                ("staff.course_id".to_string(), DataType::Int32),
-                ("staff.oh_length".to_string(), DataType::Int32),
+                ("staff.id".to_string(), DataType::Int32, false),
+                ("staff.oh_day_of_week".to_string(), DataType::Int32, false),
+                ("staff.course_id".to_string(), DataType::Int32, false),
+                ("staff.oh_length".to_string(), DataType::Int32, false),
             ]));
 
             catalog
@@ -81,7 +81,7 @@ impl IRContext {
 
         let mut create_numbered_table = |table_name: String, width: usize, row_count: usize| {
             let iter = (1..=width)
-                .map(|column_no| (format!("{table_name}.v{column_no}"), DataType::Int32));
+                .map(|column_no| (format!("{table_name}.v{column_no}"), DataType::Int32, false));
             let schema = Arc::new(SchemaDescription::from_iter(iter));
             let table_id = catalog.try_create_table(table_name, schema).unwrap();
             catalog.set_table_row_count(table_id, row_count);

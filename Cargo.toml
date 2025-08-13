@@ -10,6 +10,7 @@ default-members = ["optd/core"]
 optd-datafusion = { path = "connectors/datafusion" }
 
 tokio = { version = "1.47", features = ["macros", "rt", "sync"] }
+tracing = "0.1"
 
 # DataFusion dependencies
 datafusion = { version = "49.0.0", default-features = false }

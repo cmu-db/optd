@@ -63,7 +63,7 @@ impl Scalar {
             ScalarKind::BinaryOp(_) => self
                 .input_scalars()
                 .iter()
-                .fold(HashSet::new(), |x, y| &x & &y.used_columns()),
+                .fold(HashSet::new(), |x, y| &x | &y.used_columns()),
             ScalarKind::Assign(_) => todo!(),
             ScalarKind::ProjectionList(_) => todo!(),
         }

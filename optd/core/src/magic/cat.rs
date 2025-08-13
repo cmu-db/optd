@@ -83,9 +83,9 @@ mod tests {
 
     fn mock_table_schema(name: &str) -> SchemaDescription {
         SchemaDescription::from_iter([
-            (format!("{name}.v1"), DataType::Int32),
-            (format!("{name}.v2"), DataType::Int32),
-            (format!("{name}.v3"), DataType::Boolean),
+            (format!("{name}.v1"), DataType::Int32, false),
+            (format!("{name}.v2"), DataType::Int32, false),
+            (format!("{name}.v3"), DataType::Boolean, false),
         ])
     }
 
