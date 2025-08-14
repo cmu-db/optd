@@ -1,3 +1,4 @@
+use datafusion::logical_expr::DdlStatement;
 use datafusion::prelude::{DataFrame, SessionContext};
 use datafusion_cli::cli_context::CliSessionContext;
 
@@ -77,8 +78,17 @@ impl CliSessionContext for OptdCliSessionContext {
                     }
                     _ => (),
                 }
-            }
+            } else if let datafusion::logical_expr::LogicalPlan::Ddl(ddl) = &plan {
+                // match ddl {
+                //     DdlStatement::CreateExternalTable(create_table) => {
+                //         println!("Creating external table");
 
+                //         let _ = create_table.clone();
+                //         return self.return_empty_dataframe();
+                //     }
+                //     _ => (),
+                // }
+            }
             self.inner.execute_logical_plan(plan).await
         };
 
