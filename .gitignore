@@ -9,3 +9,6 @@
 .history
 
 *.db
+
+# configuration
+.vscode/launch.json

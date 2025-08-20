@@ -7,8 +7,6 @@ default-members = ["optd/core"]
 
 [workspace.dependencies]
 
-optd-datafusion = { path = "connectors/datafusion" }
-
 tokio = { version = "1.47", features = ["macros", "rt", "sync"] }
 
 # DataFusion dependencies
