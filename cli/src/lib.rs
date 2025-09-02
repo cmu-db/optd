@@ -5,7 +5,7 @@ use datafusion::{
     prelude::{DataFrame, SessionConfig, SessionContext},
 };
 use datafusion_cli::cli_context::CliSessionContext;
-use optd_datafusion::SessionStateBuilderOptdExt;
+use optd_datafusion::{OptdExtensionConfig, SessionStateBuilderOptdExt};
 
 pub struct OptdCliSessionContext {
     inner: SessionContext,
@@ -13,6 +13,9 @@ pub struct OptdCliSessionContext {
 
 impl OptdCliSessionContext {
     pub fn new_with_config_rt(config: SessionConfig, runtime: Arc<RuntimeEnv>) -> Self {
+        let config = config
+            .with_option_extension(OptdExtensionConfig::default())
+            .set_bool("optd.optd_enabled", false);
         let state = SessionStateBuilder::new()
             .with_config(config)
             .with_runtime_env(runtime)
@@ -21,6 +24,7 @@ impl OptdCliSessionContext {
             .with_optd_planner()
             .build();
         let inner = SessionContext::new_with_state(state);
+
         Self { inner }
     }
 

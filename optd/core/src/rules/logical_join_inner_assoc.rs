@@ -1,3 +1,5 @@
+use snafu::ensure_whatever;
+
 use crate::ir::{
     IRContext, OperatorKind,
     operator::{LogicalJoin, join::JoinType},
@@ -39,12 +41,18 @@ impl Rule for LogicalJoinInnerAssocRule {
         &self,
         operator: &crate::ir::Operator,
         ctx: &IRContext,
-    ) -> Result<Vec<std::sync::Arc<crate::ir::Operator>>, ()> {
+    ) -> crate::error::Result<Vec<std::sync::Arc<crate::ir::Operator>>> {
         // ((a JOIN b, cond_low) JOIN c, cond_up) → (a JOIN (b JOIN c, cond_up), cond_low)
         let join_upper = operator.try_borrow::<LogicalJoin>().unwrap();
-        assert_eq!(join_upper.join_type(), &JoinType::Inner);
+        ensure_whatever!(
+            join_upper.join_type().eq(&JoinType::Inner),
+            "join upper must be inner join"
+        );
         let join_lower = join_upper.outer().try_borrow::<LogicalJoin>().unwrap();
-        assert_eq!(join_lower.join_type(), &JoinType::Inner);
+        ensure_whatever!(
+            join_lower.join_type().eq(&JoinType::Inner),
+            "join_lower must be inner join"
+        );
 
         let a = join_lower.outer().clone();
         let b = join_lower.inner().clone();

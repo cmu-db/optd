@@ -8,6 +8,7 @@ use crate::{
     ir::{
         Group, GroupId, IRCommon, IRContext, Operator,
         convert::IntoOperator,
+        operator::LogicalOrderBy,
         properties::{OperatorProperties, Required, TrySatisfy},
         rule::{OperatorPattern, Rule, RuleSet},
     },
@@ -229,7 +230,7 @@ impl Cascades {
         loop {
             let next_expr = {
                 let Ok(x) = rx
-                    .wait_for(|x| index < x.exprs.len() || x.status == Status::Complete)
+                    .wait_for(|x| x.status == Status::Complete || index < x.exprs.len())
                     .await
                 else {
                     return;
@@ -275,6 +276,28 @@ impl Cascades {
             let reader = self.memo.read().await;
             reader.get_operator_one_level(expr.key(), properties.clone(), group_id)
         };
+
+        // TODO(yuchen): Properly add this as a rule:
+        if let Ok(logical_order_by) = operator.try_borrow::<LogicalOrderBy>() {
+            if let Ok(tuple_ordering) = logical_order_by.try_extract_tuple_ordering() {
+                let input_group_id = expr.key().input_operators()[0];
+                let rx = self
+                    .clone()
+                    .find_best_costed_expr_for(
+                        input_group_id,
+                        Arc::new(Required { tuple_ordering }),
+                    )
+                    .await;
+                let state = rx.borrow();
+                let costed_expr = state
+                    .costed_exprs
+                    .iter()
+                    .min_by(|x, y| x.total_cost.as_f64().total_cmp(&y.total_cost.as_f64()))
+                    .cloned();
+                return costed_expr;
+            }
+        }
+
         let op_cost = self.ctx.cm.compute_operator_cost(&operator, &self.ctx)?;
 
         let inputs_required = operator.try_satisfy(required, &self.ctx)?;
@@ -460,6 +483,7 @@ impl Cascades {
             let input_group_id = input_group_ids.get(*index)?;
 
             let rx = self.get_all_group_exprs_in(*input_group_id).await;
+            info!(%input_group_id, "recv explored");
             let input_exprs = rx.borrow().exprs.clone();
             let input_properties = rx.borrow().properties.clone();
             assert_eq!(rx.borrow().status, Status::Complete);

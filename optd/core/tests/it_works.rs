@@ -24,19 +24,23 @@ async fn optimize_plan(
     for rule in opt.rule_set.iter() {
         println!("- {}", rule.name());
     }
-    println!("\n MEMO BEFORE OPT");
-    opt.memo.read().await.dump();
+    {
+        println!("\n MEMO BEFORE OPT");
+        opt.memo.read().await.dump();
+    }
     let optimized = opt.optimize(initial_plan, required.clone()).await;
+    {
+        println!("\nMEMO AFTER OPT");
+        opt.memo.read().await.dump();
+    }
     let initial_explained = quick_explain(initial_plan, &opt.ctx);
+    println!("{}", initial_explained);
     let optimized = optimized.unwrap();
     let optimized_explained = quick_explain(&optimized, &opt.ctx);
 
     let initial_explained = initial_explained.split('\n').collect::<Vec<&str>>();
     let optimized_explained = optimized_explained.split('\n').collect::<Vec<&str>>();
     let initial_len = initial_explained[0].len();
-
-    println!("\nMEMO AFTER OPT");
-    opt.memo.read().await.dump();
 
     println!("\nEXPLAIN (root_requirement: {required}):");
     std::iter::once(format!("{:<initial_len$}", "initial plan:").as_str())
@@ -84,22 +88,27 @@ async fn integration() -> Result<(), Box<dyn std::error::Error>> {
     let join_m1_m2_and_m3 = m1
         .logical_join(
             m2,
-            column_ref(Column(1)).equal(column_ref(Column(4))),
+            column_ref(Column(1)).eq(column_ref(Column(4))),
             JoinType::Inner,
         )
         .logical_join(
             m3,
-            column_ref(Column(2)).equal(column_ref(Column(6))),
+            column_ref(Column(2)).eq(column_ref(Column(6))),
             JoinType::Inner,
         )
-        .logical_select(boolean(true))
-        .logical_select(column_ref(Column(7)).equal(int32(445)))
-        .logical_select(column_ref(Column(3)).equal(int32(799)));
+        .logical_select(column_ref(Column(3)).eq(integer(799)))
+        .logical_select(column_ref(Column(7)).eq(integer(445)))
+        .logical_project([
+            column_assign(Column(3), column_ref(Column(3))),
+            column_assign(Column(8), column_ref(Column(1)).plus(integer(1))),
+        ]);
 
     let ctx = IRContext::with_empty_magic();
     let rule_set = RuleSet::builder()
+        .add_rule(rules::LogicalJoinAsPhysicalHashJoinRule::new())
         .add_rule(rules::LogicalJoinAsPhysicalNLJoinRule::new())
         .add_rule(rules::LogicalSelectAsPhysicalFilterRule::new())
+        .add_rule(rules::LogicalProjectAsPhysicalProjectRule::new())
         .add_rule(rules::LogicalSelectJoinTransposeRule::new())
         .add_rule(rules::LogicalJoinInnerCommuteRule::new())
         .add_rule(rules::LogicalJoinInnerAssocRule::new())

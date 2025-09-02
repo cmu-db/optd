@@ -1,6 +1,7 @@
 use crate::ir::{
     cost::{Cost, CostModel},
     operator::*,
+    scalar::List,
 };
 
 pub struct MagicCostModel;
@@ -21,6 +22,9 @@ impl CostModel for MagicCostModel {
             OperatorKind::LogicalGet(_) => None,
             OperatorKind::LogicalJoin(_) => None,
             OperatorKind::LogicalSelect(_) => None,
+            OperatorKind::LogicalProject(_) => None,
+            OperatorKind::LogicalAggregate(_) => None,
+            OperatorKind::LogicalOrderBy(_) => None,
             OperatorKind::EnforcerSort(_) => {
                 let input_card = op.input_operators()[0].cardinality(ctx);
                 let cost = Cost::UNIT * input_card.as_f64() * input_card.as_f64().ln_1p().max(1.0);
@@ -41,13 +45,36 @@ impl CostModel for MagicCostModel {
                     + outer_card * Cost::UNIT;
                 Some(cost)
             }
+            OperatorKind::PhysicalHashJoin(meta) => {
+                let join = PhysicalHashJoin::borrow_raw_parts(meta, &op.common);
+                let build_card = join.build_side().cardinality(ctx);
+                let probe_card = join.probe_side().cardinality(ctx);
+                let cost = (build_card.as_f64() * 2. + probe_card.as_f64()) * Cost::UNIT;
+                Some(cost)
+            }
             OperatorKind::PhysicalFilter(meta) => {
                 let filter = PhysicalFilter::borrow_raw_parts(meta, &op.common);
                 let input_card = filter.input().cardinality(ctx);
                 let cost = input_card.as_f64() * Self::MAGIC_COMPUTATION_FACTOR * Cost::UNIT;
                 Some(cost)
             }
+            OperatorKind::PhysicalProject(meta) => {
+                let project = PhysicalProject::borrow_raw_parts(meta, &op.common);
+                let input_card = project.input().cardinality(ctx);
+                let cost = input_card.as_f64() * Self::MAGIC_COMPUTATION_FACTOR * Cost::UNIT;
+                Some(cost)
+            }
             OperatorKind::MockScan(meta) => meta.spec.mocked_operator_cost,
+            OperatorKind::PhysicalHashAggregate(meta) => {
+                let agg = PhysicalHashAggregate::borrow_raw_parts(meta, &op.common);
+                let num_exprs = agg.exprs().borrow::<List>().members().len();
+                let input_card = agg.input().cardinality(ctx);
+                let cost = input_card.as_f64()
+                    * num_exprs as f64
+                    * Self::MAGIC_COMPUTATION_FACTOR
+                    * Cost::UNIT;
+                Some(cost)
+            }
         }
     }
 }

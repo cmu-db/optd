@@ -1,31 +1,32 @@
 use crate::ir::{
     OperatorKind,
-    operator::LogicalSelect,
+    convert::IntoOperator,
+    operator::{LogicalProject, PhysicalProject},
     rule::{OperatorPattern, Rule},
 };
 
-pub struct LogicalSelectAsPhysicalFilterRule {
+pub struct LogicalProjectAsPhysicalProjectRule {
     pattern: OperatorPattern,
 }
 
-impl Default for LogicalSelectAsPhysicalFilterRule {
+impl Default for LogicalProjectAsPhysicalProjectRule {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl LogicalSelectAsPhysicalFilterRule {
+impl LogicalProjectAsPhysicalProjectRule {
     pub fn new() -> Self {
         let pattern = OperatorPattern::with_top_matches(|kind| {
-            matches!(kind, OperatorKind::LogicalSelect(_))
+            matches!(kind, OperatorKind::LogicalProject(_))
         });
         Self { pattern }
     }
 }
 
-impl Rule for LogicalSelectAsPhysicalFilterRule {
+impl Rule for LogicalProjectAsPhysicalProjectRule {
     fn name(&self) -> &'static str {
-        "logical_select_as_physical_filter"
+        "logical_project_as_physical_project"
     }
 
     fn pattern(&self) -> &OperatorPattern {
@@ -37,12 +38,10 @@ impl Rule for LogicalSelectAsPhysicalFilterRule {
         operator: &crate::ir::Operator,
         _ctx: &crate::ir::IRContext,
     ) -> crate::error::Result<Vec<std::sync::Arc<crate::ir::Operator>>> {
-        let select = operator.try_borrow::<LogicalSelect>().unwrap();
+        let project = operator.try_borrow::<LogicalProject>().unwrap();
         Ok(vec![
-            select
-                .input()
-                .clone()
-                .physical_filter(select.predicate().clone()),
+            PhysicalProject::new(project.input().clone(), project.projections().clone())
+                .into_operator(),
         ])
     }
 }

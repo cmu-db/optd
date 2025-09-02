@@ -36,7 +36,7 @@ impl Rule for LogicalJoinAsPhysicalNLJoinRule {
         &self,
         operator: &crate::ir::Operator,
         _ctx: &crate::ir::IRContext,
-    ) -> Result<Vec<std::sync::Arc<crate::ir::Operator>>, ()> {
+    ) -> crate::error::Result<Vec<std::sync::Arc<crate::ir::Operator>>> {
         let join = operator.try_borrow::<LogicalJoin>().unwrap();
         let nl_join = PhysicalNLJoin::new(
             *join.join_type(),

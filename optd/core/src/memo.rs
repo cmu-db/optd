@@ -492,7 +492,7 @@ impl MemoTable {
                     .properties
                     .output_columns
                     .get()
-                    .map(|x| format!("{x}"))
+                    .map(|x| format!("{x:?}"))
                     .unwrap_or("?".to_string()),
             );
             println!(
@@ -666,9 +666,9 @@ mod tests {
     #[test]
     fn insert_scalar() {
         let mut memo = MemoTable::new(IRContext::with_empty_magic());
-        let scalar = column_ref(Column(1)).equal(int32(799));
+        let scalar = column_ref(Column(1)).eq(integer(799));
         let scalar_from_clone = scalar.clone();
-        let scalar_dup = column_ref(Column(1)).equal(int32(799));
+        let scalar_dup = column_ref(Column(1)).eq(integer(799));
         let id = memo.insert_scalar(scalar).unwrap();
         let res = memo.insert_scalar(scalar_from_clone);
         assert_eq!(Err(id), res);

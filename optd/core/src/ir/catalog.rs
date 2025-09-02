@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 use crate::ir::data_type::DataType;
 
@@ -37,14 +37,14 @@ where
 
 /// Describe schema information for a relation.
 #[derive(Debug, Clone, PartialEq)]
-pub struct SchemaDescription {
+pub struct Schema {
     /// Description of the columns.
     columns: Arc<[Arc<Field>]>,
 }
 
-impl SchemaDescription {
+impl Schema {
     pub fn new(columns: Vec<Arc<Field>>) -> Self {
-        SchemaDescription {
+        Schema {
             columns: columns.into(),
         }
     }
@@ -54,7 +54,7 @@ impl SchemaDescription {
     }
 }
 
-impl<S> FromIterator<S> for SchemaDescription
+impl<S> FromIterator<S> for Schema
 where
     S: Into<Field>,
 {
@@ -64,7 +64,7 @@ where
     }
 }
 
-impl FromIterator<Arc<Field>> for SchemaDescription {
+impl FromIterator<Arc<Field>> for Schema {
     fn from_iter<T: IntoIterator<Item = Arc<Field>>>(iter: T) -> Self {
         let columns = iter.into_iter().collect();
         Self::new(columns)
@@ -74,22 +74,23 @@ impl FromIterator<Arc<Field>> for SchemaDescription {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableMetadata {
     pub id: DataSourceId,
-    pub schema: Arc<SchemaDescription>,
+    pub name: String,
+    pub schema: Arc<Schema>,
     pub row_count: usize,
 }
 
 pub trait Catalog: Send + Sync + 'static {
     /// Creates a table.
     fn try_create_table(
-        &mut self,
+        &self,
         table_name: String,
-        schema: Arc<SchemaDescription>,
-    ) -> anyhow::Result<DataSourceId>;
+        schema: Arc<Schema>,
+    ) -> Result<DataSourceId, DataSourceId>;
     /// Describes the schema of a table with identifier `table_id`.
-    fn describe_table(&self, table_id: DataSourceId) -> &TableMetadata;
+    fn describe_table(&self, table_id: DataSourceId) -> TableMetadata;
     /// Describes the schema of a table with name `table_name`.
-    fn try_describe_table_with_name(&self, table_name: &str) -> anyhow::Result<&TableMetadata>;
+    fn try_describe_table_with_name(&self, table_name: &str) -> anyhow::Result<TableMetadata>;
 
     /// TODO(yuchen): This is a mock.
-    fn set_table_row_count(&mut self, table_id: DataSourceId, row_count: usize);
+    fn set_table_row_count(&self, table_id: DataSourceId, row_count: usize);
 }

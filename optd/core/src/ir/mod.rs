@@ -124,7 +124,7 @@ impl IRCommon<OperatorProperties> {
             .properties
             .output_columns
             .get()
-            .map(|x| format!("{x}"))
+            .map(|x| format!("{}", x))
             .unwrap_or("?".to_string());
         fields.push(("(.output_columns)", Pretty::display(&output_columns)));
         fields.push(("(.cardinality)", Pretty::display(&cardinality)));
