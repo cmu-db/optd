@@ -34,7 +34,7 @@ async fn optimize_plan(
         opt.memo.read().await.dump();
     }
     let initial_explained = quick_explain(initial_plan, &opt.ctx);
-    println!("{}", initial_explained);
+    println!("{initial_explained}");
     let optimized = optimized.unwrap();
     let optimized_explained = quick_explain(&optimized, &opt.ctx);
 

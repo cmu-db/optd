@@ -68,7 +68,7 @@ impl Catalog for MagicCatalog {
         let Some(table_id) = reader.name_to_id.get(table_name) else {
             bail!("Table {} not found", table_name);
         };
-        Ok(reader.tables.get(&table_id).cloned().unwrap())
+        Ok(reader.tables.get(table_id).cloned().unwrap())
     }
 
     fn set_table_row_count(&self, table_id: DataSourceId, row_count: usize) {

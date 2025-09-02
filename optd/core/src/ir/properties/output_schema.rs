@@ -108,7 +108,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                     .members()
                     .iter()
                     .map(|e| {
-                        let column = e.borrow::<ColumnAssign>().column().clone();
+                        let column = *e.borrow::<ColumnAssign>().column();
                         let column_meta = ctx.get_column_meta(&column);
                         Arc::new(Field::new(
                             column_meta.name.clone(),
@@ -127,7 +127,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                     .members()
                     .iter()
                     .map(|e| {
-                        let column = e.borrow::<ColumnAssign>().column().clone();
+                        let column = *e.borrow::<ColumnAssign>().column();
                         let column_meta = ctx.get_column_meta(&column);
                         Arc::new(Field::new(
                             column_meta.name.clone(),
@@ -147,7 +147,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                     .iter()
                     .chain(agg.keys().borrow::<List>().members())
                     .map(|e| {
-                        let column = e.borrow::<ColumnAssign>().column().clone();
+                        let column = *e.borrow::<ColumnAssign>().column();
                         let column_meta = ctx.get_column_meta(&column);
                         Arc::new(Field::new(
                             column_meta.name.clone(),
@@ -168,7 +168,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                     .iter()
                     .chain(agg.exprs().borrow::<List>().members())
                     .map(|e| {
-                        let column = e.borrow::<ColumnAssign>().column().clone();
+                        let column = *e.borrow::<ColumnAssign>().column();
                         let column_meta = ctx.get_column_meta(&column);
                         Arc::new(Field::new(
                             column_meta.name.clone(),

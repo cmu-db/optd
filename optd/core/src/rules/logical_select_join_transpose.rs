@@ -57,12 +57,12 @@ impl Rule for LogicalSelectJoinTransposeRule {
             (true, false) => Some(
                 outer
                     .logical_select(select.predicate().clone())
-                    .logical_join(inner, join.join_cond().clone(), join.join_type().clone()),
+                    .logical_join(inner, join.join_cond().clone(), *join.join_type()),
             ),
             (false, true) => Some(outer.logical_join(
                 inner.logical_select(select.predicate().clone()),
                 join.join_cond().clone(),
-                join.join_type().clone(),
+                *join.join_type(),
             )),
             // Wrong: false,
             (true, true) => None,

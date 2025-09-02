@@ -21,6 +21,8 @@ impl Default for LogicalJoinAsPhysicalHashJoinRule {
     }
 }
 
+type SplittedJoinConds = (Vec<(Column, Column)>, Vec<Arc<Scalar>>);
+
 impl LogicalJoinAsPhysicalHashJoinRule {
     pub fn new() -> Self {
         let pattern =
@@ -32,7 +34,7 @@ impl LogicalJoinAsPhysicalHashJoinRule {
     fn split_equi_and_non_equi_conditions<'ir>(
         join: &LogicalJoinBorrowed<'ir>,
         ctx: &IRContext,
-    ) -> crate::error::Result<(Vec<(Column, Column)>, Vec<Arc<Scalar>>)> {
+    ) -> crate::error::Result<SplittedJoinConds> {
         let outer_columns = join.outer().output_columns(ctx);
         let inner_columns = join.inner().output_columns(ctx);
 
@@ -45,8 +47,8 @@ impl LogicalJoinAsPhysicalHashJoinRule {
                 inner_columns.contains(lhs.column()),
                 inner_columns.contains(rhs.column()),
             ) {
-                (true, false, false, true) => Some((lhs.column().clone(), rhs.column().clone())),
-                (false, true, true, false) => Some((rhs.column().clone(), lhs.column().clone())),
+                (true, false, false, true) => Some((*lhs.column(), *rhs.column())),
+                (false, true, true, false) => Some((*rhs.column(), *lhs.column())),
                 _ => None,
             }
         };

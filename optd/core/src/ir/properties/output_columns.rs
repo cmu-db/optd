@@ -56,9 +56,9 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                     .iter()
                     .map(|member| {
                         if let Ok(column_assign) = member.try_borrow::<ColumnAssign>() {
-                            column_assign.column().clone()
+                            *column_assign.column()
                         } else if let Ok(column_ref) = member.try_borrow::<ColumnRef>() {
-                            column_ref.column().clone()
+                            *column_ref.column()
                         } else {
                             unreachable!()
                         }
@@ -74,7 +74,7 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                     .iter()
                     .map(|member| {
                         let column_assign = member.try_borrow::<ColumnAssign>().unwrap();
-                        column_assign.column().clone()
+                        *column_assign.column()
                     })
                     .collect();
                 Arc::new(set)
@@ -89,7 +89,7 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                     .chain(keys.members().iter())
                     .map(|member| {
                         let column_assign = member.try_borrow::<ColumnAssign>().unwrap();
-                        column_assign.column().clone()
+                        *column_assign.column()
                     })
                     .collect();
                 Arc::new(set)
@@ -104,7 +104,7 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                     .chain(keys.members().iter())
                     .map(|member| {
                         let column_assign = member.try_borrow::<ColumnAssign>().unwrap();
-                        column_assign.column().clone()
+                        *column_assign.column()
                     })
                     .collect();
                 Arc::new(set)

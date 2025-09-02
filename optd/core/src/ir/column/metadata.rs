@@ -34,7 +34,8 @@ impl ColumnMetaStore {
 
     pub fn add_column_alias(&mut self, column: Column, alias: String) {
         let Column(index) = column;
-        self.columns.get_mut(index).map(|x| match Arc::get_mut(x) {
+        let x = self.columns.get_mut(index).unwrap();
+        match Arc::get_mut(x) {
             Some(column_meta) => column_meta.name = alias.clone(),
             None => {
                 *x = Arc::new(ColumnMeta {
@@ -42,7 +43,7 @@ impl ColumnMetaStore {
                     data_type: x.data_type,
                 })
             }
-        });
+        }
         self.name_to_column_id.insert(alias, column);
     }
 }

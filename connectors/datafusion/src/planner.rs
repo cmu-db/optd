@@ -49,7 +49,7 @@ use optd_core::{
     },
     rules,
 };
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::OptdExtensionConfig;
 

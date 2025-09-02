@@ -47,7 +47,7 @@ impl Derive<OutputColumns> for PhysicalTableScanBorrowed<'_> {
         Arc::new(
             self.projections()
                 .iter()
-                .map(|x| Column(self.first_column().0 + usize::from(*x)))
+                .map(|x| Column(self.first_column().0 + (*x)))
                 .collect(),
         )
     }
