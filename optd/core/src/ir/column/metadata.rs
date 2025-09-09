@@ -16,7 +16,10 @@ pub struct ColumnMetaStore {
 impl ColumnMetaStore {
     pub fn get(&self, column: &Column) -> &Arc<ColumnMeta> {
         let Column(index) = *column;
-        self.columns.get(index).unwrap()
+        let Some(res) = self.columns.get(index) else {
+            panic!("{column} does not have meta");
+        };
+        res
     }
 
     pub fn column_by_name(&self, name: &str) -> Option<Column> {

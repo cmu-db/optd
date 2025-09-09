@@ -22,7 +22,7 @@ pub struct IRContext {
     pub cm: Arc<dyn CostModel>,
 
     pub(crate) source_to_first_column_id: Arc<Mutex<HashMap<DataSourceId, Column>>>,
-    column_meta: Arc<Mutex<ColumnMetaStore>>,
+    pub(crate) column_meta: Arc<Mutex<ColumnMetaStore>>,
 }
 
 impl IRContext {

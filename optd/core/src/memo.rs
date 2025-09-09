@@ -678,15 +678,16 @@ mod tests {
 
     #[test]
     fn insert_new_operator() {
-        let mut memo = MemoTable::new(IRContext::with_empty_magic());
-        let join = mock_scan(1, vec![1], 0.).logical_join(
-            mock_scan(2, vec![2], 0.),
+        let ctx = IRContext::with_empty_magic();
+        let mut memo = MemoTable::new(ctx.clone());
+        let join = ctx.mock_scan(1, vec![1], 0.).logical_join(
+            ctx.mock_scan(2, vec![2], 0.),
             boolean(true),
             JoinType::Inner,
         );
 
-        let join_dup = mock_scan(1, vec![1], 0.).logical_join(
-            mock_scan(2, vec![2], 0.),
+        let join_dup = ctx.mock_scan(1, vec![1], 0.).logical_join(
+            ctx.mock_scan(2, vec![2], 0.),
             boolean(true),
             JoinType::Inner,
         );
@@ -700,16 +701,17 @@ mod tests {
 
     #[test]
     fn insert_operator_into_group() {
-        let mut memo = MemoTable::new(IRContext::with_empty_magic());
-        let join = mock_scan(1, vec![1], 0.).logical_join(
-            mock_scan(2, vec![2], 0.),
+        let ctx = IRContext::with_empty_magic();
+        let mut memo = MemoTable::new(ctx.clone());
+        let join = ctx.mock_scan(1, vec![1], 0.).logical_join(
+            ctx.mock_scan(2, vec![2], 0.),
             boolean(true),
             JoinType::Inner,
         );
         let group_id = memo.insert_new_operator(join).unwrap();
 
-        let join_commuted = mock_scan(2, vec![2], 0.).logical_join(
-            mock_scan(1, vec![1], 0.),
+        let join_commuted = ctx.mock_scan(2, vec![2], 0.).logical_join(
+            ctx.mock_scan(1, vec![1], 0.),
             boolean(true),
             JoinType::Inner,
         );
@@ -725,10 +727,11 @@ mod tests {
 
     #[test]
     fn parent_group_merge() {
-        let mut memo = MemoTable::new(IRContext::with_empty_magic());
+        let ctx = IRContext::with_empty_magic();
+        let mut memo = MemoTable::new(ctx.clone());
 
-        let m1 = mock_scan(1, vec![1], 0.);
-        let m1_alias = mock_scan(2, vec![1], 0.);
+        let m1 = ctx.mock_scan(1, vec![1], 0.);
+        let m1_alias = ctx.mock_scan(2, vec![1], 0.);
 
         let g1 = memo
             .insert_new_operator(m1.clone().logical_select(boolean(true)))
@@ -755,11 +758,12 @@ mod tests {
     #[test]
     #[tracing_test::traced_test]
     fn cascading_group_merges() {
-        let mut memo = MemoTable::new(IRContext::with_empty_magic());
+        let ctx = IRContext::with_empty_magic();
+        let mut memo = MemoTable::new(ctx.clone());
 
-        let m1 = mock_scan(1, vec![1], 0.);
+        let m1 = ctx.mock_scan(1, vec![1], 0.);
         trace!("\n{}", quick_explain(&m1, &memo.ctx));
-        let m1_alias = mock_scan(2, vec![1], 0.);
+        let m1_alias = ctx.mock_scan(2, vec![1], 0.);
 
         let g1 = memo
             .insert_new_operator(
@@ -795,10 +799,11 @@ mod tests {
 
     #[test]
     fn insert_partial_binding() {
-        let mut memo = MemoTable::new(IRContext::with_empty_magic());
+        let ctx = IRContext::with_empty_magic();
+        let mut memo = MemoTable::new(ctx.clone());
 
-        let m1 = mock_scan(1, vec![1], 0.);
-        let m1_alias = mock_scan(2, vec![1], 0.);
+        let m1 = ctx.mock_scan(1, vec![1], 0.);
+        let m1_alias = ctx.mock_scan(2, vec![1], 0.);
         memo.insert_new_operator(
             m1.clone()
                 .logical_select(boolean(true))

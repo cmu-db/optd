@@ -49,8 +49,8 @@ impl Explain for MockScanBorrowed<'_> {
 }
 
 impl MockSpec {
-    pub fn new_test_only(ids: Vec<usize>, card: f64) -> Self {
-        let mocked_output_columns = Arc::new(ids.iter().map(|id| Column(*id)).collect());
+    pub fn new_test_only(ids: Vec<Column>, card: f64) -> Self {
+        let mocked_output_columns = Arc::new(ids.iter().map(|id| *id).collect());
         let mocked_card = Cardinality::new(card);
         Self {
             mocked_output_columns,

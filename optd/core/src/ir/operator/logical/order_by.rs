@@ -101,7 +101,7 @@ impl Explain for LogicalOrderByBorrowed<'_> {
 #[cfg(test)]
 mod tests {
     use crate::ir::{
-        ColumnSet, ScalarValue,
+        ColumnSet, IRContext, ScalarValue,
         convert::{IntoOperator, IntoScalar},
         operator::{MockScan, MockSpec},
         scalar::*,
@@ -111,6 +111,7 @@ mod tests {
 
     #[test]
     fn try_extract_tuple_ordering_success() {
+        let ctx = IRContext::with_empty_magic();
         let ordered_exprs = vec![
             (
                 ColumnRef::new(Column(0)).into_scalar(),
@@ -121,12 +122,8 @@ mod tests {
                 TupleOrderingDirection::Asc,
             ),
         ];
-        let order_by = LogicalOrderBy::new(
-            MockScan::with_mock_spec(1, MockSpec::new_test_only(vec![0, 1, 2], 100.))
-                .into_operator(),
-            ordered_exprs,
-        )
-        .into_operator();
+        let order_by = LogicalOrderBy::new(ctx.mock_scan(1, vec![0, 1, 2], 100.), ordered_exprs)
+            .into_operator();
 
         let res = order_by
             .borrow::<LogicalOrderBy>()
@@ -143,6 +140,7 @@ mod tests {
 
     #[test]
     fn try_extract_tuple_ordering_error() {
+        let ctx = IRContext::with_empty_magic();
         let ordered_exprs = vec![
             (
                 ColumnRef::new(Column(0)).into_scalar(),
@@ -158,12 +156,9 @@ mod tests {
                 TupleOrderingDirection::Asc,
             ),
         ];
-        let order_by = LogicalOrderBy::new(
-            MockScan::with_mock_spec(1, MockSpec::new_test_only(vec![0, 1, 2], 100.))
-                .into_operator(),
-            ordered_exprs,
-        )
-        .into_operator();
+
+        let order_by = LogicalOrderBy::new(ctx.mock_scan(1, vec![0, 1, 2], 100.), ordered_exprs)
+            .into_operator();
 
         let res = order_by
             .borrow::<LogicalOrderBy>()

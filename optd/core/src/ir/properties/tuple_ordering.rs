@@ -226,7 +226,6 @@ mod tests {
     use super::*;
     use crate::ir::{
         IRContext, ScalarValue,
-        builder::mock_scan,
         convert::{IntoOperator, IntoScalar},
         operator::join::JoinType,
         properties::TrySatisfy,
@@ -241,8 +240,7 @@ mod tests {
             (Column(1), TupleOrderingDirection::Desc),
         ]);
 
-        let t1 = MockScan::with_mock_spec(1, MockSpec::new_test_only(vec![0, 1, 2], 100.))
-            .into_operator();
+        let t1 = ctx.mock_scan(1, vec![0, 1, 2], 100.);
         let exact_enforcer = EnforcerSort::new(required.clone(), t1.clone()).into_operator();
         let res = exact_enforcer.try_satisfy(&required, &ctx).unwrap();
         assert_eq!(res.len(), 1);
@@ -266,10 +264,9 @@ mod tests {
     #[test]
     fn physical_nljoin_try_satisfy_ordering() {
         let ctx = IRContext::with_empty_magic();
-        let m1 =
-            MockScan::with_mock_spec(1, MockSpec::new_test_only(vec![0, 1], 100.)).into_operator();
-        let m2 =
-            MockScan::with_mock_spec(2, MockSpec::new_test_only(vec![2, 3], 100.)).into_operator();
+
+        let m1 = ctx.mock_scan(1, vec![0, 1], 100.);
+        let m2 = ctx.mock_scan(1, vec![2, 3], 100.);
         let join_cond = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();
         let join1 = PhysicalNLJoin::new(JoinType::Inner, m1.clone(), m2.clone(), join_cond.clone())
             .into_operator();
@@ -309,7 +306,7 @@ mod tests {
     #[test]
     fn physical_table_scan_try_satisfy_ordering() {
         let ctx = IRContext::with_course_tables();
-        let t1 = mock_scan(1, vec![0, 1], 10.);
+        let t1 = ctx.mock_scan(1, vec![0, 1], 10.);
 
         // Satisfies empty ordering
         let ordering = TupleOrdering::default();

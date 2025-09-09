@@ -5,7 +5,7 @@ use itertools::Itertools;
 use optd_core::{
     cascades::Cascades,
     ir::{
-        Column, IRContext, Operator,
+        Column, DataType, IRContext, Operator,
         builder::*,
         explain::quick_explain,
         operator::join::JoinType,
@@ -66,6 +66,7 @@ async fn integration() -> Result<(), Box<dyn std::error::Error>> {
         .compact() // Optional: use compact format
         .init();
 
+    let ctx = IRContext::with_empty_magic();
     // CREATE TABLE m1(v1 int, v2 int, v3 int);
     // CREATE TABLE m2(v4 int, v5 int);
     // CREATE TABLE m3(v6 int, v7 int);
@@ -79,9 +80,9 @@ async fn integration() -> Result<(), Box<dyn std::error::Error>> {
     // INNER JOIN m2 ON m1.v1 = m2.v4
     // INNER JOIN m3 ON m1.v2 = m3.v6
     // WHERE m3.v7 = 445 AND m1.v3 = 799 ORDER BY v4;
-    let m1 = mock_scan(1, vec![1, 2, 3], 10.);
-    let m2 = mock_scan(2, vec![4, 5], 1000.);
-    let m3 = mock_scan(3, vec![6, 7], 20.);
+    let m1 = ctx.mock_scan(1, vec![1, 2, 3], 10.);
+    let m2 = ctx.mock_scan(2, vec![4, 5], 1000.);
+    let m3 = ctx.mock_scan(3, vec![6, 7], 20.);
     let required = Arc::new(Required {
         tuple_ordering: TupleOrdering::from_iter([(Column(4), TupleOrderingDirection::Asc)]),
     });
@@ -99,11 +100,16 @@ async fn integration() -> Result<(), Box<dyn std::error::Error>> {
         .logical_select(column_ref(Column(3)).eq(integer(799)))
         .logical_select(column_ref(Column(7)).eq(integer(445)))
         .logical_project([
-            column_assign(Column(3), column_ref(Column(3))),
-            column_assign(Column(8), column_ref(Column(1)).plus(integer(1))),
+            column_assign(
+                ctx.define_column(DataType::Int32, None),
+                column_ref(Column(3)),
+            ),
+            column_assign(
+                ctx.define_column(DataType::Int32, None),
+                column_ref(Column(1)).plus(integer(1)),
+            ),
         ]);
 
-    let ctx = IRContext::with_empty_magic();
     let rule_set = RuleSet::builder()
         .add_rule(rules::LogicalJoinAsPhysicalHashJoinRule::new())
         .add_rule(rules::LogicalJoinAsPhysicalNLJoinRule::new())

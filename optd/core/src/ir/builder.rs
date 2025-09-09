@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use itertools::Itertools;
+
 use crate::ir::{
     Column, DataType, Group, GroupId, IRContext, Operator, Scalar, ScalarValue,
     catalog::{DataSourceId, Schema},
@@ -13,19 +15,24 @@ use crate::ir::{
     scalar::*,
 };
 
-/// Creates a mock scan operator.
-pub fn mock_scan(id: usize, columns: Vec<usize>, card: f64) -> Arc<Operator> {
-    use crate::ir::operator::{MockScan, MockSpec};
-
-    let spec = MockSpec::new_test_only(columns, card);
-    MockScan::with_mock_spec(id, spec).into_operator()
-}
-
 pub fn group(group_id: GroupId, properties: Arc<OperatorProperties>) -> Arc<Operator> {
     Group::new(group_id, properties).into_operator()
 }
 
 impl IRContext {
+    /// Creates a mock scan operator.
+    pub fn mock_scan(&self, id: usize, columns: Vec<usize>, card: f64) -> Arc<Operator> {
+        use crate::ir::operator::{MockScan, MockSpec};
+        let mut mapping = self.source_to_first_column_id.lock().unwrap();
+        let mut column_meta = self.column_meta.lock().unwrap();
+        let columns = columns
+            .iter()
+            .map(|i| column_meta.new_column(DataType::Int32, None))
+            .collect_vec();
+
+        let spec = MockSpec::new_test_only(columns, card);
+        MockScan::with_mock_spec(id, spec).into_operator()
+    }
     pub fn logical_get(
         &self,
         source: DataSourceId,
