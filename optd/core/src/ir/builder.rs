@@ -23,11 +23,10 @@ impl IRContext {
     /// Creates a mock scan operator.
     pub fn mock_scan(&self, id: usize, columns: Vec<usize>, card: f64) -> Arc<Operator> {
         use crate::ir::operator::{MockScan, MockSpec};
-        let mut mapping = self.source_to_first_column_id.lock().unwrap();
         let mut column_meta = self.column_meta.lock().unwrap();
         let columns = columns
             .iter()
-            .map(|i| column_meta.new_column(DataType::Int32, None))
+            .map(|_| column_meta.new_column(DataType::Int32, None))
             .collect_vec();
 
         let spec = MockSpec::new_test_only(columns, card);

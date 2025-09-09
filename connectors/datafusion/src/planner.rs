@@ -49,7 +49,7 @@ use optd_core::{
     },
     rules,
 };
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::OptdExtensionConfig;
 
@@ -1277,7 +1277,7 @@ impl OptdQueryPlanner {
                 .await;
         };
 
-        println!("logical:\n{}", quick_explain(&optd_logical, &ctx));
+        // println!("logical:\n{}", quick_explain(&optd_logical, &ctx));
 
         let rule_set = RuleSet::builder()
             .add_rule(rules::LogicalGetAsPhysicalTableScanRule::new())
@@ -1294,7 +1294,7 @@ impl OptdQueryPlanner {
             {
                 opt.memo.read().await.dump();
             }
-            info!("optimization failed");
+            warn!("optimization failed");
             return self
                 .create_physical_plan_default(logical_plan, session_state)
                 .await;
@@ -1392,7 +1392,7 @@ impl OptdQueryPlanner {
         logical_plan: &LogicalPlan,
         session_state: &SessionState,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-        info!(node = %logical_plan, "not yet supported in optd, fallback to default planner");
+        warn!(node = %logical_plan, "not yet supported in optd, fallback to default planner");
 
         return Ok(self
             .default

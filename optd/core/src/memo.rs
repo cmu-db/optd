@@ -476,17 +476,17 @@ impl MemoTable {
     /// This method is primarily intended for debugging and testing.
     pub fn dump(&self) {
         let option = ExplainOption::default();
-        println!("======== MEMO DUMP BEGIN ========");
-        println!("\n[operators]");
-        println!("group_ids = {:?}", self.groups.keys());
-        println!("total_group_count = {}", self.groups.keys().len());
-        println!("total_operator_count = {}", self.operator_dedup.len());
+        info!("======== MEMO DUMP BEGIN ========");
+        info!("\n[operators]");
+        info!("group_ids = {:?}", self.groups.keys());
+        info!("total_group_count = {}", self.groups.keys().len());
+        info!("total_operator_count = {}", self.operator_dedup.len());
         for (group_id, group) in &self.groups {
             let state = group.exploration.borrow();
             assert_eq!(group_id, &group.group_id);
-            println!("\n[operators.{group_id}]");
-            println!("num_exprs = {}", state.exprs.len());
-            println!(
+            info!("\n[operators.{group_id}]");
+            info!("num_exprs = {}", state.exprs.len());
+            info!(
                 "output_columns = {}",
                 state
                     .properties
@@ -495,7 +495,7 @@ impl MemoTable {
                     .map(|x| format!("{x:?}"))
                     .unwrap_or("?".to_string()),
             );
-            println!(
+            info!(
                 "cardinality = {}",
                 state
                     .properties
@@ -506,11 +506,11 @@ impl MemoTable {
             );
 
             for expr in state.exprs.iter() {
-                println!("{} = {:?}", expr.id(), expr.key());
+                info!("{} = {:?}", expr.id(), expr.key());
             }
 
             for (required, tx) in group.optimizations.iter() {
-                println!("\n[operators.{group_id}.required = {required}]");
+                info!("\n[operators.{group_id}.required = {required}]");
                 let state = tx.borrow();
                 let best_index = state
                     .costed_exprs
@@ -533,7 +533,7 @@ impl MemoTable {
                         .filter(|best_index| i.eq(best_index))
                         .map(|best_index| format!("o#{best_index} (best)"))
                         .unwrap_or_else(|| format!("o#{i}{:>7}", ""));
-                    println!(
+                    info!(
                         "{opt_desc} = {{ id={}, total = {}, operation = {} inputs: {{{}}} }}",
                         costed.group_expr.id(),
                         costed.total_cost,
@@ -543,12 +543,12 @@ impl MemoTable {
                 }
             }
         }
-        println!("\n[scalars]");
+        info!("\n[scalars]");
         for (scalar_id, scalar) in &self.scalar_id_to_key {
             let s = scalar.explain(&self.ctx, &option).to_one_line_string(true);
-            println!("{scalar_id} = \"{s}\"")
+            info!("{scalar_id} = \"{s}\"")
         }
-        println!("======== MEMO DUMP END ==========");
+        info!("======== MEMO DUMP END ==========");
     }
 }
 

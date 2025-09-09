@@ -103,7 +103,6 @@ mod tests {
     use crate::ir::{
         ColumnSet, IRContext, ScalarValue,
         convert::{IntoOperator, IntoScalar},
-        operator::{MockScan, MockSpec},
         scalar::*,
     };
 
