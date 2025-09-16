@@ -1495,9 +1495,9 @@ dependencies = [
 
 [[package]]
 name = "datafusion-cli"
-version = "49.0.0"
+version = "49.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db88b7c2988301968b5234be0011ae73c67559b6f62d771393bb442d16213c60"
+checksum = "5966ac4973bf66cf5c189046b1b29de90db9ba059ce7193137dd089e277495de"
 dependencies = [
  "arrow",
  "async-trait",
