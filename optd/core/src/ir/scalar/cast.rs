@@ -3,18 +3,17 @@ use std::sync::Arc;
 use pretty_xmlish::Pretty;
 
 use crate::ir::{
-    Column, IRCommon, Scalar,
+    DataType, IRCommon, Scalar,
     explain::Explain,
     macros::{define_node, impl_scalar_conversion},
     properties::ScalarProperties,
 };
 
 define_node!(
-    /// Introducing a new [`Column`].
-    ColumnAssign, ColumnAssignBorrowed {
+    Cast, CastBorrowed {
         properties: ScalarProperties,
-        metadata: ColumnAssignMetadata {
-            column: Column,
+        metadata: CastMetadata {
+            data_type: DataType,
         },
         inputs: {
             operators: [],
@@ -22,29 +21,27 @@ define_node!(
         }
     }
 );
-impl_scalar_conversion!(ColumnAssign, ColumnAssignBorrowed);
+impl_scalar_conversion!(Cast, CastBorrowed);
 
-impl ColumnAssign {
-    pub fn new(column: Column, expr: Arc<Scalar>) -> Self {
+impl Cast {
+    pub fn new(data_type: DataType, expr: Arc<Scalar>) -> Self {
         Self {
-            meta: ColumnAssignMetadata { column },
+            meta: CastMetadata { data_type },
             common: IRCommon::with_input_scalars_only(Arc::new([expr])),
         }
     }
 }
 
-impl Explain for ColumnAssignBorrowed<'_> {
+impl Explain for CastBorrowed<'_> {
     fn explain<'a>(
         &self,
         ctx: &crate::ir::IRContext,
         option: &crate::ir::explain::ExplainOption,
     ) -> pretty_xmlish::Pretty<'a> {
-        let column_meta = ctx.get_column_meta(self.column());
         let fmt = format!(
-            "{}({}) := {}",
-            &column_meta.name,
-            self.column(),
-            self.expr().explain(ctx, option).to_one_line_string(true)
+            "CAST ({} AS {:?})",
+            self.expr().explain(ctx, option).to_one_line_string(true),
+            self.data_type(),
         );
         Pretty::display(&fmt)
     }

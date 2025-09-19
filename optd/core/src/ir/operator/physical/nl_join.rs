@@ -11,7 +11,7 @@ use crate::ir::{
 };
 
 define_node!(
-    PhysicalNLJoin, PhysicalNLJoinBorrowed  {
+    PhysicalNLJoin, PhysicalNLJoinBorrowed {
         properties: OperatorProperties,
         metadata: PhysicalNLJoinMetadata {
             join_type: JoinType,

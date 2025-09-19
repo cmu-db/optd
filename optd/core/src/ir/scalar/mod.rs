@@ -1,17 +1,22 @@
 mod assign;
 mod binary_op;
+mod cast;
 mod column_ref;
+mod function;
+mod list;
 mod literal;
-mod projection_list;
+mod nary_op;
 
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 pub use assign::*;
 pub use binary_op::*;
+pub use cast::*;
 pub use column_ref::*;
+pub use function::*;
+pub use list::*;
 pub use literal::*;
-
-pub use projection_list::*;
+pub use nary_op::*;
 
 use crate::ir::{ColumnSet, IRCommon, Operator, explain::Explain, properties::ScalarProperties};
 
@@ -20,15 +25,18 @@ use crate::ir::{ColumnSet, IRCommon, Operator, explain::Explain, properties::Sca
 pub enum ScalarKind {
     Literal(LiteralMetadata),
     ColumnRef(ColumnRefMetadata),
-    Assign(AssignMetadata),
-    ProjectionList(ProjectionListMetadata),
+    ColumnAssign(ColumnAssignMetadata),
     BinaryOp(BinaryOpMetadata),
+    NaryOp(NaryOpMetadata),
+    List(ListMetadata),
+    Function(FunctionMetadata),
+    Cast(CastMetadata),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Scalar {
     pub kind: ScalarKind,
-    pub(crate) common: IRCommon<ScalarProperties>,
+    pub common: IRCommon<ScalarProperties>,
 }
 
 impl Scalar {
@@ -58,14 +66,20 @@ impl Scalar {
 
     pub fn used_columns(&self) -> ColumnSet {
         match &self.kind {
-            ScalarKind::Literal(_) => HashSet::new(),
-            ScalarKind::ColumnRef(meta) => HashSet::from_iter(std::iter::once(meta.column)),
-            ScalarKind::BinaryOp(_) => self
-                .input_scalars()
-                .iter()
-                .fold(HashSet::new(), |x, y| &x & &y.used_columns()),
-            ScalarKind::Assign(_) => todo!(),
-            ScalarKind::ProjectionList(_) => todo!(),
+            ScalarKind::Literal(_) => ColumnSet::default(),
+            ScalarKind::ColumnRef(meta) => ColumnSet::from_iter(std::iter::once(meta.column)),
+            ScalarKind::BinaryOp(_)
+            | ScalarKind::NaryOp(_)
+            | ScalarKind::ColumnAssign(_)
+            | ScalarKind::List(_)
+            | ScalarKind::Cast(_)
+            | ScalarKind::Function(_) => self.input_scalars().iter().fold(
+                ColumnSet::default(),
+                |mut used_columns, scalar| {
+                    used_columns |= &scalar.used_columns();
+                    used_columns
+                },
+            ),
         }
     }
 }
@@ -83,10 +97,23 @@ impl Explain for Scalar {
             ScalarKind::ColumnRef(meta) => {
                 ColumnRef::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            ScalarKind::Assign(_) => todo!(),
-            ScalarKind::ProjectionList(_) => todo!(),
             ScalarKind::BinaryOp(meta) => {
                 BinaryOp::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            ScalarKind::NaryOp(meta) => {
+                NaryOp::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            ScalarKind::ColumnAssign(meta) => {
+                ColumnAssign::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            ScalarKind::List(meta) => {
+                List::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            ScalarKind::Function(meta) => {
+                Function::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            ScalarKind::Cast(meta) => {
+                Cast::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
         }
     }

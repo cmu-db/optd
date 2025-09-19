@@ -9,6 +9,7 @@ anyhow = "1.0.98"
 bitvec = "1.0.1"
 itertools = "0.14.0"
 pretty-xmlish = "0.1.13"
+snafu = "0.8.6"
 tokio = { workspace = true, features = [
     "rt-multi-thread",
     "sync",
@@ -17,7 +18,7 @@ tokio = { workspace = true, features = [
     "tracing",
 ] }
 
-tracing = "0.1.41"
+tracing = { workspace = true }
 
 [dev-dependencies]
 console-subscriber = "0.4.1"

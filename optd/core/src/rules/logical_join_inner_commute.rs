@@ -1,3 +1,5 @@
+use snafu::ensure_whatever;
+
 use crate::ir::{
     OperatorKind,
     convert::IntoOperator,
@@ -42,9 +44,12 @@ impl Rule for LogicalJoinInnerCommuteRule {
         &self,
         operator: &crate::ir::Operator,
         _ctx: &crate::ir::IRContext,
-    ) -> Result<Vec<std::sync::Arc<crate::ir::Operator>>, ()> {
+    ) -> crate::error::Result<Vec<std::sync::Arc<crate::ir::Operator>>> {
         let join = operator.try_borrow::<LogicalJoin>().unwrap();
-        assert_eq!(join.join_type(), &JoinType::Inner);
+        ensure_whatever!(
+            join.join_type().eq(&JoinType::Inner),
+            "join must be inner join"
+        );
 
         let new_outer = join.inner().clone();
         let new_inner = join.outer().clone();

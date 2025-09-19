@@ -25,7 +25,7 @@ impl Rule for EnforceTupleOrderingRule {
         &self,
         operator: &crate::ir::Operator,
         _ctx: &crate::ir::IRContext,
-    ) -> Result<Vec<std::sync::Arc<crate::ir::Operator>>, ()> {
+    ) -> crate::error::Result<Vec<Arc<crate::ir::Operator>>> {
         if self.ordering.is_empty() {
             return Ok(vec![]);
         }

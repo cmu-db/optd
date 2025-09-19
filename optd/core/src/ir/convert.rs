@@ -26,6 +26,10 @@ impl Operator {
         T::try_from_operator(self)
     }
 
+    pub fn bind<T: TryFromOperator>(self) -> T {
+        T::try_from_operator(self).unwrap()
+    }
+
     pub fn try_borrow<O>(
         &self,
     ) -> Result<<O as TryBorrowOperatorMarker<'_>>::BorrowedType, &OperatorKind>
@@ -33,6 +37,13 @@ impl Operator {
         for<'a> O: TryBorrowOperatorMarker<'a>,
     {
         O::BorrowedType::try_borrow_operator(self)
+    }
+
+    pub fn borrow<O>(&self) -> <O as TryBorrowOperatorMarker<'_>>::BorrowedType
+    where
+        for<'a> O: TryBorrowOperatorMarker<'a>,
+    {
+        O::BorrowedType::try_borrow_operator(self).unwrap()
     }
 }
 
@@ -60,6 +71,10 @@ impl Scalar {
         T::try_from_scalar(self)
     }
 
+    pub fn bind<T: TryFromScalar>(self) -> T {
+        T::try_from_scalar(self).unwrap()
+    }
+
     pub fn try_borrow<S>(
         &self,
     ) -> Result<<S as TryBorrowScalarMarker<'_>>::BorrowedType, &ScalarKind>
@@ -67,5 +82,12 @@ impl Scalar {
         for<'a> S: TryBorrowScalarMarker<'a>,
     {
         S::BorrowedType::try_borrow_scalar(self)
+    }
+
+    pub fn borrow<S>(&self) -> <S as TryBorrowScalarMarker<'_>>::BorrowedType
+    where
+        for<'a> S: TryBorrowScalarMarker<'a>,
+    {
+        S::BorrowedType::try_borrow_scalar(self).unwrap()
     }
 }
