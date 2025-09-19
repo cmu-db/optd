@@ -12,7 +12,7 @@ optd-datafusion = { path = "connectors/datafusion" }
 tokio = { version = "1.47", features = ["macros", "rt", "sync"] }
 
 # DataFusion dependencies
-datafusion = { version = "49.0.0", default-features = false }
+datafusion = { version = "49.0.2", default-features = false }
 
 [workspace.package]
 version = "0.1.0"
