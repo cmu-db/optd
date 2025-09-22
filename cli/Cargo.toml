@@ -7,7 +7,7 @@ repository.workspace = true
 [dependencies]
 clap = { version = "4.5.41", features = ["derive", "cargo"] }
 datafusion = { workspace = true }
-datafusion-cli = "49.0.2"
+datafusion-cli = "50.0.0"
 optd-datafusion = { path = "../connectors/datafusion", version = "0.1" }
 tokio = { workspace = true, features = [
     "macros",
