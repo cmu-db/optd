@@ -131,6 +131,9 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                     Self::MAGIC_GROUP_BY_KEY_NDV_FACTOR.powi(i32::try_from(len).unwrap()),
                 )
             }
+            OperatorKind::LogicalRemap(meta) => LogicalRemap::borrow_raw_parts(meta, &op.common)
+                .input()
+                .cardinality(ctx),
         }
     }
 }

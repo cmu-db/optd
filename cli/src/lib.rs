@@ -20,12 +20,14 @@ impl OptdCliSessionContext {
             .with_config(config)
             .with_runtime_env(runtime)
             .with_default_features()
-            // .with_optimizer_rules(Vec::new())
             .with_optd_planner()
             .build();
         let inner = SessionContext::new_with_state(state);
 
         Self { inner }
+    }
+    pub async fn refresh_catalogs(&self) -> datafusion::common::Result<()> {
+        self.inner.refresh_catalogs().await
     }
 
     pub fn enable_url_table(self) -> Self {

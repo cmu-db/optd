@@ -4,11 +4,12 @@ use std::{
 };
 
 use datafusion::{
+    catalog::memory::DataSourceExec,
     common::{
         DFSchema,
         tree_node::{TransformedResult, TreeNode},
     },
-    datasource::source_as_provider,
+    datasource::{physical_plan::ParquetSource, source_as_provider},
     error::DataFusionError,
     execution::{SessionState, context::QueryPlanner},
     logical_expr::{self, ExprSchemable, LogicalPlan, PlanType, StringifiedPlan, logical_plan},
@@ -19,7 +20,9 @@ use datafusion::{
         displayable,
         explain::ExplainExec,
         filter::FilterExec,
-        joins::{HashJoinExec, NestedLoopJoinExec, PartitionMode, utils::JoinFilter},
+        joins::{
+            HashJoinExec, NestedLoopJoinExec, PartitionMode, SortMergeJoinExec, utils::JoinFilter,
+        },
         projection::ProjectionExec,
         sorts::sort::SortExec,
         udaf::AggregateFunctionExpr,
@@ -32,18 +35,18 @@ use optd_core::{
     cascades::Cascades,
     ir::{
         IRContext, Scalar,
-        builder::{self as optd_builder, column_assign, column_ref},
+        builder::{self as optd_builder, column_assign, column_ref, list},
         catalog::Field,
         convert::{IntoOperator, IntoScalar},
         explain::quick_explain,
         operator::{
-            EnforcerSort, LogicalOrderBy, PhysicalFilter, PhysicalHashAggregate, PhysicalHashJoin,
-            PhysicalNLJoin, PhysicalProject, PhysicalTableScan, join,
+            EnforcerSort, LogicalOrderBy, LogicalRemap, PhysicalFilter, PhysicalHashAggregate,
+            PhysicalHashJoin, PhysicalNLJoin, PhysicalProject, PhysicalTableScan, join,
         },
         properties::TupleOrderingDirection,
         rule::RuleSet,
         scalar::{
-            BinaryOp, Cast, ColumnAssign, ColumnRef, Function, FunctionKind, List, NaryOp,
+            BinaryOp, Cast, ColumnAssign, ColumnRef, Function, FunctionKind, Like, List, NaryOp,
             NaryOpKind,
         },
     },
@@ -107,6 +110,10 @@ impl OptdQueryPlanner {
                 self.try_into_optd_logical_order_by(sort, ctx, session_state)
                     .await
             }
+            LogicalPlan::SubqueryAlias(alias) => {
+                self.try_into_optd_logical_remap(alias, ctx, session_state)
+                    .await
+            }
             plan => {
                 info!(%plan, "not supported df_logical_plan");
                 None
@@ -131,6 +138,30 @@ impl OptdQueryPlanner {
         .await?;
 
         Some(LogicalOrderBy::new(input, ordering_exprs).into_operator())
+    }
+
+    pub async fn try_into_optd_logical_remap(
+        &self,
+        node: &logical_plan::SubqueryAlias,
+        ctx: &IRContext,
+        session_state: &SessionState,
+    ) -> Option<Arc<optd_core::ir::Operator>> {
+        let input =
+            Box::pin(self.try_into_optd_logical_plan(&node.input, ctx, session_state)).await?;
+
+        let input_schema = input.output_schema(ctx)?;
+
+        let mut mappings = Vec::new();
+        for (field, remapped_column_name) in
+            node.schema.fields().iter().zip(node.schema.field_names())
+        {
+            let (index, _) = node.input.schema().fields().find(field.name())?;
+            let optd_field = &input_schema.columns()[index];
+            let column = ctx.column_by_name(&optd_field.name)?;
+            let mapped = ctx.define_column(optd_field.data_type, Some(remapped_column_name));
+            mappings.push(column_assign(mapped, column_ref(column)));
+        }
+        Some(LogicalRemap::new(input, list(mappings)).into_operator())
     }
 
     pub async fn try_into_optd_ordering_exprs(
@@ -333,7 +364,7 @@ impl OptdQueryPlanner {
                     Box::pin(self.try_from_optd_scalar(column_assign.expr(), ctx, session_state))
                         .await?;
                 let split = column_meta.name.split(".").collect_vec();
-                df_exprs.push(e.alias_if_changed(split[1].to_string())?);
+                df_exprs.push(e.alias_if_changed(split.last().unwrap().to_string())?);
             } else {
                 let e = Box::pin(self.try_from_optd_scalar(&expr, ctx, session_state)).await?;
                 df_exprs.push(e);
@@ -468,6 +499,20 @@ impl OptdQueryPlanner {
             optd_core::ir::ScalarKind::Function(_) => todo!(),
             optd_core::ir::ScalarKind::ColumnAssign(_) => todo!(),
             optd_core::ir::ScalarKind::List(_) => todo!(),
+            optd_core::ir::ScalarKind::Like(meta) => {
+                let like = Like::borrow_raw_parts(meta, &optd_scalar.common);
+                let expr =
+                    Box::pin(self.try_from_optd_scalar(like.expr(), ctx, session_state)).await?;
+                let pattern =
+                    Box::pin(self.try_from_optd_scalar(like.pattern(), ctx, session_state)).await?;
+                Ok(logical_expr::Expr::Like(logical_expr::Like::new(
+                    *like.negated(),
+                    Box::new(expr),
+                    Box::new(pattern),
+                    like.escape_char().clone(),
+                    *like.case_insensative(),
+                )))
+            }
         }
     }
 
@@ -613,6 +658,30 @@ impl OptdQueryPlanner {
                     into_optd_data_type(cast.data_type.clone())?,
                 ))
             }
+            logical_expr::Expr::Like(like) => {
+                let expr = Box::pin(self.try_into_optd_scalar(
+                    &like.expr,
+                    input_schema,
+                    ctx,
+                    session_state,
+                ))
+                .await?;
+                let pattern = Box::pin(self.try_into_optd_scalar(
+                    &like.pattern,
+                    input_schema,
+                    ctx,
+                    session_state,
+                ))
+                .await?;
+
+                Some(optd_builder::like(
+                    expr,
+                    pattern,
+                    like.negated,
+                    like.case_insensitive,
+                    like.escape_char,
+                ))
+            }
             expr => {
                 info!(?expr, "unhandled df logical expr");
                 None
@@ -629,7 +698,7 @@ impl OptdQueryPlanner {
         let table_name = node
             .table_name
             .clone()
-            .resolve("datafusion", "public")
+            .resolve("datafusion", "default")
             .to_string();
         let df_schema =
             DFSchema::try_from_qualified_schema(node.table_name.clone(), &node.source.schema())
@@ -667,26 +736,39 @@ impl OptdQueryPlanner {
             .unwrap_or((0..schema.columns().len()).collect());
 
         let predicate = {
-            let mut terms = Vec::with_capacity(node.filters.len());
-            for filter in node.filters.iter() {
-                filter.column_refs().iter().for_each(|column| {
-                    if let Ok(index) = node.source.schema().index_of(column.name()) {
-                        projections.insert(index);
-                    } else {
-                        panic!()
-                    }
-                });
-                let term = self
-                    .try_into_optd_scalar(filter, &df_schema, ctx, session_state)
-                    .await
-                    .unwrap();
+            let filters = node.filters.iter().collect_vec();
+            let supports_filter_pushdown = provider.supports_filters_pushdown(&filters).unwrap();
+            if supports_filter_pushdown
+                .iter()
+                .all(|x| x.ne(&logical_expr::TableProviderFilterPushDown::Exact))
+            {
+                None
+            } else {
+                let mut terms = Vec::with_capacity(node.filters.len());
+                for filter in node.filters.iter() {
+                    filter.column_refs().iter().for_each(|column| {
+                        if let Ok(index) = node.source.schema().index_of(column.name()) {
+                            projections.insert(index);
+                        } else {
+                            panic!()
+                        }
+                    });
+                    let term = self
+                        .try_into_optd_scalar(filter, &df_schema, ctx, session_state)
+                        .await
+                        .unwrap();
 
-                terms.push(term);
+                    terms.push(term);
+                }
+                terms.into_iter().reduce(Scalar::and)
             }
-            terms.into_iter().reduce(Scalar::and)
         };
 
-        let x = ctx.logical_get(source, &schema, Some(projections.into_iter().collect()));
+        let x = ctx.logical_get(
+            source,
+            &schema,
+            Some(projections.into_iter().sorted().collect()),
+        );
         let x = match predicate {
             Some(p) => x.logical_select(p),
             None => x,
@@ -986,7 +1068,8 @@ impl OptdQueryPlanner {
                         .try_from_optd_scalar(column_assign.expr(), ctx, session_state)
                         .await?;
 
-                    expr.push(e.alias_if_changed(column_meta.name.clone())?);
+                    let split = column_meta.name.split(".").collect_vec();
+                    expr.push(e.alias_if_changed(split.last().unwrap().to_string())?);
                 }
 
                 let input_physical_schema = input_exec.schema();
@@ -1036,6 +1119,7 @@ impl OptdQueryPlanner {
                     .collect::<datafusion::common::Result<Vec<_>>>()
                     .unwrap();
 
+                warn!(name= %input_exec.name(), schema = ?input_exec.schema());
                 Ok(
                     Arc::new(ProjectionExec::try_new(physical_exprs, input_exec).unwrap())
                         as Arc<dyn ExecutionPlan>,
@@ -1116,6 +1200,83 @@ impl OptdQueryPlanner {
                     LexOrdering::new(physical_sort_exprs).unwrap(),
                     input_exec,
                 )) as Arc<dyn ExecutionPlan>)
+            }
+            OperatorKind::LogicalRemap(meta) => {
+                let remap = LogicalRemap::borrow_raw_parts(meta, &optd_physical.common);
+
+                let input_exec =
+                    Box::pin(self.try_from_optd_physical_plan(remap.input(), ctx, session_state))
+                        .await?;
+
+                let input_logical_schema =
+                    from_optd_schema(&remap.input().output_schema(ctx).unwrap());
+                let mappings = remap.mappings().borrow::<List>();
+
+                let mut expr = Vec::with_capacity(mappings.members().len());
+
+                for member in mappings.members() {
+                    let column_assign = member.borrow::<ColumnAssign>();
+                    let column_meta = ctx.get_column_meta(column_assign.column());
+                    let e = self
+                        .try_from_optd_scalar(column_assign.expr(), ctx, session_state)
+                        .await?;
+
+                    let split = column_meta.name.split(".").collect_vec();
+                    expr.push(e.alias_if_changed(split.last().unwrap().to_string())?);
+                }
+
+                let input_physical_schema = input_exec.schema();
+                let physical_exprs = expr
+                    .iter()
+                    .map(|e| {
+                        // For projections, SQL planner and logical plan builder may convert user
+                        // provided expressions into logical Column expressions if their results
+                        // are already provided from the input plans. Because we work with
+                        // qualified columns in logical plane, derived columns involve operators or
+                        // functions will contain qualifiers as well. This will result in logical
+                        // columns with names like `SUM(t1.c1)`, `t1.c1 + t1.c2`, etc.
+                        //
+                        // If we run these logical columns through physical_name function, we will
+                        // get physical names with column qualifiers, which violates DataFusion's
+                        // field name semantics. To account for this, we need to derive the
+                        // physical name from physical input instead.
+                        //
+                        // This depends on the invariant that logical schema field index MUST match
+                        // with physical schema field index.
+                        let physical_name = if let logical_expr::Expr::Column(col) = e {
+                            match input_logical_schema.index_of_column(col) {
+                                Ok(idx) => {
+                                    // index physical field using logical field index
+                                    Ok(input_exec.schema().field(idx).name().to_string())
+                                }
+                                // logical column is not a derived column, safe to pass along to
+                                // physical_name
+                                Err(_) => logical_expr::expr::physical_name(e),
+                            }
+                        } else {
+                            logical_expr::expr::physical_name(e)
+                        };
+
+                        let physical_expr = self.default.create_physical_expr(
+                            e,
+                            &input_logical_schema,
+                            session_state,
+                        );
+
+                        // Check for possible column name mismatches
+                        let final_physical_expr =
+                            maybe_fix_physical_column_name(physical_expr, &input_physical_schema);
+
+                        tuple_err((final_physical_expr, physical_name))
+                    })
+                    .collect::<datafusion::common::Result<Vec<_>>>()
+                    .unwrap();
+
+                // warn!(?input_exec);
+                Ok(
+                    Arc::new(ProjectionExec::try_new(physical_exprs, input_exec).unwrap())
+                        as Arc<dyn ExecutionPlan>,
+                )
             }
             x => Err(DataFusionError::External(
                 format!("{x:?} cannot be executed on df yet").into(),
@@ -1277,8 +1438,6 @@ impl OptdQueryPlanner {
                 .await;
         };
 
-        // println!("logical:\n{}", quick_explain(&optd_logical, &ctx));
-
         let rule_set = RuleSet::builder()
             .add_rule(rules::LogicalGetAsPhysicalTableScanRule::new())
             .add_rule(rules::LogicalAggregateAsPhysicalHashAggregateRule::new())
@@ -1415,6 +1574,163 @@ impl QueryPlanner for OptdQueryPlanner {
         'c: 'ret,
         Self: 'ret,
     {
-        Box::pin(self.create_physical_plan_inner(logical_plan, session_state))
+        Box::pin(async {
+            let plan = self
+                .create_physical_plan_inner(logical_plan, session_state)
+                .await?;
+
+            if let Some(join_order) = get_join_order_from_df_exec(&plan) {
+                println!("Join Order: {join_order}");
+                let mut graphviz = String::new();
+                join_order.into_graphviz(&mut graphviz);
+                println!("graphviz:\n{}", graphviz);
+            } else {
+                println!("Join Order: not applicable / unhandled");
+            }
+
+            Ok(plan)
+        })
     }
+}
+
+#[derive(Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
+enum JoinOrder {
+    Table(String),
+    HashJoin(Box<Self>, Box<Self>),
+    MergeJoin(Box<Self>, Box<Self>),
+    NestedLoopJoin(Box<Self>, Box<Self>),
+    Other(Box<Self>),
+}
+
+impl JoinOrder {
+    fn into_graphviz(&self, graphviz: &mut String) {
+        graphviz.push_str("digraph G {\n");
+        graphviz.push_str("\trankdir = BT\n");
+
+        let mut counter = 0;
+        self.visit(graphviz, &mut counter);
+        graphviz.push_str("}");
+    }
+
+    fn add_base_table(label: String, graphviz: &mut String, counter: &mut usize) -> usize {
+        let id = *counter;
+        *counter += 1;
+        graphviz.push_str(&format!("\tnode{id} [label=\"{label}\"]\n"));
+        id
+    }
+
+    fn add_edge(from: usize, to: usize, graphviz: &mut String) {
+        graphviz.push_str(&format!("\tnode{from} -> node{to}\n"));
+    }
+
+    fn add_join(
+        join_method: &str,
+        _joined_tables: &Vec<&str>,
+        left_id: usize,
+        right_id: usize,
+        graphviz: &mut String,
+        counter: &mut usize,
+    ) -> usize {
+        let id = *counter;
+        *counter += 1;
+        // let label = format!(
+        //     "{join_method} (joined=[{}])",
+        //     joined_tables.iter().join(",")
+        // );
+
+        graphviz.push_str(&format!("\tnode{id} [label=\"{join_method}\"]\n"));
+        Self::add_edge(left_id, id, graphviz);
+        Self::add_edge(right_id, id, graphviz);
+        id
+    }
+
+    fn visit(&self, graphviz: &mut String, counter: &mut usize) -> (usize, Vec<&str>) {
+        match self {
+            JoinOrder::Table(name) => {
+                let id = Self::add_base_table(name.clone(), graphviz, counter);
+                return (id, vec![name]);
+            }
+            JoinOrder::HashJoin(left, right) => {
+                let (left_id, mut joined_tables) = left.visit(graphviz, counter);
+                let (right_id, mut right_joined) = right.visit(graphviz, counter);
+                joined_tables.append(&mut right_joined);
+                let id = Self::add_join("HJ", &joined_tables, left_id, right_id, graphviz, counter);
+                return (id, joined_tables);
+            }
+            JoinOrder::MergeJoin(left, right) => {
+                let (left_id, mut joined_tables) = left.visit(graphviz, counter);
+                let (right_id, mut right_joined) = right.visit(graphviz, counter);
+                joined_tables.append(&mut right_joined);
+                let id = Self::add_join("MJ", &joined_tables, left_id, right_id, graphviz, counter);
+                return (id, joined_tables);
+            }
+            JoinOrder::NestedLoopJoin(left, right) => {
+                let (left_id, mut joined_tables) = left.visit(graphviz, counter);
+                let (right_id, mut right_joined) = right.visit(graphviz, counter);
+                joined_tables.append(&mut right_joined);
+                let id =
+                    Self::add_join("NLJ", &joined_tables, left_id, right_id, graphviz, counter);
+                return (id, joined_tables);
+            }
+            JoinOrder::Other(child) => child.visit(graphviz, counter),
+        }
+    }
+}
+
+impl std::fmt::Display for JoinOrder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            JoinOrder::Table(name) => write!(f, "{}", name),
+            JoinOrder::HashJoin(left, right) => {
+                write!(f, "(HJ {} {})", left, right)
+            }
+            JoinOrder::MergeJoin(left, right) => {
+                write!(f, "(MJ {} {})", left, right)
+            }
+            JoinOrder::NestedLoopJoin(left, right) => {
+                write!(f, "(NLJ {} {})", left, right)
+            }
+            JoinOrder::Other(child) => {
+                write!(f, "<{}>", child)
+            }
+        }
+    }
+}
+
+fn get_join_order_from_df_exec(rel_node: &Arc<dyn ExecutionPlan>) -> Option<JoinOrder> {
+    if let Some(x) = rel_node.as_any().downcast_ref::<DataSourceExec>() {
+        let (config, _) = x.downcast_to_file_source::<ParquetSource>()?;
+        let location = config.file_groups[0].files()[0]
+            .object_meta
+            .location
+            .to_string();
+        let maybe_table_name = location.split('/').rev().nth(1)?;
+        return Some(JoinOrder::Table(maybe_table_name.to_string()));
+    }
+    if let Some(x) = rel_node.as_any().downcast_ref::<HashJoinExec>() {
+        let left = get_join_order_from_df_exec(x.left())?;
+        let right = get_join_order_from_df_exec(x.right())?;
+        return Some(JoinOrder::HashJoin(Box::new(left), Box::new(right)));
+    }
+
+    if let Some(x) = rel_node.as_any().downcast_ref::<SortMergeJoinExec>() {
+        let left = get_join_order_from_df_exec(x.left())?;
+        let right = get_join_order_from_df_exec(x.right())?;
+        return Some(JoinOrder::MergeJoin(Box::new(left), Box::new(right)));
+    }
+
+    if let Some(x) = rel_node.as_any().downcast_ref::<NestedLoopJoinExec>() {
+        let left = get_join_order_from_df_exec(x.left())?;
+        let right = get_join_order_from_df_exec(x.right())?;
+        return Some(JoinOrder::NestedLoopJoin(Box::new(left), Box::new(right)));
+    }
+
+    if rel_node.children().len() == 1 {
+        let child = get_join_order_from_df_exec(rel_node.children()[0])?;
+        if matches!(child, JoinOrder::Other(_) | JoinOrder::Table(_)) {
+            return Some(child);
+        }
+        return Some(JoinOrder::Other(Box::new(child)));
+    }
+    None
 }

@@ -7,8 +7,8 @@ use crate::ir::{
     catalog::{DataSourceId, Schema},
     convert::{IntoOperator, IntoScalar},
     operator::{
-        LogicalAggregate, LogicalGet, LogicalJoin, LogicalProject, LogicalSelect, PhysicalFilter,
-        PhysicalHashAggregate, PhysicalHashJoin, PhysicalNLJoin, PhysicalProject,
+        LogicalAggregate, LogicalGet, LogicalJoin, LogicalProject, LogicalRemap, LogicalSelect,
+        PhysicalFilter, PhysicalHashAggregate, PhysicalHashJoin, PhysicalNLJoin, PhysicalProject,
         PhysicalTableScan, join::JoinType,
     },
     properties::OperatorProperties,
@@ -108,6 +108,13 @@ impl Operator {
         PhysicalProject::new(self, list(projections)).into_operator()
     }
 
+    pub fn logical_remap(
+        self: Arc<Self>,
+        mappings: impl IntoIterator<Item = Arc<Scalar>>,
+    ) -> Arc<Self> {
+        LogicalRemap::new(self, list(mappings)).into_operator()
+    }
+
     pub fn logical_aggregate(
         self: Arc<Self>,
         exprs: impl IntoIterator<Item = Arc<Scalar>>,
@@ -159,6 +166,16 @@ pub fn bigint(v: impl Into<Option<i64>>) -> Arc<Scalar> {
 
 pub fn cast(expr: Arc<Scalar>, data_type: DataType) -> Arc<Scalar> {
     Cast::new(data_type, expr).into_scalar()
+}
+
+pub fn like(
+    expr: Arc<Scalar>,
+    pattern: Arc<Scalar>,
+    negated: bool,
+    case_insensative: bool,
+    escape_char: Option<char>,
+) -> Arc<Scalar> {
+    Like::new(expr, pattern, negated, case_insensative, escape_char).into_scalar()
 }
 
 pub fn list(members: impl IntoIterator<Item = Arc<Scalar>>) -> Arc<Scalar> {

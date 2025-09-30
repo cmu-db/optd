@@ -7,8 +7,8 @@ use crate::ir::{
     catalog::{Field, Schema},
     operator::{
         EnforcerSort, LogicalAggregate, LogicalGet, LogicalJoin, LogicalOrderBy, LogicalProject,
-        LogicalSelect, PhysicalFilter, PhysicalHashAggregate, PhysicalHashJoin, PhysicalNLJoin,
-        PhysicalProject, PhysicalTableScan,
+        LogicalRemap, LogicalSelect, PhysicalFilter, PhysicalHashAggregate, PhysicalHashJoin,
+        PhysicalNLJoin, PhysicalProject, PhysicalTableScan,
     },
     properties::{Derive, GetProperty, PropertyMarker},
     scalar::{ColumnAssign, List},
@@ -178,6 +178,25 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                     })
                     .collect();
 
+                Some(Schema::new(columns))
+            }
+            OperatorKind::LogicalRemap(meta) => {
+                let remap = LogicalRemap::borrow_raw_parts(meta, &self.common);
+                let columns = remap
+                    .mappings()
+                    .borrow::<List>()
+                    .members()
+                    .iter()
+                    .map(|e| {
+                        let column = *e.borrow::<ColumnAssign>().column();
+                        let column_meta = ctx.get_column_meta(&column);
+                        Arc::new(Field::new(
+                            column_meta.name.clone(),
+                            column_meta.data_type,
+                            true,
+                        ))
+                    })
+                    .collect_vec();
                 Some(Schema::new(columns))
             }
         }

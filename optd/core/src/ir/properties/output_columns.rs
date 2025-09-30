@@ -3,8 +3,8 @@ use std::sync::Arc;
 use crate::ir::{
     ColumnSet, OperatorKind,
     operator::{
-        LogicalAggregate, LogicalGet, LogicalProject, PhysicalHashAggregate, PhysicalProject,
-        PhysicalTableScan,
+        LogicalAggregate, LogicalGet, LogicalProject, LogicalRemap, PhysicalHashAggregate,
+        PhysicalProject, PhysicalTableScan,
     },
     properties::{Derive, GetProperty, PropertyMarker},
     scalar::{ColumnAssign, ColumnRef, List},
@@ -102,6 +102,19 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                     .members()
                     .iter()
                     .chain(keys.members().iter())
+                    .map(|member| {
+                        let column_assign = member.try_borrow::<ColumnAssign>().unwrap();
+                        *column_assign.column()
+                    })
+                    .collect();
+                Arc::new(set)
+            }
+            OperatorKind::LogicalRemap(meta) => {
+                let remap = LogicalRemap::borrow_raw_parts(meta, &self.common);
+                let projections = remap.mappings().try_borrow::<List>().unwrap();
+                let set = projections
+                    .members()
+                    .iter()
                     .map(|member| {
                         let column_assign = member.try_borrow::<ColumnAssign>().unwrap();
                         *column_assign.column()

@@ -206,12 +206,12 @@ async fn main_inner() -> Result<()> {
     let runtime_env = rt_builder.build_arc()?;
 
     // enable dynamic file query
-    let cli_ctx =
-        OptdCliSessionContext::new_with_config_rt(session_config, runtime_env).enable_url_table();
 
+    let cli_ctx = OptdCliSessionContext::new_with_config_rt(session_config, runtime_env);
+    cli_ctx.refresh_catalogs().await?;
+    let cli_ctx = cli_ctx.enable_url_table();
     let ctx = cli_ctx.inner();
 
-    ctx.refresh_catalogs().await?;
     // install dynamic catalog provider that can register required object stores
     ctx.register_catalog_list(Arc::new(DynamicObjectStoreCatalog::new(
         ctx.state().catalog_list().clone(),
@@ -289,6 +289,13 @@ fn get_session_config(args: &Args) -> Result<SessionConfig> {
     if env::var_os("DATAFUSION_FORMAT_NULL").is_none() {
         config_options.format.null = String::from("NULL");
     }
+
+    if let Ok(x) = env::var("OPTD_CATALOG_LOCATION") {
+        config_options.catalog.location.replace(x);
+    }
+
+    config_options.catalog.format.replace("PARQUET".to_string());
+    config_options.catalog.default_schema = "default".to_string();
 
     let session_config = SessionConfig::from(config_options).with_information_schema(true);
     Ok(session_config)
