@@ -10,6 +10,7 @@ pub use logical::get::*;
 pub use logical::join::{LogicalJoin, LogicalJoinBorrowed, LogicalJoinMetadata};
 pub use logical::order_by::*;
 pub use logical::project::*;
+pub use logical::remap::*;
 pub use logical::select::*;
 pub use physical::filter::*;
 pub use physical::hash_aggregate::*;
@@ -39,6 +40,7 @@ pub enum OperatorKind {
     LogicalProject(LogicalProjectMetadata),
     LogicalAggregate(LogicalAggregateMetadata),
     LogicalOrderBy(LogicalOrderByMetadata),
+    LogicalRemap(LogicalRemapMetadata),
     EnforcerSort(EnforcerSortMetadata),
     PhysicalTableScan(PhysicalTableScanMetadata),
     PhysicalNLJoin(PhysicalNLJoinMetadata),
@@ -183,6 +185,9 @@ impl Explain for Operator {
             }
             OperatorKind::PhysicalHashAggregate(meta) => {
                 PhysicalHashAggregate::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            OperatorKind::LogicalRemap(meta) => {
+                LogicalRemap::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
         }
     }

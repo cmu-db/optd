@@ -217,6 +217,10 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
                 // Hash aggregate does not maintain tuple ordering.
                 ordering.is_empty().then(|| vec![ordering.clone()].into())
             }
+            OperatorKind::LogicalRemap(_) => {
+                // Hash aggregate does not maintain tuple ordering.
+                ordering.is_empty().then(|| vec![ordering.clone()].into())
+            }
         }
     }
 }

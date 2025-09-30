@@ -25,6 +25,7 @@ impl CostModel for MagicCostModel {
             OperatorKind::LogicalProject(_) => None,
             OperatorKind::LogicalAggregate(_) => None,
             OperatorKind::LogicalOrderBy(_) => None,
+            OperatorKind::LogicalRemap(_) => Some(Cost::UNIT),
             OperatorKind::EnforcerSort(_) => {
                 let input_card = op.input_operators()[0].cardinality(ctx);
                 let cost = Cost::UNIT * input_card.as_f64() * input_card.as_f64().ln_1p().max(1.0);

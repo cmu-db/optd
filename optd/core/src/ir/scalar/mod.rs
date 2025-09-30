@@ -3,6 +3,7 @@ mod binary_op;
 mod cast;
 mod column_ref;
 mod function;
+mod like;
 mod list;
 mod literal;
 mod nary_op;
@@ -14,6 +15,7 @@ pub use binary_op::*;
 pub use cast::*;
 pub use column_ref::*;
 pub use function::*;
+pub use like::*;
 pub use list::*;
 pub use literal::*;
 pub use nary_op::*;
@@ -31,6 +33,7 @@ pub enum ScalarKind {
     List(ListMetadata),
     Function(FunctionMetadata),
     Cast(CastMetadata),
+    Like(LikeMetadata),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -73,6 +76,7 @@ impl Scalar {
             | ScalarKind::ColumnAssign(_)
             | ScalarKind::List(_)
             | ScalarKind::Cast(_)
+            | ScalarKind::Like(_)
             | ScalarKind::Function(_) => self.input_scalars().iter().fold(
                 ColumnSet::default(),
                 |mut used_columns, scalar| {
@@ -114,6 +118,9 @@ impl Explain for Scalar {
             }
             ScalarKind::Cast(meta) => {
                 Cast::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            ScalarKind::Like(meta) => {
+                Like::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
         }
     }
