@@ -9,4 +9,3 @@ datafusion = { workspace = true }
 tracing = { workspace = true, features = ["log"] }
 optd-core = { path = "../../optd/core", version = "0.1" }
 itertools = "0.14.0"
-df-execution-impl = { git = "https://github.com/bobby060/datafusion_sql_hint_adapter", rev = "278466d" }

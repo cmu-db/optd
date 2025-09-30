@@ -2131,17 +2131,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "df-execution-impl"
-version = "0.1.0"
-source = "git+https://github.com/bobby060/datafusion_sql_hint_adapter?rev=278466d#278466d2d640c9f7f97a79fe332d2bfacc54d4e2"
-dependencies = [
- "datafusion",
- "futures",
- "hint-engine",
- "tracing",
-]
-
-[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2549,14 +2538,6 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
-
-[[package]]
-name = "hint-engine"
-version = "0.1.0"
-source = "git+https://github.com/bobby060/datafusion_sql_hint_adapter?rev=278466d#278466d2d640c9f7f97a79fe332d2bfacc54d4e2"
-dependencies = [
- "tracing",
-]
 
 [[package]]
 name = "hmac"
@@ -3482,7 +3463,6 @@ name = "optd-datafusion"
 version = "0.1.0"
 dependencies = [
  "datafusion",
- "df-execution-impl",
  "itertools 0.14.0",
  "optd-core",
  "tracing",
