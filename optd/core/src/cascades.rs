@@ -279,23 +279,21 @@ impl Cascades {
 
         // TODO(yuchen): Properly add this as a rule:
         if let Ok(logical_order_by) = operator.try_borrow::<LogicalOrderBy>()
-            && let Ok(tuple_ordering) = logical_order_by.try_extract_tuple_ordering() {
-                let input_group_id = expr.key().input_operators()[0];
-                let rx = self
-                    .clone()
-                    .find_best_costed_expr_for(
-                        input_group_id,
-                        Arc::new(Required { tuple_ordering }),
-                    )
-                    .await;
-                let state = rx.borrow();
-                let costed_expr = state
-                    .costed_exprs
-                    .iter()
-                    .min_by(|x, y| x.total_cost.as_f64().total_cmp(&y.total_cost.as_f64()))
-                    .cloned();
-                return costed_expr;
-            }
+            && let Ok(tuple_ordering) = logical_order_by.try_extract_tuple_ordering()
+        {
+            let input_group_id = expr.key().input_operators()[0];
+            let rx = self
+                .clone()
+                .find_best_costed_expr_for(input_group_id, Arc::new(Required { tuple_ordering }))
+                .await;
+            let state = rx.borrow();
+            let costed_expr = state
+                .costed_exprs
+                .iter()
+                .min_by(|x, y| x.total_cost.as_f64().total_cmp(&y.total_cost.as_f64()))
+                .cloned();
+            return costed_expr;
+        }
 
         let op_cost = self.ctx.cm.compute_operator_cost(&operator, &self.ctx)?;
 
