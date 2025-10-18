@@ -1,42 +1,19 @@
-use std::{collections::HashSet, ops::Deref, sync::Arc};
-
-use itertools::Itertools;
+use std::sync::Arc;
 
 use crate::ir::{
     ColumnSet, OperatorKind,
-    operator::{LogicalGet, PhysicalTableScan},
+    operator::{
+        LogicalAggregate, LogicalGet, LogicalProject, LogicalRemap, PhysicalHashAggregate,
+        PhysicalProject, PhysicalTableScan,
+    },
     properties::{Derive, GetProperty, PropertyMarker},
+    scalar::{ColumnAssign, ColumnRef, List},
 };
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct OutputColumns(Arc<ColumnSet>);
-
-impl OutputColumns {
-    pub fn from_column_set(set: ColumnSet) -> Self {
-        Self(Arc::new(set))
-    }
-
-    // pub fn set(&self) -> &ColumnSet {
-    //     &self.0
-    // }
-}
-
-impl std::ops::Deref for OutputColumns {
-    type Target = ColumnSet;
-
-    fn deref(&self) -> &Self::Target {
-        self.0.deref()
-    }
-}
-
-impl std::fmt::Display for OutputColumns {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_set().entries(self.deref().iter().sorted()).finish()
-    }
-}
+pub struct OutputColumns;
 
 impl PropertyMarker for OutputColumns {
-    type Output = Self;
+    type Output = Arc<ColumnSet>;
 }
 
 impl Derive<OutputColumns> for crate::ir::Operator {
@@ -46,7 +23,6 @@ impl Derive<OutputColumns> for crate::ir::Operator {
     ) -> <OutputColumns as PropertyMarker>::Output {
         match &self.kind {
             OperatorKind::Group(_) => {
-                // Always derive a placeholder using the normalized expression.
                 panic!("Right now group's properties should always be set.")
             }
             OperatorKind::LogicalGet(meta) => {
@@ -57,19 +33,95 @@ impl Derive<OutputColumns> for crate::ir::Operator {
             }
             OperatorKind::LogicalJoin(_)
             | OperatorKind::PhysicalNLJoin(_)
+            | OperatorKind::PhysicalHashJoin(_)
             | OperatorKind::LogicalSelect(_)
             | OperatorKind::PhysicalFilter(_)
+            | OperatorKind::LogicalOrderBy(_)
             | OperatorKind::EnforcerSort(_) => {
-                let set = self
-                    .input_operators()
-                    .iter()
-                    .fold(HashSet::new(), |mut set, op| {
-                        set.extend(&*op.output_columns(ctx));
-                        set
-                    });
-                OutputColumns::from_column_set(set)
+                let set =
+                    self.input_operators()
+                        .iter()
+                        .fold(ColumnSet::default(), |mut set, op| {
+                            set |= &op.output_columns(ctx);
+                            set
+                        });
+                Arc::new(set)
             }
             OperatorKind::MockScan(meta) => meta.spec.mocked_output_columns.clone(),
+            OperatorKind::LogicalProject(meta) => {
+                let project = LogicalProject::borrow_raw_parts(meta, &self.common);
+                let projections = project.projections().try_borrow::<List>().unwrap();
+                let set = projections
+                    .members()
+                    .iter()
+                    .map(|member| {
+                        if let Ok(column_assign) = member.try_borrow::<ColumnAssign>() {
+                            *column_assign.column()
+                        } else if let Ok(column_ref) = member.try_borrow::<ColumnRef>() {
+                            *column_ref.column()
+                        } else {
+                            unreachable!()
+                        }
+                    })
+                    .collect();
+                Arc::new(set)
+            }
+            OperatorKind::PhysicalProject(meta) => {
+                let project = PhysicalProject::borrow_raw_parts(meta, &self.common);
+                let projections = project.projections().try_borrow::<List>().unwrap();
+                let set = projections
+                    .members()
+                    .iter()
+                    .map(|member| {
+                        let column_assign = member.try_borrow::<ColumnAssign>().unwrap();
+                        *column_assign.column()
+                    })
+                    .collect();
+                Arc::new(set)
+            }
+            OperatorKind::LogicalAggregate(meta) => {
+                let agg = LogicalAggregate::borrow_raw_parts(meta, &self.common);
+                let exprs = agg.exprs().try_borrow::<List>().unwrap();
+                let keys = agg.exprs().try_borrow::<List>().unwrap();
+                let set = exprs
+                    .members()
+                    .iter()
+                    .chain(keys.members().iter())
+                    .map(|member| {
+                        let column_assign = member.try_borrow::<ColumnAssign>().unwrap();
+                        *column_assign.column()
+                    })
+                    .collect();
+                Arc::new(set)
+            }
+            OperatorKind::PhysicalHashAggregate(meta) => {
+                let agg = PhysicalHashAggregate::borrow_raw_parts(meta, &self.common);
+                let exprs = agg.exprs().try_borrow::<List>().unwrap();
+                let keys = agg.exprs().try_borrow::<List>().unwrap();
+                let set = exprs
+                    .members()
+                    .iter()
+                    .chain(keys.members().iter())
+                    .map(|member| {
+                        let column_assign = member.try_borrow::<ColumnAssign>().unwrap();
+                        *column_assign.column()
+                    })
+                    .collect();
+                Arc::new(set)
+            }
+            OperatorKind::LogicalRemap(meta) => {
+                let remap = LogicalRemap::borrow_raw_parts(meta, &self.common);
+                let projections = remap.mappings().try_borrow::<List>().unwrap();
+                let set = projections
+                    .members()
+                    .iter()
+                    .map(|member| {
+                        let column_assign = member.try_borrow::<ColumnAssign>().unwrap();
+                        *column_assign.column()
+                    })
+                    .collect();
+                Arc::new(set)
+            }
         }
     }
 
@@ -86,7 +138,7 @@ impl Derive<OutputColumns> for crate::ir::Operator {
 }
 
 impl crate::ir::Operator {
-    pub fn output_columns(&self, ctx: &crate::ir::context::IRContext) -> OutputColumns {
+    pub fn output_columns(&self, ctx: &crate::ir::context::IRContext) -> Arc<ColumnSet> {
         self.get_property::<OutputColumns>(ctx)
     }
 }

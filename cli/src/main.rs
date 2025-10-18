@@ -28,7 +28,6 @@ use datafusion::execution::memory_pool::{
     FairSpillPool, GreedyMemoryPool, MemoryPool, TrackConsumersPool,
 };
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
-use datafusion::prelude::SessionContext;
 use datafusion_cli::catalog::DynamicObjectStoreCatalog;
 use datafusion_cli::functions::ParquetMetadataFunc;
 use datafusion_cli::{
@@ -158,6 +157,7 @@ pub const OPTD_CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Main CLI entrypoint
 async fn main_inner() -> Result<()> {
+    tracing_subscriber::fmt::init();
     let args = Args::parse();
 
     if !args.quiet {
@@ -206,9 +206,12 @@ async fn main_inner() -> Result<()> {
     let runtime_env = rt_builder.build_arc()?;
 
     // enable dynamic file query
-    let ctx = SessionContext::new_with_config_rt(session_config, runtime_env).enable_url_table();
 
-    ctx.refresh_catalogs().await?;
+    let cli_ctx = OptdCliSessionContext::new_with_config_rt(session_config, runtime_env);
+    cli_ctx.refresh_catalogs().await?;
+    let cli_ctx = cli_ctx.enable_url_table();
+    let ctx = cli_ctx.inner();
+
     // install dynamic catalog provider that can register required object stores
     ctx.register_catalog_list(Arc::new(DynamicObjectStoreCatalog::new(
         ctx.state().catalog_list().clone(),
@@ -217,8 +220,6 @@ async fn main_inner() -> Result<()> {
 
     // register `parquet_metadata` table function to get metadata from parquet files
     ctx.register_udtf("parquet_metadata", Arc::new(ParquetMetadataFunc {}));
-
-    let ctx = OptdCliSessionContext::new(ctx);
 
     let mut print_options = PrintOptions {
         format: args.format,
@@ -246,20 +247,20 @@ async fn main_inner() -> Result<()> {
 
     if commands.is_empty() && files.is_empty() {
         if !rc.is_empty() {
-            exec::exec_from_files(&ctx, rc, &print_options).await?;
+            exec::exec_from_files(&cli_ctx, rc, &print_options).await?;
         }
         // TODO maybe we can have thiserror for cli but for now let's keep it simple
-        return exec::exec_from_repl(&ctx, &mut print_options)
+        return exec::exec_from_repl(&cli_ctx, &mut print_options)
             .await
             .map_err(|e| DataFusionError::External(Box::new(e)));
     }
 
     if !files.is_empty() {
-        exec::exec_from_files(&ctx, files, &print_options).await?;
+        exec::exec_from_files(&cli_ctx, files, &print_options).await?;
     }
 
     if !commands.is_empty() {
-        exec::exec_from_commands(&ctx, commands, &print_options).await?;
+        exec::exec_from_commands(&cli_ctx, commands, &print_options).await?;
     }
 
     Ok(())
@@ -288,6 +289,13 @@ fn get_session_config(args: &Args) -> Result<SessionConfig> {
     if env::var_os("DATAFUSION_FORMAT_NULL").is_none() {
         config_options.format.null = String::from("NULL");
     }
+
+    if let Ok(x) = env::var("OPTD_CATALOG_LOCATION") {
+        config_options.catalog.location.replace(x);
+    }
+
+    config_options.catalog.format.replace("PARQUET".to_string());
+    config_options.catalog.default_schema = "default".to_string();
 
     let session_config = SessionConfig::from(config_options).with_information_schema(true);
     Ok(session_config)

@@ -34,9 +34,10 @@ impl ColumnRef {
 impl Explain for ColumnRefBorrowed<'_> {
     fn explain<'a>(
         &self,
-        _ctx: &crate::ir::IRContext,
+        ctx: &crate::ir::IRContext,
         _option: &crate::ir::explain::ExplainOption,
     ) -> pretty_xmlish::Pretty<'a> {
-        Pretty::display(self.column())
+        let meta = ctx.get_column_meta(self.column());
+        Pretty::display(&format!("{}({})", meta.name, self.column()))
     }
 }

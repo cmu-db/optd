@@ -1,5 +1,6 @@
 mod cardinality;
 mod output_columns;
+mod output_schema;
 mod required;
 mod tuple_ordering;
 
@@ -10,11 +11,11 @@ pub use output_columns::OutputColumns;
 pub use required::Required;
 pub use tuple_ordering::*;
 
-use crate::ir::context::IRContext;
+use crate::ir::{ColumnSet, context::IRContext};
 
 #[derive(Debug, Default)]
 pub struct OperatorProperties {
-    pub output_columns: OnceLock<OutputColumns>,
+    pub output_columns: OnceLock<Arc<ColumnSet>>,
     pub cardinality: OnceLock<Cardinality>,
 }
 

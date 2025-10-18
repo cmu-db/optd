@@ -1,17 +1,20 @@
 use std::sync::Arc;
 
+use pretty_xmlish::Pretty;
+
 use crate::ir::{
     Column, IRCommon, Scalar,
+    explain::Explain,
     macros::{define_node, impl_scalar_conversion},
     properties::ScalarProperties,
-    scalar::ColumnRef,
 };
 
 define_node!(
-    Assign, AssignBorrowed {
+    /// Introducing a new [`Column`].
+    ColumnAssign, ColumnAssignBorrowed {
         properties: ScalarProperties,
-        metadata: AssignMetadata {
-            assignee: Column,
+        metadata: ColumnAssignMetadata {
+            column: Column,
         },
         inputs: {
             operators: [],
@@ -19,19 +22,30 @@ define_node!(
         }
     }
 );
-impl_scalar_conversion!(Assign, AssignBorrowed);
+impl_scalar_conversion!(ColumnAssign, ColumnAssignBorrowed);
 
-impl Assign {
-    pub fn new(assignee: Column, expr: Arc<Scalar>) -> Self {
+impl ColumnAssign {
+    pub fn new(column: Column, expr: Arc<Scalar>) -> Self {
         Self {
-            meta: AssignMetadata { assignee },
+            meta: ColumnAssignMetadata { column },
             common: IRCommon::with_input_scalars_only(Arc::new([expr])),
         }
     }
+}
 
-    pub fn is_passthrough(&self) -> bool {
-        self.expr()
-            .try_borrow::<ColumnRef>()
-            .is_ok_and(|column_ref| column_ref.column() == self.assignee())
+impl Explain for ColumnAssignBorrowed<'_> {
+    fn explain<'a>(
+        &self,
+        ctx: &crate::ir::IRContext,
+        option: &crate::ir::explain::ExplainOption,
+    ) -> pretty_xmlish::Pretty<'a> {
+        let column_meta = ctx.get_column_meta(self.column());
+        let fmt = format!(
+            "{}({}) := {}",
+            &column_meta.name,
+            self.column(),
+            self.expr().explain(ctx, option).to_one_line_string(true)
+        );
+        Pretty::display(&fmt)
     }
 }

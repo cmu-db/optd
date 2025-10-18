@@ -5,12 +5,18 @@ mod physical;
 use std::sync::Arc;
 
 pub use enforcer::sort::*;
+pub use logical::aggregate::*;
 pub use logical::get::*;
 pub use logical::join::{LogicalJoin, LogicalJoinBorrowed, LogicalJoinMetadata};
 pub use logical::order_by::*;
+pub use logical::project::*;
+pub use logical::remap::*;
 pub use logical::select::*;
 pub use physical::filter::*;
+pub use physical::hash_aggregate::*;
+pub use physical::hash_join::*;
 pub use physical::nl_join::*;
+pub use physical::project::*;
 pub use physical::table_scan::*;
 
 pub mod join {
@@ -31,10 +37,17 @@ pub enum OperatorKind {
     LogicalGet(LogicalGetMetadata),
     LogicalJoin(LogicalJoinMetadata),
     LogicalSelect(LogicalSelectMetadata),
+    LogicalProject(LogicalProjectMetadata),
+    LogicalAggregate(LogicalAggregateMetadata),
+    LogicalOrderBy(LogicalOrderByMetadata),
+    LogicalRemap(LogicalRemapMetadata),
     EnforcerSort(EnforcerSortMetadata),
     PhysicalTableScan(PhysicalTableScanMetadata),
     PhysicalNLJoin(PhysicalNLJoinMetadata),
+    PhysicalHashJoin(PhysicalHashJoinMetadata),
     PhysicalFilter(PhysicalFilterMetadata),
+    PhysicalProject(PhysicalProjectMetadata),
+    PhysicalHashAggregate(PhysicalHashAggregateMetadata),
 }
 
 #[derive(Debug, PartialEq)]
@@ -47,9 +60,12 @@ pub enum OperatorCategory {
 
 impl OperatorKind {
     pub fn category(&self) -> OperatorCategory {
+        use OperatorKind::*;
         match self {
-            OperatorKind::Group(_) => OperatorCategory::Placeholder,
-            OperatorKind::LogicalGet(_) | OperatorKind::LogicalJoin(_) => OperatorCategory::Logical,
+            Group(_) => OperatorCategory::Placeholder,
+            LogicalGet(_) | LogicalJoin(_) | LogicalProject(_) | LogicalAggregate(_) => {
+                OperatorCategory::Logical
+            }
             OperatorKind::EnforcerSort(_) => OperatorCategory::Enforcer,
             _other => OperatorCategory::Physical,
         }
@@ -58,6 +74,8 @@ impl OperatorKind {
     pub fn maybe_produce_columns(&self) -> bool {
         match self {
             OperatorKind::LogicalGet(_) | OperatorKind::PhysicalTableScan(_) => true,
+            OperatorKind::LogicalProject(_) | OperatorKind::PhysicalProject(_) => true,
+            OperatorKind::LogicalAggregate(_) | OperatorKind::PhysicalHashAggregate(_) => true,
             OperatorKind::MockScan(_) => true,
             _other => false,
         }
@@ -70,7 +88,7 @@ pub struct Operator {
     /// The operator type and associated metadata.
     pub kind: OperatorKind,
     /// The input operators and scalars.
-    pub(crate) common: IRCommon<OperatorProperties>,
+    pub common: IRCommon<OperatorProperties>,
 }
 
 impl Operator {
@@ -129,22 +147,47 @@ impl Explain for Operator {
             OperatorKind::MockScan(meta) => {
                 MockScan::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::LogicalGet(_) => todo!(),
+            OperatorKind::LogicalGet(meta) => {
+                LogicalGet::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
             OperatorKind::LogicalJoin(meta) => {
                 LogicalJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             OperatorKind::LogicalSelect(meta) => {
                 LogicalSelect::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
+            OperatorKind::LogicalOrderBy(meta) => {
+                LogicalOrderBy::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
             OperatorKind::EnforcerSort(meta) => {
                 EnforcerSort::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::PhysicalTableScan(_) => todo!(),
+            OperatorKind::PhysicalTableScan(meta) => {
+                PhysicalTableScan::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
             OperatorKind::PhysicalNLJoin(meta) => {
                 PhysicalNLJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
+            OperatorKind::PhysicalHashJoin(meta) => {
+                PhysicalHashJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
             OperatorKind::PhysicalFilter(meta) => {
                 PhysicalFilter::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            OperatorKind::LogicalProject(meta) => {
+                LogicalProject::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            OperatorKind::PhysicalProject(meta) => {
+                PhysicalProject::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            OperatorKind::LogicalAggregate(meta) => {
+                LogicalAggregate::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            OperatorKind::PhysicalHashAggregate(meta) => {
+                PhysicalHashAggregate::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            OperatorKind::LogicalRemap(meta) => {
+                LogicalRemap::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
         }
     }

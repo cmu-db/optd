@@ -2,10 +2,12 @@ use std::sync::Arc;
 
 use bitvec::{boxed::BitBox, vec::BitVec};
 use itertools::Itertools;
+use pretty_xmlish::Pretty;
 
 use crate::ir::{
     Column, IRCommon, Operator, Scalar,
-    macros::define_node,
+    explain::Explain,
+    macros::{define_node, impl_operator_conversion},
     properties::{OperatorProperties, TupleOrdering, TupleOrderingDirection},
     scalar::ColumnRef,
 };
@@ -22,6 +24,7 @@ define_node!(
         }
     }
 );
+impl_operator_conversion!(LogicalOrderBy, LogicalOrderByBorrowed);
 
 impl LogicalOrderBy {
     pub fn new(
@@ -39,7 +42,9 @@ impl LogicalOrderBy {
             common: IRCommon::new(Arc::new([input]), exprs.into()),
         }
     }
+}
 
+impl LogicalOrderByBorrowed<'_> {
     /// Try extracts the associated tuple ordering if all the ordered exprs are of type [`ColumnRef`].
     /// On error, returns a list of all scalar expressions that are not [`ColumnRef`].
     pub fn try_extract_tuple_ordering(&self) -> Result<TupleOrdering, Vec<Arc<Scalar>>> {
@@ -64,12 +69,40 @@ impl LogicalOrderBy {
     }
 }
 
+impl Explain for LogicalOrderByBorrowed<'_> {
+    fn explain<'a>(
+        &self,
+        ctx: &crate::ir::IRContext,
+        option: &crate::ir::explain::ExplainOption,
+    ) -> Pretty<'a> {
+        let mut fields = Vec::with_capacity(1);
+
+        let ordering_exprs = self
+            .exprs()
+            .iter()
+            .zip(self.directions().iter())
+            .map(|(expr, is_asc)| {
+                let expr = expr.explain(ctx, option).to_one_line_string(true);
+                Pretty::Text(
+                    format!("{expr} {}", TupleOrderingDirection::from_bool(*is_asc)).into(),
+                )
+            })
+            .collect();
+        fields.push(("ordering_exprs", Pretty::Array(ordering_exprs)));
+
+        let metadata = self.common.explain_operator_properties(ctx, option);
+        fields.extend(metadata);
+        let children = self.common.explain_input_operators(ctx, option);
+
+        Pretty::simple_record("LogicalOrderBy", fields, children)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::ir::{
-        ColumnSet, ScalarValue,
+        ColumnSet, IRContext, ScalarValue,
         convert::{IntoOperator, IntoScalar},
-        operator::{MockScan, MockSpec},
         scalar::*,
     };
 
@@ -77,6 +110,7 @@ mod tests {
 
     #[test]
     fn try_extract_tuple_ordering_success() {
+        let ctx = IRContext::with_empty_magic();
         let ordered_exprs = vec![
             (
                 ColumnRef::new(Column(0)).into_scalar(),
@@ -87,13 +121,11 @@ mod tests {
                 TupleOrderingDirection::Asc,
             ),
         ];
-        let order_by = LogicalOrderBy::new(
-            MockScan::with_mock_spec(1, MockSpec::new_test_only(vec![0, 1, 2], 100.))
-                .into_operator(),
-            ordered_exprs,
-        );
+        let order_by = LogicalOrderBy::new(ctx.mock_scan(1, vec![0, 1, 2], 100.), ordered_exprs)
+            .into_operator();
 
         let res = order_by
+            .borrow::<LogicalOrderBy>()
             .try_extract_tuple_ordering()
             .unwrap()
             .iter_columns()
@@ -107,6 +139,7 @@ mod tests {
 
     #[test]
     fn try_extract_tuple_ordering_error() {
+        let ctx = IRContext::with_empty_magic();
         let ordered_exprs = vec![
             (
                 ColumnRef::new(Column(0)).into_scalar(),
@@ -122,13 +155,14 @@ mod tests {
                 TupleOrderingDirection::Asc,
             ),
         ];
-        let order_by = LogicalOrderBy::new(
-            MockScan::with_mock_spec(1, MockSpec::new_test_only(vec![0, 1, 2], 100.))
-                .into_operator(),
-            ordered_exprs,
-        );
 
-        let res = order_by.try_extract_tuple_ordering().unwrap_err();
+        let order_by = LogicalOrderBy::new(ctx.mock_scan(1, vec![0, 1, 2], 100.), ordered_exprs)
+            .into_operator();
+
+        let res = order_by
+            .borrow::<LogicalOrderBy>()
+            .try_extract_tuple_ordering()
+            .unwrap_err();
 
         assert_eq!(res.len(), 1);
         assert!(res[0].try_borrow::<BinaryOp>().is_ok())

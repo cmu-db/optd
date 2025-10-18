@@ -7,12 +7,12 @@ use crate::ir::{
     cost::Cost,
     explain::Explain,
     macros::{define_node, impl_operator_conversion},
-    properties::{Cardinality, OperatorProperties, OutputColumns, TupleOrdering},
+    properties::{Cardinality, OperatorProperties, TupleOrdering},
 };
 
 #[derive(Clone)]
 pub struct MockSpec {
-    pub mocked_output_columns: OutputColumns,
+    pub mocked_output_columns: Arc<ColumnSet>,
     pub mocked_card: Cardinality,
     pub mocked_operator_cost: Option<Cost>,
     pub mocked_provided_ordering: TupleOrdering,
@@ -21,7 +21,7 @@ pub struct MockSpec {
 impl Default for MockSpec {
     fn default() -> Self {
         Self {
-            mocked_output_columns: OutputColumns::from_column_set(ColumnSet::new()),
+            mocked_output_columns: Arc::default(),
             mocked_card: Cardinality::ZERO,
             mocked_operator_cost: Some(Cost::new(0.)),
             mocked_provided_ordering: Default::default(),
@@ -49,9 +49,8 @@ impl Explain for MockScanBorrowed<'_> {
 }
 
 impl MockSpec {
-    pub fn new_test_only(ids: Vec<i64>, card: f64) -> Self {
-        let mocked_output_columns =
-            OutputColumns::from_column_set(ids.iter().map(|id| Column(*id)).collect());
+    pub fn new_test_only(ids: Vec<Column>, card: f64) -> Self {
+        let mocked_output_columns = Arc::new(ids.iter().copied().collect());
         let mocked_card = Cardinality::new(card);
         Self {
             mocked_output_columns,

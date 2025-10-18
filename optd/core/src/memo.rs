@@ -476,26 +476,26 @@ impl MemoTable {
     /// This method is primarily intended for debugging and testing.
     pub fn dump(&self) {
         let option = ExplainOption::default();
-        println!("======== MEMO DUMP BEGIN ========");
-        println!("\n[operators]");
-        println!("group_ids = {:?}", self.groups.keys());
-        println!("total_group_count = {}", self.groups.keys().len());
-        println!("total_operator_count = {}", self.operator_dedup.len());
+        info!("======== MEMO DUMP BEGIN ========");
+        info!("\n[operators]");
+        info!("group_ids = {:?}", self.groups.keys());
+        info!("total_group_count = {}", self.groups.keys().len());
+        info!("total_operator_count = {}", self.operator_dedup.len());
         for (group_id, group) in &self.groups {
             let state = group.exploration.borrow();
             assert_eq!(group_id, &group.group_id);
-            println!("\n[operators.{group_id}]");
-            println!("num_exprs = {}", state.exprs.len());
-            println!(
+            info!("\n[operators.{group_id}]");
+            info!("num_exprs = {}", state.exprs.len());
+            info!(
                 "output_columns = {}",
                 state
                     .properties
                     .output_columns
                     .get()
-                    .map(|x| format!("{x}"))
+                    .map(|x| format!("{x:?}"))
                     .unwrap_or("?".to_string()),
             );
-            println!(
+            info!(
                 "cardinality = {}",
                 state
                     .properties
@@ -506,11 +506,11 @@ impl MemoTable {
             );
 
             for expr in state.exprs.iter() {
-                println!("{} = {:?}", expr.id(), expr.key());
+                info!("{} = {:?}", expr.id(), expr.key());
             }
 
             for (required, tx) in group.optimizations.iter() {
-                println!("\n[operators.{group_id}.required = {required}]");
+                info!("\n[operators.{group_id}.required = {required}]");
                 let state = tx.borrow();
                 let best_index = state
                     .costed_exprs
@@ -533,7 +533,7 @@ impl MemoTable {
                         .filter(|best_index| i.eq(best_index))
                         .map(|best_index| format!("o#{best_index} (best)"))
                         .unwrap_or_else(|| format!("o#{i}{:>7}", ""));
-                    println!(
+                    info!(
                         "{opt_desc} = {{ id={}, total = {}, operation = {} inputs: {{{}}} }}",
                         costed.group_expr.id(),
                         costed.total_cost,
@@ -543,12 +543,12 @@ impl MemoTable {
                 }
             }
         }
-        println!("\n[scalars]");
+        info!("\n[scalars]");
         for (scalar_id, scalar) in &self.scalar_id_to_key {
             let s = scalar.explain(&self.ctx, &option).to_one_line_string(true);
-            println!("{scalar_id} = \"{s}\"")
+            info!("{scalar_id} = \"{s}\"")
         }
-        println!("======== MEMO DUMP END ==========");
+        info!("======== MEMO DUMP END ==========");
     }
 }
 
@@ -666,9 +666,9 @@ mod tests {
     #[test]
     fn insert_scalar() {
         let mut memo = MemoTable::new(IRContext::with_empty_magic());
-        let scalar = column_ref(Column(1)).equal(int32(799));
+        let scalar = column_ref(Column(1)).eq(integer(799));
         let scalar_from_clone = scalar.clone();
-        let scalar_dup = column_ref(Column(1)).equal(int32(799));
+        let scalar_dup = column_ref(Column(1)).eq(integer(799));
         let id = memo.insert_scalar(scalar).unwrap();
         let res = memo.insert_scalar(scalar_from_clone);
         assert_eq!(Err(id), res);
@@ -678,15 +678,16 @@ mod tests {
 
     #[test]
     fn insert_new_operator() {
-        let mut memo = MemoTable::new(IRContext::with_empty_magic());
-        let join = mock_scan(1, vec![1], 0.).logical_join(
-            mock_scan(2, vec![2], 0.),
+        let ctx = IRContext::with_empty_magic();
+        let mut memo = MemoTable::new(ctx.clone());
+        let join = ctx.mock_scan(1, vec![1], 0.).logical_join(
+            ctx.mock_scan(2, vec![2], 0.),
             boolean(true),
             JoinType::Inner,
         );
 
-        let join_dup = mock_scan(1, vec![1], 0.).logical_join(
-            mock_scan(2, vec![2], 0.),
+        let join_dup = ctx.mock_scan(1, vec![1], 0.).logical_join(
+            ctx.mock_scan(2, vec![2], 0.),
             boolean(true),
             JoinType::Inner,
         );
@@ -700,16 +701,17 @@ mod tests {
 
     #[test]
     fn insert_operator_into_group() {
-        let mut memo = MemoTable::new(IRContext::with_empty_magic());
-        let join = mock_scan(1, vec![1], 0.).logical_join(
-            mock_scan(2, vec![2], 0.),
+        let ctx = IRContext::with_empty_magic();
+        let mut memo = MemoTable::new(ctx.clone());
+        let join = ctx.mock_scan(1, vec![1], 0.).logical_join(
+            ctx.mock_scan(2, vec![2], 0.),
             boolean(true),
             JoinType::Inner,
         );
         let group_id = memo.insert_new_operator(join).unwrap();
 
-        let join_commuted = mock_scan(2, vec![2], 0.).logical_join(
-            mock_scan(1, vec![1], 0.),
+        let join_commuted = ctx.mock_scan(2, vec![2], 0.).logical_join(
+            ctx.mock_scan(1, vec![1], 0.),
             boolean(true),
             JoinType::Inner,
         );
@@ -725,10 +727,11 @@ mod tests {
 
     #[test]
     fn parent_group_merge() {
-        let mut memo = MemoTable::new(IRContext::with_empty_magic());
+        let ctx = IRContext::with_empty_magic();
+        let mut memo = MemoTable::new(ctx.clone());
 
-        let m1 = mock_scan(1, vec![1], 0.);
-        let m1_alias = mock_scan(2, vec![1], 0.);
+        let m1 = ctx.mock_scan(1, vec![1], 0.);
+        let m1_alias = ctx.mock_scan(2, vec![1], 0.);
 
         let g1 = memo
             .insert_new_operator(m1.clone().logical_select(boolean(true)))
@@ -755,11 +758,12 @@ mod tests {
     #[test]
     #[tracing_test::traced_test]
     fn cascading_group_merges() {
-        let mut memo = MemoTable::new(IRContext::with_empty_magic());
+        let ctx = IRContext::with_empty_magic();
+        let mut memo = MemoTable::new(ctx.clone());
 
-        let m1 = mock_scan(1, vec![1], 0.);
+        let m1 = ctx.mock_scan(1, vec![1], 0.);
         trace!("\n{}", quick_explain(&m1, &memo.ctx));
-        let m1_alias = mock_scan(2, vec![1], 0.);
+        let m1_alias = ctx.mock_scan(2, vec![1], 0.);
 
         let g1 = memo
             .insert_new_operator(
@@ -795,10 +799,11 @@ mod tests {
 
     #[test]
     fn insert_partial_binding() {
-        let mut memo = MemoTable::new(IRContext::with_empty_magic());
+        let ctx = IRContext::with_empty_magic();
+        let mut memo = MemoTable::new(ctx.clone());
 
-        let m1 = mock_scan(1, vec![1], 0.);
-        let m1_alias = mock_scan(2, vec![1], 0.);
+        let m1 = ctx.mock_scan(1, vec![1], 0.);
+        let m1_alias = ctx.mock_scan(2, vec![1], 0.);
         memo.insert_new_operator(
             m1.clone()
                 .logical_select(boolean(true))

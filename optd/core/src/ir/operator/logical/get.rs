@@ -1,78 +1,67 @@
 use std::sync::Arc;
 
+use pretty_xmlish::Pretty;
+
 use crate::ir::{
-    IRCommon, Scalar,
+    Column, IRCommon,
     catalog::DataSourceId,
+    explain::Explain,
     macros::{define_node, impl_operator_conversion},
     properties::{Derive, OperatorProperties, OutputColumns},
-    scalar::ProjectionList,
 };
 
 define_node!(
     LogicalGet, LogicalGetBorrowed {
         properties: OperatorProperties,
         metadata: LogicalGetMetadata {
-            table_id: DataSourceId,
+            source: DataSourceId,
+            first_column: Column,
+            projections: Arc<[usize]>,
         },
         inputs: {
             operators: [],
-            scalars: [projection_list],
+            scalars: [],
         }
     }
 );
 impl_operator_conversion!(LogicalGet, LogicalGetBorrowed);
 
 impl LogicalGet {
-    pub fn new(table_id: DataSourceId, projection_list: Arc<Scalar>) -> Self {
+    pub fn new(source: DataSourceId, first_column: Column, projections: Arc<[usize]>) -> Self {
         Self {
-            meta: LogicalGetMetadata { table_id },
-            common: IRCommon::with_input_scalars_only(Arc::new([projection_list])),
+            meta: LogicalGetMetadata {
+                source,
+                first_column,
+                projections,
+            },
+            common: IRCommon::empty(),
         }
     }
 }
 
 impl Derive<OutputColumns> for LogicalGetBorrowed<'_> {
-    fn derive_by_compute(&self, _ctx: &crate::ir::context::IRContext) -> OutputColumns {
-        let projections = self
-            .projection_list()
-            .try_borrow::<ProjectionList>()
-            .expect("projection_list should typecheck");
-        OutputColumns::from_column_set(projections.get_all_assignees().collect())
-    }
-}
-
-#[cfg(test)]
-impl LogicalGet {
-    pub(crate) fn mock(columns: Vec<i64>) -> Self {
-        use crate::ir::{Column, convert::IntoScalar, scalar::*};
-
-        let projections = columns
-            .into_iter()
-            .map(|i| Assign::new(Column(i), ColumnRef::new(Column(i)).into_scalar()).into_scalar())
-            .collect::<Vec<_>>();
-
-        Self::new(
-            DataSourceId(1),
-            ProjectionList::new(projections.into()).into_scalar(),
+    fn derive_by_compute(
+        &self,
+        _ctx: &crate::ir::IRContext,
+    ) -> <OutputColumns as crate::ir::properties::PropertyMarker>::Output {
+        Arc::new(
+            self.projections()
+                .iter()
+                .map(|x| Column(self.first_column().0 + (*x)))
+                .collect(),
         )
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::ir::{Column, context::IRContext, convert::IntoOperator};
-
-    use super::*;
-
-    #[test]
-    fn logical_get_construct_and_access() {
-        let ctx = IRContext::with_course_tables();
-        let op = LogicalGet::mock(vec![0, 1]).into_operator();
-        let output_columns = op.output_columns(&ctx);
-        let set = &*output_columns;
-        assert_eq!(set.len(), 2);
-        assert!(set.contains(&Column(0)));
-        assert!(set.contains(&Column(1)));
-        assert!(op.try_borrow::<LogicalGet>().is_ok());
+impl Explain for LogicalGetBorrowed<'_> {
+    fn explain<'a>(
+        &self,
+        ctx: &crate::ir::IRContext,
+        option: &crate::ir::explain::ExplainOption,
+    ) -> pretty_xmlish::Pretty<'a> {
+        let mut fields = Vec::with_capacity(2);
+        fields.push((".source", Pretty::display(&self.source().0)));
+        fields.extend(self.common.explain_operator_properties(ctx, option));
+        Pretty::childless_record("LogicalGet", fields)
     }
 }

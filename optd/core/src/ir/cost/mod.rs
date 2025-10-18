@@ -1,4 +1,6 @@
-use crate::ir::{IRContext, Operator, properties::Cardinality};
+use std::sync::Arc;
+
+use crate::ir::{IRContext, Operator, explain::quick_explain, properties::Cardinality};
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Cost {
@@ -82,7 +84,8 @@ pub trait CostModel: Send + Sync + 'static {
         assert_eq!(
             op.input_operators().len(),
             input_costs.len(),
-            "input cost array should have length equal to the number of input operators"
+            "input cost array should have length equal to the number of input operators:\n{}",
+            quick_explain(Arc::new(op.clone()), ctx),
         );
         let operator_cost = self.compute_operator_cost(op, ctx)?;
         Some(input_costs.iter().fold(operator_cost, |c1, c2| c1 + *c2))

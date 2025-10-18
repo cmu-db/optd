@@ -6,3 +6,6 @@ repository.workspace = true
 
 [dependencies]
 datafusion = { workspace = true }
+tracing = { workspace = true, features = ["log"] }
+optd-core = { path = "../../optd/core", version = "0.1" }
+itertools = "0.14.0"
