@@ -133,10 +133,18 @@ impl DuckLakeConnectionBuilder {
             ),
         };
 
-        connection
-            .execute_batch(setup_query.as_str())
-            .context(ConnectionSnafu)?;
-        Ok(())
+        // Try to execute the setup query, but ignore "already attached" errors
+        match connection.execute_batch(setup_query.as_str()) {
+            Ok(_) => Ok(()),
+            Err(duckdb::Error::DuckDBFailure(_, Some(msg))) if msg.contains("already attached") => {
+                // Database is already attached, just use it
+                connection
+                    .execute_batch(&format!("USE {}", self.meta_name.as_ref()))
+                    .context(ConnectionSnafu)?;
+                Ok(())
+            }
+            Err(e) => Err(Error::ConnectionError { source: e }),
+        }
     }
 
     pub fn initialize_schema(&self, connection: &Connection) -> Result<(), Error> {
@@ -164,8 +172,7 @@ impl DuckLakeConnectionBuilder {
                     query_instance_id BIGINT PRIMARY KEY,
                     query_id BIGINT,
                     creation_time BIGINT,
-                    snapshot_id BIGINT,
-                    FOREIGN KEY (query_id) REFERENCES __ducklake_metadata_{name}.main.optd_query(query_id)
+                    snapshot_id BIGINT
                 );
 
                 CREATE TABLE IF NOT EXISTS __ducklake_metadata_{name}.main.optd_group (

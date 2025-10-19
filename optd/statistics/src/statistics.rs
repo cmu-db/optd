@@ -206,6 +206,17 @@ pub trait StatisticsProvider {
         snapshot: i64,
         connection: &duckdb::Connection,
     ) -> Result<Option<TableStatistics>, Error>;
+
+    /// Insert table column statistics
+    fn insert_table_stats(
+        &self,
+        column_id: i64,
+        begin_snapshot: i64,
+        end_snapshot: i64,
+        table_id: i64,
+        stats_type: &str,
+        payload: &str,
+    ) -> Result<(), Error>;
 }
 
 /// DuckLake-based implementation of StatisticsProvider
@@ -224,38 +235,6 @@ impl DuckLakeStatisticsProvider {
     pub fn file(path: &str) -> Result<Self, Error> {
         let connection_builder = Arc::new(DuckLakeConnectionBuilder::file(path)?);
         Ok(Self { connection_builder })
-    }
-
-    /// Insert table column statistics
-    pub fn insert_table_stats(
-        &self,
-        column_id: i64,
-        begin_snapshot: i64,
-        end_snapshot: i64,
-        table_id: i64,
-        stats_type: &str,
-        payload: &str,
-    ) -> Result<(), Error> {
-        let conn = self.connection_builder.connect()?;
-        let mut stmt = conn
-            .prepare(
-                "INSERT OR REPLACE INTO ducklake_table_column_adv_stats 
-             (column_id, begin_snapshot, end_snapshot, table_id, stats_type, payload) 
-             VALUES (?, ?, ?, ?, ?, ?)",
-            )
-            .context(QueryExecutionSnafu)?;
-
-        stmt.execute([
-            &column_id.to_string(),
-            &begin_snapshot.to_string(),
-            &end_snapshot.to_string(),
-            &table_id.to_string(),
-            stats_type,
-            payload,
-        ])
-        .context(QueryExecutionSnafu)?;
-
-        Ok(())
     }
 }
 
@@ -356,6 +335,42 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
 
         Ok(Some(table_stats))
     }
+
+    /// Insert table column statistics
+    fn insert_table_stats(
+        &self,
+        column_id: i64,
+        begin_snapshot: i64,
+        end_snapshot: i64,
+        table_id: i64,
+        stats_type: &str,
+        payload: &str,
+    ) -> Result<(), Error> {
+        let conn = self.connection_builder.connect()?;
+        let table_name = format!(
+            "__ducklake_metadata_{}.main.ducklake_table_column_adv_stats",
+            self.connection_builder.get_meta_name()
+        );
+        let query = format!(
+            "INSERT OR REPLACE INTO {} 
+             (column_id, begin_snapshot, end_snapshot, table_id, stats_type, payload) 
+             VALUES (?, ?, ?, ?, ?, ?)",
+            table_name
+        );
+        let mut stmt = conn.prepare(&query).context(QueryExecutionSnafu)?;
+
+        stmt.execute([
+            &column_id.to_string(),
+            &begin_snapshot.to_string(),
+            &end_snapshot.to_string(),
+            &table_id.to_string(),
+            stats_type,
+            payload,
+        ])
+        .context(QueryExecutionSnafu)?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -382,9 +397,16 @@ mod tests {
     fn test_table_stats_insertion() {
         let provider = DuckLakeStatisticsProvider::memory().unwrap();
 
+        // Initialize the schema first
+        let _conn = provider.get_connection().unwrap();
+
         // Insert table statistics
         let result =
             provider.insert_table_stats(1, 1, 100, 1, "ndv", r#"{"distinct_count": 1000}"#);
+        match &result {
+            Ok(_) => println!("Table stats insertion successful"),
+            Err(e) => println!("Table stats insertion failed: {}", e),
+        }
         assert!(result.is_ok());
     }
 
@@ -408,9 +430,16 @@ mod tests {
     fn test_table_stats_insertion_and_retrieval() {
         let provider = DuckLakeStatisticsProvider::memory().unwrap();
 
+        // Initialize the schema first
+        let _conn = provider.get_connection().unwrap();
+
         // Insert table statistics
         let result =
             provider.insert_table_stats(1, 1, 100, 1, "ndv", r#"{"distinct_count": 1000}"#);
+        match &result {
+            Ok(_) => println!("Table stats insertion successful"),
+            Err(e) => println!("Table stats insertion failed: {}", e),
+        }
         assert!(result.is_ok());
 
         // Note: Actual retrieval would require setting up the table_metadata

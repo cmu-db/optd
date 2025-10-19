@@ -6,6 +6,7 @@ members = [
     "optd/catalog",
     "optd/core",
     "optd/storage",
+    "optd/statistics",
 ]
 
 # By default, only compiles the `optd-core` crate.
@@ -17,7 +18,7 @@ tokio = { version = "1.47", features = ["macros", "rt", "sync"] }
 tracing = "0.1"
 
 # DataFusion dependencies
-datafusion = { version = "50.0", default-features = false }
+datafusion = { version = "=50.0.0", default-features = false }
 
 [workspace.package]
 version = "0.1.0"
