@@ -6,6 +6,7 @@ members = [
     "optd/catalog",
     "optd/core",
     "optd/storage",
+    "optd/statistics",
 ]
 
 # By default, only compiles the `optd-core` crate.
