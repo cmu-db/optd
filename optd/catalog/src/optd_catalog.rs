@@ -1,13 +1,13 @@
+use async_trait::async_trait;
 use datafusion::{
     catalog::{CatalogProvider, CatalogProviderList, SchemaProvider, TableProvider},
+    common::DataFusionError,
     error::Result,
     execution::SessionState,
-    common::DataFusionError
 };
 use parking_lot::RwLock;
 use std::any::Any;
 use std::sync::{Arc, Weak};
-use async_trait::async_trait;
 
 #[derive(Debug)]
 pub struct OptdCatalogProviderList {
