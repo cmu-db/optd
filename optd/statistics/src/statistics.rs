@@ -93,7 +93,7 @@ impl TableStatistics {
                 _extra_stats_json,
             )) = row_result
             {
-                row_count = record_count as usize; // Assuming all rows have the same record_count
+                row_count = record_count as usize; // Assuming all columns have the same record_count
 
                 let actual_contains_null = match contains_null.as_str() {
                     "TRUE" => Some(true),
@@ -150,7 +150,7 @@ pub struct ColumnStatistics {
     max: Option<String>,
     contains_null: Option<bool>,
     contains_nan: Option<bool>,
-    advanced_stats: Vec<AdvanceColumnStatistics>, // TODO, e.g. histogram, ndv, etc.
+    advanced_stats: Vec<AdvanceColumnStatistics>, // TODO, e.g. histogram, number of distinct values (set cardinality), etc.
 }
 
 impl ColumnStatistics {
@@ -197,7 +197,7 @@ pub trait StatisticsProvider {
 
     fn get_connection(&self) -> Result<duckdb::Connection, Error>;
 
-    fn current_snapshot(&self, connection: &duckdb::Connection) -> Result<i64, Error>;
+    fn current_snapshot(&self, connection: &duckdb::Connection) -> Result<CurrentSnapshot, Error>;
 
     /// Retrieve table and column statistics at specific snapshot
     fn fetch_table_statistics(
@@ -238,6 +238,15 @@ impl DuckLakeStatisticsProvider {
     }
 }
 
+pub struct SnapshotId(i64);
+
+pub struct CurrentSnapshot {
+    snapshot_id: SnapshotId,
+    schema_version: i64,
+    next_catalog_id: i64,
+    next_file_id: i64,
+}
+
 impl StatisticsProvider for DuckLakeStatisticsProvider {
     fn memory() -> Result<Box<Self>, Error> {
         let connection_builder = Arc::new(DuckLakeConnectionBuilder::memory()?);
@@ -257,7 +266,7 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
         Ok(conn)
     }
 
-    fn current_snapshot(&self, conn: &duckdb::Connection) -> Result<i64, Error> {
+    fn current_snapshot(&self, conn: &duckdb::Connection) -> Result<CurrentSnapshot, Error> {
         let mut stmt = conn
             .prepare(
                 format!(
@@ -273,18 +282,18 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
             )
             .context(QueryExecutionSnafu)?;
 
-        let row = stmt
+        let current_snapshot = stmt
             .query_row([], |row| {
-                Ok((
-                    row.get::<usize, i64>(0)?,    // snapshot_id
-                    row.get::<usize, String>(1)?, // schema_version
-                    row.get::<usize, i64>(2)?,    // next_catalog_id
-                    row.get::<usize, i64>(3)?,    // next_file_id
-                ))
+                Ok(CurrentSnapshot {
+                    snapshot_id: SnapshotId(row.get("snapshot_id")?),
+                    schema_version: row.get("schema_version")?,
+                    next_catalog_id: row.get("next_catalog_id")?,
+                    next_file_id: row.get("next_file_id")?,
+                })
             })
             .context(QueryExecutionSnafu)?;
 
-        Ok(row.0)
+        Ok(current_snapshot)
     }
 
     fn fetch_table_statistics(
@@ -346,24 +355,49 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
         stats_type: &str,
         payload: &str,
     ) -> Result<(), Error> {
-        let conn = self.connection_builder.connect()?;
+        let mut conn = self.connection_builder.connect()?;
+        // let mut txn = conn.transaction().unwrap();
+
+        let current_snapshot = self.current_snapshot(&conn)?;
+
+        // Parameters: column_id, table_id, (stats_type: &str, payload: &str)
+        // 1. Get the current snapshot id
+        // 2. insert with begin_snapshot = current snapshot + 1;
+        // 3. do an update query, UPDATE end_snapshot = current_snapshot WHERE column_id= ? and table_id= ? and stats_type = ?;
+        // 4. increment next snapshot id
+
+        // 3. check how duckdb do snapshot id increments (might need update `ducklake_snapshot` table).
+
+        // R"(INSERT INTO {METADATA_CATALOG}.ducklake_snapshot VALUES ({SNAPSHOT_ID}, NOW(), {SCHEMA_VERSION}, {NEXT_CATALOG_ID}, {NEXT_FILE_ID});)");
+        // 4. Update snapshot_changes (MIGHT BE optional).
+        // auto query = StringUtil::Format(
+        //     R"(INSERT INTO {METADATA_CATALOG}.ducklake_snapshot_changes VALUES ({SNAPSHOT_ID}, %s, %s, %s, %s);)",
+        //     SQLStringOrNull(change_info.changes_made), commit_info.author.ToSQLString(),
+        //     commit_info.commit_message.ToSQLString(), commit_info.commit_extra_info.ToSQLString());
+        // auto result = transaction.Query(commit_snapshot, query);
+        // if (result->HasError()) {
+        // 	result->GetErrorObject().Throw("Failed to write new snapshot to DuckLake:");
+        // }
+        // Commit
+
         let table_name = format!(
             "__ducklake_metadata_{}.main.ducklake_table_column_adv_stats",
             self.connection_builder.get_meta_name()
         );
+
         let query = format!(
-            "INSERT OR REPLACE INTO {} 
+            "INSERT INTO {} 
              (column_id, begin_snapshot, end_snapshot, table_id, stats_type, payload) 
              VALUES (?, ?, ?, ?, ?, ?)",
             table_name
         );
         let mut stmt = conn.prepare(&query).context(QueryExecutionSnafu)?;
 
-        stmt.execute([
-            &column_id.to_string(),
-            &begin_snapshot.to_string(),
-            &end_snapshot.to_string(),
-            &table_id.to_string(),
+        stmt.execute(duckdb::params![
+            &column_id,
+            &begin_snapshot,
+            &end_snapshot,
+            table_id,
             stats_type,
             payload,
         ])
