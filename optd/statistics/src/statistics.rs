@@ -1,25 +1,24 @@
+use duckdb::{Connection, Error as DuckDBError, params};
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use snafu::{ResultExt, prelude::*};
-use std::sync::Arc;
-
-use crate::ducklake_connection::{DuckLakeConnectionBuilder, Error as ConnectionError};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
     #[snafu(display("Database connection error: {}", source))]
-    Connection { source: ConnectionError },
+    Connection { source: DuckDBError },
     #[snafu(display("Query execution failed: {}", source))]
-    QueryExecution { source: duckdb::Error },
+    QueryExecution { source: DuckDBError },
     #[snafu(display("JSON serialization error: {}", source))]
     JsonSerialization { source: serde_json::Error },
     #[snafu(display(
-        "Statistics not found for table: {}, column: {}, snapshot: {}",
+        "Get statistics failed for table: {}, column: {}, snapshot: {}",
         table,
         column,
         snapshot
     ))]
-    StatsNotFound {
+    GetStatsFailed {
         table: String,
         column: String,
         snapshot: i64,
@@ -37,12 +36,6 @@ pub enum Error {
     },
 }
 
-impl From<ConnectionError> for Error {
-    fn from(err: ConnectionError) -> Self {
-        Error::Connection { source: err }
-    }
-}
-
 /** Packaged Statistics Objects */
 /** Table statistics -- Contains overall row count and per-column statistics */
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,82 +44,37 @@ pub struct TableStatistics {
     column_statistics: Vec<ColumnStatistics>,
 }
 
-impl TableStatistics {
-    fn new<I>(rows: I) -> Self
-    where
-        I: IntoIterator<
-            Item = Result<
-                (
-                    i64,
-                    i64,
-                    String,
-                    String,
-                    i64,
-                    i64,
-                    i64,
-                    String,
-                    String,
-                    String,
-                    String,
-                    String,
-                ),
-                duckdb::Error,
-            >,
-        >,
-    {
+impl FromIterator<Result<StatisticsEntry, Error>> for TableStatistics {
+    fn from_iter<T: IntoIterator<Item = Result<StatisticsEntry, Error>>>(iter: T) -> Self {
         let mut row_count = 0;
         let mut column_statistics = Vec::new();
 
-        for row_result in rows {
-            if let Ok((
-                _table_id,
+        for row_result in iter {
+            if let Ok(StatisticsEntry {
+                table_id: _,
                 column_id,
                 column_name,
                 column_type,
                 record_count,
-                _next_row_id,
-                _file_size_bytes,
+                next_row_id: _,
+                file_size_bytes: _,
                 contains_null,
                 contains_nan,
                 min_value,
                 max_value,
-                _extra_stats_json,
-            )) = row_result
+                extra_stats: _,
+            }) = row_result
             {
                 row_count = record_count as usize; // Assuming all columns have the same record_count
-
-                let actual_contains_null = match contains_null.as_str() {
-                    "TRUE" => Some(true),
-                    "FALSE" => Some(false),
-                    _ => None,
-                };
-
-                let actual_contains_nan = match contains_nan.as_str() {
-                    "TRUE" => Some(true),
-                    "FALSE" => Some(false),
-                    _ => None,
-                };
-
-                let actual_min_value = if min_value == "NULL" {
-                    None
-                } else {
-                    Some(min_value)
-                };
-
-                let actual_max_value = if max_value == "NULL" {
-                    None
-                } else {
-                    Some(max_value)
-                };
 
                 let column_stats = ColumnStatistics::new(
                     column_id,
                     column_type,
                     column_name.clone(),
-                    actual_min_value,
-                    actual_max_value,
-                    actual_contains_null,
-                    actual_contains_nan,
+                    min_value,
+                    max_value,
+                    contains_null,
+                    contains_nan,
                     vec![], // Advanced stats can be populated later
                 );
 
@@ -188,23 +136,32 @@ struct AdvanceColumnStatistics {
     data: Value,
 }
 
+pub struct SnapshotId(i64);
+
+struct StatisticsEntry {
+    table_id: i64,
+    column_id: i64,
+    column_name: String,
+    column_type: String,
+    record_count: i64,
+    next_row_id: i64,
+    file_size_bytes: i64,
+    contains_null: Option<bool>,
+    contains_nan: Option<bool>,
+    min_value: Option<String>,
+    max_value: Option<String>,
+    extra_stats: Option<String>,
+}
+
 pub trait StatisticsProvider {
-    /// Create a new memory-based StatisticsProvider
-    fn memory() -> Result<Box<Self>, Error>;
-
-    /// Create a new file-based StatisticsProvider
-    fn file(path: &str) -> Result<Box<Self>, Error>;
-
-    fn get_connection(&self) -> Result<duckdb::Connection, Error>;
-
-    fn current_snapshot(&self, connection: &duckdb::Connection) -> Result<CurrentSnapshot, Error>;
+    fn current_snapshot(&self) -> Result<SnapshotId, Error>;
 
     /// Retrieve table and column statistics at specific snapshot
     fn fetch_table_statistics(
         &self,
         table_name: &str,
         snapshot: i64,
-        connection: &duckdb::Connection,
+        connection: &Connection,
     ) -> Result<Option<TableStatistics>, Error>;
 
     /// Insert table column statistics
@@ -221,66 +178,98 @@ pub trait StatisticsProvider {
 
 /// DuckLake-based implementation of StatisticsProvider
 pub struct DuckLakeStatisticsProvider {
-    connection_builder: Arc<DuckLakeConnectionBuilder>,
+    conn: Connection,
 }
 
 impl DuckLakeStatisticsProvider {
     /// Create a new DuckLakeStatisticsProvider with memory-based DuckDB
-    pub fn memory() -> Result<Self, Error> {
-        let connection_builder = Arc::new(DuckLakeConnectionBuilder::memory()?);
-        Ok(Self { connection_builder })
+    fn try_new(location: Option<&str>) -> Result<Self, Error> {
+        let conn = if let Some(path) = location {
+            Connection::open(path).context(ConnectionSnafu)?
+        } else {
+            Connection::open_in_memory().context(ConnectionSnafu)?
+        };
+
+        let setup_query = r#"
+            INSTALL ducklake;
+            LOAD ducklake;
+            ATTACH 'ducklake:metadata.ducklake' AS metalake;
+            USE metalake;
+
+            CREATE TABLE IF NOT EXISTS __ducklake_metadata_{name}.main.ducklake_table_column_adv_stats (
+                column_id BIGINT,
+                begin_snapshot BIGINT,
+                end_snapshot BIGINT,
+                table_id BIGINT,
+                stats_type VARCHAR,
+                payload TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS __ducklake_metadata_{name}.main.optd_query (
+                query_id BIGINT,
+                query_string TEXT,
+                root_group_id BIGINT
+            );
+
+            CREATE TABLE IF NOT EXISTS __ducklake_metadata_{name}.main.optd_query_instance (
+                query_instance_id BIGINT PRIMARY KEY,
+                query_id BIGINT,
+                creation_time BIGINT,
+                snapshot_id BIGINT
+            );
+
+            CREATE TABLE IF NOT EXISTS __ducklake_metadata_{name}.main.optd_group (
+                group_id BIGINT,
+                begin_snapshot BIGINT,
+                end_snapshot BIGINT
+            );
+
+            CREATE TABLE IF NOT EXISTS __ducklake_metadata_{name}.main.optd_group_stats (
+                group_id BIGINT,
+                begin_snapshot BIGINT,
+                end_snapshot BIGINT,
+                stats_type VARCHAR,
+                payload TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS __ducklake_metadata_{name}.main.optd_execution_subplan_feedback (
+                group_id BIGINT,
+                begin_snapshot BIGINT,
+                end_snapshot BIGINT,
+                stats_type VARCHAR,
+                payload TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS __ducklake_metadata_{name}.main.optd_subplan_scalar_feedback (
+                scalar_id BIGINT,
+                group_id BIGINT,
+                stats_type VARCHAR,
+                payload TEXT,
+                query_instance_id BIGINT
+            );
+        "#;
+        conn.execute_batch(setup_query).context(ConnectionSnafu)?;
+        Ok(Self { conn })
     }
 
-    /// Create a new DuckLakeStatisticsProvider with file-based DuckDB
-    pub fn file(path: &str) -> Result<Self, Error> {
-        let connection_builder = Arc::new(DuckLakeConnectionBuilder::file(path)?);
-        Ok(Self { connection_builder })
+    fn get_connection(&self) -> &Connection {
+        &self.conn
     }
-}
-
-pub struct SnapshotId(i64);
-
-pub struct CurrentSnapshot {
-    snapshot_id: SnapshotId,
-    schema_version: i64,
-    next_catalog_id: i64,
-    next_file_id: i64,
 }
 
 impl StatisticsProvider for DuckLakeStatisticsProvider {
-    fn memory() -> Result<Box<Self>, Error> {
-        let connection_builder = Arc::new(DuckLakeConnectionBuilder::memory()?);
-        Ok(Box::new(Self { connection_builder }))
-    }
-
-    /// Create a new DuckLakeStatisticsProvider with file-based DuckDB
-    fn file(path: &str) -> Result<Box<Self>, Error> {
-        let connection_builder = Arc::new(DuckLakeConnectionBuilder::file(path)?);
-        Ok(Box::new(Self { connection_builder }))
-    }
-
-    /// Get a connection to the DuckDB instance and initialize the DuckLake-Optd schema
-    fn get_connection(&self) -> Result<duckdb::Connection, Error> {
-        let conn = self.connection_builder.connect()?;
-        self.connection_builder.initialize_schema(&conn)?;
-        Ok(conn)
-    }
-
-    fn current_snapshot(&self, conn: &duckdb::Connection) -> Result<CurrentSnapshot, Error> {
-        let mut stmt = conn
-            .prepare(
-                format!(
-                    r#"
-                        SELECT snapshot_id, schema_version, next_catalog_id, next_file_id
-                            FROM __ducklake_metadata_{name}.main.ducklake_snapshot
-                            WHERE snapshot_id = (SELECT MAX(snapshot_id)
-                            FROM __ducklake_metadata_{name}.main.ducklake_snapshot);
-                    "#,
-                    name = self.connection_builder.get_meta_name()
-                )
-                .as_str(),
-            )
+    fn current_snapshot(&self) -> Result<SnapshotId, Error> {
+        let mut stmt = self
+            .conn
+            .prepare("FROM snapshot_test.current_snapshot();")
             .context(QueryExecutionSnafu)?;
+
+        struct CurrentSnapshot {
+            snapshot_id: SnapshotId,
+            schema_version: i64,
+            next_catalog_id: i64,
+            next_file_id: i64,
+        }
 
         let current_snapshot = stmt
             .query_row([], |row| {
@@ -293,54 +282,70 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
             })
             .context(QueryExecutionSnafu)?;
 
-        Ok(current_snapshot)
+        Ok(current_snapshot.snapshot_id)
     }
 
     fn fetch_table_statistics(
         &self,
         table: &str,
         snapshot: i64,
-        conn: &duckdb::Connection,
+        conn: &Connection,
     ) -> Result<Option<TableStatistics>, Error> {
         // Query for table statistics within the snapshot range
         let mut stmt = conn
             .prepare(
-                format!(
                     r#"
-                        SELECT table_id, column_id, column_name, column_type, record_count, next_row_id, file_size_bytes, contains_null, contains_nan, min_value, max_value, extra_stats
-                            FROM __ducklake_metadata_{name}.main.ducklake_table_stats
-                            LEFT JOIN __ducklake_metadata_{name}.main.ducklake_table_column_stats USING (table_id)
-                            LEFT JOIN __ducklake_metadata_{name}.main.ducklake_column col USING (table_id, column_id)
-                            WHERE record_count IS NOT NULL AND file_size_bytes IS NOT NULL AND
-                                table_id = (SELECT table_id FROM __ducklake_metadata_{name}.main.ducklake_table WHERE table_name = ?)
-                                AND ? >= begin_snapshot AND (? < end_snapshot OR end_snapshot IS NULL)
-                            ORDER BY table_id, column_id;
-                    "#,
-                    name = self.connection_builder.get_meta_name()
-                ).as_str()
+                        SELECT 
+                            ts.table_id, 
+                            tcs.column_id, 
+                            dc.column_name, 
+                            dc.column_type, 
+                            ts.record_count, 
+                            ts.next_row_id, 
+                            ts.file_size_bytes, 
+                            tcs.contains_null, 
+                            tcs.contains_nan, 
+                            tcs.min_value, 
+                            tcs.max_value, 
+                            tcs.extra_stats
+                        FROM __ducklake_metadata_metalake.main.ducklake_table_stats ts
+                        LEFT JOIN __ducklake_metadata_metalake.main.ducklake_table_column_stats tcs USING (table_id)
+                        LEFT JOIN __ducklake_metadata_metalake.main.ducklake_column dc USING (table_id, column_id)
+                        INNER JOIN __ducklake_metadata_metalake.main.ducklake_table dt ON ts.table_id = dt.table_id
+                        INNER JOIN __ducklake_metadata_metalake.main.ducklake_schema ds ON dt.schema_id = ds.schema_id
+                        WHERE 
+                            ds.schema_name = current_schema()
+                            AND dt.table_name = ?
+                            AND ts.record_count IS NOT NULL 
+                            AND ts.file_size_bytes IS NOT NULL
+                            AND ? >= dc.begin_snapshot 
+                            AND (? < dc.end_snapshot OR dc.end_snapshot IS NULL)
+                        ORDER BY ts.table_id, tcs.column_id;
+                    "#
             )
             .context(QueryExecutionSnafu)?;
 
-        let rows = stmt
-            .query_map([table, snapshot.to_string().as_str()], |row| {
-                Ok((
-                    row.get::<usize, i64>(0)?,     // table_id
-                    row.get::<usize, i64>(1)?,     // column_id
-                    row.get::<usize, String>(2)?,  // column_name
-                    row.get::<usize, String>(3)?,  // column_type
-                    row.get::<usize, i64>(4)?,     // record_count
-                    row.get::<usize, i64>(5)?,     // next_row_id
-                    row.get::<usize, i64>(6)?,     // file_size_bytes
-                    row.get::<usize, String>(7)?,  // contains_null
-                    row.get::<usize, String>(8)?,  // contains_nan
-                    row.get::<usize, String>(9)?,  // min_value
-                    row.get::<usize, String>(10)?, // max_value
-                    row.get::<usize, String>(11)?, // extra_stats (JSON)
-                ))
+        let entries = stmt
+            .query_map([snapshot.to_string().as_str(), table], |row| {
+                Ok(StatisticsEntry {
+                    table_id: row.get("column_id")?,
+                    column_id: row.get("column_id")?,
+                    column_name: row.get("column_name")?,
+                    column_type: row.get("column_type")?,
+                    record_count: row.get("record_count")?,
+                    next_row_id: row.get("next_row_id")?,
+                    file_size_bytes: row.get("file_size_bytes")?,
+                    contains_null: row.get("contains_null")?,
+                    contains_nan: row.get("contains_nan")?,
+                    min_value: row.get("min_value")?,
+                    max_value: row.get("max_value")?,
+                    extra_stats: row.get("extra_stats")?,
+                })
             })
-            .context(QueryExecutionSnafu)?;
+            .context(QueryExecutionSnafu)?
+            .map(|result| result.context(QueryExecutionSnafu));
 
-        let table_stats: TableStatistics = TableStatistics::new(rows);
+        let table_stats: TableStatistics = TableStatistics::from_iter(entries);
 
         Ok(Some(table_stats))
     }
@@ -355,10 +360,9 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
         stats_type: &str,
         payload: &str,
     ) -> Result<(), Error> {
-        let mut conn = self.connection_builder.connect()?;
         // let mut txn = conn.transaction().unwrap();
 
-        let current_snapshot = self.current_snapshot(&conn)?;
+        let current_snapshot = self.current_snapshot()?;
 
         // Parameters: column_id, table_id, (stats_type: &str, payload: &str)
         // 1. Get the current snapshot id
@@ -380,23 +384,16 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
         // }
         // Commit
 
-        let table_name = format!(
-            "__ducklake_metadata_{}.main.ducklake_table_column_adv_stats",
-            self.connection_builder.get_meta_name()
-        );
-
-        let query = format!(
-            "INSERT INTO {} 
+        let query = "INSERT INTO __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
              (column_id, begin_snapshot, end_snapshot, table_id, stats_type, payload) 
-             VALUES (?, ?, ?, ?, ?, ?)",
-            table_name
-        );
-        let mut stmt = conn.prepare(&query).context(QueryExecutionSnafu)?;
+             VALUES (?, ?, ?, ?, ?, ?)";
 
-        stmt.execute(duckdb::params![
-            &column_id,
-            &begin_snapshot,
-            &end_snapshot,
+        let mut stmt = self.conn.prepare(&query).context(QueryExecutionSnafu)?;
+
+        stmt.execute(params![
+            column_id,
+            begin_snapshot,
+            end_snapshot,
             table_id,
             stats_type,
             payload,
@@ -416,23 +413,20 @@ mod tests {
     fn test_ducklake_statistics_provider_creation() {
         {
             // Test memory-based provider
-            let memory_provider = DuckLakeStatisticsProvider::memory();
+            let memory_provider = DuckLakeStatisticsProvider::try_new(None);
             assert!(memory_provider.is_ok());
         }
 
         {
             // Test file-based provider
-            let file_provider = DuckLakeStatisticsProvider::file("./test_stats.db");
+            let file_provider = DuckLakeStatisticsProvider::try_new(Some("./test_stats.db"));
             assert!(file_provider.is_ok());
         }
     }
 
     #[test]
     fn test_table_stats_insertion() {
-        let provider = DuckLakeStatisticsProvider::memory().unwrap();
-
-        // Initialize the schema first
-        let _conn = provider.get_connection().unwrap();
+        let provider = DuckLakeStatisticsProvider::try_new(None).unwrap();
 
         // Insert table statistics
         let result =
@@ -462,10 +456,7 @@ mod tests {
 
     #[test]
     fn test_table_stats_insertion_and_retrieval() {
-        let provider = DuckLakeStatisticsProvider::memory().unwrap();
-
-        // Initialize the schema first
-        let _conn = provider.get_connection().unwrap();
+        let provider = DuckLakeStatisticsProvider::try_new(None).unwrap();
 
         // Insert table statistics
         let result =
