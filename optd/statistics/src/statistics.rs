@@ -154,7 +154,7 @@ struct StatisticsEntry {
 }
 
 pub trait StatisticsProvider {
-    fn current_snapshot(&self) -> Result<SnapshotId, Error>;
+    fn fetch_current_snapshot(&self) -> Result<SnapshotId, Error>;
 
     /// Retrieve table and column statistics at specific snapshot
     fn fetch_table_statistics(
@@ -183,7 +183,7 @@ pub struct DuckLakeStatisticsProvider {
 
 impl DuckLakeStatisticsProvider {
     /// Create a new DuckLakeStatisticsProvider with memory-based DuckDB
-    fn try_new(location: Option<&str>) -> Result<Self, Error> {
+    pub fn try_new(location: Option<&str>) -> Result<Self, Error> {
         let conn = if let Some(path) = location {
             Connection::open(path).context(ConnectionSnafu)?
         } else {
@@ -196,7 +196,7 @@ impl DuckLakeStatisticsProvider {
             ATTACH 'ducklake:metadata.ducklake' AS metalake;
             USE metalake;
 
-            CREATE TABLE IF NOT EXISTS __ducklake_metadata_{name}.main.ducklake_table_column_adv_stats (
+            CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats (
                 column_id BIGINT,
                 begin_snapshot BIGINT,
                 end_snapshot BIGINT,
@@ -205,26 +205,26 @@ impl DuckLakeStatisticsProvider {
                 payload TEXT
             );
 
-            CREATE TABLE IF NOT EXISTS __ducklake_metadata_{name}.main.optd_query (
+            CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_query (
                 query_id BIGINT,
                 query_string TEXT,
                 root_group_id BIGINT
             );
 
-            CREATE TABLE IF NOT EXISTS __ducklake_metadata_{name}.main.optd_query_instance (
+            CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_query_instance (
                 query_instance_id BIGINT PRIMARY KEY,
                 query_id BIGINT,
                 creation_time BIGINT,
                 snapshot_id BIGINT
             );
 
-            CREATE TABLE IF NOT EXISTS __ducklake_metadata_{name}.main.optd_group (
+            CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_group (
                 group_id BIGINT,
                 begin_snapshot BIGINT,
                 end_snapshot BIGINT
             );
 
-            CREATE TABLE IF NOT EXISTS __ducklake_metadata_{name}.main.optd_group_stats (
+            CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_group_stats (
                 group_id BIGINT,
                 begin_snapshot BIGINT,
                 end_snapshot BIGINT,
@@ -232,7 +232,7 @@ impl DuckLakeStatisticsProvider {
                 payload TEXT
             );
 
-            CREATE TABLE IF NOT EXISTS __ducklake_metadata_{name}.main.optd_execution_subplan_feedback (
+            CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_execution_subplan_feedback (
                 group_id BIGINT,
                 begin_snapshot BIGINT,
                 end_snapshot BIGINT,
@@ -240,7 +240,7 @@ impl DuckLakeStatisticsProvider {
                 payload TEXT
             );
 
-            CREATE TABLE IF NOT EXISTS __ducklake_metadata_{name}.main.optd_subplan_scalar_feedback (
+            CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_subplan_scalar_feedback (
                 scalar_id BIGINT,
                 group_id BIGINT,
                 stats_type VARCHAR,
@@ -252,37 +252,23 @@ impl DuckLakeStatisticsProvider {
         Ok(Self { conn })
     }
 
-    fn get_connection(&self) -> &Connection {
+    pub fn get_connection(&self) -> &Connection {
         &self.conn
     }
 }
 
 impl StatisticsProvider for DuckLakeStatisticsProvider {
-    fn current_snapshot(&self) -> Result<SnapshotId, Error> {
+    fn fetch_current_snapshot(&self) -> Result<SnapshotId, Error> {
         let mut stmt = self
             .conn
-            .prepare("FROM snapshot_test.current_snapshot();")
+            .prepare("FROM ducklake_current_snapshot('metalake');")
             .context(QueryExecutionSnafu)?;
 
-        struct CurrentSnapshot {
-            snapshot_id: SnapshotId,
-            schema_version: i64,
-            next_catalog_id: i64,
-            next_file_id: i64,
-        }
-
-        let current_snapshot = stmt
-            .query_row([], |row| {
-                Ok(CurrentSnapshot {
-                    snapshot_id: SnapshotId(row.get("snapshot_id")?),
-                    schema_version: row.get("schema_version")?,
-                    next_catalog_id: row.get("next_catalog_id")?,
-                    next_file_id: row.get("next_file_id")?,
-                })
-            })
+        let snapshot_id = stmt
+            .query_row([], |row| Ok(SnapshotId(row.get(0)?)))
             .context(QueryExecutionSnafu)?;
 
-        Ok(current_snapshot.snapshot_id)
+        Ok(snapshot_id)
     }
 
     fn fetch_table_statistics(
@@ -362,7 +348,7 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
     ) -> Result<(), Error> {
         // let mut txn = conn.transaction().unwrap();
 
-        let current_snapshot = self.current_snapshot()?;
+        let current_snapshot = self.fetch_current_snapshot()?;
 
         // Parameters: column_id, table_id, (stats_type: &str, payload: &str)
         // 1. Get the current snapshot id
@@ -384,7 +370,7 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
         // }
         // Commit
 
-        let query = "INSERT INTO __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
+        let query = "INSERT OR REPLACE INTO __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
              (column_id, begin_snapshot, end_snapshot, table_id, stats_type, payload) 
              VALUES (?, ?, ?, ?, ?, ?)";
 
@@ -408,6 +394,7 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
 mod tests {
     use super::*;
     use serde_json::json;
+    use tempfile::TempDir;
 
     #[test]
     fn test_ducklake_statistics_provider_creation() {
@@ -418,15 +405,21 @@ mod tests {
         }
 
         {
-            // Test file-based provider
-            let file_provider = DuckLakeStatisticsProvider::try_new(Some("./test_stats.db"));
+            // Test file-based provider with temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir.path().join("test_stats.db");
+            let file_provider =
+                DuckLakeStatisticsProvider::try_new(Some(db_path.to_str().unwrap()));
             assert!(file_provider.is_ok());
         }
     }
 
     #[test]
     fn test_table_stats_insertion() {
-        let provider = DuckLakeStatisticsProvider::try_new(None).unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_insertion.db");
+        let provider =
+            DuckLakeStatisticsProvider::try_new(Some(db_path.to_str().unwrap())).unwrap();
 
         // Insert table statistics
         let result =
@@ -436,6 +429,7 @@ mod tests {
             Err(e) => println!("Table stats insertion failed: {}", e),
         }
         assert!(result.is_ok());
+        // temp_dir is automatically cleaned up when it goes out of scope
     }
 
     #[test]
@@ -456,7 +450,10 @@ mod tests {
 
     #[test]
     fn test_table_stats_insertion_and_retrieval() {
-        let provider = DuckLakeStatisticsProvider::try_new(None).unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_retrieval.db");
+        let provider =
+            DuckLakeStatisticsProvider::try_new(Some(db_path.to_str().unwrap())).unwrap();
 
         // Insert table statistics
         let result =
