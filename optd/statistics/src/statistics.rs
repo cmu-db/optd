@@ -1,3 +1,5 @@
+use std::thread::current;
+
 use duckdb::{Connection, Error as DuckDBError, params, types::Null};
 
 use serde::{Deserialize, Serialize};
@@ -158,6 +160,12 @@ struct StatisticsEntry {
     min_value: Option<String>,
     max_value: Option<String>,
     extra_stats: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct StatisticsUpdate {
+    stats_type: String,
+    payload: String,
 }
 
 pub trait StatisticsProvider {
@@ -384,21 +392,30 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
             .context(QueryExecutionSnafu)?;
         begin_txn_stmt.execute([]).context(QueryExecutionSnafu)?;
 
+        struct SnapshotInfo {
+            snapshot_id: i64,
+            schema_version: i64,
+            next_catalog_id: i64,
+            next_file_id: i64,
+        }
+
         let mut snapshot_stmt = self
             .conn
             .prepare("FROM ducklake_current_snapshot('metalake');")
             .context(QueryExecutionSnafu)?;
 
         let current_snapshot = snapshot_stmt
-            .query_row([], |row| Ok(SnapshotId(row.get(0)?)))
-            .context(QueryExecutionSnafu)?
-            .0;
+            .query_row([], |row| {
+                Ok(SnapshotInfo {
+                    snapshot_id: row.get("snapshot_id")?,
+                    schema_version: row.get("schema_version")?,
+                    next_catalog_id: row.get("next_catalog_id")?,
+                    next_file_id: row.get("next_file_id")?,
+                })
+            })
+            .context(QueryExecutionSnafu)?;
 
-        // Parameters: column_id, table_id, (stats_type: &str, payload: &str)
-        // 1. Get the current snapshot id
-        // 2. insert with begin_snapshot = current snapshot + 1;
-        // 3. do an update query, UPDATE end_snapshot = current_snapshot WHERE column_id= ? and table_id= ? and stats_type = ?;
-        // 4. increment next snapshot id
+        let current_snapshot_id = current_snapshot.snapshot_id;
 
         // 3. check how duckdb do snapshot id increments (might need update `ducklake_snapshot` table).
 
@@ -414,15 +431,17 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
         // }
         // Commit
 
-        // Upsert matching past snapshot and insert new snapshot
-        let mut stmt = self
+        // Update matching past snapshot and insert new snapshot
+        let mut update_stmt = self
             .conn
             .prepare(
                 r#"
-            MERGE INTO __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats adv_stats
-                USING (SELECT ? AS snapshot_update) as end_snapshot_update
-                ON (adv_stats.end_snapshot IS ? AND adv_stats.stats_type = ?)
-                WHEN MATCHED THEN UPDATE SET end_snapshot = end_snapshot_update.snapshot_update;
+            UPDATE __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats adv_stats
+                SET end_snapshot_update = ?
+                WHERE (adv_stats.end_snapshot IS ? 
+                    AND adv_stats.stats_type = ? 
+                    AND adv_stats.column_id = ?
+                    AND adv_stats.table_id = ?)
             INSERT INTO __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
                 (column_id, begin_snapshot, end_snapshot, table_id, stats_type, payload) 
                 VALUES (?, ?, ?, ?, ?, ?);
@@ -430,18 +449,62 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
             )
             .context(QueryExecutionSnafu)?;
 
-        stmt.execute(params![
-            current_snapshot,
-            Null,
-            stats_type,
-            column_id,
-            current_snapshot + 1,
-            Null,
-            table_id,
-            stats_type,
-            payload,
-        ])
-        .context(QueryExecutionSnafu)?;
+        update_stmt
+            .execute(params![
+                current_snapshot_id,
+                Null,
+                stats_type,
+                column_id,
+                table_id,
+                column_id,
+                current_snapshot_id + 1,
+                Null,
+                table_id,
+                stats_type,
+                payload,
+            ])
+            .context(QueryExecutionSnafu)?;
+
+        let mut new_snap_stmt = self
+            .conn
+            .prepare(
+                r#"
+                INSERT INTO __ducklake_metadata_metalake.main.ducklake_snapshot
+                    (snapshot_id, snapshot_time, schema_version, next_catalog_id, next_file_id) 
+                    VALUES (?, NOW(), ?, ?, ?);
+            "#,
+            )
+            .context(QueryExecutionSnafu)?;
+
+        new_snap_stmt
+            .execute(params![
+                current_snapshot_id + 1,
+                current_snapshot.schema_version,
+                current_snapshot.next_catalog_id,
+                current_snapshot.next_file_id,
+            ])
+            .context(QueryExecutionSnafu)?;
+
+        // let mut new_snap_change_stmt = self
+        //     .conn
+        //     .prepare(
+        //         r#"
+        //         INSERT INTO __ducklake_metadata_metalake.main.ducklake_snapshot_changes
+        //             (snapshot_id, changes_made, author, commit_message, commit_extra_info)
+        //             VALUES (?, ?, ?, ?, ?);
+        //     "#,
+        //     )
+        //     .context(QueryExecutionSnafu)?;
+
+        // new_snap_change_stmt
+        //     .execute(params![
+        //         current_snapshot_id + 1,
+        //         format!("updated_stats"),
+        //         Null,
+        //         Null,
+        //         Null,
+        //     ])
+        //     .context(QueryExecutionSnafu)?;
 
         // Commit transaction
         let mut begin_txn_stmt = self
