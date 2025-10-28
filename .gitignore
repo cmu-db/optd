@@ -1,4 +1,3 @@
-
 # rust
 /target
 
@@ -11,3 +10,6 @@ data/
 
 # datafusion
 .history
+.DS_Store
+optd/.DS_Store
+optd/statistics/.DS_Store
