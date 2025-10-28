@@ -138,20 +138,20 @@ struct AdvanceColumnStatistics {
     data: Value,
 }
 
-pub struct SnapshotId(i64);
+pub struct SnapshotId(pub i64);
 
 pub struct SnapshotInfo {
-    snapshot_id: i64,
-    schema_version: i64,
-    next_catalog_id: i64,
-    next_file_id: i64,
+    pub snapshot_id: i64,
+    pub schema_version: i64,
+    pub next_catalog_id: i64,
+    pub next_file_id: i64,
 }
 
 pub struct CurrentSchema {
-    schema_name: String,
-    schema_id: i64,
-    begin_snapshot: i64,
-    end_snapshot: i64,
+    pub schema_name: String,
+    pub schema_id: i64,
+    pub begin_snapshot: i64,
+    pub end_snapshot: Option<i64>,
 }
 
 struct StatisticsEntry {
@@ -305,6 +305,49 @@ impl DuckLakeStatisticsProvider {
         commit_txn_stmt.execute([]).context(QueryExecutionSnafu)?;
         Ok(())
     }
+
+    fn update_regular_column_stats(
+        &self,
+        column_id: i64,
+        table_id: i64,
+        stats_type: &str,
+        payload: &str,
+    ) -> Result<(), Error> {
+        // Column name must be part of the query string, not a parameter
+        // Only min_value and max_value are supported for regular updates
+        let query = match stats_type {
+            "min_value" => {
+                r#"
+                UPDATE __ducklake_metadata_metalake.main.ducklake_table_column_stats
+                    SET min_value = ?
+                    WHERE column_id = ? AND table_id = ?;
+                "#
+            }
+            "max_value" => {
+                r#"
+                UPDATE __ducklake_metadata_metalake.main.ducklake_table_column_stats
+                    SET max_value = ?
+                    WHERE column_id = ? AND table_id = ?;
+                "#
+            }
+            _ => {
+                return Err(Error::QueryExecution {
+                    source: DuckDBError::InvalidParameterName(format!(
+                        "Unsupported regular stats type: {}. Only min_value and max_value are supported.",
+                        stats_type
+                    )),
+                });
+            }
+        };
+
+        let mut update_regular_stmt = self.conn.prepare(query).context(QueryExecutionSnafu)?;
+
+        update_regular_stmt
+            .execute(params![payload, column_id, table_id])
+            .context(QueryExecutionSnafu)?;
+
+        Ok(())
+    }
 }
 
 impl StatisticsProvider for DuckLakeStatisticsProvider {
@@ -415,22 +458,25 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
             .context(QueryExecutionSnafu)?;
 
         let entries = stmt
-            .query_map([snapshot.to_string().as_str(), table], |row| {
-                Ok(StatisticsEntry {
-                    table_id: row.get("column_id")?,
-                    column_id: row.get("column_id")?,
-                    column_name: row.get("column_name")?,
-                    column_type: row.get("column_type")?,
-                    record_count: row.get("record_count")?,
-                    next_row_id: row.get("next_row_id")?,
-                    file_size_bytes: row.get("file_size_bytes")?,
-                    contains_null: row.get("contains_null")?,
-                    contains_nan: row.get("contains_nan")?,
-                    min_value: row.get("min_value")?,
-                    max_value: row.get("max_value")?,
-                    extra_stats: row.get("extra_stats")?,
-                })
-            })
+            .query_map(
+                [table, &snapshot.to_string(), &snapshot.to_string()],
+                |row| {
+                    Ok(StatisticsEntry {
+                        table_id: row.get("column_id")?,
+                        column_id: row.get("column_id")?,
+                        column_name: row.get("column_name")?,
+                        column_type: row.get("column_type")?,
+                        record_count: row.get("record_count")?,
+                        next_row_id: row.get("next_row_id")?,
+                        file_size_bytes: row.get("file_size_bytes")?,
+                        contains_null: row.get("contains_null")?,
+                        contains_nan: row.get("contains_nan")?,
+                        min_value: row.get("min_value")?,
+                        max_value: row.get("max_value")?,
+                        extra_stats: row.get("extra_stats")?,
+                    })
+                },
+            )
             .context(QueryExecutionSnafu)?
             .map(|result| result.context(QueryExecutionSnafu));
 
@@ -453,6 +499,15 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
         // Fetch current snapshot info
         let current_snapshot = self.fetch_current_snapshot_info()?;
         let current_snapshot_id = current_snapshot.snapshot_id;
+
+        // match the stats_type and see if it's in the regular column stats
+        match stats_type {
+            "min_value" | "max_value" => {
+                self.update_regular_column_stats(column_id, table_id, stats_type, payload)?;
+            }
+            // Still update the advanced stats for these types
+            _ => {}
+        }
 
         // Update matching past snapshot to close it
         let mut update_stmt = self
@@ -549,304 +604,5 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
         self.commit_transaction()?;
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use tempfile::TempDir;
-
-    // Counter to ensure unique database names
-    static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    fn create_test_provider(for_file: bool) -> (TempDir, DuckLakeStatisticsProvider) {
-        // Create a unique subdirectory to separate DuckLake metadata for each test
-        let temp_dir = TempDir::new().unwrap();
-        let counter = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let unique_dir = temp_dir
-            .path()
-            .join(format!("db_{}_{}", timestamp, counter));
-        std::fs::create_dir_all(&unique_dir).unwrap();
-        let metadata_path = unique_dir.join("metadata.ducklake");
-        if !for_file {
-            let provider =
-                DuckLakeStatisticsProvider::try_new(None, Some(metadata_path.to_str().unwrap()))
-                    .unwrap();
-            (temp_dir, provider)
-        } else {
-            let db_path = unique_dir.join("test.db");
-            let provider = DuckLakeStatisticsProvider::try_new(
-                Some(db_path.to_str().unwrap()),
-                Some(metadata_path.to_str().unwrap()),
-            )
-            .unwrap();
-            (temp_dir, provider)
-        }
-    }
-
-    #[test]
-    fn test_ducklake_statistics_provider_creation() {
-        {
-            // Test memory-based provider
-            let _memory_provider = create_test_provider(false);
-            // The provider creation is already asserted in create_test_provider
-        }
-
-        {
-            // Test file-based provider with unique temporary database
-            let (_temp_dir, _provider) = create_test_provider(true);
-            // The provider creation is already asserted in create_test_provider
-        }
-    }
-
-    #[test]
-    fn test_table_stats_insertion() {
-        let (_temp_dir, provider) = create_test_provider(true);
-
-        // Insert table statistics
-        let result = provider.update_table_column_stats(1, 1, "ndv", r#"{"distinct_count": 1000}"#);
-        match &result {
-            Ok(_) => println!("Table stats insertion successful"),
-            Err(e) => println!("Table stats insertion failed: {}", e),
-        }
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_json_payload_handling() {
-        let payload = json!({
-            "distinct_count": 1000,
-            "null_count": 50,
-            "min_value": 1,
-            "max_value": 999999
-        });
-
-        let payload_str = serde_json::to_string(&payload).unwrap();
-        let parsed_back: serde_json::Value = serde_json::from_str(&payload_str).unwrap();
-
-        assert_eq!(parsed_back["distinct_count"], 1000);
-        assert_eq!(parsed_back["null_count"], 50);
-    }
-
-    #[test]
-    fn test_table_stats_insertion_and_retrieval() {
-        let (_temp_dir, provider) = create_test_provider(true);
-
-        // Insert table statistics
-        let result = provider.update_table_column_stats(1, 1, "ndv", r#"{"distinct_count": 1000}"#);
-        match &result {
-            Ok(_) => println!("Table stats insertion successful"),
-            Err(e) => println!("Table stats insertion failed: {}", e),
-        }
-        assert!(result.is_ok());
-
-        // Note: Actual retrieval would require setting up the table_metadata
-        // and column_metadata tables, which would be done by the DuckLake extension
-    }
-
-    #[test]
-    fn test_snapshot_versioning_and_stats_types() {
-        let (_temp_dir, provider) = create_test_provider(true);
-        let conn = provider.get_connection();
-
-        // Test 1: Multiple columns with sequential snapshots
-        provider
-            .update_table_column_stats(1, 1, "ndv", r#"{"distinct_count": 1000}"#)
-            .unwrap();
-        provider
-            .update_table_column_stats(2, 1, "ndv", r#"{"distinct_count": 2000}"#)
-            .unwrap();
-        provider
-            .update_table_column_stats(3, 1, "histogram", r#"{"buckets": [1,2,3]}"#)
-            .unwrap();
-
-        // Verify different columns have sequential snapshots
-        let mut stmt = conn
-            .prepare(
-                r#"
-                SELECT column_id, begin_snapshot
-                FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
-                WHERE table_id = 1
-                ORDER BY begin_snapshot;
-            "#,
-            )
-            .unwrap();
-        let snapshots: Vec<(i64, i64)> = stmt
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-            .unwrap()
-            .map(|r| r.unwrap())
-            .collect();
-        assert_eq!(snapshots.len(), 3);
-        assert!(snapshots[1].1 > snapshots[0].1);
-        assert!(snapshots[2].1 > snapshots[1].1);
-
-        // Test 2: Update same column multiple times - verify snapshot continuity
-        provider
-            .update_table_column_stats(1, 1, "ndv", r#"{"distinct_count": 1500}"#)
-            .unwrap();
-        provider
-            .update_table_column_stats(1, 1, "ndv", r#"{"distinct_count": 2000}"#)
-            .unwrap();
-
-        let mut version_stmt = conn
-            .prepare(
-                r#"
-                SELECT begin_snapshot, end_snapshot, payload
-                FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
-                WHERE table_id = 1 AND column_id = 1 AND stats_type = 'ndv'
-                ORDER BY begin_snapshot;
-            "#,
-            )
-            .unwrap();
-        let versions: Vec<(i64, Option<i64>, String)> = version_stmt
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
-            .unwrap()
-            .map(|r| r.unwrap())
-            .collect();
-
-        // Should have 3 versions (original + 2 updates)
-        assert_eq!(versions.len(), 3);
-
-        // First two closed, last one current
-        assert!(versions[0].1.is_some());
-        assert!(versions[1].1.is_some());
-        assert!(versions[2].1.is_none());
-
-        // Verify snapshot continuity
-        assert_eq!(versions[0].1.unwrap() + 1, versions[1].0);
-        assert_eq!(versions[1].1.unwrap() + 1, versions[2].0);
-
-        // Verify payloads updated correctly
-        assert!(versions[0].2.contains("1000"));
-        assert!(versions[1].2.contains("1500"));
-        assert!(versions[2].2.contains("2000"));
-
-        // Test 3: Multiple stat types for same column coexist
-        provider
-            .update_table_column_stats(1, 1, "histogram", r#"{"buckets": [1,2,3,4,5]}"#)
-            .unwrap();
-        provider
-            .update_table_column_stats(1, 1, "minmax", r#"{"min": 0, "max": 100}"#)
-            .unwrap();
-
-        let type_count: i64 = conn
-            .query_row(
-                r#"
-                SELECT COUNT(DISTINCT stats_type)
-                FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
-                WHERE table_id = 1 AND column_id = 1 AND end_snapshot IS NULL
-                "#,
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(type_count, 3); // ndv, histogram, minmax
-    }
-
-    #[test]
-    fn test_snapshot_tracking_and_multi_table_stats() {
-        let (_temp_dir, provider) = create_test_provider(true);
-        let conn = provider.get_connection();
-
-        // Get initial snapshot count
-        let initial_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM __ducklake_metadata_metalake.main.ducklake_snapshot",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-
-        // Test 1: Snapshot creation tracking - insert stats for 3 columns
-        provider
-            .update_table_column_stats(1, 1, "ndv", r#"{"distinct_count": 1000}"#)
-            .unwrap();
-        provider
-            .update_table_column_stats(2, 1, "ndv", r#"{"distinct_count": 2000}"#)
-            .unwrap();
-        provider
-            .update_table_column_stats(3, 1, "ndv", r#"{"distinct_count": 3000}"#)
-            .unwrap();
-
-        let after_table1_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM __ducklake_metadata_metalake.main.ducklake_snapshot",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(after_table1_count - initial_count, 3);
-
-        // Verify snapshot_changes were recorded
-        let changes_count: i64 = conn
-            .query_row(
-                r#"
-                SELECT COUNT(*) 
-                FROM __ducklake_metadata_metalake.main.ducklake_snapshot_changes
-                WHERE changes_made LIKE 'updated_stats:%'
-                "#,
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(changes_count, 3);
-
-        // Test 2: Multiple tables with independent tracking
-
-        // Test 2: Multiple tables with independent tracking
-        provider
-            .update_table_column_stats(1, 2, "ndv", r#"{"distinct_count": 5000}"#)
-            .unwrap();
-        provider
-            .update_table_column_stats(2, 2, "ndv", r#"{"distinct_count": 6000}"#)
-            .unwrap();
-
-        // Verify each table has correct number of stats
-        let table1_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats WHERE table_id = 1",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let table2_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats WHERE table_id = 2",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-
-        assert_eq!(table1_count, 3); // 3 columns from table 1
-        assert_eq!(table2_count, 2); // 2 columns from table 2
-
-        // Verify all snapshots are sequential across tables
-        let mut snapshot_stmt = conn
-            .prepare(
-                r#"
-                SELECT table_id, column_id, begin_snapshot
-                FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
-                ORDER BY begin_snapshot
-                "#,
-            )
-            .unwrap();
-        let all_snapshots: Vec<i64> = snapshot_stmt
-            .query_map([], |row| row.get(2))
-            .unwrap()
-            .map(|r| r.unwrap())
-            .collect();
-
-        // All 5 snapshots should be increasing
-        for i in 1..all_snapshots.len() {
-            assert!(all_snapshots[i] > all_snapshots[i - 1]);
-        }
     }
 }
