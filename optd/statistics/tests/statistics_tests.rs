@@ -147,14 +147,10 @@ fn test_fetch_current_schema() {
     let (_temp_dir, provider) = create_test_statistics_provider(true);
 
     // Fetch the current schema
-    let result = provider.fetch_current_schema();
-
-    // Print error if it fails
+    let result = provider.fetch_current_schema_info();
     if let Err(ref e) = result {
         println!("Error fetching current schema: {}", e);
     }
-
-    // The result should be Ok since DuckLake creates a default 'main' schema
     assert!(
         result.is_ok(),
         "Expected fetch_current_schema to succeed, got error: {:?}",
@@ -572,11 +568,11 @@ fn test_update_and_fetch_table_column_stats() {
 
     assert_eq!(histogram_payload, histogram_data.to_string());
 
-    println!("✓ All update and fetch operations completed successfully");
-    println!("  - Initial snapshot: {}", initial_snapshot.0);
-    println!("  - After min_value update: {}", snapshot_after_min.0);
-    println!("  - After max_value update: {}", snapshot_after_max.0);
-    println!("  - After histogram update: {}", snapshot_after_histogram.0);
+    println!("All update and fetch operations completed");
+    println!("  Initial snapshot: {}", initial_snapshot.0);
+    println!("  After min_value update: {}", snapshot_after_min.0);
+    println!("  After max_value update: {}", snapshot_after_max.0);
+    println!("  After histogram update: {}", snapshot_after_histogram.0);
 }
 
 #[test]
@@ -901,4 +897,289 @@ fn test_fetch_table_stats_row_count() {
     println!("✓ Row count test passed");
     println!("  - Row count: {}", stats.row_count);
     println!("  - Column count: {}", stats.column_statistics.len());
+}
+
+#[test]
+fn test_fetch_current_schema_arrow() {
+    let (_temp_dir, provider) = create_test_statistics_provider(false);
+    let conn = provider.get_connection();
+
+    // Create a test table
+    conn.execute_batch(
+        r#"
+        CREATE TABLE schema_test_table (
+            id INTEGER,
+            name VARCHAR,
+            value DOUBLE,
+            active BOOLEAN
+        );
+        "#,
+    )
+    .unwrap();
+
+    // Fetch schema without specifying schema (default to current schema)
+    let schema = provider
+        .fetch_current_schema(None, "schema_test_table")
+        .unwrap();
+
+    assert_eq!(schema.fields().len(), 4);
+
+    // Verify field names and types
+    let field_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+    assert!(field_names.contains(&"id"));
+    assert!(field_names.contains(&"name"));
+    assert!(field_names.contains(&"value"));
+    assert!(field_names.contains(&"active"));
+
+    let id_field = schema.field_with_name("id").unwrap();
+    assert!(matches!(
+        id_field.data_type(),
+        &duckdb::arrow::datatypes::DataType::Int32
+    ));
+    let name_field = schema.field_with_name("name").unwrap();
+    assert!(matches!(
+        name_field.data_type(),
+        &duckdb::arrow::datatypes::DataType::Utf8
+    ));
+    let value_field = schema.field_with_name("value").unwrap();
+    assert!(matches!(
+        value_field.data_type(),
+        &duckdb::arrow::datatypes::DataType::Float64
+    ));
+    let active_field = schema.field_with_name("active").unwrap();
+    assert!(matches!(
+        active_field.data_type(),
+        &duckdb::arrow::datatypes::DataType::Boolean
+    ));
+
+    // Fetch schema with explicit schema name
+    let schema_explicit = provider
+        .fetch_current_schema(Some("main"), "schema_test_table")
+        .unwrap();
+
+    assert_eq!(schema_explicit.fields().len(), 4);
+    assert_eq!(schema.fields().len(), schema_explicit.fields().len());
+
+    println!("✓ Schema fetch test passed");
+    println!("  - Fields: {}", schema.fields().len());
+    println!("  - Field names: {:?}", field_names);
+}
+
+#[test]
+fn test_multiple_schemas_comprehensive() {
+    let (_temp_dir, provider) = create_test_statistics_provider(false);
+    let conn = provider.get_connection();
+
+    // Get initial schema info (should be 'main')
+    let initial_schema_info = provider.fetch_current_schema_info().unwrap();
+    assert_eq!(initial_schema_info.schema_name, "main");
+    assert_eq!(initial_schema_info.schema_id, 0);
+    assert!(initial_schema_info.end_snapshot.is_none());
+    println!("✓ Initial schema: {}", initial_schema_info.schema_name);
+
+    // Create additional schemas
+    conn.execute_batch(
+        r#"
+        CREATE SCHEMA analytics;
+        CREATE SCHEMA reporting;
+        "#,
+    )
+    .unwrap();
+    println!("✓ Created additional schemas: analytics, reporting");
+
+    // Create tables in different schemas
+    conn.execute_batch(
+        r#"
+        -- Table in main schema
+        CREATE TABLE main.users (
+            user_id INTEGER,
+            username VARCHAR,
+            email VARCHAR,
+            created_at TIMESTAMP
+        );
+        
+        -- Table in analytics schema
+        CREATE TABLE analytics.metrics (
+            metric_id BIGINT,
+            metric_name VARCHAR,
+            value DOUBLE,
+            recorded_at DATE
+        );
+        
+        -- Table in reporting schema  
+        CREATE TABLE reporting.summary (
+            report_id SMALLINT,
+            report_name TEXT,
+            data BLOB,
+            is_published BOOLEAN
+        );
+        "#,
+    )
+    .unwrap();
+    println!("✓ Created tables in all schemas");
+
+    // Test 1: Fetch schema from main (without explicit schema parameter)
+    let main_users_schema = provider.fetch_current_schema(None, "users").unwrap();
+    assert_eq!(main_users_schema.fields().len(), 4);
+
+    let user_id_field = main_users_schema.field_with_name("user_id").unwrap();
+    assert!(matches!(
+        user_id_field.data_type(),
+        &duckdb::arrow::datatypes::DataType::Int32
+    ));
+
+    let username_field = main_users_schema.field_with_name("username").unwrap();
+    assert!(matches!(
+        username_field.data_type(),
+        &duckdb::arrow::datatypes::DataType::Utf8
+    ));
+
+    let created_at_field = main_users_schema.field_with_name("created_at").unwrap();
+    assert!(matches!(
+        created_at_field.data_type(),
+        &duckdb::arrow::datatypes::DataType::Timestamp(_, _)
+    ));
+
+    println!("✓ Fetched main.users schema (4 fields)");
+
+    // Test 2: Fetch schema from main (with explicit schema parameter)
+    let main_users_schema_explicit = provider
+        .fetch_current_schema(Some("main"), "users")
+        .unwrap();
+    assert_eq!(main_users_schema_explicit.fields().len(), 4);
+    println!("✓ Fetched main.users schema explicitly");
+
+    // Test 3: Fetch schema from analytics schema
+    let analytics_metrics_schema = provider
+        .fetch_current_schema(Some("analytics"), "metrics")
+        .unwrap();
+    assert_eq!(analytics_metrics_schema.fields().len(), 4);
+
+    let metric_id_field = analytics_metrics_schema
+        .field_with_name("metric_id")
+        .unwrap();
+    assert!(matches!(
+        metric_id_field.data_type(),
+        &duckdb::arrow::datatypes::DataType::Int64
+    ));
+
+    let value_field = analytics_metrics_schema.field_with_name("value").unwrap();
+    assert!(matches!(
+        value_field.data_type(),
+        &duckdb::arrow::datatypes::DataType::Float64
+    ));
+
+    let recorded_at_field = analytics_metrics_schema
+        .field_with_name("recorded_at")
+        .unwrap();
+    assert!(matches!(
+        recorded_at_field.data_type(),
+        &duckdb::arrow::datatypes::DataType::Date32
+    ));
+
+    println!("✓ Fetched analytics.metrics schema (4 fields)");
+
+    // Test 4: Fetch schema from reporting schema
+    let reporting_summary_schema = provider
+        .fetch_current_schema(Some("reporting"), "summary")
+        .unwrap();
+    assert_eq!(reporting_summary_schema.fields().len(), 4);
+
+    let report_id_field = reporting_summary_schema
+        .field_with_name("report_id")
+        .unwrap();
+    assert!(matches!(
+        report_id_field.data_type(),
+        &duckdb::arrow::datatypes::DataType::Int16
+    ));
+
+    let report_name_field = reporting_summary_schema
+        .field_with_name("report_name")
+        .unwrap();
+    assert!(matches!(
+        report_name_field.data_type(),
+        &duckdb::arrow::datatypes::DataType::Utf8
+    ));
+
+    let data_field = reporting_summary_schema.field_with_name("data").unwrap();
+    assert!(matches!(
+        data_field.data_type(),
+        &duckdb::arrow::datatypes::DataType::Binary
+    ));
+
+    let is_published_field = reporting_summary_schema
+        .field_with_name("is_published")
+        .unwrap();
+    assert!(matches!(
+        is_published_field.data_type(),
+        &duckdb::arrow::datatypes::DataType::Boolean
+    ));
+
+    println!("✓ Fetched reporting.summary schema (4 fields)");
+
+    // Test 5: Verify schema_info still returns main (current schema)
+    let current_schema_info = provider.fetch_current_schema_info().unwrap();
+    assert_eq!(current_schema_info.schema_name, "main");
+    println!("✓ Current schema is still 'main'");
+
+    // Test 6: Switch to analytics schema and verify
+    conn.execute("USE analytics;", []).unwrap();
+    let analytics_schema_info = provider.fetch_current_schema_info().unwrap();
+    assert_eq!(analytics_schema_info.schema_name, "analytics");
+    assert!(analytics_schema_info.end_snapshot.is_none());
+    println!("✓ Switched to analytics schema");
+
+    // Test 7: Fetch table from current schema (analytics) without explicit schema
+    let metrics_schema_implicit = provider.fetch_current_schema(None, "metrics").unwrap();
+    assert_eq!(metrics_schema_implicit.fields().len(), 4);
+    println!("✓ Fetched metrics from current schema (analytics) implicitly");
+
+    // Test 8: Can still access other schemas explicitly
+    let users_from_main = provider
+        .fetch_current_schema(Some("main"), "users")
+        .unwrap();
+    assert_eq!(users_from_main.fields().len(), 4);
+    println!("✓ Can still access main.users from analytics schema");
+
+    // Test 9: Switch to reporting and verify
+    conn.execute("USE reporting;", []).unwrap();
+    let reporting_schema_info = provider.fetch_current_schema_info().unwrap();
+    assert_eq!(reporting_schema_info.schema_name, "reporting");
+    println!("✓ Switched to reporting schema");
+
+    // Test 10: Verify all schemas exist in metadata
+    let mut schema_list_stmt = conn
+        .prepare(
+            r#"
+            SELECT schema_name, schema_id, begin_snapshot, end_snapshot
+            FROM __ducklake_metadata_metalake.main.ducklake_schema
+            ORDER BY schema_id;
+            "#,
+        )
+        .unwrap();
+
+    let schemas: Vec<(String, i64, i64, Option<i64>)> = schema_list_stmt
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+
+    // Should have at least 3 schemas: main, analytics, reporting
+    assert!(schemas.len() >= 3);
+
+    let schema_names: Vec<&str> = schemas
+        .iter()
+        .map(|(name, _, _, _)| name.as_str())
+        .collect();
+    assert!(schema_names.contains(&"main"));
+    assert!(schema_names.contains(&"analytics"));
+    assert!(schema_names.contains(&"reporting"));
+
+    // All schemas should be active (end_snapshot is None)
+    for (name, _, _, end_snapshot) in &schemas {
+        println!("  Schema: {}, end_snapshot: {:?}", name, end_snapshot);
+        assert!(end_snapshot.is_none(), "Schema {} should be active", name);
+    }
 }

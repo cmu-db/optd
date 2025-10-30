@@ -1,4 +1,11 @@
-use duckdb::{Connection, Error as DuckDBError, params, types::Null};
+use std::sync::Arc;
+
+use duckdb::{
+    Connection, Error as DuckDBError,
+    arrow::datatypes::{DataType, Field, Schema, SchemaRef},
+    params,
+    types::Null,
+};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -14,6 +21,8 @@ pub enum Error {
     QueryExecution { source: DuckDBError },
     #[snafu(display("JSON serialization error: {}", source))]
     JsonSerialization { source: serde_json::Error },
+    #[snafu(display("ARROW DataType conversion error: {}", source))]
+    ArrowDataTypeConversion { source: duckdb::Error },
     #[snafu(display(
         "Get statistics failed for table: {}, column: {}, snapshot: {}",
         table,
@@ -67,56 +76,53 @@ impl FromIterator<Result<TableColumnStatisticsEntry, Error>> for TableStatistics
         let mut column_statistics = Vec::new();
 
         // Stats will be ordered by table_id then column_id
-        for row_result in iter {
-            if let Ok(TableColumnStatisticsEntry {
-                table_id: _,
-                column_id,
-                column_name,
-                column_type,
-                record_count,
-                next_row_id: _,
-                file_size_bytes: _,
-                stats_type,
-                payload,
-            }) = row_result
+        for TableColumnStatisticsEntry {
+            table_id: _,
+            column_id,
+            column_name,
+            column_type,
+            record_count,
+            next_row_id: _,
+            file_size_bytes: _,
+            stats_type,
+            payload,
+        } in iter.into_iter().flatten()
+        {
+            // Check if unique table/column combination
+            if column_statistics
+                .last()
+                .is_none_or(|last: &ColumnStatistics| last.column_id != column_id)
             {
-                // Check if unique table/column combination
-                if column_statistics
-                    .last()
-                    .map_or(true, |last: &ColumnStatistics| last.column_id != column_id)
-                {
-                    // New column encountered
-                    column_statistics.push(ColumnStatistics::new(
-                        column_id,
-                        column_type.clone(),
-                        column_name.clone(),
-                        Vec::new(),
-                    ));
-                }
+                // New column encountered
+                column_statistics.push(ColumnStatistics::new(
+                    column_id,
+                    column_type.clone(),
+                    column_name.clone(),
+                    Vec::new(),
+                ));
+            }
 
-                assert!(
-                    !column_statistics.is_empty()
-                        && column_statistics.last().unwrap().column_id == column_id,
-                    "Column statistics should not be empty and last column_id should match current column_id"
-                );
+            assert!(
+                !column_statistics.is_empty()
+                    && column_statistics.last().unwrap().column_id == column_id,
+                "Column statistics should not be empty and last column_id should match current column_id"
+            );
 
-                // Add advanced statistics
-                if let Some(last_column_stat) = column_statistics.last_mut() {
-                    if stats_type.is_some() && payload.is_some() {
-                        let advanced_stat = AdvanceColumnStatistics {
-                            stats_type: stats_type.clone().unwrap(),
-                            data: serde_json::from_str(&payload.clone().unwrap())
-                                .unwrap_or(Value::Null),
-                        };
-                        last_column_stat.add_advanced_stat(advanced_stat);
-                    }
-                }
+            if let Some(last_column_stat) = column_statistics.last_mut()
+                && stats_type.is_some()
+                && payload.is_some()
+            {
+                let advanced_stat = AdvanceColumnStatistics {
+                    stats_type: stats_type.clone().unwrap(),
+                    data: serde_json::from_str(&payload.clone().unwrap()).unwrap_or(Value::Null),
+                };
+                last_column_stat.add_advanced_stat(advanced_stat);
+            }
 
-                // Assuming all columns have the same record_count, only need to set once
-                if !row_flag {
-                    row_count = record_count as usize;
-                    row_flag = true;
-                }
+            // Assuming all columns have the same record_count, only need to set once
+            if !row_flag {
+                row_count = record_count as usize;
+                row_flag = true;
             }
         }
 
@@ -189,7 +195,9 @@ pub trait StatisticsProvider {
 
     fn fetch_current_snapshot_info(&self) -> Result<SnapshotInfo, Error>;
 
-    fn fetch_current_schema(&self) -> Result<CurrentSchema, Error>;
+    fn fetch_current_schema(&self, schema: Option<&str>, table: &str) -> Result<SchemaRef, Error>;
+
+    fn fetch_current_schema_info(&self) -> Result<CurrentSchema, Error>;
 
     /// Retrieve table and column statistics at specific snapshot
     fn fetch_table_statistics(
@@ -215,6 +223,43 @@ pub struct DuckLakeStatisticsProvider {
 }
 
 impl DuckLakeStatisticsProvider {
+    /// Convert DuckDB type string to Arrow DataType
+    fn duckdb_type_to_arrow(type_str: &str) -> Result<DataType, Error> {
+        // Handle common DuckDB types
+        let data_type = match type_str.to_uppercase().as_str() {
+            "INTEGER" | "INT" | "INT4" => DataType::Int32,
+            "BIGINT" | "INT8" | "LONG" => DataType::Int64,
+            "SMALLINT" | "INT2" | "SHORT" => DataType::Int16,
+            "TINYINT" | "INT1" => DataType::Int8,
+            "DOUBLE" | "FLOAT8" => DataType::Float64,
+            "FLOAT" | "REAL" | "FLOAT4" => DataType::Float32,
+            "BOOLEAN" | "BOOL" => DataType::Boolean,
+            "VARCHAR" | "TEXT" | "STRING" => DataType::Utf8,
+            "DATE" => DataType::Date32,
+            "TIMESTAMP" => {
+                DataType::Timestamp(duckdb::arrow::datatypes::TimeUnit::Microsecond, None)
+            }
+            "TIME" => DataType::Time64(duckdb::arrow::datatypes::TimeUnit::Microsecond),
+            "BLOB" | "BYTEA" | "BINARY" => DataType::Binary,
+            "DECIMAL" => DataType::Decimal128(38, 10), // Default precision and scale
+            _ => {
+                // For unsupported types, use Utf8 as fallback or you could error out
+                // Here we'll just return an error through the ArrowDataTypeConversion variant
+                return Err(Error::ArrowDataTypeConversion {
+                    source: DuckDBError::FromSqlConversionFailure(
+                        0,
+                        duckdb::types::Type::Text,
+                        Box::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("Unsupported DuckDB type for Arrow conversion: {}", type_str),
+                        )),
+                    ),
+                });
+            }
+        };
+        Ok(data_type)
+    }
+
     /// Create a new DuckLakeStatisticsProvider with memory-based DuckDB
     /// Parameters:
     /// - location: Optional path to database file
@@ -400,7 +445,56 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
         Ok(current_snapshot_info)
     }
 
-    fn fetch_current_schema(&self) -> Result<CurrentSchema, Error> {
+    fn fetch_current_schema(&self, schema: Option<&str>, table: &str) -> Result<SchemaRef, Error> {
+        // Construct the table reference (schema.table or just table)
+        let table_ref = if let Some(s) = schema {
+            format!("{}.{}", s, table)
+        } else {
+            table.to_string()
+        };
+
+        let schema_query = format!("DESCRIBE {};", table_ref);
+
+        let mut stmt = self
+            .conn
+            .prepare(&schema_query)
+            .context(QueryExecutionSnafu)?;
+
+        let mut fields = Vec::new();
+        let column_iter = stmt
+            .query_map([], |row| {
+                let column_name: String = row.get("column_name")?;
+                let column_type_str: String = row.get("column_type")?;
+                let null: String = row.get("null")?;
+
+                // Convert DuckDB type to Arrow type
+                let column_type = Self::duckdb_type_to_arrow(&column_type_str).map_err(|_| {
+                    DuckDBError::FromSqlConversionFailure(
+                        0,
+                        duckdb::types::Type::Text,
+                        Box::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!(
+                                "Could not convert DuckDB type '{}' to Arrow type",
+                                column_type_str
+                            ),
+                        )),
+                    )
+                })?;
+
+                fields.push(Field::new(column_name, column_type, null == "YES"));
+                Ok(())
+            })
+            .context(QueryExecutionSnafu)?;
+
+        for result in column_iter {
+            result.context(QueryExecutionSnafu)?;
+        }
+        let schema = Schema::new(fields);
+        Ok(Arc::new(schema))
+    }
+
+    fn fetch_current_schema_info(&self) -> Result<CurrentSchema, Error> {
         let mut stmt = self
             .conn
             .prepare(
