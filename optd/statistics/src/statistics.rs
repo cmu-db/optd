@@ -13,6 +13,69 @@ use snafu::{ResultExt, prelude::*};
 
 const DEFAULT_METADATA_FILE: &str = "metadata.ducklake";
 
+/// SQL query to fetch table statistics including column metadata and advanced stats at a specific snapshot.
+const FETCH_TABLE_STATS_QUERY: &str = r#"
+    SELECT 
+        ts.table_id,
+        dc.column_id,
+        dc.column_name,
+        dc.column_type,
+        ts.record_count,
+        ts.next_row_id,
+        ts.file_size_bytes,
+        tcas.stats_type,
+        tcas.payload
+    FROM __ducklake_metadata_metalake.main.ducklake_table_stats ts
+    INNER JOIN __ducklake_metadata_metalake.main.ducklake_table dt ON ts.table_id = dt.table_id
+    INNER JOIN __ducklake_metadata_metalake.main.ducklake_schema ds ON dt.schema_id = ds.schema_id
+    INNER JOIN __ducklake_metadata_metalake.main.ducklake_column dc ON dt.table_id = dc.table_id
+    LEFT JOIN __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats tcas 
+        ON dc.table_id = tcas.table_id 
+        AND dc.column_id = tcas.column_id
+        AND ? >= tcas.begin_snapshot 
+        AND (? < tcas.end_snapshot OR tcas.end_snapshot IS NULL)
+    WHERE 
+        ds.schema_name = current_schema()
+        AND dt.table_name = ?
+        AND ts.record_count IS NOT NULL 
+        AND ts.file_size_bytes IS NOT NULL
+        AND ? >= dc.begin_snapshot 
+        AND (? < dc.end_snapshot OR dc.end_snapshot IS NULL)
+    ORDER BY ts.table_id, dc.column_id, tcas.stats_type;
+"#;
+
+/// SQL query to close an existing advanced statistics entry by setting its end_snapshot.
+const UPDATE_ADV_STATS_QUERY: &str = r#"
+    UPDATE __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
+    SET end_snapshot = ?
+    WHERE end_snapshot IS NULL
+        AND stats_type = ?
+        AND column_id = ?
+        AND table_id = ?;
+"#;
+
+/// SQL query to insert a new advanced statistics entry.
+const INSERT_ADV_STATS_QUERY: &str = r#"
+    INSERT INTO __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
+        (column_id, begin_snapshot, end_snapshot, table_id, stats_type, payload) 
+    VALUES (?, ?, ?, ?, ?, ?);
+"#;
+
+/// SQL query to insert a new snapshot record.
+const INSERT_SNAPSHOT_QUERY: &str = r#"
+    INSERT INTO __ducklake_metadata_metalake.main.ducklake_snapshot
+        (snapshot_id, snapshot_time, schema_version, next_catalog_id, next_file_id) 
+    VALUES (?, NOW(), ?, ?, ?);
+"#;
+
+/// SQL query to record a snapshot change in the change log.
+const INSERT_SNAPSHOT_CHANGE_QUERY: &str = r#"
+    INSERT INTO __ducklake_metadata_metalake.main.ducklake_snapshot_changes
+        (snapshot_id, changes_made, author, commit_message, commit_extra_info)
+    VALUES (?, ?, ?, ?, ?);
+"#;
+
+/// Error types for statistics operations.
 #[derive(Debug, Snafu)]
 pub enum Error {
     #[snafu(display("Database connection error: {}", source))]
@@ -47,6 +110,8 @@ pub enum Error {
     },
 }
 
+/// Internal struct representing a row from the table statistics query.
+/// Used for collecting data before aggregating into TableStatistics.
 struct TableColumnStatisticsEntry {
     table_id: i64,
     column_id: i64,
@@ -59,8 +124,8 @@ struct TableColumnStatisticsEntry {
     payload: Option<String>,
 }
 
-/** Packaged Statistics Objects */
-/** Table statistics -- Contains overall row count and per-column statistics */
+/// Statistics for a table including row count and per-column statistics.
+/// Main structure returned when querying table statistics.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableStatistics {
     pub row_count: usize,
@@ -108,15 +173,14 @@ impl FromIterator<Result<TableColumnStatisticsEntry, Error>> for TableStatistics
                 "Column statistics should not be empty and last column_id should match current column_id"
             );
 
-            if let Some(last_column_stat) = column_statistics.last_mut()
-                && stats_type.is_some()
-                && payload.is_some()
-            {
-                let advanced_stat = AdvanceColumnStatistics {
-                    stats_type: stats_type.clone().unwrap(),
-                    data: serde_json::from_str(&payload.clone().unwrap()).unwrap_or(Value::Null),
-                };
-                last_column_stat.add_advanced_stat(advanced_stat);
+            if let Some(last_column_stat) = column_statistics.last_mut() {
+                if let (Some(st), Some(pl)) = (stats_type, payload) {
+                    let data = serde_json::from_str(&pl).unwrap_or(Value::Null);
+                    last_column_stat.add_advanced_stat(AdvanceColumnStatistics {
+                        stats_type: st,
+                        data,
+                    });
+                }
             }
 
             // Assuming all columns have the same record_count, only need to set once
@@ -133,6 +197,7 @@ impl FromIterator<Result<TableColumnStatisticsEntry, Error>> for TableStatistics
     }
 }
 
+/// Statistics for a single column including type, name, and advanced statistics.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ColumnStatistics {
     pub column_id: i64,
@@ -148,7 +213,7 @@ impl ColumnStatistics {
         name: String,
         advanced_stats: Vec<AdvanceColumnStatistics>,
     ) -> Self {
-        ColumnStatistics {
+        Self {
             column_id,
             column_type,
             name,
@@ -156,19 +221,24 @@ impl ColumnStatistics {
         }
     }
 
-    #[allow(dead_code)]
     fn add_advanced_stat(&mut self, stat: AdvanceColumnStatistics) {
         self.advanced_stats.push(stat);
     }
 }
 
+/// An advanced statistics entry with type and serialized data at a snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdvanceColumnStatistics {
     pub stats_type: String,
     pub data: Value,
 }
 
+/// Identifier for a snapshot in the statistics database.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotId(pub i64);
+
+/// Snapshot metadata including schema version and next IDs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 
 pub struct SnapshotInfo {
     pub snapshot_id: i64,
@@ -176,6 +246,9 @@ pub struct SnapshotInfo {
     pub next_catalog_id: i64,
     pub next_file_id: i64,
 }
+
+/// Schema information including name, ID, and valid snapshot range.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 
 pub struct CurrentSchema {
     pub schema_name: String,
@@ -190,16 +263,21 @@ struct StatisticsUpdate {
     payload: String,
 }
 
+/// Trait defining operations for managing table statistics with snapshot-based time travel.
 pub trait StatisticsProvider {
+    /// Fetches the current (most recent) snapshot ID.
     fn fetch_current_snapshot(&self) -> Result<SnapshotId, Error>;
 
+    /// Fetches complete metadata for the current snapshot.
     fn fetch_current_snapshot_info(&self) -> Result<SnapshotInfo, Error>;
 
+    /// Fetches the Arrow schema for a table at the current snapshot.
     fn fetch_current_schema(&self, schema: Option<&str>, table: &str) -> Result<SchemaRef, Error>;
 
+    /// Fetches schema information including name, ID, and snapshot range.
     fn fetch_current_schema_info(&self) -> Result<CurrentSchema, Error>;
 
-    /// Retrieve table and column statistics at specific snapshot
+    /// Retrieves table and column statistics at a specific snapshot.
     fn fetch_table_statistics(
         &self,
         table_name: &str,
@@ -207,7 +285,7 @@ pub trait StatisticsProvider {
         connection: &Connection,
     ) -> Result<Option<TableStatistics>, Error>;
 
-    /// Insert table column statistics
+    /// Updates or inserts advanced statistics for a table column.
     fn update_table_column_stats(
         &self,
         column_id: i64,
@@ -217,13 +295,13 @@ pub trait StatisticsProvider {
     ) -> Result<(), Error>;
 }
 
-/// DuckLake-based implementation of StatisticsProvider
+/// DuckLake-based implementation of StatisticsProvider using DuckDB with snapshot management.
 pub struct DuckLakeStatisticsProvider {
     conn: Connection,
 }
 
 impl DuckLakeStatisticsProvider {
-    /// Convert DuckDB type string to Arrow DataType
+    /// Converts a DuckDB type string to an Arrow DataType.
     fn duckdb_type_to_arrow(type_str: &str) -> Result<DataType, Error> {
         // Handle common DuckDB types
         let data_type = match type_str.to_uppercase().as_str() {
@@ -260,10 +338,8 @@ impl DuckLakeStatisticsProvider {
         Ok(data_type)
     }
 
-    /// Create a new DuckLakeStatisticsProvider with memory-based DuckDB
-    /// Parameters:
-    /// - location: Optional path to database file
-    /// - metadata_path: Optional path to ducklake metadata file
+    /// Creates a new DuckLakeStatisticsProvider with optional file paths.
+    /// If `location` is None, uses in-memory database. If `metadata_path` is None, uses default metadata file.
     pub fn try_new(location: Option<&str>, metadata_path: Option<&str>) -> Result<Self, Error> {
         let conn = if let Some(path) = location {
             Connection::open(path).context(ConnectionSnafu)?
@@ -338,100 +414,46 @@ impl DuckLakeStatisticsProvider {
         Ok(Self { conn })
     }
 
+    /// Returns a reference to the underlying DuckDB connection.
     pub fn get_connection(&self) -> &Connection {
         &self.conn
     }
 
+    /// Begins a database transaction.
     fn begin_transaction(&self) -> Result<(), Error> {
-        let mut begin_txn_stmt = self
-            .conn
-            .prepare("BEGIN TRANSACTION;")
-            .context(QueryExecutionSnafu)?;
-        begin_txn_stmt.execute([]).context(QueryExecutionSnafu)?;
-        Ok(())
+        self.conn
+            .execute_batch("BEGIN TRANSACTION;")
+            .context(QueryExecutionSnafu)
     }
 
+    /// Commits the current database transaction.
     fn commit_transaction(&self) -> Result<(), Error> {
-        let mut commit_txn_stmt = self
-            .conn
-            .prepare("COMMIT TRANSACTION;")
-            .context(QueryExecutionSnafu)?;
-        commit_txn_stmt.execute([]).context(QueryExecutionSnafu)?;
-        Ok(())
-    }
-
-    fn update_regular_column_stats(
-        &self,
-        column_id: i64,
-        table_id: i64,
-        stats_type: &str,
-        payload: &str,
-    ) -> Result<(), Error> {
-        // Column name must be part of the query string, not a parameter
-        // Only min_value and max_value are supported for regular updates
-        let query = match stats_type {
-            "min_value" => {
-                r#"
-                UPDATE __ducklake_metadata_metalake.main.ducklake_table_column_stats
-                    SET min_value = ?
-                    WHERE column_id = ? AND table_id = ?;
-                "#
-            }
-            "max_value" => {
-                r#"
-                UPDATE __ducklake_metadata_metalake.main.ducklake_table_column_stats
-                    SET max_value = ?
-                    WHERE column_id = ? AND table_id = ?;
-                "#
-            }
-            _ => {
-                return Err(Error::QueryExecution {
-                    source: DuckDBError::InvalidParameterName(format!(
-                        "Unsupported regular stats type: {}. Only min_value and max_value are supported.",
-                        stats_type
-                    )),
-                });
-            }
-        };
-
-        let mut update_regular_stmt = self.conn.prepare(query).context(QueryExecutionSnafu)?;
-
-        update_regular_stmt
-            .execute(params![payload, column_id, table_id])
-            .context(QueryExecutionSnafu)?;
-
-        Ok(())
+        self.conn
+            .execute_batch("COMMIT TRANSACTION;")
+            .context(QueryExecutionSnafu)
     }
 }
 
 impl StatisticsProvider for DuckLakeStatisticsProvider {
     fn fetch_current_snapshot(&self) -> Result<SnapshotId, Error> {
-        let mut stmt = self
-            .conn
+        self.conn
             .prepare("FROM ducklake_current_snapshot('metalake');")
-            .context(QueryExecutionSnafu)?;
-
-        let snapshot_id = stmt
+            .context(QueryExecutionSnafu)?
             .query_row([], |row| Ok(SnapshotId(row.get(0)?)))
-            .context(QueryExecutionSnafu)?;
-
-        Ok(snapshot_id)
+            .context(QueryExecutionSnafu)
     }
 
     fn fetch_current_snapshot_info(&self) -> Result<SnapshotInfo, Error> {
-        let mut snapshot_stmt = self
-            .conn
+        self.conn
             .prepare(
                 r#"
-                        SELECT snapshot_id, schema_version, next_catalog_id, next_file_id
-                            FROM __ducklake_metadata_metalake.main.ducklake_snapshot
-                            WHERE snapshot_id = (SELECT MAX(snapshot_id)
-                                FROM __ducklake_metadata_metalake.main.ducklake_snapshot);
-                    "#,
+                SELECT snapshot_id, schema_version, next_catalog_id, next_file_id
+                    FROM __ducklake_metadata_metalake.main.ducklake_snapshot
+                    WHERE snapshot_id = (SELECT MAX(snapshot_id)
+                        FROM __ducklake_metadata_metalake.main.ducklake_snapshot);
+                "#,
             )
-            .context(QueryExecutionSnafu)?;
-
-        let current_snapshot_info = snapshot_stmt
+            .context(QueryExecutionSnafu)?
             .query_row([], |row| {
                 Ok(SnapshotInfo {
                     snapshot_id: row.get("snapshot_id")?,
@@ -440,18 +462,13 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
                     next_file_id: row.get("next_file_id")?,
                 })
             })
-            .context(QueryExecutionSnafu)?;
-
-        Ok(current_snapshot_info)
+            .context(QueryExecutionSnafu)
     }
 
     fn fetch_current_schema(&self, schema: Option<&str>, table: &str) -> Result<SchemaRef, Error> {
-        // Construct the table reference (schema.table or just table)
-        let table_ref = if let Some(s) = schema {
-            format!("{}.{}", s, table)
-        } else {
-            table.to_string()
-        };
+        let table_ref = schema
+            .map(|s| format!("{}.{}", s, table))
+            .unwrap_or_else(|| table.to_string());
 
         let schema_query = format!("DESCRIBE {};", table_ref);
 
@@ -495,18 +512,15 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
     }
 
     fn fetch_current_schema_info(&self) -> Result<CurrentSchema, Error> {
-        let mut stmt = self
-            .conn
+        self.conn
             .prepare(
                 r#"
                 SELECT ds.schema_id, ds.schema_name, ds.begin_snapshot, ds.end_snapshot
                     FROM __ducklake_metadata_metalake.main.ducklake_schema ds
                     WHERE ds.schema_name = current_schema();
-            "#,
+                "#,
             )
-            .context(QueryExecutionSnafu)?;
-
-        let snapshot_id = stmt
+            .context(QueryExecutionSnafu)?
             .query_row([], |row| {
                 Ok(CurrentSchema {
                     schema_name: row.get("schema_name")?,
@@ -515,9 +529,7 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
                     end_snapshot: row.get("end_snapshot")?,
                 })
             })
-            .context(QueryExecutionSnafu)?;
-
-        Ok(snapshot_id)
+            .context(QueryExecutionSnafu)
     }
 
     fn fetch_table_statistics(
@@ -526,39 +538,8 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
         snapshot: i64,
         conn: &Connection,
     ) -> Result<Option<TableStatistics>, Error> {
-        // Query for table statistics at the snapshot
         let mut stmt = conn
-            .prepare(
-                r#"
-                    SELECT 
-                        ts.table_id,
-                        dc.column_id,
-                        dc.column_name,
-                        dc.column_type,
-                        ts.record_count,
-                        ts.next_row_id,
-                        ts.file_size_bytes,
-                        tcas.stats_type,
-                        tcas.payload
-                    FROM __ducklake_metadata_metalake.main.ducklake_table_stats ts
-                    INNER JOIN __ducklake_metadata_metalake.main.ducklake_table dt ON ts.table_id = dt.table_id
-                    INNER JOIN __ducklake_metadata_metalake.main.ducklake_schema ds ON dt.schema_id = ds.schema_id
-                    INNER JOIN __ducklake_metadata_metalake.main.ducklake_column dc ON dt.table_id = dc.table_id
-                    LEFT JOIN __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats tcas 
-                        ON dc.table_id = tcas.table_id 
-                        AND dc.column_id = tcas.column_id
-                        AND ? >= tcas.begin_snapshot 
-                        AND (? < tcas.end_snapshot OR tcas.end_snapshot IS NULL)
-                    WHERE 
-                        ds.schema_name = current_schema()
-                        AND dt.table_name = ?
-                        AND ts.record_count IS NOT NULL 
-                        AND ts.file_size_bytes IS NOT NULL
-                        AND ? >= dc.begin_snapshot 
-                        AND (? < dc.end_snapshot OR dc.end_snapshot IS NULL)
-                    ORDER BY ts.table_id, dc.column_id, tcas.stats_type;
-                "#
-            )
+            .prepare(FETCH_TABLE_STATS_QUERY)
             .context(QueryExecutionSnafu)?;
 
         let entries = stmt
@@ -587,9 +568,7 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
             .context(QueryExecutionSnafu)?
             .map(|result| result.context(QueryExecutionSnafu));
 
-        let table_stats: TableStatistics = TableStatistics::from_iter(entries);
-
-        Ok(Some(table_stats))
+        Ok(Some(TableStatistics::from_iter(entries)))
     }
 
     /// Update table column statistics
@@ -607,31 +586,10 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
         let current_snapshot = self.fetch_current_snapshot_info()?;
         let current_snapshot_id = current_snapshot.snapshot_id;
 
-        // match the stats_type and see if it's in the regular column stats
-        match stats_type {
-            "min_value" | "max_value" => {
-                self.update_regular_column_stats(column_id, table_id, stats_type, payload)?;
-            }
-            // Still update the advanced stats for these types
-            _ => {}
-        }
-
         // Update matching past snapshot to close it
-        let mut update_stmt = self
-            .conn
-            .prepare(
-                r#"
-            UPDATE __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
-                SET end_snapshot = ?
-                WHERE end_snapshot IS NULL
-                    AND stats_type = ?
-                    AND column_id = ?
-                    AND table_id = ?;
-            "#,
-            )
-            .context(QueryExecutionSnafu)?;
-
-        update_stmt
+        self.conn
+            .prepare(UPDATE_ADV_STATS_QUERY)
+            .context(QueryExecutionSnafu)?
             .execute(params![
                 current_snapshot_id + 1,
                 stats_type,
@@ -641,18 +599,9 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
             .context(QueryExecutionSnafu)?;
 
         // Insert new snapshot
-        let mut insert_stmt = self
-            .conn
-            .prepare(
-                r#"
-            INSERT INTO __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
-                (column_id, begin_snapshot, end_snapshot, table_id, stats_type, payload) 
-                VALUES (?, ?, ?, ?, ?, ?);
-            "#,
-            )
-            .context(QueryExecutionSnafu)?;
-
-        insert_stmt
+        self.conn
+            .prepare(INSERT_ADV_STATS_QUERY)
+            .context(QueryExecutionSnafu)?
             .execute(params![
                 column_id,
                 current_snapshot_id + 1,
@@ -663,18 +612,9 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
             ])
             .context(QueryExecutionSnafu)?;
 
-        let mut new_snap_stmt = self
-            .conn
-            .prepare(
-                r#"
-                INSERT INTO __ducklake_metadata_metalake.main.ducklake_snapshot
-                    (snapshot_id, snapshot_time, schema_version, next_catalog_id, next_file_id) 
-                    VALUES (?, NOW(), ?, ?, ?);
-            "#,
-            )
-            .context(QueryExecutionSnafu)?;
-
-        new_snap_stmt
+        self.conn
+            .prepare(INSERT_SNAPSHOT_QUERY)
+            .context(QueryExecutionSnafu)?
             .execute(params![
                 current_snapshot_id + 1,
                 current_snapshot.schema_version,
@@ -683,18 +623,9 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
             ])
             .context(QueryExecutionSnafu)?;
 
-        let mut new_snap_change_stmt = self
-            .conn
-            .prepare(
-                r#"
-                INSERT INTO __ducklake_metadata_metalake.main.ducklake_snapshot_changes
-                    (snapshot_id, changes_made, author, commit_message, commit_extra_info)
-                    VALUES (?, ?, ?, ?, ?);
-            "#,
-            )
-            .context(QueryExecutionSnafu)?;
-
-        new_snap_change_stmt
+        self.conn
+            .prepare(INSERT_SNAPSHOT_CHANGE_QUERY)
+            .context(QueryExecutionSnafu)?
             .execute(params![
                 current_snapshot_id + 1,
                 format!(
