@@ -66,18 +66,80 @@ fn test_table_stats_insertion() {
 
 #[test]
 fn test_table_stats_insertion_and_retrieval() {
-    let (_temp_dir, provider) = create_test_statistics_provider(true);
+    let (_temp_dir, provider, table_id, age_column_id) = create_test_provider_with_data();
+    let conn = provider.get_connection();
 
-    // Insert table statistics
-    let result = provider.update_table_column_stats(1, 1, "ndv", r#"{"distinct_count": 1000}"#);
-    match &result {
-        Ok(_) => println!("Table stats insertion successful"),
-        Err(e) => println!("Table stats insertion failed: {}", e),
-    }
-    assert!(result.is_ok());
+    // Insert some statistics for the age column
+    provider
+        .update_table_column_stats(age_column_id, table_id, "min_value", "25")
+        .unwrap();
+    provider
+        .update_table_column_stats(age_column_id, table_id, "max_value", "35")
+        .unwrap();
+    provider
+        .update_table_column_stats(
+            age_column_id,
+            table_id,
+            "histogram",
+            r#"{"buckets": [{"min": 20, "max": 30, "count": 2}]}"#,
+        )
+        .unwrap();
 
-    // Note: Actual retrieval would require setting up the table_metadata
-    // TODO
+    // Fetch statistics at the latest snapshot
+    let latest_snapshot = provider.fetch_current_snapshot().unwrap();
+    let stats = provider
+        .fetch_table_statistics("test_table", latest_snapshot.0, conn)
+        .unwrap();
+
+    assert!(stats.is_some());
+    let table_stats = stats.unwrap();
+
+    // Verify we have statistics for all 3 columns (id, name, age)
+    assert_eq!(table_stats.column_statistics.len(), 3);
+    assert_eq!(table_stats.row_count, 3); // 3 rows in test_table
+
+    // Find the age column statistics
+    let age_stats = table_stats
+        .column_statistics
+        .iter()
+        .find(|cs| cs.name == "age")
+        .expect("Should have statistics for age column");
+
+    // Verify advanced stats were retrieved
+    assert_eq!(age_stats.advanced_stats.len(), 3); // min_value, max_value, histogram
+
+    let min_stat = age_stats
+        .advanced_stats
+        .iter()
+        .find(|s| s.stats_type == "min_value")
+        .expect("Should have min_value stat");
+    // The value gets parsed as JSON, so "25" becomes the number 25
+    assert!(min_stat.data == serde_json::json!(25) || min_stat.data == serde_json::json!("25"));
+
+    let max_stat = age_stats
+        .advanced_stats
+        .iter()
+        .find(|s| s.stats_type == "max_value")
+        .expect("Should have max_value stat");
+    assert!(max_stat.data == serde_json::json!(35) || max_stat.data == serde_json::json!("35"));
+
+    let histogram_stat = age_stats
+        .advanced_stats
+        .iter()
+        .find(|s| s.stats_type == "histogram")
+        .expect("Should have histogram stat");
+    assert!(histogram_stat.data.to_string().contains("buckets"));
+
+    println!("✓ Table stats insertion and retrieval successful");
+    println!(
+        "  - Columns retrieved: {}",
+        table_stats.column_statistics.len()
+    );
+    println!("  - Row count: {}", table_stats.row_count);
+    println!(
+        "  - Age column advanced stats: {}",
+        age_stats.advanced_stats.len()
+    );
 }
 
 #[test]
@@ -196,9 +258,9 @@ fn test_snapshot_versioning_and_stats_types() {
     assert!(versions[1].1.is_some());
     assert!(versions[2].1.is_none());
 
-    // Verify snapshot continuity
-    assert_eq!(versions[0].1.unwrap() + 1, versions[1].0);
-    assert_eq!(versions[1].1.unwrap() + 1, versions[2].0);
+    // Verify snapshot continuity - end_snapshot should equal next begin_snapshot
+    assert_eq!(versions[0].1.unwrap(), versions[1].0);
+    assert_eq!(versions[1].1.unwrap(), versions[2].0);
 
     // Verify payloads updated correctly
     assert!(versions[0].2.contains("1000"));
@@ -515,4 +577,328 @@ fn test_update_and_fetch_table_column_stats() {
     println!("  - After min_value update: {}", snapshot_after_min.0);
     println!("  - After max_value update: {}", snapshot_after_max.0);
     println!("  - After histogram update: {}", snapshot_after_histogram.0);
+}
+
+#[test]
+fn test_fetch_table_stats_with_snapshot_time_travel() {
+    // Test that fetching statistics at different snapshots returns correct historical data
+    let (_temp_dir, provider, table_id, age_column_id) = create_test_provider_with_data();
+    let conn = provider.get_connection();
+
+    let snapshot_0 = provider.fetch_current_snapshot().unwrap();
+    println!("Snapshot 0: {}", snapshot_0.0);
+
+    // Add first version of histogram
+    provider
+        .update_table_column_stats(
+            age_column_id,
+            table_id,
+            "histogram",
+            r#"{"version": 1, "buckets": [1, 2, 3]}"#,
+        )
+        .unwrap();
+    let snapshot_1 = provider.fetch_current_snapshot().unwrap();
+    println!("Snapshot 1: {}", snapshot_1.0);
+
+    // Add second version of histogram
+    provider
+        .update_table_column_stats(
+            age_column_id,
+            table_id,
+            "histogram",
+            r#"{"version": 2, "buckets": [1, 2, 3, 4, 5]}"#,
+        )
+        .unwrap();
+    let snapshot_2 = provider.fetch_current_snapshot().unwrap();
+    println!("Snapshot 2: {}", snapshot_2.0);
+
+    // Add third version
+    provider
+        .update_table_column_stats(
+            age_column_id,
+            table_id,
+            "histogram",
+            r#"{"version": 3, "buckets": [10, 20, 30]}"#,
+        )
+        .unwrap();
+    let snapshot_3 = provider.fetch_current_snapshot().unwrap();
+    println!("Snapshot 3: {}", snapshot_3.0);
+
+    // Check the database
+    let mut debug_stmt = conn
+        .prepare(
+            r#"
+            SELECT column_id, stats_type, begin_snapshot, end_snapshot, payload
+            FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
+            WHERE table_id = ? AND column_id = ?
+            ORDER BY begin_snapshot;
+            "#,
+        )
+        .unwrap();
+    println!("\nAdvanced stats in database:");
+    for row in debug_stmt
+        .query_map([table_id, age_column_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, Option<i64>>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })
+        .unwrap()
+    {
+        let (col_id, stats_type, begin, end, payload) = row.unwrap();
+        println!(
+            "  col={}, type={}, begin={}, end={:?}, payload={}",
+            col_id, stats_type, begin, end, payload
+        );
+    }
+
+    // Fetch at snapshot 0 - should have no advanced stats
+    let stats_at_0 = provider
+        .fetch_table_statistics("test_table", snapshot_0.0, conn)
+        .unwrap()
+        .unwrap();
+    let age_stats_0 = stats_at_0
+        .column_statistics
+        .iter()
+        .find(|cs| cs.name == "age")
+        .unwrap();
+    assert_eq!(age_stats_0.advanced_stats.len(), 0);
+
+    // Fetch at snapshot 1 - should have version 1
+    let stats_at_1 = provider
+        .fetch_table_statistics("test_table", snapshot_1.0, conn)
+        .unwrap()
+        .unwrap();
+    let age_stats_1 = stats_at_1
+        .column_statistics
+        .iter()
+        .find(|cs| cs.name == "age")
+        .unwrap();
+    assert_eq!(age_stats_1.advanced_stats.len(), 1);
+    let histogram_1 = &age_stats_1.advanced_stats[0];
+    assert!(histogram_1.data.to_string().contains("\"version\":1"));
+
+    // Fetch at snapshot 2 - should have version 2
+    let stats_at_2 = provider
+        .fetch_table_statistics("test_table", snapshot_2.0, conn)
+        .unwrap()
+        .unwrap();
+    let age_stats_2 = stats_at_2
+        .column_statistics
+        .iter()
+        .find(|cs| cs.name == "age")
+        .unwrap();
+    assert_eq!(age_stats_2.advanced_stats.len(), 1);
+    let histogram_2 = &age_stats_2.advanced_stats[0];
+    assert!(histogram_2.data.to_string().contains("\"version\":2"));
+
+    // Fetch at snapshot 3 - should have version 3
+    let stats_at_3 = provider
+        .fetch_table_statistics("test_table", snapshot_3.0, conn)
+        .unwrap()
+        .unwrap();
+    let age_stats_3 = stats_at_3
+        .column_statistics
+        .iter()
+        .find(|cs| cs.name == "age")
+        .unwrap();
+    assert_eq!(age_stats_3.advanced_stats.len(), 1);
+    let histogram_3 = &age_stats_3.advanced_stats[0];
+    assert!(histogram_3.data.to_string().contains("\"version\":3"));
+
+    println!("✓ Snapshot time-travel test passed");
+    println!(
+        "  - Snapshot 0: {} advanced stats",
+        age_stats_0.advanced_stats.len()
+    );
+    println!("  - Snapshot 1: version 1 histogram");
+    println!("  - Snapshot 2: version 2 histogram");
+    println!("  - Snapshot 3: version 3 histogram");
+}
+
+#[test]
+fn test_fetch_table_stats_multiple_stat_types() {
+    // Test fetching when multiple stat types exist for same column
+    let (_temp_dir, provider, table_id, age_column_id) = create_test_provider_with_data();
+    let conn = provider.get_connection();
+
+    // Add multiple different stat types
+    provider
+        .update_table_column_stats(age_column_id, table_id, "min_value", "25")
+        .unwrap();
+    provider
+        .update_table_column_stats(age_column_id, table_id, "max_value", "35")
+        .unwrap();
+    provider
+        .update_table_column_stats(
+            age_column_id,
+            table_id,
+            "histogram",
+            r#"{"buckets": [20, 25, 30, 35]}"#,
+        )
+        .unwrap();
+    provider
+        .update_table_column_stats(age_column_id, table_id, "ndv", r#"{"distinct_count": 3}"#)
+        .unwrap();
+    provider
+        .update_table_column_stats(
+            age_column_id,
+            table_id,
+            "quantiles",
+            r#"{"p50": 30, "p95": 34, "p99": 35}"#,
+        )
+        .unwrap();
+
+    let current_snapshot = provider.fetch_current_snapshot().unwrap();
+    let stats = provider
+        .fetch_table_statistics("test_table", current_snapshot.0, conn)
+        .unwrap()
+        .unwrap();
+
+    let age_stats = stats
+        .column_statistics
+        .iter()
+        .find(|cs| cs.name == "age")
+        .unwrap();
+
+    // Should have all 5 stat types
+    assert_eq!(age_stats.advanced_stats.len(), 5);
+
+    // Verify all stat types are present
+    let stat_types: Vec<&str> = age_stats
+        .advanced_stats
+        .iter()
+        .map(|s| s.stats_type.as_str())
+        .collect();
+    assert!(stat_types.contains(&"min_value"));
+    assert!(stat_types.contains(&"max_value"));
+    assert!(stat_types.contains(&"histogram"));
+    assert!(stat_types.contains(&"ndv"));
+    assert!(stat_types.contains(&"quantiles"));
+
+    println!("✓ Multiple stat types test passed");
+    println!("  - Total stat types: {}", age_stats.advanced_stats.len());
+    println!("  - Stat types: {:?}", stat_types);
+}
+
+#[test]
+fn test_fetch_table_stats_columns_without_stats() {
+    // Test that columns without advanced stats are still returned
+    let (_temp_dir, provider, table_id, age_column_id) = create_test_provider_with_data();
+    let conn = provider.get_connection();
+
+    // Only add stats for age column, not for id or name
+    provider
+        .update_table_column_stats(age_column_id, table_id, "min_value", "25")
+        .unwrap();
+
+    let current_snapshot = provider.fetch_current_snapshot().unwrap();
+    let stats = provider
+        .fetch_table_statistics("test_table", current_snapshot.0, conn)
+        .unwrap()
+        .unwrap();
+
+    // Should have all 3 columns even though only age has stats
+    assert_eq!(stats.column_statistics.len(), 3);
+
+    // Find each column
+    let id_stats = stats
+        .column_statistics
+        .iter()
+        .find(|cs| cs.name == "id")
+        .expect("Should have id column");
+    let name_stats = stats
+        .column_statistics
+        .iter()
+        .find(|cs| cs.name == "name")
+        .expect("Should have name column");
+    let age_stats = stats
+        .column_statistics
+        .iter()
+        .find(|cs| cs.name == "age")
+        .expect("Should have age column");
+
+    // id and name should have no advanced stats
+    assert_eq!(id_stats.advanced_stats.len(), 0);
+    assert_eq!(name_stats.advanced_stats.len(), 0);
+
+    // age should have 1 advanced stat
+    assert_eq!(age_stats.advanced_stats.len(), 1);
+
+    println!("✓ Columns without stats test passed");
+    println!("  - Total columns: {}", stats.column_statistics.len());
+    println!("  - id stats: {}", id_stats.advanced_stats.len());
+    println!("  - name stats: {}", name_stats.advanced_stats.len());
+    println!("  - age stats: {}", age_stats.advanced_stats.len());
+}
+
+#[test]
+fn test_fetch_table_stats_row_count() {
+    // Test that row_count is correctly populated
+    let (_temp_dir, provider) = create_test_statistics_provider(false);
+    let conn = provider.get_connection();
+
+    // Create table with known row count
+    conn.execute_batch(
+        r#"
+        CREATE TABLE large_table (
+            col1 INTEGER,
+            col2 VARCHAR
+        );
+        
+        INSERT INTO large_table 
+        SELECT i, 'value_' || i::VARCHAR 
+        FROM range(1, 101) t(i);
+        "#,
+    )
+    .unwrap();
+
+    // Get table_id
+    let mut table_id_stmt = conn
+        .prepare(
+            r#"
+            SELECT table_id 
+            FROM __ducklake_metadata_metalake.main.ducklake_table dt
+            INNER JOIN __ducklake_metadata_metalake.main.ducklake_schema ds ON dt.schema_id = ds.schema_id
+            WHERE ds.schema_name = current_schema() AND dt.table_name = 'large_table';
+            "#,
+        )
+        .unwrap();
+    let table_id: i64 = table_id_stmt.query_row([], |row| row.get(0)).unwrap();
+
+    // Get column_id for col1
+    let mut column_id_stmt = conn
+        .prepare(
+            r#"
+            SELECT column_id 
+            FROM __ducklake_metadata_metalake.main.ducklake_column
+            WHERE table_id = ? AND column_name = 'col1';
+            "#,
+        )
+        .unwrap();
+    let col1_id: i64 = column_id_stmt
+        .query_row([table_id], |row| row.get(0))
+        .unwrap();
+
+    // Add some stats
+    provider
+        .update_table_column_stats(col1_id, table_id, "ndv", r#"{"distinct_count": 100}"#)
+        .unwrap();
+
+    let current_snapshot = provider.fetch_current_snapshot().unwrap();
+    let stats = provider
+        .fetch_table_statistics("large_table", current_snapshot.0, conn)
+        .unwrap()
+        .unwrap();
+
+    // Verify row count
+    assert_eq!(stats.row_count, 100);
+    assert_eq!(stats.column_statistics.len(), 2); // col1 and col2
+
+    println!("✓ Row count test passed");
+    println!("  - Row count: {}", stats.row_count);
+    println!("  - Column count: {}", stats.column_statistics.len());
 }

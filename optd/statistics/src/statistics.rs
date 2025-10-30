@@ -38,21 +38,37 @@ pub enum Error {
     },
 }
 
+struct TableColumnStatisticsEntry {
+    table_id: i64,
+    column_id: i64,
+    column_name: String,
+    column_type: String,
+    record_count: i64,
+    next_row_id: i64,
+    file_size_bytes: i64,
+    stats_type: Option<String>,
+    payload: Option<String>,
+}
+
 /** Packaged Statistics Objects */
 /** Table statistics -- Contains overall row count and per-column statistics */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableStatistics {
-    row_count: usize,
-    column_statistics: Vec<ColumnStatistics>,
+    pub row_count: usize,
+    pub column_statistics: Vec<ColumnStatistics>,
 }
 
-impl FromIterator<Result<StatisticsEntry, Error>> for TableStatistics {
-    fn from_iter<T: IntoIterator<Item = Result<StatisticsEntry, Error>>>(iter: T) -> Self {
+impl FromIterator<Result<TableColumnStatisticsEntry, Error>> for TableStatistics {
+    fn from_iter<T: IntoIterator<Item = Result<TableColumnStatisticsEntry, Error>>>(
+        iter: T,
+    ) -> Self {
+        let mut row_flag = false;
         let mut row_count = 0;
         let mut column_statistics = Vec::new();
 
+        // Stats will be ordered by table_id then column_id
         for row_result in iter {
-            if let Ok(StatisticsEntry {
+            if let Ok(TableColumnStatisticsEntry {
                 table_id: _,
                 column_id,
                 column_name,
@@ -60,27 +76,47 @@ impl FromIterator<Result<StatisticsEntry, Error>> for TableStatistics {
                 record_count,
                 next_row_id: _,
                 file_size_bytes: _,
-                contains_null,
-                contains_nan,
-                min_value,
-                max_value,
-                extra_stats: _,
+                stats_type,
+                payload,
             }) = row_result
             {
-                row_count = record_count as usize; // Assuming all columns have the same record_count
+                // Check if unique table/column combination
+                if column_statistics
+                    .last()
+                    .map_or(true, |last: &ColumnStatistics| last.column_id != column_id)
+                {
+                    // New column encountered
+                    column_statistics.push(ColumnStatistics::new(
+                        column_id,
+                        column_type.clone(),
+                        column_name.clone(),
+                        Vec::new(),
+                    ));
+                }
 
-                let column_stats = ColumnStatistics::new(
-                    column_id,
-                    column_type,
-                    column_name.clone(),
-                    min_value,
-                    max_value,
-                    contains_null,
-                    contains_nan,
-                    vec![], // Advanced stats can be populated later
+                assert!(
+                    !column_statistics.is_empty()
+                        && column_statistics.last().unwrap().column_id == column_id,
+                    "Column statistics should not be empty and last column_id should match current column_id"
                 );
 
-                column_statistics.push(column_stats);
+                // Add advanced statistics
+                if let Some(last_column_stat) = column_statistics.last_mut() {
+                    if stats_type.is_some() && payload.is_some() {
+                        let advanced_stat = AdvanceColumnStatistics {
+                            stats_type: stats_type.clone().unwrap(),
+                            data: serde_json::from_str(&payload.clone().unwrap())
+                                .unwrap_or(Value::Null),
+                        };
+                        last_column_stat.add_advanced_stat(advanced_stat);
+                    }
+                }
+
+                // Assuming all columns have the same record_count, only need to set once
+                if !row_flag {
+                    row_count = record_count as usize;
+                    row_flag = true;
+                }
             }
         }
 
@@ -93,35 +129,23 @@ impl FromIterator<Result<StatisticsEntry, Error>> for TableStatistics {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ColumnStatistics {
-    id: i64,
-    column_type: String,
-    name: String,
-    min: Option<String>,
-    max: Option<String>,
-    contains_null: Option<bool>,
-    contains_nan: Option<bool>,
-    advanced_stats: Vec<AdvanceColumnStatistics>, // TODO, e.g. histogram, number of distinct values (set cardinality), etc.
+    pub column_id: i64,
+    pub column_type: String,
+    pub name: String,
+    pub advanced_stats: Vec<AdvanceColumnStatistics>,
 }
 
 impl ColumnStatistics {
     fn new(
-        id: i64,
+        column_id: i64,
         column_type: String,
         name: String,
-        min: Option<String>,
-        max: Option<String>,
-        contains_null: Option<bool>,
-        contains_nan: Option<bool>,
         advanced_stats: Vec<AdvanceColumnStatistics>,
     ) -> Self {
         ColumnStatistics {
-            id,
+            column_id,
             column_type,
             name,
-            min,
-            max,
-            contains_null,
-            contains_nan,
             advanced_stats,
         }
     }
@@ -133,9 +157,9 @@ impl ColumnStatistics {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct AdvanceColumnStatistics {
-    stats_type: String,
-    data: Value,
+pub struct AdvanceColumnStatistics {
+    pub stats_type: String,
+    pub data: Value,
 }
 
 pub struct SnapshotId(pub i64);
@@ -152,21 +176,6 @@ pub struct CurrentSchema {
     pub schema_id: i64,
     pub begin_snapshot: i64,
     pub end_snapshot: Option<i64>,
-}
-
-struct StatisticsEntry {
-    table_id: i64,
-    column_id: i64,
-    column_name: String,
-    column_type: String,
-    record_count: i64,
-    next_row_id: i64,
-    file_size_bytes: i64,
-    contains_null: Option<bool>,
-    contains_nan: Option<bool>,
-    min_value: Option<String>,
-    max_value: Option<String>,
-    extra_stats: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -232,12 +241,12 @@ impl DuckLakeStatisticsProvider {
                 end_snapshot BIGINT,
                 table_id BIGINT,
                 stats_type VARCHAR,
-                payload TEXT
+                payload VARCHAR
             );
 
             CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_query (
                 query_id BIGINT,
-                query_string TEXT,
+                query_string VARCHAR,
                 root_group_id BIGINT
             );
 
@@ -259,7 +268,7 @@ impl DuckLakeStatisticsProvider {
                 begin_snapshot BIGINT,
                 end_snapshot BIGINT,
                 stats_type VARCHAR,
-                payload TEXT
+                payload VARCHAR
             );
 
             CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_execution_subplan_feedback (
@@ -267,14 +276,14 @@ impl DuckLakeStatisticsProvider {
                 begin_snapshot BIGINT,
                 end_snapshot BIGINT,
                 stats_type VARCHAR,
-                payload TEXT
+                payload VARCHAR
             );
 
             CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_subplan_scalar_feedback (
                 scalar_id BIGINT,
                 group_id BIGINT,
                 stats_type VARCHAR,
-                payload TEXT,
+                payload VARCHAR,
                 query_instance_id BIGINT
             );
         "#,
@@ -428,23 +437,24 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
             .prepare(
                 r#"
                     SELECT 
-                        ts.table_id, 
-                        tcs.column_id, 
-                        dc.column_name, 
-                        dc.column_type, 
-                        ts.record_count, 
-                        ts.next_row_id, 
-                        ts.file_size_bytes, 
-                        tcs.contains_null, 
-                        tcs.contains_nan, 
-                        tcs.min_value, 
-                        tcs.max_value, 
-                        tcs.extra_stats
+                        ts.table_id,
+                        dc.column_id,
+                        dc.column_name,
+                        dc.column_type,
+                        ts.record_count,
+                        ts.next_row_id,
+                        ts.file_size_bytes,
+                        tcas.stats_type,
+                        tcas.payload
                     FROM __ducklake_metadata_metalake.main.ducklake_table_stats ts
-                    LEFT JOIN __ducklake_metadata_metalake.main.ducklake_table_column_stats tcs USING (table_id)
-                    LEFT JOIN __ducklake_metadata_metalake.main.ducklake_column dc USING (table_id, column_id)
                     INNER JOIN __ducklake_metadata_metalake.main.ducklake_table dt ON ts.table_id = dt.table_id
                     INNER JOIN __ducklake_metadata_metalake.main.ducklake_schema ds ON dt.schema_id = ds.schema_id
+                    INNER JOIN __ducklake_metadata_metalake.main.ducklake_column dc ON dt.table_id = dc.table_id
+                    LEFT JOIN __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats tcas 
+                        ON dc.table_id = tcas.table_id 
+                        AND dc.column_id = tcas.column_id
+                        AND ? >= tcas.begin_snapshot 
+                        AND (? < tcas.end_snapshot OR tcas.end_snapshot IS NULL)
                     WHERE 
                         ds.schema_name = current_schema()
                         AND dt.table_name = ?
@@ -452,28 +462,31 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
                         AND ts.file_size_bytes IS NOT NULL
                         AND ? >= dc.begin_snapshot 
                         AND (? < dc.end_snapshot OR dc.end_snapshot IS NULL)
-                    ORDER BY ts.table_id, tcs.column_id;
+                    ORDER BY ts.table_id, dc.column_id, tcas.stats_type;
                 "#
             )
             .context(QueryExecutionSnafu)?;
 
         let entries = stmt
             .query_map(
-                [table, &snapshot.to_string(), &snapshot.to_string()],
+                [
+                    &snapshot.to_string(),
+                    &snapshot.to_string(),
+                    table,
+                    &snapshot.to_string(),
+                    &snapshot.to_string(),
+                ],
                 |row| {
-                    Ok(StatisticsEntry {
-                        table_id: row.get("column_id")?,
+                    Ok(TableColumnStatisticsEntry {
+                        table_id: row.get("table_id")?,
                         column_id: row.get("column_id")?,
                         column_name: row.get("column_name")?,
                         column_type: row.get("column_type")?,
                         record_count: row.get("record_count")?,
                         next_row_id: row.get("next_row_id")?,
                         file_size_bytes: row.get("file_size_bytes")?,
-                        contains_null: row.get("contains_null")?,
-                        contains_nan: row.get("contains_nan")?,
-                        min_value: row.get("min_value")?,
-                        max_value: row.get("max_value")?,
-                        extra_stats: row.get("extra_stats")?,
+                        stats_type: row.get("stats_type")?,
+                        payload: row.get("payload")?,
                     })
                 },
             )
@@ -526,7 +539,7 @@ impl StatisticsProvider for DuckLakeStatisticsProvider {
 
         update_stmt
             .execute(params![
-                current_snapshot_id,
+                current_snapshot_id + 1,
                 stats_type,
                 column_id,
                 table_id,
