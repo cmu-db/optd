@@ -3,6 +3,7 @@ mod set;
 
 pub use metadata::{ColumnMeta, ColumnMetaStore};
 pub use set::ColumnSet;
+pub type ColumnMap<T> = std::collections::HashMap<Column, T>;
 
 /// A column of data in the operator. Also known as an information unit (IU).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

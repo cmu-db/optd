@@ -1,6 +1,6 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
-use crate::ir::data_type::DataType;
+use crate::ir::{data_type::DataType, statistics::ValueHistogram};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DataSourceId(pub i64);
@@ -12,6 +12,7 @@ pub struct Field {
     pub name: String,
     pub data_type: DataType,
     pub nullable: bool,
+    pub histogram: Option<ValueHistogram>,
 }
 
 impl Field {
@@ -20,6 +21,7 @@ impl Field {
             name,
             data_type,
             nullable,
+            histogram: None,
         }
     }
 }
@@ -76,6 +78,7 @@ pub struct TableMetadata {
     pub id: DataSourceId,
     pub name: String,
     pub schema: Arc<Schema>,
+    pub histograms: HashMap<String, ValueHistogram>,
     pub row_count: usize,
 }
 

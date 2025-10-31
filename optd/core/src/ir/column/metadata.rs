@@ -1,10 +1,11 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::ir::{Column, DataType};
+use crate::ir::{Column, DataType, catalog::DataSourceId};
 
 pub struct ColumnMeta {
     pub data_type: DataType,
     pub name: String,
+    pub source_table: Option<DataSourceId>,
 }
 
 #[derive(Default)]
@@ -26,12 +27,21 @@ impl ColumnMetaStore {
         self.name_to_column_id.get(name).cloned()
     }
 
-    pub fn new_column(&mut self, data_type: DataType, name: Option<String>) -> Column {
+    pub fn new_column(
+        &mut self,
+        data_type: DataType,
+        name: Option<String>,
+        source_table: Option<DataSourceId>,
+    ) -> Column {
         let column = Column(self.columns.len());
         let name = name.unwrap_or_else(|| column.to_string());
         let old = self.name_to_column_id.insert(name.clone(), column);
         assert!(old.is_none());
-        self.columns.push(Arc::new(ColumnMeta { data_type, name }));
+        self.columns.push(Arc::new(ColumnMeta {
+            data_type,
+            name,
+            source_table,
+        }));
         column
     }
 
@@ -44,6 +54,7 @@ impl ColumnMetaStore {
                 *x = Arc::new(ColumnMeta {
                     name: alias.clone(),
                     data_type: x.data_type,
+                    source_table: x.source_table,
                 })
             }
         }

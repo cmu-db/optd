@@ -14,6 +14,7 @@ pub mod operator;
 pub mod properties;
 pub mod rule;
 pub mod scalar;
+pub mod statistics;
 mod value;
 
 pub use column::*;

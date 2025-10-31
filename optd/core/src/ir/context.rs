@@ -10,6 +10,7 @@ use crate::ir::{
     catalog::{Catalog, DataSourceId, Schema},
     cost::CostModel,
     properties::CardinalityEstimator,
+    statistics::ValueHistogram,
 };
 
 #[derive(Clone)]
@@ -23,6 +24,7 @@ pub struct IRContext {
 
     pub(crate) source_to_first_column_id: Arc<Mutex<HashMap<DataSourceId, Column>>>,
     pub(crate) column_meta: Arc<Mutex<ColumnMetaStore>>,
+    pub(crate) histograms: Arc<Mutex<HashMap<Column, ValueHistogram>>>,
 }
 
 impl IRContext {
@@ -37,6 +39,7 @@ impl IRContext {
             cm: cost,
             source_to_first_column_id: Arc::default(),
             column_meta: Arc::default(),
+            histograms: Arc::default(),
         }
     }
 
@@ -50,7 +53,13 @@ impl IRContext {
                 let columns = schema
                     .columns()
                     .iter()
-                    .map(|field| column_meta.new_column(field.data_type, Some(field.name.clone())))
+                    .map(|field| {
+                        column_meta.new_column(
+                            field.data_type,
+                            Some(field.name.clone()),
+                            Some(source),
+                        )
+                    })
                     .collect_vec();
                 vacant.insert(columns[0]);
                 columns[0]
@@ -60,7 +69,7 @@ impl IRContext {
 
     pub fn define_column(&self, data_type: DataType, name: Option<String>) -> Column {
         let mut column_meta = self.column_meta.lock().unwrap();
-        column_meta.new_column(data_type, name)
+        column_meta.new_column(data_type, name, None)
     }
 
     pub fn rename_column_alias(&self, column: Column, alias: String) {
@@ -83,5 +92,15 @@ impl IRContext {
     pub fn get_column_meta(&self, column: &Column) -> Arc<ColumnMeta> {
         let column_meta = self.column_meta.lock().unwrap();
         column_meta.get(column).clone()
+    }
+
+    pub fn set_histogram(&self, column: &Column, histogram: crate::ir::statistics::ValueHistogram) {
+        let mut histograms = self.histograms.lock().unwrap();
+        histograms.insert(column.clone(), histogram);
+    }
+
+    pub fn get_histogram(&self, column: &Column) -> Option<crate::ir::statistics::ValueHistogram> {
+        let histograms = self.histograms.lock().unwrap();
+        histograms.get(column).cloned()
     }
 }

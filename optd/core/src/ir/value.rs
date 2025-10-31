@@ -11,6 +11,19 @@ pub enum ScalarValue {
     Utf8View(Option<String>),
 }
 
+impl PartialOrd for ScalarValue {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (ScalarValue::Int32(a), ScalarValue::Int32(b)) => a.partial_cmp(b),
+            (ScalarValue::Int64(a), ScalarValue::Int64(b)) => a.partial_cmp(b),
+            (ScalarValue::Boolean(a), ScalarValue::Boolean(b)) => a.partial_cmp(b),
+            (ScalarValue::Utf8(a), ScalarValue::Utf8(b)) => a.partial_cmp(b),
+            (ScalarValue::Utf8View(a), ScalarValue::Utf8View(b)) => a.partial_cmp(b),
+            _ => None,
+        }
+    }
+}
+
 impl ScalarValue {
     pub fn is_null(&self) -> bool {
         match self {

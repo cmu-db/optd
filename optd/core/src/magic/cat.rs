@@ -50,6 +50,7 @@ impl Catalog for MagicCatalog {
                 id,
                 name: table_name,
                 schema,
+                histograms: HashMap::new(),
                 row_count: 0,
             },
         );

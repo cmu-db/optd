@@ -1,6 +1,6 @@
 use crate::ir::{
     operator::*,
-    properties::{Cardinality, CardinalityEstimator},
+    properties::{Cardinality, CardinalityEstimator, ColumnRestrictions, GetProperty},
     scalar::*,
 };
 
@@ -77,8 +77,28 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                         _ => unreachable!("join condition must be boolean"),
                     }
                 } else {
-                    Self::MAGIC_PREDICATE_SELECTIVITY
+                    println!("HERE");
+                    let restrictions = op.get_property::<ColumnRestrictions>(ctx);
+                    restrictions
+                        .iter()
+                        .map(|(column, restriction)| {
+                            let Some(hist) = ctx.get_histogram(column) else {
+                                println!(
+                                    "No histogram for column {:?}, use default selectivity",
+                                    column
+                                );
+                                return Self::MAGIC_PREDICATE_SELECTIVITY;
+                            };
+                            restriction.iter().fold(1.0, |acc, r| {
+                                acc * {
+                                    let result = hist.estimate_range(r).unwrap()[0];
+                                    result / hist.total_count() as f64
+                                }
+                            })
+                        })
+                        .fold(1., |acc, x| acc * x)
                 };
+                println!("Estimated selectivity: {}", selectivity);
 
                 selectivity * filter.input().cardinality(ctx)
             }

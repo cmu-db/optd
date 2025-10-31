@@ -1,7 +1,9 @@
 mod cardinality;
+mod eq_columns;
 mod output_columns;
 mod output_schema;
 mod required;
+mod restriction;
 mod tuple_ordering;
 
 use std::sync::{Arc, OnceLock};
@@ -9,6 +11,7 @@ use std::sync::{Arc, OnceLock};
 pub use cardinality::*;
 pub use output_columns::OutputColumns;
 pub use required::Required;
+pub use restriction::ColumnRestrictions;
 pub use tuple_ordering::*;
 
 use crate::ir::{ColumnSet, context::IRContext};
