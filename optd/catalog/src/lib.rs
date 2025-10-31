@@ -194,12 +194,11 @@ impl FromIterator<Result<TableColumnStatisticsEntry, Error>> for TableStatistics
                 "Column statistics should not be empty and last column_id should match current column_id"
             );
 
-            if let Some(last_column_stat) = column_statistics.last_mut() {
-                if let (Some(stats_type), Some(payload)) = (e.stats_type, e.payload) {
-                    let data = serde_json::from_str(&payload).unwrap_or(Value::Null);
-                    last_column_stat
-                        .add_advanced_stat(AdvanceColumnStatistics { stats_type, data });
-                }
+            if let Some(last_column_stat) = column_statistics.last_mut()
+                && let (Some(stats_type), Some(payload)) = (e.stats_type, e.payload)
+            {
+                let data = serde_json::from_str(&payload).unwrap_or(Value::Null);
+                last_column_stat.add_advanced_stat(AdvanceColumnStatistics { stats_type, data });
             }
 
             // Assuming all columns have the same record_count, only need to set once
