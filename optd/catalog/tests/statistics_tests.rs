@@ -1,4 +1,4 @@
-use optd_statistics::{DuckLakeStatisticsProvider, StatisticsProvider};
+use optd_catalog::{Catalog, DuckLakeCatalog, SnapshotId};
 use serde_json::json;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -6,8 +6,8 @@ use tempfile::TempDir;
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// Creates a test statistics provider with isolated metadata directory.
-fn create_test_provider(for_file: bool) -> (TempDir, DuckLakeStatisticsProvider) {
+/// Creates a test catalog with isolated metadata directory.
+fn create_test_catalog(for_file: bool) -> (TempDir, DuckLakeCatalog) {
     let temp_dir = TempDir::new().unwrap();
     let counter = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
     let timestamp = SystemTime::now()
@@ -20,24 +20,24 @@ fn create_test_provider(for_file: bool) -> (TempDir, DuckLakeStatisticsProvider)
     std::fs::create_dir_all(&unique_dir).unwrap();
     let metadata_path = unique_dir.join("metadata.ducklake");
 
-    let provider = if for_file {
+    let catalog = if for_file {
         let db_path = unique_dir.join("test.db");
-        DuckLakeStatisticsProvider::try_new(
+        DuckLakeCatalog::try_new(
             Some(db_path.to_str().unwrap()),
             Some(metadata_path.to_str().unwrap()),
         )
     } else {
-        DuckLakeStatisticsProvider::try_new(None, Some(metadata_path.to_str().unwrap()))
+        DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap()))
     }
     .unwrap();
 
-    (temp_dir, provider)
+    (temp_dir, catalog)
 }
 
-/// Creates a test provider with a pre-populated test_table (id, name, age columns).
-fn create_test_provider_with_data() -> (TempDir, DuckLakeStatisticsProvider, i64, i64) {
-    let (temp_dir, provider) = create_test_provider(false);
-    let conn = provider.get_connection();
+/// Creates a test catalog with a pre-populated test_table (id, name, age columns).
+fn create_test_catalog_with_data() -> (TempDir, DuckLakeCatalog, i64, i64) {
+    let (temp_dir, catalog) = create_test_catalog(false);
+    let conn = catalog.get_connection();
 
     conn.execute_batch(
         r#"
@@ -71,20 +71,20 @@ fn create_test_provider_with_data() -> (TempDir, DuckLakeStatisticsProvider, i64
         )
         .unwrap();
 
-    (temp_dir, provider, table_id, age_column_id)
+    (temp_dir, catalog, table_id, age_column_id)
 }
 
 #[test]
 fn test_ducklake_statistics_provider_creation() {
     // Test both memory-based and file-based provider creation.
-    let (_temp_dir, _provider) = create_test_provider(false);
-    let (_temp_dir, _provider) = create_test_provider(true);
+    let (_temp_dir, _provider) = create_test_catalog(false);
+    let (_temp_dir, _provider) = create_test_catalog(true);
 }
 
 #[test]
 fn test_table_stats_insertion() {
     // Test basic statistics insertion without errors.
-    let (_temp_dir, provider) = create_test_provider(true);
+    let (_temp_dir, provider) = create_test_catalog(true);
 
     let result = provider.update_table_column_stats(1, 1, "ndv", r#"{"distinct_count": 1000}"#);
     assert!(result.is_ok());
@@ -93,7 +93,7 @@ fn test_table_stats_insertion() {
 #[test]
 fn test_table_stats_insertion_and_retrieval() {
     // Test inserting and retrieving multiple statistics types for a column.
-    let (_temp_dir, provider, table_id, age_column_id) = create_test_provider_with_data();
+    let (_temp_dir, provider, table_id, age_column_id) = create_test_catalog_with_data();
     let conn = provider.get_connection();
 
     provider
@@ -111,9 +111,9 @@ fn test_table_stats_insertion_and_retrieval() {
         )
         .unwrap();
 
-    let latest_snapshot = provider.fetch_current_snapshot().unwrap();
+    let latest_snapshot = provider.current_snapshot().unwrap();
     let stats = provider
-        .fetch_table_statistics("test_table", latest_snapshot.0, conn)
+        .table_statistics("test_table", latest_snapshot, conn)
         .unwrap()
         .unwrap();
 
@@ -148,11 +148,11 @@ fn test_table_stats_insertion_and_retrieval() {
 }
 
 #[test]
-fn test_fetch_current_schema() {
+fn test_current_schema() {
     // Test fetching current schema info returns valid metadata.
-    let (_temp_dir, provider) = create_test_provider(true);
+    let (_temp_dir, provider) = create_test_catalog(true);
 
-    let schema = provider.fetch_current_schema_info().unwrap();
+    let schema = provider.current_schema_info().unwrap();
 
     assert_eq!(schema.schema_name, "main");
     assert_eq!(schema.schema_id, 0);
@@ -163,7 +163,7 @@ fn test_fetch_current_schema() {
 #[test]
 fn test_snapshot_versioning_and_stats_types() {
     // Test snapshot creation, versioning, and continuity for multiple stats updates.
-    let (_temp_dir, provider) = create_test_provider(true);
+    let (_temp_dir, provider) = create_test_catalog(true);
     let conn = provider.get_connection();
 
     provider
@@ -248,7 +248,7 @@ fn test_snapshot_versioning_and_stats_types() {
 #[test]
 fn test_snapshot_tracking_and_multi_table_stats() {
     // Test snapshot creation tracking and statistics isolation across multiple tables.
-    let (_temp_dir, provider) = create_test_provider(true);
+    let (_temp_dir, provider) = create_test_catalog(true);
     let conn = provider.get_connection();
 
     let initial_count: i64 = conn
@@ -346,13 +346,13 @@ fn test_snapshot_tracking_and_multi_table_stats() {
 #[test]
 fn test_update_and_fetch_table_column_stats() {
     // Test updating min/max values and advanced statistics with snapshot progression.
-    let (_temp_dir, provider, table_id, age_column_id) = create_test_provider_with_data();
+    let (_temp_dir, provider, table_id, age_column_id) = create_test_catalog_with_data();
     let conn = provider.get_connection();
 
-    let initial_snapshot = provider.fetch_current_snapshot().unwrap();
+    let initial_snapshot = provider.current_snapshot().unwrap();
     assert!(
         provider
-            .fetch_table_statistics("test_table", initial_snapshot.0, conn)
+            .table_statistics("test_table", initial_snapshot, conn)
             .unwrap()
             .is_some()
     );
@@ -360,13 +360,13 @@ fn test_update_and_fetch_table_column_stats() {
     provider
         .update_table_column_stats(age_column_id, table_id, "min_value", "25")
         .unwrap();
-    let snapshot_after_min = provider.fetch_current_snapshot().unwrap();
+    let snapshot_after_min = provider.current_snapshot().unwrap();
     assert_eq!(snapshot_after_min.0, initial_snapshot.0 + 1);
 
     provider
         .update_table_column_stats(age_column_id, table_id, "max_value", "35")
         .unwrap();
-    let snapshot_after_max = provider.fetch_current_snapshot().unwrap();
+    let snapshot_after_max = provider.current_snapshot().unwrap();
     assert_eq!(snapshot_after_max.0, initial_snapshot.0 + 2);
 
     let (min_val, max_val): (Option<String>, Option<String>) = conn
@@ -422,17 +422,17 @@ fn test_update_and_fetch_table_column_stats() {
         )
         .unwrap();
 
-    let snapshot_after_histogram = provider.fetch_current_snapshot().unwrap();
+    let snapshot_after_histogram = provider.current_snapshot().unwrap();
     assert_eq!(snapshot_after_histogram.0, initial_snapshot.0 + 3);
 }
 
 #[test]
 fn test_fetch_table_stats_with_snapshot_time_travel() {
     // Test time-travel capability by fetching statistics at different snapshot points.
-    let (_temp_dir, provider, table_id, age_column_id) = create_test_provider_with_data();
+    let (_temp_dir, provider, table_id, age_column_id) = create_test_catalog_with_data();
     let conn = provider.get_connection();
 
-    let snapshot_0 = provider.fetch_current_snapshot().unwrap();
+    let snapshot_0 = provider.current_snapshot().unwrap();
 
     provider
         .update_table_column_stats(
@@ -442,7 +442,7 @@ fn test_fetch_table_stats_with_snapshot_time_travel() {
             r#"{"version": 1, "buckets": [1, 2, 3]}"#,
         )
         .unwrap();
-    let snapshot_1 = provider.fetch_current_snapshot().unwrap();
+    let snapshot_1 = provider.current_snapshot().unwrap();
 
     provider
         .update_table_column_stats(
@@ -452,7 +452,7 @@ fn test_fetch_table_stats_with_snapshot_time_travel() {
             r#"{"version": 2, "buckets": [1, 2, 3, 4, 5]}"#,
         )
         .unwrap();
-    let snapshot_2 = provider.fetch_current_snapshot().unwrap();
+    let snapshot_2 = provider.current_snapshot().unwrap();
 
     provider
         .update_table_column_stats(
@@ -462,10 +462,10 @@ fn test_fetch_table_stats_with_snapshot_time_travel() {
             r#"{"version": 3, "buckets": [10, 20, 30]}"#,
         )
         .unwrap();
-    let snapshot_3 = provider.fetch_current_snapshot().unwrap();
+    let snapshot_3 = provider.current_snapshot().unwrap();
 
     let stats_at_0 = provider
-        .fetch_table_statistics("test_table", snapshot_0.0, conn)
+        .table_statistics("test_table", snapshot_0, conn)
         .unwrap()
         .unwrap();
     let age_stats_0 = stats_at_0
@@ -476,7 +476,7 @@ fn test_fetch_table_stats_with_snapshot_time_travel() {
     assert_eq!(age_stats_0.advanced_stats.len(), 0);
 
     let stats_at_1 = provider
-        .fetch_table_statistics("test_table", snapshot_1.0, conn)
+        .table_statistics("test_table", snapshot_1, conn)
         .unwrap()
         .unwrap();
     let age_stats_1 = stats_at_1
@@ -493,7 +493,7 @@ fn test_fetch_table_stats_with_snapshot_time_travel() {
     );
 
     let stats_at_2 = provider
-        .fetch_table_statistics("test_table", snapshot_2.0, conn)
+        .table_statistics("test_table", snapshot_2, conn)
         .unwrap()
         .unwrap();
     let age_stats_2 = stats_at_2
@@ -510,7 +510,7 @@ fn test_fetch_table_stats_with_snapshot_time_travel() {
     );
 
     let stats_at_3 = provider
-        .fetch_table_statistics("test_table", snapshot_3.0, conn)
+        .table_statistics("test_table", snapshot_3, conn)
         .unwrap()
         .unwrap();
     let age_stats_3 = stats_at_3
@@ -530,7 +530,7 @@ fn test_fetch_table_stats_with_snapshot_time_travel() {
 #[test]
 fn test_fetch_table_stats_multiple_stat_types() {
     // Test fetching when multiple statistics types exist for the same column.
-    let (_temp_dir, provider, table_id, age_column_id) = create_test_provider_with_data();
+    let (_temp_dir, provider, table_id, age_column_id) = create_test_catalog_with_data();
     let conn = provider.get_connection();
 
     provider
@@ -559,9 +559,9 @@ fn test_fetch_table_stats_multiple_stat_types() {
         )
         .unwrap();
 
-    let current_snapshot = provider.fetch_current_snapshot().unwrap();
+    let current_snapshot = provider.current_snapshot().unwrap();
     let stats = provider
-        .fetch_table_statistics("test_table", current_snapshot.0, conn)
+        .table_statistics("test_table", current_snapshot, conn)
         .unwrap()
         .unwrap();
 
@@ -589,16 +589,16 @@ fn test_fetch_table_stats_multiple_stat_types() {
 #[test]
 fn test_fetch_table_stats_columns_without_stats() {
     // Test that columns without advanced statistics are still returned in fetch results.
-    let (_temp_dir, provider, table_id, age_column_id) = create_test_provider_with_data();
+    let (_temp_dir, provider, table_id, age_column_id) = create_test_catalog_with_data();
     let conn = provider.get_connection();
 
     provider
         .update_table_column_stats(age_column_id, table_id, "min_value", "25")
         .unwrap();
 
-    let current_snapshot = provider.fetch_current_snapshot().unwrap();
+    let current_snapshot = provider.current_snapshot().unwrap();
     let stats = provider
-        .fetch_table_statistics("test_table", current_snapshot.0, conn)
+        .table_statistics("test_table", current_snapshot, conn)
         .unwrap()
         .unwrap();
 
@@ -628,7 +628,7 @@ fn test_fetch_table_stats_columns_without_stats() {
 #[test]
 fn test_fetch_table_stats_row_count() {
     // Test that row_count is correctly populated from table statistics.
-    let (_temp_dir, provider) = create_test_provider(false);
+    let (_temp_dir, provider) = create_test_catalog(false);
     let conn = provider.get_connection();
 
     conn.execute_batch(
@@ -670,9 +670,9 @@ fn test_fetch_table_stats_row_count() {
         .update_table_column_stats(col1_id, table_id, "ndv", r#"{"distinct_count": 100}"#)
         .unwrap();
 
-    let current_snapshot = provider.fetch_current_snapshot().unwrap();
+    let current_snapshot = provider.current_snapshot().unwrap();
     let stats = provider
-        .fetch_table_statistics("large_table", current_snapshot.0, conn)
+        .table_statistics("large_table", current_snapshot, conn)
         .unwrap()
         .unwrap();
 
@@ -681,9 +681,9 @@ fn test_fetch_table_stats_row_count() {
 }
 
 #[test]
-fn test_fetch_current_schema_arrow() {
+fn test_current_schema_arrow() {
     // Test fetching Arrow schema from DuckDB table with type conversions.
-    let (_temp_dir, provider) = create_test_provider(false);
+    let (_temp_dir, provider) = create_test_catalog(false);
     let conn = provider.get_connection();
 
     conn.execute_batch(
@@ -698,9 +698,7 @@ fn test_fetch_current_schema_arrow() {
     )
     .unwrap();
 
-    let schema = provider
-        .fetch_current_schema(None, "schema_test_table")
-        .unwrap();
+    let schema = provider.current_schema(None, "schema_test_table").unwrap();
 
     assert_eq!(schema.fields().len(), 4);
 
@@ -728,7 +726,7 @@ fn test_fetch_current_schema_arrow() {
     ));
 
     let schema_explicit = provider
-        .fetch_current_schema(Some("main"), "schema_test_table")
+        .current_schema(Some("main"), "schema_test_table")
         .unwrap();
     assert_eq!(schema_explicit.fields().len(), 4);
 }
@@ -736,10 +734,10 @@ fn test_fetch_current_schema_arrow() {
 #[test]
 fn test_multiple_schemas_comprehensive() {
     // Test schema fetching and metadata tracking across multiple database schemas.
-    let (_temp_dir, provider) = create_test_provider(false);
+    let (_temp_dir, provider) = create_test_catalog(false);
     let conn = provider.get_connection();
 
-    let initial_schema_info = provider.fetch_current_schema_info().unwrap();
+    let initial_schema_info = provider.current_schema_info().unwrap();
     assert_eq!(initial_schema_info.schema_name, "main");
     assert_eq!(initial_schema_info.schema_id, 0);
     assert!(initial_schema_info.end_snapshot.is_none());
@@ -755,7 +753,7 @@ fn test_multiple_schemas_comprehensive() {
     )
     .unwrap();
 
-    let main_users_schema = provider.fetch_current_schema(None, "users").unwrap();
+    let main_users_schema = provider.current_schema(None, "users").unwrap();
     assert_eq!(main_users_schema.fields().len(), 4);
     assert!(matches!(
         main_users_schema
@@ -780,7 +778,7 @@ fn test_multiple_schemas_comprehensive() {
     ));
 
     let analytics_metrics_schema = provider
-        .fetch_current_schema(Some("analytics"), "metrics")
+        .current_schema(Some("analytics"), "metrics")
         .unwrap();
     assert_eq!(analytics_metrics_schema.fields().len(), 4);
     assert!(matches!(
@@ -806,7 +804,7 @@ fn test_multiple_schemas_comprehensive() {
     ));
 
     let reporting_summary_schema = provider
-        .fetch_current_schema(Some("reporting"), "summary")
+        .current_schema(Some("reporting"), "summary")
         .unwrap();
     assert_eq!(reporting_summary_schema.fields().len(), 4);
     assert!(matches!(
@@ -831,24 +829,22 @@ fn test_multiple_schemas_comprehensive() {
         &duckdb::arrow::datatypes::DataType::Boolean
     ));
 
-    let current_schema_info = provider.fetch_current_schema_info().unwrap();
+    let current_schema_info = provider.current_schema_info().unwrap();
     assert_eq!(current_schema_info.schema_name, "main");
 
     conn.execute("USE analytics;", []).unwrap();
-    let analytics_schema_info = provider.fetch_current_schema_info().unwrap();
+    let analytics_schema_info = provider.current_schema_info().unwrap();
     assert_eq!(analytics_schema_info.schema_name, "analytics");
     assert!(analytics_schema_info.end_snapshot.is_none());
 
-    let metrics_schema_implicit = provider.fetch_current_schema(None, "metrics").unwrap();
+    let metrics_schema_implicit = provider.current_schema(None, "metrics").unwrap();
     assert_eq!(metrics_schema_implicit.fields().len(), 4);
 
-    let users_from_main = provider
-        .fetch_current_schema(Some("main"), "users")
-        .unwrap();
+    let users_from_main = provider.current_schema(Some("main"), "users").unwrap();
     assert_eq!(users_from_main.fields().len(), 4);
 
     conn.execute("USE reporting;", []).unwrap();
-    let reporting_schema_info = provider.fetch_current_schema_info().unwrap();
+    let reporting_schema_info = provider.current_schema_info().unwrap();
     assert_eq!(reporting_schema_info.schema_name, "reporting");
 
     let schemas: Vec<(String, i64, i64, Option<i64>)> = conn
@@ -885,13 +881,13 @@ fn test_multiple_schemas_comprehensive() {
 #[test]
 fn test_error_handling_edge_cases() {
     // Test various error scenarios: non-existent tables, invalid snapshots, invalid IDs.
-    let (_temp_dir, provider, table_id, age_column_id) = create_test_provider_with_data();
+    let (_temp_dir, provider, table_id, age_column_id) = create_test_catalog_with_data();
     let conn = provider.get_connection();
 
     // Non-existent table returns empty results
-    let current_snapshot = provider.fetch_current_snapshot().unwrap();
+    let current_snapshot = provider.current_snapshot().unwrap();
     let stats = provider
-        .fetch_table_statistics("nonexistent_table", current_snapshot.0, conn)
+        .table_statistics("nonexistent_table", current_snapshot, conn)
         .unwrap();
     assert!(stats.is_some());
     assert_eq!(stats.unwrap().column_statistics.len(), 0);
@@ -901,7 +897,7 @@ fn test_error_handling_edge_cases() {
         .update_table_column_stats(age_column_id, table_id, "min_value", "25")
         .unwrap();
     let future_stats = provider
-        .fetch_table_statistics("test_table", 99999, conn)
+        .table_statistics("test_table", SnapshotId(99999), conn)
         .unwrap();
     assert!(future_stats.is_some());
     assert_eq!(future_stats.unwrap().column_statistics.len(), 3);
@@ -912,18 +908,14 @@ fn test_error_handling_edge_cases() {
     assert!(result.is_ok());
 
     // Fetching schema for non-existent table returns error
-    assert!(
-        provider
-            .fetch_current_schema(None, "nonexistent_table")
-            .is_err()
-    );
+    assert!(provider.current_schema(None, "nonexistent_table").is_err());
 
     // Invalid schema name returns error
     conn.execute_batch("CREATE TABLE test (id INTEGER);")
         .unwrap();
     assert!(
         provider
-            .fetch_current_schema(Some("nonexistent_schema"), "test")
+            .current_schema(Some("nonexistent_schema"), "test")
             .is_err()
     );
 }
@@ -931,10 +923,10 @@ fn test_error_handling_edge_cases() {
 #[test]
 fn test_update_same_stat_rapidly() {
     // Test updating the same statistic multiple times in rapid succession.
-    let (_temp_dir, provider, table_id, age_column_id) = create_test_provider_with_data();
+    let (_temp_dir, provider, table_id, age_column_id) = create_test_catalog_with_data();
     let conn = provider.get_connection();
 
-    let initial_snapshot = provider.fetch_current_snapshot().unwrap();
+    let initial_snapshot = provider.current_snapshot().unwrap();
 
     for i in 1..=5 {
         provider
@@ -947,7 +939,7 @@ fn test_update_same_stat_rapidly() {
             .unwrap();
     }
 
-    let final_snapshot = provider.fetch_current_snapshot().unwrap();
+    let final_snapshot = provider.current_snapshot().unwrap();
     assert_eq!(final_snapshot.0, initial_snapshot.0 + 5);
 
     let versions: Vec<(i64, Option<i64>)> = conn
@@ -978,15 +970,15 @@ fn test_update_same_stat_rapidly() {
 #[test]
 fn test_data_edge_cases() {
     // Test empty tables, single columns, special characters, and large payloads.
-    let (_temp_dir, provider) = create_test_provider(false);
+    let (_temp_dir, provider) = create_test_catalog(false);
     let conn = provider.get_connection();
 
     // Empty table with zero rows
     conn.execute_batch("CREATE TABLE empty_table (id INTEGER, name VARCHAR);")
         .unwrap();
-    let current_snapshot = provider.fetch_current_snapshot().unwrap();
+    let current_snapshot = provider.current_snapshot().unwrap();
     let empty_stats = provider
-        .fetch_table_statistics("empty_table", current_snapshot.0, conn)
+        .table_statistics("empty_table", current_snapshot, conn)
         .unwrap()
         .unwrap();
     assert_eq!(empty_stats.row_count, 0);
@@ -999,9 +991,9 @@ fn test_data_edge_cases() {
         "#,
     )
     .unwrap();
-    let single_snapshot = provider.fetch_current_snapshot().unwrap();
+    let single_snapshot = provider.current_snapshot().unwrap();
     let single_stats = provider
-        .fetch_table_statistics("single_col", single_snapshot.0, conn)
+        .table_statistics("single_col", single_snapshot, conn)
         .unwrap()
         .unwrap();
     assert_eq!(single_stats.column_statistics.len(), 1);
@@ -1068,9 +1060,9 @@ fn test_data_edge_cases() {
     provider
         .update_table_column_stats(age_column_id, table_id, "large_histogram", &large_payload)
         .unwrap();
-    let new_snapshot = provider.fetch_current_snapshot().unwrap();
+    let new_snapshot = provider.current_snapshot().unwrap();
     let large_stats = provider
-        .fetch_table_statistics("test_table", new_snapshot.0, conn)
+        .table_statistics("test_table", new_snapshot, conn)
         .unwrap()
         .unwrap();
     let age_stats = large_stats
@@ -1089,7 +1081,7 @@ fn test_data_edge_cases() {
 #[test]
 fn test_schema_edge_cases() {
     // Test schema fetching with nullable/non-nullable columns and complex types.
-    let (_temp_dir, provider) = create_test_provider(false);
+    let (_temp_dir, provider) = create_test_catalog(false);
     let conn = provider.get_connection();
 
     // Mixed nullable and non-nullable columns
@@ -1104,7 +1096,7 @@ fn test_schema_edge_cases() {
         "#,
     )
     .unwrap();
-    let mixed_schema = provider.fetch_current_schema(None, "mixed_nulls").unwrap();
+    let mixed_schema = provider.current_schema(None, "mixed_nulls").unwrap();
     assert_eq!(mixed_schema.fields().len(), 4);
     assert!(!mixed_schema.field_with_name("id").unwrap().is_nullable());
     assert!(
@@ -1145,9 +1137,7 @@ fn test_schema_edge_cases() {
         "#,
     )
     .unwrap();
-    let complex_schema = provider
-        .fetch_current_schema(None, "complex_types")
-        .unwrap();
+    let complex_schema = provider.current_schema(None, "complex_types").unwrap();
     assert_eq!(complex_schema.fields().len(), 11);
     assert!(matches!(
         complex_schema
@@ -1196,7 +1186,7 @@ fn test_schema_edge_cases() {
 #[test]
 fn test_concurrent_snapshot_isolation() {
     // Test statistics with special characters and edge case JSON values.
-    let (_temp_dir, provider, table_id, age_column_id) = create_test_provider_with_data();
+    let (_temp_dir, provider, table_id, age_column_id) = create_test_catalog_with_data();
 
     let special_payload =
         r#"{"value": "test\"with\\special\nchars", "unicode": "测试", "empty": ""}"#;
@@ -1229,7 +1219,7 @@ fn test_concurrent_snapshot_isolation() {
 #[test]
 fn test_large_statistics_payload() {
     // Test handling of large statistics payloads.
-    let (_temp_dir, provider, table_id, age_column_id) = create_test_provider_with_data();
+    let (_temp_dir, provider, table_id, age_column_id) = create_test_catalog_with_data();
 
     let large_histogram: Vec<i32> = (0..1000).collect();
     let large_payload = json!({
@@ -1248,9 +1238,9 @@ fn test_large_statistics_payload() {
     assert!(result.is_ok());
 
     let conn = provider.get_connection();
-    let current_snapshot = provider.fetch_current_snapshot().unwrap();
+    let current_snapshot = provider.current_snapshot().unwrap();
     let stats = provider
-        .fetch_table_statistics("test_table", current_snapshot.0, conn)
+        .table_statistics("test_table", current_snapshot, conn)
         .unwrap()
         .unwrap();
 
@@ -1272,7 +1262,7 @@ fn test_large_statistics_payload() {
 #[test]
 fn test_mixed_null_and_non_null_columns() {
     // Test schema fetching with mixed nullable and non-nullable columns.
-    let (_temp_dir, provider) = create_test_provider(false);
+    let (_temp_dir, provider) = create_test_catalog(false);
     let conn = provider.get_connection();
 
     conn.execute_batch(
@@ -1287,7 +1277,7 @@ fn test_mixed_null_and_non_null_columns() {
     )
     .unwrap();
 
-    let schema = provider.fetch_current_schema(None, "mixed_nulls").unwrap();
+    let schema = provider.current_schema(None, "mixed_nulls").unwrap();
 
     assert_eq!(schema.fields().len(), 4);
 
@@ -1307,7 +1297,7 @@ fn test_mixed_null_and_non_null_columns() {
 #[test]
 fn test_schema_with_complex_types() {
     // Test schema fetching with various complex and edge case data types.
-    let (_temp_dir, provider) = create_test_provider(false);
+    let (_temp_dir, provider) = create_test_catalog(false);
     let conn = provider.get_connection();
 
     conn.execute_batch(
@@ -1329,9 +1319,7 @@ fn test_schema_with_complex_types() {
     )
     .unwrap();
 
-    let schema = provider
-        .fetch_current_schema(None, "complex_types")
-        .unwrap();
+    let schema = provider.current_schema(None, "complex_types").unwrap();
 
     assert_eq!(schema.fields().len(), 11);
 

@@ -3555,6 +3555,13 @@ checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
 [[package]]
 name = "optd-catalog"
 version = "0.1.0"
+dependencies = [
+ "duckdb",
+ "serde",
+ "serde_json",
+ "snafu",
+ "tempfile",
+]
 
 [[package]]
 name = "optd-cli"
@@ -3598,27 +3605,6 @@ dependencies = [
  "optd-core",
  "tracing",
 ]
-
-[[package]]
-name = "optd-statistics"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "duckdb",
- "futures",
- "glob",
- "parking_lot",
- "serde",
- "serde_json",
- "snafu",
- "tempfile",
- "tokio",
- "url",
-]
-
-[[package]]
-name = "optd-storage"
-version = "0.1.0"
 
 [[package]]
 name = "option-ext"
