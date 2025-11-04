@@ -14,28 +14,31 @@ use snafu::{ResultExt, prelude::*};
 /// Operations for managing table statistics with snapshot-based time travel.
 pub trait Catalog {
     /// Gets the current (most recent) snapshot ID.
-    fn current_snapshot(&self) -> Result<SnapshotId, Error>;
+    fn current_snapshot(conn: &Connection) -> Result<SnapshotId, Error>;
 
     /// Gets complete metadata for the current snapshot.
-    fn current_snapshot_info(&self) -> Result<SnapshotInfo, Error>;
+    fn current_snapshot_info(conn: &Connection) -> Result<SnapshotInfo, Error>;
 
     /// Gets the Arrow schema for a table at the current snapshot.
-    fn current_schema(&self, schema: Option<&str>, table: &str) -> Result<SchemaRef, Error>;
+    fn current_schema(
+        conn: &Connection,
+        schema: Option<&str>,
+        table: &str,
+    ) -> Result<SchemaRef, Error>;
 
     /// Gets schema information including name, ID, and snapshot range.
-    fn current_schema_info(&self) -> Result<CurrentSchema, Error>;
+    fn current_schema_info(conn: &Connection) -> Result<CurrentSchema, Error>;
 
     /// Retrieves table and column statistics at a specific snapshot.
     fn table_statistics(
-        &self,
+        connection: &Connection,
         table_name: &str,
         snapshot: SnapshotId,
-        connection: &Connection,
     ) -> Result<Option<TableStatistics>, Error>;
 
     /// Updates or inserts advanced statistics for a table column.
     fn update_table_column_stats(
-        &self,
+        connection: &Connection,
         column_id: i64,
         table_id: i64,
         stats_type: &str,
@@ -291,47 +294,46 @@ pub struct DuckLakeCatalog {
 }
 
 impl Catalog for DuckLakeCatalog {
-    fn current_snapshot(&self) -> Result<SnapshotId, Error> {
-        self.conn
-            .prepare("FROM ducklake_current_snapshot('metalake');")
+    fn current_snapshot(conn: &Connection) -> Result<SnapshotId, Error> {
+        conn.prepare("FROM ducklake_current_snapshot('metalake');")
             .context(QueryExecutionSnafu)?
             .query_row([], |row| Ok(SnapshotId(row.get(0)?)))
             .context(QueryExecutionSnafu)
     }
 
-    fn current_snapshot_info(&self) -> Result<SnapshotInfo, Error> {
-        self.conn
-            .prepare(
-                r#"
-                SELECT snapshot_id, schema_version, next_catalog_id, next_file_id
-                    FROM __ducklake_metadata_metalake.main.ducklake_snapshot
+    fn current_snapshot_info(conn: &Connection) -> Result<SnapshotInfo, Error> {
+        conn.prepare(
+            r#"
+            SELECT snapshot_id, schema_version, next_catalog_id, next_file_id
+                FROM __ducklake_metadata_metalake.main.ducklake_snapshot
                     WHERE snapshot_id = (SELECT MAX(snapshot_id)
                         FROM __ducklake_metadata_metalake.main.ducklake_snapshot);
                 "#,
-            )
-            .context(QueryExecutionSnafu)?
-            .query_row([], |row| {
-                Ok(SnapshotInfo {
-                    id: SnapshotId(row.get("snapshot_id")?),
-                    schema_version: row.get("schema_version")?,
-                    next_catalog_id: row.get("next_catalog_id")?,
-                    next_file_id: row.get("next_file_id")?,
-                })
+        )
+        .context(QueryExecutionSnafu)?
+        .query_row([], |row| {
+            Ok(SnapshotInfo {
+                id: SnapshotId(row.get("snapshot_id")?),
+                schema_version: row.get("schema_version")?,
+                next_catalog_id: row.get("next_catalog_id")?,
+                next_file_id: row.get("next_file_id")?,
             })
-            .context(QueryExecutionSnafu)
+        })
+        .context(QueryExecutionSnafu)
     }
 
-    fn current_schema(&self, schema: Option<&str>, table: &str) -> Result<SchemaRef, Error> {
+    fn current_schema(
+        conn: &Connection,
+        schema: Option<&str>,
+        table: &str,
+    ) -> Result<SchemaRef, Error> {
         let table_ref = schema
             .map(|s| format!("{}.{}", s, table))
             .unwrap_or_else(|| table.to_string());
 
         let schema_query = format!("DESCRIBE {};", table_ref);
 
-        let mut stmt = self
-            .conn
-            .prepare(&schema_query)
-            .context(QueryExecutionSnafu)?;
+        let mut stmt = conn.prepare(&schema_query).context(QueryExecutionSnafu)?;
 
         let mut fields = Vec::new();
         let column_iter = stmt
@@ -367,32 +369,30 @@ impl Catalog for DuckLakeCatalog {
         Ok(Arc::new(schema))
     }
 
-    fn current_schema_info(&self) -> Result<CurrentSchema, Error> {
-        self.conn
-            .prepare(
-                r#"
-                SELECT ds.schema_id, ds.schema_name, ds.begin_snapshot, ds.end_snapshot
-                    FROM __ducklake_metadata_metalake.main.ducklake_schema ds
-                    WHERE ds.schema_name = current_schema();
+    fn current_schema_info(conn: &Connection) -> Result<CurrentSchema, Error> {
+        conn.prepare(
+            r#"
+            SELECT ds.schema_id, ds.schema_name, ds.begin_snapshot, ds.end_snapshot
+                FROM __ducklake_metadata_metalake.main.ducklake_schema ds
+                WHERE ds.schema_name = current_schema();
                 "#,
-            )
-            .context(QueryExecutionSnafu)?
-            .query_row([], |row| {
-                Ok(CurrentSchema {
-                    schema_name: row.get("schema_name")?,
-                    schema_id: row.get("schema_id")?,
-                    begin_snapshot: row.get("begin_snapshot")?,
-                    end_snapshot: row.get("end_snapshot")?,
-                })
+        )
+        .context(QueryExecutionSnafu)?
+        .query_row([], |row| {
+            Ok(CurrentSchema {
+                schema_name: row.get("schema_name")?,
+                schema_id: row.get("schema_id")?,
+                begin_snapshot: row.get("begin_snapshot")?,
+                end_snapshot: row.get("end_snapshot")?,
             })
-            .context(QueryExecutionSnafu)
+        })
+        .context(QueryExecutionSnafu)
     }
 
     fn table_statistics(
-        &self,
+        conn: &Connection,
         table: &str,
         snapshot: SnapshotId,
-        conn: &Connection,
     ) -> Result<Option<TableStatistics>, Error> {
         let mut stmt = conn
             .prepare(FETCH_TABLE_STATS_QUERY)
@@ -423,21 +423,17 @@ impl Catalog for DuckLakeCatalog {
 
     /// Update table column statistics
     fn update_table_column_stats(
-        &self,
+        conn: &Connection,
         column_id: i64,
         table_id: i64,
         stats_type: &str,
         payload: &str,
     ) -> Result<(), Error> {
-        // Start transaction
-        self.begin_transaction()?;
-
         // Fetch current snapshot info
-        let curr_snapshot = self.current_snapshot_info()?;
+        let curr_snapshot = Self::current_snapshot_info(conn)?;
 
         // Update matching past snapshot to close it
-        self.conn
-            .prepare(UPDATE_ADV_STATS_QUERY)
+        conn.prepare(UPDATE_ADV_STATS_QUERY)
             .context(QueryExecutionSnafu)?
             .execute(params![
                 curr_snapshot.id.0 + 1,
@@ -448,8 +444,7 @@ impl Catalog for DuckLakeCatalog {
             .context(QueryExecutionSnafu)?;
 
         // Insert new snapshot
-        self.conn
-            .prepare(INSERT_ADV_STATS_QUERY)
+        conn.prepare(INSERT_ADV_STATS_QUERY)
             .context(QueryExecutionSnafu)?
             .execute(params![
                 column_id,
@@ -461,8 +456,7 @@ impl Catalog for DuckLakeCatalog {
             ])
             .context(QueryExecutionSnafu)?;
 
-        self.conn
-            .prepare(INSERT_SNAPSHOT_QUERY)
+        conn.prepare(INSERT_SNAPSHOT_QUERY)
             .context(QueryExecutionSnafu)?
             .execute(params![
                 curr_snapshot.id.0 + 1,
@@ -472,8 +466,7 @@ impl Catalog for DuckLakeCatalog {
             ])
             .context(QueryExecutionSnafu)?;
 
-        self.conn
-            .prepare(INSERT_SNAPSHOT_CHANGE_QUERY)
+        conn.prepare(INSERT_SNAPSHOT_CHANGE_QUERY)
             .context(QueryExecutionSnafu)?
             .execute(params![
                 curr_snapshot.id.0 + 1,
@@ -486,9 +479,6 @@ impl Catalog for DuckLakeCatalog {
                 Null,
             ])
             .context(QueryExecutionSnafu)?;
-
-        // Commit transaction
-        self.commit_transaction()?;
 
         Ok(())
     }
@@ -576,18 +566,10 @@ impl DuckLakeCatalog {
         &self.conn
     }
 
-    /// Begins a database transaction.
-    fn begin_transaction(&self) -> Result<(), Error> {
-        self.conn
-            .execute_batch("BEGIN TRANSACTION;")
-            .context(QueryExecutionSnafu)
-    }
-
-    /// Commits the current database transaction.
-    fn commit_transaction(&self) -> Result<(), Error> {
-        self.conn
-            .execute_batch("COMMIT TRANSACTION;")
-            .context(QueryExecutionSnafu)
+    /// Returns a mutable reference to the underlying DuckDB connection.
+    /// Required for creating transactions.
+    pub fn get_connection_mut(&mut self) -> &mut Connection {
+        &mut self.conn
     }
 
     /// Converts a DuckDB type string to an Arrow DataType.
@@ -610,8 +592,6 @@ impl DuckLakeCatalog {
             "BLOB" | "BYTEA" | "BINARY" => DataType::Binary,
             "DECIMAL" => DataType::Decimal128(38, 10), // Default precision and scale
             _ => {
-                // For unsupported types, use Utf8 as fallback or you could error out
-                // Here we'll just return an error through the ArrowDataTypeConversion variant
                 return Err(Error::ArrowDataTypeConversion {
                     source: DuckDBError::FromSqlConversionFailure(
                         0,
