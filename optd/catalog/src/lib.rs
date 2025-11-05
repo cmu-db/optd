@@ -1,9 +1,5 @@
-// mod optd_catalog;
-// mod optd_table;
-mod ducklake_connection;
-mod statistics;
+mod optd_catalog;
+mod optd_table;
 
-// pub use optd_catalog::*;
-// pub use optd_table::*;
-pub use ducklake_connection::{ConnectionMode, DuckLakeConnectionBuilder, query};
-pub use statistics::{DuckLakeStatisticsProvider, Error as InterfaceError, StatisticsProvider};
+pub use optd_catalog::*;
+pub use optd_table::*;
