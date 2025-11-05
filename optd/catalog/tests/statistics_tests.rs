@@ -84,40 +84,35 @@ fn test_ducklake_statistics_provider_creation() {
 #[test]
 fn test_table_stats_insertion() {
     // Test basic statistics insertion without errors.
-    let (_temp_dir, provider) = create_test_catalog(true);
-    let conn = provider.get_connection();
+    let (_temp_dir, mut provider) = create_test_catalog(true);
 
-    let result = DuckLakeCatalog::update_table_column_stats(
-        conn,
-        1,
-        1,
-        "ndv",
-        r#"{"distinct_count": 1000}"#,
-    );
+    let result = provider.update_table_column_stats(1, 1, "ndv", r#"{"distinct_count": 1000}"#);
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_table_stats_insertion_and_retrieval() {
     // Test inserting and retrieving multiple statistics types for a column.
-    let (_temp_dir, provider, table_id, age_column_id) = create_test_catalog_with_data();
-    let conn = provider.get_connection();
+    let (_temp_dir, mut provider, table_id, age_column_id) = create_test_catalog_with_data();
 
-    DuckLakeCatalog::update_table_column_stats(conn, age_column_id, table_id, "min_value", "25")
+    provider
+        .update_table_column_stats(age_column_id, table_id, "min_value", "25")
         .unwrap();
-    DuckLakeCatalog::update_table_column_stats(conn, age_column_id, table_id, "max_value", "35")
+    provider
+        .update_table_column_stats(age_column_id, table_id, "max_value", "35")
         .unwrap();
-    DuckLakeCatalog::update_table_column_stats(
-        conn,
-        age_column_id,
-        table_id,
-        "histogram",
-        r#"{"buckets": [{"min": 20, "max": 30, "count": 2}]}"#,
-    )
-    .unwrap();
+    provider
+        .update_table_column_stats(
+            age_column_id,
+            table_id,
+            "histogram",
+            r#"{"buckets": [{"min": 20, "max": 30, "count": 2}]}"#,
+        )
+        .unwrap();
 
-    let latest_snapshot = DuckLakeCatalog::current_snapshot(conn).unwrap();
-    let stats = DuckLakeCatalog::table_statistics(conn, "test_table", latest_snapshot)
+    let latest_snapshot = provider.current_snapshot().unwrap();
+    let stats = provider
+        .table_statistics("test_table", latest_snapshot)
         .unwrap()
         .unwrap();
 
@@ -154,10 +149,9 @@ fn test_table_stats_insertion_and_retrieval() {
 #[test]
 fn test_current_schema() {
     // Test fetching current schema info returns valid metadata.
-    let (_temp_dir, provider) = create_test_catalog(true);
-    let conn = provider.get_connection();
+    let (_temp_dir, mut provider) = create_test_catalog(true);
 
-    let schema = DuckLakeCatalog::current_schema_info(conn).unwrap();
+    let schema = provider.current_schema_info().unwrap();
 
     assert_eq!(schema.schema_name, "main");
     assert_eq!(schema.schema_id, 0);
@@ -168,18 +162,21 @@ fn test_current_schema() {
 #[test]
 fn test_snapshot_versioning_and_stats_types() {
     // Test snapshot creation, versioning, and continuity for multiple stats updates.
-    let (_temp_dir, provider) = create_test_catalog(true);
-    let conn = provider.get_connection();
+    let (_temp_dir, mut provider) = create_test_catalog(true);
 
-    DuckLakeCatalog::update_table_column_stats(conn, 1, 1, "ndv", r#"{"distinct_count": 1000}"#)
+    provider
+        .update_table_column_stats(1, 1, "ndv", r#"{"distinct_count": 1000}"#)
         .unwrap();
-    DuckLakeCatalog::update_table_column_stats(conn, 2, 1, "ndv", r#"{"distinct_count": 2000}"#)
+    provider
+        .update_table_column_stats(2, 1, "ndv", r#"{"distinct_count": 2000}"#)
         .unwrap();
-    DuckLakeCatalog::update_table_column_stats(conn, 3, 1, "histogram", r#"{"buckets": [1,2,3]}"#)
+    provider
+        .update_table_column_stats(3, 1, "histogram", r#"{"buckets": [1,2,3]}"#)
         .unwrap();
 
-    let snapshots: Vec<(i64, i64)> = conn
-        .prepare(
+    let snapshots: Vec<(i64, i64)> = {
+        let conn = provider.get_connection();
+        conn.prepare(
             r#"
             SELECT column_id, begin_snapshot
                 FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
@@ -191,18 +188,22 @@ fn test_snapshot_versioning_and_stats_types() {
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
         .unwrap()
         .map(|r| r.unwrap())
-        .collect();
+        .collect()
+    };
     assert_eq!(snapshots.len(), 3);
     assert!(snapshots[1].1 > snapshots[0].1);
     assert!(snapshots[2].1 > snapshots[1].1);
 
-    DuckLakeCatalog::update_table_column_stats(conn, 1, 1, "ndv", r#"{"distinct_count": 1500}"#)
+    provider
+        .update_table_column_stats(1, 1, "ndv", r#"{"distinct_count": 1500}"#)
         .unwrap();
-    DuckLakeCatalog::update_table_column_stats(conn, 1, 1, "ndv", r#"{"distinct_count": 2000}"#)
+    provider
+        .update_table_column_stats(1, 1, "ndv", r#"{"distinct_count": 2000}"#)
         .unwrap();
 
-    let versions: Vec<(i64, Option<i64>, String)> = conn
-        .prepare(
+    let versions: Vec<(i64, Option<i64>, String)> = {
+        let conn = provider.get_connection();
+        conn.prepare(
             r#"
             SELECT begin_snapshot, end_snapshot, payload
                 FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
@@ -214,7 +215,8 @@ fn test_snapshot_versioning_and_stats_types() {
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
         .unwrap()
         .map(|r| r.unwrap())
-        .collect();
+        .collect()
+    };
 
     assert_eq!(versions.len(), 3);
     assert!(versions[0].1.is_some() && versions[1].1.is_some() && versions[2].1.is_none());
@@ -224,19 +226,16 @@ fn test_snapshot_versioning_and_stats_types() {
     assert!(versions[1].2.contains("1500"));
     assert!(versions[2].2.contains("2000"));
 
-    DuckLakeCatalog::update_table_column_stats(
-        conn,
-        1,
-        1,
-        "histogram",
-        r#"{"buckets": [1,2,3,4,5]}"#,
-    )
-    .unwrap();
-    DuckLakeCatalog::update_table_column_stats(conn, 1, 1, "minmax", r#"{"min": 0, "max": 100}"#)
+    provider
+        .update_table_column_stats(1, 1, "histogram", r#"{"buckets": [1,2,3,4,5]}"#)
+        .unwrap();
+    provider
+        .update_table_column_stats(1, 1, "minmax", r#"{"min": 0, "max": 100}"#)
         .unwrap();
 
-    let type_count: i64 = conn
-        .query_row(
+    let type_count: i64 = {
+        let conn = provider.get_connection();
+        conn.query_row(
             r#"
             SELECT COUNT(DISTINCT stats_type)
                 FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
@@ -245,42 +244,50 @@ fn test_snapshot_versioning_and_stats_types() {
             [],
             |row| row.get(0),
         )
-        .unwrap();
+        .unwrap()
+    };
     assert_eq!(type_count, 3);
 }
 
 #[test]
 fn test_snapshot_tracking_and_multi_table_stats() {
     // Test snapshot creation tracking and statistics isolation across multiple tables.
-    let (_temp_dir, provider) = create_test_catalog(true);
-    let conn = provider.get_connection();
+    let (_temp_dir, mut provider) = create_test_catalog(true);
 
-    let initial_count: i64 = conn
-        .query_row(
+    let initial_count: i64 = {
+        let conn = provider.get_connection();
+        conn.query_row(
             "SELECT COUNT(*) FROM __ducklake_metadata_metalake.main.ducklake_snapshot",
             [],
             |row| row.get(0),
         )
+        .unwrap()
+    };
+
+    provider
+        .update_table_column_stats(1, 1, "ndv", r#"{"distinct_count": 1000}"#)
+        .unwrap();
+    provider
+        .update_table_column_stats(2, 1, "ndv", r#"{"distinct_count": 2000}"#)
+        .unwrap();
+    provider
+        .update_table_column_stats(3, 1, "ndv", r#"{"distinct_count": 3000}"#)
         .unwrap();
 
-    DuckLakeCatalog::update_table_column_stats(conn, 1, 1, "ndv", r#"{"distinct_count": 1000}"#)
-        .unwrap();
-    DuckLakeCatalog::update_table_column_stats(conn, 2, 1, "ndv", r#"{"distinct_count": 2000}"#)
-        .unwrap();
-    DuckLakeCatalog::update_table_column_stats(conn, 3, 1, "ndv", r#"{"distinct_count": 3000}"#)
-        .unwrap();
-
-    let after_table1_count: i64 = conn
-        .query_row(
+    let after_table1_count: i64 = {
+        let conn = provider.get_connection();
+        conn.query_row(
             "SELECT COUNT(*) FROM __ducklake_metadata_metalake.main.ducklake_snapshot",
             [],
             |row| row.get(0),
         )
-        .unwrap();
+        .unwrap()
+    };
     assert_eq!(after_table1_count - initial_count, 3);
 
-    let changes_count: i64 = conn
-        .query_row(
+    let changes_count: i64 = {
+        let conn = provider.get_connection();
+        conn.query_row(
             r#"
             SELECT COUNT(*)
                 FROM __ducklake_metadata_metalake.main.ducklake_snapshot_changes
@@ -289,42 +296,50 @@ fn test_snapshot_tracking_and_multi_table_stats() {
             [],
             |row| row.get(0),
         )
-        .unwrap();
+        .unwrap()
+    };
     assert_eq!(changes_count, 3);
 
-    DuckLakeCatalog::update_table_column_stats(conn, 1, 2, "ndv", r#"{"distinct_count": 5000}"#)
+    provider
+        .update_table_column_stats(1, 2, "ndv", r#"{"distinct_count": 5000}"#)
         .unwrap();
-    DuckLakeCatalog::update_table_column_stats(conn, 2, 2, "ndv", r#"{"distinct_count": 6000}"#)
+    provider
+        .update_table_column_stats(2, 2, "ndv", r#"{"distinct_count": 6000}"#)
         .unwrap();
 
-    let table1_count: i64 = conn
-        .query_row(
-            r#"
-            SELECT COUNT(*)
-                FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
-                WHERE table_id = 1
-            "#,
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let table2_count: i64 = conn
-        .query_row(
-            r#"
-            SELECT COUNT(*)
-                FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
-                WHERE table_id = 2
-            "#,
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
+    let (table1_count, table2_count): (i64, i64) = {
+        let conn = provider.get_connection();
+        let table1_count: i64 = conn
+            .query_row(
+                r#"
+                SELECT COUNT(*)
+                    FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
+                    WHERE table_id = 1
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let table2_count: i64 = conn
+            .query_row(
+                r#"
+                SELECT COUNT(*)
+                    FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
+                    WHERE table_id = 2
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        (table1_count, table2_count)
+    };
 
     assert_eq!(table1_count, 3);
     assert_eq!(table2_count, 2);
 
-    let all_snapshots: Vec<i64> = conn
-        .prepare(
+    let all_snapshots: Vec<i64> = {
+        let conn = provider.get_connection();
+        conn.prepare(
             r#"
             SELECT begin_snapshot
                 FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
@@ -335,7 +350,8 @@ fn test_snapshot_tracking_and_multi_table_stats() {
         .query_map([], |row| row.get(0))
         .unwrap()
         .map(|r| r.unwrap())
-        .collect();
+        .collect()
+    };
 
     for i in 1..all_snapshots.len() {
         assert!(all_snapshots[i] > all_snapshots[i - 1]);
@@ -345,28 +361,31 @@ fn test_snapshot_tracking_and_multi_table_stats() {
 #[test]
 fn test_update_and_fetch_table_column_stats() {
     // Test updating min/max values and advanced statistics with snapshot progression.
-    let (_temp_dir, provider, table_id, age_column_id) = create_test_catalog_with_data();
-    let conn = provider.get_connection();
+    let (_temp_dir, mut provider, table_id, age_column_id) = create_test_catalog_with_data();
 
-    let initial_snapshot = DuckLakeCatalog::current_snapshot(conn).unwrap();
+    let initial_snapshot = provider.current_snapshot().unwrap();
     assert!(
-        DuckLakeCatalog::table_statistics(conn, "test_table", initial_snapshot)
+        provider
+            .table_statistics("test_table", initial_snapshot)
             .unwrap()
             .is_some()
     );
 
-    DuckLakeCatalog::update_table_column_stats(conn, age_column_id, table_id, "min_value", "25")
+    provider
+        .update_table_column_stats(age_column_id, table_id, "min_value", "25")
         .unwrap();
-    let snapshot_after_min = DuckLakeCatalog::current_snapshot(conn).unwrap();
+    let snapshot_after_min = provider.current_snapshot().unwrap();
     assert_eq!(snapshot_after_min.0, initial_snapshot.0 + 1);
 
-    DuckLakeCatalog::update_table_column_stats(conn, age_column_id, table_id, "max_value", "35")
+    provider
+        .update_table_column_stats(age_column_id, table_id, "max_value", "35")
         .unwrap();
-    let snapshot_after_max = DuckLakeCatalog::current_snapshot(conn).unwrap();
+    let snapshot_after_max = provider.current_snapshot().unwrap();
     assert_eq!(snapshot_after_max.0, initial_snapshot.0 + 2);
 
-    let (min_val, max_val): (Option<String>, Option<String>) = conn
-        .query_row(
+    let (min_val, max_val): (Option<String>, Option<String>) = {
+        let conn = provider.get_connection();
+        conn.query_row(
             r#"
             SELECT min_value, max_value
                 FROM __ducklake_metadata_metalake.main.ducklake_table_column_stats
@@ -375,13 +394,15 @@ fn test_update_and_fetch_table_column_stats() {
             [table_id, age_column_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .unwrap();
+        .unwrap()
+    };
 
     assert_eq!(min_val, Some("25".to_string()));
     assert_eq!(max_val, Some("35".to_string()));
 
-    let adv_stats: Vec<(String, String, i64, Option<i64>)> = conn
-        .prepare(
+    let adv_stats: Vec<(String, String, i64, Option<i64>)> = {
+        let conn = provider.get_connection();
+        conn.prepare(
             r#"
             SELECT stats_type, payload, begin_snapshot, end_snapshot
                 FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
@@ -395,7 +416,8 @@ fn test_update_and_fetch_table_column_stats() {
         })
         .unwrap()
         .map(|r| r.unwrap())
-        .collect();
+        .collect()
+    };
 
     assert_eq!(adv_stats.len(), 2);
     assert!(
@@ -409,57 +431,56 @@ fn test_update_and_fetch_table_column_stats() {
             .any(|(st, p, _, e)| st == "min_value" && p == "25" && e.is_none())
     );
 
-    DuckLakeCatalog::update_table_column_stats(conn,
-            age_column_id,
+    provider.update_table_column_stats(age_column_id,
             table_id,
             "histogram",
             &json!({"buckets": [{"min": 20, "max": 30, "count": 2}, {"min": 30, "max": 40, "count": 1}]}).to_string(),
         )
         .unwrap();
 
-    let snapshot_after_histogram = DuckLakeCatalog::current_snapshot(conn).unwrap();
+    let snapshot_after_histogram = provider.current_snapshot().unwrap();
     assert_eq!(snapshot_after_histogram.0, initial_snapshot.0 + 3);
 }
 
 #[test]
 fn test_fetch_table_stats_with_snapshot_time_travel() {
     // Test time-travel capability by fetching statistics at different snapshot points.
-    let (_temp_dir, provider, table_id, age_column_id) = create_test_catalog_with_data();
-    let conn = provider.get_connection();
+    let (_temp_dir, mut provider, table_id, age_column_id) = create_test_catalog_with_data();
 
-    let snapshot_0 = DuckLakeCatalog::current_snapshot(conn).unwrap();
+    let snapshot_0 = provider.current_snapshot().unwrap();
 
-    DuckLakeCatalog::update_table_column_stats(
-        conn,
-        age_column_id,
-        table_id,
-        "histogram",
-        r#"{"version": 1, "buckets": [1, 2, 3]}"#,
-    )
-    .unwrap();
-    let snapshot_1 = DuckLakeCatalog::current_snapshot(conn).unwrap();
+    provider
+        .update_table_column_stats(
+            age_column_id,
+            table_id,
+            "histogram",
+            r#"{"version": 1, "buckets": [1, 2, 3]}"#,
+        )
+        .unwrap();
+    let snapshot_1 = provider.current_snapshot().unwrap();
 
-    DuckLakeCatalog::update_table_column_stats(
-        conn,
-        age_column_id,
-        table_id,
-        "histogram",
-        r#"{"version": 2, "buckets": [1, 2, 3, 4, 5]}"#,
-    )
-    .unwrap();
-    let snapshot_2 = DuckLakeCatalog::current_snapshot(conn).unwrap();
+    provider
+        .update_table_column_stats(
+            age_column_id,
+            table_id,
+            "histogram",
+            r#"{"version": 2, "buckets": [1, 2, 3, 4, 5]}"#,
+        )
+        .unwrap();
+    let snapshot_2 = provider.current_snapshot().unwrap();
 
-    DuckLakeCatalog::update_table_column_stats(
-        conn,
-        age_column_id,
-        table_id,
-        "histogram",
-        r#"{"version": 3, "buckets": [10, 20, 30]}"#,
-    )
-    .unwrap();
-    let snapshot_3 = DuckLakeCatalog::current_snapshot(conn).unwrap();
+    provider
+        .update_table_column_stats(
+            age_column_id,
+            table_id,
+            "histogram",
+            r#"{"version": 3, "buckets": [10, 20, 30]}"#,
+        )
+        .unwrap();
+    let snapshot_3 = provider.current_snapshot().unwrap();
 
-    let stats_at_0 = DuckLakeCatalog::table_statistics(conn, "test_table", snapshot_0)
+    let stats_at_0 = provider
+        .table_statistics("test_table", snapshot_0)
         .unwrap()
         .unwrap();
     let age_stats_0 = stats_at_0
@@ -469,7 +490,8 @@ fn test_fetch_table_stats_with_snapshot_time_travel() {
         .unwrap();
     assert_eq!(age_stats_0.advanced_stats.len(), 0);
 
-    let stats_at_1 = DuckLakeCatalog::table_statistics(conn, "test_table", snapshot_1)
+    let stats_at_1 = provider
+        .table_statistics("test_table", snapshot_1)
         .unwrap()
         .unwrap();
     let age_stats_1 = stats_at_1
@@ -485,7 +507,8 @@ fn test_fetch_table_stats_with_snapshot_time_travel() {
             .contains("\"version\":1")
     );
 
-    let stats_at_2 = DuckLakeCatalog::table_statistics(conn, "test_table", snapshot_2)
+    let stats_at_2 = provider
+        .table_statistics("test_table", snapshot_2)
         .unwrap()
         .unwrap();
     let age_stats_2 = stats_at_2
@@ -501,7 +524,8 @@ fn test_fetch_table_stats_with_snapshot_time_travel() {
             .contains("\"version\":2")
     );
 
-    let stats_at_3 = DuckLakeCatalog::table_statistics(conn, "test_table", snapshot_3)
+    let stats_at_3 = provider
+        .table_statistics("test_table", snapshot_3)
         .unwrap()
         .unwrap();
     let age_stats_3 = stats_at_3
@@ -521,40 +545,37 @@ fn test_fetch_table_stats_with_snapshot_time_travel() {
 #[test]
 fn test_fetch_table_stats_multiple_stat_types() {
     // Test fetching when multiple statistics types exist for the same column.
-    let (_temp_dir, provider, table_id, age_column_id) = create_test_catalog_with_data();
-    let conn = provider.get_connection();
+    let (_temp_dir, mut provider, table_id, age_column_id) = create_test_catalog_with_data();
 
-    DuckLakeCatalog::update_table_column_stats(conn, age_column_id, table_id, "min_value", "25")
+    provider
+        .update_table_column_stats(age_column_id, table_id, "min_value", "25")
         .unwrap();
-    DuckLakeCatalog::update_table_column_stats(conn, age_column_id, table_id, "max_value", "35")
+    provider
+        .update_table_column_stats(age_column_id, table_id, "max_value", "35")
         .unwrap();
-    DuckLakeCatalog::update_table_column_stats(
-        conn,
-        age_column_id,
-        table_id,
-        "histogram",
-        r#"{"buckets": [20, 25, 30, 35]}"#,
-    )
-    .unwrap();
-    DuckLakeCatalog::update_table_column_stats(
-        conn,
-        age_column_id,
-        table_id,
-        "ndv",
-        r#"{"distinct_count": 3}"#,
-    )
-    .unwrap();
-    DuckLakeCatalog::update_table_column_stats(
-        conn,
-        age_column_id,
-        table_id,
-        "quantiles",
-        r#"{"p50": 30, "p95": 34, "p99": 35}"#,
-    )
-    .unwrap();
+    provider
+        .update_table_column_stats(
+            age_column_id,
+            table_id,
+            "histogram",
+            r#"{"buckets": [20, 25, 30, 35]}"#,
+        )
+        .unwrap();
+    provider
+        .update_table_column_stats(age_column_id, table_id, "ndv", r#"{"distinct_count": 3}"#)
+        .unwrap();
+    provider
+        .update_table_column_stats(
+            age_column_id,
+            table_id,
+            "quantiles",
+            r#"{"p50": 30, "p95": 34, "p99": 35}"#,
+        )
+        .unwrap();
 
-    let current_snapshot = DuckLakeCatalog::current_snapshot(conn).unwrap();
-    let stats = DuckLakeCatalog::table_statistics(conn, "test_table", current_snapshot)
+    let current_snapshot = provider.current_snapshot().unwrap();
+    let stats = provider
+        .table_statistics("test_table", current_snapshot)
         .unwrap()
         .unwrap();
 
@@ -582,14 +603,15 @@ fn test_fetch_table_stats_multiple_stat_types() {
 #[test]
 fn test_fetch_table_stats_columns_without_stats() {
     // Test that columns without advanced statistics are still returned in fetch results.
-    let (_temp_dir, provider, table_id, age_column_id) = create_test_catalog_with_data();
-    let conn = provider.get_connection();
+    let (_temp_dir, mut provider, table_id, age_column_id) = create_test_catalog_with_data();
 
-    DuckLakeCatalog::update_table_column_stats(conn, age_column_id, table_id, "min_value", "25")
+    provider
+        .update_table_column_stats(age_column_id, table_id, "min_value", "25")
         .unwrap();
 
-    let current_snapshot = DuckLakeCatalog::current_snapshot(conn).unwrap();
-    let stats = DuckLakeCatalog::table_statistics(conn, "test_table", current_snapshot)
+    let current_snapshot = provider.current_snapshot().unwrap();
+    let stats = provider
+        .table_statistics("test_table", current_snapshot)
         .unwrap()
         .unwrap();
 
@@ -619,7 +641,7 @@ fn test_fetch_table_stats_columns_without_stats() {
 #[test]
 fn test_fetch_table_stats_row_count() {
     // Test that row_count is correctly populated from table statistics.
-    let (_temp_dir, provider) = create_test_catalog(false);
+    let (_temp_dir, mut provider) = create_test_catalog(false);
     let conn = provider.get_connection();
 
     conn.execute_batch(
@@ -657,17 +679,13 @@ fn test_fetch_table_stats_row_count() {
         )
         .unwrap();
 
-    DuckLakeCatalog::update_table_column_stats(
-        conn,
-        col1_id,
-        table_id,
-        "ndv",
-        r#"{"distinct_count": 100}"#,
-    )
-    .unwrap();
+    provider
+        .update_table_column_stats(col1_id, table_id, "ndv", r#"{"distinct_count": 100}"#)
+        .unwrap();
 
-    let current_snapshot = DuckLakeCatalog::current_snapshot(conn).unwrap();
-    let stats = DuckLakeCatalog::table_statistics(conn, "large_table", current_snapshot)
+    let current_snapshot = provider.current_snapshot().unwrap();
+    let stats = provider
+        .table_statistics("large_table", current_snapshot)
         .unwrap()
         .unwrap();
 
@@ -678,7 +696,7 @@ fn test_fetch_table_stats_row_count() {
 #[test]
 fn test_current_schema_arrow() {
     // Test fetching Arrow schema from DuckDB table with type conversions.
-    let (_temp_dir, provider) = create_test_catalog(false);
+    let (_temp_dir, mut provider) = create_test_catalog(false);
     let conn = provider.get_connection();
 
     conn.execute_batch(
@@ -693,7 +711,7 @@ fn test_current_schema_arrow() {
     )
     .unwrap();
 
-    let schema = DuckLakeCatalog::current_schema(conn, None, "schema_test_table").unwrap();
+    let schema = provider.current_schema(None, "schema_test_table").unwrap();
 
     assert_eq!(schema.fields().len(), 4);
 
@@ -720,34 +738,37 @@ fn test_current_schema_arrow() {
         &duckdb::arrow::datatypes::DataType::Boolean
     ));
 
-    let schema_explicit =
-        DuckLakeCatalog::current_schema(conn, Some("main"), "schema_test_table").unwrap();
+    let schema_explicit = provider
+        .current_schema(Some("main"), "schema_test_table")
+        .unwrap();
     assert_eq!(schema_explicit.fields().len(), 4);
 }
 
 #[test]
 fn test_multiple_schemas_comprehensive() {
     // Test schema fetching and metadata tracking across multiple database schemas.
-    let (_temp_dir, provider) = create_test_catalog(false);
-    let conn = provider.get_connection();
+    let (_temp_dir, mut provider) = create_test_catalog(false);
 
-    let initial_schema_info = DuckLakeCatalog::current_schema_info(conn).unwrap();
+    let initial_schema_info = provider.current_schema_info().unwrap();
     assert_eq!(initial_schema_info.schema_name, "main");
     assert_eq!(initial_schema_info.schema_id, 0);
     assert!(initial_schema_info.end_snapshot.is_none());
 
-    conn.execute_batch(
-        r#"
+    {
+        let conn = provider.get_connection();
+        conn.execute_batch(
+            r#"
         CREATE SCHEMA analytics;
         CREATE SCHEMA reporting;
         CREATE TABLE main.users (user_id INTEGER, username VARCHAR, email VARCHAR, created_at TIMESTAMP);
         CREATE TABLE analytics.metrics (metric_id BIGINT, metric_name VARCHAR, value DOUBLE, recorded_at DATE);
         CREATE TABLE reporting.summary (report_id SMALLINT, report_name TEXT, data BLOB, is_published BOOLEAN);
         "#,
-    )
-    .unwrap();
+        )
+        .unwrap();
+    }
 
-    let main_users_schema = DuckLakeCatalog::current_schema(conn, None, "users").unwrap();
+    let main_users_schema = provider.current_schema(None, "users").unwrap();
     assert_eq!(main_users_schema.fields().len(), 4);
     assert!(matches!(
         main_users_schema
@@ -771,8 +792,9 @@ fn test_multiple_schemas_comprehensive() {
         &duckdb::arrow::datatypes::DataType::Timestamp(_, _)
     ));
 
-    let analytics_metrics_schema =
-        DuckLakeCatalog::current_schema(conn, Some("analytics"), "metrics").unwrap();
+    let analytics_metrics_schema = provider
+        .current_schema(Some("analytics"), "metrics")
+        .unwrap();
     assert_eq!(analytics_metrics_schema.fields().len(), 4);
     assert!(matches!(
         analytics_metrics_schema
@@ -796,8 +818,9 @@ fn test_multiple_schemas_comprehensive() {
         &duckdb::arrow::datatypes::DataType::Date32
     ));
 
-    let reporting_summary_schema =
-        DuckLakeCatalog::current_schema(conn, Some("reporting"), "summary").unwrap();
+    let reporting_summary_schema = provider
+        .current_schema(Some("reporting"), "summary")
+        .unwrap();
     assert_eq!(reporting_summary_schema.fields().len(), 4);
     assert!(matches!(
         reporting_summary_schema
@@ -821,26 +844,33 @@ fn test_multiple_schemas_comprehensive() {
         &duckdb::arrow::datatypes::DataType::Boolean
     ));
 
-    let current_schema_info = DuckLakeCatalog::current_schema_info(conn).unwrap();
+    let current_schema_info = provider.current_schema_info().unwrap();
     assert_eq!(current_schema_info.schema_name, "main");
 
-    conn.execute("USE analytics;", []).unwrap();
-    let analytics_schema_info = DuckLakeCatalog::current_schema_info(conn).unwrap();
+    {
+        let conn = provider.get_connection();
+        conn.execute("USE analytics;", []).unwrap();
+    }
+    let analytics_schema_info = provider.current_schema_info().unwrap();
     assert_eq!(analytics_schema_info.schema_name, "analytics");
     assert!(analytics_schema_info.end_snapshot.is_none());
 
-    let metrics_schema_implicit = DuckLakeCatalog::current_schema(conn, None, "metrics").unwrap();
+    let metrics_schema_implicit = provider.current_schema(None, "metrics").unwrap();
     assert_eq!(metrics_schema_implicit.fields().len(), 4);
 
-    let users_from_main = DuckLakeCatalog::current_schema(conn, Some("main"), "users").unwrap();
+    let users_from_main = provider.current_schema(Some("main"), "users").unwrap();
     assert_eq!(users_from_main.fields().len(), 4);
 
-    conn.execute("USE reporting;", []).unwrap();
-    let reporting_schema_info = DuckLakeCatalog::current_schema_info(conn).unwrap();
+    {
+        let conn = provider.get_connection();
+        conn.execute("USE reporting;", []).unwrap();
+    }
+    let reporting_schema_info = provider.current_schema_info().unwrap();
     assert_eq!(reporting_schema_info.schema_name, "reporting");
 
-    let schemas: Vec<(String, i64, i64, Option<i64>)> = conn
-        .prepare(
+    let schemas: Vec<(String, i64, i64, Option<i64>)> = {
+        let conn = provider.get_connection();
+        conn.prepare(
             r#"
             SELECT schema_name, schema_id, begin_snapshot, end_snapshot
                 FROM __ducklake_metadata_metalake.main.ducklake_schema
@@ -853,7 +883,8 @@ fn test_multiple_schemas_comprehensive() {
         })
         .unwrap()
         .map(|r| r.unwrap())
-        .collect();
+        .collect()
+    };
 
     assert!(schemas.len() >= 3);
 
@@ -873,67 +904,71 @@ fn test_multiple_schemas_comprehensive() {
 #[test]
 fn test_error_handling_edge_cases() {
     // Test various error scenarios: non-existent tables, invalid snapshots, invalid IDs.
-    let (_temp_dir, provider, table_id, age_column_id) = create_test_catalog_with_data();
-    let conn = provider.get_connection();
+    let (_temp_dir, mut provider, table_id, age_column_id) = create_test_catalog_with_data();
 
     // Non-existent table returns empty results
-    let current_snapshot = DuckLakeCatalog::current_snapshot(conn).unwrap();
-    let stats =
-        DuckLakeCatalog::table_statistics(conn, "nonexistent_table", current_snapshot).unwrap();
+    let current_snapshot = provider.current_snapshot().unwrap();
+    let stats = provider
+        .table_statistics("nonexistent_table", current_snapshot)
+        .unwrap();
     assert!(stats.is_some());
     assert_eq!(stats.unwrap().column_statistics.len(), 0);
 
     // Invalid/future snapshot still returns data
-    DuckLakeCatalog::update_table_column_stats(conn, age_column_id, table_id, "min_value", "25")
+    provider
+        .update_table_column_stats(age_column_id, table_id, "min_value", "25")
         .unwrap();
-    let future_stats =
-        DuckLakeCatalog::table_statistics(conn, "test_table", SnapshotId(99999)).unwrap();
+    let future_stats = provider
+        .table_statistics("test_table", SnapshotId(99999))
+        .unwrap();
     assert!(future_stats.is_some());
     assert_eq!(future_stats.unwrap().column_statistics.len(), 3);
 
     // Updating with invalid IDs succeeds without error
-    let result = DuckLakeCatalog::update_table_column_stats(
-        conn,
-        9999,
-        9999,
-        "ndv",
-        r#"{"distinct_count": 100}"#,
-    );
+    let result =
+        provider.update_table_column_stats(9999, 9999, "ndv", r#"{"distinct_count": 100}"#);
     assert!(result.is_ok());
 
     // Fetching schema for non-existent table returns error
-    assert!(DuckLakeCatalog::current_schema(conn, None, "nonexistent_table").is_err());
+    assert!(provider.current_schema(None, "nonexistent_table").is_err());
 
     // Invalid schema name returns error
-    conn.execute_batch("CREATE TABLE test (id INTEGER);")
-        .unwrap();
-    assert!(DuckLakeCatalog::current_schema(conn, Some("nonexistent_schema"), "test").is_err());
+    {
+        let conn = provider.get_connection();
+        conn.execute_batch("CREATE TABLE test (id INTEGER);")
+            .unwrap();
+    }
+    assert!(
+        provider
+            .current_schema(Some("nonexistent_schema"), "test")
+            .is_err()
+    );
 }
 
 #[test]
 fn test_update_same_stat_rapidly() {
     // Test updating the same statistic multiple times in rapid succession.
-    let (_temp_dir, provider, table_id, age_column_id) = create_test_catalog_with_data();
-    let conn = provider.get_connection();
+    let (_temp_dir, mut provider, table_id, age_column_id) = create_test_catalog_with_data();
 
-    let initial_snapshot = DuckLakeCatalog::current_snapshot(conn).unwrap();
+    let initial_snapshot = provider.current_snapshot().unwrap();
 
     for i in 1..=5 {
-        DuckLakeCatalog::update_table_column_stats(
-            conn,
-            age_column_id,
-            table_id,
-            "ndv",
-            &format!(r#"{{"distinct_count": {}}}"#, i * 100),
-        )
-        .unwrap();
+        provider
+            .update_table_column_stats(
+                age_column_id,
+                table_id,
+                "ndv",
+                &format!(r#"{{"distinct_count": {}}}"#, i * 100),
+            )
+            .unwrap();
     }
 
-    let final_snapshot = DuckLakeCatalog::current_snapshot(conn).unwrap();
+    let final_snapshot = provider.current_snapshot().unwrap();
     assert_eq!(final_snapshot.0, initial_snapshot.0 + 5);
 
-    let versions: Vec<(i64, Option<i64>)> = conn
-        .prepare(
+    let versions: Vec<(i64, Option<i64>)> = {
+        let conn = provider.get_connection();
+        conn.prepare(
             r#"
             SELECT begin_snapshot, end_snapshot
                 FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
@@ -947,7 +982,8 @@ fn test_update_same_stat_rapidly() {
         })
         .unwrap()
         .map(|r| r.unwrap())
-        .collect();
+        .collect()
+    };
 
     assert_eq!(versions.len(), 5);
     for i in 0..4 {
@@ -960,19 +996,22 @@ fn test_update_same_stat_rapidly() {
 #[test]
 fn test_data_edge_cases() {
     // Test empty tables, single columns, special characters, and large payloads.
-    let (_temp_dir, provider) = create_test_catalog(false);
+    let (_temp_dir, mut provider) = create_test_catalog(false);
     let conn = provider.get_connection();
 
     // Empty table with zero rows
     conn.execute_batch("CREATE TABLE empty_table (id INTEGER, name VARCHAR);")
         .unwrap();
-    let current_snapshot = DuckLakeCatalog::current_snapshot(conn).unwrap();
-    let empty_stats = DuckLakeCatalog::table_statistics(conn, "empty_table", current_snapshot)
+
+    let current_snapshot = provider.current_snapshot().unwrap();
+    let empty_stats = provider
+        .table_statistics("empty_table", current_snapshot)
         .unwrap()
         .unwrap();
     assert_eq!(empty_stats.row_count, 0);
 
     // Single column table
+    let conn = provider.get_connection();
     conn.execute_batch(
         r#"
         CREATE TABLE single_col (value INTEGER);
@@ -980,8 +1019,10 @@ fn test_data_edge_cases() {
         "#,
     )
     .unwrap();
-    let single_snapshot = DuckLakeCatalog::current_snapshot(conn).unwrap();
-    let single_stats = DuckLakeCatalog::table_statistics(conn, "single_col", single_snapshot)
+
+    let single_snapshot = provider.current_snapshot().unwrap();
+    let single_stats = provider
+        .table_statistics("single_col", single_snapshot)
         .unwrap()
         .unwrap();
     assert_eq!(single_stats.column_statistics.len(), 1);
@@ -989,48 +1030,48 @@ fn test_data_edge_cases() {
     assert_eq!(single_stats.column_statistics[0].name, "value");
 
     // Special characters in payload
-    conn.execute_batch(
-        r#"
+    let (table_id, age_column_id) = {
+        let conn = provider.get_connection();
+        conn.execute_batch(
+            r#"
         CREATE TABLE test_table (id INTEGER, age INTEGER);
         INSERT INTO test_table VALUES (1, 25), (2, 30);
         "#,
-    )
-    .unwrap();
-    let table_id: i64 = conn
-        .query_row(
-            r#"
+        )
+        .unwrap();
+        let table_id: i64 = conn
+            .query_row(
+                r#"
             SELECT table_id FROM __ducklake_metadata_metalake.main.ducklake_table dt
             INNER JOIN __ducklake_metadata_metalake.main.ducklake_schema ds ON dt.schema_id = ds.schema_id
             WHERE ds.schema_name = current_schema() AND dt.table_name = 'test_table';
             "#,
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let age_column_id: i64 = conn
-        .query_row(
-            r#"
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let age_column_id: i64 = conn
+            .query_row(
+                r#"
             SELECT column_id
                 FROM __ducklake_metadata_metalake.main.ducklake_column
                 WHERE table_id = ? AND column_name = 'age';
             "#,
-            [table_id],
-            |row| row.get(0),
-        )
-        .unwrap();
+                [table_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        (table_id, age_column_id)
+    };
 
     let special_payload =
         r#"{"value": "test\"with\\special\nchars", "unicode": "测试", "empty": ""}"#;
-    DuckLakeCatalog::update_table_column_stats(
-        conn,
-        age_column_id,
-        table_id,
-        "special_test",
-        special_payload,
-    )
-    .unwrap();
-    let retrieved: String = conn
-        .query_row(
+    provider
+        .update_table_column_stats(age_column_id, table_id, "special_test", special_payload)
+        .unwrap();
+    let retrieved: String = {
+        let conn = provider.get_connection();
+        conn.query_row(
             r#"
             SELECT payload
                 FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
@@ -1040,7 +1081,8 @@ fn test_data_edge_cases() {
             [age_column_id, table_id],
             |row| row.get(0),
         )
-        .unwrap();
+        .unwrap()
+    };
     assert_eq!(retrieved, special_payload);
 
     // Large payload
@@ -1050,16 +1092,12 @@ fn test_data_edge_cases() {
         "metadata": "x".repeat(1000)
     })
     .to_string();
-    DuckLakeCatalog::update_table_column_stats(
-        conn,
-        age_column_id,
-        table_id,
-        "large_histogram",
-        &large_payload,
-    )
-    .unwrap();
-    let new_snapshot = DuckLakeCatalog::current_snapshot(conn).unwrap();
-    let large_stats = DuckLakeCatalog::table_statistics(conn, "test_table", new_snapshot)
+    provider
+        .update_table_column_stats(age_column_id, table_id, "large_histogram", &large_payload)
+        .unwrap();
+    let new_snapshot = provider.current_snapshot().unwrap();
+    let large_stats = provider
+        .table_statistics("test_table", new_snapshot)
         .unwrap()
         .unwrap();
     let age_stats = large_stats
@@ -1078,7 +1116,7 @@ fn test_data_edge_cases() {
 #[test]
 fn test_schema_edge_cases() {
     // Test schema fetching with nullable/non-nullable columns and complex types.
-    let (_temp_dir, provider) = create_test_catalog(false);
+    let (_temp_dir, mut provider) = create_test_catalog(false);
     let conn = provider.get_connection();
 
     // Mixed nullable and non-nullable columns
@@ -1093,7 +1131,8 @@ fn test_schema_edge_cases() {
         "#,
     )
     .unwrap();
-    let mixed_schema = DuckLakeCatalog::current_schema(conn, None, "mixed_nulls").unwrap();
+
+    let mixed_schema = provider.current_schema(None, "mixed_nulls").unwrap();
     assert_eq!(mixed_schema.fields().len(), 4);
     assert!(!mixed_schema.field_with_name("id").unwrap().is_nullable());
     assert!(
@@ -1116,6 +1155,7 @@ fn test_schema_edge_cases() {
     );
 
     // Complex types
+    let conn = provider.get_connection();
     conn.execute_batch(
         r#"
         CREATE TABLE complex_types (
@@ -1134,7 +1174,8 @@ fn test_schema_edge_cases() {
         "#,
     )
     .unwrap();
-    let complex_schema = DuckLakeCatalog::current_schema(conn, None, "complex_types").unwrap();
+
+    let complex_schema = provider.current_schema(None, "complex_types").unwrap();
     assert_eq!(complex_schema.fields().len(), 11);
     assert!(matches!(
         complex_schema
@@ -1183,13 +1224,11 @@ fn test_schema_edge_cases() {
 #[test]
 fn test_concurrent_snapshot_isolation() {
     // Test statistics with special characters and edge case JSON values.
-    let (_temp_dir, provider, table_id, age_column_id) = create_test_catalog_with_data();
-    let conn = provider.get_connection();
+    let (_temp_dir, mut provider, table_id, age_column_id) = create_test_catalog_with_data();
 
     let special_payload =
         r#"{"value": "test\"with\\special\nchars", "unicode": "测试", "empty": ""}"#;
-    let result = DuckLakeCatalog::update_table_column_stats(
-        conn,
+    let result = provider.update_table_column_stats(
         age_column_id,
         table_id,
         "special_test",
@@ -1198,8 +1237,9 @@ fn test_concurrent_snapshot_isolation() {
 
     assert!(result.is_ok());
 
-    let retrieved_payload: String = conn
-        .query_row(
+    let retrieved_payload: String = {
+        let conn = provider.get_connection();
+        conn.query_row(
             r#"
             SELECT payload
                 FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
@@ -1209,7 +1249,8 @@ fn test_concurrent_snapshot_isolation() {
             [age_column_id, table_id],
             |row| row.get(0),
         )
-        .unwrap();
+        .unwrap()
+    };
 
     assert_eq!(retrieved_payload, special_payload);
 }
@@ -1217,8 +1258,7 @@ fn test_concurrent_snapshot_isolation() {
 #[test]
 fn test_large_statistics_payload() {
     // Test handling of large statistics payloads.
-    let (_temp_dir, provider, table_id, age_column_id) = create_test_catalog_with_data();
-    let conn = provider.get_connection();
+    let (_temp_dir, mut provider, table_id, age_column_id) = create_test_catalog_with_data();
 
     let large_histogram: Vec<i32> = (0..1000).collect();
     let large_payload = json!({
@@ -1227,8 +1267,7 @@ fn test_large_statistics_payload() {
     })
     .to_string();
 
-    let result = DuckLakeCatalog::update_table_column_stats(
-        conn,
+    let result = provider.update_table_column_stats(
         age_column_id,
         table_id,
         "large_histogram",
@@ -1237,8 +1276,9 @@ fn test_large_statistics_payload() {
 
     assert!(result.is_ok());
 
-    let current_snapshot = DuckLakeCatalog::current_snapshot(conn).unwrap();
-    let stats = DuckLakeCatalog::table_statistics(conn, "test_table", current_snapshot)
+    let current_snapshot = provider.current_snapshot().unwrap();
+    let stats = provider
+        .table_statistics("test_table", current_snapshot)
         .unwrap()
         .unwrap();
 
@@ -1260,7 +1300,7 @@ fn test_large_statistics_payload() {
 #[test]
 fn test_mixed_null_and_non_null_columns() {
     // Test schema fetching with mixed nullable and non-nullable columns.
-    let (_temp_dir, provider) = create_test_catalog(false);
+    let (_temp_dir, mut provider) = create_test_catalog(false);
     let conn = provider.get_connection();
 
     conn.execute_batch(
@@ -1275,7 +1315,7 @@ fn test_mixed_null_and_non_null_columns() {
     )
     .unwrap();
 
-    let schema = DuckLakeCatalog::current_schema(conn, None, "mixed_nulls").unwrap();
+    let schema = provider.current_schema(None, "mixed_nulls").unwrap();
 
     assert_eq!(schema.fields().len(), 4);
 
@@ -1295,7 +1335,7 @@ fn test_mixed_null_and_non_null_columns() {
 #[test]
 fn test_schema_with_complex_types() {
     // Test schema fetching with various complex and edge case data types.
-    let (_temp_dir, provider) = create_test_catalog(false);
+    let (_temp_dir, mut provider) = create_test_catalog(false);
     let conn = provider.get_connection();
 
     conn.execute_batch(
@@ -1317,7 +1357,7 @@ fn test_schema_with_complex_types() {
     )
     .unwrap();
 
-    let schema = DuckLakeCatalog::current_schema(conn, None, "complex_types").unwrap();
+    let schema = provider.current_schema(None, "complex_types").unwrap();
 
     assert_eq!(schema.fields().len(), 11);
 

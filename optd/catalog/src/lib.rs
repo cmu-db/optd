@@ -1,8 +1,6 @@
-use std::sync::Arc;
-
 use duckdb::{
     Connection, Error as DuckDBError,
-    arrow::datatypes::{DataType, Field, Schema, SchemaRef},
+    arrow::datatypes::{Field, Schema, SchemaRef},
     params,
     types::Null,
 };
@@ -10,35 +8,32 @@ use duckdb::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use snafu::{ResultExt, prelude::*};
+use std::{collections::HashMap, sync::Arc};
 
 /// Operations for managing table statistics with snapshot-based time travel.
 pub trait Catalog {
     /// Gets the current (most recent) snapshot ID.
-    fn current_snapshot(conn: &Connection) -> Result<SnapshotId, Error>;
+    fn current_snapshot(&mut self) -> Result<SnapshotId, Error>;
 
     /// Gets complete metadata for the current snapshot.
-    fn current_snapshot_info(conn: &Connection) -> Result<SnapshotInfo, Error>;
+    fn current_snapshot_info(&mut self) -> Result<SnapshotInfo, Error>;
 
     /// Gets the Arrow schema for a table at the current snapshot.
-    fn current_schema(
-        conn: &Connection,
-        schema: Option<&str>,
-        table: &str,
-    ) -> Result<SchemaRef, Error>;
+    fn current_schema(&mut self, schema: Option<&str>, table: &str) -> Result<SchemaRef, Error>;
 
     /// Gets schema information including name, ID, and snapshot range.
-    fn current_schema_info(conn: &Connection) -> Result<CurrentSchema, Error>;
+    fn current_schema_info(&mut self) -> Result<CurrentSchema, Error>;
 
     /// Retrieves table and column statistics at a specific snapshot.
     fn table_statistics(
-        connection: &Connection,
+        &mut self,
         table_name: &str,
         snapshot: SnapshotId,
     ) -> Result<Option<TableStatistics>, Error>;
 
     /// Updates or inserts advanced statistics for a table column.
     fn update_table_column_stats(
-        connection: &Connection,
+        &mut self,
         column_id: i64,
         table_id: i64,
         stats_type: &str,
@@ -47,6 +42,75 @@ pub trait Catalog {
 }
 
 const DEFAULT_METADATA_FILE: &str = "metadata.ducklake";
+
+const CREATE_EXTRA_TABLES_QUERY: &str = r#"
+    CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats (
+        column_id BIGINT,
+        begin_snapshot BIGINT,
+        end_snapshot BIGINT,
+        table_id BIGINT,
+        stats_type VARCHAR,
+        payload VARCHAR
+    );
+
+    CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_query (
+        query_id BIGINT,
+        query_string VARCHAR,
+        root_group_id BIGINT
+    );
+
+    CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_query_instance (
+        query_instance_id BIGINT PRIMARY KEY,
+        query_id BIGINT,
+        creation_time BIGINT,
+        snapshot_id BIGINT
+    );
+
+    CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_group (
+        group_id BIGINT,
+        begin_snapshot BIGINT,
+        end_snapshot BIGINT
+    );
+
+    CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_group_stats (
+        group_id BIGINT,
+        begin_snapshot BIGINT,
+        end_snapshot BIGINT,
+        stats_type VARCHAR,
+        payload VARCHAR
+    );
+
+    CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_execution_subplan_feedback (
+        group_id BIGINT,
+        begin_snapshot BIGINT,
+        end_snapshot BIGINT,
+        stats_type VARCHAR,
+        payload VARCHAR
+    );
+
+    CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_subplan_scalar_feedback (
+        scalar_id BIGINT,
+        group_id BIGINT,
+        stats_type VARCHAR,
+        payload VARCHAR,
+        query_instance_id BIGINT
+    );
+"#;
+
+// SQL query to fetch the latest snapshot information.
+const SNAPSHOT_INFO_QUERY: &str = r#"
+    SELECT snapshot_id, schema_version, next_catalog_id, next_file_id
+    FROM __ducklake_metadata_metalake.main.ducklake_snapshot
+    WHERE snapshot_id = (SELECT MAX(snapshot_id)
+        FROM __ducklake_metadata_metalake.main.ducklake_snapshot);
+"#;
+
+// SQL query to fetch schema information including name, ID, and snapshot valid range.
+const SCHEMA_INFO_QUERY: &str = r#"
+    SELECT ds.schema_id, ds.schema_name, ds.begin_snapshot, ds.end_snapshot
+        FROM __ducklake_metadata_metalake.main.ducklake_schema ds
+        WHERE ds.schema_name = current_schema();
+"#;
 
 /// SQL query to fetch table statistics including column metadata and advanced stats at a specific snapshot.
 const FETCH_TABLE_STATS_QUERY: &str = r#"
@@ -117,6 +181,8 @@ pub enum Error {
     Connection { source: DuckDBError },
     #[snafu(display("Query execution failed: {}", source))]
     QueryExecution { source: DuckDBError },
+    #[snafu(display("Transaction error: {}", source))]
+    Transaction { source: DuckDBError },
     #[snafu(display("JSON serialization error: {}", source))]
     JsonSerialization { source: serde_json::Error },
     #[snafu(display("ARROW DataType conversion error: {}", source))]
@@ -280,49 +346,120 @@ pub struct CurrentSchema {
     pub end_snapshot: Option<i64>,
 }
 
-// TODO(ray): remove this once we have use.
-#[allow(dead_code)]
-#[derive(Debug, Serialize, Deserialize)]
-struct StatisticsUpdate {
-    stats_type: String,
-    payload: String,
-}
-
 /// A catalog implementation using DuckDB with snapshot management.
 pub struct DuckLakeCatalog {
     conn: Connection,
 }
 
 impl Catalog for DuckLakeCatalog {
-    fn current_snapshot(conn: &Connection) -> Result<SnapshotId, Error> {
+    fn current_snapshot(&mut self) -> Result<SnapshotId, Error> {
+        let txn = self.conn.transaction().context(TransactionSnafu)?;
+        let result = Self::current_snapshot_inner(&txn);
+        txn.commit().context(TransactionSnafu)?;
+        result
+    }
+
+    fn current_snapshot_info(&mut self) -> Result<SnapshotInfo, Error> {
+        let txn = self.conn.transaction().context(TransactionSnafu)?;
+        let result = Self::current_snapshot_info_inner(&txn);
+        txn.commit().context(TransactionSnafu)?;
+        result
+    }
+
+    fn current_schema(&mut self, schema: Option<&str>, table: &str) -> Result<SchemaRef, Error> {
+        let txn = self.conn.transaction().context(TransactionSnafu)?;
+        let result = Self::current_schema_inner(&txn, schema, table);
+        txn.commit().context(TransactionSnafu)?;
+        result
+    }
+
+    fn current_schema_info(&mut self) -> Result<CurrentSchema, Error> {
+        let txn = self.conn.transaction().context(TransactionSnafu)?;
+        let result = Self::current_schema_info_inner(&txn);
+        txn.commit().context(TransactionSnafu)?;
+        result
+    }
+
+    fn table_statistics(
+        &mut self,
+        table: &str,
+        snapshot: SnapshotId,
+    ) -> Result<Option<TableStatistics>, Error> {
+        let txn = self.conn.transaction().context(TransactionSnafu)?;
+        let result = Self::table_statistics_inner(&txn, table, snapshot);
+        txn.commit().context(TransactionSnafu)?;
+        result
+    }
+
+    /// Update table column statistics
+    fn update_table_column_stats(
+        &mut self,
+        column_id: i64,
+        table_id: i64,
+        stats_type: &str,
+        payload: &str,
+    ) -> Result<(), Error> {
+        let txn = self.conn.transaction().context(TransactionSnafu)?;
+        let result =
+            Self::update_table_column_stats_inner(&txn, column_id, table_id, stats_type, payload);
+        txn.commit().context(TransactionSnafu)?;
+        result
+    }
+}
+
+impl DuckLakeCatalog {
+    /// Creates a new DuckLakeStatisticsProvider with optional file paths.
+    /// If `location` is None, uses in-memory database. If `metadata_path` is None, uses default metadata file.
+    pub fn try_new(location: Option<&str>, metadata_path: Option<&str>) -> Result<Self, Error> {
+        let conn = if let Some(path) = location {
+            Connection::open(path).context(ConnectionSnafu)?
+        } else {
+            Connection::open_in_memory().context(ConnectionSnafu)?
+        };
+
+        // Use provided metadata path or default to DEFAULT_METADATA_FILE
+        let metadata_file = metadata_path.unwrap_or(DEFAULT_METADATA_FILE);
+        let setup_query = format!(
+            r#"
+            INSTALL ducklake;
+            LOAD ducklake;
+            ATTACH 'ducklake:{metadata_file}' AS metalake;
+            USE metalake;
+
+            {CREATE_EXTRA_TABLES_QUERY}
+        "#
+        );
+        conn.execute_batch(&setup_query).context(ConnectionSnafu)?;
+        Ok(Self { conn })
+    }
+
+    /// Returns a reference to the underlying DuckDB connection.
+    pub fn get_connection(&self) -> &Connection {
+        &self.conn
+    }
+
+    fn current_snapshot_inner(conn: &Connection) -> Result<SnapshotId, Error> {
         conn.prepare("FROM ducklake_current_snapshot('metalake');")
             .context(QueryExecutionSnafu)?
             .query_row([], |row| Ok(SnapshotId(row.get(0)?)))
             .context(QueryExecutionSnafu)
     }
 
-    fn current_snapshot_info(conn: &Connection) -> Result<SnapshotInfo, Error> {
-        conn.prepare(
-            r#"
-            SELECT snapshot_id, schema_version, next_catalog_id, next_file_id
-                FROM __ducklake_metadata_metalake.main.ducklake_snapshot
-                    WHERE snapshot_id = (SELECT MAX(snapshot_id)
-                        FROM __ducklake_metadata_metalake.main.ducklake_snapshot);
-                "#,
-        )
-        .context(QueryExecutionSnafu)?
-        .query_row([], |row| {
-            Ok(SnapshotInfo {
-                id: SnapshotId(row.get("snapshot_id")?),
-                schema_version: row.get("schema_version")?,
-                next_catalog_id: row.get("next_catalog_id")?,
-                next_file_id: row.get("next_file_id")?,
+    fn current_snapshot_info_inner(conn: &Connection) -> Result<SnapshotInfo, Error> {
+        conn.prepare(SNAPSHOT_INFO_QUERY)
+            .context(QueryExecutionSnafu)?
+            .query_row([], |row| {
+                Ok(SnapshotInfo {
+                    id: SnapshotId(row.get("snapshot_id")?),
+                    schema_version: row.get("schema_version")?,
+                    next_catalog_id: row.get("next_catalog_id")?,
+                    next_file_id: row.get("next_file_id")?,
+                })
             })
-        })
-        .context(QueryExecutionSnafu)
+            .context(QueryExecutionSnafu)
     }
 
-    fn current_schema(
+    fn current_schema_inner(
         conn: &Connection,
         schema: Option<&str>,
         table: &str,
@@ -331,65 +468,60 @@ impl Catalog for DuckLakeCatalog {
             .map(|s| format!("{}.{}", s, table))
             .unwrap_or_else(|| table.to_string());
 
-        let schema_query = format!("DESCRIBE {};", table_ref);
-
+        // Use SELECT * with LIMIT 0 to get schema with data types
+        let schema_query = format!("SELECT * FROM {table_ref} LIMIT 0;");
         let mut stmt = conn.prepare(&schema_query).context(QueryExecutionSnafu)?;
+        let arrow_result = stmt.query_arrow([]).context(QueryExecutionSnafu)?;
+        let arrow_schema = arrow_result.get_schema();
 
-        let mut fields = Vec::new();
-        let column_iter = stmt
-            .query_map([], |row| {
-                let column_name: String = row.get("column_name")?;
-                let column_type_str: String = row.get("column_type")?;
-                let null: String = row.get("null")?;
+        // Get nullable info from DESCRIBE
+        // This is to fix Arrow API limitation with nullable info
+        let describe_query = format!("DESCRIBE {table_ref}");
+        let mut stmt = conn.prepare(&describe_query).context(QueryExecutionSnafu)?;
+        let mut nullable_map = HashMap::new();
+        let mut rows = stmt.query([]).context(QueryExecutionSnafu)?;
 
-                // Convert DuckDB type to Arrow type
-                let column_type = Self::duckdb_type_to_arrow(&column_type_str).map_err(|_| {
-                    DuckDBError::FromSqlConversionFailure(
-                        0,
-                        duckdb::types::Type::Text,
-                        Box::new(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            format!(
-                                "Could not convert DuckDB type '{}' to Arrow type",
-                                column_type_str
-                            ),
-                        )),
-                    )
-                })?;
-
-                fields.push(Field::new(column_name, column_type, null == "YES"));
-                Ok(())
-            })
-            .context(QueryExecutionSnafu)?;
-
-        for result in column_iter {
-            result.context(QueryExecutionSnafu)?;
+        while let Some(row) = rows.next().context(QueryExecutionSnafu)? {
+            let col_name: String = row.get(0).context(QueryExecutionSnafu)?;
+            let null_str: String = row.get(2).context(QueryExecutionSnafu)?;
+            nullable_map.insert(col_name, null_str == "YES");
         }
-        let schema = Schema::new(fields);
-        Ok(Arc::new(schema))
-    }
 
-    fn current_schema_info(conn: &Connection) -> Result<CurrentSchema, Error> {
-        conn.prepare(
-            r#"
-            SELECT ds.schema_id, ds.schema_name, ds.begin_snapshot, ds.end_snapshot
-                FROM __ducklake_metadata_metalake.main.ducklake_schema ds
-                WHERE ds.schema_name = current_schema();
-                "#,
-        )
-        .context(QueryExecutionSnafu)?
-        .query_row([], |row| {
-            Ok(CurrentSchema {
-                schema_name: row.get("schema_name")?,
-                schema_id: row.get("schema_id")?,
-                begin_snapshot: row.get("begin_snapshot")?,
-                end_snapshot: row.get("end_snapshot")?,
+        // Rebuild schema with correct nullable flags
+        let fields: Vec<_> = arrow_schema
+            .fields()
+            .iter()
+            .map(|field| {
+                let nullable = nullable_map
+                    .get(field.name().as_str())
+                    .copied()
+                    .unwrap_or(true);
+                Arc::new(Field::new(
+                    field.name().as_str(),
+                    field.data_type().clone(),
+                    nullable,
+                ))
             })
-        })
-        .context(QueryExecutionSnafu)
+            .collect();
+
+        Ok(Arc::new(Schema::new(fields)))
     }
 
-    fn table_statistics(
+    fn current_schema_info_inner(conn: &Connection) -> Result<CurrentSchema, Error> {
+        conn.prepare(SCHEMA_INFO_QUERY)
+            .context(QueryExecutionSnafu)?
+            .query_row([], |row| {
+                Ok(CurrentSchema {
+                    schema_name: row.get("schema_name")?,
+                    schema_id: row.get("schema_id")?,
+                    begin_snapshot: row.get("begin_snapshot")?,
+                    end_snapshot: row.get("end_snapshot")?,
+                })
+            })
+            .context(QueryExecutionSnafu)
+    }
+
+    fn table_statistics_inner(
         conn: &Connection,
         table: &str,
         snapshot: SnapshotId,
@@ -421,8 +553,7 @@ impl Catalog for DuckLakeCatalog {
         Ok(Some(TableStatistics::from_iter(entries)))
     }
 
-    /// Update table column statistics
-    fn update_table_column_stats(
+    fn update_table_column_stats_inner(
         conn: &Connection,
         column_id: i64,
         table_id: i64,
@@ -430,7 +561,7 @@ impl Catalog for DuckLakeCatalog {
         payload: &str,
     ) -> Result<(), Error> {
         // Fetch current snapshot info
-        let curr_snapshot = Self::current_snapshot_info(conn)?;
+        let curr_snapshot = Self::current_snapshot_info_inner(conn)?;
 
         // Update matching past snapshot to close it
         conn.prepare(UPDATE_ADV_STATS_QUERY)
@@ -471,8 +602,7 @@ impl Catalog for DuckLakeCatalog {
             .execute(params![
                 curr_snapshot.id.0 + 1,
                 format!(
-                    r#"updated_stats:"main"."ducklake_table_column_adv_stats",{}:{}"#,
-                    stats_type, payload
+                    r#"updated_stats:"main"."ducklake_table_column_adv_stats",{stats_type}:{payload}"#,
                 ),
                 Null,
                 Null,
@@ -481,129 +611,5 @@ impl Catalog for DuckLakeCatalog {
             .context(QueryExecutionSnafu)?;
 
         Ok(())
-    }
-}
-
-impl DuckLakeCatalog {
-    /// Creates a new DuckLakeStatisticsProvider with optional file paths.
-    /// If `location` is None, uses in-memory database. If `metadata_path` is None, uses default metadata file.
-    pub fn try_new(location: Option<&str>, metadata_path: Option<&str>) -> Result<Self, Error> {
-        let conn = if let Some(path) = location {
-            Connection::open(path).context(ConnectionSnafu)?
-        } else {
-            Connection::open_in_memory().context(ConnectionSnafu)?
-        };
-
-        // Use provided metadata path or default to DEFAULT_METADATA_FILE
-        let metadata_file = metadata_path.unwrap_or(DEFAULT_METADATA_FILE);
-        let setup_query = format!(
-            r#"
-            INSTALL ducklake;
-            LOAD ducklake;
-            ATTACH 'ducklake:{}' AS metalake;
-            USE metalake;
-
-            CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats (
-                column_id BIGINT,
-                begin_snapshot BIGINT,
-                end_snapshot BIGINT,
-                table_id BIGINT,
-                stats_type VARCHAR,
-                payload VARCHAR
-            );
-
-            CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_query (
-                query_id BIGINT,
-                query_string VARCHAR,
-                root_group_id BIGINT
-            );
-
-            CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_query_instance (
-                query_instance_id BIGINT PRIMARY KEY,
-                query_id BIGINT,
-                creation_time BIGINT,
-                snapshot_id BIGINT
-            );
-
-            CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_group (
-                group_id BIGINT,
-                begin_snapshot BIGINT,
-                end_snapshot BIGINT
-            );
-
-            CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_group_stats (
-                group_id BIGINT,
-                begin_snapshot BIGINT,
-                end_snapshot BIGINT,
-                stats_type VARCHAR,
-                payload VARCHAR
-            );
-
-            CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_execution_subplan_feedback (
-                group_id BIGINT,
-                begin_snapshot BIGINT,
-                end_snapshot BIGINT,
-                stats_type VARCHAR,
-                payload VARCHAR
-            );
-
-            CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_subplan_scalar_feedback (
-                scalar_id BIGINT,
-                group_id BIGINT,
-                stats_type VARCHAR,
-                payload VARCHAR,
-                query_instance_id BIGINT
-            );
-        "#,
-            metadata_file
-        );
-        conn.execute_batch(&setup_query).context(ConnectionSnafu)?;
-        Ok(Self { conn })
-    }
-
-    /// Returns a reference to the underlying DuckDB connection.
-    pub fn get_connection(&self) -> &Connection {
-        &self.conn
-    }
-
-    /// Returns a mutable reference to the underlying DuckDB connection.
-    /// Required for creating transactions.
-    pub fn get_connection_mut(&mut self) -> &mut Connection {
-        &mut self.conn
-    }
-
-    /// Converts a DuckDB type string to an Arrow DataType.
-    fn duckdb_type_to_arrow(type_str: &str) -> Result<DataType, Error> {
-        // Handle common DuckDB types
-        let data_type = match type_str.to_uppercase().as_str() {
-            "INTEGER" | "INT" | "INT4" => DataType::Int32,
-            "BIGINT" | "INT8" | "LONG" => DataType::Int64,
-            "SMALLINT" | "INT2" | "SHORT" => DataType::Int16,
-            "TINYINT" | "INT1" => DataType::Int8,
-            "DOUBLE" | "FLOAT8" => DataType::Float64,
-            "FLOAT" | "REAL" | "FLOAT4" => DataType::Float32,
-            "BOOLEAN" | "BOOL" => DataType::Boolean,
-            "VARCHAR" | "TEXT" | "STRING" => DataType::Utf8,
-            "DATE" => DataType::Date32,
-            "TIMESTAMP" => {
-                DataType::Timestamp(duckdb::arrow::datatypes::TimeUnit::Microsecond, None)
-            }
-            "TIME" => DataType::Time64(duckdb::arrow::datatypes::TimeUnit::Microsecond),
-            "BLOB" | "BYTEA" | "BINARY" => DataType::Binary,
-            "DECIMAL" => DataType::Decimal128(38, 10), // Default precision and scale
-            _ => {
-                return Err(Error::ArrowDataTypeConversion {
-                    source: DuckDBError::FromSqlConversionFailure(
-                        0,
-                        duckdb::types::Type::Text,
-                        Box::new(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            format!("Unsupported DuckDB type for Arrow conversion: {}", type_str),
-                        )),
-                    ),
-                });
-            }
-        };
-        Ok(data_type)
     }
 }
