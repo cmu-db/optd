@@ -5,15 +5,10 @@ edition.workspace = true
 repository.workspace = true
 
 [dependencies]
-datafusion = "=50.1.0"
-parking_lot = "=0.12.5"
-glob = "0.3.2"
-url = "2.5.4"
-async-trait = "0.1.88"
-tokio = { workspace = true, features = ["full"] }
-duckdb = { features = ["r2d2"], version = "1.4.0" }
-r2d2 = "0.8.10"
+serde = { version = "1.0", features = ["derive"] }
+duckdb = { version = "1.4.0", features = ["bundled"] }
 snafu = "0.8.6"
 serde_json = "1.0"
-futures = "0.3.31"
-serde = "1.0.228"
+
+[dev-dependencies]
+tempfile = "3.8"

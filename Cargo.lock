@@ -2249,7 +2249,6 @@ dependencies = [
  "hashlink",
  "libduckdb-sys",
  "num-integer",
- "r2d2",
  "rust_decimal",
  "strum 0.27.2",
 ]
@@ -3181,6 +3180,7 @@ version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b93c3ff279601516f01531cadf2ccba50394fbb5f7bf685c6e6b9b07c8dca6f"
 dependencies = [
+ "cc",
  "flate2",
  "pkg-config",
  "serde",
@@ -3556,18 +3556,11 @@ checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
 name = "optd-catalog"
 version = "0.1.0"
 dependencies = [
- "async-trait",
- "datafusion",
  "duckdb",
- "futures",
- "glob",
- "parking_lot",
- "r2d2",
  "serde",
  "serde_json",
  "snafu",
- "tokio",
- "url",
+ "tempfile",
 ]
 
 [[package]]
@@ -3614,10 +3607,6 @@ dependencies = [
  "optd-core",
  "tracing",
 ]
-
-[[package]]
-name = "optd-storage"
-version = "0.1.0"
 
 [[package]]
 name = "option-ext"

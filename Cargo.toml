@@ -1,12 +1,6 @@
 [workspace]
 resolver = "2"
-members = [
-    "cli",
-    "connectors/datafusion",
-    "optd/catalog",
-    "optd/core",
-    "optd/storage",
-]
+members = ["cli", "connectors/datafusion", "optd/core", "optd/catalog"]
 
 # By default, only compiles the `optd-core` crate.
 default-members = ["optd/core"]
