@@ -1,5 +1,7 @@
+mod catalog;
 mod extension;
 mod planner;
+mod table;
 
 use std::sync::Arc;
 
