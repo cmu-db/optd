@@ -10,6 +10,9 @@ use serde_json::Value;
 use snafu::{ResultExt, prelude::*};
 use std::{collections::HashMap, sync::Arc};
 
+mod service;
+pub use service::{CatalogBackend, CatalogRequest, CatalogService, CatalogServiceHandle};
+
 /// Operations for managing table statistics with snapshot-based time travel.
 pub trait Catalog {
     /// Gets the current (most recent) snapshot ID.
