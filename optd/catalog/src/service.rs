@@ -1,5 +1,5 @@
 use crate::{
-    Catalog, CatalogError, CurrentSchema, DuckLakeCatalog, SchemaRef, SnapshotId, SnapshotInfo,
+    Catalog, CurrentSchema, DuckLakeCatalog, Error, SchemaRef, SnapshotId, SnapshotInfo,
     TableStatistics,
 };
 use tokio::sync::{mpsc, oneshot};
@@ -9,47 +9,39 @@ const CHANNEL_BUFFER_SIZE: usize = 1000;
 
 /// Trait defining the catalog backend that can be used with the service.
 pub trait CatalogBackend: Send + 'static {
-    fn current_snapshot(&mut self) -> Result<SnapshotId, CatalogError>;
-    fn current_snapshot_info(&mut self) -> Result<SnapshotInfo, CatalogError>;
-    fn current_schema(
-        &mut self,
-        schema: Option<&str>,
-        table: &str,
-    ) -> Result<SchemaRef, CatalogError>;
-    fn current_schema_info(&mut self) -> Result<CurrentSchema, CatalogError>;
+    fn current_snapshot(&mut self) -> Result<SnapshotId, Error>;
+    fn current_snapshot_info(&mut self) -> Result<SnapshotInfo, Error>;
+    fn current_schema(&mut self, schema: Option<&str>, table: &str) -> Result<SchemaRef, Error>;
+    fn current_schema_info(&mut self) -> Result<CurrentSchema, Error>;
     fn table_statistics(
         &mut self,
         table_name: &str,
         snapshot: SnapshotId,
-    ) -> Result<Option<TableStatistics>, CatalogError>;
+    ) -> Result<Option<TableStatistics>, Error>;
     fn update_table_column_stats(
         &mut self,
         column_id: i64,
         table_id: i64,
         stats_type: &str,
         payload: &str,
-    ) -> Result<(), CatalogError>;
+    ) -> Result<(), Error>;
 }
 
 /// Implement CatalogBackend for any type that implements Catalog
 impl<T: Catalog + Send + 'static> CatalogBackend for T {
-    fn current_snapshot(&mut self) -> Result<SnapshotId, CatalogError> {
+    fn current_snapshot(&mut self) -> Result<SnapshotId, Error> {
         Catalog::current_snapshot(self)
     }
 
-    fn current_snapshot_info(&mut self) -> Result<SnapshotInfo, CatalogError> {
+    fn current_snapshot_info(&mut self) -> Result<SnapshotInfo, Error> {
         Catalog::current_snapshot_info(self)
     }
 
-    fn current_schema(
-        &mut self,
-        schema: Option<&str>,
-        table: &str,
-    ) -> Result<SchemaRef, CatalogError> {
+    fn current_schema(&mut self, schema: Option<&str>, table: &str) -> Result<SchemaRef, Error> {
         Catalog::current_schema(self, schema, table)
     }
 
-    fn current_schema_info(&mut self) -> Result<CurrentSchema, CatalogError> {
+    fn current_schema_info(&mut self) -> Result<CurrentSchema, Error> {
         Catalog::current_schema_info(self)
     }
 
@@ -57,7 +49,7 @@ impl<T: Catalog + Send + 'static> CatalogBackend for T {
         &mut self,
         table_name: &str,
         snapshot: SnapshotId,
-    ) -> Result<Option<TableStatistics>, CatalogError> {
+    ) -> Result<Option<TableStatistics>, Error> {
         Catalog::table_statistics(self, table_name, snapshot)
     }
 
@@ -67,7 +59,7 @@ impl<T: Catalog + Send + 'static> CatalogBackend for T {
         table_id: i64,
         stats_type: &str,
         payload: &str,
-    ) -> Result<(), CatalogError> {
+    ) -> Result<(), Error> {
         Catalog::update_table_column_stats(self, column_id, table_id, stats_type, payload)
     }
 }
@@ -75,27 +67,27 @@ impl<T: Catalog + Send + 'static> CatalogBackend for T {
 #[derive(Debug)]
 pub enum CatalogRequest {
     CurrentSnapshot {
-        respond_to: oneshot::Sender<Result<SnapshotId, CatalogError>>,
+        respond_to: oneshot::Sender<Result<SnapshotId, Error>>,
     },
 
     CurrentSnapshotInfo {
-        respond_to: oneshot::Sender<Result<SnapshotInfo, CatalogError>>,
+        respond_to: oneshot::Sender<Result<SnapshotInfo, Error>>,
     },
 
     CurrentSchema {
         schema: Option<String>,
         table: String,
-        respond_to: oneshot::Sender<Result<SchemaRef, CatalogError>>,
+        respond_to: oneshot::Sender<Result<SchemaRef, Error>>,
     },
 
     CurrentSchemaInfo {
-        respond_to: oneshot::Sender<Result<CurrentSchema, CatalogError>>,
+        respond_to: oneshot::Sender<Result<CurrentSchema, Error>>,
     },
 
     TableStatistics {
         table_name: String,
         snapshot: SnapshotId,
-        respond_to: oneshot::Sender<Result<Option<TableStatistics>, CatalogError>>,
+        respond_to: oneshot::Sender<Result<Option<TableStatistics>, Error>>,
     },
 
     UpdateTableColumnStats {
@@ -103,7 +95,7 @@ pub enum CatalogRequest {
         table_id: i64,
         stats_type: String,
         payload: String,
-        respond_to: oneshot::Sender<Result<(), CatalogError>>,
+        respond_to: oneshot::Sender<Result<(), Error>>,
     },
 
     Shutdown,
@@ -116,30 +108,30 @@ pub struct CatalogServiceHandle {
 }
 
 impl CatalogServiceHandle {
-    pub async fn current_snapshot(&self) -> Result<SnapshotId, CatalogError> {
+    pub async fn current_snapshot(&self) -> Result<SnapshotId, Error> {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(CatalogRequest::CurrentSnapshot { respond_to: tx })
             .await
-            .map_err(|_| CatalogError::QueryExecution {
+            .map_err(|_| Error::QueryExecution {
                 source: duckdb::Error::ExecuteReturnedResults,
             })?;
 
-        rx.await.map_err(|_| CatalogError::QueryExecution {
+        rx.await.map_err(|_| Error::QueryExecution {
             source: duckdb::Error::ExecuteReturnedResults,
         })?
     }
 
-    pub async fn current_snapshot_info(&self) -> Result<SnapshotInfo, CatalogError> {
+    pub async fn current_snapshot_info(&self) -> Result<SnapshotInfo, Error> {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(CatalogRequest::CurrentSnapshotInfo { respond_to: tx })
             .await
-            .map_err(|_| CatalogError::QueryExecution {
+            .map_err(|_| Error::QueryExecution {
                 source: duckdb::Error::ExecuteReturnedResults,
             })?;
 
-        rx.await.map_err(|_| CatalogError::QueryExecution {
+        rx.await.map_err(|_| Error::QueryExecution {
             source: duckdb::Error::ExecuteReturnedResults,
         })?
     }
@@ -148,7 +140,7 @@ impl CatalogServiceHandle {
         &self,
         schema: Option<&str>,
         table: &str,
-    ) -> Result<SchemaRef, CatalogError> {
+    ) -> Result<SchemaRef, Error> {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(CatalogRequest::CurrentSchema {
@@ -157,25 +149,25 @@ impl CatalogServiceHandle {
                 respond_to: tx,
             })
             .await
-            .map_err(|_| CatalogError::QueryExecution {
+            .map_err(|_| Error::QueryExecution {
                 source: duckdb::Error::ExecuteReturnedResults,
             })?;
 
-        rx.await.map_err(|_| CatalogError::QueryExecution {
+        rx.await.map_err(|_| Error::QueryExecution {
             source: duckdb::Error::ExecuteReturnedResults,
         })?
     }
 
-    pub async fn current_schema_info(&self) -> Result<CurrentSchema, CatalogError> {
+    pub async fn current_schema_info(&self) -> Result<CurrentSchema, Error> {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(CatalogRequest::CurrentSchemaInfo { respond_to: tx })
             .await
-            .map_err(|_| CatalogError::QueryExecution {
+            .map_err(|_| Error::QueryExecution {
                 source: duckdb::Error::ExecuteReturnedResults,
             })?;
 
-        rx.await.map_err(|_| CatalogError::QueryExecution {
+        rx.await.map_err(|_| Error::QueryExecution {
             source: duckdb::Error::ExecuteReturnedResults,
         })?
     }
@@ -184,7 +176,7 @@ impl CatalogServiceHandle {
         &self,
         table_name: &str,
         snapshot: SnapshotId,
-    ) -> Result<Option<TableStatistics>, CatalogError> {
+    ) -> Result<Option<TableStatistics>, Error> {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(CatalogRequest::TableStatistics {
@@ -193,11 +185,11 @@ impl CatalogServiceHandle {
                 respond_to: tx,
             })
             .await
-            .map_err(|_| CatalogError::QueryExecution {
+            .map_err(|_| Error::QueryExecution {
                 source: duckdb::Error::ExecuteReturnedResults,
             })?;
 
-        rx.await.map_err(|_| CatalogError::QueryExecution {
+        rx.await.map_err(|_| Error::QueryExecution {
             source: duckdb::Error::ExecuteReturnedResults,
         })?
     }
@@ -208,7 +200,7 @@ impl CatalogServiceHandle {
         table_id: i64,
         stats_type: &str,
         payload: &str,
-    ) -> Result<(), CatalogError> {
+    ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(CatalogRequest::UpdateTableColumnStats {
@@ -219,20 +211,20 @@ impl CatalogServiceHandle {
                 respond_to: tx,
             })
             .await
-            .map_err(|_| CatalogError::QueryExecution {
+            .map_err(|_| Error::QueryExecution {
                 source: duckdb::Error::ExecuteReturnedResults,
             })?;
 
-        rx.await.map_err(|_| CatalogError::QueryExecution {
+        rx.await.map_err(|_| Error::QueryExecution {
             source: duckdb::Error::ExecuteReturnedResults,
         })?
     }
 
-    pub async fn shutdown(&self) -> Result<(), CatalogError> {
+    pub async fn shutdown(&self) -> Result<(), Error> {
         self.sender
             .send(CatalogRequest::Shutdown)
             .await
-            .map_err(|_| CatalogError::QueryExecution {
+            .map_err(|_| Error::QueryExecution {
                 source: duckdb::Error::ExecuteReturnedResults,
             })
     }
@@ -330,7 +322,7 @@ impl CatalogService<DuckLakeCatalog> {
     pub fn try_new_from_location(
         location: Option<&str>,
         metadata_path: Option<&str>,
-    ) -> Result<(Self, CatalogServiceHandle), CatalogError> {
+    ) -> Result<(Self, CatalogServiceHandle), Error> {
         let catalog = DuckLakeCatalog::try_new(location, metadata_path)?;
         Ok(Self::new(catalog))
     }
