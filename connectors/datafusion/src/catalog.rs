@@ -48,8 +48,7 @@ impl CatalogProviderList for OptdCatalogProviderList {
     fn catalog(&self, name: &str) -> Option<Arc<dyn CatalogProvider>> {
         let catalog_handle = self.catalog_handle.clone();
         self.inner.catalog(name).map(|catalog| {
-            Arc::new(OptdCatalogProvider::new(catalog, catalog_handle))
-                as Arc<dyn CatalogProvider>
+            Arc::new(OptdCatalogProvider::new(catalog, catalog_handle)) as Arc<dyn CatalogProvider>
         })
     }
 }
