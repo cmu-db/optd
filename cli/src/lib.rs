@@ -7,6 +7,7 @@ use datafusion::{
     sql::TableReference,
 };
 use datafusion_cli::cli_context::CliSessionContext;
+use optd_datafusion::{OptdExtensionConfig, SessionStateBuilderOptdExt};
 use std::sync::Arc;
 
 pub struct OptdCliSessionContext {

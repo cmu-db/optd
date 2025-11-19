@@ -102,7 +102,7 @@ pub enum CatalogRequest {
 }
 
 /// Handle for catalog service interaction
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CatalogServiceHandle {
     sender: mpsc::Sender<CatalogRequest>,
 }

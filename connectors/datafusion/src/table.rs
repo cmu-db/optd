@@ -4,10 +4,7 @@ use datafusion::{
     arrow::datatypes::SchemaRef,
     catalog::{Session, TableProvider},
     common::{Constraints, Statistics},
-    datasource::{
-        TableType,
-        listing::{ListingTable, ListingTableUrl},
-    },
+    datasource::{TableType, listing::ListingTable},
     error::Result,
     logical_expr::{LogicalPlan, TableProviderFilterPushDown, dml::InsertOp},
     physical_plan::ExecutionPlan,
@@ -15,29 +12,9 @@ use datafusion::{
     sql::TableReference,
 };
 
-use glob::Pattern;
-use url::Url;
+use optd_catalog::CatalogServiceHandle;
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct OptdTableUrl {
-    inner: Arc<ListingTableUrl>,
-}
-
-impl OptdTableUrl {
-    pub fn try_new(url: Url, glob: Option<Pattern>) -> Result<Self> {
-        let inner = ListingTableUrl::try_new(url, glob)?;
-        Ok(OptdTableUrl {
-            inner: Arc::new(inner),
-        })
-    }
-
-    pub fn new_with_inner(inner: Arc<ListingTableUrl>) -> Self {
-        OptdTableUrl { inner }
-    }
-}
-
-// #[derive()]
-
+#[allow(dead_code)]
 pub struct OptdTable {
     inner: Box<ListingTable>,
     name: String,
@@ -50,7 +27,7 @@ impl OptdTable {
         name: String,
         table_reference: TableReference,
     ) -> Result<Self> {
-        Ok(OptdTable {
+        Ok(Self {
             inner: Box::new(inner),
             name,
             table_reference,
@@ -62,7 +39,7 @@ impl OptdTable {
         name: String,
         table_reference: TableReference,
     ) -> Self {
-        OptdTable {
+        Self {
             inner,
             name,
             table_reference,
@@ -78,10 +55,34 @@ impl OptdTable {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OptdTableProvider {
     inner: Arc<dyn TableProvider>,
-    table_url: OptdTableUrl,
+    catalog_handle: Option<CatalogServiceHandle>,
+    table_name: String,
+}
+
+impl OptdTableProvider {
+    pub fn new(
+        inner: Arc<dyn TableProvider>,
+        table_name: String,
+        catalog_handle: Option<CatalogServiceHandle>,
+    ) -> Self {
+        Self {
+            inner,
+            catalog_handle,
+            table_name,
+        }
+    }
+
+    pub fn table_name(&self) -> &str {
+        &self.table_name
+    }
+
+    /// Get the catalog handle if available
+    pub fn catalog_handle(&self) -> Option<&CatalogServiceHandle> {
+        self.catalog_handle.as_ref()
+    }
 }
 
 #[async_trait::async_trait]
@@ -116,7 +117,7 @@ impl TableProvider for OptdTableProvider {
         self.inner.get_table_definition()
     }
 
-    fn get_logical_plan(&self) -> Option<Cow<LogicalPlan>> {
+    fn get_logical_plan(&'_ self) -> Option<Cow<'_, LogicalPlan>> {
         self.inner.get_logical_plan()
     }
 
@@ -135,7 +136,23 @@ impl TableProvider for OptdTableProvider {
     }
 
     fn statistics(&self) -> Option<Statistics> {
-        self.inner.statistics()
+        let stats = self.inner.statistics();
+
+        if let Some(ref s) = stats {
+            tracing::debug!(
+                "Retrieved statistics from inner provider for table {} (num_rows={:?}, total_byte_size={:?})",
+                self.table_name,
+                s.num_rows,
+                s.total_byte_size
+            );
+        } else {
+            tracing::debug!(
+                "No statistics available for table {} from inner provider",
+                self.table_name
+            );
+        }
+
+        stats
     }
 
     async fn insert_into(
