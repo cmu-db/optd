@@ -28,10 +28,12 @@ use datafusion::execution::memory_pool::{
     FairSpillPool, GreedyMemoryPool, MemoryPool, TrackConsumersPool,
 };
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+use datafusion::logical_expr::ExplainFormat;
 use datafusion_cli::catalog::DynamicObjectStoreCatalog;
 use datafusion_cli::functions::ParquetMetadataFunc;
 use datafusion_cli::{
     DATAFUSION_CLI_VERSION, exec,
+    object_storage::instrumented::InstrumentedObjectStoreRegistry,
     pool_type::PoolType,
     print_format::PrintFormat,
     print_options::{MaxRows, PrintOptions},
@@ -226,6 +228,7 @@ async fn main_inner() -> Result<()> {
         quiet: args.quiet,
         maxrows: args.maxrows,
         color: args.color,
+        instrumented_registry: Arc::new(InstrumentedObjectStoreRegistry::new()),
     };
 
     let commands = args.command;
@@ -282,7 +285,7 @@ fn get_session_config(args: &Args) -> Result<SessionConfig> {
     // use easier to understand "tree" mode by default
     // if the user hasn't specified an explain format in the environment
     if env::var_os("DATAFUSION_EXPLAIN_FORMAT").is_none() {
-        config_options.explain.format = String::from("tree");
+        config_options.explain.format = ExplainFormat::Tree;
     }
 
     // in the CLI, we want to show NULL values rather the empty strings
