@@ -10,9 +10,7 @@ tokio = { version = "1.47", features = ["macros", "rt", "sync"] }
 tracing = "0.1"
 
 # DataFusion dependencies
-datafusion = { version = "50.3", default-features = false, features = [
-    "parquet",
-] }
+datafusion = { version = "51.0", default-features = false }
 
 [workspace.package]
 version = "0.1.0"
