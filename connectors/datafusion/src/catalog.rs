@@ -53,8 +53,8 @@ impl CatalogProviderList for OptdCatalogProviderList {
     }
 }
 
-#[derive(Debug)]
-struct OptdCatalogProvider {
+#[derive(Debug, Clone)]
+pub struct OptdCatalogProvider {
     inner: Arc<dyn CatalogProvider>,
     catalog_handle: Option<CatalogServiceHandle>,
 }
@@ -69,6 +69,10 @@ impl OptdCatalogProvider {
             catalog_handle,
         }
     }
+
+    pub fn catalog_handle(&self) -> Option<&CatalogServiceHandle> {
+        self.catalog_handle.as_ref()
+    }
 }
 
 impl CatalogProvider for OptdCatalogProvider {
@@ -81,10 +85,9 @@ impl CatalogProvider for OptdCatalogProvider {
     }
 
     fn schema(&self, name: &str) -> Option<Arc<dyn SchemaProvider>> {
-        let catalog_handle = self.catalog_handle.clone();
-        self.inner.schema(name).map(|schema| {
-            Arc::new(OptdSchemaProvider::new(schema, catalog_handle)) as Arc<dyn SchemaProvider>
-        })
+        self.inner
+            .schema(name)
+            .map(|schema| Arc::new(OptdSchemaProvider::new(schema)) as Arc<dyn SchemaProvider>)
     }
 
     fn register_schema(
@@ -99,18 +102,11 @@ impl CatalogProvider for OptdCatalogProvider {
 #[derive(Debug)]
 pub struct OptdSchemaProvider {
     inner: Arc<dyn SchemaProvider>,
-    catalog_handle: Option<CatalogServiceHandle>,
 }
 
 impl OptdSchemaProvider {
-    pub fn new(
-        inner: Arc<dyn SchemaProvider>,
-        catalog_handle: Option<CatalogServiceHandle>,
-    ) -> Self {
-        Self {
-            inner,
-            catalog_handle,
-        }
+    pub fn new(inner: Arc<dyn SchemaProvider>) -> Self {
+        Self { inner }
     }
 }
 
@@ -128,11 +124,7 @@ impl SchemaProvider for OptdSchemaProvider {
         let table_opt = self.inner.table(name).await?;
 
         if let Some(table) = table_opt {
-            let optd_table = Arc::new(OptdTableProvider::new(
-                table,
-                name.to_string(),
-                self.catalog_handle.clone(),
-            ));
+            let optd_table = Arc::new(OptdTableProvider::new(table, name.to_string()));
 
             Ok(Some(optd_table as Arc<dyn TableProvider>))
         } else {

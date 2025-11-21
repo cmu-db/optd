@@ -12,8 +12,6 @@ use datafusion::{
     sql::TableReference,
 };
 
-use optd_catalog::CatalogServiceHandle;
-
 #[allow(dead_code)]
 pub struct OptdTable {
     inner: Box<ListingTable>,
@@ -58,30 +56,16 @@ impl OptdTable {
 #[derive(Debug, Clone)]
 pub struct OptdTableProvider {
     inner: Arc<dyn TableProvider>,
-    catalog_handle: Option<CatalogServiceHandle>,
     table_name: String,
 }
 
 impl OptdTableProvider {
-    pub fn new(
-        inner: Arc<dyn TableProvider>,
-        table_name: String,
-        catalog_handle: Option<CatalogServiceHandle>,
-    ) -> Self {
-        Self {
-            inner,
-            catalog_handle,
-            table_name,
-        }
+    pub fn new(inner: Arc<dyn TableProvider>, table_name: String) -> Self {
+        Self { inner, table_name }
     }
 
     pub fn table_name(&self) -> &str {
         &self.table_name
-    }
-
-    /// Get the catalog handle if available
-    pub fn catalog_handle(&self) -> Option<&CatalogServiceHandle> {
-        self.catalog_handle.as_ref()
     }
 }
 

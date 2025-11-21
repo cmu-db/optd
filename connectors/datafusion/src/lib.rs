@@ -5,7 +5,7 @@ mod table;
 
 use std::sync::Arc;
 
-pub use catalog::{OptdCatalogProviderList, OptdSchemaProvider};
+pub use catalog::{OptdCatalogProvider, OptdCatalogProviderList, OptdSchemaProvider};
 pub use extension::{OptdExtension, OptdExtensionConfig};
 pub use planner::OptdQueryPlanner;
 pub use table::{OptdTable, OptdTableProvider};

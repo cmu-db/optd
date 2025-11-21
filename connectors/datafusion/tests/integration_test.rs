@@ -9,7 +9,7 @@ use datafusion::{
     prelude::*,
 };
 use optd_catalog::{CatalogService, DuckLakeCatalog};
-use optd_datafusion::{OptdCatalogProviderList, OptdTableProvider};
+use optd_datafusion::{OptdCatalogProvider, OptdCatalogProviderList, OptdTableProvider};
 use serde_json;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -53,8 +53,24 @@ fn create_test_data(
     (schema, batch)
 }
 
-/// Retrieves OptdTableProvider from catalog hierarchy
-async fn get_optd_table(
+/// Wraps a catalog list as OptdCatalogProvider
+async fn get_wrapped_catalog(
+    catalog_list: Arc<dyn CatalogProviderList>,
+    catalog_handle: Option<optd_catalog::CatalogServiceHandle>,
+) -> Arc<OptdCatalogProvider> {
+    let optd_catalog_list = OptdCatalogProviderList::new(catalog_list, catalog_handle);
+    let catalog = optd_catalog_list.catalog("datafusion").unwrap();
+    Arc::new(
+        catalog
+            .as_any()
+            .downcast_ref::<OptdCatalogProvider>()
+            .unwrap()
+            .clone(),
+    )
+}
+
+/// Retrieves a table as OptdTableProvider
+async fn get_wrapped_table(
     catalog_list: Arc<dyn CatalogProviderList>,
     catalog_handle: Option<optd_catalog::CatalogServiceHandle>,
     table_name: &str,
@@ -67,12 +83,13 @@ async fn get_optd_table(
         .await
         .expect("Failed to retrieve table")
         .expect("Table not found");
-    table
-        .as_any()
-        .downcast_ref::<OptdTableProvider>()
-        .unwrap()
-        .clone()
-        .into()
+    Arc::new(
+        table
+            .as_any()
+            .downcast_ref::<OptdTableProvider>()
+            .unwrap()
+            .clone(),
+    )
 }
 
 #[tokio::test]
@@ -105,10 +122,9 @@ async fn test_table_provider_wrapping() {
     .unwrap();
 
     let mem_table = Arc::new(MemTable::try_new(schema.clone(), vec![vec![batch]]).unwrap());
-    let optd_table = OptdTableProvider::new(mem_table.clone(), "test_table".to_string(), None);
+    let optd_table = OptdTableProvider::new(mem_table.clone(), "test_table".to_string());
 
     assert_eq!(optd_table.table_name(), "test_table");
-    assert!(optd_table.catalog_handle().is_none());
     assert_eq!(optd_table.schema(), schema);
     assert!(optd_table.statistics().is_none());
 }
@@ -125,7 +141,7 @@ async fn test_schema_retrieval() {
     );
     ctx.register_batch("numbers", batch).unwrap();
 
-    let optd_table = get_optd_table(ctx.state().catalog_list().clone(), None, "numbers").await;
+    let optd_table = get_wrapped_table(ctx.state().catalog_list().clone(), None, "numbers").await;
     assert_eq!(optd_table.table_name(), "numbers");
 
     let schema = optd_table.schema();
@@ -229,9 +245,11 @@ async fn test_table_metadata_access_through_catalog() {
     );
     ctx.register_batch("orders", batch).unwrap();
 
-    let optd_table = get_optd_table(ctx.state().catalog_list().clone(), None, "orders").await;
+    let optd_table = get_wrapped_table(ctx.state().catalog_list().clone(), None, "orders").await;
+    let catalog = get_wrapped_catalog(ctx.state().catalog_list().clone(), None).await;
+
     assert_eq!(optd_table.table_name(), "orders");
-    assert!(optd_table.catalog_handle().is_none());
+    assert!(catalog.catalog_handle().is_none());
     assert!(optd_table.statistics().is_none());
 
     let results = ctx
@@ -410,9 +428,15 @@ async fn test_catalog_service_handle_propagation() {
     );
     ctx.register_batch("users", batch).unwrap();
 
-    let optd_table =
-        get_optd_table(ctx.state().catalog_list().clone(), Some(handle), "users").await;
-    assert!(optd_table.catalog_handle().is_some());
+    let optd_table = get_wrapped_table(
+        ctx.state().catalog_list().clone(),
+        Some(handle.clone()),
+        "users",
+    )
+    .await;
+    let catalog = get_wrapped_catalog(ctx.state().catalog_list().clone(), Some(handle)).await;
+
+    assert!(catalog.catalog_handle().is_some());
     assert_eq!(optd_table.table_name(), "users");
     assert_eq!(optd_table.schema(), schema);
 }
@@ -430,8 +454,8 @@ async fn test_catalog_service_snapshot_retrieval() {
     );
     ctx.register_batch("test", batch).unwrap();
 
-    let optd_table = get_optd_table(ctx.state().catalog_list().clone(), Some(handle), "test").await;
-    let catalog_handle = optd_table.catalog_handle().unwrap();
+    let catalog = get_wrapped_catalog(ctx.state().catalog_list().clone(), Some(handle)).await;
+    let catalog_handle = catalog.catalog_handle().unwrap();
 
     let snapshot = catalog_handle.current_snapshot().await.unwrap();
     assert_eq!(snapshot.0, 0, "Fresh catalog should start at snapshot 0");
@@ -487,16 +511,12 @@ async fn test_full_workflow_with_catalog_service() {
     );
     ctx.register_batch("products", batch).unwrap();
 
-    let optd_table = get_optd_table(
-        ctx.state().catalog_list().clone(),
-        Some(handle.clone()),
-        "products",
-    )
-    .await;
+    let catalog =
+        get_wrapped_catalog(ctx.state().catalog_list().clone(), Some(handle.clone())).await;
 
-    assert!(optd_table.catalog_handle().is_some());
+    assert!(catalog.catalog_handle().is_some());
 
-    let snapshot = optd_table
+    let snapshot = catalog
         .catalog_handle()
         .unwrap()
         .current_snapshot()
@@ -657,14 +677,9 @@ async fn test_catalog_service_with_datafusion_integration() {
     );
     ctx.register_batch("test_table", batch).unwrap();
 
-    let optd_table = get_optd_table(
-        ctx.state().catalog_list().clone(),
-        Some(handle),
-        "test_table",
-    )
-    .await;
+    let catalog = get_wrapped_catalog(ctx.state().catalog_list().clone(), Some(handle)).await;
 
-    let snapshot = optd_table
+    let snapshot = catalog
         .catalog_handle()
         .unwrap()
         .current_snapshot()
@@ -889,6 +904,10 @@ async fn test_multiple_schemas_with_catalog_service() {
 
     // Verify handle propagates to tables in both schemas
     let catalog_provider = optd_catalog_list.catalog("datafusion").unwrap();
+    let optd_catalog = catalog_provider
+        .as_any()
+        .downcast_ref::<OptdCatalogProvider>()
+        .expect("Should be OptdCatalogProvider");
 
     let table1 = catalog_provider
         .schema("public")
@@ -897,10 +916,7 @@ async fn test_multiple_schemas_with_catalog_service() {
         .await
         .unwrap()
         .unwrap();
-    let table1_optd = table1.as_any().downcast_ref::<OptdTableProvider>().unwrap();
-    let handle1 = table1_optd
-        .catalog_handle()
-        .expect("table1 should have catalog handle");
+    let _table1_optd = table1.as_any().downcast_ref::<OptdTableProvider>().unwrap();
 
     let table2 = catalog_provider
         .schema("analytics")
@@ -909,18 +925,16 @@ async fn test_multiple_schemas_with_catalog_service() {
         .await
         .unwrap()
         .unwrap();
-    let table2_optd = table2.as_any().downcast_ref::<OptdTableProvider>().unwrap();
-    let handle2 = table2_optd
-        .catalog_handle()
-        .expect("table2 should have catalog handle");
+    let _table2_optd = table2.as_any().downcast_ref::<OptdTableProvider>().unwrap();
 
-    // Verify both can access the same catalog service
-    let snapshot1 = handle1.current_snapshot().await.unwrap();
-    let snapshot2 = handle2.current_snapshot().await.unwrap();
-    assert_eq!(
-        snapshot1.0, snapshot2.0,
-        "Both tables should share the same catalog snapshot"
-    );
+    // Verify catalog has the handle (handle is at catalog level, not table level)
+    let handle = optd_catalog
+        .catalog_handle()
+        .expect("catalog should have catalog handle");
+
+    // Verify catalog service is accessible
+    let snapshot = handle.current_snapshot().await.unwrap();
+    assert_eq!(snapshot.0, 0, "Fresh catalog should start at snapshot 0");
 
     // Verify cross-schema query works
     let results = ctx
