@@ -3691,6 +3691,7 @@ dependencies = [
  "optd-catalog",
  "optd-datafusion",
  "regex",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
