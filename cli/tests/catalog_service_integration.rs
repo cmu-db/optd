@@ -1,7 +1,11 @@
 // Integration tests for OptD catalog service handle functions
 
-use datafusion::catalog::CatalogProviderList;
-use datafusion::prelude::*;
+use datafusion::{
+    arrow::array::{Int32Array, RecordBatch},
+    arrow::datatypes::{DataType, Field, Schema},
+    catalog::CatalogProviderList,
+    prelude::SessionContext,
+};
 use optd_catalog::{CatalogService, DuckLakeCatalog};
 use optd_datafusion::OptdCatalogProviderList;
 use std::sync::Arc;
@@ -176,33 +180,75 @@ async fn test_catalog_service_handle() -> Result<(), Box<dyn std::error::Error>>
         .unwrap();
     assert_eq!(buckets.len(), 2, "Should have 2 histogram buckets");
 
-    // Test DataFusion integration
-    let ctx = SessionContext::new();
-    let df_schema = Arc::new(datafusion::arrow::datatypes::Schema::new(vec![
-        datafusion::arrow::datatypes::Field::new(
-            "id",
-            datafusion::arrow::datatypes::DataType::Int32,
-            false,
-        ),
-        datafusion::arrow::datatypes::Field::new(
-            "value",
-            datafusion::arrow::datatypes::DataType::Int32,
-            false,
-        ),
-    ]));
+    Ok(())
+}
 
-    let batch = datafusion::arrow::array::RecordBatch::try_new(
-        df_schema.clone(),
-        vec![
-            Arc::new(datafusion::arrow::array::Int32Array::from(vec![
-                1, 2, 3, 4, 5,
-            ])),
-            Arc::new(datafusion::arrow::array::Int32Array::from(vec![
-                10, 20, 30, 40, 50,
-            ])),
-        ],
+#[tokio::test]
+async fn test_datafusion_catalog_integration() -> Result<(), Box<dyn std::error::Error>> {
+    // Setup catalog with test data and statistics
+    let temp_dir = TempDir::new()?;
+    let metadata_path = temp_dir.path().join("metadata.ducklake");
+
+    {
+        let setup_catalog = DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap()))?;
+        let conn = setup_catalog.get_connection();
+        conn.execute_batch("CREATE TABLE df_test (id INTEGER, value INTEGER)")?;
+        conn.execute_batch(
+            "INSERT INTO df_test VALUES (1, 10), (2, 20), (3, 30), (4, 40), (5, 50)",
+        )?;
+    }
+
+    let catalog = DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap()))?;
+    let (service, handle) = CatalogService::new(catalog);
+    tokio::spawn(async move { service.run().await });
+
+    // Setup statistics for testing
+    let query_catalog = DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap()))?;
+    let conn = query_catalog.get_connection();
+
+    let table_id: i64 = conn.query_row(
+        "SELECT table_id FROM __ducklake_metadata_metalake.main.ducklake_table dt
+         INNER JOIN __ducklake_metadata_metalake.main.ducklake_schema ds ON dt.schema_id = ds.schema_id
+         WHERE ds.schema_name = current_schema() AND dt.table_name = 'df_test'",
+        [],
+        |row| row.get(0),
     )?;
-    ctx.register_batch("test_table", batch)?;
+
+    let value_column_id: i64 = conn.query_row(
+        "SELECT column_id FROM __ducklake_metadata_metalake.main.ducklake_column
+         WHERE table_id = ? AND column_name = 'value'",
+        [table_id],
+        |row| row.get(0),
+    )?;
+
+    // Add test statistics
+    handle
+        .update_table_column_stats(value_column_id, table_id, "ndv", r#"{"distinct_count": 5}"#)
+        .await?;
+    handle
+        .update_table_column_stats(
+            value_column_id,
+            table_id,
+            "histogram",
+            r#"{"buckets": [{"lower": 10, "upper": 30, "count": 3}, {"lower": 30, "upper": 50, "count": 2}]}"#
+        )
+        .await?;
+
+    // Test DataFusion catalog integration
+    let ctx = SessionContext::new();
+    ctx.register_batch(
+        "df_test",
+        RecordBatch::try_new(
+            Arc::new(Schema::new(vec![
+                Field::new("id", DataType::Int32, false),
+                Field::new("value", DataType::Int32, false),
+            ])),
+            vec![
+                Arc::new(Int32Array::from(vec![1, 2, 3, 4, 5])),
+                Arc::new(Int32Array::from(vec![10, 20, 30, 40, 50])),
+            ],
+        )?,
+    )?;
 
     let optd_catalog_list =
         OptdCatalogProviderList::new(ctx.state().catalog_list().clone(), Some(handle.clone()));
@@ -213,14 +259,65 @@ async fn test_catalog_service_handle() -> Result<(), Box<dyn std::error::Error>>
         .downcast_ref::<optd_datafusion::OptdCatalogProvider>()
         .expect("Should be OptdCatalogProvider");
 
-    assert!(optd_catalog.catalog_handle().is_some());
+    assert!(
+        optd_catalog.catalog_handle().is_some(),
+        "Catalog handle should propagate through DataFusion integration"
+    );
 
-    // Verify handle works from catalog
-    optd_catalog
+    // Verify statistics retrieval through DataFusion catalog
+    let stats_via_catalog = optd_catalog
         .catalog_handle()
         .unwrap()
-        .current_snapshot()
-        .await?;
+        .table_statistics(
+            "df_test",
+            optd_catalog
+                .catalog_handle()
+                .unwrap()
+                .current_snapshot()
+                .await?,
+        )
+        .await?
+        .unwrap();
+
+    assert_eq!(stats_via_catalog.row_count, 5);
+
+    let value_stats = stats_via_catalog
+        .column_statistics
+        .iter()
+        .find(|c| c.name == "value")
+        .expect("Should find value column statistics");
+
+    assert_eq!(
+        value_stats.advanced_stats.len(),
+        2,
+        "Should have both ndv and histogram stats"
+    );
+
+    // Verify ndv statistic
+    assert_eq!(
+        value_stats
+            .advanced_stats
+            .iter()
+            .find(|s| s.stats_type == "ndv")
+            .and_then(|s| s.data.get("distinct_count").and_then(|v| v.as_i64())),
+        Some(5),
+        "Should retrieve ndv statistics through DataFusion catalog"
+    );
+
+    // Verify histogram statistic
+    let histogram = value_stats
+        .advanced_stats
+        .iter()
+        .find(|s| s.stats_type == "histogram")
+        .expect("Should have histogram statistic");
+    let buckets = histogram
+        .data
+        .get("buckets")
+        .and_then(|v| v.as_array())
+        .expect("Should have buckets");
+    assert_eq!(buckets.len(), 2);
+    assert_eq!(buckets[0].get("lower").and_then(|v| v.as_i64()), Some(10));
+    assert_eq!(buckets[0].get("count").and_then(|v| v.as_i64()), Some(3));
 
     Ok(())
 }
