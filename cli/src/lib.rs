@@ -42,15 +42,6 @@ impl OptdCliSessionContext {
         &self.inner
     }
 
-    #[ignore = "not yet fully implemented"]
-    // pub fn register_optd_catalog(&self, optd_catalog: Arc<OptdCatalogProviderList>) -> Result<()> {
-    //     let state = self.inner.state_ref().read().clone();
-    // state.register_catalog(
-    //     "ducklake",
-    //     Arc::new(datafusion_ducklake::DuckLakeCatalogProvider::new()),
-    // )
-    // }
-
     pub fn return_empty_dataframe(&self) -> Result<DataFrame> {
         let plan = LogicalPlanBuilder::empty(false).build()?;
         Ok(DataFrame::new(self.inner.state(), plan))
