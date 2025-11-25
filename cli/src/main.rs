@@ -217,7 +217,7 @@ async fn main_inner() -> Result<()> {
     let ctx = cli_ctx.inner();
 
     // Initialize catalog with optional DuckLake catalog service
-    let catalog_handle = if let Ok(metadata_path) = env::var("OPTD_CATALOG_METADATA_PATH") {
+    let catalog_handle = if let Ok(metadata_path) = env::var("OPTD_METADATA_CATALOG_PATH") {
         if !args.quiet {
             println!("Using OptD catalog with metadata path: {}", metadata_path);
         }

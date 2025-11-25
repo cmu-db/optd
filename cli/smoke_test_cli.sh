@@ -42,9 +42,9 @@ fi
 # Test 3: Metadata path configuration
 echo "Test 3: Metadata path environment variable"
 TMPDIR_PATH=$(mktemp -d)
-export OPTD_CATALOG_METADATA_PATH="$TMPDIR_PATH/test.ducklake"
+export OPTD_METADATA_CATALOG_PATH="$TMPDIR_PATH/test.ducklake"
 output=$($CLI -c "SELECT 1;" 2>&1)
-unset OPTD_CATALOG_METADATA_PATH
+unset OPTD_METADATA_CATALOG_PATH
 rm -rf "$TMPDIR_PATH"
 if echo "$output" | grep -q "Using OptD catalog with metadata path"; then
     echo -e "${GREEN}✓ PASS${RESET} - Metadata path recognized"
