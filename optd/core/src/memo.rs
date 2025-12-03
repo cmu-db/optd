@@ -1,7 +1,10 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Debug,
-    sync::{Arc, atomic::AtomicI64},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicI64, AtomicUsize},
+    },
 };
 
 use itertools::Itertools;
@@ -18,6 +21,11 @@ use crate::{
     },
     utility::union_find::UnionFind,
 };
+
+static GROUP_COUNT: AtomicUsize = AtomicUsize::new(0);
+static OPERATOR_COUNT: AtomicUsize = AtomicUsize::new(0);
+static GROUP_COUNTS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+static OPERATOR_COUNTS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct MemoGroupExpr {
@@ -138,6 +146,10 @@ pub struct MemoTable {
 
 impl MemoTable {
     pub fn new(ctx: IRContext) -> Self {
+        let mut group_counts_acc = GROUP_COUNTS.lock().unwrap();
+        let mut operator_count_acc = OPERATOR_COUNTS.lock().unwrap();
+        operator_count_acc.push(0);
+        group_counts_acc.push(0);
         Self {
             scalar_dedup: Default::default(),
             scalar_id_to_key: Default::default(),
@@ -481,6 +493,16 @@ impl MemoTable {
         info!("group_ids = {:?}", self.groups.keys());
         info!("total_group_count = {}", self.groups.keys().len());
         info!("total_operator_count = {}", self.operator_dedup.len());
+        GROUP_COUNT.fetch_add(self.groups.len(), std::sync::atomic::Ordering::Relaxed);
+        OPERATOR_COUNT.fetch_add(
+            self.operator_dedup.len(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        GROUP_COUNTS.lock().unwrap().push(self.groups.len());
+        OPERATOR_COUNTS
+            .lock()
+            .unwrap()
+            .push(self.operator_dedup.len());
         for (group_id, group) in &self.groups {
             let state = group.exploration.borrow();
             assert_eq!(group_id, &group.group_id);
@@ -548,7 +570,20 @@ impl MemoTable {
             let s = scalar.explain(&self.ctx, &option).to_one_line_string(true);
             info!("{scalar_id} = \"{s}\"")
         }
+        info!("\n[operators]");
+        info!("group_ids = {:?}", self.groups.keys());
+        info!("total_group_count = {}", self.groups.keys().len());
+        info!("total_operator_count = {}", self.operator_dedup.len());
         info!("======== MEMO DUMP END ==========");
+        let group_counts_acc = GROUP_COUNTS.lock().unwrap();
+        let operator_count_acc = OPERATOR_COUNTS.lock().unwrap();
+        println!(
+            "{{ \"group_count_acc_before\": {:?},  \"group_count_acc_after\": {:?}, \"operator_count_before\": {:?}, \"operator_count_after\": {:?} }}",
+            &group_counts_acc[group_counts_acc.len() - 2],
+            &group_counts_acc[group_counts_acc.len() - 1],
+            &operator_count_acc[operator_count_acc.len() - 2],
+            &operator_count_acc[operator_count_acc.len() - 1],
+        );
     }
 }
 

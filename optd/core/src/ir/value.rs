@@ -9,6 +9,7 @@ pub enum ScalarValue {
     Boolean(Option<bool>),
     Utf8(Option<String>),
     Utf8View(Option<String>),
+    Decimal128(Option<i128>, u8, i8),
 }
 
 impl PartialOrd for ScalarValue {
@@ -32,6 +33,7 @@ impl ScalarValue {
             ScalarValue::Boolean(v) => v.is_none(),
             ScalarValue::Utf8(v) => v.is_none(),
             ScalarValue::Utf8View(v) => v.is_none(),
+            ScalarValue::Decimal128(v, _, _) => v.is_none(),
         }
     }
 
@@ -42,6 +44,9 @@ impl ScalarValue {
             ScalarValue::Boolean(_) => DataType::Boolean,
             ScalarValue::Utf8(_) => DataType::Utf8,
             ScalarValue::Utf8View(_) => DataType::Utf8View,
+            ScalarValue::Decimal128(_, precision, scale) => {
+                DataType::Decimal128(*precision, *scale)
+            }
         }
     }
 }
@@ -65,6 +70,10 @@ impl std::fmt::Display for ScalarValue {
             ScalarValue::Boolean(v) => fmt_optional(f, v, "boolean"),
             ScalarValue::Utf8(v) => fmt_optional(f, v, "utf8"),
             ScalarValue::Utf8View(v) => fmt_optional(f, v, "utf8_view"),
+            ScalarValue::Decimal128(v, precision, scale) => match v {
+                Some(val) => write!(f, "{val}::decimal128({}, {})", precision, scale),
+                None => write!(f, "null::decimal128({}, {})", precision, scale),
+            },
         }
     }
 }

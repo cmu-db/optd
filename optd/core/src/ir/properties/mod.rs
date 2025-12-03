@@ -11,7 +11,7 @@ use std::sync::{Arc, OnceLock};
 pub use cardinality::*;
 pub use output_columns::OutputColumns;
 pub use required::Required;
-pub use restriction::ColumnRestrictions;
+pub use restriction::{ColumnRestrictions, Restrictions};
 pub use tuple_ordering::*;
 
 use crate::ir::{ColumnSet, context::IRContext};

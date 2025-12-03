@@ -1,6 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::ir::{data_type::DataType, statistics::ValueHistogram};
+use crate::ir::{
+    data_type::DataType,
+    statistics::{ColumnStatistics, ScalarValueHistogram},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DataSourceId(pub i64);
@@ -12,7 +15,7 @@ pub struct Field {
     pub name: String,
     pub data_type: DataType,
     pub nullable: bool,
-    pub histogram: Option<ValueHistogram>,
+    pub histogram: Option<ScalarValueHistogram>,
 }
 
 impl Field {
@@ -78,7 +81,7 @@ pub struct TableMetadata {
     pub id: DataSourceId,
     pub name: String,
     pub schema: Arc<Schema>,
-    pub histograms: HashMap<String, ValueHistogram>,
+    pub statistics: HashMap<String, Arc<ColumnStatistics>>,
     pub row_count: usize,
 }
 
@@ -96,4 +99,10 @@ pub trait Catalog: Send + Sync + 'static {
 
     /// TODO(yuchen): This is a mock.
     fn set_table_row_count(&self, table_id: DataSourceId, row_count: usize);
+
+    fn set_column_stats(
+        &self,
+        table_id: DataSourceId,
+        column_stats: HashMap<String, Arc<ColumnStatistics>>,
+    );
 }

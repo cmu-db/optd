@@ -12,7 +12,8 @@ use crate::ir::{
 define_node!(
     LogicalRemap, LogicalRemapBorrowed {
         properties: OperatorProperties,
-        metadata: LogicalRemapMetadata {},
+        metadata: LogicalRemapMetadata {
+        },
         inputs: {
             operators: [input],
             scalars: [mappings],

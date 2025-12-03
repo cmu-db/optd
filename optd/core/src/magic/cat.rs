@@ -6,7 +6,7 @@ use std::{
 use anyhow::bail;
 use tracing::info;
 
-use crate::ir::catalog::*;
+use crate::ir::{catalog::*, statistics::ColumnStatistics};
 
 pub struct MagicCatalog(RwLock<MagicCatalogInner>);
 
@@ -50,7 +50,7 @@ impl Catalog for MagicCatalog {
                 id,
                 name: table_name,
                 schema,
-                histograms: HashMap::new(),
+                statistics: HashMap::new(),
                 row_count: 0,
             },
         );
@@ -76,6 +76,16 @@ impl Catalog for MagicCatalog {
         let mut writer = self.0.write().unwrap();
         let table = writer.tables.get_mut(&table_id).unwrap();
         table.row_count = row_count;
+    }
+
+    fn set_column_stats(
+        &self,
+        table_id: DataSourceId,
+        column_stats: HashMap<String, Arc<ColumnStatistics>>,
+    ) {
+        let mut writer = self.0.write().unwrap();
+        let table = writer.tables.get_mut(&table_id).unwrap();
+        table.statistics = column_stats;
     }
 }
 

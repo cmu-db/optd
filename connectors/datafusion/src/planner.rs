@@ -49,6 +49,7 @@ use optd_core::{
             BinaryOp, Cast, ColumnAssign, ColumnRef, Function, FunctionKind, Like, List, NaryOp,
             NaryOpKind,
         },
+        statistics::ColumnStatistics,
     },
     rules,
 };
@@ -56,9 +57,30 @@ use tracing::{info, warn};
 
 use crate::OptdExtensionConfig;
 
-#[derive(Default)]
 pub struct OptdQueryPlanner {
     default: DefaultPhysicalPlanner,
+    opt: Arc<Cascades>,
+}
+
+impl OptdQueryPlanner {
+    pub fn new() -> Self {
+        let ctx = IRContext::with_empty_magic();
+        let rule_set = RuleSet::builder()
+            .add_rule(rules::LogicalGetAsPhysicalTableScanRule::new())
+            .add_rule(rules::LogicalAggregateAsPhysicalHashAggregateRule::new())
+            .add_rule(rules::LogicalJoinAsPhysicalHashJoinRule::new())
+            .add_rule(rules::LogicalJoinAsPhysicalNLJoinRule::new())
+            .add_rule(rules::LogicalProjectAsPhysicalProjectRule::new())
+            .add_rule(rules::LogicalSelectAsPhysicalFilterRule::new())
+            .add_rule(rules::LogicalJoinInnerAssocRule::new())
+            .add_rule(rules::LogicalJoinInnerCommuteRule::new())
+            .build();
+        let opt = Arc::new(Cascades::new(ctx, rule_set));
+        OptdQueryPlanner {
+            default: DefaultPhysicalPlanner::default(),
+            opt,
+        }
+    }
 }
 
 impl std::fmt::Debug for OptdQueryPlanner {
@@ -159,6 +181,9 @@ impl OptdQueryPlanner {
             let optd_field = &input_schema.columns()[index];
             let column = ctx.column_by_name(&optd_field.name)?;
             let mapped = ctx.define_column(optd_field.data_type, Some(remapped_column_name));
+            if let Some(stats) = ctx.get_column_stats(&column) {
+                ctx.set_column_stats(mapped, stats);
+            }
             mappings.push(column_assign(mapped, column_ref(column)));
         }
         Some(LogicalRemap::new(input, list(mappings)).into_operator())
@@ -432,6 +457,9 @@ impl OptdQueryPlanner {
                     optd_core::ir::ScalarValue::Utf8View(v) => {
                         datafusion::scalar::ScalarValue::Utf8View(v.clone())
                     }
+                    optd_core::ir::ScalarValue::Decimal128(v, precision, scale) => {
+                        datafusion::scalar::ScalarValue::Decimal128(v.clone(), *precision, *scale)
+                    }
                 };
                 Ok(logical_expr::Expr::Literal(value, None))
             }
@@ -483,7 +511,7 @@ impl OptdQueryPlanner {
                 let x = exprs
                     .into_iter()
                     .reduce(|l, r| logical_expr::binary_expr(l, op, r))
-                    .unwrap();
+                    .unwrap_or(logical_expr::lit(true));
 
                 Ok(x)
             }
@@ -546,6 +574,9 @@ impl OptdQueryPlanner {
                 datafusion::scalar::ScalarValue::Utf8View(v) => {
                     Some(optd_core::ir::builder::utf8_view(v.as_deref().clone()))
                 }
+                datafusion::scalar::ScalarValue::Decimal128(v, precision, scale) => Some(
+                    optd_core::ir::builder::decimal128(v.clone(), *precision, *scale),
+                ),
                 value => {
                     info!(?value, "unhandled scalar value");
                     None
@@ -707,11 +738,14 @@ impl OptdQueryPlanner {
 
         let source = ctx
             .cat
-            .try_create_table(table_name, schema.clone())
+            .try_create_table(table_name.clone(), schema.clone())
             .unwrap_or_else(|existing| existing);
 
         info!(?source, ?schema);
-        ctx.add_base_table_columns(source, &schema);
+        let column = ctx.add_base_table_columns(source, &schema);
+
+        ctx.set_column_stats(column, Arc::new(ColumnStatistics::dummy(1)));
+        // println!("inserted column_stats for {}.id", table_name);
 
         let provider = source_as_provider(&node.source).unwrap();
         let exec = provider
@@ -729,6 +763,7 @@ impl OptdQueryPlanner {
                 })
                 .unwrap_or(1000),
         );
+
         let mut projections = node
             .projection
             .as_ref()
@@ -1312,6 +1347,10 @@ fn into_optd_data_type(
         datafusion::arrow::datatypes::DataType::Int64 => Some(optd_core::ir::DataType::Int64),
         datafusion::arrow::datatypes::DataType::Utf8 => Some(optd_core::ir::DataType::Utf8),
         datafusion::arrow::datatypes::DataType::Utf8View => Some(optd_core::ir::DataType::Utf8View),
+        datafusion::arrow::datatypes::DataType::Decimal128(precision, scale) => {
+            Some(optd_core::ir::DataType::Decimal128(precision, scale))
+        }
+        datafusion::arrow::datatypes::DataType::Date32 => Some(optd_core::ir::DataType::Date32),
         data_type => {
             info!(?data_type, "unsupported df data type");
             None
@@ -1328,6 +1367,10 @@ fn from_optd_data_type(
         optd_core::ir::DataType::Boolean => datafusion::arrow::datatypes::DataType::Boolean,
         optd_core::ir::DataType::Utf8 => datafusion::arrow::datatypes::DataType::Utf8,
         optd_core::ir::DataType::Utf8View => datafusion::arrow::datatypes::DataType::Utf8View,
+        optd_core::ir::DataType::Decimal128(p, s) => {
+            datafusion::arrow::datatypes::DataType::Decimal128(p, s)
+        }
+        optd_core::ir::DataType::Date32 => datafusion::arrow::datatypes::DataType::Date32,
     }
 }
 
@@ -1408,12 +1451,18 @@ impl OptdQueryPlanner {
         logical_plan: &LogicalPlan,
         session_state: &SessionState,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
+        println!("Optimization started");
         match session_state
             .config_options()
             .extensions
             .get::<OptdExtensionConfig>()
         {
-            Some(config) if config.optd_enabled => (),
+            Some(config) if config.optd_enabled => {
+                if config.optd_refresh_memo {
+                    self.opt.refresh_memo().await;
+                }
+            }
+
             _ => {
                 return self
                     .default
@@ -1421,7 +1470,6 @@ impl OptdQueryPlanner {
                     .await;
             }
         }
-        let ctx = IRContext::with_empty_magic();
 
         let (actual_logical_plan, mut explain) = match logical_plan {
             LogicalPlan::Explain(explain) => (explain.plan.as_ref(), Some(explain.clone())),
@@ -1429,7 +1477,7 @@ impl OptdQueryPlanner {
         };
 
         let res = self
-            .try_into_optd_logical_plan(actual_logical_plan, &ctx, session_state)
+            .try_into_optd_logical_plan(actual_logical_plan, &self.opt.ctx, session_state)
             .await;
 
         let Some(optd_logical) = res else {
@@ -1438,34 +1486,38 @@ impl OptdQueryPlanner {
                 .await;
         };
 
-        let rule_set = RuleSet::builder()
-            .add_rule(rules::LogicalGetAsPhysicalTableScanRule::new())
-            .add_rule(rules::LogicalAggregateAsPhysicalHashAggregateRule::new())
-            .add_rule(rules::LogicalJoinAsPhysicalHashJoinRule::new())
-            .add_rule(rules::LogicalJoinAsPhysicalNLJoinRule::new())
-            .add_rule(rules::LogicalProjectAsPhysicalProjectRule::new())
-            .add_rule(rules::LogicalSelectAsPhysicalFilterRule::new())
-            .add_rule(rules::LogicalJoinInnerCommuteRule::new())
-            .add_rule(rules::LogicalJoinInnerAssocRule::new())
-            .build();
-        let opt = Arc::new(Cascades::new(ctx, rule_set));
-        let Some(optd_physical) = opt.optimize(&optd_logical, Arc::default()).await else {
+        self.opt.ctx.show_all_statistics();
+
+        let opt_start_time = std::time::Instant::now();
+        let Some(optd_physical) = self.opt.optimize(&optd_logical, Arc::default()).await else {
             {
-                opt.memo.read().await.dump();
+                self.opt.memo.read().await.dump();
             }
             warn!("optimization failed");
             return self
                 .create_physical_plan_default(logical_plan, session_state)
                 .await;
         };
+        println!(
+            "{{ opt_time_secs: {} }}",
+            opt_start_time.elapsed().as_secs_f64()
+        );
 
         {
-            opt.memo.read().await.dump();
+            self.opt.memo.read().await.dump();
         }
-        info!("got a plan:\n{}", quick_explain(&optd_physical, &opt.ctx));
+
+        println!(
+            "logical Plan:  \n{}",
+            quick_explain(&optd_logical, &self.opt.ctx)
+        );
+        println!(
+            "got a plan:\n{}",
+            quick_explain(&optd_physical, &self.opt.ctx)
+        );
 
         let res = self
-            .try_from_optd_physical_plan(&optd_physical, &opt.ctx, session_state)
+            .try_from_optd_physical_plan(&optd_physical, &self.opt.ctx, session_state)
             .await;
         let Ok(physical_plan) = res else {
             info!(?res);
@@ -1474,10 +1526,10 @@ impl OptdQueryPlanner {
                 .await;
         };
 
-        info!("Converted into df");
+        // println!("Converted into df");
 
         explain.as_mut().map(|x| {
-            let s = quick_explain(&optd_logical, &opt.ctx);
+            let s = quick_explain(&optd_logical, &self.opt.ctx);
             x.stringified_plans.push(StringifiedPlan::new(
                 PlanType::OptimizedLogicalPlan {
                     optimizer_name: "optd-conversion".to_string(),
@@ -1487,7 +1539,7 @@ impl OptdQueryPlanner {
         });
 
         explain.as_mut().map(|x| {
-            let s = quick_explain(&optd_physical, &opt.ctx);
+            let s = quick_explain(&optd_physical, &self.opt.ctx);
             x.stringified_plans.push(StringifiedPlan::new(
                 PlanType::OptimizedPhysicalPlan {
                     optimizer_name: "optd-finalized".to_string(),
@@ -1544,6 +1596,7 @@ impl OptdQueryPlanner {
                 )) as Arc<dyn ExecutionPlan>
             })
             .unwrap_or(physical_plan))
+        // Err(DataFusionError::External("Planned".into()))
     }
 
     async fn create_physical_plan_default(
@@ -1699,11 +1752,13 @@ impl std::fmt::Display for JoinOrder {
 
 fn get_join_order_from_df_exec(rel_node: &Arc<dyn ExecutionPlan>) -> Option<JoinOrder> {
     if let Some(x) = rel_node.as_any().downcast_ref::<DataSourceExec>() {
+        // println!("DataSourceExec: {:?}", x);
         let (config, _) = x.downcast_to_file_source::<ParquetSource>()?;
         let location = config.file_groups[0].files()[0]
             .object_meta
             .location
             .to_string();
+        // println!("DataSourceExec location: {}", location);
         let maybe_table_name = location.split('/').rev().nth(1)?;
         return Some(JoinOrder::Table(maybe_table_name.to_string()));
     }

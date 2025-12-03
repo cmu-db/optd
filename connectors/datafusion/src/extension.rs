@@ -5,6 +5,8 @@ extensions_options! {
    pub struct OptdExtensionConfig {
        /// Should try run optd optimizer instead of datafusion default.
        pub optd_enabled: bool, default = true
+       /// Should refresh memo for each query.
+       pub optd_refresh_memo: bool, default = false
    }
 }
 

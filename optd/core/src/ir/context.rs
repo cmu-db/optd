@@ -10,7 +10,7 @@ use crate::ir::{
     catalog::{Catalog, DataSourceId, Schema},
     cost::CostModel,
     properties::CardinalityEstimator,
-    statistics::ValueHistogram,
+    statistics::ColumnStatistics,
 };
 
 #[derive(Clone)]
@@ -24,7 +24,7 @@ pub struct IRContext {
 
     pub(crate) source_to_first_column_id: Arc<Mutex<HashMap<DataSourceId, Column>>>,
     pub(crate) column_meta: Arc<Mutex<ColumnMetaStore>>,
-    pub(crate) histograms: Arc<Mutex<HashMap<Column, ValueHistogram>>>,
+    pub(crate) statistics: Arc<Mutex<HashMap<Column, Arc<ColumnStatistics>>>>,
 }
 
 impl IRContext {
@@ -39,7 +39,15 @@ impl IRContext {
             cm: cost,
             source_to_first_column_id: Arc::default(),
             column_meta: Arc::default(),
-            histograms: Arc::default(),
+            statistics: Arc::default(),
+        }
+    }
+
+    pub fn show_all_statistics(&self) {
+        let stats = self.statistics.lock().unwrap();
+        for (col, stat) in stats.iter() {
+            let meta = self.get_column_meta(col);
+            // println!("Column {} has statistics: {:?}", meta.name, stat);
         }
     }
 
@@ -94,13 +102,13 @@ impl IRContext {
         column_meta.get(column).clone()
     }
 
-    pub fn set_histogram(&self, column: &Column, histogram: crate::ir::statistics::ValueHistogram) {
-        let mut histograms = self.histograms.lock().unwrap();
-        histograms.insert(column.clone(), histogram);
+    pub fn set_column_stats(&self, column: Column, column_stats: Arc<ColumnStatistics>) {
+        let mut stats = self.statistics.lock().unwrap();
+        stats.insert(column.clone(), column_stats);
     }
 
-    pub fn get_histogram(&self, column: &Column) -> Option<crate::ir::statistics::ValueHistogram> {
-        let histograms = self.histograms.lock().unwrap();
-        histograms.get(column).cloned()
+    pub fn get_column_stats(&self, column: &Column) -> Option<Arc<ColumnStatistics>> {
+        let stats = self.statistics.lock().unwrap();
+        stats.get(column).cloned()
     }
 }

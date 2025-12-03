@@ -2,7 +2,23 @@ use std::sync::Arc;
 
 use datafusion::{
     execution::{SessionStateBuilder, runtime_env::RuntimeEnv},
+    optimizer::{
+        common_subexpr_eliminate::CommonSubexprEliminate,
+        decorrelate_lateral_join::DecorrelateLateralJoin,
+        decorrelate_predicate_subquery::DecorrelatePredicateSubquery,
+        eliminate_cross_join::EliminateCrossJoin,
+        eliminate_duplicated_expr::EliminateDuplicatedExpr, eliminate_filter::EliminateFilter,
+        eliminate_group_by_constant::EliminateGroupByConstant, eliminate_join::EliminateJoin,
+        eliminate_limit::EliminateLimit, eliminate_outer_join::EliminateOuterJoin,
+        extract_equijoin_predicate::ExtractEquijoinPredicate,
+        filter_null_join_keys::FilterNullJoinKeys, optimize_projections::OptimizeProjections,
+        propagate_empty_relation::PropagateEmptyRelation, push_down_filter::PushDownFilter,
+        push_down_limit::PushDownLimit, replace_distinct_aggregate::ReplaceDistinctWithAggregate,
+        scalar_subquery_to_join::ScalarSubqueryToJoin, simplify_expressions::SimplifyExpressions,
+        single_distinct_to_groupby::SingleDistinctToGroupBy,
+    },
     prelude::{DataFrame, SessionConfig, SessionContext},
+    sql::sqlparser::keywords::OPTIMIZER_COSTS,
 };
 use datafusion_cli::cli_context::CliSessionContext;
 use optd_datafusion::{OptdExtensionConfig, SessionStateBuilderOptdExt};
@@ -15,11 +31,38 @@ impl OptdCliSessionContext {
     pub fn new_with_config_rt(config: SessionConfig, runtime: Arc<RuntimeEnv>) -> Self {
         let config = config
             .with_option_extension(OptdExtensionConfig::default())
-            .set_bool("optd.optd_enabled", false);
+            .set_bool("optd.optd_enabled", true);
         let state = SessionStateBuilder::new()
             .with_config(config)
             .with_runtime_env(runtime)
             .with_default_features()
+            .with_optimizer_rules(vec![
+                // Arc::new(OptimizeUnions::new()),
+                Arc::new(SimplifyExpressions::new()),
+                // Arc::new(ReplaceDistinctWithAggregate::new()),
+                // Arc::new(EliminateJoin::new()),
+                // Arc::new(DecorrelatePredicateSubquery::new()),
+                // Arc::new(ScalarSubqueryToJoin::new()),
+                // Arc::new(DecorrelateLateralJoin::new()),
+                // // Arc::new(ExtractEquijoinPredicate::new()),
+                // Arc::new(EliminateDuplicatedExpr::new()),
+                // // Arc::new(EliminateFilter::new()),
+                // // Arc::new(EliminateCrossJoin::new()),
+                // Arc::new(EliminateLimit::new()),
+                // Arc::new(PropagateEmptyRelation::new()),
+                // Arc::new(FilterNullJoinKeys::default()),
+                // Arc::new(EliminateOuterJoin::new()),
+                // // Filters can't be pushed down past Limits, we should do PushDownFilter after PushDownLimit
+                // Arc::new(PushDownLimit::new()),
+                // Arc::new(PushDownFilter::new()),
+                // Arc::new(SingleDistinctToGroupBy::new()),
+                // // The previous optimizations added expressions and projections,
+                // // that might benefit from the following rules
+                // Arc::new(EliminateGroupByConstant::new()),
+                // Arc::new(CommonSubexprEliminate::new()),
+                // Arc::new(OptimizeProjections::new()),
+            ])
+            // .with_optimizer_rules(vec![])
             .with_optd_planner()
             .build();
         let inner = SessionContext::new_with_state(state);

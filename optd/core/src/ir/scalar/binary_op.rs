@@ -104,6 +104,14 @@ impl BinaryOpBorrowed<'_> {
     pub fn is_ge(&self) -> bool {
         matches!(self.op_kind(), BinaryOpKind::Ge)
     }
+
+    pub fn is_range(&self) -> bool {
+        self.is_lt() || self.is_le() || self.is_gt() || self.is_ge()
+    }
+
+    pub fn is_comparison(&self) -> bool {
+        self.is_eq() || self.is_range()
+    }
 }
 
 impl Explain for BinaryOpBorrowed<'_> {

@@ -32,6 +32,11 @@ impl Cascades {
         }
     }
 
+    pub async fn refresh_memo(&self) {
+        let mut writer = self.memo.write().await;
+        *writer = MemoTable::new(self.ctx.clone());
+    }
+
     /// Optimizes a query plan to find the lowest-cost execution plan that satisfies the requirement.
     pub async fn optimize(
         self: &Arc<Self>,

@@ -12,6 +12,6 @@ pub trait SessionStateBuilderOptdExt: Sized {
 
 impl SessionStateBuilderOptdExt for datafusion::execution::SessionStateBuilder {
     fn with_optd_planner(self) -> Self {
-        self.with_query_planner(Arc::new(OptdQueryPlanner::default()))
+        self.with_query_planner(Arc::new(OptdQueryPlanner::new()))
     }
 }

@@ -5,4 +5,6 @@ pub enum DataType {
     Boolean,
     Utf8,
     Utf8View,
+    Decimal128(u8, i8),
+    Date32,
 }
