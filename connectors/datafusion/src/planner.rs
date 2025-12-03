@@ -460,6 +460,9 @@ impl OptdQueryPlanner {
                     optd_core::ir::ScalarValue::Decimal128(v, precision, scale) => {
                         datafusion::scalar::ScalarValue::Decimal128(v.clone(), *precision, *scale)
                     }
+                    optd_core::ir::ScalarValue::Date32(v) => {
+                        datafusion::scalar::ScalarValue::Date32(v.clone())
+                    }
                 };
                 Ok(logical_expr::Expr::Literal(value, None))
             }
@@ -577,6 +580,9 @@ impl OptdQueryPlanner {
                 datafusion::scalar::ScalarValue::Decimal128(v, precision, scale) => Some(
                     optd_core::ir::builder::decimal128(v.clone(), *precision, *scale),
                 ),
+                datafusion::scalar::ScalarValue::Date32(v) => {
+                    Some(optd_core::ir::builder::date32(v.clone()))
+                }
                 value => {
                     info!(?value, "unhandled scalar value");
                     None
@@ -1154,7 +1160,7 @@ impl OptdQueryPlanner {
                     .collect::<datafusion::common::Result<Vec<_>>>()
                     .unwrap();
 
-                warn!(name= %input_exec.name(), schema = ?input_exec.schema());
+                // warn!(name= %input_exec.name(), schema = ?input_exec.schema());
                 Ok(
                     Arc::new(ProjectionExec::try_new(physical_exprs, input_exec).unwrap())
                         as Arc<dyn ExecutionPlan>,

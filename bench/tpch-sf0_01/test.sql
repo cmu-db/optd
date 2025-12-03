@@ -101,4 +101,115 @@ CREATE EXTERNAL TABLE supplier_tbl STORED AS CSV LOCATION 'bench/tpch-sf0_01/sup
 insert into supplier select column_1, column_2, column_3, column_4, column_5, column_6, column_7 from supplier_tbl;
 
 set optd.optd_predicate_pushdown = true;
-SELECT * FROM lineitem, orders WHERE l_orderkey = o_orderkey AND l_quantity = 46.00;
+-- SELECT * FROM lineitem, orders WHERE l_orderkey = o_orderkey AND l_quantity = 46.00;
+
+-- select
+--         s_acctbal,
+--         s_name,
+--         n_name,
+--         p_partkey,
+--         p_mfgr,
+--         s_address,
+--         s_phone,
+--         s_comment
+-- from
+--         part,
+--         supplier,
+--         partsupp,
+--         nation,
+--         region
+-- where
+--         p_partkey = ps_partkey
+--         and s_suppkey = ps_suppkey
+--         and p_size = 15
+--         -- and p_type like '%BRASS'
+--         and s_nationkey = n_nationkey
+--         and n_regionkey = r_regionkey
+--         and r_name = 'EUROPE';
+
+
+-- Q3
+-- select
+--         l_orderkey,
+--         sum(l_extendedprice * (1 - l_discount)) as revenue,
+--         o_orderdate,
+--         o_shippriority
+-- from
+--         customer,
+--         orders,
+--         lineitem
+-- where
+--         c_mktsegment = 'BUILDING'
+--         and c_custkey = o_custkey
+--         and l_orderkey = o_orderkey
+--         and o_orderdate < date '1995-03-15'
+--         and l_shipdate > date '1995-03-15'
+-- group by
+--         l_orderkey,
+--         o_orderdate,
+--         o_shippriority
+-- order by
+--         revenue desc,
+--         o_orderdate;
+
+
+-- Q5
+-- select
+--         n_name,
+--         sum(l_extendedprice * (1 - l_discount)) as revenue
+-- from
+--         customer,
+--         orders,
+--         lineitem,
+--         supplier,
+--         nation,
+--         region
+-- where
+--         c_custkey = o_custkey
+--         and l_orderkey = o_orderkey
+--         and l_suppkey = s_suppkey
+--         and c_nationkey = s_nationkey
+--         and s_nationkey = n_nationkey
+--         and n_regionkey = r_regionkey
+--         and r_name = 'ASIA'
+--         and o_orderdate >= date '1994-01-01'
+--         and o_orderdate < date '1994-01-01' + interval '1' year
+-- group by
+--         n_name
+-- order by
+--         revenue desc
+
+
+select
+        c_custkey,
+        c_name,
+        sum(l_extendedprice * (1 - l_discount)) as revenue,
+        c_acctbal,
+        n_name,
+        c_address,
+        c_phone,
+        c_comment
+from
+        customer,
+        orders,
+        lineitem,
+        nation
+where
+        c_custkey = o_custkey
+        and l_orderkey = o_orderkey
+        and o_orderdate >= date '1993-10-01'
+        and o_orderdate < date '1993-10-01' + interval '3' month
+        and l_returnflag = 'R'
+        and c_nationkey = n_nationkey
+group by
+        c_custkey,
+        c_name,
+        c_acctbal,
+        c_phone,
+        n_name,
+        c_address,
+        c_comment
+order by
+        revenue desc
+-- limit
+--         20

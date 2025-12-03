@@ -10,6 +10,7 @@ pub enum ScalarValue {
     Utf8(Option<String>),
     Utf8View(Option<String>),
     Decimal128(Option<i128>, u8, i8),
+    Date32(Option<i32>),
 }
 
 impl PartialOrd for ScalarValue {
@@ -34,6 +35,7 @@ impl ScalarValue {
             ScalarValue::Utf8(v) => v.is_none(),
             ScalarValue::Utf8View(v) => v.is_none(),
             ScalarValue::Decimal128(v, _, _) => v.is_none(),
+            ScalarValue::Date32(v) => v.is_none(),
         }
     }
 
@@ -47,6 +49,7 @@ impl ScalarValue {
             ScalarValue::Decimal128(_, precision, scale) => {
                 DataType::Decimal128(*precision, *scale)
             }
+            ScalarValue::Date32(_) => DataType::Date32,
         }
     }
 }
@@ -74,6 +77,7 @@ impl std::fmt::Display for ScalarValue {
                 Some(val) => write!(f, "{val}::decimal128({}, {})", precision, scale),
                 None => write!(f, "null::decimal128({}, {})", precision, scale),
             },
+            ScalarValue::Date32(v) => fmt_optional(f, v, "date32"),
         }
     }
 }

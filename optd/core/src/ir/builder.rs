@@ -165,6 +165,10 @@ pub fn decimal128(v: impl Into<Option<i128>>, precision: u8, scale: i8) -> Arc<S
     Literal::new(ScalarValue::Decimal128(v.into(), precision, scale)).into_scalar()
 }
 
+pub fn date32(v: impl Into<Option<i32>>) -> Arc<Scalar> {
+    Literal::new(ScalarValue::Date32(v.into())).into_scalar()
+}
+
 /// Creates a literal of type integer (i32).
 pub fn integer(v: impl Into<Option<i32>>) -> Arc<Scalar> {
     Literal::new(ScalarValue::Int32(v.into())).into_scalar()
