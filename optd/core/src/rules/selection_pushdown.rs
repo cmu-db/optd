@@ -74,9 +74,8 @@ impl SelectionPushdownRule {
             .iter()
             .enumerate()
             .map(|(i, op)| {
-                ht.remove(&i)
-                    .map(|acc| self.transform_inner(&op, ctx, acc))
-                    .unwrap_or_else(|| Ok(op.clone()))
+                let acc = ht.remove(&i).unwrap_or_else(|| Vec::new());
+                self.transform_inner(&op, ctx, acc)
             })
             .collect::<Result<Vec<_>, _>>()?;
 
