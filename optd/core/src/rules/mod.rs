@@ -3,6 +3,7 @@ mod implementations;
 mod logical_join_inner_assoc;
 mod logical_join_inner_commute;
 mod logical_select_join_transpose;
+mod selection_pushdown;
 
 pub use enforcers::*;
 pub use implementations::*;
