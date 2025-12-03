@@ -23,6 +23,7 @@ use datafusion::{
         joins::{
             HashJoinExec, NestedLoopJoinExec, PartitionMode, SortMergeJoinExec, utils::JoinFilter,
         },
+        limit::GlobalLimitExec,
         projection::ProjectionExec,
         sorts::sort::SortExec,
         udaf::AggregateFunctionExpr,
@@ -40,8 +41,9 @@ use optd_core::{
         convert::{IntoOperator, IntoScalar},
         explain::quick_explain,
         operator::{
-            EnforcerSort, LogicalOrderBy, LogicalRemap, PhysicalFilter, PhysicalHashAggregate,
-            PhysicalHashJoin, PhysicalNLJoin, PhysicalProject, PhysicalTableScan, join,
+            EnforcerSort, LogicalLimit, LogicalOrderBy, LogicalRemap, PhysicalFilter,
+            PhysicalHashAggregate, PhysicalHashJoin, PhysicalNLJoin, PhysicalProject,
+            PhysicalTableScan, join,
         },
         properties::TupleOrderingDirection,
         rule::{Rule, RuleSet},
@@ -136,10 +138,41 @@ impl OptdQueryPlanner {
                 self.try_into_optd_logical_remap(alias, ctx, session_state)
                     .await
             }
+            LogicalPlan::Limit(limit) => {
+                self.try_into_optd_logical_limit(limit, ctx, session_state)
+                    .await
+            }
             plan => {
                 info!(%plan, "not supported df_logical_plan");
                 None
             }
+        }
+    }
+
+    pub async fn try_into_optd_logical_limit(
+        &self,
+        node: &logical_plan::Limit,
+        ctx: &IRContext,
+        session_state: &SessionState,
+    ) -> Option<Arc<optd_core::ir::Operator>> {
+        let input =
+            Box::pin(self.try_into_optd_logical_plan(&node.input, ctx, session_state)).await?;
+
+        if node.skip.is_some() {
+            return None;
+        }
+
+        if let Some(fetch) = &node.fetch {
+            if let logical_expr::Expr::Literal(datafusion::common::ScalarValue::Int64(Some(n)), _) =
+                fetch.as_ref()
+            {
+                let limit = *n as usize;
+                Some(LogicalLimit::new(limit, input).into_operator())
+            } else {
+                return None;
+            }
+        } else {
+            return None;
         }
     }
 
@@ -1316,6 +1349,16 @@ impl OptdQueryPlanner {
                 // warn!(?input_exec);
                 Ok(
                     Arc::new(ProjectionExec::try_new(physical_exprs, input_exec).unwrap())
+                        as Arc<dyn ExecutionPlan>,
+                )
+            }
+            OperatorKind::LogicalLimit(meta) => {
+                let limit = LogicalLimit::borrow_raw_parts(meta, &optd_physical.common);
+                let input_exec =
+                    Box::pin(self.try_from_optd_physical_plan(limit.input(), ctx, session_state))
+                        .await?;
+                Ok(
+                    Arc::new(GlobalLimitExec::new(input_exec, 0, Some(*limit.limit())))
                         as Arc<dyn ExecutionPlan>,
                 )
             }

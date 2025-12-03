@@ -218,8 +218,15 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
                 ordering.is_empty().then(|| vec![ordering.clone()].into())
             }
             OperatorKind::LogicalRemap(_) => {
-                // Hash aggregate does not maintain tuple ordering.
                 ordering.is_empty().then(|| vec![ordering.clone()].into())
+            }
+            OperatorKind::LogicalLimit(meta) => {
+                let limit = LogicalLimit::borrow_raw_parts(meta, &self.common);
+                let output_from_input = limit.input().output_columns(ctx);
+                ordering
+                    .iter_columns()
+                    .all(|col| output_from_input.contains(col))
+                    .then(|| vec![ordering.clone()].into())
             }
         }
     }

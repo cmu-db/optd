@@ -328,6 +328,10 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
             OperatorKind::LogicalRemap(meta) => LogicalRemap::borrow_raw_parts(meta, &op.common)
                 .input()
                 .cardinality(ctx),
+            OperatorKind::LogicalLimit(meta) => {
+                let limit = LogicalLimit::borrow_raw_parts(meta, &op.common);
+                Cardinality::with_count_lossy(*limit.limit())
+            }
         }
     }
 }

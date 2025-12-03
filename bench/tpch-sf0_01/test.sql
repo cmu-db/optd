@@ -180,7 +180,7 @@ set optd.optd_predicate_pushdown = true;
 --         revenue desc
 
 
-select
+explain select
         c_custkey,
         c_name,
         sum(l_extendedprice * (1 - l_discount)) as revenue,
@@ -211,5 +211,5 @@ group by
         c_comment
 order by
         revenue desc
--- limit
---         20
+limit
+        20

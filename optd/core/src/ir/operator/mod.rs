@@ -8,6 +8,7 @@ pub use enforcer::sort::*;
 pub use logical::aggregate::*;
 pub use logical::get::*;
 pub use logical::join::{LogicalJoin, LogicalJoinBorrowed, LogicalJoinMetadata};
+pub use logical::limit::{LogicalLimit, LogicalLimitBorrowed, LogicalLimitMetadata};
 pub use logical::order_by::*;
 pub use logical::project::*;
 pub use logical::remap::*;
@@ -41,6 +42,7 @@ pub enum OperatorKind {
     LogicalAggregate(LogicalAggregateMetadata),
     LogicalOrderBy(LogicalOrderByMetadata),
     LogicalRemap(LogicalRemapMetadata),
+    LogicalLimit(LogicalLimitMetadata),
     EnforcerSort(EnforcerSortMetadata),
     PhysicalTableScan(PhysicalTableScanMetadata),
     PhysicalNLJoin(PhysicalNLJoinMetadata),
@@ -188,6 +190,9 @@ impl Explain for Operator {
             }
             OperatorKind::LogicalRemap(meta) => {
                 LogicalRemap::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            OperatorKind::LogicalLimit(meta) => {
+                LogicalLimit::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
         }
     }

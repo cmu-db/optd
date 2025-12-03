@@ -6,9 +6,9 @@ use crate::ir::{
     OperatorKind,
     catalog::{Field, Schema},
     operator::{
-        EnforcerSort, LogicalAggregate, LogicalGet, LogicalJoin, LogicalOrderBy, LogicalProject,
-        LogicalRemap, LogicalSelect, PhysicalFilter, PhysicalHashAggregate, PhysicalHashJoin,
-        PhysicalNLJoin, PhysicalProject, PhysicalTableScan,
+        EnforcerSort, LogicalAggregate, LogicalGet, LogicalJoin, LogicalLimit, LogicalOrderBy,
+        LogicalProject, LogicalRemap, LogicalSelect, PhysicalFilter, PhysicalHashAggregate,
+        PhysicalHashJoin, PhysicalNLJoin, PhysicalProject, PhysicalTableScan,
     },
     properties::{Derive, GetProperty, PropertyMarker},
     scalar::{ColumnAssign, List},
@@ -198,6 +198,11 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                     })
                     .collect_vec();
                 Some(Schema::new(columns))
+            }
+            OperatorKind::LogicalLimit(logical_limit_metadata) => {
+                let logical_limit =
+                    LogicalLimit::borrow_raw_parts(logical_limit_metadata, &self.common);
+                logical_limit.input().output_schema(ctx)
             }
         }
     }

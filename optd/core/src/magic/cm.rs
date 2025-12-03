@@ -76,6 +76,13 @@ impl CostModel for MagicCostModel {
                     * Cost::UNIT;
                 Some(cost)
             }
+            OperatorKind::LogicalLimit(logical_limit_metadata) => {
+                let limit = LogicalLimit::borrow_raw_parts(logical_limit_metadata, &op.common)
+                    .limit()
+                    .clone() as f64;
+                let cost = limit * Self::MAGIC_COMPUTATION_FACTOR * Cost::UNIT;
+                Some(cost)
+            }
         }
     }
 }

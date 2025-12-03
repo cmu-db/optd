@@ -3,8 +3,8 @@ use std::sync::Arc;
 use crate::ir::{
     ColumnSet, OperatorKind,
     operator::{
-        LogicalAggregate, LogicalGet, LogicalProject, LogicalRemap, PhysicalHashAggregate,
-        PhysicalProject, PhysicalTableScan,
+        LogicalAggregate, LogicalGet, LogicalLimit, LogicalProject, LogicalRemap,
+        PhysicalHashAggregate, PhysicalProject, PhysicalTableScan,
     },
     properties::{Derive, GetProperty, PropertyMarker},
     scalar::{ColumnAssign, ColumnRef, List},
@@ -121,6 +121,10 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                     })
                     .collect();
                 Arc::new(set)
+            }
+            OperatorKind::LogicalLimit(meta) => {
+                let logical_limit = LogicalLimit::borrow_raw_parts(meta, &self.common);
+                logical_limit.input().output_columns(ctx)
             }
         }
     }
