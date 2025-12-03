@@ -4,7 +4,7 @@ use snafu::whatever;
 
 use crate::ir::{
     IRContext, OperatorKind,
-    operator::{LogicalJoin, LogicalSelect},
+    operator::LogicalSelect,
     rule::{OperatorPattern, Rule},
     scalar::NaryOp,
 };
@@ -112,11 +112,8 @@ mod tests {
     use crate::ir::{
         Column, IRContext,
         builder::{boolean, column_ref, integer},
-        convert::{IntoOperator, IntoScalar},
         explain::quick_explain,
-        operator::{MockScan, MockSpec, join::JoinType},
-        rule,
-        scalar::Literal,
+        operator::join::JoinType,
     };
 
     use super::*;

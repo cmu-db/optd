@@ -44,14 +44,14 @@ use optd_core::{
             PhysicalHashJoin, PhysicalNLJoin, PhysicalProject, PhysicalTableScan, join,
         },
         properties::TupleOrderingDirection,
-        rule::RuleSet,
+        rule::{Rule, RuleSet},
         scalar::{
             BinaryOp, Cast, ColumnAssign, ColumnRef, Function, FunctionKind, Like, List, NaryOp,
             NaryOpKind,
         },
         statistics::ColumnStatistics,
     },
-    rules,
+    rules::{self, SelectionPushdownRule},
 };
 use tracing::{info, warn};
 
@@ -1451,6 +1451,7 @@ impl OptdQueryPlanner {
         logical_plan: &LogicalPlan,
         session_state: &SessionState,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
+        let mut should_pushdown = false;
         println!("Optimization started");
         match session_state
             .config_options()
@@ -1461,6 +1462,7 @@ impl OptdQueryPlanner {
                 if config.optd_refresh_memo {
                     self.opt.refresh_memo().await;
                 }
+                should_pushdown = config.optd_predicate_pushdown;
             }
 
             _ => {
@@ -1488,8 +1490,18 @@ impl OptdQueryPlanner {
 
         self.opt.ctx.show_all_statistics();
 
+        let predicate_pushdown = SelectionPushdownRule::new();
+        let normalized = if should_pushdown {
+            predicate_pushdown
+                .transform(&optd_logical, &self.opt.ctx)
+                .unwrap()[0]
+                .clone()
+        } else {
+            optd_logical.clone()
+        };
+
         let opt_start_time = std::time::Instant::now();
-        let Some(optd_physical) = self.opt.optimize(&optd_logical, Arc::default()).await else {
+        let Some(optd_physical) = self.opt.optimize(&normalized, Arc::default()).await else {
             {
                 self.opt.memo.read().await.dump();
             }
@@ -1507,14 +1519,18 @@ impl OptdQueryPlanner {
             self.opt.memo.read().await.dump();
         }
 
-        println!(
-            "logical Plan:  \n{}",
-            quick_explain(&optd_logical, &self.opt.ctx)
-        );
-        println!(
-            "got a plan:\n{}",
-            quick_explain(&optd_physical, &self.opt.ctx)
-        );
+        // println!(
+        //     "logical Plan:  \n{}",
+        //     quick_explain(&optd_logical, &self.opt.ctx)
+        // );
+        // println!(
+        //     "logical Plan after pushdown:  \n{}",
+        //     quick_explain(&normalized, &self.opt.ctx)
+        // );
+        // println!(
+        //     "got a plan:\n{}",
+        //     quick_explain(&optd_physical, &self.opt.ctx)
+        // );
 
         let res = self
             .try_from_optd_physical_plan(&optd_physical, &self.opt.ctx, session_state)

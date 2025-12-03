@@ -10,3 +10,4 @@ pub use implementations::*;
 pub use logical_join_inner_assoc::LogicalJoinInnerAssocRule;
 pub use logical_join_inner_commute::LogicalJoinInnerCommuteRule;
 pub use logical_select_join_transpose::LogicalSelectJoinTransposeRule;
+pub use selection_pushdown::SelectionPushdownRule;

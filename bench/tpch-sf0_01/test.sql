@@ -100,4 +100,5 @@ insert into region select column_1, column_2, column_3 from region_tbl;
 CREATE EXTERNAL TABLE supplier_tbl STORED AS CSV LOCATION 'bench/tpch-sf0_01/supplier.tbl' OPTIONS('DELIMITER' '|', 'HAS_HEADER' 'false');
 insert into supplier select column_1, column_2, column_3, column_4, column_5, column_6, column_7 from supplier_tbl;
 
+set optd.optd_predicate_pushdown = true;
 SELECT * FROM lineitem, orders WHERE l_orderkey = o_orderkey AND l_quantity = 46.00;
