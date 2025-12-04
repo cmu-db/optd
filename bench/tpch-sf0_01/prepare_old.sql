@@ -1,0 +1,16 @@
+CREATE TABLE IF NOT EXISTS lineitem AS SELECT * FROM 'bench/tpch-sf0_01/lineitem.parquet' LIMIT 0;
+INSERT INTO lineitem SELECT * FROM 'bench/tpch-sf0_01/lineitem.parquet';
+CREATE TABLE IF NOT EXISTS customer AS SELECT * FROM 'bench/tpch-sf0_01/customer.parquet' LIMIT 0;
+INSERT INTO customer SELECT * FROM 'bench/tpch-sf0_01/customer.parquet';
+CREATE TABLE IF NOT EXISTS nation AS SELECT * FROM 'bench/tpch-sf0_01/nation.parquet' LIMIT 0;
+INSERT INTO nation SELECT * FROM 'bench/tpch-sf0_01/nation.parquet';
+CREATE TABLE IF NOT EXISTS orders AS SELECT * FROM 'bench/tpch-sf0_01/orders.parquet' LIMIT 0;
+INSERT INTO orders SELECT * FROM 'bench/tpch-sf0_01/orders.parquet';
+CREATE TABLE IF NOT EXISTS part AS SELECT * FROM 'bench/tpch-sf0_01/part.parquet' LIMIT 0;
+INSERT INTO part SELECT * FROM 'bench/tpch-sf0_01/part.parquet';
+CREATE TABLE IF NOT EXISTS partsupp AS SELECT * FROM 'bench/tpch-sf0_01/partsupp.parquet' 0;
+INSERT INTO partsupp SELECT * FROM 'bench/tpch-sf0_01/partsupp.parquet';
+CREATE TABLE IF NOT EXISTS region AS SELECT * FROM 'bench/tpch-sf0_01/region.parquet' LIMIT 0;
+INSERT INTO region SELECT * FROM 'bench/tpch-sf0_01/region.parquet';
+CREATE TABLE IF NOT EXISTS supplier AS SELECT * FROM 'bench/tpch-sf0_01/supplier.parquet' LIMIT 0;
+INSERT INTO supplier SELECT * FROM 'bench/tpch-sf0_01/supplier.parquet';
