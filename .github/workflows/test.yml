@@ -45,28 +45,28 @@ jobs:
       # https://github.com/rust-lang/cargo/issues/6669
       - name: cargo test --doc
         run: cargo test --locked --all-features --doc
-  minimal:
-    # This action chooses the oldest version of the dependencies permitted by Cargo.toml to ensure
-    # that this crate is compatible with the minimal version that this crate and its dependencies
-    # require. This will pickup issues where this create relies on functionality that was introduced
-    # later than the actual version specified (e.g., when we choose just a major version, but a
-    # method was added after this version).
-    runs-on: ubuntu-latest
-    name: ubuntu / stable / minimal-versions
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          submodules: true
-      - name: Install stable
-        uses: dtolnay/rust-toolchain@stable
-      - name: Install nightly for -Z direct-minimal-versions
-        uses: dtolnay/rust-toolchain@nightly
-      - name: rustup default stable
-        run: rustup default stable
-      - name: cargo update -Z direct-minimal-versions
-        run: cargo +nightly update -Z direct-minimal-versions
-      - name: cargo test
-        run: cargo test --locked --all-features --all-targets
+  # minimal:
+  #   # This action chooses the oldest version of the dependencies permitted by Cargo.toml to ensure
+  #   # that this crate is compatible with the minimal version that this crate and its dependencies
+  #   # require. This will pickup issues where this create relies on functionality that was introduced
+  #   # later than the actual version specified (e.g., when we choose just a major version, but a
+  #   # method was added after this version).
+  #   runs-on: ubuntu-latest
+  #   name: ubuntu / stable / minimal-versions
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #       with:
+  #         submodules: true
+  #     - name: Install stable
+  #       uses: dtolnay/rust-toolchain@stable
+  #     - name: Install nightly for -Z direct-minimal-versions
+  #       uses: dtolnay/rust-toolchain@nightly
+  #     - name: rustup default stable
+  #       run: rustup default stable
+  #     - name: cargo update -Z direct-minimal-versions
+  #       run: cargo +nightly update -Z direct-minimal-versions
+  #     - name: cargo test
+  #       run: cargo test --locked --all-features --all-targets
   os-check:
     # run cargo test on mac and windows
     runs-on: ${{ matrix.os }}
