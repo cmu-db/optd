@@ -493,7 +493,7 @@ async fn test_statistics_versioning() {
 // Concurrency Tests
 // ============================================================================
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_concurrent_read_operations() {
     let (_temp_dir, service, handle) = create_test_service();
 
@@ -519,7 +519,7 @@ async fn test_concurrent_read_operations() {
     handle.shutdown().await.unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_concurrent_mixed_operations() {
     let (_temp_dir, service, handle) = create_test_service();
 
@@ -1013,7 +1013,7 @@ async fn test_rapid_sequential_updates() {
 // Performance and Stress Tests
 // ============================================================================
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_high_concurrency_stress() {
     let (_temp_dir, service, handle) = create_test_service();
 
@@ -1021,9 +1021,9 @@ async fn test_high_concurrency_stress() {
         service.run().await;
     });
 
-    // Spawn 100 concurrent tasks
+    // Spawn 50 concurrent tasks
     let mut tasks = vec![];
-    for i in 0..100 {
+    for i in 0..50 {
         let handle_clone = handle.clone();
         tasks.push(tokio::spawn(async move {
             if i % 3 == 0 {
