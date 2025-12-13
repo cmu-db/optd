@@ -98,6 +98,31 @@ const CREATE_EXTRA_TABLES_QUERY: &str = r#"
         payload VARCHAR,
         query_instance_id BIGINT
     );
+
+    CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_external_table (
+        table_id BIGINT PRIMARY KEY,
+        schema_id BIGINT NOT NULL,
+        table_name VARCHAR NOT NULL,
+        location VARCHAR NOT NULL,
+        file_format VARCHAR NOT NULL,
+        compression VARCHAR,
+        begin_snapshot BIGINT NOT NULL,
+        end_snapshot BIGINT,
+        created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS __ducklake_metadata_metalake.main.optd_external_table_options (
+        table_id BIGINT NOT NULL,
+        option_key VARCHAR NOT NULL,
+        option_value VARCHAR NOT NULL,
+        PRIMARY KEY (table_id, option_key)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_optd_external_table_schema 
+        ON __ducklake_metadata_metalake.main.optd_external_table(schema_id, table_name, end_snapshot);
+
+    CREATE INDEX IF NOT EXISTS idx_optd_external_table_snapshot
+        ON __ducklake_metadata_metalake.main.optd_external_table(begin_snapshot, end_snapshot);
 "#;
 
 // SQL query to fetch the latest snapshot information.
