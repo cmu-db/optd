@@ -1,6 +1,6 @@
 use crate::{
-    Catalog, CurrentSchema, DuckLakeCatalog, Error, SchemaRef, SnapshotId, SnapshotInfo,
-    TableStatistics,
+    Catalog, CurrentSchema, DuckLakeCatalog, Error, ExternalTableMetadata, RegisterTableRequest,
+    SchemaRef, SnapshotId, SnapshotInfo, TableStatistics,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -24,6 +24,24 @@ pub trait CatalogBackend: Send + 'static {
         table_id: i64,
         stats_type: &str,
         payload: &str,
+    ) -> Result<(), Error>;
+    fn register_external_table(
+        &mut self,
+        request: RegisterTableRequest,
+    ) -> Result<ExternalTableMetadata, Error>;
+    fn get_external_table(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
+    ) -> Result<Option<ExternalTableMetadata>, Error>;
+    fn list_external_tables(
+        &mut self,
+        schema_name: Option<&str>,
+    ) -> Result<Vec<ExternalTableMetadata>, Error>;
+    fn drop_external_table(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
     ) -> Result<(), Error>;
 }
 
@@ -62,6 +80,36 @@ impl<T: Catalog + Send + 'static> CatalogBackend for T {
     ) -> Result<(), Error> {
         Catalog::update_table_column_stats(self, column_id, table_id, stats_type, payload)
     }
+
+    fn register_external_table(
+        &mut self,
+        request: RegisterTableRequest,
+    ) -> Result<ExternalTableMetadata, Error> {
+        Catalog::register_external_table(self, request)
+    }
+
+    fn get_external_table(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
+    ) -> Result<Option<ExternalTableMetadata>, Error> {
+        Catalog::get_external_table(self, schema_name, table_name)
+    }
+
+    fn list_external_tables(
+        &mut self,
+        schema_name: Option<&str>,
+    ) -> Result<Vec<ExternalTableMetadata>, Error> {
+        Catalog::list_external_tables(self, schema_name)
+    }
+
+    fn drop_external_table(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
+    ) -> Result<(), Error> {
+        Catalog::drop_external_table(self, schema_name, table_name)
+    }
 }
 
 #[derive(Debug)]
@@ -95,6 +143,28 @@ pub enum CatalogRequest {
         table_id: i64,
         stats_type: String,
         payload: String,
+        respond_to: oneshot::Sender<Result<(), Error>>,
+    },
+
+    RegisterExternalTable {
+        request: RegisterTableRequest,
+        respond_to: oneshot::Sender<Result<ExternalTableMetadata, Error>>,
+    },
+
+    GetExternalTable {
+        schema_name: Option<String>,
+        table_name: String,
+        respond_to: oneshot::Sender<Result<Option<ExternalTableMetadata>, Error>>,
+    },
+
+    ListExternalTables {
+        schema_name: Option<String>,
+        respond_to: oneshot::Sender<Result<Vec<ExternalTableMetadata>, Error>>,
+    },
+
+    DropExternalTable {
+        schema_name: Option<String>,
+        table_name: String,
         respond_to: oneshot::Sender<Result<(), Error>>,
     },
 
@@ -220,6 +290,90 @@ impl CatalogServiceHandle {
         })?
     }
 
+    pub async fn register_external_table(
+        &self,
+        request: RegisterTableRequest,
+    ) -> Result<ExternalTableMetadata, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(CatalogRequest::RegisterExternalTable {
+                request,
+                respond_to: tx,
+            })
+            .await
+            .map_err(|_| Error::QueryExecution {
+                source: duckdb::Error::ExecuteReturnedResults,
+            })?;
+
+        rx.await.map_err(|_| Error::QueryExecution {
+            source: duckdb::Error::ExecuteReturnedResults,
+        })?
+    }
+
+    pub async fn get_external_table(
+        &self,
+        schema_name: Option<&str>,
+        table_name: &str,
+    ) -> Result<Option<ExternalTableMetadata>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(CatalogRequest::GetExternalTable {
+                schema_name: schema_name.map(|s| s.to_string()),
+                table_name: table_name.to_string(),
+                respond_to: tx,
+            })
+            .await
+            .map_err(|_| Error::QueryExecution {
+                source: duckdb::Error::ExecuteReturnedResults,
+            })?;
+
+        rx.await.map_err(|_| Error::QueryExecution {
+            source: duckdb::Error::ExecuteReturnedResults,
+        })?
+    }
+
+    pub async fn list_external_tables(
+        &self,
+        schema_name: Option<&str>,
+    ) -> Result<Vec<ExternalTableMetadata>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(CatalogRequest::ListExternalTables {
+                schema_name: schema_name.map(|s| s.to_string()),
+                respond_to: tx,
+            })
+            .await
+            .map_err(|_| Error::QueryExecution {
+                source: duckdb::Error::ExecuteReturnedResults,
+            })?;
+
+        rx.await.map_err(|_| Error::QueryExecution {
+            source: duckdb::Error::ExecuteReturnedResults,
+        })?
+    }
+
+    pub async fn drop_external_table(
+        &self,
+        schema_name: Option<&str>,
+        table_name: &str,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(CatalogRequest::DropExternalTable {
+                schema_name: schema_name.map(|s| s.to_string()),
+                table_name: table_name.to_string(),
+                respond_to: tx,
+            })
+            .await
+            .map_err(|_| Error::QueryExecution {
+                source: duckdb::Error::ExecuteReturnedResults,
+            })?;
+
+        rx.await.map_err(|_| Error::QueryExecution {
+            source: duckdb::Error::ExecuteReturnedResults,
+        })?
+    }
+
     pub async fn shutdown(&self) -> Result<(), Error> {
         self.sender
             .send(CatalogRequest::Shutdown)
@@ -304,6 +458,44 @@ impl<B: CatalogBackend> CatalogService<B> {
                         &stats_type,
                         &payload,
                     );
+                    let _ = respond_to.send(result);
+                }
+
+                CatalogRequest::RegisterExternalTable {
+                    request,
+                    respond_to,
+                } => {
+                    let result = self.backend.register_external_table(request);
+                    let _ = respond_to.send(result);
+                }
+
+                CatalogRequest::GetExternalTable {
+                    schema_name,
+                    table_name,
+                    respond_to,
+                } => {
+                    let result = self
+                        .backend
+                        .get_external_table(schema_name.as_deref(), &table_name);
+                    let _ = respond_to.send(result);
+                }
+
+                CatalogRequest::ListExternalTables {
+                    schema_name,
+                    respond_to,
+                } => {
+                    let result = self.backend.list_external_tables(schema_name.as_deref());
+                    let _ = respond_to.send(result);
+                }
+
+                CatalogRequest::DropExternalTable {
+                    schema_name,
+                    table_name,
+                    respond_to,
+                } => {
+                    let result = self
+                        .backend
+                        .drop_external_table(schema_name.as_deref(), &table_name);
                     let _ = respond_to.send(result);
                 }
 

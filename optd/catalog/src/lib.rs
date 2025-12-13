@@ -42,6 +42,32 @@ pub trait Catalog {
         stats_type: &str,
         payload: &str,
     ) -> Result<(), Error>;
+
+    /// Registers a new external table in the catalog.
+    fn register_external_table(
+        &mut self,
+        request: RegisterTableRequest,
+    ) -> Result<ExternalTableMetadata, Error>;
+
+    /// Retrieves external table metadata by name.
+    fn get_external_table(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
+    ) -> Result<Option<ExternalTableMetadata>, Error>;
+
+    /// Lists all active external tables in a schema.
+    fn list_external_tables(
+        &mut self,
+        schema_name: Option<&str>,
+    ) -> Result<Vec<ExternalTableMetadata>, Error>;
+
+    /// Soft-deletes an external table by setting its end_snapshot.
+    fn drop_external_table(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
+    ) -> Result<(), Error>;
 }
 
 const DEFAULT_METADATA_FILE: &str = "metadata.ducklake";
@@ -374,6 +400,31 @@ pub struct CurrentSchema {
     pub end_snapshot: Option<i64>,
 }
 
+/// Metadata for an external table including location, format, and options.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExternalTableMetadata {
+    pub table_id: i64,
+    pub schema_id: i64,
+    pub table_name: String,
+    pub location: String,
+    pub file_format: String,
+    pub compression: Option<String>,
+    pub options: HashMap<String, String>,
+    pub begin_snapshot: i64,
+    pub end_snapshot: Option<i64>,
+}
+
+/// Request to register a new external table in the catalog.
+#[derive(Debug, Clone)]
+pub struct RegisterTableRequest {
+    pub table_name: String,
+    pub schema_name: Option<String>,
+    pub location: String,
+    pub file_format: String,
+    pub compression: Option<String>,
+    pub options: HashMap<String, String>,
+}
+
 /// A catalog implementation using DuckDB with snapshot management.
 pub struct DuckLakeCatalog {
     conn: Connection,
@@ -430,6 +481,48 @@ impl Catalog for DuckLakeCatalog {
         let txn = self.conn.transaction().context(TransactionSnafu)?;
         let result =
             Self::update_table_column_stats_inner(&txn, column_id, table_id, stats_type, payload);
+        txn.commit().context(TransactionSnafu)?;
+        result
+    }
+
+    fn register_external_table(
+        &mut self,
+        request: RegisterTableRequest,
+    ) -> Result<ExternalTableMetadata, Error> {
+        let txn = self.conn.transaction().context(TransactionSnafu)?;
+        let result = Self::register_external_table_inner(&txn, request);
+        txn.commit().context(TransactionSnafu)?;
+        result
+    }
+
+    fn get_external_table(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
+    ) -> Result<Option<ExternalTableMetadata>, Error> {
+        let txn = self.conn.transaction().context(TransactionSnafu)?;
+        let result = Self::get_external_table_inner(&txn, schema_name, table_name);
+        txn.commit().context(TransactionSnafu)?;
+        result
+    }
+
+    fn list_external_tables(
+        &mut self,
+        schema_name: Option<&str>,
+    ) -> Result<Vec<ExternalTableMetadata>, Error> {
+        let txn = self.conn.transaction().context(TransactionSnafu)?;
+        let result = Self::list_external_tables_inner(&txn, schema_name);
+        txn.commit().context(TransactionSnafu)?;
+        result
+    }
+
+    fn drop_external_table(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
+    ) -> Result<(), Error> {
+        let txn = self.conn.transaction().context(TransactionSnafu)?;
+        let result = Self::drop_external_table_inner(&txn, schema_name, table_name);
         txn.commit().context(TransactionSnafu)?;
         result
     }
@@ -637,6 +730,263 @@ impl DuckLakeCatalog {
                 Null,
             ])
             .context(QueryExecutionSnafu)?;
+
+        Ok(())
+    }
+
+    fn register_external_table_inner(
+        conn: &Connection,
+        request: RegisterTableRequest,
+    ) -> Result<ExternalTableMetadata, Error> {
+        // Get current schema info
+        let schema_info = Self::current_schema_info_inner(conn)?;
+        let curr_snapshot = Self::current_snapshot_info_inner(conn)?;
+
+        // Generate new table_id (get max + 1, or start from 1)
+        let table_id: i64 = conn
+            .query_row(
+                r#"
+                SELECT COALESCE(MAX(table_id), 0) + 1
+                FROM __ducklake_metadata_metalake.main.optd_external_table
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .context(QueryExecutionSnafu)?;
+
+        // Insert table metadata
+        conn.prepare(
+            r#"
+            INSERT INTO __ducklake_metadata_metalake.main.optd_external_table
+                (table_id, schema_id, table_name, location, file_format, compression, begin_snapshot)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .context(QueryExecutionSnafu)?
+        .execute(params![
+            table_id,
+            schema_info.schema_id,
+            &request.table_name,
+            &request.location,
+            &request.file_format,
+            request.compression.as_deref(),
+            curr_snapshot.id.0,
+        ])
+        .context(QueryExecutionSnafu)?;
+
+        // Insert table options
+        for (key, value) in &request.options {
+            conn.prepare(
+                r#"
+                INSERT INTO __ducklake_metadata_metalake.main.optd_external_table_options
+                    (table_id, option_key, option_value)
+                VALUES (?, ?, ?)
+                "#,
+            )
+            .context(QueryExecutionSnafu)?
+            .execute(params![table_id, key, value])
+            .context(QueryExecutionSnafu)?;
+        }
+
+        Ok(ExternalTableMetadata {
+            table_id,
+            schema_id: schema_info.schema_id,
+            table_name: request.table_name,
+            location: request.location,
+            file_format: request.file_format,
+            compression: request.compression,
+            options: request.options,
+            begin_snapshot: curr_snapshot.id.0,
+            end_snapshot: None,
+        })
+    }
+
+    fn get_external_table_inner(
+        conn: &Connection,
+        _schema_name: Option<&str>,
+        table_name: &str,
+    ) -> Result<Option<ExternalTableMetadata>, Error> {
+        // Get schema_id
+        let schema_info = Self::current_schema_info_inner(conn)?;
+
+        // Query for active table
+        let mut stmt = conn
+            .prepare(
+                r#"
+                SELECT table_id, schema_id, table_name, location, file_format, 
+                       compression, begin_snapshot, end_snapshot
+                FROM __ducklake_metadata_metalake.main.optd_external_table
+                WHERE schema_id = ? AND table_name = ? AND end_snapshot IS NULL
+                "#,
+            )
+            .context(QueryExecutionSnafu)?;
+
+        let mut rows = stmt
+            .query(params![schema_info.schema_id, table_name])
+            .context(QueryExecutionSnafu)?;
+
+        if let Some(row) = rows.next().context(QueryExecutionSnafu)? {
+            let table_id: i64 = row.get(0).context(QueryExecutionSnafu)?;
+            let schema_id: i64 = row.get(1).context(QueryExecutionSnafu)?;
+            let table_name: String = row.get(2).context(QueryExecutionSnafu)?;
+            let location: String = row.get(3).context(QueryExecutionSnafu)?;
+            let file_format: String = row.get(4).context(QueryExecutionSnafu)?;
+            let compression: Option<String> = row.get(5).context(QueryExecutionSnafu)?;
+            let begin_snapshot: i64 = row.get(6).context(QueryExecutionSnafu)?;
+            let end_snapshot: Option<i64> = row.get(7).context(QueryExecutionSnafu)?;
+
+            // Fetch options
+            let mut options = HashMap::new();
+            let mut opt_stmt = conn
+                .prepare(
+                    r#"
+                    SELECT option_key, option_value
+                    FROM __ducklake_metadata_metalake.main.optd_external_table_options
+                    WHERE table_id = ?
+                    "#,
+                )
+                .context(QueryExecutionSnafu)?;
+
+            let opt_rows = opt_stmt
+                .query(params![table_id])
+                .context(QueryExecutionSnafu)?;
+
+            for opt_row in opt_rows.mapped(|r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            {
+                let (key, value) = opt_row.context(QueryExecutionSnafu)?;
+                options.insert(key, value);
+            }
+
+            Ok(Some(ExternalTableMetadata {
+                table_id,
+                schema_id,
+                table_name,
+                location,
+                file_format,
+                compression,
+                options,
+                begin_snapshot,
+                end_snapshot,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn list_external_tables_inner(
+        conn: &Connection,
+        _schema_name: Option<&str>,
+    ) -> Result<Vec<ExternalTableMetadata>, Error> {
+        let schema_info = Self::current_schema_info_inner(conn)?;
+
+        let mut stmt = conn
+            .prepare(
+                r#"
+                SELECT table_id, schema_id, table_name, location, file_format,
+                       compression, begin_snapshot, end_snapshot
+                FROM __ducklake_metadata_metalake.main.optd_external_table
+                WHERE schema_id = ? AND end_snapshot IS NULL
+                ORDER BY table_name
+                "#,
+            )
+            .context(QueryExecutionSnafu)?;
+
+        let rows = stmt
+            .query(params![schema_info.schema_id])
+            .context(QueryExecutionSnafu)?;
+
+        let mut tables = Vec::new();
+        for row in rows.mapped(|r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, Option<String>>(5)?,
+                r.get::<_, i64>(6)?,
+                r.get::<_, Option<i64>>(7)?,
+            ))
+        }) {
+            let (
+                table_id,
+                schema_id,
+                table_name,
+                location,
+                file_format,
+                compression,
+                begin_snapshot,
+                end_snapshot,
+            ) = row.context(QueryExecutionSnafu)?;
+
+            // Fetch options for this table
+            let mut options = HashMap::new();
+            let mut opt_stmt = conn
+                .prepare(
+                    r#"
+                    SELECT option_key, option_value
+                    FROM __ducklake_metadata_metalake.main.optd_external_table_options
+                    WHERE table_id = ?
+                    "#,
+                )
+                .context(QueryExecutionSnafu)?;
+
+            let opt_rows = opt_stmt
+                .query(params![table_id])
+                .context(QueryExecutionSnafu)?;
+
+            for opt_row in opt_rows.mapped(|r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            {
+                let (key, value) = opt_row.context(QueryExecutionSnafu)?;
+                options.insert(key, value);
+            }
+
+            tables.push(ExternalTableMetadata {
+                table_id,
+                schema_id,
+                table_name,
+                location,
+                file_format,
+                compression,
+                options,
+                begin_snapshot,
+                end_snapshot,
+            });
+        }
+
+        Ok(tables)
+    }
+
+    fn drop_external_table_inner(
+        conn: &Connection,
+        _schema_name: Option<&str>,
+        table_name: &str,
+    ) -> Result<(), Error> {
+        let schema_info = Self::current_schema_info_inner(conn)?;
+        let curr_snapshot = Self::current_snapshot_info_inner(conn)?;
+
+        // Soft delete by setting end_snapshot
+        let updated = conn
+            .prepare(
+                r#"
+                UPDATE __ducklake_metadata_metalake.main.optd_external_table
+                SET end_snapshot = ?
+                WHERE schema_id = ? AND table_name = ? AND end_snapshot IS NULL
+                "#,
+            )
+            .context(QueryExecutionSnafu)?
+            .execute(params![
+                curr_snapshot.id.0,
+                schema_info.schema_id,
+                table_name
+            ])
+            .context(QueryExecutionSnafu)?;
+
+        if updated == 0 {
+            return Err(Error::QueryExecution {
+                source: DuckDBError::QueryReturnedNoRows,
+            });
+        }
 
         Ok(())
     }
