@@ -35,7 +35,6 @@ async fn create_cli_context_with_catalog(
     (cli_ctx, service_handle)
 }
 
-/// Test custom options like compression are stored in metadata
 #[tokio::test]
 async fn test_create_table_with_compression() {
     let temp_dir = TempDir::new().unwrap();
@@ -58,20 +57,28 @@ async fn test_create_table_with_compression() {
         .unwrap();
     cli_ctx.execute_logical_plan(logical_plan).await.unwrap();
 
-    // Verify it works
+    // Verify it works with correct data
     let result = cli_ctx
         .inner()
-        .sql("SELECT * FROM test_no_compression")
+        .sql("SELECT * FROM test_no_compression ORDER BY id")
         .await
         .unwrap();
     let batches = result.collect().await.unwrap();
-    assert_eq!(batches[0].num_rows(), 2);
+    assert_eq!(batches[0].num_rows(), 2, "Should have exactly 2 rows");
+    
+    use datafusion::arrow::array::{Int64Array, StringArray};
+    let id_col = batches[0].column(0).as_any().downcast_ref::<Int64Array>().unwrap();
+    let name_col = batches[0].column(1).as_any().downcast_ref::<StringArray>().unwrap();
+    assert_eq!(id_col.value(0), 1);
+    assert_eq!(name_col.value(0), "Alice");
+    assert_eq!(id_col.value(1), 2);
+    assert_eq!(name_col.value(1), "Bob");
 
-    // New session - verify table persists with its options
+    // New session - verify table persists with its options and data
     let (cli_ctx2, _service_handle2) = create_cli_context_with_catalog(&temp_dir).await;
     let result = cli_ctx2
         .inner()
-        .sql("SELECT * FROM test_no_compression")
+        .sql("SELECT * FROM test_no_compression ORDER BY id")
         .await
         .unwrap();
     let batches = result.collect().await.unwrap();
@@ -80,9 +87,15 @@ async fn test_create_table_with_compression() {
         2,
         "Table with options should persist"
     );
+    
+    let id_col = batches[0].column(0).as_any().downcast_ref::<Int64Array>().unwrap();
+    let name_col = batches[0].column(1).as_any().downcast_ref::<StringArray>().unwrap();
+    assert_eq!(id_col.value(0), 1, "Persisted data should match original");
+    assert_eq!(name_col.value(0), "Alice");
+    assert_eq!(id_col.value(1), 2);
+    assert_eq!(name_col.value(1), "Bob");
 }
 
-/// Test CREATE then DROP then CREATE again (reuse table name)
 #[tokio::test]
 async fn test_create_drop_recreate_table() {
     let temp_dir = TempDir::new().unwrap();
@@ -142,7 +155,6 @@ async fn test_create_drop_recreate_table() {
     assert_eq!(batches[0].num_rows(), 1);
 }
 
-/// Test multiple formats: CSV, Parquet, JSON
 #[tokio::test]
 async fn test_multiple_file_formats() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = TempDir::new()?;
@@ -223,7 +235,6 @@ async fn test_multiple_file_formats() -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
-/// Test custom table options persistence
 #[tokio::test]
 async fn test_custom_table_options() {
     let temp_dir = TempDir::new().unwrap();
@@ -257,7 +268,6 @@ async fn test_custom_table_options() {
     assert_eq!(batches[0].num_rows(), 2);
 }
 
-/// Test DROP TABLE after query (ensure in-memory vs persistent state is handled)
 #[tokio::test]
 async fn test_drop_table_after_queries() {
     let temp_dir = TempDir::new().unwrap();
@@ -309,7 +319,6 @@ async fn test_drop_table_after_queries() {
     assert!(result.is_err());
 }
 
-/// Test DROP IF EXISTS is idempotent
 #[tokio::test]
 async fn test_drop_if_exists_idempotent() {
     let temp_dir = TempDir::new().unwrap();
@@ -329,7 +338,6 @@ async fn test_drop_if_exists_idempotent() {
     }
 }
 
-/// Test table name case sensitivity and special characters
 #[tokio::test]
 async fn test_table_name_variations() {
     let temp_dir = TempDir::new().unwrap();
@@ -380,7 +388,6 @@ async fn test_table_name_variations() {
     cli_ctx.inner().sql("SELECT * FROM table123").await.unwrap();
 }
 
-/// Test empty table (no data, only schema)
 #[tokio::test]
 async fn test_empty_table_persistence() {
     let temp_dir = TempDir::new().unwrap();
@@ -401,14 +408,25 @@ async fn test_empty_table_persistence() {
         .unwrap();
     cli_ctx.execute_logical_plan(logical_plan).await.unwrap();
 
-    // Query should return 0 rows
+    // Query should return 0 rows but preserve schema
     let result = cli_ctx.inner().sql("SELECT * FROM empty").await.unwrap();
     let batches = result.collect().await.unwrap();
-    assert_eq!(batches.len(), 0); // Empty result
+    assert_eq!(batches.len(), 0, "Empty table should return 0 batches");
+    
+    // Verify schema is still accessible via LIMIT 0
+    let result_schema = cli_ctx.inner().sql("SELECT * FROM empty LIMIT 0").await.unwrap();
+    let schema_batches = result_schema.collect().await.unwrap();
+    if !schema_batches.is_empty() {
+        let schema = schema_batches[0].schema();
+        assert_eq!(schema.fields().len(), 3, "Should have 3 columns");
+        assert_eq!(schema.field(0).name(), "id");
+        assert_eq!(schema.field(1).name(), "name");
+        assert_eq!(schema.field(2).name(), "age");
+    }
 
-    // New session - should still work
+    // New session - should still work with same schema
     let (cli_ctx2, _service_handle2) = create_cli_context_with_catalog(&temp_dir).await;
     let result = cli_ctx2.inner().sql("SELECT * FROM empty").await.unwrap();
     let batches = result.collect().await.unwrap();
-    assert_eq!(batches.len(), 0);
+    assert_eq!(batches.len(), 0, "Empty table should still return 0 batches after restart");
 }

@@ -52,12 +52,20 @@ async fn test_drop_table() {
         .unwrap();
     cli_ctx.execute_logical_plan(logical_plan).await.unwrap();
 
-    // Verify table exists
-    let result = cli_ctx.inner().sql("SELECT * FROM test").await.unwrap();
+    // Verify table exists with correct data
+    let result = cli_ctx.inner().sql("SELECT * FROM test ORDER BY id").await.unwrap();
     let batches = datafusion::prelude::DataFrame::collect(result)
         .await
         .unwrap();
-    assert_eq!(batches[0].num_rows(), 2);
+    assert_eq!(batches[0].num_rows(), 2, "Should have exactly 2 rows before drop");
+    
+    use datafusion::arrow::array::{Int64Array, StringArray};
+    let id_col = batches[0].column(0).as_any().downcast_ref::<Int64Array>().unwrap();
+    let name_col = batches[0].column(1).as_any().downcast_ref::<StringArray>().unwrap();
+    assert_eq!(id_col.value(0), 1, "First row should have id=1");
+    assert_eq!(name_col.value(0), "Alice", "First row should be Alice");
+    assert_eq!(id_col.value(1), 2, "Second row should have id=2");
+    assert_eq!(name_col.value(1), "Bob", "Second row should be Bob");
 
     // Drop the table
     let drop_sql = "DROP TABLE test";
@@ -128,12 +136,20 @@ async fn test_drop_table_persists_across_sessions() {
             .unwrap();
         cli_ctx.execute_logical_plan(logical_plan).await.unwrap();
 
-        // Verify table exists
-        let result = cli_ctx.inner().sql("SELECT * FROM test").await.unwrap();
+        // Verify table exists with correct data
+        let result = cli_ctx.inner().sql("SELECT * FROM test ORDER BY id").await.unwrap();
         let batches = datafusion::prelude::DataFrame::collect(result)
             .await
             .unwrap();
-        assert_eq!(batches[0].num_rows(), 2);
+        assert_eq!(batches[0].num_rows(), 2, "Should have exactly 2 rows");
+        
+        use datafusion::arrow::array::{Int64Array, StringArray};
+        let id_col = batches[0].column(0).as_any().downcast_ref::<Int64Array>().unwrap();
+        let name_col = batches[0].column(1).as_any().downcast_ref::<StringArray>().unwrap();
+        assert_eq!(id_col.value(0), 1);
+        assert_eq!(name_col.value(0), "Alice");
+        assert_eq!(id_col.value(1), 2);
+        assert_eq!(name_col.value(1), "Bob");
 
         // Drop the table
         let drop_sql = "DROP TABLE test";
@@ -186,9 +202,25 @@ async fn test_drop_table_multiple_tables() {
         cli_ctx.execute_logical_plan(logical_plan).await.unwrap();
     }
 
-    // Verify both tables exist
-    cli_ctx.inner().sql("SELECT * FROM test1").await.unwrap();
-    cli_ctx.inner().sql("SELECT * FROM test2").await.unwrap();
+    // Verify both tables exist with correct data
+    let result1 = cli_ctx.inner().sql("SELECT * FROM test1").await.unwrap();
+    let batches1 = result1.collect().await.unwrap();
+    assert_eq!(batches1[0].num_rows(), 1, "test1 should have 1 row");
+    
+    use datafusion::arrow::array::{Int64Array, StringArray};
+    let id_col = batches1[0].column(0).as_any().downcast_ref::<Int64Array>().unwrap();
+    let name_col = batches1[0].column(1).as_any().downcast_ref::<StringArray>().unwrap();
+    assert_eq!(id_col.value(0), 1);
+    assert_eq!(name_col.value(0), "Alice");
+    
+    let result2 = cli_ctx.inner().sql("SELECT * FROM test2").await.unwrap();
+    let batches2 = result2.collect().await.unwrap();
+    assert_eq!(batches2[0].num_rows(), 1, "test2 should have 1 row");
+    
+    let id_col2 = batches2[0].column(0).as_any().downcast_ref::<Int64Array>().unwrap();
+    let name_col2 = batches2[0].column(1).as_any().downcast_ref::<StringArray>().unwrap();
+    assert_eq!(id_col2.value(0), 2);
+    assert_eq!(name_col2.value(0), "Bob");
 
     // Drop only test1
     let drop_sql = "DROP TABLE test1";
@@ -204,7 +236,14 @@ async fn test_drop_table_multiple_tables() {
     let result = cli_ctx.inner().sql("SELECT * FROM test1").await;
     assert!(result.is_err());
 
-    // test2 should still exist
+    // test2 should still exist with correct data
     let result = cli_ctx.inner().sql("SELECT * FROM test2").await;
-    assert!(result.is_ok());
+    assert!(result.is_ok(), "test2 should still be accessible");
+    let batches = result.unwrap().collect().await.unwrap();
+    assert_eq!(batches[0].num_rows(), 1, "test2 should still have 1 row");
+    
+    let id_col = batches[0].column(0).as_any().downcast_ref::<Int64Array>().unwrap();
+    let name_col = batches[0].column(1).as_any().downcast_ref::<StringArray>().unwrap();
+    assert_eq!(id_col.value(0), 2, "test2 data should be unchanged");
+    assert_eq!(name_col.value(0), "Bob", "test2 data should be unchanged");
 }

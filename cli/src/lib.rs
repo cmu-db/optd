@@ -1,5 +1,8 @@
 use datafusion::{
-    arrow::{array::{RecordBatch, StringArray}, datatypes::{DataType, Field, Schema}},
+    arrow::{
+        array::{RecordBatch, StringArray},
+        datatypes::{DataType, Field, Schema},
+    },
     catalog::CatalogProviderList,
     common::{DataFusionError, Result, exec_err, not_impl_err},
     datasource::TableProvider,

@@ -95,8 +95,8 @@ async fn test_show_tables_single() {
         .unwrap();
     let expected_location = csv_path.to_str().unwrap();
     assert_eq!(
-        locations.value(0), 
-        expected_location, 
+        locations.value(0),
+        expected_location,
         "Location should match exact file path"
     );
 
@@ -107,14 +107,17 @@ async fn test_show_tables_single() {
         .downcast_ref::<StringArray>()
         .unwrap();
     assert_eq!(formats.value(0), "CSV", "Format should be exactly 'CSV'");
-    
+
     // Verify compression is None for uncompressed file
     let compressions = batches[0]
         .column(3)
         .as_any()
         .downcast_ref::<StringArray>()
         .unwrap();
-    assert!(compressions.is_null(0), "Compression should be NULL for uncompressed file");
+    assert!(
+        compressions.is_null(0),
+        "Compression should be NULL for uncompressed file"
+    );
 }
 
 #[tokio::test]
@@ -173,37 +176,45 @@ async fn test_show_tables_multiple() {
 
     assert!(names.contains(&"users"), "Should contain users table");
     assert!(names.contains(&"orders"), "Should contain orders table");
-    
+
     // Verify formats match table types
     let formats = batches[0]
         .column(2)
         .as_any()
         .downcast_ref::<StringArray>()
         .unwrap();
-    
+
     // Find users table and verify CSV format
     let users_idx = names.iter().position(|&n| n == "users").unwrap();
-    assert_eq!(formats.value(users_idx), "CSV", "users table should be CSV format");
-    
+    assert_eq!(
+        formats.value(users_idx),
+        "CSV",
+        "users table should be CSV format"
+    );
+
     // Find orders table and verify JSON format
     let orders_idx = names.iter().position(|&n| n == "orders").unwrap();
-    assert_eq!(formats.value(orders_idx), "JSON", "orders table should be JSON format");
-    
+    assert_eq!(
+        formats.value(orders_idx),
+        "JSON",
+        "orders table should be JSON format"
+    );
+
     // Verify locations are correct
     let locations = batches[0]
         .column(1)
         .as_any()
         .downcast_ref::<StringArray>()
         .unwrap();
-    
+
     assert_eq!(
-        locations.value(users_idx), 
-        csv_path.to_str().unwrap(), 
+        locations.value(users_idx),
+        csv_path.to_str().unwrap(),
         "users location should match CSV path"
     );
     assert_eq!(
-        locations.value(orders_idx), 
-        json_path.to_str().unwrap(), 
+        locations.value(orders_idx),
+        json_path.to_str().unwrap(),
         "orders location should match JSON path"
     );
 }
@@ -259,7 +270,11 @@ async fn test_show_tables_after_drop() {
     let batches = df.collect().await.unwrap();
 
     assert_eq!(batches.len(), 1);
-    assert_eq!(batches[0].num_rows(), 1, "Should have exactly 1 table remaining");
+    assert_eq!(
+        batches[0].num_rows(),
+        1,
+        "Should have exactly 1 table remaining"
+    );
 
     // Verify only table2 remains with correct metadata
     let table_names = batches[0]
@@ -267,8 +282,12 @@ async fn test_show_tables_after_drop() {
         .as_any()
         .downcast_ref::<StringArray>()
         .unwrap();
-    assert_eq!(table_names.value(0), "table2", "Remaining table should be table2");
-    
+    assert_eq!(
+        table_names.value(0),
+        "table2",
+        "Remaining table should be table2"
+    );
+
     // Verify table2 location and format are correct
     let locations = batches[0]
         .column(1)
@@ -276,11 +295,11 @@ async fn test_show_tables_after_drop() {
         .downcast_ref::<StringArray>()
         .unwrap();
     assert_eq!(
-        locations.value(0), 
-        csv2_path.to_str().unwrap(), 
+        locations.value(0),
+        csv2_path.to_str().unwrap(),
         "table2 location should match its CSV path"
     );
-    
+
     let formats = batches[0]
         .column(2)
         .as_any()

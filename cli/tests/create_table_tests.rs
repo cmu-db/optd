@@ -12,7 +12,6 @@ use optd_datafusion::OptdCatalogProviderList;
 use std::sync::Arc;
 use tempfile::TempDir;
 
-/// Test that CREATE EXTERNAL TABLE persists metadata to catalog
 #[tokio::test]
 async fn test_create_external_table_persistence() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = TempDir::new()?;
@@ -91,17 +90,34 @@ async fn test_create_external_table_persistence() -> Result<(), Box<dyn std::err
         assert_eq!(
             schema.fields().len(),
             3,
-            "Should have 3 columns (id, name, age)"
+            "Should have exactly 3 columns (id, name, age)"
         );
         assert_eq!(schema.field(0).name(), "id");
         assert_eq!(schema.field(1).name(), "name");
         assert_eq!(schema.field(2).name(), "age");
+
+        // Validate actual data values
+        use datafusion::arrow::array::{Int64Array, StringArray};
+        let id_col = batches[0].column(0).as_any().downcast_ref::<Int64Array>().unwrap();
+        let name_col = batches[0].column(1).as_any().downcast_ref::<StringArray>().unwrap();
+        let age_col = batches[0].column(2).as_any().downcast_ref::<Int64Array>().unwrap();
+
+        assert_eq!(id_col.value(0), 1, "First row ID should be 1");
+        assert_eq!(name_col.value(0), "Alice", "First row name should be Alice");
+        assert_eq!(age_col.value(0), 30, "First row age should be 30");
+
+        assert_eq!(id_col.value(1), 2, "Second row ID should be 2");
+        assert_eq!(name_col.value(1), "Bob", "Second row name should be Bob");
+        assert_eq!(age_col.value(1), 25, "Second row age should be 25");
+
+        assert_eq!(id_col.value(2), 3, "Third row ID should be 3");
+        assert_eq!(name_col.value(2), "Carol", "Third row name should be Carol");
+        assert_eq!(age_col.value(2), 35, "Third row age should be 35");
     }
 
     Ok(())
 }
 
-/// Test multiple external tables with different formats
 #[tokio::test]
 async fn test_multiple_external_tables() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = TempDir::new()?;
@@ -170,14 +186,30 @@ async fn test_multiple_external_tables() -> Result<(), Box<dyn std::error::Error
         let logical_plan = cli_ctx.inner().state().create_logical_plan(&sql).await?;
         cli_ctx.execute_logical_plan(logical_plan).await?;
 
-        // Query both tables
-        let result = cli_ctx.inner().sql("SELECT * FROM users").await?;
+        // Query both tables and validate data
+        let result = cli_ctx.inner().sql("SELECT * FROM users ORDER BY id").await?;
         let batches = result.collect().await?;
-        assert_eq!(batches[0].num_rows(), 2);
+        assert_eq!(batches[0].num_rows(), 2, "Users table should have 2 rows");
+        
+        use datafusion::arrow::array::{Int64Array, StringArray};
+        let id_col = batches[0].column(0).as_any().downcast_ref::<Int64Array>().unwrap();
+        let name_col = batches[0].column(1).as_any().downcast_ref::<StringArray>().unwrap();
+        assert_eq!(id_col.value(0), 1);
+        assert_eq!(name_col.value(0), "Alice");
+        assert_eq!(id_col.value(1), 2);
+        assert_eq!(name_col.value(1), "Bob");
 
-        let result = cli_ctx.inner().sql("SELECT * FROM orders").await?;
+        let result = cli_ctx.inner().sql("SELECT * FROM orders ORDER BY order_id").await?;
         let batches = result.collect().await?;
-        assert_eq!(batches[0].num_rows(), 2);
+        assert_eq!(batches[0].num_rows(), 2, "Orders table should have 2 rows");
+        
+        use datafusion::arrow::array::Int32Array;
+        let order_id_col = batches[0].column(0).as_any().downcast_ref::<Int32Array>().unwrap();
+        let user_id_col = batches[0].column(1).as_any().downcast_ref::<Int32Array>().unwrap();
+        assert_eq!(order_id_col.value(0), 101);
+        assert_eq!(user_id_col.value(0), 1);
+        assert_eq!(order_id_col.value(1), 102);
+        assert_eq!(user_id_col.value(1), 2);
     }
 
     // Verify both persist
@@ -196,20 +228,35 @@ async fn test_multiple_external_tables() -> Result<(), Box<dyn std::error::Error
             .inner()
             .register_catalog_list(Arc::new(optd_catalog_list));
 
-        // Both tables should work after restart
-        let result = cli_ctx.inner().sql("SELECT * FROM users").await?;
+        // Both tables should work after restart with exact data
+        let result = cli_ctx.inner().sql("SELECT * FROM users ORDER BY id").await?;
         let batches = result.collect().await?;
         assert_eq!(batches[0].num_rows(), 2, "CSV table should persist");
+        
+        use datafusion::arrow::array::{Int64Array, StringArray};
+        let id_col = batches[0].column(0).as_any().downcast_ref::<Int64Array>().unwrap();
+        let name_col = batches[0].column(1).as_any().downcast_ref::<StringArray>().unwrap();
+        assert_eq!(id_col.value(0), 1, "Persisted CSV data should match");
+        assert_eq!(name_col.value(0), "Alice");
+        assert_eq!(id_col.value(1), 2);
+        assert_eq!(name_col.value(1), "Bob");
 
-        let result = cli_ctx.inner().sql("SELECT * FROM orders").await?;
+        let result = cli_ctx.inner().sql("SELECT * FROM orders ORDER BY order_id").await?;
         let batches = result.collect().await?;
         assert_eq!(batches[0].num_rows(), 2, "Parquet table should persist");
+        
+        use datafusion::arrow::array::Int32Array;
+        let order_id_col = batches[0].column(0).as_any().downcast_ref::<Int32Array>().unwrap();
+        let user_id_col = batches[0].column(1).as_any().downcast_ref::<Int32Array>().unwrap();
+        assert_eq!(order_id_col.value(0), 101, "Persisted Parquet data should match");
+        assert_eq!(user_id_col.value(0), 1);
+        assert_eq!(order_id_col.value(1), 102);
+        assert_eq!(user_id_col.value(1), 2);
     }
 
     Ok(())
 }
 
-/// Test IF NOT EXISTS behavior
 #[tokio::test]
 async fn test_create_external_table_if_not_exists() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = TempDir::new()?;
