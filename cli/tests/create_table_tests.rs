@@ -1,15 +1,14 @@
 // Integration test for CREATE EXTERNAL TABLE persistence
 
 use datafusion::{
-    arrow::array::{Int32Array, RecordBatch, StringArray},
+    arrow::array::{Int32Array, RecordBatch},
     arrow::datatypes::{DataType, Field, Schema},
-    catalog::CatalogProviderList,
-    execution::{SessionStateBuilder, runtime_env::RuntimeEnvBuilder},
-    prelude::{SessionConfig, SessionContext},
+    execution::runtime_env::RuntimeEnvBuilder,
+    prelude::SessionConfig,
 };
 use optd_catalog::{CatalogService, DuckLakeCatalog};
 use optd_cli::OptdCliSessionContext;
-use optd_datafusion::{OptdCatalogProviderList, SessionStateBuilderOptdExt};
+use optd_datafusion::OptdCatalogProviderList;
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -23,7 +22,7 @@ async fn test_create_external_table_persistence() -> Result<(), Box<dyn std::err
     // Create test CSV file
     std::fs::write(&csv_path, "id,name,age\n1,Alice,30\n2,Bob,25\n3,Carol,35\n")?;
 
-    // Session 1: Create external table
+    // Create external table
     {
         let catalog = DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap()))?;
         let (service, handle) = CatalogService::new(catalog);
@@ -40,18 +39,17 @@ async fn test_create_external_table_persistence() -> Result<(), Box<dyn std::err
             .inner()
             .register_catalog_list(Arc::new(optd_catalog_list));
 
-        // Execute CREATE EXTERNAL TABLE via CLI context (to trigger persistence)
+        // CREATE EXTERNAL TABLE via CLI context
         let sql = format!(
             "CREATE EXTERNAL TABLE users STORED AS CSV LOCATION '{}' OPTIONS ('format.has_header' 'true')",
             csv_path.display()
         );
 
-        // Use CliSessionContext to execute (this will use our custom logic)
+        // Use CliSessionContext to execute
         use datafusion_cli::cli_context::CliSessionContext;
         let logical_plan = cli_ctx.inner().state().create_logical_plan(&sql).await?;
         cli_ctx.execute_logical_plan(logical_plan).await?;
 
-        // Verify table is accessible in this session
         let result = cli_ctx
             .inner()
             .sql("SELECT * FROM users ORDER BY id")
@@ -61,7 +59,7 @@ async fn test_create_external_table_persistence() -> Result<(), Box<dyn std::err
         assert_eq!(batches[0].num_rows(), 3);
     }
 
-    // Session 2: Verify table persists after restart
+    // Verify table persists after restart
     {
         let catalog = DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap()))?;
         let (service, handle) = CatalogService::new(catalog);
@@ -88,7 +86,6 @@ async fn test_create_external_table_persistence() -> Result<(), Box<dyn std::err
         assert_eq!(batches.len(), 1, "Should have one batch");
         assert_eq!(batches[0].num_rows(), 3, "Should have 3 rows");
 
-        // Verify columns exist (schema is inferred correctly)
         let schema = batches[0].schema();
         println!("Schema: {:?}", schema);
         assert_eq!(
@@ -245,12 +242,12 @@ async fn test_create_external_table_if_not_exists() -> Result<(), Box<dyn std::e
     let logical_plan = cli_ctx.inner().state().create_logical_plan(&sql).await?;
     cli_ctx.execute_logical_plan(logical_plan).await?;
 
-    // Try to create again - should fail
+    // Try to create again
     let logical_plan = cli_ctx.inner().state().create_logical_plan(&sql).await?;
     let result = cli_ctx.execute_logical_plan(logical_plan).await;
     assert!(result.is_err(), "Should fail on duplicate table creation");
 
-    // Try with IF NOT EXISTS - should succeed
+    // Try with IF NOT EXISTS
     let sql_if_not_exists = format!(
         "CREATE EXTERNAL TABLE IF NOT EXISTS test STORED AS CSV LOCATION '{}'",
         csv_path.display()

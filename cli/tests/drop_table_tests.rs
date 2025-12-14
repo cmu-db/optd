@@ -1,11 +1,8 @@
-use datafusion::{
-    execution::{SessionStateBuilder, runtime_env::RuntimeEnvBuilder},
-    prelude::{SessionConfig, SessionContext},
-};
+use datafusion::{execution::runtime_env::RuntimeEnvBuilder, prelude::SessionConfig};
 use datafusion_cli::cli_context::CliSessionContext;
 use optd_catalog::{CatalogService, DuckLakeCatalog};
 use optd_cli::OptdCliSessionContext;
-use optd_datafusion::{OptdCatalogProviderList, SessionStateBuilderOptdExt};
+use optd_datafusion::OptdCatalogProviderList;
 use std::sync::Arc;
 use tempfile::TempDir;
 
