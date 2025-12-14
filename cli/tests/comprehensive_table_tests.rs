@@ -65,10 +65,18 @@ async fn test_create_table_with_compression() {
         .unwrap();
     let batches = result.collect().await.unwrap();
     assert_eq!(batches[0].num_rows(), 2, "Should have exactly 2 rows");
-    
+
     use datafusion::arrow::array::{Int64Array, StringArray};
-    let id_col = batches[0].column(0).as_any().downcast_ref::<Int64Array>().unwrap();
-    let name_col = batches[0].column(1).as_any().downcast_ref::<StringArray>().unwrap();
+    let id_col = batches[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .unwrap();
+    let name_col = batches[0]
+        .column(1)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
     assert_eq!(id_col.value(0), 1);
     assert_eq!(name_col.value(0), "Alice");
     assert_eq!(id_col.value(1), 2);
@@ -87,9 +95,17 @@ async fn test_create_table_with_compression() {
         2,
         "Table with options should persist"
     );
-    
-    let id_col = batches[0].column(0).as_any().downcast_ref::<Int64Array>().unwrap();
-    let name_col = batches[0].column(1).as_any().downcast_ref::<StringArray>().unwrap();
+
+    let id_col = batches[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .unwrap();
+    let name_col = batches[0]
+        .column(1)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
     assert_eq!(id_col.value(0), 1, "Persisted data should match original");
     assert_eq!(name_col.value(0), "Alice");
     assert_eq!(id_col.value(1), 2);
@@ -412,9 +428,13 @@ async fn test_empty_table_persistence() {
     let result = cli_ctx.inner().sql("SELECT * FROM empty").await.unwrap();
     let batches = result.collect().await.unwrap();
     assert_eq!(batches.len(), 0, "Empty table should return 0 batches");
-    
+
     // Verify schema is still accessible via LIMIT 0
-    let result_schema = cli_ctx.inner().sql("SELECT * FROM empty LIMIT 0").await.unwrap();
+    let result_schema = cli_ctx
+        .inner()
+        .sql("SELECT * FROM empty LIMIT 0")
+        .await
+        .unwrap();
     let schema_batches = result_schema.collect().await.unwrap();
     if !schema_batches.is_empty() {
         let schema = schema_batches[0].schema();
@@ -428,5 +448,9 @@ async fn test_empty_table_persistence() {
     let (cli_ctx2, _service_handle2) = create_cli_context_with_catalog(&temp_dir).await;
     let result = cli_ctx2.inner().sql("SELECT * FROM empty").await.unwrap();
     let batches = result.collect().await.unwrap();
-    assert_eq!(batches.len(), 0, "Empty table should still return 0 batches after restart");
+    assert_eq!(
+        batches.len(),
+        0,
+        "Empty table should still return 0 batches after restart"
+    );
 }
