@@ -3,8 +3,13 @@ use tempfile::TempDir;
 
 fn create_test_catalog() -> (TempDir, DuckLakeCatalog) {
     let temp_dir = TempDir::new().unwrap();
+    let db_path = temp_dir.path().join("test.db");
     let metadata_path = temp_dir.path().join("metadata.ducklake");
-    let catalog = DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
+    let catalog = DuckLakeCatalog::try_new(
+        Some(db_path.to_str().unwrap()),
+        Some(metadata_path.to_str().unwrap()),
+    )
+    .unwrap();
     (temp_dir, catalog)
 }
 
@@ -50,11 +55,13 @@ fn test_external_table_indexes_created() {
 #[test]
 fn test_external_table_metadata_persists_across_connections() {
     let temp_dir = TempDir::new().unwrap();
+    let db_path = temp_dir.path().join("test.db");
     let metadata_path = temp_dir.path().join("metadata.ducklake");
+    let db_str = db_path.to_str().unwrap().to_string();
     let metadata_str = metadata_path.to_str().unwrap().to_string();
 
     let (_schema_id, _snapshot_id) = {
-        let catalog = DuckLakeCatalog::try_new(None, Some(&metadata_str)).unwrap();
+        let catalog = DuckLakeCatalog::try_new(Some(&db_str), Some(&metadata_str)).unwrap();
         let conn = catalog.get_connection();
 
         let schema_id: i64 = conn
@@ -97,7 +104,7 @@ fn test_external_table_metadata_persists_across_connections() {
     };
 
     {
-        let catalog = DuckLakeCatalog::try_new(None, Some(&metadata_str)).unwrap();
+        let catalog = DuckLakeCatalog::try_new(Some(&db_str), Some(&metadata_str)).unwrap();
         let conn = catalog.get_connection();
 
         let (retrieved_table_name, retrieved_location, retrieved_format): (String, String, String) =

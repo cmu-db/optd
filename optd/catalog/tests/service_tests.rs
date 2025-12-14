@@ -9,10 +9,14 @@ fn create_test_service() -> (
     CatalogServiceHandle,
 ) {
     let temp_dir = TempDir::new().unwrap();
+    let db_path = temp_dir.path().join("test.db");
     let metadata_path = temp_dir.path().join("metadata.ducklake");
 
-    let (service, handle) =
-        CatalogService::try_new_from_location(None, Some(metadata_path.to_str().unwrap())).unwrap();
+    let (service, handle) = CatalogService::try_new_from_location(
+        Some(db_path.to_str().unwrap()),
+        Some(metadata_path.to_str().unwrap()),
+    )
+    .unwrap();
 
     (temp_dir, service, handle)
 }

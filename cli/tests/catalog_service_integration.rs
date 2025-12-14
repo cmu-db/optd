@@ -15,10 +15,14 @@ use tempfile::TempDir;
 async fn test_catalog_service_handle() -> Result<(), Box<dyn std::error::Error>> {
     // Setup catalog with test data
     let temp_dir = TempDir::new()?;
+    let db_path = temp_dir.path().join("test.db");
     let metadata_path = temp_dir.path().join("metadata.ducklake");
 
     {
-        let setup_catalog = DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap()))?;
+        let setup_catalog = DuckLakeCatalog::try_new(
+            Some(db_path.to_str().unwrap()),
+            Some(metadata_path.to_str().unwrap()),
+        )?;
         let conn = setup_catalog.get_connection();
         conn.execute_batch("CREATE TABLE test_table (id INTEGER, name VARCHAR, age INTEGER)")?;
         conn.execute_batch(
@@ -27,7 +31,10 @@ async fn test_catalog_service_handle() -> Result<(), Box<dyn std::error::Error>>
     }
 
     // Start catalog service again to check restart resilience
-    let catalog = DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap()))?;
+    let catalog = DuckLakeCatalog::try_new(
+        Some(db_path.to_str().unwrap()),
+        Some(metadata_path.to_str().unwrap()),
+    )?;
     let (service, handle) = CatalogService::new(catalog);
     tokio::spawn(async move { service.run().await });
 
@@ -52,7 +59,10 @@ async fn test_catalog_service_handle() -> Result<(), Box<dyn std::error::Error>>
     assert_eq!(schema.field(2).name(), "age");
 
     // Test statistics
-    let query_catalog = DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap()))?;
+    let query_catalog = DuckLakeCatalog::try_new(
+        Some(db_path.to_str().unwrap()),
+        Some(metadata_path.to_str().unwrap()),
+    )?;
     let conn = query_catalog.get_connection();
 
     let table_id: i64 = conn.query_row(
@@ -187,10 +197,14 @@ async fn test_catalog_service_handle() -> Result<(), Box<dyn std::error::Error>>
 async fn test_datafusion_catalog_integration() -> Result<(), Box<dyn std::error::Error>> {
     // Setup catalog with test data and statistics
     let temp_dir = TempDir::new()?;
+    let db_path = temp_dir.path().join("test.db");
     let metadata_path = temp_dir.path().join("metadata.ducklake");
 
     {
-        let setup_catalog = DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap()))?;
+        let setup_catalog = DuckLakeCatalog::try_new(
+            Some(db_path.to_str().unwrap()),
+            Some(metadata_path.to_str().unwrap()),
+        )?;
         let conn = setup_catalog.get_connection();
         conn.execute_batch("CREATE TABLE df_test (id INTEGER, value INTEGER)")?;
         conn.execute_batch(
@@ -198,12 +212,18 @@ async fn test_datafusion_catalog_integration() -> Result<(), Box<dyn std::error:
         )?;
     }
 
-    let catalog = DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap()))?;
+    let catalog = DuckLakeCatalog::try_new(
+        Some(db_path.to_str().unwrap()),
+        Some(metadata_path.to_str().unwrap()),
+    )?;
     let (service, handle) = CatalogService::new(catalog);
     tokio::spawn(async move { service.run().await });
 
     // Setup statistics for testing
-    let query_catalog = DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap()))?;
+    let query_catalog = DuckLakeCatalog::try_new(
+        Some(db_path.to_str().unwrap()),
+        Some(metadata_path.to_str().unwrap()),
+    )?;
     let conn = query_catalog.get_connection();
 
     let table_id: i64 = conn.query_row(

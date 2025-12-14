@@ -7,7 +7,7 @@ use tempfile::TempDir;
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Creates a test catalog with isolated metadata directory.
-fn create_test_catalog(for_file: bool) -> (TempDir, DuckLakeCatalog) {
+fn create_test_catalog(_for_file: bool) -> (TempDir, DuckLakeCatalog) {
     let temp_dir = TempDir::new().unwrap();
     let counter = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
     let timestamp = SystemTime::now()
@@ -18,17 +18,14 @@ fn create_test_catalog(for_file: bool) -> (TempDir, DuckLakeCatalog) {
         .path()
         .join(format!("db_{}_{}", timestamp, counter));
     std::fs::create_dir_all(&unique_dir).unwrap();
+    let db_path = unique_dir.join("test.db");
     let metadata_path = unique_dir.join("metadata.ducklake");
 
-    let catalog = if for_file {
-        let db_path = unique_dir.join("test.db");
-        DuckLakeCatalog::try_new(
-            Some(db_path.to_str().unwrap()),
-            Some(metadata_path.to_str().unwrap()),
-        )
-    } else {
-        DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap()))
-    }
+    // Always use database file in temp directory to prevent metadata.ducklake in CWD
+    let catalog = DuckLakeCatalog::try_new(
+        Some(db_path.to_str().unwrap()),
+        Some(metadata_path.to_str().unwrap()),
+    )
     .unwrap();
 
     (temp_dir, catalog)

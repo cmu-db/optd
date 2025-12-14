@@ -1,14 +1,26 @@
-use optd_catalog::{CatalogService, RegisterTableRequest};
+use optd_catalog::{CatalogService, DuckLakeCatalog, RegisterTableRequest};
 use std::collections::HashMap;
 use tempfile::TempDir;
 
+fn create_test_service_setup() -> (
+    TempDir,
+    optd_catalog::CatalogServiceHandle,
+    CatalogService<DuckLakeCatalog>,
+) {
+    let temp_dir = TempDir::new().unwrap();
+    let db_path = temp_dir.path().join("test.db");
+    let metadata_path = temp_dir.path().join("metadata.ducklake");
+    let (service, handle) = CatalogService::try_new_from_location(
+        Some(db_path.to_str().unwrap()),
+        Some(metadata_path.to_str().unwrap()),
+    )
+    .unwrap();
+    (temp_dir, handle, service)
+}
+
 #[tokio::test]
 async fn test_service_register_external_table() {
-    let temp_dir = TempDir::new().unwrap();
-    let metadata_path = temp_dir.path().join("metadata.ducklake");
-
-    let (service, handle) =
-        CatalogService::try_new_from_location(None, Some(metadata_path.to_str().unwrap())).unwrap();
+    let (_temp_dir, handle, service) = create_test_service_setup();
 
     tokio::spawn(async move {
         service.run().await;
@@ -39,11 +51,7 @@ async fn test_service_register_external_table() {
 
 #[tokio::test]
 async fn test_service_get_external_table() {
-    let temp_dir = TempDir::new().unwrap();
-    let metadata_path = temp_dir.path().join("metadata.ducklake");
-
-    let (service, handle) =
-        CatalogService::try_new_from_location(None, Some(metadata_path.to_str().unwrap())).unwrap();
+    let (_temp_dir, handle, service) = create_test_service_setup();
 
     tokio::spawn(async move {
         service.run().await;
@@ -76,12 +84,8 @@ async fn test_service_get_external_table() {
 }
 
 #[tokio::test]
-async fn test_service_get_nonexistent_table() {
-    let temp_dir = TempDir::new().unwrap();
-    let metadata_path = temp_dir.path().join("metadata.ducklake");
-
-    let (service, handle) =
-        CatalogService::try_new_from_location(None, Some(metadata_path.to_str().unwrap())).unwrap();
+async fn test_service_drop_nonexistent_table() {
+    let (_temp_dir, handle, service) = create_test_service_setup();
 
     tokio::spawn(async move {
         service.run().await;
@@ -98,11 +102,7 @@ async fn test_service_get_nonexistent_table() {
 
 #[tokio::test]
 async fn test_service_list_external_tables() {
-    let temp_dir = TempDir::new().unwrap();
-    let metadata_path = temp_dir.path().join("metadata.ducklake");
-
-    let (service, handle) =
-        CatalogService::try_new_from_location(None, Some(metadata_path.to_str().unwrap())).unwrap();
+    let (_temp_dir, handle, service) = create_test_service_setup();
 
     tokio::spawn(async move {
         service.run().await;
@@ -128,18 +128,13 @@ async fn test_service_list_external_tables() {
 }
 
 #[tokio::test]
-async fn test_service_drop_external_table() {
-    let temp_dir = TempDir::new().unwrap();
-    let metadata_path = temp_dir.path().join("metadata.ducklake");
-
-    let (service, handle) =
-        CatalogService::try_new_from_location(None, Some(metadata_path.to_str().unwrap())).unwrap();
+async fn test_service_error_duplicate_table_name() {
+    let (_temp_dir, handle, service) = create_test_service_setup();
 
     tokio::spawn(async move {
         service.run().await;
     });
 
-    // Register
     let request = RegisterTableRequest {
         table_name: "temp_table".to_string(),
         schema_name: None,
@@ -170,11 +165,7 @@ async fn test_service_drop_external_table() {
 
 #[tokio::test]
 async fn test_service_concurrent_operations() {
-    let temp_dir = TempDir::new().unwrap();
-    let metadata_path = temp_dir.path().join("metadata.ducklake");
-
-    let (service, handle) =
-        CatalogService::try_new_from_location(None, Some(metadata_path.to_str().unwrap())).unwrap();
+    let (_temp_dir, handle, service) = create_test_service_setup();
 
     tokio::spawn(async move {
         service.run().await;
@@ -213,11 +204,7 @@ async fn test_service_concurrent_operations() {
 
 #[tokio::test]
 async fn test_service_mixed_operations() {
-    let temp_dir = TempDir::new().unwrap();
-    let metadata_path = temp_dir.path().join("metadata.ducklake");
-
-    let (service, handle) =
-        CatalogService::try_new_from_location(None, Some(metadata_path.to_str().unwrap())).unwrap();
+    let (_temp_dir, handle, service) = create_test_service_setup();
 
     tokio::spawn(async move {
         service.run().await;
@@ -258,13 +245,15 @@ async fn test_service_mixed_operations() {
 #[tokio::test]
 async fn test_service_persistence_across_restarts() {
     let temp_dir = TempDir::new().unwrap();
+    let db_path = temp_dir.path().join("test.db");
     let metadata_path = temp_dir.path().join("metadata.ducklake");
+    let db_str = db_path.to_str().unwrap().to_string();
     let metadata_str = metadata_path.to_str().unwrap().to_string();
 
     // First service instance
     {
         let (service, handle) =
-            CatalogService::try_new_from_location(None, Some(&metadata_str)).unwrap();
+            CatalogService::try_new_from_location(Some(&db_str), Some(&metadata_str)).unwrap();
 
         tokio::spawn(async move {
             service.run().await;
@@ -286,7 +275,7 @@ async fn test_service_persistence_across_restarts() {
     // Second service instance
     {
         let (service, handle) =
-            CatalogService::try_new_from_location(None, Some(&metadata_str)).unwrap();
+            CatalogService::try_new_from_location(Some(&db_str), Some(&metadata_str)).unwrap();
 
         tokio::spawn(async move {
             service.run().await;

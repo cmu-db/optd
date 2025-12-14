@@ -4,8 +4,13 @@ use tempfile::TempDir;
 
 fn create_test_catalog() -> (TempDir, DuckLakeCatalog) {
     let temp_dir = TempDir::new().unwrap();
+    let db_path = temp_dir.path().join("test.db");
     let metadata_path = temp_dir.path().join("metadata.ducklake");
-    let catalog = DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
+    let catalog = DuckLakeCatalog::try_new(
+        Some(db_path.to_str().unwrap()),
+        Some(metadata_path.to_str().unwrap()),
+    )
+    .unwrap();
     (temp_dir, catalog)
 }
 
@@ -215,12 +220,14 @@ fn test_list_excludes_dropped_tables() {
 #[test]
 fn test_external_table_metadata_persists_across_connections() {
     let temp_dir = TempDir::new().unwrap();
+    let db_path = temp_dir.path().join("test.db");
     let metadata_path = temp_dir.path().join("metadata.ducklake");
+    let db_str = db_path.to_str().unwrap().to_string();
     let metadata_str = metadata_path.to_str().unwrap().to_string();
 
     // Register tables in first connection
     {
-        let mut catalog = DuckLakeCatalog::try_new(None, Some(&metadata_str)).unwrap();
+        let mut catalog = DuckLakeCatalog::try_new(Some(&db_str), Some(&metadata_str)).unwrap();
 
         let request = RegisterTableRequest {
             table_name: "persistent_table".to_string(),
@@ -240,7 +247,7 @@ fn test_external_table_metadata_persists_across_connections() {
 
     // Verify in second connection
     {
-        let mut catalog = DuckLakeCatalog::try_new(None, Some(&metadata_str)).unwrap();
+        let mut catalog = DuckLakeCatalog::try_new(Some(&db_str), Some(&metadata_str)).unwrap();
 
         let retrieved = catalog
             .get_external_table(None, "persistent_table")

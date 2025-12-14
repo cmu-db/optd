@@ -216,7 +216,6 @@ async fn main_inner() -> Result<()> {
     let cli_ctx = cli_ctx.enable_url_table();
     let ctx = cli_ctx.inner();
 
-    // Initialize catalog with optional DuckLake catalog service
     let catalog_handle = if let Ok(metadata_path) = env::var("OPTD_METADATA_CATALOG_PATH") {
         if !args.quiet {
             println!("Using OptD catalog with metadata path: {}", metadata_path);
@@ -233,20 +232,16 @@ async fn main_inner() -> Result<()> {
         None
     };
 
-    // Wrap the catalog list with OptdCatalogProviderList
     let original_catalog_list = ctx.state().catalog_list().clone();
     let optd_catalog_list =
         OptdCatalogProviderList::new(original_catalog_list.clone(), catalog_handle);
 
-    // install dynamic catalog provider that can register required object stores
-    // and wrap it with OptD catalog provider
     let dynamic_catalog = Arc::new(DynamicObjectStoreCatalog::new(
         Arc::new(optd_catalog_list),
         ctx.state_weak_ref(),
     ));
     ctx.register_catalog_list(dynamic_catalog);
 
-    // register `parquet_metadata` table function to get metadata from parquet files
     ctx.register_udtf("parquet_metadata", Arc::new(ParquetMetadataFunc {}));
 
     let mut print_options = PrintOptions {
