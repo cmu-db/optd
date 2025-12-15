@@ -67,8 +67,11 @@ fn test_register_multiple_tables_increments_id() {
     let metadata1 = catalog.register_external_table(request1).unwrap();
     let metadata2 = catalog.register_external_table(request2).unwrap();
 
-    assert_eq!(metadata1.table_id, 1);
-    assert_eq!(metadata2.table_id, 2);
+    // External tables use negative IDs to avoid collision with internal tables
+    // Internal: 1, 2, 3, ... (positive)
+    // External: -1, -2, -3, ... (negative)
+    assert_eq!(metadata1.table_id, -1);
+    assert_eq!(metadata2.table_id, -2);
 }
 
 #[test]

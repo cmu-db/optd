@@ -37,7 +37,7 @@ async fn test_drop_table() {
     let csv_path = temp_dir.path().join("test.csv");
     std::fs::write(&csv_path, "id,name\n1,Alice\n2,Bob\n").unwrap();
 
-    // Session 1: Create table
+    // Create table
     let (cli_ctx, _service_handle) = create_cli_context_with_catalog(&temp_dir).await;
 
     let create_sql = format!(
@@ -190,7 +190,7 @@ async fn test_drop_table_persists_across_sessions() {
         cli_ctx.execute_logical_plan(logical_plan).await.unwrap();
     }
 
-    // Session 2: Table should not be available (lazy loading should filter it out)
+    // Table should not be available (lazy loading should filter it out)
     {
         let (cli_ctx, _service_handle) = create_cli_context_with_catalog(&temp_dir).await;
 

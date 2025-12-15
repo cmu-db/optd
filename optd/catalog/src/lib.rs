@@ -68,6 +68,23 @@ pub trait Catalog {
         schema_name: Option<&str>,
         table_name: &str,
     ) -> Result<(), Error>;
+
+    /// Sets statistics for any table (Phase 8A: Manual Statistics Interface).
+    /// Works for both internal DuckDB tables and external tables.
+    fn set_table_statistics(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
+        stats: TableStatistics,
+    ) -> Result<(), Error>;
+
+    /// Gets statistics for any table (Phase 8A: Manual Statistics Interface).
+    /// Works for both internal DuckDB tables and external tables.
+    fn get_table_statistics_manual(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
+    ) -> Result<Option<TableStatistics>, Error>;
 }
 
 const DEFAULT_METADATA_FILE: &str = "metadata.ducklake";
@@ -280,7 +297,7 @@ struct TableColumnStatisticsEntry {
 }
 
 /// Statistics for a table including row count and per-column statistics.
-/// Main structure returned when querying table statistics.
+/// Used for both reading and writing statistics (internal and external tables).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableStatistics {
     pub row_count: usize,
@@ -339,6 +356,7 @@ impl FromIterator<Result<TableColumnStatisticsEntry, Error>> for TableStatistics
 }
 
 /// Statistics for a single column including type, name, and advanced statistics.
+/// For external tables without ducklake_column entries, column_id will be 0 and name identifies the column.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ColumnStatistics {
     pub column_id: i64,
@@ -413,6 +431,8 @@ pub struct ExternalTableMetadata {
     pub begin_snapshot: i64,
     pub end_snapshot: Option<i64>,
 }
+
+// ExternalTableStatistics and ExternalColumnStatistics removed - use unified TableStatistics and AdvanceColumnStatistics instead
 
 /// Request to register a new external table in the catalog.
 #[derive(Debug, Clone)]
@@ -523,6 +543,29 @@ impl Catalog for DuckLakeCatalog {
     ) -> Result<(), Error> {
         let txn = self.conn.transaction().context(TransactionSnafu)?;
         let result = Self::drop_external_table_inner(&txn, schema_name, table_name);
+        txn.commit().context(TransactionSnafu)?;
+        result
+    }
+
+    fn set_table_statistics(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
+        stats: TableStatistics,
+    ) -> Result<(), Error> {
+        let txn = self.conn.transaction().context(TransactionSnafu)?;
+        let result = Self::set_table_statistics_inner(&txn, schema_name, table_name, stats);
+        txn.commit().context(TransactionSnafu)?;
+        result
+    }
+
+    fn get_table_statistics_manual(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
+    ) -> Result<Option<TableStatistics>, Error> {
+        let txn = self.conn.transaction().context(TransactionSnafu)?;
+        let result = Self::get_table_statistics_manual_inner(&txn, schema_name, table_name);
         txn.commit().context(TransactionSnafu)?;
         result
     }
@@ -742,11 +785,12 @@ impl DuckLakeCatalog {
         let schema_info = Self::current_schema_info_inner(conn)?;
         let curr_snapshot = Self::current_snapshot_info_inner(conn)?;
 
-        // Generate new table_id (get max + 1, or start from 1)
+        // Generate negative table_id to avoid collision with internal tables.
+        // Internal tables use positive IDs (1, 2, 3, ...), external tables use negative (-1, -2, -3, ...).
         let table_id: i64 = conn
             .query_row(
                 r#"
-                SELECT COALESCE(MAX(table_id), 0) + 1
+                SELECT COALESCE(MIN(table_id), 0) - 1
                 FROM __ducklake_metadata_metalake.main.optd_external_table
                 "#,
                 [],
@@ -989,5 +1033,310 @@ impl DuckLakeCatalog {
         }
 
         Ok(())
+    }
+
+    fn set_table_statistics_inner(
+        conn: &Connection,
+        _schema_name: Option<&str>,
+        table_name: &str,
+        stats: TableStatistics,
+    ) -> Result<(), Error> {
+        let schema_info = Self::current_schema_info_inner(conn)?;
+
+        // Get table_id from ducklake_table or optd_external_table
+        let table_id: Result<i64, _> = conn
+            .prepare(
+                r#"
+                SELECT table_id FROM __ducklake_metadata_metalake.main.ducklake_table
+                WHERE schema_id = ? AND table_name = ?
+                UNION ALL
+                SELECT table_id FROM __ducklake_metadata_metalake.main.optd_external_table
+                WHERE schema_id = ? AND table_name = ? AND end_snapshot IS NULL
+                LIMIT 1
+                "#,
+            )
+            .context(QueryExecutionSnafu)?
+            .query_row(
+                params![
+                    schema_info.schema_id,
+                    table_name,
+                    schema_info.schema_id,
+                    table_name
+                ],
+                |row| row.get(0),
+            );
+
+        let table_id = match table_id {
+            Ok(id) => id,
+            Err(DuckDBError::QueryReturnedNoRows) => {
+                return Err(Error::QueryExecution {
+                    source: DuckDBError::QueryReturnedNoRows,
+                });
+            }
+            Err(e) => return Err(Error::QueryExecution { source: e }),
+        };
+
+        // Check for existing statistics
+        let has_existing_stats: i64 = conn
+            .prepare(
+                r#"
+                SELECT COUNT(*) 
+                FROM __ducklake_metadata_metalake.main.ducklake_table_stats
+                WHERE table_id = ? AND record_count IS NOT NULL
+                "#,
+            )
+            .context(QueryExecutionSnafu)?
+            .query_row(params![table_id], |row| row.get(0))
+            .context(QueryExecutionSnafu)?;
+
+        let curr_snapshot = if has_existing_stats > 0 {
+            // Close existing column stats before creating new snapshot
+            let close_snapshot = Self::current_snapshot_info_inner(conn)?;
+
+            conn.prepare(
+                r#"
+                UPDATE __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
+                SET end_snapshot = ?
+                WHERE end_snapshot IS NULL
+                    AND table_id = ?
+                "#,
+            )
+            .context(QueryExecutionSnafu)?
+            .execute(params![close_snapshot.id.0, table_id])
+            .context(QueryExecutionSnafu)?;
+
+            // Create a new snapshot for the update
+            let new_snapshot = Self::current_snapshot_info_inner(conn)?;
+
+            conn.prepare(INSERT_SNAPSHOT_QUERY)
+                .context(QueryExecutionSnafu)?
+                .execute(params![
+                    new_snapshot.id.0 + 1,
+                    new_snapshot.schema_version,
+                    new_snapshot.next_catalog_id,
+                    new_snapshot.next_file_id,
+                ])
+                .context(QueryExecutionSnafu)?;
+
+            conn.prepare(INSERT_SNAPSHOT_CHANGE_QUERY)
+                .context(QueryExecutionSnafu)?
+                .execute(params![
+                    new_snapshot.id.0 + 1,
+                    format!("Updated table statistics for table_id: {}", table_id),
+                    Null,
+                    Null,
+                    Null,
+                ])
+                .context(QueryExecutionSnafu)?;
+
+            // Return the new snapshot info
+            SnapshotInfo {
+                id: SnapshotId(new_snapshot.id.0 + 1),
+                schema_version: new_snapshot.schema_version,
+                next_catalog_id: new_snapshot.next_catalog_id,
+                next_file_id: new_snapshot.next_file_id,
+            }
+        } else {
+            // No existing stats, just get current snapshot
+            Self::current_snapshot_info_inner(conn)?
+        };
+
+        // Insert/update row count in ducklake_table_stats
+        // First, delete existing row if any
+        conn.prepare(
+            r#"
+            DELETE FROM __ducklake_metadata_metalake.main.ducklake_table_stats
+            WHERE table_id = ?
+            "#,
+        )
+        .context(QueryExecutionSnafu)?
+        .execute(params![table_id])
+        .context(QueryExecutionSnafu)?;
+
+        // Insert new row count
+        conn.prepare(
+            r#"
+            INSERT INTO __ducklake_metadata_metalake.main.ducklake_table_stats
+                (table_id, record_count, next_row_id, file_size_bytes)
+            VALUES (?, ?, NULL, NULL)
+            "#,
+        )
+        .context(QueryExecutionSnafu)?
+        .execute(params![table_id, stats.row_count as i64])
+        .context(QueryExecutionSnafu)?;
+
+        // Insert column statistics
+        for col_stats in &stats.column_statistics {
+            for adv_stat in &col_stats.advanced_stats {
+                // Build JSON payload
+                let mut payload_obj = if col_stats.column_id == 0 {
+                    // For external tables (column_id = 0), include column_name in payload
+                    serde_json::json!({
+                        "column_name": col_stats.name
+                    })
+                } else {
+                    // For internal tables, payload is just the stat data
+                    serde_json::json!({})
+                };
+
+                // Merge the stat's data into the payload
+                if let (Value::Object(map), Value::Object(data_map)) =
+                    (&mut payload_obj, &adv_stat.data)
+                {
+                    for (k, v) in data_map {
+                        map.insert(k.clone(), v.clone());
+                    }
+                }
+
+                conn.prepare(INSERT_ADV_STATS_QUERY)
+                    .context(QueryExecutionSnafu)?
+                    .execute(params![
+                        col_stats.column_id,
+                        curr_snapshot.id.0,
+                        Null, // end_snapshot
+                        table_id,
+                        adv_stat.stats_type,
+                        payload_obj.to_string()
+                    ])
+                    .context(QueryExecutionSnafu)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn get_table_statistics_manual_inner(
+        conn: &Connection,
+        _schema_name: Option<&str>,
+        table_name: &str,
+    ) -> Result<Option<TableStatistics>, Error> {
+        let schema_info = Self::current_schema_info_inner(conn)?;
+
+        // Get table_id from ducklake_table or optd_external_table
+        let table_id: Result<i64, _> = conn
+            .prepare(
+                r#"
+                SELECT table_id FROM __ducklake_metadata_metalake.main.ducklake_table
+                WHERE schema_id = ? AND table_name = ?
+                UNION ALL
+                SELECT table_id FROM __ducklake_metadata_metalake.main.optd_external_table
+                WHERE schema_id = ? AND table_name = ? AND end_snapshot IS NULL
+                LIMIT 1
+                "#,
+            )
+            .context(QueryExecutionSnafu)?
+            .query_row(
+                params![
+                    schema_info.schema_id,
+                    table_name,
+                    schema_info.schema_id,
+                    table_name
+                ],
+                |row| row.get(0),
+            );
+
+        let table_id = match table_id {
+            Ok(id) => id,
+            Err(DuckDBError::QueryReturnedNoRows) => return Ok(None),
+            Err(e) => return Err(Error::QueryExecution { source: e }),
+        };
+
+        // Fetch row count
+        let row_count: Result<i64, _> = conn
+            .prepare(
+                r#"
+                SELECT record_count
+                FROM __ducklake_metadata_metalake.main.ducklake_table_stats
+                WHERE table_id = ? AND record_count IS NOT NULL
+                "#,
+            )
+            .context(QueryExecutionSnafu)?
+            .query_row(params![table_id], |row| row.get(0));
+
+        let row_count = match row_count {
+            Ok(count) => count as usize,
+            Err(DuckDBError::QueryReturnedNoRows) => return Ok(None),
+            Err(e) => return Err(Error::QueryExecution { source: e }),
+        };
+
+        // Fetch column statistics
+        let curr_snapshot = Self::current_snapshot_info_inner(conn)?;
+
+        let mut stmt = conn
+            .prepare(
+                r#"
+                SELECT column_id, stats_type, payload
+                FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
+                WHERE table_id = ? 
+                  AND ? >= begin_snapshot 
+                  AND (? < end_snapshot OR end_snapshot IS NULL)
+                ORDER BY column_id, stats_type
+                "#,
+            )
+            .context(QueryExecutionSnafu)?;
+
+        let rows = stmt
+            .query_map(
+                params![table_id, curr_snapshot.id.0, curr_snapshot.id.0],
+                |row| {
+                    let column_id: i64 = row.get(0)?;
+                    let stats_type: String = row.get(1)?;
+                    let payload: String = row.get(2)?;
+                    Ok((column_id, stats_type, payload))
+                },
+            )
+            .context(QueryExecutionSnafu)?;
+
+        // Group by column_name (external) or column_id (internal)
+        let mut column_stats_map: HashMap<String, ColumnStatistics> = HashMap::new();
+
+        for row_result in rows {
+            let (column_id, stats_type, payload) = row_result.context(QueryExecutionSnafu)?;
+            let mut parsed: serde_json::Value =
+                serde_json::from_str(&payload).context(JsonSerializationSnafu)?;
+
+            // For external tables (column_id=0), extract name from payload; for internal, query ducklake_column.
+            let column_name = if column_id == 0 {
+                let name = parsed["column_name"].as_str().unwrap_or("").to_string();
+                // Remove column_name from data object
+                if let Value::Object(ref mut map) = parsed {
+                    map.remove("column_name");
+                }
+                name
+            } else {
+                // Look up column name from ducklake_column table
+                conn.query_row(
+                    "SELECT column_name FROM __ducklake_metadata_metalake.main.ducklake_column
+                     WHERE column_id = ? AND table_id = ?",
+                    params![column_id, table_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap_or_else(|_| format!("column_{}", column_id))
+            };
+
+            let adv_stat = AdvanceColumnStatistics {
+                stats_type,
+                data: parsed,
+            };
+
+            let key = column_name.clone();
+            column_stats_map
+                .entry(key)
+                .or_insert_with(|| ColumnStatistics {
+                    column_id,
+                    column_type: String::new(), // Will be populated if needed
+                    name: column_name,
+                    advanced_stats: Vec::new(),
+                })
+                .advanced_stats
+                .push(adv_stat);
+        }
+
+        let column_statistics: Vec<ColumnStatistics> = column_stats_map.into_values().collect();
+
+        Ok(Some(TableStatistics {
+            row_count,
+            column_statistics,
+        }))
     }
 }
