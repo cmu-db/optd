@@ -903,13 +903,12 @@ fn test_error_handling_edge_cases() {
     // Test various error scenarios: non-existent tables, invalid snapshots, invalid IDs.
     let (_temp_dir, mut provider, table_id, age_column_id) = create_test_catalog_with_data();
 
-    // Non-existent table returns empty results
+    // Non-existent table returns None
     let current_snapshot = provider.current_snapshot().unwrap();
     let stats = provider
         .table_statistics("nonexistent_table", current_snapshot)
         .unwrap();
-    assert!(stats.is_some());
-    assert_eq!(stats.unwrap().column_statistics.len(), 0);
+    assert!(stats.is_none());
 
     // Invalid/future snapshot still returns data
     provider

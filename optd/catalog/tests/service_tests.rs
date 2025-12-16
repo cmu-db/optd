@@ -199,12 +199,11 @@ async fn test_table_statistics_empty_table() {
     let stats = stats.unwrap();
     assert_eq!(stats.row_count, 0);
 
-    // For empty tables with no data, the statistics system may not return column metadata
-    // This is expected behavior - verify it's empty or has minimal stats
+    // For empty tables with no data, we should still get column metadata
     assert_eq!(
         stats.column_statistics.len(),
-        0,
-        "Empty table with no data should have 0 column statistics"
+        2,
+        "Empty table should have 2 column statistics (id and name)"
     );
 
     // If there were column statistics, verify no advanced stats would be present
@@ -234,8 +233,8 @@ async fn test_table_statistics_nonexistent_table() {
         .await
         .unwrap();
 
-    assert!(stats.is_some());
-    assert_eq!(stats.unwrap().column_statistics.len(), 0);
+    // Nonexistent tables should return None, not empty statistics
+    assert!(stats.is_none());
 
     handle.shutdown().await.unwrap();
 }

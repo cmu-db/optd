@@ -202,33 +202,34 @@ const SCHEMA_INFO_QUERY: &str = r#"
 "#;
 
 /// SQL query to fetch table statistics including column metadata and advanced stats at a specific snapshot.
+/// Supports internal tables (ducklake_table with ducklake_column).
+/// For tables without statistics yet, returns column metadata with row_count=0.
 const FETCH_TABLE_STATS_QUERY: &str = r#"
     SELECT 
-        ts.table_id,
+        dt.table_id,
         dc.column_id,
         dc.column_name,
         dc.column_type,
-        ts.record_count,
-        ts.next_row_id,
-        ts.file_size_bytes,
+        COALESCE(ts.record_count, 0) as record_count,
+        COALESCE(ts.next_row_id, 0) as next_row_id,
+        COALESCE(ts.file_size_bytes, 0) as file_size_bytes,
         tcas.stats_type,
         tcas.payload
-    FROM __ducklake_metadata_metalake.main.ducklake_table_stats ts
-    INNER JOIN __ducklake_metadata_metalake.main.ducklake_table dt ON ts.table_id = dt.table_id
+    FROM __ducklake_metadata_metalake.main.ducklake_table dt
     INNER JOIN __ducklake_metadata_metalake.main.ducklake_schema ds ON dt.schema_id = ds.schema_id
     INNER JOIN __ducklake_metadata_metalake.main.ducklake_column dc ON dt.table_id = dc.table_id
+    LEFT JOIN __ducklake_metadata_metalake.main.ducklake_table_stats ts ON dt.table_id = ts.table_id
     LEFT JOIN __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats tcas 
         ON dc.table_id = tcas.table_id 
         AND dc.column_id = tcas.column_id
         AND ? >= tcas.begin_snapshot 
         AND (? < tcas.end_snapshot OR tcas.end_snapshot IS NULL)
     WHERE 
-        ds.schema_name = current_schema()
+        ds.schema_name = COALESCE(?, current_schema())
         AND dt.table_name = ?
-        AND ts.record_count IS NOT NULL 
         AND ? >= dc.begin_snapshot 
         AND (? < dc.end_snapshot OR dc.end_snapshot IS NULL)
-    ORDER BY ts.table_id, dc.column_id, tcas.stats_type;
+    ORDER BY dt.table_id, dc.column_id, tcas.stats_type;
 "#;
 
 /// SQL query to close an existing advanced statistics entry by setting its end_snapshot.
@@ -524,7 +525,7 @@ impl Catalog for DuckLakeCatalog {
         snapshot: SnapshotId,
     ) -> Result<Option<TableStatistics>, Error> {
         let txn = self.conn.transaction().context(TransactionSnafu)?;
-        let result = Self::table_statistics_inner(&txn, table, snapshot);
+        let result = Self::table_statistics_inner(&txn, None, table, Some(snapshot));
         txn.commit().context(TransactionSnafu)?;
         result
     }
@@ -560,7 +561,7 @@ impl Catalog for DuckLakeCatalog {
         table_name: &str,
     ) -> Result<Option<ExternalTableMetadata>, Error> {
         let txn = self.conn.transaction().context(TransactionSnafu)?;
-        let result = Self::get_external_table_inner(&txn, schema_name, table_name);
+        let result = Self::get_external_table_inner(&txn, schema_name, table_name, None);
         txn.commit().context(TransactionSnafu)?;
         result
     }
@@ -570,7 +571,7 @@ impl Catalog for DuckLakeCatalog {
         schema_name: Option<&str>,
     ) -> Result<Vec<ExternalTableMetadata>, Error> {
         let txn = self.conn.transaction().context(TransactionSnafu)?;
-        let result = Self::list_external_tables_inner(&txn, schema_name);
+        let result = Self::list_external_tables_inner(&txn, schema_name, None);
         txn.commit().context(TransactionSnafu)?;
         result
     }
@@ -755,18 +756,40 @@ impl DuckLakeCatalog {
             .context(QueryExecutionSnafu)
     }
 
+    /// Fetch table statistics using the FromIterator pattern for optimizer compatibility.
+    ///
+    /// # Parameters
+    /// - `schema_name`: Optional schema name (None = current schema)
+    /// - `snapshot`: Optional snapshot ID (None = current snapshot)
+    ///
+    /// For internal tables, returns statistics even if no data exists yet (row_count=0).
+    /// For non-existent tables, returns None.
     fn table_statistics_inner(
         conn: &Connection,
+        schema_name: Option<&str>,
         table: &str,
-        snapshot: SnapshotId,
+        snapshot: Option<SnapshotId>,
     ) -> Result<Option<TableStatistics>, Error> {
+        // Determine the snapshot to use
+        let query_snapshot = match snapshot {
+            Some(snap) => snap,
+            None => Self::current_snapshot_info_inner(conn)?.id,
+        };
+
         let mut stmt = conn
             .prepare(FETCH_TABLE_STATS_QUERY)
             .context(QueryExecutionSnafu)?;
 
-        let entries = stmt
+        let entries: Vec<_> = stmt
             .query_map(
-                params![&snapshot.0, &snapshot.0, table, &snapshot.0, &snapshot.0,],
+                params![
+                    &query_snapshot.0,
+                    &query_snapshot.0,
+                    schema_name,
+                    table,
+                    &query_snapshot.0,
+                    &query_snapshot.0,
+                ],
                 |row| {
                     Ok(TableColumnStatisticsEntry {
                         _table_id: row.get("table_id")?,
@@ -782,9 +805,18 @@ impl DuckLakeCatalog {
                 },
             )
             .context(QueryExecutionSnafu)?
-            .map(|result| result.context(QueryExecutionSnafu));
+            .collect::<Result<Vec<_>, _>>()
+            .context(QueryExecutionSnafu)?;
 
-        Ok(Some(TableStatistics::from_iter(entries)))
+        // If no entries found, the table doesn't exist
+        if entries.is_empty() {
+            return Ok(None);
+        }
+
+        // Convert entries to TableStatistics using FromIterator
+        Ok(Some(TableStatistics::from_iter(
+            entries.into_iter().map(Ok),
+        )))
     }
 
     fn update_table_column_stats_inner(
@@ -937,40 +969,104 @@ impl DuckLakeCatalog {
         })
     }
 
+    /// Unified method to get external table metadata.
+    /// If `snapshot_id` is None, gets the current active table (end_snapshot IS NULL).
+    /// If `snapshot_id` is Some, gets the table as it existed at that snapshot.
     fn get_external_table_inner(
         conn: &Connection,
         _schema_name: Option<&str>,
         table_name: &str,
+        snapshot_id: Option<i64>,
     ) -> Result<Option<ExternalTableMetadata>, Error> {
         // Get schema_id
         let schema_info = Self::current_schema_info_inner(conn)?;
 
-        // Query for active table
-        let mut stmt = conn
-            .prepare(
-                r#"
-                SELECT table_id, schema_id, table_name, location, file_format, 
-                       compression, begin_snapshot, end_snapshot
-                FROM __ducklake_metadata_metalake.main.optd_external_table
-                WHERE schema_id = ? AND table_name = ? AND end_snapshot IS NULL
-                "#,
-            )
-            .context(QueryExecutionSnafu)?;
+        // Query and extract data based on snapshot parameter
+        let row_data = match snapshot_id {
+            None => {
+                let mut stmt = conn
+                    .prepare(
+                        r#"
+                        SELECT table_id, schema_id, table_name, location, file_format, 
+                               compression, begin_snapshot, end_snapshot
+                        FROM __ducklake_metadata_metalake.main.optd_external_table
+                        WHERE schema_id = ? AND table_name = ? AND end_snapshot IS NULL
+                        "#,
+                    )
+                    .context(QueryExecutionSnafu)?;
 
-        let mut rows = stmt
-            .query(params![schema_info.schema_id, table_name])
-            .context(QueryExecutionSnafu)?;
+                let mut rows = stmt
+                    .query(params![schema_info.schema_id, table_name])
+                    .context(QueryExecutionSnafu)?;
 
-        if let Some(row) = rows.next().context(QueryExecutionSnafu)? {
-            let table_id: i64 = row.get(0).context(QueryExecutionSnafu)?;
-            let schema_id: i64 = row.get(1).context(QueryExecutionSnafu)?;
-            let table_name: String = row.get(2).context(QueryExecutionSnafu)?;
-            let location: String = row.get(3).context(QueryExecutionSnafu)?;
-            let file_format: String = row.get(4).context(QueryExecutionSnafu)?;
-            let compression: Option<String> = row.get(5).context(QueryExecutionSnafu)?;
-            let begin_snapshot: i64 = row.get(6).context(QueryExecutionSnafu)?;
-            let end_snapshot: Option<i64> = row.get(7).context(QueryExecutionSnafu)?;
+                if let Some(row) = rows.next().context(QueryExecutionSnafu)? {
+                    Some((
+                        row.get::<_, i64>(0).context(QueryExecutionSnafu)?,
+                        row.get::<_, i64>(1).context(QueryExecutionSnafu)?,
+                        row.get::<_, String>(2).context(QueryExecutionSnafu)?,
+                        row.get::<_, String>(3).context(QueryExecutionSnafu)?,
+                        row.get::<_, String>(4).context(QueryExecutionSnafu)?,
+                        row.get::<_, Option<String>>(5)
+                            .context(QueryExecutionSnafu)?,
+                        row.get::<_, i64>(6).context(QueryExecutionSnafu)?,
+                        row.get::<_, Option<i64>>(7).context(QueryExecutionSnafu)?,
+                    ))
+                } else {
+                    None
+                }
+            }
+            Some(snapshot) => {
+                let mut stmt = conn
+                    .prepare(
+                        r#"
+                        SELECT table_id, schema_id, table_name, location, file_format, 
+                               compression, begin_snapshot, end_snapshot
+                        FROM __ducklake_metadata_metalake.main.optd_external_table
+                        WHERE schema_id = ? AND table_name = ? 
+                          AND begin_snapshot <= ?
+                          AND (end_snapshot IS NULL OR end_snapshot > ?)
+                        "#,
+                    )
+                    .context(QueryExecutionSnafu)?;
 
+                let mut rows = stmt
+                    .query(params![
+                        schema_info.schema_id,
+                        table_name,
+                        snapshot,
+                        snapshot
+                    ])
+                    .context(QueryExecutionSnafu)?;
+
+                if let Some(row) = rows.next().context(QueryExecutionSnafu)? {
+                    Some((
+                        row.get::<_, i64>(0).context(QueryExecutionSnafu)?,
+                        row.get::<_, i64>(1).context(QueryExecutionSnafu)?,
+                        row.get::<_, String>(2).context(QueryExecutionSnafu)?,
+                        row.get::<_, String>(3).context(QueryExecutionSnafu)?,
+                        row.get::<_, String>(4).context(QueryExecutionSnafu)?,
+                        row.get::<_, Option<String>>(5)
+                            .context(QueryExecutionSnafu)?,
+                        row.get::<_, i64>(6).context(QueryExecutionSnafu)?,
+                        row.get::<_, Option<i64>>(7).context(QueryExecutionSnafu)?,
+                    ))
+                } else {
+                    None
+                }
+            }
+        };
+
+        if let Some((
+            table_id,
+            schema_id,
+            table_name,
+            location,
+            file_format,
+            compression,
+            begin_snapshot,
+            end_snapshot,
+        )) = row_data
+        {
             // Fetch options
             let mut options = HashMap::new();
             let mut opt_stmt = conn
@@ -1009,52 +1105,99 @@ impl DuckLakeCatalog {
         }
     }
 
+    /// Unified method to list external tables.
+    /// If `snapshot_id` is None, lists current active tables (end_snapshot IS NULL).
+    /// If `snapshot_id` is Some, lists tables as they existed at that snapshot.
     fn list_external_tables_inner(
         conn: &Connection,
         _schema_name: Option<&str>,
+        snapshot_id: Option<i64>,
     ) -> Result<Vec<ExternalTableMetadata>, Error> {
         let schema_info = Self::current_schema_info_inner(conn)?;
 
-        let mut stmt = conn
-            .prepare(
-                r#"
-                SELECT table_id, schema_id, table_name, location, file_format,
-                       compression, begin_snapshot, end_snapshot
-                FROM __ducklake_metadata_metalake.main.optd_external_table
-                WHERE schema_id = ? AND end_snapshot IS NULL
-                ORDER BY table_name
-                "#,
-            )
-            .context(QueryExecutionSnafu)?;
+        // Collect table data based on snapshot parameter
+        let table_rows = match snapshot_id {
+            None => {
+                let mut stmt = conn
+                    .prepare(
+                        r#"
+                        SELECT table_id, schema_id, table_name, location, file_format,
+                               compression, begin_snapshot, end_snapshot
+                        FROM __ducklake_metadata_metalake.main.optd_external_table
+                        WHERE schema_id = ? AND end_snapshot IS NULL
+                        ORDER BY table_name
+                        "#,
+                    )
+                    .context(QueryExecutionSnafu)?;
 
-        let rows = stmt
-            .query(params![schema_info.schema_id])
-            .context(QueryExecutionSnafu)?;
+                let rows = stmt
+                    .query(params![schema_info.schema_id])
+                    .context(QueryExecutionSnafu)?;
 
+                rows.mapped(|r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, String>(4)?,
+                        r.get::<_, Option<String>>(5)?,
+                        r.get::<_, i64>(6)?,
+                        r.get::<_, Option<i64>>(7)?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .context(QueryExecutionSnafu)?
+            }
+            Some(snapshot) => {
+                let mut stmt = conn
+                    .prepare(
+                        r#"
+                        SELECT table_id, schema_id, table_name, location, file_format,
+                               compression, begin_snapshot, end_snapshot
+                        FROM __ducklake_metadata_metalake.main.optd_external_table
+                        WHERE schema_id = ? 
+                          AND begin_snapshot <= ?
+                          AND (end_snapshot IS NULL OR end_snapshot > ?)
+                        ORDER BY table_name
+                        "#,
+                    )
+                    .context(QueryExecutionSnafu)?;
+
+                let rows = stmt
+                    .query(params![schema_info.schema_id, snapshot, snapshot])
+                    .context(QueryExecutionSnafu)?;
+
+                rows.mapped(|r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, String>(4)?,
+                        r.get::<_, Option<String>>(5)?,
+                        r.get::<_, i64>(6)?,
+                        r.get::<_, Option<i64>>(7)?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .context(QueryExecutionSnafu)?
+            }
+        };
+
+        // Now build ExternalTableMetadata for each table
         let mut tables = Vec::new();
-        for row in rows.mapped(|r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, i64>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, String>(4)?,
-                r.get::<_, Option<String>>(5)?,
-                r.get::<_, i64>(6)?,
-                r.get::<_, Option<i64>>(7)?,
-            ))
-        }) {
-            let (
-                table_id,
-                schema_id,
-                table_name,
-                location,
-                file_format,
-                compression,
-                begin_snapshot,
-                end_snapshot,
-            ) = row.context(QueryExecutionSnafu)?;
-
+        for (
+            table_id,
+            schema_id,
+            table_name,
+            location,
+            file_format,
+            compression,
+            begin_snapshot,
+            end_snapshot,
+        ) in table_rows
+        {
             // Fetch options for this table
             let mut options = HashMap::new();
             let mut opt_stmt = conn
@@ -1176,170 +1319,23 @@ impl DuckLakeCatalog {
         Ok(())
     }
 
+    /// Get external table at a specific snapshot (wrapper for backward compatibility).
     fn get_external_table_at_snapshot_inner(
         conn: &Connection,
-        _schema_name: Option<&str>,
+        schema_name: Option<&str>,
         table_name: &str,
         snapshot_id: i64,
     ) -> Result<Option<ExternalTableMetadata>, Error> {
-        let schema_info = Self::current_schema_info_inner(conn)?;
-
-        // Query for table active at the given snapshot
-        let mut stmt = conn
-            .prepare(
-                r#"
-                SELECT table_id, schema_id, table_name, location, file_format, 
-                       compression, begin_snapshot, end_snapshot
-                FROM __ducklake_metadata_metalake.main.optd_external_table
-                WHERE schema_id = ? AND table_name = ? 
-                  AND begin_snapshot <= ?
-                  AND (end_snapshot IS NULL OR end_snapshot > ?)
-                "#,
-            )
-            .context(QueryExecutionSnafu)?;
-
-        let mut rows = stmt
-            .query(params![
-                schema_info.schema_id,
-                table_name,
-                snapshot_id,
-                snapshot_id
-            ])
-            .context(QueryExecutionSnafu)?;
-
-        if let Some(row) = rows.next().context(QueryExecutionSnafu)? {
-            let table_id: i64 = row.get(0).context(QueryExecutionSnafu)?;
-            let schema_id: i64 = row.get(1).context(QueryExecutionSnafu)?;
-            let table_name: String = row.get(2).context(QueryExecutionSnafu)?;
-            let location: String = row.get(3).context(QueryExecutionSnafu)?;
-            let file_format: String = row.get(4).context(QueryExecutionSnafu)?;
-            let compression: Option<String> = row.get(5).context(QueryExecutionSnafu)?;
-            let begin_snapshot: i64 = row.get(6).context(QueryExecutionSnafu)?;
-            let end_snapshot: Option<i64> = row.get(7).context(QueryExecutionSnafu)?;
-
-            // Fetch options
-            let mut options = HashMap::new();
-            let mut opt_stmt = conn
-                .prepare(
-                    r#"
-                    SELECT option_key, option_value
-                    FROM __ducklake_metadata_metalake.main.optd_external_table_options
-                    WHERE table_id = ?
-                    "#,
-                )
-                .context(QueryExecutionSnafu)?;
-
-            let opt_rows = opt_stmt
-                .query(params![table_id])
-                .context(QueryExecutionSnafu)?;
-
-            for opt_row in opt_rows.mapped(|r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-            {
-                let (key, value) = opt_row.context(QueryExecutionSnafu)?;
-                options.insert(key, value);
-            }
-
-            Ok(Some(ExternalTableMetadata {
-                table_id,
-                schema_id,
-                table_name,
-                location,
-                file_format,
-                compression,
-                options,
-                begin_snapshot,
-                end_snapshot,
-            }))
-        } else {
-            Ok(None)
-        }
+        Self::get_external_table_inner(conn, schema_name, table_name, Some(snapshot_id))
     }
 
+    /// List external tables at a specific snapshot (wrapper for backward compatibility).
     fn list_external_tables_at_snapshot_inner(
         conn: &Connection,
-        _schema_name: Option<&str>,
+        schema_name: Option<&str>,
         snapshot_id: i64,
     ) -> Result<Vec<ExternalTableMetadata>, Error> {
-        let schema_info = Self::current_schema_info_inner(conn)?;
-
-        let mut stmt = conn
-            .prepare(
-                r#"
-                SELECT table_id, schema_id, table_name, location, file_format,
-                       compression, begin_snapshot, end_snapshot
-                FROM __ducklake_metadata_metalake.main.optd_external_table
-                WHERE schema_id = ? 
-                  AND begin_snapshot <= ?
-                  AND (end_snapshot IS NULL OR end_snapshot > ?)
-                ORDER BY table_name
-                "#,
-            )
-            .context(QueryExecutionSnafu)?;
-
-        let rows = stmt
-            .query(params![schema_info.schema_id, snapshot_id, snapshot_id])
-            .context(QueryExecutionSnafu)?;
-
-        let mut tables = Vec::new();
-        for row in rows.mapped(|r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, i64>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, String>(4)?,
-                r.get::<_, Option<String>>(5)?,
-                r.get::<_, i64>(6)?,
-                r.get::<_, Option<i64>>(7)?,
-            ))
-        }) {
-            let (
-                table_id,
-                schema_id,
-                table_name,
-                location,
-                file_format,
-                compression,
-                begin_snapshot,
-                end_snapshot,
-            ) = row.context(QueryExecutionSnafu)?;
-
-            // Fetch options for this table
-            let mut options = HashMap::new();
-            let mut opt_stmt = conn
-                .prepare(
-                    r#"
-                    SELECT option_key, option_value
-                    FROM __ducklake_metadata_metalake.main.optd_external_table_options
-                    WHERE table_id = ?
-                    "#,
-                )
-                .context(QueryExecutionSnafu)?;
-
-            let opt_rows = opt_stmt
-                .query(params![table_id])
-                .context(QueryExecutionSnafu)?;
-
-            for opt_row in opt_rows.mapped(|r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-            {
-                let (key, value) = opt_row.context(QueryExecutionSnafu)?;
-                options.insert(key, value);
-            }
-
-            tables.push(ExternalTableMetadata {
-                table_id,
-                schema_id,
-                table_name,
-                location,
-                file_format,
-                compression,
-                options,
-                begin_snapshot,
-                end_snapshot,
-            });
-        }
-
-        Ok(tables)
+        Self::list_external_tables_inner(conn, schema_name, Some(snapshot_id))
     }
 
     fn set_table_statistics_inner(
@@ -1557,6 +1553,8 @@ impl DuckLakeCatalog {
         Ok(())
     }
 
+    /// Get table statistics manually (for external tables or manual queries).
+    /// This handles both internal and external tables, with external tables using column_id=0.
     fn get_table_statistics_manual_inner(
         conn: &Connection,
         _schema_name: Option<&str>,
