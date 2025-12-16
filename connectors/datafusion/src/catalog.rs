@@ -118,12 +118,10 @@ impl OptdSchemaProvider {
         }
     }
 
-    /// Creates a TableProvider from external table metadata by reconstructing
-    /// the appropriate DataFusion table based on the file format.
+    /// Creates a `TableProvider` from external table metadata.
     ///
-    /// Note: DataFusion uses lazy schema inference for file-based tables. The schema
-    /// may appear empty when the TableProvider is first created, but will be populated
-    /// during actual query execution when files are read.
+    /// Reconstructs the appropriate DataFusion table based on file format (CSV, Parquet, JSON).
+    /// DataFusion uses lazy schema inference - schemas are populated during query execution.
     async fn create_table_from_metadata(
         &self,
         metadata: &ExternalTableMetadata,

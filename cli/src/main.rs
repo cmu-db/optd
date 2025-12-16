@@ -241,7 +241,7 @@ async fn main_inner() -> Result<()> {
         ctx.state_weak_ref(),
     ));
     ctx.register_catalog_list(dynamic_catalog);
-    
+
     // Register OptD time-travel UDTFs after catalog is set up
     cli_ctx.register_udtfs();
 

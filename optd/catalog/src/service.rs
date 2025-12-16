@@ -18,6 +18,17 @@ pub trait CatalogBackend: Send + 'static {
         table_name: &str,
         snapshot: SnapshotId,
     ) -> Result<Option<TableStatistics>, Error>;
+    fn set_table_statistics(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
+        stats: TableStatistics,
+    ) -> Result<(), Error>;
+    fn get_table_statistics_manual(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
+    ) -> Result<Option<TableStatistics>, Error>;
     fn update_table_column_stats(
         &mut self,
         column_id: i64,
@@ -81,6 +92,23 @@ impl<T: Catalog + Send + 'static> CatalogBackend for T {
         snapshot: SnapshotId,
     ) -> Result<Option<TableStatistics>, Error> {
         Catalog::table_statistics(self, table_name, snapshot)
+    }
+
+    fn set_table_statistics(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
+        stats: TableStatistics,
+    ) -> Result<(), Error> {
+        Catalog::set_table_statistics(self, schema_name, table_name, stats)
+    }
+
+    fn get_table_statistics_manual(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
+    ) -> Result<Option<TableStatistics>, Error> {
+        Catalog::get_table_statistics_manual(self, schema_name, table_name)
     }
 
     fn update_table_column_stats(
@@ -218,6 +246,19 @@ pub enum CatalogRequest {
         respond_to: oneshot::Sender<Result<Vec<ExternalTableMetadata>, Error>>,
     },
 
+    SetTableStatistics {
+        schema_name: Option<String>,
+        table_name: String,
+        stats: TableStatistics,
+        respond_to: oneshot::Sender<Result<(), Error>>,
+    },
+
+    GetTableStatisticsManual {
+        schema_name: Option<String>,
+        table_name: String,
+        respond_to: oneshot::Sender<Result<Option<TableStatistics>, Error>>,
+    },
+
     Shutdown,
 }
 
@@ -328,6 +369,52 @@ impl CatalogServiceHandle {
                 table_id,
                 stats_type: stats_type.to_string(),
                 payload: payload.to_string(),
+                respond_to: tx,
+            })
+            .await
+            .map_err(|_| Error::QueryExecution {
+                source: duckdb::Error::ExecuteReturnedResults,
+            })?;
+
+        rx.await.map_err(|_| Error::QueryExecution {
+            source: duckdb::Error::ExecuteReturnedResults,
+        })?
+    }
+
+    pub async fn set_table_statistics(
+        &self,
+        schema_name: Option<&str>,
+        table_name: &str,
+        stats: TableStatistics,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(CatalogRequest::SetTableStatistics {
+                schema_name: schema_name.map(|s| s.to_string()),
+                table_name: table_name.to_string(),
+                stats,
+                respond_to: tx,
+            })
+            .await
+            .map_err(|_| Error::QueryExecution {
+                source: duckdb::Error::ExecuteReturnedResults,
+            })?;
+
+        rx.await.map_err(|_| Error::QueryExecution {
+            source: duckdb::Error::ExecuteReturnedResults,
+        })?
+    }
+
+    pub async fn get_table_statistics_manual(
+        &self,
+        schema_name: Option<&str>,
+        table_name: &str,
+    ) -> Result<Option<TableStatistics>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(CatalogRequest::GetTableStatisticsManual {
+                schema_name: schema_name.map(|s| s.to_string()),
+                table_name: table_name.to_string(),
                 respond_to: tx,
             })
             .await
@@ -511,14 +598,9 @@ impl<B: CatalogBackend> CatalogService<B> {
         (service, handle)
     }
 
-    /// Run the service, processing requests until shutdown
+    /// Runs the service, processing requests until shutdown.
     ///
-    /// Spawn with tokio:
-    /// ```ignore
-    /// tokio::spawn(async move {
-    ///     service.run().await;
-    /// });
-    /// ```
+    /// Spawn with `tokio::spawn(async move { service.run().await; })`.
     pub async fn run(mut self) {
         while let Some(request) = self.receiver.recv().await {
             match request {
@@ -636,6 +718,31 @@ impl<B: CatalogBackend> CatalogService<B> {
                     let result = self
                         .backend
                         .list_external_tables_at_snapshot(schema_name.as_deref(), snapshot_id);
+                    let _ = respond_to.send(result);
+                }
+
+                CatalogRequest::SetTableStatistics {
+                    schema_name,
+                    table_name,
+                    stats,
+                    respond_to,
+                } => {
+                    let result = self.backend.set_table_statistics(
+                        schema_name.as_deref(),
+                        &table_name,
+                        stats,
+                    );
+                    let _ = respond_to.send(result);
+                }
+
+                CatalogRequest::GetTableStatisticsManual {
+                    schema_name,
+                    table_name,
+                    respond_to,
+                } => {
+                    let result = self
+                        .backend
+                        .get_table_statistics_manual(schema_name.as_deref(), &table_name);
                     let _ = respond_to.send(result);
                 }
 

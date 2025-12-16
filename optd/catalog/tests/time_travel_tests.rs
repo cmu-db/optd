@@ -1,4 +1,4 @@
-//! Time-travel query tests (Phase 9).
+//! Time-travel query tests.
 
 use optd_catalog::{Catalog, DuckLakeCatalog, RegisterTableRequest};
 use std::collections::HashMap;

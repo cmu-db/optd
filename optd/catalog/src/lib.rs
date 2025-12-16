@@ -6,7 +6,7 @@ use duckdb::{
 };
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use snafu::{ResultExt, prelude::*};
 use std::{collections::HashMap, sync::Arc};
 
@@ -226,7 +226,6 @@ const FETCH_TABLE_STATS_QUERY: &str = r#"
         ds.schema_name = current_schema()
         AND dt.table_name = ?
         AND ts.record_count IS NOT NULL 
-        AND ts.file_size_bytes IS NOT NULL
         AND ? >= dc.begin_snapshot 
         AND (? < dc.end_snapshot OR dc.end_snapshot IS NULL)
     ORDER BY ts.table_id, dc.column_id, tcas.stats_type;
@@ -320,6 +319,10 @@ struct TableColumnStatisticsEntry {
 pub struct TableStatistics {
     pub row_count: usize,
     pub column_statistics: Vec<ColumnStatistics>,
+
+    /// Total size of the table file(s) in bytes
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<usize>,
 }
 
 impl FromIterator<Result<TableColumnStatisticsEntry, Error>> for TableStatistics {
@@ -369,6 +372,7 @@ impl FromIterator<Result<TableColumnStatisticsEntry, Error>> for TableStatistics
         TableStatistics {
             row_count,
             column_statistics,
+            size_bytes: None, // Not populated from database queries
         }
     }
 }
@@ -381,6 +385,19 @@ pub struct ColumnStatistics {
     pub column_type: String,
     pub name: String,
     pub advanced_stats: Vec<AdvanceColumnStatistics>,
+
+    /// Minimum value in the column (serialized as JSON string)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_value: Option<String>,
+    /// Maximum value in the column (serialized as JSON string)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_value: Option<String>,
+    /// Total number of null values
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub null_count: Option<usize>,
+    /// Number of distinct values (NDV)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub distinct_count: Option<usize>,
 }
 
 impl ColumnStatistics {
@@ -395,6 +412,10 @@ impl ColumnStatistics {
             column_type,
             name,
             advanced_stats,
+            min_value: None,
+            max_value: None,
+            null_count: None,
+            distinct_count: None,
         }
     }
 
@@ -1439,20 +1460,65 @@ impl DuckLakeCatalog {
         .execute(params![table_id])
         .context(QueryExecutionSnafu)?;
 
-        // Insert new row count
+        // Insert new row count and file size
         conn.prepare(
             r#"
             INSERT INTO __ducklake_metadata_metalake.main.ducklake_table_stats
                 (table_id, record_count, next_row_id, file_size_bytes)
-            VALUES (?, ?, NULL, NULL)
+            VALUES (?, ?, NULL, ?)
             "#,
         )
         .context(QueryExecutionSnafu)?
-        .execute(params![table_id, stats.row_count as i64])
+        .execute(params![
+            table_id,
+            stats.row_count as i64,
+            stats.size_bytes.map(|s| s as i64)
+        ])
         .context(QueryExecutionSnafu)?;
 
         // Insert column statistics
         for col_stats in &stats.column_statistics {
+            // Insert basic statistics (min/max/null/distinct)
+            if col_stats.min_value.is_some()
+                || col_stats.max_value.is_some()
+                || col_stats.null_count.is_some()
+                || col_stats.distinct_count.is_some()
+            {
+                let mut basic_payload = serde_json::json!({});
+
+                if let Value::Object(map) = &mut basic_payload {
+                    if col_stats.column_id == 0 {
+                        // For external tables, include column_name
+                        map.insert("column_name".to_string(), json!(col_stats.name));
+                    }
+                    if let Some(ref min_val) = col_stats.min_value {
+                        map.insert("min_value".to_string(), json!(min_val));
+                    }
+                    if let Some(ref max_val) = col_stats.max_value {
+                        map.insert("max_value".to_string(), json!(max_val));
+                    }
+                    if let Some(null_cnt) = col_stats.null_count {
+                        map.insert("null_count".to_string(), json!(null_cnt));
+                    }
+                    if let Some(distinct_cnt) = col_stats.distinct_count {
+                        map.insert("distinct_count".to_string(), json!(distinct_cnt));
+                    }
+                }
+
+                conn.prepare(INSERT_ADV_STATS_QUERY)
+                    .context(QueryExecutionSnafu)?
+                    .execute(params![
+                        col_stats.column_id,
+                        curr_snapshot.id.0,
+                        Null, // end_snapshot
+                        table_id,
+                        "basic_stats", // stats_type
+                        basic_payload.to_string()
+                    ])
+                    .context(QueryExecutionSnafu)?;
+            }
+
+            // Insert advanced statistics (existing behavior)
             for adv_stat in &col_stats.advanced_stats {
                 // Build JSON payload
                 let mut payload_obj = if col_stats.column_id == 0 {
@@ -1527,20 +1593,20 @@ impl DuckLakeCatalog {
             Err(e) => return Err(Error::QueryExecution { source: e }),
         };
 
-        // Fetch row count
-        let row_count: Result<i64, _> = conn
+        // Fetch row count and file size
+        let stats_result: Result<(i64, Option<i64>), _> = conn
             .prepare(
                 r#"
-                SELECT record_count
+                SELECT record_count, file_size_bytes
                 FROM __ducklake_metadata_metalake.main.ducklake_table_stats
                 WHERE table_id = ? AND record_count IS NOT NULL
                 "#,
             )
             .context(QueryExecutionSnafu)?
-            .query_row(params![table_id], |row| row.get(0));
+            .query_row(params![table_id], |row| Ok((row.get(0)?, row.get(1)?)));
 
-        let row_count = match row_count {
-            Ok(count) => count as usize,
+        let (row_count, size_bytes) = match stats_result {
+            Ok((count, size)) => (count as usize, size.map(|s| s as usize)),
             Err(DuckDBError::QueryReturnedNoRows) => return Ok(None),
             Err(e) => return Err(Error::QueryExecution { source: e }),
         };
@@ -1600,22 +1666,44 @@ impl DuckLakeCatalog {
                 .unwrap_or_else(|_| format!("column_{}", column_id))
             };
 
-            let adv_stat = AdvanceColumnStatistics {
-                stats_type,
-                data: parsed,
-            };
-
             let key = column_name.clone();
-            column_stats_map
+            let col_stat = column_stats_map
                 .entry(key)
                 .or_insert_with(|| ColumnStatistics {
                     column_id,
                     column_type: String::new(), // Will be populated if needed
                     name: column_name,
                     advanced_stats: Vec::new(),
-                })
-                .advanced_stats
-                .push(adv_stat);
+                    min_value: None,
+                    max_value: None,
+                    null_count: None,
+                    distinct_count: None,
+                });
+
+            // Handle basic_stats separately (Phase 8C)
+            if stats_type == "basic_stats" {
+                if let Value::Object(ref map) = parsed {
+                    if let Some(min_val) = map.get("min_value").and_then(|v| v.as_str()) {
+                        col_stat.min_value = Some(min_val.to_string());
+                    }
+                    if let Some(max_val) = map.get("max_value").and_then(|v| v.as_str()) {
+                        col_stat.max_value = Some(max_val.to_string());
+                    }
+                    if let Some(null_cnt) = map.get("null_count").and_then(|v| v.as_u64()) {
+                        col_stat.null_count = Some(null_cnt as usize);
+                    }
+                    if let Some(distinct_cnt) = map.get("distinct_count").and_then(|v| v.as_u64()) {
+                        col_stat.distinct_count = Some(distinct_cnt as usize);
+                    }
+                }
+            } else {
+                // Regular advanced statistics
+                let adv_stat = AdvanceColumnStatistics {
+                    stats_type,
+                    data: parsed,
+                };
+                col_stat.advanced_stats.push(adv_stat);
+            }
         }
 
         let column_statistics: Vec<ColumnStatistics> = column_stats_map.into_values().collect();
@@ -1623,6 +1711,7 @@ impl DuckLakeCatalog {
         Ok(Some(TableStatistics {
             row_count,
             column_statistics,
+            size_bytes,
         }))
     }
 }

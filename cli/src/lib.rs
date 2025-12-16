@@ -1,3 +1,4 @@
+mod auto_stats;
 mod udtf;
 
 use datafusion::{
@@ -17,6 +18,7 @@ use optd_datafusion::{
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::auto_stats::{AutoStatsConfig, compute_table_statistics};
 use crate::udtf::{ListSnapshotsFunction, ListTablesAtSnapshotFunction};
 
 pub struct OptdCliSessionContext {
@@ -39,9 +41,9 @@ impl OptdCliSessionContext {
         Self { inner }
     }
 
-    /// Register User-Defined Table Functions (UDTFs) for snapshot queries
+    /// Registers User-Defined Table Functions for snapshot queries.
     ///
-    /// Call this after registering the OptD catalog to enable time-travel UDTFs.
+    /// Call after registering the OptD catalog to enable time-travel UDTFs.
     pub fn register_udtfs(&self) {
         let catalog_handle = self.get_catalog_handle();
 
@@ -109,6 +111,22 @@ impl OptdCliSessionContext {
                 .register_external_table(request)
                 .await
                 .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+            // Auto-compute statistics if enabled
+            let config = AutoStatsConfig::default();
+
+            if let Ok(Some(stats)) =
+                compute_table_statistics(&cmd.location, &cmd.file_type, &config).await
+            {
+                // Store the computed statistics
+                if let Err(e) = catalog_handle
+                    .set_table_statistics(None, &cmd.name.to_string(), stats)
+                    .await
+                {
+                    eprintln!("Warning: Failed to store auto-computed statistics: {}", e);
+                    // Don't fail the CREATE TABLE operation if stats storage fails
+                }
+            }
         }
 
         self.return_empty_dataframe()

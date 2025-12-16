@@ -29,6 +29,7 @@ fn test_internal_table_statistics_basic() {
     let stats = TableStatistics {
         row_count: 2,
         column_statistics: vec![],
+        size_bytes: None,
     };
     catalog.set_table_statistics(None, "users", stats).unwrap();
 
@@ -86,6 +87,10 @@ fn test_internal_table_with_column_statistics() {
                     "distinct_count": 1000
                 }),
             }],
+            min_value: None,
+            max_value: None,
+            null_count: None,
+            distinct_count: None,
         },
         ColumnStatistics {
             column_id: price_column_id,
@@ -99,12 +104,17 @@ fn test_internal_table_with_column_statistics() {
                     "null_count": 0
                 }),
             }],
+            min_value: None,
+            max_value: None,
+            null_count: None,
+            distinct_count: None,
         },
     ];
 
     let stats = TableStatistics {
         row_count: 1000,
         column_statistics: column_stats,
+        size_bytes: None,
     };
     catalog
         .set_table_statistics(None, "products", stats)
@@ -211,6 +221,7 @@ fn test_internal_and_external_tables_separate_catalogs() {
     let internal_stats = TableStatistics {
         row_count: 100,
         column_statistics: vec![],
+        size_bytes: None,
     };
     catalog
         .set_table_statistics(None, "internal_users", internal_stats)
@@ -227,7 +238,12 @@ fn test_internal_and_external_tables_separate_catalogs() {
                 stats_type: "basic".to_string(),
                 data: json!({"min_value": "2024-01-01", "max_value": "2024-12-31"}),
             }],
+            min_value: None,
+            max_value: None,
+            null_count: None,
+            distinct_count: None,
         }],
+        size_bytes: None,
     };
     catalog
         .set_table_statistics(None, "external_logs", external_stats)
@@ -272,6 +288,7 @@ fn test_internal_table_update_statistics() {
     let stats1 = TableStatistics {
         row_count: 1000,
         column_statistics: vec![],
+        size_bytes: None,
     };
     catalog
         .set_table_statistics(None, "events", stats1)
@@ -281,6 +298,7 @@ fn test_internal_table_update_statistics() {
     let stats2 = TableStatistics {
         row_count: 2000,
         column_statistics: vec![],
+        size_bytes: None,
     };
     catalog
         .set_table_statistics(None, "events", stats2)

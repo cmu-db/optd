@@ -29,6 +29,10 @@ fn create_column_stats(
             stats_type: stats_type.to_string(),
             data,
         }],
+        min_value: None,
+        max_value: None,
+        null_count: None,
+        distinct_count: None,
     }
 }
 
@@ -51,6 +55,7 @@ fn test_set_and_get_table_statistics_row_count_only() {
     let stats = TableStatistics {
         row_count: 1000,
         column_statistics: vec![],
+        size_bytes: None,
     };
     catalog
         .set_table_statistics(None, "test_table", stats)
@@ -108,6 +113,7 @@ fn test_set_statistics_with_column_stats() {
     let stats = TableStatistics {
         row_count: 1000,
         column_statistics: column_stats,
+        size_bytes: None,
     };
     catalog.set_table_statistics(None, "users", stats).unwrap();
 
@@ -202,6 +208,7 @@ fn test_flexible_stats_types() {
     let stats = TableStatistics {
         row_count: 8000,
         column_statistics: column_stats,
+        size_bytes: None,
     };
     catalog
         .set_table_statistics(None, "products", stats)
@@ -266,6 +273,7 @@ fn test_update_statistics() {
     let stats1 = TableStatistics {
         row_count: 1000,
         column_statistics: vec![],
+        size_bytes: None,
     };
     catalog
         .set_table_statistics(None, "test_table", stats1)
@@ -282,6 +290,7 @@ fn test_update_statistics() {
     let stats2 = TableStatistics {
         row_count: 2000,
         column_statistics: vec![],
+        size_bytes: None,
     };
     catalog
         .set_table_statistics(None, "test_table", stats2)
