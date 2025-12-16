@@ -1,7 +1,4 @@
-//! Tests for automatic statistics computation.
-//!
-//! Verifies that statistics are automatically computed and stored when creating
-//! external tables with supported file formats.
+//! Tests for automatic statistics computation when creating external tables.
 
 use datafusion::{execution::runtime_env::RuntimeEnvBuilder, prelude::SessionConfig};
 use datafusion_cli::cli_context::CliSessionContext;
@@ -111,9 +108,9 @@ async fn test_auto_stats_parquet_enabled_by_default() {
         .unwrap();
     cli_ctx.execute_logical_plan(plan).await.unwrap();
 
-    // Query through the service handle using get_table_statistics_manual (for external tables)
+    let snapshot = catalog_handle.current_snapshot().await.unwrap();
     let stats = catalog_handle
-        .get_table_statistics_manual(None, "test_users")
+        .table_statistics("test_users", snapshot)
         .await
         .unwrap();
 
@@ -155,8 +152,9 @@ async fn test_auto_stats_parquet_row_count_accuracy() {
             .unwrap();
         cli_ctx.execute_logical_plan(plan).await.unwrap();
 
+        let snapshot = catalog_handle.current_snapshot().await.unwrap();
         let stats = catalog_handle
-            .get_table_statistics_manual(None, &format!("test_{}", num_rows))
+            .table_statistics(&format!("test_{}", num_rows), snapshot)
             .await
             .unwrap();
 
@@ -199,9 +197,10 @@ async fn test_auto_stats_disabled_for_csv_by_default() {
         .unwrap();
     cli_ctx.execute_logical_plan(plan).await.unwrap();
 
-    // Check that statistics were NOT auto-computed (CSV disabled by default)
+    // CSV statistics disabled by default
+    let snapshot = catalog_handle.current_snapshot().await.unwrap();
     let stats = catalog_handle
-        .get_table_statistics_manual(None, "test_csv")
+        .table_statistics("test_csv", snapshot)
         .await
         .unwrap();
 
@@ -242,9 +241,10 @@ async fn test_auto_stats_disabled_for_json_by_default() {
         .unwrap();
     cli_ctx.execute_logical_plan(plan).await.unwrap();
 
-    // Check that statistics were NOT auto-computed (JSON disabled by default)
+    // JSON statistics disabled by default
+    let snapshot = catalog_handle.current_snapshot().await.unwrap();
     let stats = catalog_handle
-        .get_table_statistics_manual(None, "test_json")
+        .table_statistics("test_json", snapshot)
         .await
         .unwrap();
 
@@ -285,9 +285,10 @@ async fn test_auto_stats_multiple_tables() {
     }
 
     // Verify all tables have correct statistics
+    let snapshot = catalog_handle.current_snapshot().await.unwrap();
     for (name, expected_rows) in &tables {
         let stats = catalog_handle
-            .get_table_statistics_manual(None, name)
+            .table_statistics(name, snapshot)
             .await
             .unwrap();
         assert!(
@@ -376,8 +377,9 @@ async fn test_column_statistics_extraction() {
         .unwrap();
     cli_ctx.execute_logical_plan(plan).await.unwrap();
 
+    let snapshot = catalog_handle.current_snapshot().await.unwrap();
     let stats = catalog_handle
-        .get_table_statistics_manual(None, "test_column_stats")
+        .table_statistics("test_column_stats", snapshot)
         .await
         .unwrap()
         .expect("Statistics should be auto-computed");

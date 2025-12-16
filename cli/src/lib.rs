@@ -41,19 +41,15 @@ impl OptdCliSessionContext {
         Self { inner }
     }
 
-    /// Registers User-Defined Table Functions for snapshot queries.
-    ///
-    /// Call after registering the OptD catalog to enable time-travel UDTFs.
+    /// Registers snapshot query UDTFs.
     pub fn register_udtfs(&self) {
         let catalog_handle = self.get_catalog_handle();
 
-        // Register list_snapshots() function
         self.inner.register_udtf(
             "list_snapshots",
             Arc::new(ListSnapshotsFunction::new(catalog_handle.clone())),
         );
 
-        // Register list_tables_at_snapshot(snapshot_id) function
         self.inner.register_udtf(
             "list_tables_at_snapshot",
             Arc::new(ListTablesAtSnapshotFunction::new(catalog_handle)),
@@ -96,11 +92,11 @@ impl OptdCliSessionContext {
         let table_provider: Arc<dyn TableProvider> = self.create_custom_table(cmd).await?;
         self.register_table(cmd.name.clone(), table_provider)?;
 
-        // Persist metadata to catalog if OptD catalog is enabled.
+        // Persist to catalog
         if let Some(catalog_handle) = self.get_catalog_handle() {
             let request = RegisterTableRequest {
                 table_name: cmd.name.to_string(),
-                schema_name: None, // Use default schema
+                schema_name: None,
                 location: cmd.location.clone(),
                 file_format: cmd.file_type.clone(),
                 compression: Self::extract_compression(&cmd.options),
@@ -112,19 +108,18 @@ impl OptdCliSessionContext {
                 .await
                 .map_err(|e| DataFusionError::External(Box::new(e)))?;
 
-            // Auto-compute statistics if enabled
+            // Auto-compute statistics
             let config = AutoStatsConfig::default();
 
             if let Ok(Some(stats)) =
                 compute_table_statistics(&cmd.location, &cmd.file_type, &config).await
             {
-                // Store the computed statistics
+                // Store statistics
                 if let Err(e) = catalog_handle
                     .set_table_statistics(None, &cmd.name.to_string(), stats)
                     .await
                 {
-                    eprintln!("Warning: Failed to store auto-computed statistics: {}", e);
-                    // Don't fail the CREATE TABLE operation if stats storage fails
+                    eprintln!("Warning: Failed to store statistics: {}", e);
                 }
             }
         }
@@ -186,7 +181,7 @@ impl OptdCliSessionContext {
             .cloned()
     }
 
-    /// Handles DROP TABLE command by deregistering from DataFusion and persisting the deletion.
+    /// Handles DROP TABLE.
     async fn drop_external_table(&self, table_name: &str, if_exists: bool) -> Result<DataFrame> {
         // Check if table exists in DataFusion.
         let table_exists = self
@@ -209,7 +204,7 @@ impl OptdCliSessionContext {
             }
         }
 
-        // Deregister from DataFusion's in-memory catalog.
+        // Deregister from DataFusion
         self.inner
             .state()
             .catalog_list()

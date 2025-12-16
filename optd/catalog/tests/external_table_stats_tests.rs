@@ -1,4 +1,4 @@
-// Tests external table statistics using TableStatistics and ColumnStatistics
+//! External table statistics tests.
 
 use optd_catalog::{
     AdvanceColumnStatistics, Catalog, ColumnStatistics, DuckLakeCatalog, RegisterTableRequest,
@@ -58,9 +58,8 @@ fn test_set_and_get_external_table_statistics() {
         .unwrap();
 
     // Get statistics
-    let retrieved_stats = catalog
-        .get_table_statistics_manual(None, "test_table")
-        .unwrap();
+    let snapshot = catalog.current_snapshot().unwrap();
+    let retrieved_stats = catalog.table_statistics("test_table", snapshot).unwrap();
     assert!(retrieved_stats.is_some());
     let retrieved_stats = retrieved_stats.unwrap();
     assert_eq!(retrieved_stats.row_count, 1000);
@@ -114,8 +113,9 @@ fn test_set_statistics_with_column_stats() {
     catalog.set_table_statistics(None, "users", stats).unwrap();
 
     // Get and verify statistics
+    let snapshot = catalog.current_snapshot().unwrap();
     let retrieved_stats = catalog
-        .get_table_statistics_manual(None, "users")
+        .table_statistics("users", snapshot)
         .unwrap()
         .unwrap();
 
@@ -175,8 +175,9 @@ fn test_update_statistics() {
         .unwrap();
 
     // Verify initial statistics
+    let snapshot = catalog.current_snapshot().unwrap();
     let retrieved1 = catalog
-        .get_table_statistics_manual(None, "test_table")
+        .table_statistics("test_table", snapshot)
         .unwrap()
         .unwrap();
     assert_eq!(retrieved1.row_count, 100);
@@ -192,8 +193,9 @@ fn test_update_statistics() {
         .unwrap();
 
     // Verify updated statistics
+    let snapshot = catalog.current_snapshot().unwrap();
     let retrieved2 = catalog
-        .get_table_statistics_manual(None, "test_table")
+        .table_statistics("test_table", snapshot)
         .unwrap()
         .unwrap();
     assert_eq!(retrieved2.row_count, 200);
@@ -203,7 +205,8 @@ fn test_update_statistics() {
 fn test_get_statistics_for_nonexistent_table() {
     let (_temp_dir, mut catalog) = create_test_catalog();
 
-    let result = catalog.get_table_statistics_manual(None, "nonexistent");
+    let snapshot = catalog.current_snapshot().unwrap();
+    let result = catalog.table_statistics("nonexistent", snapshot);
     assert!(result.unwrap().is_none());
 }
 
@@ -222,7 +225,8 @@ fn test_get_statistics_without_setting_them() {
     };
     catalog.register_external_table(request).unwrap();
 
-    let result = catalog.get_table_statistics_manual(None, "test_table");
+    let snapshot = catalog.current_snapshot().unwrap();
+    let result = catalog.table_statistics("test_table", snapshot);
     assert!(result.unwrap().is_none());
 }
 
@@ -261,8 +265,9 @@ fn test_statistics_persist_across_catalog_restarts() {
         let mut catalog =
             DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
 
+        let snapshot = catalog.current_snapshot().unwrap();
         let retrieved = catalog
-            .get_table_statistics_manual(None, "persistent_table")
+            .table_statistics("persistent_table", snapshot)
             .unwrap()
             .unwrap();
         assert_eq!(retrieved.row_count, 5000);
@@ -304,8 +309,9 @@ fn test_update_statistics_with_column_stats() {
         .unwrap();
 
     // Verify initial
+    let snapshot = catalog.current_snapshot().unwrap();
     let retrieved_initial = catalog
-        .get_table_statistics_manual(None, "evolving_table")
+        .table_statistics("evolving_table", snapshot)
         .unwrap()
         .unwrap();
     assert_eq!(retrieved_initial.row_count, 1000);
@@ -343,8 +349,9 @@ fn test_update_statistics_with_column_stats() {
         .unwrap();
 
     // Verify update
+    let snapshot = catalog.current_snapshot().unwrap();
     let retrieved_updated = catalog
-        .get_table_statistics_manual(None, "evolving_table")
+        .table_statistics("evolving_table", snapshot)
         .unwrap()
         .unwrap();
     assert_eq!(retrieved_updated.row_count, 2000);
@@ -408,8 +415,9 @@ fn test_partial_column_statistics() {
         .unwrap();
 
     // Verify
+    let snapshot = catalog.current_snapshot().unwrap();
     let retrieved = catalog
-        .get_table_statistics_manual(None, "partial_stats_table")
+        .table_statistics("partial_stats_table", snapshot)
         .unwrap()
         .unwrap();
     assert_eq!(retrieved.row_count, 3000);
@@ -468,8 +476,9 @@ fn test_statistics_with_empty_column_stats_vec() {
         .unwrap();
 
     // Verify
+    let snapshot = catalog.current_snapshot().unwrap();
     let retrieved = catalog
-        .get_table_statistics_manual(None, "empty_col_stats")
+        .table_statistics("empty_col_stats", snapshot)
         .unwrap()
         .unwrap();
     assert_eq!(retrieved.row_count, 100);
@@ -584,8 +593,9 @@ fn test_flexible_stats_types() {
         .unwrap();
 
     // Get and verify all stat types are preserved
+    let snapshot = catalog.current_snapshot().unwrap();
     let retrieved_stats = catalog
-        .get_table_statistics_manual(None, "products")
+        .table_statistics("products", snapshot)
         .unwrap()
         .unwrap();
 
@@ -752,8 +762,9 @@ fn test_advanced_statistics_persist_across_sessions() {
             .unwrap();
 
         // Verify stats are accessible in this session
+        let snapshot = catalog.current_snapshot().unwrap();
         let retrieved = catalog
-            .get_table_statistics_manual(None, "optimizer_stats_table")
+            .table_statistics("optimizer_stats_table", snapshot)
             .unwrap()
             .expect("Stats should be set");
         assert_eq!(retrieved.row_count, 100000);
@@ -766,16 +777,14 @@ fn test_advanced_statistics_persist_across_sessions() {
         let mut catalog =
             DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
 
+        let snapshot = catalog.current_snapshot().unwrap();
         let retrieved = catalog
-            .get_table_statistics_manual(None, "optimizer_stats_table")
+            .table_statistics("optimizer_stats_table", snapshot)
             .unwrap()
             .expect("Stats should persist across sessions");
 
         // Verify table-level statistics
-        assert_eq!(
-            retrieved.row_count, 100000,
-            "Row count should persist"
-        );
+        assert_eq!(retrieved.row_count, 100000, "Row count should persist");
         assert_eq!(
             retrieved.size_bytes,
             Some(52428800),
@@ -813,10 +822,7 @@ fn test_advanced_statistics_persist_across_sessions() {
         assert_eq!(buckets[0]["lower"], 0);
         assert_eq!(buckets[0]["upper"], 18);
         assert_eq!(buckets[0]["count"], 5000);
-        assert_eq!(
-            age_stats.advanced_stats[0].data["total_count"],
-            100000
-        );
+        assert_eq!(age_stats.advanced_stats[0].data["total_count"], 100000);
 
         // Verify HyperLogLog (user_id column)
         let user_id_stats = retrieved
@@ -829,10 +835,7 @@ fn test_advanced_statistics_persist_across_sessions() {
             user_id_stats.advanced_stats[0].data["estimated_cardinality"],
             87543
         );
-        assert_eq!(
-            user_id_stats.advanced_stats[0].data["precision"],
-            14
-        );
+        assert_eq!(user_id_stats.advanced_stats[0].data["precision"], 14);
         assert!(
             user_id_stats.advanced_stats[0].data["register_values"]
                 .as_str()
@@ -848,7 +851,10 @@ fn test_advanced_statistics_persist_across_sessions() {
             .iter()
             .find(|s| s.name == "country")
             .expect("country column stats should exist");
-        assert_eq!(country_stats.advanced_stats[0].stats_type, "most_common_values");
+        assert_eq!(
+            country_stats.advanced_stats[0].stats_type,
+            "most_common_values"
+        );
         let mcv_values = country_stats.advanced_stats[0].data["values"]
             .as_array()
             .expect("MCV should have values array");
@@ -856,10 +862,7 @@ fn test_advanced_statistics_persist_across_sessions() {
         assert_eq!(mcv_values[0]["value"], "USA");
         assert_eq!(mcv_values[0]["frequency"], 0.45);
         assert_eq!(mcv_values[0]["count"], 45000);
-        assert_eq!(
-            country_stats.advanced_stats[0].data["total_distinct"],
-            25
-        );
+        assert_eq!(country_stats.advanced_stats[0].data["total_distinct"], 25);
 
         // Verify Bloom Filter (email column)
         let email_stats = retrieved
@@ -868,18 +871,9 @@ fn test_advanced_statistics_persist_across_sessions() {
             .find(|s| s.name == "email")
             .expect("email column stats should exist");
         assert_eq!(email_stats.advanced_stats[0].stats_type, "bloom_filter");
-        assert_eq!(
-            email_stats.advanced_stats[0].data["num_bits"],
-            1000000
-        );
-        assert_eq!(
-            email_stats.advanced_stats[0].data["num_hash_functions"],
-            7
-        );
-        assert_eq!(
-            email_stats.advanced_stats[0].data["expected_fpp"],
-            0.01
-        );
+        assert_eq!(email_stats.advanced_stats[0].data["num_bits"], 1000000);
+        assert_eq!(email_stats.advanced_stats[0].data["num_hash_functions"], 7);
+        assert_eq!(email_stats.advanced_stats[0].data["expected_fpp"], 0.01);
 
         // Verify Correlation statistics (created_at column)
         let created_at_stats = retrieved
@@ -895,7 +889,9 @@ fn test_advanced_statistics_persist_across_sessions() {
         assert_eq!(temporal["peak_hour"], 14);
         assert_eq!(temporal["weekend_ratio"], 0.28);
 
-        println!("✅ INTEGRATION TEST PASSED: All advanced statistics types persist across sessions!");
+        println!(
+            "✅ INTEGRATION TEST PASSED: All advanced statistics types persist across sessions!"
+        );
         println!("   - Basic stats (min/max/null/distinct): ✓");
         println!("   - Histogram (5 buckets): ✓");
         println!("   - HyperLogLog (87543 estimated cardinality): ✓");
@@ -946,14 +942,19 @@ fn test_advanced_statistics_persist_across_sessions() {
             .set_table_statistics(None, "optimizer_stats_table", updated_stats)
             .unwrap();
 
+        let snapshot = catalog.current_snapshot().unwrap();
         let retrieved = catalog
-            .get_table_statistics_manual(None, "optimizer_stats_table")
+            .table_statistics("optimizer_stats_table", snapshot)
             .unwrap()
             .expect("Updated stats should exist");
 
         assert_eq!(retrieved.row_count, 150000, "Row count should be updated");
         assert_eq!(retrieved.column_statistics.len(), 2, "Only 2 columns now");
-        assert_eq!(retrieved.size_bytes, Some(78643200), "Size should be updated");
+        assert_eq!(
+            retrieved.size_bytes,
+            Some(78643200),
+            "Size should be updated"
+        );
     } // Drop catalog
 
     // ========== SESSION 4: Verify updates persisted ==========
@@ -961,8 +962,9 @@ fn test_advanced_statistics_persist_across_sessions() {
         let mut catalog =
             DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
 
+        let snapshot = catalog.current_snapshot().unwrap();
         let retrieved = catalog
-            .get_table_statistics_manual(None, "optimizer_stats_table")
+            .table_statistics("optimizer_stats_table", snapshot)
             .unwrap()
             .expect("Updated stats should persist");
 
@@ -983,11 +985,17 @@ fn test_advanced_statistics_persist_across_sessions() {
 
         // Verify old stats were replaced
         assert!(
-            retrieved.column_statistics.iter().all(|s| s.name == "id" || s.name == "age"),
+            retrieved
+                .column_statistics
+                .iter()
+                .all(|s| s.name == "id" || s.name == "age"),
             "Only id and age columns should remain"
         );
         assert!(
-            retrieved.column_statistics.iter().all(|s| s.name != "user_id"),
+            retrieved
+                .column_statistics
+                .iter()
+                .all(|s| s.name != "user_id"),
             "user_id column should be gone"
         );
 

@@ -95,14 +95,6 @@ pub trait Catalog {
         table_name: &str,
         stats: TableStatistics,
     ) -> Result<(), Error>;
-
-    /// Gets statistics for any table.
-    /// Works for both internal DuckDB tables and external tables.
-    fn get_table_statistics_manual(
-        &mut self,
-        schema_name: Option<&str>,
-        table_name: &str,
-    ) -> Result<Option<TableStatistics>, Error>;
 }
 
 const DEFAULT_METADATA_FILE: &str = "metadata.ducklake";
@@ -199,37 +191,6 @@ const SCHEMA_INFO_QUERY: &str = r#"
     SELECT ds.schema_id, ds.schema_name, ds.begin_snapshot, ds.end_snapshot
         FROM __ducklake_metadata_metalake.main.ducklake_schema ds
         WHERE ds.schema_name = current_schema();
-"#;
-
-/// SQL query to fetch table statistics including column metadata and advanced stats at a specific snapshot.
-/// Supports internal tables (ducklake_table with ducklake_column).
-/// For tables without statistics yet, returns column metadata with row_count=0.
-const FETCH_TABLE_STATS_QUERY: &str = r#"
-    SELECT 
-        dt.table_id,
-        dc.column_id,
-        dc.column_name,
-        dc.column_type,
-        COALESCE(ts.record_count, 0) as record_count,
-        COALESCE(ts.next_row_id, 0) as next_row_id,
-        COALESCE(ts.file_size_bytes, 0) as file_size_bytes,
-        tcas.stats_type,
-        tcas.payload
-    FROM __ducklake_metadata_metalake.main.ducklake_table dt
-    INNER JOIN __ducklake_metadata_metalake.main.ducklake_schema ds ON dt.schema_id = ds.schema_id
-    INNER JOIN __ducklake_metadata_metalake.main.ducklake_column dc ON dt.table_id = dc.table_id
-    LEFT JOIN __ducklake_metadata_metalake.main.ducklake_table_stats ts ON dt.table_id = ts.table_id
-    LEFT JOIN __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats tcas 
-        ON dc.table_id = tcas.table_id 
-        AND dc.column_id = tcas.column_id
-        AND ? >= tcas.begin_snapshot 
-        AND (? < tcas.end_snapshot OR tcas.end_snapshot IS NULL)
-    WHERE 
-        ds.schema_name = COALESCE(?, current_schema())
-        AND dt.table_name = ?
-        AND ? >= dc.begin_snapshot 
-        AND (? < dc.end_snapshot OR dc.end_snapshot IS NULL)
-    ORDER BY dt.table_id, dc.column_id, tcas.stats_type;
 "#;
 
 /// SQL query to close an existing advanced statistics entry by setting its end_snapshot.
@@ -629,17 +590,6 @@ impl Catalog for DuckLakeCatalog {
         txn.commit().context(TransactionSnafu)?;
         result
     }
-
-    fn get_table_statistics_manual(
-        &mut self,
-        schema_name: Option<&str>,
-        table_name: &str,
-    ) -> Result<Option<TableStatistics>, Error> {
-        let txn = self.conn.transaction().context(TransactionSnafu)?;
-        let result = Self::get_table_statistics_manual_inner(&txn, schema_name, table_name);
-        txn.commit().context(TransactionSnafu)?;
-        result
-    }
 }
 
 impl DuckLakeCatalog {
@@ -758,65 +708,350 @@ impl DuckLakeCatalog {
 
     /// Fetch table statistics using the FromIterator pattern for optimizer compatibility.
     ///
+    /// Unified implementation that handles both internal tables (with ducklake_column)
+    /// and external tables (with column_id=0 and names in JSON payloads).
+    ///
     /// # Parameters
     /// - `schema_name`: Optional schema name (None = current schema)
+    /// - `table`: Table name
     /// - `snapshot`: Optional snapshot ID (None = current snapshot)
     ///
-    /// For internal tables, returns statistics even if no data exists yet (row_count=0).
-    /// For non-existent tables, returns None.
+    /// Returns None if table doesn't exist or has no statistics.
     fn table_statistics_inner(
         conn: &Connection,
         schema_name: Option<&str>,
         table: &str,
         snapshot: Option<SnapshotId>,
     ) -> Result<Option<TableStatistics>, Error> {
-        // Determine the snapshot to use
+        let schema_info = Self::current_schema_info_inner(conn)?;
         let query_snapshot = match snapshot {
             Some(snap) => snap,
             None => Self::current_snapshot_info_inner(conn)?.id,
         };
 
-        let mut stmt = conn
-            .prepare(FETCH_TABLE_STATS_QUERY)
-            .context(QueryExecutionSnafu)?;
-
-        let entries: Vec<_> = stmt
-            .query_map(
-                params![
-                    &query_snapshot.0,
-                    &query_snapshot.0,
-                    schema_name,
-                    table,
-                    &query_snapshot.0,
-                    &query_snapshot.0,
-                ],
-                |row| {
-                    Ok(TableColumnStatisticsEntry {
-                        _table_id: row.get("table_id")?,
-                        column_id: row.get("column_id")?,
-                        column_name: row.get("column_name")?,
-                        column_type: row.get("column_type")?,
-                        record_count: row.get("record_count")?,
-                        _next_row_id: row.get("next_row_id")?,
-                        _file_size_bytes: row.get("file_size_bytes")?,
-                        stats_type: row.get("stats_type")?,
-                        payload: row.get("payload")?,
-                    })
-                },
+        // Step 1: Get table_id and check if it's an internal table
+        let table_lookup: Result<(i64, bool), _> = conn
+            .prepare(
+                r#"
+                SELECT table_id, 1 as is_internal FROM __ducklake_metadata_metalake.main.ducklake_table
+                WHERE schema_id = ? AND table_name = ?
+                UNION ALL
+                SELECT table_id, 0 as is_internal FROM __ducklake_metadata_metalake.main.optd_external_table
+                WHERE schema_id = ? AND table_name = ? AND end_snapshot IS NULL
+                LIMIT 1
+                "#,
             )
             .context(QueryExecutionSnafu)?
-            .collect::<Result<Vec<_>, _>>()
+            .query_row(
+                params![
+                    schema_info.schema_id,
+                    table,
+                    schema_info.schema_id,
+                    table
+                ],
+                |row| Ok((row.get(0)?, row.get::<_, i64>(1)? == 1)),
+            );
+
+        let (table_id, is_internal_table) = match table_lookup {
+            Ok(result) => result,
+            Err(DuckDBError::QueryReturnedNoRows) => return Ok(None),
+            Err(e) => return Err(Error::QueryExecution { source: e }),
+        };
+
+        // Step 2: Fetch row count and file size (may not exist for tables without statistics)
+        let stats_result: Result<(i64, Option<i64>), _> = conn
+            .prepare(
+                r#"
+                SELECT record_count, file_size_bytes
+                FROM __ducklake_metadata_metalake.main.ducklake_table_stats
+                WHERE table_id = ? AND record_count IS NOT NULL
+                "#,
+            )
+            .context(QueryExecutionSnafu)?
+            .query_row(params![table_id], |row| Ok((row.get(0)?, row.get(1)?)));
+
+        let (record_count, file_size_bytes) = match stats_result {
+            Ok((count, size)) => (count, size),
+            Err(DuckDBError::QueryReturnedNoRows) => {
+                // No statistics exist yet
+                // For internal tables, we should still return column metadata
+                if is_internal_table {
+                    // Query ducklake_column to get column metadata
+                    let mut stmt = conn
+                        .prepare(
+                            r#"
+                            SELECT column_id, column_name, column_type
+                            FROM __ducklake_metadata_metalake.main.ducklake_column
+                            WHERE table_id = ?
+                            ORDER BY column_id
+                            "#,
+                        )
+                        .context(QueryExecutionSnafu)?;
+
+                    let columns = stmt
+                        .query_map(params![table_id], |row| {
+                            Ok(ColumnStatistics {
+                                column_id: row.get(0)?,
+                                column_type: row.get(2)?,
+                                name: row.get(1)?,
+                                advanced_stats: Vec::new(),
+                                min_value: None,
+                                max_value: None,
+                                null_count: None,
+                                distinct_count: None,
+                            })
+                        })
+                        .context(QueryExecutionSnafu)?
+                        .collect::<Result<Vec<_>, _>>()
+                        .context(QueryExecutionSnafu)?;
+
+                    return Ok(Some(TableStatistics {
+                        row_count: 0,
+                        column_statistics: columns,
+                        size_bytes: None,
+                    }));
+                } else {
+                    // External table without statistics - return None
+                    return Ok(None);
+                }
+            }
+            Err(e) => return Err(Error::QueryExecution { source: e }),
+        };
+
+        // Step 3: Fetch column statistics from ducklake_table_column_adv_stats
+        let mut stmt = conn
+            .prepare(
+                r#"
+                SELECT column_id, stats_type, payload
+                FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
+                WHERE table_id = ? 
+                  AND ? >= begin_snapshot 
+                  AND (? < end_snapshot OR end_snapshot IS NULL)
+                ORDER BY column_id, stats_type
+                "#,
+            )
             .context(QueryExecutionSnafu)?;
 
-        // If no entries found, the table doesn't exist
+        let rows = stmt
+            .query_map(
+                params![table_id, query_snapshot.0, query_snapshot.0],
+                |row| {
+                    let column_id: i64 = row.get(0)?;
+                    let stats_type: String = row.get(1)?;
+                    let payload: String = row.get(2)?;
+                    Ok((column_id, stats_type, payload))
+                },
+            )
+            .context(QueryExecutionSnafu)?;
+
+        // Step 4: Build TableColumnStatisticsEntry objects for FromIterator
+        let mut entries: Vec<TableColumnStatisticsEntry> = Vec::new();
+        let mut column_data: HashMap<i64, (String, String)> = HashMap::new(); // column_id -> (name, type)
+        let mut external_column_mapping: HashMap<String, i64> = HashMap::new(); // column_name -> unique negative ID for external tables
+        let mut next_external_id = -1i64;
+
+        for row_result in rows {
+            let (column_id, stats_type, payload) = row_result.context(QueryExecutionSnafu)?;
+            let mut parsed: serde_json::Value =
+                serde_json::from_str(&payload).context(JsonSerializationSnafu)?;
+
+            // Resolve column_name and assign unique column_id for external tables
+            let (effective_column_id, column_name) = if column_id == 0 {
+                // External table: extract column_name from JSON payload
+                let name = parsed["column_name"].as_str().unwrap_or("").to_string();
+                // Remove column_name from payload for cleaner advanced_stats
+                if let Value::Object(ref mut map) = parsed {
+                    map.remove("column_name");
+                }
+
+                // Assign unique negative column_id for this external column
+                let effective_id =
+                    *external_column_mapping
+                        .entry(name.clone())
+                        .or_insert_with(|| {
+                            let id = next_external_id;
+                            next_external_id -= 1;
+                            id
+                        });
+
+                (effective_id, name)
+            } else {
+                // Internal table: query ducklake_column if we haven't already
+                let name = if let Some((name, _)) = column_data.get(&column_id) {
+                    name.clone()
+                } else {
+                    let name: String = conn
+                        .query_row(
+                            "SELECT column_name, column_type FROM __ducklake_metadata_metalake.main.ducklake_column
+                             WHERE column_id = ? AND table_id = ?",
+                            params![column_id, table_id],
+                            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                        )
+                        .map(|(n, t)| {
+                            column_data.insert(column_id, (n.clone(), t));
+                            n
+                        })
+                        .unwrap_or_else(|_| format!("column_{}", column_id));
+                    name
+                };
+                (column_id, name)
+            };
+
+            // Get column_type (empty string for external tables, will be populated later if needed)
+            let column_type = column_data
+                .get(&effective_column_id)
+                .map(|(_, t)| t.clone())
+                .unwrap_or_default();
+
+            // Create entry for this stat using effective_column_id
+            entries.push(TableColumnStatisticsEntry {
+                _table_id: table_id,
+                column_id: effective_column_id, // Use negative IDs for external tables
+                column_name,
+                column_type,
+                record_count,
+                _next_row_id: 0, // Not used in FromIterator
+                _file_size_bytes: file_size_bytes.unwrap_or(0),
+                stats_type: Some(stats_type),
+                payload: Some(parsed.to_string()),
+            });
+        }
+
+        // If no column stats, handle based on table type
         if entries.is_empty() {
-            return Ok(None);
+            if is_internal_table {
+                // For internal tables, return column metadata even without stats
+                let mut stmt = conn
+                    .prepare(
+                        r#"
+                        SELECT column_id, column_name, column_type
+                        FROM __ducklake_metadata_metalake.main.ducklake_column
+                        WHERE table_id = ?
+                        ORDER BY column_id
+                        "#,
+                    )
+                    .context(QueryExecutionSnafu)?;
+
+                let columns = stmt
+                    .query_map(params![table_id], |row| {
+                        Ok(ColumnStatistics {
+                            column_id: row.get(0)?,
+                            column_type: row.get(2)?,
+                            name: row.get(1)?,
+                            advanced_stats: Vec::new(),
+                            min_value: None,
+                            max_value: None,
+                            null_count: None,
+                            distinct_count: None,
+                        })
+                    })
+                    .context(QueryExecutionSnafu)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .context(QueryExecutionSnafu)?;
+
+                return Ok(Some(TableStatistics {
+                    row_count: record_count as usize,
+                    column_statistics: columns,
+                    size_bytes: file_size_bytes.map(|s| s as usize),
+                }));
+            } else {
+                // External table without column stats - just return row count
+                return Ok(Some(TableStatistics {
+                    row_count: record_count as usize,
+                    column_statistics: Vec::new(),
+                    size_bytes: file_size_bytes.map(|s| s as usize),
+                }));
+            }
         }
 
         // Convert entries to TableStatistics using FromIterator
-        Ok(Some(TableStatistics::from_iter(
-            entries.into_iter().map(Ok),
-        )))
+        let mut result = TableStatistics::from_iter(entries.into_iter().map(Ok));
+
+        // For internal tables, ensure ALL columns are included (even those without stats)
+        if is_internal_table {
+            // Query all columns from ducklake_column
+            let mut stmt = conn
+                .prepare(
+                    r#"
+                    SELECT column_id, column_name, column_type
+                    FROM __ducklake_metadata_metalake.main.ducklake_column
+                    WHERE table_id = ?
+                    ORDER BY column_id
+                    "#,
+                )
+                .context(QueryExecutionSnafu)?;
+
+            let all_columns: Vec<(i64, String, String)> = stmt
+                .query_map(params![table_id], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })
+                .context(QueryExecutionSnafu)?
+                .collect::<Result<Vec<_>, _>>()
+                .context(QueryExecutionSnafu)?;
+
+            // Build a set of column_ids that already have statistics
+            let existing_column_ids: std::collections::HashSet<i64> = result
+                .column_statistics
+                .iter()
+                .map(|cs| cs.column_id)
+                .collect();
+
+            // Add columns that don't have statistics yet
+            for (col_id, col_name, col_type) in all_columns {
+                if !existing_column_ids.contains(&col_id) {
+                    result.column_statistics.push(ColumnStatistics {
+                        column_id: col_id,
+                        column_type: col_type,
+                        name: col_name,
+                        advanced_stats: Vec::new(),
+                        min_value: None,
+                        max_value: None,
+                        null_count: None,
+                        distinct_count: None,
+                    });
+                }
+            }
+
+            // Sort by column_id to maintain consistent ordering
+            result.column_statistics.sort_by_key(|cs| cs.column_id);
+        }
+
+        // Normalize external table column_ids back to 0 (they were negative for grouping)
+        // Also extract basic_stats into direct fields
+        for col_stat in &mut result.column_statistics {
+            if col_stat.column_id < 0 {
+                col_stat.column_id = 0;
+            }
+
+            // Extract basic_stats into direct fields if present
+            if let Some(basic_stat) = col_stat
+                .advanced_stats
+                .iter()
+                .find(|s| s.stats_type == "basic_stats")
+            {
+                if let Some(min_val) = basic_stat.data.get("min_value").and_then(|v| v.as_str()) {
+                    col_stat.min_value = Some(min_val.to_string());
+                }
+                if let Some(max_val) = basic_stat.data.get("max_value").and_then(|v| v.as_str()) {
+                    col_stat.max_value = Some(max_val.to_string());
+                }
+                if let Some(null_cnt) = basic_stat.data.get("null_count").and_then(|v| v.as_u64()) {
+                    col_stat.null_count = Some(null_cnt as usize);
+                }
+                if let Some(distinct_cnt) = basic_stat
+                    .data
+                    .get("distinct_count")
+                    .and_then(|v| v.as_u64())
+                {
+                    col_stat.distinct_count = Some(distinct_cnt as usize);
+                }
+            }
+        }
+
+        // Set size_bytes from the fetched value (FromIterator doesn't populate this)
+        result.size_bytes = file_size_bytes.map(|s| s as usize);
+
+        Ok(Some(result))
     }
 
     fn update_table_column_stats_inner(
@@ -1551,165 +1786,5 @@ impl DuckLakeCatalog {
         }
 
         Ok(())
-    }
-
-    /// Get table statistics manually (for external tables or manual queries).
-    /// This handles both internal and external tables, with external tables using column_id=0.
-    fn get_table_statistics_manual_inner(
-        conn: &Connection,
-        _schema_name: Option<&str>,
-        table_name: &str,
-    ) -> Result<Option<TableStatistics>, Error> {
-        let schema_info = Self::current_schema_info_inner(conn)?;
-
-        // Get table_id from ducklake_table or optd_external_table
-        let table_id: Result<i64, _> = conn
-            .prepare(
-                r#"
-                SELECT table_id FROM __ducklake_metadata_metalake.main.ducklake_table
-                WHERE schema_id = ? AND table_name = ?
-                UNION ALL
-                SELECT table_id FROM __ducklake_metadata_metalake.main.optd_external_table
-                WHERE schema_id = ? AND table_name = ? AND end_snapshot IS NULL
-                LIMIT 1
-                "#,
-            )
-            .context(QueryExecutionSnafu)?
-            .query_row(
-                params![
-                    schema_info.schema_id,
-                    table_name,
-                    schema_info.schema_id,
-                    table_name
-                ],
-                |row| row.get(0),
-            );
-
-        let table_id = match table_id {
-            Ok(id) => id,
-            Err(DuckDBError::QueryReturnedNoRows) => return Ok(None),
-            Err(e) => return Err(Error::QueryExecution { source: e }),
-        };
-
-        // Fetch row count and file size
-        let stats_result: Result<(i64, Option<i64>), _> = conn
-            .prepare(
-                r#"
-                SELECT record_count, file_size_bytes
-                FROM __ducklake_metadata_metalake.main.ducklake_table_stats
-                WHERE table_id = ? AND record_count IS NOT NULL
-                "#,
-            )
-            .context(QueryExecutionSnafu)?
-            .query_row(params![table_id], |row| Ok((row.get(0)?, row.get(1)?)));
-
-        let (row_count, size_bytes) = match stats_result {
-            Ok((count, size)) => (count as usize, size.map(|s| s as usize)),
-            Err(DuckDBError::QueryReturnedNoRows) => return Ok(None),
-            Err(e) => return Err(Error::QueryExecution { source: e }),
-        };
-
-        // Fetch column statistics
-        let curr_snapshot = Self::current_snapshot_info_inner(conn)?;
-
-        let mut stmt = conn
-            .prepare(
-                r#"
-                SELECT column_id, stats_type, payload
-                FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
-                WHERE table_id = ? 
-                  AND ? >= begin_snapshot 
-                  AND (? < end_snapshot OR end_snapshot IS NULL)
-                ORDER BY column_id, stats_type
-                "#,
-            )
-            .context(QueryExecutionSnafu)?;
-
-        let rows = stmt
-            .query_map(
-                params![table_id, curr_snapshot.id.0, curr_snapshot.id.0],
-                |row| {
-                    let column_id: i64 = row.get(0)?;
-                    let stats_type: String = row.get(1)?;
-                    let payload: String = row.get(2)?;
-                    Ok((column_id, stats_type, payload))
-                },
-            )
-            .context(QueryExecutionSnafu)?;
-
-        // Group by column_name (external) or column_id (internal)
-        let mut column_stats_map: HashMap<String, ColumnStatistics> = HashMap::new();
-
-        for row_result in rows {
-            let (column_id, stats_type, payload) = row_result.context(QueryExecutionSnafu)?;
-            let mut parsed: serde_json::Value =
-                serde_json::from_str(&payload).context(JsonSerializationSnafu)?;
-
-            // For external tables (column_id=0), extract name from payload; for internal, query ducklake_column.
-            let column_name = if column_id == 0 {
-                let name = parsed["column_name"].as_str().unwrap_or("").to_string();
-                // Remove column_name from data object
-                if let Value::Object(ref mut map) = parsed {
-                    map.remove("column_name");
-                }
-                name
-            } else {
-                // Look up column name from ducklake_column table
-                conn.query_row(
-                    "SELECT column_name FROM __ducklake_metadata_metalake.main.ducklake_column
-                     WHERE column_id = ? AND table_id = ?",
-                    params![column_id, table_id],
-                    |row| row.get::<_, String>(0),
-                )
-                .unwrap_or_else(|_| format!("column_{}", column_id))
-            };
-
-            let key = column_name.clone();
-            let col_stat = column_stats_map
-                .entry(key)
-                .or_insert_with(|| ColumnStatistics {
-                    column_id,
-                    column_type: String::new(), // Will be populated if needed
-                    name: column_name,
-                    advanced_stats: Vec::new(),
-                    min_value: None,
-                    max_value: None,
-                    null_count: None,
-                    distinct_count: None,
-                });
-
-            // Handle basic_stats separately (Phase 8C)
-            if stats_type == "basic_stats" {
-                if let Value::Object(ref map) = parsed {
-                    if let Some(min_val) = map.get("min_value").and_then(|v| v.as_str()) {
-                        col_stat.min_value = Some(min_val.to_string());
-                    }
-                    if let Some(max_val) = map.get("max_value").and_then(|v| v.as_str()) {
-                        col_stat.max_value = Some(max_val.to_string());
-                    }
-                    if let Some(null_cnt) = map.get("null_count").and_then(|v| v.as_u64()) {
-                        col_stat.null_count = Some(null_cnt as usize);
-                    }
-                    if let Some(distinct_cnt) = map.get("distinct_count").and_then(|v| v.as_u64()) {
-                        col_stat.distinct_count = Some(distinct_cnt as usize);
-                    }
-                }
-            } else {
-                // Regular advanced statistics
-                let adv_stat = AdvanceColumnStatistics {
-                    stats_type,
-                    data: parsed,
-                };
-                col_stat.advanced_stats.push(adv_stat);
-            }
-        }
-
-        let column_statistics: Vec<ColumnStatistics> = column_stats_map.into_values().collect();
-
-        Ok(Some(TableStatistics {
-            row_count,
-            column_statistics,
-            size_bytes,
-        }))
     }
 }

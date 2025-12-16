@@ -24,11 +24,6 @@ pub trait CatalogBackend: Send + 'static {
         table_name: &str,
         stats: TableStatistics,
     ) -> Result<(), Error>;
-    fn get_table_statistics_manual(
-        &mut self,
-        schema_name: Option<&str>,
-        table_name: &str,
-    ) -> Result<Option<TableStatistics>, Error>;
     fn update_table_column_stats(
         &mut self,
         column_id: i64,
@@ -101,14 +96,6 @@ impl<T: Catalog + Send + 'static> CatalogBackend for T {
         stats: TableStatistics,
     ) -> Result<(), Error> {
         Catalog::set_table_statistics(self, schema_name, table_name, stats)
-    }
-
-    fn get_table_statistics_manual(
-        &mut self,
-        schema_name: Option<&str>,
-        table_name: &str,
-    ) -> Result<Option<TableStatistics>, Error> {
-        Catalog::get_table_statistics_manual(self, schema_name, table_name)
     }
 
     fn update_table_column_stats(
@@ -253,12 +240,6 @@ pub enum CatalogRequest {
         respond_to: oneshot::Sender<Result<(), Error>>,
     },
 
-    GetTableStatisticsManual {
-        schema_name: Option<String>,
-        table_name: String,
-        respond_to: oneshot::Sender<Result<Option<TableStatistics>, Error>>,
-    },
-
     Shutdown,
 }
 
@@ -393,28 +374,6 @@ impl CatalogServiceHandle {
                 schema_name: schema_name.map(|s| s.to_string()),
                 table_name: table_name.to_string(),
                 stats,
-                respond_to: tx,
-            })
-            .await
-            .map_err(|_| Error::QueryExecution {
-                source: duckdb::Error::ExecuteReturnedResults,
-            })?;
-
-        rx.await.map_err(|_| Error::QueryExecution {
-            source: duckdb::Error::ExecuteReturnedResults,
-        })?
-    }
-
-    pub async fn get_table_statistics_manual(
-        &self,
-        schema_name: Option<&str>,
-        table_name: &str,
-    ) -> Result<Option<TableStatistics>, Error> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(CatalogRequest::GetTableStatisticsManual {
-                schema_name: schema_name.map(|s| s.to_string()),
-                table_name: table_name.to_string(),
                 respond_to: tx,
             })
             .await
@@ -732,17 +691,6 @@ impl<B: CatalogBackend> CatalogService<B> {
                         &table_name,
                         stats,
                     );
-                    let _ = respond_to.send(result);
-                }
-
-                CatalogRequest::GetTableStatisticsManual {
-                    schema_name,
-                    table_name,
-                    respond_to,
-                } => {
-                    let result = self
-                        .backend
-                        .get_table_statistics_manual(schema_name.as_deref(), &table_name);
                     let _ = respond_to.send(result);
                 }
 

@@ -1,4 +1,4 @@
-//! Tests for statistics with internal DuckDB tables.
+//! Internal table statistics tests.
 
 use optd_catalog::{
     AdvanceColumnStatistics, Catalog, ColumnStatistics, DuckLakeCatalog, TableStatistics,
@@ -34,7 +34,8 @@ fn test_internal_table_statistics_basic() {
     catalog.set_table_statistics(None, "users", stats).unwrap();
 
     // Get statistics
-    let retrieved = catalog.get_table_statistics_manual(None, "users").unwrap();
+    let snapshot = catalog.current_snapshot().unwrap();
+    let retrieved = catalog.table_statistics("users", snapshot).unwrap();
     assert!(retrieved.is_some());
     assert_eq!(retrieved.unwrap().row_count, 2);
 }
@@ -121,13 +122,14 @@ fn test_internal_table_with_column_statistics() {
         .unwrap();
 
     // Get and verify statistics
+    let snapshot = catalog.current_snapshot().unwrap();
     let retrieved = catalog
-        .get_table_statistics_manual(None, "products")
+        .table_statistics("products", snapshot)
         .unwrap()
         .unwrap();
 
     assert_eq!(retrieved.row_count, 1000);
-    assert_eq!(retrieved.column_statistics.len(), 2);
+    assert_eq!(retrieved.column_statistics.len(), 3); // All columns: id, price, category
 
     // Verify column names are properly looked up (not "1", "2")
     let id_stats = retrieved
@@ -141,6 +143,26 @@ fn test_internal_table_with_column_statistics() {
     );
     assert_eq!(id_stats.advanced_stats.len(), 1);
     assert_eq!(id_stats.advanced_stats[0].stats_type, "basic");
+
+    let price_stats = retrieved
+        .column_statistics
+        .iter()
+        .find(|c| c.column_id == price_column_id)
+        .unwrap();
+    assert_eq!(price_stats.name, "price");
+    assert_eq!(price_stats.advanced_stats.len(), 1);
+
+    // Verify category column exists but has no stats
+    let category_stats = retrieved
+        .column_statistics
+        .iter()
+        .find(|c| c.name == "category")
+        .unwrap();
+    assert_eq!(
+        category_stats.advanced_stats.len(),
+        0,
+        "category should have no advanced stats"
+    );
 
     let price_stats = retrieved
         .column_statistics
@@ -250,12 +272,11 @@ fn test_internal_and_external_tables_separate_catalogs() {
         .unwrap();
 
     // Verify both work independently (no collision!)
+    let snapshot = catalog.current_snapshot().unwrap();
     let internal = catalog
-        .get_table_statistics_manual(None, "internal_users")
+        .table_statistics("internal_users", snapshot)
         .unwrap();
-    let external = catalog
-        .get_table_statistics_manual(None, "external_logs")
-        .unwrap();
+    let external = catalog.table_statistics("external_logs", snapshot).unwrap();
 
     assert!(internal.is_some(), "internal_users statistics should exist");
     assert!(external.is_some(), "external_logs statistics should exist");
@@ -305,8 +326,9 @@ fn test_internal_table_update_statistics() {
         .unwrap();
 
     // Verify updated value
+    let snapshot = catalog.current_snapshot().unwrap();
     let retrieved = catalog
-        .get_table_statistics_manual(None, "events")
+        .table_statistics("events", snapshot)
         .unwrap()
         .unwrap();
     assert_eq!(retrieved.row_count, 2000);

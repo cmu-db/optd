@@ -1,4 +1,4 @@
-// Tests both external and internal table statistics using TableStatistics and ColumnStatistics
+//! Unified statistics API tests for both external and internal tables.
 
 use optd_catalog::{
     AdvanceColumnStatistics, Catalog, ColumnStatistics, DuckLakeCatalog, RegisterTableRequest,
@@ -62,9 +62,8 @@ fn test_set_and_get_table_statistics_row_count_only() {
         .unwrap();
 
     // Get and verify statistics
-    let retrieved_stats = catalog
-        .get_table_statistics_manual(None, "test_table")
-        .unwrap();
+    let snapshot = catalog.current_snapshot().unwrap();
+    let retrieved_stats = catalog.table_statistics("test_table", snapshot).unwrap();
     assert!(retrieved_stats.is_some());
     let retrieved_stats = retrieved_stats.unwrap();
     assert_eq!(retrieved_stats.row_count, 1000);
@@ -118,8 +117,9 @@ fn test_set_statistics_with_column_stats() {
     catalog.set_table_statistics(None, "users", stats).unwrap();
 
     // Get and verify statistics
+    let snapshot = catalog.current_snapshot().unwrap();
     let retrieved_stats = catalog
-        .get_table_statistics_manual(None, "users")
+        .table_statistics("users", snapshot)
         .unwrap()
         .unwrap();
 
@@ -215,8 +215,9 @@ fn test_flexible_stats_types() {
         .unwrap();
 
     // Get and verify all stat types are preserved
+    let snapshot = catalog.current_snapshot().unwrap();
     let retrieved_stats = catalog
-        .get_table_statistics_manual(None, "products")
+        .table_statistics("products", snapshot)
         .unwrap()
         .unwrap();
 
@@ -280,8 +281,9 @@ fn test_update_statistics() {
         .unwrap();
 
     // Verify initial
+    let snapshot = catalog.current_snapshot().unwrap();
     let retrieved1 = catalog
-        .get_table_statistics_manual(None, "test_table")
+        .table_statistics("test_table", snapshot)
         .unwrap()
         .unwrap();
     assert_eq!(retrieved1.row_count, 1000);
@@ -297,8 +299,9 @@ fn test_update_statistics() {
         .unwrap();
 
     // Verify update
+    let snapshot = catalog.current_snapshot().unwrap();
     let retrieved2 = catalog
-        .get_table_statistics_manual(None, "test_table")
+        .table_statistics("test_table", snapshot)
         .unwrap()
         .unwrap();
     assert_eq!(retrieved2.row_count, 2000);
@@ -308,6 +311,7 @@ fn test_update_statistics() {
 fn test_nonexistent_table() {
     let (_temp_dir, mut catalog) = create_test_catalog();
 
-    let result = catalog.get_table_statistics_manual(None, "nonexistent");
+    let snapshot = catalog.current_snapshot().unwrap();
+    let result = catalog.table_statistics("nonexistent", snapshot);
     assert!(result.unwrap().is_none());
 }
