@@ -43,6 +43,18 @@ pub trait CatalogBackend: Send + 'static {
         schema_name: Option<&str>,
         table_name: &str,
     ) -> Result<(), Error>;
+    fn list_snapshots(&mut self) -> Result<Vec<SnapshotInfo>, Error>;
+    fn get_external_table_at_snapshot(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
+        snapshot_id: i64,
+    ) -> Result<Option<ExternalTableMetadata>, Error>;
+    fn list_external_tables_at_snapshot(
+        &mut self,
+        schema_name: Option<&str>,
+        snapshot_id: i64,
+    ) -> Result<Vec<ExternalTableMetadata>, Error>;
 }
 
 /// Implement CatalogBackend for any type that implements Catalog
@@ -110,6 +122,27 @@ impl<T: Catalog + Send + 'static> CatalogBackend for T {
     ) -> Result<(), Error> {
         Catalog::drop_external_table(self, schema_name, table_name)
     }
+
+    fn list_snapshots(&mut self) -> Result<Vec<SnapshotInfo>, Error> {
+        Catalog::list_snapshots(self)
+    }
+
+    fn get_external_table_at_snapshot(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
+        snapshot_id: i64,
+    ) -> Result<Option<ExternalTableMetadata>, Error> {
+        Catalog::get_external_table_at_snapshot(self, schema_name, table_name, snapshot_id)
+    }
+
+    fn list_external_tables_at_snapshot(
+        &mut self,
+        schema_name: Option<&str>,
+        snapshot_id: i64,
+    ) -> Result<Vec<ExternalTableMetadata>, Error> {
+        Catalog::list_external_tables_at_snapshot(self, schema_name, snapshot_id)
+    }
 }
 
 #[derive(Debug)]
@@ -166,6 +199,23 @@ pub enum CatalogRequest {
         schema_name: Option<String>,
         table_name: String,
         respond_to: oneshot::Sender<Result<(), Error>>,
+    },
+
+    ListSnapshots {
+        respond_to: oneshot::Sender<Result<Vec<SnapshotInfo>, Error>>,
+    },
+
+    GetExternalTableAtSnapshot {
+        schema_name: Option<String>,
+        table_name: String,
+        snapshot_id: i64,
+        respond_to: oneshot::Sender<Result<Option<ExternalTableMetadata>, Error>>,
+    },
+
+    ListExternalTablesAtSnapshot {
+        schema_name: Option<String>,
+        snapshot_id: i64,
+        respond_to: oneshot::Sender<Result<Vec<ExternalTableMetadata>, Error>>,
     },
 
     Shutdown,
@@ -352,6 +402,66 @@ impl CatalogServiceHandle {
         })?
     }
 
+    pub async fn list_snapshots(&self) -> Result<Vec<SnapshotInfo>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(CatalogRequest::ListSnapshots { respond_to: tx })
+            .await
+            .map_err(|_| Error::QueryExecution {
+                source: duckdb::Error::ExecuteReturnedResults,
+            })?;
+
+        rx.await.map_err(|_| Error::QueryExecution {
+            source: duckdb::Error::ExecuteReturnedResults,
+        })?
+    }
+
+    pub async fn get_external_table_at_snapshot(
+        &self,
+        schema_name: Option<&str>,
+        table_name: &str,
+        snapshot_id: i64,
+    ) -> Result<Option<ExternalTableMetadata>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(CatalogRequest::GetExternalTableAtSnapshot {
+                schema_name: schema_name.map(|s| s.to_string()),
+                table_name: table_name.to_string(),
+                snapshot_id,
+                respond_to: tx,
+            })
+            .await
+            .map_err(|_| Error::QueryExecution {
+                source: duckdb::Error::ExecuteReturnedResults,
+            })?;
+
+        rx.await.map_err(|_| Error::QueryExecution {
+            source: duckdb::Error::ExecuteReturnedResults,
+        })?
+    }
+
+    pub async fn list_external_tables_at_snapshot(
+        &self,
+        schema_name: Option<&str>,
+        snapshot_id: i64,
+    ) -> Result<Vec<ExternalTableMetadata>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(CatalogRequest::ListExternalTablesAtSnapshot {
+                schema_name: schema_name.map(|s| s.to_string()),
+                snapshot_id,
+                respond_to: tx,
+            })
+            .await
+            .map_err(|_| Error::QueryExecution {
+                source: duckdb::Error::ExecuteReturnedResults,
+            })?;
+
+        rx.await.map_err(|_| Error::QueryExecution {
+            source: duckdb::Error::ExecuteReturnedResults,
+        })?
+    }
+
     pub async fn drop_external_table(
         &self,
         schema_name: Option<&str>,
@@ -496,6 +606,36 @@ impl<B: CatalogBackend> CatalogService<B> {
                     let result = self
                         .backend
                         .drop_external_table(schema_name.as_deref(), &table_name);
+                    let _ = respond_to.send(result);
+                }
+
+                CatalogRequest::ListSnapshots { respond_to } => {
+                    let result = self.backend.list_snapshots();
+                    let _ = respond_to.send(result);
+                }
+
+                CatalogRequest::GetExternalTableAtSnapshot {
+                    schema_name,
+                    table_name,
+                    snapshot_id,
+                    respond_to,
+                } => {
+                    let result = self.backend.get_external_table_at_snapshot(
+                        schema_name.as_deref(),
+                        &table_name,
+                        snapshot_id,
+                    );
+                    let _ = respond_to.send(result);
+                }
+
+                CatalogRequest::ListExternalTablesAtSnapshot {
+                    schema_name,
+                    snapshot_id,
+                    respond_to,
+                } => {
+                    let result = self
+                        .backend
+                        .list_external_tables_at_snapshot(schema_name.as_deref(), snapshot_id);
                     let _ = respond_to.send(result);
                 }
 

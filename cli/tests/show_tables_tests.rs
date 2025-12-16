@@ -18,7 +18,8 @@ fn create_test_context() -> (TempDir, OptdCliSessionContext) {
     let (service, handle) = CatalogService::new(catalog);
     tokio::spawn(async move { service.run().await });
 
-    let config = SessionConfig::new();
+    // Enable information_schema for SHOW TABLES support
+    let config = SessionConfig::new().with_information_schema(true);
     let runtime = RuntimeEnvBuilder::new().build_arc().unwrap();
     let cli_ctx = OptdCliSessionContext::new_with_config_rt(config, runtime);
 
@@ -29,18 +30,51 @@ fn create_test_context() -> (TempDir, OptdCliSessionContext) {
         .inner()
         .register_catalog_list(Arc::new(optd_catalog_list));
 
+    // Register UDTFs after catalog is set up
+    cli_ctx.register_udtfs();
+
     (temp_dir, cli_ctx)
 }
 
-#[tokio::test]
+/// Helper to get current snapshot ID
+async fn get_current_snapshot(cli_ctx: &OptdCliSessionContext) -> i64 {
+    let df = cli_ctx
+        .inner()
+        .sql("SELECT MAX(snapshot_id) as snapshot_id FROM list_snapshots()")
+        .await
+        .unwrap();
+    let batches = df.collect().await.unwrap();
+    batches[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<datafusion::arrow::array::Int64Array>()
+        .unwrap()
+        .value(0)
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_show_tables_empty() {
     let (_temp_dir, cli_ctx) = create_test_context();
 
-    let df = cli_ctx.sql_with_optd("SHOW TABLES").await.unwrap();
+    // Get current snapshot (should be 0 - initial snapshot with no tables)
+    let snapshot_id = get_current_snapshot(&cli_ctx).await;
+
+    let df = cli_ctx
+        .inner()
+        .sql(&format!(
+            "SELECT * FROM list_tables_at_snapshot({})",
+            snapshot_id
+        ))
+        .await
+        .unwrap();
     let batches = df.collect().await.unwrap();
 
     assert_eq!(batches.len(), 1);
-    assert_eq!(batches[0].num_rows(), 0);
+    assert_eq!(
+        batches[0].num_rows(),
+        0,
+        "Should have no tables at initial snapshot"
+    );
     assert_eq!(batches[0].num_columns(), 4);
 
     // Verify column names
@@ -51,7 +85,7 @@ async fn test_show_tables_empty() {
     assert_eq!(schema.field(3).name(), "compression");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_show_tables_single() {
     let (temp_dir, cli_ctx) = create_test_context();
 
@@ -72,12 +106,20 @@ async fn test_show_tables_single() {
         .unwrap();
     cli_ctx.execute_logical_plan(logical_plan).await.unwrap();
 
-    // Execute SHOW TABLES
-    let df = cli_ctx.sql_with_optd("SHOW TABLES").await.unwrap();
+    // Get current snapshot and query tables
+    let snapshot_id = get_current_snapshot(&cli_ctx).await;
+    let df = cli_ctx
+        .inner()
+        .sql(&format!(
+            "SELECT * FROM list_tables_at_snapshot({})",
+            snapshot_id
+        ))
+        .await
+        .unwrap();
     let batches = df.collect().await.unwrap();
 
     assert_eq!(batches.len(), 1);
-    assert_eq!(batches[0].num_rows(), 1);
+    assert_eq!(batches[0].num_rows(), 1, "Should have 1 table");
 
     // Verify table name
     let table_names = batches[0]
@@ -120,7 +162,7 @@ async fn test_show_tables_single() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_show_tables_multiple() {
     let (temp_dir, cli_ctx) = create_test_context();
 
@@ -156,8 +198,16 @@ async fn test_show_tables_multiple() {
         .unwrap();
     cli_ctx.execute_logical_plan(logical_plan2).await.unwrap();
 
-    // Execute SHOW TABLES
-    let df = cli_ctx.sql_with_optd("SHOW TABLES").await.unwrap();
+    // Get current snapshot and query tables
+    let snapshot_id = get_current_snapshot(&cli_ctx).await;
+    let df = cli_ctx
+        .inner()
+        .sql(&format!(
+            "SELECT * FROM list_tables_at_snapshot({}) ORDER BY table_name",
+            snapshot_id
+        ))
+        .await
+        .unwrap();
     let batches = df.collect().await.unwrap();
 
     assert_eq!(batches.len(), 1);
@@ -219,7 +269,7 @@ async fn test_show_tables_multiple() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_show_tables_after_drop() {
     let (temp_dir, cli_ctx) = create_test_context();
 
@@ -265,8 +315,16 @@ async fn test_show_tables_after_drop() {
         .unwrap();
     cli_ctx.execute_logical_plan(drop_plan).await.unwrap();
 
-    // Execute SHOW TABLES
-    let df = cli_ctx.sql_with_optd("SHOW TABLES").await.unwrap();
+    // Get current snapshot and query tables
+    let snapshot_id = get_current_snapshot(&cli_ctx).await;
+    let df = cli_ctx
+        .inner()
+        .sql(&format!(
+            "SELECT * FROM list_tables_at_snapshot({})",
+            snapshot_id
+        ))
+        .await
+        .unwrap();
     let batches = df.collect().await.unwrap();
 
     assert_eq!(batches.len(), 1);
@@ -308,13 +366,26 @@ async fn test_show_tables_after_drop() {
     assert_eq!(formats.value(0), "CSV", "table2 format should be CSV");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_show_tables_with_semicolon() {
     let (_temp_dir, cli_ctx) = create_test_context();
 
-    let df = cli_ctx.sql_with_optd("SHOW TABLES;").await.unwrap();
+    // Get current snapshot (should be 0 - initial snapshot with no tables)
+    let snapshot_id = get_current_snapshot(&cli_ctx).await;
+    let df = cli_ctx
+        .inner()
+        .sql(&format!(
+            "SELECT * FROM list_tables_at_snapshot({});",
+            snapshot_id
+        ))
+        .await
+        .unwrap();
     let batches = df.collect().await.unwrap();
 
     assert_eq!(batches.len(), 1);
-    assert_eq!(batches[0].num_rows(), 0);
+    assert_eq!(
+        batches[0].num_rows(),
+        0,
+        "Should have no tables at initial snapshot"
+    );
 }

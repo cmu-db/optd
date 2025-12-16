@@ -1,3 +1,7 @@
+// Streamlined DROP TABLE tests - focused on unique functionality
+// Basic DROP and IF EXISTS behavior is covered in comprehensive_table_tests.rs
+// These tests focus on cross-session persistence and multiple table scenarios
+
 use datafusion::{execution::runtime_env::RuntimeEnvBuilder, prelude::SessionConfig};
 use datafusion_cli::cli_context::CliSessionContext;
 use optd_catalog::{CatalogService, DuckLakeCatalog};
@@ -27,105 +31,6 @@ async fn create_cli_context_with_catalog(
         .register_catalog_list(Arc::new(optd_catalog_list));
 
     (cli_ctx, service_handle)
-}
-
-#[tokio::test]
-async fn test_drop_table() {
-    let temp_dir = TempDir::new().unwrap();
-
-    // Create test CSV file
-    let csv_path = temp_dir.path().join("test.csv");
-    std::fs::write(&csv_path, "id,name\n1,Alice\n2,Bob\n").unwrap();
-
-    // Create table
-    let (cli_ctx, _service_handle) = create_cli_context_with_catalog(&temp_dir).await;
-
-    let create_sql = format!(
-        "CREATE EXTERNAL TABLE test STORED AS CSV LOCATION '{}' OPTIONS ('format.has_header' 'true')",
-        csv_path.display()
-    );
-    let logical_plan = cli_ctx
-        .inner()
-        .state()
-        .create_logical_plan(&create_sql)
-        .await
-        .unwrap();
-    cli_ctx.execute_logical_plan(logical_plan).await.unwrap();
-
-    // Verify table exists with correct data
-    let result = cli_ctx
-        .inner()
-        .sql("SELECT * FROM test ORDER BY id")
-        .await
-        .unwrap();
-    let batches = datafusion::prelude::DataFrame::collect(result)
-        .await
-        .unwrap();
-    assert_eq!(
-        batches[0].num_rows(),
-        2,
-        "Should have exactly 2 rows before drop"
-    );
-
-    use datafusion::arrow::array::{Int64Array, StringArray};
-    let id_col = batches[0]
-        .column(0)
-        .as_any()
-        .downcast_ref::<Int64Array>()
-        .unwrap();
-    let name_col = batches[0]
-        .column(1)
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .unwrap();
-    assert_eq!(id_col.value(0), 1, "First row should have id=1");
-    assert_eq!(name_col.value(0), "Alice", "First row should be Alice");
-    assert_eq!(id_col.value(1), 2, "Second row should have id=2");
-    assert_eq!(name_col.value(1), "Bob", "Second row should be Bob");
-
-    // Drop the table
-    let drop_sql = "DROP TABLE test";
-    let logical_plan = cli_ctx
-        .inner()
-        .state()
-        .create_logical_plan(drop_sql)
-        .await
-        .unwrap();
-    cli_ctx.execute_logical_plan(logical_plan).await.unwrap();
-
-    // Verify table no longer exists
-    let result = cli_ctx.inner().sql("SELECT * FROM test").await;
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("test"));
-}
-
-#[tokio::test]
-async fn test_drop_table_if_exists() {
-    let temp_dir = TempDir::new().unwrap();
-    let (cli_ctx, _service_handle) = create_cli_context_with_catalog(&temp_dir).await;
-
-    // DROP TABLE IF EXISTS on non-existent table should succeed
-    let drop_sql = "DROP TABLE IF EXISTS nonexistent";
-    let logical_plan = cli_ctx
-        .inner()
-        .state()
-        .create_logical_plan(drop_sql)
-        .await
-        .unwrap();
-    let result = cli_ctx.execute_logical_plan(logical_plan).await;
-    assert!(result.is_ok());
-
-    // DROP TABLE (without IF EXISTS) on non-existent table should fail
-    let drop_sql = "DROP TABLE nonexistent";
-    let logical_plan = cli_ctx
-        .inner()
-        .state()
-        .create_logical_plan(drop_sql)
-        .await
-        .unwrap();
-    let result = cli_ctx.execute_logical_plan(logical_plan).await;
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("doesn't exist"));
 }
 
 #[tokio::test]

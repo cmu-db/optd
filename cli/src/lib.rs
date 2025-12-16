@@ -1,8 +1,6 @@
+mod udtf;
+
 use datafusion::{
-    arrow::{
-        array::{RecordBatch, StringArray},
-        datatypes::{DataType, Field, Schema},
-    },
     catalog::CatalogProviderList,
     common::{DataFusionError, Result, exec_err, not_impl_err},
     datasource::TableProvider,
@@ -18,6 +16,8 @@ use optd_datafusion::{
 };
 use std::collections::HashMap;
 use std::sync::Arc;
+
+use crate::udtf::{ListSnapshotsFunction, ListTablesAtSnapshotFunction};
 
 pub struct OptdCliSessionContext {
     inner: SessionContext,
@@ -38,6 +38,25 @@ impl OptdCliSessionContext {
 
         Self { inner }
     }
+
+    /// Register User-Defined Table Functions (UDTFs) for snapshot queries
+    ///
+    /// Call this after registering the OptD catalog to enable time-travel UDTFs.
+    pub fn register_udtfs(&self) {
+        let catalog_handle = self.get_catalog_handle();
+
+        // Register list_snapshots() function
+        self.inner.register_udtf(
+            "list_snapshots",
+            Arc::new(ListSnapshotsFunction::new(catalog_handle.clone())),
+        );
+
+        // Register list_tables_at_snapshot(snapshot_id) function
+        self.inner.register_udtf(
+            "list_tables_at_snapshot",
+            Arc::new(ListTablesAtSnapshotFunction::new(catalog_handle)),
+        );
+    }
     pub async fn refresh_catalogs(&self) -> datafusion::common::Result<()> {
         self.inner.refresh_catalogs().await
     }
@@ -54,18 +73,6 @@ impl OptdCliSessionContext {
     pub fn return_empty_dataframe(&self) -> Result<DataFrame> {
         let plan = LogicalPlanBuilder::empty(false).build()?;
         Ok(DataFrame::new(self.inner.state(), plan))
-    }
-
-    /// Execute SQL statement, intercepting SHOW TABLES and other custom commands.
-    pub async fn sql_with_optd(&self, sql: &str) -> Result<DataFrame> {
-        // Check if this is a SHOW TABLES command
-        let sql_trimmed = sql.trim().to_uppercase();
-        if sql_trimmed.starts_with("SHOW TABLES") || sql_trimmed == "SHOW TABLES;" {
-            return self.show_tables().await;
-        }
-
-        // Otherwise, use standard DataFusion SQL execution
-        self.inner.sql(sql).await
     }
 
     async fn create_external_table(&self, cmd: &CreateExternalTable) -> Result<DataFrame> {
@@ -203,70 +210,6 @@ impl OptdCliSessionContext {
         }
 
         self.return_empty_dataframe()
-    }
-
-    /// Lists all registered external tables from the catalog.
-    ///
-    /// Returns a DataFrame with table metadata including name, location, format, and compression.
-    async fn show_tables(&self) -> Result<DataFrame> {
-        if let Some(catalog_handle) = self.get_catalog_handle() {
-            let tables = catalog_handle
-                .list_external_tables(None)
-                .await
-                .map_err(|e| DataFusionError::External(Box::new(e)))?;
-
-            // Create schema for result
-            let schema = Arc::new(Schema::new(vec![
-                Field::new("table_name", DataType::Utf8, false),
-                Field::new("location", DataType::Utf8, false),
-                Field::new("file_format", DataType::Utf8, false),
-                Field::new("compression", DataType::Utf8, true),
-            ]));
-
-            // Build arrays from table metadata
-            let table_names: Vec<String> = tables.iter().map(|t| t.table_name.clone()).collect();
-            let locations: Vec<String> = tables.iter().map(|t| t.location.clone()).collect();
-            let formats: Vec<String> = tables.iter().map(|t| t.file_format.clone()).collect();
-            let compressions: Vec<Option<String>> =
-                tables.iter().map(|t| t.compression.clone()).collect();
-
-            let batch = RecordBatch::try_new(
-                schema.clone(),
-                vec![
-                    Arc::new(StringArray::from(table_names)),
-                    Arc::new(StringArray::from(locations)),
-                    Arc::new(StringArray::from(formats)),
-                    Arc::new(StringArray::from(compressions)),
-                ],
-            )?;
-
-            // Convert to DataFrame
-            self.inner
-                .read_batch(batch)
-                .map_err(|e| DataFusionError::External(Box::new(e)))
-        } else {
-            // No catalog handle available - return empty result
-            let schema = Arc::new(Schema::new(vec![
-                Field::new("table_name", DataType::Utf8, false),
-                Field::new("location", DataType::Utf8, false),
-                Field::new("file_format", DataType::Utf8, false),
-                Field::new("compression", DataType::Utf8, true),
-            ]));
-
-            let batch = RecordBatch::try_new(
-                schema.clone(),
-                vec![
-                    Arc::new(StringArray::from(Vec::<String>::new())),
-                    Arc::new(StringArray::from(Vec::<String>::new())),
-                    Arc::new(StringArray::from(Vec::<String>::new())),
-                    Arc::new(StringArray::from(Vec::<Option<String>>::new())),
-                ],
-            )?;
-
-            self.inner
-                .read_batch(batch)
-                .map_err(|e| DataFusionError::External(Box::new(e)))
-        }
     }
 }
 
