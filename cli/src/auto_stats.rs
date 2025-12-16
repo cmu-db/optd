@@ -149,17 +149,17 @@ fn extract_column_statistics_from_parquet(
 
             if let Some(stats) = col_metadata.statistics() {
                 // Update min value (keep the smallest)
-                if let Some(min_str) = parquet_stat_to_string(stats, true) {
-                    if global_min.is_none() || min_str < global_min.as_ref().unwrap().clone() {
-                        global_min = Some(min_str);
-                    }
+                if let Some(min_str) = parquet_stat_to_string(stats, true)
+                    && (global_min.is_none() || min_str < global_min.as_ref().unwrap().clone())
+                {
+                    global_min = Some(min_str);
                 }
 
                 // Update max value (keep the largest)
-                if let Some(max_str) = parquet_stat_to_string(stats, false) {
-                    if global_max.is_none() || max_str > global_max.as_ref().unwrap().clone() {
-                        global_max = Some(max_str);
-                    }
+                if let Some(max_str) = parquet_stat_to_string(stats, false)
+                    && (global_max.is_none() || max_str > global_max.as_ref().unwrap().clone())
+                {
+                    global_max = Some(max_str);
                 }
 
                 // Accumulate null count

@@ -1,9 +1,9 @@
-// Catalog-level error handling tests: statistics and metadata operations
+// Catalog error handling tests
 
 use optd_catalog::{CatalogService, CatalogServiceHandle, DuckLakeCatalog};
 use tempfile::TempDir;
 
-/// Helper to create a test catalog service
+/// Creates a test catalog service with temp storage.
 fn create_test_service() -> (
     TempDir,
     CatalogService<DuckLakeCatalog>,

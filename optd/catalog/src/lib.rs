@@ -708,16 +708,39 @@ impl DuckLakeCatalog {
             .context(QueryExecutionSnafu)
     }
 
-    /// Fetch table statistics using the FromIterator pattern for optimizer compatibility.
+    /// Resolves schema info by name, defaulting to current schema if None.
     ///
-    /// Unified implementation that handles both internal tables (with ducklake_column)
-    /// and external tables (with column_id=0 and names in JSON payloads).
+    /// Currently always receives None from callers, using default schema.
+    fn resolve_schema_info_inner(
+        conn: &Connection,
+        schema_name: Option<&str>,
+    ) -> Result<CurrentSchema, Error> {
+        match schema_name {
+            None => Self::current_schema_info_inner(conn),
+            Some(name) => conn
+                .prepare(
+                    r#"
+                    SELECT ds.schema_id, ds.schema_name, ds.begin_snapshot, ds.end_snapshot
+                    FROM __ducklake_metadata_metalake.main.ducklake_schema ds
+                    WHERE ds.schema_name = ?
+                    "#,
+                )
+                .context(QueryExecutionSnafu)?
+                .query_row([name], |row| {
+                    Ok(CurrentSchema {
+                        schema_name: row.get("schema_name")?,
+                        schema_id: row.get("schema_id")?,
+                        begin_snapshot: row.get("begin_snapshot")?,
+                        end_snapshot: row.get("end_snapshot")?,
+                    })
+                })
+                .context(QueryExecutionSnafu),
+        }
+    }
+
+    /// Fetches table statistics for optimizer use.
     ///
-    /// # Parameters
-    /// - `schema_name`: Optional schema name (None = current schema)
-    /// - `table`: Table name
-    /// - `snapshot`: Optional snapshot ID (None = current snapshot)
-    ///
+    /// Handles both internal tables (ducklake_column) and external tables (column_id=0).
     /// Returns None if table doesn't exist or has no statistics.
     fn table_statistics_inner(
         conn: &Connection,
@@ -725,7 +748,7 @@ impl DuckLakeCatalog {
         table: &str,
         snapshot: Option<SnapshotId>,
     ) -> Result<Option<TableStatistics>, Error> {
-        let schema_info = Self::current_schema_info_inner(conn)?;
+        let schema_info = Self::resolve_schema_info_inner(conn, schema_name)?;
         let query_snapshot = match snapshot {
             Some(snap) => snap,
             None => Self::current_snapshot_info_inner(conn)?.id,
@@ -1211,12 +1234,12 @@ impl DuckLakeCatalog {
     /// If `snapshot_id` is Some, gets the table as it existed at that snapshot.
     fn get_external_table_inner(
         conn: &Connection,
-        _schema_name: Option<&str>,
+        schema_name: Option<&str>,
         table_name: &str,
         snapshot_id: Option<i64>,
     ) -> Result<Option<ExternalTableMetadata>, Error> {
         // Get schema_id
-        let schema_info = Self::current_schema_info_inner(conn)?;
+        let schema_info = Self::resolve_schema_info_inner(conn, schema_name)?;
 
         // Query and extract data based on snapshot parameter
         let row_data = match snapshot_id {
@@ -1347,10 +1370,10 @@ impl DuckLakeCatalog {
     /// If `snapshot_id` is Some, lists tables as they existed at that snapshot.
     fn list_external_tables_inner(
         conn: &Connection,
-        _schema_name: Option<&str>,
+        schema_name: Option<&str>,
         snapshot_id: Option<i64>,
     ) -> Result<Vec<ExternalTableMetadata>, Error> {
-        let schema_info = Self::current_schema_info_inner(conn)?;
+        let schema_info = Self::resolve_schema_info_inner(conn, schema_name)?;
 
         // Collect table data based on snapshot parameter
         let table_rows = match snapshot_id {
@@ -1502,10 +1525,10 @@ impl DuckLakeCatalog {
 
     fn drop_external_table_inner(
         conn: &Connection,
-        _schema_name: Option<&str>,
+        schema_name: Option<&str>,
         table_name: &str,
     ) -> Result<(), Error> {
-        let schema_info = Self::current_schema_info_inner(conn)?;
+        let schema_info = Self::resolve_schema_info_inner(conn, schema_name)?;
         let curr_snapshot = Self::current_snapshot_info_inner(conn)?;
 
         // Soft delete by setting end_snapshot
@@ -1577,11 +1600,11 @@ impl DuckLakeCatalog {
 
     fn set_table_statistics_inner(
         conn: &Connection,
-        _schema_name: Option<&str>,
+        schema_name: Option<&str>,
         table_name: &str,
         stats: TableStatistics,
     ) -> Result<(), Error> {
-        let schema_info = Self::current_schema_info_inner(conn)?;
+        let schema_info = Self::resolve_schema_info_inner(conn, schema_name)?;
 
         // Get table_id from ducklake_table or optd_external_table
         let table_id: Result<i64, _> = conn

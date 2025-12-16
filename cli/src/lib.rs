@@ -96,6 +96,7 @@ impl OptdCliSessionContext {
         if let Some(catalog_handle) = self.get_catalog_handle() {
             let request = RegisterTableRequest {
                 table_name: cmd.name.to_string(),
+                // TODO: Parse schema from table name (e.g., "schema.table")
                 schema_name: None,
                 location: cmd.location.clone(),
                 file_format: cmd.file_type.clone(),

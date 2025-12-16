@@ -1,4 +1,4 @@
-// Error handling tests: verify robust error handling and clear error messages
+// CLI error handling tests
 
 use datafusion::{execution::runtime_env::RuntimeEnvBuilder, prelude::SessionConfig};
 use datafusion_cli::cli_context::CliSessionContext;
@@ -8,7 +8,7 @@ use optd_datafusion::OptdCatalogProviderList;
 use std::sync::Arc;
 use tempfile::TempDir;
 
-/// Creates a test CLI context with persistent catalog
+/// Creates CLI context with temp persistent catalog.
 async fn create_cli_context_with_catalog(
     temp_dir: &TempDir,
 ) -> (OptdCliSessionContext, tokio::task::JoinHandle<()>) {
@@ -30,7 +30,7 @@ async fn create_cli_context_with_catalog(
     (cli_ctx, service_handle)
 }
 
-/// Helper to execute SQL with proper error handling
+/// Executes SQL and returns result.
 async fn execute_sql(cli_ctx: &OptdCliSessionContext, sql: &str) -> datafusion::error::Result<()> {
     let plan = cli_ctx.inner().state().create_logical_plan(sql).await?;
     cli_ctx.execute_logical_plan(plan).await?;

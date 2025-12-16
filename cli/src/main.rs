@@ -248,12 +248,11 @@ async fn main_inner() -> Result<()> {
 
     // Eagerly load external tables from catalog into DataFusion's in-memory catalog
     // This allows SHOW TABLES to list external tables immediately without requiring a query first
-    if let Some(handle) = &catalog_handle {
-        if let Err(e) = populate_external_tables(ctx, handle).await {
-            if !args.quiet {
-                eprintln!("Warning: Failed to populate external tables: {}", e);
-            }
-        }
+    if let Some(handle) = &catalog_handle
+        && let Err(e) = populate_external_tables(ctx, handle).await
+        && !args.quiet
+    {
+        eprintln!("Warning: Failed to populate external tables: {}", e);
     }
 
     ctx.register_udtf("parquet_metadata", Arc::new(ParquetMetadataFunc {}));

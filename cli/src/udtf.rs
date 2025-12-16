@@ -164,7 +164,7 @@ impl datafusion::catalog::TableFunctionImpl for ListTablesAtSnapshotFunction {
 
             Ok(Arc::new(MemTable::try_new(schema, vec![vec![batch]])?))
         } else {
-            return datafusion::common::exec_err!("Catalog not available for time-travel queries");
+            datafusion::common::exec_err!("Catalog not available for time-travel queries")
         }
     }
 }

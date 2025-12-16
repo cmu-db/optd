@@ -118,10 +118,7 @@ impl OptdSchemaProvider {
         }
     }
 
-    /// Creates a `TableProvider` from external table metadata.
-    ///
-    /// Reconstructs the appropriate DataFusion table based on file format (CSV, Parquet, JSON).
-    /// DataFusion uses lazy schema inference - schemas are populated during query execution.
+    /// Reconstructs TableProvider from metadata (CSV/Parquet/JSON).
     async fn create_table_from_metadata(
         &self,
         metadata: &ExternalTableMetadata,
@@ -185,6 +182,7 @@ impl SchemaProvider for OptdSchemaProvider {
 
         if let Some(catalog_handle) = &self.catalog_handle
             && let Some(metadata) = catalog_handle
+                // TODO: Extract schema from fully-qualified table name
                 .get_external_table(None, name)
                 .await
                 .map_err(|e| DataFusionError::External(Box::new(e)))?
