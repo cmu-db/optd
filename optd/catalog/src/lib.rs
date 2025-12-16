@@ -259,6 +259,8 @@ pub enum Error {
         stats_type: String,
         snapshot: i64,
     },
+    #[snafu(display("Table '{}' does not exist", table_name))]
+    TableNotFound { table_name: String },
 }
 
 /// Internal representation of a row from the table statistics query.
@@ -1524,8 +1526,8 @@ impl DuckLakeCatalog {
             .context(QueryExecutionSnafu)?;
 
         if updated == 0 {
-            return Err(Error::QueryExecution {
-                source: DuckDBError::QueryReturnedNoRows,
+            return Err(Error::TableNotFound {
+                table_name: table_name.to_string(),
             });
         }
 
@@ -1607,8 +1609,8 @@ impl DuckLakeCatalog {
         let table_id = match table_id {
             Ok(id) => id,
             Err(DuckDBError::QueryReturnedNoRows) => {
-                return Err(Error::QueryExecution {
-                    source: DuckDBError::QueryReturnedNoRows,
+                return Err(Error::TableNotFound {
+                    table_name: table_name.to_string(),
                 });
             }
             Err(e) => return Err(Error::QueryExecution { source: e }),
