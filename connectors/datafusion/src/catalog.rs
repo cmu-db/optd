@@ -108,12 +108,12 @@ impl CatalogProvider for OptdCatalogProvider {
         let mut names = self.inner.schema_names();
 
         // Add schemas from optd catalog
-        if let Some(catalog_handle) = &self.catalog_handle {
-            if let Ok(mut schemas) = catalog_handle.blocking_list_schemas() {
-                names.append(&mut schemas);
-                names.sort();
-                names.dedup();
-            }
+        if let Some(catalog_handle) = &self.catalog_handle
+            && let Ok(mut schemas) = catalog_handle.blocking_list_schemas()
+        {
+            names.append(&mut schemas);
+            names.sort();
+            names.dedup();
         }
 
         names

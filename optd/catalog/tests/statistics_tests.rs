@@ -1439,7 +1439,8 @@ fn test_schema_with_complex_types() {
 fn test_external_set_and_get_table_statistics() {
     let temp_dir = TempDir::new().unwrap();
     let metadata_path = temp_dir.path().join("metadata.ducklake");
-    let mut catalog = DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
+    let mut catalog =
+        DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
 
     // Create an external table first
     let request = RegisterTableRequest {
@@ -1475,7 +1476,8 @@ fn test_external_set_and_get_table_statistics() {
 fn test_external_set_statistics_with_column_stats() {
     let temp_dir = TempDir::new().unwrap();
     let metadata_path = temp_dir.path().join("metadata.ducklake");
-    let mut catalog = DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
+    let mut catalog =
+        DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
 
     // Create an external table
     let request = RegisterTableRequest {
@@ -1560,7 +1562,8 @@ fn test_external_set_statistics_with_column_stats() {
 fn test_external_update_statistics() {
     let temp_dir = TempDir::new().unwrap();
     let metadata_path = temp_dir.path().join("metadata.ducklake");
-    let mut catalog = DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
+    let mut catalog =
+        DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
 
     // Create table
     let request = RegisterTableRequest {
@@ -1614,7 +1617,8 @@ fn test_external_update_statistics() {
 fn test_external_get_statistics_for_nonexistent_table() {
     let temp_dir = TempDir::new().unwrap();
     let metadata_path = temp_dir.path().join("metadata.ducklake");
-    let mut catalog = DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
+    let mut catalog =
+        DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
 
     let snapshot = catalog.current_snapshot().unwrap();
     let result = catalog.table_statistics("nonexistent", snapshot);
@@ -1625,7 +1629,8 @@ fn test_external_get_statistics_for_nonexistent_table() {
 fn test_external_get_statistics_without_setting_them() {
     let temp_dir = TempDir::new().unwrap();
     let metadata_path = temp_dir.path().join("metadata.ducklake");
-    let mut catalog = DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
+    let mut catalog =
+        DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
 
     // Create table but don't set statistics
     let request = RegisterTableRequest {

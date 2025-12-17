@@ -186,7 +186,9 @@ fn test_nonexistent_schema_graceful() {
     let (_temp_dir, mut catalog) = create_test_catalog();
 
     // Read operations return None/empty
-    let table = catalog.get_external_table(Some("nonexistent"), "test").unwrap();
+    let table = catalog
+        .get_external_table(Some("nonexistent"), "test")
+        .unwrap();
     assert!(table.is_none());
 
     let tables = catalog.list_external_tables(Some("nonexistent")).unwrap();

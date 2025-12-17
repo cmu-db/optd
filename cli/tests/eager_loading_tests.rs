@@ -12,11 +12,11 @@ use tempfile::TempDir;
 async fn test_cli_populate_on_startup() {
     let temp_dir = TempDir::new().unwrap();
     let metadata_path = temp_dir.path().join("metadata.ducklake");
-    
+
     // Create test CSV files
     let csv_path1 = temp_dir.path().join("table1.csv");
     std::fs::write(&csv_path1, "id\n1\n2\n").unwrap();
-    
+
     let csv_path2 = temp_dir.path().join("table2.csv");
     std::fs::write(&csv_path2, "id\n3\n4\n").unwrap();
 
@@ -32,7 +32,8 @@ async fn test_cli_populate_on_startup() {
         let cli_ctx = OptdCliSessionContext::new_with_config_rt(config, runtime);
 
         let original_catalog_list = cli_ctx.inner().state().catalog_list().clone();
-        let optd_catalog_list = OptdCatalogProviderList::new(original_catalog_list, Some(handle.clone()));
+        let optd_catalog_list =
+            OptdCatalogProviderList::new(original_catalog_list, Some(handle.clone()));
         cli_ctx
             .inner()
             .register_catalog_list(Arc::new(optd_catalog_list));
@@ -69,7 +70,8 @@ async fn test_cli_populate_on_startup() {
         let cli_ctx = OptdCliSessionContext::new_with_config_rt(config, runtime);
 
         let original_catalog_list = cli_ctx.inner().state().catalog_list().clone();
-        let optd_catalog_list = OptdCatalogProviderList::new(original_catalog_list, Some(handle.clone()));
+        let optd_catalog_list =
+            OptdCatalogProviderList::new(original_catalog_list, Some(handle.clone()));
         cli_ctx
             .inner()
             .register_catalog_list(Arc::new(optd_catalog_list));
@@ -80,7 +82,10 @@ async fn test_cli_populate_on_startup() {
         let external_tables = handle.list_external_tables(None).await.unwrap();
         for metadata in external_tables {
             // This simulates what populate_external_tables does
-            let _ = cli_ctx.inner().sql(&format!("SELECT * FROM {} LIMIT 0", metadata.table_name)).await;
+            let _ = cli_ctx
+                .inner()
+                .sql(&format!("SELECT * FROM {} LIMIT 0", metadata.table_name))
+                .await;
         }
 
         // Now SHOW TABLES should immediately show both tables without lazy loading
@@ -93,11 +98,17 @@ async fn test_cli_populate_on_startup() {
 
         // Should see both tables
         assert!(!batches.is_empty(), "Should have result batches");
-        let table_names: Vec<String> = batches.iter()
+        let table_names: Vec<String> = batches
+            .iter()
             .flat_map(|batch| {
                 let array = batch.column_by_name("table_name").unwrap();
-                let string_array = array.as_any().downcast_ref::<datafusion::arrow::array::StringArray>().unwrap();
-                (0..string_array.len()).map(|i| string_array.value(i).to_string()).collect::<Vec<_>>()
+                let string_array = array
+                    .as_any()
+                    .downcast_ref::<datafusion::arrow::array::StringArray>()
+                    .unwrap();
+                (0..string_array.len())
+                    .map(|i| string_array.value(i).to_string())
+                    .collect::<Vec<_>>()
             })
             .collect();
 
@@ -133,7 +144,8 @@ async fn test_eager_vs_lazy_loading() {
         let cli_ctx = OptdCliSessionContext::new_with_config_rt(config, runtime);
 
         let original_catalog_list = cli_ctx.inner().state().catalog_list().clone();
-        let optd_catalog_list = OptdCatalogProviderList::new(original_catalog_list, Some(handle.clone()));
+        let optd_catalog_list =
+            OptdCatalogProviderList::new(original_catalog_list, Some(handle.clone()));
         cli_ctx
             .inner()
             .register_catalog_list(Arc::new(optd_catalog_list));
@@ -166,18 +178,27 @@ async fn test_eager_vs_lazy_loading() {
         let cli_ctx = OptdCliSessionContext::new_with_config_rt(config, runtime);
 
         let original_catalog_list = cli_ctx.inner().state().catalog_list().clone();
-        let optd_catalog_list = OptdCatalogProviderList::new(original_catalog_list, Some(handle.clone()));
+        let optd_catalog_list =
+            OptdCatalogProviderList::new(original_catalog_list, Some(handle.clone()));
         cli_ctx
             .inner()
             .register_catalog_list(Arc::new(optd_catalog_list));
 
         // Without explicit populate, lazy-loading still works
         // The table will be loaded on first access
-        let df = cli_ctx.inner().sql("SELECT * FROM lazy_table").await.unwrap();
+        let df = cli_ctx
+            .inner()
+            .sql("SELECT * FROM lazy_table")
+            .await
+            .unwrap();
         let batches = df.collect().await.unwrap();
 
         assert_eq!(batches.len(), 1);
-        assert_eq!(batches[0].num_rows(), 3, "Should read all rows via lazy loading");
+        assert_eq!(
+            batches[0].num_rows(),
+            3,
+            "Should read all rows via lazy loading"
+        );
 
         handle.shutdown().await.unwrap();
     }
@@ -194,20 +215,25 @@ async fn test_eager_vs_lazy_loading() {
         let cli_ctx = OptdCliSessionContext::new_with_config_rt(config, runtime);
 
         let original_catalog_list = cli_ctx.inner().state().catalog_list().clone();
-        let optd_catalog_list = OptdCatalogProviderList::new(original_catalog_list, Some(handle.clone()));
+        let optd_catalog_list =
+            OptdCatalogProviderList::new(original_catalog_list, Some(handle.clone()));
         cli_ctx
             .inner()
             .register_catalog_list(Arc::new(optd_catalog_list));
 
         // Populate eagerly loads all tables
         // Simulate eager loading by querying table
-        let _ = cli_ctx.inner().sql("SELECT * FROM lazy_table LIMIT 0").await.unwrap();
+        let _ = cli_ctx
+            .inner()
+            .sql("SELECT * FROM lazy_table LIMIT 0")
+            .await
+            .unwrap();
 
         // Table should already be in memory
         let catalog = cli_ctx.inner().catalog("datafusion").unwrap();
         let schema = catalog.schema("public").unwrap();
         let table_immediate = schema.table("lazy_table").await.unwrap();
-        
+
         assert!(
             table_immediate.is_some(),
             "Table should be in memory immediately after populate"
@@ -216,4 +242,3 @@ async fn test_eager_vs_lazy_loading() {
         handle.shutdown().await.unwrap();
     }
 }
-

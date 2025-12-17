@@ -50,7 +50,8 @@ async fn test_cli_statistics_available_after_create() {
     let cli_ctx = OptdCliSessionContext::new_with_config_rt(config, runtime);
 
     let original_catalog_list = cli_ctx.inner().state().catalog_list().clone();
-    let optd_catalog_list = OptdCatalogProviderList::new(original_catalog_list, Some(handle.clone()));
+    let optd_catalog_list =
+        OptdCatalogProviderList::new(original_catalog_list, Some(handle.clone()));
     cli_ctx
         .inner()
         .register_catalog_list(Arc::new(optd_catalog_list));
@@ -77,7 +78,7 @@ async fn test_cli_statistics_available_after_create() {
 
     assert!(stats.is_some(), "Statistics should be available");
     let stats = stats.unwrap();
-    
+
     assert_eq!(stats.row_count, 5, "Row count should be 5");
     assert_eq!(
         stats.column_statistics.len(),
@@ -151,7 +152,8 @@ async fn test_statistics_versioning_across_snapshots() {
     let cli_ctx = OptdCliSessionContext::new_with_config_rt(config, runtime);
 
     let original_catalog_list = cli_ctx.inner().state().catalog_list().clone();
-    let optd_catalog_list = OptdCatalogProviderList::new(original_catalog_list, Some(handle.clone()));
+    let optd_catalog_list =
+        OptdCatalogProviderList::new(original_catalog_list, Some(handle.clone()));
     cli_ctx
         .inner()
         .register_catalog_list(Arc::new(optd_catalog_list));

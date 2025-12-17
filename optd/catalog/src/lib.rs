@@ -1295,9 +1295,9 @@ impl DuckLakeCatalog {
         // Get schema_id - if schema doesn't exist, return None instead of error
         let schema_info = match Self::resolve_schema_info_inner(conn, schema_name) {
             Ok(info) => info,
-            Err(Error::QueryExecution { source })
-                if matches!(source, duckdb::Error::QueryReturnedNoRows) =>
-            {
+            Err(Error::QueryExecution {
+                source: duckdb::Error::QueryReturnedNoRows,
+            }) => {
                 return Ok(None);
             }
             Err(e) => return Err(e),
@@ -1438,9 +1438,9 @@ impl DuckLakeCatalog {
         // Get schema_id - if schema doesn't exist, return empty list instead of error
         let schema_info = match Self::resolve_schema_info_inner(conn, schema_name) {
             Ok(info) => info,
-            Err(Error::QueryExecution { source })
-                if matches!(source, duckdb::Error::QueryReturnedNoRows) =>
-            {
+            Err(Error::QueryExecution {
+                source: duckdb::Error::QueryReturnedNoRows,
+            }) => {
                 return Ok(Vec::new());
             }
             Err(e) => return Err(e),
@@ -1602,9 +1602,9 @@ impl DuckLakeCatalog {
         // Get schema_id - if schema doesn't exist, return TableNotFound error
         let schema_info = match Self::resolve_schema_info_inner(conn, schema_name) {
             Ok(info) => info,
-            Err(Error::QueryExecution { source })
-                if matches!(source, duckdb::Error::QueryReturnedNoRows) =>
-            {
+            Err(Error::QueryExecution {
+                source: duckdb::Error::QueryReturnedNoRows,
+            }) => {
                 return Err(Error::TableNotFound {
                     table_name: table_name.to_string(),
                 });

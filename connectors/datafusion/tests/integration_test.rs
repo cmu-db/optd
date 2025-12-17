@@ -10,7 +10,6 @@ use datafusion::{
 };
 use optd_catalog::{CatalogService, DuckLakeCatalog};
 use optd_datafusion::{OptdCatalogProvider, OptdCatalogProviderList, OptdTableProvider};
-use serde_json;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};

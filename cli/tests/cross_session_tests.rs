@@ -1,4 +1,4 @@
-use datafusion::arrow::array::{Array, Int64Array, StringArray};
+use datafusion::arrow::array::{Array, Int64Array};
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::prelude::*;
 use datafusion_cli::cli_context::CliSessionContext;

@@ -327,8 +327,8 @@ async fn test_column_statistics_extraction() {
     let mut scores = Vec::new();
 
     for i in 0..100 {
-        ids.push(i as i32 + 1); // 1 to 100
-        ages.push(20 + (i % 50) as i32); // 20 to 69
+        ids.push(i + 1); // 1 to 100
+        ages.push(20 + (i % 50)); // 20 to 69
         scores.push(i as f64); // 0.0 to 99.0
     }
 
