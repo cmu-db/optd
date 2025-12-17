@@ -61,6 +61,9 @@ pub trait CatalogBackend: Send + 'static {
         schema_name: Option<&str>,
         snapshot_id: i64,
     ) -> Result<Vec<ExternalTableMetadata>, Error>;
+    fn create_schema(&mut self, schema_name: &str) -> Result<(), Error>;
+    fn list_schemas(&mut self) -> Result<Vec<String>, Error>;
+    fn drop_schema(&mut self, schema_name: &str) -> Result<(), Error>;
 }
 
 /// Implement CatalogBackend for any type that implements Catalog
@@ -158,6 +161,18 @@ impl<T: Catalog + Send + 'static> CatalogBackend for T {
     ) -> Result<Vec<ExternalTableMetadata>, Error> {
         Catalog::list_external_tables_at_snapshot(self, schema_name, snapshot_id)
     }
+
+    fn create_schema(&mut self, schema_name: &str) -> Result<(), Error> {
+        Catalog::create_schema(self, schema_name)
+    }
+
+    fn list_schemas(&mut self) -> Result<Vec<String>, Error> {
+        Catalog::list_schemas(self)
+    }
+
+    fn drop_schema(&mut self, schema_name: &str) -> Result<(), Error> {
+        Catalog::drop_schema(self, schema_name)
+    }
 }
 
 #[derive(Debug)]
@@ -237,6 +252,20 @@ pub enum CatalogRequest {
         schema_name: Option<String>,
         table_name: String,
         stats: TableStatistics,
+        respond_to: oneshot::Sender<Result<(), Error>>,
+    },
+
+    CreateSchema {
+        schema_name: String,
+        respond_to: oneshot::Sender<Result<(), Error>>,
+    },
+
+    ListSchemas {
+        respond_to: oneshot::Sender<Result<Vec<String>, Error>>,
+    },
+
+    DropSchema {
+        schema_name: String,
         respond_to: oneshot::Sender<Result<(), Error>>,
     },
 
@@ -530,6 +559,73 @@ impl CatalogServiceHandle {
         })?
     }
 
+    pub async fn create_schema(&self, schema_name: &str) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(CatalogRequest::CreateSchema {
+                schema_name: schema_name.to_string(),
+                respond_to: tx,
+            })
+            .await
+            .map_err(|_| Error::QueryExecution {
+                source: duckdb::Error::ExecuteReturnedResults,
+            })?;
+
+        rx.await.map_err(|_| Error::QueryExecution {
+            source: duckdb::Error::ExecuteReturnedResults,
+        })?
+    }
+
+    pub async fn list_schemas(&self) -> Result<Vec<String>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(CatalogRequest::ListSchemas { respond_to: tx })
+            .await
+            .map_err(|_| Error::QueryExecution {
+                source: duckdb::Error::ExecuteReturnedResults,
+            })?;
+
+        rx.await.map_err(|_| Error::QueryExecution {
+            source: duckdb::Error::ExecuteReturnedResults,
+        })?
+    }
+
+    pub fn blocking_list_schemas(&self) -> Result<Vec<String>, Error> {
+        let sender = self.sender.clone();
+        tokio::task::block_in_place(move || {
+            tokio::runtime::Handle::current().block_on(async move {
+                let (tx, rx) = oneshot::channel();
+                sender
+                    .send(CatalogRequest::ListSchemas { respond_to: tx })
+                    .await
+                    .map_err(|_| Error::QueryExecution {
+                        source: duckdb::Error::ExecuteReturnedResults,
+                    })?;
+
+                rx.await.map_err(|_| Error::QueryExecution {
+                    source: duckdb::Error::ExecuteReturnedResults,
+                })?
+            })
+        })
+    }
+
+    pub async fn drop_schema(&self, schema_name: &str) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(CatalogRequest::DropSchema {
+                schema_name: schema_name.to_string(),
+                respond_to: tx,
+            })
+            .await
+            .map_err(|_| Error::QueryExecution {
+                source: duckdb::Error::ExecuteReturnedResults,
+            })?;
+
+        rx.await.map_err(|_| Error::QueryExecution {
+            source: duckdb::Error::ExecuteReturnedResults,
+        })?
+    }
+
     pub async fn shutdown(&self) -> Result<(), Error> {
         self.sender
             .send(CatalogRequest::Shutdown)
@@ -691,6 +787,27 @@ impl<B: CatalogBackend> CatalogService<B> {
                         &table_name,
                         stats,
                     );
+                    let _ = respond_to.send(result);
+                }
+
+                CatalogRequest::CreateSchema {
+                    schema_name,
+                    respond_to,
+                } => {
+                    let result = self.backend.create_schema(&schema_name);
+                    let _ = respond_to.send(result);
+                }
+
+                CatalogRequest::ListSchemas { respond_to } => {
+                    let result = self.backend.list_schemas();
+                    let _ = respond_to.send(result);
+                }
+
+                CatalogRequest::DropSchema {
+                    schema_name,
+                    respond_to,
+                } => {
+                    let result = self.backend.drop_schema(&schema_name);
                     let _ = respond_to.send(result);
                 }
 

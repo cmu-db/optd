@@ -94,10 +94,13 @@ impl OptdCliSessionContext {
 
         // Persist to catalog
         if let Some(catalog_handle) = self.get_catalog_handle() {
+            // Parse schema from table name
+            let full_name = cmd.name.to_string();
+            let (schema_name, table_name) = Self::parse_table_name(&full_name);
+
             let request = RegisterTableRequest {
-                table_name: cmd.name.to_string(),
-                // TODO: Parse schema from table name (e.g., "schema.table")
-                schema_name: None,
+                table_name: table_name.to_string(),
+                schema_name: schema_name.map(|s| s.to_string()),
                 location: cmd.location.clone(),
                 file_format: cmd.file_type.clone(),
                 compression: Self::extract_compression(&cmd.options),
@@ -117,7 +120,7 @@ impl OptdCliSessionContext {
             {
                 // Store statistics
                 if let Err(e) = catalog_handle
-                    .set_table_statistics(None, &cmd.name.to_string(), stats)
+                    .set_table_statistics(schema_name, table_name, stats)
                     .await
                 {
                     eprintln!("Warning: Failed to store statistics: {}", e);
@@ -182,6 +185,17 @@ impl OptdCliSessionContext {
             .cloned()
     }
 
+    /// Parses a table name into (schema_name, table_name).
+    fn parse_table_name(full_name: &str) -> (Option<&str>, &str) {
+        if let Some(dot_pos) = full_name.find('.') {
+            let schema = &full_name[..dot_pos];
+            let table = &full_name[dot_pos + 1..];
+            (Some(schema), table)
+        } else {
+            (None, full_name)
+        }
+    }
+
     /// Handles DROP TABLE.
     async fn drop_external_table(&self, table_name: &str, if_exists: bool) -> Result<DataFrame> {
         // Check if table exists in DataFusion.
@@ -217,8 +231,11 @@ impl OptdCliSessionContext {
             })?;
 
         if let Some(catalog_handle) = self.get_catalog_handle() {
+            // Parse schema from table name
+            let (schema_name, pure_table_name) = Self::parse_table_name(table_name);
+
             catalog_handle
-                .drop_external_table(None, table_name)
+                .drop_external_table(schema_name, pure_table_name)
                 .await
                 .map_err(|e| DataFusionError::External(Box::new(e)))?;
         }

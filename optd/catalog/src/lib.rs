@@ -13,28 +13,28 @@ use std::{collections::HashMap, sync::Arc};
 mod service;
 pub use service::{CatalogBackend, CatalogRequest, CatalogService, CatalogServiceHandle};
 
-/// Operations for managing table statistics with snapshot-based time travel.
+/// Catalog operations with snapshot-based time travel
 pub trait Catalog {
-    /// Gets the current (most recent) snapshot ID.
+    /// Gets current snapshot ID
     fn current_snapshot(&mut self) -> Result<SnapshotId, Error>;
 
-    /// Gets complete metadata for the current snapshot.
+    /// Gets current snapshot metadata
     fn current_snapshot_info(&mut self) -> Result<SnapshotInfo, Error>;
 
-    /// Gets the Arrow schema for a table at the current snapshot.
+    /// Gets Arrow schema for table
     fn current_schema(&mut self, schema: Option<&str>, table: &str) -> Result<SchemaRef, Error>;
 
-    /// Gets schema information including name, ID, and snapshot range.
+    /// Gets schema info (name, ID, snapshot range)
     fn current_schema_info(&mut self) -> Result<CurrentSchema, Error>;
 
-    /// Retrieves table and column statistics at a specific snapshot.
+    /// Retrieves table statistics at snapshot
     fn table_statistics(
         &mut self,
         table_name: &str,
         snapshot: SnapshotId,
     ) -> Result<Option<TableStatistics>, Error>;
 
-    /// Updates or inserts advanced statistics for a table column.
+    /// Updates/inserts advanced statistics for column
     fn update_table_column_stats(
         &mut self,
         column_id: i64,
@@ -43,33 +43,33 @@ pub trait Catalog {
         payload: &str,
     ) -> Result<(), Error>;
 
-    /// Registers a new external table in the catalog.
+    /// Registers external table
     fn register_external_table(
         &mut self,
         request: RegisterTableRequest,
     ) -> Result<ExternalTableMetadata, Error>;
 
-    /// Retrieves external table metadata by name.
+    /// Retrieves external table metadata
     fn get_external_table(
         &mut self,
         schema_name: Option<&str>,
         table_name: &str,
     ) -> Result<Option<ExternalTableMetadata>, Error>;
 
-    /// Lists all active external tables in a schema.
+    /// Lists active external tables in schema
     fn list_external_tables(
         &mut self,
         schema_name: Option<&str>,
     ) -> Result<Vec<ExternalTableMetadata>, Error>;
 
-    /// Soft-deletes an external table by setting its end_snapshot.
+    /// Soft-deletes external table
     fn drop_external_table(
         &mut self,
         schema_name: Option<&str>,
         table_name: &str,
     ) -> Result<(), Error>;
 
-    /// Retrieves external table metadata at a specific snapshot (time-travel).
+    /// Retrieves external table at snapshot (time-travel)
     fn get_external_table_at_snapshot(
         &mut self,
         schema_name: Option<&str>,
@@ -77,24 +77,32 @@ pub trait Catalog {
         snapshot_id: i64,
     ) -> Result<Option<ExternalTableMetadata>, Error>;
 
-    /// Lists all external tables active at a specific snapshot (time-travel).
+    /// Lists external tables at snapshot (time-travel)
     fn list_external_tables_at_snapshot(
         &mut self,
         schema_name: Option<&str>,
         snapshot_id: i64,
     ) -> Result<Vec<ExternalTableMetadata>, Error>;
 
-    /// Lists all snapshots with their metadata.
+    /// Lists all snapshots
     fn list_snapshots(&mut self) -> Result<Vec<SnapshotInfo>, Error>;
 
-    /// Sets statistics for any table.
-    /// Works for both internal DuckDB tables and external tables.
+    /// Sets table statistics (internal or external tables)
     fn set_table_statistics(
         &mut self,
         schema_name: Option<&str>,
         table_name: &str,
         stats: TableStatistics,
     ) -> Result<(), Error>;
+
+    /// Creates schema
+    fn create_schema(&mut self, schema_name: &str) -> Result<(), Error>;
+
+    /// Lists all schemas
+    fn list_schemas(&mut self) -> Result<Vec<String>, Error>;
+
+    /// Drops schema (soft-delete)
+    fn drop_schema(&mut self, schema_name: &str) -> Result<(), Error>;
 }
 
 const DEFAULT_METADATA_FILE: &str = "metadata.ducklake";
@@ -193,7 +201,7 @@ const SCHEMA_INFO_QUERY: &str = r#"
         WHERE ds.schema_name = current_schema();
 "#;
 
-/// SQL query to close an existing advanced statistics entry by setting its end_snapshot.
+/// SQL to close advanced statistics entry
 const UPDATE_ADV_STATS_QUERY: &str = r#"
     UPDATE __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
     SET end_snapshot = ?
@@ -203,28 +211,28 @@ const UPDATE_ADV_STATS_QUERY: &str = r#"
         AND table_id = ?;
 "#;
 
-/// SQL query to insert a new advanced statistics entry.
+/// SQL to insert advanced statistics entry
 const INSERT_ADV_STATS_QUERY: &str = r#"
     INSERT INTO __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
         (column_id, begin_snapshot, end_snapshot, table_id, stats_type, payload) 
     VALUES (?, ?, ?, ?, ?, ?);
 "#;
 
-/// SQL query to insert a new snapshot record.
+/// SQL to insert snapshot record
 const INSERT_SNAPSHOT_QUERY: &str = r#"
     INSERT INTO __ducklake_metadata_metalake.main.ducklake_snapshot
         (snapshot_id, snapshot_time, schema_version, next_catalog_id, next_file_id) 
     VALUES (?, NOW(), ?, ?, ?);
 "#;
 
-/// SQL query to record a snapshot change in the change log.
+/// SQL to record snapshot change
 const INSERT_SNAPSHOT_CHANGE_QUERY: &str = r#"
     INSERT INTO __ducklake_metadata_metalake.main.ducklake_snapshot_changes
         (snapshot_id, changes_made, author, commit_message, commit_extra_info)
     VALUES (?, ?, ?, ?, ?);
 "#;
 
-/// Error types for statistics operations.
+/// Catalog error types
 #[derive(Debug, Snafu)]
 pub enum Error {
     #[snafu(display("Database connection error: {}", source))]
@@ -237,6 +245,8 @@ pub enum Error {
     JsonSerialization { source: serde_json::Error },
     #[snafu(display("ARROW DataType conversion error: {}", source))]
     ArrowDataTypeConversion { source: duckdb::Error },
+    #[snafu(display("{}", message))]
+    InvalidOperation { message: String },
     #[snafu(display(
         "Get statistics failed for table: {}, column: {}, snapshot: {}",
         table,
@@ -263,8 +273,7 @@ pub enum Error {
     TableNotFound { table_name: String },
 }
 
-/// Internal representation of a row from the table statistics query.
-/// Used for collecting data before aggregating into TableStatistics.
+/// Internal row representation for statistics query
 struct TableColumnStatisticsEntry {
     _table_id: i64,
     column_id: i64,
@@ -277,14 +286,13 @@ struct TableColumnStatisticsEntry {
     payload: Option<String>,
 }
 
-/// Statistics for a table including row count and per-column statistics.
-/// Used for both reading and writing statistics (internal and external tables).
+/// Table statistics (row count + column stats)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableStatistics {
     pub row_count: usize,
     pub column_statistics: Vec<ColumnStatistics>,
 
-    /// Total size of the table file(s) in bytes
+    /// File size in bytes
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size_bytes: Option<usize>,
 }
@@ -341,8 +349,7 @@ impl FromIterator<Result<TableColumnStatisticsEntry, Error>> for TableStatistics
     }
 }
 
-/// Statistics for a single column including type, name, and advanced statistics.
-/// For external tables without ducklake_column entries, column_id will be 0 and name identifies the column.
+/// Column statistics (external tables use column_id=0, name for identification)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ColumnStatistics {
     pub column_id: i64,
@@ -592,6 +599,27 @@ impl Catalog for DuckLakeCatalog {
         txn.commit().context(TransactionSnafu)?;
         result
     }
+
+    fn create_schema(&mut self, schema_name: &str) -> Result<(), Error> {
+        let txn = self.conn.transaction().context(TransactionSnafu)?;
+        let result = Self::create_schema_inner(&txn, schema_name);
+        txn.commit().context(TransactionSnafu)?;
+        result
+    }
+
+    fn list_schemas(&mut self) -> Result<Vec<String>, Error> {
+        let txn = self.conn.transaction().context(TransactionSnafu)?;
+        let result = Self::list_schemas_inner(&txn);
+        txn.commit().context(TransactionSnafu)?;
+        result
+    }
+
+    fn drop_schema(&mut self, schema_name: &str) -> Result<(), Error> {
+        let txn = self.conn.transaction().context(TransactionSnafu)?;
+        let result = Self::drop_schema_inner(&txn, schema_name);
+        txn.commit().context(TransactionSnafu)?;
+        result
+    }
 }
 
 impl DuckLakeCatalog {
@@ -708,9 +736,7 @@ impl DuckLakeCatalog {
             .context(QueryExecutionSnafu)
     }
 
-    /// Resolves schema info by name, defaulting to current schema if None.
-    ///
-    /// Currently always receives None from callers, using default schema.
+    /// Resolves schema: None → "main" (default), Some(name) → named schema
     fn resolve_schema_info_inner(
         conn: &Connection,
         schema_name: Option<&str>,
@@ -1143,9 +1169,32 @@ impl DuckLakeCatalog {
         conn: &Connection,
         request: RegisterTableRequest,
     ) -> Result<ExternalTableMetadata, Error> {
-        // Get current schema info
-        let schema_info = Self::current_schema_info_inner(conn)?;
+        // Resolve schema (use provided schema_name or default to current schema)
+        let schema_info = Self::resolve_schema_info_inner(conn, request.schema_name.as_deref())?;
         let curr_snapshot = Self::current_snapshot_info_inner(conn)?;
+
+        // Check if table already exists in this schema
+        let exists = conn
+            .prepare(
+                r#"
+                SELECT COUNT(*) FROM __ducklake_metadata_metalake.main.optd_external_table
+                WHERE schema_id = ? AND table_name = ? AND end_snapshot IS NULL
+                "#,
+            )
+            .context(QueryExecutionSnafu)?
+            .query_row(params![schema_info.schema_id, &request.table_name], |row| {
+                row.get::<_, i64>(0)
+            })
+            .context(QueryExecutionSnafu)?;
+
+        if exists > 0 {
+            return Err(Error::InvalidOperation {
+                message: format!(
+                    "Table '{}' already exists in schema '{}'",
+                    request.table_name, schema_info.schema_name
+                ),
+            });
+        }
 
         // Generate negative table_id to avoid collision with internal tables.
         // Internal tables use positive IDs (1, 2, 3, ...), external tables use negative (-1, -2, -3, ...).
@@ -1238,8 +1287,16 @@ impl DuckLakeCatalog {
         table_name: &str,
         snapshot_id: Option<i64>,
     ) -> Result<Option<ExternalTableMetadata>, Error> {
-        // Get schema_id
-        let schema_info = Self::resolve_schema_info_inner(conn, schema_name)?;
+        // Get schema_id - if schema doesn't exist, return None instead of error
+        let schema_info = match Self::resolve_schema_info_inner(conn, schema_name) {
+            Ok(info) => info,
+            Err(Error::QueryExecution { source })
+                if matches!(source, duckdb::Error::QueryReturnedNoRows) =>
+            {
+                return Ok(None);
+            }
+            Err(e) => return Err(e),
+        };
 
         // Query and extract data based on snapshot parameter
         let row_data = match snapshot_id {
@@ -1373,7 +1430,16 @@ impl DuckLakeCatalog {
         schema_name: Option<&str>,
         snapshot_id: Option<i64>,
     ) -> Result<Vec<ExternalTableMetadata>, Error> {
-        let schema_info = Self::resolve_schema_info_inner(conn, schema_name)?;
+        // Get schema_id - if schema doesn't exist, return empty list instead of error
+        let schema_info = match Self::resolve_schema_info_inner(conn, schema_name) {
+            Ok(info) => info,
+            Err(Error::QueryExecution { source })
+                if matches!(source, duckdb::Error::QueryReturnedNoRows) =>
+            {
+                return Ok(Vec::new());
+            }
+            Err(e) => return Err(e),
+        };
 
         // Collect table data based on snapshot parameter
         let table_rows = match snapshot_id {
@@ -1528,7 +1594,18 @@ impl DuckLakeCatalog {
         schema_name: Option<&str>,
         table_name: &str,
     ) -> Result<(), Error> {
-        let schema_info = Self::resolve_schema_info_inner(conn, schema_name)?;
+        // Get schema_id - if schema doesn't exist, return TableNotFound error
+        let schema_info = match Self::resolve_schema_info_inner(conn, schema_name) {
+            Ok(info) => info,
+            Err(Error::QueryExecution { source })
+                if matches!(source, duckdb::Error::QueryReturnedNoRows) =>
+            {
+                return Err(Error::TableNotFound {
+                    table_name: table_name.to_string(),
+                });
+            }
+            Err(e) => return Err(e),
+        };
         let curr_snapshot = Self::current_snapshot_info_inner(conn)?;
 
         // Soft delete by setting end_snapshot
@@ -1809,6 +1886,185 @@ impl DuckLakeCatalog {
                     .context(QueryExecutionSnafu)?;
             }
         }
+
+        Ok(())
+    }
+
+    fn create_schema_inner(conn: &Connection, schema_name: &str) -> Result<(), Error> {
+        let curr_snapshot = Self::current_snapshot_info_inner(conn)?;
+
+        // Check if schema already exists
+        let exists: i64 = conn
+            .prepare(
+                r#"
+                SELECT COUNT(*)
+                FROM __ducklake_metadata_metalake.main.ducklake_schema
+                WHERE schema_name = ? AND end_snapshot IS NULL
+                "#,
+            )
+            .context(QueryExecutionSnafu)?
+            .query_row([schema_name], |row| row.get(0))
+            .context(QueryExecutionSnafu)?;
+
+        if exists > 0 {
+            return Err(Error::InvalidOperation {
+                message: format!("Schema '{}' already exists", schema_name),
+            });
+        }
+
+        // Get next schema_id
+        let schema_id: i64 = conn
+            .query_row(
+                r#"
+                SELECT COALESCE(MAX(schema_id), 0) + 1
+                FROM __ducklake_metadata_metalake.main.ducklake_schema
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .context(QueryExecutionSnafu)?;
+
+        // Insert new schema
+        conn.prepare(
+            r#"
+            INSERT INTO __ducklake_metadata_metalake.main.ducklake_schema
+                (schema_id, schema_name, begin_snapshot, end_snapshot)
+            VALUES (?, ?, ?, NULL)
+            "#,
+        )
+        .context(QueryExecutionSnafu)?
+        .execute(params![schema_id, schema_name, curr_snapshot.id.0 + 1])
+        .context(QueryExecutionSnafu)?;
+
+        // Create new snapshot
+        conn.prepare(INSERT_SNAPSHOT_QUERY)
+            .context(QueryExecutionSnafu)?
+            .execute(params![
+                curr_snapshot.id.0 + 1,
+                curr_snapshot.schema_version,
+                curr_snapshot.next_catalog_id,
+                curr_snapshot.next_file_id,
+            ])
+            .context(QueryExecutionSnafu)?;
+
+        conn.prepare(INSERT_SNAPSHOT_CHANGE_QUERY)
+            .context(QueryExecutionSnafu)?
+            .execute(params![
+                curr_snapshot.id.0 + 1,
+                format!(r#"created_schema:"{}""#, schema_name),
+                Null,
+                Null,
+                Null,
+            ])
+            .context(QueryExecutionSnafu)?;
+
+        Ok(())
+    }
+
+    fn list_schemas_inner(conn: &Connection) -> Result<Vec<String>, Error> {
+        let mut stmt = conn
+            .prepare(
+                r#"
+                SELECT schema_name
+                FROM __ducklake_metadata_metalake.main.ducklake_schema
+                WHERE end_snapshot IS NULL
+                ORDER BY schema_name
+                "#,
+            )
+            .context(QueryExecutionSnafu)?;
+
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .context(QueryExecutionSnafu)?;
+
+        let mut schemas = Vec::new();
+        for row in rows {
+            schemas.push(row.context(QueryExecutionSnafu)?);
+        }
+
+        Ok(schemas)
+    }
+
+    fn drop_schema_inner(conn: &Connection, schema_name: &str) -> Result<(), Error> {
+        let curr_snapshot = Self::current_snapshot_info_inner(conn)?;
+
+        // Check if schema exists
+        let schema_id: Result<i64, _> = conn
+            .prepare(
+                r#"
+                SELECT schema_id
+                FROM __ducklake_metadata_metalake.main.ducklake_schema
+                WHERE schema_name = ? AND end_snapshot IS NULL
+                "#,
+            )
+            .context(QueryExecutionSnafu)?
+            .query_row([schema_name], |row| row.get(0));
+
+        let schema_id = match schema_id {
+            Ok(id) => id,
+            Err(DuckDBError::QueryReturnedNoRows) => {
+                return Err(Error::InvalidOperation {
+                    message: format!("Schema '{}' does not exist", schema_name),
+                });
+            }
+            Err(e) => return Err(Error::QueryExecution { source: e }),
+        };
+
+        // Check if schema has any active tables
+        let table_count: i64 = conn
+            .prepare(
+                r#"
+                SELECT COUNT(*)
+                FROM __ducklake_metadata_metalake.main.optd_external_table
+                WHERE schema_id = ? AND end_snapshot IS NULL
+                "#,
+            )
+            .context(QueryExecutionSnafu)?
+            .query_row([schema_id], |row| row.get(0))
+            .context(QueryExecutionSnafu)?;
+
+        if table_count > 0 {
+            return Err(Error::InvalidOperation {
+                message: format!(
+                    "Cannot drop schema '{}': {} active table(s) exist",
+                    schema_name, table_count
+                ),
+            });
+        }
+
+        // Soft-delete schema
+        conn.prepare(
+            r#"
+            UPDATE __ducklake_metadata_metalake.main.ducklake_schema
+            SET end_snapshot = ?
+            WHERE schema_name = ? AND end_snapshot IS NULL
+            "#,
+        )
+        .context(QueryExecutionSnafu)?
+        .execute(params![curr_snapshot.id.0 + 1, schema_name])
+        .context(QueryExecutionSnafu)?;
+
+        // Create new snapshot
+        conn.prepare(INSERT_SNAPSHOT_QUERY)
+            .context(QueryExecutionSnafu)?
+            .execute(params![
+                curr_snapshot.id.0 + 1,
+                curr_snapshot.schema_version,
+                curr_snapshot.next_catalog_id,
+                curr_snapshot.next_file_id,
+            ])
+            .context(QueryExecutionSnafu)?;
+
+        conn.prepare(INSERT_SNAPSHOT_CHANGE_QUERY)
+            .context(QueryExecutionSnafu)?
+            .execute(params![
+                curr_snapshot.id.0 + 1,
+                format!(r#"dropped_schema:"{}""#, schema_name),
+                Null,
+                Null,
+                Null,
+            ])
+            .context(QueryExecutionSnafu)?;
 
         Ok(())
     }
