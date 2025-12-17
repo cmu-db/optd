@@ -781,6 +781,7 @@ impl DuckLakeCatalog {
         };
 
         // Step 1: Get table_id and check if it's an internal table
+        // Use snapshot-aware query for external tables to support time-travel
         let table_lookup: Result<(i64, bool), _> = conn
             .prepare(
                 r#"
@@ -788,7 +789,9 @@ impl DuckLakeCatalog {
                 WHERE schema_id = ? AND table_name = ?
                 UNION ALL
                 SELECT table_id, 0 as is_internal FROM __ducklake_metadata_metalake.main.optd_external_table
-                WHERE schema_id = ? AND table_name = ? AND end_snapshot IS NULL
+                WHERE schema_id = ? AND table_name = ? 
+                  AND begin_snapshot <= ?
+                  AND (end_snapshot IS NULL OR end_snapshot > ?)
                 LIMIT 1
                 "#,
             )
@@ -798,7 +801,9 @@ impl DuckLakeCatalog {
                     schema_info.schema_id,
                     table,
                     schema_info.schema_id,
-                    table
+                    table,
+                    query_snapshot.0,
+                    query_snapshot.0
                 ],
                 |row| Ok((row.get(0)?, row.get::<_, i64>(1)? == 1)),
             );
