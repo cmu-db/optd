@@ -453,6 +453,7 @@ impl MemoTable {
             });
 
             // Deduplication is needed so we don't have duplicated expressions in a memo group.
+            group_exprs.sort_by_key(|key| key.id());
             group_exprs.dedup_by_key(|key| key.id());
             group.exploration.send_modify(|state| {
                 std::mem::swap(&mut state.exprs, &mut group_exprs);
