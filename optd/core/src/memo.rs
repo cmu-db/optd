@@ -756,6 +756,31 @@ mod tests {
     }
 
     #[test]
+    fn order_in_group_merge() {
+        let ctx = IRContext::with_empty_magic();
+        let mut memo = MemoTable::new(ctx.clone());
+
+        let gid1 = memo.insert_new_operator(
+            ctx.mock_scan(1, vec![1], 0.)
+                .logical_select(boolean(true))
+        ).ok().unwrap();
+
+        let gid2 = memo.insert_new_operator(
+            ctx.mock_scan(2, vec![1], 0.)
+                .logical_select(boolean(true))
+        ).ok().unwrap();
+
+        // does not happen with insert on gid2!!!
+        memo.insert_operator_into_group(ctx.mock_scan(3, vec![1], 0.), gid1);
+
+        let gid0 = memo.insert_new_operator(ctx.mock_scan(1, vec![1], 0.)).unwrap_err();
+        memo.insert_operator_into_group(ctx.mock_scan(2, vec![1], 0.), gid0);
+
+        let gs = memo.get_memo_group(&gid2);
+        assert_eq!(gs.exploration.borrow().exprs.len(), 2);
+    }
+
+    #[test]
     #[tracing_test::traced_test]
     fn cascading_group_merges() {
         let ctx = IRContext::with_empty_magic();
