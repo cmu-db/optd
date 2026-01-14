@@ -23,3 +23,9 @@ object_store = "0.12.3"
 url = "2.5.4"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 tracing = { workspace = true }
+
+futures = "0.3.31"
+optd-catalog = { path = "../optd/catalog", version = "0.1" }
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,10 +1,14 @@
+mod catalog;
 mod extension;
 mod planner;
+mod table;
 
 use std::sync::Arc;
 
+pub use catalog::{OptdCatalogProvider, OptdCatalogProviderList, OptdSchemaProvider};
 pub use extension::{OptdExtension, OptdExtensionConfig};
 pub use planner::OptdQueryPlanner;
+pub use table::{OptdTable, OptdTableProvider};
 
 pub trait SessionStateBuilderOptdExt: Sized {
     fn with_optd_planner(self) -> Self;

@@ -44,7 +44,9 @@ use datafusion::common::config_err;
 use datafusion::config::ConfigOptions;
 use datafusion::execution::disk_manager::{DiskManagerBuilder, DiskManagerMode};
 
+use optd_catalog::{CatalogService, DuckLakeCatalog};
 use optd_cli::OptdCliSessionContext;
+use optd_datafusion::OptdCatalogProviderList;
 
 #[derive(Debug, Parser, PartialEq)]
 #[clap(author, version, about, long_about= None)]
@@ -214,11 +216,35 @@ async fn main_inner() -> Result<()> {
     let cli_ctx = cli_ctx.enable_url_table();
     let ctx = cli_ctx.inner();
 
+    // Initialize catalog with optional DuckLake catalog service
+    let catalog_handle = if let Ok(metadata_path) = env::var("OPTD_METADATA_CATALOG_PATH") {
+        if !args.quiet {
+            println!("Using OptD catalog with metadata path: {}", metadata_path);
+        }
+        let ducklake_catalog = DuckLakeCatalog::try_new(None, Some(&metadata_path))
+            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+        let (service, handle) = CatalogService::new(ducklake_catalog);
+        tokio::spawn(async move { service.run().await });
+        Some(handle)
+    } else {
+        if !args.quiet {
+            println!("OptD catalog integration enabled (no persistent metadata)");
+        }
+        None
+    };
+
+    // Wrap the catalog list with OptdCatalogProviderList
+    let original_catalog_list = ctx.state().catalog_list().clone();
+    let optd_catalog_list =
+        OptdCatalogProviderList::new(original_catalog_list.clone(), catalog_handle);
+
     // install dynamic catalog provider that can register required object stores
-    ctx.register_catalog_list(Arc::new(DynamicObjectStoreCatalog::new(
-        ctx.state().catalog_list().clone(),
+    // and wrap it with OptD catalog provider
+    let dynamic_catalog = Arc::new(DynamicObjectStoreCatalog::new(
+        Arc::new(optd_catalog_list),
         ctx.state_weak_ref(),
-    )));
+    ));
+    ctx.register_catalog_list(dynamic_catalog);
 
     // register `parquet_metadata` table function to get metadata from parquet files
     ctx.register_udtf("parquet_metadata", Arc::new(ParquetMetadataFunc {}));
