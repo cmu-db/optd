@@ -2,8 +2,6 @@
 resolver = "2"
 members = ["cli", "connectors/datafusion", "optd/core", "optd/catalog"]
 
-default-members = ["optd/core"]
-
 [workspace.dependencies]
 
 tokio = { version = "1.47", features = ["macros", "rt", "sync"] }
@@ -18,4 +16,4 @@ datafusion = { version = "51.0", default-features = false, features = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-repository = "https://github.com/yliang412/optd"
+repository = "https://github.com/cmu-db/optd"
