@@ -10,7 +10,6 @@ use datafusion::{
 };
 use optd_catalog::{CatalogService, DuckLakeCatalog};
 use optd_datafusion::{OptdCatalogProvider, OptdCatalogProviderList, OptdTableProvider};
-use serde_json;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -18,8 +17,6 @@ use tempfile::TempDir;
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// Creates a test catalog with isolated metadata directory
-/// TempDir is returned to keep the directory alive
 fn create_test_catalog() -> (TempDir, DuckLakeCatalog) {
     let temp_dir = TempDir::new().unwrap();
     let counter = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
@@ -31,14 +28,19 @@ fn create_test_catalog() -> (TempDir, DuckLakeCatalog) {
         .path()
         .join(format!("df_test_{}_{}", timestamp, counter));
     std::fs::create_dir_all(&unique_dir).unwrap();
+
+    let db_path = unique_dir.join("test.db");
     let metadata_path = unique_dir.join("metadata.ducklake");
 
-    let catalog = DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
+    let catalog = DuckLakeCatalog::try_new(
+        Some(db_path.to_str().unwrap()),
+        Some(metadata_path.to_str().unwrap()),
+    )
+    .unwrap();
 
     (temp_dir, catalog)
 }
 
-/// Creates test schema and batch
 fn create_test_data(
     fields: Vec<(&str, DataType)>,
     columns: Vec<Arc<dyn datafusion::arrow::array::Array>>,
@@ -53,7 +55,6 @@ fn create_test_data(
     (schema, batch)
 }
 
-/// Wraps a catalog list as OptdCatalogProvider
 async fn get_wrapped_catalog(
     catalog_list: Arc<dyn CatalogProviderList>,
     catalog_handle: Option<optd_catalog::CatalogServiceHandle>,
@@ -69,7 +70,6 @@ async fn get_wrapped_catalog(
     )
 }
 
-/// Retrieves a table as OptdTableProvider
 async fn get_wrapped_table(
     catalog_list: Arc<dyn CatalogProviderList>,
     catalog_handle: Option<optd_catalog::CatalogServiceHandle>,

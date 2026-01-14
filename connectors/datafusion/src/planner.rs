@@ -237,14 +237,14 @@ impl OptdQueryPlanner {
             };
 
             let optd_expr = self
-                .try_into_optd_scalar(&unaliased, input_schema, ctx, session_state)
+                .try_into_optd_scalar(unaliased, input_schema, ctx, session_state)
                 .await?;
 
             let expr = if should_project {
                 let name = maybe_aliased.name_for_alias().ok()?;
                 let data_type = maybe_aliased.get_type(input_schema).unwrap();
                 let column = if let Ok(column_ref) = optd_expr.try_borrow::<ColumnRef>() {
-                    let column = column_ref.column().clone();
+                    let column = *column_ref.column();
                     ctx.rename_column_alias(column, name);
                     column
                 } else {
@@ -301,14 +301,14 @@ impl OptdQueryPlanner {
         for (left_key, right_key) in node.on.iter() {
             let lhs = Box::pin(self.try_into_optd_scalar(
                 left_key,
-                &node.left.schema(),
+                node.left.schema(),
                 ctx,
                 session_state,
             ))
             .await?;
             let rhs = Box::pin(self.try_into_optd_scalar(
                 right_key,
-                &node.right.schema(),
+                node.right.schema(),
                 ctx,
                 session_state,
             ))
@@ -366,7 +366,7 @@ impl OptdQueryPlanner {
                 let split = column_meta.name.split(".").collect_vec();
                 df_exprs.push(e.alias_if_changed(split.last().unwrap().to_string())?);
             } else {
-                let e = Box::pin(self.try_from_optd_scalar(&expr, ctx, session_state)).await?;
+                let e = Box::pin(self.try_from_optd_scalar(expr, ctx, session_state)).await?;
                 df_exprs.push(e);
             }
         }
@@ -425,9 +425,9 @@ impl OptdQueryPlanner {
                 let literal =
                     optd_core::ir::scalar::Literal::borrow_raw_parts(meta, &optd_scalar.common);
                 let value = match literal.value() {
-                    optd_core::ir::ScalarValue::Int32(v) => v.clone().into(),
-                    optd_core::ir::ScalarValue::Int64(v) => v.clone().into(),
-                    optd_core::ir::ScalarValue::Boolean(v) => v.clone().into(),
+                    optd_core::ir::ScalarValue::Int32(v) => (*v).into(),
+                    optd_core::ir::ScalarValue::Int64(v) => (*v).into(),
+                    optd_core::ir::ScalarValue::Boolean(v) => (*v).into(),
                     optd_core::ir::ScalarValue::Utf8(v) => v.as_deref().into(),
                     optd_core::ir::ScalarValue::Utf8View(v) => {
                         datafusion::scalar::ScalarValue::Utf8View(v.clone())
@@ -493,7 +493,7 @@ impl OptdQueryPlanner {
                     Box::pin(self.try_from_optd_scalar(cast.expr(), ctx, session_state)).await?;
                 Ok(logical_expr::cast(
                     expr,
-                    from_optd_data_type(cast.data_type().clone()),
+                    from_optd_data_type(*cast.data_type()),
                 ))
             }
             optd_core::ir::ScalarKind::Function(_) => todo!(),
@@ -509,7 +509,7 @@ impl OptdQueryPlanner {
                     *like.negated(),
                     Box::new(expr),
                     Box::new(pattern),
-                    like.escape_char().clone(),
+                    *like.escape_char(),
                     *like.case_insensative(),
                 )))
             }
@@ -527,24 +527,24 @@ impl OptdQueryPlanner {
             logical_expr::Expr::Column(column) => Some(column_ref({
                 let column_name = column.flat_name();
                 ctx.column_by_name(column_name.as_str())
-                    .expect(&format!("{column_name} not found"))
+                    .unwrap_or_else(|| panic!("{column_name} not found"))
             })),
 
             logical_expr::Expr::Literal(v, _) => match v {
                 datafusion::scalar::ScalarValue::Boolean(v) => {
-                    Some(optd_core::ir::builder::boolean(v.clone()))
+                    Some(optd_core::ir::builder::boolean(*v))
                 }
                 datafusion::scalar::ScalarValue::Int32(v) => {
-                    Some(optd_core::ir::builder::integer(v.clone()))
+                    Some(optd_core::ir::builder::integer(*v))
                 }
                 datafusion::scalar::ScalarValue::Int64(v) => {
-                    Some(optd_core::ir::builder::bigint(v.clone()))
+                    Some(optd_core::ir::builder::bigint(*v))
                 }
                 datafusion::scalar::ScalarValue::Utf8(v) => {
-                    Some(optd_core::ir::builder::utf8(v.as_deref().clone()))
+                    Some(optd_core::ir::builder::utf8(v.as_deref()))
                 }
                 datafusion::scalar::ScalarValue::Utf8View(v) => {
-                    Some(optd_core::ir::builder::utf8_view(v.as_deref().clone()))
+                    Some(optd_core::ir::builder::utf8_view(v.as_deref()))
                 }
                 value => {
                     info!(?value, "unhandled scalar value");
@@ -785,7 +785,8 @@ impl OptdQueryPlanner {
         session_state: &SessionState,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         use optd_core::ir::OperatorKind;
-        let res = match &optd_physical.kind {
+
+        match &optd_physical.kind {
             OperatorKind::PhysicalTableScan(meta) => {
                 let physical = PhysicalTableScan::borrow_raw_parts(meta, &optd_physical.common);
                 let table_metadata = ctx.cat.describe_table(*physical.source());
@@ -1281,8 +1282,7 @@ impl OptdQueryPlanner {
             x => Err(DataFusionError::External(
                 format!("{x:?} cannot be executed on df yet").into(),
             )),
-        };
-        res
+        }
     }
 }
 
@@ -1476,7 +1476,7 @@ impl OptdQueryPlanner {
 
         info!("Converted into df");
 
-        explain.as_mut().map(|x| {
+        if let Some(x) = explain.as_mut() {
             let s = quick_explain(&optd_logical, &opt.ctx);
             x.stringified_plans.push(StringifiedPlan::new(
                 PlanType::OptimizedLogicalPlan {
@@ -1484,9 +1484,9 @@ impl OptdQueryPlanner {
                 },
                 s,
             ));
-        });
+        }
 
-        explain.as_mut().map(|x| {
+        if let Some(x) = explain.as_mut() {
             let s = quick_explain(&optd_physical, &opt.ctx);
             x.stringified_plans.push(StringifiedPlan::new(
                 PlanType::OptimizedPhysicalPlan {
@@ -1496,9 +1496,9 @@ impl OptdQueryPlanner {
             ));
             x.stringified_plans
                 .push(StringifiedPlan::new(PlanType::FinalPhysicalPlan, s));
-        });
+        }
 
-        explain.as_mut().map(|x| {
+        if let Some(x) = explain.as_mut() {
             let config = &session_state.config_options().explain;
             x.stringified_plans.push(StringifiedPlan::new(
                 PlanType::FinalPhysicalPlan,
@@ -1533,7 +1533,7 @@ impl OptdQueryPlanner {
                     ));
                 }
             }
-        });
+        }
 
         Ok(explain
             .map(|x| {
@@ -1553,10 +1553,10 @@ impl OptdQueryPlanner {
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         warn!(node = %logical_plan, "not yet supported in optd, fallback to default planner");
 
-        return Ok(self
+        return self
             .default
             .create_physical_plan(logical_plan, session_state)
-            .await?);
+            .await;
     }
 }
 
@@ -1582,7 +1582,7 @@ impl QueryPlanner for OptdQueryPlanner {
             if let Some(join_order) = get_join_order_from_df_exec(&plan) {
                 println!("Join Order: {join_order}");
                 let mut graphviz = String::new();
-                join_order.into_graphviz(&mut graphviz);
+                join_order.write_graphviz(&mut graphviz);
                 println!("graphviz:\n{}", graphviz);
             } else {
                 println!("Join Order: not applicable / unhandled");
@@ -1603,13 +1603,13 @@ enum JoinOrder {
 }
 
 impl JoinOrder {
-    fn into_graphviz(&self, graphviz: &mut String) {
+    fn write_graphviz(&self, graphviz: &mut String) {
         graphviz.push_str("digraph G {\n");
         graphviz.push_str("\trankdir = BT\n");
 
         let mut counter = 0;
         self.visit(graphviz, &mut counter);
-        graphviz.push_str("}");
+        graphviz.push('}');
     }
 
     fn add_base_table(label: String, graphviz: &mut String, counter: &mut usize) -> usize {
@@ -1648,21 +1648,21 @@ impl JoinOrder {
         match self {
             JoinOrder::Table(name) => {
                 let id = Self::add_base_table(name.clone(), graphviz, counter);
-                return (id, vec![name]);
+                (id, vec![name])
             }
             JoinOrder::HashJoin(left, right) => {
                 let (left_id, mut joined_tables) = left.visit(graphviz, counter);
                 let (right_id, mut right_joined) = right.visit(graphviz, counter);
                 joined_tables.append(&mut right_joined);
                 let id = Self::add_join("HJ", &joined_tables, left_id, right_id, graphviz, counter);
-                return (id, joined_tables);
+                (id, joined_tables)
             }
             JoinOrder::MergeJoin(left, right) => {
                 let (left_id, mut joined_tables) = left.visit(graphviz, counter);
                 let (right_id, mut right_joined) = right.visit(graphviz, counter);
                 joined_tables.append(&mut right_joined);
                 let id = Self::add_join("MJ", &joined_tables, left_id, right_id, graphviz, counter);
-                return (id, joined_tables);
+                (id, joined_tables)
             }
             JoinOrder::NestedLoopJoin(left, right) => {
                 let (left_id, mut joined_tables) = left.visit(graphviz, counter);
@@ -1670,7 +1670,7 @@ impl JoinOrder {
                 joined_tables.append(&mut right_joined);
                 let id =
                     Self::add_join("NLJ", &joined_tables, left_id, right_id, graphviz, counter);
-                return (id, joined_tables);
+                (id, joined_tables)
             }
             JoinOrder::Other(child) => child.visit(graphviz, counter),
         }

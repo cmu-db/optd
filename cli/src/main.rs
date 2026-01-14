@@ -29,6 +29,7 @@ use datafusion::execution::memory_pool::{
 };
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::logical_expr::ExplainFormat;
+use datafusion::prelude::SessionContext;
 use datafusion_cli::catalog::DynamicObjectStoreCatalog;
 use datafusion_cli::functions::ParquetMetadataFunc;
 use datafusion_cli::{
@@ -44,7 +45,7 @@ use datafusion::common::config_err;
 use datafusion::config::ConfigOptions;
 use datafusion::execution::disk_manager::{DiskManagerBuilder, DiskManagerMode};
 
-use optd_catalog::{CatalogService, DuckLakeCatalog};
+use optd_catalog::{CatalogService, CatalogServiceHandle, DuckLakeCatalog};
 use optd_cli::OptdCliSessionContext;
 use optd_datafusion::OptdCatalogProviderList;
 
@@ -216,7 +217,6 @@ async fn main_inner() -> Result<()> {
     let cli_ctx = cli_ctx.enable_url_table();
     let ctx = cli_ctx.inner();
 
-    // Initialize catalog with optional DuckLake catalog service
     let catalog_handle = if let Ok(metadata_path) = env::var("OPTD_METADATA_CATALOG_PATH") {
         if !args.quiet {
             println!("Using OptD catalog with metadata path: {}", metadata_path);
@@ -233,20 +233,28 @@ async fn main_inner() -> Result<()> {
         None
     };
 
-    // Wrap the catalog list with OptdCatalogProviderList
     let original_catalog_list = ctx.state().catalog_list().clone();
     let optd_catalog_list =
-        OptdCatalogProviderList::new(original_catalog_list.clone(), catalog_handle);
+        OptdCatalogProviderList::new(original_catalog_list.clone(), catalog_handle.clone());
 
-    // install dynamic catalog provider that can register required object stores
-    // and wrap it with OptD catalog provider
     let dynamic_catalog = Arc::new(DynamicObjectStoreCatalog::new(
         Arc::new(optd_catalog_list),
         ctx.state_weak_ref(),
     ));
     ctx.register_catalog_list(dynamic_catalog);
 
-    // register `parquet_metadata` table function to get metadata from parquet files
+    // Register OptD time-travel UDTFs after catalog is set up
+    cli_ctx.register_udtfs();
+
+    // Eagerly load external tables from catalog into DataFusion's in-memory catalog
+    // This allows SHOW TABLES to list external tables immediately without requiring a query first
+    if let Some(handle) = &catalog_handle
+        && let Err(e) = populate_external_tables(ctx, handle).await
+        && !args.quiet
+    {
+        eprintln!("Warning: Failed to populate external tables: {}", e);
+    }
+
     ctx.register_udtf("parquet_metadata", Arc::new(ParquetMetadataFunc {}));
 
     let mut print_options = PrintOptions {
@@ -420,6 +428,99 @@ fn parse_size_string(size: &str, label: &str) -> Result<usize, String> {
     } else {
         Err(format!("Invalid {label} '{size}'"))
     }
+}
+
+/// Eagerly loads all external tables from the catalog into DataFusion's in-memory catalog.
+///
+/// This enables SHOW TABLES to list external tables immediately without requiring
+/// a query to trigger lazy-loading. External tables are reconstructed as TableProviders
+/// and registered in the default schema.
+async fn populate_external_tables(
+    ctx: &SessionContext,
+    catalog_handle: &CatalogServiceHandle,
+) -> Result<()> {
+    // List all external tables from the catalog
+    let external_tables = catalog_handle
+        .list_external_tables(None)
+        .await
+        .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+    // Reconstruct and register each table
+    for metadata in external_tables {
+        // Create TableProvider from metadata
+        let table_provider = match create_table_provider_from_metadata(&metadata).await {
+            Ok(provider) => provider,
+            Err(e) => {
+                eprintln!(
+                    "Warning: Failed to load external table '{}': {}",
+                    metadata.table_name, e
+                );
+                continue; // Skip this table but continue with others
+            }
+        };
+
+        // Register in DataFusion's default catalog
+        if let Err(e) = ctx.register_table(&metadata.table_name, table_provider) {
+            eprintln!(
+                "Warning: Failed to register table '{}': {}",
+                metadata.table_name, e
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Creates a TableProvider from external table metadata.
+///
+/// This is similar to OptdSchemaProvider::create_table_from_metadata but doesn't
+/// require self since it's called during initialization.
+async fn create_table_provider_from_metadata(
+    metadata: &optd_catalog::ExternalTableMetadata,
+) -> Result<Arc<dyn datafusion::catalog::TableProvider>> {
+    let temp_ctx = SessionContext::new();
+
+    // Register table based on file format
+    match metadata.file_format.to_uppercase().as_str() {
+        "CSV" => {
+            temp_ctx
+                .register_csv("temp_table", &metadata.location, Default::default())
+                .await?;
+        }
+        "PARQUET" => {
+            temp_ctx
+                .register_parquet("temp_table", &metadata.location, Default::default())
+                .await?;
+        }
+        "JSON" | "NDJSON" => {
+            temp_ctx
+                .register_json("temp_table", &metadata.location, Default::default())
+                .await?;
+        }
+        _ => {
+            return Err(DataFusionError::Plan(format!(
+                "Unsupported file format: {}. Supported formats: PARQUET, CSV, JSON",
+                metadata.file_format
+            )));
+        }
+    }
+
+    // Force schema inference by executing a query
+    let _ = temp_ctx.sql("SELECT * FROM temp_table LIMIT 0").await?;
+
+    // Extract the TableProvider
+    let catalog = temp_ctx
+        .catalog("datafusion")
+        .ok_or_else(|| DataFusionError::Plan("Default catalog not found".to_string()))?;
+    let schema = catalog
+        .schema("public")
+        .ok_or_else(|| DataFusionError::Plan("Default schema not found".to_string()))?;
+    let table = schema
+        .table("temp_table")
+        .await?
+        .ok_or_else(|| DataFusionError::Plan("Table not found after registration".to_string()))?;
+
+    Ok(table)
 }
 
 pub fn extract_memory_pool_size(size: &str) -> Result<usize, String> {

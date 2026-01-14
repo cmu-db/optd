@@ -12,6 +12,7 @@ data/
 .history
 
 *.db
+*.ducklake
 
 # configuration
 .vscode/launch.json

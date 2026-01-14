@@ -1,5 +1,12 @@
-use optd_catalog::{Catalog, DuckLakeCatalog, SnapshotId};
+//! Comprehensive statistics tests for both internal and external tables.
+//! Covers snapshot versioning, time-travel queries, and edge cases.
+
+use optd_catalog::{
+    AdvanceColumnStatistics, Catalog, ColumnStatistics, DuckLakeCatalog, RegisterTableRequest,
+    SnapshotId, TableStatistics,
+};
 use serde_json::json;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
@@ -7,7 +14,7 @@ use tempfile::TempDir;
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Creates a test catalog with isolated metadata directory.
-fn create_test_catalog(for_file: bool) -> (TempDir, DuckLakeCatalog) {
+fn create_test_catalog(_for_file: bool) -> (TempDir, DuckLakeCatalog) {
     let temp_dir = TempDir::new().unwrap();
     let counter = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
     let timestamp = SystemTime::now()
@@ -18,17 +25,14 @@ fn create_test_catalog(for_file: bool) -> (TempDir, DuckLakeCatalog) {
         .path()
         .join(format!("db_{}_{}", timestamp, counter));
     std::fs::create_dir_all(&unique_dir).unwrap();
+    let db_path = unique_dir.join("test.db");
     let metadata_path = unique_dir.join("metadata.ducklake");
 
-    let catalog = if for_file {
-        let db_path = unique_dir.join("test.db");
-        DuckLakeCatalog::try_new(
-            Some(db_path.to_str().unwrap()),
-            Some(metadata_path.to_str().unwrap()),
-        )
-    } else {
-        DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap()))
-    }
+    // Always use database file in temp directory to prevent metadata.ducklake in CWD
+    let catalog = DuckLakeCatalog::try_new(
+        Some(db_path.to_str().unwrap()),
+        Some(metadata_path.to_str().unwrap()),
+    )
     .unwrap();
 
     (temp_dir, catalog)
@@ -73,6 +77,27 @@ fn create_test_catalog_with_data() -> (TempDir, DuckLakeCatalog, i64, i64) {
 
     (temp_dir, catalog, table_id, age_column_id)
 }
+
+/// Helper to create column statistics for external tables (column_id = 0).
+fn col_stats(column_name: &str, stats_type: &str, data: serde_json::Value) -> ColumnStatistics {
+    ColumnStatistics {
+        column_id: 0,
+        column_type: String::new(),
+        name: column_name.to_string(),
+        advanced_stats: vec![AdvanceColumnStatistics {
+            stats_type: stats_type.to_string(),
+            data,
+        }],
+        min_value: None,
+        max_value: None,
+        null_count: None,
+        distinct_count: None,
+    }
+}
+
+// ============================================================================
+// Internal Table Statistics Tests
+// ============================================================================
 
 #[test]
 fn test_ducklake_statistics_provider_creation() {
@@ -906,13 +931,12 @@ fn test_error_handling_edge_cases() {
     // Test various error scenarios: non-existent tables, invalid snapshots, invalid IDs.
     let (_temp_dir, mut provider, table_id, age_column_id) = create_test_catalog_with_data();
 
-    // Non-existent table returns empty results
+    // Non-existent table returns None
     let current_snapshot = provider.current_snapshot().unwrap();
     let stats = provider
         .table_statistics("nonexistent_table", current_snapshot)
         .unwrap();
-    assert!(stats.is_some());
-    assert_eq!(stats.unwrap().column_statistics.len(), 0);
+    assert!(stats.is_none());
 
     // Invalid/future snapshot still returns data
     provider
@@ -1405,4 +1429,265 @@ fn test_schema_with_complex_types() {
         schema.field_with_name("bool_col").unwrap().data_type(),
         &duckdb::arrow::datatypes::DataType::Boolean
     ));
+}
+
+// ============================================================================
+// External Table Statistics Tests
+// ============================================================================
+
+#[test]
+fn test_external_set_and_get_table_statistics() {
+    let temp_dir = TempDir::new().unwrap();
+    let metadata_path = temp_dir.path().join("metadata.ducklake");
+    let mut catalog =
+        DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
+
+    // Create an external table first
+    let request = RegisterTableRequest {
+        table_name: "test_table".to_string(),
+        schema_name: None,
+        location: "/tmp/test.csv".to_string(),
+        file_format: "CSV".to_string(),
+        compression: None,
+        options: HashMap::new(),
+    };
+    catalog.register_external_table(request).unwrap();
+
+    // Set statistics
+    let stats = TableStatistics {
+        row_count: 1000,
+        column_statistics: vec![],
+        size_bytes: None,
+    };
+    catalog
+        .set_table_statistics(None, "test_table", stats)
+        .unwrap();
+
+    // Get statistics
+    let snapshot = catalog.current_snapshot().unwrap();
+    let retrieved_stats = catalog.table_statistics("test_table", snapshot).unwrap();
+    assert!(retrieved_stats.is_some());
+    let retrieved_stats = retrieved_stats.unwrap();
+    assert_eq!(retrieved_stats.row_count, 1000);
+    assert!(retrieved_stats.column_statistics.is_empty());
+}
+
+#[test]
+fn test_external_set_statistics_with_column_stats() {
+    let temp_dir = TempDir::new().unwrap();
+    let metadata_path = temp_dir.path().join("metadata.ducklake");
+    let mut catalog =
+        DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
+
+    // Create an external table
+    let request = RegisterTableRequest {
+        table_name: "users".to_string(),
+        schema_name: None,
+        location: "/tmp/users.csv".to_string(),
+        file_format: "CSV".to_string(),
+        compression: None,
+        options: HashMap::new(),
+    };
+    catalog.register_external_table(request).unwrap();
+
+    // Set statistics with column stats
+    let column_stats = vec![
+        col_stats(
+            "id",
+            "basic",
+            json!({
+                "min_value": "1",
+                "max_value": "1000",
+                "null_count": 0,
+                "distinct_count": 1000
+            }),
+        ),
+        col_stats(
+            "age",
+            "basic",
+            json!({
+                "min_value": "18",
+                "max_value": "80",
+                "null_count": 5,
+                "distinct_count": 50
+            }),
+        ),
+    ];
+
+    let stats = TableStatistics {
+        row_count: 1000,
+        column_statistics: column_stats,
+        size_bytes: None,
+    };
+    catalog.set_table_statistics(None, "users", stats).unwrap();
+
+    // Get and verify statistics
+    let snapshot = catalog.current_snapshot().unwrap();
+    let retrieved_stats = catalog
+        .table_statistics("users", snapshot)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(retrieved_stats.row_count, 1000);
+    assert_eq!(retrieved_stats.column_statistics.len(), 2);
+
+    // Find id column stats
+    let id_stats = retrieved_stats
+        .column_statistics
+        .iter()
+        .find(|s| s.name == "id")
+        .unwrap();
+    assert_eq!(id_stats.name, "id");
+    assert_eq!(id_stats.advanced_stats[0].stats_type, "basic");
+    assert_eq!(id_stats.advanced_stats[0].data["min_value"], "1");
+    assert_eq!(id_stats.advanced_stats[0].data["max_value"], "1000");
+    assert_eq!(id_stats.advanced_stats[0].data["null_count"], 0);
+    assert_eq!(id_stats.advanced_stats[0].data["distinct_count"], 1000);
+
+    // Find age column stats
+    let age_stats = retrieved_stats
+        .column_statistics
+        .iter()
+        .find(|s| s.name == "age")
+        .unwrap();
+    assert_eq!(age_stats.name, "age");
+    assert_eq!(age_stats.advanced_stats[0].stats_type, "basic");
+    assert_eq!(age_stats.advanced_stats[0].data["min_value"], "18");
+    assert_eq!(age_stats.advanced_stats[0].data["max_value"], "80");
+    assert_eq!(age_stats.advanced_stats[0].data["null_count"], 5);
+    assert_eq!(age_stats.advanced_stats[0].data["distinct_count"], 50);
+}
+
+#[test]
+fn test_external_update_statistics() {
+    let temp_dir = TempDir::new().unwrap();
+    let metadata_path = temp_dir.path().join("metadata.ducklake");
+    let mut catalog =
+        DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
+
+    // Create table
+    let request = RegisterTableRequest {
+        table_name: "test_table".to_string(),
+        schema_name: None,
+        location: "/tmp/test.csv".to_string(),
+        file_format: "CSV".to_string(),
+        compression: None,
+        options: HashMap::new(),
+    };
+    catalog.register_external_table(request).unwrap();
+
+    // Set initial statistics
+    let stats1 = TableStatistics {
+        row_count: 100,
+        column_statistics: vec![],
+        size_bytes: None,
+    };
+    catalog
+        .set_table_statistics(None, "test_table", stats1)
+        .unwrap();
+
+    // Verify initial statistics
+    let snapshot = catalog.current_snapshot().unwrap();
+    let retrieved1 = catalog
+        .table_statistics("test_table", snapshot)
+        .unwrap()
+        .unwrap();
+    assert_eq!(retrieved1.row_count, 100);
+
+    // Update statistics
+    let stats2 = TableStatistics {
+        row_count: 200,
+        column_statistics: vec![],
+        size_bytes: None,
+    };
+    catalog
+        .set_table_statistics(None, "test_table", stats2)
+        .unwrap();
+
+    // Verify updated statistics
+    let snapshot = catalog.current_snapshot().unwrap();
+    let retrieved2 = catalog
+        .table_statistics("test_table", snapshot)
+        .unwrap()
+        .unwrap();
+    assert_eq!(retrieved2.row_count, 200);
+}
+
+#[test]
+fn test_external_get_statistics_for_nonexistent_table() {
+    let temp_dir = TempDir::new().unwrap();
+    let metadata_path = temp_dir.path().join("metadata.ducklake");
+    let mut catalog =
+        DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
+
+    let snapshot = catalog.current_snapshot().unwrap();
+    let result = catalog.table_statistics("nonexistent", snapshot);
+    assert!(result.unwrap().is_none());
+}
+
+#[test]
+fn test_external_get_statistics_without_setting_them() {
+    let temp_dir = TempDir::new().unwrap();
+    let metadata_path = temp_dir.path().join("metadata.ducklake");
+    let mut catalog =
+        DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
+
+    // Create table but don't set statistics
+    let request = RegisterTableRequest {
+        table_name: "test_table".to_string(),
+        schema_name: None,
+        location: "/tmp/test.csv".to_string(),
+        file_format: "CSV".to_string(),
+        compression: None,
+        options: HashMap::new(),
+    };
+    catalog.register_external_table(request).unwrap();
+
+    let snapshot = catalog.current_snapshot().unwrap();
+    let result = catalog.table_statistics("test_table", snapshot);
+    assert!(result.unwrap().is_none());
+}
+
+#[test]
+fn test_external_statistics_persist_across_catalog_restarts() {
+    let temp_dir = TempDir::new().unwrap();
+    let metadata_path = temp_dir.path().join("metadata.ducklake");
+
+    // First session: create table and set statistics
+    {
+        let mut catalog =
+            DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
+
+        let request = RegisterTableRequest {
+            table_name: "persistent_table".to_string(),
+            schema_name: None,
+            location: "/tmp/persistent.csv".to_string(),
+            file_format: "CSV".to_string(),
+            compression: None,
+            options: HashMap::new(),
+        };
+        catalog.register_external_table(request).unwrap();
+
+        let stats = TableStatistics {
+            row_count: 5000,
+            column_statistics: vec![],
+            size_bytes: None,
+        };
+        catalog
+            .set_table_statistics(None, "persistent_table", stats)
+            .unwrap();
+    } // catalog dropped here
+
+    // Second session: reconnect and verify statistics persist
+    {
+        let mut catalog =
+            DuckLakeCatalog::try_new(None, Some(metadata_path.to_str().unwrap())).unwrap();
+
+        let snapshot = catalog.current_snapshot().unwrap();
+        let retrieved = catalog
+            .table_statistics("persistent_table", snapshot)
+            .unwrap()
+            .unwrap();
+        assert_eq!(retrieved.row_count, 5000);
+    }
 }
