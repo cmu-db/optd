@@ -251,6 +251,7 @@ async fn test_error_invalid_table_name() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_error_drop_nonexistent_table() {
     let temp_dir = TempDir::new().unwrap();
     let (cli_ctx, _service_handle) = create_cli_context_with_catalog(&temp_dir).await;

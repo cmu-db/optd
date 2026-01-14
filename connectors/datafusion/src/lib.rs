@@ -20,9 +20,9 @@ impl SessionStateBuilderOptdExt for datafusion::execution::SessionStateBuilder {
     }
 }
 
-/// Extension trait for DataFusion SessionContext to integrate OptD catalog
+/// Extension trait for DataFusion SessionContext to integrate optd catalog
 pub trait SessionContextOptdExt {
-    /// Creates a new SessionContext with OptD catalog provider to enable lazy-loading
+    /// Creates a new SessionContext with optd catalog provider to enable lazy-loading
     /// of external tables from the persistent catalog.
     ///
     /// # Example

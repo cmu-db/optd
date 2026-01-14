@@ -633,7 +633,7 @@ impl OptdQueryPlanner {
                     .params
                     .args
                     .iter()
-                    .map(|x| x.data_type_and_nullable(input_schema).unwrap().0)
+                    .map(|x| x.to_field(input_schema).unwrap().1.data_type().clone())
                     .collect_vec();
                 let return_type = agg_func.func.return_type(&input_types).unwrap();
                 Some(
@@ -874,7 +874,7 @@ impl OptdQueryPlanner {
                     .unzip();
                 let filter_df_fields = filter_df_fields
                     .into_iter()
-                    .map(|(qualifier, field)| (qualifier.cloned(), Arc::new(field.clone())))
+                    .map(|(qualifier, field)| (qualifier.cloned(), field.clone()))
                     .collect();
 
                 let metadata: HashMap<_, _> = left_dfschema
@@ -1005,7 +1005,7 @@ impl OptdQueryPlanner {
                     .unzip();
                 let filter_df_fields = filter_df_fields
                     .into_iter()
-                    .map(|(qualifier, field)| (qualifier.cloned(), Arc::new(field.clone())))
+                    .map(|(qualifier, field)| (qualifier.cloned(), field.clone()))
                     .collect();
 
                 let metadata: HashMap<_, _> = build_side_dfschema
@@ -1402,7 +1402,7 @@ fn maybe_fix_physical_column_name(
 }
 
 impl OptdQueryPlanner {
-    /// Optd's actual implementation of [`QueryPlanner::create_physical_plan`].
+    /// optd's actual implementation of [`QueryPlanner::create_physical_plan`].
     async fn create_physical_plan_inner(
         &self,
         logical_plan: &LogicalPlan,
@@ -1579,21 +1579,13 @@ impl QueryPlanner for OptdQueryPlanner {
                 .create_physical_plan_inner(logical_plan, session_state)
                 .await?;
 
-            if let Some(join_order) = get_join_order_from_df_exec(&plan) {
-                println!("Join Order: {join_order}");
-                let mut graphviz = String::new();
-                join_order.write_graphviz(&mut graphviz);
-                println!("graphviz:\n{}", graphviz);
-            } else {
-                println!("Join Order: not applicable / unhandled");
-            }
-
             Ok(plan)
         })
     }
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
+#[allow(dead_code)]
 enum JoinOrder {
     Table(String),
     HashJoin(Box<Self>, Box<Self>),
@@ -1602,6 +1594,7 @@ enum JoinOrder {
     Other(Box<Self>),
 }
 
+#[allow(dead_code)]
 impl JoinOrder {
     fn write_graphviz(&self, graphviz: &mut String) {
         graphviz.push_str("digraph G {\n");
@@ -1697,6 +1690,7 @@ impl std::fmt::Display for JoinOrder {
     }
 }
 
+#[allow(dead_code)]
 fn get_join_order_from_df_exec(rel_node: &Arc<dyn ExecutionPlan>) -> Option<JoinOrder> {
     if let Some(x) = rel_node.as_any().downcast_ref::<DataSourceExec>() {
         let (config, _) = x.downcast_to_file_source::<ParquetSource>()?;

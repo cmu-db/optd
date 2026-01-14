@@ -22,7 +22,7 @@ CLI=./target/debug/optd-cli
 # Test 1: Basic functionality
 echo "Test 1: Basic query execution"
 output=$($CLI -c "SELECT 1 as test;" 2>&1)
-if [ $? -eq 0 ] && echo "$output" | grep -q "OptD catalog"; then
+if [ $? -eq 0 ] && echo "$output" | grep -q "optd catalog"; then
     echo -e "${GREEN}✓ PASS${RESET} - CLI runs, catalog integration active"
 else
     echo -e "${RED}✗ FAIL${RESET}"
@@ -46,7 +46,7 @@ export OPTD_METADATA_CATALOG_PATH="$TMPDIR_PATH/test.ducklake"
 output=$($CLI -c "SELECT 1;" 2>&1)
 unset OPTD_METADATA_CATALOG_PATH
 rm -rf "$TMPDIR_PATH"
-if echo "$output" | grep -q "Using OptD catalog with metadata path"; then
+if echo "$output" | grep -q "Using optd catalog with metadata path"; then
     echo -e "${GREEN}✓ PASS${RESET} - Metadata path recognized"
 else
     echo -e "${RED}✗ FAIL${RESET}"

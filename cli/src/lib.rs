@@ -21,19 +21,24 @@ use std::sync::Arc;
 use crate::auto_stats::{AutoStatsConfig, compute_table_statistics};
 use crate::udtf::{ListSnapshotsFunction, ListTablesAtSnapshotFunction};
 
+/// The optd CLI session context for executing queries in DataFusion
+/// with optd features.
 pub struct OptdCliSessionContext {
     inner: SessionContext,
 }
 
 impl OptdCliSessionContext {
+    /// Creates a new `OptdCliSessionContext` with the given DataFusion session config
+    /// and a runtime environment.
     pub fn new_with_config_rt(config: SessionConfig, runtime: Arc<RuntimeEnv>) -> Self {
         let config = config
             .with_option_extension(OptdExtensionConfig::default())
-            .set_bool("optd.optd_enabled", false);
+            .set_bool("optd.optd_enabled", true);
         let state = SessionStateBuilder::new()
             .with_config(config)
             .with_runtime_env(runtime)
             .with_default_features()
+            // .with_optimizer_rules(vec![]) // Disable all default rules
             .with_optd_planner()
             .build();
         let inner = SessionContext::new_with_state(state);
@@ -55,24 +60,30 @@ impl OptdCliSessionContext {
             Arc::new(ListTablesAtSnapshotFunction::new(catalog_handle)),
         );
     }
+
+    /// Refreshes catalogs.
     pub async fn refresh_catalogs(&self) -> datafusion::common::Result<()> {
         self.inner.refresh_catalogs().await
     }
 
+    /// Enables querying local files as tables.
     pub fn enable_url_table(self) -> Self {
         let inner = self.inner.enable_url_table();
         Self { inner }
     }
 
+    /// Returns a reference to the inner `SessionContext`.
     pub fn inner(&self) -> &SessionContext {
         &self.inner
     }
 
+    /// Returns an empty DataFrame.
     pub fn return_empty_dataframe(&self) -> Result<DataFrame> {
         let plan = LogicalPlanBuilder::empty(false).build()?;
         Ok(DataFrame::new(self.inner.state(), plan))
     }
 
+    /// Handles CREATE EXTERNAL TABLE.
     async fn create_external_table(&self, cmd: &CreateExternalTable) -> Result<DataFrame> {
         let exist = self.inner.table_exist(cmd.name.clone())?;
 
