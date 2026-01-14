@@ -1,4 +1,4 @@
-// Integration tests for OptD catalog service handle functions
+// Integration tests for optd catalog service handle functions
 
 use datafusion::{
     arrow::array::{Int32Array, RecordBatch},

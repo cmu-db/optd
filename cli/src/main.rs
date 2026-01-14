@@ -219,7 +219,7 @@ async fn main_inner() -> Result<()> {
 
     let catalog_handle = if let Ok(metadata_path) = env::var("OPTD_METADATA_CATALOG_PATH") {
         if !args.quiet {
-            println!("Using OptD catalog with metadata path: {}", metadata_path);
+            println!("Using optd catalog with metadata path: {}", metadata_path);
         }
         let ducklake_catalog = DuckLakeCatalog::try_new(None, Some(&metadata_path))
             .map_err(|e| DataFusionError::External(Box::new(e)))?;
@@ -228,7 +228,7 @@ async fn main_inner() -> Result<()> {
         Some(handle)
     } else {
         if !args.quiet {
-            println!("OptD catalog integration enabled (no persistent metadata)");
+            println!("optd catalog integration enabled (no persistent metadata)");
         }
         None
     };
@@ -243,7 +243,7 @@ async fn main_inner() -> Result<()> {
     ));
     ctx.register_catalog_list(dynamic_catalog);
 
-    // Register OptD time-travel UDTFs after catalog is set up
+    // Register optd time-travel UDTFs after catalog is set up
     cli_ctx.register_udtfs();
 
     // Eagerly load external tables from catalog into DataFusion's in-memory catalog

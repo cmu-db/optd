@@ -90,7 +90,7 @@ async fn test_lazy_load_table_from_catalog() {
         .await
         .unwrap();
 
-    // Create DataFusion context and wrap with Optd provider
+    // Create DataFusion context and wrap with optd provider
     let ctx = SessionContext::new();
     let catalog = ctx.catalog("datafusion").unwrap();
     let optd_catalog = Arc::new(OptdCatalogProvider::new(
@@ -237,7 +237,7 @@ async fn test_end_to_end_query_with_lazy_loading() {
         .await
         .unwrap();
 
-    // Create DataFusion context with Optd catalog wrapper
+    // Create DataFusion context with optd catalog wrapper
     let ctx = SessionContext::new();
 
     // Manually register the table in the context for this test

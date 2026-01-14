@@ -22,7 +22,7 @@ fn create_test_context() -> (TempDir, OptdCliSessionContext) {
     let runtime = RuntimeEnvBuilder::new().build_arc().unwrap();
     let cli_ctx = OptdCliSessionContext::new_with_config_rt(config, runtime);
 
-    // Wrap with OptD catalog
+    // Wrap with optd catalog
     let original_catalog_list = cli_ctx.inner().state().catalog_list().clone();
     let optd_catalog_list = OptdCatalogProviderList::new(original_catalog_list, Some(handle));
     cli_ctx
