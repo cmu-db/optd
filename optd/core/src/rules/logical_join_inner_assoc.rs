@@ -61,7 +61,7 @@ impl Rule for LogicalJoinInnerAssocRule {
         if !join_upper
             .join_cond()
             .used_columns()
-            .is_subset(&(&*b.output_columns(ctx) & &*c.output_columns(ctx)))
+            .is_subset(&(&*b.output_columns(ctx) | &*c.output_columns(ctx)))
         {
             return Ok(vec![]);
         }
