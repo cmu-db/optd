@@ -1,4 +1,5 @@
-// Catalog error handling tests
+//! Catalog error handling tests
+#![cfg(not(target_os = "windows"))]
 
 use optd_catalog::{CatalogService, CatalogServiceHandle, DuckLakeCatalog};
 use tempfile::TempDir;
@@ -51,7 +52,6 @@ async fn test_error_get_nonexistent_table_metadata() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_error_drop_nonexistent_table() {
     let (_temp_dir, service, handle) = create_test_service();
 
@@ -203,7 +203,6 @@ async fn test_current_schema_for_nonexistent_table() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_current_schema_with_different_schemas() {
     use optd_catalog::RegisterTableRequest;
     use std::collections::HashMap;
@@ -464,7 +463,6 @@ async fn test_special_characters_in_names() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_concurrent_catalog_modifications() {
     use optd_catalog::RegisterTableRequest;
     use std::collections::HashMap;
@@ -529,7 +527,6 @@ async fn test_concurrent_catalog_modifications() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_concurrent_statistics_updates() {
     use optd_catalog::{RegisterTableRequest, TableStatistics};
     use std::collections::HashMap;

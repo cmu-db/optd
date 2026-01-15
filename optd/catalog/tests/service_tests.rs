@@ -1,3 +1,5 @@
+#![cfg(not(target_os = "windows"))]
+
 use optd_catalog::{CatalogService, CatalogServiceHandle, DuckLakeCatalog};
 use std::time::Duration;
 use tempfile::TempDir;
