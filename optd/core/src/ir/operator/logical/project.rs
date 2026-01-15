@@ -1,7 +1,8 @@
+//! The logical projection operator selects specific columns or expressions
+//! from the input data.
+
 use std::sync::Arc;
-
 use pretty_xmlish::Pretty;
-
 use crate::ir::{
     IRCommon, Operator, Scalar,
     explain::Explain,
@@ -21,6 +22,9 @@ define_node!(
 );
 impl_operator_conversion!(LogicalProject, LogicalProjectBorrowed);
 
+/// Metadata: (none)
+/// Scalars: 
+/// - projections: The expressions to project.
 impl LogicalProject {
     pub fn new(input: Arc<Operator>, projections: Arc<Scalar>) -> Self {
         Self {

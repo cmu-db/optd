@@ -1,5 +1,7 @@
-use pretty_xmlish::Pretty;
+//! All nodes should implement this trait to provide human-readable 
+//! explanations.
 
+use pretty_xmlish::Pretty;
 use crate::ir::IRContext;
 
 pub trait Explain {

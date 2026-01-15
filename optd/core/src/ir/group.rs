@@ -1,7 +1,8 @@
+//! Defines the Group operator, which represents an equivalence class
+//! in the query optimizer.
+
 use std::sync::Arc;
-
 use pretty_xmlish::Pretty;
-
 use crate::ir::{
     IRCommon,
     explain::Explain,
@@ -40,6 +41,9 @@ define_node!(
 
 impl_operator_conversion!(Group, GroupBorrowed);
 
+/// Metadata: 
+/// - group_id: The unique identifier for the group.
+/// Scalars: (none)
 impl Group {
     pub fn new(group_id: GroupId, properties: Arc<OperatorProperties>) -> Self {
         Self {

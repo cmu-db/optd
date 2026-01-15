@@ -1,8 +1,8 @@
-use std::sync::Arc;
+//! N-ary scalar operations like AND, OR.
 
+use std::sync::Arc;
 use itertools::Itertools;
 use pretty_xmlish::Pretty;
-
 use crate::ir::{
     IRCommon, Scalar,
     explain::Explain,
@@ -40,6 +40,10 @@ impl std::fmt::Display for NaryOpKind {
     }
 }
 
+/// Metadata:
+/// - op_kind: The kind of N-ary operation (And, Or).
+/// Scalars:
+/// - terms: The input scalar expressions.
 impl NaryOp {
     pub fn new(op_kind: NaryOpKind, terms: Arc<[Arc<Scalar>]>) -> Self {
         Self {

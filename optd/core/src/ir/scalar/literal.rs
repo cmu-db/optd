@@ -1,5 +1,7 @@
-use pretty_xmlish::Pretty;
+//! Literal scalar values are used to represent constant values in expressions.
+//! These hold ScalarValue enum variants.
 
+use pretty_xmlish::Pretty;
 use crate::ir::{
     IRCommon, ScalarValue,
     explain::Explain,
@@ -8,7 +10,6 @@ use crate::ir::{
 };
 
 define_node!(
-    /// A literal that holds an [`ScalarValue`].
     Literal, LiteralBorrowed {
         properties: ScalarProperties,
         metadata: LiteralMetadata {
@@ -22,6 +23,9 @@ define_node!(
 );
 impl_scalar_conversion!(Literal, LiteralBorrowed);
 
+/// Metadata:
+/// - value: The literal scalar value.
+/// Scalars: (none)
 impl Literal {
     pub fn new(value: ScalarValue) -> Self {
         Self {

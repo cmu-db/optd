@@ -1,3 +1,15 @@
+//! Scalar expressions are used to compute values in various contexts, such as
+//! projections, filters, and join conditions. They can represent literals, 
+//! column references, and other scalar operations.
+//! 
+//! Each scalar expression is represented by the `Scalar` struct, which contains
+//! metadata specific to the type of scalar expression it represents. 
+//! 
+//! Similar to operators, scalar expressions are stored in plans using the
+//! Scalar struct, which holds the specific kind of scalar expression and its
+//! associated metadata. This can be "downcast" to the specific scalar type
+//! when needed.
+
 mod assign;
 mod binary_op;
 mod cast;
@@ -67,6 +79,7 @@ impl Scalar {
         }
     }
 
+    /// Returns the set of columns used by this scalar expression.
     pub fn used_columns(&self) -> ColumnSet {
         match &self.kind {
             ScalarKind::Literal(_) => ColumnSet::default(),

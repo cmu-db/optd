@@ -1,7 +1,7 @@
+//! Scalar node for binary operations of two other scalars.
+
 use std::sync::Arc;
-
 use pretty_xmlish::Pretty;
-
 use crate::ir::{
     IRCommon, Scalar,
     explain::Explain,
@@ -55,6 +55,11 @@ impl std::fmt::Display for BinaryOpKind {
     }
 }
 
+/// Metadata:
+/// - op_kind: The kind of binary operation.
+/// Scalars:
+/// - lhs: The left-hand side scalar expression.
+/// - rhs: The right-hand side scalar expression.
 impl BinaryOp {
     pub fn new(op_kind: BinaryOpKind, lhs: Arc<Scalar>, rhs: Arc<Scalar>) -> Self {
         Self {
