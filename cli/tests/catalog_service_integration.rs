@@ -1,4 +1,5 @@
-// Integration tests for optd catalog service handle functions
+#![cfg(not(target_os = "windows"))]
+//! Integration tests for optd catalog service handle functions
 
 use datafusion::{
     arrow::array::{Int32Array, RecordBatch},
