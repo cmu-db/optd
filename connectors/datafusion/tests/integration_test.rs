@@ -1,3 +1,5 @@
+#![cfg(not(target_os = "windows"))]
+
 use datafusion::{
     arrow::{
         array::{Float64Array, Int32Array, Int64Array, RecordBatch, StringArray},

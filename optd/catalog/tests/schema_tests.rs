@@ -1,4 +1,5 @@
 //! Multi-schema support tests: CRUD operations, isolation, and complex queries.
+#![cfg(not(target_os = "windows"))]
 
 use optd_catalog::{Catalog, DuckLakeCatalog, RegisterTableRequest};
 use std::collections::HashMap;

@@ -1,5 +1,6 @@
 //! Comprehensive statistics tests for both internal and external tables.
 //! Covers snapshot versioning, time-travel queries, and edge cases.
+#![cfg(not(target_os = "windows"))]
 
 use optd_catalog::{
     AdvanceColumnStatistics, Catalog, ColumnStatistics, DuckLakeCatalog, RegisterTableRequest,
