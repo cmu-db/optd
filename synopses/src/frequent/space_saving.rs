@@ -173,10 +173,12 @@ mod tests {
 
         sketch.update("a", 2);
         sketch.update("a", 3);
+        sketch.update("b", 5);
+        sketch.update("c", 7);
 
-        assert_eq!(sketch.len(), 1);
+        assert_eq!(sketch.len(), 3);
         let range = sketch.get(&"a");
-        // Only item, so min_weight = 5, range is [5-5, 5] = [0, 5]
+        // With capacity filled, min_weight = 5, range is [5-5, 5] = [0, 5]
         assert_eq!(*range.start(), 0);
         assert_eq!(*range.end(), 5);
     }
@@ -236,6 +238,7 @@ mod tests {
 
         sketch.update("a", 5);
         sketch.update("b", 3);
+        sketch.update("c", 4);
 
         let range = sketch.get(&"a");
         // min_weight = 3, so lower bound = 5 - 3 = 2
@@ -371,6 +374,7 @@ mod tests {
 
         sketch.update("a", 10);
         sketch.update("b", 5);
+        sketch.update("c", 7); // Add third item to reach capacity
         sketch.update("a", 15); // Total weight for "a" = 25
 
         assert_eq!(sketch.items.get(&"a"), Some(&25));
