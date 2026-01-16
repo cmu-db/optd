@@ -453,6 +453,7 @@ impl MemoTable {
             });
 
             // Deduplication is needed so we don't have duplicated expressions in a memo group.
+            group_exprs.sort_by_key(|key| key.id());
             group_exprs.dedup_by_key(|key| key.id());
             group.exploration.send_modify(|state| {
                 std::mem::swap(&mut state.exprs, &mut group_exprs);
@@ -753,6 +754,31 @@ mod tests {
         let g1_group = memo.get_memo_group(&g1);
         let g2_group = memo.get_memo_group(&g2);
         assert_eq!(g1_group.group_id, g2_group.group_id);
+    }
+
+    #[test]
+    fn order_in_group_merge() {
+        let ctx = IRContext::with_empty_magic();
+        let mut memo = MemoTable::new(ctx.clone());
+
+        let gid1 = memo.insert_new_operator(
+            ctx.mock_scan(1, vec![1], 0.)
+                .logical_select(boolean(true))
+        ).ok().unwrap();
+
+        let gid2 = memo.insert_new_operator(
+            ctx.mock_scan(2, vec![1], 0.)
+                .logical_select(boolean(true))
+        ).ok().unwrap();
+
+        // does not happen with insert on gid2!!!
+        memo.insert_operator_into_group(ctx.mock_scan(3, vec![1], 0.), gid1);
+
+        let gid0 = memo.insert_new_operator(ctx.mock_scan(1, vec![1], 0.)).unwrap_err();
+        memo.insert_operator_into_group(ctx.mock_scan(2, vec![1], 0.), gid0);
+
+        let gs = memo.get_memo_group(&gid2);
+        assert_eq!(gs.exploration.borrow().exprs.len(), 2);
     }
 
     #[test]
