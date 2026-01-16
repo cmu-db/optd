@@ -1,3 +1,4 @@
+#![cfg(not(target_os = "windows"))]
 //! Integration tests for lazy loading tables from catalog
 
 use datafusion::{

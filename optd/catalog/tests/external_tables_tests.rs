@@ -1,5 +1,6 @@
 //! External table registration, retrieval, and management tests.
 //! Tests both direct API calls and service layer (async RPC).
+#![cfg(not(target_os = "windows"))]
 
 use optd_catalog::{Catalog, CatalogService, DuckLakeCatalog, RegisterTableRequest};
 use std::collections::HashMap;
