@@ -1,7 +1,7 @@
+//! The logical remap operator remaps columns in a relation to new aliases.
+
 use std::sync::Arc;
-
 use pretty_xmlish::Pretty;
-
 use crate::ir::{
     IRCommon, Operator, Scalar,
     explain::Explain,
@@ -21,6 +21,9 @@ define_node!(
 );
 impl_operator_conversion!(LogicalRemap, LogicalRemapBorrowed);
 
+/// Metadata: (none)
+/// Scalars:
+/// - mappings: A list defining the remapping of columns to new aliases.
 impl LogicalRemap {
     pub fn new(input: Arc<Operator>, mappings: Arc<Scalar>) -> Self {
         Self {

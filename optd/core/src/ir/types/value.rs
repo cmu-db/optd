@@ -1,7 +1,8 @@
+//! A module for representing nullable scalar values in the IR.
+
 use crate::ir::DataType;
 
-/// A dynamically typed, nullable single value.
-// TODO(yuchen: Might require implementation.
+// TODO(yuchen): Might require implementation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ScalarValue {
     Int32(Option<i32>),

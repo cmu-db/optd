@@ -1,7 +1,8 @@
+//! This module defines a set that can be used to store an unordered set of
+//! columns, as well as implements associated set operations on it
+
 use std::collections::HashSet;
-
 use itertools::Itertools;
-
 use crate::ir::Column;
 
 #[derive(Debug, Clone, PartialEq, Default)]

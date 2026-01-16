@@ -1,11 +1,14 @@
+//! This module defines the cardinality property for IR operators,
+//! representing the number of tuples that can be produced by an Operator.
+
 use crate::ir::{
     Operator,
     context::IRContext,
     properties::{Derive, GetProperty, PropertyMarker},
 };
 
-/// The number of tuples that can be produced by an [`Operator`].
-/// TODO(yuchen): In the future we should consider keeping separate min/max + error bounds.
+/// TODO(yuchen): In the future we should consider keeping separate min/max + 
+/// error bounds.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Cardinality {
     card: f64,

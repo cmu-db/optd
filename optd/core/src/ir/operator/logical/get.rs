@@ -1,13 +1,13 @@
+//! The logical get operator is a scan on some data source.
+
 use std::sync::Arc;
-
 use pretty_xmlish::Pretty;
-
 use crate::ir::{
     Column, IRCommon,
     catalog::DataSourceId,
     explain::Explain,
     macros::{define_node, impl_operator_conversion},
-    properties::{Derive, OperatorProperties, OutputColumns},
+    properties::{OperatorProperties},
 };
 
 define_node!(
@@ -26,6 +26,12 @@ define_node!(
 );
 impl_operator_conversion!(LogicalGet, LogicalGetBorrowed);
 
+/// Metadata: 
+/// - source: The data source to scan.
+/// - first_column: The columns of the data source have monotonic indices
+///                 starting from this column.
+/// - projections: The list of column indices to project from this table.
+/// Scalars: (none)
 impl LogicalGet {
     pub fn new(source: DataSourceId, first_column: Column, projections: Arc<[usize]>) -> Self {
         Self {
@@ -36,20 +42,6 @@ impl LogicalGet {
             },
             common: IRCommon::empty(),
         }
-    }
-}
-
-impl Derive<OutputColumns> for LogicalGetBorrowed<'_> {
-    fn derive_by_compute(
-        &self,
-        _ctx: &crate::ir::IRContext,
-    ) -> <OutputColumns as crate::ir::properties::PropertyMarker>::Output {
-        Arc::new(
-            self.projections()
-                .iter()
-                .map(|x| Column(self.first_column().0 + (*x)))
-                .collect(),
-        )
     }
 }
 

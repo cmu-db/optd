@@ -1,7 +1,7 @@
+//! Operator for a list of scalar values.
+
 use std::sync::Arc;
-
 use pretty_xmlish::Pretty;
-
 use crate::ir::{
     IRCommon, Scalar,
     explain::Explain,
@@ -21,6 +21,9 @@ define_node!(
 );
 impl_scalar_conversion!(List, ListBorrowed);
 
+/// Metadata: (none)
+/// Scalars:
+/// - members: The scalar expressions to be included in the list.
 impl List {
     pub fn new(members: Arc<[Arc<Scalar>]>) -> Self {
         Self {

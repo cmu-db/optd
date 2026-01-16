@@ -1,7 +1,9 @@
+//! This module defines the `OutputSchema` property for operators in the IR,
+//! allowing retrieval of the output schema based on the operator type and its
+//! metadata.
+
 use std::sync::Arc;
-
 use itertools::Itertools;
-
 use crate::ir::{
     OperatorKind,
     catalog::{Field, Schema},

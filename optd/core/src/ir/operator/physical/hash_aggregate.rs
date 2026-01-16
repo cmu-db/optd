@@ -1,7 +1,11 @@
+//! The aggregate operator groups rows by a set of keys and applies an aggregate
+//! function to each group, using hashing as the aggregation strategy - 
+//! implementing the logical aggregate operator
+//! 
+//! UNIMPLEMENTED: Currently, grouping set semantics are not handled.
+
 use std::sync::Arc;
-
 use pretty_xmlish::Pretty;
-
 use crate::ir::{
     IRCommon, Operator, Scalar,
     explain::Explain,
@@ -9,7 +13,6 @@ use crate::ir::{
     properties::OperatorProperties,
 };
 
-// NOTE: We do not handle grouping set semantics now.
 define_node!(
     PhysicalHashAggregate, PhysicalHashAggregateBorrowed {
         properties: OperatorProperties,
@@ -22,6 +25,10 @@ define_node!(
 );
 impl_operator_conversion!(PhysicalHashAggregate, PhysicalHashAggregateBorrowed);
 
+/// Metadata: (none)
+/// Scalars:
+/// - exprs: The aggregate expressions to compute.
+/// - keys: The grouping keys.
 impl PhysicalHashAggregate {
     pub fn new(input: Arc<Operator>, exprs: Arc<Scalar>, keys: Arc<Scalar>) -> Self {
         Self {

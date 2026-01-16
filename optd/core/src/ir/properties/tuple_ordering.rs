@@ -1,7 +1,9 @@
+//! This module defines the `TupleOrdering` property for operators in the IR,
+//! which specifies the ordering of tuples based on specified columns and their
+//! directions (ascending/descending).
+
 use std::sync::Arc;
-
 use bitvec::{boxed::BitBox, vec::BitVec};
-
 use crate::ir::operator::*;
 use crate::ir::{Column, Operator, OperatorCategory, OperatorKind};
 

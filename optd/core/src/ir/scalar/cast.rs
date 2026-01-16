@@ -1,7 +1,7 @@
+//! IR node for casting scalar expressions to different data types.
+
 use std::sync::Arc;
-
 use pretty_xmlish::Pretty;
-
 use crate::ir::{
     DataType, IRCommon, Scalar,
     explain::Explain,
@@ -23,6 +23,10 @@ define_node!(
 );
 impl_scalar_conversion!(Cast, CastBorrowed);
 
+/// Metadata:
+/// - data_type: The target data type to cast to.
+/// Scalars:
+/// - expr: The scalar expression to be cast.
 impl Cast {
     pub fn new(data_type: DataType, expr: Arc<Scalar>) -> Self {
         Self {

@@ -1,7 +1,8 @@
+//! The logical join operator joins two input relations based on a join 
+//! condition.
+
 use std::sync::Arc;
-
 use pretty_xmlish::Pretty;
-
 use crate::ir::{
     IRCommon, Operator, Scalar,
     explain::Explain,
@@ -29,6 +30,10 @@ pub enum JoinType {
     Left,
 }
 
+/// Metadata: 
+/// - join_type: The type of join (e.g., Inner, Left).
+/// Scalars:
+/// - join_cond: The join condition as a scalar expression.
 impl LogicalJoin {
     pub fn new(
         join_type: JoinType,

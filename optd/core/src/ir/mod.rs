@@ -1,3 +1,10 @@
+//! Intermediate Representation (IR) module.
+//! 
+//! This module contains the core definitions and structures for the
+//! intermediate representation used in the query optimizer. It includes
+//! definitions for operators, scalars, groups, properties, and related
+//! components.
+
 use std::sync::{Arc, LazyLock};
 
 pub mod builder;
@@ -6,7 +13,7 @@ mod column;
 mod context;
 pub mod convert;
 pub mod cost;
-mod data_type;
+mod types;
 pub mod explain;
 mod group;
 mod macros;
@@ -14,16 +21,15 @@ pub mod operator;
 pub mod properties;
 pub mod rule;
 pub mod scalar;
-mod value;
 
 pub use column::*;
 pub use context::IRContext;
-pub use data_type::DataType;
+pub use types::DataType;
 pub use group::*;
 pub use operator::{Operator, OperatorCategory, OperatorKind};
 use pretty_xmlish::Pretty;
 pub use scalar::{Scalar, ScalarKind};
-pub use value::ScalarValue;
+pub use types::value::ScalarValue;
 
 use crate::ir::{
     explain::{Explain, ExplainOption},

@@ -1,7 +1,8 @@
+//! The filter operator filters incoming data based on some predicate -
+//! implementing the logical select operator
+
 use std::sync::Arc;
-
 use pretty_xmlish::Pretty;
-
 use crate::ir::{
     IRCommon, Operator, Scalar,
     explain::Explain,
@@ -21,6 +22,9 @@ define_node!(
 );
 impl_operator_conversion!(PhysicalFilter, PhysicalFilterBorrowed);
 
+/// Metadata: (none)
+/// Scalars: 
+/// - predicate: The predicate to filter rows by.
 impl PhysicalFilter {
     pub fn new(input: Arc<Operator>, predicate: Arc<Scalar>) -> Self {
         Self {

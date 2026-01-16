@@ -1,7 +1,7 @@
+//! Assigns a scalar expression to a new Column
+
 use std::sync::Arc;
-
 use pretty_xmlish::Pretty;
-
 use crate::ir::{
     Column, IRCommon, Scalar,
     explain::Explain,
@@ -10,7 +10,6 @@ use crate::ir::{
 };
 
 define_node!(
-    /// Introducing a new [`Column`].
     ColumnAssign, ColumnAssignBorrowed {
         properties: ScalarProperties,
         metadata: ColumnAssignMetadata {
@@ -24,6 +23,10 @@ define_node!(
 );
 impl_scalar_conversion!(ColumnAssign, ColumnAssignBorrowed);
 
+/// Metadata:
+/// - column: The column being assigned to.
+/// Scalars:
+/// - expr: The expression being assigned to this new column
 impl ColumnAssign {
     pub fn new(column: Column, expr: Arc<Scalar>) -> Self {
         Self {

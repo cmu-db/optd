@@ -1,8 +1,8 @@
-use std::sync::Arc;
+//! Scalar functions are used to represent scalar function calls in the IR.
 
+use std::sync::Arc;
 use itertools::Itertools;
 use pretty_xmlish::Pretty;
-
 use crate::ir::{
     DataType, IRCommon, Scalar,
     explain::Explain,
@@ -32,9 +32,14 @@ define_node!(
         },
     }
 );
-
 impl_scalar_conversion!(Function, FunctionBorrowed);
 
+/// Metadata:
+/// - id: The identifier of the function.
+/// - kind: The kind of the function (scalar, aggregate, window).
+/// - return_type: The return data type of the function.
+/// Scalars:
+/// - params: The parameters of the function.
 impl Function {
     pub fn new_aggregate(
         id: impl Into<Arc<str>>,

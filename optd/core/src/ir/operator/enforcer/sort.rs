@@ -1,7 +1,8 @@
+//! The sort enforcer operator imposes a specific tuple ordering on its input 
+//! data.
+
 use std::sync::Arc;
-
 use pretty_xmlish::Pretty;
-
 use crate::ir::{
     IRCommon, Operator,
     explain::Explain,
@@ -23,6 +24,9 @@ define_node!(
 );
 impl_operator_conversion!(EnforcerSort, EnforcerSortBorrowed);
 
+/// Metadata: 
+/// - tuple_ordering: The tuple ordering that this enforcer imposes.
+/// Scalars: (none)
 impl EnforcerSort {
     pub fn new(tuple_ordering: TupleOrdering, input: Arc<Operator>) -> Self {
         Self {

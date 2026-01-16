@@ -1,5 +1,6 @@
-use pretty_xmlish::Pretty;
+//! A reference to a Column in the IR.
 
+use pretty_xmlish::Pretty;
 use crate::ir::{
     Column, IRCommon,
     explain::Explain,
@@ -8,7 +9,6 @@ use crate::ir::{
 };
 
 define_node!(
-    /// A reference to a [`Column`].
     ColumnRef, ColumnRefBorrowed {
         properties: ScalarProperties,
         metadata: ColumnRefMetadata {
@@ -22,6 +22,9 @@ define_node!(
 );
 impl_scalar_conversion!(ColumnRef, ColumnRefBorrowed);
 
+/// Metadata:
+/// - column: The referenced column.
+/// Scalars: (none)
 impl ColumnRef {
     pub fn new(column: Column) -> Self {
         Self {

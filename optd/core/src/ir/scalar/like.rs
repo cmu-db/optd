@@ -1,7 +1,7 @@
+//! Represents a SQL LIKE scalar operation.
+
 use std::sync::Arc;
-
 use pretty_xmlish::Pretty;
-
 use crate::ir::{
     IRCommon, Scalar,
     explain::Explain,
@@ -25,6 +25,13 @@ define_node!(
 );
 impl_scalar_conversion!(Like, LikeBorrowed);
 
+/// Metadata:
+/// - negated: Whether the LIKE operation is negated (NOT LIKE).
+/// - escape_char: Optional escape character for the LIKE pattern.
+/// - case_insensative: Whether the LIKE operation is case-insensitive (ILIKE).
+/// Scalars:
+/// - expr: The expression to be matched.
+/// - pattern: The pattern to match against.
 impl Like {
     pub fn new(
         expr: Arc<Scalar>,

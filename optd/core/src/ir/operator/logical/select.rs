@@ -1,7 +1,7 @@
+//! The logical select operator filters incoming data based on some predicate.
+
 use std::sync::Arc;
-
 use pretty_xmlish::Pretty;
-
 use crate::ir::{
     IRCommon, Operator, Scalar,
     explain::Explain,
@@ -21,6 +21,9 @@ define_node!(
 );
 impl_operator_conversion!(LogicalSelect, LogicalSelectBorrowed);
 
+/// Metadata: (none)
+/// Scalars: 
+/// - predicate: The predicate to filter rows by.
 impl LogicalSelect {
     pub fn new(input: Arc<Operator>, predicate: Arc<Scalar>) -> Self {
         Self {
