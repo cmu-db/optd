@@ -1,6 +1,4 @@
-use std::sync::Arc;
-
-use pretty_xmlish::Pretty;
+//! Assigns a scalar expression to a new Column
 
 use crate::ir::{
     Column, IRCommon, Scalar,
@@ -8,9 +6,14 @@ use crate::ir::{
     macros::{define_node, impl_scalar_conversion},
     properties::ScalarProperties,
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 define_node!(
-    /// Introducing a new [`Column`].
+    /// Metadata:
+    /// - column: The column being assigned to.
+    /// Scalars:
+    /// - expr: The expression being assigned to this new column
     ColumnAssign, ColumnAssignBorrowed {
         properties: ScalarProperties,
         metadata: ColumnAssignMetadata {

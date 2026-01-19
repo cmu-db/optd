@@ -1,7 +1,4 @@
-use std::sync::Arc;
-
-use itertools::Itertools;
-use pretty_xmlish::Pretty;
+//! Scalar functions are used to represent scalar function calls in the IR.
 
 use crate::ir::{
     DataType, IRCommon, Scalar,
@@ -9,6 +6,9 @@ use crate::ir::{
     macros::{define_node, impl_scalar_conversion},
     properties::ScalarProperties,
 };
+use itertools::Itertools;
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 // TODO: Full type signature in optd, right now just use id.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -19,6 +19,12 @@ pub enum FunctionKind {
 }
 
 define_node!(
+    /// Metadata:
+    /// - id: The identifier of the function.
+    /// - kind: The kind of the function (scalar, aggregate, window).
+    /// - return_type: The return data type of the function.
+    /// Scalars:
+    /// - params: The parameters of the function.
     Function, FunctionBorrowed {
         properties: ScalarProperties,
         metadata: FunctionMetadata {
@@ -32,7 +38,6 @@ define_node!(
         },
     }
 );
-
 impl_scalar_conversion!(Function, FunctionBorrowed);
 
 impl Function {

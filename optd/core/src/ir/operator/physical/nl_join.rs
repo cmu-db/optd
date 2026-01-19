@@ -1,6 +1,6 @@
-use std::sync::Arc;
-
-use pretty_xmlish::Pretty;
+//! The nested loop join operator joins two input relations based on a join
+//! condition, using looping over tables as the join strategy - as one
+//! implementation of the logical join operator
 
 use crate::ir::{
     IRCommon, Operator, Scalar,
@@ -9,8 +9,14 @@ use crate::ir::{
     operator::join::JoinType,
     properties::OperatorProperties,
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 define_node!(
+    /// Metadata:
+    /// - join_type: The type of join (e.g., Inner, Left).
+    /// Scalars:
+    /// - join_cond: The join conditions to join on
     PhysicalNLJoin, PhysicalNLJoinBorrowed {
         properties: OperatorProperties,
         metadata: PhysicalNLJoinMetadata {

@@ -1,16 +1,23 @@
-use std::sync::Arc;
-
-use pretty_xmlish::Pretty;
+//! The table scan operator is a scan on some table data - as one implementation
+//! of the logical get operator.
 
 use crate::ir::{
     Column, IRCommon,
     catalog::DataSourceId,
     explain::Explain,
     macros::{define_node, impl_operator_conversion},
-    properties::{Derive, OperatorProperties, OutputColumns},
+    properties::OperatorProperties,
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 define_node!(
+    /// Metadata:
+    /// - source: The data source to scan.
+    /// - first_column: The columns of the data source have monotonic indices
+    ///                 starting from this column.
+    /// - projections: The list of column indices to project from this table.
+    /// Scalars: (none)
     PhysicalTableScan, PhysicalTableScanBorrowed {
         properties: OperatorProperties,
         metadata: PhysicalTableScanMetadata {
@@ -36,20 +43,6 @@ impl PhysicalTableScan {
             },
             common: IRCommon::empty(),
         }
-    }
-}
-
-impl Derive<OutputColumns> for PhysicalTableScanBorrowed<'_> {
-    fn derive_by_compute(
-        &self,
-        _ctx: &crate::ir::IRContext,
-    ) -> <OutputColumns as crate::ir::properties::PropertyMarker>::Output {
-        Arc::new(
-            self.projections()
-                .iter()
-                .map(|x| Column(self.first_column().0 + (*x)))
-                .collect(),
-        )
     }
 }
 

@@ -1,3 +1,18 @@
+//! Operators are the core component of the IR. They represent operations
+//! that can be performed on data, such as scans, joins, filters.
+//!
+//! While each operator has a specific structure and metadata, they all share
+//! common characteristics, such as input operators and scalar expressions.
+//!
+//! This module defines the `Operator` struct, which encapsulates these common
+//! characteristics, along with an enum `OperatorKind` that enumerates all
+//! possible operator types and their associated metadata.
+//!
+//! When tree plans are constructed, operators are stored in the `Operator`
+//! struct, with their specific type and metadata represented by the
+//! `OperatorKind` enum. They can be "downcasted" (i.e. reconstructed) to their
+//! specific types when needed.
+
 mod enforcer;
 mod logical;
 mod physical;
@@ -59,18 +74,25 @@ pub enum OperatorCategory {
 }
 
 impl OperatorKind {
+    /// Returns the category of the operator.
     pub fn category(&self) -> OperatorCategory {
         use OperatorKind::*;
         match self {
             Group(_) => OperatorCategory::Placeholder,
-            LogicalGet(_) | LogicalJoin(_) | LogicalProject(_) | LogicalAggregate(_) => {
-                OperatorCategory::Logical
-            }
-            OperatorKind::EnforcerSort(_) => OperatorCategory::Enforcer,
-            _other => OperatorCategory::Physical,
+            LogicalGet(_) | LogicalJoin(_) | LogicalProject(_) | LogicalAggregate(_)
+            | LogicalOrderBy(_) | LogicalRemap(_) | LogicalSelect(_) => OperatorCategory::Logical,
+            EnforcerSort(_) => OperatorCategory::Enforcer,
+            PhysicalFilter(_)
+            | PhysicalProject(_)
+            | PhysicalHashJoin(_)
+            | PhysicalNLJoin(_)
+            | PhysicalTableScan(_)
+            | PhysicalHashAggregate(_)
+            | MockScan(_) => OperatorCategory::Physical,
         }
     }
 
+    /// Returns true if the operator may produce columns as output.
     pub fn maybe_produce_columns(&self) -> bool {
         match self {
             OperatorKind::LogicalGet(_) | OperatorKind::PhysicalTableScan(_) => true,
@@ -82,8 +104,10 @@ impl OperatorKind {
     }
 }
 
+/// The operator struct that is able to represent any operator type.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Operator {
+    /// The group ID if this operator is a placeholder for a group.
     pub group_id: Option<GroupId>,
     /// The operator type and associated metadata.
     pub kind: OperatorKind,
@@ -103,6 +127,7 @@ impl Operator {
             common,
         }
     }
+
     /// Gets the slice to the input operators.
     pub fn input_operators(&self) -> &[Arc<Operator>] {
         &self.common.input_operators
@@ -113,6 +138,7 @@ impl Operator {
         &self.common.input_scalars
     }
 
+    /// Gests the operator properties.
     pub fn properties(&self) -> &Arc<OperatorProperties> {
         &self.common.properties
     }

@@ -1,6 +1,6 @@
-use std::sync::Arc;
-
-use itertools::Itertools;
+//! This module defines the `OutputSchema` property for operators in the IR,
+//! allowing retrieval of the output schema based on the operator type and its
+//! metadata.
 
 use crate::ir::{
     OperatorKind,
@@ -13,6 +13,8 @@ use crate::ir::{
     properties::{Derive, GetProperty, PropertyMarker},
     scalar::{ColumnAssign, List},
 };
+use itertools::Itertools;
+use std::sync::Arc;
 
 pub struct OutputSchema;
 

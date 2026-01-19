@@ -1,6 +1,6 @@
-use std::sync::Arc;
-
-use pretty_xmlish::Pretty;
+//! The hash join operator joins two input relations based on a join
+//! condition, using hashing as the join strategy - as one implementation of the
+//! logical join operator
 
 use crate::ir::{
     Column, IRCommon, Operator, Scalar,
@@ -11,8 +11,16 @@ use crate::ir::{
     properties::OperatorProperties,
     scalar::NaryOp,
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 define_node!(
+    /// Metadata:
+    /// - join_type: The type of join (e.g., Inner, Left).
+    /// - keys: The columns from each table to hash tuples on and match
+    /// Scalars:
+    /// - non_equi_conds: The join conditions that are not equi-join, thus cannot
+    ///                   be done using hashing
     PhysicalHashJoin, PhysicalHashJoinBorrowed {
         properties: OperatorProperties,
         metadata: PhysicalHashJoinMetadata {
@@ -25,7 +33,6 @@ define_node!(
         }
     }
 );
-
 impl_operator_conversion!(PhysicalHashJoin, PhysicalHashJoinBorrowed);
 
 impl PhysicalHashJoin {

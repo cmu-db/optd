@@ -1,6 +1,8 @@
-use std::sync::Arc;
+//! Traits for converting between generic and specific IR operator and scalar
+//! types.
 
 use crate::ir::{Operator, OperatorKind, Scalar, ScalarKind};
+use std::sync::Arc;
 
 pub trait IntoOperator {
     /// Converts the specfic operator type to the generic [`Operator`].

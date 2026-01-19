@@ -1,6 +1,4 @@
-use std::sync::Arc;
-
-use pretty_xmlish::Pretty;
+//! Operator for a list of scalar values.
 
 use crate::ir::{
     IRCommon, Scalar,
@@ -8,8 +6,13 @@ use crate::ir::{
     macros::{define_node, impl_scalar_conversion},
     properties::ScalarProperties,
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 define_node!(
+    /// Metadata: (none)
+    /// Scalars:
+    /// - members: The scalar expressions to be included in the list.
     List, ListBorrowed {
         properties: ScalarProperties,
         metadata: ListMetadata {},

@@ -1,7 +1,4 @@
-use std::sync::Arc;
-
-use itertools::Itertools;
-use pretty_xmlish::Pretty;
+//! N-ary scalar operations like AND, OR.
 
 use crate::ir::{
     IRCommon, Scalar,
@@ -9,8 +6,15 @@ use crate::ir::{
     macros::{define_node, impl_scalar_conversion},
     properties::ScalarProperties,
 };
+use itertools::Itertools;
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 define_node!(
+    /// Metadata:
+    /// - op_kind: The kind of N-ary operation (And, Or).
+    /// Scalars:
+    /// - terms: The input scalar expressions.
     NaryOp, NaryOpBorrowed {
         properties: ScalarProperties,
         metadata: NaryOpMetadata {

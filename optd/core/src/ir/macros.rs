@@ -1,3 +1,7 @@
+//! Macros to assist in defining IR nodes (operators and scalars).
+//! These macros generate the boilerplate code for defining new IR nodes,
+//! including their metadata, input accessors, and conversion traits.
+
 // Helper macro to generate getter method for a specific input at an index
 macro_rules! generate_input_getter {
     (operator, $method_name:ident, $index:expr) => {

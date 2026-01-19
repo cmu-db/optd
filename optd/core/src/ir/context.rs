@@ -1,15 +1,16 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
-
-use itertools::Itertools;
+//! IRContext holds shared context for the IR, including catalog access,
+//! cardinality estimation, and cost modeling.
 
 use crate::ir::{
     Column, ColumnMeta, ColumnMetaStore, DataType,
     catalog::{Catalog, DataSourceId, Schema},
     cost::CostModel,
     properties::CardinalityEstimator,
+};
+use itertools::Itertools;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
 };
 
 #[derive(Clone)]
@@ -82,6 +83,6 @@ impl IRContext {
 
     pub fn get_column_meta(&self, column: &Column) -> Arc<ColumnMeta> {
         let column_meta = self.column_meta.lock().unwrap();
-        column_meta.get(column).clone()
+        column_meta.get(column)
     }
 }

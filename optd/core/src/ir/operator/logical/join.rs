@@ -1,6 +1,5 @@
-use std::sync::Arc;
-
-use pretty_xmlish::Pretty;
+//! The logical join operator joins two input relations based on a join
+//! condition.
 
 use crate::ir::{
     IRCommon, Operator, Scalar,
@@ -8,8 +7,13 @@ use crate::ir::{
     macros::{define_node, impl_operator_conversion},
     properties::OperatorProperties,
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 define_node!(
+    /// Metadata:
+    /// - join_type: The type of join (e.g., Inner, Left).
+    /// Scalars: (none)
     LogicalJoin, LogicalJoinBorrowed {
         properties: OperatorProperties,
         metadata: LogicalJoinMetadata {

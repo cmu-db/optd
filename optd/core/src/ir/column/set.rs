@@ -1,8 +1,9 @@
-use std::collections::HashSet;
-
-use itertools::Itertools;
+//! This module defines a set that can be used to store an unordered set of
+//! columns, as well as implements associated set operations on it
 
 use crate::ir::Column;
+use itertools::Itertools;
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ColumnSet(HashSet<Column>);

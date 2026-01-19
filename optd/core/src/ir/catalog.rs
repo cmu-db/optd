@@ -1,6 +1,8 @@
-use std::sync::Arc;
+//! Definitions for the catalog interface.
+//! optd uses the catalog interface to get schema information about tables.
 
-use crate::ir::data_type::DataType;
+use crate::ir::types::DataType;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DataSourceId(pub i64);
@@ -71,6 +73,7 @@ impl FromIterator<Arc<Field>> for Schema {
     }
 }
 
+/// Contains metadata information about a table.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableMetadata {
     pub id: DataSourceId,

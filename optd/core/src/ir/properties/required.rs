@@ -1,10 +1,12 @@
-use std::sync::Arc;
+//! This module defines the `Required` property for operators in the IR,
+//! which specifies the required tuple ordering for the output of an operator.
 
 use crate::ir::{
     Operator,
     context::IRContext,
     properties::{PropertyMarker, TupleOrdering},
 };
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Required {
