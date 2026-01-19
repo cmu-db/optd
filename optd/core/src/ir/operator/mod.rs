@@ -1,15 +1,15 @@
 //! Operators are the core component of the IR. They represent operations
 //! that can be performed on data, such as scans, joins, filters.
-//! 
+//!
 //! While each operator has a specific structure and metadata, they all share
 //! common characteristics, such as input operators and scalar expressions.
-//! 
+//!
 //! This module defines the `Operator` struct, which encapsulates these common
 //! characteristics, along with an enum `OperatorKind` that enumerates all
 //! possible operator types and their associated metadata.
-//! 
-//! When tree plans are constructed, operators are stored in the `Operator` 
-//! struct, with their specific type and metadata represented by the 
+//!
+//! When tree plans are constructed, operators are stored in the `Operator`
+//! struct, with their specific type and metadata represented by the
 //! `OperatorKind` enum. They can be "downcasted" (i.e. reconstructed) to their
 //! specific types when needed.
 
@@ -80,11 +80,15 @@ impl OperatorKind {
         match self {
             Group(_) => OperatorCategory::Placeholder,
             LogicalGet(_) | LogicalJoin(_) | LogicalProject(_) | LogicalAggregate(_)
-                | LogicalOrderBy(_) | LogicalRemap(_) | LogicalSelect(_) => OperatorCategory::Logical,
+            | LogicalOrderBy(_) | LogicalRemap(_) | LogicalSelect(_) => OperatorCategory::Logical,
             EnforcerSort(_) => OperatorCategory::Enforcer,
-            PhysicalFilter(_) | PhysicalProject(_) | PhysicalHashJoin(_) | PhysicalNLJoin(_)
-                | PhysicalTableScan(_) | PhysicalHashAggregate(_) 
-                | MockScan(_) => OperatorCategory::Physical,
+            PhysicalFilter(_)
+            | PhysicalProject(_)
+            | PhysicalHashJoin(_)
+            | PhysicalNLJoin(_)
+            | PhysicalTableScan(_)
+            | PhysicalHashAggregate(_)
+            | MockScan(_) => OperatorCategory::Physical,
         }
     }
 

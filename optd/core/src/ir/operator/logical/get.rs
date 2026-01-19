@@ -1,14 +1,14 @@
 //! The logical get operator is a scan on some data source.
 
-use std::sync::Arc;
-use pretty_xmlish::Pretty;
 use crate::ir::{
     Column, IRCommon,
     catalog::DataSourceId,
     explain::Explain,
     macros::{define_node, impl_operator_conversion},
-    properties::{OperatorProperties},
+    properties::OperatorProperties,
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 define_node!(
     LogicalGet, LogicalGetBorrowed {
@@ -26,7 +26,7 @@ define_node!(
 );
 impl_operator_conversion!(LogicalGet, LogicalGetBorrowed);
 
-/// Metadata: 
+/// Metadata:
 /// - source: The data source to scan.
 /// - first_column: The columns of the data source have monotonic indices
 ///                 starting from this column.

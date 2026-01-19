@@ -1,8 +1,8 @@
 //! Sets are used in Cascades to represent batches of transformations that can
 //! be run
 
-use std::sync::Arc;
 use crate::ir::rule::Rule;
+use std::sync::Arc;
 
 /// RuleSets are sorted, which allows them to represent batches of
 /// transformations / implementation rules that can be run in order

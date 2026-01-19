@@ -1,8 +1,6 @@
 //! The builder module provides helper functions to construct IR nodes such as
 //! operators and scalar expressions in a more ergonomic way.
 
-use std::sync::Arc;
-use itertools::Itertools;
 use crate::ir::{
     Column, DataType, Group, GroupId, IRContext, Operator, Scalar, ScalarValue,
     catalog::{DataSourceId, Schema},
@@ -15,6 +13,8 @@ use crate::ir::{
     properties::OperatorProperties,
     scalar::*,
 };
+use itertools::Itertools;
+use std::sync::Arc;
 
 pub fn group(group_id: GroupId, properties: Arc<OperatorProperties>) -> Arc<Operator> {
     Group::new(group_id, properties).into_operator()
@@ -33,7 +33,7 @@ impl IRContext {
         let spec = MockSpec::new_test_only(columns, card);
         MockScan::with_mock_spec(id, spec).into_operator()
     }
-    
+
     pub fn logical_get(
         &self,
         source: DataSourceId,

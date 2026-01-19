@@ -1,9 +1,7 @@
-//! The hash join operator joins two input relations based on a join 
+//! The hash join operator joins two input relations based on a join
 //! condition, using hashing as the join strategy - as one implementation of the
 //! logical join operator
 
-use std::sync::Arc;
-use pretty_xmlish::Pretty;
 use crate::ir::{
     Column, IRCommon, Operator, Scalar,
     builder::column_ref,
@@ -13,6 +11,8 @@ use crate::ir::{
     properties::OperatorProperties,
     scalar::NaryOp,
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 define_node!(
     PhysicalHashJoin, PhysicalHashJoinBorrowed {
@@ -29,7 +29,7 @@ define_node!(
 );
 impl_operator_conversion!(PhysicalHashJoin, PhysicalHashJoinBorrowed);
 
-/// Metadata: 
+/// Metadata:
 /// - join_type: The type of join (e.g., Inner, Left).
 /// - keys: The columns from each table to hash tuples on and match
 /// Scalars:

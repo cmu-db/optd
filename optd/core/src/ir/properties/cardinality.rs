@@ -7,7 +7,7 @@ use crate::ir::{
     properties::{Derive, GetProperty, PropertyMarker},
 };
 
-/// TODO(yuchen): In the future we should consider keeping separate min/max + 
+/// TODO(yuchen): In the future we should consider keeping separate min/max +
 /// error bounds.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Cardinality {

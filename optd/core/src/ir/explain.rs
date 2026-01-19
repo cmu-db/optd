@@ -1,8 +1,8 @@
-//! All nodes should implement this trait to provide human-readable 
+//! All nodes should implement this trait to provide human-readable
 //! explanations.
 
-use pretty_xmlish::Pretty;
 use crate::ir::IRContext;
+use pretty_xmlish::Pretty;
 
 pub trait Explain {
     fn explain<'a>(&self, ctx: &IRContext, option: &ExplainOption) -> Pretty<'a>;

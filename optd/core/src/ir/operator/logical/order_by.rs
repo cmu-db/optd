@@ -1,10 +1,6 @@
-//! The logical order by operator sorts incoming data based on specified 
+//! The logical order by operator sorts incoming data based on specified
 //! expressions and directions.
 
-use std::sync::Arc;
-use bitvec::{boxed::BitBox, vec::BitVec};
-use itertools::Itertools;
-use pretty_xmlish::Pretty;
 use crate::ir::{
     Column, IRCommon, Operator, Scalar,
     explain::Explain,
@@ -12,6 +8,10 @@ use crate::ir::{
     properties::{OperatorProperties, TupleOrdering, TupleOrderingDirection},
     scalar::ColumnRef,
 };
+use bitvec::{boxed::BitBox, vec::BitVec};
+use itertools::Itertools;
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 define_node!(
     LogicalOrderBy, LogicalOrderByBorrowed {
@@ -28,9 +28,9 @@ define_node!(
 impl_operator_conversion!(LogicalOrderBy, LogicalOrderByBorrowed);
 
 /// Metadata:
-/// - directions: A bit vector indicating the ordering direction for each 
+/// - directions: A bit vector indicating the ordering direction for each
 ///               expression (true for ascending, false for descending).
-/// Scalars: 
+/// Scalars:
 /// - exprs: The expression array to order by.
 impl LogicalOrderBy {
     pub fn new(

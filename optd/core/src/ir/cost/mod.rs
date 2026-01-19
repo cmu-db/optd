@@ -1,8 +1,8 @@
 //! This module defines the necessary components of the cost model used by the
 //! optd operators
 
-use std::sync::Arc;
 use crate::ir::{IRContext, Operator, explain::quick_explain, properties::Cardinality};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Cost {
@@ -76,7 +76,6 @@ impl std::ops::Mul<Cost> for f64 {
 }
 
 pub trait CostModel: Send + Sync + 'static {
-
     /// Computes the cost of the given operator, excluding input costs.
     /// This should be implemented by specific cost models per operator
     fn compute_operator_cost(&self, op: &Operator, ctx: &IRContext) -> Option<Cost>;
@@ -98,7 +97,7 @@ pub trait CostModel: Send + Sync + 'static {
         Some(input_costs.iter().fold(operator_cost, |c1, c2| c1 + *c2))
     }
 
-    /// Recursively computes the costs of the input operators of the given 
+    /// Recursively computes the costs of the input operators of the given
     /// operator, down to leaf nodes.
     fn compute_input_costs(&self, op: &Operator, ctx: &IRContext) -> Option<Vec<Cost>> {
         op.input_operators()
@@ -113,5 +112,4 @@ pub trait CostModel: Send + Sync + 'static {
         let input_costs = self.compute_input_costs(op, ctx)?;
         self.compute_total_with_input_costs(op, &input_costs, ctx)
     }
-
 }

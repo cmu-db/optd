@@ -5,11 +5,11 @@
 mod pattern;
 mod set;
 
-use std::sync::Arc;
-use crate::ir::{IRContext, Operator};
 use crate::error::Result;
+use crate::ir::{IRContext, Operator};
 pub use pattern::{OperatorMatchFunc, OperatorPattern};
 pub use set::{RuleSet, RuleSetBuilder};
+use std::sync::Arc;
 
 /// An interface describing a valid rule over the operator IR.
 pub trait Rule: 'static + Send + Sync {
@@ -22,9 +22,5 @@ pub trait Rule: 'static + Send + Sync {
     /// Performs the transformation on `operator`.
     /// A rule may produce zero or more new plans as part of the transformation.
     /// The returned plans are returned by returning their root nodes
-    fn transform(
-        &self,
-        operator: &Operator,
-        ctx: &IRContext,
-    ) -> Result<Vec<Arc<Operator>>>;
+    fn transform(&self, operator: &Operator, ctx: &IRContext) -> Result<Vec<Arc<Operator>>>;
 }

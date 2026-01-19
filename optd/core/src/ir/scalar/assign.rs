@@ -1,13 +1,13 @@
 //! Assigns a scalar expression to a new Column
 
-use std::sync::Arc;
-use pretty_xmlish::Pretty;
 use crate::ir::{
     Column, IRCommon, Scalar,
     explain::Explain,
     macros::{define_node, impl_scalar_conversion},
     properties::ScalarProperties,
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 define_node!(
     ColumnAssign, ColumnAssignBorrowed {

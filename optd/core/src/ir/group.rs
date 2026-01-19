@@ -1,14 +1,14 @@
 //! Defines the Group operator, which represents an equivalence class
 //! in the query optimizer.
 
-use std::sync::Arc;
-use pretty_xmlish::Pretty;
 use crate::ir::{
     IRCommon,
     explain::Explain,
     macros::{define_node, impl_operator_conversion},
     properties::OperatorProperties,
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 /// Uniquely identifies an equivalent class in the optimizer.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -41,7 +41,7 @@ define_node!(
 
 impl_operator_conversion!(Group, GroupBorrowed);
 
-/// Metadata: 
+/// Metadata:
 /// - group_id: The unique identifier for the group.
 /// Scalars: (none)
 impl Group {

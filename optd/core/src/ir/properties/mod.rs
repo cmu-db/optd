@@ -1,17 +1,17 @@
-//! This module defines the properties of IR nodes, including operators and 
+//! This module defines the properties of IR nodes, including operators and
 //! scalars. It provides traits and implementations for deriving and
-//! retrieving properties such as output schema, cardinality, required 
+//! retrieving properties such as output schema, cardinality, required
 //! properties, and output columns.
-//! 
+//!
 //! The structure of an operator (such as LogicalJoin) is
-//! { 
+//! {
 //!     Common:
 //!         InputOperators: [ ... ]
 //!         InputScalars: [ ... ]
 //!         Properties: { Cached properties for quick access }
-//!     Metadata: operator specific information 
+//!     Metadata: operator specific information
 //! }
-//! 
+//!
 //! The saved properties are different for operators and scalars. Not all
 //! properties need to be saved / cached into the node. Some properties can be
 //! derived on the fly using the Derive trait.
@@ -47,7 +47,7 @@ pub trait PropertyMarker {
     type Output;
 }
 
-/// Deriving properties allows computing properties based on the operator and 
+/// Deriving properties allows computing properties based on the operator and
 /// context. Each property type should implement this trait for operators to
 /// allow properties to be derived while in the operator form.
 pub trait Derive<P: PropertyMarker> {

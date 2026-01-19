@@ -1,8 +1,8 @@
 //! Definitions for the catalog interface.
 //! optd uses the catalog interface to get schema information about tables.
 
-use std::sync::Arc;
 use crate::ir::types::DataType;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DataSourceId(pub i64);

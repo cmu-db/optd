@@ -1,8 +1,8 @@
-//! Traits for converting between generic and specific IR operator and scalar 
+//! Traits for converting between generic and specific IR operator and scalar
 //! types.
 
-use std::sync::Arc;
 use crate::ir::{Operator, OperatorKind, Scalar, ScalarKind};
+use std::sync::Arc;
 
 pub trait IntoOperator {
     /// Converts the specfic operator type to the generic [`Operator`].

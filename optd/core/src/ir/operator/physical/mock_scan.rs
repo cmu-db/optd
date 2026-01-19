@@ -1,8 +1,6 @@
 //! The mock scan operator is a scan on some mock data - as one implementation
 //! of the logical get operator.
 
-use std::sync::Arc;
-use pretty_xmlish::Pretty;
 use crate::ir::{
     Column, ColumnSet, IRCommon,
     cost::Cost,
@@ -10,6 +8,8 @@ use crate::ir::{
     macros::{define_node, impl_operator_conversion},
     properties::{Cardinality, OperatorProperties, TupleOrdering},
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct MockSpec {
@@ -97,7 +97,7 @@ define_node!(
 );
 impl_operator_conversion!(MockScan, MockScanBorrowed);
 
-/// Metadata: 
+/// Metadata:
 /// - mock_id: The mock data source to scan.
 /// - spec: The mocked schema for this mock data source
 /// Scalars: (none)

@@ -1,16 +1,16 @@
-//! IRContext holds shared context for the IR, including catalog access, 
+//! IRContext holds shared context for the IR, including catalog access,
 //! cardinality estimation, and cost modeling.
 
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
-use itertools::Itertools;
 use crate::ir::{
     Column, ColumnMeta, ColumnMetaStore, DataType,
     catalog::{Catalog, DataSourceId, Schema},
     cost::CostModel,
     properties::CardinalityEstimator,
+};
+use itertools::Itertools;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
 };
 
 #[derive(Clone)]

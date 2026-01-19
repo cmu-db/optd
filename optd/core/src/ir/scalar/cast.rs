@@ -1,13 +1,13 @@
 //! IR node for casting scalar expressions to different data types.
 
-use std::sync::Arc;
-use pretty_xmlish::Pretty;
 use crate::ir::{
     DataType, IRCommon, Scalar,
     explain::Explain,
     macros::{define_node, impl_scalar_conversion},
     properties::ScalarProperties,
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 define_node!(
     Cast, CastBorrowed {

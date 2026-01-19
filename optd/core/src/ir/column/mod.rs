@@ -1,5 +1,5 @@
 //! This module defines the column type for operators in optd.
-//! Columns are lightweight structures with only an identifier, and a 
+//! Columns are lightweight structures with only an identifier, and a
 //! ColumnMetaStore is used to access more information about a Column
 
 mod metadata;

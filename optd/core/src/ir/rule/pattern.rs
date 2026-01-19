@@ -8,10 +8,10 @@ use crate::ir::{Operator, OperatorKind};
 type MatchFunc<K> = Box<dyn Fn(&K) -> bool + 'static + Send + Sync>;
 pub type OperatorMatchFunc = MatchFunc<OperatorKind>;
 
-/// An OperatorPattern describes a pattern to match against an Operator in the 
+/// An OperatorPattern describes a pattern to match against an Operator in the
 /// IR. It contains some function to match against the top-level operator kind,
 /// as well as a list of input operator patterns to match against the operator's
-/// inputs. The input operator patterns are tuples of the form (child index, 
+/// inputs. The input operator patterns are tuples of the form (child index,
 /// pattern).
 pub struct OperatorPattern {
     matches: OperatorMatchFunc,
@@ -53,13 +53,14 @@ impl OperatorPattern {
 
     pub fn matches_without_expand(&self, operator: &Operator) -> bool {
         let input_ops = operator.input_operators();
-        self.top_matches(&operator.kind) && self.input_operator_patterns.iter().all(
-            |(i, input_pattern)| {
-                input_ops
-                    .get(*i)
-                    .map_or(false, |input_op| 
-                        input_pattern.matches_without_expand(input_op))
-        })
-
+        self.top_matches(&operator.kind)
+            && self
+                .input_operator_patterns
+                .iter()
+                .all(|(i, input_pattern)| {
+                    input_ops.get(*i).map_or(false, |input_op| {
+                        input_pattern.matches_without_expand(input_op)
+                    })
+                })
     }
 }

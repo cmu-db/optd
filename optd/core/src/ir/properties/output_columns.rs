@@ -1,9 +1,8 @@
 //! This module defines the `OutputColumns` property for operators in the IR,
 //! representing the set of columns produced by an operator.
 
-use std::sync::Arc;
 use crate::ir::{
-    ColumnSet, OperatorKind, Column,
+    Column, ColumnSet, OperatorKind,
     operator::{
         LogicalAggregate, LogicalGet, LogicalProject, LogicalRemap, PhysicalHashAggregate,
         PhysicalProject, PhysicalTableScan,
@@ -11,6 +10,7 @@ use crate::ir::{
     properties::{Derive, GetProperty, PropertyMarker},
     scalar::{ColumnAssign, ColumnRef, List},
 };
+use std::sync::Arc;
 
 pub struct OutputColumns;
 

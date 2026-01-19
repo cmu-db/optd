@@ -1,15 +1,15 @@
 //! The table scan operator is a scan on some table data - as one implementation
 //! of the logical get operator.
 
-use std::sync::Arc;
-use pretty_xmlish::Pretty;
 use crate::ir::{
     Column, IRCommon,
     catalog::DataSourceId,
     explain::Explain,
     macros::{define_node, impl_operator_conversion},
-    properties::{OperatorProperties},
+    properties::OperatorProperties,
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 define_node!(
     PhysicalTableScan, PhysicalTableScanBorrowed {
@@ -27,7 +27,7 @@ define_node!(
 );
 impl_operator_conversion!(PhysicalTableScan, PhysicalTableScanBorrowed);
 
-/// Metadata: 
+/// Metadata:
 /// - source: The data source to scan.
 /// - first_column: The columns of the data source have monotonic indices
 ///                 starting from this column.

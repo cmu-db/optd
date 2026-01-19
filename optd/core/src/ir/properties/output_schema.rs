@@ -2,8 +2,6 @@
 //! allowing retrieval of the output schema based on the operator type and its
 //! metadata.
 
-use std::sync::Arc;
-use itertools::Itertools;
 use crate::ir::{
     OperatorKind,
     catalog::{Field, Schema},
@@ -15,6 +13,8 @@ use crate::ir::{
     properties::{Derive, GetProperty, PropertyMarker},
     scalar::{ColumnAssign, List},
 };
+use itertools::Itertools;
+use std::sync::Arc;
 
 pub struct OutputSchema;
 

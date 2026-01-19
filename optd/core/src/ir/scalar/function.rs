@@ -1,14 +1,14 @@
 //! Scalar functions are used to represent scalar function calls in the IR.
 
-use std::sync::Arc;
-use itertools::Itertools;
-use pretty_xmlish::Pretty;
 use crate::ir::{
     DataType, IRCommon, Scalar,
     explain::Explain,
     macros::{define_node, impl_scalar_conversion},
     properties::ScalarProperties,
 };
+use itertools::Itertools;
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 // TODO: Full type signature in optd, right now just use id.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

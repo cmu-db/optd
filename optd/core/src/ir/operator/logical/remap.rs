@@ -1,13 +1,13 @@
 //! The logical remap operator remaps columns in a relation to new aliases.
 
-use std::sync::Arc;
-use pretty_xmlish::Pretty;
 use crate::ir::{
     IRCommon, Operator, Scalar,
     explain::Explain,
     macros::{define_node, impl_operator_conversion},
     properties::OperatorProperties,
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 define_node!(
     LogicalRemap, LogicalRemapBorrowed {

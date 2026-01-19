@@ -1,17 +1,17 @@
 //! The aggregate operator groups rows by a set of keys and applies an aggregate
-//! function to each group, using hashing as the aggregation strategy - 
+//! function to each group, using hashing as the aggregation strategy -
 //! implementing the logical aggregate operator
-//! 
+//!
 //! UNIMPLEMENTED: Currently, grouping set semantics are not handled.
 
-use std::sync::Arc;
-use pretty_xmlish::Pretty;
 use crate::ir::{
     IRCommon, Operator, Scalar,
     explain::Explain,
     macros::{define_node, impl_operator_conversion},
     properties::OperatorProperties,
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 define_node!(
     PhysicalHashAggregate, PhysicalHashAggregateBorrowed {
