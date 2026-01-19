@@ -19,6 +19,12 @@ pub enum FunctionKind {
 }
 
 define_node!(
+    /// Metadata:
+    /// - id: The identifier of the function.
+    /// - kind: The kind of the function (scalar, aggregate, window).
+    /// - return_type: The return data type of the function.
+    /// Scalars:
+    /// - params: The parameters of the function.
     Function, FunctionBorrowed {
         properties: ScalarProperties,
         metadata: FunctionMetadata {
@@ -34,12 +40,6 @@ define_node!(
 );
 impl_scalar_conversion!(Function, FunctionBorrowed);
 
-/// Metadata:
-/// - id: The identifier of the function.
-/// - kind: The kind of the function (scalar, aggregate, window).
-/// - return_type: The return data type of the function.
-/// Scalars:
-/// - params: The parameters of the function.
 impl Function {
     pub fn new_aggregate(
         id: impl Into<Arc<str>>,

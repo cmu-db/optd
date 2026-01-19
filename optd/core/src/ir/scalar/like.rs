@@ -10,6 +10,13 @@ use pretty_xmlish::Pretty;
 use std::sync::Arc;
 
 define_node!(
+    /// Metadata:
+    /// - negated: Whether the LIKE operation is negated (NOT LIKE).
+    /// - escape_char: Optional escape character for the LIKE pattern.
+    /// - case_insensative: Whether the LIKE operation is case-insensitive (ILIKE).
+    /// Scalars:
+    /// - expr: The expression to be matched.
+    /// - pattern: The pattern to match against.
     Like, LikeBorrowed {
         properties: ScalarProperties,
         metadata: LikeMetadata {
@@ -25,13 +32,6 @@ define_node!(
 );
 impl_scalar_conversion!(Like, LikeBorrowed);
 
-/// Metadata:
-/// - negated: Whether the LIKE operation is negated (NOT LIKE).
-/// - escape_char: Optional escape character for the LIKE pattern.
-/// - case_insensative: Whether the LIKE operation is case-insensitive (ILIKE).
-/// Scalars:
-/// - expr: The expression to be matched.
-/// - pattern: The pattern to match against.
 impl Like {
     pub fn new(
         expr: Arc<Scalar>,

@@ -13,6 +13,10 @@ use pretty_xmlish::Pretty;
 use std::sync::Arc;
 
 define_node!(
+    /// Metadata:
+    /// - join_type: The type of join (e.g., Inner, Left).
+    /// Scalars:
+    /// - join_cond: The join conditions to join on
     PhysicalNLJoin, PhysicalNLJoinBorrowed {
         properties: OperatorProperties,
         metadata: PhysicalNLJoinMetadata {
@@ -26,10 +30,6 @@ define_node!(
 );
 impl_operator_conversion!(PhysicalNLJoin, PhysicalNLJoinBorrowed);
 
-/// Metadata:
-/// - join_type: The type of join (e.g., Inner, Left).
-/// Scalars:
-/// - join_cond: The join conditions to join on
 impl PhysicalNLJoin {
     pub fn new(
         join_type: JoinType,

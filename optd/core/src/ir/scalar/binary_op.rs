@@ -10,6 +10,11 @@ use pretty_xmlish::Pretty;
 use std::sync::Arc;
 
 define_node!(
+    /// Metadata:
+    /// - op_kind: The kind of binary operation.
+    /// Scalars:
+    /// - lhs: The left-hand side scalar expression.
+    /// - rhs: The right-hand side scalar expression.
     BinaryOp, BinaryOpBorrowed {
         properties: ScalarProperties,
         metadata: BinaryOpMetadata {
@@ -55,11 +60,6 @@ impl std::fmt::Display for BinaryOpKind {
     }
 }
 
-/// Metadata:
-/// - op_kind: The kind of binary operation.
-/// Scalars:
-/// - lhs: The left-hand side scalar expression.
-/// - rhs: The right-hand side scalar expression.
 impl BinaryOp {
     pub fn new(op_kind: BinaryOpKind, lhs: Arc<Scalar>, rhs: Arc<Scalar>) -> Self {
         Self {

@@ -10,6 +10,10 @@ use pretty_xmlish::Pretty;
 use std::sync::Arc;
 
 define_node!(
+    /// Metadata:
+    /// - data_type: The target data type to cast to.
+    /// Scalars:
+    /// - expr: The scalar expression to be cast.
     Cast, CastBorrowed {
         properties: ScalarProperties,
         metadata: CastMetadata {
@@ -23,10 +27,6 @@ define_node!(
 );
 impl_scalar_conversion!(Cast, CastBorrowed);
 
-/// Metadata:
-/// - data_type: The target data type to cast to.
-/// Scalars:
-/// - expr: The scalar expression to be cast.
 impl Cast {
     pub fn new(data_type: DataType, expr: Arc<Scalar>) -> Self {
         Self {

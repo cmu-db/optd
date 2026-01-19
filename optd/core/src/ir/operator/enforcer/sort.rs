@@ -11,6 +11,9 @@ use pretty_xmlish::Pretty;
 use std::sync::Arc;
 
 define_node!(
+    /// Metadata:
+    /// - tuple_ordering: The tuple ordering that this enforcer imposes.
+    /// Scalars: (none)
     EnforcerSort, EnforcerSortBorrowed {
         properties: OperatorProperties,
         metadata: EnforcerSortMetadata {
@@ -24,9 +27,6 @@ define_node!(
 );
 impl_operator_conversion!(EnforcerSort, EnforcerSortBorrowed);
 
-/// Metadata:
-/// - tuple_ordering: The tuple ordering that this enforcer imposes.
-/// Scalars: (none)
 impl EnforcerSort {
     pub fn new(tuple_ordering: TupleOrdering, input: Arc<Operator>) -> Self {
         Self {

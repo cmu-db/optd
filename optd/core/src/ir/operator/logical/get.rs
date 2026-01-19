@@ -11,6 +11,12 @@ use pretty_xmlish::Pretty;
 use std::sync::Arc;
 
 define_node!(
+    /// Metadata:
+    /// - source: The data source to scan.
+    /// - first_column: The columns of the data source have monotonic indices
+    ///                 starting from this column.
+    /// - projections: The list of column indices to project from this table.
+    /// Scalars: (none)
     LogicalGet, LogicalGetBorrowed {
         properties: OperatorProperties,
         metadata: LogicalGetMetadata {
@@ -26,12 +32,6 @@ define_node!(
 );
 impl_operator_conversion!(LogicalGet, LogicalGetBorrowed);
 
-/// Metadata:
-/// - source: The data source to scan.
-/// - first_column: The columns of the data source have monotonic indices
-///                 starting from this column.
-/// - projections: The list of column indices to project from this table.
-/// Scalars: (none)
 impl LogicalGet {
     pub fn new(source: DataSourceId, first_column: Column, projections: Arc<[usize]>) -> Self {
         Self {

@@ -10,6 +10,9 @@ use pretty_xmlish::Pretty;
 use std::sync::Arc;
 
 define_node!(
+    /// Metadata: (none)
+    /// Scalars:
+    /// - predicate: The predicate to filter rows by.
     LogicalSelect, LogicalSelectBorrowed {
         properties: OperatorProperties,
         metadata: LogicalSelectMetadata {},
@@ -21,9 +24,6 @@ define_node!(
 );
 impl_operator_conversion!(LogicalSelect, LogicalSelectBorrowed);
 
-/// Metadata: (none)
-/// Scalars:
-/// - predicate: The predicate to filter rows by.
 impl LogicalSelect {
     pub fn new(input: Arc<Operator>, predicate: Arc<Scalar>) -> Self {
         Self {

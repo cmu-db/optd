@@ -9,6 +9,9 @@ use crate::ir::{
 use pretty_xmlish::Pretty;
 
 define_node!(
+    /// Metadata:
+    /// - column: The referenced column.
+    /// Scalars: (none)
     ColumnRef, ColumnRefBorrowed {
         properties: ScalarProperties,
         metadata: ColumnRefMetadata {
@@ -22,9 +25,6 @@ define_node!(
 );
 impl_scalar_conversion!(ColumnRef, ColumnRefBorrowed);
 
-/// Metadata:
-/// - column: The referenced column.
-/// Scalars: (none)
 impl ColumnRef {
     pub fn new(column: Column) -> Self {
         Self {

@@ -14,6 +14,11 @@ use pretty_xmlish::Pretty;
 use std::sync::Arc;
 
 define_node!(
+    /// Metadata:
+    /// - directions: A bit vector indicating the ordering direction for each
+    ///               expression (true for ascending, false for descending).
+    /// Scalars:
+    /// - exprs: The expression array to order by.
     LogicalOrderBy, LogicalOrderByBorrowed {
         properties: OperatorProperties,
         metadata: LogicalOrderByMetadata {
@@ -27,11 +32,6 @@ define_node!(
 );
 impl_operator_conversion!(LogicalOrderBy, LogicalOrderByBorrowed);
 
-/// Metadata:
-/// - directions: A bit vector indicating the ordering direction for each
-///               expression (true for ascending, false for descending).
-/// Scalars:
-/// - exprs: The expression array to order by.
 impl LogicalOrderBy {
     pub fn new(
         input: Arc<Operator>,

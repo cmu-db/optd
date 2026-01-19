@@ -10,6 +10,9 @@ use crate::ir::{
 use pretty_xmlish::Pretty;
 
 define_node!(
+    /// Metadata:
+    /// - value: The literal scalar value.
+    /// Scalars: (none)
     Literal, LiteralBorrowed {
         properties: ScalarProperties,
         metadata: LiteralMetadata {
@@ -23,9 +26,6 @@ define_node!(
 );
 impl_scalar_conversion!(Literal, LiteralBorrowed);
 
-/// Metadata:
-/// - value: The literal scalar value.
-/// Scalars: (none)
 impl Literal {
     pub fn new(value: ScalarValue) -> Self {
         Self {

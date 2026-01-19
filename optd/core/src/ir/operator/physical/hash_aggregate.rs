@@ -14,6 +14,10 @@ use pretty_xmlish::Pretty;
 use std::sync::Arc;
 
 define_node!(
+    /// Metadata: (none)
+    /// Scalars:
+    /// - exprs: The aggregate expressions to compute.
+    /// - keys: The grouping keys.
     PhysicalHashAggregate, PhysicalHashAggregateBorrowed {
         properties: OperatorProperties,
         metadata: PhysicalHashAggregateMetadata {},
@@ -25,10 +29,6 @@ define_node!(
 );
 impl_operator_conversion!(PhysicalHashAggregate, PhysicalHashAggregateBorrowed);
 
-/// Metadata: (none)
-/// Scalars:
-/// - exprs: The aggregate expressions to compute.
-/// - keys: The grouping keys.
 impl PhysicalHashAggregate {
     pub fn new(input: Arc<Operator>, exprs: Arc<Scalar>, keys: Arc<Scalar>) -> Self {
         Self {

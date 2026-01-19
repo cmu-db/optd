@@ -83,6 +83,10 @@ impl std::hash::Hash for MockSpec {
 }
 
 define_node!(
+    /// Metadata:
+    /// - mock_id: The mock data source to scan.
+    /// - spec: The mocked schema for this mock data source
+    /// Scalars: (none)
     MockScan, MockScanBorrowed {
         properties: OperatorProperties,
         metadata: MockScanMetadata {
@@ -97,10 +101,6 @@ define_node!(
 );
 impl_operator_conversion!(MockScan, MockScanBorrowed);
 
-/// Metadata:
-/// - mock_id: The mock data source to scan.
-/// - spec: The mocked schema for this mock data source
-/// Scalars: (none)
 impl MockScan {
     pub fn with_mock_spec(id: usize, spec: MockSpec) -> Self {
         Self {

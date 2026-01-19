@@ -13,6 +13,10 @@ use pretty_xmlish::Pretty;
 use std::sync::Arc;
 
 define_node!(
+    /// Metadata: (none)
+    /// Scalars:
+    /// - exprs: The aggregate expressions to compute.
+    /// - keys: The grouping keys.
     LogicalAggregate, LogicalAggregateBorrowed {
         properties: OperatorProperties,
         metadata: LogicalAggregateMetadata {},
@@ -24,10 +28,6 @@ define_node!(
 );
 impl_operator_conversion!(LogicalAggregate, LogicalAggregateBorrowed);
 
-/// Metadata: (none)
-/// Scalars:
-/// - exprs: The aggregate expressions to compute.
-/// - keys: The grouping keys.
 impl LogicalAggregate {
     pub fn new(input: Arc<Operator>, exprs: Arc<Scalar>, keys: Arc<Scalar>) -> Self {
         Self {

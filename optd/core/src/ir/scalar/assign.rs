@@ -10,6 +10,10 @@ use pretty_xmlish::Pretty;
 use std::sync::Arc;
 
 define_node!(
+    /// Metadata:
+    /// - column: The column being assigned to.
+    /// Scalars:
+    /// - expr: The expression being assigned to this new column
     ColumnAssign, ColumnAssignBorrowed {
         properties: ScalarProperties,
         metadata: ColumnAssignMetadata {
@@ -23,10 +27,6 @@ define_node!(
 );
 impl_scalar_conversion!(ColumnAssign, ColumnAssignBorrowed);
 
-/// Metadata:
-/// - column: The column being assigned to.
-/// Scalars:
-/// - expr: The expression being assigned to this new column
 impl ColumnAssign {
     pub fn new(column: Column, expr: Arc<Scalar>) -> Self {
         Self {

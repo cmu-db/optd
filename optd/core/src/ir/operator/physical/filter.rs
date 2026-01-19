@@ -11,6 +11,9 @@ use pretty_xmlish::Pretty;
 use std::sync::Arc;
 
 define_node!(
+    /// Metadata: (none)
+    /// Scalars:
+    /// - predicate: The predicate to filter rows by.
     PhysicalFilter, PhysicalFilterBorrowed {
         properties: OperatorProperties,
         metadata: PhysicalFilterMetadata {},
@@ -22,9 +25,6 @@ define_node!(
 );
 impl_operator_conversion!(PhysicalFilter, PhysicalFilterBorrowed);
 
-/// Metadata: (none)
-/// Scalars:
-/// - predicate: The predicate to filter rows by.
 impl PhysicalFilter {
     pub fn new(input: Arc<Operator>, predicate: Arc<Scalar>) -> Self {
         Self {

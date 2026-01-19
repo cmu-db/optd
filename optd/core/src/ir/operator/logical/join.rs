@@ -11,6 +11,9 @@ use pretty_xmlish::Pretty;
 use std::sync::Arc;
 
 define_node!(
+    /// Metadata:
+    /// - join_type: The type of join (e.g., Inner, Left).
+    /// Scalars: (none)
     LogicalJoin, LogicalJoinBorrowed {
         properties: OperatorProperties,
         metadata: LogicalJoinMetadata {
@@ -30,10 +33,6 @@ pub enum JoinType {
     Left,
 }
 
-/// Metadata:
-/// - join_type: The type of join (e.g., Inner, Left).
-/// Scalars:
-/// - join_cond: The join condition as a scalar expression.
 impl LogicalJoin {
     pub fn new(
         join_type: JoinType,

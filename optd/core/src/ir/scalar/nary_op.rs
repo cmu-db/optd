@@ -11,6 +11,10 @@ use pretty_xmlish::Pretty;
 use std::sync::Arc;
 
 define_node!(
+    /// Metadata:
+    /// - op_kind: The kind of N-ary operation (And, Or).
+    /// Scalars:
+    /// - terms: The input scalar expressions.
     NaryOp, NaryOpBorrowed {
         properties: ScalarProperties,
         metadata: NaryOpMetadata {
@@ -40,10 +44,6 @@ impl std::fmt::Display for NaryOpKind {
     }
 }
 
-/// Metadata:
-/// - op_kind: The kind of N-ary operation (And, Or).
-/// Scalars:
-/// - terms: The input scalar expressions.
 impl NaryOp {
     pub fn new(op_kind: NaryOpKind, terms: Arc<[Arc<Scalar>]>) -> Self {
         Self {

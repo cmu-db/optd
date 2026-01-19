@@ -27,6 +27,9 @@ impl std::fmt::Debug for GroupId {
 }
 
 define_node!(
+    /// Metadata:
+    /// - tuple_ordering: The tuple ordering that this enforcer imposes.
+    /// Scalars: (none)
     Group, GroupBorrowed {
         properties: OperatorProperties,
         metadata: GroupMetadata {
@@ -41,9 +44,6 @@ define_node!(
 
 impl_operator_conversion!(Group, GroupBorrowed);
 
-/// Metadata:
-/// - group_id: The unique identifier for the group.
-/// Scalars: (none)
 impl Group {
     pub fn new(group_id: GroupId, properties: Arc<OperatorProperties>) -> Self {
         Self {

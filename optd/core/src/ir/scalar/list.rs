@@ -10,6 +10,9 @@ use pretty_xmlish::Pretty;
 use std::sync::Arc;
 
 define_node!(
+    /// Metadata: (none)
+    /// Scalars:
+    /// - members: The scalar expressions to be included in the list.
     List, ListBorrowed {
         properties: ScalarProperties,
         metadata: ListMetadata {},
@@ -21,9 +24,6 @@ define_node!(
 );
 impl_scalar_conversion!(List, ListBorrowed);
 
-/// Metadata: (none)
-/// Scalars:
-/// - members: The scalar expressions to be included in the list.
 impl List {
     pub fn new(members: Arc<[Arc<Scalar>]>) -> Self {
         Self {

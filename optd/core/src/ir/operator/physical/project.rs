@@ -11,6 +11,9 @@ use pretty_xmlish::Pretty;
 use std::sync::Arc;
 
 define_node!(
+    /// Metadata: (none)
+    /// Scalars:
+    /// - projections: The expressions to project.
     PhysicalProject, PhysicalProjectBorrowed {
         properties: OperatorProperties,
         metadata: PhysicalProjectMetadata {},
@@ -22,9 +25,6 @@ define_node!(
 );
 impl_operator_conversion!(PhysicalProject, PhysicalProjectBorrowed);
 
-/// Metadata: (none)
-/// Scalars:
-/// - projections: The expressions to project.
 impl PhysicalProject {
     pub fn new(input: Arc<Operator>, projections: Arc<Scalar>) -> Self {
         Self {
