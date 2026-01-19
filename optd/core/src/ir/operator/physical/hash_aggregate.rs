@@ -1,6 +1,8 @@
-use std::sync::Arc;
-
-use pretty_xmlish::Pretty;
+//! The aggregate operator groups rows by a set of keys and applies an aggregate
+//! function to each group, using hashing as the aggregation strategy -
+//! implementing the logical aggregate operator
+//!
+//! UNIMPLEMENTED: Currently, grouping set semantics are not handled.
 
 use crate::ir::{
     IRCommon, Operator, Scalar,
@@ -8,9 +10,14 @@ use crate::ir::{
     macros::{define_node, impl_operator_conversion},
     properties::OperatorProperties,
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
-// NOTE: We do not handle grouping set semantics now.
 define_node!(
+    /// Metadata: (none)
+    /// Scalars:
+    /// - exprs: The aggregate expressions to compute.
+    /// - keys: The grouping keys.
     PhysicalHashAggregate, PhysicalHashAggregateBorrowed {
         properties: OperatorProperties,
         metadata: PhysicalHashAggregateMetadata {},

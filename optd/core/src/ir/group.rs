@@ -1,6 +1,5 @@
-use std::sync::Arc;
-
-use pretty_xmlish::Pretty;
+//! Defines the Group operator, which represents an equivalence class
+//! in the query optimizer.
 
 use crate::ir::{
     IRCommon,
@@ -8,6 +7,8 @@ use crate::ir::{
     macros::{define_node, impl_operator_conversion},
     properties::OperatorProperties,
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 /// Uniquely identifies an equivalent class in the optimizer.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -26,6 +27,9 @@ impl std::fmt::Debug for GroupId {
 }
 
 define_node!(
+    /// Metadata:
+    /// - tuple_ordering: The tuple ordering that this enforcer imposes.
+    /// Scalars: (none)
     Group, GroupBorrowed {
         properties: OperatorProperties,
         metadata: GroupMetadata {

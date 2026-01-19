@@ -1,6 +1,4 @@
-use std::sync::Arc;
-
-use pretty_xmlish::Pretty;
+//! Scalar node for binary operations of two other scalars.
 
 use crate::ir::{
     IRCommon, Scalar,
@@ -8,8 +6,15 @@ use crate::ir::{
     macros::{define_node, impl_scalar_conversion},
     properties::ScalarProperties,
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 define_node!(
+    /// Metadata:
+    /// - op_kind: The kind of binary operation.
+    /// Scalars:
+    /// - lhs: The left-hand side scalar expression.
+    /// - rhs: The right-hand side scalar expression.
     BinaryOp, BinaryOpBorrowed {
         properties: ScalarProperties,
         metadata: BinaryOpMetadata {

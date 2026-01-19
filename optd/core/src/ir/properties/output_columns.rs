@@ -1,7 +1,8 @@
-use std::sync::Arc;
+//! This module defines the `OutputColumns` property for operators in the IR,
+//! representing the set of columns produced by an operator.
 
 use crate::ir::{
-    ColumnSet, OperatorKind,
+    Column, ColumnSet, OperatorKind,
     operator::{
         LogicalAggregate, LogicalGet, LogicalProject, LogicalRemap, PhysicalHashAggregate,
         PhysicalProject, PhysicalTableScan,
@@ -9,6 +10,7 @@ use crate::ir::{
     properties::{Derive, GetProperty, PropertyMarker},
     scalar::{ColumnAssign, ColumnRef, List},
 };
+use std::sync::Arc;
 
 pub struct OutputColumns;
 
@@ -26,10 +28,22 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                 panic!("Right now group's properties should always be set.")
             }
             OperatorKind::LogicalGet(meta) => {
-                LogicalGet::borrow_raw_parts(meta, &self.common).derive(ctx)
+                let node = LogicalGet::borrow_raw_parts(meta, &self.common);
+                Arc::new(
+                    node.projections()
+                        .iter()
+                        .map(|x| Column(node.first_column().0 + (*x)))
+                        .collect(),
+                )
             }
             OperatorKind::PhysicalTableScan(meta) => {
-                PhysicalTableScan::borrow_raw_parts(meta, &self.common).derive(ctx)
+                let node = PhysicalTableScan::borrow_raw_parts(meta, &self.common);
+                Arc::new(
+                    node.projections()
+                        .iter()
+                        .map(|x| Column(node.first_column().0 + (*x)))
+                        .collect(),
+                )
             }
             OperatorKind::LogicalJoin(_)
             | OperatorKind::PhysicalNLJoin(_)

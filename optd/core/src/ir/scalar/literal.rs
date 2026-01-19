@@ -1,4 +1,5 @@
-use pretty_xmlish::Pretty;
+//! Literal scalar values are used to represent constant values in expressions.
+//! These hold ScalarValue enum variants.
 
 use crate::ir::{
     IRCommon, ScalarValue,
@@ -6,9 +7,12 @@ use crate::ir::{
     macros::{define_node, impl_scalar_conversion},
     properties::ScalarProperties,
 };
+use pretty_xmlish::Pretty;
 
 define_node!(
-    /// A literal that holds an [`ScalarValue`].
+    /// Metadata:
+    /// - value: The literal scalar value.
+    /// Scalars: (none)
     Literal, LiteralBorrowed {
         properties: ScalarProperties,
         metadata: LiteralMetadata {

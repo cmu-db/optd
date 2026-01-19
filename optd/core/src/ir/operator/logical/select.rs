@@ -1,6 +1,4 @@
-use std::sync::Arc;
-
-use pretty_xmlish::Pretty;
+//! The logical select operator filters incoming data based on some predicate.
 
 use crate::ir::{
     IRCommon, Operator, Scalar,
@@ -8,8 +6,13 @@ use crate::ir::{
     macros::{define_node, impl_operator_conversion},
     properties::OperatorProperties,
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 define_node!(
+    /// Metadata: (none)
+    /// Scalars:
+    /// - predicate: The predicate to filter rows by.
     LogicalSelect, LogicalSelectBorrowed {
         properties: OperatorProperties,
         metadata: LogicalSelectMetadata {},

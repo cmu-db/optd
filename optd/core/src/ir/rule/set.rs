@@ -1,12 +1,18 @@
-use std::sync::Arc;
+//! Sets are used in Cascades to represent batches of transformations that can
+//! be run
 
 use crate::ir::rule::Rule;
+use std::sync::Arc;
 
+/// RuleSets are sorted, which allows them to represent batches of
+/// transformations / implementation rules that can be run in order
 #[derive(Default)]
 pub struct RuleSet {
-    rules: Arc<[Arc<dyn super::Rule>]>,
+    rules: Arc<[Arc<dyn Rule>]>,
 }
 
+/// A RuleSetBuilder implements the builder pattern to create RuleSets easily.
+/// RuleSets can be built as RuleSet::builder().add_rule(rule)...build()
 #[derive(Default)]
 pub struct RuleSetBuilder {
     rules: Vec<Arc<dyn super::Rule>>,

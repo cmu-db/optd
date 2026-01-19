@@ -1,8 +1,5 @@
-use std::sync::Arc;
-
-use bitvec::{boxed::BitBox, vec::BitVec};
-use itertools::Itertools;
-use pretty_xmlish::Pretty;
+//! The logical order by operator sorts incoming data based on specified
+//! expressions and directions.
 
 use crate::ir::{
     Column, IRCommon, Operator, Scalar,
@@ -11,8 +8,17 @@ use crate::ir::{
     properties::{OperatorProperties, TupleOrdering, TupleOrderingDirection},
     scalar::ColumnRef,
 };
+use bitvec::{boxed::BitBox, vec::BitVec};
+use itertools::Itertools;
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 define_node!(
+    /// Metadata:
+    /// - directions: A bit vector indicating the ordering direction for each
+    ///               expression (true for ascending, false for descending).
+    /// Scalars:
+    /// - exprs: The expression array to order by.
     LogicalOrderBy, LogicalOrderByBorrowed {
         properties: OperatorProperties,
         metadata: LogicalOrderByMetadata {

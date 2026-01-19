@@ -1,6 +1,5 @@
-use std::sync::Arc;
-
-use pretty_xmlish::Pretty;
+//! The projection operator selects specific columns or expressions from the
+//! input data - implementing the logical project operator.
 
 use crate::ir::{
     IRCommon, Operator, Scalar,
@@ -8,8 +7,13 @@ use crate::ir::{
     macros::{define_node, impl_operator_conversion},
     properties::OperatorProperties,
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 define_node!(
+    /// Metadata: (none)
+    /// Scalars:
+    /// - projections: The expressions to project.
     PhysicalProject, PhysicalProjectBorrowed {
         properties: OperatorProperties,
         metadata: PhysicalProjectMetadata {},

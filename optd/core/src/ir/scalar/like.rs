@@ -1,6 +1,4 @@
-use std::sync::Arc;
-
-use pretty_xmlish::Pretty;
+//! Represents a SQL LIKE scalar operation.
 
 use crate::ir::{
     IRCommon, Scalar,
@@ -8,8 +6,17 @@ use crate::ir::{
     macros::{define_node, impl_scalar_conversion},
     properties::ScalarProperties,
 };
+use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 define_node!(
+    /// Metadata:
+    /// - negated: Whether the LIKE operation is negated (NOT LIKE).
+    /// - escape_char: Optional escape character for the LIKE pattern.
+    /// - case_insensative: Whether the LIKE operation is case-insensitive (ILIKE).
+    /// Scalars:
+    /// - expr: The expression to be matched.
+    /// - pattern: The pattern to match against.
     Like, LikeBorrowed {
         properties: ScalarProperties,
         metadata: LikeMetadata {
