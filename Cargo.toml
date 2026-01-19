@@ -1,8 +1,19 @@
 [workspace]
 resolver = "2"
-members = ["cli", "connectors/datafusion", "optd/core", "optd/catalog"]
-default-members = ["optd/core", "optd/catalog", "connectors/datafusion"]
+members = [
+    "cli",
+    "connectors/datafusion",
+    "optd/core",
+    "optd/catalog",
+    "synopses",
+]
 
+default-members = [
+    "optd/core",
+    "optd/catalog",
+    "connectors/datafusion",
+    "synopses",
+]
 
 [workspace.dependencies]
 
