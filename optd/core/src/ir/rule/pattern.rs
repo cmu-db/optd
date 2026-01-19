@@ -58,7 +58,7 @@ impl OperatorPattern {
                 .input_operator_patterns
                 .iter()
                 .all(|(i, input_pattern)| {
-                    input_ops.get(*i).map_or(false, |input_op| {
+                    input_ops.get(*i).is_some_and(|input_op| {
                         input_pattern.matches_without_expand(input_op)
                     })
                 })
