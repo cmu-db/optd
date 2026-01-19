@@ -4838,6 +4838,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "synopses"
+version = "0.1.0"
+dependencies = [
+ "itertools",
+ "rand 0.9.2",
+]
+
+[[package]]
 name = "synstructure"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
