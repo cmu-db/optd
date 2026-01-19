@@ -8,6 +8,13 @@ members = [
     "synopses",
 ]
 
+default-members = [
+    "optd/core",
+    "optd/catalog",
+    "connectors/datafusion",
+    "synopses",
+]
+
 [workspace.dependencies]
 
 tokio = { version = "1.47", features = ["macros", "rt", "sync"] }
