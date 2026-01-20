@@ -42,7 +42,7 @@ impl IRContext {
     ) -> Arc<Operator> {
         let first_column = self.add_base_table_columns(source, schema);
 
-        let projections = projections.unwrap_or_else(|| (0..schema.columns().len()).collect());
+        let projections = projections.unwrap_or_else(|| (0..schema.fields().len()).collect());
         LogicalGet::new(source, first_column, projections).into_operator()
     }
 
@@ -54,7 +54,7 @@ impl IRContext {
     ) -> Arc<Operator> {
         let first_column = self.add_base_table_columns(source, schema);
 
-        let projections = projections.unwrap_or_else(|| (0..schema.columns().len()).collect());
+        let projections = projections.unwrap_or_else(|| (0..schema.fields().len()).collect());
         PhysicalTableScan::new(source, first_column, projections).into_operator()
     }
 }

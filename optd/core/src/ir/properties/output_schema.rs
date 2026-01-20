@@ -33,22 +33,22 @@ impl Derive<OutputSchema> for crate::ir::Operator {
             OperatorKind::LogicalGet(meta) => {
                 let get = LogicalGet::borrow_raw_parts(meta, &self.common);
                 let meta = ctx.cat.describe_table(*get.source());
-                Some(
+                Some(Schema::new(
                     get.projections()
                         .iter()
-                        .map(|i| meta.schema.columns()[*i].clone())
-                        .collect(),
-                )
+                        .map(|i| meta.schema.fields()[*i].clone())
+                        .collect_vec(),
+                ))
             }
             OperatorKind::PhysicalTableScan(meta) => {
                 let scan = PhysicalTableScan::borrow_raw_parts(meta, &self.common);
                 let meta = ctx.cat.describe_table(*scan.source());
-                Some(
+                Some(Schema::new(
                     scan.projections()
                         .iter()
-                        .map(|i| meta.schema.columns()[*i].clone())
-                        .collect(),
-                )
+                        .map(|i| meta.schema.fields()[*i].clone())
+                        .collect_vec(),
+                ))
             }
             OperatorKind::LogicalSelect(meta) => {
                 let select = LogicalSelect::borrow_raw_parts(meta, &self.common);
@@ -63,9 +63,9 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                 let columns = join
                     .outer()
                     .output_schema(ctx)?
-                    .columns()
+                    .fields()
                     .iter()
-                    .chain(join.inner().output_schema(ctx)?.columns().iter())
+                    .chain(join.inner().output_schema(ctx)?.fields().iter())
                     .cloned()
                     .collect_vec();
                 Some(Schema::new(columns))
@@ -75,9 +75,9 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                 let columns = join
                     .outer()
                     .output_schema(ctx)?
-                    .columns()
+                    .fields()
                     .iter()
-                    .chain(join.inner().output_schema(ctx)?.columns().iter())
+                    .chain(join.inner().output_schema(ctx)?.fields().iter())
                     .cloned()
                     .collect_vec();
                 Some(Schema::new(columns))
@@ -87,9 +87,9 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                 let columns = join
                     .build_side()
                     .output_schema(ctx)?
-                    .columns()
+                    .fields()
                     .iter()
-                    .chain(join.probe_side().output_schema(ctx)?.columns().iter())
+                    .chain(join.probe_side().output_schema(ctx)?.fields().iter())
                     .cloned()
                     .collect_vec();
                 Some(Schema::new(columns))
@@ -157,7 +157,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                             true,
                         ))
                     })
-                    .collect();
+                    .collect_vec();
 
                 Some(Schema::new(columns))
             }
@@ -178,7 +178,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                             true,
                         ))
                     })
-                    .collect();
+                    .collect_vec();
 
                 Some(Schema::new(columns))
             }

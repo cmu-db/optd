@@ -1,77 +1,12 @@
 //! Definitions for the catalog interface.
 //! optd uses the catalog interface to get schema information about tables.
 
-use crate::ir::types::DataType;
+pub use arrow_schema::Field;
+pub use arrow_schema::Schema;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DataSourceId(pub i64);
-
-/// Describes schema information about a column.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Field {
-    /// The name of the column, e.g. `my_column`.
-    pub name: String,
-    pub data_type: DataType,
-    pub nullable: bool,
-}
-
-impl Field {
-    pub fn new(name: String, data_type: DataType, nullable: bool) -> Self {
-        Field {
-            name,
-            data_type,
-            nullable,
-        }
-    }
-}
-
-impl<S> From<(S, DataType, bool)> for Field
-where
-    S: Into<String>,
-{
-    fn from(value: (S, DataType, bool)) -> Self {
-        let (name, data_type, nullable) = value;
-
-        Field::new(name.into(), data_type, nullable)
-    }
-}
-
-/// Describe schema information for a relation.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Schema {
-    /// Description of the columns.
-    columns: Arc<[Arc<Field>]>,
-}
-
-impl Schema {
-    pub fn new(columns: Vec<Arc<Field>>) -> Self {
-        Schema {
-            columns: columns.into(),
-        }
-    }
-
-    pub fn columns(&self) -> &[Arc<Field>] {
-        &self.columns
-    }
-}
-
-impl<S> FromIterator<S> for Schema
-where
-    S: Into<Field>,
-{
-    fn from_iter<T: IntoIterator<Item = S>>(columns: T) -> Self {
-        let columns = columns.into_iter().map(|x| Arc::new(x.into())).collect();
-        Self::new(columns)
-    }
-}
-
-impl FromIterator<Arc<Field>> for Schema {
-    fn from_iter<T: IntoIterator<Item = Arc<Field>>>(iter: T) -> Self {
-        let columns = iter.into_iter().collect();
-        Self::new(columns)
-    }
-}
 
 /// Contains metadata information about a table.
 #[derive(Debug, Clone, PartialEq)]

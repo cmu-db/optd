@@ -85,10 +85,10 @@ mod tests {
     use super::*;
 
     fn mock_table_schema(name: &str) -> Schema {
-        Schema::from_iter([
-            (format!("{name}.v1"), DataType::Int32, false),
-            (format!("{name}.v2"), DataType::Int32, false),
-            (format!("{name}.v3"), DataType::Boolean, false),
+        Schema::new(vec![
+            Field::new(format!("{name}.v1"), DataType::Int32, false),
+            Field::new(format!("{name}.v2"), DataType::Int32, false),
+            Field::new(format!("{name}.v3"), DataType::Boolean, false),
         ])
     }
 

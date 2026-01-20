@@ -36,7 +36,7 @@ use optd_core::{
     ir::{
         IRContext, Scalar,
         builder::{self as optd_builder, column_assign, column_ref, list},
-        catalog::Field,
+        catalog::{Field, Schema},
         convert::{IntoOperator, IntoScalar},
         explain::quick_explain,
         operator::{
@@ -156,10 +156,10 @@ impl OptdQueryPlanner {
             node.schema.fields().iter().zip(node.schema.field_names())
         {
             let (index, _) = node.input.schema().fields().find(field.name())?;
-            let optd_field = &input_schema.columns()[index];
-            let column = ctx.column_by_name(&optd_field.name)?;
+            let optd_field = &input_schema.fields[index];
+            let column = ctx.column_by_name(&optd_field.name())?;
             let mapped =
-                ctx.define_column(optd_field.data_type.clone(), Some(remapped_column_name));
+                ctx.define_column(optd_field.data_type().clone(), Some(remapped_column_name));
             mappings.push(column_assign(mapped, column_ref(column)));
         }
         Some(LogicalRemap::new(input, list(mappings)).into_operator())
@@ -724,7 +724,7 @@ impl OptdQueryPlanner {
             .projection
             .as_ref()
             .map(|x| x.iter().cloned().collect::<HashSet<_>>())
-            .unwrap_or((0..schema.columns().len()).collect());
+            .unwrap_or((0..schema.fields().len()).collect());
 
         let predicate = {
             let filters = node.filters.iter().collect_vec();
@@ -1289,22 +1289,22 @@ fn into_optd_schema(df_schema: &DFSchema) -> Option<Arc<optd_core::ir::catalog::
                 f.is_nullable(),
             )))
         })
-        .collect::<Option<_>>()?;
-    Some(Arc::new(x))
+        .collect::<Option<Vec<_>>>()?;
+    Some(Arc::new(Schema::new(x)))
 }
 
 fn from_optd_schema(schema: &optd_core::ir::catalog::Schema) -> Arc<DFSchema> {
     let mut builder = datafusion::arrow::datatypes::SchemaBuilder::new();
     let qualifiers = schema
-        .columns()
+        .fields()
         .iter()
         .map(|f| {
-            let column = datafusion::prelude::Column::from_qualified_name(f.name.clone());
+            let column = datafusion::prelude::Column::from_qualified_name(f.name().clone());
 
             builder.push(Arc::new(datafusion::arrow::datatypes::Field::new(
                 column.name,
-                f.data_type.clone(),
-                f.nullable,
+                f.data_type().clone(),
+                f.is_nullable(),
             )));
             column.relation
         })
