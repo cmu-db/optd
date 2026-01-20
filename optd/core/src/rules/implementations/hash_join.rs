@@ -100,6 +100,10 @@ impl Rule for LogicalJoinAsPhysicalHashJoinRule {
 
         let (equi_conds, non_equi_conds) = Self::split_equi_and_non_equi_conditions(&join, ctx)?;
 
+        if equi_conds.is_empty() {
+            return Ok(vec![]);
+        }
+
         let build_side = join.outer().clone();
         let probe_side = join.inner().clone();
 

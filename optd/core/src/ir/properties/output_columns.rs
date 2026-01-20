@@ -96,7 +96,7 @@ impl Derive<OutputColumns> for crate::ir::Operator {
             OperatorKind::LogicalAggregate(meta) => {
                 let agg = LogicalAggregate::borrow_raw_parts(meta, &self.common);
                 let exprs = agg.exprs().try_borrow::<List>().unwrap();
-                let keys = agg.exprs().try_borrow::<List>().unwrap();
+                let keys = agg.keys().try_borrow::<List>().unwrap();
                 let set = exprs
                     .members()
                     .iter()
@@ -111,7 +111,7 @@ impl Derive<OutputColumns> for crate::ir::Operator {
             OperatorKind::PhysicalHashAggregate(meta) => {
                 let agg = PhysicalHashAggregate::borrow_raw_parts(meta, &self.common);
                 let exprs = agg.exprs().try_borrow::<List>().unwrap();
-                let keys = agg.exprs().try_borrow::<List>().unwrap();
+                let keys = agg.keys().try_borrow::<List>().unwrap();
                 let set = exprs
                     .members()
                     .iter()
