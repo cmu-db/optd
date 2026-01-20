@@ -158,7 +158,8 @@ impl OptdQueryPlanner {
             let (index, _) = node.input.schema().fields().find(field.name())?;
             let optd_field = &input_schema.columns()[index];
             let column = ctx.column_by_name(&optd_field.name)?;
-            let mapped = ctx.define_column(optd_field.data_type, Some(remapped_column_name));
+            let mapped =
+                ctx.define_column(optd_field.data_type.clone(), Some(remapped_column_name));
             mappings.push(column_assign(mapped, column_ref(column)));
         }
         Some(LogicalRemap::new(input, list(mappings)).into_operator())
@@ -248,7 +249,7 @@ impl OptdQueryPlanner {
                     ctx.rename_column_alias(column, name);
                     column
                 } else {
-                    ctx.define_column(into_optd_data_type(data_type)?, Some(name))
+                    ctx.define_column(data_type.clone(), Some(name))
                 };
                 column_assign(column, optd_expr)
             } else {
@@ -491,10 +492,7 @@ impl OptdQueryPlanner {
                 let cast = Cast::borrow_raw_parts(meta, &optd_scalar.common);
                 let expr =
                     Box::pin(self.try_from_optd_scalar(cast.expr(), ctx, session_state)).await?;
-                Ok(logical_expr::cast(
-                    expr,
-                    from_optd_data_type(*cast.data_type()),
-                ))
+                Ok(logical_expr::cast(expr, cast.data_type().clone()))
             }
             optd_core::ir::ScalarKind::Function(_) => todo!(),
             optd_core::ir::ScalarKind::ColumnAssign(_) => todo!(),
@@ -637,12 +635,8 @@ impl OptdQueryPlanner {
                     .collect_vec();
                 let return_type = agg_func.func.return_type(&input_types).unwrap();
                 Some(
-                    Function::new_aggregate(
-                        func_name.to_string(),
-                        params.into(),
-                        into_optd_data_type(return_type)?,
-                    )
-                    .into_scalar(),
+                    Function::new_aggregate(func_name.to_string(), params.into(), return_type)
+                        .into_scalar(),
                 )
             }
             logical_expr::Expr::Cast(cast) => {
@@ -653,10 +647,7 @@ impl OptdQueryPlanner {
                     session_state,
                 ))
                 .await?;
-                Some(optd_builder::cast(
-                    input,
-                    into_optd_data_type(cast.data_type.clone())?,
-                ))
+                Some(optd_builder::cast(input, cast.data_type.clone()))
             }
             logical_expr::Expr::Like(like) => {
                 let expr = Box::pin(self.try_into_optd_scalar(
@@ -1292,43 +1283,14 @@ fn into_optd_schema(df_schema: &DFSchema) -> Option<Arc<optd_core::ir::catalog::
         .iter()
         .zip(df_schema.as_arrow().fields())
         .map(|(column, f)| {
-            let data_type = into_optd_data_type(f.data_type().clone())?;
             Some(Arc::new(Field::new(
                 column.flat_name(),
-                data_type,
+                f.data_type().clone(),
                 f.is_nullable(),
             )))
         })
         .collect::<Option<_>>()?;
     Some(Arc::new(x))
-}
-
-fn into_optd_data_type(
-    data_type: datafusion::arrow::datatypes::DataType,
-) -> Option<optd_core::ir::DataType> {
-    match data_type {
-        datafusion::arrow::datatypes::DataType::Boolean => Some(optd_core::ir::DataType::Boolean),
-        datafusion::arrow::datatypes::DataType::Int32 => Some(optd_core::ir::DataType::Int32),
-        datafusion::arrow::datatypes::DataType::Int64 => Some(optd_core::ir::DataType::Int64),
-        datafusion::arrow::datatypes::DataType::Utf8 => Some(optd_core::ir::DataType::Utf8),
-        datafusion::arrow::datatypes::DataType::Utf8View => Some(optd_core::ir::DataType::Utf8View),
-        data_type => {
-            info!(?data_type, "unsupported df data type");
-            None
-        }
-    }
-}
-
-fn from_optd_data_type(
-    data_type: optd_core::ir::DataType,
-) -> datafusion::arrow::datatypes::DataType {
-    match data_type {
-        optd_core::ir::DataType::Int32 => datafusion::arrow::datatypes::DataType::Int32,
-        optd_core::ir::DataType::Int64 => datafusion::arrow::datatypes::DataType::Int64,
-        optd_core::ir::DataType::Boolean => datafusion::arrow::datatypes::DataType::Boolean,
-        optd_core::ir::DataType::Utf8 => datafusion::arrow::datatypes::DataType::Utf8,
-        optd_core::ir::DataType::Utf8View => datafusion::arrow::datatypes::DataType::Utf8View,
-    }
 }
 
 fn from_optd_schema(schema: &optd_core::ir::catalog::Schema) -> Arc<DFSchema> {
@@ -1339,10 +1301,9 @@ fn from_optd_schema(schema: &optd_core::ir::catalog::Schema) -> Arc<DFSchema> {
         .map(|f| {
             let column = datafusion::prelude::Column::from_qualified_name(f.name.clone());
 
-            let data_type = from_optd_data_type(f.data_type);
             builder.push(Arc::new(datafusion::arrow::datatypes::Field::new(
                 column.name,
-                data_type,
+                f.data_type.clone(),
                 f.nullable,
             )));
             column.relation

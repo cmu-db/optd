@@ -3670,6 +3670,7 @@ name = "optd-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arrow-schema 57.2.0",
  "bitvec",
  "console-subscriber",
  "itertools",

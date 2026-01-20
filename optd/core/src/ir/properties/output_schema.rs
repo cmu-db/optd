@@ -114,7 +114,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                         let column_meta = ctx.get_column_meta(&column);
                         Arc::new(Field::new(
                             column_meta.name.clone(),
-                            column_meta.data_type,
+                            column_meta.data_type.clone(),
                             true,
                         ))
                     })
@@ -133,7 +133,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                         let column_meta = ctx.get_column_meta(&column);
                         Arc::new(Field::new(
                             column_meta.name.clone(),
-                            column_meta.data_type,
+                            column_meta.data_type.clone(),
                             true,
                         ))
                     })
@@ -153,7 +153,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                         let column_meta = ctx.get_column_meta(&column);
                         Arc::new(Field::new(
                             column_meta.name.clone(),
-                            column_meta.data_type,
+                            column_meta.data_type.clone(),
                             true,
                         ))
                     })
@@ -174,7 +174,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                         let column_meta = ctx.get_column_meta(&column);
                         Arc::new(Field::new(
                             column_meta.name.clone(),
-                            column_meta.data_type,
+                            column_meta.data_type.clone(),
                             true,
                         ))
                     })
@@ -194,7 +194,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                         let column_meta = ctx.get_column_meta(&column);
                         Arc::new(Field::new(
                             column_meta.name.clone(),
-                            column_meta.data_type,
+                            column_meta.data_type.clone(),
                             true,
                         ))
                     })
