@@ -19,7 +19,7 @@ use std::sync::Arc;
 pub struct OutputSchema;
 
 impl PropertyMarker for OutputSchema {
-    type Output = Option<crate::ir::catalog::Schema>;
+    type Output = Option<Schema>;
 }
 
 impl Derive<OutputSchema> for crate::ir::Operator {
@@ -36,7 +36,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                 Some(Schema::new(
                     get.projections()
                         .iter()
-                        .map(|i| meta.schema.fields()[*i].clone())
+                        .map(|i| meta.schema.field(*i).clone())
                         .collect_vec(),
                 ))
             }
@@ -46,7 +46,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                 Some(Schema::new(
                     scan.projections()
                         .iter()
-                        .map(|i| meta.schema.fields()[*i].clone())
+                        .map(|i| meta.schema.field(*i).clone())
                         .collect_vec(),
                 ))
             }

@@ -3,7 +3,7 @@
 
 pub use arrow_schema::Field;
 pub use arrow_schema::Schema;
-use std::sync::Arc;
+pub use arrow_schema::SchemaRef;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DataSourceId(pub i64);
@@ -13,7 +13,7 @@ pub struct DataSourceId(pub i64);
 pub struct TableMetadata {
     pub id: DataSourceId,
     pub name: String,
-    pub schema: Arc<Schema>,
+    pub schema: SchemaRef,
     pub row_count: usize,
 }
 
@@ -22,7 +22,7 @@ pub trait Catalog: Send + Sync + 'static {
     fn try_create_table(
         &self,
         table_name: String,
-        schema: Arc<Schema>,
+        schema: SchemaRef,
     ) -> Result<DataSourceId, DataSourceId>;
     /// Describes the schema of a table with identifier `table_id`.
     fn describe_table(&self, table_id: DataSourceId) -> TableMetadata;
