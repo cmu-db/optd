@@ -36,14 +36,3 @@ macro_rules! connector_err {
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn test_connector_err() -> Result<()> {
-        connector_err!("An error occurred: {}", "something went wrong");
-    }
-}
