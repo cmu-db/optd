@@ -1,5 +1,7 @@
 use snafu::prelude::*;
 
+pub use snafu::whatever;
+
 #[derive(Debug, Snafu)]
 pub enum Error {
     #[snafu(whatever, display("{message}"))]
@@ -10,6 +12,38 @@ pub enum Error {
         #[snafu(source(from(Box<dyn std::error::Error + Send + Sync>, Some)))]
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
+    #[snafu(display("Connector error: {}", message))]
+    Connector { message: String },
 }
 
-pub type Result<T> = core::result::Result<T, crate::error::Error>;
+#[macro_export]
+macro_rules! connector_err {
+    ($fmt:literal$(, $($arg:expr),* $(,)?)?) => {
+        return core::result::Result::Err($crate::error::Error::Connector {
+            message: format!($fmt$(, $($arg),*)*),
+        });
+    };
+    ($source:expr, $fmt:literal$(, $($arg:expr),* $(,)?)*) => {
+        match $source {
+            core::result::Result::Ok(v) => v,
+            core::result::Result::Err(e) => {
+                return core::result::Result::Err($crate::error::Error::Connector {
+                    message: format!($fmt$(, $($arg),*)*),
+                });
+            }
+        }
+    };
+}
+
+pub type Result<T> = core::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn test_connector_err() -> Result<()> {
+        connector_err!("An error occurred: {}", "something went wrong");
+    }
+}

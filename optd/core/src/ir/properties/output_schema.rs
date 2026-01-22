@@ -2,6 +2,7 @@
 //! allowing retrieval of the output schema based on the operator type and its
 //! metadata.
 
+use crate::error::{Result, whatever};
 use crate::ir::{
     OperatorKind,
     catalog::{Field, Schema},
@@ -19,7 +20,7 @@ use std::sync::Arc;
 pub struct OutputSchema;
 
 impl PropertyMarker for OutputSchema {
-    type Output = Option<Schema>;
+    type Output = Result<Schema>;
 }
 
 impl Derive<OutputSchema> for crate::ir::Operator {
@@ -28,12 +29,16 @@ impl Derive<OutputSchema> for crate::ir::Operator {
         ctx: &crate::ir::IRContext,
     ) -> <OutputSchema as PropertyMarker>::Output {
         match &self.kind {
-            OperatorKind::Group(_) => None,
-            OperatorKind::MockScan(_) => None,
+            OperatorKind::Group(_) => {
+                whatever!("should not derive output schema for Group operator")
+            }
+            OperatorKind::MockScan(_) => {
+                whatever!("should not derive output schema for MockScan operator")
+            }
             OperatorKind::LogicalGet(meta) => {
                 let get = LogicalGet::borrow_raw_parts(meta, &self.common);
                 let meta = ctx.cat.describe_table(*get.source());
-                Some(Schema::new(
+                Ok(Schema::new(
                     get.projections()
                         .iter()
                         .map(|i| meta.schema.field(*i).clone())
@@ -43,7 +48,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
             OperatorKind::PhysicalTableScan(meta) => {
                 let scan = PhysicalTableScan::borrow_raw_parts(meta, &self.common);
                 let meta = ctx.cat.describe_table(*scan.source());
-                Some(Schema::new(
+                Ok(Schema::new(
                     scan.projections()
                         .iter()
                         .map(|i| meta.schema.field(*i).clone())
@@ -68,7 +73,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                     .chain(join.inner().output_schema(ctx)?.fields().iter())
                     .cloned()
                     .collect_vec();
-                Some(Schema::new(columns))
+                Ok(Schema::new(columns))
             }
             OperatorKind::PhysicalNLJoin(meta) => {
                 let join = PhysicalNLJoin::borrow_raw_parts(meta, &self.common);
@@ -80,7 +85,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                     .chain(join.inner().output_schema(ctx)?.fields().iter())
                     .cloned()
                     .collect_vec();
-                Some(Schema::new(columns))
+                Ok(Schema::new(columns))
             }
             OperatorKind::PhysicalHashJoin(meta) => {
                 let join = PhysicalHashJoin::borrow_raw_parts(meta, &self.common);
@@ -92,7 +97,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                     .chain(join.probe_side().output_schema(ctx)?.fields().iter())
                     .cloned()
                     .collect_vec();
-                Some(Schema::new(columns))
+                Ok(Schema::new(columns))
             }
             OperatorKind::EnforcerSort(meta) => {
                 let sort = EnforcerSort::borrow_raw_parts(meta, &self.common);
@@ -119,7 +124,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                         ))
                     })
                     .collect_vec();
-                Some(Schema::new(columns))
+                Ok(Schema::new(columns))
             }
             OperatorKind::PhysicalProject(meta) => {
                 let project = PhysicalProject::borrow_raw_parts(meta, &self.common);
@@ -138,7 +143,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                         ))
                     })
                     .collect_vec();
-                Some(Schema::new(columns))
+                Ok(Schema::new(columns))
             }
             OperatorKind::LogicalAggregate(meta) => {
                 let agg = LogicalAggregate::borrow_raw_parts(meta, &self.common);
@@ -159,7 +164,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                     })
                     .collect_vec();
 
-                Some(Schema::new(columns))
+                Ok(Schema::new(columns))
             }
             OperatorKind::PhysicalHashAggregate(meta) => {
                 let agg = PhysicalHashAggregate::borrow_raw_parts(meta, &self.common);
@@ -180,7 +185,7 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                     })
                     .collect_vec();
 
-                Some(Schema::new(columns))
+                Ok(Schema::new(columns))
             }
             OperatorKind::LogicalRemap(meta) => {
                 let remap = LogicalRemap::borrow_raw_parts(meta, &self.common);
@@ -199,14 +204,14 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                         ))
                     })
                     .collect_vec();
-                Some(Schema::new(columns))
+                Ok(Schema::new(columns))
             }
         }
     }
 }
 
 impl crate::ir::Operator {
-    pub fn output_schema(&self, ctx: &crate::ir::context::IRContext) -> Option<Schema> {
+    pub fn output_schema(&self, ctx: &crate::ir::context::IRContext) -> Result<Schema> {
         self.get_property::<OutputSchema>(ctx)
     }
 }
