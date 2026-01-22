@@ -168,7 +168,7 @@ impl OptdQueryPlanner {
                 .whatever_context("cannot find field name in the input schema")?;
             let optd_field = &input_schema.fields[index];
             let column = ctx
-                .column_by_name(&optd_field.name())
+                .column_by_name(optd_field.name())
                 .whatever_context("cannot find column by name in ctx")?;
             let mapped =
                 ctx.define_column(optd_field.data_type().clone(), Some(remapped_column_name));
