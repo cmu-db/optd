@@ -27,6 +27,7 @@ datafusion = { version = "52.0.0", default-features = false, features = [
 ] }
 
 arrow-schema = { version = "57.2.0", default-features = false }
+chrono = { version = "0.4.43", default-features = false }
 
 [workspace.package]
 version = "0.1.0"

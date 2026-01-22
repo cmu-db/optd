@@ -426,12 +426,33 @@ impl OptdQueryPlanner {
                 let literal =
                     optd_core::ir::scalar::Literal::borrow_raw_parts(meta, &optd_scalar.common);
                 let value = match literal.value() {
+                    optd_core::ir::ScalarValue::Boolean(v) => (*v).into(),
+                    optd_core::ir::ScalarValue::Int8(v) => (*v).into(),
+                    optd_core::ir::ScalarValue::Int16(v) => (*v).into(),
                     optd_core::ir::ScalarValue::Int32(v) => (*v).into(),
                     optd_core::ir::ScalarValue::Int64(v) => (*v).into(),
-                    optd_core::ir::ScalarValue::Boolean(v) => (*v).into(),
+                    optd_core::ir::ScalarValue::UInt8(v) => (*v).into(),
+                    optd_core::ir::ScalarValue::UInt16(v) => (*v).into(),
+                    optd_core::ir::ScalarValue::UInt32(v) => (*v).into(),
+                    optd_core::ir::ScalarValue::UInt64(v) => (*v).into(),
                     optd_core::ir::ScalarValue::Utf8(v) => v.as_deref().into(),
                     optd_core::ir::ScalarValue::Utf8View(v) => {
                         datafusion::scalar::ScalarValue::Utf8View(v.clone())
+                    }
+                    optd_core::ir::ScalarValue::Date32(v) => {
+                        datafusion::scalar::ScalarValue::Date32(*v)
+                    }
+                    optd_core::ir::ScalarValue::Date64(v) => {
+                        datafusion::scalar::ScalarValue::Date64(*v)
+                    }
+                    optd_core::ir::ScalarValue::Decimal32(v, precision, scale) => {
+                        datafusion::scalar::ScalarValue::Decimal32(*v, *precision, *scale)
+                    }
+                    optd_core::ir::ScalarValue::Decimal64(v, precision, scale) => {
+                        datafusion::scalar::ScalarValue::Decimal64(*v, *precision, *scale)
+                    }
+                    optd_core::ir::ScalarValue::Decimal128(v, precision, scale) => {
+                        datafusion::scalar::ScalarValue::Decimal128(*v, *precision, *scale)
                     }
                 };
                 Ok(logical_expr::Expr::Literal(value, None))
@@ -532,18 +553,57 @@ impl OptdQueryPlanner {
                 datafusion::scalar::ScalarValue::Boolean(v) => {
                     Some(optd_core::ir::builder::boolean(*v))
                 }
+                datafusion::scalar::ScalarValue::Int8(v) => {
+                    Some(optd_core::ir::builder::literal(*v))
+                }
+                datafusion::scalar::ScalarValue::Int16(v) => {
+                    Some(optd_core::ir::builder::literal(*v))
+                }
                 datafusion::scalar::ScalarValue::Int32(v) => {
-                    Some(optd_core::ir::builder::integer(*v))
+                    Some(optd_core::ir::builder::literal(*v))
                 }
                 datafusion::scalar::ScalarValue::Int64(v) => {
-                    Some(optd_core::ir::builder::bigint(*v))
+                    Some(optd_core::ir::builder::literal(*v))
+                }
+                datafusion::scalar::ScalarValue::UInt8(v) => {
+                    Some(optd_core::ir::builder::literal(*v))
+                }
+                datafusion::scalar::ScalarValue::UInt16(v) => {
+                    Some(optd_core::ir::builder::literal(*v))
+                }
+                datafusion::scalar::ScalarValue::UInt32(v) => {
+                    Some(optd_core::ir::builder::literal(*v))
+                }
+                datafusion::scalar::ScalarValue::UInt64(v) => {
+                    Some(optd_core::ir::builder::literal(*v))
                 }
                 datafusion::scalar::ScalarValue::Utf8(v) => {
-                    Some(optd_core::ir::builder::utf8(v.as_deref()))
+                    Some(optd_core::ir::builder::literal(v.as_deref()))
                 }
                 datafusion::scalar::ScalarValue::Utf8View(v) => {
-                    Some(optd_core::ir::builder::utf8_view(v.as_deref()))
+                    Some(optd_core::ir::builder::literal(v.as_deref()))
                 }
+                datafusion::scalar::ScalarValue::Decimal32(v, precision, scale) => {
+                    Some(optd_core::ir::builder::literal(
+                        optd_core::ir::ScalarValue::Decimal32(*v, *precision, *scale),
+                    ))
+                }
+                datafusion::scalar::ScalarValue::Decimal64(v, precision, scale) => {
+                    Some(optd_core::ir::builder::literal(
+                        optd_core::ir::ScalarValue::Decimal64(*v, *precision, *scale),
+                    ))
+                }
+                datafusion::scalar::ScalarValue::Decimal128(v, precision, scale) => {
+                    Some(optd_core::ir::builder::literal(
+                        optd_core::ir::ScalarValue::Decimal128(*v, *precision, *scale),
+                    ))
+                }
+                datafusion::scalar::ScalarValue::Date32(v) => Some(
+                    optd_core::ir::builder::literal(optd_core::ir::ScalarValue::Date32(*v)),
+                ),
+                datafusion::scalar::ScalarValue::Date64(v) => Some(
+                    optd_core::ir::builder::literal(optd_core::ir::ScalarValue::Date64(*v)),
+                ),
                 value => {
                     info!(?value, "unhandled scalar value");
                     None

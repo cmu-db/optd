@@ -20,6 +20,7 @@ tokio = { workspace = true, features = [
 
 tracing = { workspace = true }
 arrow-schema = { workspace = true }
+chrono = { workspace = true }
 
 [dev-dependencies]
 console-subscriber = "0.4.1"

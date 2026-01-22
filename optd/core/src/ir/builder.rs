@@ -157,12 +157,16 @@ pub fn utf8_view<'a>(v: impl Into<Option<&'a str>>) -> Arc<Scalar> {
     Literal::new(ScalarValue::Utf8View(v.into().map(|x| x.to_string()))).into_scalar()
 }
 
+pub fn literal<T: Into<ScalarValue>>(v: T) -> Arc<Scalar> {
+    Literal::new(v.into()).into_scalar()
+}
+
 /// Creates a literal of type integer (i32).
-pub fn integer(v: impl Into<Option<i32>>) -> Arc<Scalar> {
+pub fn int32(v: impl Into<Option<i32>>) -> Arc<Scalar> {
     Literal::new(ScalarValue::Int32(v.into())).into_scalar()
 }
 
-pub fn bigint(v: impl Into<Option<i64>>) -> Arc<Scalar> {
+pub fn int64(v: impl Into<Option<i64>>) -> Arc<Scalar> {
     Literal::new(ScalarValue::Int64(v.into())).into_scalar()
 }
 
