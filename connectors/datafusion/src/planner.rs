@@ -1516,7 +1516,10 @@ impl QueryPlanner for OptdQueryPlanner {
 
             match res {
                 Err(e) => {
-                    warn!(error = %e, "optd planner failed, fallback to default planner");
+                    eprintln!(
+                        "optd planner does not support this query yet, fallback to default planner:"
+                    );
+                    warn!(error = %e);
                     return self
                         .create_physical_plan_default(logical_plan, session_state)
                         .await;
