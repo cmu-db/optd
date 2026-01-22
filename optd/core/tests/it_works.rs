@@ -97,8 +97,8 @@ async fn integration() -> Result<(), Box<dyn std::error::Error>> {
             column_ref(Column(2)).eq(column_ref(Column(6))),
             JoinType::Inner,
         )
-        .logical_select(column_ref(Column(3)).eq(integer(799)))
-        .logical_select(column_ref(Column(7)).eq(integer(445)))
+        .logical_select(column_ref(Column(3)).eq(int32(799)))
+        .logical_select(column_ref(Column(7)).eq(int32(445)))
         .logical_project([
             column_assign(
                 ctx.define_column(DataType::Int32, None),
@@ -106,7 +106,7 @@ async fn integration() -> Result<(), Box<dyn std::error::Error>> {
             ),
             column_assign(
                 ctx.define_column(DataType::Int32, None),
-                column_ref(Column(1)).plus(integer(1)),
+                column_ref(Column(1)).plus(int32(1)),
             ),
         ]);
 

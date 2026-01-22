@@ -42,7 +42,7 @@ impl IRContext {
     ) -> Arc<Operator> {
         let first_column = self.add_base_table_columns(source, schema);
 
-        let projections = projections.unwrap_or_else(|| (0..schema.columns().len()).collect());
+        let projections = projections.unwrap_or_else(|| (0..schema.fields().len()).collect());
         LogicalGet::new(source, first_column, projections).into_operator()
     }
 
@@ -54,7 +54,7 @@ impl IRContext {
     ) -> Arc<Operator> {
         let first_column = self.add_base_table_columns(source, schema);
 
-        let projections = projections.unwrap_or_else(|| (0..schema.columns().len()).collect());
+        let projections = projections.unwrap_or_else(|| (0..schema.fields().len()).collect());
         PhysicalTableScan::new(source, first_column, projections).into_operator()
     }
 }
@@ -157,12 +157,16 @@ pub fn utf8_view<'a>(v: impl Into<Option<&'a str>>) -> Arc<Scalar> {
     Literal::new(ScalarValue::Utf8View(v.into().map(|x| x.to_string()))).into_scalar()
 }
 
+pub fn literal<T: Into<ScalarValue>>(v: T) -> Arc<Scalar> {
+    Literal::new(v.into()).into_scalar()
+}
+
 /// Creates a literal of type integer (i32).
-pub fn integer(v: impl Into<Option<i32>>) -> Arc<Scalar> {
+pub fn int32(v: impl Into<Option<i32>>) -> Arc<Scalar> {
     Literal::new(ScalarValue::Int32(v.into())).into_scalar()
 }
 
-pub fn bigint(v: impl Into<Option<i64>>) -> Arc<Scalar> {
+pub fn int64(v: impl Into<Option<i64>>) -> Arc<Scalar> {
     Literal::new(ScalarValue::Int64(v.into())).into_scalar()
 }
 
