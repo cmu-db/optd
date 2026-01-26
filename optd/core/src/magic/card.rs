@@ -1,5 +1,7 @@
 use crate::ir::{
+    Operator, Scalar,
     operator::*,
+    operator::join::JoinType,
     properties::{Cardinality, CardinalityEstimator},
     scalar::*,
 };
@@ -19,6 +21,36 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
         ctx: &crate::ir::IRContext,
     ) -> crate::ir::properties::Cardinality {
         use crate::ir::OperatorKind;
+        let join_selectivity = |join_cond: &Scalar| {
+            if let Ok(literal) = join_cond.try_borrow::<Literal>() {
+                match literal.value() {
+                    crate::ir::ScalarValue::Boolean(Some(true)) => 1.,
+                    crate::ir::ScalarValue::Boolean(_) => 0.,
+                    _ => unreachable!("join condition must be boolean"),
+                }
+            } else {
+                Self::MAGIC_JOIN_COND_SELECTIVITY
+            }
+        };
+        let estimate_join = |join_type: &JoinType,
+                             outer: &Operator,
+                             inner: &Operator,
+                             join_cond: &Scalar| {
+            let left_card = outer.cardinality(ctx);
+            let right_card = inner.cardinality(ctx);
+            match *join_type {
+                JoinType::Mark(_) => left_card,
+                JoinType::Single => {
+                    let selectivity = join_selectivity(join_cond);
+                    (selectivity * left_card * right_card)
+                        .map(|value| value.min(left_card.as_f64()))
+                }
+                _ => {
+                    let selectivity = join_selectivity(join_cond);
+                    selectivity * left_card * right_card
+                }
+            }
+        };
         match &op.kind {
             OperatorKind::Group(_) => {
                 // Relies on the normalized expression's cardinality estimation.
@@ -34,18 +66,21 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
             }
             OperatorKind::LogicalJoin(meta) => {
                 let join = LogicalJoin::borrow_raw_parts(meta, &op.common);
-                let selectivity = if let Ok(literal) = join.join_cond().try_borrow::<Literal>() {
-                    match literal.value() {
-                        crate::ir::ScalarValue::Boolean(Some(true)) => 1.,
-                        crate::ir::ScalarValue::Boolean(_) => 0.,
-                        _ => unreachable!("join condition must be boolean"),
-                    }
-                } else {
-                    MagicCardinalityEstimator::MAGIC_JOIN_COND_SELECTIVITY
-                };
-                let left_card = join.outer().cardinality(ctx);
-                let right_card = join.inner().cardinality(ctx);
-                selectivity * left_card * right_card
+                estimate_join(
+                    join.join_type(),
+                    join.outer().as_ref(),
+                    join.inner().as_ref(),
+                    join.join_cond().as_ref(),
+                )
+            }
+            OperatorKind::LogicalDependentJoin(meta) => {
+                let join = LogicalDependentJoin::borrow_raw_parts(meta, &op.common);
+                estimate_join(
+                    join.join_type(),
+                    join.outer().as_ref(),
+                    join.inner().as_ref(),
+                    join.join_cond().as_ref(),
+                )
             }
             OperatorKind::PhysicalNLJoin(meta) => {
                 let join = PhysicalNLJoin::borrow_raw_parts(meta, &op.common);
@@ -98,6 +133,11 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
             }
             OperatorKind::LogicalOrderBy(meta) => {
                 LogicalOrderBy::borrow_raw_parts(meta, &op.common)
+                    .input()
+                    .cardinality(ctx)
+            }
+            OperatorKind::LogicalSubquery(meta) => {
+                LogicalSubquery::borrow_raw_parts(meta, &op.common)
                     .input()
                     .cardinality(ctx)
             }

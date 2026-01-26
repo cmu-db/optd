@@ -21,12 +21,14 @@ use std::sync::Arc;
 
 pub use enforcer::sort::*;
 pub use logical::aggregate::*;
+pub use logical::dependent_join::*;
 pub use logical::get::*;
 pub use logical::join::{LogicalJoin, LogicalJoinBorrowed, LogicalJoinMetadata};
 pub use logical::order_by::*;
 pub use logical::project::*;
 pub use logical::remap::*;
 pub use logical::select::*;
+pub use logical::subquery::*;
 pub use physical::filter::*;
 pub use physical::hash_aggregate::*;
 pub use physical::hash_join::*;
@@ -51,11 +53,13 @@ pub enum OperatorKind {
     MockScan(MockScanMetadata),
     LogicalGet(LogicalGetMetadata),
     LogicalJoin(LogicalJoinMetadata),
+    LogicalDependentJoin(LogicalDependentJoinMetadata),
     LogicalSelect(LogicalSelectMetadata),
     LogicalProject(LogicalProjectMetadata),
     LogicalAggregate(LogicalAggregateMetadata),
     LogicalOrderBy(LogicalOrderByMetadata),
     LogicalRemap(LogicalRemapMetadata),
+    LogicalSubquery(LogicalSubqueryMetadata),
     EnforcerSort(EnforcerSortMetadata),
     PhysicalTableScan(PhysicalTableScanMetadata),
     PhysicalNLJoin(PhysicalNLJoinMetadata),
@@ -79,8 +83,15 @@ impl OperatorKind {
         use OperatorKind::*;
         match self {
             Group(_) => OperatorCategory::Placeholder,
-            LogicalGet(_) | LogicalJoin(_) | LogicalProject(_) | LogicalAggregate(_)
-            | LogicalOrderBy(_) | LogicalRemap(_) | LogicalSelect(_) => OperatorCategory::Logical,
+            LogicalGet(_)
+            | LogicalJoin(_)
+            | LogicalDependentJoin(_)
+            | LogicalProject(_)
+            | LogicalAggregate(_)
+            | LogicalOrderBy(_)
+            | LogicalRemap(_)
+            | LogicalSelect(_)
+            | LogicalSubquery(_) => OperatorCategory::Logical,
             EnforcerSort(_) => OperatorCategory::Enforcer,
             PhysicalFilter(_)
             | PhysicalProject(_)
@@ -179,6 +190,9 @@ impl Explain for Operator {
             OperatorKind::LogicalJoin(meta) => {
                 LogicalJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
+            OperatorKind::LogicalDependentJoin(meta) => {
+                LogicalDependentJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
             OperatorKind::LogicalSelect(meta) => {
                 LogicalSelect::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
@@ -214,6 +228,9 @@ impl Explain for Operator {
             }
             OperatorKind::LogicalRemap(meta) => {
                 LogicalRemap::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            OperatorKind::LogicalSubquery(meta) => {
+                LogicalSubquery::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
         }
     }

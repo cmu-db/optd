@@ -6,9 +6,10 @@ use crate::ir::{
     OperatorKind,
     catalog::{Field, Schema},
     operator::{
-        EnforcerSort, LogicalAggregate, LogicalGet, LogicalJoin, LogicalOrderBy, LogicalProject,
-        LogicalRemap, LogicalSelect, PhysicalFilter, PhysicalHashAggregate, PhysicalHashJoin,
-        PhysicalNLJoin, PhysicalProject, PhysicalTableScan,
+        EnforcerSort, LogicalAggregate, LogicalDependentJoin, LogicalGet, LogicalJoin,
+        LogicalOrderBy, LogicalProject, LogicalRemap, LogicalSelect, LogicalSubquery,
+        PhysicalFilter, PhysicalHashAggregate, PhysicalHashJoin, PhysicalNLJoin, PhysicalProject,
+        PhysicalTableScan, join::JoinType,
     },
     properties::{Derive, GetProperty, PropertyMarker},
     scalar::{ColumnAssign, List},
@@ -54,21 +55,77 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                 let select = LogicalSelect::borrow_raw_parts(meta, &self.common);
                 select.input().output_schema(ctx)
             }
+            OperatorKind::LogicalSubquery(meta) => {
+                let subquery = LogicalSubquery::borrow_raw_parts(meta, &self.common);
+                subquery.input().output_schema(ctx)
+            }
             OperatorKind::PhysicalFilter(meta) => {
                 let filter = PhysicalFilter::borrow_raw_parts(meta, &self.common);
                 filter.input().output_schema(ctx)
             }
             OperatorKind::LogicalJoin(meta) => {
                 let join = LogicalJoin::borrow_raw_parts(meta, &self.common);
-                let columns = join
-                    .outer()
-                    .output_schema(ctx)?
-                    .columns()
-                    .iter()
-                    .chain(join.inner().output_schema(ctx)?.columns().iter())
-                    .cloned()
-                    .collect_vec();
-                Some(Schema::new(columns))
+                match join.join_type() {
+                    JoinType::Mark(mark_column) => {
+                        let mut columns = join
+                            .outer()
+                            .output_schema(ctx)?
+                            .columns()
+                            .iter()
+                            .cloned()
+                            .collect_vec();
+                        let mark_meta = ctx.get_column_meta(mark_column);
+                        columns.push(Arc::new(Field::new(
+                            mark_meta.name.clone(),
+                            mark_meta.data_type,
+                            true,
+                        )));
+                        Some(Schema::new(columns))
+                    }
+                    _ => {
+                        let columns = join
+                            .outer()
+                            .output_schema(ctx)?
+                            .columns()
+                            .iter()
+                            .chain(join.inner().output_schema(ctx)?.columns().iter())
+                            .cloned()
+                            .collect_vec();
+                        Some(Schema::new(columns))
+                    }
+                }
+            }
+            OperatorKind::LogicalDependentJoin(meta) => {
+                let join = LogicalDependentJoin::borrow_raw_parts(meta, &self.common);
+                match join.join_type() {
+                    JoinType::Mark(mark_column) => {
+                        let mut columns = join
+                            .outer()
+                            .output_schema(ctx)?
+                            .columns()
+                            .iter()
+                            .cloned()
+                            .collect_vec();
+                        let mark_meta = ctx.get_column_meta(mark_column);
+                        columns.push(Arc::new(Field::new(
+                            mark_meta.name.clone(),
+                            mark_meta.data_type,
+                            true,
+                        )));
+                        Some(Schema::new(columns))
+                    }
+                    _ => {
+                        let columns = join
+                            .outer()
+                            .output_schema(ctx)?
+                            .columns()
+                            .iter()
+                            .chain(join.inner().output_schema(ctx)?.columns().iter())
+                            .cloned()
+                            .collect_vec();
+                        Some(Schema::new(columns))
+                    }
+                }
             }
             OperatorKind::PhysicalNLJoin(meta) => {
                 let join = PhysicalNLJoin::borrow_raw_parts(meta, &self.common);

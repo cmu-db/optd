@@ -21,10 +21,12 @@ impl CostModel for MagicCostModel {
             OperatorKind::Group(_) => None,
             OperatorKind::LogicalGet(_) => None,
             OperatorKind::LogicalJoin(_) => None,
+            OperatorKind::LogicalDependentJoin(_) => None,
             OperatorKind::LogicalSelect(_) => None,
             OperatorKind::LogicalProject(_) => None,
             OperatorKind::LogicalAggregate(_) => None,
             OperatorKind::LogicalOrderBy(_) => None,
+            OperatorKind::LogicalSubquery(_) => None,
             OperatorKind::LogicalRemap(_) => Some(Cost::UNIT),
             OperatorKind::EnforcerSort(_) => {
                 let input_card = op.input_operators()[0].cardinality(ctx);

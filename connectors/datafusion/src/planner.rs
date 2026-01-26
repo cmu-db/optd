@@ -833,6 +833,18 @@ impl OptdQueryPlanner {
                 let join_type = match join.join_type() {
                     join::JoinType::Inner => logical_expr::JoinType::Inner,
                     join::JoinType::Left => logical_expr::JoinType::Left,
+                    join::JoinType::Single => {
+                        return Err(DataFusionError::NotImplemented(
+                            "single join is not supported in datafusion physical planning"
+                                .to_string(),
+                        ));
+                    }
+                    join::JoinType::Mark(_) => {
+                        return Err(DataFusionError::NotImplemented(
+                            "mark join is not supported in datafusion physical planning"
+                                .to_string(),
+                        ));
+                    }
                 };
                 let left_dfschema = from_optd_schema(&join.outer().output_schema(ctx).unwrap());
                 let right_dfschema = from_optd_schema(&join.inner().output_schema(ctx).unwrap());
@@ -930,6 +942,18 @@ impl OptdQueryPlanner {
                 let join_type = match join.join_type() {
                     join::JoinType::Inner => logical_expr::JoinType::Inner,
                     join::JoinType::Left => logical_expr::JoinType::Left,
+                    join::JoinType::Single => {
+                        return Err(DataFusionError::NotImplemented(
+                            "single join is not supported in datafusion physical planning"
+                                .to_string(),
+                        ));
+                    }
+                    join::JoinType::Mark(_) => {
+                        return Err(DataFusionError::NotImplemented(
+                            "mark join is not supported in datafusion physical planning"
+                                .to_string(),
+                        ));
+                    }
                 };
                 let build_side_dfschema =
                     from_optd_schema(&join.build_side().output_schema(ctx).unwrap());

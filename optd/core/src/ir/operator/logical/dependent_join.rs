@@ -1,10 +1,12 @@
-//! The logical join operator joins two input relations based on a join
-//! condition.
+//! The dependent join operator joins two input relations where the inner
+//! relation may depend on columns from the outer relation, typically for
+//! correlated subqueries.
 
 use crate::ir::{
-    Column, IRCommon, Operator, Scalar,
+    IRCommon, Operator, Scalar,
     explain::Explain,
     macros::{define_node, impl_operator_conversion},
+    operator::join::JoinType,
     properties::OperatorProperties,
 };
 use pretty_xmlish::Pretty;
@@ -15,9 +17,9 @@ define_node!(
     /// - join_type: The type of join (e.g., Inner, Left, Mark, Single).
     /// Scalars:
     /// - join_cond: The join conditions to join on
-    LogicalJoin, LogicalJoinBorrowed {
+    LogicalDependentJoin, LogicalDependentJoinBorrowed {
         properties: OperatorProperties,
-        metadata: LogicalJoinMetadata {
+        metadata: LogicalDependentJoinMetadata {
             join_type: JoinType,
         },
         inputs: {
@@ -26,17 +28,9 @@ define_node!(
         }
     }
 );
-impl_operator_conversion!(LogicalJoin, LogicalJoinBorrowed);
+impl_operator_conversion!(LogicalDependentJoin, LogicalDependentJoinBorrowed);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum JoinType {
-    Inner,
-    Left,
-    Single,
-    Mark(Column),
-}
-
-impl LogicalJoin {
+impl LogicalDependentJoin {
     pub fn new(
         join_type: JoinType,
         outer: Arc<Operator>,
@@ -44,13 +38,13 @@ impl LogicalJoin {
         join_cond: Arc<Scalar>,
     ) -> Self {
         Self {
-            meta: LogicalJoinMetadata { join_type },
+            meta: LogicalDependentJoinMetadata { join_type },
             common: IRCommon::new(Arc::new([outer, inner]), Arc::new([join_cond])),
         }
     }
 }
 
-impl Explain for LogicalJoinBorrowed<'_> {
+impl Explain for LogicalDependentJoinBorrowed<'_> {
     fn explain<'a>(
         &self,
         ctx: &crate::ir::IRContext,
@@ -61,6 +55,6 @@ impl Explain for LogicalJoinBorrowed<'_> {
         fields.push((".join_cond", self.join_cond().explain(ctx, option)));
         fields.extend(self.common.explain_operator_properties(ctx, option));
         let children = self.common.explain_input_operators(ctx, option);
-        Pretty::simple_record("LogicalJoin", fields, children)
+        Pretty::simple_record("LogicalDependentJoin", fields, children)
     }
 }

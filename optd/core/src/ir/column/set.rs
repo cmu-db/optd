@@ -24,6 +24,11 @@ impl ColumnSet {
     pub fn with_capacity(n: usize) -> Self {
         Self(HashSet::with_capacity(n))
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Column> {
+        self.0.iter()
+    }
+
     pub fn contains(&self, column: &Column) -> bool {
         self.0.contains(column)
     }
