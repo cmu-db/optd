@@ -3,6 +3,7 @@
 //! metadata.
 
 use crate::error::{Result, whatever};
+use crate::ir::Operator;
 use crate::ir::{
     OperatorKind,
     catalog::{Field, Schema},
@@ -24,7 +25,7 @@ impl PropertyMarker for OutputSchema {
     type Output = Result<Schema>;
 }
 
-impl Derive<OutputSchema> for crate::ir::Operator {
+impl Derive<OutputSchema> for Operator {
     fn derive_by_compute(
         &self,
         ctx: &crate::ir::IRContext,
@@ -70,91 +71,19 @@ impl Derive<OutputSchema> for crate::ir::Operator {
             }
             OperatorKind::LogicalJoin(meta) => {
                 let join = LogicalJoin::borrow_raw_parts(meta, &self.common);
-                match join.join_type() {
-                    JoinType::Mark(mark_column) => {
-                        let mut columns = join
-                            .outer()
-                            .output_schema(ctx)?
-                            .fields()
-                            .iter()
-                            .cloned()
-                            .collect_vec();
-                        let mark_meta = ctx.get_column_meta(mark_column);
-                        columns.push(Arc::new(Field::new(
-                            mark_meta.name.clone(),
-                            mark_meta.data_type.clone(),
-                            true,
-                        )));
-                        Ok(Schema::new(columns))
-                    }
-                    _ => {
-                        let columns = join
-                            .outer()
-                            .output_schema(ctx)?
-                            .fields()
-                            .iter()
-                            .chain(join.inner().output_schema(ctx)?.fields().iter())
-                            .cloned()
-                            .collect_vec();
-                        Ok(Schema::new(columns))
-                    }
-                }
+                compute_join_schema(join.outer(), join.inner(), join.join_type(), ctx)
             }
             OperatorKind::LogicalDependentJoin(meta) => {
                 let join = LogicalDependentJoin::borrow_raw_parts(meta, &self.common);
-                match join.join_type() {
-                    JoinType::Mark(mark_column) => {
-                        let mut columns = join
-                            .outer()
-                            .output_schema(ctx)?
-                            .fields()
-                            .iter()
-                            .cloned()
-                            .collect_vec();
-                        let mark_meta = ctx.get_column_meta(mark_column);
-                        columns.push(Arc::new(Field::new(
-                            mark_meta.name.clone(),
-                            mark_meta.data_type.clone(),
-                            true,
-                        )));
-                        Ok(Schema::new(columns))
-                    }
-                    _ => {
-                        let columns = join
-                            .outer()
-                            .output_schema(ctx)?
-                            .fields()
-                            .iter()
-                            .chain(join.inner().output_schema(ctx)?.fields().iter())
-                            .cloned()
-                            .collect_vec();
-                        Ok(Schema::new(columns))
-                    }
-                }
+                compute_join_schema(join.outer(), join.inner(), join.join_type(), ctx)
             }
             OperatorKind::PhysicalNLJoin(meta) => {
                 let join = PhysicalNLJoin::borrow_raw_parts(meta, &self.common);
-                let columns = join
-                    .outer()
-                    .output_schema(ctx)?
-                    .fields()
-                    .iter()
-                    .chain(join.inner().output_schema(ctx)?.fields().iter())
-                    .cloned()
-                    .collect_vec();
-                Ok(Schema::new(columns))
+                compute_join_schema(join.outer(), join.inner(), join.join_type(), ctx)
             }
             OperatorKind::PhysicalHashJoin(meta) => {
                 let join = PhysicalHashJoin::borrow_raw_parts(meta, &self.common);
-                let columns = join
-                    .build_side()
-                    .output_schema(ctx)?
-                    .fields()
-                    .iter()
-                    .chain(join.probe_side().output_schema(ctx)?.fields().iter())
-                    .cloned()
-                    .collect_vec();
-                Ok(Schema::new(columns))
+                compute_join_schema(join.build_side(), join.probe_side(), join.join_type(), ctx)
             }
             OperatorKind::EnforcerSort(meta) => {
                 let sort = EnforcerSort::borrow_raw_parts(meta, &self.common);
@@ -267,8 +196,70 @@ impl Derive<OutputSchema> for crate::ir::Operator {
     }
 }
 
-impl crate::ir::Operator {
+impl Operator {
     pub fn output_schema(&self, ctx: &crate::ir::context::IRContext) -> Result<Schema> {
         self.get_property::<OutputSchema>(ctx)
     }
+}
+
+/// Computes the output schema for join operators based on their join type.
+/// This function handles different join types, adjusting the nullability
+/// of the fields accordingly and adding a mark field if necessary.
+fn compute_join_schema(
+    outer: &Operator,
+    inner: &Operator,
+    join_type: &JoinType,
+    ctx: &crate::ir::IRContext,
+) -> Result<Schema> {
+    let (outer_nullable, inner_nullable, mark_field) = match join_type {
+        JoinType::Inner => (false, false, None),
+        JoinType::Left => (false, true, None),
+        JoinType::Single => (false, true, None),
+        JoinType::Mark(mark_column) => {
+            let mark_meta = ctx.get_column_meta(mark_column);
+            (
+                false,
+                true,
+                Some(Arc::new(Field::new(
+                    mark_meta.name.clone(),
+                    mark_meta.data_type.clone(),
+                    true,
+                ))),
+            )
+        }
+    };
+
+    let inner_schema = inner.output_schema(ctx)?;
+    let outer_schema = outer.output_schema(ctx)?;
+
+    let map_all_fields_to_nullable = |schema: &Schema| {
+        Schema::new(
+            schema
+                .fields()
+                .iter()
+                .map(|x| Arc::new(Field::new(x.name().clone(), x.data_type().clone(), true)))
+                .collect_vec(),
+        )
+    };
+
+    let outer_schema = if outer_nullable {
+        map_all_fields_to_nullable(&outer_schema)
+    } else {
+        outer_schema
+    };
+    let inner_schema = if inner_nullable {
+        map_all_fields_to_nullable(&inner_schema)
+    } else {
+        inner_schema
+    };
+
+    Ok(Schema::new(
+        outer_schema
+            .fields()
+            .iter()
+            .cloned()
+            .chain(inner_schema.fields().iter().cloned())
+            .chain(mark_field.into_iter())
+            .collect_vec(),
+    ))
 }
