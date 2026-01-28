@@ -75,28 +75,28 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                         let mut columns = join
                             .outer()
                             .output_schema(ctx)?
-                            .columns()
+                            .fields()
                             .iter()
                             .cloned()
                             .collect_vec();
                         let mark_meta = ctx.get_column_meta(mark_column);
                         columns.push(Arc::new(Field::new(
                             mark_meta.name.clone(),
-                            mark_meta.data_type,
+                            mark_meta.data_type.clone(),
                             true,
                         )));
-                        Some(Schema::new(columns))
+                        Ok(Schema::new(columns))
                     }
                     _ => {
                         let columns = join
                             .outer()
                             .output_schema(ctx)?
-                            .columns()
+                            .fields()
                             .iter()
-                            .chain(join.inner().output_schema(ctx)?.columns().iter())
+                            .chain(join.inner().output_schema(ctx)?.fields().iter())
                             .cloned()
                             .collect_vec();
-                        Some(Schema::new(columns))
+                        Ok(Schema::new(columns))
                     }
                 }
             }
@@ -107,28 +107,28 @@ impl Derive<OutputSchema> for crate::ir::Operator {
                         let mut columns = join
                             .outer()
                             .output_schema(ctx)?
-                            .columns()
+                            .fields()
                             .iter()
                             .cloned()
                             .collect_vec();
                         let mark_meta = ctx.get_column_meta(mark_column);
                         columns.push(Arc::new(Field::new(
                             mark_meta.name.clone(),
-                            mark_meta.data_type,
+                            mark_meta.data_type.clone(),
                             true,
                         )));
-                        Some(Schema::new(columns))
+                        Ok(Schema::new(columns))
                     }
                     _ => {
                         let columns = join
                             .outer()
                             .output_schema(ctx)?
-                            .columns()
+                            .fields()
                             .iter()
-                            .chain(join.inner().output_schema(ctx)?.columns().iter())
+                            .chain(join.inner().output_schema(ctx)?.fields().iter())
                             .cloned()
                             .collect_vec();
-                        Some(Schema::new(columns))
+                        Ok(Schema::new(columns))
                     }
                 }
             }
