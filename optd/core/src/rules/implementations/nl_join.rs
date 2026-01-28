@@ -1,7 +1,7 @@
 use crate::ir::{
     OperatorKind,
     convert::IntoOperator,
-    operator::{LogicalJoin, PhysicalNLJoin},
+    operator::{LogicalJoin, PhysicalNLJoin, join::JoinType},
     rule::{OperatorPattern, Rule},
 };
 
@@ -17,8 +17,13 @@ impl Default for LogicalJoinAsPhysicalNLJoinRule {
 
 impl LogicalJoinAsPhysicalNLJoinRule {
     pub fn new() -> Self {
-        let pattern =
-            OperatorPattern::with_top_matches(|kind| matches!(kind, OperatorKind::LogicalJoin(_)));
+        let pattern = OperatorPattern::with_top_matches(|kind| {
+            matches!(
+                kind,
+                OperatorKind::LogicalJoin(meta)
+                    if matches!(meta.join_type, JoinType::Inner | JoinType::Left)
+            )
+        });
         Self { pattern }
     }
 }

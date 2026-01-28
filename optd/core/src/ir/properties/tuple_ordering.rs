@@ -167,10 +167,12 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
             OperatorKind::Group(_) => None,
             OperatorKind::LogicalGet(_)
             | OperatorKind::LogicalJoin(_)
+            | OperatorKind::LogicalDependentJoin(_)
             | OperatorKind::LogicalProject(_)
             | OperatorKind::LogicalSelect(_)
             | OperatorKind::LogicalOrderBy(_)
-            | OperatorKind::LogicalAggregate(_) => {
+            | OperatorKind::LogicalAggregate(_)
+            | OperatorKind::LogicalSubquery(_) => {
                 assert_eq!(self.kind.category(), OperatorCategory::Logical);
                 None
             }

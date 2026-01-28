@@ -1,6 +1,6 @@
 use crate::ir::{
     IRContext, OperatorKind,
-    operator::{LogicalJoin, LogicalSelect},
+    operator::{LogicalJoin, LogicalSelect, join::JoinType},
     rule::{OperatorPattern, Rule},
 };
 
@@ -22,7 +22,13 @@ impl LogicalSelectJoinTransposeRule {
         });
         pattern.add_input_operator_pattern(
             INPUT,
-            OperatorPattern::with_top_matches(|kind| matches!(kind, OperatorKind::LogicalJoin(_))),
+            OperatorPattern::with_top_matches(|kind| {
+                matches!(
+                    kind,
+                    OperatorKind::LogicalJoin(meta)
+                        if matches!(meta.join_type, JoinType::Inner | JoinType::Left)
+                )
+            }),
         );
         Self { pattern }
     }

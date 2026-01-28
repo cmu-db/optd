@@ -4,8 +4,8 @@
 use crate::ir::{
     Column, ColumnSet, OperatorKind,
     operator::{
-        LogicalAggregate, LogicalGet, LogicalProject, LogicalRemap, PhysicalHashAggregate,
-        PhysicalProject, PhysicalTableScan,
+        LogicalAggregate, LogicalDependentJoin, LogicalGet, LogicalJoin, LogicalProject,
+        LogicalRemap, PhysicalHashAggregate, PhysicalProject, PhysicalTableScan, join::JoinType,
     },
     properties::{Derive, GetProperty, PropertyMarker},
     scalar::{ColumnAssign, ColumnRef, List},
@@ -45,13 +45,51 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                         .collect(),
                 )
             }
-            OperatorKind::LogicalJoin(_)
-            | OperatorKind::PhysicalNLJoin(_)
+            OperatorKind::LogicalJoin(meta) => {
+                let join = LogicalJoin::borrow_raw_parts(meta, &self.common);
+                match join.join_type() {
+                    JoinType::Mark(mark_column) => {
+                        let outer_columns = join.outer().output_columns(ctx);
+                        let set = outer_columns
+                            .iter()
+                            .cloned()
+                            .chain(std::iter::once(*mark_column))
+                            .collect();
+                        Arc::new(set)
+                    }
+                    _ => {
+                        let outer_columns = join.outer().output_columns(ctx);
+                        let inner_columns = join.inner().output_columns(ctx);
+                        Arc::new(outer_columns.as_ref() | inner_columns.as_ref())
+                    }
+                }
+            }
+            OperatorKind::LogicalDependentJoin(meta) => {
+                let join = LogicalDependentJoin::borrow_raw_parts(meta, &self.common);
+                match join.join_type() {
+                    JoinType::Mark(mark_column) => {
+                        let outer_columns = join.outer().output_columns(ctx);
+                        let set = outer_columns
+                            .iter()
+                            .cloned()
+                            .chain(std::iter::once(*mark_column))
+                            .collect();
+                        Arc::new(set)
+                    }
+                    _ => {
+                        let outer_columns = join.outer().output_columns(ctx);
+                        let inner_columns = join.inner().output_columns(ctx);
+                        Arc::new(outer_columns.as_ref() | inner_columns.as_ref())
+                    }
+                }
+            }
+            OperatorKind::PhysicalNLJoin(_)
             | OperatorKind::PhysicalHashJoin(_)
             | OperatorKind::LogicalSelect(_)
             | OperatorKind::PhysicalFilter(_)
             | OperatorKind::LogicalOrderBy(_)
-            | OperatorKind::EnforcerSort(_) => {
+            | OperatorKind::EnforcerSort(_)
+            | OperatorKind::LogicalSubquery(_) => {
                 let set =
                     self.input_operators()
                         .iter()

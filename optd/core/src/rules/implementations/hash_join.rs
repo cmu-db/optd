@@ -6,7 +6,7 @@ use crate::ir::{
     Column, IRContext, OperatorKind, Scalar,
     builder::boolean,
     convert::IntoScalar,
-    operator::{LogicalJoin, LogicalJoinBorrowed},
+    operator::{LogicalJoin, LogicalJoinBorrowed, join::JoinType},
     rule::{OperatorPattern, Rule},
     scalar::{BinaryOp, BinaryOpBorrowed, ColumnRef, NaryOp, NaryOpKind},
 };
@@ -25,8 +25,13 @@ type SplittedJoinConds = (Vec<(Column, Column)>, Vec<Arc<Scalar>>);
 
 impl LogicalJoinAsPhysicalHashJoinRule {
     pub fn new() -> Self {
-        let pattern =
-            OperatorPattern::with_top_matches(|kind| matches!(kind, OperatorKind::LogicalJoin(_)));
+        let pattern = OperatorPattern::with_top_matches(|kind| {
+            matches!(
+                kind,
+                OperatorKind::LogicalJoin(meta)
+                    if matches!(meta.join_type, JoinType::Inner | JoinType::Left)
+            )
+        });
         Self { pattern }
     }
 
