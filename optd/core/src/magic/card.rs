@@ -1,7 +1,7 @@
 use crate::ir::{
     Operator, Scalar,
-    operator::*,
     operator::join::JoinType,
+    operator::*,
     properties::{Cardinality, CardinalityEstimator},
     scalar::*,
 };
@@ -32,25 +32,23 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                 Self::MAGIC_JOIN_COND_SELECTIVITY
             }
         };
-        let estimate_join = |join_type: &JoinType,
-                             outer: &Operator,
-                             inner: &Operator,
-                             join_cond: &Scalar| {
-            let left_card = outer.cardinality(ctx);
-            let right_card = inner.cardinality(ctx);
-            match *join_type {
-                JoinType::Mark(_) => left_card,
-                JoinType::Single => {
-                    let selectivity = join_selectivity(join_cond);
-                    (selectivity * left_card * right_card)
-                        .map(|value| value.min(left_card.as_f64()))
+        let estimate_join =
+            |join_type: &JoinType, outer: &Operator, inner: &Operator, join_cond: &Scalar| {
+                let left_card = outer.cardinality(ctx);
+                let right_card = inner.cardinality(ctx);
+                match *join_type {
+                    JoinType::Mark(_) => left_card,
+                    JoinType::Single => {
+                        let selectivity = join_selectivity(join_cond);
+                        (selectivity * left_card * right_card)
+                            .map(|value| value.min(left_card.as_f64()))
+                    }
+                    _ => {
+                        let selectivity = join_selectivity(join_cond);
+                        selectivity * left_card * right_card
+                    }
                 }
-                _ => {
-                    let selectivity = join_selectivity(join_cond);
-                    selectivity * left_card * right_card
-                }
-            }
-        };
+            };
         match &op.kind {
             OperatorKind::Group(_) => {
                 // Relies on the normalized expression's cardinality estimation.
