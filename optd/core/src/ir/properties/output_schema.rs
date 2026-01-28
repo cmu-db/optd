@@ -259,7 +259,7 @@ fn compute_join_schema(
             .iter()
             .cloned()
             .chain(inner_schema.fields().iter().cloned())
-            .chain(mark_field.into_iter())
+            .chain(mark_field)
             .collect_vec(),
     ))
 }
