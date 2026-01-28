@@ -2,6 +2,7 @@ mod catalog;
 mod extension;
 mod planner;
 mod table;
+mod value;
 
 use std::sync::Arc;
 
@@ -9,6 +10,9 @@ pub use catalog::{OptdCatalogProvider, OptdCatalogProviderList, OptdSchemaProvid
 pub use extension::{OptdExtension, OptdExtensionConfig};
 pub use planner::OptdQueryPlanner;
 pub use table::{OptdTable, OptdTableProvider};
+
+pub use optd_core::error::Error as OptdError;
+pub use optd_core::error::Result as OptdResult;
 
 pub trait SessionStateBuilderOptdExt: Sized {
     fn with_optd_planner(self) -> Self;

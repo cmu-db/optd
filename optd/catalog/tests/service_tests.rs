@@ -167,9 +167,9 @@ async fn test_current_schema_with_table() {
     );
 
     // Verify field order matches CREATE TABLE order
-    assert_eq!(schema.fields()[0].name(), "id");
-    assert_eq!(schema.fields()[1].name(), "name");
-    assert_eq!(schema.fields()[2].name(), "age");
+    assert_eq!(schema.field(0).name(), "id");
+    assert_eq!(schema.field(1).name(), "name");
+    assert_eq!(schema.field(2).name(), "age");
 
     handle.shutdown().await.unwrap();
 }

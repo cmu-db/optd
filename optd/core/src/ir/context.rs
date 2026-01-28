@@ -49,9 +49,12 @@ impl IRContext {
             Entry::Vacant(vacant) => {
                 let mut column_meta = self.column_meta.lock().unwrap();
                 let columns = schema
-                    .columns()
+                    .fields()
                     .iter()
-                    .map(|field| column_meta.new_column(field.data_type, Some(field.name.clone())))
+                    .map(|field| {
+                        column_meta
+                            .new_column(field.data_type().clone(), Some(field.name().clone()))
+                    })
                     .collect_vec();
                 vacant.insert(columns[0]);
                 columns[0]

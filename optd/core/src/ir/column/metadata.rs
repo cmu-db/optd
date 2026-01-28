@@ -61,7 +61,7 @@ impl ColumnMetaStore {
             None => {
                 *x = Arc::new(ColumnMeta {
                     name: alias.clone(),
-                    data_type: x.data_type,
+                    data_type: x.data_type.clone(),
                 })
             }
         }

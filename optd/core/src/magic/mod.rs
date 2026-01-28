@@ -14,6 +14,7 @@ use crate::ir::{DataType, catalog::*};
 pub use card::MagicCardinalityEstimator;
 pub use cat::MagicCatalog;
 pub use cm::MagicCostModel;
+use itertools::Itertools;
 
 use crate::ir::IRContext;
 
@@ -36,9 +37,9 @@ impl IRContext {
     pub fn with_course_tables() -> Self {
         let catalog = MagicCatalog::default();
         let course = {
-            let schema = Arc::new(Schema::from_iter([
-                ("course.id".to_string(), DataType::Int32, false),
-                ("course.credit".to_string(), DataType::Int32, false),
+            let schema = Arc::new(Schema::new(vec![
+                Field::new("course.id".to_string(), DataType::Int32, false),
+                Field::new("course.credit".to_string(), DataType::Int32, false),
             ]));
 
             catalog
@@ -48,10 +49,10 @@ impl IRContext {
         catalog.set_table_row_count(course, 10);
 
         let schedule = {
-            let schema = Arc::new(Schema::from_iter([
-                ("schedule.day_of_week".to_string(), DataType::Int32, false),
-                ("schedule.course_id".to_string(), DataType::Int32, false),
-                ("schedule.has_lecture".to_string(), DataType::Boolean, false),
+            let schema = Arc::new(Schema::new(vec![
+                Field::new("schedule.day_of_week".to_string(), DataType::Int32, false),
+                Field::new("schedule.course_id".to_string(), DataType::Int32, false),
+                Field::new("schedule.has_lecture".to_string(), DataType::Boolean, false),
             ]));
 
             catalog
@@ -61,11 +62,11 @@ impl IRContext {
         catalog.set_table_row_count(schedule, 25);
 
         let staff = {
-            let schema = Arc::new(Schema::from_iter([
-                ("staff.id".to_string(), DataType::Int32, false),
-                ("staff.oh_day_of_week".to_string(), DataType::Int32, false),
-                ("staff.course_id".to_string(), DataType::Int32, false),
-                ("staff.oh_length".to_string(), DataType::Int32, false),
+            let schema = Arc::new(Schema::new(vec![
+                Field::new("staff.id".to_string(), DataType::Int32, false),
+                Field::new("staff.oh_day_of_week".to_string(), DataType::Int32, false),
+                Field::new("staff.course_id".to_string(), DataType::Int32, false),
+                Field::new("staff.oh_length".to_string(), DataType::Int32, false),
             ]));
 
             catalog
@@ -80,9 +81,12 @@ impl IRContext {
         let catalog = MagicCatalog::default();
 
         let create_numbered_table = |table_name: String, width: usize, row_count: usize| {
-            let iter = (1..=width)
-                .map(|column_no| (format!("{table_name}.v{column_no}"), DataType::Int32, false));
-            let schema = Arc::new(Schema::from_iter(iter));
+            let fields = (1..=width)
+                .map(|column_no| {
+                    Field::new(format!("{table_name}.v{column_no}"), DataType::Int32, false)
+                })
+                .collect_vec();
+            let schema = Arc::new(Schema::new(fields));
             let table_id = catalog.try_create_table(table_name, schema).unwrap();
             catalog.set_table_row_count(table_id, row_count);
         };

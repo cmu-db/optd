@@ -33,10 +33,12 @@ use datafusion::{
 use itertools::{Either, Itertools};
 use optd_core::{
     cascades::Cascades,
+    connector_err,
+    error::Result as OptdResult,
     ir::{
         IRContext, Scalar,
-        builder::{self as optd_builder, column_assign, column_ref, list},
-        catalog::Field,
+        builder::{self as optd_builder, column_assign, column_ref, list, literal},
+        catalog::{Field, Schema},
         convert::{IntoOperator, IntoScalar},
         explain::quick_explain,
         operator::{
@@ -52,9 +54,13 @@ use optd_core::{
     },
     rules,
 };
+use snafu::{OptionExt, ResultExt};
 use tracing::{info, warn};
 
-use crate::OptdExtensionConfig;
+use crate::{
+    OptdExtensionConfig,
+    value::{from_optd_value, try_into_optd_value},
+};
 
 #[derive(Default)]
 pub struct OptdQueryPlanner {
@@ -84,7 +90,7 @@ impl OptdQueryPlanner {
         df_logical: &LogicalPlan,
         ctx: &IRContext,
         session_state: &SessionState,
-    ) -> Option<Arc<optd_core::ir::Operator>> {
+    ) -> OptdResult<Arc<optd_core::ir::Operator>> {
         match df_logical {
             LogicalPlan::TableScan(table_scan) => {
                 self.try_into_optd_logical_get(table_scan, ctx, session_state)
@@ -115,8 +121,7 @@ impl OptdQueryPlanner {
                     .await
             }
             plan => {
-                info!(%plan, "not supported df_logical_plan");
-                None
+                connector_err!("Unsupported DataFusion logical plan: {:?}", plan);
             }
         }
     }
@@ -126,7 +131,7 @@ impl OptdQueryPlanner {
         node: &logical_plan::Sort,
         ctx: &IRContext,
         session_state: &SessionState,
-    ) -> Option<Arc<optd_core::ir::Operator>> {
+    ) -> OptdResult<Arc<optd_core::ir::Operator>> {
         let input =
             Box::pin(self.try_into_optd_logical_plan(&node.input, ctx, session_state)).await?;
         let ordering_exprs = Box::pin(self.try_into_optd_ordering_exprs(
@@ -137,7 +142,7 @@ impl OptdQueryPlanner {
         ))
         .await?;
 
-        Some(LogicalOrderBy::new(input, ordering_exprs).into_operator())
+        Ok(LogicalOrderBy::new(input, ordering_exprs).into_operator())
     }
 
     pub async fn try_into_optd_logical_remap(
@@ -145,7 +150,7 @@ impl OptdQueryPlanner {
         node: &logical_plan::SubqueryAlias,
         ctx: &IRContext,
         session_state: &SessionState,
-    ) -> Option<Arc<optd_core::ir::Operator>> {
+    ) -> OptdResult<Arc<optd_core::ir::Operator>> {
         let input =
             Box::pin(self.try_into_optd_logical_plan(&node.input, ctx, session_state)).await?;
 
@@ -155,13 +160,21 @@ impl OptdQueryPlanner {
         for (field, remapped_column_name) in
             node.schema.fields().iter().zip(node.schema.field_names())
         {
-            let (index, _) = node.input.schema().fields().find(field.name())?;
-            let optd_field = &input_schema.columns()[index];
-            let column = ctx.column_by_name(&optd_field.name)?;
-            let mapped = ctx.define_column(optd_field.data_type, Some(remapped_column_name));
+            let (index, _) = node
+                .input
+                .schema()
+                .fields()
+                .find(field.name())
+                .whatever_context("cannot find field name in the input schema")?;
+            let optd_field = &input_schema.fields[index];
+            let column = ctx
+                .column_by_name(optd_field.name())
+                .whatever_context("cannot find column by name in ctx")?;
+            let mapped =
+                ctx.define_column(optd_field.data_type().clone(), Some(remapped_column_name));
             mappings.push(column_assign(mapped, column_ref(column)));
         }
-        Some(LogicalRemap::new(input, list(mappings)).into_operator())
+        Ok(LogicalRemap::new(input, list(mappings)).into_operator())
     }
 
     pub async fn try_into_optd_ordering_exprs(
@@ -170,7 +183,7 @@ impl OptdQueryPlanner {
         input_schema: &DFSchema,
         ctx: &IRContext,
         session_state: &SessionState,
-    ) -> Option<Vec<(Arc<Scalar>, TupleOrderingDirection)>> {
+    ) -> OptdResult<Vec<(Arc<Scalar>, TupleOrderingDirection)>> {
         // TODO(yuchen) support NULL first / last.
         let mut ordering_exprs = Vec::with_capacity(sort_exprs.len());
         for sort_expr in sort_exprs {
@@ -188,7 +201,7 @@ impl OptdQueryPlanner {
             };
             ordering_exprs.push((expr, direction))
         }
-        Some(ordering_exprs)
+        Ok(ordering_exprs)
     }
 
     pub async fn try_into_optd_logical_aggregate(
@@ -196,7 +209,7 @@ impl OptdQueryPlanner {
         node: &logical_plan::Aggregate,
         ctx: &IRContext,
         session_state: &SessionState,
-    ) -> Option<Arc<optd_core::ir::Operator>> {
+    ) -> OptdResult<Arc<optd_core::ir::Operator>> {
         let input =
             Box::pin(self.try_into_optd_logical_plan(&node.input, ctx, session_state)).await?;
 
@@ -218,7 +231,7 @@ impl OptdQueryPlanner {
         ))
         .await?;
 
-        Some(input.logical_aggregate(exprs, keys))
+        Ok(input.logical_aggregate(exprs, keys))
     }
 
     pub async fn try_into_optd_expr_list(
@@ -228,7 +241,7 @@ impl OptdQueryPlanner {
         should_project: bool,
         ctx: &IRContext,
         session_state: &SessionState,
-    ) -> Option<Vec<Arc<Scalar>>> {
+    ) -> OptdResult<Vec<Arc<Scalar>>> {
         let mut expr_list = Vec::with_capacity(exprs.len());
         for maybe_aliased in exprs {
             let unaliased = match maybe_aliased {
@@ -241,14 +254,16 @@ impl OptdQueryPlanner {
                 .await?;
 
             let expr = if should_project {
-                let name = maybe_aliased.name_for_alias().ok()?;
+                let name = maybe_aliased
+                    .name_for_alias()
+                    .whatever_context("failed to get DataFusion name for alias")?;
                 let data_type = maybe_aliased.get_type(input_schema).unwrap();
                 let column = if let Ok(column_ref) = optd_expr.try_borrow::<ColumnRef>() {
                     let column = *column_ref.column();
                     ctx.rename_column_alias(column, name);
                     column
                 } else {
-                    ctx.define_column(into_optd_data_type(data_type)?, Some(name))
+                    ctx.define_column(data_type.clone(), Some(name))
                 };
                 column_assign(column, optd_expr)
             } else {
@@ -257,7 +272,7 @@ impl OptdQueryPlanner {
 
             expr_list.push(expr);
         }
-        Some(expr_list)
+        Ok(expr_list)
     }
 
     pub async fn try_into_optd_logical_project(
@@ -265,7 +280,7 @@ impl OptdQueryPlanner {
         node: &logical_plan::Projection,
         ctx: &IRContext,
         session_state: &SessionState,
-    ) -> Option<Arc<optd_core::ir::Operator>> {
+    ) -> OptdResult<Arc<optd_core::ir::Operator>> {
         let input =
             Box::pin(self.try_into_optd_logical_plan(&node.input, ctx, session_state)).await?;
 
@@ -278,7 +293,7 @@ impl OptdQueryPlanner {
         ))
         .await?;
 
-        Some(input.logical_project(projections))
+        Ok(input.logical_project(projections))
     }
 
     pub async fn try_into_optd_logical_join(
@@ -286,11 +301,11 @@ impl OptdQueryPlanner {
         node: &logical_plan::Join,
         ctx: &IRContext,
         session_state: &SessionState,
-    ) -> Option<Arc<optd_core::ir::Operator>> {
+    ) -> OptdResult<Arc<optd_core::ir::Operator>> {
         let join_type = match node.join_type {
             logical_expr::JoinType::Inner => optd_core::ir::operator::join::JoinType::Inner,
             logical_expr::JoinType::Left => optd_core::ir::operator::join::JoinType::Left,
-            _ => return None,
+            v => connector_err!("Unsupported join type: {:?}", v),
         };
         let left =
             Box::pin(self.try_into_optd_logical_plan(&node.left, ctx, session_state)).await?;
@@ -325,7 +340,7 @@ impl OptdQueryPlanner {
 
         let join_cond = NaryOp::new(NaryOpKind::And, terms.into()).into_scalar();
 
-        Some(left.logical_join(right, join_cond, join_type))
+        Ok(left.logical_join(right, join_cond, join_type))
     }
 
     pub async fn try_into_optd_logical_select(
@@ -333,7 +348,7 @@ impl OptdQueryPlanner {
         node: &logical_plan::Filter,
         ctx: &IRContext,
         session_state: &SessionState,
-    ) -> Option<Arc<optd_core::ir::Operator>> {
+    ) -> OptdResult<Arc<optd_core::ir::Operator>> {
         let input =
             Box::pin(self.try_into_optd_logical_plan(&node.input, ctx, session_state)).await?;
         let predicate = Box::pin(self.try_into_optd_scalar(
@@ -344,7 +359,7 @@ impl OptdQueryPlanner {
         ))
         .await?;
 
-        Some(input.logical_select(predicate))
+        Ok(input.logical_select(predicate))
     }
 
     pub async fn try_from_optd_expr_list(
@@ -424,15 +439,7 @@ impl OptdQueryPlanner {
             optd_core::ir::ScalarKind::Literal(meta) => {
                 let literal =
                     optd_core::ir::scalar::Literal::borrow_raw_parts(meta, &optd_scalar.common);
-                let value = match literal.value() {
-                    optd_core::ir::ScalarValue::Int32(v) => (*v).into(),
-                    optd_core::ir::ScalarValue::Int64(v) => (*v).into(),
-                    optd_core::ir::ScalarValue::Boolean(v) => (*v).into(),
-                    optd_core::ir::ScalarValue::Utf8(v) => v.as_deref().into(),
-                    optd_core::ir::ScalarValue::Utf8View(v) => {
-                        datafusion::scalar::ScalarValue::Utf8View(v.clone())
-                    }
-                };
+                let value = from_optd_value(literal.value().clone());
                 Ok(logical_expr::Expr::Literal(value, None))
             }
             optd_core::ir::ScalarKind::ColumnRef(meta) => {
@@ -491,10 +498,7 @@ impl OptdQueryPlanner {
                 let cast = Cast::borrow_raw_parts(meta, &optd_scalar.common);
                 let expr =
                     Box::pin(self.try_from_optd_scalar(cast.expr(), ctx, session_state)).await?;
-                Ok(logical_expr::cast(
-                    expr,
-                    from_optd_data_type(*cast.data_type()),
-                ))
+                Ok(logical_expr::cast(expr, cast.data_type().clone()))
             }
             optd_core::ir::ScalarKind::Function(_) => todo!(),
             optd_core::ir::ScalarKind::ColumnAssign(_) => todo!(),
@@ -522,35 +526,15 @@ impl OptdQueryPlanner {
         input_schema: &DFSchema,
         ctx: &IRContext,
         session_state: &SessionState,
-    ) -> Option<Arc<optd_core::ir::Scalar>> {
+    ) -> OptdResult<Arc<optd_core::ir::Scalar>> {
         match node {
-            logical_expr::Expr::Column(column) => Some(column_ref({
+            logical_expr::Expr::Column(column) => Ok(column_ref({
                 let column_name = column.flat_name();
                 ctx.column_by_name(column_name.as_str())
                     .unwrap_or_else(|| panic!("{column_name} not found"))
             })),
 
-            logical_expr::Expr::Literal(v, _) => match v {
-                datafusion::scalar::ScalarValue::Boolean(v) => {
-                    Some(optd_core::ir::builder::boolean(*v))
-                }
-                datafusion::scalar::ScalarValue::Int32(v) => {
-                    Some(optd_core::ir::builder::integer(*v))
-                }
-                datafusion::scalar::ScalarValue::Int64(v) => {
-                    Some(optd_core::ir::builder::bigint(*v))
-                }
-                datafusion::scalar::ScalarValue::Utf8(v) => {
-                    Some(optd_core::ir::builder::utf8(v.as_deref()))
-                }
-                datafusion::scalar::ScalarValue::Utf8View(v) => {
-                    Some(optd_core::ir::builder::utf8_view(v.as_deref()))
-                }
-                value => {
-                    info!(?value, "unhandled scalar value");
-                    None
-                }
-            },
+            logical_expr::Expr::Literal(v, _) => Ok(literal(try_into_optd_value(v.clone())?)),
             logical_expr::Expr::BinaryExpr(binary_expr) => {
                 let op_kind = match &binary_expr.op {
                     logical_expr::Operator::Eq => {
@@ -590,8 +574,7 @@ impl OptdQueryPlanner {
                         Either::Right(optd_core::ir::scalar::NaryOpKind::Or)
                     }
                     op => {
-                        info!(?op, "unhandled binary expr");
-                        return None;
+                        connector_err!("Unsupported binary expr op: {:?}", op);
                     }
                 };
 
@@ -611,8 +594,8 @@ impl OptdQueryPlanner {
                 .await?;
 
                 match op_kind {
-                    Either::Left(op_kind) => Some(left.binary_op(right, op_kind)),
-                    Either::Right(op_kind) => Some(left.nary_op(right, op_kind)),
+                    Either::Left(op_kind) => Ok(left.binary_op(right, op_kind)),
+                    Either::Right(op_kind) => Ok(left.nary_op(right, op_kind)),
                 }
             }
             logical_expr::Expr::Alias(alias) => {
@@ -636,13 +619,9 @@ impl OptdQueryPlanner {
                     .map(|x| x.to_field(input_schema).unwrap().1.data_type().clone())
                     .collect_vec();
                 let return_type = agg_func.func.return_type(&input_types).unwrap();
-                Some(
-                    Function::new_aggregate(
-                        func_name.to_string(),
-                        params.into(),
-                        into_optd_data_type(return_type)?,
-                    )
-                    .into_scalar(),
+                Ok(
+                    Function::new_aggregate(func_name.to_string(), params.into(), return_type)
+                        .into_scalar(),
                 )
             }
             logical_expr::Expr::Cast(cast) => {
@@ -653,10 +632,7 @@ impl OptdQueryPlanner {
                     session_state,
                 ))
                 .await?;
-                Some(optd_builder::cast(
-                    input,
-                    into_optd_data_type(cast.data_type.clone())?,
-                ))
+                Ok(optd_builder::cast(input, cast.data_type.clone()))
             }
             logical_expr::Expr::Like(like) => {
                 let expr = Box::pin(self.try_into_optd_scalar(
@@ -674,7 +650,7 @@ impl OptdQueryPlanner {
                 ))
                 .await?;
 
-                Some(optd_builder::like(
+                Ok(optd_builder::like(
                     expr,
                     pattern,
                     like.negated,
@@ -683,8 +659,7 @@ impl OptdQueryPlanner {
                 ))
             }
             expr => {
-                info!(?expr, "unhandled df logical expr");
-                None
+                connector_err!("Unsupported df logical expr: {:?}", expr);
             }
         }
     }
@@ -694,7 +669,7 @@ impl OptdQueryPlanner {
         node: &logical_plan::TableScan,
         ctx: &IRContext,
         session_state: &SessionState,
-    ) -> Option<Arc<optd_core::ir::Operator>> {
+    ) -> OptdResult<Arc<optd_core::ir::Operator>> {
         let table_name = node
             .table_name
             .clone()
@@ -709,8 +684,6 @@ impl OptdQueryPlanner {
             .cat
             .try_create_table(table_name, schema.clone())
             .unwrap_or_else(|existing| existing);
-
-        info!(?source, ?schema);
         ctx.add_base_table_columns(source, &schema);
 
         let provider = source_as_provider(&node.source).unwrap();
@@ -733,7 +706,7 @@ impl OptdQueryPlanner {
             .projection
             .as_ref()
             .map(|x| x.iter().cloned().collect::<HashSet<_>>())
-            .unwrap_or((0..schema.columns().len()).collect());
+            .unwrap_or((0..schema.fields().len()).collect());
 
         let predicate = {
             let filters = node.filters.iter().collect_vec();
@@ -774,8 +747,7 @@ impl OptdQueryPlanner {
             None => x,
         };
 
-        info!("created optd logical get");
-        Some(x)
+        Ok(x)
     }
 
     pub async fn try_from_optd_physical_plan(
@@ -1310,64 +1282,34 @@ impl OptdQueryPlanner {
     }
 }
 
-fn into_optd_schema(df_schema: &DFSchema) -> Option<Arc<optd_core::ir::catalog::Schema>> {
+fn into_optd_schema(df_schema: &DFSchema) -> OptdResult<Arc<optd_core::ir::catalog::Schema>> {
     let x = df_schema
         .columns()
         .iter()
         .zip(df_schema.as_arrow().fields())
         .map(|(column, f)| {
-            let data_type = into_optd_data_type(f.data_type().clone())?;
-            Some(Arc::new(Field::new(
+            Ok(Arc::new(Field::new(
                 column.flat_name(),
-                data_type,
+                f.data_type().clone(),
                 f.is_nullable(),
             )))
         })
-        .collect::<Option<_>>()?;
-    Some(Arc::new(x))
-}
-
-fn into_optd_data_type(
-    data_type: datafusion::arrow::datatypes::DataType,
-) -> Option<optd_core::ir::DataType> {
-    match data_type {
-        datafusion::arrow::datatypes::DataType::Boolean => Some(optd_core::ir::DataType::Boolean),
-        datafusion::arrow::datatypes::DataType::Int32 => Some(optd_core::ir::DataType::Int32),
-        datafusion::arrow::datatypes::DataType::Int64 => Some(optd_core::ir::DataType::Int64),
-        datafusion::arrow::datatypes::DataType::Utf8 => Some(optd_core::ir::DataType::Utf8),
-        datafusion::arrow::datatypes::DataType::Utf8View => Some(optd_core::ir::DataType::Utf8View),
-        data_type => {
-            info!(?data_type, "unsupported df data type");
-            None
-        }
-    }
-}
-
-fn from_optd_data_type(
-    data_type: optd_core::ir::DataType,
-) -> datafusion::arrow::datatypes::DataType {
-    match data_type {
-        optd_core::ir::DataType::Int32 => datafusion::arrow::datatypes::DataType::Int32,
-        optd_core::ir::DataType::Int64 => datafusion::arrow::datatypes::DataType::Int64,
-        optd_core::ir::DataType::Boolean => datafusion::arrow::datatypes::DataType::Boolean,
-        optd_core::ir::DataType::Utf8 => datafusion::arrow::datatypes::DataType::Utf8,
-        optd_core::ir::DataType::Utf8View => datafusion::arrow::datatypes::DataType::Utf8View,
-    }
+        .collect::<OptdResult<Vec<_>>>()?;
+    Ok(Arc::new(Schema::new(x)))
 }
 
 fn from_optd_schema(schema: &optd_core::ir::catalog::Schema) -> Arc<DFSchema> {
     let mut builder = datafusion::arrow::datatypes::SchemaBuilder::new();
     let qualifiers = schema
-        .columns()
+        .fields()
         .iter()
         .map(|f| {
-            let column = datafusion::prelude::Column::from_qualified_name(f.name.clone());
+            let column = datafusion::prelude::Column::from_qualified_name(f.name().clone());
 
-            let data_type = from_optd_data_type(f.data_type);
             builder.push(Arc::new(datafusion::arrow::datatypes::Field::new(
                 column.name,
-                data_type,
-                f.nullable,
+                f.data_type().clone(),
+                f.is_nullable(),
             )));
             column.relation
         })
@@ -1452,15 +1394,16 @@ impl OptdQueryPlanner {
             _ => (logical_plan, None),
         };
 
-        let res = self
+        let optd_logical = self
             .try_into_optd_logical_plan(actual_logical_plan, &ctx, session_state)
-            .await;
+            .await
+            .map_err(|e| DataFusionError::External(e.into()))?;
 
-        let Some(optd_logical) = res else {
-            return self
-                .create_physical_plan_default(logical_plan, session_state)
-                .await;
-        };
+        // let Ok(optd_logical) = res else {
+        //     return self
+        //         .create_physical_plan_default(logical_plan, session_state)
+        //         .await;
+        // };
 
         let rule_set = RuleSet::builder()
             .add_rule(rules::LogicalGetAsPhysicalTableScanRule::new())
@@ -1488,15 +1431,9 @@ impl OptdQueryPlanner {
         }
         info!("got a plan:\n{}", quick_explain(&optd_physical, &opt.ctx));
 
-        let res = self
+        let physical_plan = self
             .try_from_optd_physical_plan(&optd_physical, &opt.ctx, session_state)
-            .await;
-        let Ok(physical_plan) = res else {
-            info!(?res);
-            return self
-                .create_physical_plan_default(logical_plan, session_state)
-                .await;
-        };
+            .await?;
 
         info!("Converted into df");
 
@@ -1575,8 +1512,6 @@ impl OptdQueryPlanner {
         logical_plan: &LogicalPlan,
         session_state: &SessionState,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-        warn!(node = %logical_plan, "not yet supported in optd, fallback to default planner");
-
         return self
             .default
             .create_physical_plan(logical_plan, session_state)
@@ -1599,11 +1534,22 @@ impl QueryPlanner for OptdQueryPlanner {
         Self: 'ret,
     {
         Box::pin(async {
-            let plan = self
+            let res = self
                 .create_physical_plan_inner(logical_plan, session_state)
-                .await?;
+                .await;
 
-            Ok(plan)
+            match res {
+                Err(e) => {
+                    eprintln!(
+                        "optd planner does not support this query yet, fallback to default planner:"
+                    );
+                    warn!(error = %e);
+                    return self
+                        .create_physical_plan_default(logical_plan, session_state)
+                        .await;
+                }
+                Ok(plan) => Ok(plan),
+            }
         })
     }
 }

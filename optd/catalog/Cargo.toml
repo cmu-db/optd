@@ -7,7 +7,7 @@ repository.workspace = true
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 duckdb = { version = "1.4.3", features = ["bundled"] }
-snafu = "0.8.6"
+snafu = { workspace = true }
 serde_json = "1.0"
 tokio = { workspace = true, features = ["sync", "rt-multi-thread"] }
 
