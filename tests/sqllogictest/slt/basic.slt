@@ -1,0 +1,12 @@
+statement ok
+CREATE TABLE t1(v1 int);
+
+statement ok
+INSERT INTO TABLE t1 VALUES (0), (1), (2);
+
+query
+SELECT v1 FROM t1;
+----
+0
+1
+2

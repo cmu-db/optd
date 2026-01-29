@@ -5,9 +5,9 @@ edition.workspace = true
 repository.workspace = true
 
 [dependencies]
-anyhow = "1.0.98"
+anyhow = { workspace = true }
 bitvec = "1.0.1"
-itertools = "0.14.0"
+itertools = { workspace = true }
 pretty-xmlish = "0.1.13"
 snafu = { workspace = true }
 tokio = { workspace = true, features = [

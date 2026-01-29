@@ -121,7 +121,7 @@ impl OptdQueryPlanner {
                     .await
             }
             plan => {
-                connector_err!("Unsupported DataFusion logical plan: {:?}", plan);
+                connector_err!("Unsupported DataFusion logical plan: {}", plan);
             }
         }
     }
@@ -305,7 +305,7 @@ impl OptdQueryPlanner {
         let join_type = match node.join_type {
             logical_expr::JoinType::Inner => optd_core::ir::operator::join::JoinType::Inner,
             logical_expr::JoinType::Left => optd_core::ir::operator::join::JoinType::Left,
-            v => connector_err!("Unsupported join type: {:?}", v),
+            v => connector_err!("Unsupported join type: {}", v),
         };
         let left =
             Box::pin(self.try_into_optd_logical_plan(&node.left, ctx, session_state)).await?;
@@ -574,7 +574,7 @@ impl OptdQueryPlanner {
                         Either::Right(optd_core::ir::scalar::NaryOpKind::Or)
                     }
                     op => {
-                        connector_err!("Unsupported binary expr op: {:?}", op);
+                        connector_err!("Unsupported binary expr op: {}", op);
                     }
                 };
 
@@ -659,7 +659,7 @@ impl OptdQueryPlanner {
                 ))
             }
             expr => {
-                connector_err!("Unsupported df logical expr: {:?}", expr);
+                connector_err!("Unsupported df logical expr: {}", expr);
             }
         }
     }
@@ -1541,9 +1541,8 @@ impl QueryPlanner for OptdQueryPlanner {
             match res {
                 Err(e) => {
                     eprintln!(
-                        "optd planner does not support this query yet, fallback to default planner:"
+                        "optd planner does not support this query yet, fallback to default planner:\n{e}"
                     );
-                    warn!(error = %e);
                     return self
                         .create_physical_plan_default(logical_plan, session_state)
                         .await;

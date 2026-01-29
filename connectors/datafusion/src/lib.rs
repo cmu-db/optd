@@ -7,6 +7,16 @@ mod value;
 use std::sync::Arc;
 
 pub use catalog::{OptdCatalogProvider, OptdCatalogProviderList, OptdSchemaProvider};
+use datafusion::arrow::array::RecordBatch;
+use datafusion::common::plan_datafusion_err;
+use datafusion::config::ConfigOptions;
+use datafusion::error::DataFusionError;
+use datafusion::execution::SessionStateBuilder;
+use datafusion::execution::runtime_env::RuntimeEnv;
+use datafusion::prelude::SessionConfig;
+use datafusion::prelude::SessionContext;
+use datafusion::sql::parser::DFParser;
+use datafusion::sql::sqlparser::dialect::dialect_from_str;
 pub use extension::{OptdExtension, OptdExtensionConfig};
 pub use planner::OptdQueryPlanner;
 pub use table::{OptdTable, OptdTableProvider};
@@ -24,39 +34,81 @@ impl SessionStateBuilderOptdExt for datafusion::execution::SessionStateBuilder {
     }
 }
 
-/// Extension trait for DataFusion SessionContext to integrate optd catalog
-pub trait SessionContextOptdExt {
-    /// Creates a new SessionContext with optd catalog provider to enable lazy-loading
-    /// of external tables from the persistent catalog.
-    ///
-    /// # Example
-    /// ```ignore
-    /// let ctx = SessionContext::with_optd_catalog(catalog_handle);
-    /// ctx.sql("SELECT * FROM users").await?;
-    /// ```
-    fn with_optd_catalog(catalog_handle: optd_catalog::CatalogServiceHandle) -> Self;
+pub fn create_optd_session_context(
+    config: SessionConfig,
+    runtime: Arc<RuntimeEnv>,
+) -> SessionContext {
+    let config = config
+        .with_option_extension(OptdExtensionConfig::default())
+        .set_bool("optd.optd_enabled", true)
+        .with_default_catalog_and_schema("datafusion", "default");
+    let state = SessionStateBuilder::new()
+        .with_config(config)
+        .with_runtime_env(runtime)
+        .with_default_features()
+        .with_optd_planner()
+        .build();
+    SessionContext::new_with_state(state)
 }
 
-impl SessionContextOptdExt for datafusion::prelude::SessionContext {
-    fn with_optd_catalog(catalog_handle: optd_catalog::CatalogServiceHandle) -> Self {
-        use datafusion::execution::SessionStateBuilder;
+pub struct DataFusionDB {
+    ctx: SessionContext,
+}
 
-        // Create a default session state first
-        let default_ctx = Self::new();
-        let catalog_list = default_ctx.state().catalog_list().clone();
+impl DataFusionDB {
+    pub async fn new() -> Result<Self, DataFusionError> {
+        let config_options = ConfigOptions::from_env()?;
+        let config = SessionConfig::from(config_options).with_information_schema(true);
 
-        // Wrap it with OptdCatalogProviderList to enable catalog integration
-        let optd_catalog_list = Arc::new(OptdCatalogProviderList::new(
-            catalog_list,
-            Some(catalog_handle),
-        ));
+        let ctx = create_optd_session_context(config, Arc::new(RuntimeEnv::default()));
+        Ok(Self { ctx })
+    }
 
-        // Build new state with the wrapped catalog list
-        let state = SessionStateBuilder::new()
-            .with_default_features()
-            .with_catalog_list(Arc::clone(&optd_catalog_list) as _)
-            .build();
+    pub fn session_context(&self) -> &SessionContext {
+        &self.ctx
+    }
 
-        Self::new_with_state(state)
+    pub async fn execute_one(&self, sql: &str) -> Result<Vec<RecordBatch>, DataFusionError> {
+        self.execute_inner(sql, true).await
+    }
+
+    pub async fn execute(&self, sql: &str) -> Result<Vec<RecordBatch>, DataFusionError> {
+        self.execute_inner(sql, false).await
+    }
+
+    pub async fn execute_inner(
+        &self,
+        sql: &str,
+        single_stmt_check: bool,
+    ) -> Result<Vec<RecordBatch>, DataFusionError> {
+        let task_ctx = self.ctx.task_ctx();
+        let options = task_ctx.session_config().options();
+        let dialect = &options.sql_parser.dialect;
+
+        let statements = {
+            let dialect = dialect_from_str(dialect).ok_or_else(|| {
+                plan_datafusion_err!(
+                    "Unsupported SQL dialect: {dialect}. Available dialects: \
+                 Generic, MySQL, PostgreSQL, Hive, SQLite, Snowflake, Redshift, \
+                 MsSQL, ClickHouse, BigQuery, Ansi, DuckDB, Databricks."
+                )
+            })?;
+            DFParser::parse_sql_with_dialect(&sql, dialect.as_ref())?
+        };
+
+        if single_stmt_check && statements.len() != 1 {
+            panic!("Only support executing one statement at a time")
+        }
+
+        let mut results = Vec::new();
+        for statement in statements {
+            let plan = self.ctx.state().statement_to_plan(statement).await?;
+            let df = self.ctx.execute_logical_plan(plan).await?;
+            let task_ctx = Arc::new(df.task_ctx());
+            let physical_plan = df.create_physical_plan().await?;
+            let batches = datafusion::physical_plan::collect(physical_plan, task_ctx).await?;
+            results.extend(batches);
+        }
+        Ok(results)
     }
 }
