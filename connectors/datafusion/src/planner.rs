@@ -12,7 +12,9 @@ use datafusion::{
     datasource::{physical_plan::ParquetSource, source_as_provider},
     error::DataFusionError,
     execution::{SessionState, context::QueryPlanner},
-    logical_expr::{self, ExprSchemable, LogicalPlan, PlanType, StringifiedPlan, logical_plan},
+    logical_expr::{
+        self, ExprSchemable, LogicalPlan, PlanType, Statement, StringifiedPlan, logical_plan,
+    },
     physical_expr::{LexOrdering, aggregate::AggregateExprBuilder, create_physical_sort_expr},
     physical_plan::{
         ExecutionPlan,
@@ -670,10 +672,15 @@ impl OptdQueryPlanner {
         ctx: &IRContext,
         session_state: &SessionState,
     ) -> OptdResult<Arc<optd_core::ir::Operator>> {
+        let (default_catalog, default_schema) = (
+            &session_state.config_options().catalog.default_catalog,
+            &session_state.config_options().catalog.default_schema,
+        );
+
         let table_name = node
             .table_name
             .clone()
-            .resolve("datafusion", "default")
+            .resolve(default_catalog, default_schema)
             .to_string();
         let df_schema =
             DFSchema::try_from_qualified_schema(node.table_name.clone(), &node.source.schema())
@@ -783,7 +790,12 @@ impl OptdQueryPlanner {
                     session_state,
                 ))
                 .await?;
-                let input_schema = from_optd_schema(&physical.input().output_schema(ctx).unwrap());
+                let input_schema = from_optd_schema(
+                    &physical
+                        .input()
+                        .output_schema(ctx)
+                        .map_err(|x| DataFusionError::External(x.into()))?,
+                )?;
                 let predicate = self
                     .try_from_optd_scalar(physical.predicate(), ctx, session_state)
                     .await?;
@@ -818,8 +830,18 @@ impl OptdQueryPlanner {
                         ));
                     }
                 };
-                let left_dfschema = from_optd_schema(&join.outer().output_schema(ctx).unwrap());
-                let right_dfschema = from_optd_schema(&join.inner().output_schema(ctx).unwrap());
+                let left_dfschema = from_optd_schema(
+                    &join
+                        .outer()
+                        .output_schema(ctx)
+                        .map_err(|x| DataFusionError::External(x.into()))?,
+                )?;
+                let right_dfschema = from_optd_schema(
+                    &join
+                        .inner()
+                        .output_schema(ctx)
+                        .map_err(|x| DataFusionError::External(x.into()))?,
+                )?;
 
                 let join_cond =
                     Box::pin(self.try_from_optd_scalar(join.join_cond(), ctx, session_state))
@@ -927,10 +949,18 @@ impl OptdQueryPlanner {
                         ));
                     }
                 };
-                let build_side_dfschema =
-                    from_optd_schema(&join.build_side().output_schema(ctx).unwrap());
-                let probe_side_dfschema =
-                    from_optd_schema(&join.probe_side().output_schema(ctx).unwrap());
+                let build_side_dfschema = from_optd_schema(
+                    &join
+                        .build_side()
+                        .output_schema(ctx)
+                        .map_err(|x| DataFusionError::External(x.into()))?,
+                )?;
+                let probe_side_dfschema = from_optd_schema(
+                    &join
+                        .probe_side()
+                        .output_schema(ctx)
+                        .map_err(|x| DataFusionError::External(x.into()))?,
+                )?;
 
                 let mut join_on = Vec::with_capacity(join.keys().len());
                 for (l_col, r_col) in join.keys().iter() {
@@ -1052,8 +1082,12 @@ impl OptdQueryPlanner {
                 ))
                 .await?;
 
-                let input_logical_schema =
-                    from_optd_schema(&physical_project.input().output_schema(ctx).unwrap());
+                let input_logical_schema = from_optd_schema(
+                    &physical_project
+                        .input()
+                        .output_schema(ctx)
+                        .map_err(|x| DataFusionError::External(x.into()))?,
+                )?;
                 let projections = physical_project.projections().borrow::<List>();
 
                 let mut expr = Vec::with_capacity(projections.members().len());
@@ -1113,12 +1147,11 @@ impl OptdQueryPlanner {
 
                         tuple_err((final_physical_expr, physical_name))
                     })
-                    .collect::<datafusion::common::Result<Vec<_>>>()
-                    .unwrap();
+                    .collect::<datafusion::common::Result<Vec<_>>>()?;
 
                 warn!(name= %input_exec.name(), schema = ?input_exec.schema());
                 Ok(
-                    Arc::new(ProjectionExec::try_new(physical_exprs, input_exec).unwrap())
+                    Arc::new(ProjectionExec::try_new(physical_exprs, input_exec)?)
                         as Arc<dyn ExecutionPlan>,
                 )
             }
@@ -1128,7 +1161,11 @@ impl OptdQueryPlanner {
                     Box::pin(self.try_from_optd_physical_plan(agg.input(), ctx, session_state))
                         .await?;
 
-                let input_dfschema = from_optd_schema(&agg.input().output_schema(ctx).unwrap());
+                let input_dfschema = from_optd_schema(
+                    &agg.input()
+                        .output_schema(ctx)
+                        .map_err(|x| DataFusionError::External(x.into()))?,
+                )?;
                 let agg_exprs = Box::pin(self.try_from_optd_agg_exprs(
                     agg.exprs().borrow::<List>().members(),
                     &input_dfschema,
@@ -1164,8 +1201,7 @@ impl OptdQueryPlanner {
                         vec![None; agg_num],
                         input_exec,
                         schema,
-                    )
-                    .unwrap(),
+                    )?,
                 ) as Arc<dyn ExecutionPlan + 'static>)
             }
             OperatorKind::EnforcerSort(meta) => {
@@ -1173,7 +1209,12 @@ impl OptdQueryPlanner {
                 let input_exec =
                     Box::pin(self.try_from_optd_physical_plan(sort.input(), ctx, session_state))
                         .await?;
-                let input_dfschema = from_optd_schema(&sort.input().output_schema(ctx).unwrap());
+                let input_dfschema = from_optd_schema(
+                    &sort
+                        .input()
+                        .output_schema(ctx)
+                        .map_err(|x| DataFusionError::External(x.into()))?,
+                )?;
                 let mut physical_sort_exprs = Vec::with_capacity(sort.tuple_ordering().len());
 
                 for (column, direction) in sort.tuple_ordering().iter() {
@@ -1194,7 +1235,7 @@ impl OptdQueryPlanner {
                     physical_sort_exprs.push(physical_sort_expr);
                 }
                 Ok(Arc::new(SortExec::new(
-                    LexOrdering::new(physical_sort_exprs).unwrap(),
+                    LexOrdering::new(physical_sort_exprs).expect("Non-empty sort exprs"),
                     input_exec,
                 )) as Arc<dyn ExecutionPlan>)
             }
@@ -1205,8 +1246,12 @@ impl OptdQueryPlanner {
                     Box::pin(self.try_from_optd_physical_plan(remap.input(), ctx, session_state))
                         .await?;
 
-                let input_logical_schema =
-                    from_optd_schema(&remap.input().output_schema(ctx).unwrap());
+                let input_logical_schema = from_optd_schema(
+                    &remap
+                        .input()
+                        .output_schema(ctx)
+                        .map_err(|x| DataFusionError::External(x.into()))?,
+                )?;
                 let mappings = remap.mappings().borrow::<List>();
 
                 let mut expr = Vec::with_capacity(mappings.members().len());
@@ -1266,12 +1311,10 @@ impl OptdQueryPlanner {
 
                         tuple_err((final_physical_expr, physical_name))
                     })
-                    .collect::<datafusion::common::Result<Vec<_>>>()
-                    .unwrap();
+                    .collect::<datafusion::common::Result<Vec<_>>>()?;
 
-                // warn!(?input_exec);
                 Ok(
-                    Arc::new(ProjectionExec::try_new(physical_exprs, input_exec).unwrap())
+                    Arc::new(ProjectionExec::try_new(physical_exprs, input_exec)?)
                         as Arc<dyn ExecutionPlan>,
                 )
             }
@@ -1298,7 +1341,9 @@ fn into_optd_schema(df_schema: &DFSchema) -> OptdResult<Arc<optd_core::ir::catal
     Ok(Arc::new(Schema::new(x)))
 }
 
-fn from_optd_schema(schema: &optd_core::ir::catalog::Schema) -> Arc<DFSchema> {
+fn from_optd_schema(
+    schema: &optd_core::ir::catalog::Schema,
+) -> Result<Arc<DFSchema>, DataFusionError> {
     let mut builder = datafusion::arrow::datatypes::SchemaBuilder::new();
     let qualifiers = schema
         .fields()
@@ -1315,10 +1360,10 @@ fn from_optd_schema(schema: &optd_core::ir::catalog::Schema) -> Arc<DFSchema> {
         })
         .collect::<Vec<_>>();
 
-    Arc::new(
-        DFSchema::from_field_specific_qualified_schema(qualifiers, &Arc::new(builder.finish()))
-            .unwrap(),
-    )
+    Ok(Arc::new(DFSchema::from_field_specific_qualified_schema(
+        qualifiers,
+        &Arc::new(builder.finish()),
+    )?))
 }
 
 // Handle the case where the name of a physical column expression does not match the corresponding physical input fields names.
@@ -1374,18 +1419,15 @@ impl OptdQueryPlanner {
         logical_plan: &LogicalPlan,
         session_state: &SessionState,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-        match session_state
-            .config_options()
-            .extensions
-            .get::<OptdExtensionConfig>()
+        if let LogicalPlan::Dml(_)
+        | LogicalPlan::Ddl(_)
+        | LogicalPlan::EmptyRelation(_)
+        | LogicalPlan::Statement(Statement::SetVariable(_)) = logical_plan
         {
-            Some(config) if config.optd_enabled => (),
-            _ => {
-                return self
-                    .default
-                    .create_physical_plan(logical_plan, session_state)
-                    .await;
-            }
+            // Fallback to the datafusion planner for DML/DDL operations. optd currently do not handle this.
+            return self
+                .create_physical_plan_default(logical_plan, session_state)
+                .await;
         }
         let ctx = IRContext::with_empty_magic();
 
@@ -1441,10 +1483,12 @@ impl OptdQueryPlanner {
             let s = quick_explain(&optd_logical, &opt.ctx);
             x.stringified_plans.push(StringifiedPlan::new(
                 PlanType::OptimizedLogicalPlan {
-                    optimizer_name: "optd-conversion".to_string(),
+                    optimizer_name: "optd-initial".to_string(),
                 },
-                s,
+                s.clone(),
             ));
+            x.stringified_plans
+                .push(StringifiedPlan::new(PlanType::FinalLogicalPlan, s));
         }
 
         if let Some(x) = explain.as_mut() {
@@ -1533,19 +1577,38 @@ impl QueryPlanner for OptdQueryPlanner {
         'c: 'ret,
         Self: 'ret,
     {
-        Box::pin(async {
+        Box::pin(async move {
+            let (optd_enabled, optd_strict_mode) = {
+                session_state
+                    .config_options()
+                    .extensions
+                    .get::<OptdExtensionConfig>()
+                    .map(|conf| (conf.optd_enabled, conf.optd_strict_mode))
+                    .unwrap_or((true, false))
+            };
+
+            if !optd_enabled {
+                return self
+                    .create_physical_plan_default(logical_plan, session_state)
+                    .await;
+            }
+
             let res = self
                 .create_physical_plan_inner(logical_plan, session_state)
                 .await;
 
             match res {
                 Err(e) => {
-                    eprintln!(
-                        "optd planner does not support this query yet, fallback to default planner:\n{e}"
-                    );
-                    return self
-                        .create_physical_plan_default(logical_plan, session_state)
-                        .await;
+                    if optd_strict_mode {
+                        return Err(e);
+                    } else {
+                        eprintln!(
+                            "optd planner does not support this query yet, fallback to default planner:\n{e}"
+                        );
+                        return self
+                            .create_physical_plan_default(logical_plan, session_state)
+                            .await;
+                    }
                 }
                 Ok(plan) => Ok(plan),
             }

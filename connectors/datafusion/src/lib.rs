@@ -41,7 +41,7 @@ pub fn create_optd_session_context(
     let config = config
         .with_option_extension(OptdExtensionConfig::default())
         .set_bool("optd.optd_enabled", true)
-        .with_default_catalog_and_schema("datafusion", "default");
+        .set_bool("optd.optd_strict_mode", false);
     let state = SessionStateBuilder::new()
         .with_config(config)
         .with_runtime_env(runtime)

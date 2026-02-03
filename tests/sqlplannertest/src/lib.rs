@@ -72,8 +72,8 @@ impl sqlplannertest::PlannerTestRunner for PlannerTestDB {
                     let explained_output = result
                         .into_iter()
                         .filter_map(|row| match row[0].as_str() {
-                            "physical_plan after optd-finalized"
-                            | "logical_plan after optd-conversion" => Some(row[0..2].join(":\n")),
+                            "logical_plan after optd-initial"
+                            | "physical_plan after optd-finalized" => Some(row[0..2].join(":\n")),
                             _ => None,
                         })
                         .join("\n\n");
