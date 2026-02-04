@@ -6,7 +6,7 @@ use std::{
 use anyhow::bail;
 use tracing::info;
 
-use crate::ir::catalog::*;
+use crate::ir::{catalog::*, statistics::TableStatistics};
 
 pub struct MagicCatalog(RwLock<MagicCatalogInner>);
 
@@ -50,7 +50,32 @@ impl Catalog for MagicCatalog {
                 id,
                 name: table_name,
                 schema,
-                row_count: 0,
+                stats: None,
+            },
+        );
+        writer.next_table_id += 1;
+        Ok(id)
+    }
+
+    fn try_create_table_with_stats(
+        &self,
+        table_name: String,
+        schema: SchemaRef,
+        stats: TableStatistics,
+    ) -> Result<DataSourceId, DataSourceId> {
+        let mut writer = self.0.write().unwrap();
+        let id = DataSourceId(writer.next_table_id);
+        match writer.name_to_id.entry(table_name.clone()) {
+            Entry::Occupied(occupied) => return Err(*occupied.get()),
+            Entry::Vacant(vacant) => vacant.insert(id),
+        };
+        writer.tables.insert(
+            id,
+            TableMetadata {
+                id,
+                name: table_name,
+                schema,
+                stats: Some(stats),
             },
         );
         writer.next_table_id += 1;
@@ -71,10 +96,10 @@ impl Catalog for MagicCatalog {
         Ok(reader.tables.get(table_id).cloned().unwrap())
     }
 
-    fn set_table_row_count(&self, table_id: DataSourceId, row_count: usize) {
+    fn set_table_stats(&self, table_id: DataSourceId, stats: TableStatistics) {
         let mut writer = self.0.write().unwrap();
         let table = writer.tables.get_mut(&table_id).unwrap();
-        table.row_count = row_count;
+        table.stats = Some(stats);
     }
 }
 

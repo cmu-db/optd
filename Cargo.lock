@@ -3636,6 +3636,7 @@ version = "0.1.0"
 dependencies = [
  "duckdb",
  "futures",
+ "optd-core",
  "serde",
  "serde_json",
  "snafu",
@@ -3676,6 +3677,8 @@ dependencies = [
  "console-subscriber",
  "itertools",
  "pretty-xmlish",
+ "serde",
+ "serde_json",
  "snafu",
  "tokio",
  "tracing",

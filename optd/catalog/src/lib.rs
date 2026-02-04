@@ -5,6 +5,7 @@ use duckdb::{
     types::Null,
 };
 
+use optd_core::ir::statistics::{ColumnStatistics, TableStatistics, AdvanceColumnStatistics};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use snafu::{ResultExt, prelude::*};
@@ -179,7 +180,7 @@ const CREATE_EXTRA_TABLES_QUERY: &str = r#"
         PRIMARY KEY (table_id, option_key)
     );
 
-    CREATE INDEX IF NOT EXISTS idx_optd_external_table_schema 
+    CREATE INDEX IF NOT EXISTS idx_optd_external_table_schema
         ON __ducklake_metadata_metalake.main.optd_external_table(schema_id, table_name, end_snapshot);
 
     CREATE INDEX IF NOT EXISTS idx_optd_external_table_snapshot
@@ -214,14 +215,14 @@ const UPDATE_ADV_STATS_QUERY: &str = r#"
 /// SQL to insert advanced statistics entry
 const INSERT_ADV_STATS_QUERY: &str = r#"
     INSERT INTO __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
-        (column_id, begin_snapshot, end_snapshot, table_id, stats_type, payload) 
+        (column_id, begin_snapshot, end_snapshot, table_id, stats_type, payload)
     VALUES (?, ?, ?, ?, ?, ?);
 "#;
 
 /// SQL to insert snapshot record
 const INSERT_SNAPSHOT_QUERY: &str = r#"
     INSERT INTO __ducklake_metadata_metalake.main.ducklake_snapshot
-        (snapshot_id, snapshot_time, schema_version, next_catalog_id, next_file_id) 
+        (snapshot_id, snapshot_time, schema_version, next_catalog_id, next_file_id)
     VALUES (?, NOW(), ?, ?, ?);
 "#;
 
@@ -286,122 +287,54 @@ struct TableColumnStatisticsEntry {
     payload: Option<String>,
 }
 
-/// Table statistics (row count + column stats)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TableStatistics {
-    pub row_count: usize,
-    pub column_statistics: Vec<ColumnStatistics>,
+fn table_statistics_from_entries(
+    entries: Vec<TableColumnStatisticsEntry>,
+) -> TableStatistics {
+    let mut row_flag = false;
+    let mut row_count = 0;
+    let mut column_statistics = Vec::new();
 
-    /// File size in bytes
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub size_bytes: Option<usize>,
-}
-
-impl FromIterator<Result<TableColumnStatisticsEntry, Error>> for TableStatistics {
-    fn from_iter<T: IntoIterator<Item = Result<TableColumnStatisticsEntry, Error>>>(
-        iter: T,
-    ) -> Self {
-        let mut row_flag = false;
-        let mut row_count = 0;
-        let mut column_statistics = Vec::new();
-
-        // Stats will be ordered by table_id then column_id
-        for e in iter.into_iter().flatten() {
-            // Check if unique table/column combination
-            if column_statistics
-                .last()
-                .is_none_or(|last: &ColumnStatistics| last.column_id != e.column_id)
-            {
-                // New column encountered
-                column_statistics.push(ColumnStatistics::new(
-                    e.column_id,
-                    e.column_type.clone(),
-                    e.column_name.clone(),
-                    Vec::new(),
-                ));
-            }
-
-            assert!(
-                !column_statistics.is_empty()
-                    && column_statistics.last().unwrap().column_id == e.column_id,
-                "Column statistics should not be empty and last column_id should match current column_id"
-            );
-
-            if let Some(last_column_stat) = column_statistics.last_mut()
-                && let (Some(stats_type), Some(payload)) = (e.stats_type, e.payload)
-            {
-                let data = serde_json::from_str(&payload).unwrap_or(Value::Null);
-                last_column_stat.add_advanced_stat(AdvanceColumnStatistics { stats_type, data });
-            }
-
-            // Assuming all columns have the same record_count, only need to set once
-            if !row_flag {
-                row_count = e.record_count as usize;
-                row_flag = true;
-            }
+    // Stats will be ordered by table_id then column_id
+    for e in entries.into_iter() {
+        // Check if unique table/column combination
+        if column_statistics
+            .last()
+            .is_none_or(|last: &ColumnStatistics| last.column_id != e.column_id)
+        {
+            // New column encountered
+            column_statistics.push(ColumnStatistics::new(
+                e.column_id,
+                e.column_type.clone(),
+                e.column_name.clone(),
+                Vec::new(),
+            ));
         }
 
-        TableStatistics {
-            row_count,
-            column_statistics,
-            size_bytes: None, // Not populated from database queries
+        assert!(
+            !column_statistics.is_empty()
+                && column_statistics.last().unwrap().column_id == e.column_id,
+            "Column statistics should not be empty and last column_id should match current column_id"
+        );
+
+        if let Some(last_column_stat) = column_statistics.last_mut()
+            && let (Some(stats_type), Some(payload)) = (e.stats_type, e.payload)
+        {
+            let data = serde_json::from_str(&payload).unwrap_or(Value::Null);
+            last_column_stat.add_advanced_stat(AdvanceColumnStatistics { stats_type, data });
         }
-    }
-}
 
-/// Column statistics (external tables use column_id=0, name for identification)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ColumnStatistics {
-    pub column_id: i64,
-    pub column_type: String,
-    pub name: String,
-    pub advanced_stats: Vec<AdvanceColumnStatistics>,
-
-    /// Minimum value in the column (serialized as JSON string)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub min_value: Option<String>,
-    /// Maximum value in the column (serialized as JSON string)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_value: Option<String>,
-    /// Total number of null values
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub null_count: Option<usize>,
-    /// Number of distinct values (NDV)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub distinct_count: Option<usize>,
-}
-
-impl ColumnStatistics {
-    fn new(
-        column_id: i64,
-        column_type: String,
-        name: String,
-        advanced_stats: Vec<AdvanceColumnStatistics>,
-    ) -> Self {
-        Self {
-            column_id,
-            column_type,
-            name,
-            advanced_stats,
-            min_value: None,
-            max_value: None,
-            null_count: None,
-            distinct_count: None,
+        // Assuming all columns have the same record_count, only need to set once
+        if !row_flag {
+            row_count = e.record_count as usize;
+            row_flag = true;
         }
     }
 
-    fn add_advanced_stat(&mut self, stat: AdvanceColumnStatistics) {
-        self.advanced_stats.push(stat);
+    TableStatistics {
+        row_count,
+        column_statistics,
+        size_bytes: None, // Not populated from database queries
     }
-}
-
-/// An advanced statistics entry with type and serialized data at a snapshot.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AdvanceColumnStatistics {
-    /// Type of the statistical summaries (e.g., histogram, distinct count).
-    pub stats_type: String,
-    /// Serialized data for the statistics at a snapshot.
-    pub data: Value,
 }
 
 /// Identifier for a snapshot in the statistics database.
@@ -789,7 +722,7 @@ impl DuckLakeCatalog {
                 WHERE schema_id = ? AND table_name = ?
                 UNION ALL
                 SELECT table_id, 0 as is_internal FROM __ducklake_metadata_metalake.main.optd_external_table
-                WHERE schema_id = ? AND table_name = ? 
+                WHERE schema_id = ? AND table_name = ?
                   AND begin_snapshot <= ?
                   AND (end_snapshot IS NULL OR end_snapshot > ?)
                 LIMIT 1
@@ -880,8 +813,8 @@ impl DuckLakeCatalog {
                 r#"
                 SELECT column_id, stats_type, payload
                 FROM __ducklake_metadata_metalake.main.ducklake_table_column_adv_stats
-                WHERE table_id = ? 
-                  AND ? >= begin_snapshot 
+                WHERE table_id = ?
+                  AND ? >= begin_snapshot
                   AND (? < end_snapshot OR end_snapshot IS NULL)
                 ORDER BY column_id, stats_type
                 "#,
@@ -1020,8 +953,8 @@ impl DuckLakeCatalog {
             }
         }
 
-        // Convert entries to TableStatistics using FromIterator
-        let mut result = TableStatistics::from_iter(entries.into_iter().map(Ok));
+        // Convert entries to TableStatistics
+        let mut result = table_statistics_from_entries(entries);
 
         // For internal tables, ensure ALL columns are included (even those without stats)
         if is_internal_table {
@@ -1309,7 +1242,7 @@ impl DuckLakeCatalog {
                 let mut stmt = conn
                     .prepare(
                         r#"
-                        SELECT table_id, schema_id, table_name, location, file_format, 
+                        SELECT table_id, schema_id, table_name, location, file_format,
                                compression, begin_snapshot, end_snapshot
                         FROM __ducklake_metadata_metalake.main.optd_external_table
                         WHERE schema_id = ? AND table_name = ? AND end_snapshot IS NULL
@@ -1341,10 +1274,10 @@ impl DuckLakeCatalog {
                 let mut stmt = conn
                     .prepare(
                         r#"
-                        SELECT table_id, schema_id, table_name, location, file_format, 
+                        SELECT table_id, schema_id, table_name, location, file_format,
                                compression, begin_snapshot, end_snapshot
                         FROM __ducklake_metadata_metalake.main.optd_external_table
-                        WHERE schema_id = ? AND table_name = ? 
+                        WHERE schema_id = ? AND table_name = ?
                           AND begin_snapshot <= ?
                           AND (end_snapshot IS NULL OR end_snapshot > ?)
                         "#,
@@ -1487,7 +1420,7 @@ impl DuckLakeCatalog {
                         SELECT table_id, schema_id, table_name, location, file_format,
                                compression, begin_snapshot, end_snapshot
                         FROM __ducklake_metadata_metalake.main.optd_external_table
-                        WHERE schema_id = ? 
+                        WHERE schema_id = ?
                           AND begin_snapshot <= ?
                           AND (end_snapshot IS NULL OR end_snapshot > ?)
                         ORDER BY table_name
@@ -1725,7 +1658,7 @@ impl DuckLakeCatalog {
         let has_existing_stats: i64 = conn
             .prepare(
                 r#"
-                SELECT COUNT(*) 
+                SELECT COUNT(*)
                 FROM __ducklake_metadata_metalake.main.ducklake_table_stats
                 WHERE table_id = ? AND record_count IS NOT NULL
                 "#,

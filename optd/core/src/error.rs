@@ -8,7 +8,7 @@ pub enum Error {
     Whatever {
         /// The error message.
         message: String,
-        /// The underying error.
+        /// The underlying error.
         #[snafu(source(from(Box<dyn std::error::Error + Send + Sync>, Some)))]
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
