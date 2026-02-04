@@ -6,6 +6,8 @@ members = [
     "optd/core",
     "optd/catalog",
     "synopses",
+    "tests/sqllogictest",
+    "tests/sqlplannertest",
 ]
 
 default-members = [
@@ -13,6 +15,8 @@ default-members = [
     "optd/catalog",
     "connectors/datafusion",
     "synopses",
+    "tests/sqllogictest",
+    "tests/sqlplannertest",
 ]
 
 [workspace.dependencies]
@@ -29,6 +33,9 @@ datafusion = { version = "52.0.0", default-features = false, features = [
 arrow-schema = { version = "57.2.0", default-features = false }
 chrono = { version = "0.4.43", default-features = false }
 snafu = "0.8.6"
+async-trait = "0.1"
+anyhow = "1.0"
+itertools = "0.14.0"
 
 [workspace.package]
 version = "0.1.0"

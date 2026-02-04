@@ -5,16 +5,14 @@ use datafusion::{
     catalog::CatalogProviderList,
     common::{DataFusionError, Result, exec_err, not_impl_err},
     datasource::TableProvider,
-    execution::{SessionStateBuilder, runtime_env::RuntimeEnv},
+    execution::runtime_env::RuntimeEnv,
     logical_expr::{CreateExternalTable, LogicalPlanBuilder},
     prelude::{DataFrame, SessionConfig, SessionContext},
     sql::TableReference,
 };
 use datafusion_cli::cli_context::CliSessionContext;
 use optd_catalog::{CatalogServiceHandle, RegisterTableRequest};
-use optd_datafusion::{
-    OptdCatalogProvider, OptdCatalogProviderList, OptdExtensionConfig, SessionStateBuilderOptdExt,
-};
+use optd_datafusion::{OptdCatalogProvider, OptdCatalogProviderList, create_optd_session_context};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -31,19 +29,9 @@ impl OptdCliSessionContext {
     /// Creates a new `OptdCliSessionContext` with the given DataFusion session config
     /// and a runtime environment.
     pub fn new_with_config_rt(config: SessionConfig, runtime: Arc<RuntimeEnv>) -> Self {
-        let config = config
-            .with_option_extension(OptdExtensionConfig::default())
-            .set_bool("optd.optd_enabled", true);
-        let state = SessionStateBuilder::new()
-            .with_config(config)
-            .with_runtime_env(runtime)
-            .with_default_features()
-            // .with_optimizer_rules(vec![]) // Disable all default rules
-            .with_optd_planner()
-            .build();
-        let inner = SessionContext::new_with_state(state);
-
-        Self { inner }
+        Self {
+            inner: create_optd_session_context(config, runtime),
+        }
     }
 
     /// Registers snapshot query UDTFs.

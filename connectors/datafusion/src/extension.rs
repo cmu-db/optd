@@ -5,6 +5,8 @@ extensions_options! {
    pub struct OptdExtensionConfig {
        /// Should try run optd optimizer instead of datafusion default.
        pub optd_enabled: bool, default = true
+       /// Should fail on any unsupported features.
+       pub optd_strict_mode: bool, default = false
    }
 }
 

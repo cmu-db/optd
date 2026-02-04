@@ -1,0 +1,29 @@
+-- TPC-H Q12
+SELECT
+    l_shipmode,
+    sum(case when o_orderpriority = '1-URGENT'
+             or o_orderpriority = '2-HIGH'
+             then 1 else 0 end) as high_priority_orders,
+    sum(case when o_orderpriority <> '1-URGENT'
+             and o_orderpriority <> '2-HIGH'
+             then 1 else 0 end) as low_priority_orders
+FROM
+    orders,
+    lineitem
+WHERE
+    o_orderkey = l_orderkey
+    AND l_shipmode in ('MAIL', 'SHIP')
+    AND l_commitdate < l_receiptdate
+    AND l_shipdate < l_commitdate
+    AND l_receiptdate >= DATE '1994-01-01'
+    AND l_receiptdate < DATE '1995-01-01'
+GROUP BY
+    l_shipmode
+ORDER BY
+    l_shipmode;
+
+/*
+Error
+External error: Connector error: Unsupported df logical expr: CASE WHEN orders.o_orderpriority = Utf8View("1-URGENT") OR orders.o_orderpriority = Utf8View("2-HIGH") THEN Int64(1) ELSE Int64(0) END
+*/
+

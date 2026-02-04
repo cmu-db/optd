@@ -332,7 +332,6 @@ fn get_session_config(args: &Args) -> Result<SessionConfig> {
     }
 
     config_options.catalog.format.replace("PARQUET".to_string());
-    config_options.catalog.default_schema = "default".to_string();
 
     let session_config = SessionConfig::from(config_options).with_information_schema(true);
     Ok(session_config)

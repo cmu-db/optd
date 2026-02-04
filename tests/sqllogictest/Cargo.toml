@@ -1,19 +1,19 @@
 [package]
-name = "optd-datafusion"
+name = "optd-sqllogictest"
+description = "SQLLogicTest for optd"
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
 
 [dependencies]
 datafusion = { workspace = true }
-tracing = { workspace = true, features = ["log"] }
 optd-core = { path = "../../optd/core", version = "0.1" }
-optd-catalog = { path = "../../optd/catalog", version = "0.1" }
-itertools = { workspace = true }
-async-trait = { workspace = true }
+optd-datafusion = { path = "../../connectors/datafusion", version = "0.1" }
 snafu = { workspace = true }
-
-[dev-dependencies]
-tempfile = "3.13"
-serde_json = "1"
+sqllogictest = "0.29"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+async-trait = { workspace = true }
+
+[[test]]
+name = "harness"
+harness = false
