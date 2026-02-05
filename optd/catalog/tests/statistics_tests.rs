@@ -3,9 +3,11 @@
 #![cfg(not(target_os = "windows"))]
 
 use optd_catalog::{
-    AdvanceColumnStatistics, Catalog, ColumnStatistics, DuckLakeCatalog, RegisterTableRequest,
-    SnapshotId, TableStatistics,
+Catalog, DuckLakeCatalog, RegisterTableRequest,
+    SnapshotId
 };
+use optd_core::ir::statistics::{AdvanceColumnStatistics, ColumnStatistics, TableStatistics};
+
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
