@@ -5,7 +5,7 @@ use duckdb::{
     types::Null,
 };
 
-use optd_core::ir::statistics::{ColumnStatistics, TableStatistics, AdvanceColumnStatistics};
+use optd_core::ir::statistics::{AdvanceColumnStatistics, ColumnStatistics, TableStatistics};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use snafu::{ResultExt, prelude::*};
@@ -287,9 +287,7 @@ struct TableColumnStatisticsEntry {
     payload: Option<String>,
 }
 
-fn table_statistics_from_entries(
-    entries: Vec<TableColumnStatisticsEntry>,
-) -> TableStatistics {
+fn table_statistics_from_entries(entries: Vec<TableColumnStatisticsEntry>) -> TableStatistics {
     let mut row_flag = false;
     let mut row_count = 0;
     let mut column_statistics = Vec::new();

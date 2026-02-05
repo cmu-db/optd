@@ -743,25 +743,27 @@ impl OptdQueryPlanner {
                         row_count,
                         size_bytes,
                         column_statistics: column_statistics
-                        .iter()
-                        .enumerate()
-                        .map(|(index, column_stat)| {
-                            let column = Column(first_column.0 + index);
-                            let column_meta = ctx.get_column_meta(&column);
+                            .iter()
+                            .enumerate()
+                            .map(|(index, column_stat)| {
+                                let column = Column(first_column.0 + index);
+                                let column_meta = ctx.get_column_meta(&column);
 
-                            ColumnStatistics {
-                                column_id: column.0 as i64,
-                                column_type: format!("{:?}", column_meta.data_type),
-                                name: column_meta.name.clone(),
-                                // TODO(Aditya): populate with stuff from HLL, digests, etc.
-                                advanced_stats: Vec::new(),
-                                min_value: precision_to_string(&column_stat.min_value),
-                                max_value: precision_to_string(&column_stat.max_value),
-                                null_count: precision_to_option(&column_stat.null_count),
-                                distinct_count: precision_to_option(&column_stat.distinct_count),
-                            }
-                        })
-                        .collect(),
+                                ColumnStatistics {
+                                    column_id: column.0 as i64,
+                                    column_type: format!("{:?}", column_meta.data_type),
+                                    name: column_meta.name.clone(),
+                                    // TODO(Aditya): populate with stuff from HLL, digests, etc.
+                                    advanced_stats: Vec::new(),
+                                    min_value: precision_to_string(&column_stat.min_value),
+                                    max_value: precision_to_string(&column_stat.max_value),
+                                    null_count: precision_to_option(&column_stat.null_count),
+                                    distinct_count: precision_to_option(
+                                        &column_stat.distinct_count,
+                                    ),
+                                }
+                            })
+                            .collect(),
                     }
                 })
                 .unwrap_or_else(|_| TableStatistics {
