@@ -5,7 +5,7 @@
 //! for CSV/JSON files. Behavior is configurable via environment variables.
 
 use datafusion::common::{DataFusionError, Result};
-use optd_catalog::TableStatistics;
+use optd_core::ir::statistics::{ColumnStatistics, TableStatistics};
 use std::path::Path;
 
 /// Configuration for automatic statistics computation
@@ -127,7 +127,7 @@ async fn extract_parquet_statistics(location: &str) -> Result<Option<TableStatis
 /// Aggregates min/max/null_count across all row groups for each column.
 fn extract_column_statistics_from_parquet(
     metadata: &parquet::file::metadata::ParquetMetaData,
-) -> Result<Vec<optd_catalog::ColumnStatistics>> {
+) -> Result<Vec<ColumnStatistics>> {
     let schema = metadata.file_metadata().schema_descr();
     let num_row_groups = metadata.num_row_groups();
     let mut column_statistics = Vec::new();
@@ -174,7 +174,7 @@ fn extract_column_statistics_from_parquet(
             }
         }
 
-        column_statistics.push(optd_catalog::ColumnStatistics {
+        column_statistics.push(ColumnStatistics {
             column_id: 0, // External tables don't have column IDs
             column_type: col_type,
             name: col_name,

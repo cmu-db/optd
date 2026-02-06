@@ -28,6 +28,7 @@ futures = "0.3.31"
 optd-catalog = { path = "../optd/catalog", version = "0.1" }
 parquet = "57.2"
 serde_json = "1"
+optd-core = { version = "0.1.0", path = "../optd/core" }
 
 [dev-dependencies]
 tempfile = "3"
