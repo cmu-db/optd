@@ -3655,6 +3655,7 @@ dependencies = [
  "futures",
  "object_store",
  "optd-catalog",
+ "optd-core",
  "optd-datafusion",
  "parquet",
  "regex",
