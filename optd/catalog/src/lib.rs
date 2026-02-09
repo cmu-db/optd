@@ -1016,11 +1016,11 @@ impl DuckLakeCatalog {
                 .iter()
                 .find(|s| s.stats_type == "basic_stats")
             {
-                if let Some(min_val) = basic_stat.data.get("min_value").and_then(|v| v.as_str()) {
-                    col_stat.min_value = Some(min_val.to_string());
+                if let Some(min_val) = basic_stat.data.get("min_value") {
+                    col_stat.min_value = Some(min_val.clone());
                 }
-                if let Some(max_val) = basic_stat.data.get("max_value").and_then(|v| v.as_str()) {
-                    col_stat.max_value = Some(max_val.to_string());
+                if let Some(max_val) = basic_stat.data.get("max_value") {
+                    col_stat.max_value = Some(max_val.clone());
                 }
                 if let Some(null_cnt) = basic_stat.data.get("null_count").and_then(|v| v.as_u64()) {
                     col_stat.null_count = Some(null_cnt as usize);
@@ -1761,10 +1761,10 @@ impl DuckLakeCatalog {
                         map.insert("column_name".to_string(), json!(col_stats.name));
                     }
                     if let Some(ref min_val) = col_stats.min_value {
-                        map.insert("min_value".to_string(), json!(min_val));
+                        map.insert("min_value".to_string(), min_val.clone());
                     }
                     if let Some(ref max_val) = col_stats.max_value {
-                        map.insert("max_value".to_string(), json!(max_val));
+                        map.insert("max_value".to_string(), max_val.clone());
                     }
                     if let Some(null_cnt) = col_stats.null_count {
                         map.insert("null_count".to_string(), json!(null_cnt));

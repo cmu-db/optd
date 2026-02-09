@@ -20,13 +20,12 @@ pub struct ColumnStatistics {
     pub name: String,
     pub advanced_stats: Vec<AdvanceColumnStatistics>,
 
-    /// TODO(Aditya): Move this to Value?
-    /// Minimum value in the column (serialized as JSON string)
+    /// Minimum value in the column
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub min_value: Option<String>,
-    /// Maximum value in the column (serialized as JSON string)
+    pub min_value: Option<Value>,
+    /// Maximum value in the column
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_value: Option<String>,
+    pub max_value: Option<Value>,
     /// Total number of null values
     #[serde(skip_serializing_if = "Option::is_none")]
     pub null_count: Option<usize>,

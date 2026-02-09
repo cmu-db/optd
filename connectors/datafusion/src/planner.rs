@@ -112,14 +112,34 @@ fn precision_to_option<T: Copy + PartialOrd + Eq + std::fmt::Debug>(
     }
 }
 
-/// Extract value from Precision as Option<String>.
-/// TODO(Aditya): this should not be required after we move from `String` to `Value`.
-fn precision_to_string<T: ToString + PartialOrd + Eq + Clone + std::fmt::Debug>(
+/// Extract value from Precision as Option<serde_json::Value>.
+fn precision_to_value<T: ToString + PartialOrd + Eq + Clone + std::fmt::Debug>(
     precision: &datafusion::common::stats::Precision<T>,
-) -> Option<String> {
+) -> Option<serde_json::Value> {
     match precision {
-        datafusion::common::stats::Precision::Exact(v) => Some(v.to_string()),
-        datafusion::common::stats::Precision::Inexact(v) => Some(v.to_string()),
+        datafusion::common::stats::Precision::Exact(v) => {
+            let s = v.to_string();
+            // Try to parse as number first, fall back to string
+            if let Ok(n) = s.parse::<i64>() {
+                Some(serde_json::Value::Number(n.into()))
+            } else if let Ok(n) = s.parse::<f64>() {
+                serde_json::Number::from_f64(n).map(serde_json::Value::Number)
+            } else {
+                // TODO(AC): Panic instead?
+                Some(serde_json::Value::String(s))
+            }
+        }
+        datafusion::common::stats::Precision::Inexact(v) => {
+            let s = v.to_string();
+            if let Ok(n) = s.parse::<i64>() {
+                Some(serde_json::Value::Number(n.into()))
+            } else if let Ok(n) = s.parse::<f64>() {
+                serde_json::Number::from_f64(n).map(serde_json::Value::Number)
+            } else {
+                // TODO(AC): Panic instead?
+                Some(serde_json::Value::String(s))
+            }
+        }
         datafusion::common::stats::Precision::Absent => None,
     }
 }
@@ -765,8 +785,8 @@ impl OptdQueryPlanner {
                                     name: column_meta.name.clone(),
                                     // TODO(Aditya): populate with stuff from HLL, digests, etc.
                                     advanced_stats: Vec::new(),
-                                    min_value: precision_to_string(&column_stat.min_value),
-                                    max_value: precision_to_string(&column_stat.max_value),
+                                    min_value: precision_to_value(&column_stat.min_value),
+                                    max_value: precision_to_value(&column_stat.max_value),
                                     null_count: precision_to_option(&column_stat.null_count),
                                     distinct_count: precision_to_option(
                                         &column_stat.distinct_count,

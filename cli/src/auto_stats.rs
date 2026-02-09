@@ -138,8 +138,8 @@ fn extract_column_statistics_from_parquet(
         let col_type = format!("{:?}", field.physical_type());
 
         // Aggregate statistics across all row groups
-        let mut global_min: Option<String> = None;
-        let mut global_max: Option<String> = None;
+        let mut global_min: Option<serde_json::Value> = None;
+        let mut global_max: Option<serde_json::Value> = None;
         let mut total_null_count: usize = 0;
         let mut distinct_count: Option<usize> = None;
 
@@ -149,17 +149,39 @@ fn extract_column_statistics_from_parquet(
 
             if let Some(stats) = col_metadata.statistics() {
                 // Update min value (keep the smallest)
-                if let Some(min_str) = parquet_stat_to_string(stats, true)
-                    && (global_min.is_none() || min_str < global_min.as_ref().unwrap().clone())
-                {
-                    global_min = Some(min_str);
+                if let Some(min_val) = parquet_stat_to_value(stats, true) {
+                    let should_update = match (&global_min, &min_val) {
+                        (None, _) => true,
+                        (Some(serde_json::Value::Number(a)), serde_json::Value::Number(b)) => {
+                            b.as_f64().unwrap_or(f64::MAX)
+                                < a.as_f64().unwrap_or(f64::MAX)
+                        }
+                        (Some(serde_json::Value::String(a)), serde_json::Value::String(b)) => {
+                            b < a
+                        }
+                        _ => false,
+                    };
+                    if should_update {
+                        global_min = Some(min_val);
+                    }
                 }
 
                 // Update max value (keep the largest)
-                if let Some(max_str) = parquet_stat_to_string(stats, false)
-                    && (global_max.is_none() || max_str > global_max.as_ref().unwrap().clone())
-                {
-                    global_max = Some(max_str);
+                if let Some(max_val) = parquet_stat_to_value(stats, false) {
+                    let should_update = match (&global_max, &max_val) {
+                        (None, _) => true,
+                        (Some(serde_json::Value::Number(a)), serde_json::Value::Number(b)) => {
+                            b.as_f64().unwrap_or(f64::MIN)
+                                > a.as_f64().unwrap_or(f64::MIN)
+                        }
+                        (Some(serde_json::Value::String(a)), serde_json::Value::String(b)) => {
+                            b > a
+                        }
+                        _ => false,
+                    };
+                    if should_update {
+                        global_max = Some(max_val);
+                    }
                 }
 
                 // Accumulate null count
@@ -189,35 +211,43 @@ fn extract_column_statistics_from_parquet(
     Ok(column_statistics)
 }
 
-/// Converts Parquet statistics to string representation.
+/// Converts Parquet statistics to a serde_json::Value.
 ///
-/// Returns min or max value as string. For optimizer integration, use proper ScalarValue.
-fn parquet_stat_to_string(
+/// Returns min or max value. Numeric types become `Value::Number`,
+/// byte arrays become `Value::String`.
+fn parquet_stat_to_value(
     stats: &parquet::file::statistics::Statistics,
     is_min: bool,
-) -> Option<String> {
+) -> Option<serde_json::Value> {
     use parquet::file::statistics::Statistics;
 
     match stats {
         Statistics::Boolean(s) => {
-            if is_min { s.min_opt() } else { s.max_opt() }.map(|v| v.to_string())
+            if is_min { s.min_opt() } else { s.max_opt() }
+                .map(|v| serde_json::Value::Number((*v as i64).into()))
         }
         Statistics::Int32(s) => {
-            if is_min { s.min_opt() } else { s.max_opt() }.map(|v| v.to_string())
+            if is_min { s.min_opt() } else { s.max_opt() }
+                .map(|v| serde_json::Value::Number((*v as i64).into()))
         }
         Statistics::Int64(s) => {
-            if is_min { s.min_opt() } else { s.max_opt() }.map(|v| v.to_string())
+            if is_min { s.min_opt() } else { s.max_opt() }
+                .map(|v| serde_json::Value::Number((*v).into()))
         }
         Statistics::Float(s) => {
-            if is_min { s.min_opt() } else { s.max_opt() }.map(|v| v.to_string())
+            if is_min { s.min_opt() } else { s.max_opt() }
+                .and_then(|v| serde_json::Number::from_f64(*v as f64))
+                .map(serde_json::Value::Number)
         }
         Statistics::Double(s) => {
-            if is_min { s.min_opt() } else { s.max_opt() }.map(|v| v.to_string())
+            if is_min { s.min_opt() } else { s.max_opt() }
+                .and_then(|v| serde_json::Number::from_f64(*v))
+                .map(serde_json::Value::Number)
         }
         Statistics::ByteArray(s) => if is_min { s.min_opt() } else { s.max_opt() }
-            .map(|v| String::from_utf8_lossy(v.data()).to_string()),
+            .map(|v| serde_json::Value::String(String::from_utf8_lossy(v.data()).to_string())),
         Statistics::FixedLenByteArray(s) => if is_min { s.min_opt() } else { s.max_opt() }
-            .map(|v| String::from_utf8_lossy(v.data()).to_string()),
+            .map(|v| serde_json::Value::String(String::from_utf8_lossy(v.data()).to_string())),
         Statistics::Int96(_) => None, // Int96 is deprecated, skip
     }
 }
