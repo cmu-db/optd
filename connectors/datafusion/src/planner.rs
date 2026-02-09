@@ -38,7 +38,7 @@ use optd_core::{
     connector_err,
     error::Result as OptdResult,
     ir::{
-        IRContext, Scalar,
+        Column, IRContext, Scalar,
         builder::{self as optd_builder, column_assign, column_ref, list, literal},
         catalog::{Field, Schema},
         convert::{IntoOperator, IntoScalar},
@@ -53,6 +53,7 @@ use optd_core::{
             BinaryOp, Cast, ColumnAssign, ColumnRef, Function, FunctionKind, Like, List, NaryOp,
             NaryOpKind,
         },
+        statistics::{ColumnStatistics, TableStatistics},
     },
     rules,
 };
@@ -63,6 +64,8 @@ use crate::{
     OptdExtensionConfig,
     value::{from_optd_value, try_into_optd_value},
 };
+
+const DEFAULT_ROW_COUNT: usize = 1000;
 
 #[derive(Default)]
 pub struct OptdQueryPlanner {
@@ -83,6 +86,41 @@ fn tuple_err<T, R>(
         (Err(e), Ok(_)) => Err(e),
         (Ok(_), Err(e1)) => Err(e1),
         (Err(e), Err(_)) => Err(e),
+    }
+}
+
+/// Extract value from Precision, returning default if Absent.
+fn precision_value_or<T: Copy + PartialOrd + Eq + std::fmt::Debug>(
+    precision: datafusion::common::stats::Precision<T>,
+    default: T,
+) -> T {
+    match precision {
+        datafusion::common::stats::Precision::Exact(v) => v,
+        datafusion::common::stats::Precision::Inexact(v) => v,
+        datafusion::common::stats::Precision::Absent => default,
+    }
+}
+
+/// Extract value from Precision as Option.
+fn precision_to_option<T: Copy + PartialOrd + Eq + std::fmt::Debug>(
+    precision: &datafusion::common::stats::Precision<T>,
+) -> Option<T> {
+    match precision {
+        datafusion::common::stats::Precision::Exact(v) => Some(*v),
+        datafusion::common::stats::Precision::Inexact(v) => Some(*v),
+        datafusion::common::stats::Precision::Absent => None,
+    }
+}
+
+/// Extract value from Precision as Option<String>.
+/// TODO(Aditya): this should not be required after we move from `String` to `Value`.
+fn precision_to_string<T: ToString + PartialOrd + Eq + Clone + std::fmt::Debug>(
+    precision: &datafusion::common::stats::Precision<T>,
+) -> Option<String> {
+    match precision {
+        datafusion::common::stats::Precision::Exact(v) => Some(v.to_string()),
+        datafusion::common::stats::Precision::Inexact(v) => Some(v.to_string()),
+        datafusion::common::stats::Precision::Absent => None,
     }
 }
 
@@ -691,7 +729,7 @@ impl OptdQueryPlanner {
             .cat
             .try_create_table(table_name, schema.clone())
             .unwrap_or_else(|existing| existing);
-        ctx.add_base_table_columns(source, &schema);
+        let first_column = ctx.add_base_table_columns(source, &schema);
 
         let provider = source_as_provider(&node.source).unwrap();
         let exec = provider
@@ -699,16 +737,50 @@ impl OptdQueryPlanner {
             .await
             .unwrap();
 
-        ctx.cat.set_table_row_count(
+        ctx.cat.set_table_stats(
             source,
             exec.partition_statistics(None)
-                .map(|x| match x.num_rows {
-                    datafusion::common::stats::Precision::Exact(x) => x,
-                    datafusion::common::stats::Precision::Inexact(x) => x,
-                    datafusion::common::stats::Precision::Absent => 1000,
+                .map(|statistics| {
+                    let column_statistics = statistics.column_statistics;
+
+                    let row_count = precision_value_or(statistics.num_rows, DEFAULT_ROW_COUNT);
+                    let size_bytes = precision_to_option(&statistics.total_byte_size);
+
+                    TableStatistics {
+                        row_count,
+                        size_bytes,
+                        column_statistics: column_statistics
+                            .iter()
+                            .enumerate()
+                            .map(|(index, column_stat)| {
+                                let column = Column(first_column.0 + index);
+                                let column_meta = ctx.get_column_meta(&column);
+
+                                ColumnStatistics {
+                                    column_id: column.0 as i64,
+                                    column_type: format!("{:?}", column_meta.data_type),
+                                    name: column_meta.name.clone(),
+                                    // TODO(Aditya): populate with stuff from HLL, digests, etc.
+                                    advanced_stats: Vec::new(),
+                                    min_value: precision_to_string(&column_stat.min_value),
+                                    max_value: precision_to_string(&column_stat.max_value),
+                                    null_count: precision_to_option(&column_stat.null_count),
+                                    distinct_count: precision_to_option(
+                                        &column_stat.distinct_count,
+                                    ),
+                                }
+                            })
+                            .collect(),
+                    }
                 })
-                .unwrap_or(1000),
+                .unwrap_or_else(|_| TableStatistics {
+                    row_count: DEFAULT_ROW_COUNT,
+                    size_bytes: None,
+                    // TODO(Aditya): add some default column stats?
+                    column_statistics: vec![],
+                }),
         );
+
         let mut projections = node
             .projection
             .as_ref()

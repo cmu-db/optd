@@ -20,6 +20,7 @@ pub mod operator;
 pub mod properties;
 pub mod rule;
 pub mod scalar;
+pub mod statistics;
 mod types;
 
 pub use column::*;
