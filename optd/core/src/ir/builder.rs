@@ -33,7 +33,8 @@ impl IRContext {
         let mut column_meta = self.column_meta.lock().unwrap();
         let columns = columns
             .iter()
-            .map(|_| column_meta.new_column(DataType::Int32, None))
+            // TODO(AC): Dummy MockScan source?
+            .map(|_| column_meta.new_column(DataType::Int32, None, None))
             .collect_vec();
 
         let spec = MockSpec::new_test_only(columns, card);

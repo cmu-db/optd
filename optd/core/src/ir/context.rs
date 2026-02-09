@@ -52,8 +52,11 @@ impl IRContext {
                     .fields()
                     .iter()
                     .map(|field| {
-                        column_meta
-                            .new_column(field.data_type().clone(), Some(field.name().clone()))
+                        column_meta.new_column(
+                            field.data_type().clone(),
+                            Some(field.name().clone()),
+                            Some(source),
+                        )
                     })
                     .collect_vec();
                 vacant.insert(columns[0]);
@@ -64,7 +67,8 @@ impl IRContext {
 
     pub fn define_column(&self, data_type: DataType, name: Option<String>) -> Column {
         let mut column_meta = self.column_meta.lock().unwrap();
-        column_meta.new_column(data_type, name)
+        // TODO(AC): Where is this being used? what should be used as source?
+        column_meta.new_column(data_type, name, None)
     }
 
     pub fn rename_column_alias(&self, column: Column, alias: String) {

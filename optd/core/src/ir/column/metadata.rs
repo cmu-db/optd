@@ -1,7 +1,7 @@
 //! This module defines a metadata type for columns in tables. See column/mod.rs
 //! for information about the base column type
 
-use crate::ir::{Column, DataType};
+use crate::ir::{Column, DataType, catalog::DataSourceId};
 use std::{collections::HashMap, sync::Arc};
 
 /// Note that the column data type only stores the column identifier, all other
@@ -10,6 +10,9 @@ use std::{collections::HashMap, sync::Arc};
 pub struct ColumnMeta {
     pub data_type: DataType,
     pub name: String,
+    /// The data source (table) this column originates from, if any.
+    /// `None` for computed columns (projections, expressions).
+    pub source: Option<DataSourceId>,
 }
 
 /// The context for a given execution needs to store metadata for all columns
@@ -47,12 +50,18 @@ impl ColumnMetaStore {
     }
 
     /// The name of this column must be globally unique
-    pub fn new_column(&mut self, data_type: DataType, name: Option<String>) -> Column {
+    pub fn new_column(
+        &mut self,
+        data_type: DataType,
+        name: Option<String>,
+        source: Option<DataSourceId>,
+    ) -> Column {
         let column = Column(self.columns.len());
         let name = name.unwrap_or_else(|| column.to_string());
         let old = self.name_to_column_id.insert(name.clone(), column);
         assert!(old.is_none());
-        self.columns.push(Arc::new(ColumnMeta { data_type, name }));
+        self.columns
+            .push(Arc::new(ColumnMeta { data_type, name, source }));
         column
     }
 
@@ -70,6 +79,7 @@ impl ColumnMetaStore {
                 *x = Arc::new(ColumnMeta {
                     name: alias.clone(),
                     data_type: x.data_type.clone(),
+                    source: x.source,
                 })
             }
         }
