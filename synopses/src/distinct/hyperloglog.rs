@@ -10,10 +10,15 @@ use std::{
 };
 
 use crate::utils::Murmur2Hash64a;
+use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize)]
+#[serde(bound(deserialize = "S: Default"))]
 pub struct HyperLogLog<K, S = BuildHasherDefault<Murmur2Hash64a>, const P: usize = 12> {
+    #[serde(skip, default)]
     hash_builder: S,
     k: Box<[u8]>,
+    #[serde(skip)]
     _phantom: PhantomData<K>,
 }
 
@@ -131,6 +136,19 @@ impl<K, S, const P: usize> HyperLogLog<K, S, P> {
         Self {
             hash_builder,
             k: vec![0u8; m].into_boxed_slice(),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<K, S: Default, const P: usize> HyperLogLog<K, S, P> {
+    /// Create a HyperLogLog from pre-existing register data.
+    /// Panics if `k.len() != 1 << P`.
+    pub fn from_registers(k: Box<[u8]>) -> Self {
+        assert_eq!(k.len(), 1 << P, "register array length must be 1 << P");
+        Self {
+            hash_builder: S::default(),
+            k,
             _phantom: PhantomData,
         }
     }
