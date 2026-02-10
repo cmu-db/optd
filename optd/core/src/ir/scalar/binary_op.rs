@@ -36,6 +36,7 @@ pub enum BinaryOpKind {
     Divide,
     Modulo,
     Eq,
+    IsNotDistinctFrom,
     Lt,
     Le,
     Gt,
@@ -51,6 +52,7 @@ impl std::fmt::Display for BinaryOpKind {
             BinaryOpKind::Divide => "/",
             BinaryOpKind::Modulo => "%",
             BinaryOpKind::Eq => "=",
+            BinaryOpKind::IsNotDistinctFrom => "IS NOT DISTINCT FROM",
             BinaryOpKind::Lt => "<",
             BinaryOpKind::Le => "<=",
             BinaryOpKind::Gt => ">",
@@ -91,7 +93,11 @@ impl BinaryOpBorrowed<'_> {
     }
 
     pub fn is_eq(&self) -> bool {
-        matches!(self.op_kind(), BinaryOpKind::Eq)
+        matches!(self.op_kind(), BinaryOpKind::Eq | BinaryOpKind::IsNotDistinctFrom)
+    }
+
+    pub fn is_not_distinct_from(&self) -> bool {
+        matches!(self.op_kind(), BinaryOpKind::IsNotDistinctFrom)
     }
 
     pub fn is_lt(&self) -> bool {

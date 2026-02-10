@@ -6,9 +6,9 @@ use crate::ir::{
     catalog::{DataSourceId, Schema},
     convert::{IntoOperator, IntoScalar},
     operator::{
-        LogicalAggregate, LogicalGet, LogicalJoin, LogicalProject, LogicalRemap, LogicalSelect,
-        PhysicalFilter, PhysicalHashAggregate, PhysicalHashJoin, PhysicalNLJoin, PhysicalProject,
-        PhysicalTableScan, join::JoinType,
+        LogicalAggregate, LogicalDependentJoin, LogicalGet, LogicalJoin, LogicalProject,
+        LogicalRemap, LogicalSelect, MockScan, MockSpec, PhysicalFilter, PhysicalHashAggregate,
+        PhysicalHashJoin, PhysicalNLJoin, PhysicalProject, PhysicalTableScan, join::JoinType,
     },
     properties::OperatorProperties,
     scalar::*,
@@ -18,6 +18,12 @@ use std::sync::Arc;
 
 pub fn group(group_id: GroupId, properties: Arc<OperatorProperties>) -> Arc<Operator> {
     Group::new(group_id, properties).into_operator()
+}
+
+/// Creates a mock scan with specific column indices.
+/// Use for tests that need exact column IDs.
+pub fn mock_scan_with_columns(id: usize, columns: Vec<Column>, card: f64) -> Arc<Operator> {
+    MockScan::with_mock_spec(id, MockSpec::new_test_only(columns, card)).into_operator()
 }
 
 impl IRContext {
@@ -67,6 +73,16 @@ impl Operator {
         join_type: JoinType,
     ) -> Arc<Self> {
         LogicalJoin::new(join_type, self, inner, join_cond).into_operator()
+    }
+
+    /// Creates a dependent (correlated) join.
+    pub fn logical_dependent_join(
+        self: Arc<Self>,
+        inner: Arc<Self>,
+        join_cond: Arc<Scalar>,
+        join_type: JoinType,
+    ) -> Arc<Self> {
+        LogicalDependentJoin::new(join_type, self, inner, join_cond).into_operator()
     }
 
     pub fn nl_join(

@@ -5,6 +5,7 @@ use std::{collections::HashMap, hash::Hash};
 /// A specialized Union-Find data structure for tracking representatives.
 ///
 /// Implements union-find with path compression for O(log n) amortized time complexity.
+#[derive(Clone, Debug)]
 pub struct UnionFind<T> {
     parents: HashMap<T, T>,
 }
@@ -59,6 +60,11 @@ impl<T: Eq + Hash + Clone> UnionFind<T> {
         let representative = self.find_with_compression(&parent);
         self.parents.insert(x.clone(), representative.clone());
         representative
+    }
+
+    /// Returns an iterator over all keys in the union-find structure
+    pub fn keys(&self) -> impl Iterator<Item = &T> {
+        self.parents.keys()
     }
 }
 

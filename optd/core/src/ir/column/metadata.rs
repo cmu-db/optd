@@ -26,6 +26,9 @@ pub struct ColumnMetaStore {
 }
 
 impl ColumnMetaStore {
+    pub fn len(&self) -> usize {
+        self.columns.len()
+    }
     pub fn get(&self, column: &Column) -> Arc<ColumnMeta> {
         let Column(index) = *column;
         let Some(res) = self.columns.get(index) else {
