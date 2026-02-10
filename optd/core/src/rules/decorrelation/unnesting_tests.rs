@@ -78,7 +78,8 @@ fn test_simple_unnesting() {
 
     let input_plan = {
         let left_branch = mock_scan_with_columns(1, t1_cols.to_vec(), 100.0);
-        let right_branch = mock_scan_with_columns(2, t2_cols.to_vec(), 100.0).logical_select(column_ref(t2).eq(column_ref(t1)));
+        let right_branch = mock_scan_with_columns(2, t2_cols.to_vec(), 100.0)
+            .logical_select(column_ref(t2).eq(column_ref(t1)));
 
         left_branch.logical_dependent_join(right_branch, boolean(true), JoinType::Inner)
     };
@@ -124,13 +125,16 @@ fn test_deep_nesting_and_scope() {
     let t1 = t1_cols[0];
     let t2 = t2_cols[0];
     let t3 = t3_cols[0];
-    
+
     let input_plan = {
         let left_branch = mock_scan_with_columns(1, t1_cols.to_vec(), 100.0);
         let right_branch = {
             let left_branch = mock_scan_with_columns(2, t2_cols.to_vec(), 100.0);
-            let right_branch = mock_scan_with_columns(3, t3_cols.to_vec(), 100.0)
-                .logical_select(column_ref(t3).eq(column_ref(t2)).and(column_ref(t3).eq(column_ref(t1))));
+            let right_branch = mock_scan_with_columns(3, t3_cols.to_vec(), 100.0).logical_select(
+                column_ref(t3)
+                    .eq(column_ref(t2))
+                    .and(column_ref(t3).eq(column_ref(t1))),
+            );
 
             left_branch.logical_dependent_join(right_branch, boolean(true), JoinType::Inner)
         };
@@ -151,8 +155,11 @@ fn test_deep_nesting_and_scope() {
         let right_branch = {
             let left_branch = mock_scan_with_columns(2, t2_cols.to_vec(), 100.0);
             let right_branch = {
-                let left_branch =
-                    create_domain_with_aliases(mock_scan_with_columns(1, t1_cols.to_vec(), 100.0), vec![t1], vec![d1]);
+                let left_branch = create_domain_with_aliases(
+                    mock_scan_with_columns(1, t1_cols.to_vec(), 100.0),
+                    vec![t1],
+                    vec![d1],
+                );
                 let right_branch = mock_scan_with_columns(3, t3_cols.to_vec(), 100.0);
 
                 left_branch.logical_join(
@@ -206,7 +213,8 @@ fn test_complex_operators() {
     let input_plan = {
         let left_branch = mock_scan_with_columns(1, t1_cols.to_vec(), 100.0);
         let right_branch = {
-            let agg_input = mock_scan_with_columns(2, t2_cols.to_vec(), 100.0).logical_select(column_ref(t2).eq(column_ref(t1)));
+            let agg_input = mock_scan_with_columns(2, t2_cols.to_vec(), 100.0)
+                .logical_select(column_ref(t2).eq(column_ref(t1)));
             agg_input.logical_aggregate(std::iter::empty(), std::iter::empty())
         };
 
@@ -221,15 +229,22 @@ fn test_complex_operators() {
             Column(id)
         };
         let d1 = fresh();
-        
+
         let left_branch = mock_scan_with_columns(1, t1_cols.to_vec(), 100.0);
         let right_branch = {
-            let domain =
-                create_domain_with_aliases(mock_scan_with_columns(1, t1_cols.to_vec(), 100.0), vec![t1], vec![d1]);
+            let domain = create_domain_with_aliases(
+                mock_scan_with_columns(1, t1_cols.to_vec(), 100.0),
+                vec![t1],
+                vec![d1],
+            );
             let agg_input = mock_scan_with_columns(2, t2_cols.to_vec(), 100.0);
             let keys = vec![column_assign(t2, column_ref(t2))];
             let agg = agg_input.logical_aggregate(std::iter::empty(), keys);
-            domain.logical_join(agg, null_safe_eq(column_ref(d1), column_ref(t2)), JoinType::Left)
+            domain.logical_join(
+                agg,
+                null_safe_eq(column_ref(d1), column_ref(t2)),
+                JoinType::Left,
+            )
         };
 
         left_branch.logical_join(
@@ -286,11 +301,9 @@ fn test_join_equivalence_merging() {
     let expected_plan = {
         let left_branch = mock_scan_with_columns(1, t1_cols.clone(), 100.0);
         let right_branch = {
-            let left_sel = mock_scan_with_columns(2, t2_cols.clone(), 100.0)
-                ;
+            let left_sel = mock_scan_with_columns(2, t2_cols.clone(), 100.0);
 
-            let right_sel = mock_scan_with_columns(3, t3_cols.clone(), 100.0)
-                ;
+            let right_sel = mock_scan_with_columns(3, t3_cols.clone(), 100.0);
 
             left_sel.logical_join(
                 right_sel,
@@ -329,7 +342,15 @@ fn test_join_equivalence_merging() {
 fn test_multi_outer_refs_domain_retained() {
     fn build_input_plan(
         ctx: &IRContext,
-    ) -> (Arc<Operator>, Vec<Column>, Vec<Column>, Column, Column, Column, Column) {
+    ) -> (
+        Arc<Operator>,
+        Vec<Column>,
+        Vec<Column>,
+        Column,
+        Column,
+        Column,
+        Column,
+    ) {
         let t1_cols = make_cols(ctx, 2);
         let t2_cols = make_cols(ctx, 2);
         let t1c0 = t1_cols[0];
@@ -339,8 +360,11 @@ fn test_multi_outer_refs_domain_retained() {
 
         let left_branch = mock_scan_with_columns(1, t1_cols.clone(), 100.0);
         let right_branch = {
-            let select_input = mock_scan_with_columns(2, t2_cols.clone(), 100.0)
-                .logical_select(column_ref(t2c0).gt(column_ref(t1c0)).and(column_ref(t2c1).gt(column_ref(t1c1))));
+            let select_input = mock_scan_with_columns(2, t2_cols.clone(), 100.0).logical_select(
+                column_ref(t2c0)
+                    .gt(column_ref(t1c0))
+                    .and(column_ref(t2c1).gt(column_ref(t1c1))),
+            );
             let keys = vec![column_assign(t2c0, column_ref(t2c0))];
             select_input.logical_aggregate(std::iter::empty(), keys)
         };
@@ -376,7 +400,9 @@ fn test_multi_outer_refs_domain_retained() {
             );
             let join_input = domain.logical_join(
                 mock_scan_with_columns(2, t2_cols.clone(), 100.0),
-                column_ref(t2c0).gt(column_ref(d1)).and(column_ref(t2c1).gt(column_ref(d2))),
+                column_ref(t2c0)
+                    .gt(column_ref(d1))
+                    .and(column_ref(t2c1).gt(column_ref(d2))),
                 JoinType::Inner,
             );
             let keys = vec![

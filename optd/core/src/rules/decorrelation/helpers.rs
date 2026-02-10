@@ -4,21 +4,17 @@
 /// simplicity with the borrow checker, this is currently maintained in a single
 /// structure. This can be optimised in the future to prevent unnecessary
 /// copying.
-
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::ir::convert::{IntoOperator, IntoScalar};
-use crate::ir::operator::{
-    LogicalJoin, Operator, join::JoinType,
-};
+use crate::ir::operator::{LogicalJoin, Operator, join::JoinType};
 use crate::ir::scalar::{BinaryOpKind, ColumnRef, NaryOpKind};
 use crate::ir::{Column, ColumnSet, IRContext, Scalar, ScalarKind, ScalarValue};
 use crate::utility::union_find::UnionFind;
 
 #[derive(Clone, Debug)]
 pub(super) struct UnnestingInfo {
-
     /// The columns from the outer query that are referenced in this subquery
     pub(super) outer_refs: HashSet<Column>,
 
@@ -42,7 +38,6 @@ pub(super) struct UnnestingInfo {
     pub(super) parent_domain_op: Option<Arc<Operator>>,
     /// Parent outer refs that are actually referenced in this scope
     pub(super) required_parent_refs: HashSet<Column>,
-
 }
 
 impl UnnestingInfo {
@@ -75,35 +70,41 @@ impl UnnestingInfo {
         repr: HashMap<Column, Column>,
         domain_op: Arc<Operator>,
         parent: Option<&UnnestingInfo>,
-        required_parent_refs: HashSet<Column>
+        required_parent_refs: HashSet<Column>,
     ) -> Self {
-        let (parent_outer_refs, parent_repr, parent_domain_repr, parent_domain_op) = if let Some(p) = parent {
-            // Flatten parent's outer refs (up to the first scope)
-            let mut parent_outer_refs = p.outer_refs.clone();
-            parent_outer_refs.extend(p.parent_outer_refs.iter().copied());
-            // Flatten parent's repr mappings (up to the first scope)
-            let mut parent_repr = p.repr.clone();
-            parent_repr.extend(p.parent_repr.iter().map(|(k, v)| (*k, *v)));
-            // Flatten parent's domain repr mappings
-            let mut parent_domain_repr = p.domain_repr.clone();
-            parent_domain_repr.extend(p.parent_domain_repr.iter().map(|(k, v)| (*k, *v)));
-            let parent_domain_op = if let Some(grandparent_domain) = &p.parent_domain_op {
-                Some(
-                    LogicalJoin::new(
-                        JoinType::Inner,
-                        p.domain_op.clone(),
-                        grandparent_domain.clone(),
-                        crate::ir::scalar::Literal::boolean(true).into_scalar(),
+        let (parent_outer_refs, parent_repr, parent_domain_repr, parent_domain_op) =
+            if let Some(p) = parent {
+                // Flatten parent's outer refs (up to the first scope)
+                let mut parent_outer_refs = p.outer_refs.clone();
+                parent_outer_refs.extend(p.parent_outer_refs.iter().copied());
+                // Flatten parent's repr mappings (up to the first scope)
+                let mut parent_repr = p.repr.clone();
+                parent_repr.extend(p.parent_repr.iter().map(|(k, v)| (*k, *v)));
+                // Flatten parent's domain repr mappings
+                let mut parent_domain_repr = p.domain_repr.clone();
+                parent_domain_repr.extend(p.parent_domain_repr.iter().map(|(k, v)| (*k, *v)));
+                let parent_domain_op = if let Some(grandparent_domain) = &p.parent_domain_op {
+                    Some(
+                        LogicalJoin::new(
+                            JoinType::Inner,
+                            p.domain_op.clone(),
+                            grandparent_domain.clone(),
+                            crate::ir::scalar::Literal::boolean(true).into_scalar(),
+                        )
+                        .into_operator(),
                     )
-                    .into_operator(),
+                } else {
+                    Some(p.domain_op.clone())
+                };
+                (
+                    parent_outer_refs,
+                    parent_repr,
+                    parent_domain_repr,
+                    parent_domain_op,
                 )
             } else {
-                Some(p.domain_op.clone())
+                (HashSet::new(), HashMap::new(), HashMap::new(), None)
             };
-            (parent_outer_refs, parent_repr, parent_domain_repr, parent_domain_op)
-        } else {
-            (HashSet::new(), HashMap::new(), HashMap::new(), None)
-        };
         Self {
             outer_refs,
             domain_repr,
@@ -114,7 +115,7 @@ impl UnnestingInfo {
             parent_repr,
             parent_domain_repr,
             parent_domain_op,
-            required_parent_refs
+            required_parent_refs,
         }
     }
 
@@ -185,9 +186,10 @@ impl UnnestingInfo {
                 if bin.op_kind == BinaryOpKind::Eq
                     || bin.op_kind == BinaryOpKind::IsNotDistinctFrom =>
             {
-                if let (ScalarKind::ColumnRef(l), ScalarKind::ColumnRef(r)) =
-                    (&condition.input_scalars()[0].kind, &condition.input_scalars()[1].kind)
-                {
+                if let (ScalarKind::ColumnRef(l), ScalarKind::ColumnRef(r)) = (
+                    &condition.input_scalars()[0].kind,
+                    &condition.input_scalars()[1].kind,
+                ) {
                     if self.is_outer_ref(&l.column) && !self.is_outer_ref(&r.column) {
                         self.cclasses.merge(&r.column, &l.column);
                     } else {
@@ -244,10 +246,12 @@ impl UnnestingInfo {
             ScalarKind::NaryOp(nary) if nary.op_kind == NaryOpKind::And => {
                 let mut terms = Vec::new();
                 for term in scalar.input_scalars() {
-                    if matches!(&term.kind, ScalarKind::Literal(meta) if matches!(meta.value, ScalarValue::Boolean(Some(true)))) {
+                    if matches!(&term.kind, ScalarKind::Literal(meta) if matches!(meta.value, ScalarValue::Boolean(Some(true))))
+                    {
                         continue;
                     }
-                    if matches!(&term.kind, ScalarKind::Literal(meta) if matches!(meta.value, ScalarValue::Boolean(Some(false)))) {
+                    if matches!(&term.kind, ScalarKind::Literal(meta) if matches!(meta.value, ScalarValue::Boolean(Some(false))))
+                    {
                         return crate::ir::scalar::Literal::boolean(false).into_scalar();
                     }
                     terms.push(term.clone());
@@ -327,7 +331,10 @@ impl UnnestingInfo {
                         match (left_mapped, right_mapped) {
                             (Some(l), Some(r)) if l == r => Some(l),
                             (Some(l), Some(r)) => {
-                                if matches!(join_type, JoinType::Inner) && self.is_outer_ref(&l) && !other.is_outer_ref(&r) {
+                                if matches!(join_type, JoinType::Inner)
+                                    && self.is_outer_ref(&l)
+                                    && !other.is_outer_ref(&r)
+                                {
                                     Some(r)
                                 } else {
                                     Some(l)

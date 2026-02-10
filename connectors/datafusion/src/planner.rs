@@ -461,6 +461,9 @@ impl OptdQueryPlanner {
                     optd_core::ir::scalar::BinaryOpKind::Divide => logical_expr::Operator::Divide,
                     optd_core::ir::scalar::BinaryOpKind::Modulo => logical_expr::Operator::Modulo,
                     optd_core::ir::scalar::BinaryOpKind::Eq => logical_expr::Operator::Eq,
+                    optd_core::ir::scalar::BinaryOpKind::IsNotDistinctFrom => {
+                        logical_expr::Operator::IsNotDistinctFrom
+                    }
                     optd_core::ir::scalar::BinaryOpKind::Lt => logical_expr::Operator::Lt,
                     optd_core::ir::scalar::BinaryOpKind::Le => logical_expr::Operator::LtEq,
                     optd_core::ir::scalar::BinaryOpKind::Gt => logical_expr::Operator::Gt,

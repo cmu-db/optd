@@ -1,7 +1,6 @@
 /// This is the top level rule called when decorrelation needs to be triggered
 /// This rule takes in plans that are written in terms of dependent joins,
 /// and unnests arbitrary levels of these dependent joins
-
 use std::sync::Arc;
 
 use crate::ir::IRContext;
@@ -42,7 +41,5 @@ impl UnnestingRule {
         } else {
             op
         }
-        
     }
-
 }

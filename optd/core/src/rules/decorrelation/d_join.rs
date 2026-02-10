@@ -1,6 +1,6 @@
 /// This module is the main arbitrary unnesting algorithm, based on the paper
 /// Improving Unnesting of Complex Queries (BTW 2025)
-/// 
+///
 /// Gaps:
 /// 1 - We currently only support full unnesting, without the "simple unnesting"
 ///     pass before that. This is logically correct, and anything that can be
@@ -14,18 +14,22 @@
 ///     should potentially be done in a pass before decorrelation, and we could
 ///     also consider the indexed algebra from the paper (section 3.1) for
 ///     accessing sets (which also currently take O(n) work)
-/// 3 - The "advanced constructs" from the paper (like CTEs, WITH RECURSIVE, 
+/// 3 - The "advanced constructs" from the paper (like CTEs, WITH RECURSIVE,
 ///     etc) are unsupported, since many of these constructs don't even have a
 ///     meaningful IR in optd
-
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::ir::{Column, Scalar, ScalarKind, ScalarValue};
 use crate::ir::IRContext;
 use crate::ir::convert::{IntoOperator, IntoScalar};
-use crate::ir::operator::{LogicalAggregate, LogicalDependentJoin, LogicalJoin, LogicalProject, LogicalRemap, Operator, OperatorKind};
-use crate::ir::scalar::{BinaryOp, BinaryOpKind, ColumnAssign, ColumnRef, List, NaryOp, NaryOpKind};
+use crate::ir::operator::{
+    LogicalAggregate, LogicalDependentJoin, LogicalJoin, LogicalProject, LogicalRemap, Operator,
+    OperatorKind,
+};
+use crate::ir::scalar::{
+    BinaryOp, BinaryOpKind, ColumnAssign, ColumnRef, List, NaryOp, NaryOpKind,
+};
+use crate::ir::{Column, Scalar, ScalarKind, ScalarValue};
 
 use super::UnnestingRule;
 use super::helpers::{UnnestingInfo, compute_accessing_set};
@@ -34,9 +38,9 @@ impl UnnestingRule {
     // Creates the domain for the new unnesting struct
     fn create_domain(
         &self,
-        outer_refs: Vec<Column>, 
+        outer_refs: Vec<Column>,
         outer: Arc<Operator>,
-        ctx: &IRContext
+        ctx: &IRContext,
     ) -> (HashMap<Column, Column>, Arc<Operator>) {
         // Compute the domain representation
         let mut domain_repr: HashMap<Column, Column> = HashMap::new();
@@ -104,13 +108,7 @@ impl UnnestingRule {
                 .copied()
                 .collect();
             let left_accessing = compute_accessing_set(dep_join.outer(), &pu.access_refs(), ctx);
-            let op = self.unnest(
-                dep_join.outer().clone(),
-                *pu,
-                &left_accessing,
-                false,
-                ctx,
-            );
+            let op = self.unnest(dep_join.outer().clone(), *pu, &left_accessing, false, ctx);
             let cond = pu.rewrite_columns(dep_join.join_cond().clone());
             (op, cond)
         } else {
@@ -131,11 +129,18 @@ impl UnnestingRule {
             }
         }
         if outer_refs.is_empty() {
-            return LogicalJoin::new(*dep_join.join_type(), new_outer, dep_join.inner().clone(), condition.clone()).into_operator()
+            return LogicalJoin::new(
+                *dep_join.join_type(),
+                new_outer,
+                dep_join.inner().clone(),
+                condition.clone(),
+            )
+            .into_operator();
         }
         let mut outer_refs_vec: Vec<Column> = outer_refs.iter().copied().collect();
         outer_refs_vec.sort_by_key(|c| c.0);
-        let (domain_repr, domain_op) = self.create_domain(outer_refs_vec.clone(), new_outer.clone(), ctx);
+        let (domain_repr, domain_op) =
+            self.create_domain(outer_refs_vec.clone(), new_outer.clone(), ctx);
         let mut info = UnnestingInfo::new_with_parent(
             outer_refs,
             domain_repr.clone(),
@@ -150,13 +155,7 @@ impl UnnestingRule {
 
         // Unnest right-hand side
         info.update_equivalences(&condition);
-        let new_inner = self.unnest(
-            dep_join.inner().clone(),
-            &mut info,
-            &accessing,
-            false,
-            ctx,
-        );
+        let new_inner = self.unnest(dep_join.inner().clone(), &mut info, &accessing, false, ctx);
         info.update_repr_with_available(&new_inner.output_columns(ctx));
         let mut new_conds = Vec::new();
         for c in &outer_refs_vec {
@@ -165,7 +164,9 @@ impl UnnestingRule {
             if left_ref == right_ref {
                 continue;
             }
-            new_conds.push(BinaryOp::new(BinaryOpKind::IsNotDistinctFrom, left_ref, right_ref).into_scalar());
+            new_conds.push(
+                BinaryOp::new(BinaryOpKind::IsNotDistinctFrom, left_ref, right_ref).into_scalar(),
+            );
         }
         if !matches!(
             &condition.kind,
