@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use crate::ir::IRContext;
-use crate::ir::operator::{Operator, OperatorKind};
+use crate::ir::operator::{LogicalDependentJoin, Operator, OperatorKind};
 
 pub struct UnnestingRule {}
 
@@ -23,8 +23,9 @@ impl UnnestingRule {
         // joins, since decorrelation may end before reaching a child dependent join
         // Thus, we then map decorrelation onto all child operators, so that we keep
         // going until there still exists a dependent join operator
-        if let OperatorKind::LogicalDependentJoin(_) = op.kind {
-            let res = self.d_join_elimination(op, None, ctx);
+        if let OperatorKind::LogicalDependentJoin(meta) = &op.kind {
+            let dep = LogicalDependentJoin::borrow_raw_parts(meta, &op.common);
+            let res = self.d_join_elimination(dep, None, None, ctx);
             return self.traverse_and_unnest(res, ctx);
         }
 

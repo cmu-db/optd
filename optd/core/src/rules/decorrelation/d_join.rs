@@ -7,32 +7,34 @@
 ///     simply unnested can be fully unnested. However, we can probably shave
 ///     off a few milliseconds by running a simple unnesting pass first if
 ///     latency is essential in the future
-/// 2 - We compute outer-references on the fly, by checking which columns of a
+/// 2 - The "advanced constructs" from the paper (like CTEs, WITH RECURSIVE,
+///     etc) are unsupported, since many of these constructs don't even have a
+///     meaningful IR in optd
+/// 3 - We compute outer-references on the fly, by checking which columns of a
 ///     join operator is not bound by downstream columns being produced. This is
 ///     a much bigger latency concern than (1), since we do potentially O(n)
 ///     work per operator in the tree, i.e. potentially O(n^2) total work. This
-///     should potentially be done in a pass before decorrelation, and we could
-///     also consider the indexed algebra from the paper (section 3.1) for
-///     accessing sets (which also currently take O(n) work)
-/// 3 - The "advanced constructs" from the paper (like CTEs, WITH RECURSIVE,
-///     etc) are unsupported, since many of these constructs don't even have a
-///     meaningful IR in optd
+///     should potentially be done in a pass before decorrelation, where we mark
+///     every dependent join with the operators that access outer columns. This
+///     will let us skip all accessing checks
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::ir::IRContext;
 use crate::ir::convert::{IntoOperator, IntoScalar};
 use crate::ir::operator::{
-    LogicalAggregate, LogicalDependentJoin, LogicalJoin, LogicalProject, LogicalRemap, Operator,
-    OperatorKind,
+    LogicalAggregate, LogicalDependentJoinBorrowed, LogicalJoin, LogicalProject, LogicalRemap, Operator
 };
 use crate::ir::scalar::{
     BinaryOp, BinaryOpKind, ColumnAssign, ColumnRef, List, NaryOp, NaryOpKind,
 };
-use crate::ir::{Column, Scalar, ScalarKind, ScalarValue};
+use crate::ir::{Column, Scalar};
+use crate::rules::decorrelation::helpers::is_true_scalar;
 
 use super::UnnestingRule;
-use super::helpers::{UnnestingInfo, compute_accessing_set};
+use super::helpers::{
+    Unnesting, UnnestingInfo, compute_accessing_set, is_contained_in,
+};
 
 impl UnnestingRule {
     // Creates the domain for the new unnesting struct
@@ -58,10 +60,7 @@ impl UnnestingRule {
         let domain_project = LogicalProject::new(outer.clone(), project_list).into_operator();
         let group_keys: Vec<Arc<Scalar>> = outer_refs
             .iter()
-            .map(|c| {
-                let col_ref = ColumnRef::new(*c).into_scalar();
-                ColumnAssign::new(*c, col_ref).into_scalar()
-            })
+            .map(|c| ColumnAssign::new(*c, ColumnRef::new(*c).into_scalar()).into_scalar())
             .collect();
         let group_keys_list = List::new(group_keys.into()).into_scalar();
         let empty_exprs_list = List::new(vec![].into()).into_scalar();
@@ -71,9 +70,7 @@ impl UnnestingRule {
         let remap_keys: Vec<Arc<Scalar>> = outer_refs
             .iter()
             .map(|c| {
-                let target = *domain_repr
-                    .get(c)
-                    .expect("domain repr missing for outer ref");
+                let target = *domain_repr.get(c).unwrap();
                 let col_ref = ColumnRef::new(*c).into_scalar();
                 ColumnAssign::new(target, col_ref).into_scalar()
             })
@@ -88,43 +85,44 @@ impl UnnestingRule {
     // the algorithm from page 11 of the referenced paper
     pub(super) fn d_join_elimination(
         &self,
-        join: Arc<Operator>,
-        mut parent_unnesting: Option<&mut UnnestingInfo>,
+        dep_join: LogicalDependentJoinBorrowed<'_>,
+        mut parent_unnesting: Option<&mut Unnesting<'_>>,
+        parent_accessing: Option<&HashSet<*const Operator>>,
         ctx: &IRContext,
     ) -> Arc<Operator> {
         // In the nested case we have to unnest the left-hand side first
-        let dep_join = if let OperatorKind::LogicalDependentJoin(meta) = &join.kind {
-            LogicalDependentJoin::borrow_raw_parts(meta, &join.common)
-        } else {
-            panic!("Unnesting is only run on dependent joins!");
-        };
-        let mut required_parent_refs = HashSet::new();
         let (new_outer, condition) = if let Some(ref mut pu) = parent_unnesting {
-            required_parent_refs = dep_join
-                .inner()
-                .collect_used_columns()
+            let acc_left = parent_accessing
+                .unwrap()
                 .iter()
-                .filter(|c| pu.is_outer_ref(c))
+                .filter(|&&op_ptr| is_contained_in(op_ptr, dep_join.outer()))
                 .copied()
                 .collect();
-            let left_accessing = compute_accessing_set(dep_join.outer(), &pu.access_refs(), ctx);
-            let op = self.unnest(dep_join.outer().clone(), *pu, &left_accessing, false, ctx);
+            let op = self.unnest(
+                dep_join.outer().clone(),
+                *pu,
+                &acc_left,
+                ctx,
+            );
             let cond = pu.rewrite_columns(dep_join.join_cond().clone());
             (op, cond)
         } else {
             (dep_join.outer().clone(), dep_join.join_cond().clone())
         };
 
+        let (mut accessing_operators, accessing_cols) = compute_accessing_set(dep_join.inner(), ctx);
+
         // Create a new unnesting struct
         let mut outer_refs = HashSet::new();
         let outer_outputs = new_outer.output_columns(ctx);
-        for c in dep_join.inner().collect_used_columns().iter() {
+        for c in &accessing_cols {
             if outer_outputs.contains(c) {
                 outer_refs.insert(*c);
             } else if let Some(pu) = parent_unnesting.as_deref() {
-                let mapped = pu.resolve_mapped_column(*c);
-                if outer_outputs.contains(&mapped) {
-                    outer_refs.insert(mapped);
+                if let Some(mapped) = pu.resolve_col(*c) {
+                    if outer_outputs.contains(&mapped) {
+                        outer_refs.insert(mapped);
+                    }
                 }
             }
         }
@@ -141,37 +139,46 @@ impl UnnestingRule {
         outer_refs_vec.sort_by_key(|c| c.0);
         let (domain_repr, domain_op) =
             self.create_domain(outer_refs_vec.clone(), new_outer.clone(), ctx);
-        let mut info = UnnestingInfo::new_with_parent(
+        let info = Arc::new(UnnestingInfo::new(
             outer_refs,
-            domain_repr.clone(),
-            domain_repr,
-            domain_op,
+            (domain_repr, domain_op),
             parent_unnesting.as_deref(),
-            required_parent_refs,
-        );
+        ));
+        let mut unnesting = Unnesting::new(info);
 
         // Merge with parent unnesting if needed
-        let accessing = compute_accessing_set(dep_join.inner(), &info.access_refs(), ctx);
+        let acc_right = if parent_unnesting.is_some() {
+            parent_accessing
+                .unwrap()
+                .iter()
+                .filter(|&&op_ptr| is_contained_in(op_ptr, dep_join.inner()))
+                .copied()
+                .collect()
+        } else {
+            HashSet::new()
+        };
+        accessing_operators.extend(acc_right);
 
         // Unnest right-hand side
-        info.update_equivalences(&condition);
-        let new_inner = self.unnest(dep_join.inner().clone(), &mut info, &accessing, false, ctx);
-        info.update_repr_with_available(&new_inner.output_columns(ctx));
+        unnesting.update_cclasses_equivalences(&condition);
+        let new_inner = self.unnest(
+            dep_join.inner().clone(),
+            &mut unnesting,
+            &accessing_operators,
+            ctx,
+        );
+
+        // Add equality to join condition
+        unnesting.update_repr_with_available(&new_inner.output_columns(ctx));
         let mut new_conds = Vec::new();
         for c in &outer_refs_vec {
             let left_ref = ColumnRef::new(*c).into_scalar();
-            let right_ref = ColumnRef::new(*info.repr.get(c).unwrap_or(c)).into_scalar();
-            if left_ref == right_ref {
-                continue;
-            }
+            let right_ref = ColumnRef::new(*unnesting.repr.get(c).unwrap()).into_scalar();
             new_conds.push(
                 BinaryOp::new(BinaryOpKind::IsNotDistinctFrom, left_ref, right_ref).into_scalar(),
             );
         }
-        if !matches!(
-            &condition.kind,
-            ScalarKind::Literal(meta) if matches!(meta.value, ScalarValue::Boolean(Some(true)))
-        ) {
+        if !is_true_scalar(&condition) {
             new_conds.push(condition.clone());
         }
         let final_cond = if new_conds.len() == 1 {
