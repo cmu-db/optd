@@ -1415,6 +1415,7 @@ impl OptdQueryPlanner {
             .add_rule(rules::LogicalJoinAsPhysicalNLJoinRule::new())
             .add_rule(rules::LogicalProjectAsPhysicalProjectRule::new())
             .add_rule(rules::LogicalSelectAsPhysicalFilterRule::new())
+            .add_rule(rules::LogicalSelectSimplifyRule::new())
             .add_rule(rules::LogicalJoinInnerCommuteRule::new())
             .add_rule(rules::LogicalJoinInnerAssocRule::new())
             .build();

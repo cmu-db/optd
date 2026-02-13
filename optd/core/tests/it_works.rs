@@ -114,6 +114,7 @@ async fn integration() -> Result<(), Box<dyn std::error::Error>> {
         .add_rule(rules::LogicalJoinAsPhysicalHashJoinRule::new())
         .add_rule(rules::LogicalJoinAsPhysicalNLJoinRule::new())
         .add_rule(rules::LogicalSelectAsPhysicalFilterRule::new())
+        .add_rule(rules::LogicalSelectSimplifyRule::new())
         .add_rule(rules::LogicalProjectAsPhysicalProjectRule::new())
         .add_rule(rules::LogicalSelectJoinTransposeRule::new())
         .add_rule(rules::LogicalJoinInnerCommuteRule::new())

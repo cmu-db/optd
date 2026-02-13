@@ -119,7 +119,7 @@ impl UnnestingRule {
             if outer_outputs.contains(c) {
                 outer_refs.insert(*c);
             } else if let Some(pu) = parent_unnesting.as_deref() {
-                if let Some(mapped) = pu.resolve_col(*c) {
+                if let Some(mapped) = pu.resolve_mapped_col(*c) {
                     if outer_outputs.contains(&mapped) {
                         outer_refs.insert(mapped);
                     }
@@ -169,11 +169,11 @@ impl UnnestingRule {
         );
 
         // Add equality to join condition
-        unnesting.update_repr_with_available(&new_inner.output_columns(ctx));
         let mut new_conds = Vec::new();
         for c in &outer_refs_vec {
             let left_ref = ColumnRef::new(*c).into_scalar();
-            let right_ref = ColumnRef::new(*unnesting.repr.get(c).unwrap()).into_scalar();
+            let right_col = unnesting.resolve_mapped_col(*c).unwrap_or(*c);
+            let right_ref = ColumnRef::new(right_col).into_scalar();
             new_conds.push(
                 BinaryOp::new(BinaryOpKind::IsNotDistinctFrom, left_ref, right_ref).into_scalar(),
             );
