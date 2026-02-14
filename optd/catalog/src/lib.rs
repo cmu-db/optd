@@ -5,6 +5,7 @@ use duckdb::{
     types::Null,
 };
 
+use optd_core::ir::DataType;
 use optd_core::ir::statistics::{AdvanceColumnStatistics, ColumnStatistics, TableStatistics};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -287,6 +288,50 @@ struct TableColumnStatisticsEntry {
     payload: Option<String>,
 }
 
+/// Convert a serde_json::Value to a plain String (stripping JSON quotes).
+fn value_to_string(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Null => String::new(), // TODO(AC/Yuchen): Return None instead?
+        other => other.to_string(),
+    }
+}
+
+/// Parse a column type string (from the DB) into a DataType.
+/// Handles DuckDB type names (lowercase), Arrow type names (PascalCase), and JSON-encoded types.
+fn parse_column_type(s: &str) -> DataType {
+    // Handle common DuckDB type names (lowercase)
+    match s.to_lowercase().as_str() {
+        "boolean" | "bool" => return DataType::Boolean,
+        "tinyint" | "int8" => return DataType::Int8,
+        "smallint" | "int16" => return DataType::Int16,
+        "integer" | "int32" | "int" => return DataType::Int32,
+        "bigint" | "int64" => return DataType::Int64,
+        "utinyint" | "uint8" => return DataType::UInt8,
+        "usmallint" | "uint16" => return DataType::UInt16,
+        "uinteger" | "uint32" => return DataType::UInt32,
+        "ubigint" | "uint64" => return DataType::UInt64,
+        "float" | "float32" | "real" => return DataType::Float32,
+        "double" | "float64" => return DataType::Float64,
+        "varchar" | "text" | "utf8" | "string" => return DataType::Utf8,
+        "date" | "date32" => return DataType::Date32,
+        "blob" | "binary" | "bytea" => return DataType::Binary,
+        _ => {}
+    }
+    // Try deserializing as a JSON-encoded DataType (e.g. Arrow PascalCase names)
+    if let Ok(dt) = serde_json::from_value(serde_json::Value::String(s.to_string())) {
+        return dt;
+    }
+    // Try as a raw JSON value (for complex types stored as objects)
+    if let Ok(dt) = serde_json::from_str(s) {
+        return dt;
+    }
+    // Fallback
+    DataType::Utf8
+}
+
 fn table_statistics_from_entries(entries: Vec<TableColumnStatisticsEntry>) -> TableStatistics {
     let mut row_flag = false;
     let mut row_count = 0;
@@ -302,7 +347,7 @@ fn table_statistics_from_entries(entries: Vec<TableColumnStatisticsEntry>) -> Ta
             // New column encountered
             column_statistics.push(ColumnStatistics::new(
                 e.column_id,
-                e.column_type.clone(),
+                parse_column_type(&e.column_type),
                 e.column_name.clone(),
                 Vec::new(),
             ));
@@ -777,9 +822,10 @@ impl DuckLakeCatalog {
 
                     let columns = stmt
                         .query_map(params![table_id], |row| {
+                            let col_type_str: String = row.get(2)?;
                             Ok(ColumnStatistics {
                                 column_id: row.get(0)?,
-                                column_type: row.get(2)?,
+                                column_type: parse_column_type(&col_type_str),
                                 name: row.get(1)?,
                                 advanced_stats: Vec::new(),
                                 min_value: None,
@@ -921,9 +967,10 @@ impl DuckLakeCatalog {
 
                 let columns = stmt
                     .query_map(params![table_id], |row| {
+                        let col_type_str: String = row.get(2)?;
                         Ok(ColumnStatistics {
                             column_id: row.get(0)?,
-                            column_type: row.get(2)?,
+                            column_type: parse_column_type(&col_type_str),
                             name: row.get(1)?,
                             advanced_stats: Vec::new(),
                             min_value: None,
@@ -988,7 +1035,7 @@ impl DuckLakeCatalog {
                 if !existing_column_ids.contains(&col_id) {
                     result.column_statistics.push(ColumnStatistics {
                         column_id: col_id,
-                        column_type: col_type,
+                        column_type: parse_column_type(&col_type),
                         name: col_name,
                         advanced_stats: Vec::new(),
                         min_value: None,
@@ -1017,10 +1064,10 @@ impl DuckLakeCatalog {
                 .find(|s| s.stats_type == "basic_stats")
             {
                 if let Some(min_val) = basic_stat.data.get("min_value") {
-                    col_stat.min_value = Some(min_val.clone());
+                    col_stat.min_value = Some(value_to_string(min_val));
                 }
                 if let Some(max_val) = basic_stat.data.get("max_value") {
-                    col_stat.max_value = Some(max_val.clone());
+                    col_stat.max_value = Some(value_to_string(max_val));
                 }
                 if let Some(null_cnt) = basic_stat.data.get("null_count").and_then(|v| v.as_u64()) {
                     col_stat.null_count = Some(null_cnt as usize);
@@ -1761,10 +1808,10 @@ impl DuckLakeCatalog {
                         map.insert("column_name".to_string(), json!(col_stats.name));
                     }
                     if let Some(ref min_val) = col_stats.min_value {
-                        map.insert("min_value".to_string(), min_val.clone());
+                        map.insert("min_value".to_string(), json!(min_val));
                     }
                     if let Some(ref max_val) = col_stats.max_value {
-                        map.insert("max_value".to_string(), max_val.clone());
+                        map.insert("max_value".to_string(), json!(max_val));
                     }
                     if let Some(null_cnt) = col_stats.null_count {
                         map.insert("null_count".to_string(), json!(null_cnt));

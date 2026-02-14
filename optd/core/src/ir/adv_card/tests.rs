@@ -2,8 +2,6 @@
 
 use std::sync::Arc;
 
-use serde_json::json;
-
 use crate::ir::{
     Column, DataType, IRContext,
     builder::*,
@@ -44,7 +42,7 @@ fn simple_table_stats(row_count: usize, col_stats: Vec<ColumnStatistics>) -> Tab
 fn col_stat(name: &str, distinct_count: usize) -> ColumnStatistics {
     ColumnStatistics {
         column_id: 0,
-        column_type: "Int32".to_string(),
+        column_type: DataType::Int32,
         name: name.to_string(),
         advanced_stats: vec![],
         min_value: None,
@@ -54,32 +52,23 @@ fn col_stat(name: &str, distinct_count: usize) -> ColumnStatistics {
     }
 }
 
-fn col_stat_with_range(
-    name: &str,
-    distinct_count: usize,
-    min: i64,
-    max: i64,
-) -> ColumnStatistics {
+fn col_stat_with_range(name: &str, distinct_count: usize, min: i64, max: i64) -> ColumnStatistics {
     ColumnStatistics {
         column_id: 0,
-        column_type: "Int32".to_string(),
+        column_type: DataType::Int32,
         name: name.to_string(),
         advanced_stats: vec![],
-        min_value: Some(json!(min)),
-        max_value: Some(json!(max)),
+        min_value: Some(min.to_string()),
+        max_value: Some(max.to_string()),
         null_count: Some(0),
         distinct_count: Some(distinct_count),
     }
 }
 
-fn col_stat_with_nulls(
-    name: &str,
-    distinct_count: usize,
-    null_count: usize,
-) -> ColumnStatistics {
+fn col_stat_with_nulls(name: &str, distinct_count: usize, null_count: usize) -> ColumnStatistics {
     ColumnStatistics {
         column_id: 0,
-        column_type: "Int32".to_string(),
+        column_type: DataType::Int32,
         name: name.to_string(),
         advanced_stats: vec![],
         min_value: None,
@@ -94,9 +83,11 @@ fn col_stat_with_nulls(
 #[test]
 fn test_scan_with_stats() {
     let cat = MagicCatalog::default();
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("t.a".to_string(), DataType::Int32, false),
-    ]));
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
     let src = cat
         .try_create_table("t".to_string(), schema.clone())
         .unwrap();
@@ -111,9 +102,11 @@ fn test_scan_with_stats() {
 #[test]
 fn test_scan_without_stats() {
     let cat = MagicCatalog::default();
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("t.a".to_string(), DataType::Int32, false),
-    ]));
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
     let src = cat
         .try_create_table("t".to_string(), schema.clone())
         .unwrap();
@@ -130,9 +123,11 @@ fn test_scan_without_stats() {
 #[test]
 fn test_equality_selectivity() {
     let cat = MagicCatalog::default();
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("t.a".to_string(), DataType::Int32, false),
-    ]));
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
     let src = cat
         .try_create_table("t".to_string(), schema.clone())
         .unwrap();
@@ -154,9 +149,11 @@ fn test_equality_selectivity() {
 #[test]
 fn test_equality_selectivity_with_nulls() {
     let cat = MagicCatalog::default();
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("t.a".to_string(), DataType::Int32, false),
-    ]));
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
     let src = cat
         .try_create_table("t".to_string(), schema.clone())
         .unwrap();
@@ -181,9 +178,11 @@ fn test_equality_selectivity_with_nulls() {
 #[test]
 fn test_literal_true_false() {
     let cat = MagicCatalog::default();
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("t.a".to_string(), DataType::Int32, false),
-    ]));
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
     let src = cat
         .try_create_table("t".to_string(), schema.clone())
         .unwrap();
@@ -222,7 +221,9 @@ fn test_nary_and_selectivity() {
     // a = 1 AND b = 2 → (1/10) * (1/5) = 0.02
     let col_a = Column(0);
     let col_b = Column(1);
-    let pred = column_ref(col_a).eq(int32(1)).and(column_ref(col_b).eq(int32(2)));
+    let pred = column_ref(col_a)
+        .eq(int32(1))
+        .and(column_ref(col_b).eq(int32(2)));
     let filtered = scan.logical_select(pred);
     let card = filtered.cardinality(&ctx);
 
@@ -251,7 +252,9 @@ fn test_nary_or_selectivity() {
     // a = 1 OR b = 2 → 1 - (1-0.1)*(1-0.2) = 1 - 0.9*0.8 = 0.28
     let col_a = Column(0);
     let col_b = Column(1);
-    let pred = column_ref(col_a).eq(int32(1)).or(column_ref(col_b).eq(int32(2)));
+    let pred = column_ref(col_a)
+        .eq(int32(1))
+        .or(column_ref(col_b).eq(int32(2)));
     let filtered = scan.logical_select(pred);
     let card = filtered.cardinality(&ctx);
 
@@ -262,9 +265,11 @@ fn test_nary_or_selectivity() {
 #[test]
 fn test_unknown_predicate_fallback() {
     let cat = MagicCatalog::default();
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("t.a".to_string(), DataType::Int32, false),
-    ]));
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
     let src = cat
         .try_create_table("t".to_string(), schema.clone())
         .unwrap();
@@ -286,9 +291,11 @@ fn test_unknown_predicate_fallback() {
 #[test]
 fn test_ndv_zero_fallback() {
     let cat = MagicCatalog::default();
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("t.a".to_string(), DataType::Int32, false),
-    ]));
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
     let src = cat
         .try_create_table("t".to_string(), schema.clone())
         .unwrap();
@@ -328,9 +335,11 @@ fn test_ndv_from_hll_advanced_stats() {
     use synopses::distinct::HyperLogLog;
 
     let cat = MagicCatalog::default();
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("t.a".to_string(), DataType::Int32, false),
-    ]));
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
     let src = cat
         .try_create_table("t".to_string(), schema.clone())
         .unwrap();
@@ -344,7 +353,7 @@ fn test_ndv_from_hll_advanced_stats() {
 
     let col_stats = ColumnStatistics {
         column_id: 0,
-        column_type: "Int32".to_string(),
+        column_type: DataType::Int32,
         name: "t.a".to_string(),
         advanced_stats: vec![AdvanceColumnStatistics {
             stats_type: "hll".to_string(),
@@ -369,7 +378,7 @@ fn test_ndv_from_hll_advanced_stats() {
     // NDV from HLL should be ~50, so selectivity ~1/50 = 0.02
     // card = 1000 * 0.02 = 20
     // Allow some HLL approximation error
-    assert!(card.as_f64() > 10.0 && card.as_f64() < 30.0);
+    assert!(card.as_f64() > 17.0 && card.as_f64() < 23.0);
 }
 
 // ---------- Equi-join tests ----------
@@ -377,12 +386,16 @@ fn test_ndv_from_hll_advanced_stats() {
 #[test]
 fn test_equijoin_basic() {
     let cat = MagicCatalog::default();
-    let schema_a = Arc::new(Schema::new(vec![
-        Field::new("a.id".to_string(), DataType::Int32, false),
-    ]));
-    let schema_b = Arc::new(Schema::new(vec![
-        Field::new("b.aid".to_string(), DataType::Int32, false),
-    ]));
+    let schema_a = Arc::new(Schema::new(vec![Field::new(
+        "a.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let schema_b = Arc::new(Schema::new(vec![Field::new(
+        "b.aid".to_string(),
+        DataType::Int32,
+        false,
+    )]));
     let src_a = cat
         .try_create_table("a".to_string(), schema_a.clone())
         .unwrap();
@@ -418,12 +431,16 @@ fn test_equijoin_basic() {
 #[test]
 fn test_equijoin_domain_no_overlap() {
     let cat = MagicCatalog::default();
-    let schema_a = Arc::new(Schema::new(vec![
-        Field::new("a.id".to_string(), DataType::Int32, false),
-    ]));
-    let schema_b = Arc::new(Schema::new(vec![
-        Field::new("b.id".to_string(), DataType::Int32, false),
-    ]));
+    let schema_a = Arc::new(Schema::new(vec![Field::new(
+        "a.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let schema_b = Arc::new(Schema::new(vec![Field::new(
+        "b.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
     let src_a = cat
         .try_create_table("a".to_string(), schema_a.clone())
         .unwrap();
@@ -452,8 +469,8 @@ fn test_equijoin_domain_no_overlap() {
     let join = scan_a.hash_join(scan_b, keys, boolean(true), JoinType::Inner);
     let card = join.cardinality(&ctx);
 
-    // Disjoint domains → near-zero (1.0)
-    assert_eq!(card.as_f64(), 1.0);
+    // Disjoint domains → zero rows
+    assert_eq!(card.as_f64(), 0.0);
 }
 
 #[test]

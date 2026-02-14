@@ -1,7 +1,34 @@
 //! Advanced cardinality estimator using table/column statistics and HLL synopses.
 //!
-//! v1 scope: Scan + equality filter + equi-join (PhysicalHashJoin only).
-//! Falls back to magic constants for unsupported operators.
+//! # Scope (v1)
+//!
+//! Statistics-driven estimation for: **Scan**, **equality filter**, and
+//! **equi-join** (PhysicalHashJoin only). All other operators fall back to
+//! hardcoded "magic" constants identical to [`crate::magic::MagicCardinalityEstimator`].
+//!
+//! # High-level approach
+//!
+//! * **Scan**: `|R| = table_stats.row_count`. Falls back to 1 000 when no stats.
+//! * **Filter**: `|σ_p(R)| = sel(p) · |R|`. See [`selectivity::filter_selectivity`].
+//! * **Hash Join**: `|R ⋈ S| = |R| · |S| · Π sel(k_i)` over equi-key pairs.
+//!   See [`selectivity::equijoin_cardinality`].
+//! * **Other joins / aggregates / projections**: magic-constant fallbacks.
+//!
+//! # Column-to-statistics lookup
+//!
+//! Each IR `Column` carries a `ColumnMeta.source: Option<DataSourceId>` that
+//! records which base table the column originated from (set in
+//! `add_base_table_columns`; `None` for derived columns). The [`column_stats`]
+//! helper uses this provenance chain:
+//!
+//! ```text
+//! Column → ColumnMeta.source → Catalog.describe_table → TableStatistics
+//!        → (column.id - first_column_id) → ColumnStatistics
+//! ```
+//!
+//! **Assumption:** column provenance is only valid for non-nested queries.
+//! Derived columns (expressions, subqueries) have `source = None` and will
+//! always miss the stats lookup, causing a fallback.
 
 mod selectivity;
 
@@ -23,17 +50,46 @@ pub type StoredHLL = HyperLogLog<Vec<u8>, BuildHasherDefault<Murmur2Hash64a>, 12
 pub struct AdvancedCardinalityEstimator;
 
 impl AdvancedCardinalityEstimator {
+    /// Fallback selectivity when a join condition is a non-literal expression
+    /// that we cannot decompose into equi-keys. Mirrors the constant from
+    /// `MagicCardinalityEstimator`.
+    ///
+    /// Formula (fallback): `|R ⋈ S| = 0.4 · |R| · |S|`
     pub const FALLBACK_JOIN_SELECTIVITY: f64 = 0.4;
+
+    /// Fallback selectivity for any predicate we cannot analyze (e.g. range,
+    /// LIKE, function calls). Mirrors the constant from
+    /// `MagicCardinalityEstimator`.
+    ///
+    /// Formula (fallback): `|σ_p(R)| = 0.1 · |R|`
     pub const FALLBACK_PREDICATE_SELECTIVITY: f64 = 0.1;
+
+    /// Fraction of input rows assumed to survive a GROUP BY per grouping key.
+    /// Applied exponentially: `sel = 0.2 ^ num_keys`.
+    ///
+    /// **Assumption:** each additional grouping key multiplicatively reduces
+    /// the number of distinct groups by this factor.
     pub const FALLBACK_GROUP_BY_NDV_FACTOR: f64 = 0.2;
+
+    /// Default table cardinality when no statistics are available at all.
     pub const FALLBACK_DEFAULT_CARDINALITY: usize = 1000;
 }
 
-/// Look up TableStatistics and column offset for an IR Column.
-/// Returns None if: column has no source table, table has no stats,
-/// or column offset is out of bounds.
+/// Resolve an IR [`Column`] to its owning [`TableStatistics`] and the offset
+/// of the column within that table's `column_statistics` vector.
+///
+/// Returns `None` (triggering a fallback in the caller) when any of:
+/// - The column has no `source` (i.e. it is a derived/computed column).
+/// - The source table has no statistics in the catalog.
+/// - The column offset exceeds the statistics vector length.
+///
+/// **Assumption:** Column IDs are allocated contiguously per table starting
+/// from `first_column_id`, so `offset = column.0 - first_column_id` gives the
+/// position in `column_statistics`.
 fn column_stats(ctx: &IRContext, column: Column) -> Option<(TableStatistics, usize)> {
     let meta = ctx.get_column_meta(&column);
+    // Provenance lookup: only base-table columns carry a source.
+    // Derived columns (expressions, subqueries) have source = None.
     let source = meta.source?;
     let table_meta = ctx.cat.describe_table(source);
     let stats = table_meta.stats?;
@@ -51,8 +107,17 @@ fn column_stats(ctx: &IRContext, column: Column) -> Option<(TableStatistics, usi
     }
 }
 
-/// Extract NDV for a column. Checks distinct_count first, then tries
-/// deserializing HLL from advanced_stats.
+/// Extract the number of distinct values (NDV) for a column.
+///
+/// Resolution order:
+/// 1. `distinct_count` — precomputed exact or approximate count stored
+///    directly in [`ColumnStatistics`].
+/// 2. HyperLogLog synopsis — deserialized from `advanced_stats` entries
+///    with `stats_type == "hll"`. Provides an approximate count with
+///    ~1.04 / √(2^P) standard error (P = 12 → ~1.6% error).
+///
+/// Returns `None` if neither source yields a positive count, which causes
+/// callers to fall back to magic constants.
 fn ndv(col_stats: &ColumnStatistics) -> Option<usize> {
     // 1. Check precomputed distinct_count
     if let Some(dc) = col_stats.distinct_count {
@@ -62,7 +127,7 @@ fn ndv(col_stats: &ColumnStatistics) -> Option<usize> {
     }
     // 2. Try HLL from advanced_stats
     for adv in &col_stats.advanced_stats {
-        // TODO(AC): Replace with constants in AdvColStats?
+        // TODO(AC): Replace with constants (enum?) in AdvColStats
         if adv.stats_type == "hll" {
             if let Ok(hll) = serde_json::from_value::<StoredHLL>(adv.data.clone()) {
                 let count = hll.approx_distinct();
@@ -79,6 +144,9 @@ impl CardinalityEstimator for AdvancedCardinalityEstimator {
     fn estimate(&self, op: &Operator, ctx: &IRContext) -> Cardinality {
         use crate::ir::OperatorKind;
 
+        // Selectivity for non-hash joins where we only inspect the join condition
+        // as a whole (no key decomposition). If the condition is a boolean literal
+        // we know the exact selectivity; otherwise we fall back to 0.4.
         let join_selectivity = |join_cond: &Scalar| {
             if let Ok(literal) = join_cond.try_borrow::<Literal>() {
                 match literal.value() {
@@ -91,6 +159,13 @@ impl CardinalityEstimator for AdvancedCardinalityEstimator {
             }
         };
 
+        // Fallback join estimator for join types we don't have stats-driven
+        // estimation for (LogicalJoin, DependentJoin, NLJoin).
+        //
+        // Formula by join type:
+        //   Mark(col)  → |outer|           (adds a boolean column, no row change)
+        //   Single     → min(sel · |L| · |R|, |L|)  (at-most-one match per left row)
+        //   Otherwise  → sel · |L| · |R|            (standard cross-product model)
         let estimate_join =
             |join_type: &JoinType, outer: &Operator, inner: &Operator, join_cond: &Scalar| {
                 let left_card = outer.cardinality(ctx);
@@ -114,6 +189,8 @@ impl CardinalityEstimator for AdvancedCardinalityEstimator {
             }
 
             // --- Stats-driven: Scan ---
+            // Formula: |Scan(T)| = T.row_count   (exact from catalog stats)
+            // Fallback: 1000 when no stats are available.
             OperatorKind::LogicalGet(meta) => match ctx.cat.describe_table(meta.source).stats {
                 Some(stats) => Cardinality::with_count_lossy(stats.row_count),
                 None => Cardinality::with_count_lossy(Self::FALLBACK_DEFAULT_CARDINALITY),
@@ -126,11 +203,13 @@ impl CardinalityEstimator for AdvancedCardinalityEstimator {
             }
 
             // --- Stats-driven: Filter ---
+            // Formula: |σ_p(R)| = sel(p) · |R|
+            // where sel(p) is computed by selectivity::filter_selectivity.
+            // base_row_count is used to compute null_fraction = null_count / row_count.
             OperatorKind::LogicalSelect(meta) => {
                 let filter = LogicalSelect::borrow_raw_parts(meta, &op.common);
                 let input_card = filter.input().cardinality(ctx);
 
-                // Get base table row count for null-fraction computation
                 let base_row_count = input_card.as_f64() as usize;
                 let sel = selectivity::filter_selectivity(filter.predicate(), ctx, base_row_count);
                 sel * input_card
@@ -143,12 +222,23 @@ impl CardinalityEstimator for AdvancedCardinalityEstimator {
                 sel * input_card
             }
 
-            // --- Stats-driven: PhysicalHashJoin ---
+            // --- Stats-driven: PhysicalHashJoin (equi-join) ---
+            // Formula: |R ⋈_{k1,...,kn} S| = |R| · |S| · Π_i 1/max(NDV_R(k_i), NDV_S(k_i))
+            // See selectivity::equijoin_cardinality for full details.
+            //
+            // Assumption: inner-join semantics. Other join types are not yet handled.
+            // Assumption: non-equi conditions (e.g. x.b < y.b) are ignored.
             OperatorKind::PhysicalHashJoin(meta) => {
                 let join = PhysicalHashJoin::borrow_raw_parts(meta, &op.common);
                 let build_card = join.build_side().cardinality(ctx);
                 let probe_card = join.probe_side().cardinality(ctx);
 
+                // TODO(AC) -- This does not handle non-equi-conds obtained via the scalars.
+                // Check how postgres or cockroach do this. DuckDB likely not good at it.
+                // Example: x.a = y.a and x.b < y.b
+
+                // TODO(AC/Yuchen): This assumes inner-join. Handle other join types by
+                // passing in the entire `join` variable (or the join_type field.)
                 selectivity::equijoin_cardinality(join.keys(), build_card, probe_card, ctx)
             }
 
@@ -190,6 +280,13 @@ impl CardinalityEstimator for AdvancedCardinalityEstimator {
             }
 
             // --- Fallback: aggregates ---
+            // Formula: |γ_{k1,...,kn}(R)| = 0.2^n  (fraction of input rows)
+            //
+            // Assumption: each grouping key independently reduces the group
+            // count by a factor of 0.2. This does NOT use actual NDV from
+            // statistics — it is a pure heuristic.
+            //
+            // Example: GROUP BY (a, b) → 0.2^2 = 0.04 → 4% of input rows.
             OperatorKind::LogicalAggregate(meta) => {
                 let agg = LogicalAggregate::borrow_raw_parts(meta, &op.common);
                 let len = agg.keys().borrow::<List>().members().len();
@@ -205,7 +302,7 @@ impl CardinalityEstimator for AdvancedCardinalityEstimator {
                 )
             }
 
-            // --- Pass-through ---
+            // --- Pass-through: these operators do not change row count ---
             OperatorKind::LogicalOrderBy(meta) => {
                 LogicalOrderBy::borrow_raw_parts(meta, &op.common)
                     .input()

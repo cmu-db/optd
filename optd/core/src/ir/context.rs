@@ -67,7 +67,7 @@ impl IRContext {
 
     pub fn define_column(&self, data_type: DataType, name: Option<String>) -> Column {
         let mut column_meta = self.column_meta.lock().unwrap();
-        // TODO(AC): Where is this being used? what should be used as source?
+        // TODO(AC/Yuchen): Where is this being used? what should be used as source?
         column_meta.new_column(data_type, name, None)
     }
 

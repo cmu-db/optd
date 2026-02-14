@@ -33,7 +33,7 @@ impl IRContext {
         let mut column_meta = self.column_meta.lock().unwrap();
         let columns = columns
             .iter()
-            // TODO(AC): Dummy MockScan source?
+            // TODO(AC/Yuchen): Dummy MockScan source?
             .map(|_| column_meta.new_column(DataType::Int32, None, None))
             .collect_vec();
 

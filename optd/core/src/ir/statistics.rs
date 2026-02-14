@@ -1,3 +1,4 @@
+use crate::ir::DataType;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -16,16 +17,16 @@ pub struct TableStatistics {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ColumnStatistics {
     pub column_id: i64,
-    pub column_type: String,
+    pub column_type: DataType,
     pub name: String,
     pub advanced_stats: Vec<AdvanceColumnStatistics>,
 
-    /// Minimum value in the column
+    /// Minimum value in the column (serialized as string)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub min_value: Option<Value>,
-    /// Maximum value in the column
+    pub min_value: Option<String>,
+    /// Maximum value in the column (serialized as string)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_value: Option<Value>,
+    pub max_value: Option<String>,
     /// Total number of null values
     #[serde(skip_serializing_if = "Option::is_none")]
     pub null_count: Option<usize>,
@@ -37,7 +38,7 @@ pub struct ColumnStatistics {
 impl ColumnStatistics {
     pub fn new(
         column_id: i64,
-        column_type: String,
+        column_type: DataType,
         name: String,
         advanced_stats: Vec<AdvanceColumnStatistics>,
     ) -> Self {

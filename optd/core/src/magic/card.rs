@@ -115,6 +115,7 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                     match literal.value() {
                         crate::ir::ScalarValue::Boolean(Some(true)) => 1.,
                         crate::ir::ScalarValue::Boolean(_) => 0.,
+                        // TODO(AC/Yuchen): Join condition?
                         _ => unreachable!("join condition must be boolean"),
                     }
                 } else {
@@ -129,6 +130,7 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                     match literal.value() {
                         crate::ir::ScalarValue::Boolean(Some(true)) => 1.,
                         crate::ir::ScalarValue::Boolean(_) => 0.,
+                        // TODO(AC/Yuchen): Join condition?
                         _ => unreachable!("join condition must be boolean"),
                     }
                 } else {

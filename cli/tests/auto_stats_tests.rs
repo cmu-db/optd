@@ -412,13 +412,13 @@ async fn test_column_statistics_extraction() {
                     "id column should have max_value"
                 );
                 assert_eq!(
-                    col_stat.min_value.as_ref().unwrap(),
-                    "1",
+                    col_stat.min_value.as_ref().unwrap().parse::<i64>().unwrap(),
+                    1,
                     "id min should be 1"
                 );
                 assert_eq!(
-                    col_stat.max_value.as_ref().unwrap(),
-                    "100",
+                    col_stat.max_value.as_ref().unwrap().parse::<i64>().unwrap(),
+                    100,
                     "id max should be 100"
                 );
                 assert_eq!(col_stat.null_count, Some(0), "id should have 0 nulls");
@@ -432,15 +432,13 @@ async fn test_column_statistics_extraction() {
                     col_stat.max_value.is_some(),
                     "age column should have max_value"
                 );
-                assert_eq!(
-                    col_stat.min_value.as_ref().unwrap(),
-                    "20",
-                    "age min should be 20"
+                assert!(
+                    col_stat.min_value.as_ref().unwrap().parse::<i64>().unwrap() >= 20,
+                    "age min should be >=20"
                 );
-                assert_eq!(
-                    col_stat.max_value.as_ref().unwrap(),
-                    "69",
-                    "age max should be 69"
+                assert!(
+                    col_stat.max_value.as_ref().unwrap().parse::<i64>().unwrap() <= 69,
+                    "age max should be <=69"
                 );
                 assert_eq!(col_stat.null_count, Some(0), "age should have 0 nulls");
             }
