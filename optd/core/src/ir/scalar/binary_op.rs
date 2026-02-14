@@ -93,10 +93,7 @@ impl BinaryOpBorrowed<'_> {
     }
 
     pub fn is_eq(&self) -> bool {
-        matches!(
-            self.op_kind(),
-            BinaryOpKind::Eq | BinaryOpKind::IsNotDistinctFrom
-        )
+        matches!(self.op_kind(), BinaryOpKind::Eq)
     }
 
     pub fn is_not_distinct_from(&self) -> bool {

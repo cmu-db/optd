@@ -172,7 +172,7 @@ impl Operator {
     }
 
     /// Gets the set of columns used by this operator and its children
-    /// TODO(SM): Are all columns used by an operator always stored in its scalar
+    /// TODO: Are all columns used by an operator always stored in its scalar
     /// set? Can we guarantee used columns will not be part of the metadata
     /// set? If this is not guaranteed, should operators implement some sort of
     /// used_columns property (similar to output_schema), so we don't have this

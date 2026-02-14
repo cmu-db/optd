@@ -32,7 +32,10 @@ pub use list::*;
 pub use literal::*;
 pub use nary_op::*;
 
-use crate::ir::{ColumnSet, IRCommon, Operator, ScalarValue, convert::IntoScalar, explain::Explain, properties::ScalarProperties};
+use crate::ir::{
+    ColumnSet, IRCommon, Operator, ScalarValue, convert::IntoScalar, explain::Explain,
+    properties::ScalarProperties,
+};
 
 /// The scalar type and its associated metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -103,10 +106,7 @@ impl Scalar {
     // Simplifies an n-ary scalar by dropping redundant terms
     pub fn simplify_nary_scalar(self: Arc<Self>) -> Arc<Scalar> {
         match &self.kind {
-            ScalarKind::BinaryOp(bin)
-                if bin.op_kind == BinaryOpKind::Eq
-                    || bin.op_kind == BinaryOpKind::IsNotDistinctFrom =>
-            {
+            ScalarKind::BinaryOp(bin) if bin.op_kind == BinaryOpKind::IsNotDistinctFrom => {
                 let lhs = self.input_scalars()[0].clone();
                 let rhs = self.input_scalars()[1].clone();
                 if lhs == rhs {
@@ -118,10 +118,12 @@ impl Scalar {
             ScalarKind::NaryOp(nary) if nary.op_kind == NaryOpKind::And => {
                 let mut terms = Vec::new();
                 for term in self.input_scalars() {
-                    if matches!(&term.kind, ScalarKind::Literal(meta) if matches!(meta.value, ScalarValue::Boolean(Some(true)))) {
+                    if matches!(&term.kind, ScalarKind::Literal(meta) if matches!(meta.value, ScalarValue::Boolean(Some(true))))
+                    {
                         continue;
                     }
-                    if matches!(&term.kind, ScalarKind::Literal(meta) if matches!(meta.value, ScalarValue::Boolean(Some(false)))) {
+                    if matches!(&term.kind, ScalarKind::Literal(meta) if matches!(meta.value, ScalarValue::Boolean(Some(false))))
+                    {
                         return Literal::boolean(false).into_scalar();
                     }
                     terms.push(term.clone());
@@ -141,6 +143,13 @@ impl Scalar {
             }
             _ => self,
         }
+    }
+
+    pub fn is_true_scalar(&self) -> bool {
+        matches!(
+            &self.kind,
+            ScalarKind::Literal(meta) if matches!(meta.value, ScalarValue::Boolean(Some(true)))
+        )
     }
 }
 

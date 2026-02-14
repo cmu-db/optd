@@ -29,7 +29,7 @@ impl UnnestingRule {
             return self.traverse_and_unnest(res, ctx);
         }
 
-        // TODO(SM): We are recursing deep! For query plans with hundreds of nodes,
+        // TODO: We are recursing deep! For query plans with hundreds of nodes,
         // this may overflow. This is therefore potentially better to do with DFS
         let new_inputs: Vec<Arc<Operator>> = op
             .input_operators()
