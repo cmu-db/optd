@@ -1,4 +1,28 @@
-/// This module is the main arbitrary unnesting algorithm
+/// This module implements subquery decorrelation, based on the paper "Improving 
+/// Unnesting of Complex Queries (BTW 2025)" by Thomas Neumann. 
+/// 
+/// Gaps to the paper's implementation / Future TODOs:
+///
+/// 1 - We currently only support full unnesting, without the "simple unnesting" 
+/// pass before that. This is logically correct, and anything that can be simply 
+/// unnested can be fully unnested. However, we can probably shave off a few 
+/// milliseconds by running a simple unnesting pass first if latency is essential in
+/// the future (i.e. OLTP applications).
+///
+/// 2 - The 4 "advanced constructs" from the paper (CTEs, WITH RECURSIVE, FULL OUTER
+/// joins, ORDER BY with LIMIT) are unsupported, since many of these constructs 
+/// don't even have a meaningful IR in optd. When these constructs are added, the
+/// implementation rules for those operators can be added.
+///
+/// 3 - We compute outer-references and accessing sets on the fly, by checking
+/// which columns of an operator are not bound by downstream columns being
+/// produced. This is a much bigger latency concern than (1), since we do
+/// potentially O(n) work per operator in the tree, i.e. potentially O(n^2)
+/// total work. This should be done in a pass before decorrelation, where we
+/// mark every dependent join with the operators that access outer columns, and
+/// every operator with which of its columns are outer references or bound
+/// references.
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -9,13 +33,13 @@ use crate::ir::operator::{
     LogicalAggregate, LogicalDependentJoinBorrowed, LogicalJoin, LogicalProject, LogicalRemap,
     Operator,
 };
-use crate::ir::scalar::{
-    BinaryOp, BinaryOpKind, ColumnAssign, ColumnRef, List, NaryOp, NaryOpKind,
-};
+use crate::ir::scalar::{BinaryOp, BinaryOpKind, ColumnAssign, ColumnRef, List};
 use crate::ir::{Column, Scalar};
 
 use super::UnnestingRule;
-use super::helpers::{Unnesting, UnnestingInfo, compute_accessing_set, is_contained_in};
+use super::helpers::{
+    Unnesting, UnnestingInfo, compute_accessing_set, is_contained_in, remap_right_output_collisions,
+};
 
 impl UnnestingRule {
     // Creates the domain for the new unnesting struct
@@ -71,11 +95,10 @@ impl UnnestingRule {
         parent_accessing: Option<&HashSet<*const Operator>>,
         ctx: &IRContext,
     ) -> Arc<Operator> {
-        // We currently only support inner joins!
-        assert_eq!(*dep_join.join_type(), JoinType::Inner);
-
-        // NOTE: In the paper, "simple unnesting" occurs at this point. This
-        // is currently unimplemented, and explained in the file header
+        // We currently only support inner dependent joins!
+        // TODO: Support left outer, single, and mark joins
+        let join_type = *dep_join.join_type();
+        assert_eq!(join_type, JoinType::Inner);
 
         // In the nested case we have to unnest the left-hand side first
         let (new_outer, condition) = if let Some(ref mut pu) = parent_unnesting {
@@ -125,6 +148,9 @@ impl UnnestingRule {
             &accessing_operators,
             ctx,
         );
+        let new_outer_cols = new_outer.output_columns(ctx);
+        let (new_inner, remap) =
+            remap_right_output_collisions(&new_outer_cols, new_inner, &mut unnesting, ctx);
 
         // Add equality to join condition
         let mut new_conds = Vec::new();
@@ -139,47 +165,44 @@ impl UnnestingRule {
             new_conds.push(condition.clone());
         }
 
-        // If this nested elimination found representatives for ancestor-scope
-        // refs, reconcile them with the parent's currently chosen
-        // representatives (if any) before propagating upward.
+        // If this nested elimination is inside an already-decorrelating scope,
+        // reconcile parent-vs-inner representative choices
         let mut nested_repr_choices = Vec::new();
-        let new_outer_cols = new_outer.output_columns(ctx);
         let new_inner_cols = new_inner.output_columns(ctx);
         if let Some(parent) = parent_unnesting.as_deref() {
-            for (outer_col, nested_repr) in &unnesting.get_nested_repr_entries() {
-                if let Some(parent_repr) = parent.resolve_col(*outer_col)
-                    && parent_repr != *nested_repr
-                    && new_outer_cols.contains(&parent_repr)
-                    && new_inner_cols.contains(nested_repr)
-                {
-                    let left_ref = ColumnRef::new(parent_repr).into_scalar();
-                    let right_ref = ColumnRef::new(*nested_repr).into_scalar();
+            for outer_col in parent.collect_outer_refs_recursive() {
+                let parent_repr = parent
+                    .resolve_col(outer_col)
+                    .filter(|col| new_outer_cols.contains(col));
+                let inner_repr = unnesting
+                    .resolve_col(outer_col)
+                    .map(|col: Column| remap.get(&col).copied().unwrap_or(col))
+                    .filter(|col| new_inner_cols.contains(col));
+
+                if let (Some(l), Some(r)) = (parent_repr, inner_repr) {
+                    assert!(l != r);
+                    let left_ref = ColumnRef::new(l).into_scalar();
+                    let right_ref = ColumnRef::new(r).into_scalar();
                     new_conds.push(
                         BinaryOp::new(BinaryOpKind::IsNotDistinctFrom, left_ref, right_ref)
                             .into_scalar(),
                     );
-                    nested_repr_choices.push((*outer_col, parent_repr));
-                } else {
-                    nested_repr_choices.push((*outer_col, *nested_repr));
+                    nested_repr_choices.push((outer_col, l));
+                } else if let Some(r) = inner_repr {
+                    nested_repr_choices.push((outer_col, r));
                 }
             }
         }
 
-        let final_cond = if new_conds.len() == 1 {
-            new_conds[0].clone()
-        } else {
-            NaryOp::new(NaryOpKind::And, new_conds.into()).into_scalar()
-        };
-
         // Propagate higher-scope representatives discovered in this nested
         // elimination back to the parent state.
-        drop(unnesting);
         if let Some(parent) = parent_unnesting.as_deref_mut() {
             for (outer_col, repr_col) in nested_repr_choices {
                 parent.set_scoped_repr_of(outer_col, repr_col);
             }
         }
 
-        LogicalJoin::new(*dep_join.join_type(), new_outer, new_inner, final_cond).into_operator()
+        let new_cond = Scalar::combine_conjuncts(new_conds);
+        LogicalJoin::new(join_type, new_outer, new_inner, new_cond).into_operator()
     }
 }

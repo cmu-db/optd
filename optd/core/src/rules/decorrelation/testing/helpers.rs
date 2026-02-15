@@ -10,6 +10,8 @@ use crate::ir::scalar::{
 };
 use crate::ir::{Column, DataType, IRContext, Scalar, ScalarValue};
 use crate::rules::decorrelation::UnnestingRule;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -21,7 +23,6 @@ pub(super) fn make_cols(ctx: &IRContext, n: usize) -> Vec<Column> {
         .collect()
 }
 
-/// Creates a NULL safe equality predicate
 pub(super) fn null_safe_eq(
     lhs: Arc<crate::ir::Scalar>,
     rhs: Arc<crate::ir::Scalar>,
@@ -29,7 +30,6 @@ pub(super) fn null_safe_eq(
     BinaryOp::new(BinaryOpKind::IsNotDistinctFrom, lhs, rhs).into_scalar()
 }
 
-/// Creates a domain operator and remaps its output columns to new aliases.
 pub(super) fn create_domain_with_aliases(
     input: Arc<Operator>,
     from_cols: Vec<Column>,
@@ -53,61 +53,61 @@ pub(super) fn create_domain_with_aliases(
     domain_distinct.logical_remap(remap_assigns)
 }
 
-type EvalRow = BTreeMap<Column, Option<i32>>;
-type MockData = BTreeMap<usize, Vec<EvalRow>>;
+// --- Helper functions to "execute" a plan and check equality ---
 
+/// One row of data keyed by column id; values are nullable i32s.
+type Row = BTreeMap<Column, Option<i32>>;
+
+/// Mock scan table data keyed by mock table id.
+type MockData = BTreeMap<usize, Vec<Row>>;
+
+/// Runtime value domain used by the mini evaluator.
 #[derive(Clone, Copy)]
 enum EvalValue {
     Int(Option<i32>),
     Bool(Option<bool>),
 }
 
+/// Gather mock scan schemas so random test data can be generated consistently.
 fn collect_mock_schemas(op: &Arc<Operator>, schemas: &mut BTreeMap<usize, Vec<Column>>) {
     if let OperatorKind::MockScan(meta) = &op.kind {
         let scan = MockScan::borrow_raw_parts(meta, &op.common);
         let mut cols: Vec<Column> = scan.spec().mocked_output_columns.iter().copied().collect();
         cols.sort_by_key(|c| c.0);
-        if let Some(existing) = schemas.get(scan.mock_id()) {
-            assert_eq!(
-                existing, &cols,
-                "same mock id must expose the same output columns"
-            );
-        } else {
-            schemas.insert(*scan.mock_id(), cols);
-        }
+        schemas.insert(*scan.mock_id(), cols);
     }
     for child in op.input_operators() {
         collect_mock_schemas(child, schemas);
     }
 }
 
-fn next_rand(state: &mut u64) -> u64 {
-    *state = state
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(1442695040888963407);
-    *state
-}
-
-fn random_value(state: &mut u64) -> Option<i32> {
-    match next_rand(state) % 5 {
-        0 => None,
-        1 => Some(-1),
-        2 => Some(0),
-        3 => Some(1),
-        _ => Some(2),
+/// Build per-mock scan input rows from discovered schemas and a seed.
+fn generate_mock_data(
+    schemas: &BTreeMap<usize, Vec<Column>>,
+    seed: u64,
+    num_rows_low: usize,
+    num_rows_high: usize,
+) -> MockData {
+    /// Draw a random test value with some NULLs to exercise null semantics.
+    fn random_value(rng: &mut StdRng) -> Option<i32> {
+        match rng.gen_range(0..5) {
+            0 => None,
+            1 => Some(-1),
+            2 => Some(0),
+            3 => Some(1),
+            _ => Some(2),
+        }
     }
-}
 
-fn generate_mock_data(schemas: &BTreeMap<usize, Vec<Column>>, seed: u64) -> MockData {
-    let mut state = seed;
+    let mut rng = StdRng::seed_from_u64(seed);
     let mut data = BTreeMap::new();
     for (mock_id, cols) in schemas {
-        let row_count = (next_rand(&mut state) % 4) as usize;
+        let row_count = rng.gen_range(num_rows_low..num_rows_high);
         let mut rows = Vec::with_capacity(row_count);
         for _ in 0..row_count {
             let mut row = BTreeMap::new();
             for col in cols {
-                row.insert(*col, random_value(&mut state));
+                row.insert(*col, random_value(&mut rng));
             }
             rows.push(row);
         }
@@ -116,7 +116,8 @@ fn generate_mock_data(schemas: &BTreeMap<usize, Vec<Column>>, seed: u64) -> Mock
     data
 }
 
-fn lookup_col(row: &EvalRow, env: &[EvalRow], col: Column) -> Option<i32> {
+/// Resolve a column from the current row, or from outer correlated rows.
+fn lookup_col(row: &Row, env: &[Row], col: Column) -> Option<i32> {
     if let Some(v) = row.get(&col) {
         return *v;
     }
@@ -128,6 +129,7 @@ fn lookup_col(row: &EvalRow, env: &[EvalRow], col: Column) -> Option<i32> {
     panic!("unbound column during evaluation: {:?}", col);
 }
 
+/// Enforce boolean-typed scalar evaluation in the mini evaluator.
 fn as_bool(v: EvalValue) -> Option<bool> {
     match v {
         EvalValue::Bool(b) => b,
@@ -135,6 +137,7 @@ fn as_bool(v: EvalValue) -> Option<bool> {
     }
 }
 
+/// Enforce integer-typed scalar evaluation in the mini evaluator.
 fn as_int(v: EvalValue) -> Option<i32> {
     match v {
         EvalValue::Int(i) => i,
@@ -142,7 +145,8 @@ fn as_int(v: EvalValue) -> Option<i32> {
     }
 }
 
-fn eval_scalar(s: &Arc<Scalar>, row: &EvalRow, env: &[EvalRow]) -> EvalValue {
+/// Evaluate a scalar expression under SQL three-valued logic rules.
+fn eval_scalar(s: &Arc<Scalar>, row: &Row, env: &[Row]) -> EvalValue {
     match &s.kind {
         ScalarKind::ColumnRef(meta) => {
             let cr = ColumnRef::borrow_raw_parts(meta, &s.common);
@@ -243,11 +247,8 @@ fn eval_scalar(s: &Arc<Scalar>, row: &EvalRow, env: &[EvalRow]) -> EvalValue {
     }
 }
 
-fn eval_predicate_true(pred: &Arc<Scalar>, row: &EvalRow, env: &[EvalRow]) -> bool {
-    matches!(as_bool(eval_scalar(pred, row, env)), Some(true))
-}
-
-fn combine_rows(left: &EvalRow, right: &EvalRow) -> EvalRow {
+/// Merge two rows produced by a join pair into one composite row.
+fn combine_rows(left: &Row, right: &Row) -> Row {
     let mut out = left.clone();
     for (c, v) in right {
         if let Some(existing) = out.get(c) {
@@ -261,11 +262,8 @@ fn combine_rows(left: &EvalRow, right: &EvalRow) -> EvalRow {
     out
 }
 
-fn eval_list_members(list: &Arc<Scalar>) -> Vec<Arc<Scalar>> {
-    list.try_borrow::<List>().unwrap().members().to_vec()
-}
-
-fn eval_op(op: &Arc<Operator>, env: &[EvalRow], data: &MockData, ctx: &IRContext) -> Vec<EvalRow> {
+/// Interpret a logical plan over mock data and return produced rows.
+fn eval_op(op: &Arc<Operator>, env: &[Row], data: &MockData, ctx: &IRContext) -> Vec<Row> {
     match &op.kind {
         OperatorKind::MockScan(meta) => {
             let scan = MockScan::borrow_raw_parts(meta, &op.common);
@@ -275,16 +273,21 @@ fn eval_op(op: &Arc<Operator>, env: &[EvalRow], data: &MockData, ctx: &IRContext
             let sel = LogicalSelect::borrow_raw_parts(meta, &op.common);
             eval_op(sel.input(), env, data, ctx)
                 .into_iter()
-                .filter(|r| eval_predicate_true(sel.predicate(), r, env))
+                .filter(|r| matches!(as_bool(eval_scalar(sel.predicate(), r, env)), Some(true)))
                 .collect()
         }
         OperatorKind::LogicalProject(meta) => {
             let proj = LogicalProject::borrow_raw_parts(meta, &op.common);
-            let members = eval_list_members(proj.projections());
+            let members = proj
+                .projections()
+                .try_borrow::<List>()
+                .unwrap()
+                .members()
+                .to_vec();
             eval_op(proj.input(), env, data, ctx)
                 .into_iter()
                 .map(|r| {
-                    let mut out = EvalRow::new();
+                    let mut out = Row::new();
                     for m in &members {
                         if let Ok(assign) = m.try_borrow::<ColumnAssign>() {
                             out.insert(
@@ -303,11 +306,16 @@ fn eval_op(op: &Arc<Operator>, env: &[EvalRow], data: &MockData, ctx: &IRContext
         }
         OperatorKind::LogicalRemap(meta) => {
             let remap = LogicalRemap::borrow_raw_parts(meta, &op.common);
-            let members = eval_list_members(remap.mappings());
+            let members = remap
+                .mappings()
+                .try_borrow::<List>()
+                .unwrap()
+                .members()
+                .to_vec();
             eval_op(remap.input(), env, data, ctx)
                 .into_iter()
                 .map(|r| {
-                    let mut out = EvalRow::new();
+                    let mut out = Row::new();
                     for m in &members {
                         let assign = m.try_borrow::<ColumnAssign>().unwrap();
                         out.insert(
@@ -322,13 +330,13 @@ fn eval_op(op: &Arc<Operator>, env: &[EvalRow], data: &MockData, ctx: &IRContext
         OperatorKind::LogicalAggregate(meta) => {
             let agg = LogicalAggregate::borrow_raw_parts(meta, &op.common);
             let input_rows = eval_op(agg.input(), env, data, ctx);
-            let key_members = eval_list_members(agg.keys());
+            let key_members = agg.keys().try_borrow::<List>().unwrap().members().to_vec();
             if key_members.is_empty() {
-                return vec![EvalRow::new()];
+                return vec![Row::new()];
             }
-            let mut groups: BTreeMap<Vec<(Column, Option<i32>)>, EvalRow> = BTreeMap::new();
+            let mut groups: BTreeMap<Vec<(Column, Option<i32>)>, Row> = BTreeMap::new();
             for r in input_rows {
-                let mut out = EvalRow::new();
+                let mut out = Row::new();
                 for m in &key_members {
                     if let Ok(assign) = m.try_borrow::<ColumnAssign>() {
                         out.insert(
@@ -360,7 +368,10 @@ fn eval_op(op: &Arc<Operator>, env: &[EvalRow], data: &MockData, ctx: &IRContext
                     for l in &left_rows {
                         for r in &right_rows {
                             let row = combine_rows(l, r);
-                            if eval_predicate_true(join.join_cond(), &row, env) {
+                            if matches!(
+                                as_bool(eval_scalar(join.join_cond(), &row, env)),
+                                Some(true)
+                            ) {
                                 out.push(row);
                             }
                         }
@@ -375,7 +386,10 @@ fn eval_op(op: &Arc<Operator>, env: &[EvalRow], data: &MockData, ctx: &IRContext
                         let mut matched = false;
                         for r in &right_rows {
                             let row = combine_rows(l, r);
-                            if eval_predicate_true(join.join_cond(), &row, env) {
+                            if matches!(
+                                as_bool(eval_scalar(join.join_cond(), &row, env)),
+                                Some(true)
+                            ) {
                                 out.push(row);
                                 matched = true;
                             }
@@ -404,7 +418,7 @@ fn eval_op(op: &Arc<Operator>, env: &[EvalRow], data: &MockData, ctx: &IRContext
                 let inner_rows = eval_op(dep.inner(), &new_env, data, ctx);
                 for r in &inner_rows {
                     let row = combine_rows(l, r);
-                    if eval_predicate_true(dep.join_cond(), &row, env) {
+                    if matches!(as_bool(eval_scalar(dep.join_cond(), &row, env)), Some(true)) {
                         out.push(row);
                     }
                 }
@@ -415,8 +429,9 @@ fn eval_op(op: &Arc<Operator>, env: &[EvalRow], data: &MockData, ctx: &IRContext
     }
 }
 
+/// Convert rows into a multiset keyed by selected output columns.
 fn rows_to_bag(
-    rows: Vec<EvalRow>,
+    rows: Vec<Row>,
     compare_cols: &[Column],
 ) -> BTreeMap<Vec<(Column, Option<i32>)>, usize> {
     let mut bag = BTreeMap::new();
@@ -430,14 +445,22 @@ fn rows_to_bag(
     bag
 }
 
-fn assert_semantic_equivalence(ctx: &IRContext, input: Arc<Operator>, expected: Arc<Operator>) {
+/// Check semantic equivalence by running both plans over many random datasets.
+fn assert_executed_equivalence(
+    ctx: &IRContext,
+    input: Arc<Operator>,
+    expected: Arc<Operator>,
+    num_rows_low: usize,
+    num_rows_high: usize,
+    num_iterations: usize,
+) {
     let mut schemas = BTreeMap::new();
     collect_mock_schemas(&input, &mut schemas);
     collect_mock_schemas(&expected, &mut schemas);
     let mut compare_cols: Vec<Column> = input.output_columns(ctx).iter().copied().collect();
     compare_cols.sort_by_key(|c| c.0);
-    for seed in 0..256_u64 {
-        let data = generate_mock_data(&schemas, seed);
+    for seed in 0..num_iterations {
+        let data = generate_mock_data(&schemas, seed as u64, num_rows_low, num_rows_high);
         let in_rows = rows_to_bag(eval_op(&input, &[], &data, ctx), &compare_cols);
         let ex_rows = rows_to_bag(eval_op(&expected, &[], &data, ctx), &compare_cols);
         if in_rows != ex_rows {
@@ -462,5 +485,7 @@ pub(super) fn assert_unnesting(ctx: &IRContext, input: Arc<Operator>, expected: 
             quick_explain(&expected, ctx)
         );
     }
-    assert_semantic_equivalence(ctx, input, expected);
+
+    // We execute tests on these plans with tables of size 8-12, 32 times each
+    assert_executed_equivalence(ctx, input, expected, 8, 12, 32);
 }

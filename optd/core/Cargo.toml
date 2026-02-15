@@ -26,3 +26,4 @@ chrono = { workspace = true }
 console-subscriber = "0.4.1"
 tracing-test = "0.2.5"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+rand = "0.8.5"

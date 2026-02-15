@@ -103,6 +103,17 @@ impl Scalar {
         }
     }
 
+    /// Conjoin predicates with `AND`, returning `true` for an empty list.
+    pub fn combine_conjuncts(mut conds: Vec<Arc<Scalar>>) -> Arc<Scalar> {
+        if conds.is_empty() {
+            Literal::boolean(true).into_scalar()
+        } else if conds.len() == 1 {
+            conds.pop().unwrap()
+        } else {
+            NaryOp::new(NaryOpKind::And, conds.into()).into_scalar()
+        }
+    }
+
     // Simplifies an n-ary scalar by dropping redundant terms
     pub fn simplify_nary_scalar(self: Arc<Self>) -> Arc<Scalar> {
         match &self.kind {

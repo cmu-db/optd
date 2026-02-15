@@ -631,7 +631,7 @@ fn test_deep_nesting_multiple_dependencies() {
 ///      |--- Scan(T2) [v1]
 ///      |--- Join [T3.v3 = T4.v5 && d2 IS NOT DISTINCT FROM T4.v4]
 ///           |--- OrderBy [T3.v2 ASC]
-///           |    |--- Project [T3.v2, T3.v3]
+///           |    |--- Project [T3.v2, T3.v3, d1, d2]
 ///           |         |--- Join [T3.v2 > d2 && T3.v3 > d1]
 ///           |              |--- Join [true]
 ///           |              |    |--- Domain(T2.v1) -> d2
@@ -770,7 +770,12 @@ fn test_nested_dep_join_regular_join_orderby_project_domain_vs_repr() {
                                 .and(column_ref(t3c1).gt(column_ref(d1))),
                             JoinType::Inner,
                         )
-                        .logical_project(vec![column_ref(t3c0), column_ref(t3c1)]);
+                        .logical_project(vec![
+                            column_ref(t3c0),
+                            column_ref(t3c1),
+                            column_ref(d1),
+                            column_ref(d2),
+                        ]);
                     LogicalOrderBy::new(
                         select_input,
                         vec![(column_ref(t3c0), TupleOrderingDirection::Asc)],

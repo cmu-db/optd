@@ -8,38 +8,99 @@ use crate::ir::operator::{
     LogicalRemap, LogicalSelect, Operator, OperatorKind, join::JoinType,
 };
 use crate::ir::rule::Rule;
-use crate::ir::scalar::{
-    BinaryOp, BinaryOpKind, ColumnAssign, ColumnRef, List, NaryOp, NaryOpKind,
-};
+use crate::ir::scalar::{BinaryOp, BinaryOpKind, ColumnAssign, ColumnRef, List};
 use crate::ir::{Column, ColumnSet, IRContext, Scalar, ScalarKind};
 use crate::rules::decorrelation::helpers::UnnestingInfo;
 use crate::rules::logical_select_simplify::LogicalSelectSimplifyRule;
 
 use super::UnnestingRule;
-use super::helpers::{Unnesting, is_contained_in};
+use super::helpers::{Unnesting, is_contained_in, remap_right_output_collisions};
 
 impl UnnestingRule {
-    fn get_required_domain_ops<'a>(
+    fn build_domain_chain<'a>(
         info: &UnnestingInfo<'a>,
         unnesting: &Unnesting<'_>,
         seen_outer_refs: &HashSet<Column>,
-        required_domain_ops: &mut Vec<Arc<Operator>>,
-    ) {
-        if info
-            .get_domain_repr_set()
-            .keys()
-            .any(|v| seen_outer_refs.contains(v) && !unnesting.has_resolved_repr_for(v))
-        {
-            required_domain_ops.push(info.get_domain_op());
+        include_resolved_refs: bool,
+    ) -> Option<Arc<Operator>> {
+        fn get_required_domain_ops<'a>(
+            info: &UnnestingInfo<'a>,
+            unnesting: &Unnesting<'_>,
+            seen_outer_refs: &HashSet<Column>,
+            include_resolved_refs: bool,
+            required_domain_ops: &mut Vec<Arc<Operator>>,
+        ) {
+            if info.get_domain_repr_set().keys().any(|v| {
+                seen_outer_refs.contains(v)
+                    && (include_resolved_refs || !unnesting.has_resolved_repr_for(v))
+            }) {
+                required_domain_ops.push(info.get_domain_op());
+            }
+            if let Some(parent) = info.get_parent() {
+                get_required_domain_ops(
+                    parent.get_info().as_ref(),
+                    unnesting,
+                    seen_outer_refs,
+                    include_resolved_refs,
+                    required_domain_ops,
+                );
+            }
         }
-        if let Some(parent) = info.get_parent() {
-            Self::get_required_domain_ops(
-                parent.get_info().as_ref(),
-                unnesting,
-                seen_outer_refs,
-                required_domain_ops,
-            );
+
+        let mut domains = Vec::new();
+        get_required_domain_ops(
+            info,
+            unnesting,
+            seen_outer_refs,
+            include_resolved_refs,
+            &mut domains,
+        );
+        if domains.is_empty() {
+            return None;
         }
+        let mut chain = domains.remove(0);
+        for next_domain in domains {
+            chain = LogicalJoin::new(
+                JoinType::Inner,
+                chain,
+                next_domain,
+                crate::ir::scalar::Literal::boolean(true).into_scalar(),
+            )
+            .into_operator();
+        }
+        Some(chain)
+    }
+
+    fn build_domain<'a>(
+        info: &UnnestingInfo<'a>,
+        unnesting: &Unnesting<'_>,
+        seen_outer_refs: &HashSet<Column>,
+        op: Arc<Operator>,
+    ) -> Arc<Operator> {
+        let Some(chain) = Self::build_domain_chain(info, unnesting, seen_outer_refs, false) else {
+            return op;
+        };
+        LogicalJoin::new(
+            JoinType::Inner,
+            chain,
+            op,
+            crate::ir::scalar::Literal::boolean(true).into_scalar(),
+        )
+        .into_operator()
+    }
+
+    /// Collect all currently-resolved representative columns that should be
+    /// preserved across projection/remap boundaries.
+    fn collect_preserved_reprs(info: &Unnesting<'_>) -> Vec<Column> {
+        let mut reps = Vec::new();
+        for outer_col in info.collect_outer_refs_recursive() {
+            if let Some(resolved) = info.resolve_col(outer_col) {
+                reps.push(resolved);
+            }
+        }
+        reps.sort_by_key(|c| c.0);
+        reps.dedup_by_key(|c| c.0);
+        reps
     }
 
     // Helper function to rewrite columns, specifically for join conditions
@@ -47,6 +108,7 @@ impl UnnestingRule {
     pub(super) fn rewrite_join_columns(
         left: &Unnesting<'_>,
         right: &Unnesting<'_>,
+        right_remap: &HashMap<Column, Column>,
         scalar: Arc<Scalar>,
         left_cols: &ColumnSet,
         right_cols: &ColumnSet,
@@ -57,7 +119,11 @@ impl UnnestingRule {
                 if left_cols.contains(&cr.column) ^ right_cols.contains(&cr.column) {
                     ColumnRef::new(cr.column).into_scalar()
                 } else {
-                    match (left.resolve_col(cr.column), right.resolve_col(cr.column)) {
+                    let l_res = left.resolve_col(cr.column);
+                    let r_res = right
+                        .resolve_col(cr.column)
+                        .map(|col| right_remap.get(&col).copied().unwrap_or(col));
+                    match (l_res, r_res) {
                         (Some(l), Some(r)) => {
                             if matches!(join_type, JoinType::Inner)
                                 && left.is_outer_ref_recursive(&l)
@@ -82,6 +148,7 @@ impl UnnestingRule {
                         Self::rewrite_join_columns(
                             left,
                             right,
+                            right_remap,
                             s.clone(),
                             left_cols,
                             right_cols,
@@ -118,14 +185,10 @@ impl UnnestingRule {
         seen_outer_refs: &mut HashSet<Column>,
         ctx: &IRContext,
     ) -> Arc<Operator> {
-        // Terminal Condition: if no accessing operators remain in this subtree, stop here.
+        // Terminal Condition: if no accessing operators remain in this subtree,
+        // stop here. Choose representative columns / domain-joins for each
+        // outer-ref
         if accessing.is_empty() {
-            // Choose representative columns for each outer-ref
-            // NOTE: The paper claims that we can use a heuristic optimisation
-            // here to decide whether to use cclass equivalent columns, or
-            // inject a domain join.
-            // Current policy is all-or-nothing: if all seen refs can be
-            // rewritten, use repr for all; otherwise do pure domain injection.
             let available: &ColumnSet = &op.output_columns(ctx);
             let mut available_cols: Vec<Column> = available.iter().copied().collect();
             available_cols.sort_by_key(|col| col.0);
@@ -147,6 +210,12 @@ impl UnnestingRule {
                     break;
                 }
             }
+
+            // TODO: The paper claims that we can use a heuristic optimisation
+            // here to decide whether to use cclass equivalent columns, or
+            // inject a domain join. Current policy is all-or-nothing: if all
+            // seen refs can be resolved, use repr for all; otherwise do pure
+            // domain injection.
             if can_resolve_all {
                 for (outer_col, repr_col) in chosen_reprs {
                     info.set_scoped_repr_of(outer_col, repr_col);
@@ -157,34 +226,7 @@ impl UnnestingRule {
                 }
             }
 
-            // Get the required domain operators
-            let mut required_domains = Vec::new();
-            Self::get_required_domain_ops(
-                info.get_info().as_ref(),
-                info,
-                &seen_outer_refs,
-                &mut required_domains,
-            );
-            if !required_domains.is_empty() {
-                let mut domain_chain = required_domains.remove(0);
-                for next_domain in required_domains {
-                    domain_chain = LogicalJoin::new(
-                        JoinType::Inner,
-                        domain_chain,
-                        next_domain,
-                        crate::ir::scalar::Literal::boolean(true).into_scalar(),
-                    )
-                    .into_operator();
-                }
-                return LogicalJoin::new(
-                    JoinType::Inner,
-                    domain_chain,
-                    op,
-                    crate::ir::scalar::Literal::boolean(true).into_scalar(),
-                )
-                .into_operator();
-            }
-            return op;
+            return Self::build_domain(info.get_info().as_ref(), info, &seen_outer_refs, op);
         }
 
         // Compute what outer refs this operator accesses
@@ -250,8 +292,7 @@ impl UnnestingRule {
                         }
                     })
                     .collect();
-                let reps = info.get_resolved_repr_values();
-                for rep in reps {
+                for rep in Self::collect_preserved_reprs(info) {
                     if new_input.output_columns(ctx).contains(&rep) && output_cols.insert(rep) {
                         members.push(ColumnRef::new(rep).into_scalar());
                     }
@@ -278,8 +319,7 @@ impl UnnestingRule {
                             .map(|assign| *assign.column())
                     })
                     .collect();
-                let reps = info.get_resolved_repr_values();
-                for rep in reps {
+                for rep in Self::collect_preserved_reprs(info) {
                     if new_input.output_columns(ctx).contains(&rep) && output_cols.insert(rep) {
                         members.push(
                             ColumnAssign::new(rep, ColumnRef::new(rep).into_scalar()).into_scalar(),
@@ -318,20 +358,19 @@ impl UnnestingRule {
                     ctx,
                 );
 
-                // The new expressions is based on a simple rewrite
                 let new_exprs = info.rewrite_columns(node.exprs().clone());
-
-                // The new keys is based on a rewrite, as well as the repr of
-                // all outer columns
                 let new_keys_scalar = info.rewrite_columns(node.keys().clone());
                 let mut new_keys_vec = new_keys_scalar.input_scalars().to_vec();
                 let mut key_cols: HashSet<Column> = new_keys_vec
                     .iter()
                     .filter_map(|s| s.try_borrow::<ColumnAssign>().ok().map(|a| *a.column()))
                     .collect();
-                let mut outer_refs_vec: Vec<Column> =
-                    info.get_info().get_outer_refs().iter().copied().collect();
-                outer_refs_vec.sort_by_key(|c| c.0);
+                let input_cols = new_input.output_columns(ctx);
+                let mut outer_refs_vec = info.collect_outer_refs_recursive();
+                outer_refs_vec.retain(|c| {
+                    let rep = info.resolve_col(*c).unwrap_or(*c);
+                    input_cols.contains(&rep)
+                });
                 for c in &outer_refs_vec {
                     let rep = info.resolve_col(*c).unwrap_or(*c);
                     if key_cols.insert(rep) {
@@ -340,8 +379,8 @@ impl UnnestingRule {
                     }
                 }
                 let final_keys = List::new(new_keys_vec.into()).into_scalar();
-
                 let agg = LogicalAggregate::new(new_input, new_exprs, final_keys).into_operator();
+
                 if node
                     .keys()
                     .try_borrow::<List>()
@@ -350,10 +389,25 @@ impl UnnestingRule {
                     .is_empty()
                 {
                     // Special case for if there are no grouping columns
+                    let outer_refs_set: HashSet<Column> = outer_refs_vec.iter().copied().collect();
+                    let domain_input = Self::build_domain_chain(
+                        info.get_info().as_ref(),
+                        info,
+                        &outer_refs_set,
+                        true,
+                    )
+                    .unwrap_or_else(|| info.get_info().get_domain_op());
+                    let domain_output_cols = domain_input.output_columns(ctx);
+                    let (agg, agg_remap) =
+                        remap_right_output_collisions(&domain_output_cols, agg, info, ctx);
+
                     let mut conds = Vec::new();
                     for c in &outer_refs_vec {
-                        let left_col = info.get_info().get_domain_repr_of(c).unwrap_or(*c);
-                        let right_col = info.resolve_col(*c).unwrap_or(*c);
+                        let left_col = info.resolve_domain_repr_recursive(*c).unwrap_or(*c);
+                        let right_col = info
+                            .resolve_col(*c)
+                            .map(|col| agg_remap.get(&col).copied().unwrap_or(col))
+                            .unwrap_or(*c);
                         let left_ref = ColumnRef::new(left_col).into_scalar();
                         let right_ref = ColumnRef::new(right_col).into_scalar();
                         if left_ref == right_ref {
@@ -364,45 +418,30 @@ impl UnnestingRule {
                                 .into_scalar(),
                         );
                     }
-                    let join_cond = if conds.is_empty() {
-                        crate::ir::scalar::Literal::boolean(true).into_scalar()
-                    } else if conds.len() == 1 {
-                        conds.pop().unwrap()
-                    } else {
-                        NaryOp::new(NaryOpKind::And, conds.into()).into_scalar()
-                    };
+                    let join_cond = Scalar::combine_conjuncts(conds);
                     for c in &outer_refs_vec {
-                        if let Some(_) = info.get_info().get_domain_repr_of(c) {
+                        if info.resolve_domain_repr_recursive(*c).is_some() {
                             info.clear_scoped_repr_of(c);
                         }
                     }
-                    LogicalJoin::new(
-                        JoinType::Left,
-                        info.get_info().get_domain_op(),
-                        agg,
-                        join_cond,
-                    )
-                    .into_operator()
+                    LogicalJoin::new(JoinType::Left, domain_input, agg, join_cond).into_operator()
                 } else {
                     agg
                 }
             }
             OperatorKind::LogicalDependentJoin(ref meta) => {
                 let dep = LogicalDependentJoin::borrow_raw_parts(meta, &op.common);
-                let mut unnested =
+                let unnested =
                     self.d_join_elimination(dep, Some(info), Some(&child_accessing), ctx);
                 let dep_output_cols = unnested.output_columns(ctx);
 
-                // Nested dependent-join elimination can choose representatives
+                // Nested dependent-join elimination may choose representatives
                 // for only a subset of seen outer refs. Any remaining refs must
                 // still carry their domain joins at this boundary.
                 let unresolved_outer_refs: HashSet<Column> = seen_outer_refs
                     .iter()
                     .copied()
                     .filter(|c| {
-                        if !info.is_outer_ref_recursive(c) || dep_output_cols.contains(c) {
-                            return false;
-                        }
                         if let Some(repr) = info.get_resolved_repr_of(c)
                             && dep_output_cols.contains(repr)
                         {
@@ -411,42 +450,22 @@ impl UnnestingRule {
                         if let Some(domain_repr) = info.resolve_domain_repr_recursive(*c)
                             && dep_output_cols.contains(&domain_repr)
                         {
-                            info.set_scoped_repr_of(*c, domain_repr);
+                            info.clear_scoped_repr_of(c);
                             return false;
                         }
                         true
                     })
                     .collect();
                 if !unresolved_outer_refs.is_empty() {
-                    let mut required_domains = Vec::new();
-                    Self::get_required_domain_ops(
+                    Self::build_domain(
                         info.get_info().as_ref(),
                         info,
                         &unresolved_outer_refs,
-                        &mut required_domains,
-                    );
-                    if !required_domains.is_empty() {
-                        let mut domain_chain = required_domains.remove(0);
-                        for next_domain in required_domains {
-                            domain_chain = LogicalJoin::new(
-                                JoinType::Inner,
-                                domain_chain,
-                                next_domain,
-                                crate::ir::scalar::Literal::boolean(true).into_scalar(),
-                            )
-                            .into_operator();
-                        }
-                        unnested = LogicalJoin::new(
-                            JoinType::Inner,
-                            domain_chain,
-                            unnested,
-                            crate::ir::scalar::Literal::boolean(true).into_scalar(),
-                        )
-                        .into_operator();
-                    }
+                        unnested,
+                    )
+                } else {
+                    unnested
                 }
-
-                unnested
             }
             OperatorKind::LogicalJoin(ref meta) => {
                 let node = LogicalJoin::borrow_raw_parts(meta, &op.common);
@@ -503,7 +522,7 @@ impl UnnestingRule {
                 let mut left_info = Unnesting::new(info.get_info());
                 let mut right_info = Unnesting::new(info.get_info());
                 let mut right_seen_refs = HashSet::new();
-                let mut new_right = self.unnest_inner(
+                let new_right = self.unnest_inner(
                     right.clone(),
                     &mut right_info,
                     &right_accessing,
@@ -537,36 +556,21 @@ impl UnnestingRule {
                 // columns would collapse in the join output. Remap right-side
                 // collisions to fresh columns so we can add explicit equality.
                 let left_output_cols = new_left.output_columns(ctx);
-                let right_output_cols = new_right.output_columns(ctx);
-                let mut right_remap: HashMap<Column, Column> = HashMap::new();
-                let mut remap_members = Vec::new();
-                let mut right_cols_vec: Vec<Column> = right_output_cols.iter().copied().collect();
-                right_cols_vec.sort_by_key(|c| c.0);
-                for col in right_cols_vec {
-                    let out_col = if left_output_cols.contains(&col) {
-                        let fresh =
-                            ctx.define_column(ctx.get_column_meta(&col).data_type.clone(), None);
-                        right_remap.insert(col, fresh);
-                        fresh
-                    } else {
-                        col
-                    };
-                    remap_members.push(
-                        ColumnAssign::new(out_col, ColumnRef::new(col).into_scalar()).into_scalar(),
-                    );
-                }
-                if !right_remap.is_empty() {
-                    let remap_list = List::new(remap_members.into()).into_scalar();
-                    new_right = LogicalRemap::new(new_right, remap_list).into_operator();
-                    right_info.remap_repr_values(&right_remap);
-                }
+                let (new_right, right_remap) = remap_right_output_collisions(
+                    &left_output_cols,
+                    new_right,
+                    &mut right_info,
+                    ctx,
+                );
 
+                let right_output_cols = new_right.output_columns(ctx);
                 let new_cond = Self::rewrite_join_columns(
                     &left_info,
                     &right_info,
+                    &right_remap,
                     node.join_cond().clone(),
                     &left_output_cols,
-                    &new_right.output_columns(ctx),
+                    &right_output_cols,
                     join_type,
                 );
 
@@ -574,51 +578,39 @@ impl UnnestingRule {
                 if !new_cond.is_true_scalar() {
                     join_conds.push(new_cond);
                 }
-                let mut outer_refs_vec: Vec<Column> =
-                    info.get_info().get_outer_refs().iter().copied().collect();
-                outer_refs_vec.sort_by_key(|c| c.0);
-                let mut nested_refs_vec: Vec<Column> = left_info
-                    .get_nested_repr_set()
-                    .keys()
-                    .chain(right_info.get_nested_repr_set().keys())
-                    .copied()
-                    .collect();
-                nested_refs_vec.sort_by_key(|c| c.0);
-                nested_refs_vec.dedup_by_key(|c| c.0);
-                let mut propagated_refs = outer_refs_vec.clone();
-                propagated_refs.extend(nested_refs_vec);
+                let mut propagated_refs = info.collect_outer_refs_recursive().clone();
                 propagated_refs.sort_by_key(|c| c.0);
                 propagated_refs.dedup_by_key(|c| c.0);
-                for c in &propagated_refs {
-                    let left_repr = left_info.resolve_col(*c).unwrap_or(*c);
+                propagated_refs.retain(|c| {
+                    let left_repr = left_info
+                        .resolve_col(*c)
+                        .filter(|col| left_output_cols.contains(col));
                     let right_repr = right_info
                         .resolve_col(*c)
                         .map(|col: Column| right_remap.get(&col).copied().unwrap_or(col))
-                        .unwrap_or(*c);
-                    if left_repr != right_repr {
-                        let left_ref = ColumnRef::new(left_repr).into_scalar();
-                        let right_ref = ColumnRef::new(right_repr).into_scalar();
-                        join_conds.push(
-                            BinaryOp::new(BinaryOpKind::IsNotDistinctFrom, left_ref, right_ref)
-                                .into_scalar(),
-                        );
-                    }
+                        .filter(|col| right_output_cols.contains(col));
+                    left_repr.is_some() && right_repr.is_some()
+                });
+                for c in &propagated_refs {
+                    let left_repr = left_info.resolve_col(*c).unwrap();
+                    let right_repr = right_info.resolve_col(*c).unwrap();
+                    assert!(left_repr != right_repr);
+                    let left_ref = ColumnRef::new(left_repr).into_scalar();
+                    let right_ref = ColumnRef::new(right_repr).into_scalar();
+                    join_conds.push(
+                        BinaryOp::new(BinaryOpKind::IsNotDistinctFrom, left_ref, right_ref)
+                            .into_scalar(),
+                    );
                 }
-                let final_cond = if join_conds.is_empty() {
-                    crate::ir::scalar::Literal::boolean(true).into_scalar()
-                } else if join_conds.len() == 1 {
-                    join_conds.pop().unwrap()
-                } else {
-                    NaryOp::new(NaryOpKind::And, join_conds.into()).into_scalar()
-                };
 
                 info.merge_col_eq_from(&left_info);
                 if !outputs_unmatched_left {
                     info.merge_col_eq_from(&right_info);
                 }
-
                 for c in &propagated_refs {
-                    let left_resolved = left_info.get_resolved_repr_of(c).copied();
+                    let left_resolved = left_info
+                        .get_resolved_repr_of(c)
+                        .copied();
                     let right_resolved = right_info
                         .get_resolved_repr_of(c)
                         .copied()
@@ -635,7 +627,13 @@ impl UnnestingRule {
                     }
                 }
 
-                LogicalJoin::new(join_type, new_left, new_right, final_cond).into_operator()
+                LogicalJoin::new(
+                    join_type,
+                    new_left,
+                    new_right,
+                    Scalar::combine_conjuncts(join_conds),
+                )
+                .into_operator()
             }
             _ => {
                 panic!("UnnestingRule: Unsupported operator kind encountered");

@@ -3676,6 +3676,7 @@ dependencies = [
  "console-subscriber",
  "itertools",
  "pretty-xmlish",
+ "rand 0.8.5",
  "snafu",
  "tokio",
  "tracing",

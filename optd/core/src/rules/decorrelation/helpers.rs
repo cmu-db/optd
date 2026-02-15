@@ -6,9 +6,10 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use crate::ir::convert::IntoOperator;
 use crate::ir::convert::IntoScalar;
-use crate::ir::operator::Operator;
-use crate::ir::scalar::{BinaryOpKind, ColumnRef, NaryOpKind};
+use crate::ir::operator::{LogicalRemap, Operator};
+use crate::ir::scalar::{BinaryOpKind, ColumnAssign, ColumnRef, List, NaryOpKind};
 use crate::ir::{Column, ColumnSet, IRContext, Scalar, ScalarKind};
 use crate::utility::union_find::UnionFind;
 
@@ -107,10 +108,6 @@ impl<'a> Unnesting<'a> {
         self.nested_repr.get(col)
     }
 
-    pub(super) fn get_nested_repr_set(&self) -> &HashMap<Column, Column> {
-        &self.nested_repr
-    }
-
     pub(super) fn get_resolved_repr_of(&self, col: &Column) -> Option<&Column> {
         self.get_repr_of(col)
             .or_else(|| self.get_nested_repr_of(col))
@@ -123,7 +120,6 @@ impl<'a> Unnesting<'a> {
     pub(super) fn set_scoped_repr_of(&mut self, key: Column, val: Column) {
         if self.info.is_outer_ref(&key) {
             self.repr.insert(key, val);
-            self.nested_repr.remove(&key);
         } else if self.is_outer_ref_recursive(&key) {
             self.nested_repr.insert(key, val);
         }
@@ -134,26 +130,16 @@ impl<'a> Unnesting<'a> {
         self.nested_repr.remove(key);
     }
 
-    pub(super) fn get_resolved_repr_values(&self) -> Vec<Column> {
-        let mut values: Vec<Column> = self
-            .repr
-            .values()
-            .chain(self.nested_repr.values())
-            .copied()
-            .collect();
-        values.sort_by_key(|c| c.0);
-        values.dedup_by_key(|c| c.0);
-        values
-    }
-
-    pub(super) fn get_nested_repr_entries(&self) -> Vec<(Column, Column)> {
-        let mut entries: Vec<(Column, Column)> = self
-            .nested_repr
-            .iter()
-            .map(|(key, val)| (*key, *val))
-            .collect();
-        entries.sort_by_key(|(key, _)| key.0);
-        entries
+    pub(super) fn collect_outer_refs_recursive(&self) -> Vec<Column> {
+        let mut refs = Vec::new();
+        let mut scope = Some(self.get_info());
+        while let Some(info) = scope {
+            refs.extend(info.get_outer_refs().iter().copied());
+            scope = info.get_parent().map(|p| p.get_info());
+        }
+        refs.sort_by_key(|c| c.0);
+        refs.dedup_by_key(|c| c.0);
+        refs
     }
 
     pub(super) fn remap_repr_values(&mut self, remap: &HashMap<Column, Column>) {
@@ -220,7 +206,7 @@ impl<'a> Unnesting<'a> {
         }
     }
 
-    // Rewrite the scalar using representative columns.
+    // Rewrite the scalar using representative / domain columns.
     pub(super) fn rewrite_columns(&self, scalar: Arc<Scalar>) -> Arc<Scalar> {
         let rewritten = match &scalar.kind {
             ScalarKind::ColumnRef(cr) => {
@@ -289,4 +275,35 @@ pub(super) fn is_contained_in(op_ptr: *const Operator, subtree: &Arc<Operator>) 
             .input_operators()
             .iter()
             .any(|c| is_contained_in(op_ptr, c));
+}
+
+/// Remap right-side output columns that collide with left-side outputs.
+/// Returns the (possibly remapped) right operator and the old->new remap map.
+pub(super) fn remap_right_output_collisions(
+    left_output_cols: &ColumnSet,
+    mut right: Arc<Operator>,
+    unnesting: &mut Unnesting<'_>,
+    ctx: &IRContext,
+) -> (Arc<Operator>, HashMap<Column, Column>) {
+    let mut right_remap: HashMap<Column, Column> = HashMap::new();
+    let mut remap_members = Vec::new();
+    let mut right_cols_vec: Vec<Column> = right.output_columns(ctx).iter().copied().collect();
+    right_cols_vec.sort_by_key(|c| c.0);
+    for col in right_cols_vec {
+        let out_col = if left_output_cols.contains(&col) {
+            let fresh = ctx.define_column(ctx.get_column_meta(&col).data_type.clone(), None);
+            right_remap.insert(col, fresh);
+            fresh
+        } else {
+            col
+        };
+        remap_members
+            .push(ColumnAssign::new(out_col, ColumnRef::new(col).into_scalar()).into_scalar());
+    }
+    if !right_remap.is_empty() {
+        let remap_list = List::new(remap_members.into()).into_scalar();
+        right = LogicalRemap::new(right, remap_list).into_operator();
+        unnesting.remap_repr_values(&right_remap);
+    }
+    (right, right_remap)
 }
