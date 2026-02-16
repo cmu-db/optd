@@ -151,7 +151,7 @@ fn equality_selectivity_col_lit(
 
     let (stats, offset) = column_stats(ctx, col_meta.column)?;
     let col_stats = stats.column_statistics.get(offset)?;
-    let distinct = ndv(col_stats)?;
+    let distinct = ndv(col_stats).unwrap_or(base_row_count);
 
     // Null adjustment: null rows never satisfy an equality predicate.
     // null_fraction = null_count / base_row_count
@@ -220,7 +220,7 @@ pub fn equijoin_cardinality(
             .and_then(|(s, off)| s.column_statistics.get(off).cloned().map(|c| (s, c)));
 
         match (&build_info, &probe_info) {
-            (Some((_, build_cs)), Some((_, probe_cs))) => {
+            (Some((build_ts, build_cs)), Some((probe_ts, probe_cs))) => {
                 // Domain-overlap check: if [min, max] ranges are disjoint,
                 // no rows can match on this key → entire join produces 0 rows.
                 if !domains_overlap(build_cs, probe_cs) {
@@ -237,34 +237,43 @@ pub fn equijoin_cardinality(
                         selectivity *= 1.0 / max_ndv;
                         any_key_had_stats = true;
                     }
+                    // We could also check the case where at least one of the sides has some cardinality
+                    // statistics available. For example, we can assume that ndv of the other table is 
+                    // <= n or we can use it's row-count as the NDV if available. 
+                    // However, we want to avoid mixing statistics in potentially un-explainable ways 
+                    // at the moment for the sake of simplicity.
+                    // TODO(AC): Benchmark the case where:
+                    // a. the ndv of other table is assumed <= n
+                    // b. the ndv of other table is assumed = row_count if available
                     // (Some(n), None) | (None, Some(n)) => {
-                    //     // This uses ONLY the selectivity
-                    //     // of the only table. We assume that the ndv of the other table is
-                    //     // <= n.
-                    //     // TODO(AC): Document the assumption.
-                    //     // TODO(AC): Can we assume that the NDV of other column is row_count (i.e. primary key)
-                    //     //          -- No don't. Test if it is better, probably not because row_count will dominate ndv usually.
-                    //     // TODO(AC): low priority -- check if min(1/n, fallback) is better than using just the fallback?
                     //     selectivity *= 1.0 / n as f64;
                     //     any_key_had_stats = true;
                     // }
                     (_, _) => {
-                        // TODO(AC): Try row counts here.
-                        selectivity *= AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY;
+                        // No NDV on either side: use max(row_count) as an
+                        // upper-bound NDV estimate. NDV can never exceed the
+                        // number of rows, so this is the most conservative
+                        // assumption without distinct-value stats.
+                        let br = build_ts.row_count;
+                        let pr = probe_ts.row_count;
+                        if br > 0 && pr > 0 {
+                            selectivity *= 1.0 / br.max(pr) as f64;
+                            any_key_had_stats = true;
+                        } else {
+                            selectivity *=
+                                AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY;
+                        }
                     }
                 }
             }
-            // TODO(AC): Document why commenting out.
-            // // At least one side has stats with NDV
-            // (Some((_, cs)), None) | (None, Some((_, cs))) => {
-            //     if let Some(n) = ndv(cs) {
-            //         selectivity *= 1.0 / n as f64;
-            //         any_key_had_stats = true;
-            //     } else {
-            //         selectivity *= AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY;
-            //     }
-            // }
-            // No stats on either side
+            // At least one side has no column_stats at all, so we don't
+            // have access to its TableStatistics (row_count) either — the
+            // current column_stats() lookup bundles table-level and
+            // column-level stats together, so a missing column entry means
+            // the entire TableStatistics is unavailable here.
+            // TODO(AC): Propagate TableStatistics independently of
+            // column-level stats so we can fall back to row_count even
+            // when column stats are absent.
             (_, _) => {
                 selectivity *= AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY;
             }
