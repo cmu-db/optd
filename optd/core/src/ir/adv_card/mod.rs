@@ -141,6 +141,20 @@ fn ndv(col_stats: &ColumnStatistics) -> Option<usize> {
     None
 }
 
+/// Extract the deserialized HLL sketch from a column's advanced statistics.
+///
+/// Returns `None` if no HLL entry exists or deserialization fails.
+fn extract_hll(col_stats: &ColumnStatistics) -> Option<StoredHLL> {
+    for adv in &col_stats.advanced_stats {
+        if adv.stats_type == "hll" {
+            if let Ok(hll) = serde_json::from_value::<StoredHLL>(adv.data.clone()) {
+                return Some(hll);
+            }
+        }
+    }
+    None
+}
+
 impl CardinalityEstimator for AdvancedCardinalityEstimator {
     fn estimate(&self, op: &Operator, ctx: &IRContext) -> Cardinality {
         use crate::ir::OperatorKind;

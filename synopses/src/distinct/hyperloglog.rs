@@ -12,7 +12,7 @@ use std::{
 use crate::utils::Murmur2Hash64a;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(deserialize = "S: Default"))]
 pub struct HyperLogLog<K, S = BuildHasherDefault<Murmur2Hash64a>, const P: usize = 12> {
     #[serde(skip, default)]

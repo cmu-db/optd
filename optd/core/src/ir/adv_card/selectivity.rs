@@ -18,8 +18,18 @@
 //!
 //! For a hash join on key pairs `(k1_L, k1_R), ..., (kn_L, kn_R)`:
 //!
+//! **Preferred (HLL intersection):** when HyperLogLog sketches are available
+//! on both sides of a key pair, we compute the intersection size via
+//! inclusion-exclusion (`|A ∩ B| = |A| + |B| - |A ∪ B|`) and derive:
+//!
 //! ```text
-//! |R ⋈ S| = |R| · |S| · Π_i  1 / max(NDV_R(k_i), NDV_S(k_i))
+//! sel(k_i) = |intersect(k_i)| / (NDV_R(k_i) · NDV_S(k_i))
+//! ```
+//!
+//! **Fallback (containment assumption):** when HLLs are not available:
+//!
+//! ```text
+//! sel(k_i) = 1 / max(NDV_R(k_i), NDV_S(k_i))
 //! ```
 //!
 //! With a domain-overlap pre-check per key pair: if `[min, max]` ranges are
@@ -29,7 +39,7 @@ use crate::ir::{
     Column, IRContext, Scalar, properties::Cardinality, scalar::*, statistics::ColumnStatistics,
 };
 
-use super::{AdvancedCardinalityEstimator, column_stats, ndv};
+use super::{AdvancedCardinalityEstimator, column_stats, extract_hll, ndv};
 
 /// Compute filter selectivity for a predicate tree.
 ///
@@ -179,14 +189,19 @@ fn equality_selectivity_col_lit(
 ///
 /// where for each key pair `(k_i_R, k_i_S)`:
 ///
+/// **Preferred (HLL intersection):** when both sides have HLL sketches:
+/// ```text
+/// sel(k_i) = |intersect(k_i)| / (NDV_R(k_i) · NDV_S(k_i))
+/// ```
+/// where `|intersect| = |A| + |B| - |A ∪ B|` via inclusion-exclusion on
+/// merged HLL registers. This avoids the containment assumption and
+/// directly estimates actual domain overlap.
+///
+/// **Fallback (containment assumption):** when HLLs are unavailable:
 /// ```text
 /// sel(k_i) = 1 / max(NDV_R(k_i), NDV_S(k_i))
 /// ```
-///
 /// This is the standard equi-join selectivity from Selinger et al. (1979).
-/// Using `max(NDV)` rather than `min(NDV)` gives a more conservative (lower)
-/// estimate, which avoids over-counting when the smaller-NDV side has values
-/// not present in the larger-NDV side.
 ///
 /// # Non-equi condition handling
 ///
@@ -211,8 +226,10 @@ fn equality_selectivity_col_lit(
 /// - **Independence across key pairs.** Composite keys `(k1, k2)` are treated as
 ///   independent: `sel = sel(k1) · sel(k2)`.
 /// - **Uniform value distribution** within each column.
-/// - **Containment assumption:** the values of the smaller-NDV column are a
-///   subset of the larger-NDV column. This justifies using `max(NDV)`.
+/// - **HLL intersection preferred:** when HLL sketches are available on both
+///   sides, we use inclusion-exclusion to estimate the actual intersection
+///   size, avoiding the containment assumption entirely. When HLLs are not
+///   available, we fall back to the containment assumption (`1/max(NDV)`).
 /// - **Independence between equi-keys and non-equi conditions.** The non-equi
 ///   selectivity is multiplied in independently. Correlated conditions (e.g.
 ///   `x.a = y.a AND x.a < 10`) may lead to under-estimation.
@@ -244,10 +261,17 @@ pub fn equijoin_cardinality(
                 let probe_ndv = ndv(probe_cs);
 
                 match (build_ndv, probe_ndv) {
-                    // sel(k_i) = 1 / max(NDV_build, NDV_probe)
                     (Some(bn), Some(pn)) => {
-                        let max_ndv = bn.max(pn) as f64;
-                        selectivity *= 1.0 / max_ndv;
+                        // Prefer HLL intersection when both sketches are available.
+                        // Falls back to the containment assumption (1/max(NDV))
+                        // when HLLs are absent.
+                        if let Some(sel) = hll_join_selectivity(build_cs, probe_cs) {
+                            selectivity *= sel;
+                        } else {
+                            // sel(k_i) = 1 / max(NDV_build, NDV_probe)
+                            let max_ndv = bn.max(pn) as f64;
+                            selectivity *= 1.0 / max_ndv;
+                        }
                         any_key_had_stats = true;
                     }
                     // We could also check the case where at least one of the sides has some cardinality
@@ -304,6 +328,41 @@ pub fn equijoin_cardinality(
     let non_equi_sel = filter_selectivity(non_equi_conds, ctx, equijoin_card as usize);
 
     Cardinality::new(equijoin_card * non_equi_sel)
+}
+
+/// Compute equi-join selectivity using HLL set intersection.
+///
+/// Uses inclusion-exclusion on the HLL sketches:
+/// `|A ∩ B| = |A| + |B| - |A ∪ B|`
+///
+/// Returns `sel = |intersect| / (NDV_A × NDV_B)`, or `None` if HLLs are
+/// unavailable on either side.
+fn hll_join_selectivity(
+    build_cs: &ColumnStatistics,
+    probe_cs: &ColumnStatistics,
+) -> Option<f64> {
+    let build_hll = extract_hll(build_cs)?;
+    let probe_hll = extract_hll(probe_cs)?;
+
+    let build_ndv = build_hll.approx_distinct();
+    let probe_ndv = probe_hll.approx_distinct();
+    if build_ndv == 0 || probe_ndv == 0 {
+        return Some(0.0);
+    }
+
+    // Union via merge (takes max of registers)
+    let mut union_hll = build_hll.clone();
+    union_hll.merge(&probe_hll);
+    let union_ndv = union_hll.approx_distinct();
+
+    // Inclusion-exclusion: |A ∩ B| = |A| + |B| - |A ∪ B|
+    // Clamped to 0 to handle HLL approximation error.
+    let intersect = (build_ndv + probe_ndv).saturating_sub(union_ndv);
+    if intersect == 0 {
+        return Some(0.0);
+    }
+
+    Some(intersect as f64 / (build_ndv as f64 * probe_ndv as f64))
 }
 
 /// Check if two columns have overlapping value domains using min/max statistics.

@@ -381,6 +381,271 @@ fn test_ndv_from_hll_advanced_stats() {
     assert!(card.as_f64() > 17.0 && card.as_f64() < 23.0);
 }
 
+/// Create column stats with an HLL built from the given integer range,
+/// and optional min/max range strings. `distinct_count` is set to `None`
+/// to force the HLL path in `ndv()` / `extract_hll()`.
+fn col_stat_with_hll(
+    name: &str,
+    values: std::ops::Range<i32>,
+    min_max: Option<(i64, i64)>,
+) -> ColumnStatistics {
+    use synopses::distinct::HyperLogLog;
+
+    let mut hll: HyperLogLog<i32> = HyperLogLog::new();
+    for v in values {
+        hll.insert(&v);
+    }
+    let hll_data = serde_json::to_value(&hll).unwrap();
+    ColumnStatistics {
+        column_id: 0,
+        column_type: DataType::Int32,
+        name: name.to_string(),
+        advanced_stats: vec![AdvanceColumnStatistics {
+            stats_type: "hll".to_string(),
+            data: hll_data,
+        }],
+        min_value: min_max.map(|(lo, _)| lo.to_string()),
+        max_value: min_max.map(|(_, hi)| hi.to_string()),
+        null_count: Some(0),
+        distinct_count: None,
+    }
+}
+
+// ---------- HLL join selectivity tests ----------
+
+#[test]
+fn test_equijoin_hll_full_overlap() {
+    // Both sides have the same values (0..100) → HLL intersection ≈ NDV
+    // Selectivity ≈ NDV / (NDV * NDV) = 1/NDV ≈ 1/100
+    let cat = MagicCatalog::default();
+    let schema_a = Arc::new(Schema::new(vec![Field::new(
+        "a.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let schema_b = Arc::new(Schema::new(vec![Field::new(
+        "b.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src_a = cat
+        .try_create_table("a".to_string(), schema_a.clone())
+        .unwrap();
+    let src_b = cat
+        .try_create_table("b".to_string(), schema_b.clone())
+        .unwrap();
+
+    cat.set_table_stats(
+        src_a,
+        simple_table_stats(1000, vec![col_stat_with_hll("a.id", 0..100, Some((0, 99)))]),
+    );
+    cat.set_table_stats(
+        src_b,
+        simple_table_stats(2000, vec![col_stat_with_hll("b.id", 0..100, Some((0, 99)))]),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan_a = ctx.table_scan(src_a, &schema_a, None);
+    let scan_b = ctx.table_scan(src_b, &schema_b, None);
+    let keys: Arc<[(Column, Column)]> = Arc::new([(Column(0), Column(1))]);
+    let join = scan_a.hash_join(scan_b, keys, boolean(true), JoinType::Inner);
+    let card = join.cardinality(&ctx).as_f64();
+
+    // Full overlap: sel ≈ |intersect|/(NDV_a * NDV_b) ≈ 100/(100*100) = 1/100
+    // card ≈ 1000 * 2000 / 100 = 20000
+    // With HLL error, allow ±30%
+    assert!(card > 14000.0 && card < 26000.0, "card = {card}");
+}
+
+#[test]
+fn test_equijoin_hll_partial_overlap() {
+    // a has values 0..200, b has values 100..300 → ~100 values overlap
+    // intersection ≈ 100, NDV_a ≈ 200, NDV_b ≈ 200
+    // sel ≈ 100 / (200 * 200) = 1/400
+    let cat = MagicCatalog::default();
+    let schema_a = Arc::new(Schema::new(vec![Field::new(
+        "a.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let schema_b = Arc::new(Schema::new(vec![Field::new(
+        "b.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src_a = cat
+        .try_create_table("a".to_string(), schema_a.clone())
+        .unwrap();
+    let src_b = cat
+        .try_create_table("b".to_string(), schema_b.clone())
+        .unwrap();
+
+    cat.set_table_stats(
+        src_a,
+        simple_table_stats(
+            1000,
+            vec![col_stat_with_hll("a.id", 0..200, Some((0, 199)))],
+        ),
+    );
+    cat.set_table_stats(
+        src_b,
+        simple_table_stats(
+            1000,
+            vec![col_stat_with_hll("b.id", 100..300, Some((100, 299)))],
+        ),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan_a = ctx.table_scan(src_a, &schema_a, None);
+    let scan_b = ctx.table_scan(src_b, &schema_b, None);
+    let keys: Arc<[(Column, Column)]> = Arc::new([(Column(0), Column(1))]);
+    let join = scan_a.hash_join(scan_b, keys, boolean(true), JoinType::Inner);
+    let card = join.cardinality(&ctx).as_f64();
+
+    // Partial overlap: sel ≈ 100/(200*200) = 0.0025
+    // card ≈ 1000 * 1000 * 0.0025 = 2500
+    // Containment assumption would give: 1000 * 1000 / max(200,200) = 5000
+    // HLL should give a lower estimate. Allow wide margin for HLL error.
+    assert!(card > 1000.0 && card < 5000.0, "card = {card}");
+
+    // Verify it's strictly less than what containment would give
+    let containment_card = 1000.0 * 1000.0 / 200.0; // 5000
+    assert!(
+        card < containment_card,
+        "HLL estimate {card} should be less than containment {containment_card}"
+    );
+}
+
+#[test]
+fn test_equijoin_hll_no_overlap() {
+    // a has values 0..100, b has values 1000..1100 → no overlap
+    let cat = MagicCatalog::default();
+    let schema_a = Arc::new(Schema::new(vec![Field::new(
+        "a.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let schema_b = Arc::new(Schema::new(vec![Field::new(
+        "b.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src_a = cat
+        .try_create_table("a".to_string(), schema_a.clone())
+        .unwrap();
+    let src_b = cat
+        .try_create_table("b".to_string(), schema_b.clone())
+        .unwrap();
+
+    cat.set_table_stats(
+        src_a,
+        simple_table_stats(
+            500,
+            vec![col_stat_with_hll("a.id", 0..100, Some((0, 99)))],
+        ),
+    );
+    cat.set_table_stats(
+        src_b,
+        simple_table_stats(
+            500,
+            vec![col_stat_with_hll("b.id", 1000..1100, Some((1000, 1099)))],
+        ),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan_a = ctx.table_scan(src_a, &schema_a, None);
+    let scan_b = ctx.table_scan(src_b, &schema_b, None);
+    let keys: Arc<[(Column, Column)]> = Arc::new([(Column(0), Column(1))]);
+    let join = scan_a.hash_join(scan_b, keys, boolean(true), JoinType::Inner);
+    let card = join.cardinality(&ctx).as_f64();
+
+    // Disjoint domains → domain overlap check (min/max) short-circuits to 0
+    assert_eq!(card, 0.0);
+}
+
+#[test]
+fn test_equijoin_hll_no_overlap_overlapping_range() {
+    // a has values 0,2,4,...,198 (evens), b has values 1,3,5,...,199 (odds)
+    // min/max ranges overlap ([0,198] vs [1,199]) but actual values are disjoint.
+    // HLL intersection should be ~0.
+    let cat = MagicCatalog::default();
+    let schema_a = Arc::new(Schema::new(vec![Field::new(
+        "a.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let schema_b = Arc::new(Schema::new(vec![Field::new(
+        "b.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src_a = cat
+        .try_create_table("a".to_string(), schema_a.clone())
+        .unwrap();
+    let src_b = cat
+        .try_create_table("b".to_string(), schema_b.clone())
+        .unwrap();
+
+    // Build HLLs with even/odd values manually
+    use synopses::distinct::HyperLogLog;
+    let mut hll_a: HyperLogLog<i32> = HyperLogLog::new();
+    for v in (0..200).step_by(2) {
+        hll_a.insert(&v);
+    }
+    let mut hll_b: HyperLogLog<i32> = HyperLogLog::new();
+    for v in (1..200).step_by(2) {
+        hll_b.insert(&v);
+    }
+
+    let cs_a = ColumnStatistics {
+        column_id: 0,
+        column_type: DataType::Int32,
+        name: "a.id".to_string(),
+        advanced_stats: vec![AdvanceColumnStatistics {
+            stats_type: "hll".to_string(),
+            data: serde_json::to_value(&hll_a).unwrap(),
+        }],
+        min_value: Some("0".to_string()),
+        max_value: Some("198".to_string()),
+        null_count: Some(0),
+        distinct_count: None,
+    };
+    let cs_b = ColumnStatistics {
+        column_id: 0,
+        column_type: DataType::Int32,
+        name: "b.id".to_string(),
+        advanced_stats: vec![AdvanceColumnStatistics {
+            stats_type: "hll".to_string(),
+            data: serde_json::to_value(&hll_b).unwrap(),
+        }],
+        min_value: Some("1".to_string()),
+        max_value: Some("199".to_string()),
+        null_count: Some(0),
+        distinct_count: None,
+    };
+
+    cat.set_table_stats(src_a, simple_table_stats(500, vec![cs_a]));
+    cat.set_table_stats(src_b, simple_table_stats(500, vec![cs_b]));
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan_a = ctx.table_scan(src_a, &schema_a, None);
+    let scan_b = ctx.table_scan(src_b, &schema_b, None);
+    let keys: Arc<[(Column, Column)]> = Arc::new([(Column(0), Column(1))]);
+    let join = scan_a.hash_join(scan_b, keys, boolean(true), JoinType::Inner);
+    let card = join.cardinality(&ctx).as_f64();
+
+    // Ranges overlap but actual values are disjoint.
+    // Containment assumption would give 500*500/100 = 2500.
+    // HLL intersection should be very small (near 0 due to disjoint sets,
+    // though HLL may have some estimation noise).
+    // The key assertion: much less than containment estimate.
+    let containment_card = 500.0 * 500.0 / 100.0;
+    assert!(
+        card < containment_card * 0.3,
+        "HLL estimate {card} should be much less than containment {containment_card}"
+    );
+}
+
 // ---------- Equi-join tests ----------
 
 #[test]
