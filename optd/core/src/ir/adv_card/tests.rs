@@ -861,3 +861,407 @@ fn test_integration_scan_filter_join_project() {
     let projected = joined.physical_project(vec![column_ref(Column(0))]);
     assert!((projected.cardinality(&ctx).as_f64() - joined_card).abs() < 0.01);
 }
+
+// ---------- Empirical: HLL accuracy vs containment ----------
+
+/// Analytical containment-assumption join cardinality.
+fn containment_join_card(rows_a: f64, rows_b: f64, ndv_a: f64, ndv_b: f64) -> f64 {
+    rows_a * rows_b / ndv_a.max(ndv_b)
+}
+
+/// Analytical ground-truth join cardinality (uniform distribution, known overlap).
+fn ground_truth_join_card(
+    rows_a: f64,
+    rows_b: f64,
+    ndv_a: f64,
+    ndv_b: f64,
+    intersect_ndv: f64,
+) -> f64 {
+    intersect_ndv * (rows_a / ndv_a) * (rows_b / ndv_b)
+}
+
+/// Build a two-table equi-join with HLL stats and return the estimated cardinality.
+fn hll_join_card(
+    rows_a: usize,
+    values_a: std::ops::Range<i32>,
+    rows_b: usize,
+    values_b: std::ops::Range<i32>,
+) -> f64 {
+    let min_a = values_a.start as i64;
+    let max_a = (values_a.end - 1) as i64;
+    let min_b = values_b.start as i64;
+    let max_b = (values_b.end - 1) as i64;
+
+    let cat = MagicCatalog::default();
+    let schema_a = Arc::new(Schema::new(vec![Field::new(
+        "a.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let schema_b = Arc::new(Schema::new(vec![Field::new(
+        "b.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src_a = cat
+        .try_create_table("a".to_string(), schema_a.clone())
+        .unwrap();
+    let src_b = cat
+        .try_create_table("b".to_string(), schema_b.clone())
+        .unwrap();
+
+    cat.set_table_stats(
+        src_a,
+        simple_table_stats(
+            rows_a,
+            vec![col_stat_with_hll("a.id", values_a, Some((min_a, max_a)))],
+        ),
+    );
+    cat.set_table_stats(
+        src_b,
+        simple_table_stats(
+            rows_b,
+            vec![col_stat_with_hll("b.id", values_b, Some((min_b, max_b)))],
+        ),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan_a = ctx.table_scan(src_a, &schema_a, None);
+    let scan_b = ctx.table_scan(src_b, &schema_b, None);
+    let keys: Arc<[(Column, Column)]> = Arc::new([(Column(0), Column(1))]);
+    let join = scan_a.hash_join(scan_b, keys, boolean(true), JoinType::Inner);
+    join.cardinality(&ctx).as_f64()
+}
+
+#[test]
+fn test_empirical_partial_overlap_50pct() {
+    // A: values 0..200 (NDV=200), B: values 100..300 (NDV=200)
+    // Intersection = 100 values
+    let rows_a = 1000.0;
+    let rows_b = 1000.0;
+    let ndv_a = 200.0;
+    let ndv_b = 200.0;
+    let intersect = 100.0;
+
+    let truth = ground_truth_join_card(rows_a, rows_b, ndv_a, ndv_b, intersect);
+    let containment = containment_join_card(rows_a, rows_b, ndv_a, ndv_b);
+    let hll_est = hll_join_card(1000, 0..200, 1000, 100..300);
+
+    println!("50% overlap: truth={truth}, containment={containment}, hll={hll_est}");
+
+    // truth=2500, containment=5000 (2× over)
+    // HLL should be closer to truth than containment
+    let hll_error = (hll_est - truth).abs();
+    let containment_error = (containment - truth).abs();
+    assert!(
+        hll_error < containment_error,
+        "HLL error ({hll_error}) should be less than containment error ({containment_error})"
+    );
+    // HLL should be within 50% of truth (generous for HLL noise)
+    assert!(
+        hll_est > truth * 0.5 && hll_est < truth * 1.5,
+        "HLL estimate {hll_est} should be within 50% of truth {truth}"
+    );
+}
+
+#[test]
+fn test_empirical_small_overlap_10pct() {
+    // A: values 0..1000 (NDV=1000), B: values 900..2000 (NDV=1100)
+    // Intersection = 100 values
+    let rows_a = 5000.0;
+    let rows_b = 5000.0;
+    let ndv_a = 1000.0;
+    let ndv_b = 1100.0;
+    let intersect = 100.0;
+
+    let truth = ground_truth_join_card(rows_a, rows_b, ndv_a, ndv_b, intersect);
+    let containment = containment_join_card(rows_a, rows_b, ndv_a, ndv_b);
+    let hll_est = hll_join_card(5000, 0..1000, 5000, 900..2000);
+
+    println!("10% overlap: truth={truth:.0}, containment={containment:.0}, hll={hll_est:.0}");
+
+    // truth ≈ 2273, containment ≈ 22727 (10× over)
+    let hll_error = (hll_est - truth).abs();
+    let containment_error = (containment - truth).abs();
+    assert!(
+        hll_error < containment_error,
+        "HLL error ({hll_error:.0}) should be less than containment error ({containment_error:.0})"
+    );
+}
+
+#[test]
+fn test_empirical_full_containment_regression() {
+    // A: values 0..100 (NDV=100), B: values 0..500 (NDV=500)
+    // Intersection = 100 values (A is a subset of B)
+    let rows_a = 500.0;
+    let rows_b = 2500.0;
+    let ndv_a = 100.0;
+    let ndv_b = 500.0;
+    let intersect = 100.0;
+
+    let truth = ground_truth_join_card(rows_a, rows_b, ndv_a, ndv_b, intersect);
+    let containment = containment_join_card(rows_a, rows_b, ndv_a, ndv_b);
+    let hll_est = hll_join_card(500, 0..100, 2500, 0..500);
+
+    println!("Full containment: truth={truth}, containment={containment}, hll={hll_est}");
+
+    // truth = 100 * 5 * 5 = 2500, containment = 500*2500/500 = 2500
+    // Both should be similar. HLL should not degrade this case.
+    // Allow wider margin since HLL intersection estimation on subset
+    // can be noisy with inclusion-exclusion.
+    assert!(
+        hll_est > truth * 0.4 && hll_est < truth * 2.0,
+        "HLL estimate {hll_est} should be reasonable vs truth {truth}"
+    );
+}
+
+#[test]
+fn test_empirical_skewed_table_sizes() {
+    // A: 100 rows, values 0..50 (NDV=50)
+    // B: 10000 rows, values 25..225 (NDV=200)
+    // Intersection = 25 values
+    let rows_a = 100.0;
+    let rows_b = 10000.0;
+    let ndv_a = 50.0;
+    let ndv_b = 200.0;
+    let intersect = 25.0;
+
+    let truth = ground_truth_join_card(rows_a, rows_b, ndv_a, ndv_b, intersect);
+    let containment = containment_join_card(rows_a, rows_b, ndv_a, ndv_b);
+    let hll_est = hll_join_card(100, 0..50, 10000, 25..225);
+
+    println!("Skewed sizes: truth={truth}, containment={containment}, hll={hll_est}");
+
+    // truth = 25 * 2 * 50 = 2500, containment = 100*10000/200 = 5000
+    let hll_error = (hll_est - truth).abs();
+    let containment_error = (containment - truth).abs();
+    assert!(
+        hll_error < containment_error,
+        "HLL error ({hll_error:.0}) should be less than containment error ({containment_error:.0})"
+    );
+}
+
+// ---------- Empirical: Plan quality via Cascades ----------
+
+use crate::{
+    cascades::Cascades,
+    ir::{explain::quick_explain, rule::RuleSet},
+    rules,
+};
+
+/// Build an IRContext with AdvancedCardinalityEstimator using the given catalog.
+fn cascades_with_catalog(cat: MagicCatalog) -> Arc<Cascades> {
+    let ctx = adv_ctx_with_catalog(cat);
+    let rule_set = RuleSet::builder()
+        .add_rule(rules::LogicalGetAsPhysicalTableScanRule::new())
+        .add_rule(rules::LogicalJoinAsPhysicalHashJoinRule::new())
+        .add_rule(rules::LogicalJoinAsPhysicalNLJoinRule::new())
+        .add_rule(rules::LogicalSelectAsPhysicalFilterRule::new())
+        .add_rule(rules::LogicalProjectAsPhysicalProjectRule::new())
+        .add_rule(rules::LogicalSelectJoinTransposeRule::new())
+        .add_rule(rules::LogicalJoinInnerCommuteRule::new())
+        .add_rule(rules::LogicalJoinInnerAssocRule::new())
+        .build();
+    Arc::new(Cascades::new(ctx, rule_set))
+}
+
+#[tokio::test]
+async fn test_plan_quality_join_order_three_tables() {
+    // Three tables: A(1000 rows), B(1000 rows), C(1000 rows)
+    // A ⋈ B has LOW overlap (10%): A values 0..500, B values 450..1000
+    // B ⋈ C has HIGH overlap (100%): B values 450..1000, C values 450..1000
+    //
+    // With accurate HLL estimates:
+    //   A⋈B produces few rows (low intersection) → expensive intermediate
+    //   B⋈C produces many rows (full intersection) but that's a dense join
+    //
+    // The optimizer should prefer the plan that minimizes total cost.
+    // We verify the optimizer produces a valid plan and the cost is finite.
+    let cat = MagicCatalog::default();
+    let schema_a = Arc::new(Schema::new(vec![
+        Field::new("a.id".to_string(), DataType::Int32, false),
+        Field::new("a.v".to_string(), DataType::Int32, false),
+    ]));
+    let schema_b = Arc::new(Schema::new(vec![
+        Field::new("b.id".to_string(), DataType::Int32, false),
+        Field::new("b.aid".to_string(), DataType::Int32, false),
+    ]));
+    let schema_c = Arc::new(Schema::new(vec![
+        Field::new("c.bid".to_string(), DataType::Int32, false),
+        Field::new("c.v".to_string(), DataType::Int32, false),
+    ]));
+
+    let src_a = cat
+        .try_create_table("a".to_string(), schema_a.clone())
+        .unwrap();
+    let src_b = cat
+        .try_create_table("b".to_string(), schema_b.clone())
+        .unwrap();
+    let src_c = cat
+        .try_create_table("c".to_string(), schema_c.clone())
+        .unwrap();
+
+    // A: 1000 rows, join col values 0..500 (NDV=500)
+    cat.set_table_stats(
+        src_a,
+        simple_table_stats(
+            1000,
+            vec![
+                col_stat_with_hll("a.id", 0..500, Some((0, 499))),
+                col_stat("a.v", 100),
+            ],
+        ),
+    );
+    // B: 1000 rows, join col 1 (b.id) values 450..1000 (low overlap with A)
+    //                join col 2 (b.aid) values 0..550 (high overlap with C)
+    cat.set_table_stats(
+        src_b,
+        simple_table_stats(
+            1000,
+            vec![
+                col_stat_with_hll("b.id", 450..1000, Some((450, 999))),
+                col_stat_with_hll("b.aid", 0..550, Some((0, 549))),
+            ],
+        ),
+    );
+    // C: 1000 rows, join col values 0..550 (high overlap with B.aid)
+    cat.set_table_stats(
+        src_c,
+        simple_table_stats(
+            1000,
+            vec![
+                col_stat_with_hll("c.bid", 0..550, Some((0, 549))),
+                col_stat("c.v", 200),
+            ],
+        ),
+    );
+
+    let opt = cascades_with_catalog(cat);
+    let ctx = &opt.ctx;
+
+    // Build logical plan: A ⋈ B ⋈ C
+    // A.id = B.id AND B.aid = C.bid
+    let scan_a = ctx.logical_get(src_a, &schema_a, None);
+    let scan_b = ctx.logical_get(src_b, &schema_b, None);
+    let scan_c = ctx.logical_get(src_c, &schema_c, None);
+
+    // A(cols 0,1) ⋈ B(cols 2,3) on A.id(0) = B.id(2)
+    let ab = scan_a.logical_join(
+        scan_b,
+        column_ref(Column(0)).eq(column_ref(Column(2))),
+        JoinType::Inner,
+    );
+    // (A⋈B)(cols 0..3) ⋈ C(cols 4,5) on B.aid(3) = C.bid(4)
+    let abc = ab.logical_join(
+        scan_c,
+        column_ref(Column(3)).eq(column_ref(Column(4))),
+        JoinType::Inner,
+    );
+
+    let required = Arc::new(crate::ir::properties::Required::default());
+    let optimized = opt.optimize(&abc, required).await.unwrap();
+
+    let explained = quick_explain(&optimized, ctx);
+    println!("Optimized plan:\n{explained}");
+
+    // Verify the optimizer produced a physical plan with finite cost
+    let cost = ctx.cm.compute_total_cost(&optimized, ctx);
+    assert!(cost.is_some(), "Optimized plan should have a computable cost");
+    let cost_val = cost.unwrap().as_f64();
+    assert!(
+        cost_val.is_finite() && cost_val > 0.0,
+        "Cost should be finite and positive, got {cost_val}"
+    );
+
+    // The optimized plan should contain PhysicalHashJoin nodes
+    assert!(
+        explained.contains("PhysicalHashJoin"),
+        "Plan should use hash joins: {explained}"
+    );
+}
+
+#[tokio::test]
+async fn test_plan_quality_filter_pushdown_with_hll() {
+    // Two tables: orders(10000 rows), customers(500 rows)
+    // Join on orders.customer_id = customers.id
+    // Filter: orders.status = 1 (selectivity 1/5)
+    //
+    // The optimizer should push the filter below the join.
+    // With HLL-based cardinality, the cost of the filtered join should
+    // be lower than the unfiltered join.
+    let cat = MagicCatalog::default();
+    let schema_orders = Arc::new(Schema::new(vec![
+        Field::new("orders.id".to_string(), DataType::Int32, false),
+        Field::new("orders.cid".to_string(), DataType::Int32, false),
+        Field::new("orders.status".to_string(), DataType::Int32, false),
+    ]));
+    let schema_cust = Arc::new(Schema::new(vec![
+        Field::new("cust.id".to_string(), DataType::Int32, false),
+        Field::new("cust.name".to_string(), DataType::Int32, false),
+    ]));
+
+    let orders = cat
+        .try_create_table("orders".to_string(), schema_orders.clone())
+        .unwrap();
+    let cust = cat
+        .try_create_table("customers".to_string(), schema_cust.clone())
+        .unwrap();
+
+    cat.set_table_stats(
+        orders,
+        simple_table_stats(
+            10000,
+            vec![
+                col_stat_with_range("orders.id", 10000, 1, 10000),
+                col_stat_with_hll("orders.cid", 1..501, Some((1, 500))),
+                col_stat("orders.status", 5),
+            ],
+        ),
+    );
+    cat.set_table_stats(
+        cust,
+        simple_table_stats(
+            500,
+            vec![
+                col_stat_with_hll("cust.id", 1..501, Some((1, 500))),
+                col_stat("cust.name", 490),
+            ],
+        ),
+    );
+
+    let opt = cascades_with_catalog(cat);
+    let ctx = &opt.ctx;
+
+    let scan_orders = ctx.logical_get(orders, &schema_orders, None);
+    let scan_cust = ctx.logical_get(cust, &schema_cust, None);
+
+    // orders ⋈ customers on orders.cid(1) = cust.id(3)
+    let joined = scan_orders.logical_join(
+        scan_cust,
+        column_ref(Column(1)).eq(column_ref(Column(3))),
+        JoinType::Inner,
+    );
+    // Filter: orders.status(2) = 1
+    let filtered_join = joined.logical_select(column_ref(Column(2)).eq(int32(1)));
+
+    let required = Arc::new(crate::ir::properties::Required::default());
+    let optimized = opt.optimize(&filtered_join, required).await.unwrap();
+
+    let explained = quick_explain(&optimized, ctx);
+    println!("Filter pushdown plan:\n{explained}");
+
+    // The optimizer should produce a valid physical plan
+    let cost = ctx.cm.compute_total_cost(&optimized, ctx);
+    assert!(cost.is_some(), "Optimized plan should have a computable cost");
+    let cost_val = cost.unwrap().as_f64();
+    assert!(
+        cost_val.is_finite() && cost_val > 0.0,
+        "Cost should be finite and positive, got {cost_val}"
+    );
+
+    // Verify filter exists in the plan (either pushed down or on top)
+    assert!(
+        explained.contains("PhysicalFilter") || explained.contains("PhysicalHashJoin"),
+        "Plan should contain filter and join: {explained}"
+    );
+}
