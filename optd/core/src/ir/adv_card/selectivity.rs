@@ -168,12 +168,13 @@ fn equality_selectivity_col_lit(
     Some((1.0 - null_fraction) / distinct as f64)
 }
 
-/// Estimate cardinality for a PhysicalHashJoin on pre-extracted equi-join keys.
+/// Estimate cardinality for a PhysicalHashJoin on pre-extracted equi-join keys,
+/// optionally refined by non-equi conditions.
 ///
 /// # Formula
 ///
 /// ```text
-/// |R ⋈ S| = |R| · |S| · Π_i sel(k_i)
+/// |R ⋈ S| = |R| · |S| · Π_i sel(k_i) · sel(non_equi_conds)
 /// ```
 ///
 /// where for each key pair `(k_i_R, k_i_S)`:
@@ -186,6 +187,16 @@ fn equality_selectivity_col_lit(
 /// Using `max(NDV)` rather than `min(NDV)` gives a more conservative (lower)
 /// estimate, which avoids over-counting when the smaller-NDV side has values
 /// not present in the larger-NDV side.
+///
+/// # Non-equi condition handling
+///
+/// After computing the equi-join cardinality, we apply the selectivity of any
+/// non-equi conditions (e.g. `x.b < y.b` in `x.a = y.a AND x.b < y.b`).
+/// These are treated as a post-join filter using [`filter_selectivity`], with the
+/// equi-join result as the base row count for null-fraction computation.
+///
+/// When `non_equi_conds` is a literal `TRUE` (i.e. no non-equi conditions),
+/// `filter_selectivity` returns 1.0 and the estimate is unchanged.
 ///
 /// # Domain-overlap optimization
 ///
@@ -202,10 +213,12 @@ fn equality_selectivity_col_lit(
 /// - **Uniform value distribution** within each column.
 /// - **Containment assumption:** the values of the smaller-NDV column are a
 ///   subset of the larger-NDV column. This justifies using `max(NDV)`.
-/// - **Non-equi conditions are ignored.** E.g. `x.a = y.a AND x.b < y.b` only
-///   uses the `x.a = y.a` key; the range condition on `b` is not factored in.
+/// - **Independence between equi-keys and non-equi conditions.** The non-equi
+///   selectivity is multiplied in independently. Correlated conditions (e.g.
+///   `x.a = y.a AND x.a < 10`) may lead to under-estimation.
 pub fn equijoin_cardinality(
     keys: &[(Column, Column)],
+    non_equi_conds: &Scalar,
     build_card: Cardinality,
     probe_card: Cardinality,
     ctx: &IRContext,
@@ -284,9 +297,13 @@ pub fn equijoin_cardinality(
         selectivity = AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY;
     }
 
-    // TODO(AC): Also call card estimation on non-equi conditions obtained via the predicates.
+    // Apply selectivity of non-equi conditions (e.g. range predicates like x.b < y.b).
+    // These are treated as a post-join filter on the equi-join result.
+    // When non_equi_conds is literal TRUE, filter_selectivity returns 1.0 (no effect).
+    let equijoin_card = build_card.as_f64() * probe_card.as_f64() * selectivity;
+    let non_equi_sel = filter_selectivity(non_equi_conds, ctx, equijoin_card as usize);
 
-    Cardinality::new(build_card.as_f64() * probe_card.as_f64() * selectivity)
+    Cardinality::new(equijoin_card * non_equi_sel)
 }
 
 /// Check if two columns have overlapping value domains using min/max statistics.

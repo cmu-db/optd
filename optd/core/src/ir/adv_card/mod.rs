@@ -10,7 +10,8 @@
 //!
 //! * **Scan**: `|R| = table_stats.row_count`. Falls back to 1 000 when no stats.
 //! * **Filter**: `|σ_p(R)| = sel(p) · |R|`. See [`selectivity::filter_selectivity`].
-//! * **Hash Join**: `|R ⋈ S| = |R| · |S| · Π sel(k_i)` over equi-key pairs.
+//! * **Hash Join**: `|R ⋈ S| = |R| · |S| · Π sel(k_i) · sel(non_equi_conds)`
+//!   over equi-key pairs, refined by non-equi condition selectivity.
 //!   See [`selectivity::equijoin_cardinality`].
 //! * **Other joins / aggregates / projections**: magic-constant fallbacks.
 //!
@@ -222,24 +223,28 @@ impl CardinalityEstimator for AdvancedCardinalityEstimator {
                 sel * input_card
             }
 
-            // --- Stats-driven: PhysicalHashJoin (equi-join) ---
-            // Formula: |R ⋈_{k1,...,kn} S| = |R| · |S| · Π_i 1/max(NDV_R(k_i), NDV_S(k_i))
+            // --- Stats-driven: PhysicalHashJoin (equi-join + non-equi conditions) ---
+            // Formula: |R ⋈ S| = |R| · |S| · Π_i 1/max(NDV_R(k_i), NDV_S(k_i)) · sel(non_equi)
             // See selectivity::equijoin_cardinality for full details.
             //
+            // Non-equi conditions (e.g. x.b < y.b in "x.a = y.a AND x.b < y.b") are
+            // applied as a post-join filter using filter_selectivity.
+            //
             // Assumption: inner-join semantics. Other join types are not yet handled.
-            // Assumption: non-equi conditions (e.g. x.b < y.b) are ignored.
             OperatorKind::PhysicalHashJoin(meta) => {
                 let join = PhysicalHashJoin::borrow_raw_parts(meta, &op.common);
                 let build_card = join.build_side().cardinality(ctx);
                 let probe_card = join.probe_side().cardinality(ctx);
 
-                // TODO(AC) -- This does not handle non-equi-conds obtained via the scalars.
-                // Check how postgres or cockroach do this. DuckDB likely not good at it.
-                // Example: x.a = y.a and x.b < y.b
-
                 // TODO(AC/Yuchen): This assumes inner-join. Handle other join types by
                 // passing in the entire `join` variable (or the join_type field.)
-                selectivity::equijoin_cardinality(join.keys(), build_card, probe_card, ctx)
+                selectivity::equijoin_cardinality(
+                    join.keys(),
+                    join.non_equi_conds(),
+                    build_card,
+                    probe_card,
+                    ctx,
+                )
             }
 
             // TODO(AC): For all the other joins, use our estimator
