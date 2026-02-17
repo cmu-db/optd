@@ -25,7 +25,7 @@ pub fn try_into_optd_value(value: DFScalarValue) -> OptdResult<OptdScalarValue> 
         DFScalarValue::Date32(v) => Ok(OptdScalarValue::Date32(v)),
         DFScalarValue::Date64(v) => Ok(OptdScalarValue::Date64(v)),
         value => connector_err!(
-            "Conversion from DataFusion ScalarValue {:?} is not implemented",
+            "Conversion from DataFusion ScalarValue {} is not implemented",
             value
         ),
     }

@@ -84,23 +84,23 @@ impl OperatorKind {
         use OperatorKind::*;
         match self {
             Group(_) => OperatorCategory::Placeholder,
-            LogicalGet(_)
-            | LogicalJoin(_)
-            | LogicalDependentJoin(_)
-            | LogicalProject(_)
-            | LogicalAggregate(_)
-            | LogicalOrderBy(_)
-            | LogicalRemap(_)
-            | LogicalSelect(_)
-            | LogicalSubquery(_) => OperatorCategory::Logical,
+            LogicalGet(_) => OperatorCategory::Logical,
+            LogicalJoin(_) => OperatorCategory::Logical,
+            LogicalDependentJoin(_) => OperatorCategory::Logical,
+            LogicalProject(_) => OperatorCategory::Logical,
+            LogicalAggregate(_) => OperatorCategory::Logical,
+            LogicalOrderBy(_) => OperatorCategory::Logical,
+            LogicalRemap(_) => OperatorCategory::Logical,
+            LogicalSelect(_) => OperatorCategory::Logical,
+            LogicalSubquery(_) => OperatorCategory::Logical,
             EnforcerSort(_) => OperatorCategory::Enforcer,
-            PhysicalFilter(_)
-            | PhysicalProject(_)
-            | PhysicalHashJoin(_)
-            | PhysicalNLJoin(_)
-            | PhysicalTableScan(_)
-            | PhysicalHashAggregate(_)
-            | MockScan(_) => OperatorCategory::Physical,
+            PhysicalFilter(_) => OperatorCategory::Physical,
+            PhysicalProject(_) => OperatorCategory::Physical,
+            PhysicalHashJoin(_) => OperatorCategory::Physical,
+            PhysicalNLJoin(_) => OperatorCategory::Physical,
+            PhysicalTableScan(_) => OperatorCategory::Physical,
+            PhysicalHashAggregate(_) => OperatorCategory::Physical,
+            MockScan(_) => OperatorCategory::Physical,
         }
     }
 

@@ -12,6 +12,8 @@ impl MagicCardinalityEstimator {
     const MAGIC_JOIN_COND_SELECTIVITY: f64 = 0.4;
     const MAGIC_PREDICATE_SELECTIVITY: f64 = 0.1;
     const MAGIC_GROUP_BY_KEY_NDV_FACTOR: f64 = 0.2;
+
+    const MAGIC_DEFAULT_CARDINALITY: usize = 1000;
 }
 
 impl CardinalityEstimator for MagicCardinalityEstimator {
@@ -54,13 +56,19 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                 // Relies on the normalized expression's cardinality estimation.
                 panic!("right now should always be set");
             }
-            OperatorKind::LogicalGet(meta) => {
-                let exact_row_count = ctx.cat.describe_table(meta.source).row_count;
-                Cardinality::with_count_lossy(exact_row_count)
-            }
+            OperatorKind::LogicalGet(meta) => match ctx.cat.describe_table(meta.source).stats {
+                Some(stats) => Cardinality::with_count_lossy(stats.row_count),
+                None => Cardinality::with_count_lossy(
+                    MagicCardinalityEstimator::MAGIC_DEFAULT_CARDINALITY,
+                ),
+            },
             OperatorKind::PhysicalTableScan(meta) => {
-                let exact_row_count = ctx.cat.describe_table(meta.source).row_count;
-                Cardinality::with_count_lossy(exact_row_count)
+                match ctx.cat.describe_table(meta.source).stats {
+                    Some(stats) => Cardinality::with_count_lossy(stats.row_count),
+                    None => Cardinality::with_count_lossy(
+                        MagicCardinalityEstimator::MAGIC_DEFAULT_CARDINALITY,
+                    ),
+                }
             }
             OperatorKind::LogicalJoin(meta) => {
                 let join = LogicalJoin::borrow_raw_parts(meta, &op.common);
