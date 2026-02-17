@@ -196,9 +196,7 @@ fn extract_column_statistics_from_parquet(
 }
 
 /// Converts a Parquet physical type to an Arrow DataType.
-fn parquet_physical_to_data_type(
-    physical_type: parquet::basic::Type,
-) -> optd_core::ir::DataType {
+fn parquet_physical_to_data_type(physical_type: parquet::basic::Type) -> optd_core::ir::DataType {
     use optd_core::ir::DataType;
     match physical_type {
         parquet::basic::Type::BOOLEAN => DataType::Boolean,

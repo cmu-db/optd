@@ -539,10 +539,7 @@ fn test_equijoin_hll_no_overlap() {
 
     cat.set_table_stats(
         src_a,
-        simple_table_stats(
-            500,
-            vec![col_stat_with_hll("a.id", 0..100, Some((0, 99)))],
-        ),
+        simple_table_stats(500, vec![col_stat_with_hll("a.id", 0..100, Some((0, 99)))]),
     );
     cat.set_table_stats(
         src_b,
@@ -1166,7 +1163,10 @@ async fn test_plan_quality_join_order_three_tables() {
 
     // Verify the optimizer produced a physical plan with finite cost
     let cost = ctx.cm.compute_total_cost(&optimized, ctx);
-    assert!(cost.is_some(), "Optimized plan should have a computable cost");
+    assert!(
+        cost.is_some(),
+        "Optimized plan should have a computable cost"
+    );
     let cost_val = cost.unwrap().as_f64();
     assert!(
         cost_val.is_finite() && cost_val > 0.0,
@@ -1252,7 +1252,10 @@ async fn test_plan_quality_filter_pushdown_with_hll() {
 
     // The optimizer should produce a valid physical plan
     let cost = ctx.cm.compute_total_cost(&optimized, ctx);
-    assert!(cost.is_some(), "Optimized plan should have a computable cost");
+    assert!(
+        cost.is_some(),
+        "Optimized plan should have a computable cost"
+    );
     let cost_val = cost.unwrap().as_f64();
     assert!(
         cost_val.is_finite() && cost_val > 0.0,

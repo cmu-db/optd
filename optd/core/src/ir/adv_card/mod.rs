@@ -108,6 +108,18 @@ fn column_stats(ctx: &IRContext, column: Column) -> Option<(TableStatistics, usi
     }
 }
 
+/// Extract the deserialized HLL sketch from a column's advanced statistics.
+///
+/// Returns `None` if no HLL entry exists or deserialization fails.
+fn extract_hll(col_stats: &ColumnStatistics) -> Option<StoredHLL> {
+    for adv in &col_stats.advanced_stats {
+        if adv.stats_type == "hll" && let Ok(hll) = serde_json::from_value::<StoredHLL>(adv.data.clone()) {
+                return Some(hll);
+        }
+    }
+    None
+}
+
 /// Extract the number of distinct values (NDV) for a column.
 ///
 /// Resolution order:
@@ -121,35 +133,17 @@ fn column_stats(ctx: &IRContext, column: Column) -> Option<(TableStatistics, usi
 /// callers to fall back to magic constants.
 fn ndv(col_stats: &ColumnStatistics) -> Option<usize> {
     // 1. Check precomputed distinct_count
-    if let Some(dc) = col_stats.distinct_count {
-        if dc > 0 {
-            return Some(dc);
-        }
+    if let Some(dc) = col_stats.distinct_count
+        && dc > 0
+    {
+        return Some(dc);
     }
-    // 2. Try HLL from advanced_stats
-    for adv in &col_stats.advanced_stats {
-        // TODO(AC): Replace with constants (enum?) in AdvColStats
-        if adv.stats_type == "hll" {
-            if let Ok(hll) = serde_json::from_value::<StoredHLL>(adv.data.clone()) {
-                let count = hll.approx_distinct();
-                if count > 0 {
-                    return Some(count);
-                }
-            }
-        }
-    }
-    None
-}
 
-/// Extract the deserialized HLL sketch from a column's advanced statistics.
-///
-/// Returns `None` if no HLL entry exists or deserialization fails.
-fn extract_hll(col_stats: &ColumnStatistics) -> Option<StoredHLL> {
-    for adv in &col_stats.advanced_stats {
-        if adv.stats_type == "hll" {
-            if let Ok(hll) = serde_json::from_value::<StoredHLL>(adv.data.clone()) {
-                return Some(hll);
-            }
+    // 2. Try HLL from advanced_stats
+    if let Some(hll) = extract_hll(col_stats) {
+        let count = hll.approx_distinct();
+        if count > 0 {
+            return Some(count);
         }
     }
     None

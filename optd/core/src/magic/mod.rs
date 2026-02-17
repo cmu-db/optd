@@ -10,6 +10,7 @@ mod cm;
 
 use std::sync::Arc;
 
+use crate::ir::IRContext;
 use crate::ir::{
     DataType,
     catalog::*,
@@ -19,7 +20,6 @@ pub use card::MagicCardinalityEstimator;
 pub use cat::MagicCatalog;
 pub use cm::MagicCostModel;
 use itertools::Itertools;
-use crate::ir::IRContext;
 
 impl IRContext {
     pub fn with_empty_magic() -> Self {

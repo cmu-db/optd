@@ -60,8 +60,11 @@ impl ColumnMetaStore {
         let name = name.unwrap_or_else(|| column.to_string());
         let old = self.name_to_column_id.insert(name.clone(), column);
         assert!(old.is_none());
-        self.columns
-            .push(Arc::new(ColumnMeta { data_type, name, source }));
+        self.columns.push(Arc::new(ColumnMeta {
+            data_type,
+            name,
+            source,
+        }));
         column
     }
 

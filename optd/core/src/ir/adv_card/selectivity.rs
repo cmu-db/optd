@@ -257,48 +257,46 @@ pub fn equijoin_cardinality(
                     return Cardinality::new(0.0);
                 }
 
-                let build_ndv = ndv(build_cs);
-                let probe_ndv = ndv(probe_cs);
-
-                match (build_ndv, probe_ndv) {
-                    (Some(bn), Some(pn)) => {
-                        // Prefer HLL intersection when both sketches are available.
-                        // Falls back to the containment assumption (1/max(NDV))
-                        // when HLLs are absent.
-                        if let Some(sel) = hll_join_selectivity(build_cs, probe_cs) {
-                            selectivity *= sel;
-                        } else {
+                // Prefer HLL intersection when both sketches are available.
+                // Falls back to the containment assumption (1/max(NDV))
+                // when HLLs are absent.
+                if let Some(sel) = hll_join_selectivity(build_cs, probe_cs) {
+                    selectivity *= sel;
+                    any_key_had_stats = true;
+                } else {
+                    match (ndv(build_cs), ndv(probe_cs)) {
+                        (Some(build_ndv), Some(probe_ndv)) => {
                             // sel(k_i) = 1 / max(NDV_build, NDV_probe)
-                            let max_ndv = bn.max(pn) as f64;
+                            let max_ndv = build_ndv.max(probe_ndv) as f64;
                             selectivity *= 1.0 / max_ndv;
-                        }
-                        any_key_had_stats = true;
-                    }
-                    // We could also check the case where at least one of the sides has some cardinality
-                    // statistics available. For example, we can assume that ndv of the other table is 
-                    // <= n or we can use it's row-count as the NDV if available. 
-                    // However, we want to avoid mixing statistics in potentially un-explainable ways 
-                    // at the moment for the sake of simplicity.
-                    // TODO(AC): Benchmark the case where:
-                    // a. the ndv of other table is assumed <= n
-                    // b. the ndv of other table is assumed = row_count if available
-                    // (Some(n), None) | (None, Some(n)) => {
-                    //     selectivity *= 1.0 / n as f64;
-                    //     any_key_had_stats = true;
-                    // }
-                    (_, _) => {
-                        // No NDV on either side: use max(row_count) as an
-                        // upper-bound NDV estimate. NDV can never exceed the
-                        // number of rows, so this is the most conservative
-                        // assumption without distinct-value stats.
-                        let br = build_ts.row_count;
-                        let pr = probe_ts.row_count;
-                        if br > 0 && pr > 0 {
-                            selectivity *= 1.0 / br.max(pr) as f64;
                             any_key_had_stats = true;
-                        } else {
-                            selectivity *=
-                                AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY;
+                        }
+                        // We could also check the case where at least one of the sides has some cardinality
+                        // statistics available. For example, we can assume that ndv of the other table is
+                        // <= n or we can use it's row-count as the NDV if available.
+                        // However, we want to avoid mixing statistics in potentially un-explainable ways
+                        // at the moment for the sake of simplicity.
+                        // TODO(AC): Benchmark the case where:
+                        // a. the ndv of other table is assumed <= n
+                        // b. the ndv of other table is assumed = row_count if available
+                        // (Some(n), None) | (None, Some(n)) => {
+                        //     selectivity *= 1.0 / n as f64;
+                        //     any_key_had_stats = true;
+                        // }
+                        (_, _) => {
+                            // No NDV on either side: use max(row_count) as an
+                            // upper-bound NDV estimate. NDV can never exceed the
+                            // number of rows, so this is the most conservative
+                            // assumption without distinct-value stats.
+                            let br = build_ts.row_count;
+                            let pr = probe_ts.row_count;
+                            if br > 0 && pr > 0 {
+                                selectivity *= 1.0 / br.max(pr) as f64;
+                                any_key_had_stats = true;
+                            } else {
+                                selectivity *=
+                                    AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY;
+                            }
                         }
                     }
                 }
@@ -337,10 +335,7 @@ pub fn equijoin_cardinality(
 ///
 /// Returns `sel = |intersect| / (NDV_A × NDV_B)`, or `None` if HLLs are
 /// unavailable on either side.
-fn hll_join_selectivity(
-    build_cs: &ColumnStatistics,
-    probe_cs: &ColumnStatistics,
-) -> Option<f64> {
+fn hll_join_selectivity(build_cs: &ColumnStatistics, probe_cs: &ColumnStatistics) -> Option<f64> {
     let build_hll = extract_hll(build_cs)?;
     let probe_hll = extract_hll(probe_cs)?;
 
