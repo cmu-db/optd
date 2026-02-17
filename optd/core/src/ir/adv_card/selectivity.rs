@@ -5,14 +5,16 @@
 //! Recursively decomposes a predicate scalar tree and computes a selectivity
 //! factor in `[0.0, 1.0]`.
 //!
-//! | Predicate shape           | Formula                                          |
-//! |---------------------------|--------------------------------------------------|
-//! | `TRUE`                    | 1.0                                              |
-//! | `FALSE` / `NULL`          | 0.0                                              |
-//! | `col = literal`           | `(1 - null_frac) / NDV(col)`                     |
-//! | `p1 AND p2 AND ...`       | `Π sel(p_i)`  (independence assumption)          |
-//! | `p1 OR  p2 OR  ...`       | `1 - Π (1 - sel(p_i))` (independence assumption) |
-//! | anything else             | `FALLBACK_PREDICATE_SELECTIVITY` (0.1)           |
+//! | Predicate shape                  | Formula                                                          |
+//! |----------------------------------|------------------------------------------------------------------|
+//! | `TRUE`                           | 1.0                                                              |
+//! | `FALSE` / `NULL`                 | 0.0                                                              |
+//! | `col = literal`                  | `(1 - null_frac) / NDV(col)`                                     |
+//! | `col < v` / `col <= v`           | `clamp((v - min)/(max - min), 0, 1) · (1 - null_frac)`          |
+//! | `col > v` / `col >= v`           | `clamp((max - v)/(max - min), 0, 1) · (1 - null_frac)`          |
+//! | `p1 AND p2 AND ...`              | 0 if same-col ranges contradict; else `Π sel(p_i)`              |
+//! | `p1 OR  p2 OR  ...`              | `(1 - null_frac)` if same-col ranges cover domain; else `1-Π(1-sel)` |
+//! | anything else                    | `FALLBACK_PREDICATE_SELECTIVITY` (0.1)                           |
 //!
 //! # Equi-join cardinality ([`equijoin_cardinality`])
 //!
@@ -36,7 +38,8 @@
 //! disjoint the result is 0 immediately.
 
 use crate::ir::{
-    Column, IRContext, Scalar, properties::Cardinality, scalar::*, statistics::ColumnStatistics,
+    Column, IRContext, Scalar, ScalarValue, properties::Cardinality, scalar::*,
+    statistics::ColumnStatistics,
 };
 
 use super::{AdvancedCardinalityEstimator, column_stats, extract_hll, ndv};
@@ -78,25 +81,80 @@ pub fn filter_selectivity(predicate: &Scalar, ctx: &IRContext, base_row_count: u
             AdvancedCardinalityEstimator::FALLBACK_PREDICATE_SELECTIVITY
         }
 
-        // -- Future Optimization Idea: Domain Range Analysis --
-        // TODO(AC): If we encounter equality or range filters that essentially leave
-        // the intersection as NULL, maybe we should set the selectivity to 0 here?
-        // For example "A > 10 and A < -10" or "A = 10 and A = 11"
+        // Range: col {<, <=, >, >=} literal  or  literal {<, <=, >, >=} col
         //
-        // Also consider how to optimize cases like
-        //  - "A < 10 or A > 10" -> "A != 10"
-        //  - "A < 10 or A > 9" -> "True"
-        // ------------------------------
+        // Uses continuous uniform distribution over [min, max] from column
+        // statistics. See `range_selectivity_col_lit` for formula and assumptions.
+        ScalarKind::BinaryOp(meta)
+            if matches!(
+                meta.op_kind,
+                BinaryOpKind::Lt | BinaryOpKind::Le | BinaryOpKind::Gt | BinaryOpKind::Ge
+            ) =>
+        {
+            let binop = BinaryOp::borrow_raw_parts(meta, &predicate.common);
+            let lhs = binop.lhs();
+            let rhs = binop.rhs();
+
+            // Try col op literal
+            if let Some(sel) =
+                range_selectivity_col_lit(lhs, rhs, meta.op_kind, ctx, base_row_count)
+            {
+                return sel;
+            }
+            // Try literal op col → flip operator direction
+            let flipped = flip_range_op(meta.op_kind);
+            if let Some(sel) =
+                range_selectivity_col_lit(rhs, lhs, flipped, ctx, base_row_count)
+            {
+                return sel;
+            }
+            AdvancedCardinalityEstimator::FALLBACK_PREDICATE_SELECTIVITY
+        }
 
         // N-ary AND: sel(p1 AND p2 AND ...) = Π sel(p_i)
         //
-        // Assumption: all predicates are statistically independent.
-        // This can under-estimate when predicates are correlated (e.g.
-        // "age > 18 AND age < 25"). A decay function could model correlation
-        // but is not yet implemented.
+        // Before applying the independence assumption, we check for
+        // **same-column range contradictions**: if all range predicates on a
+        // single column define an empty interval (e.g. `col > 50 AND col < 30`),
+        // the conjunction is unsatisfiable → selectivity 0.
+        //
+        // # Algorithm (contradiction detection)
+        //
+        // 1. For each AND term, extract range bounds via `extract_range_bound`.
+        // 2. Per column, track a running interval [lo, hi], initialized to
+        //    (-∞, +∞).
+        // 3. Tighten: `col < v` / `col <= v` → `hi = min(hi, v)`;
+        //    `col > v` / `col >= v` → `lo = max(lo, v)`.
+        // 4. If for ANY column `lo >= hi`, the range is empty → return 0.0.
+        //
+        // Complexity: O(n) where n = number of AND terms; single linear scan.
+        //
+        // Assumption: only detects contradictions from range predicates
+        // (Lt/Le/Gt/Ge) on literal values. Equality contradictions
+        // (e.g. `col = 5 AND col = 6`) are NOT detected here.
+        //
+        // When non-contradictory, falls through to the independence assumption
+        // (Π sel(p_i)), which can under-estimate correlated predicates like
+        // `age > 18 AND age < 25`.
+        //
+        // TODO(AC): Also detect equality contradictions (col = 5 AND col = 6 → 0).
+        // TODO(AC): When non-contradictory, use the tightened range to compute a
+        //   more accurate selectivity for the conjunction instead of independence
+        //   assumption. E.g. `col > 10 AND col < 50` with domain [0, 100] should
+        //   give sel = 0.4, not 0.5 * 0.5 = 0.25.
+        // TODO(AC): Use histogram bucket boundaries for more accurate conjunction
+        //   selectivity on skewed distributions.
         ScalarKind::NaryOp(meta) if meta.op_kind == NaryOpKind::And => {
             let nary = NaryOp::borrow_raw_parts(meta, &predicate.common);
-            nary.terms()
+            let terms = nary.terms();
+
+            // Contradiction check: accumulate range bounds per column.
+            if and_ranges_contradict(terms) {
+                return 0.0;
+            }
+
+            // Fall through to independence assumption.
+            terms
                 .iter()
                 .map(|t| filter_selectivity(t, ctx, base_row_count))
                 .product()
@@ -104,16 +162,40 @@ pub fn filter_selectivity(predicate: &Scalar, ctx: &IRContext, base_row_count: u
 
         // N-ary OR: sel(p1 OR p2 OR ...) = 1 - Π (1 - sel(p_i))
         //
-        // Derived from inclusion-exclusion under the independence assumption:
-        //   P(A ∪ B) = P(A) + P(B) - P(A)·P(B) = 1 - (1-P(A))·(1-P(B))
-        // Generalized to n terms.
+        // Before applying the independence assumption, we check for
+        // **same-column range tautologies**: if all OR terms are range
+        // predicates on the same column and their union covers the entire
+        // domain [min, max], the disjunction is a tautology for non-null
+        // values → selectivity ≈ (1 - null_frac).
         //
-        // Assumption: all predicates are statistically independent (same
-        // caveat as AND above).
+        // # Algorithm (tautology detection)
+        //
+        // 1. Extract range bounds from all OR terms.
+        // 2. All terms must reference the same column; otherwise skip.
+        // 3. Collect the implied intervals, sort by lower bound, and merge
+        //    overlapping intervals.
+        // 4. If the merged result covers [min, max], return (1 - null_frac).
+        //
+        // Complexity: O(n log n) due to sort; for typical queries (2-5 OR
+        // terms) this is negligible.
+        //
+        // Assumption: all terms must be on the same column. Mixed-column ORs
+        // fall through to the independence assumption (correct behavior).
+        //
+        // TODO(AC): For partial coverage (union covers fraction f of [min, max]),
+        //   return f * (1 - null_frac) instead of falling through to independence.
+        //   This would give exact results under uniform distribution.
         ScalarKind::NaryOp(meta) if meta.op_kind == NaryOpKind::Or => {
             let nary = NaryOp::borrow_raw_parts(meta, &predicate.common);
-            let product_complement: f64 = nary
-                .terms()
+            let terms = nary.terms();
+
+            // Tautology check: see if OR covers entire domain.
+            if let Some(sel) = or_ranges_tautology(terms, ctx, base_row_count) {
+                return sel;
+            }
+
+            // Fall through to independence assumption.
+            let product_complement: f64 = terms
                 .iter()
                 .map(|t| 1.0 - filter_selectivity(t, ctx, base_row_count))
                 .product();
@@ -358,6 +440,354 @@ fn hll_join_selectivity(build_cs: &ColumnStatistics, probe_cs: &ColumnStatistics
     }
 
     Some(intersect as f64 / (build_ndv as f64 * probe_ndv as f64))
+}
+
+/// Convert a [`ScalarValue`] to f64 for use in range selectivity calculations.
+///
+/// # Supported types
+///
+/// Int8, Int16, Int32, Int64, UInt8, UInt16, UInt32, UInt64, Decimal32/64/128.
+///
+/// # Unsupported types (returns `None`)
+///
+/// Boolean, Utf8, Utf8View, Date32, Date64, and any null variant.
+///
+/// # Precision
+///
+/// Casting i64/u64 to f64 can lose precision beyond 2^53 (~9 × 10^15).
+/// For selectivity estimation (inherently approximate), this is negligible.
+/// Decimal types are converted via `value as f64 / 10^scale`.
+///
+/// TODO: Support Date32/Date64 by converting to days-since-epoch f64,
+/// enabling range queries on date columns.
+fn scalar_value_to_f64(value: &ScalarValue) -> Option<f64> {
+    match value {
+        ScalarValue::Int8(Some(v)) => Some(*v as f64),
+        ScalarValue::Int16(Some(v)) => Some(*v as f64),
+        ScalarValue::Int32(Some(v)) => Some(*v as f64),
+        ScalarValue::Int64(Some(v)) => Some(*v as f64),
+        ScalarValue::UInt8(Some(v)) => Some(*v as f64),
+        ScalarValue::UInt16(Some(v)) => Some(*v as f64),
+        ScalarValue::UInt32(Some(v)) => Some(*v as f64),
+        ScalarValue::UInt64(Some(v)) => Some(*v as f64),
+        ScalarValue::Decimal32(Some(v), _, scale) => {
+            Some(*v as f64 / 10f64.powi(*scale as i32))
+        }
+        ScalarValue::Decimal64(Some(v), _, scale) => {
+            Some(*v as f64 / 10f64.powi(*scale as i32))
+        }
+        ScalarValue::Decimal128(Some(v), _, scale) => {
+            Some(*v as f64 / 10f64.powi(*scale as i32))
+        }
+        _ => None, // Null variants, Boolean, Utf8, Date types
+    }
+}
+
+/// Flip a comparison operator for commuted operands.
+///
+/// When we encounter `literal < col`, we rewrite it as `col > literal`.
+/// This allows [`range_selectivity_col_lit`] to always expect the column
+/// on the left-hand side.
+fn flip_range_op(op: BinaryOpKind) -> BinaryOpKind {
+    match op {
+        BinaryOpKind::Lt => BinaryOpKind::Gt,
+        BinaryOpKind::Le => BinaryOpKind::Ge,
+        BinaryOpKind::Gt => BinaryOpKind::Lt,
+        BinaryOpKind::Ge => BinaryOpKind::Le,
+        other => other, // Eq and arithmetic ops are symmetric or N/A
+    }
+}
+
+/// Compute selectivity for a range predicate `col op literal` where
+/// op ∈ {<, <=, >, >=}.
+///
+/// # Formula (continuous uniform distribution approximation)
+///
+/// ```text
+/// sel(col < v)  = clamp((v - min) / (max - min), 0, 1) · (1 - null_frac)
+/// sel(col <= v) = clamp((v - min) / (max - min), 0, 1) · (1 - null_frac)
+/// sel(col > v)  = clamp((max - v) / (max - min), 0, 1) · (1 - null_frac)
+/// sel(col >= v) = clamp((max - v) / (max - min), 0, 1) · (1 - null_frac)
+/// ```
+///
+/// # Assumptions
+///
+/// - **Continuous uniform distribution:** Values are spread uniformly over
+///   `[min, max]`. This is the standard textbook assumption (Selinger et al.,
+///   1979). Under this model, `<=` and `<` produce the same selectivity since
+///   the probability of hitting any single point in a continuous distribution
+///   is 0. For discrete integer domains, the true difference is
+///   `1/(max - min + 1)`, which is negligible for domains of size > 100.
+///
+/// - **min/max are tight bounds:** We assume `min_value` and `max_value` from
+///   column statistics are the actual minimum and maximum in the column. Stale
+///   statistics (e.g. after inserts) may cause over- or under-estimation.
+///
+/// - **Literal value may be outside `[min, max]`:** Clamping handles this:
+///   `col < value` where `value < min` yields 0; `col < value` where
+///   `value > max` yields `(1 - null_frac)`.
+///
+/// - **Null values never satisfy range predicates:** SQL semantics:
+///   comparisons with NULL yield NULL/false, so we exclude the null fraction.
+///
+/// # Fallback
+///
+/// Returns `None` when:
+/// - `col_expr` is not a `ColumnRef`
+/// - Column statistics are unavailable
+/// - `min_value` or `max_value` are absent or non-numeric (cannot parse to f64)
+/// - `min == max` (zero-width domain; degenerate case)
+/// - `lit_expr` is not a `Literal` or its value is non-numeric
+///
+/// TODO: For discrete integer columns, use the more precise formula:
+///   `sel(col < v) = floor(v - min) / (max - min + 1)`. This requires
+///   checking `ColumnStatistics.column_type` for integrality.
+///
+/// TODO: When histograms are available, use histogram bucket boundaries for
+///   much more accurate selectivity on skewed distributions. The uniform
+///   assumption can be 10-100× off for highly skewed data (e.g. Zipfian).
+fn range_selectivity_col_lit(
+    col_expr: &Scalar,
+    lit_expr: &Scalar,
+    op: BinaryOpKind,
+    ctx: &IRContext,
+    base_row_count: usize,
+) -> Option<f64> {
+    let ScalarKind::ColumnRef(col_meta) = &col_expr.kind else {
+        return None;
+    };
+
+    let (stats, offset) = column_stats(ctx, col_meta.column)?;
+    let col_stats = stats.column_statistics.get(offset)?;
+
+    // Parse min/max from column statistics.
+    let min = col_stats.min_value.as_ref()?.parse::<f64>().ok()?;
+    let max = col_stats.max_value.as_ref()?.parse::<f64>().ok()?;
+    let domain = max - min;
+    if domain <= 0.0 {
+        // Zero-width or inverted domain; degenerate case — fall back.
+        return None;
+    }
+
+    // Extract literal value as f64.
+    let ScalarKind::Literal(lit_meta) = &lit_expr.kind else {
+        return None;
+    };
+    let lit = Literal::borrow_raw_parts(lit_meta, &lit_expr.common);
+    let value = scalar_value_to_f64(lit.value())?;
+
+    // Null adjustment (same pattern as equality_selectivity_col_lit).
+    let null_fraction = if base_row_count > 0 {
+        col_stats
+            .null_count
+            .map(|nc| nc as f64 / base_row_count as f64)
+            .unwrap_or(0.0)
+    } else {
+        0.0
+    };
+
+    // Compute range fraction under continuous uniform distribution.
+    let fraction = match op {
+        BinaryOpKind::Lt | BinaryOpKind::Le => (value - min) / domain,
+        BinaryOpKind::Gt | BinaryOpKind::Ge => (max - value) / domain,
+        _ => return None, // Not a range op
+    };
+
+    Some(fraction.clamp(0.0, 1.0) * (1.0 - null_fraction))
+}
+
+/// Attempt to extract a range bound from a scalar predicate.
+///
+/// Returns `Some((column, op, value))` if the predicate is of the form
+/// `col op literal` or `literal op col` (with op flipped appropriately),
+/// where op ∈ {<, <=, >, >=}.
+///
+/// Returns `None` for non-range predicates (equality, non-literal RHS,
+/// complex expressions, etc.).
+///
+/// Time complexity: O(1) per predicate.
+fn extract_range_bound(term: &Scalar) -> Option<(Column, BinaryOpKind, f64)> {
+    let ScalarKind::BinaryOp(meta) = &term.kind else {
+        return None;
+    };
+    if !matches!(
+        meta.op_kind,
+        BinaryOpKind::Lt | BinaryOpKind::Le | BinaryOpKind::Gt | BinaryOpKind::Ge
+    ) {
+        return None;
+    }
+
+    let binop = BinaryOp::borrow_raw_parts(meta, &term.common);
+    let lhs = binop.lhs();
+    let rhs = binop.rhs();
+
+    // Try col op literal
+    if let ScalarKind::ColumnRef(col_meta) = &lhs.kind {
+        if let ScalarKind::Literal(lit_meta) = &rhs.kind {
+            let lit = Literal::borrow_raw_parts(lit_meta, &rhs.common);
+            if let Some(v) = scalar_value_to_f64(lit.value()) {
+                return Some((col_meta.column, meta.op_kind, v));
+            }
+        }
+    }
+
+    // Try literal op col → flip operator
+    if let ScalarKind::Literal(lit_meta) = &lhs.kind {
+        if let ScalarKind::ColumnRef(col_meta) = &rhs.kind {
+            let lit = Literal::borrow_raw_parts(lit_meta, &lhs.common);
+            if let Some(v) = scalar_value_to_f64(lit.value()) {
+                return Some((col_meta.column, flip_range_op(meta.op_kind), v));
+            }
+        }
+    }
+
+    None
+}
+
+/// Check whether AND-ed range predicates on the same column contradict.
+///
+/// Scans the terms for range bounds (via [`extract_range_bound`]) and
+/// accumulates a running interval `[lo, hi]` per column. If for any column
+/// the lower bound meets or exceeds the upper bound, the conjunction is
+/// unsatisfiable.
+///
+/// Returns `true` (contradiction) only when at least one column has an empty
+/// range. Non-range terms (equality, complex expressions) are ignored — they
+/// do not prevent the independence-assumption fallback.
+///
+/// # Complexity
+///
+/// O(n) where n = number of AND terms. Uses a `HashMap<Column, (f64, f64)>`
+/// with expected O(1) per lookup. Typical queries have 2-5 AND terms and
+/// 1-2 distinct columns, so the map is trivially small.
+fn and_ranges_contradict(terms: &[std::sync::Arc<Scalar>]) -> bool {
+    use std::collections::HashMap;
+
+    // Per-column running interval: (lo, hi).
+    // Initialized lazily on first range bound for each column.
+    let mut intervals: HashMap<Column, (f64, f64)> = HashMap::new();
+
+    for term in terms {
+        if let Some((col, op, value)) = extract_range_bound(term) {
+            let entry = intervals.entry(col).or_insert((f64::NEG_INFINITY, f64::INFINITY));
+            match op {
+                BinaryOpKind::Lt | BinaryOpKind::Le => {
+                    // col < v / col <= v → upper bound tightens
+                    entry.1 = entry.1.min(value);
+                }
+                BinaryOpKind::Gt | BinaryOpKind::Ge => {
+                    // col > v / col >= v → lower bound tightens
+                    entry.0 = entry.0.max(value);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Check for empty intervals.
+    intervals.values().any(|(lo, hi)| lo >= hi)
+}
+
+/// Check whether OR-ed range predicates on a single column form a tautology.
+///
+/// If all OR terms are range predicates on the **same** column, and their
+/// union covers the column's entire domain `[min, max]`, returns the
+/// tautology selectivity `(1 - null_frac)`.
+///
+/// # Algorithm
+///
+/// 1. Extract range bounds from all terms. If any term is not a range
+///    predicate, or terms reference different columns, return `None`.
+/// 2. Convert each range bound to an interval on the number line:
+///    - `col < v` / `col <= v` → `[min, v]`
+///    - `col > v` / `col >= v` → `[v, max]`
+///    where `min` and `max` come from column statistics.
+/// 3. Sort intervals by lower bound and merge overlapping ones.
+/// 4. If the single merged interval covers `[min, max]`, it's a tautology.
+///
+/// # Complexity
+///
+/// O(n log n) due to the sort step, where n = number of OR terms.
+/// For typical queries (2-5 OR terms), this is negligible.
+///
+/// # Assumptions
+///
+/// - All terms must reference the same column. Mixed-column ORs return `None`.
+/// - Only handles range predicates (Lt/Le/Gt/Ge). Equality or complex terms
+///   cause early return `None`.
+/// - Uses the same continuous uniform assumption as range selectivity.
+///
+/// TODO(AC): For partial coverage (union covers fraction f of [min, max]),
+///   return f * (1 - null_frac) instead of returning `None`.
+fn or_ranges_tautology(
+    terms: &[std::sync::Arc<Scalar>],
+    ctx: &IRContext,
+    base_row_count: usize,
+) -> Option<f64> {
+    if terms.is_empty() {
+        return None;
+    }
+
+    // Extract bounds; bail if any term isn't a range predicate.
+    let mut bounds = Vec::with_capacity(terms.len());
+    for term in terms {
+        bounds.push(extract_range_bound(term)?);
+    }
+
+    // All bounds must reference the same column.
+    let target_col = bounds[0].0;
+    if !bounds.iter().all(|(col, _, _)| *col == target_col) {
+        return None;
+    }
+
+    // Look up column stats for min/max.
+    let (stats, offset) = column_stats(ctx, target_col)?;
+    let col_stats = stats.column_statistics.get(offset)?;
+    let min = col_stats.min_value.as_ref()?.parse::<f64>().ok()?;
+    let max = col_stats.max_value.as_ref()?.parse::<f64>().ok()?;
+    if min >= max {
+        return None;
+    }
+
+    // Convert each bound to an interval [lo, hi].
+    let mut intervals: Vec<(f64, f64)> = bounds
+        .iter()
+        .map(|(_, op, v)| match op {
+            BinaryOpKind::Lt | BinaryOpKind::Le => (min, *v),
+            BinaryOpKind::Gt | BinaryOpKind::Ge => (*v, max),
+            _ => (min, min), // shouldn't happen; extract_range_bound filters
+        })
+        .collect();
+
+    // Sort by lower bound, then merge overlapping intervals.
+    intervals.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let mut merged: Vec<(f64, f64)> = Vec::new();
+    for (lo, hi) in intervals {
+        if let Some(last) = merged.last_mut() {
+            if lo <= last.1 {
+                // Overlapping or adjacent — extend.
+                last.1 = last.1.max(hi);
+                continue;
+            }
+        }
+        merged.push((lo, hi));
+    }
+
+    // Check if the single merged interval covers [min, max].
+    if merged.len() == 1 && merged[0].0 <= min && merged[0].1 >= max {
+        // Tautology for non-null values.
+        let null_fraction = if base_row_count > 0 {
+            col_stats
+                .null_count
+                .map(|nc| nc as f64 / base_row_count as f64)
+                .unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        return Some(1.0 - null_fraction);
+    }
+
+    None
 }
 
 /// Check if two columns have overlapping value domains using min/max statistics.

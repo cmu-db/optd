@@ -2,9 +2,12 @@
 //!
 //! # Scope (v1)
 //!
-//! Statistics-driven estimation for: **Scan**, **equality filter**, and
-//! **equi-join** (PhysicalHashJoin only). All other operators fall back to
-//! hardcoded "magic" constants identical to [`crate::magic::MagicCardinalityEstimator`].
+//! Statistics-driven estimation for: **Scan**, **equality filter**,
+//! **range filter** (Lt/Le/Gt/Ge with min/max stats), and **equi-join**
+//! (PhysicalHashJoin only). Range filters use continuous uniform distribution
+//! over `[min, max]`. AND/OR conjunctions detect same-column range
+//! contradictions (→ 0) and tautologies (→ 1). All other operators fall back
+//! to hardcoded "magic" constants identical to [`crate::magic::MagicCardinalityEstimator`].
 //!
 //! # High-level approach
 //!

@@ -152,7 +152,7 @@ fn test_equality_selectivity_with_nulls() {
     let schema = Arc::new(Schema::new(vec![Field::new(
         "t.a".to_string(),
         DataType::Int32,
-        false,
+        true,
     )]));
     let src = cat
         .try_create_table("t".to_string(), schema.clone())
@@ -278,13 +278,13 @@ fn test_unknown_predicate_fallback() {
     let ctx = adv_ctx_with_catalog(cat);
     let scan = ctx.logical_get(src, &schema, None);
 
-    // a < 5 (range predicate — not supported in v1, should fallback)
+    // a < 5 (range predicate without min/max stats → should fallback)
     let col_a = Column(0);
     let pred = column_ref(col_a).lt(int32(5));
     let filtered = scan.logical_select(pred);
     let card = filtered.cardinality(&ctx);
 
-    // Expected: 1000 * 0.1 (FALLBACK_PREDICATE_SELECTIVITY)
+    // Expected: 1000 * 0.1 (FALLBACK_PREDICATE_SELECTIVITY — no min/max available)
     assert!((card.as_f64() - 100.0).abs() < 0.01);
 }
 
@@ -299,7 +299,11 @@ fn test_ndv_zero_fallback() {
     let src = cat
         .try_create_table("t".to_string(), schema.clone())
         .unwrap();
+
     // NDV = 0 → should fall back
+    // Physically, this makese no sense -- a non-nullable column with 1000 rows can not have 0 distinct values.
+    // This test is purely for verifying the fallback behvaiour for situations where the distinct count is corrupted
+    // or erroneously parsed as 0 when it did not exist.
     cat.set_table_stats(src, simple_table_stats(1000, vec![col_stat("t.a", 0)]));
 
     let ctx = adv_ctx_with_catalog(cat);
@@ -310,8 +314,9 @@ fn test_ndv_zero_fallback() {
     let filtered = scan.logical_select(pred);
     let card = filtered.cardinality(&ctx);
 
-    // NDV=0 → ndv() returns None → fallback selectivity 0.1
-    assert!((card.as_f64() - 100.0).abs() < 0.01);
+    // NDV=0 → ndv() returns None → equality_selectivity_col_lit falls back
+    // to base_row_count (1000) as NDV → sel = 1/1000 = 0.001 → card = 1.0
+    assert!((card.as_f64() - 1.0).abs() < 0.01);
 }
 
 #[test]
@@ -1267,4 +1272,377 @@ async fn test_plan_quality_filter_pushdown_with_hll() {
         explained.contains("PhysicalFilter") || explained.contains("PhysicalHashJoin"),
         "Plan should contain filter and join: {explained}"
     );
+}
+
+// ---------- Range selectivity tests ----------
+
+#[test]
+fn test_range_lt_selectivity() {
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(
+        src,
+        simple_table_stats(1000, vec![col_stat_with_range("t.a", 100, 0, 100)]),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan = ctx.logical_get(src, &schema, None);
+
+    // col < 50 with domain [0, 100] → sel = (50 - 0) / (100 - 0) = 0.5
+    let pred = column_ref(Column(0)).lt(int32(50));
+    let card = scan.logical_select(pred).cardinality(&ctx);
+    assert!((card.as_f64() - 500.0).abs() < 1.0, "card = {}", card.as_f64());
+}
+
+#[test]
+fn test_range_gt_selectivity() {
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(
+        src,
+        simple_table_stats(1000, vec![col_stat_with_range("t.a", 100, 0, 100)]),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan = ctx.logical_get(src, &schema, None);
+
+    // col > 75 with domain [0, 100] → sel = (100 - 75) / 100 = 0.25
+    let pred = column_ref(Column(0)).gt(int32(75));
+    let card = scan.logical_select(pred).cardinality(&ctx);
+    assert!((card.as_f64() - 250.0).abs() < 1.0, "card = {}", card.as_f64());
+}
+
+#[test]
+fn test_range_le_selectivity() {
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(
+        src,
+        simple_table_stats(1000, vec![col_stat_with_range("t.a", 100, 0, 100)]),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan = ctx.logical_get(src, &schema, None);
+
+    // col <= 25 with domain [0, 100] → sel = (25 - 0) / 100 = 0.25
+    // (continuous approximation: <= and < give same result)
+    let pred = column_ref(Column(0)).le(int32(25));
+    let card = scan.logical_select(pred).cardinality(&ctx);
+    assert!((card.as_f64() - 250.0).abs() < 1.0, "card = {}", card.as_f64());
+}
+
+#[test]
+fn test_range_ge_selectivity() {
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(
+        src,
+        simple_table_stats(1000, vec![col_stat_with_range("t.a", 100, 0, 100)]),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan = ctx.logical_get(src, &schema, None);
+
+    // col >= 80 with domain [0, 100] → sel = (100 - 80) / 100 = 0.2
+    let pred = column_ref(Column(0)).ge(int32(80));
+    let card = scan.logical_select(pred).cardinality(&ctx);
+    assert!((card.as_f64() - 200.0).abs() < 1.0, "card = {}", card.as_f64());
+}
+
+#[test]
+fn test_range_commuted() {
+    // 50 < col  ≡  col > 50
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(
+        src,
+        simple_table_stats(1000, vec![col_stat_with_range("t.a", 100, 0, 100)]),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan = ctx.logical_get(src, &schema, None);
+
+    // int32(50) < column_ref(0)  →  col > 50  →  sel = (100 - 50) / 100 = 0.5
+    let pred = int32(50).lt(column_ref(Column(0)));
+    let card = scan.logical_select(pred).cardinality(&ctx);
+    assert!((card.as_f64() - 500.0).abs() < 1.0, "card = {}", card.as_f64());
+}
+
+#[test]
+fn test_range_out_of_bounds_low() {
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(
+        src,
+        simple_table_stats(1000, vec![col_stat_with_range("t.a", 100, 0, 100)]),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan = ctx.logical_get(src, &schema, None);
+
+    // col < -10 with domain [0, 100] → clamped to 0
+    let pred = column_ref(Column(0)).lt(int32(-10));
+    let card = scan.logical_select(pred).cardinality(&ctx);
+    assert_eq!(card.as_f64(), 0.0);
+}
+
+#[test]
+fn test_range_out_of_bounds_high() {
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(
+        src,
+        simple_table_stats(1000, vec![col_stat_with_range("t.a", 100, 0, 100)]),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan = ctx.logical_get(src, &schema, None);
+
+    // col > 200 with domain [0, 100] → clamped to 0
+    let pred = column_ref(Column(0)).gt(int32(200));
+    let card = scan.logical_select(pred).cardinality(&ctx);
+    assert_eq!(card.as_f64(), 0.0);
+}
+
+#[test]
+fn test_range_covers_all() {
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(
+        src,
+        simple_table_stats(1000, vec![col_stat_with_range("t.a", 100, 0, 100)]),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan = ctx.logical_get(src, &schema, None);
+
+    // col < 200 with domain [0, 100] → clamped to 1.0
+    let pred = column_ref(Column(0)).lt(int32(200));
+    let card = scan.logical_select(pred).cardinality(&ctx);
+    assert!((card.as_f64() - 1000.0).abs() < 1.0, "card = {}", card.as_f64());
+}
+
+#[test]
+fn test_range_with_nulls() {
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        true,
+    )]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    // 200 nulls out of 1000 rows, domain [0, 100]
+    let mut cs = col_stat_with_range("t.a", 100, 0, 100);
+    cs.null_count = Some(200);
+    cat.set_table_stats(src, simple_table_stats(1000, vec![cs]));
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan = ctx.logical_get(src, &schema, None);
+
+    // col < 50 → range_frac = 0.5, null_frac = 0.2 → sel = 0.5 * 0.8 = 0.4
+    let pred = column_ref(Column(0)).lt(int32(50));
+    let card = scan.logical_select(pred).cardinality(&ctx);
+    assert!((card.as_f64() - 400.0).abs() < 1.0, "card = {}", card.as_f64());
+}
+
+#[test]
+fn test_range_no_stats_fallback() {
+    // No min/max → fallback to 0.1
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(src, simple_table_stats(1000, vec![col_stat("t.a", 10)]));
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan = ctx.logical_get(src, &schema, None);
+
+    let pred = column_ref(Column(0)).lt(int32(50));
+    let card = scan.logical_select(pred).cardinality(&ctx);
+    // Fallback: 1000 * 0.1 = 100
+    assert!((card.as_f64() - 100.0).abs() < 0.01, "card = {}", card.as_f64());
+}
+
+// ---------- AND/OR range analysis tests ----------
+
+#[test]
+fn test_and_contradiction() {
+    // col > 50 AND col < 30 with domain [0, 100] → contradiction → 0
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(
+        src,
+        simple_table_stats(1000, vec![col_stat_with_range("t.a", 100, 0, 100)]),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan = ctx.logical_get(src, &schema, None);
+
+    let pred = column_ref(Column(0))
+        .gt(int32(50))
+        .and(column_ref(Column(0)).lt(int32(30)));
+    let card = scan.logical_select(pred).cardinality(&ctx);
+    assert_eq!(card.as_f64(), 0.0);
+}
+
+#[test]
+fn test_and_range_normal() {
+    // col > 20 AND col < 80 — non-contradictory, falls through to independence
+    // sel(col > 20) = (100-20)/100 = 0.8
+    // sel(col < 80) = (80-0)/100 = 0.8
+    // independence: 0.8 * 0.8 = 0.64
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(
+        src,
+        simple_table_stats(1000, vec![col_stat_with_range("t.a", 100, 0, 100)]),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan = ctx.logical_get(src, &schema, None);
+
+    let pred = column_ref(Column(0))
+        .gt(int32(20))
+        .and(column_ref(Column(0)).lt(int32(80)));
+    let card = scan.logical_select(pred).cardinality(&ctx);
+    // 1000 * 0.8 * 0.8 = 640
+    assert!((card.as_f64() - 640.0).abs() < 1.0, "card = {}", card.as_f64());
+}
+
+#[test]
+fn test_or_tautology() {
+    // col < 60 OR col >= 40 with domain [0, 100]
+    // Intervals: [0, 60] and [40, 100] → merged: [0, 100] → covers domain → tautology
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(
+        src,
+        simple_table_stats(1000, vec![col_stat_with_range("t.a", 100, 0, 100)]),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan = ctx.logical_get(src, &schema, None);
+
+    let pred = column_ref(Column(0))
+        .lt(int32(60))
+        .or(column_ref(Column(0)).ge(int32(40)));
+    let card = scan.logical_select(pred).cardinality(&ctx);
+    // Tautology: sel = 1.0, card = 1000
+    assert!((card.as_f64() - 1000.0).abs() < 1.0, "card = {}", card.as_f64());
+}
+
+#[test]
+fn test_or_non_tautology() {
+    // col < 30 OR col > 70 with domain [0, 100]
+    // Intervals: [0, 30] and [70, 100] → gap at [30, 70] → NOT a tautology
+    // Falls through to independence:
+    //   sel(col < 30) = 0.3, sel(col > 70) = 0.3
+    //   sel(OR) = 1 - (1-0.3)*(1-0.3) = 1 - 0.49 = 0.51
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(
+        src,
+        simple_table_stats(1000, vec![col_stat_with_range("t.a", 100, 0, 100)]),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan = ctx.logical_get(src, &schema, None);
+
+    let pred = column_ref(Column(0))
+        .lt(int32(30))
+        .or(column_ref(Column(0)).gt(int32(70)));
+    let card = scan.logical_select(pred).cardinality(&ctx);
+    // Independence: 1 - 0.7 * 0.7 = 0.51 → card = 510
+    assert!((card.as_f64() - 510.0).abs() < 1.0, "card = {}", card.as_f64());
 }
