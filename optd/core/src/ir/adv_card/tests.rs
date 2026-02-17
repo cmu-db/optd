@@ -7,7 +7,6 @@ use crate::ir::{
     builder::*,
     catalog::{Catalog, Field, Schema},
     operator::join::JoinType,
-    properties::{Cardinality, CardinalityEstimator},
     statistics::{AdvanceColumnStatistics, ColumnStatistics, TableStatistics},
 };
 use crate::magic::{MagicCatalog, MagicCostModel};

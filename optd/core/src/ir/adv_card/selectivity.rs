@@ -13,7 +13,7 @@
 //! | `col < v` / `col <= v`           | `clamp((v - min)/(max - min), 0, 1) · (1 - null_frac)`          |
 //! | `col > v` / `col >= v`           | `clamp((max - v)/(max - min), 0, 1) · (1 - null_frac)`          |
 //! | `p1 AND p2 AND ...`              | 0 if same-col ranges contradict; else `Π sel(p_i)`              |
-//! | `p1 OR  p2 OR  ...`              | `(1 - null_frac)` if same-col ranges cover domain; else `1-Π(1-sel)` |
+//! | `p1 OR  p2 OR  ...`             | `(1 - null_frac)` if same-col ranges cover domain; else `1-Π(1-sel)` |
 //! | anything else                    | `FALLBACK_PREDICATE_SELECTIVITY` (0.1)                           |
 //!
 //! # Equi-join cardinality ([`equijoin_cardinality`])
@@ -38,20 +38,21 @@
 //! disjoint the result is 0 immediately.
 
 use crate::ir::{
-    Column, IRContext, Scalar, ScalarValue, properties::Cardinality, scalar::*,
-    statistics::ColumnStatistics,
+    Column, DataType, IRContext, Scalar, ScalarValue, operator::join::JoinType,
+    properties::Cardinality, scalar::*, statistics::ColumnStatistics,
 };
 
-use super::{AdvancedCardinalityEstimator, column_stats, extract_hll, ndv};
+use super::{AdvancedCardinalityEstimator, column_stats, extract_hll, ndv, null_fraction};
 
 /// Compute filter selectivity for a predicate tree.
 ///
 /// Returns a factor in `[0.0, 1.0]`. The caller multiplies by input cardinality
 /// to get the estimated output cardinality: `|σ_p(R)| = sel(p) · |R|`.
 ///
-/// `base_row_count` is the input row count, used to derive null fraction:
-/// `null_frac = null_count / base_row_count`.
-pub fn filter_selectivity(predicate: &Scalar, ctx: &IRContext, base_row_count: usize) -> f64 {
+/// Null fractions and NDV fallbacks are derived from each column's own
+/// `TableStatistics.row_count` (looked up via [`column_stats`]), not from
+/// the filtered input cardinality.
+pub fn filter_selectivity(predicate: &Scalar, ctx: &IRContext) -> f64 {
     match &predicate.kind {
         // Literal boolean
         ScalarKind::Literal(meta) => {
@@ -71,11 +72,11 @@ pub fn filter_selectivity(predicate: &Scalar, ctx: &IRContext, base_row_count: u
             let rhs = binop.rhs();
 
             // Try col = literal
-            if let Some(sel) = equality_selectivity_col_lit(lhs, rhs, ctx, base_row_count) {
+            if let Some(sel) = equality_selectivity_col_lit(lhs, rhs, ctx) {
                 return sel;
             }
             // Try literal = col (commuted)
-            if let Some(sel) = equality_selectivity_col_lit(rhs, lhs, ctx, base_row_count) {
+            if let Some(sel) = equality_selectivity_col_lit(rhs, lhs, ctx) {
                 return sel;
             }
             AdvancedCardinalityEstimator::FALLBACK_PREDICATE_SELECTIVITY
@@ -96,16 +97,12 @@ pub fn filter_selectivity(predicate: &Scalar, ctx: &IRContext, base_row_count: u
             let rhs = binop.rhs();
 
             // Try col op literal
-            if let Some(sel) =
-                range_selectivity_col_lit(lhs, rhs, meta.op_kind, ctx, base_row_count)
-            {
+            if let Some(sel) = range_selectivity_col_lit(lhs, rhs, meta.op_kind, ctx) {
                 return sel;
             }
             // Try literal op col → flip operator direction
             let flipped = flip_range_op(meta.op_kind);
-            if let Some(sel) =
-                range_selectivity_col_lit(rhs, lhs, flipped, ctx, base_row_count)
-            {
+            if let Some(sel) = range_selectivity_col_lit(rhs, lhs, flipped, ctx) {
                 return sel;
             }
             AdvancedCardinalityEstimator::FALLBACK_PREDICATE_SELECTIVITY
@@ -154,10 +151,7 @@ pub fn filter_selectivity(predicate: &Scalar, ctx: &IRContext, base_row_count: u
             }
 
             // Fall through to independence assumption.
-            terms
-                .iter()
-                .map(|t| filter_selectivity(t, ctx, base_row_count))
-                .product()
+            terms.iter().map(|t| filter_selectivity(t, ctx)).product()
         }
 
         // N-ary OR: sel(p1 OR p2 OR ...) = 1 - Π (1 - sel(p_i))
@@ -190,14 +184,14 @@ pub fn filter_selectivity(predicate: &Scalar, ctx: &IRContext, base_row_count: u
             let terms = nary.terms();
 
             // Tautology check: see if OR covers entire domain.
-            if let Some(sel) = or_ranges_tautology(terms, ctx, base_row_count) {
+            if let Some(sel) = or_ranges_tautology(terms, ctx) {
                 return sel;
             }
 
             // Fall through to independence assumption.
             let product_complement: f64 = terms
                 .iter()
-                .map(|t| 1.0 - filter_selectivity(t, ctx, base_row_count))
+                .map(|t| 1.0 - filter_selectivity(t, ctx))
                 .product();
             1.0 - product_complement
         }
@@ -216,7 +210,7 @@ pub fn filter_selectivity(predicate: &Scalar, ctx: &IRContext, base_row_count: u
 /// ```
 ///
 /// where:
-/// - `null_fraction = null_count / base_row_count` (0 if unknown)
+/// - `null_fraction = null_count / table_row_count` (0 if unknown)
 /// - `NDV` = number of distinct non-null values from stats or HLL
 ///
 /// # Assumptions
@@ -235,7 +229,6 @@ fn equality_selectivity_col_lit(
     col_expr: &Scalar,
     _lit_expr: &Scalar,
     ctx: &IRContext,
-    base_row_count: usize,
 ) -> Option<f64> {
     let ScalarKind::ColumnRef(col_meta) = &col_expr.kind else {
         return None;
@@ -243,21 +236,11 @@ fn equality_selectivity_col_lit(
 
     let (stats, offset) = column_stats(ctx, col_meta.column)?;
     let col_stats = stats.column_statistics.get(offset)?;
-    let distinct = ndv(col_stats).unwrap_or(base_row_count);
+    let table_row_count = stats.row_count;
+    let distinct = ndv(col_stats).unwrap_or(table_row_count);
 
-    // Null adjustment: null rows never satisfy an equality predicate.
-    // null_fraction = null_count / base_row_count
-    let null_fraction = if base_row_count > 0 {
-        col_stats
-            .null_count
-            .map(|nc| nc as f64 / base_row_count as f64)
-            .unwrap_or(0.0)
-    } else {
-        0.0
-    };
-
-    // sel = (1 - null_fraction) / NDV
-    Some((1.0 - null_fraction) / distinct as f64)
+    let nf = null_fraction(col_stats, table_row_count);
+    Some((1.0 - nf) / distinct as f64)
 }
 
 /// Estimate cardinality for a PhysicalHashJoin on pre-extracted equi-join keys,
@@ -295,6 +278,14 @@ fn equality_selectivity_col_lit(
 /// When `non_equi_conds` is a literal `TRUE` (i.e. no non-equi conditions),
 /// `filter_selectivity` returns 1.0 and the estimate is unchanged.
 ///
+/// # Join-type adjustment
+///
+/// The base inner-join estimate is adjusted for the requested join type:
+/// - **Inner**: no adjustment.
+/// - **Left**: `max(result, |left|)` — every left row appears at least once.
+/// - **Mark(col)**: `|left|` — adds a boolean column, no row change.
+/// - **Single**: `min(result, |left|)` — at-most-one match per left row.
+///
 /// # Domain-overlap optimization
 ///
 /// Before computing selectivity for a key pair, we check whether the `[min, max]`
@@ -303,8 +294,6 @@ fn equality_selectivity_col_lit(
 ///
 /// # Assumptions
 ///
-/// - **Inner-join semantics only.** Other join types (LEFT, SEMI, etc.) are not
-///   yet accounted for; they would need adjustment (e.g. LEFT JOIN ≥ |L|).
 /// - **Independence across key pairs.** Composite keys `(k1, k2)` are treated as
 ///   independent: `sel = sel(k1) · sel(k2)`.
 /// - **Uniform value distribution** within each column.
@@ -315,9 +304,14 @@ fn equality_selectivity_col_lit(
 /// - **Independence between equi-keys and non-equi conditions.** The non-equi
 ///   selectivity is multiplied in independently. Correlated conditions (e.g.
 ///   `x.a = y.a AND x.a < 10`) may lead to under-estimation.
+// TODO(AC/Yuchen): Make `describe_table` return `Arc<TableStatistics>` -- the
+// per-key-pair `column_stats` calls will become cheap (Arc clone instead of
+// deep clone of `Vec<ColumnStatistics>`). Until then, composite keys on the
+// same table pay repeated deep-clone costs.
 pub fn equijoin_cardinality(
     keys: &[(Column, Column)],
     non_equi_conds: &Scalar,
+    join_type: &JoinType,
     build_card: Cardinality,
     probe_card: Cardinality,
     ctx: &IRContext,
@@ -326,13 +320,20 @@ pub fn equijoin_cardinality(
     let mut any_key_had_stats = false;
 
     for (build_col, probe_col) in keys {
-        let build_info = column_stats(ctx, *build_col)
-            .and_then(|(s, off)| s.column_statistics.get(off).cloned().map(|c| (s, c)));
-        let probe_info = column_stats(ctx, *probe_col)
-            .and_then(|(s, off)| s.column_statistics.get(off).cloned().map(|c| (s, c)));
+        match (
+            &column_stats(ctx, *build_col),
+            &column_stats(ctx, *probe_col),
+        ) {
+            (Some((build_ts, build_off)), Some((probe_ts, probe_off))) => {
+                let Some(build_cs) = build_ts.column_statistics.get(*build_off) else {
+                    selectivity *= AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY;
+                    continue;
+                };
+                let Some(probe_cs) = probe_ts.column_statistics.get(*probe_off) else {
+                    selectivity *= AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY;
+                    continue;
+                };
 
-        match (&build_info, &probe_info) {
-            (Some((build_ts, build_cs)), Some((probe_ts, probe_cs))) => {
                 // Domain-overlap check: if [min, max] ranges are disjoint,
                 // no rows can match on this key → entire join produces 0 rows.
                 if !domains_overlap(build_cs, probe_cs) {
@@ -361,6 +362,7 @@ pub fn equijoin_cardinality(
                         // TODO(AC): Benchmark the case where:
                         // a. the ndv of other table is assumed <= n
                         // b. the ndv of other table is assumed = row_count if available
+                        // Sample Code:
                         // (Some(n), None) | (None, Some(n)) => {
                         //     selectivity *= 1.0 / n as f64;
                         //     any_key_had_stats = true;
@@ -404,10 +406,20 @@ pub fn equijoin_cardinality(
     // Apply selectivity of non-equi conditions (e.g. range predicates like x.b < y.b).
     // These are treated as a post-join filter on the equi-join result.
     // When non_equi_conds is literal TRUE, filter_selectivity returns 1.0 (no effect).
-    let equijoin_card = build_card.as_f64() * probe_card.as_f64() * selectivity;
-    let non_equi_sel = filter_selectivity(non_equi_conds, ctx, equijoin_card as usize);
+    let inner_card = build_card.as_f64() * probe_card.as_f64() * selectivity;
+    let non_equi_sel = filter_selectivity(non_equi_conds, ctx);
+    let inner_result = inner_card * non_equi_sel;
 
-    Cardinality::new(equijoin_card * non_equi_sel)
+    // Adjust for join type.
+    let left = build_card.as_f64();
+    let adjusted = match *join_type {
+        JoinType::Inner => inner_result,
+        JoinType::Left => inner_result.max(left),
+        JoinType::Mark(_) => left,
+        JoinType::Single => inner_result.min(left),
+    };
+
+    Cardinality::new(adjusted)
 }
 
 /// Compute equi-join selectivity using HLL set intersection.
@@ -442,6 +454,53 @@ fn hll_join_selectivity(build_cs: &ColumnStatistics, probe_cs: &ColumnStatistics
     Some(intersect as f64 / (build_ndv as f64 * probe_ndv as f64))
 }
 
+/// Parse a column statistic's min/max string value to f64, respecting the
+/// column's [`DataType`].
+///
+/// # Supported types
+///
+/// - Integer types (Int8..Int64, UInt8..UInt64): parsed as integer, cast to f64.
+/// - Float16/Float32/Float64: parsed as f64 directly.
+/// - Decimal128/Decimal256: parsed as f64 (string is already in decimal form).
+/// - Date32: parsed as i32 (days since epoch), cast to f64.
+/// - Date64: parsed as i64 (milliseconds since epoch), cast to f64.
+///
+/// TODO(AC/Yuchen): What to do?
+/// # Unsupported types (returns `None`)
+///
+/// Boolean, Utf8, Binary, and any other non-numeric type.
+///
+/// # Precision
+///
+/// Casting i64/u64 to f64 can lose precision beyond 2^53 (~9 × 10^15).
+/// For selectivity estimation (inherently approximate), this is negligible.
+fn parse_stat_value(value: &str, data_type: &DataType) -> Option<f64> {
+    match data_type {
+        DataType::Int8 => value.parse::<i8>().ok().map(|v| v as f64),
+        DataType::Int16 => value.parse::<i16>().ok().map(|v| v as f64),
+        DataType::Int32 => value.parse::<i32>().ok().map(|v| v as f64),
+        DataType::Int64 => value.parse::<i64>().ok().map(|v| v as f64),
+        DataType::UInt8 => value.parse::<u8>().ok().map(|v| v as f64),
+        DataType::UInt16 => value.parse::<u16>().ok().map(|v| v as f64),
+        DataType::UInt32 => value.parse::<u32>().ok().map(|v| v as f64),
+        DataType::UInt64 => value.parse::<u64>().ok().map(|v| v as f64),
+        DataType::Float16 | DataType::Float32 | DataType::Float64 => value.parse::<f64>().ok(),
+        DataType::Decimal128(_, _) | DataType::Decimal256(_, _) => {
+            // String representation is already in decimal form (e.g. "123.45").
+            value.parse::<f64>().ok()
+        }
+        DataType::Date32 => {
+            // Days since epoch, stored as integer string.
+            value.parse::<i32>().ok().map(|v| v as f64)
+        }
+        DataType::Date64 => {
+            // Milliseconds since epoch, stored as integer string.
+            value.parse::<i64>().ok().map(|v| v as f64)
+        }
+        _ => None,
+    }
+}
+
 /// Convert a [`ScalarValue`] to f64 for use in range selectivity calculations.
 ///
 /// # Supported types
@@ -470,15 +529,9 @@ fn scalar_value_to_f64(value: &ScalarValue) -> Option<f64> {
         ScalarValue::UInt16(Some(v)) => Some(*v as f64),
         ScalarValue::UInt32(Some(v)) => Some(*v as f64),
         ScalarValue::UInt64(Some(v)) => Some(*v as f64),
-        ScalarValue::Decimal32(Some(v), _, scale) => {
-            Some(*v as f64 / 10f64.powi(*scale as i32))
-        }
-        ScalarValue::Decimal64(Some(v), _, scale) => {
-            Some(*v as f64 / 10f64.powi(*scale as i32))
-        }
-        ScalarValue::Decimal128(Some(v), _, scale) => {
-            Some(*v as f64 / 10f64.powi(*scale as i32))
-        }
+        ScalarValue::Decimal32(Some(v), _, scale) => Some(*v as f64 / 10f64.powi(*scale as i32)),
+        ScalarValue::Decimal64(Some(v), _, scale) => Some(*v as f64 / 10f64.powi(*scale as i32)),
+        ScalarValue::Decimal128(Some(v), _, scale) => Some(*v as f64 / 10f64.powi(*scale as i32)),
         _ => None, // Null variants, Boolean, Utf8, Date types
     }
 }
@@ -535,7 +588,7 @@ fn flip_range_op(op: BinaryOpKind) -> BinaryOpKind {
 /// Returns `None` when:
 /// - `col_expr` is not a `ColumnRef`
 /// - Column statistics are unavailable
-/// - `min_value` or `max_value` are absent or non-numeric (cannot parse to f64)
+/// - `min_value` or `max_value` are absent or cannot be parsed for the column's type
 /// - `min == max` (zero-width domain; degenerate case)
 /// - `lit_expr` is not a `Literal` or its value is non-numeric
 ///
@@ -551,7 +604,6 @@ fn range_selectivity_col_lit(
     lit_expr: &Scalar,
     op: BinaryOpKind,
     ctx: &IRContext,
-    base_row_count: usize,
 ) -> Option<f64> {
     let ScalarKind::ColumnRef(col_meta) = &col_expr.kind else {
         return None;
@@ -559,10 +611,11 @@ fn range_selectivity_col_lit(
 
     let (stats, offset) = column_stats(ctx, col_meta.column)?;
     let col_stats = stats.column_statistics.get(offset)?;
+    let table_row_count = stats.row_count;
 
-    // Parse min/max from column statistics.
-    let min = col_stats.min_value.as_ref()?.parse::<f64>().ok()?;
-    let max = col_stats.max_value.as_ref()?.parse::<f64>().ok()?;
+    // Parse min/max using the column's DataType.
+    let min = parse_stat_value(col_stats.min_value.as_ref()?, &col_stats.column_type)?;
+    let max = parse_stat_value(col_stats.max_value.as_ref()?, &col_stats.column_type)?;
     let domain = max - min;
     if domain <= 0.0 {
         // Zero-width or inverted domain; degenerate case — fall back.
@@ -576,15 +629,7 @@ fn range_selectivity_col_lit(
     let lit = Literal::borrow_raw_parts(lit_meta, &lit_expr.common);
     let value = scalar_value_to_f64(lit.value())?;
 
-    // Null adjustment (same pattern as equality_selectivity_col_lit).
-    let null_fraction = if base_row_count > 0 {
-        col_stats
-            .null_count
-            .map(|nc| nc as f64 / base_row_count as f64)
-            .unwrap_or(0.0)
-    } else {
-        0.0
-    };
+    let nf = null_fraction(col_stats, table_row_count);
 
     // Compute range fraction under continuous uniform distribution.
     let fraction = match op {
@@ -593,7 +638,7 @@ fn range_selectivity_col_lit(
         _ => return None, // Not a range op
     };
 
-    Some(fraction.clamp(0.0, 1.0) * (1.0 - null_fraction))
+    Some(fraction.clamp(0.0, 1.0) * (1.0 - nf))
 }
 
 /// Attempt to extract a range bound from a scalar predicate.
@@ -665,11 +710,17 @@ fn and_ranges_contradict(terms: &[std::sync::Arc<Scalar>]) -> bool {
 
     // Per-column running interval: (lo, hi).
     // Initialized lazily on first range bound for each column.
+    // TODO(perf): Replace the `HashMap<Column, (f64, f64)>` allocation with a
+    // `SmallVec` or sorted `Vec<(Column, f64, f64)>` for the common case (<=4
+    // columns). During Cascades optimization the same predicate may be evaluated
+    // many times.
     let mut intervals: HashMap<Column, (f64, f64)> = HashMap::new();
 
     for term in terms {
         if let Some((col, op, value)) = extract_range_bound(term) {
-            let entry = intervals.entry(col).or_insert((f64::NEG_INFINITY, f64::INFINITY));
+            let entry = intervals
+                .entry(col)
+                .or_insert((f64::NEG_INFINITY, f64::INFINITY));
             match op {
                 BinaryOpKind::Lt | BinaryOpKind::Le => {
                     // col < v / col <= v → upper bound tightens
@@ -702,7 +753,7 @@ fn and_ranges_contradict(terms: &[std::sync::Arc<Scalar>]) -> bool {
 ///    - `col < v` / `col <= v` → `[min, v]`
 ///    - `col > v` / `col >= v` → `[v, max]`
 ///    where `min` and `max` come from column statistics.
-/// 3. Sort intervals by lower bound and merge overlapping ones.
+/// 3. Sort intervals by lower bound and merge overlapping ones in-place.
 /// 4. If the single merged interval covers `[min, max]`, it's a tautology.
 ///
 /// # Complexity
@@ -719,11 +770,7 @@ fn and_ranges_contradict(terms: &[std::sync::Arc<Scalar>]) -> bool {
 ///
 /// TODO(AC): For partial coverage (union covers fraction f of [min, max]),
 ///   return f * (1 - null_frac) instead of returning `None`.
-fn or_ranges_tautology(
-    terms: &[std::sync::Arc<Scalar>],
-    ctx: &IRContext,
-    base_row_count: usize,
-) -> Option<f64> {
+fn or_ranges_tautology(terms: &[std::sync::Arc<Scalar>], ctx: &IRContext) -> Option<f64> {
     if terms.is_empty() {
         return None;
     }
@@ -743,13 +790,14 @@ fn or_ranges_tautology(
     // Look up column stats for min/max.
     let (stats, offset) = column_stats(ctx, target_col)?;
     let col_stats = stats.column_statistics.get(offset)?;
-    let min = col_stats.min_value.as_ref()?.parse::<f64>().ok()?;
-    let max = col_stats.max_value.as_ref()?.parse::<f64>().ok()?;
+    let table_row_count = stats.row_count;
+    let min = parse_stat_value(col_stats.min_value.as_ref()?, &col_stats.column_type)?;
+    let max = parse_stat_value(col_stats.max_value.as_ref()?, &col_stats.column_type)?;
     if min >= max {
         return None;
     }
 
-    // Convert each bound to an interval [lo, hi].
+    // Convert each bound to an interval [lo, hi], then sort and merge in-place.
     let mut intervals: Vec<(f64, f64)> = bounds
         .iter()
         .map(|(_, op, v)| match op {
@@ -759,32 +807,26 @@ fn or_ranges_tautology(
         })
         .collect();
 
-    // Sort by lower bound, then merge overlapping intervals.
-    intervals.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    let mut merged: Vec<(f64, f64)> = Vec::new();
-    for (lo, hi) in intervals {
-        if let Some(last) = merged.last_mut() {
-            if lo <= last.1 {
-                // Overlapping or adjacent — extend.
-                last.1 = last.1.max(hi);
-                continue;
-            }
+    intervals.sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Merge overlapping intervals in-place.
+    let mut write = 0;
+    for read in 1..intervals.len() {
+        if intervals[read].0 <= intervals[write].1 {
+            // Overlapping or adjacent — extend.
+            intervals[write].1 = intervals[write].1.max(intervals[read].1);
+        } else {
+            write += 1;
+            intervals[write] = intervals[read];
         }
-        merged.push((lo, hi));
     }
+    let merged_count = write + 1;
 
     // Check if the single merged interval covers [min, max].
-    if merged.len() == 1 && merged[0].0 <= min && merged[0].1 >= max {
+    if merged_count == 1 && intervals[0].0 <= min && intervals[0].1 >= max {
         // Tautology for non-null values.
-        let null_fraction = if base_row_count > 0 {
-            col_stats
-                .null_count
-                .map(|nc| nc as f64 / base_row_count as f64)
-                .unwrap_or(0.0)
-        } else {
-            0.0
-        };
-        return Some(1.0 - null_fraction);
+        let nf = null_fraction(col_stats, table_row_count);
+        return Some(1.0 - nf);
     }
 
     None
@@ -798,26 +840,39 @@ fn or_ranges_tautology(
 /// Returns `true` (assumes overlap) when min/max are unavailable or non-numeric,
 /// since we cannot prove disjointness.
 fn domains_overlap(a: &ColumnStatistics, b: &ColumnStatistics) -> bool {
-    let (a_min, a_max) = match (&a.min_value, &a.max_value) {
-        (Some(min), Some(max)) => (min, max),
-        _ => return true, // Can't determine, assume overlap
+    let a_min = match a
+        .min_value
+        .as_ref()
+        .and_then(|v| parse_stat_value(v, &a.column_type))
+    {
+        Some(v) => v,
+        None => return true, // Can't determine, assume overlap
     };
-    let (b_min, b_max) = match (&b.min_value, &b.max_value) {
-        (Some(min), Some(max)) => (min, max),
-        _ => return true,
+    let a_max = match a
+        .max_value
+        .as_ref()
+        .and_then(|v| parse_stat_value(v, &a.column_type))
+    {
+        Some(v) => v,
+        None => return true,
+    };
+    let b_min = match b
+        .min_value
+        .as_ref()
+        .and_then(|v| parse_stat_value(v, &b.column_type))
+    {
+        Some(v) => v,
+        None => return true,
+    };
+    let b_max = match b
+        .max_value
+        .as_ref()
+        .and_then(|v| parse_stat_value(v, &b.column_type))
+    {
+        Some(v) => v,
+        None => return true,
     };
 
-    // Try to parse as f64 for numeric comparison
-    match (
-        a_min.parse::<f64>(),
-        a_max.parse::<f64>(),
-        b_min.parse::<f64>(),
-        b_max.parse::<f64>(),
-    ) {
-        (Ok(a_lo), Ok(a_hi), Ok(b_lo), Ok(b_hi)) => {
-            // Ranges overlap if NOT (a_hi < b_lo OR b_hi < a_lo)
-            !(a_hi < b_lo || b_hi < a_lo)
-        }
-        _ => true, // Non-numeric, assume overlap
-    }
+    // Ranges overlap if NOT (a_hi < b_lo OR b_hi < a_lo)
+    !(a_max < b_min || b_max < a_min)
 }

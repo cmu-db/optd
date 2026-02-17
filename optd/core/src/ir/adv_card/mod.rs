@@ -40,6 +40,7 @@ use std::hash::BuildHasherDefault;
 
 use crate::ir::{
     Column, IRContext, Operator, Scalar,
+    catalog::DataSourceId,
     operator::join::JoinType,
     operator::*,
     properties::{Cardinality, CardinalityEstimator},
@@ -79,6 +80,88 @@ impl AdvancedCardinalityEstimator {
     pub const FALLBACK_DEFAULT_CARDINALITY: usize = 1000;
 }
 
+// ---------------------------------------------------------------------------
+// Shared estimation helpers (deduplicated across logical/physical variants)
+// ---------------------------------------------------------------------------
+
+/// Estimate scan cardinality from catalog statistics.
+///
+/// Returns `table_stats.row_count` if available, otherwise
+/// [`AdvancedCardinalityEstimator::FALLBACK_DEFAULT_CARDINALITY`].
+fn estimate_scan(ctx: &IRContext, source: DataSourceId) -> Cardinality {
+    match ctx.cat.describe_table(source).stats {
+        Some(stats) => Cardinality::with_count_lossy(stats.row_count),
+        None => Cardinality::with_count_lossy(
+            AdvancedCardinalityEstimator::FALLBACK_DEFAULT_CARDINALITY,
+        ),
+    }
+}
+
+/// Estimate filter cardinality: `sel(predicate) · |input|`.
+fn estimate_filter(input: &Operator, predicate: &Scalar, ctx: &IRContext) -> Cardinality {
+    let input_card = input.cardinality(ctx);
+    let sel = selectivity::filter_selectivity(predicate, ctx);
+    sel * input_card
+}
+
+/// Estimate aggregate cardinality using the magic NDV-factor heuristic.
+///
+/// Formula: `0.2 ^ num_keys` as a fraction of input rows.
+fn estimate_aggregate(num_keys: usize) -> Cardinality {
+    Cardinality::new(
+        AdvancedCardinalityEstimator::FALLBACK_GROUP_BY_NDV_FACTOR
+            .powi(i32::try_from(num_keys).unwrap()),
+    )
+}
+
+/// Compute selectivity for a join condition as a whole (no key decomposition).
+///
+/// If the condition is a boolean literal we know the exact selectivity;
+/// otherwise we fall back to [`AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY`].
+fn join_cond_selectivity(join_cond: &Scalar) -> f64 {
+    if let Ok(literal) = join_cond.try_borrow::<Literal>() {
+        match literal.value() {
+            crate::ir::ScalarValue::Boolean(Some(true)) => 1.,
+            crate::ir::ScalarValue::Boolean(_) => 0.,
+            _ => unreachable!("join condition must be boolean"),
+        }
+    } else {
+        AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY
+    }
+}
+
+/// Fallback join estimator for join types without stats-driven estimation.
+///
+/// Formula by join type:
+///   Mark(col)  → |outer|           (adds a boolean column, no row change)
+///   Single     → min(sel · |L| · |R|, |L|)  (at-most-one match per left row)
+///   Otherwise  → sel · |L| · |R|            (standard cross-product model)
+fn estimate_fallback_join(
+    join_type: &JoinType,
+    outer: &Operator,
+    inner: &Operator,
+    join_cond: &Scalar,
+    ctx: &IRContext,
+) -> Cardinality {
+    let left_card = outer.cardinality(ctx);
+    let right_card = inner.cardinality(ctx);
+    match *join_type {
+        JoinType::Mark(_) => left_card,
+        JoinType::Single => {
+            let sel = join_cond_selectivity(join_cond);
+            (sel * left_card * right_card).map(|value| value.min(left_card.as_f64()))
+        }
+        _ => {
+            let sel = join_cond_selectivity(join_cond);
+            sel * left_card * right_card
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Statistics lookup helpers
+// ---------------------------------------------------------------------------
+
 /// Resolve an IR [`Column`] to its owning [`TableStatistics`] and the offset
 /// of the column within that table's `column_statistics` vector.
 ///
@@ -90,6 +173,12 @@ impl AdvancedCardinalityEstimator {
 /// **Assumption:** Column IDs are allocated contiguously per table starting
 /// from `first_column_id`, so `offset = column.0 - first_column_id` gives the
 /// position in `column_statistics`.
+// TODO(perf): Replace `Arc<Mutex<HashMap>>` on `source_to_first_column_id`
+// with a `RwLock` or freeze the map into a plain `Arc<HashMap>` before
+// optimization begins, since `add_base_table_columns` is the only writer and
+// runs during plan construction (before Cascades optimization). This would
+// eliminate mutex contention when `column_stats()` is called many times during
+// optimization.
 fn column_stats(ctx: &IRContext, column: Column) -> Option<(TableStatistics, usize)> {
     let meta = ctx.get_column_meta(&column);
     // Provenance lookup: only base-table columns carry a source.
@@ -114,13 +203,32 @@ fn column_stats(ctx: &IRContext, column: Column) -> Option<(TableStatistics, usi
 /// Extract the deserialized HLL sketch from a column's advanced statistics.
 ///
 /// Returns `None` if no HLL entry exists or deserialization fails.
+// TODO(perf): Cache deserialized HLLs to avoid re-parsing the register array
+// from `serde_json::Value` on every call. During Cascades optimization the
+// same join operator may be estimated dozens of times. A
+// `HashMap<(DataSourceId, usize), StoredHLL>` in `IRContext` or at the
+// estimator level would eliminate O(2^P) = O(4096) deserialization per call.
 fn extract_hll(col_stats: &ColumnStatistics) -> Option<StoredHLL> {
     for adv in &col_stats.advanced_stats {
-        if adv.stats_type == "hll" && let Ok(hll) = serde_json::from_value::<StoredHLL>(adv.data.clone()) {
-                return Some(hll);
+        if adv.stats_type == "hll"
+            && let Ok(hll) = serde_json::from_value::<StoredHLL>(adv.data.clone())
+        {
+            return Some(hll);
         }
     }
     None
+}
+
+/// Compute null fraction for a column: `null_count / table_row_count`.
+fn null_fraction(col_stats: &ColumnStatistics, table_row_count: usize) -> f64 {
+    if table_row_count > 0 {
+        col_stats
+            .null_count
+            .map(|nc| nc as f64 / table_row_count as f64)
+            .unwrap_or(0.0)
+    } else {
+        0.0
+    }
 }
 
 /// Extract the number of distinct values (NDV) for a column.
@@ -156,166 +264,81 @@ impl CardinalityEstimator for AdvancedCardinalityEstimator {
     fn estimate(&self, op: &Operator, ctx: &IRContext) -> Cardinality {
         use crate::ir::OperatorKind;
 
-        // Selectivity for non-hash joins where we only inspect the join condition
-        // as a whole (no key decomposition). If the condition is a boolean literal
-        // we know the exact selectivity; otherwise we fall back to 0.4.
-        let join_selectivity = |join_cond: &Scalar| {
-            if let Ok(literal) = join_cond.try_borrow::<Literal>() {
-                match literal.value() {
-                    crate::ir::ScalarValue::Boolean(Some(true)) => 1.,
-                    crate::ir::ScalarValue::Boolean(_) => 0.,
-                    _ => unreachable!("join condition must be boolean"),
-                }
-            } else {
-                Self::FALLBACK_JOIN_SELECTIVITY
-            }
-        };
-
-        // Fallback join estimator for join types we don't have stats-driven
-        // estimation for (LogicalJoin, DependentJoin, NLJoin).
-        //
-        // Formula by join type:
-        //   Mark(col)  → |outer|           (adds a boolean column, no row change)
-        //   Single     → min(sel · |L| · |R|, |L|)  (at-most-one match per left row)
-        //   Otherwise  → sel · |L| · |R|            (standard cross-product model)
-        let estimate_join =
-            |join_type: &JoinType, outer: &Operator, inner: &Operator, join_cond: &Scalar| {
-                let left_card = outer.cardinality(ctx);
-                let right_card = inner.cardinality(ctx);
-                match *join_type {
-                    JoinType::Mark(_) => left_card,
-                    JoinType::Single => {
-                        let sel = join_selectivity(join_cond);
-                        (sel * left_card * right_card).map(|value| value.min(left_card.as_f64()))
-                    }
-                    _ => {
-                        let sel = join_selectivity(join_cond);
-                        sel * left_card * right_card
-                    }
-                }
-            };
-
         match &op.kind {
             OperatorKind::Group(_) => {
-                panic!("right now should always be set");
+                unreachable!("Group nodes must have cardinality set before estimation")
             }
 
             // --- Stats-driven: Scan ---
-            // Formula: |Scan(T)| = T.row_count   (exact from catalog stats)
-            // Fallback: 1000 when no stats are available.
-            OperatorKind::LogicalGet(meta) => match ctx.cat.describe_table(meta.source).stats {
-                Some(stats) => Cardinality::with_count_lossy(stats.row_count),
-                None => Cardinality::with_count_lossy(Self::FALLBACK_DEFAULT_CARDINALITY),
-            },
-            OperatorKind::PhysicalTableScan(meta) => {
-                match ctx.cat.describe_table(meta.source).stats {
-                    Some(stats) => Cardinality::with_count_lossy(stats.row_count),
-                    None => Cardinality::with_count_lossy(Self::FALLBACK_DEFAULT_CARDINALITY),
-                }
-            }
+            OperatorKind::LogicalGet(meta) => estimate_scan(ctx, meta.source),
+            OperatorKind::PhysicalTableScan(meta) => estimate_scan(ctx, meta.source),
 
             // --- Stats-driven: Filter ---
-            // Formula: |σ_p(R)| = sel(p) · |R|
-            // where sel(p) is computed by selectivity::filter_selectivity.
-            // base_row_count is used to compute null_fraction = null_count / row_count.
             OperatorKind::LogicalSelect(meta) => {
                 let filter = LogicalSelect::borrow_raw_parts(meta, &op.common);
-                let input_card = filter.input().cardinality(ctx);
-
-                let base_row_count = input_card.as_f64() as usize;
-                let sel = selectivity::filter_selectivity(filter.predicate(), ctx, base_row_count);
-                sel * input_card
+                estimate_filter(filter.input(), filter.predicate(), ctx)
             }
             OperatorKind::PhysicalFilter(meta) => {
                 let filter = PhysicalFilter::borrow_raw_parts(meta, &op.common);
-                let input_card = filter.input().cardinality(ctx);
-                let base_row_count = input_card.as_f64() as usize;
-                let sel = selectivity::filter_selectivity(filter.predicate(), ctx, base_row_count);
-                sel * input_card
+                estimate_filter(filter.input(), filter.predicate(), ctx)
             }
 
             // --- Stats-driven: PhysicalHashJoin (equi-join + non-equi conditions) ---
-            // Formula: |R ⋈ S| = |R| · |S| · Π_i 1/max(NDV_R(k_i), NDV_S(k_i)) · sel(non_equi)
-            // See selectivity::equijoin_cardinality for full details.
-            //
-            // Non-equi conditions (e.g. x.b < y.b in "x.a = y.a AND x.b < y.b") are
-            // applied as a post-join filter using filter_selectivity.
-            //
-            // Assumption: inner-join semantics. Other join types are not yet handled.
             OperatorKind::PhysicalHashJoin(meta) => {
                 let join = PhysicalHashJoin::borrow_raw_parts(meta, &op.common);
                 let build_card = join.build_side().cardinality(ctx);
                 let probe_card = join.probe_side().cardinality(ctx);
 
-                // TODO(AC/Yuchen): This assumes inner-join. Handle other join types by
-                // passing in the entire `join` variable (or the join_type field.)
                 selectivity::equijoin_cardinality(
                     join.keys(),
                     join.non_equi_conds(),
+                    join.join_type(),
                     build_card,
                     probe_card,
                     ctx,
                 )
             }
 
-            // TODO(AC): For all the other joins, use our estimator
-
             // --- Fallback: other joins ---
             OperatorKind::LogicalJoin(meta) => {
                 let join = LogicalJoin::borrow_raw_parts(meta, &op.common);
-                estimate_join(
+                estimate_fallback_join(
                     join.join_type(),
                     join.outer().as_ref(),
                     join.inner().as_ref(),
                     join.join_cond().as_ref(),
+                    ctx,
                 )
             }
             OperatorKind::LogicalDependentJoin(meta) => {
                 let join = LogicalDependentJoin::borrow_raw_parts(meta, &op.common);
-                estimate_join(
+                estimate_fallback_join(
                     join.join_type(),
                     join.outer().as_ref(),
                     join.inner().as_ref(),
                     join.join_cond().as_ref(),
+                    ctx,
                 )
             }
             OperatorKind::PhysicalNLJoin(meta) => {
                 let join = PhysicalNLJoin::borrow_raw_parts(meta, &op.common);
-                let sel = if let Ok(literal) = join.join_cond().try_borrow::<Literal>() {
-                    match literal.value() {
-                        crate::ir::ScalarValue::Boolean(Some(true)) => 1.,
-                        crate::ir::ScalarValue::Boolean(_) => 0.,
-                        _ => unreachable!("join condition must be boolean"),
-                    }
-                } else {
-                    Self::FALLBACK_JOIN_SELECTIVITY
-                };
-                let left_card = join.outer().cardinality(ctx);
-                let right_card = join.inner().cardinality(ctx);
-                sel * left_card * right_card
+                estimate_fallback_join(
+                    join.join_type(),
+                    join.outer().as_ref(),
+                    join.inner().as_ref(),
+                    join.join_cond().as_ref(),
+                    ctx,
+                )
             }
 
             // --- Fallback: aggregates ---
-            // Formula: |γ_{k1,...,kn}(R)| = 0.2^n  (fraction of input rows)
-            //
-            // Assumption: each grouping key independently reduces the group
-            // count by a factor of 0.2. This does NOT use actual NDV from
-            // statistics — it is a pure heuristic.
-            //
-            // Example: GROUP BY (a, b) → 0.2^2 = 0.04 → 4% of input rows.
             OperatorKind::LogicalAggregate(meta) => {
                 let agg = LogicalAggregate::borrow_raw_parts(meta, &op.common);
-                let len = agg.keys().borrow::<List>().members().len();
-                Cardinality::new(
-                    Self::FALLBACK_GROUP_BY_NDV_FACTOR.powi(i32::try_from(len).unwrap()),
-                )
+                estimate_aggregate(agg.keys().borrow::<List>().members().len())
             }
             OperatorKind::PhysicalHashAggregate(meta) => {
                 let agg = PhysicalHashAggregate::borrow_raw_parts(meta, &op.common);
-                let len = agg.keys().borrow::<List>().members().len();
-                Cardinality::new(
-                    Self::FALLBACK_GROUP_BY_NDV_FACTOR.powi(i32::try_from(len).unwrap()),
-                )
+                estimate_aggregate(agg.keys().borrow::<List>().members().len())
             }
 
             // --- Pass-through: these operators do not change row count ---
