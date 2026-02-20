@@ -123,9 +123,10 @@ impl UnnestingRule {
                 outer_refs.insert(*c);
             } else if let Some(pu) = parent_unnesting.as_deref()
                 && let Some(mapped) = pu.resolve_col(*c)
-                    && outer_outputs.contains(&mapped) {
-                        outer_refs.insert(mapped);
-                    }
+                && outer_outputs.contains(&mapped)
+            {
+                outer_refs.insert(mapped);
+            }
         }
         let mut outer_refs_vec: Vec<Column> = outer_refs.iter().copied().collect();
         outer_refs_vec.sort_by_key(|c| c.0);
