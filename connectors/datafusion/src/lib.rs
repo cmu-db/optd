@@ -93,7 +93,7 @@ impl DataFusionDB {
                  MsSQL, ClickHouse, BigQuery, Ansi, DuckDB, Databricks."
                 )
             })?;
-            DFParser::parse_sql_with_dialect(&sql, dialect.as_ref())?
+            DFParser::parse_sql_with_dialect(sql, dialect.as_ref())?
         };
 
         if single_stmt_check && statements.len() != 1 {

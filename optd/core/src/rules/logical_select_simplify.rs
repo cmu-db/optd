@@ -55,7 +55,7 @@ impl Rule for LogicalSelectSimplifyRule {
             } else {
                 NaryOp::new(NaryOpKind::And, vec![join_cond, predicate].into()).into_scalar()
             };
-            return Ok(vec![
+            Ok(vec![
                 LogicalJoin::new(
                     JoinType::Inner,
                     join.outer().clone(),
@@ -63,9 +63,9 @@ impl Rule for LogicalSelectSimplifyRule {
                     merged_cond,
                 )
                 .into_operator(),
-            ]);
+            ])
         } else {
-            return Ok(vec![]);
-        };
+            Ok(vec![])
+        }
     }
 }

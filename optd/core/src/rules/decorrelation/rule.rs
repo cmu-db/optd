@@ -8,6 +8,12 @@ use crate::ir::operator::{LogicalDependentJoin, Operator, OperatorKind};
 
 pub struct UnnestingRule {}
 
+impl Default for UnnestingRule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UnnestingRule {
     pub fn new() -> Self {
         Self {}

@@ -1676,14 +1676,13 @@ impl QueryPlanner for OptdQueryPlanner {
             match res {
                 Err(e) => {
                     if optd_strict_mode {
-                        return Err(e);
+                        Err(e)
                     } else {
                         eprintln!(
                             "optd planner does not support this query yet, fallback to default planner:\n{e}"
                         );
-                        return self
-                            .create_physical_plan_default(logical_plan, session_state)
-                            .await;
+                        self.create_physical_plan_default(logical_plan, session_state)
+                            .await
                     }
                 }
                 Ok(plan) => Ok(plan),

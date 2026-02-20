@@ -246,7 +246,7 @@ pub(super) fn compute_accessing_set(
         // that is not available to it from a downstream operator
         let available = op
             .input_operators()
-            .into_iter()
+            .iter()
             .fold(ColumnSet::default(), |acc, child| {
                 acc | &child.output_columns(ctx)
             });
@@ -270,11 +270,11 @@ pub(super) fn compute_accessing_set(
 
 /// Check if an operator (by pointer) is contained within a subtree.
 pub(super) fn is_contained_in(op_ptr: *const Operator, subtree: &Arc<Operator>) -> bool {
-    return Arc::as_ptr(subtree) == op_ptr
+    Arc::as_ptr(subtree) == op_ptr
         || subtree
             .input_operators()
             .iter()
-            .any(|c| is_contained_in(op_ptr, c));
+            .any(|c| is_contained_in(op_ptr, c))
 }
 
 /// Remap right-side output columns that collide with left-side outputs.

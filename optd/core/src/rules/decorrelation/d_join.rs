@@ -107,7 +107,7 @@ impl UnnestingRule {
                 .filter(|&&op_ptr| is_contained_in(op_ptr, dep_join.outer()))
                 .copied()
                 .collect();
-            let op = self.unnest(dep_join.outer().clone(), *pu, &acc_left, ctx);
+            let op = self.unnest(dep_join.outer().clone(), pu, &acc_left, ctx);
             let cond = pu.rewrite_columns(dep_join.join_cond().clone());
             (op, cond)
         } else {
@@ -121,13 +121,11 @@ impl UnnestingRule {
         for c in &accessing_cols {
             if outer_outputs.contains(c) {
                 outer_refs.insert(*c);
-            } else if let Some(pu) = parent_unnesting.as_deref() {
-                if let Some(mapped) = pu.resolve_col(*c) {
-                    if outer_outputs.contains(&mapped) {
+            } else if let Some(pu) = parent_unnesting.as_deref()
+                && let Some(mapped) = pu.resolve_col(*c)
+                    && outer_outputs.contains(&mapped) {
                         outer_refs.insert(mapped);
                     }
-                }
-            }
         }
         let mut outer_refs_vec: Vec<Column> = outer_refs.iter().copied().collect();
         outer_refs_vec.sort_by_key(|c| c.0);
@@ -195,7 +193,7 @@ impl UnnestingRule {
 
         // Propagate higher-scope representatives discovered in this nested
         // elimination back to the parent state.
-        if let Some(parent) = parent_unnesting.as_deref_mut() {
+        if let Some(parent) = parent_unnesting {
             for (outer_col, repr_col) in nested_repr_choices {
                 parent.set_scoped_repr_of(outer_col, repr_col);
             }

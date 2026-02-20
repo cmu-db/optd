@@ -226,13 +226,13 @@ impl UnnestingRule {
                 }
             }
 
-            return Self::build_domain(info.get_info().as_ref(), info, &seen_outer_refs, op);
+            return Self::build_domain(info.get_info().as_ref(), info, seen_outer_refs, op);
         }
 
         // Compute what outer refs this operator accesses
         let available: ColumnSet = op
             .input_operators()
-            .into_iter()
+            .iter()
             .fold(ColumnSet::default(), |acc, child| {
                 acc | &child.output_columns(ctx)
             });
