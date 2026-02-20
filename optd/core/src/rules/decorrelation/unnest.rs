@@ -608,9 +608,7 @@ impl UnnestingRule {
                     info.merge_col_eq_from(&right_info);
                 }
                 for c in &propagated_refs {
-                    let left_resolved = left_info
-                        .get_resolved_repr_of(c)
-                        .copied();
+                    let left_resolved = left_info.get_resolved_repr_of(c).copied();
                     let right_resolved = right_info
                         .get_resolved_repr_of(c)
                         .copied()
