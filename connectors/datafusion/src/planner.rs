@@ -501,6 +501,9 @@ impl OptdQueryPlanner {
                     optd_core::ir::scalar::BinaryOpKind::Divide => logical_expr::Operator::Divide,
                     optd_core::ir::scalar::BinaryOpKind::Modulo => logical_expr::Operator::Modulo,
                     optd_core::ir::scalar::BinaryOpKind::Eq => logical_expr::Operator::Eq,
+                    optd_core::ir::scalar::BinaryOpKind::IsNotDistinctFrom => {
+                        logical_expr::Operator::IsNotDistinctFrom
+                    }
                     optd_core::ir::scalar::BinaryOpKind::Lt => logical_expr::Operator::Lt,
                     optd_core::ir::scalar::BinaryOpKind::Le => logical_expr::Operator::LtEq,
                     optd_core::ir::scalar::BinaryOpKind::Gt => logical_expr::Operator::Gt,
@@ -1526,6 +1529,7 @@ impl OptdQueryPlanner {
             .add_rule(rules::LogicalJoinAsPhysicalNLJoinRule::new())
             .add_rule(rules::LogicalProjectAsPhysicalProjectRule::new())
             .add_rule(rules::LogicalSelectAsPhysicalFilterRule::new())
+            .add_rule(rules::LogicalSelectSimplifyRule::new())
             .add_rule(rules::LogicalJoinInnerCommuteRule::new())
             .add_rule(rules::LogicalJoinInnerAssocRule::new())
             .build();
@@ -1672,14 +1676,13 @@ impl QueryPlanner for OptdQueryPlanner {
             match res {
                 Err(e) => {
                     if optd_strict_mode {
-                        return Err(e);
+                        Err(e)
                     } else {
                         eprintln!(
                             "optd planner does not support this query yet, fallback to default planner:\n{e}"
                         );
-                        return self
-                            .create_physical_plan_default(logical_plan, session_state)
-                            .await;
+                        self.create_physical_plan_default(logical_plan, session_state)
+                            .await
                     }
                 }
                 Ok(plan) => Ok(plan),

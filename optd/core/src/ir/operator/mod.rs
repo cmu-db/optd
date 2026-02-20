@@ -17,6 +17,7 @@ mod enforcer;
 mod logical;
 mod physical;
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 pub use enforcer::sort::*;
@@ -44,7 +45,7 @@ pub use physical::mock_scan::*;
 
 use crate::ir::explain::Explain;
 use crate::ir::properties::OperatorProperties;
-use crate::ir::{Group, GroupId, GroupMetadata, IRCommon, Scalar};
+use crate::ir::{Column, Group, GroupId, GroupMetadata, IRCommon, Scalar};
 
 /// The operator type and its associated metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -167,6 +168,30 @@ impl Operator {
             group_id: None,
             kind: self.kind.clone(),
             common: IRCommon::new(input_operators, input_scalars),
+        }
+    }
+
+    /// Gets the set of columns used by this operator and its children
+    /// TODO: Are all columns used by an operator always stored in its scalar
+    /// set? Can we guarantee used columns will not be part of the metadata
+    /// set? If this is not guaranteed, should operators implement some sort of
+    /// used_columns property (similar to output_schema), so we don't have this
+    /// fragile assumption?
+    pub fn collect_used_columns(&self) -> HashSet<Column> {
+        let mut used = HashSet::new();
+        self.collect_used_columns_recursive(&mut used);
+        used
+    }
+
+    /// Recursive subcall used in collceted_used_columns to get child uses
+    fn collect_used_columns_recursive(&self, used: &mut HashSet<Column>) {
+        for scalar in self.input_scalars() {
+            for col in scalar.used_columns().iter() {
+                used.insert(*col);
+            }
+        }
+        for child in self.input_operators() {
+            child.collect_used_columns_recursive(used);
         }
     }
 }

@@ -36,6 +36,14 @@ impl ColumnSet {
     pub fn is_subset(&self, other: &ColumnSet) -> bool {
         self.0.is_subset(&other.0)
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn as_hash_set(self) -> HashSet<Column> {
+        self.0
+    }
 }
 
 impl std::ops::BitOr<&ColumnSet> for ColumnSet {
@@ -81,5 +89,28 @@ impl std::ops::BitAnd<&ColumnSet> for &ColumnSet {
 impl std::ops::BitAndAssign<&ColumnSet> for ColumnSet {
     fn bitand_assign(&mut self, rhs: &ColumnSet) {
         self.0.retain(|column| rhs.contains(column));
+    }
+}
+
+impl std::ops::Sub<&ColumnSet> for ColumnSet {
+    type Output = ColumnSet;
+
+    fn sub(mut self, rhs: &ColumnSet) -> Self::Output {
+        self.0.retain(|column| !rhs.contains(column));
+        self
+    }
+}
+
+impl std::ops::Sub<&ColumnSet> for &ColumnSet {
+    type Output = ColumnSet;
+
+    fn sub(self, rhs: &ColumnSet) -> Self::Output {
+        self.0.difference(&rhs.0).cloned().collect()
+    }
+}
+
+impl std::ops::SubAssign<&ColumnSet> for ColumnSet {
+    fn sub_assign(&mut self, rhs: &ColumnSet) {
+        self.0.retain(|column| !rhs.contains(column));
     }
 }
