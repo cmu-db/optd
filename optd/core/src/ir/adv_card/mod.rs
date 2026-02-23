@@ -3,11 +3,12 @@
 //! # Scope (v1)
 //!
 //! Statistics-driven estimation for: **Scan**, **equality filter**,
-//! **range filter** (Lt/Le/Gt/Ge with min/max stats), and **equi-join**
-//! (PhysicalHashJoin only). Range filters use continuous uniform distribution
-//! over `[min, max]`. AND/OR conjunctions detect same-column range
-//! contradictions (→ 0) and tautologies (→ 1). All other operators fall back
-//! to hardcoded "magic" constants identical to [`crate::magic::MagicCardinalityEstimator`].
+//! **range filter** (Lt/Le/Gt/Ge with min/max stats), **equi-join**
+//! (PhysicalHashJoin only), and **aggregate** (GROUP BY using column NDV).
+//! Range filters use continuous uniform distribution over `[min, max]`.
+//! AND/OR conjunctions detect same-column range contradictions (→ 0) and
+//! tautologies (→ 1). All other operators fall back to hardcoded "magic"
+//! constants identical to [`crate::magic::MagicCardinalityEstimator`].
 //!
 //! # High-level approach
 //!
@@ -16,7 +17,10 @@
 //! * **Hash Join**: `|R ⋈ S| = |R| · |S| · Π sel(k_i) · sel(non_equi_conds)`
 //!   over equi-key pairs, refined by non-equi condition selectivity.
 //!   See [`selectivity::equijoin_cardinality`].
-//! * **Other joins / aggregates / projections**: magic-constant fallbacks.
+//! * **Aggregate**: `min(|input|, Π NDV(k_i))` over grouping keys; falls back
+//!   to `|input| × 0.2^k` per key when column stats are unavailable. Scalar
+//!   aggregates (0 keys) always return 1.
+//! * **Other joins / projections**: magic-constant fallbacks.
 //!
 //! # Column-to-statistics lookup
 //!
@@ -37,10 +41,12 @@
 mod selectivity;
 
 use std::hash::BuildHasherDefault;
+use std::sync::Arc;
 
 use crate::ir::{
     Column, IRContext, Operator, Scalar,
     catalog::DataSourceId,
+    convert::IntoScalar,
     operator::join::JoinType,
     operator::*,
     properties::{Cardinality, CardinalityEstimator},
@@ -104,14 +110,39 @@ fn estimate_filter(input: &Operator, predicate: &Scalar, ctx: &IRContext) -> Car
     sel * input_card
 }
 
-/// Estimate aggregate cardinality using the magic NDV-factor heuristic.
+/// Estimate aggregate cardinality using column NDV statistics where available.
 ///
-/// Formula: `0.2 ^ num_keys` as a fraction of input rows.
-fn estimate_aggregate(num_keys: usize) -> Cardinality {
-    Cardinality::new(
-        AdvancedCardinalityEstimator::FALLBACK_GROUP_BY_NDV_FACTOR
-            .powi(i32::try_from(num_keys).unwrap()),
-    )
+/// - **0 keys (scalar aggregate):** always returns 1 output row.
+/// - **k ≥ 1 keys:** computes `min(input_card, Π NDV(k_i))` where each key's NDV is:
+///   - looked up from column statistics when the key is a bare `ColumnRef` with provenance, or
+///   - estimated as `input_card × FALLBACK_GROUP_BY_NDV_FACTOR` when stats are unavailable.
+///
+/// The result is floored at 1 to avoid sub-row estimates from pure-magic fallbacks on
+/// tiny inputs.
+fn estimate_aggregate(keys: &[Arc<Scalar>], input: &Operator, ctx: &IRContext) -> Cardinality {
+    if keys.is_empty() {
+        // Scalar aggregate (SELECT agg(...) FROM t with no GROUP BY) always produces 1 row.
+        return Cardinality::UNIT;
+    }
+
+    let input_card = input.cardinality(ctx);
+
+    let mut ndv_product: f64 = 1.0;
+    for key in keys {
+        let key_ndv = key
+            .try_borrow::<ColumnRef>()
+            .ok()
+            .and_then(|col_ref| column_stats(ctx, *col_ref.column()))
+            .and_then(|(table_stats, offset)| ndv(&table_stats.column_statistics[offset]))
+            .map(|n| n as f64)
+            .unwrap_or_else(|| {
+                input_card.as_f64() * AdvancedCardinalityEstimator::FALLBACK_GROUP_BY_NDV_FACTOR
+            });
+        ndv_product *= key_ndv;
+    }
+
+    // Cap at input cardinality; floor at 1 to avoid sub-row estimates.
+    Cardinality::new(ndv_product.min(input_card.as_f64()).max(1.0))
 }
 
 /// Compute selectivity for a join condition as a whole (no key decomposition).

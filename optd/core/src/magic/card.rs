@@ -166,18 +166,22 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
             OperatorKind::LogicalAggregate(meta) => {
                 let agg = LogicalAggregate::borrow_raw_parts(meta, &op.common);
                 let len = agg.keys().borrow::<List>().members().len();
-
-                Cardinality::new(
-                    Self::MAGIC_GROUP_BY_KEY_NDV_FACTOR.powi(i32::try_from(len).unwrap()),
-                )
+                if len == 0 {
+                    return Cardinality::UNIT;
+                }
+                let factor =
+                    Self::MAGIC_GROUP_BY_KEY_NDV_FACTOR.powi(i32::try_from(len).unwrap());
+                factor * agg.input().cardinality(ctx)
             }
             OperatorKind::PhysicalHashAggregate(meta) => {
                 let agg = PhysicalHashAggregate::borrow_raw_parts(meta, &op.common);
                 let len = agg.keys().borrow::<List>().members().len();
-
-                Cardinality::new(
-                    Self::MAGIC_GROUP_BY_KEY_NDV_FACTOR.powi(i32::try_from(len).unwrap()),
-                )
+                if len == 0 {
+                    return Cardinality::UNIT;
+                }
+                let factor =
+                    Self::MAGIC_GROUP_BY_KEY_NDV_FACTOR.powi(i32::try_from(len).unwrap());
+                factor * agg.input().cardinality(ctx)
             }
             OperatorKind::LogicalRemap(meta) => LogicalRemap::borrow_raw_parts(meta, &op.common)
                 .input()
