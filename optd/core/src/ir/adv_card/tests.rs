@@ -1645,3 +1645,320 @@ fn test_or_non_tautology() {
     // Independence: 1 - 0.7 * 0.7 = 0.51 → card = 510
     assert!((card.as_f64() - 510.0).abs() < 1.0, "card = {}", card.as_f64());
 }
+
+// ---------- LogicalJoin and PhysicalNLJoin stats-driven estimation ----------
+
+/// Build a two-table catalog with simple NDV stats (no HLL) and return
+/// (ctx, scan_a, scan_b, col_a, col_b).
+fn make_two_table_ctx(
+    row_a: usize,
+    ndv_a: usize,
+    row_b: usize,
+    ndv_b: usize,
+) -> (IRContext, std::sync::Arc<crate::ir::Operator>, std::sync::Arc<crate::ir::Operator>, Column, Column) {
+    let cat = MagicCatalog::default();
+    let schema_a = Arc::new(Schema::new(vec![Field::new(
+        "a.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let schema_b = Arc::new(Schema::new(vec![Field::new(
+        "b.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src_a = cat
+        .try_create_table("a".to_string(), schema_a.clone())
+        .unwrap();
+    let src_b = cat
+        .try_create_table("b".to_string(), schema_b.clone())
+        .unwrap();
+
+    cat.set_table_stats(src_a, simple_table_stats(row_a, vec![col_stat("a.id", ndv_a)]));
+    cat.set_table_stats(src_b, simple_table_stats(row_b, vec![col_stat("b.id", ndv_b)]));
+
+    let ctx = adv_ctx_with_catalog(cat);
+    // Column IDs are allocated in creation order: Column(0) for a.id, Column(1) for b.id.
+    let scan_a = ctx.logical_get(src_a, &schema_a, None);
+    let scan_b = ctx.logical_get(src_b, &schema_b, None);
+    let col_a = Column(0);
+    let col_b = Column(1);
+    (ctx, scan_a, scan_b, col_a, col_b)
+}
+
+#[test]
+fn test_logical_join_inner_equi_uses_ndv() {
+    // Stats: |a| = 1000, NDV_a = 100; |b| = 2000, NDV_b = 200.
+    // Containment assumption: sel = 1/max(100, 200) = 1/200
+    // Expected inner join: 1000 * 2000 / 200 = 10_000
+    // Magic constant would give: 0.4 * 1000 * 2000 = 800_000 — much higher.
+    let (ctx, scan_a, scan_b, col_a, col_b) = make_two_table_ctx(1000, 100, 2000, 200);
+    let join_cond = column_ref(col_a).eq(column_ref(col_b));
+    let join = scan_a.logical_join(scan_b, join_cond, JoinType::Inner);
+    let card = join.cardinality(&ctx).as_f64();
+
+    assert!(
+        (card - 10_000.0).abs() < 0.01,
+        "expected 10000 (stats-driven), got {card}"
+    );
+    // Explicitly verify we're NOT returning the magic-constant estimate.
+    assert!(
+        card < 100_000.0,
+        "cardinality {card} looks like magic-constant fallback (0.4 * 1000 * 2000 = 800_000)"
+    );
+}
+
+#[test]
+fn test_logical_join_left_preserves_outer() {
+    // Stats: |a| = 1000, NDV_a = 1000; |b| = 100, NDV_b = 100.
+    // sel = 1/max(1000, 100) = 1/1000
+    // inner_base = 1000 * 100 / 1000 = 100 < |a| = 1000
+    // Left join → max(100, 1000) = 1000
+    let (ctx, scan_a, scan_b, col_a, col_b) = make_two_table_ctx(1000, 1000, 100, 100);
+    let join_cond = column_ref(col_a).eq(column_ref(col_b));
+    let join = scan_a.logical_join(scan_b, join_cond, JoinType::Left);
+    let card = join.cardinality(&ctx).as_f64();
+
+    // Left join result must be at least |outer| = 1000
+    assert!(card >= 1000.0, "Left join must preserve outer rows, got {card}");
+    assert!(
+        (card - 1000.0).abs() < 0.01,
+        "expected 1000 (= |outer|), got {card}"
+    );
+}
+
+#[test]
+fn test_logical_join_single_capped_at_outer() {
+    // Stats: |a| = 100, NDV_a = 1; |b| = 1000, NDV_b = 1.
+    // sel = 1/max(1, 1) = 1 (all rows match — unique key)
+    // inner_base = 100 * 1000 * 1 = 100_000 > |a| = 100
+    // Single join → min(100_000, 100) = 100
+    let (ctx, scan_a, scan_b, col_a, col_b) = make_two_table_ctx(100, 1, 1000, 1);
+    let join_cond = column_ref(col_a).eq(column_ref(col_b));
+    let join = scan_a.logical_join(scan_b, join_cond, JoinType::Single);
+    let card = join.cardinality(&ctx).as_f64();
+
+    // Single join result must be at most |outer| = 100
+    assert!(card <= 100.0, "Single join must be capped at outer size, got {card}");
+    assert!(
+        (card - 100.0).abs() < 0.01,
+        "expected 100 (= |outer|), got {card}"
+    );
+}
+
+#[test]
+fn test_logical_join_mark_equals_outer_card() {
+    // Mark join: every outer row gets a boolean mark column.
+    // Output cardinality = |outer| regardless of join condition stats.
+    let mark_col = Column(99); // hypothetical mark column (not from either table)
+    let (ctx, scan_a, scan_b, col_a, col_b) = make_two_table_ctx(1000, 100, 500, 50);
+    let join_cond = column_ref(col_a).eq(column_ref(col_b));
+    let join = scan_a.logical_join(scan_b, join_cond, JoinType::Mark(mark_col));
+    let card = join.cardinality(&ctx).as_f64();
+
+    assert!(
+        (card - 1000.0).abs() < 0.01,
+        "Mark join must equal |outer| = 1000, got {card}"
+    );
+}
+
+#[test]
+fn test_logical_join_non_equi_fallback() {
+    // Non-equi condition (Lt) → no equi-keys extracted → magic constant fallback.
+    // |a| = 1000, |b| = 2000 → fallback = 0.4 * 1000 * 2000 = 800_000
+    let (ctx, scan_a, scan_b, col_a, col_b) = make_two_table_ctx(1000, 100, 2000, 200);
+    let join_cond = column_ref(col_a).lt(column_ref(col_b)); // not col_a = col_b
+    let join = scan_a.logical_join(scan_b, join_cond, JoinType::Inner);
+    let card = join.cardinality(&ctx).as_f64();
+
+    assert!(
+        (card - 800_000.0).abs() < 0.01,
+        "non-equi condition should fall back to 0.4 * 1000 * 2000 = 800000, got {card}"
+    );
+}
+
+#[test]
+fn test_nl_join_inner_equi_uses_ndv() {
+    // Same setup as test_logical_join_inner_equi_uses_ndv but using PhysicalNLJoin.
+    // Stats: |a| = 1000, NDV_a = 100; |b| = 2000, NDV_b = 200.
+    // Expected: 1000 * 2000 / 200 = 10_000
+    let (ctx, scan_a, scan_b, col_a, col_b) = make_two_table_ctx(1000, 100, 2000, 200);
+    let join_cond = column_ref(col_a).eq(column_ref(col_b));
+    let join = scan_a.nl_join(scan_b, join_cond, JoinType::Inner);
+    let card = join.cardinality(&ctx).as_f64();
+
+    assert!(
+        (card - 10_000.0).abs() < 0.01,
+        "expected 10000 (stats-driven NLJoin), got {card}"
+    );
+}
+
+#[test]
+fn test_nl_join_non_equi_fallback() {
+    // Non-equi condition → magic constant for NLJoin too.
+    // |a| = 500, |b| = 400 → 0.4 * 500 * 400 = 80_000
+    let (ctx, scan_a, scan_b, col_a, col_b) = make_two_table_ctx(500, 100, 400, 80);
+    let join_cond = column_ref(col_a).lt(column_ref(col_b));
+    let join = scan_a.nl_join(scan_b, join_cond, JoinType::Inner);
+    let card = join.cardinality(&ctx).as_f64();
+
+    assert!(
+        (card - 80_000.0).abs() < 0.01,
+        "expected 80000 (magic fallback), got {card}"
+    );
+}
+
+// ---------- Aggregate cardinality tests ----------
+
+#[test]
+fn test_aggregate_scalar_zero_keys() {
+    // SELECT COUNT(*) FROM t — no GROUP BY keys → always 1 output row.
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(src, simple_table_stats(1000, vec![col_stat("t.a", 50)]));
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan = ctx.logical_get(src, &schema, None);
+    let agg = scan.logical_aggregate([], []);
+    let card = agg.cardinality(&ctx).as_f64();
+
+    assert_eq!(card, 1.0, "scalar aggregate must produce exactly 1 row");
+}
+
+#[test]
+fn test_aggregate_single_key_with_stats() {
+    // GROUP BY t.a where NDV(t.a) = 50, |t| = 1000.
+    // Expected: min(1000, 50) = 50.
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(src, simple_table_stats(1000, vec![col_stat("t.a", 50)]));
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let col_a = Column(0);
+    let scan = ctx.logical_get(src, &schema, None);
+    let agg = scan.logical_aggregate([], [column_ref(col_a)]);
+    let card = agg.cardinality(&ctx).as_f64();
+
+    assert!(
+        (card - 50.0).abs() < 0.01,
+        "expected 50 (NDV of key), got {card}"
+    );
+}
+
+#[test]
+fn test_aggregate_two_keys_with_stats_under_input() {
+    // GROUP BY t.a, t.b where NDV(a)=10, NDV(b)=20, |t|=1000.
+    // Expected: min(1000, 10*20) = min(1000, 200) = 200.
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("t.a".to_string(), DataType::Int32, false),
+        Field::new("t.b".to_string(), DataType::Int32, false),
+    ]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(
+        src,
+        simple_table_stats(1000, vec![col_stat("t.a", 10), col_stat("t.b", 20)]),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let col_a = Column(0);
+    let col_b = Column(1);
+    let scan = ctx.logical_get(src, &schema, None);
+    let agg = scan.logical_aggregate([], [column_ref(col_a), column_ref(col_b)]);
+    let card = agg.cardinality(&ctx).as_f64();
+
+    assert!(
+        (card - 200.0).abs() < 0.01,
+        "expected 200 (NDV product), got {card}"
+    );
+}
+
+#[test]
+fn test_aggregate_ndv_product_exceeds_input_card() {
+    // GROUP BY t.a, t.b where NDV(a)=200, NDV(b)=200, |t|=1000.
+    // Expected: min(1000, 200*200) = min(1000, 40000) = 1000 (capped).
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("t.a".to_string(), DataType::Int32, false),
+        Field::new("t.b".to_string(), DataType::Int32, false),
+    ]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(
+        src,
+        simple_table_stats(1000, vec![col_stat("t.a", 200), col_stat("t.b", 200)]),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let col_a = Column(0);
+    let col_b = Column(1);
+    let scan = ctx.logical_get(src, &schema, None);
+    let agg = scan.logical_aggregate([], [column_ref(col_a), column_ref(col_b)]);
+    let card = agg.cardinality(&ctx).as_f64();
+
+    assert!(
+        (card - 1000.0).abs() < 0.01,
+        "expected 1000 (capped at input_card), got {card}"
+    );
+}
+
+#[test]
+fn test_aggregate_single_key_no_stats_fallback() {
+    // GROUP BY on a table with no column stats → magic factor.
+    // |t| = 1000, 1 key, no stats → 0.2 * 1000 = 200.
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "t.a".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    // Set row count but no distinct_count for the column (NDV unavailable).
+    cat.set_table_stats(
+        src,
+        simple_table_stats(
+            1000,
+            vec![ColumnStatistics {
+                column_id: 0,
+                column_type: DataType::Int32,
+                name: "t.a".to_string(),
+                advanced_stats: vec![],
+                min_value: None,
+                max_value: None,
+                null_count: Some(0),
+                distinct_count: None, // no NDV
+            }],
+        ),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let col_a = Column(0);
+    let scan = ctx.logical_get(src, &schema, None);
+    let agg = scan.logical_aggregate([], [column_ref(col_a)]);
+    let card = agg.cardinality(&ctx).as_f64();
+
+    // fallback: 0.2 * 1000 = 200, capped at 1000 → 200
+    assert!(
+        (card - 200.0).abs() < 0.01,
+        "expected 200 (magic fallback), got {card}"
+    );
+}

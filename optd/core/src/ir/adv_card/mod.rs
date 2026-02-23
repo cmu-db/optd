@@ -43,8 +43,10 @@ mod selectivity;
 use std::hash::BuildHasherDefault;
 use std::sync::Arc;
 
+use itertools::{Either, Itertools};
+
 use crate::ir::{
-    Column, IRContext, Operator, Scalar,
+    Column, ColumnSet, IRContext, Operator, Scalar,
     catalog::DataSourceId,
     convert::IntoScalar,
     operator::join::JoinType,
@@ -53,6 +55,7 @@ use crate::ir::{
     scalar::*,
     statistics::{ColumnStatistics, TableStatistics},
 };
+use crate::ir::builder::boolean;
 use synopses::{distinct::HyperLogLog, utils::Murmur2Hash64a};
 
 /// Canonical HLL type for catalog storage and deserialization.
@@ -187,6 +190,78 @@ fn estimate_fallback_join(
             sel * left_card * right_card
         }
     }
+}
+
+/// Decompose a join condition into equi-key pairs and a non-equi remainder.
+///
+/// Returns `(keys, non_equi_cond)` where `keys` lists `(outer_col, inner_col)`
+/// equi-join pairs and `non_equi_cond` is the remaining predicate (literal
+/// `TRUE` when no non-equi conditions remain).
+///
+/// Recognized patterns:
+/// - `col_outer = col_inner` → single equi-key, non_equi = TRUE
+/// - `(col_outer = col_inner) AND ...` → multiple equi-keys, non-equi remainder
+/// - anything else → no equi-keys, full condition as non_equi
+///
+/// Mirrors `LogicalJoinAsPhysicalHashJoinRule::split_equi_and_non_equi_conditions`
+/// but operates directly on the join_cond scalar without creating a new operator.
+fn extract_equi_and_non_equi(
+    join_cond: &Arc<Scalar>,
+    outer_cols: &ColumnSet,
+    inner_cols: &ColumnSet,
+) -> (Vec<(Column, Column)>, Arc<Scalar>) {
+    // If `eq` is a `col_outer = col_inner` equality, return `(outer_col, inner_col)`.
+    let try_get_equi_key = |eq: BinaryOpBorrowed<'_>| -> Option<(Column, Column)> {
+        let lhs = eq.lhs().try_borrow::<ColumnRef>().ok()?;
+        let rhs = eq.rhs().try_borrow::<ColumnRef>().ok()?;
+        match (
+            outer_cols.contains(lhs.column()),
+            outer_cols.contains(rhs.column()),
+            inner_cols.contains(lhs.column()),
+            inner_cols.contains(rhs.column()),
+        ) {
+            (true, false, false, true) => Some((*lhs.column(), *rhs.column())),
+            (false, true, true, false) => Some((*rhs.column(), *lhs.column())),
+            _ => None,
+        }
+    };
+
+    // Case 1: Single `col = col` equality.
+    if let Ok(binop) = join_cond.try_borrow::<BinaryOp>()
+        && binop.is_eq()
+    {
+        return match try_get_equi_key(binop) {
+            Some(key) => (vec![key], boolean(true)),
+            None => (vec![], join_cond.clone()),
+        };
+    }
+
+    // Case 2: AND of terms — partition into equi-keys and non-equi remainder.
+    if let Ok(nary) = join_cond.try_borrow::<NaryOp>()
+        && nary.is_and()
+    {
+        let (keys, non_equi): (Vec<_>, Vec<Arc<Scalar>>) =
+            nary.terms().iter().partition_map(|term| {
+                if let Ok(binop) = term.try_borrow::<BinaryOp>()
+                    && binop.is_eq()
+                {
+                    if let Some(key) = try_get_equi_key(binop) {
+                        return Either::Left(key);
+                    }
+                }
+                Either::Right(term.clone())
+            });
+
+        let non_equi_scalar = match &non_equi[..] {
+            [] => boolean(true),
+            [singleton] => singleton.clone(),
+            terms => NaryOp::new(NaryOpKind::And, terms.into()).into_scalar(),
+        };
+        return (keys, non_equi_scalar);
+    }
+
+    // Case 3: Anything else (non-equi condition, literal, etc.) — no keys.
+    (vec![], join_cond.clone())
 }
 
 // ---------------------------------------------------------------------------
@@ -330,17 +405,36 @@ impl CardinalityEstimator for AdvancedCardinalityEstimator {
                 )
             }
 
-            // --- Fallback: other joins ---
+            // --- Stats-driven: LogicalJoin (equi-join keys extracted from condition) ---
             OperatorKind::LogicalJoin(meta) => {
                 let join = LogicalJoin::borrow_raw_parts(meta, &op.common);
-                estimate_fallback_join(
-                    join.join_type(),
-                    join.outer().as_ref(),
-                    join.inner().as_ref(),
-                    join.join_cond().as_ref(),
-                    ctx,
-                )
+                let outer_cols = join.outer().output_columns(ctx);
+                let inner_cols = join.inner().output_columns(ctx);
+                let (keys, non_equi) =
+                    extract_equi_and_non_equi(join.join_cond(), &outer_cols, &inner_cols);
+                if keys.is_empty() {
+                    estimate_fallback_join(
+                        join.join_type(),
+                        join.outer().as_ref(),
+                        join.inner().as_ref(),
+                        join.join_cond().as_ref(),
+                        ctx,
+                    )
+                } else {
+                    let outer_card = join.outer().cardinality(ctx);
+                    let inner_card = join.inner().cardinality(ctx);
+                    selectivity::equijoin_cardinality(
+                        &keys,
+                        &non_equi,
+                        join.join_type(),
+                        outer_card,
+                        inner_card,
+                        ctx,
+                    )
+                }
             }
+
+            // --- Fallback: dependent join (correlated subquery; stats-driven infeasible) ---
             OperatorKind::LogicalDependentJoin(meta) => {
                 let join = LogicalDependentJoin::borrow_raw_parts(meta, &op.common);
                 estimate_fallback_join(
@@ -351,25 +445,44 @@ impl CardinalityEstimator for AdvancedCardinalityEstimator {
                     ctx,
                 )
             }
+
+            // --- Stats-driven: PhysicalNLJoin (equi-join keys extracted from condition) ---
             OperatorKind::PhysicalNLJoin(meta) => {
                 let join = PhysicalNLJoin::borrow_raw_parts(meta, &op.common);
-                estimate_fallback_join(
-                    join.join_type(),
-                    join.outer().as_ref(),
-                    join.inner().as_ref(),
-                    join.join_cond().as_ref(),
-                    ctx,
-                )
+                let outer_cols = join.outer().output_columns(ctx);
+                let inner_cols = join.inner().output_columns(ctx);
+                let (keys, non_equi) =
+                    extract_equi_and_non_equi(join.join_cond(), &outer_cols, &inner_cols);
+                if keys.is_empty() {
+                    estimate_fallback_join(
+                        join.join_type(),
+                        join.outer().as_ref(),
+                        join.inner().as_ref(),
+                        join.join_cond().as_ref(),
+                        ctx,
+                    )
+                } else {
+                    let outer_card = join.outer().cardinality(ctx);
+                    let inner_card = join.inner().cardinality(ctx);
+                    selectivity::equijoin_cardinality(
+                        &keys,
+                        &non_equi,
+                        join.join_type(),
+                        outer_card,
+                        inner_card,
+                        ctx,
+                    )
+                }
             }
 
-            // --- Fallback: aggregates ---
+            // --- Stats-driven: aggregates ---
             OperatorKind::LogicalAggregate(meta) => {
                 let agg = LogicalAggregate::borrow_raw_parts(meta, &op.common);
-                estimate_aggregate(agg.keys().borrow::<List>().members().len())
+                estimate_aggregate(agg.keys().borrow::<List>().members(), agg.input(), ctx)
             }
             OperatorKind::PhysicalHashAggregate(meta) => {
                 let agg = PhysicalHashAggregate::borrow_raw_parts(meta, &op.common);
-                estimate_aggregate(agg.keys().borrow::<List>().members().len())
+                estimate_aggregate(agg.keys().borrow::<List>().members(), agg.input(), ctx)
             }
 
             // --- Pass-through: these operators do not change row count ---
