@@ -45,6 +45,7 @@ use datafusion::config::ConfigOptions;
 use datafusion::execution::disk_manager::{DiskManagerBuilder, DiskManagerMode};
 
 use optd_cli::OptdCliSessionContext;
+use optd_datafusion::OptdExtensionConfig;
 
 #[derive(Debug, Parser, PartialEq)]
 #[clap(author, version, about, long_about= None)]
@@ -142,6 +143,12 @@ struct Args {
         value_parser(extract_disk_limit)
     )]
     disk_limit: Option<usize>,
+
+    #[clap(
+        long,
+        help = "Disable DataFusion optimizers and run only Optd optimization"
+    )]
+    optd_only: bool,
 }
 
 #[tokio::main]
@@ -300,7 +307,14 @@ fn get_session_config(args: &Args) -> Result<SessionConfig> {
 
     config_options.catalog.format.replace("PARQUET".to_string());
 
-    let session_config = SessionConfig::from(config_options).with_information_schema(true);
+    let mut session_config = SessionConfig::from(config_options)
+        .with_information_schema(true)
+        .with_option_extension(OptdExtensionConfig::default());
+
+    if args.optd_only {
+        session_config = session_config.set_bool("optd.optd_only", true);
+    }
+
     Ok(session_config)
 }
 

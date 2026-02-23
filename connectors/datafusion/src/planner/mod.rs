@@ -512,14 +512,20 @@ impl QueryPlanner for OptdQueryPlanner {
         Self: 'ret,
     {
         Box::pin(async move {
-            let (optd_enabled, optd_strict_mode) = {
+            let (optd_enabled, optd_strict_mode, optd_only) = {
                 session_state
                     .config_options()
                     .extensions
                     .get::<OptdExtensionConfig>()
-                    .map(|conf| (conf.optd_enabled, conf.optd_strict_mode))
-                    .unwrap_or((true, false))
+                    .map(|conf| (conf.optd_enabled, conf.optd_strict_mode, conf.optd_only))
+                    .unwrap_or((true, false, false))
             };
+
+            if optd_only && !optd_enabled {
+                return Err(DataFusionError::Plan(
+                    "optd.optd_only requires optd.optd_enabled = true".to_string(),
+                ));
+            }
 
             if !optd_enabled {
                 return self
@@ -533,7 +539,7 @@ impl QueryPlanner for OptdQueryPlanner {
 
             match res {
                 Err(e) => {
-                    if optd_strict_mode {
+                    if optd_strict_mode || optd_only {
                         Err(e)
                     } else {
                         eprintln!(
