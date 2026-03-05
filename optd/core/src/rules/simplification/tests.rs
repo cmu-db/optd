@@ -1,11 +1,11 @@
-use arrow_schema::{DataType as ArrowDataType, Field, Schema};
+use super::SimplificationPass;
 use crate::ir::{
     Column, DataType,
     builder::*,
     catalog::DataSourceId,
     operator::{LogicalGet, LogicalJoin, LogicalProject, LogicalSelect, join::JoinType},
 };
-use super::SimplificationPass;
+use arrow_schema::{DataType as ArrowDataType, Field, Schema};
 
 // Input plan tree:
 // LogicalSelect [c3 = 20 AND true]

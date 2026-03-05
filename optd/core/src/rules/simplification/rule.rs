@@ -1,8 +1,7 @@
+use crate::ir::{IRContext, Operator};
 /// Top level trait for what a simplification rule needs to implement, as well
 /// as the recursive applifcation function
-
 use std::sync::Arc;
-use crate::ir::{IRContext, Operator};
 
 pub(super) trait RulePass {
     fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Arc<Operator>;

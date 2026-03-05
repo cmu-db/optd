@@ -1,9 +1,9 @@
-use std::{collections::HashMap, sync::Arc};
 use crate::ir::{
     Column, Scalar,
     convert::IntoScalar,
     scalar::{ColumnRef, NaryOp},
 };
+use std::{collections::HashMap, sync::Arc};
 
 pub(super) fn split_conjuncts(predicate: Arc<Scalar>) -> Vec<Arc<Scalar>> {
     if let Ok(and) = predicate.try_borrow::<NaryOp>()

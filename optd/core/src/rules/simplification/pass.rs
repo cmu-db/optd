@@ -1,5 +1,3 @@
-use std::sync::Arc;
-use crate::ir::{IRContext, Operator};
 use super::{
     prune::ColumnPruningRulePass,
     rewrite::{
@@ -8,6 +6,8 @@ use super::{
     },
     rule::RulePass,
 };
+use crate::ir::{IRContext, Operator};
+use std::sync::Arc;
 
 /// The maximum number of iterations simplification should run, if it hasn't
 /// yet converged onto a fixed point
@@ -32,7 +32,9 @@ impl Default for SimplificationPass {
 
 impl SimplificationPass {
     pub fn new() -> Self {
-        Self { max_iterations: MAX_ITERATIONS }
+        Self {
+            max_iterations: MAX_ITERATIONS,
+        }
     }
 
     pub fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Arc<Operator> {

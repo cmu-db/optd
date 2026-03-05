@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use super::{rule::RulePass, scalar::simplify_scalar_recursively};
 use crate::ir::{
     Column, ColumnSet, IRContext, Operator,
     convert::{IntoOperator, IntoScalar},
@@ -8,7 +8,7 @@ use crate::ir::{
     },
     scalar::{ColumnAssign, ColumnRef, List},
 };
-use super::{rule::RulePass, scalar::simplify_scalar_recursively};
+use std::sync::Arc;
 
 pub(super) struct ColumnPruningRulePass;
 
@@ -43,14 +43,14 @@ fn prune_operator(op: Arc<Operator>, required: &ColumnSet, ctx: &IRContext) -> A
             let mut input_required = ColumnSet::default();
             for member in members {
                 let keep = if let Ok(assign) = member.try_borrow::<ColumnAssign>() {
-                        Some(*assign.column())
-                    } else if let Ok(column_ref) = member.try_borrow::<ColumnRef>() {
-                        Some(*column_ref.column())
-                    } else {
-                        None
-                    }
-                    .map(|column| required.contains(&column))
-                    .unwrap_or(true);
+                    Some(*assign.column())
+                } else if let Ok(column_ref) = member.try_borrow::<ColumnRef>() {
+                    Some(*column_ref.column())
+                } else {
+                    None
+                }
+                .map(|column| required.contains(&column))
+                .unwrap_or(true);
                 if keep {
                     kept.push(member.clone());
                     input_required |= &member.used_columns();

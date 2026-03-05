@@ -1,10 +1,3 @@
-use std::{collections::HashMap, sync::Arc};
-use crate::ir::{
-    Column, ColumnSet, IRContext, Operator, Scalar,
-    convert::{IntoOperator, IntoScalar},
-    operator::{LogicalJoin, LogicalProject, LogicalSelect, join::JoinType},
-    scalar::{ColumnAssign, ColumnRef, List},
-};
 use super::{
     rule::{RulePass, rewrite_bottom_up},
     scalar::{
@@ -12,6 +5,13 @@ use super::{
         substitute_columns,
     },
 };
+use crate::ir::{
+    Column, ColumnSet, IRContext, Operator, Scalar,
+    convert::{IntoOperator, IntoScalar},
+    operator::{LogicalJoin, LogicalProject, LogicalSelect, join::JoinType},
+    scalar::{ColumnAssign, ColumnRef, List},
+};
+use std::{collections::HashMap, sync::Arc};
 
 pub(super) struct ScalarSimplificationRulePass;
 pub(super) struct MergeSelectRulePass;
@@ -135,21 +135,30 @@ impl RulePass for PushSelectThroughJoinRulePass {
             let new_outer = if outer_filters.is_empty() {
                 join.outer().clone()
             } else {
-                LogicalSelect::new(join.outer().clone(), combine_conjuncts_simplified(outer_filters)).into_operator()
+                LogicalSelect::new(
+                    join.outer().clone(),
+                    combine_conjuncts_simplified(outer_filters),
+                )
+                .into_operator()
             };
             let new_inner = if inner_filters.is_empty() {
                 join.inner().clone()
             } else {
-                LogicalSelect::new(join.inner().clone(), combine_conjuncts_simplified(inner_filters)).into_operator()
+                LogicalSelect::new(
+                    join.inner().clone(),
+                    combine_conjuncts_simplified(inner_filters),
+                )
+                .into_operator()
             };
             let new_join_cond = combine_conjuncts_simplified(join_conds);
-            let new_join =
-                LogicalJoin::new(*join.join_type(), new_outer, new_inner, new_join_cond).into_operator();
+            let new_join = LogicalJoin::new(*join.join_type(), new_outer, new_inner, new_join_cond)
+                .into_operator();
 
             if top_filters.is_empty() {
                 new_join
             } else {
-                LogicalSelect::new(new_join, combine_conjuncts_simplified(top_filters)).into_operator()
+                LogicalSelect::new(new_join, combine_conjuncts_simplified(top_filters))
+                    .into_operator()
             }
         })
     }
