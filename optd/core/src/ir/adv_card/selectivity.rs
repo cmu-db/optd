@@ -1,20 +1,51 @@
 //! Selectivity estimation helpers for filters and equi-joins.
 //!
+//! # Shared primitive: [`ColumnConstraintGraph`]
+//!
+//! Both filter contradiction detection and join-key de-duplication share the
+//! same underlying pattern: a set of `(Column, Column)` equality pairs builds
+//! equivalence classes (Union-Find), and constraints on any column in a class
+//! propagate to the class representative.  [`ColumnConstraintGraph`] encapsulates
+//! this: [`ColumnConstraintGraph::add_equality`] returns `true` only when the
+//! two columns were previously in different components (spanning-tree edge),
+//! which drives Kruskal's algorithm in the join path.
+//!
 //! # Filter selectivity ([`filter_selectivity`])
 //!
 //! Recursively decomposes a predicate scalar tree and computes a selectivity
 //! factor in `[0.0, 1.0]`.
 //!
-//! | Predicate shape                  | Formula                                                          |
-//! |----------------------------------|------------------------------------------------------------------|
-//! | `TRUE`                           | 1.0                                                              |
-//! | `FALSE` / `NULL`                 | 0.0                                                              |
-//! | `col = literal`                  | `(1 - null_frac) / NDV(col)`                                     |
-//! | `col < v` / `col <= v`           | `clamp((v - min)/(max - min), 0, 1) · (1 - null_frac)`          |
-//! | `col > v` / `col >= v`           | `clamp((max - v)/(max - min), 0, 1) · (1 - null_frac)`          |
-//! | `p1 AND p2 AND ...`              | 0 if same-col ranges contradict; else `Π sel(p_i)`              |
-//! | `p1 OR  p2 OR  ...`             | `(1 - null_frac)` if same-col ranges cover domain; else `1-Π(1-sel)` |
-//! | anything else                    | `FALLBACK_PREDICATE_SELECTIVITY` (0.1)                           |
+//! | Predicate shape                       | Formula / Result                                                       |
+//! |---------------------------------------|------------------------------------------------------------------------|
+//! | `TRUE`                                | 1.0                                                                    |
+//! | `FALSE` / `NULL`                      | 0.0                                                                    |
+//! | `col = literal`                       | `(1 - null_frac) / NDV(col)`                                           |
+//! | `col < v` / `col <= v`               | `clamp((v - min)/(max - min), 0, 1) · (1 - null_frac)`                |
+//! | `col > v` / `col >= v`               | `clamp((max - v)/(max - min), 0, 1) · (1 - null_frac)`                |
+//! | `p1 AND p2 AND ...`                   | 0 if ranges/literals contradict (see below); else `Π sel(p_i)`        |
+//! | `p1 OR  p2 OR  ...`                  | `(1 - null_frac)` if same-col ranges cover domain; else `1-Π(1-sel)`  |
+//! | anything else                         | `FALLBACK_PREDICATE_SELECTIVITY` (0.1)                                 |
+//!
+//! ## AND contradiction detection
+//!
+//! Before applying the independence assumption, [`and_ranges_contradict`] runs
+//! a two-pass scan over the AND terms:
+//!
+//! 1. **Pass 1 — equivalence classes**: extract `col_a = col_b` pairs and
+//!    `col = literal` constraints; build a [`ColumnConstraintGraph`].
+//! 2. **Pass 2 — range propagation**: extract range bounds (`col op v`) and
+//!    accumulate them per equivalence-class representative.
+//!
+//! Contradiction if any representative's accumulated `[lo, hi]` is empty
+//! (`lo ≥ hi`), or if two different literals are assigned to the same class.
+//!
+//! This detects both same-column contradictions (`col > 50 AND col < 30`) and
+//! cross-column contradictions propagated through equalities:
+//!
+//! ```text
+//! A = B AND A > 50 AND B < 30  →  class {A,B}: lo=50, hi=30  →  contradiction → 0
+//! A = 5 AND B = 3 AND A = B    →  class {A,B}: literals 5 ≠ 3 → contradiction → 0
+//! ```
 //!
 //! # Equi-join cardinality ([`equijoin_cardinality`])
 //!
@@ -34,15 +65,255 @@
 //! sel(k_i) = 1 / max(NDV_R(k_i), NDV_S(k_i))
 //! ```
 //!
-//! With a domain-overlap pre-check per key pair: if `[min, max]` ranges are
-//! disjoint the result is 0 immediately.
+//! ## MST-based de-duplication (Kruskal's algorithm)
+//!
+//! Key pairs can form cycles in the column equality graph (e.g. `A=B, B=C, A=C`
+//! — a triangle). Multiplying all three selectivities over-constrains the
+//! estimate: only two independent constraints are needed for three columns.
+//!
+//! [`equijoin_cardinality`] uses **Kruskal's algorithm** to select a minimum
+//! spanning forest:
+//!
+//! 1. Compute selectivity for every key pair (Phase A).
+//! 2. Check domain overlap for **all** key pairs — even those that will be
+//!    skipped for selectivity still represent real join conditions: if their
+//!    `[min, max]` ranges are disjoint the join returns 0.
+//! 3. Sort edges ascending by selectivity (most constraining first).
+//! 4. Use [`ColumnConstraintGraph`] to include an edge only when it connects
+//!    two previously-separate components; skip cycle-forming edges (Phase B).
+//!
+//! ```text
+//! Triangle A=B, B=C, A=C (all sel = 1/N):
+//!   naïve:  sel = (1/N)³          ← over-constrained
+//!   MST:    sel = (1/N)²          ← correct: 2 independent constraints
+//! ```
+
+use std::collections::HashMap;
 
 use crate::ir::{
     Column, DataType, IRContext, Scalar, ScalarValue, operator::join::JoinType,
     properties::Cardinality, scalar::*, statistics::ColumnStatistics,
 };
+use crate::utility::union_find::UnionFind;
 
 use super::{AdvancedCardinalityEstimator, column_stats, extract_hll, ndv, null_fraction};
+
+// ---------------------------------------------------------------------------
+// Shared primitive: column constraint graph
+// ---------------------------------------------------------------------------
+
+/// Tracks column equivalence classes and per-class range constraints.
+///
+/// Both join-key MST and filter contradiction detection use the same underlying
+/// pattern: a set of `(Column, Column)` equality pairs defines equivalence
+/// classes (via Union-Find), and range constraints on any column in a class
+/// propagate to the class representative.
+///
+/// # Usage
+///
+/// - **Join (Kruskal's MST):** call [`add_equality`] in ascending-selectivity
+///   order; include a key pair's selectivity in the product only when
+///   [`add_equality`] returns `true` (spanning-tree edge).
+/// - **Filter (contradiction detection):** call [`add_equality`] for every
+///   `col = col` term (ignore return value — want full classes, not just
+///   spanning tree), then call [`add_range`] for every range bound, then check
+///   [`has_range_contradiction`].
+///
+/// [`add_equality`]: ColumnConstraintGraph::add_equality
+/// [`add_range`]: ColumnConstraintGraph::add_range
+/// [`has_range_contradiction`]: ColumnConstraintGraph::has_range_contradiction
+struct ColumnConstraintGraph {
+    uf: UnionFind<Column>,
+    /// Running interval `[lo, hi]` per equivalence-class representative.
+    ///
+    /// Initialized lazily: the first range bound for a representative inserts
+    /// `(-∞, +∞)` and immediately tightens it.
+    intervals: HashMap<Column, (f64, f64)>,
+    /// Literal equality value seen per representative (`col = constant`).
+    ///
+    /// Used to detect the contradiction `col = 5 AND col = 3` (two different
+    /// literals for the same equivalence class).
+    literal_eq: HashMap<Column, f64>,
+}
+
+impl ColumnConstraintGraph {
+    fn new() -> Self {
+        Self {
+            uf: UnionFind::default(),
+            intervals: HashMap::new(),
+            literal_eq: HashMap::new(),
+        }
+    }
+
+    /// Add a column-equality constraint `a = b`.
+    ///
+    /// Returns `true` if `a` and `b` were previously in **different** components
+    /// (i.e. this edge is a spanning-tree / Kruskal's edge).
+    /// Returns `false` if they were already in the same component (cycle — edge
+    /// is transitively implied and should be skipped for selectivity).
+    fn add_equality(&mut self, a: Column, b: Column) -> bool {
+        let root_a = self.uf.find(&a);
+        let root_b = self.uf.find(&b);
+        if root_a == root_b {
+            return false; // already same component
+        }
+        // Merge: root_a becomes the representative of the combined class.
+        self.uf.merge(&a, &b);
+        let new_root = self.uf.find(&a); // always root_a after merge(&a, &b)
+
+        // Merge intervals: if both classes had intervals, intersect them.
+        let interval_b = self.intervals.remove(&root_b);
+        if let Some((lo_b, hi_b)) = interval_b {
+            let entry = self
+                .intervals
+                .entry(new_root)
+                .or_insert((f64::NEG_INFINITY, f64::INFINITY));
+            entry.0 = entry.0.max(lo_b);
+            entry.1 = entry.1.min(hi_b);
+        }
+
+        // Merge literal equalities: if both classes had a literal, check consistency.
+        let lit_b = self.literal_eq.remove(&root_b);
+        if let Some(v_b) = lit_b {
+            match self.literal_eq.get(&new_root) {
+                Some(&v_a) => {
+                    // Two different literals on the same class → mark contradiction
+                    // by collapsing the interval to empty.
+                    if (v_a - v_b).abs() > f64::EPSILON {
+                        let entry = self
+                            .intervals
+                            .entry(new_root)
+                            .or_insert((f64::NEG_INFINITY, f64::INFINITY));
+                        // Set lo > hi to signal contradiction.
+                        entry.0 = 1.0;
+                        entry.1 = 0.0;
+                    }
+                }
+                None => {
+                    self.literal_eq.insert(new_root, v_b);
+                }
+            }
+        }
+
+        true
+    }
+
+    /// Add a range constraint `col op value` where op ∈ {<, <=, >, >=}.
+    ///
+    /// Internally resolves `col` to its equivalence-class representative and
+    /// tightens the representative's `[lo, hi]` interval.
+    fn add_range(&mut self, col: Column, op: BinaryOpKind, value: f64) {
+        let rep = self.uf.find(&col);
+        let entry = self
+            .intervals
+            .entry(rep)
+            .or_insert((f64::NEG_INFINITY, f64::INFINITY));
+        match op {
+            BinaryOpKind::Lt | BinaryOpKind::Le => entry.1 = entry.1.min(value),
+            BinaryOpKind::Gt | BinaryOpKind::Ge => entry.0 = entry.0.max(value),
+            _ => {}
+        }
+    }
+
+    /// Add a literal-equality constraint `col = value`.
+    ///
+    /// Records the literal for the representative. If a different literal was
+    /// already recorded for the same representative, marks the interval as empty
+    /// (contradiction).
+    fn add_literal_eq(&mut self, col: Column, value: f64) {
+        let rep = self.uf.find(&col);
+        match self.literal_eq.get(&rep) {
+            Some(&existing) => {
+                if (existing - value).abs() > f64::EPSILON {
+                    // Contradiction: col = v1 AND col = v2, v1 ≠ v2.
+                    let entry = self
+                        .intervals
+                        .entry(rep)
+                        .or_insert((f64::NEG_INFINITY, f64::INFINITY));
+                    entry.0 = 1.0;
+                    entry.1 = 0.0;
+                }
+            }
+            None => {
+                self.literal_eq.insert(rep, value);
+            }
+        }
+    }
+
+    /// Returns `true` if any equivalence class has an empty interval (`lo >= hi`),
+    /// indicating an unsatisfiable conjunction of constraints.
+    fn has_range_contradiction(&self) -> bool {
+        self.intervals.values().any(|(lo, hi)| lo >= hi)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Column-equality extraction from scalar predicates
+// ---------------------------------------------------------------------------
+
+/// Attempt to extract a `col_a = col_b` column-equality from a scalar term.
+///
+/// Returns `Some((col_a, col_b))` iff the term is a `BinaryOp(Eq)` with both
+/// operands being `ColumnRef` nodes. Returns `None` for `col = literal`,
+/// `literal = col`, or any other shape.
+///
+/// This is used by the filter AND contradiction detector to build equivalence
+/// classes from within-predicate column equalities, enabling cross-column range
+/// propagation (e.g. `A = B AND A > 50 AND B < 30` → contradiction).
+fn extract_column_equality(term: &Scalar) -> Option<(Column, Column)> {
+    let ScalarKind::BinaryOp(meta) = &term.kind else {
+        return None;
+    };
+    if meta.op_kind != BinaryOpKind::Eq {
+        return None;
+    }
+    let binop = BinaryOp::borrow_raw_parts(meta, &term.common);
+    match (&binop.lhs().kind, &binop.rhs().kind) {
+        (ScalarKind::ColumnRef(a), ScalarKind::ColumnRef(b)) => Some((a.column, b.column)),
+        _ => None,
+    }
+}
+
+/// Attempt to extract a `col = literal_value` literal-equality from a scalar
+/// term, returning `Some((column, f64_value))`.
+///
+/// Returns `None` if the term is not an equality, if either side is not a
+/// column or literal, or if the literal cannot be converted to f64.
+fn extract_literal_equality(term: &Scalar) -> Option<(Column, f64)> {
+    let ScalarKind::BinaryOp(meta) = &term.kind else {
+        return None;
+    };
+    if meta.op_kind != BinaryOpKind::Eq {
+        return None;
+    }
+    let binop = BinaryOp::borrow_raw_parts(meta, &term.common);
+    let lhs = binop.lhs();
+    let rhs = binop.rhs();
+
+    // col = literal
+    if let (ScalarKind::ColumnRef(col_meta), ScalarKind::Literal(lit_meta)) =
+        (&lhs.kind, &rhs.kind)
+    {
+        let lit = Literal::borrow_raw_parts(lit_meta, &rhs.common);
+        if let Some(v) = scalar_value_to_f64(lit.value()) {
+            return Some((col_meta.column, v));
+        }
+    }
+    // literal = col
+    if let (ScalarKind::Literal(lit_meta), ScalarKind::ColumnRef(col_meta)) =
+        (&lhs.kind, &rhs.kind)
+    {
+        let lit = Literal::borrow_raw_parts(lit_meta, &lhs.common);
+        if let Some(v) = scalar_value_to_f64(lit.value()) {
+            return Some((col_meta.column, v));
+        }
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
+// Filter selectivity
+// ---------------------------------------------------------------------------
 
 /// Compute filter selectivity for a predicate tree.
 ///
@@ -111,30 +382,28 @@ pub fn filter_selectivity(predicate: &Scalar, ctx: &IRContext) -> f64 {
         // N-ary AND: sel(p1 AND p2 AND ...) = Π sel(p_i)
         //
         // Before applying the independence assumption, we check for
-        // **same-column range contradictions**: if all range predicates on a
-        // single column define an empty interval (e.g. `col > 50 AND col < 30`),
-        // the conjunction is unsatisfiable → selectivity 0.
+        // **contradictions** via [`and_ranges_contradict`], which uses a
+        // two-pass algorithm:
         //
-        // # Algorithm (contradiction detection)
+        // Pass 1 — build equivalence classes:
+        //   - `col_a = col_b` terms → merge into [`ColumnConstraintGraph`].
+        //   - `col = literal` terms → record per-representative literal value.
+        //   - Two different literals on the same class → contradiction.
         //
-        // 1. For each AND term, extract range bounds via `extract_range_bound`.
-        // 2. Per column, track a running interval [lo, hi], initialized to
-        //    (-∞, +∞).
-        // 3. Tighten: `col < v` / `col <= v` → `hi = min(hi, v)`;
-        //    `col > v` / `col >= v` → `lo = max(lo, v)`.
-        // 4. If for ANY column `lo >= hi`, the range is empty → return 0.0.
+        // Pass 2 — accumulate range bounds per representative:
+        //   - `col op v` → `add_range(col, op, v)` normalises to representative.
+        //   - If any representative's [lo, hi] is empty (lo ≥ hi) → contradiction.
         //
-        // Complexity: O(n) where n = number of AND terms; single linear scan.
+        // This detects both single-column contradictions (`col > 50 AND col < 30`)
+        // and cross-column contradictions propagated through equalities
+        // (`A = B AND A > 50 AND B < 30`).
         //
-        // Assumption: only detects contradictions from range predicates
-        // (Lt/Le/Gt/Ge) on literal values. Equality contradictions
-        // (e.g. `col = 5 AND col = 6`) are NOT detected here.
+        // Complexity: O(n) with two linear scans and O(1) amortised UF/HashMap.
         //
         // When non-contradictory, falls through to the independence assumption
         // (Π sel(p_i)), which can under-estimate correlated predicates like
         // `age > 18 AND age < 25`.
         //
-        // TODO(AC): Also detect equality contradictions (col = 5 AND col = 6 → 0).
         // TODO(AC): When non-contradictory, use the tightened range to compute a
         //   more accurate selectivity for the conjunction instead of independence
         //   assumption. E.g. `col > 10 AND col < 50` with domain [0, 100] should
@@ -145,7 +414,7 @@ pub fn filter_selectivity(predicate: &Scalar, ctx: &IRContext) -> f64 {
             let nary = NaryOp::borrow_raw_parts(meta, &predicate.common);
             let terms = nary.terms();
 
-            // Contradiction check: accumulate range bounds per column.
+            // Contradiction check: two-pass equivalence-class + range analysis.
             if and_ranges_contradict(terms) {
                 return 0.0;
             }
@@ -243,6 +512,19 @@ fn equality_selectivity_col_lit(
     Some((1.0 - nf) / distinct as f64)
 }
 
+/// A join key pair with its pre-computed selectivity.
+///
+/// Collected in Phase A of [`equijoin_cardinality`] so that Phase B (Kruskal's
+/// MST) can sort them and process them in order of ascending selectivity.
+struct JoinEdge {
+    build_col: Column,
+    probe_col: Column,
+    /// Estimated selectivity for this key pair.
+    selectivity: f64,
+    /// Whether column statistics were available for this pair (vs. pure fallback).
+    had_stats: bool,
+}
+
 /// Estimate cardinality for a PhysicalHashJoin on pre-extracted equi-join keys,
 /// optionally refined by non-equi conditions.
 ///
@@ -252,58 +534,72 @@ fn equality_selectivity_col_lit(
 /// |R ⋈ S| = |R| · |S| · Π_i sel(k_i) · sel(non_equi_conds)
 /// ```
 ///
-/// where for each key pair `(k_i_R, k_i_S)`:
+/// where the product is taken only over **spanning-tree edges** of the join-key
+/// graph (see MST section below). For each included key pair `(k_i_R, k_i_S)`:
 ///
 /// **Preferred (HLL intersection):** when both sides have HLL sketches:
 /// ```text
 /// sel(k_i) = |intersect(k_i)| / (NDV_R(k_i) · NDV_S(k_i))
 /// ```
 /// where `|intersect| = |A| + |B| - |A ∪ B|` via inclusion-exclusion on
-/// merged HLL registers. This avoids the containment assumption and
-/// directly estimates actual domain overlap.
+/// merged HLL registers.
 ///
 /// **Fallback (containment assumption):** when HLLs are unavailable:
 /// ```text
 /// sel(k_i) = 1 / max(NDV_R(k_i), NDV_S(k_i))
 /// ```
-/// This is the standard equi-join selectivity from Selinger et al. (1979).
+///
+/// # MST-based de-duplication (Kruskal's algorithm)
+///
+/// Multiple key pairs can form cycles (equivalence classes). Example: `A=B,
+/// B=C, C=A` — only two independent constraints are needed for three columns.
+/// Multiplying all three selectivities would over-constrain the estimate.
+///
+/// We use **Kruskal's algorithm** on the bipartite column graph:
+/// - Nodes: all `Column` identifiers in `keys`.
+/// - Edges: each `(build_col, probe_col)` pair, weighted by its selectivity.
+/// - Sort edges ascending by selectivity (most constraining first).
+/// - Use [`ColumnConstraintGraph`] (Union-Find) to include an edge only when it
+///   connects two previously-separate components (spanning-tree edge).
+/// - Skip edges whose endpoints are already in the same component (cycles /
+///   transitively-implied conditions).
+///
+/// Self-join keys `(A, A)` are naturally skipped (both endpoints already in the
+/// same component after the first `add_equality` call), which correctly avoids
+/// applying a spurious `1/NDV` factor for a tautology.
+///
+/// # Domain-overlap check (all key pairs, including non-spanning-tree ones)
+///
+/// Even a key pair that would be skipped for selectivity still represents a real
+/// join condition: if its `[min, max]` ranges are disjoint, the join must return
+/// 0 rows. Domain disjointness is therefore checked in Phase A for **every** key
+/// pair, before Kruskal's sorting.
+///
+/// Example: A=[0,99], B=[0,200], C=[100,200] with keys (A,B),(B,C),(A,C).
+/// Spanning tree = {(A,B),(B,C)}; (A,C) is skipped for selectivity but its
+/// domain check (A=[0,99] vs C=[100,200]) returns 0 — correctly.
 ///
 /// # Non-equi condition handling
 ///
 /// After computing the equi-join cardinality, we apply the selectivity of any
 /// non-equi conditions (e.g. `x.b < y.b` in `x.a = y.a AND x.b < y.b`).
-/// These are treated as a post-join filter using [`filter_selectivity`], with the
-/// equi-join result as the base row count for null-fraction computation.
+/// These are treated as a post-join filter using [`filter_selectivity`].
 ///
-/// When `non_equi_conds` is a literal `TRUE` (i.e. no non-equi conditions),
-/// `filter_selectivity` returns 1.0 and the estimate is unchanged.
+/// When `non_equi_conds` is a literal `TRUE`, `filter_selectivity` returns 1.0.
 ///
 /// # Join-type adjustment
 ///
-/// The base inner-join estimate is adjusted for the requested join type:
 /// - **Inner**: no adjustment.
 /// - **Left**: `max(result, |left|)` — every left row appears at least once.
 /// - **Mark(col)**: `|left|` — adds a boolean column, no row change.
 /// - **Single**: `min(result, |left|)` — at-most-one match per left row.
 ///
-/// # Domain-overlap optimization
-///
-/// Before computing selectivity for a key pair, we check whether the `[min, max]`
-/// ranges overlap. If they are provably disjoint (e.g. `[0, 99]` vs `[200, 299]`),
-/// the join produces zero rows and we short-circuit immediately.
-///
 /// # Assumptions
 ///
-/// - **Independence across key pairs.** Composite keys `(k1, k2)` are treated as
-///   independent: `sel = sel(k1) · sel(k2)`.
+/// - **Independent spanning-tree key pairs.** The selectivities of MST edges
+///   are treated as independent: `sel = Π sel(k_i)`.
 /// - **Uniform value distribution** within each column.
-/// - **HLL intersection preferred:** when HLL sketches are available on both
-///   sides, we use inclusion-exclusion to estimate the actual intersection
-///   size, avoiding the containment assumption entirely. When HLLs are not
-///   available, we fall back to the containment assumption (`1/max(NDV)`).
-/// - **Independence between equi-keys and non-equi conditions.** The non-equi
-///   selectivity is multiplied in independently. Correlated conditions (e.g.
-///   `x.a = y.a AND x.a < 10`) may lead to under-estimation.
+/// - **Independence between equi-keys and non-equi conditions.**
 // TODO(AC/Yuchen): Make `describe_table` return `Arc<TableStatistics>` -- the
 // per-key-pair `column_stats` calls will become cheap (Arc clone instead of
 // deep clone of `Vec<ColumnStatistics>`). Until then, composite keys on the
@@ -316,8 +612,13 @@ pub fn equijoin_cardinality(
     probe_card: Cardinality,
     ctx: &IRContext,
 ) -> Cardinality {
-    let mut selectivity: f64 = 1.0;
-    let mut any_key_had_stats = false;
+    // -----------------------------------------------------------------------
+    // Phase A: collect per-key selectivities and domain-overlap check.
+    //
+    // Domain overlap is checked for ALL key pairs (not just spanning-tree ones)
+    // because a non-spanning-tree edge still represents a real join condition.
+    // -----------------------------------------------------------------------
+    let mut edges: Vec<JoinEdge> = Vec::with_capacity(keys.len());
 
     for (build_col, probe_col) in keys {
         match (
@@ -326,33 +627,41 @@ pub fn equijoin_cardinality(
         ) {
             (Some((build_ts, build_off)), Some((probe_ts, probe_off))) => {
                 let Some(build_cs) = build_ts.column_statistics.get(*build_off) else {
-                    selectivity *= AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY;
+                    edges.push(JoinEdge {
+                        build_col: *build_col,
+                        probe_col: *probe_col,
+                        selectivity: AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
+                        had_stats: false,
+                    });
                     continue;
                 };
                 let Some(probe_cs) = probe_ts.column_statistics.get(*probe_off) else {
-                    selectivity *= AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY;
+                    edges.push(JoinEdge {
+                        build_col: *build_col,
+                        probe_col: *probe_col,
+                        selectivity: AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
+                        had_stats: false,
+                    });
                     continue;
                 };
 
                 // Domain-overlap check: if [min, max] ranges are disjoint,
                 // no rows can match on this key → entire join produces 0 rows.
+                // Check ALL key pairs, including those that will become
+                // non-spanning-tree edges in Phase B.
                 if !domains_overlap(build_cs, probe_cs) {
                     return Cardinality::new(0.0);
                 }
 
-                // Prefer HLL intersection when both sketches are available.
-                // Falls back to the containment assumption (1/max(NDV))
-                // when HLLs are absent.
-                if let Some(sel) = hll_join_selectivity(build_cs, probe_cs) {
-                    selectivity *= sel;
-                    any_key_had_stats = true;
+                // Compute per-edge selectivity: prefer HLL, fall back to
+                // containment assumption, then row-count upper bound.
+                let (sel, had_stats) = if let Some(s) = hll_join_selectivity(build_cs, probe_cs) {
+                    (s, true)
                 } else {
                     match (ndv(build_cs), ndv(probe_cs)) {
                         (Some(build_ndv), Some(probe_ndv)) => {
-                            // sel(k_i) = 1 / max(NDV_build, NDV_probe)
                             let max_ndv = build_ndv.max(probe_ndv) as f64;
-                            selectivity *= 1.0 / max_ndv;
-                            any_key_had_stats = true;
+                            (1.0 / max_ndv, true)
                         }
                         // We could also check the case where at least one of the sides has some cardinality
                         // statistics available. For example, we can assume that ndv of the other table is
@@ -362,28 +671,27 @@ pub fn equijoin_cardinality(
                         // TODO(AC): Benchmark the case where:
                         // a. the ndv of other table is assumed <= n
                         // b. the ndv of other table is assumed = row_count if available
-                        // Sample Code:
-                        // (Some(n), None) | (None, Some(n)) => {
-                        //     selectivity *= 1.0 / n as f64;
-                        //     any_key_had_stats = true;
-                        // }
                         (_, _) => {
-                            // No NDV on either side: use max(row_count) as an
-                            // upper-bound NDV estimate. NDV can never exceed the
-                            // number of rows, so this is the most conservative
-                            // assumption without distinct-value stats.
                             let br = build_ts.row_count;
                             let pr = probe_ts.row_count;
                             if br > 0 && pr > 0 {
-                                selectivity *= 1.0 / br.max(pr) as f64;
-                                any_key_had_stats = true;
+                                (1.0 / br.max(pr) as f64, true)
                             } else {
-                                selectivity *=
-                                    AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY;
+                                (
+                                    AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
+                                    false,
+                                )
                             }
                         }
                     }
-                }
+                };
+
+                edges.push(JoinEdge {
+                    build_col: *build_col,
+                    probe_col: *probe_col,
+                    selectivity: sel,
+                    had_stats,
+                });
             }
             // At least one side has no column_stats at all, so we don't
             // have access to its TableStatistics (row_count) either — the
@@ -394,9 +702,43 @@ pub fn equijoin_cardinality(
             // column-level stats so we can fall back to row_count even
             // when column stats are absent.
             (_, _) => {
-                selectivity *= AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY;
+                edges.push(JoinEdge {
+                    build_col: *build_col,
+                    probe_col: *probe_col,
+                    selectivity: AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
+                    had_stats: false,
+                });
             }
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase B: Kruskal's MST — sort edges by ascending selectivity and include
+    // only spanning-tree edges (those connecting different components).
+    //
+    // Sorting by ascending selectivity picks the most constraining edges first,
+    // giving the tightest (most accurate) cardinality estimate.
+    //
+    // Cycle-forming edges (transitively implied by earlier edges) are skipped,
+    // avoiding over-constraining the estimate for cyclic equi-conditions.
+    // -----------------------------------------------------------------------
+    edges.sort_unstable_by(|a, b| {
+        a.selectivity
+            .partial_cmp(&b.selectivity)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut graph = ColumnConstraintGraph::new();
+    let mut selectivity: f64 = 1.0;
+    let mut any_key_had_stats = false;
+
+    for edge in &edges {
+        // add_equality returns true iff this edge is a spanning-tree edge.
+        if graph.add_equality(edge.build_col, edge.probe_col) {
+            selectivity *= edge.selectivity;
+            any_key_had_stats |= edge.had_stats;
+        }
+        // else: cycle-forming edge — transitively implied, skip.
     }
 
     if keys.is_empty() && !any_key_had_stats {
@@ -689,54 +1031,67 @@ fn extract_range_bound(term: &Scalar) -> Option<(Column, BinaryOpKind, f64)> {
     None
 }
 
-/// Check whether AND-ed range predicates on the same column contradict.
+/// Check whether AND-ed predicates contain a contradiction.
 ///
-/// Scans the terms for range bounds (via [`extract_range_bound`]) and
-/// accumulates a running interval `[lo, hi]` per column. If for any column
-/// the lower bound meets or exceeds the upper bound, the conjunction is
-/// unsatisfiable.
+/// Detects two classes of contradiction:
 ///
-/// Returns `true` (contradiction) only when at least one column has an empty
-/// range. Non-range terms (equality, complex expressions) are ignored — they
-/// do not prevent the independence-assumption fallback.
+/// 1. **Range contradiction on equivalent columns**: range bounds on columns
+///    that are related by equality (`col_a = col_b`) are merged into the same
+///    equivalence class. If the accumulated interval for any class is empty
+///    (lo ≥ hi), the conjunction is unsatisfiable.
+///    - Example: `A = B AND A > 50 AND B < 30` → class {A,B} gets lo=50,
+///      hi=30 → contradiction.
+///    - Subsumes the previous single-column detection (`col > 50 AND col < 30`).
+///
+/// 2. **Literal-equality contradiction**: two different literal values for the
+///    same equivalence class (`col = 5 AND col = 3`, or via transitivity
+///    `A = B AND A = 5 AND B = 3`).
+///
+/// Returns `true` (contradiction) only when at least one class has an empty
+/// range or conflicting literals. Non-range, non-equality terms are ignored.
+///
+/// # Algorithm
+///
+/// Two-pass over the AND terms:
+/// 1. **Pass 1 — build equivalence classes**: extract `col_a = col_b` pairs
+///    via [`extract_column_equality`] and add them to a [`ColumnConstraintGraph`].
+///    Also record `col = literal` constraints via [`extract_literal_equality`].
+/// 2. **Pass 2 — accumulate range bounds**: extract range bounds via
+///    [`extract_range_bound`] and call [`ColumnConstraintGraph::add_range`],
+///    which automatically normalises to the class representative.
 ///
 /// # Complexity
 ///
-/// O(n) where n = number of AND terms. Uses a `HashMap<Column, (f64, f64)>`
-/// with expected O(1) per lookup. Typical queries have 2-5 AND terms and
-/// 1-2 distinct columns, so the map is trivially small.
+/// O(n) where n = number of AND terms; two linear scans with O(1) amortized
+/// Union-Find and HashMap operations. Typical queries have 2-5 AND terms.
+///
+/// # Unchanged behaviour for existing predicates
+///
+/// When no `col = col` equalities are present, the Union-Find degenerates to
+/// identity mapping and the result is identical to the old single-pass
+/// per-column interval check.
 fn and_ranges_contradict(terms: &[std::sync::Arc<Scalar>]) -> bool {
-    use std::collections::HashMap;
+    let mut graph = ColumnConstraintGraph::new();
 
-    // Per-column running interval: (lo, hi).
-    // Initialized lazily on first range bound for each column.
-    // TODO(perf): Replace the `HashMap<Column, (f64, f64)>` allocation with a
-    // `SmallVec` or sorted `Vec<(Column, f64, f64)>` for the common case (<=4
-    // columns). During Cascades optimization the same predicate may be evaluated
-    // many times.
-    let mut intervals: HashMap<Column, (f64, f64)> = HashMap::new();
-
+    // Pass 1: build equivalence classes from col=col equalities and record
+    // col=literal constraints.
     for term in terms {
-        if let Some((col, op, value)) = extract_range_bound(term) {
-            let entry = intervals
-                .entry(col)
-                .or_insert((f64::NEG_INFINITY, f64::INFINITY));
-            match op {
-                BinaryOpKind::Lt | BinaryOpKind::Le => {
-                    // col < v / col <= v → upper bound tightens
-                    entry.1 = entry.1.min(value);
-                }
-                BinaryOpKind::Gt | BinaryOpKind::Ge => {
-                    // col > v / col >= v → lower bound tightens
-                    entry.0 = entry.0.max(value);
-                }
-                _ => {}
-            }
+        if let Some((a, b)) = extract_column_equality(term) {
+            graph.add_equality(a, b);
+        }
+        if let Some((col, val)) = extract_literal_equality(term) {
+            graph.add_literal_eq(col, val);
         }
     }
 
-    // Check for empty intervals.
-    intervals.values().any(|(lo, hi)| lo >= hi)
+    // Pass 2: accumulate range bounds, normalised to representatives.
+    for term in terms {
+        if let Some((col, op, value)) = extract_range_bound(term) {
+            graph.add_range(col, op, value);
+        }
+    }
+
+    graph.has_range_contradiction()
 }
 
 /// Check whether OR-ed range predicates on a single column form a tautology.

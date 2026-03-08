@@ -1962,3 +1962,411 @@ fn test_aggregate_single_key_no_stats_fallback() {
         "expected 200 (magic fallback), got {card}"
     );
 }
+
+// ---------- MST join key tests ----------
+
+/// Triangle join: three keys forming a cycle (B=C, A=C, A=B).
+///
+/// Setup: (A ⋈ B) as build (both columns available), C as probe.
+/// Keys: `(B,C)`, `(A,C)`, `(A,B)` — a triangle in the column graph.
+///
+/// Kruskal's MST (all edges have equal selectivity 1/10):
+/// - `(B,C)`: {B,C} → new component → spanning-tree edge, sel *= 1/10
+/// - `(A,C)`: A ∉ {B,C} → new node merges in → spanning-tree edge, sel *= 1/10
+/// - `(A,B)`: A and B are already in the same component {A,B,C} → **cycle → skipped**
+///
+/// With MST: sel = (1/10)² = 0.01, card = 1000 × 100 × 0.01 = 1,000
+/// Without MST (naïve): sel = (1/10)³ = 0.001, card = 1000 × 100 × 0.001 = 100
+#[test]
+fn test_equijoin_mst_triangle_no_hll() {
+    let cat = MagicCatalog::default();
+    let schema_a = Arc::new(Schema::new(vec![Field::new(
+        "a.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let schema_b = Arc::new(Schema::new(vec![Field::new(
+        "b.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let schema_c = Arc::new(Schema::new(vec![Field::new(
+        "c.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+
+    let src_a = cat
+        .try_create_table("a".to_string(), schema_a.clone())
+        .unwrap();
+    let src_b = cat
+        .try_create_table("b".to_string(), schema_b.clone())
+        .unwrap();
+    let src_c = cat
+        .try_create_table("c".to_string(), schema_c.clone())
+        .unwrap();
+
+    // All three tables: 100 rows, NDV=10, overlapping domains [0,9].
+    cat.set_table_stats(
+        src_a,
+        simple_table_stats(100, vec![col_stat_with_range("a.id", 10, 0, 9)]),
+    );
+    cat.set_table_stats(
+        src_b,
+        simple_table_stats(100, vec![col_stat_with_range("b.id", 10, 0, 9)]),
+    );
+    cat.set_table_stats(
+        src_c,
+        simple_table_stats(100, vec![col_stat_with_range("c.id", 10, 0, 9)]),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    // Columns: A=Column(0), B=Column(1), C=Column(2)
+    let col_a = Column(0);
+    let col_b = Column(1);
+    let col_c = Column(2);
+
+    // First join A ⋈ B (one equi-key A=B). Result has 100 * 100 * (1/10) = 1000 rows.
+    let join_ab = ctx
+        .table_scan(src_a, &schema_a, None)
+        .hash_join(
+            ctx.table_scan(src_b, &schema_b, None),
+            Arc::new([(col_a, col_b)]),
+            boolean(true),
+            JoinType::Inner,
+        );
+
+    // Second join: (A ⋈ B) ⋈ C with triangle keys (B=C), (A=C), (A=B).
+    // The estimator sees build has columns {A=0, B=1} and probe has {C=2}.
+    // (A,B) as a key pair treats Column(0) as "build" and Column(1) as "probe",
+    // even though both come from the build side — valid from the stats perspective.
+    let join_abc = join_ab.hash_join(
+        ctx.table_scan(src_c, &schema_c, None),
+        Arc::new([(col_b, col_c), (col_a, col_c), (col_a, col_b)]), // triangle
+        boolean(true),
+        JoinType::Inner,
+    );
+    let card = join_abc.cardinality(&ctx).as_f64();
+
+    // MST picks 2 of the 3 spanning-tree edges: sel = (1/10)^2 = 0.01
+    // card = 1000 * 100 * 0.01 = 1,000.
+    // Without MST (naïve) would give 1000 * 100 * (1/10)^3 = 100.
+    assert!(
+        (card - 1_000.0).abs() < 1.0,
+        "expected 1,000 (MST: 2 spanning-tree edges out of 3), got {card}"
+    );
+}
+
+/// Duplicate key: the same (build_col, probe_col) pair appears twice.
+///
+/// The second occurrence is in the same UF component as the first → skipped.
+/// Result should be identical to a single key.
+#[test]
+fn test_equijoin_mst_duplicate_key() {
+    let cat = MagicCatalog::default();
+    let schema_a = Arc::new(Schema::new(vec![Field::new(
+        "a.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let schema_b = Arc::new(Schema::new(vec![Field::new(
+        "b.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let src_a = cat
+        .try_create_table("a".to_string(), schema_a.clone())
+        .unwrap();
+    let src_b = cat
+        .try_create_table("b".to_string(), schema_b.clone())
+        .unwrap();
+
+    cat.set_table_stats(
+        src_a,
+        simple_table_stats(100, vec![col_stat_with_range("a.id", 10, 0, 9)]),
+    );
+    cat.set_table_stats(
+        src_b,
+        simple_table_stats(200, vec![col_stat_with_range("b.id", 10, 0, 9)]),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let col_a = Column(0);
+    let col_b = Column(1);
+
+    // Duplicate key pair: (A,B) twice.
+    let keys_dup: Arc<[(Column, Column)]> = Arc::new([(col_a, col_b), (col_a, col_b)]);
+    let keys_single: Arc<[(Column, Column)]> = Arc::new([(col_a, col_b)]);
+
+    let scan_a_dup = ctx.table_scan(src_a, &schema_a, None);
+    let scan_b_dup = ctx.table_scan(src_b, &schema_b, None);
+    let join_dup = scan_a_dup.hash_join(scan_b_dup, keys_dup, boolean(true), JoinType::Inner);
+
+    let scan_a_single = ctx.table_scan(src_a, &schema_a, None);
+    let scan_b_single = ctx.table_scan(src_b, &schema_b, None);
+    let join_single =
+        scan_a_single.hash_join(scan_b_single, keys_single, boolean(true), JoinType::Inner);
+
+    let card_dup = join_dup.cardinality(&ctx).as_f64();
+    let card_single = join_single.cardinality(&ctx).as_f64();
+
+    // Both should give the same result: duplicate key is skipped.
+    // Expected: 100 * 200 * (1/10) = 2000
+    assert!(
+        (card_dup - card_single).abs() < 0.01,
+        "duplicate key should give same result as single key: dup={card_dup}, single={card_single}"
+    );
+    assert!(
+        (card_dup - 2000.0).abs() < 0.01,
+        "expected 2000 (1/max(10,10) once), got {card_dup}"
+    );
+}
+
+/// Disjoint domain on a non-spanning-tree edge must still return 0.
+///
+/// A=[0,99], B=[0,200], C=[100,200].  Keys: (A,B) and (A,C).
+/// MST: (A,B) is the spanning-tree edge; (A,C) would be skipped for selectivity
+/// because A and C are in the same component as A after the first merge.
+/// But (A,C) domain check: A=[0,99] vs C=[100,200] → disjoint → join = 0.
+#[test]
+fn test_equijoin_mst_non_spanning_edge_disjoint_domain() {
+    let cat = MagicCatalog::default();
+    let schema_a = Arc::new(Schema::new(vec![Field::new(
+        "a.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let schema_b = Arc::new(Schema::new(vec![Field::new(
+        "b.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+    let schema_c = Arc::new(Schema::new(vec![Field::new(
+        "c.id".to_string(),
+        DataType::Int32,
+        false,
+    )]));
+
+    let src_a = cat
+        .try_create_table("a".to_string(), schema_a.clone())
+        .unwrap();
+    let src_b = cat
+        .try_create_table("b".to_string(), schema_b.clone())
+        .unwrap();
+    let src_c = cat
+        .try_create_table("c".to_string(), schema_c.clone())
+        .unwrap();
+
+    // A=[0,99], B=[0,200] (bridges A and C), C=[100,200] (disjoint from A)
+    cat.set_table_stats(
+        src_a,
+        simple_table_stats(100, vec![col_stat_with_range("a.id", 100, 0, 99)]),
+    );
+    cat.set_table_stats(
+        src_b,
+        simple_table_stats(200, vec![col_stat_with_range("b.id", 200, 0, 200)]),
+    );
+    cat.set_table_stats(
+        src_c,
+        simple_table_stats(100, vec![col_stat_with_range("c.id", 100, 100, 200)]),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let col_a = Column(0);
+    let col_b = Column(1);
+    let col_c = Column(2);
+
+    // (A,B) overlaps; (A,C) is disjoint — but both are explicit join conditions.
+    let join_ab = ctx
+        .table_scan(src_a, &schema_a, None)
+        .hash_join(
+            ctx.table_scan(src_b, &schema_b, None),
+            Arc::new([(col_a, col_b)]),
+            boolean(true),
+            JoinType::Inner,
+        );
+    // Join result with C on both (B=C) and (A=C). The (A,C) pair has disjoint domains.
+    let join_abc = join_ab.hash_join(
+        ctx.table_scan(src_c, &schema_c, None),
+        Arc::new([(col_b, col_c), (col_a, col_c)]),
+        boolean(true),
+        JoinType::Inner,
+    );
+    let card = join_abc.cardinality(&ctx).as_f64();
+
+    // (A,C) domain disjointness must be detected even if (A,C) is not a spanning-tree edge.
+    assert_eq!(
+        card, 0.0,
+        "disjoint domain on non-spanning-tree edge must yield 0, got {card}"
+    );
+}
+
+// ---------- Filter equivalence class tests ----------
+
+/// Cross-column contradiction: A = B AND A > 50 AND B < 30.
+///
+/// A and B are in the same equivalence class via A = B.
+/// Propagating both range bounds onto the class: lo=50, hi=30 → contradiction.
+#[test]
+fn test_filter_cross_column_contradiction() {
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("t.a".to_string(), DataType::Int32, false),
+        Field::new("t.b".to_string(), DataType::Int32, false),
+    ]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(
+        src,
+        simple_table_stats(
+            1000,
+            vec![
+                col_stat_with_range("t.a", 100, 0, 100),
+                col_stat_with_range("t.b", 100, 0, 100),
+            ],
+        ),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan = ctx.logical_get(src, &schema, None);
+
+    // A = B AND A > 50 AND B < 30 → contradiction (B < 30 AND B = A AND A > 50)
+    let pred = column_ref(Column(0))
+        .eq(column_ref(Column(1)))  // A = B
+        .and(column_ref(Column(0)).gt(int32(50))) // A > 50
+        .and(column_ref(Column(1)).lt(int32(30))); // B < 30
+    let card = scan.logical_select(pred).cardinality(&ctx);
+
+    assert_eq!(
+        card.as_f64(),
+        0.0,
+        "A=B AND A>50 AND B<30 must be a contradiction, got {}",
+        card.as_f64()
+    );
+}
+
+/// Cross-column non-contradiction: A = B AND A > 10 AND B < 50 with domain [0,100].
+///
+/// After merging A and B, the class has lo=10, hi=50 → [10, 50] is a valid interval.
+#[test]
+fn test_filter_cross_column_non_contradiction() {
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("t.a".to_string(), DataType::Int32, false),
+        Field::new("t.b".to_string(), DataType::Int32, false),
+    ]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(
+        src,
+        simple_table_stats(
+            1000,
+            vec![
+                col_stat_with_range("t.a", 100, 0, 100),
+                col_stat_with_range("t.b", 100, 0, 100),
+            ],
+        ),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan = ctx.logical_get(src, &schema, None);
+
+    // A = B AND A > 10 AND B < 50 → [10, 50] is valid, NOT a contradiction.
+    let pred = column_ref(Column(0))
+        .eq(column_ref(Column(1)))  // A = B
+        .and(column_ref(Column(0)).gt(int32(10))) // A > 10
+        .and(column_ref(Column(1)).lt(int32(50))); // B < 50
+    let card = scan.logical_select(pred).cardinality(&ctx);
+
+    assert!(
+        card.as_f64() > 0.0,
+        "A=B AND A>10 AND B<50 must not be a contradiction, got {}",
+        card.as_f64()
+    );
+}
+
+/// Literal-equality contradiction: A = 5 AND B = 3 AND A = B.
+///
+/// After merging A and B, the class has two conflicting literals (5 ≠ 3) → contradiction.
+#[test]
+fn test_filter_literal_eq_contradiction() {
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("t.a".to_string(), DataType::Int32, false),
+        Field::new("t.b".to_string(), DataType::Int32, false),
+    ]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(
+        src,
+        simple_table_stats(
+            1000,
+            vec![
+                col_stat_with_range("t.a", 100, 0, 100),
+                col_stat_with_range("t.b", 100, 0, 100),
+            ],
+        ),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan = ctx.logical_get(src, &schema, None);
+
+    // A = 5 AND B = 3 AND A = B → merging A and B gives class with literals 5 and 3 → contradiction.
+    let pred = column_ref(Column(0))
+        .eq(int32(5)) // A = 5
+        .and(column_ref(Column(1)).eq(int32(3))) // B = 3
+        .and(column_ref(Column(0)).eq(column_ref(Column(1)))); // A = B
+    let card = scan.logical_select(pred).cardinality(&ctx);
+
+    assert_eq!(
+        card.as_f64(),
+        0.0,
+        "A=5 AND B=3 AND A=B must be a contradiction, got {}",
+        card.as_f64()
+    );
+}
+
+/// Redundant cross-column constraint: A = B AND A > 30 AND B > 20.
+///
+/// After merging A and B, the class has lo = max(30, 20) = 30. The B > 20 constraint
+/// is subsumed by A > 30. Result should NOT be a contradiction.
+#[test]
+fn test_filter_redundant_cross_column_constraint() {
+    let cat = MagicCatalog::default();
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("t.a".to_string(), DataType::Int32, false),
+        Field::new("t.b".to_string(), DataType::Int32, false),
+    ]));
+    let src = cat
+        .try_create_table("t".to_string(), schema.clone())
+        .unwrap();
+    cat.set_table_stats(
+        src,
+        simple_table_stats(
+            1000,
+            vec![
+                col_stat_with_range("t.a", 100, 0, 100),
+                col_stat_with_range("t.b", 100, 0, 100),
+            ],
+        ),
+    );
+
+    let ctx = adv_ctx_with_catalog(cat);
+    let scan = ctx.logical_get(src, &schema, None);
+
+    // A = B AND A > 30 AND B > 20 → class lo = max(30, 20) = 30, hi = ∞ → valid.
+    let pred = column_ref(Column(0))
+        .eq(column_ref(Column(1))) // A = B
+        .and(column_ref(Column(0)).gt(int32(30))) // A > 30
+        .and(column_ref(Column(1)).gt(int32(20))); // B > 20 (subsumed)
+    let card = scan.logical_select(pred).cardinality(&ctx);
+
+    assert!(
+        card.as_f64() > 0.0,
+        "A=B AND A>30 AND B>20 is not a contradiction, got {}",
+        card.as_f64()
+    );
+}
