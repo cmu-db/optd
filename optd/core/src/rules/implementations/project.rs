@@ -40,8 +40,12 @@ impl Rule for LogicalProjectAsPhysicalProjectRule {
     ) -> crate::error::Result<Vec<std::sync::Arc<crate::ir::Operator>>> {
         let project = operator.try_borrow::<LogicalProject>().unwrap();
         Ok(vec![
-            PhysicalProject::new(project.input().clone(), project.projections().clone())
-                .into_operator(),
+            PhysicalProject::new(
+                project.table_index().clone(),
+                project.input().clone(),
+                project.projections().clone(),
+            )
+            .into_operator(),
         ])
     }
 }

@@ -32,7 +32,7 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                 Arc::new(
                     node.projections()
                         .iter()
-                        .map(|x| Column(node.first_column().0 + (*x)))
+                        .map(|x| Column(*node.table_index(), *x))
                         .collect(),
                 )
             }
@@ -41,7 +41,7 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                 Arc::new(
                     node.projections()
                         .iter()
-                        .map(|x| Column(node.first_column().0 + (*x)))
+                        .map(|x| Column(*node.table_index(), *x))
                         .collect(),
                 )
             }
@@ -163,14 +163,10 @@ impl Derive<OutputColumns> for crate::ir::Operator {
             }
             OperatorKind::LogicalRemap(meta) => {
                 let remap = LogicalRemap::borrow_raw_parts(meta, &self.common);
-                let projections = remap.mappings().try_borrow::<List>().unwrap();
-                let set = projections
-                    .members()
-                    .iter()
-                    .map(|member| {
-                        let column_assign = member.try_borrow::<ColumnAssign>().unwrap();
-                        *column_assign.column()
-                    })
+                let binder = ctx.binder.read().unwrap();
+                let binding = binder.get_binding(remap.table_index()).unwrap();
+                let set = (0..binding.schema().fields().len())
+                    .map(|i| Column(*remap.table_index(), i))
                     .collect();
                 Arc::new(set)
             }

@@ -84,31 +84,28 @@ async fn integration() -> Result<(), Box<dyn std::error::Error>> {
     let m2 = ctx.mock_scan(2, vec![4, 5], 1000.);
     let m3 = ctx.mock_scan(3, vec![6, 7], 20.);
     let required = Arc::new(Required {
-        tuple_ordering: TupleOrdering::from_iter([(Column(4), TupleOrderingDirection::Asc)]),
+        tuple_ordering: TupleOrdering::from_iter([(Column(2, 4), TupleOrderingDirection::Asc)]),
     });
     let join_m1_m2_and_m3 = m1
         .logical_join(
             m2,
-            column_ref(Column(1)).eq(column_ref(Column(4))),
+            column_ref(Column(1, 1)).eq(column_ref(Column(2, 4))),
             JoinType::Inner,
         )
         .logical_join(
             m3,
-            column_ref(Column(2)).eq(column_ref(Column(6))),
+            column_ref(Column(1, 2)).eq(column_ref(Column(3, 6))),
             JoinType::Inner,
         )
-        .logical_select(column_ref(Column(3)).eq(int32(799)))
-        .logical_select(column_ref(Column(7)).eq(int32(445)))
-        .logical_project([
-            column_assign(
-                ctx.define_column(DataType::Int32, None),
-                column_ref(Column(3)),
-            ),
-            column_assign(
-                ctx.define_column(DataType::Int32, None),
-                column_ref(Column(1)).plus(int32(1)),
-            ),
-        ]);
+        .logical_select(column_ref(Column(1, 3)).eq(int32(799)))
+        .logical_select(column_ref(Column(3, 7)).eq(int32(445)))
+        .logical_project(
+            4,
+            [
+                column_ref(Column(1, 3)),
+                column_ref(Column(1, 1)).plus(int32(1)),
+            ],
+        );
 
     let rule_set = RuleSet::builder()
         .add_rule(rules::LogicalJoinAsPhysicalHashJoinRule::new())

@@ -5,23 +5,23 @@
 mod metadata;
 mod set;
 
-pub use metadata::{ColumnMeta, ColumnMetaStore};
+pub use metadata::ColumnMeta;
 pub use set::ColumnSet;
 
 /// A column of data in an operator. Also known as an information unit (IU).
-/// The usize represents the identifier of the column in the system, and the
-/// identifiers are globally unique in a query plan
+/// The column is represented as (table_index, column_index), where each table index
+/// is globally unique in a query plan.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Column(pub usize);
+pub struct Column(pub i64, pub usize);
 
 impl std::fmt::Display for Column {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "v#{}", self.0)
+        write!(f, "v#{}.{}", self.0, self.1)
     }
 }
 
 impl std::fmt::Debug for Column {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "v#{}", self.0)
+        write!(f, "v#{}.{}", self.0, self.1)
     }
 }

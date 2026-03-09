@@ -2,6 +2,8 @@ use snafu::prelude::*;
 
 pub use snafu::whatever;
 
+use crate::ir::schema::SchemaError;
+
 #[derive(Debug, Snafu)]
 pub enum Error {
     #[snafu(whatever, display("{message}"))]
@@ -14,6 +16,8 @@ pub enum Error {
     },
     #[snafu(display("Connector error: {}", message))]
     Connector { message: String },
+    #[snafu(display("Schema error: {}", message))]
+    Schema { message: SchemaError },
 }
 
 #[macro_export]

@@ -302,7 +302,9 @@ pub(super) fn remap_right_output_collisions(
     }
     if !right_remap.is_empty() {
         let remap_list = List::new(remap_members.into()).into_scalar();
-        right = LogicalRemap::new(right, remap_list).into_operator();
+        // TODO(yuchen): fix this
+        let table_index = 0;
+        right = LogicalRemap::new(table_index, right).into_operator();
         unnesting.remap_repr_values(&right_remap);
     }
     (right, right_remap)

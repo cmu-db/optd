@@ -103,7 +103,8 @@ mod tests {
 
         let join_cond = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();
 
-        let tuple_ordering = TupleOrdering::from_iter([(Column(0), TupleOrderingDirection::Asc)]);
+        let tuple_ordering =
+            TupleOrdering::from_iter([(Column(1, 0), TupleOrderingDirection::Asc)]);
 
         // plan with sort on top.
         let op1 = EnforcerSort::new(

@@ -3,65 +3,49 @@
 
 use crate::ir::{
     Column, DataType, Group, GroupId, IRContext, Operator, Scalar, ScalarValue,
-    catalog::{DataSourceId, Schema},
+    catalog::Schema,
     convert::{IntoOperator, IntoScalar},
     operator::{
         LogicalAggregate, LogicalDependentJoin, LogicalGet, LogicalJoin, LogicalProject,
-        LogicalRemap, LogicalSelect, MockScan, MockSpec, PhysicalFilter, PhysicalHashAggregate,
-        PhysicalHashJoin, PhysicalNLJoin, PhysicalProject, PhysicalTableScan, join::JoinType,
+        LogicalRemap, LogicalSelect, PhysicalFilter, PhysicalHashAggregate, PhysicalHashJoin,
+        PhysicalNLJoin, PhysicalProject, PhysicalTableScan, join::JoinType,
     },
     properties::OperatorProperties,
     scalar::*,
 };
-use itertools::Itertools;
 use std::sync::Arc;
 
 pub fn group(group_id: GroupId, properties: Arc<OperatorProperties>) -> Arc<Operator> {
     Group::new(group_id, properties).into_operator()
 }
 
-/// Creates a mock scan with specific column indices.
-/// Use for tests that need exact column IDs.
-pub fn mock_scan_with_columns(id: usize, columns: Vec<Column>, card: f64) -> Arc<Operator> {
-    MockScan::with_mock_spec(id, MockSpec::new_test_only(columns, card)).into_operator()
-}
-
 impl IRContext {
     /// Creates a mock scan operator.
-    pub fn mock_scan(&self, id: usize, columns: Vec<usize>, card: f64) -> Arc<Operator> {
+    pub fn mock_scan(&self, table_index: i64, columns: Vec<usize>, card: f64) -> Arc<Operator> {
         use crate::ir::operator::{MockScan, MockSpec};
-        let mut column_meta = self.column_meta.lock().unwrap();
-        let columns = columns
-            .iter()
-            .map(|_| column_meta.new_column(DataType::Int32, None))
-            .collect_vec();
 
-        let spec = MockSpec::new_test_only(columns, card);
-        MockScan::with_mock_spec(id, spec).into_operator()
+        let spec = MockSpec::new_test_only(table_index, columns, card);
+        MockScan::with_mock_spec(table_index, spec).into_operator()
     }
 
     pub fn logical_get(
         &self,
-        source: DataSourceId,
+        table_index: i64,
         schema: &Schema,
         projections: Option<Arc<[usize]>>,
     ) -> Arc<Operator> {
-        let first_column = self.add_base_table_columns(source, schema);
-
         let projections = projections.unwrap_or_else(|| (0..schema.fields().len()).collect());
-        LogicalGet::new(source, first_column, projections).into_operator()
+        LogicalGet::new(table_index, projections).into_operator()
     }
 
     pub fn table_scan(
         &self,
-        source: DataSourceId,
+        table_index: i64,
         schema: &Schema,
         projections: Option<Arc<[usize]>>,
     ) -> Arc<Operator> {
-        let first_column = self.add_base_table_columns(source, schema);
-
         let projections = projections.unwrap_or_else(|| (0..schema.fields().len()).collect());
-        PhysicalTableScan::new(source, first_column, projections).into_operator()
+        PhysicalTableScan::new(table_index, projections).into_operator()
     }
 }
 
@@ -114,23 +98,22 @@ impl Operator {
 
     pub fn logical_project(
         self: Arc<Self>,
+        table_index: i64,
         projections: impl IntoIterator<Item = Arc<Scalar>>,
     ) -> Arc<Self> {
-        LogicalProject::new(self, list(projections)).into_operator()
+        LogicalProject::new(table_index, self, list(projections)).into_operator()
     }
 
     pub fn physical_project(
         self: Arc<Self>,
+        table_index: i64,
         projections: impl IntoIterator<Item = Arc<Scalar>>,
     ) -> Arc<Self> {
-        PhysicalProject::new(self, list(projections)).into_operator()
+        PhysicalProject::new(table_index, self, list(projections)).into_operator()
     }
 
-    pub fn logical_remap(
-        self: Arc<Self>,
-        mappings: impl IntoIterator<Item = Arc<Scalar>>,
-    ) -> Arc<Self> {
-        LogicalRemap::new(self, list(mappings)).into_operator()
+    pub fn logical_remap(self: Arc<Self>, table_index: i64) -> Arc<Self> {
+        LogicalRemap::new(table_index, self).into_operator()
     }
 
     pub fn logical_aggregate(
@@ -138,7 +121,7 @@ impl Operator {
         exprs: impl IntoIterator<Item = Arc<Scalar>>,
         keys: impl IntoIterator<Item = Arc<Scalar>>,
     ) -> Arc<Self> {
-        LogicalAggregate::new(self, list(exprs), list(keys)).into_operator()
+        LogicalAggregate::new(0, self, list(exprs), list(keys)).into_operator()
     }
 
     pub fn hash_aggregate(

@@ -61,7 +61,10 @@ impl UnnestingRule {
             .map(|c| ColumnRef::new(*c).into_scalar())
             .collect();
         let project_list = List::new(project_scalars.into()).into_scalar();
-        let domain_project = LogicalProject::new(outer.clone(), project_list).into_operator();
+        // TODO(yuchen): fix this
+        let table_index: i64 = 0;
+        let domain_project =
+            LogicalProject::new(table_index, outer.clone(), project_list).into_operator();
         let group_keys: Vec<Arc<Scalar>> = outer_refs
             .iter()
             .map(|c| ColumnAssign::new(*c, ColumnRef::new(*c).into_scalar()).into_scalar())
@@ -69,7 +72,7 @@ impl UnnestingRule {
         let group_keys_list = List::new(group_keys.into()).into_scalar();
         let empty_exprs_list = List::new(vec![].into()).into_scalar();
         let domain_distinct =
-            LogicalAggregate::new(domain_project, empty_exprs_list, group_keys_list)
+            LogicalAggregate::new(0, domain_project, empty_exprs_list, group_keys_list)
                 .into_operator();
         let remap_keys: Vec<Arc<Scalar>> = outer_refs
             .iter()
@@ -80,7 +83,9 @@ impl UnnestingRule {
             })
             .collect();
         let remap_list = List::new(remap_keys.into()).into_scalar();
-        let domain_d = LogicalRemap::new(domain_distinct, remap_list).into_operator();
+        // TODO(yuchen): fix this
+        let table_index = 0;
+        let domain_d = LogicalRemap::new(table_index, domain_distinct).into_operator();
 
         (domain_repr, domain_d)
     }

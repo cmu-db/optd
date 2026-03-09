@@ -7,6 +7,7 @@
 
 use std::sync::{Arc, LazyLock};
 
+pub mod binder;
 pub mod builder;
 pub mod catalog;
 mod column;
@@ -20,7 +21,9 @@ pub mod operator;
 pub mod properties;
 pub mod rule;
 pub mod scalar;
+pub mod schema;
 pub mod statistics;
+pub mod table_ref;
 mod types;
 
 pub use column::*;

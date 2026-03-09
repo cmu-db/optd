@@ -24,7 +24,7 @@ pub use enforcer::sort::*;
 pub use logical::aggregate::*;
 pub use logical::dependent_join::*;
 pub use logical::get::*;
-pub use logical::join::{LogicalJoin, LogicalJoinBorrowed, LogicalJoinMetadata};
+pub use logical::join::*;
 pub use logical::order_by::*;
 pub use logical::project::*;
 pub use logical::remap::*;

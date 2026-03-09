@@ -19,7 +19,9 @@ define_node!(
     /// - keys: The grouping keys.
     LogicalAggregate, LogicalAggregateBorrowed {
         properties: OperatorProperties,
-        metadata: LogicalAggregateMetadata {},
+        metadata: LogicalAggregateMetadata {
+            aggregate_table_index: i64,
+        },
         inputs: {
             operators: [input],
             scalars: [exprs, keys],
@@ -29,9 +31,16 @@ define_node!(
 impl_operator_conversion!(LogicalAggregate, LogicalAggregateBorrowed);
 
 impl LogicalAggregate {
-    pub fn new(input: Arc<Operator>, exprs: Arc<Scalar>, keys: Arc<Scalar>) -> Self {
+    pub fn new(
+        aggregate_table_index: i64,
+        input: Arc<Operator>,
+        exprs: Arc<Scalar>,
+        keys: Arc<Scalar>,
+    ) -> Self {
         Self {
-            meta: LogicalAggregateMetadata {},
+            meta: LogicalAggregateMetadata {
+                aggregate_table_index,
+            },
             common: IRCommon::new(Arc::new([input]), Arc::new([exprs, keys])),
         }
     }

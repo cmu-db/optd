@@ -119,11 +119,11 @@ mod tests {
         let ctx = IRContext::with_empty_magic();
         let ordered_exprs = vec![
             (
-                ColumnRef::new(Column(0)).into_scalar(),
+                ColumnRef::new(Column(1, 0)).into_scalar(),
                 TupleOrderingDirection::Asc,
             ),
             (
-                ColumnRef::new(Column(2)).into_scalar(),
+                ColumnRef::new(Column(1, 2)).into_scalar(),
                 TupleOrderingDirection::Asc,
             ),
         ];
@@ -138,9 +138,9 @@ mod tests {
             .cloned()
             .collect::<ColumnSet>();
 
-        assert!(res.contains(&Column(0)));
-        assert!(res.contains(&Column(2)));
-        assert!(!res.contains(&Column(1)));
+        assert!(res.contains(&Column(1, 0)));
+        assert!(res.contains(&Column(1, 2)));
+        assert!(!res.contains(&Column(1, 1)));
     }
 
     #[test]
@@ -148,13 +148,13 @@ mod tests {
         let ctx = IRContext::with_empty_magic();
         let ordered_exprs = vec![
             (
-                ColumnRef::new(Column(0)).into_scalar(),
+                ColumnRef::new(Column(1, 0)).into_scalar(),
                 TupleOrderingDirection::Asc,
             ),
             (
                 BinaryOp::new(
                     BinaryOpKind::Plus,
-                    ColumnRef::new(Column(2)).into_scalar(),
+                    ColumnRef::new(Column(1, 2)).into_scalar(),
                     Literal::new(ScalarValue::Int32(Some(1))).into_scalar(),
                 )
                 .into_scalar(),

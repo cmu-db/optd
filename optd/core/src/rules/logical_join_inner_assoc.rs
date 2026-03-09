@@ -114,9 +114,9 @@ mod tests {
         let b_ref = new_lower.outer().try_borrow::<MockScan>().unwrap();
         let c_ref = new_lower.inner().try_borrow::<MockScan>().unwrap();
 
-        assert_eq!(&1, a_ref.mock_id());
-        assert_eq!(&2, b_ref.mock_id());
-        assert_eq!(&3, c_ref.mock_id(),);
+        assert_eq!(&1, a_ref.table_index());
+        assert_eq!(&2, b_ref.table_index());
+        assert_eq!(&3, c_ref.table_index(),);
         assert_eq!(
             &ScalarValue::Boolean(Some(false)),
             new_upper

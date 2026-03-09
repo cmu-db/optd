@@ -37,7 +37,9 @@ pub(super) fn create_domain_with_aliases(
 ) -> Arc<Operator> {
     assert_eq!(from_cols.len(), to_cols.len(), "domain remap must be 1:1");
     let project_exprs: Vec<_> = from_cols.iter().map(|c| column_ref(*c)).collect();
-    let domain_project = input.logical_project(project_exprs);
+
+    let table_index = 0;
+    let domain_project = input.logical_project(table_index, project_exprs);
 
     let group_keys: Vec<_> = from_cols
         .iter()
@@ -50,7 +52,8 @@ pub(super) fn create_domain_with_aliases(
         .zip(to_cols.iter())
         .map(|(from, to)| column_assign(*to, column_ref(*from)))
         .collect();
-    domain_distinct.logical_remap(remap_assigns)
+    let table_index = 0;
+    domain_distinct.logical_remap(table_index)
 }
 
 // --- Helper functions to "execute" a plan and check equality ---
@@ -59,7 +62,7 @@ pub(super) fn create_domain_with_aliases(
 type Row = BTreeMap<Column, Option<i32>>;
 
 /// Mock scan table data keyed by mock table id.
-type MockData = BTreeMap<usize, Vec<Row>>;
+type MockData = BTreeMap<i64, Vec<Row>>;
 
 /// Runtime value domain used by the mini evaluator.
 #[derive(Clone, Copy)]
@@ -69,12 +72,12 @@ enum EvalValue {
 }
 
 /// Gather mock scan schemas so random test data can be generated consistently.
-fn collect_mock_schemas(op: &Arc<Operator>, schemas: &mut BTreeMap<usize, Vec<Column>>) {
+fn collect_mock_schemas(op: &Arc<Operator>, schemas: &mut BTreeMap<i64, Vec<Column>>) {
     if let OperatorKind::MockScan(meta) = &op.kind {
         let scan = MockScan::borrow_raw_parts(meta, &op.common);
         let mut cols: Vec<Column> = scan.spec().mocked_output_columns.iter().copied().collect();
         cols.sort_by_key(|c| c.0);
-        schemas.insert(*scan.mock_id(), cols);
+        schemas.insert(*scan.table_index(), cols);
     }
     for child in op.input_operators() {
         collect_mock_schemas(child, schemas);
@@ -83,7 +86,7 @@ fn collect_mock_schemas(op: &Arc<Operator>, schemas: &mut BTreeMap<usize, Vec<Co
 
 /// Build per-mock scan input rows from discovered schemas and a seed.
 fn generate_mock_data(
-    schemas: &BTreeMap<usize, Vec<Column>>,
+    schemas: &BTreeMap<i64, Vec<Column>>,
     seed: u64,
     num_rows_low: usize,
     num_rows_high: usize,
@@ -267,7 +270,7 @@ fn eval_op(op: &Arc<Operator>, env: &[Row], data: &MockData, ctx: &IRContext) ->
     match &op.kind {
         OperatorKind::MockScan(meta) => {
             let scan = MockScan::borrow_raw_parts(meta, &op.common);
-            data.get(scan.mock_id()).cloned().unwrap_or_default()
+            data.get(scan.table_index()).cloned().unwrap_or_default()
         }
         OperatorKind::LogicalSelect(meta) => {
             let sel = LogicalSelect::borrow_raw_parts(meta, &op.common);
@@ -304,28 +307,29 @@ fn eval_op(op: &Arc<Operator>, env: &[Row], data: &MockData, ctx: &IRContext) ->
                 })
                 .collect()
         }
-        OperatorKind::LogicalRemap(meta) => {
-            let remap = LogicalRemap::borrow_raw_parts(meta, &op.common);
-            let members = remap
-                .mappings()
-                .try_borrow::<List>()
-                .unwrap()
-                .members()
-                .to_vec();
-            eval_op(remap.input(), env, data, ctx)
-                .into_iter()
-                .map(|r| {
-                    let mut out = Row::new();
-                    for m in &members {
-                        let assign = m.try_borrow::<ColumnAssign>().unwrap();
-                        out.insert(
-                            *assign.column(),
-                            as_int(eval_scalar(assign.expr(), &r, env)),
-                        );
-                    }
-                    out
-                })
-                .collect()
+        OperatorKind::LogicalRemap(_meta) => {
+            todo!()
+            // let remap = LogicalRemap::borrow_raw_parts(meta, &op.common);
+            // let members = remap
+            //     .mappings()
+            //     .try_borrow::<List>()
+            //     .unwrap()
+            //     .members()
+            //     .to_vec();
+            // eval_op(remap.input(), env, data, ctx)
+            //     .into_iter()
+            //     .map(|r| {
+            //         let mut out = Row::new();
+            //         for m in &members {
+            //             let assign = m.try_borrow::<ColumnAssign>().unwrap();
+            //             out.insert(
+            //                 *assign.column(),
+            //                 as_int(eval_scalar(assign.expr(), &r, env)),
+            //             );
+            //         }
+            //         out
+            //     })
+            //     .collect()
         }
         OperatorKind::LogicalAggregate(meta) => {
             let agg = LogicalAggregate::borrow_raw_parts(meta, &op.common);

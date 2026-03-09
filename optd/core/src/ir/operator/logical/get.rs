@@ -20,8 +20,7 @@ define_node!(
     LogicalGet, LogicalGetBorrowed {
         properties: OperatorProperties,
         metadata: LogicalGetMetadata {
-            source: DataSourceId,
-            first_column: Column,
+            table_index: i64,
             projections: Arc<[usize]>,
         },
         inputs: {
@@ -33,11 +32,10 @@ define_node!(
 impl_operator_conversion!(LogicalGet, LogicalGetBorrowed);
 
 impl LogicalGet {
-    pub fn new(source: DataSourceId, first_column: Column, projections: Arc<[usize]>) -> Self {
+    pub fn new(table_index: i64, projections: Arc<[usize]>) -> Self {
         Self {
             meta: LogicalGetMetadata {
-                source,
-                first_column,
+                table_index,
                 projections,
             },
             common: IRCommon::empty(),
@@ -52,7 +50,7 @@ impl Explain for LogicalGetBorrowed<'_> {
         option: &crate::ir::explain::ExplainOption,
     ) -> pretty_xmlish::Pretty<'a> {
         let mut fields = Vec::with_capacity(2);
-        fields.push((".source", Pretty::display(&self.source().0)));
+        fields.push((".table_index", Pretty::display(&self.table_index())));
         fields.extend(self.common.explain_operator_properties(ctx, option));
         Pretty::childless_record("LogicalGet", fields)
     }

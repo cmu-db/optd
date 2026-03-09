@@ -86,11 +86,19 @@ mod tests {
 
         assert_eq!(
             &1,
-            nl_join.outer().try_borrow::<MockScan>().unwrap().mock_id()
+            nl_join
+                .outer()
+                .try_borrow::<MockScan>()
+                .unwrap()
+                .table_index()
         );
         assert_eq!(
             &2,
-            nl_join.inner().try_borrow::<MockScan>().unwrap().mock_id()
+            nl_join
+                .inner()
+                .try_borrow::<MockScan>()
+                .unwrap()
+                .table_index()
         );
         assert_eq!(&JoinType::Inner, nl_join.join_type());
         assert_eq!(

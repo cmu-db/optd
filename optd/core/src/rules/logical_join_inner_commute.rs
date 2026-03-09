@@ -96,8 +96,8 @@ mod tests {
         let new_outer = commuted.outer().try_borrow::<MockScan>().unwrap();
         let new_inner = commuted.inner().try_borrow::<MockScan>().unwrap();
 
-        assert_eq!(new_outer.mock_id(), &2);
-        assert_eq!(new_inner.mock_id(), &1);
+        assert_eq!(new_outer.table_index(), &2);
+        assert_eq!(new_inner.table_index(), &1);
 
         let left_outer_join =
             LogicalJoin::new(JoinType::Left, m_outer, m_inner, join_cond).into_operator();

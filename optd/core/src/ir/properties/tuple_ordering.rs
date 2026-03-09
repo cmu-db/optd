@@ -244,8 +244,8 @@ mod tests {
     fn enforcer_sort_try_satisify_ordering() {
         let ctx = IRContext::with_empty_magic();
         let required = TupleOrdering::from_iter([
-            (Column(0), TupleOrderingDirection::Asc),
-            (Column(1), TupleOrderingDirection::Desc),
+            (Column(1, 0), TupleOrderingDirection::Asc),
+            (Column(1, 1), TupleOrderingDirection::Desc),
         ]);
 
         let t1 = ctx.mock_scan(1, vec![0, 1, 2], 100.);
@@ -255,16 +255,17 @@ mod tests {
         assert_eq!(res[0], TupleOrdering::default());
 
         let stronger_provided = TupleOrdering::from_iter([
-            (Column(0), TupleOrderingDirection::Asc),
-            (Column(1), TupleOrderingDirection::Desc),
-            (Column(2), TupleOrderingDirection::Asc),
+            (Column(1, 0), TupleOrderingDirection::Asc),
+            (Column(1, 1), TupleOrderingDirection::Desc),
+            (Column(1, 2), TupleOrderingDirection::Asc),
         ]);
         let stronger_enforcer = EnforcerSort::new(stronger_provided, t1.clone()).into_operator();
         let res = stronger_enforcer.try_satisfy(&required, &ctx).unwrap();
         assert_eq!(res.len(), 1);
         assert_eq!(res[0], TupleOrdering::default());
 
-        let weaker_provided = TupleOrdering::from_iter([(Column(0), TupleOrderingDirection::Asc)]);
+        let weaker_provided =
+            TupleOrdering::from_iter([(Column(1, 0), TupleOrderingDirection::Asc)]);
         let weaker_enforcer = EnforcerSort::new(weaker_provided, t1.clone()).into_operator();
         assert_eq!(None, weaker_enforcer.try_satisfy(&required, &ctx));
     }
@@ -291,8 +292,8 @@ mod tests {
         assert_eq!(res[1], empty);
 
         let ordering_from_t1 = TupleOrdering::from_iter([
-            (Column(0), TupleOrderingDirection::Asc),
-            (Column(1), TupleOrderingDirection::Desc),
+            (Column(1, 0), TupleOrderingDirection::Asc),
+            (Column(1, 1), TupleOrderingDirection::Desc),
         ]);
 
         // Only satisifies when t1 is the outer side.
@@ -304,8 +305,8 @@ mod tests {
 
         // Both should not satisfy.
         let columns_from_both_sides = TupleOrdering::from_iter([
-            (Column(0), TupleOrderingDirection::Asc),
-            (Column(2), TupleOrderingDirection::Desc),
+            (Column(1, 0), TupleOrderingDirection::Asc),
+            (Column(2, 2), TupleOrderingDirection::Desc),
         ]);
         assert_eq!(None, join1.try_satisfy(&columns_from_both_sides, &ctx));
         assert_eq!(None, join2.try_satisfy(&columns_from_both_sides, &ctx));
@@ -323,8 +324,8 @@ mod tests {
 
         // Does not satisfies the ordering [0, 1]. (for detecting regressions).
         let ordering = TupleOrdering::from_iter([
-            (Column(0), TupleOrderingDirection::Asc),
-            (Column(1), TupleOrderingDirection::Asc),
+            (Column(1, 0), TupleOrderingDirection::Asc),
+            (Column(1, 1), TupleOrderingDirection::Asc),
         ]);
         assert_eq!(None, t1.try_satisfy(&ordering, &ctx));
     }

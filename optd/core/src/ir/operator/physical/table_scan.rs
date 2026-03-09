@@ -21,8 +21,7 @@ define_node!(
     PhysicalTableScan, PhysicalTableScanBorrowed {
         properties: OperatorProperties,
         metadata: PhysicalTableScanMetadata {
-            source: DataSourceId,
-            first_column: Column,
+            table_index: i64,
             projections: Arc<[usize]>,
         },
         inputs: {
@@ -34,11 +33,10 @@ define_node!(
 impl_operator_conversion!(PhysicalTableScan, PhysicalTableScanBorrowed);
 
 impl PhysicalTableScan {
-    pub fn new(source: DataSourceId, first_column: Column, projections: Arc<[usize]>) -> Self {
+    pub fn new(table_index: i64, projections: Arc<[usize]>) -> Self {
         Self {
             meta: PhysicalTableScanMetadata {
-                source,
-                first_column,
+                table_index,
                 projections,
             },
             common: IRCommon::empty(),
@@ -53,7 +51,7 @@ impl Explain for PhysicalTableScanBorrowed<'_> {
         option: &crate::ir::explain::ExplainOption,
     ) -> pretty_xmlish::Pretty<'a> {
         let mut fields = Vec::with_capacity(2);
-        fields.push((".source", Pretty::display(&self.source().0)));
+        fields.push((".table_index", Pretty::display(&self.table_index())));
         fields.extend(self.common.explain_operator_properties(ctx, option));
         Pretty::childless_record("PhysicalTableScan", fields)
     }

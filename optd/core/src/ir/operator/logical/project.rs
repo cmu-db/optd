@@ -11,12 +11,15 @@ use pretty_xmlish::Pretty;
 use std::sync::Arc;
 
 define_node!(
-    /// Metadata: (none)
+    /// Metadata:
+    /// - table_index: table index of the project node.
     /// Scalars:
     /// - projections: The expressions to project.
     LogicalProject, LogicalProjectBorrowed {
         properties: OperatorProperties,
-        metadata: LogicalProjectMetadata {},
+        metadata: LogicalProjectMetadata {
+            table_index: i64,
+        },
         inputs: {
             operators: [input],
             scalars: [projections],
@@ -26,9 +29,9 @@ define_node!(
 impl_operator_conversion!(LogicalProject, LogicalProjectBorrowed);
 
 impl LogicalProject {
-    pub fn new(input: Arc<Operator>, projections: Arc<Scalar>) -> Self {
+    pub fn new(table_index: i64, input: Arc<Operator>, projections: Arc<Scalar>) -> Self {
         Self {
-            meta: LogicalProjectMetadata {},
+            meta: LogicalProjectMetadata { table_index },
             common: IRCommon::new(Arc::new([input]), Arc::new([projections])),
         }
     }
@@ -42,6 +45,7 @@ impl Explain for LogicalProjectBorrowed<'_> {
     ) -> pretty_xmlish::Pretty<'a> {
         let mut fields = Vec::new();
         let projecions_explained = self.projections().explain(ctx, option);
+        fields.push((".table_index", Pretty::display(&self.table_index())));
         fields.push((".projections", projecions_explained));
         fields.extend(self.common.explain_operator_properties(ctx, option));
         let children = self.common.explain_input_operators(ctx, option);

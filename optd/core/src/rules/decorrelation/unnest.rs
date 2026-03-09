@@ -298,7 +298,8 @@ impl UnnestingRule {
                     }
                 }
                 let final_exprs = List::new(members.into()).into_scalar();
-                LogicalProject::new(new_input, final_exprs).into_operator()
+                todo!();
+                LogicalProject::new(0, new_input, final_exprs).into_operator()
             }
             OperatorKind::LogicalRemap(ref meta) => {
                 let node = LogicalRemap::borrow_raw_parts(meta, &op.common);
@@ -309,25 +310,28 @@ impl UnnestingRule {
                     seen_outer_refs,
                     ctx,
                 );
-                let new_exprs = info.rewrite_columns(node.mappings().clone());
-                let mut members = new_exprs.try_borrow::<List>().unwrap().members().to_vec();
-                let mut output_cols: HashSet<Column> = members
-                    .iter()
-                    .filter_map(|expr| {
-                        expr.try_borrow::<ColumnAssign>()
-                            .ok()
-                            .map(|assign| *assign.column())
-                    })
-                    .collect();
-                for rep in Self::collect_preserved_reprs(info) {
-                    if new_input.output_columns(ctx).contains(&rep) && output_cols.insert(rep) {
-                        members.push(
-                            ColumnAssign::new(rep, ColumnRef::new(rep).into_scalar()).into_scalar(),
-                        );
-                    }
-                }
-                let final_exprs = List::new(members.into()).into_scalar();
-                LogicalRemap::new(new_input, final_exprs).into_operator()
+                todo!("node.mappings need to be changed");
+                // let new_exprs = info.rewrite_columns(node.mappings().clone());
+                // let mut members = new_exprs.try_borrow::<List>().unwrap().members().to_vec();
+                // let mut output_cols: HashSet<Column> = members
+                //     .iter()
+                //     .filter_map(|expr| {
+                //         expr.try_borrow::<ColumnAssign>()
+                //             .ok()
+                //             .map(|assign| *assign.column())
+                //     })
+                //     .collect();
+                // for rep in Self::collect_preserved_reprs(info) {
+                //     if new_input.output_columns(ctx).contains(&rep) && output_cols.insert(rep) {
+                //         members.push(
+                //             ColumnAssign::new(rep, ColumnRef::new(rep).into_scalar()).into_scalar(),
+                //         );
+                //     }
+                // }
+                // let final_exprs = List::new(members.into()).into_scalar();
+                // // TODO(yuchen): Fix this
+                // let table_index = 0;
+                // LogicalRemap::new(table_index, new_input).into_operator()
             }
             OperatorKind::LogicalOrderBy(ref meta) => {
                 let node = LogicalOrderBy::borrow_raw_parts(meta, &op.common);
@@ -379,7 +383,8 @@ impl UnnestingRule {
                     }
                 }
                 let final_keys = List::new(new_keys_vec.into()).into_scalar();
-                let agg = LogicalAggregate::new(new_input, new_exprs, final_keys).into_operator();
+                let agg =
+                    LogicalAggregate::new(0, new_input, new_exprs, final_keys).into_operator();
 
                 if node
                     .keys()

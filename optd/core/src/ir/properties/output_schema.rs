@@ -4,6 +4,7 @@
 
 use crate::error::{Result, whatever};
 use crate::ir::Operator;
+use crate::ir::catalog::DataSourceId;
 use crate::ir::{
     OperatorKind,
     catalog::{Field, Schema},
@@ -16,13 +17,14 @@ use crate::ir::{
     properties::{Derive, GetProperty, PropertyMarker},
     scalar::{ColumnAssign, List},
 };
+use arrow_schema::SchemaRef;
 use itertools::Itertools;
 use std::sync::Arc;
 
 pub struct OutputSchema;
 
 impl PropertyMarker for OutputSchema {
-    type Output = Result<Schema>;
+    type Output = Result<SchemaRef>;
 }
 
 impl Derive<OutputSchema> for Operator {
@@ -39,23 +41,25 @@ impl Derive<OutputSchema> for Operator {
             }
             OperatorKind::LogicalGet(meta) => {
                 let get = LogicalGet::borrow_raw_parts(meta, &self.common);
-                let meta = ctx.cat.describe_table(*get.source());
-                Ok(Schema::new(
+                let meta = ctx.catalog.describe_table(DataSourceId(*get.table_index()));
+                Ok(Arc::new(Schema::new(
                     get.projections()
                         .iter()
                         .map(|i| meta.schema.field(*i).clone())
                         .collect_vec(),
-                ))
+                )))
             }
             OperatorKind::PhysicalTableScan(meta) => {
                 let scan = PhysicalTableScan::borrow_raw_parts(meta, &self.common);
-                let meta = ctx.cat.describe_table(*scan.source());
-                Ok(Schema::new(
+                let meta = ctx
+                    .catalog
+                    .describe_table(DataSourceId(*scan.table_index()));
+                Ok(Arc::new(Schema::new(
                     scan.projections()
                         .iter()
                         .map(|i| meta.schema.field(*i).clone())
                         .collect_vec(),
-                ))
+                )))
             }
             OperatorKind::LogicalSelect(meta) => {
                 let select = LogicalSelect::borrow_raw_parts(meta, &self.common);
@@ -110,7 +114,7 @@ impl Derive<OutputSchema> for Operator {
                         ))
                     })
                     .collect_vec();
-                Ok(Schema::new(columns))
+                Ok(Arc::new(Schema::new(columns)))
             }
             OperatorKind::PhysicalProject(meta) => {
                 let project = PhysicalProject::borrow_raw_parts(meta, &self.common);
@@ -129,7 +133,7 @@ impl Derive<OutputSchema> for Operator {
                         ))
                     })
                     .collect_vec();
-                Ok(Schema::new(columns))
+                Ok(Arc::new(Schema::new(columns)))
             }
             OperatorKind::LogicalAggregate(meta) => {
                 let agg = LogicalAggregate::borrow_raw_parts(meta, &self.common);
@@ -150,7 +154,7 @@ impl Derive<OutputSchema> for Operator {
                     })
                     .collect_vec();
 
-                Ok(Schema::new(columns))
+                Ok(Arc::new(Schema::new(columns)))
             }
             OperatorKind::PhysicalHashAggregate(meta) => {
                 let agg = PhysicalHashAggregate::borrow_raw_parts(meta, &self.common);
@@ -171,33 +175,21 @@ impl Derive<OutputSchema> for Operator {
                     })
                     .collect_vec();
 
-                Ok(Schema::new(columns))
+                Ok(Arc::new(Schema::new(columns)))
             }
             OperatorKind::LogicalRemap(meta) => {
                 let remap = LogicalRemap::borrow_raw_parts(meta, &self.common);
-                let columns = remap
-                    .mappings()
-                    .borrow::<List>()
-                    .members()
-                    .iter()
-                    .map(|e| {
-                        let column = *e.borrow::<ColumnAssign>().column();
-                        let column_meta = ctx.get_column_meta(&column);
-                        Arc::new(Field::new(
-                            column_meta.name.clone(),
-                            column_meta.data_type.clone(),
-                            true,
-                        ))
-                    })
-                    .collect_vec();
-                Ok(Schema::new(columns))
+                let binder = ctx.binder.read().unwrap();
+                let binding = binder.get_binding(remap.table_index()).unwrap();
+
+                Ok(binding.schema().inner().clone())
             }
         }
     }
 }
 
 impl Operator {
-    pub fn output_schema(&self, ctx: &crate::ir::context::IRContext) -> Result<Schema> {
+    pub fn output_schema(&self, ctx: &crate::ir::context::IRContext) -> Result<SchemaRef> {
         self.get_property::<OutputSchema>(ctx)
     }
 }
@@ -210,7 +202,7 @@ fn compute_join_schema(
     inner: &Operator,
     join_type: &JoinType,
     ctx: &crate::ir::IRContext,
-) -> Result<Schema> {
+) -> Result<SchemaRef> {
     let (outer_nullable, inner_nullable, mark_field) = match join_type {
         JoinType::Inner => (false, false, None),
         JoinType::Left => (false, true, None),
@@ -233,13 +225,13 @@ fn compute_join_schema(
     let outer_schema = outer.output_schema(ctx)?;
 
     let map_all_fields_to_nullable = |schema: &Schema| {
-        Schema::new(
+        Arc::new(Schema::new(
             schema
                 .fields()
                 .iter()
                 .map(|x| Arc::new(Field::new(x.name().clone(), x.data_type().clone(), true)))
                 .collect_vec(),
-        )
+        ))
     };
 
     let outer_schema = if outer_nullable {
@@ -253,7 +245,7 @@ fn compute_join_schema(
         inner_schema
     };
 
-    Ok(Schema::new(
+    Ok(Arc::new(Schema::new(
         outer_schema
             .fields()
             .iter()
@@ -261,5 +253,5 @@ fn compute_join_schema(
             .chain(inner_schema.fields().iter().cloned())
             .chain(mark_field)
             .collect_vec(),
-    ))
+    )))
 }
