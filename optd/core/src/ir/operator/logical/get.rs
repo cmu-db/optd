@@ -1,8 +1,7 @@
 //! The logical get operator is a scan on some data source.
 
 use crate::ir::{
-    Column, IRCommon,
-    catalog::DataSourceId,
+    IRCommon,
     explain::Explain,
     macros::{define_node, impl_operator_conversion},
     properties::OperatorProperties,

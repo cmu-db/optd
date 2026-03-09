@@ -41,7 +41,7 @@ impl Rule for LogicalProjectAsPhysicalProjectRule {
         let project = operator.try_borrow::<LogicalProject>().unwrap();
         Ok(vec![
             PhysicalProject::new(
-                project.table_index().clone(),
+                *project.table_index(),
                 project.input().clone(),
                 project.projections().clone(),
             )

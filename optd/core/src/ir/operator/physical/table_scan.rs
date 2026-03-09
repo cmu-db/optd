@@ -2,8 +2,7 @@
 //! of the logical get operator.
 
 use crate::ir::{
-    Column, IRCommon,
-    catalog::DataSourceId,
+    IRCommon,
     explain::Explain,
     macros::{define_node, impl_operator_conversion},
     properties::OperatorProperties,

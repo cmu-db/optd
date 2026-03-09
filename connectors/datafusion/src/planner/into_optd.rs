@@ -329,7 +329,7 @@ impl OptdQueryPlannerContext<'_> {
             whatever!("does not support order by in aggregate")
         }
 
-        if !agg_func.params.null_treatment.is_some() {
+        if agg_func.params.null_treatment.is_none() {
             whatever!("does not support special null treatment in aggregate")
         }
 

@@ -1,18 +1,12 @@
 //! Definitions for the catalog interface.
 //! optd uses the catalog interface to get schema information about tables.
 
-use std::collections::BTreeSet;
-use std::collections::HashMap;
-use std::sync::Arc;
 
 pub use arrow_schema::Field;
 pub use arrow_schema::Schema;
 pub use arrow_schema::SchemaRef;
-use snafu::ensure;
 
-use crate::error::Error;
 use crate::ir::statistics::TableStatistics;
-use crate::ir::table_ref::TableRef;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DataSourceId(pub i64);

@@ -13,6 +13,12 @@ pub struct BindContext {
     scopes: Vec<Vec<(TableRef, i64)>>,
 }
 
+impl Default for BindContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BindContext {
     pub fn new() -> Self {
         Self {
@@ -82,7 +88,7 @@ impl BindContext {
                     matches.push(*binding);
                 }
             }
-            if matches.len() > 0 {
+            if !matches.is_empty() {
                 // Do not go to an outer scope if there is some match.
                 break;
             }

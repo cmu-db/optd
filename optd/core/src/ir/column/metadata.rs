@@ -1,8 +1,7 @@
 //! This module defines a metadata type for columns in tables. See column/mod.rs
 //! for information about the base column type
 
-use crate::ir::{Column, DataType};
-use std::{collections::HashMap, sync::Arc};
+use crate::ir::DataType;
 
 /// Note that the column data type only stores the column identifier, all other
 /// metadata (data type, name) is stored in the ColumnMeta type and accessible

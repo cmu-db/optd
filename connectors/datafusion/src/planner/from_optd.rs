@@ -160,7 +160,7 @@ impl OptdQueryPlannerContext<'_> {
             .map(|e| self.try_from_optd_scalar_expr(e))
             .try_collect()?;
 
-        let filter = filter.into_iter().reduce(|l, r| logical_expr::and(l, r));
+        let filter = filter.into_iter().reduce(logical_expr::and);
 
         let join_type = Self::try_from_optd_join_type(node.join_type())?;
         let join = logical_plan::Join::try_new(

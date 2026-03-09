@@ -3,7 +3,7 @@ mod into_optd;
 mod utils;
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     sync::{Arc, Mutex},
 };
 
@@ -17,59 +17,33 @@ use datafusion::{
     error::DataFusionError,
     execution::{SessionState, context::QueryPlanner},
     logical_expr::{
-        self, ExprSchemable, LogicalPlan, PlanType, Statement, StringifiedPlan, TableScan,
-        TableSource, logical_plan,
+        LogicalPlan, PlanType, Statement, StringifiedPlan, TableScan,
+        TableSource,
     },
-    physical_expr::{LexOrdering, aggregate::AggregateExprBuilder, create_physical_sort_expr},
     physical_plan::{
         ExecutionPlan,
-        aggregates::PhysicalGroupBy,
         displayable,
         explain::ExplainExec,
-        filter::FilterExec,
         joins::{
-            HashJoinExec, NestedLoopJoinExec, PartitionMode, SortMergeJoinExec, utils::JoinFilter,
+            HashJoinExec, NestedLoopJoinExec, SortMergeJoinExec,
         },
-        projection::ProjectionExec,
-        sorts::sort::SortExec,
-        udaf::AggregateFunctionExpr,
     },
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
     sql::TableReference,
 };
-use itertools::{Either, Itertools};
+use itertools::Itertools;
 use optd_core::{
-    cascades::Cascades,
-    connector_err,
     error::Result as OptdResult,
     ir::{
-        Column, IRContext, Scalar,
-        builder::{self as optd_builder, column_assign, column_ref, literal},
+        Column, IRContext,
         catalog::{DataSourceId, Field, Schema},
-        convert::{IntoOperator, IntoScalar},
         explain::quick_explain,
-        operator::{
-            EnforcerSort, LogicalOrderBy, LogicalRemap, PhysicalFilter, PhysicalHashAggregate,
-            PhysicalHashJoin, PhysicalNLJoin, PhysicalProject, PhysicalTableScan, join,
-        },
-        properties::TupleOrderingDirection,
-        rule::RuleSet,
-        scalar::{
-            BinaryOp, Cast, ColumnAssign, ColumnRef, Function, FunctionKind, Like, List, NaryOp,
-            NaryOpKind,
-        },
         statistics::{ColumnStatistics, TableStatistics},
-        table_ref::TableRef,
     },
-    rules,
 };
-use snafu::{OptionExt, ResultExt, Snafu};
-use tracing::{info, warn};
+use snafu::Snafu;
 
-use crate::{
-    OptdExtensionConfig,
-    value::{from_optd_value, try_into_optd_value},
-};
+use crate::OptdExtensionConfig;
 
 const DEFAULT_ROW_COUNT: usize = 1000;
 
@@ -198,7 +172,7 @@ impl OptdQueryPlanner {
                                     let column_meta = ctx.get_column_meta(&column);
 
                                     ColumnStatistics {
-                                        column_id: column.0 as i64,
+                                        column_id: column.0,
                                         column_type: format!("{:?}", column_meta.data_type),
                                         name: column_meta.name.clone(),
                                         // TODO(Aditya): populate with stuff from HLL, digests, etc.
