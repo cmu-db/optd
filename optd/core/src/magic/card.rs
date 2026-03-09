@@ -169,8 +169,7 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                 if len == 0 {
                     return Cardinality::UNIT;
                 }
-                let factor =
-                    Self::MAGIC_GROUP_BY_KEY_NDV_FACTOR.powi(i32::try_from(len).unwrap());
+                let factor = Self::MAGIC_GROUP_BY_KEY_NDV_FACTOR.powi(i32::try_from(len).unwrap());
                 factor * agg.input().cardinality(ctx)
             }
             OperatorKind::PhysicalHashAggregate(meta) => {
@@ -179,8 +178,7 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                 if len == 0 {
                     return Cardinality::UNIT;
                 }
-                let factor =
-                    Self::MAGIC_GROUP_BY_KEY_NDV_FACTOR.powi(i32::try_from(len).unwrap());
+                let factor = Self::MAGIC_GROUP_BY_KEY_NDV_FACTOR.powi(i32::try_from(len).unwrap());
                 factor * agg.input().cardinality(ctx)
             }
             OperatorKind::LogicalRemap(meta) => LogicalRemap::borrow_raw_parts(meta, &op.common)

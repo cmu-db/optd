@@ -45,6 +45,7 @@ use std::sync::Arc;
 
 use itertools::{Either, Itertools};
 
+use crate::ir::builder::boolean;
 use crate::ir::{
     Column, ColumnSet, IRContext, Operator, Scalar,
     catalog::DataSourceId,
@@ -55,7 +56,6 @@ use crate::ir::{
     scalar::*,
     statistics::{ColumnStatistics, TableStatistics},
 };
-use crate::ir::builder::boolean;
 use synopses::{distinct::HyperLogLog, utils::Murmur2Hash64a};
 
 /// Canonical HLL type for catalog storage and deserialization.
@@ -244,10 +244,9 @@ fn extract_equi_and_non_equi(
             nary.terms().iter().partition_map(|term| {
                 if let Ok(binop) = term.try_borrow::<BinaryOp>()
                     && binop.is_eq()
+                    && let Some(key) = try_get_equi_key(binop)
                 {
-                    if let Some(key) = try_get_equi_key(binop) {
-                        return Either::Left(key);
-                    }
+                    return Either::Left(key);
                 }
                 Either::Right(term.clone())
             });

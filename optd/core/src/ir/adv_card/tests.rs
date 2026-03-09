@@ -1297,7 +1297,11 @@ fn test_range_lt_selectivity() {
     // col < 50 with domain [0, 100] → sel = (50 - 0) / (100 - 0) = 0.5
     let pred = column_ref(Column(0)).lt(int32(50));
     let card = scan.logical_select(pred).cardinality(&ctx);
-    assert!((card.as_f64() - 500.0).abs() < 1.0, "card = {}", card.as_f64());
+    assert!(
+        (card.as_f64() - 500.0).abs() < 1.0,
+        "card = {}",
+        card.as_f64()
+    );
 }
 
 #[test]
@@ -1322,7 +1326,11 @@ fn test_range_gt_selectivity() {
     // col > 75 with domain [0, 100] → sel = (100 - 75) / 100 = 0.25
     let pred = column_ref(Column(0)).gt(int32(75));
     let card = scan.logical_select(pred).cardinality(&ctx);
-    assert!((card.as_f64() - 250.0).abs() < 1.0, "card = {}", card.as_f64());
+    assert!(
+        (card.as_f64() - 250.0).abs() < 1.0,
+        "card = {}",
+        card.as_f64()
+    );
 }
 
 #[test]
@@ -1348,7 +1356,11 @@ fn test_range_le_selectivity() {
     // (continuous approximation: <= and < give same result)
     let pred = column_ref(Column(0)).le(int32(25));
     let card = scan.logical_select(pred).cardinality(&ctx);
-    assert!((card.as_f64() - 250.0).abs() < 1.0, "card = {}", card.as_f64());
+    assert!(
+        (card.as_f64() - 250.0).abs() < 1.0,
+        "card = {}",
+        card.as_f64()
+    );
 }
 
 #[test]
@@ -1373,7 +1385,11 @@ fn test_range_ge_selectivity() {
     // col >= 80 with domain [0, 100] → sel = (100 - 80) / 100 = 0.2
     let pred = column_ref(Column(0)).ge(int32(80));
     let card = scan.logical_select(pred).cardinality(&ctx);
-    assert!((card.as_f64() - 200.0).abs() < 1.0, "card = {}", card.as_f64());
+    assert!(
+        (card.as_f64() - 200.0).abs() < 1.0,
+        "card = {}",
+        card.as_f64()
+    );
 }
 
 #[test]
@@ -1399,7 +1415,11 @@ fn test_range_commuted() {
     // int32(50) < column_ref(0)  →  col > 50  →  sel = (100 - 50) / 100 = 0.5
     let pred = int32(50).lt(column_ref(Column(0)));
     let card = scan.logical_select(pred).cardinality(&ctx);
-    assert!((card.as_f64() - 500.0).abs() < 1.0, "card = {}", card.as_f64());
+    assert!(
+        (card.as_f64() - 500.0).abs() < 1.0,
+        "card = {}",
+        card.as_f64()
+    );
 }
 
 #[test]
@@ -1474,7 +1494,11 @@ fn test_range_covers_all() {
     // col < 200 with domain [0, 100] → clamped to 1.0
     let pred = column_ref(Column(0)).lt(int32(200));
     let card = scan.logical_select(pred).cardinality(&ctx);
-    assert!((card.as_f64() - 1000.0).abs() < 1.0, "card = {}", card.as_f64());
+    assert!(
+        (card.as_f64() - 1000.0).abs() < 1.0,
+        "card = {}",
+        card.as_f64()
+    );
 }
 
 #[test]
@@ -1499,7 +1523,11 @@ fn test_range_with_nulls() {
     // col < 50 → range_frac = 0.5, null_frac = 0.2 → sel = 0.5 * 0.8 = 0.4
     let pred = column_ref(Column(0)).lt(int32(50));
     let card = scan.logical_select(pred).cardinality(&ctx);
-    assert!((card.as_f64() - 400.0).abs() < 1.0, "card = {}", card.as_f64());
+    assert!(
+        (card.as_f64() - 400.0).abs() < 1.0,
+        "card = {}",
+        card.as_f64()
+    );
 }
 
 #[test]
@@ -1522,7 +1550,11 @@ fn test_range_no_stats_fallback() {
     let pred = column_ref(Column(0)).lt(int32(50));
     let card = scan.logical_select(pred).cardinality(&ctx);
     // Fallback: 1000 * 0.1 = 100
-    assert!((card.as_f64() - 100.0).abs() < 0.01, "card = {}", card.as_f64());
+    assert!(
+        (card.as_f64() - 100.0).abs() < 0.01,
+        "card = {}",
+        card.as_f64()
+    );
 }
 
 // ---------- AND/OR range analysis tests ----------
@@ -1582,7 +1614,11 @@ fn test_and_range_normal() {
         .and(column_ref(Column(0)).lt(int32(80)));
     let card = scan.logical_select(pred).cardinality(&ctx);
     // 1000 * 0.8 * 0.8 = 640
-    assert!((card.as_f64() - 640.0).abs() < 1.0, "card = {}", card.as_f64());
+    assert!(
+        (card.as_f64() - 640.0).abs() < 1.0,
+        "card = {}",
+        card.as_f64()
+    );
 }
 
 #[test]
@@ -1611,7 +1647,11 @@ fn test_or_tautology() {
         .or(column_ref(Column(0)).ge(int32(40)));
     let card = scan.logical_select(pred).cardinality(&ctx);
     // Tautology: sel = 1.0, card = 1000
-    assert!((card.as_f64() - 1000.0).abs() < 1.0, "card = {}", card.as_f64());
+    assert!(
+        (card.as_f64() - 1000.0).abs() < 1.0,
+        "card = {}",
+        card.as_f64()
+    );
 }
 
 #[test]
@@ -1643,7 +1683,11 @@ fn test_or_non_tautology() {
         .or(column_ref(Column(0)).gt(int32(70)));
     let card = scan.logical_select(pred).cardinality(&ctx);
     // Independence: 1 - 0.7 * 0.7 = 0.51 → card = 510
-    assert!((card.as_f64() - 510.0).abs() < 1.0, "card = {}", card.as_f64());
+    assert!(
+        (card.as_f64() - 510.0).abs() < 1.0,
+        "card = {}",
+        card.as_f64()
+    );
 }
 
 // ---------- LogicalJoin and PhysicalNLJoin stats-driven estimation ----------
@@ -1655,7 +1699,13 @@ fn make_two_table_ctx(
     ndv_a: usize,
     row_b: usize,
     ndv_b: usize,
-) -> (IRContext, std::sync::Arc<crate::ir::Operator>, std::sync::Arc<crate::ir::Operator>, Column, Column) {
+) -> (
+    IRContext,
+    std::sync::Arc<crate::ir::Operator>,
+    std::sync::Arc<crate::ir::Operator>,
+    Column,
+    Column,
+) {
     let cat = MagicCatalog::default();
     let schema_a = Arc::new(Schema::new(vec![Field::new(
         "a.id".to_string(),
@@ -1674,8 +1724,14 @@ fn make_two_table_ctx(
         .try_create_table("b".to_string(), schema_b.clone())
         .unwrap();
 
-    cat.set_table_stats(src_a, simple_table_stats(row_a, vec![col_stat("a.id", ndv_a)]));
-    cat.set_table_stats(src_b, simple_table_stats(row_b, vec![col_stat("b.id", ndv_b)]));
+    cat.set_table_stats(
+        src_a,
+        simple_table_stats(row_a, vec![col_stat("a.id", ndv_a)]),
+    );
+    cat.set_table_stats(
+        src_b,
+        simple_table_stats(row_b, vec![col_stat("b.id", ndv_b)]),
+    );
 
     let ctx = adv_ctx_with_catalog(cat);
     // Column IDs are allocated in creation order: Column(0) for a.id, Column(1) for b.id.
@@ -1720,7 +1776,10 @@ fn test_logical_join_left_preserves_outer() {
     let card = join.cardinality(&ctx).as_f64();
 
     // Left join result must be at least |outer| = 1000
-    assert!(card >= 1000.0, "Left join must preserve outer rows, got {card}");
+    assert!(
+        card >= 1000.0,
+        "Left join must preserve outer rows, got {card}"
+    );
     assert!(
         (card - 1000.0).abs() < 0.01,
         "expected 1000 (= |outer|), got {card}"
@@ -1739,7 +1798,10 @@ fn test_logical_join_single_capped_at_outer() {
     let card = join.cardinality(&ctx).as_f64();
 
     // Single join result must be at most |outer| = 100
-    assert!(card <= 100.0, "Single join must be capped at outer size, got {card}");
+    assert!(
+        card <= 100.0,
+        "Single join must be capped at outer size, got {card}"
+    );
     assert!(
         (card - 100.0).abs() < 0.01,
         "expected 100 (= |outer|), got {card}"
@@ -2027,14 +2089,12 @@ fn test_equijoin_mst_triangle_no_hll() {
     let col_c = Column(2);
 
     // First join A ⋈ B (one equi-key A=B). Result has 100 * 100 * (1/10) = 1000 rows.
-    let join_ab = ctx
-        .table_scan(src_a, &schema_a, None)
-        .hash_join(
-            ctx.table_scan(src_b, &schema_b, None),
-            Arc::new([(col_a, col_b)]),
-            boolean(true),
-            JoinType::Inner,
-        );
+    let join_ab = ctx.table_scan(src_a, &schema_a, None).hash_join(
+        ctx.table_scan(src_b, &schema_b, None),
+        Arc::new([(col_a, col_b)]),
+        boolean(true),
+        JoinType::Inner,
+    );
 
     // Second join: (A ⋈ B) ⋈ C with triangle keys (B=C), (A=C), (A=B).
     // The estimator sees build has columns {A=0, B=1} and probe has {C=2}.
@@ -2177,14 +2237,12 @@ fn test_equijoin_mst_non_spanning_edge_disjoint_domain() {
     let col_c = Column(2);
 
     // (A,B) overlaps; (A,C) is disjoint — but both are explicit join conditions.
-    let join_ab = ctx
-        .table_scan(src_a, &schema_a, None)
-        .hash_join(
-            ctx.table_scan(src_b, &schema_b, None),
-            Arc::new([(col_a, col_b)]),
-            boolean(true),
-            JoinType::Inner,
-        );
+    let join_ab = ctx.table_scan(src_a, &schema_a, None).hash_join(
+        ctx.table_scan(src_b, &schema_b, None),
+        Arc::new([(col_a, col_b)]),
+        boolean(true),
+        JoinType::Inner,
+    );
     // Join result with C on both (B=C) and (A=C). The (A,C) pair has disjoint domains.
     let join_abc = join_ab.hash_join(
         ctx.table_scan(src_c, &schema_c, None),
@@ -2233,7 +2291,7 @@ fn test_filter_cross_column_contradiction() {
 
     // A = B AND A > 50 AND B < 30 → contradiction (B < 30 AND B = A AND A > 50)
     let pred = column_ref(Column(0))
-        .eq(column_ref(Column(1)))  // A = B
+        .eq(column_ref(Column(1))) // A = B
         .and(column_ref(Column(0)).gt(int32(50))) // A > 50
         .and(column_ref(Column(1)).lt(int32(30))); // B < 30
     let card = scan.logical_select(pred).cardinality(&ctx);
@@ -2275,7 +2333,7 @@ fn test_filter_cross_column_non_contradiction() {
 
     // A = B AND A > 10 AND B < 50 → [10, 50] is valid, NOT a contradiction.
     let pred = column_ref(Column(0))
-        .eq(column_ref(Column(1)))  // A = B
+        .eq(column_ref(Column(1))) // A = B
         .and(column_ref(Column(0)).gt(int32(10))) // A > 10
         .and(column_ref(Column(1)).lt(int32(50))); // B < 50
     let card = scan.logical_select(pred).cardinality(&ctx);

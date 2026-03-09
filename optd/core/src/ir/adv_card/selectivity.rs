@@ -291,8 +291,7 @@ fn extract_literal_equality(term: &Scalar) -> Option<(Column, f64)> {
     let rhs = binop.rhs();
 
     // col = literal
-    if let (ScalarKind::ColumnRef(col_meta), ScalarKind::Literal(lit_meta)) =
-        (&lhs.kind, &rhs.kind)
+    if let (ScalarKind::ColumnRef(col_meta), ScalarKind::Literal(lit_meta)) = (&lhs.kind, &rhs.kind)
     {
         let lit = Literal::borrow_raw_parts(lit_meta, &rhs.common);
         if let Some(v) = scalar_value_to_f64(lit.value()) {
@@ -300,8 +299,7 @@ fn extract_literal_equality(term: &Scalar) -> Option<(Column, f64)> {
         }
     }
     // literal = col
-    if let (ScalarKind::Literal(lit_meta), ScalarKind::ColumnRef(col_meta)) =
-        (&lhs.kind, &rhs.kind)
+    if let (ScalarKind::Literal(lit_meta), ScalarKind::ColumnRef(col_meta)) = (&lhs.kind, &rhs.kind)
     {
         let lit = Literal::borrow_raw_parts(lit_meta, &lhs.common);
         if let Some(v) = scalar_value_to_f64(lit.value()) {
@@ -1009,22 +1007,22 @@ fn extract_range_bound(term: &Scalar) -> Option<(Column, BinaryOpKind, f64)> {
     let rhs = binop.rhs();
 
     // Try col op literal
-    if let ScalarKind::ColumnRef(col_meta) = &lhs.kind {
-        if let ScalarKind::Literal(lit_meta) = &rhs.kind {
-            let lit = Literal::borrow_raw_parts(lit_meta, &rhs.common);
-            if let Some(v) = scalar_value_to_f64(lit.value()) {
-                return Some((col_meta.column, meta.op_kind, v));
-            }
+    if let ScalarKind::ColumnRef(col_meta) = &lhs.kind
+        && let ScalarKind::Literal(lit_meta) = &rhs.kind
+    {
+        let lit = Literal::borrow_raw_parts(lit_meta, &rhs.common);
+        if let Some(v) = scalar_value_to_f64(lit.value()) {
+            return Some((col_meta.column, meta.op_kind, v));
         }
     }
 
     // Try literal op col → flip operator
-    if let ScalarKind::Literal(lit_meta) = &lhs.kind {
-        if let ScalarKind::ColumnRef(col_meta) = &rhs.kind {
-            let lit = Literal::borrow_raw_parts(lit_meta, &lhs.common);
-            if let Some(v) = scalar_value_to_f64(lit.value()) {
-                return Some((col_meta.column, flip_range_op(meta.op_kind), v));
-            }
+    if let ScalarKind::Literal(lit_meta) = &lhs.kind
+        && let ScalarKind::ColumnRef(col_meta) = &rhs.kind
+    {
+        let lit = Literal::borrow_raw_parts(lit_meta, &lhs.common);
+        if let Some(v) = scalar_value_to_f64(lit.value()) {
+            return Some((col_meta.column, flip_range_op(meta.op_kind), v));
         }
     }
 
@@ -1107,7 +1105,7 @@ fn and_ranges_contradict(terms: &[std::sync::Arc<Scalar>]) -> bool {
 /// 2. Convert each range bound to an interval on the number line:
 ///    - `col < v` / `col <= v` → `[min, v]`
 ///    - `col > v` / `col >= v` → `[v, max]`
-///    where `min` and `max` come from column statistics.
+///      where `min` and `max` come from column statistics.
 /// 3. Sort intervals by lower bound and merge overlapping ones in-place.
 /// 4. If the single merged interval covers `[min, max]`, it's a tautology.
 ///
