@@ -2,10 +2,7 @@ mod from_optd;
 mod into_optd;
 mod utils;
 
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, sync::Arc};
 
 use datafusion::{
     catalog::memory::DataSourceExec,
@@ -16,22 +13,15 @@ use datafusion::{
     datasource::{physical_plan::ParquetSource, source_as_provider},
     error::DataFusionError,
     execution::{SessionState, context::QueryPlanner},
-    logical_expr::{
-        LogicalPlan, PlanType, Statement, StringifiedPlan, TableScan,
-        TableSource,
-    },
+    logical_expr::{LogicalPlan, PlanType, Statement, StringifiedPlan, TableScan, TableSource},
     physical_plan::{
-        ExecutionPlan,
-        displayable,
+        ExecutionPlan, displayable,
         explain::ExplainExec,
-        joins::{
-            HashJoinExec, NestedLoopJoinExec, SortMergeJoinExec,
-        },
+        joins::{HashJoinExec, NestedLoopJoinExec, SortMergeJoinExec},
     },
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
     sql::TableReference,
 };
-use itertools::Itertools;
 use optd_core::{
     error::Result as OptdResult,
     ir::{
@@ -41,7 +31,7 @@ use optd_core::{
         statistics::{ColumnStatistics, TableStatistics},
     },
 };
-use snafu::Snafu;
+use snafu::{ResultExt, Snafu};
 
 use crate::OptdExtensionConfig;
 
@@ -50,7 +40,6 @@ const DEFAULT_ROW_COUNT: usize = 1000;
 #[derive(Default)]
 pub struct OptdQueryPlanner {
     default: DefaultPhysicalPlanner,
-    table_reference_to_source: Mutex<HashMap<TableReference, Arc<dyn TableSource + 'static>>>,
 }
 
 impl std::fmt::Debug for OptdQueryPlanner {
@@ -75,7 +64,7 @@ pub enum OptdDFConnectorError {
     },
 }
 
-pub type OptdDFConnectorResult<T> = std::result::Result<T, OptdDFConnectorError>;
+pub type Result<T> = std::result::Result<T, OptdDFConnectorError>;
 
 pub struct OptdQueryPlannerContext<'a> {
     pub inner: IRContext,
@@ -90,17 +79,6 @@ impl<'a> OptdQueryPlannerContext<'a> {
             session_state,
             table_reference_to_source: HashMap::new(),
         }
-    }
-}
-
-fn tuple_err<T, R>(
-    value: (datafusion::common::Result<T>, datafusion::common::Result<R>),
-) -> datafusion::common::Result<(T, R)> {
-    match value {
-        (Ok(e), Ok(e1)) => Ok((e, e1)),
-        (Err(e), Ok(_)) => Err(e),
-        (Ok(_), Err(e1)) => Err(e1),
-        (Err(e), Err(_)) => Err(e),
     }
 }
 
@@ -200,95 +178,8 @@ impl OptdQueryPlanner {
     }
 }
 
-fn into_optd_schema(df_schema: &DFSchema) -> OptdResult<Arc<optd_core::ir::catalog::Schema>> {
-    let x = df_schema
-        .columns()
-        .iter()
-        .zip(df_schema.as_arrow().fields())
-        .map(|(column, f)| {
-            Ok(Arc::new(Field::new(
-                column.flat_name(),
-                f.data_type().clone(),
-                f.is_nullable(),
-            )))
-        })
-        .collect::<OptdResult<Vec<_>>>()?;
-    Ok(Arc::new(Schema::new(x)))
-}
-
-fn from_optd_schema(
-    schema: &optd_core::ir::catalog::Schema,
-) -> Result<Arc<DFSchema>, DataFusionError> {
-    let mut builder = datafusion::arrow::datatypes::SchemaBuilder::new();
-    let qualifiers = schema
-        .fields()
-        .iter()
-        .map(|f| {
-            let column = datafusion::prelude::Column::from_qualified_name(f.name().clone());
-
-            builder.push(Arc::new(datafusion::arrow::datatypes::Field::new(
-                column.name,
-                f.data_type().clone(),
-                f.is_nullable(),
-            )));
-            column.relation
-        })
-        .collect::<Vec<_>>();
-
-    Ok(Arc::new(DFSchema::from_field_specific_qualified_schema(
-        qualifiers,
-        &Arc::new(builder.finish()),
-    )?))
-}
-
-// Handle the case where the name of a physical column expression does not match the corresponding physical input fields names.
-// Physical column names are derived from the physical schema, whereas physical column expressions are derived from the logical column names.
-//
-// This is a special case that applies only to column expressions. Logical plans may slightly modify column names by appending a suffix (e.g., using ':'),
-// to avoid duplicates—since DFSchemas do not allow duplicate names. For example: `count(Int64(1)):1`.
-fn maybe_fix_physical_column_name(
-    expr: datafusion::common::Result<Arc<dyn datafusion::physical_plan::PhysicalExpr>>,
-    input_physical_schema: &datafusion::arrow::datatypes::SchemaRef,
-) -> datafusion::common::Result<Arc<dyn datafusion::physical_plan::PhysicalExpr>> {
-    use datafusion::common::tree_node::Transformed;
-    use datafusion::physical_plan::expressions::Column;
-    let Ok(expr) = expr else { return expr };
-    expr.transform_down(|node| {
-        if let Some(column) = node.as_any().downcast_ref::<Column>() {
-            let idx = column.index();
-            let physical_field = input_physical_schema.field(idx);
-            let expr_col_name = column.name();
-            let physical_name = physical_field.name();
-
-            if expr_col_name != physical_name {
-                // handle edge cases where the physical_name contains ':'.
-                let colon_count = physical_name.matches(':').count();
-                let mut splits = expr_col_name.match_indices(':');
-                let split_pos = splits.nth(colon_count);
-
-                if let Some((i, _)) = split_pos {
-                    let base_name = &expr_col_name[..i];
-                    if base_name == physical_name {
-                        let updated_column =
-                            datafusion::physical_plan::expressions::Column::new(physical_name, idx);
-                        return Ok(datafusion::common::tree_node::Transformed::yes(Arc::new(
-                            updated_column,
-                        )));
-                    }
-                }
-            }
-
-            // If names already match or fix is not possible, just leave it as it is
-            Ok(Transformed::no(node))
-        } else {
-            Ok(Transformed::no(node))
-        }
-    })
-    .data()
-}
-
 impl OptdQueryPlanner {
-    async fn create_physical_plan_inner_v2(
+    async fn create_physical_plan_inner(
         &self,
         logical_plan: &LogicalPlan,
         session_state: &SessionState,
@@ -311,15 +202,12 @@ impl OptdQueryPlanner {
             _ => (logical_plan, None),
         };
 
-        let res = ctx
+        let optd_logical = ctx
             .try_into_optd_plan(actual_logical_plan)
-            .map_err(|e| DataFusionError::External(e.into()));
-
-        let Ok(optd_logical) = res else {
-            return self
-                .create_physical_plan_default(logical_plan, session_state)
-                .await;
-        };
+            .map_err(|e| match e {
+                OptdDFConnectorError::DataFusionError { source } => source,
+                err => DataFusionError::External(err.into()),
+            })?;
 
         let optd_physical = optd_logical.clone();
 
@@ -589,7 +477,7 @@ impl QueryPlanner for OptdQueryPlanner {
             }
 
             let res = self
-                .create_physical_plan_inner_v2(logical_plan, session_state)
+                .create_physical_plan_inner(logical_plan, session_state)
                 .await;
 
             match res {

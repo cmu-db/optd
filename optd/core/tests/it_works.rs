@@ -5,7 +5,7 @@ use itertools::Itertools;
 use optd_core::{
     cascades::Cascades,
     ir::{
-        Column, DataType, IRContext, Operator,
+        Column, IRContext, Operator,
         builder::*,
         explain::quick_explain,
         operator::join::JoinType,

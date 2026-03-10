@@ -22,13 +22,13 @@ use optd_core::ir::{
 };
 use snafu::{ResultExt, whatever};
 
-use crate::planner::{DataFusionSnafu, OptdDFConnectorResult, OptdQueryPlannerContext, OptdSnafu};
+use crate::planner::{DataFusionSnafu, OptdQueryPlannerContext, OptdSnafu, Result};
 
 impl OptdQueryPlannerContext<'_> {
     pub fn try_into_optd_plan(
         &mut self,
         df_logical_plan: &DFLogicalPlan,
-    ) -> OptdDFConnectorResult<Arc<optd_core::ir::Operator>> {
+    ) -> Result<Arc<optd_core::ir::Operator>> {
         match df_logical_plan {
             DFLogicalPlan::TableScan(table_scan) => self.try_into_optd_logical_get(table_scan),
             DFLogicalPlan::Filter(filter) => self.try_into_optd_logical_select(filter),
@@ -48,14 +48,14 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_into_optd_logical_limit(
         &mut self,
         node: &logical_plan::Limit,
-    ) -> OptdDFConnectorResult<Arc<optd_core::ir::Operator>> {
-        unimplemented!()
+    ) -> Result<Arc<optd_core::ir::Operator>> {
+        whatever!("Conversion into limit not implemented")
     }
 
     pub fn try_into_optd_logical_order_by(
         &mut self,
         node: &logical_plan::Sort,
-    ) -> OptdDFConnectorResult<Arc<optd_core::ir::Operator>> {
+    ) -> Result<Arc<optd_core::ir::Operator>> {
         if node.fetch.is_some() {
             whatever!("Does not handle fetch in sort yet")
         }
@@ -81,7 +81,7 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_into_optd_logical_aggregate(
         &mut self,
         node: &logical_plan::Aggregate,
-    ) -> OptdDFConnectorResult<Arc<optd_core::ir::Operator>> {
+    ) -> Result<Arc<optd_core::ir::Operator>> {
         let input = self.try_into_optd_plan(&node.input)?;
 
         let exprs = node
@@ -100,9 +100,12 @@ impl OptdQueryPlannerContext<'_> {
         let aggrgate_schema = node
             .aggr_expr
             .iter()
-            .map(|e| e.to_field(node.input.schema()).map(|(_, field)| field))
-            .collect::<Result<Vec<_>, _>>()
-            .context(DataFusionSnafu)
+            .map(|e| {
+                e.to_field(node.input.schema())
+                    .map(|(_, field)| field)
+                    .context(DataFusionSnafu)
+            })
+            .collect::<Result<Vec<_>>>()
             .map(Schema::new)?;
 
         let table_index = self
@@ -119,7 +122,7 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_into_optd_logical_project(
         &mut self,
         node: &logical_plan::Projection,
-    ) -> OptdDFConnectorResult<Arc<optd_core::ir::Operator>> {
+    ) -> Result<Arc<optd_core::ir::Operator>> {
         let input = self.try_into_optd_plan(&node.input)?;
 
         // Note: projection create unnamed binding with no table ref.
@@ -141,7 +144,7 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_into_optd_logical_remap(
         &mut self,
         node: &logical_plan::SubqueryAlias,
-    ) -> OptdDFConnectorResult<Arc<optd_core::ir::Operator>> {
+    ) -> Result<Arc<optd_core::ir::Operator>> {
         let input = self.try_into_optd_plan(&node.input)?;
         let table_ref = Self::into_optd_table_ref(&node.alias);
         let table_index = self
@@ -156,7 +159,7 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_into_optd_logical_join(
         &mut self,
         node: &logical_plan::Join,
-    ) -> OptdDFConnectorResult<Arc<optd_core::ir::Operator>> {
+    ) -> Result<Arc<optd_core::ir::Operator>> {
         let left = self.try_into_optd_plan(&node.left)?;
         let right = self.try_into_optd_plan(&node.right)?;
         let join_type = Self::try_into_optd_join_type(node.join_type)?;
@@ -182,7 +185,7 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_into_optd_logical_select(
         &mut self,
         node: &logical_plan::Filter,
-    ) -> OptdDFConnectorResult<Arc<optd_core::ir::Operator>> {
+    ) -> Result<Arc<optd_core::ir::Operator>> {
         let input = self.try_into_optd_plan(node.input.as_ref())?;
         let predicate = self.try_into_optd_scalar_expr(&node.predicate, node.input.schema())?;
 
@@ -193,7 +196,7 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_into_optd_logical_get(
         &mut self,
         node: &logical_plan::TableScan,
-    ) -> OptdDFConnectorResult<Arc<optd_core::ir::Operator>> {
+    ) -> Result<Arc<optd_core::ir::Operator>> {
         if !node.filters.is_empty() {
             whatever!(
                 "do not support filters in TableScan, filters: {:?}",
@@ -231,7 +234,7 @@ impl OptdQueryPlannerContext<'_> {
         &mut self,
         node: &DFExpr,
         input_schema: &DFSchema,
-    ) -> OptdDFConnectorResult<Arc<optd_core::ir::Scalar>> {
+    ) -> Result<Arc<optd_core::ir::Scalar>> {
         match node {
             DFExpr::Column(column) => self.try_into_optd_column_ref(column),
             DFExpr::Literal(literal, _) => self.try_into_optd_literal(literal),
@@ -253,15 +256,12 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_into_optd_column_ref(
         &self,
         column: &datafusion::common::Column,
-    ) -> OptdDFConnectorResult<Arc<Scalar>> {
+    ) -> Result<Arc<Scalar>> {
         let column = self.try_get_optd_column(column.relation.as_ref(), &column.name)?;
         Ok(ColumnRef::new(column).into_scalar())
     }
 
-    pub fn try_into_optd_literal(
-        &self,
-        literal: &DFScalarValue,
-    ) -> OptdDFConnectorResult<Arc<Scalar>> {
+    pub fn try_into_optd_literal(&self, literal: &DFScalarValue) -> Result<Arc<Scalar>> {
         Self::try_into_optd_scalar_value(literal.clone()).map(optd_builder::literal)
     }
 
@@ -269,7 +269,7 @@ impl OptdQueryPlannerContext<'_> {
         &mut self,
         binary_expr: &logical_expr::BinaryExpr,
         input_schema: &DFSchema,
-    ) -> OptdDFConnectorResult<Arc<Scalar>> {
+    ) -> Result<Arc<Scalar>> {
         let op_kind = match &binary_expr.op {
             logical_expr::Operator::Eq => Either::Left(optd_core::ir::scalar::BinaryOpKind::Eq),
             logical_expr::Operator::Plus => Either::Left(optd_core::ir::scalar::BinaryOpKind::Plus),
@@ -312,7 +312,7 @@ impl OptdQueryPlannerContext<'_> {
         &mut self,
         agg_func: &AggregateFunction,
         input_schema: &DFSchema,
-    ) -> OptdDFConnectorResult<Arc<Scalar>> {
+    ) -> Result<Arc<Scalar>> {
         if agg_func.params.distinct {
             whatever!("does not support distinct aggregate")
         }
@@ -363,7 +363,7 @@ impl OptdQueryPlannerContext<'_> {
         &mut self,
         node: &DFCast,
         input_schema: &DFSchema,
-    ) -> OptdDFConnectorResult<Arc<Scalar>> {
+    ) -> Result<Arc<Scalar>> {
         let input = self.try_into_optd_scalar_expr(&node.expr, input_schema)?;
         let cast = Cast::new(node.data_type.clone(), input);
         Ok(cast.into_scalar())
@@ -373,7 +373,7 @@ impl OptdQueryPlannerContext<'_> {
         &mut self,
         node: &DFLike,
         input_schema: &DFSchema,
-    ) -> OptdDFConnectorResult<Arc<Scalar>> {
+    ) -> Result<Arc<Scalar>> {
         let expr = self.try_into_optd_scalar_expr(&node.expr, input_schema)?;
         let pattern = self.try_into_optd_scalar_expr(&node.pattern, input_schema)?;
         let like = Like::new(

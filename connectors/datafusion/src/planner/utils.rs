@@ -9,7 +9,7 @@ use optd_core::ir::{
 };
 use snafu::{OptionExt, ResultExt, whatever};
 
-use crate::planner::{OptdDFConnectorResult, OptdQueryPlannerContext, OptdSnafu};
+use crate::planner::{OptdQueryPlannerContext, OptdSnafu, Result};
 
 impl OptdQueryPlannerContext<'_> {
     pub fn into_optd_table_ref(table_ref: &TableReference) -> TableRef {
@@ -44,7 +44,7 @@ impl OptdQueryPlannerContext<'_> {
         &self,
         table_ref: Option<&TableReference>,
         column_name: &str,
-    ) -> OptdDFConnectorResult<Column> {
+    ) -> Result<Column> {
         let table_ref = table_ref.map(Self::into_optd_table_ref);
         let column = self
             .inner
@@ -54,16 +54,14 @@ impl OptdQueryPlannerContext<'_> {
         Ok(column)
     }
 
-    pub fn try_from_optd_column(&self, column: &Column) -> OptdDFConnectorResult<DFColumn> {
+    pub fn try_from_optd_column(&self, column: &Column) -> Result<DFColumn> {
         let (table_ref, field) = self.inner.get_column_name(column).context(OptdSnafu)?;
         let table_reference = Self::from_optd_table_ref(&table_ref);
         let column = DFColumn::new(Some(table_reference), field.name());
         Ok(column)
     }
 
-    pub fn try_into_optd_scalar_value(
-        value: DFScalarValue,
-    ) -> OptdDFConnectorResult<OptdScalarValue> {
+    pub fn try_into_optd_scalar_value(value: DFScalarValue) -> Result<OptdScalarValue> {
         match value {
             DFScalarValue::Boolean(v) => Ok(OptdScalarValue::Boolean(v)),
             DFScalarValue::Int8(v) => Ok(OptdScalarValue::Int8(v)),
@@ -110,7 +108,7 @@ impl OptdQueryPlannerContext<'_> {
         }
     }
 
-    pub fn try_into_optd_join_type(join_type: DFJoinType) -> OptdDFConnectorResult<OptdJoinType> {
+    pub fn try_into_optd_join_type(join_type: DFJoinType) -> Result<OptdJoinType> {
         match join_type {
             DFJoinType::Inner => Ok(OptdJoinType::Inner),
             DFJoinType::Left => Ok(OptdJoinType::Left),
@@ -118,7 +116,7 @@ impl OptdQueryPlannerContext<'_> {
         }
     }
 
-    pub fn try_from_optd_join_type(join_type: &OptdJoinType) -> OptdDFConnectorResult<DFJoinType> {
+    pub fn try_from_optd_join_type(join_type: &OptdJoinType) -> Result<DFJoinType> {
         match join_type {
             OptdJoinType::Inner => Ok(DFJoinType::Inner),
             OptdJoinType::Left => Ok(DFJoinType::Left),

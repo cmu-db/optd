@@ -8,7 +8,7 @@ use crate::ir::{
         LogicalRemap, PhysicalHashAggregate, PhysicalProject, PhysicalTableScan, join::JoinType,
     },
     properties::{Derive, GetProperty, PropertyMarker},
-    scalar::{ColumnAssign, ColumnRef, List},
+    scalar::{ColumnAssign, List},
 };
 use std::sync::Arc;
 
@@ -103,31 +103,16 @@ impl Derive<OutputColumns> for crate::ir::Operator {
             OperatorKind::LogicalProject(meta) => {
                 let project = LogicalProject::borrow_raw_parts(meta, &self.common);
                 let projections = project.projections().try_borrow::<List>().unwrap();
-                let set = projections
-                    .members()
-                    .iter()
-                    .map(|member| {
-                        if let Ok(column_assign) = member.try_borrow::<ColumnAssign>() {
-                            *column_assign.column()
-                        } else if let Ok(column_ref) = member.try_borrow::<ColumnRef>() {
-                            *column_ref.column()
-                        } else {
-                            unreachable!()
-                        }
-                    })
+                let set = (0..projections.members().len())
+                    .map(|i| Column(*project.table_index(), i))
                     .collect();
                 Arc::new(set)
             }
             OperatorKind::PhysicalProject(meta) => {
                 let project = PhysicalProject::borrow_raw_parts(meta, &self.common);
                 let projections = project.projections().try_borrow::<List>().unwrap();
-                let set = projections
-                    .members()
-                    .iter()
-                    .map(|member| {
-                        let column_assign = member.try_borrow::<ColumnAssign>().unwrap();
-                        *column_assign.column()
-                    })
+                let set = (0..projections.members().len())
+                    .map(|i| Column(*project.table_index(), i))
                     .collect();
                 Arc::new(set)
             }
@@ -163,9 +148,8 @@ impl Derive<OutputColumns> for crate::ir::Operator {
             }
             OperatorKind::LogicalRemap(meta) => {
                 let remap = LogicalRemap::borrow_raw_parts(meta, &self.common);
-                let binder = ctx.binder.read().unwrap();
-                let binding = binder.get_binding(remap.table_index()).unwrap();
-                let set = (0..binding.schema().fields().len())
+                let input_columns = remap.input().output_columns(ctx);
+                let set = (0..input_columns.len())
                     .map(|i| Column(*remap.table_index(), i))
                     .collect();
                 Arc::new(set)

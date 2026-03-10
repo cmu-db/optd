@@ -21,13 +21,13 @@ use optd_core::ir::{
 };
 use snafu::{OptionExt, ResultExt, whatever};
 
-use crate::planner::{DataFusionSnafu, OptdDFConnectorResult, OptdQueryPlannerContext, OptdSnafu};
+use crate::planner::{DataFusionSnafu, Result, OptdQueryPlannerContext, OptdSnafu};
 
 impl OptdQueryPlannerContext<'_> {
     pub fn try_from_optd_plan(
         &mut self,
         optd_plan: &Operator,
-    ) -> OptdDFConnectorResult<DFLogicalPlan> {
+    ) -> Result<DFLogicalPlan> {
         match &optd_plan.kind {
             OperatorKind::LogicalGet(meta) => {
                 let node = LogicalGet::borrow_raw_parts(meta, &optd_plan.common);
@@ -60,7 +60,7 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_from_optd_logical_aggregate(
         &mut self,
         node: LogicalAggregateBorrowed<'_>,
-    ) -> OptdDFConnectorResult<DFLogicalPlan> {
+    ) -> Result<DFLogicalPlan> {
         let input = self.try_from_optd_plan(node.input())?;
 
         let keys = node.keys().borrow::<List>();
@@ -83,7 +83,7 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_from_optd_logical_remap(
         &mut self,
         node: LogicalRemapBorrowed<'_>,
-    ) -> OptdDFConnectorResult<DFLogicalPlan> {
+    ) -> Result<DFLogicalPlan> {
         let input = self.try_from_optd_plan(node.input())?;
         let binder = self.inner.binder.read().unwrap();
         let binding = binder
@@ -106,7 +106,7 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_from_optd_logical_project(
         &mut self,
         node: LogicalProjectBorrowed<'_>,
-    ) -> OptdDFConnectorResult<DFLogicalPlan> {
+    ) -> Result<DFLogicalPlan> {
         let projection_list = node.projections().borrow::<List>();
         let exprs = projection_list
             .members()
@@ -140,7 +140,7 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_from_optd_logical_join(
         &mut self,
         node: LogicalJoinBorrowed<'_>,
-    ) -> OptdDFConnectorResult<DFLogicalPlan> {
+    ) -> Result<DFLogicalPlan> {
         let outer = self.try_from_optd_plan(node.outer())?;
         let inner = self.try_from_optd_plan(node.inner())?;
         let (equi_conds, non_equi_conds) =
@@ -179,7 +179,7 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_from_optd_logical_select(
         &mut self,
         node: LogicalSelectBorrowed<'_>,
-    ) -> OptdDFConnectorResult<DFLogicalPlan> {
+    ) -> Result<DFLogicalPlan> {
         let input = self.try_from_optd_plan(node.input())?;
         let predicate = self.try_from_optd_scalar_expr(node.predicate())?;
         let filter =
@@ -190,7 +190,7 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_from_optd_logical_get(
         &mut self,
         node: LogicalGetBorrowed<'_>,
-    ) -> OptdDFConnectorResult<DFLogicalPlan> {
+    ) -> Result<DFLogicalPlan> {
         let binder = self.inner.binder.read().unwrap();
         let binding = binder
             .get_binding(node.table_index())
@@ -217,7 +217,7 @@ impl OptdQueryPlannerContext<'_> {
 }
 
 impl OptdQueryPlannerContext<'_> {
-    pub fn try_from_optd_scalar_expr(&mut self, expr: &Scalar) -> OptdDFConnectorResult<DFExpr> {
+    pub fn try_from_optd_scalar_expr(&mut self, expr: &Scalar) -> Result<DFExpr> {
         match &expr.kind {
             optd_core::ir::ScalarKind::Literal(meta) => {
                 let node = Literal::borrow_raw_parts(meta, &expr.common);
@@ -257,7 +257,7 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_from_optd_literal(
         &self,
         node: LiteralBorrowed<'_>,
-    ) -> OptdDFConnectorResult<DFExpr> {
+    ) -> Result<DFExpr> {
         let value = Self::from_optd_value(node.value().clone());
         Ok(DFExpr::Literal(value, None))
     }
@@ -265,7 +265,7 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_from_optd_column_ref(
         &self,
         node: ColumnRefBorrowed<'_>,
-    ) -> OptdDFConnectorResult<DFExpr> {
+    ) -> Result<DFExpr> {
         let column = self.try_from_optd_column(node.column())?;
         Ok(DFExpr::Column(column))
     }
@@ -273,7 +273,7 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_from_optd_binary_op(
         &mut self,
         node: BinaryOpBorrowed<'_>,
-    ) -> OptdDFConnectorResult<DFExpr> {
+    ) -> Result<DFExpr> {
         let left = self.try_from_optd_scalar_expr(node.lhs())?;
         let right = self.try_from_optd_scalar_expr(node.rhs())?;
         let op = match node.op_kind() {
@@ -296,7 +296,7 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_from_optd_nary_op(
         &mut self,
         node: NaryOpBorrowed<'_>,
-    ) -> OptdDFConnectorResult<DFExpr> {
+    ) -> Result<DFExpr> {
         let op = match node.op_kind() {
             NaryOpKind::And => logical_expr::Operator::And,
             NaryOpKind::Or => logical_expr::Operator::Or,
@@ -316,13 +316,13 @@ impl OptdQueryPlannerContext<'_> {
         Ok(nary_expr)
     }
 
-    pub fn try_from_optd_cast(&mut self, node: CastBorrowed<'_>) -> OptdDFConnectorResult<DFExpr> {
+    pub fn try_from_optd_cast(&mut self, node: CastBorrowed<'_>) -> Result<DFExpr> {
         let input = self.try_from_optd_scalar_expr(node.expr())?;
         let cast = logical_expr::cast(input, node.data_type().clone());
         Ok(cast)
     }
 
-    pub fn try_from_optd_like(&mut self, node: LikeBorrowed<'_>) -> OptdDFConnectorResult<DFExpr> {
+    pub fn try_from_optd_like(&mut self, node: LikeBorrowed<'_>) -> Result<DFExpr> {
         let input = self.try_from_optd_scalar_expr(node.expr())?;
         let pattern = self.try_from_optd_scalar_expr(node.pattern())?;
         let like = logical_expr::Like::new(
@@ -338,7 +338,7 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_from_optd_function(
         &mut self,
         node: FunctionBorrowed<'_>,
-    ) -> OptdDFConnectorResult<DFExpr> {
+    ) -> Result<DFExpr> {
         let args = node
             .params()
             .iter()
