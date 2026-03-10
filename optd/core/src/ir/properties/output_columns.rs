@@ -86,6 +86,7 @@ impl Derive<OutputColumns> for crate::ir::Operator {
             OperatorKind::PhysicalNLJoin(_)
             | OperatorKind::PhysicalHashJoin(_)
             | OperatorKind::LogicalSelect(_)
+            | OperatorKind::LogicalLimit(_)
             | OperatorKind::PhysicalFilter(_)
             | OperatorKind::LogicalOrderBy(_)
             | OperatorKind::EnforcerSort(_)

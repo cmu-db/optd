@@ -10,7 +10,7 @@ use crate::ir::{
     catalog::{Field, Schema},
     operator::{
         EnforcerSort, LogicalAggregate, LogicalDependentJoin, LogicalGet, LogicalJoin,
-        LogicalOrderBy, LogicalProject, LogicalRemap, LogicalSelect, LogicalSubquery,
+        LogicalLimit, LogicalOrderBy, LogicalProject, LogicalRemap, LogicalSelect, LogicalSubquery,
         PhysicalFilter, PhysicalHashAggregate, PhysicalHashJoin, PhysicalNLJoin, PhysicalProject,
         PhysicalTableScan, join::JoinType,
     },
@@ -64,6 +64,10 @@ impl Derive<OutputSchema> for Operator {
             OperatorKind::LogicalSelect(meta) => {
                 let select = LogicalSelect::borrow_raw_parts(meta, &self.common);
                 select.input().output_schema(ctx)
+            }
+            OperatorKind::LogicalLimit(meta) => {
+                let limit = LogicalLimit::borrow_raw_parts(meta, &self.common);
+                limit.input().output_schema(ctx)
             }
             OperatorKind::LogicalSubquery(meta) => {
                 let subquery = LogicalSubquery::borrow_raw_parts(meta, &self.common);

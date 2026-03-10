@@ -170,6 +170,7 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
             | OperatorKind::LogicalDependentJoin(_)
             | OperatorKind::LogicalProject(_)
             | OperatorKind::LogicalSelect(_)
+            | OperatorKind::LogicalLimit(_)
             | OperatorKind::LogicalOrderBy(_)
             | OperatorKind::LogicalAggregate(_)
             | OperatorKind::LogicalSubquery(_) => {

@@ -1,7 +1,6 @@
 //! Definitions for the catalog interface.
 //! optd uses the catalog interface to get schema information about tables.
 
-
 pub use arrow_schema::Field;
 pub use arrow_schema::Schema;
 pub use arrow_schema::SchemaRef;

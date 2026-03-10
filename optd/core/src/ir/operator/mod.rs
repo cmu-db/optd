@@ -25,6 +25,7 @@ pub use logical::aggregate::*;
 pub use logical::dependent_join::*;
 pub use logical::get::*;
 pub use logical::join::*;
+pub use logical::limit::*;
 pub use logical::order_by::*;
 pub use logical::project::*;
 pub use logical::remap::*;
@@ -58,6 +59,7 @@ pub enum OperatorKind {
     LogicalSelect(LogicalSelectMetadata),
     LogicalProject(LogicalProjectMetadata),
     LogicalAggregate(LogicalAggregateMetadata),
+    LogicalLimit(LogicalLimitMetadata),
     LogicalOrderBy(LogicalOrderByMetadata),
     LogicalRemap(LogicalRemapMetadata),
     LogicalSubquery(LogicalSubqueryMetadata),
@@ -89,6 +91,7 @@ impl OperatorKind {
             LogicalDependentJoin(_) => OperatorCategory::Logical,
             LogicalProject(_) => OperatorCategory::Logical,
             LogicalAggregate(_) => OperatorCategory::Logical,
+            LogicalLimit(_) => OperatorCategory::Logical,
             LogicalOrderBy(_) => OperatorCategory::Logical,
             LogicalRemap(_) => OperatorCategory::Logical,
             LogicalSelect(_) => OperatorCategory::Logical,
@@ -220,6 +223,9 @@ impl Explain for Operator {
             }
             OperatorKind::LogicalSelect(meta) => {
                 LogicalSelect::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            OperatorKind::LogicalLimit(meta) => {
+                LogicalLimit::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             OperatorKind::LogicalOrderBy(meta) => {
                 LogicalOrderBy::borrow_raw_parts(meta, &self.common).explain(ctx, option)

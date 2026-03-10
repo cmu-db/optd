@@ -10,12 +10,12 @@ use datafusion::{
 };
 use itertools::{Either, Itertools};
 use optd_core::ir::{
-    Scalar, builder as optd_builder,
+    Scalar, ScalarValue, builder as optd_builder,
     catalog::Schema,
     convert::{IntoOperator, IntoScalar},
     operator::{
-        LogicalAggregate, LogicalGet, LogicalJoin, LogicalOrderBy, LogicalProject, LogicalRemap,
-        LogicalSelect,
+        LogicalAggregate, LogicalGet, LogicalJoin, LogicalLimit, LogicalOrderBy, LogicalProject,
+        LogicalRemap, LogicalSelect,
     },
     properties::TupleOrderingDirection,
     scalar::{Cast, ColumnRef, Function, Like, List, NaryOp, NaryOpKind},
@@ -49,7 +49,17 @@ impl OptdQueryPlannerContext<'_> {
         &mut self,
         node: &logical_plan::Limit,
     ) -> Result<Arc<optd_core::ir::Operator>> {
-        whatever!("Conversion into limit not implemented")
+        let input = self.try_into_optd_plan(&node.input)?;
+        let skip = match &node.skip {
+            Some(skip) => self.try_into_optd_scalar_expr(skip, node.input.schema())?,
+            None => optd_builder::literal(0_i64),
+        };
+        let fetch = match &node.fetch {
+            Some(fetch) => self.try_into_optd_scalar_expr(fetch, node.input.schema())?,
+            None => optd_builder::literal(ScalarValue::Int64(None)),
+        };
+
+        Ok(LogicalLimit::new(input, skip, fetch).into_operator())
     }
 
     pub fn try_into_optd_logical_order_by(

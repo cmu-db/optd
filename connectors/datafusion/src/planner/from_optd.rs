@@ -9,9 +9,9 @@ use optd_core::ir::{
     Operator, OperatorKind, Scalar,
     operator::{
         LogicalAggregate, LogicalAggregateBorrowed, LogicalGet, LogicalGetBorrowed, LogicalJoin,
-        LogicalJoinBorrowed, LogicalProject, LogicalProjectBorrowed, LogicalRemap,
-        LogicalRemapBorrowed, LogicalSelect, LogicalSelectBorrowed,
-        split_equi_and_non_equi_conditions,
+        LogicalJoinBorrowed, LogicalLimit, LogicalLimitBorrowed, LogicalProject,
+        LogicalProjectBorrowed, LogicalRemap, LogicalRemapBorrowed, LogicalSelect,
+        LogicalSelectBorrowed, split_equi_and_non_equi_conditions,
     },
     scalar::{
         BinaryOp, BinaryOpBorrowed, BinaryOpKind, Cast, CastBorrowed, ColumnRef, ColumnRefBorrowed,
@@ -21,13 +21,10 @@ use optd_core::ir::{
 };
 use snafu::{OptionExt, ResultExt, whatever};
 
-use crate::planner::{DataFusionSnafu, Result, OptdQueryPlannerContext, OptdSnafu};
+use crate::planner::{DataFusionSnafu, OptdQueryPlannerContext, OptdSnafu, Result};
 
 impl OptdQueryPlannerContext<'_> {
-    pub fn try_from_optd_plan(
-        &mut self,
-        optd_plan: &Operator,
-    ) -> Result<DFLogicalPlan> {
+    pub fn try_from_optd_plan(&mut self, optd_plan: &Operator) -> Result<DFLogicalPlan> {
         match &optd_plan.kind {
             OperatorKind::LogicalGet(meta) => {
                 let node = LogicalGet::borrow_raw_parts(meta, &optd_plan.common);
@@ -52,6 +49,10 @@ impl OptdQueryPlannerContext<'_> {
             OperatorKind::LogicalAggregate(meta) => {
                 let node = LogicalAggregate::borrow_raw_parts(meta, &optd_plan.common);
                 self.try_from_optd_logical_aggregate(node)
+            }
+            OperatorKind::LogicalLimit(meta) => {
+                let node = LogicalLimit::borrow_raw_parts(meta, &optd_plan.common);
+                self.try_from_optd_logical_limit(node)
             }
             kind => whatever!("unsupported operator type {kind:?}"),
         }
@@ -187,6 +188,31 @@ impl OptdQueryPlannerContext<'_> {
         Ok(DFLogicalPlan::Filter(filter))
     }
 
+    pub fn try_from_optd_logical_limit(
+        &mut self,
+        node: LogicalLimitBorrowed<'_>,
+    ) -> Result<DFLogicalPlan> {
+        let input = self.try_from_optd_plan(node.input())?;
+        let skip_expr = self.try_from_optd_scalar_expr(node.skip())?;
+        let fetch_expr = self.try_from_optd_scalar_expr(node.fetch())?;
+
+        let skip = match skip_expr {
+            DFExpr::Literal(datafusion::scalar::ScalarValue::Int64(Some(0)), _) => None,
+            DFExpr::Literal(datafusion::scalar::ScalarValue::Int64(None), _) => None,
+            expr => Some(Box::new(expr)),
+        };
+        let fetch = match fetch_expr {
+            DFExpr::Literal(datafusion::scalar::ScalarValue::Int64(None), _) => None,
+            expr => Some(Box::new(expr)),
+        };
+
+        Ok(DFLogicalPlan::Limit(logical_plan::Limit {
+            skip,
+            fetch,
+            input: Arc::new(input),
+        }))
+    }
+
     pub fn try_from_optd_logical_get(
         &mut self,
         node: LogicalGetBorrowed<'_>,
@@ -254,26 +280,17 @@ impl OptdQueryPlannerContext<'_> {
         }
     }
 
-    pub fn try_from_optd_literal(
-        &self,
-        node: LiteralBorrowed<'_>,
-    ) -> Result<DFExpr> {
+    pub fn try_from_optd_literal(&self, node: LiteralBorrowed<'_>) -> Result<DFExpr> {
         let value = Self::from_optd_value(node.value().clone());
         Ok(DFExpr::Literal(value, None))
     }
 
-    pub fn try_from_optd_column_ref(
-        &self,
-        node: ColumnRefBorrowed<'_>,
-    ) -> Result<DFExpr> {
+    pub fn try_from_optd_column_ref(&self, node: ColumnRefBorrowed<'_>) -> Result<DFExpr> {
         let column = self.try_from_optd_column(node.column())?;
         Ok(DFExpr::Column(column))
     }
 
-    pub fn try_from_optd_binary_op(
-        &mut self,
-        node: BinaryOpBorrowed<'_>,
-    ) -> Result<DFExpr> {
+    pub fn try_from_optd_binary_op(&mut self, node: BinaryOpBorrowed<'_>) -> Result<DFExpr> {
         let left = self.try_from_optd_scalar_expr(node.lhs())?;
         let right = self.try_from_optd_scalar_expr(node.rhs())?;
         let op = match node.op_kind() {
@@ -293,10 +310,7 @@ impl OptdQueryPlannerContext<'_> {
         Ok(logical_expr::binary_expr(left, op, right))
     }
 
-    pub fn try_from_optd_nary_op(
-        &mut self,
-        node: NaryOpBorrowed<'_>,
-    ) -> Result<DFExpr> {
+    pub fn try_from_optd_nary_op(&mut self, node: NaryOpBorrowed<'_>) -> Result<DFExpr> {
         let op = match node.op_kind() {
             NaryOpKind::And => logical_expr::Operator::And,
             NaryOpKind::Or => logical_expr::Operator::Or,
@@ -335,10 +349,7 @@ impl OptdQueryPlannerContext<'_> {
         Ok(DFExpr::Like(like))
     }
 
-    pub fn try_from_optd_function(
-        &mut self,
-        node: FunctionBorrowed<'_>,
-    ) -> Result<DFExpr> {
+    pub fn try_from_optd_function(&mut self, node: FunctionBorrowed<'_>) -> Result<DFExpr> {
         let args = node
             .params()
             .iter()

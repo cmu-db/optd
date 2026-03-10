@@ -23,6 +23,7 @@ impl CostModel for MagicCostModel {
             OperatorKind::LogicalJoin(_) => None,
             OperatorKind::LogicalDependentJoin(_) => None,
             OperatorKind::LogicalSelect(_) => None,
+            OperatorKind::LogicalLimit(_) => None,
             OperatorKind::LogicalProject(_) => None,
             OperatorKind::LogicalAggregate(_) => None,
             OperatorKind::LogicalOrderBy(_) => None,

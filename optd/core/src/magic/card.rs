@@ -133,6 +133,18 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
 
                 selectivity * filter.input().cardinality(ctx)
             }
+            OperatorKind::LogicalLimit(meta) => {
+                let limit = LogicalLimit::borrow_raw_parts(meta, &op.common);
+                let input_card = limit.input().cardinality(ctx);
+                let remaining = extract_skip_bound(limit.skip().as_ref())
+                    .map(|skip| (input_card.as_f64() - skip as f64).max(0.0))
+                    .unwrap_or(input_card.as_f64());
+
+                extract_fetch_bound(limit.fetch().as_ref())
+                    .map(|fetch| remaining.min(fetch as f64))
+                    .map(Cardinality::new)
+                    .unwrap_or_else(|| Cardinality::new(remaining))
+            }
             OperatorKind::PhysicalFilter(meta) => {
                 let filter = PhysicalFilter::borrow_raw_parts(meta, &op.common);
                 let selectivity = if let Ok(literal) = filter.predicate().try_borrow::<Literal>() {
@@ -191,5 +203,39 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                 .input()
                 .cardinality(ctx),
         }
+    }
+}
+
+fn extract_skip_bound(skip: &Scalar) -> Option<u64> {
+    let literal = skip.try_borrow::<Literal>().ok()?;
+    match literal.value() {
+        crate::ir::ScalarValue::Int8(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::Int16(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::Int32(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::Int64(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::UInt8(Some(v)) => Some(u64::from(*v)),
+        crate::ir::ScalarValue::UInt16(Some(v)) => Some(u64::from(*v)),
+        crate::ir::ScalarValue::UInt32(Some(v)) => Some(u64::from(*v)),
+        crate::ir::ScalarValue::UInt64(Some(v)) => Some(*v),
+        _ => None,
+    }
+}
+
+fn extract_fetch_bound(fetch: &Scalar) -> Option<u64> {
+    let literal = fetch.try_borrow::<Literal>().ok()?;
+    match literal.value() {
+        crate::ir::ScalarValue::Int8(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::Int16(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::Int32(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::Int64(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::UInt8(Some(v)) => Some(u64::from(*v)),
+        crate::ir::ScalarValue::UInt16(Some(v)) => Some(u64::from(*v)),
+        crate::ir::ScalarValue::UInt32(Some(v)) => Some(u64::from(*v)),
+        crate::ir::ScalarValue::UInt64(Some(v)) => Some(*v),
+        crate::ir::ScalarValue::Int8(None)
+        | crate::ir::ScalarValue::Int16(None)
+        | crate::ir::ScalarValue::Int32(None)
+        | crate::ir::ScalarValue::Int64(None) => None,
+        _ => None,
     }
 }
