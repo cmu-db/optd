@@ -15,7 +15,6 @@ use crate::ir::{
         PhysicalTableScan, join::JoinType,
     },
     properties::{Derive, GetProperty, PropertyMarker},
-    scalar::{ColumnAssign, List},
 };
 use arrow_schema::SchemaRef;
 use itertools::Itertools;
@@ -103,83 +102,19 @@ impl Derive<OutputSchema> for Operator {
             }
             OperatorKind::LogicalProject(meta) => {
                 let project = LogicalProject::borrow_raw_parts(meta, &self.common);
-                let columns = project
-                    .projections()
-                    .borrow::<List>()
-                    .members()
-                    .iter()
-                    .map(|e| {
-                        let column = *e.borrow::<ColumnAssign>().column();
-                        let column_meta = ctx.get_column_meta(&column);
-                        Arc::new(Field::new(
-                            column_meta.name.clone(),
-                            column_meta.data_type.clone(),
-                            true,
-                        ))
-                    })
-                    .collect_vec();
-                Ok(Arc::new(Schema::new(columns)))
+                Ok(ctx.get_binding(project.table_index())?.schema().clone())
             }
             OperatorKind::PhysicalProject(meta) => {
                 let project = PhysicalProject::borrow_raw_parts(meta, &self.common);
-                let columns = project
-                    .projections()
-                    .borrow::<List>()
-                    .members()
-                    .iter()
-                    .map(|e| {
-                        let column = *e.borrow::<ColumnAssign>().column();
-                        let column_meta = ctx.get_column_meta(&column);
-                        Arc::new(Field::new(
-                            column_meta.name.clone(),
-                            column_meta.data_type.clone(),
-                            true,
-                        ))
-                    })
-                    .collect_vec();
-                Ok(Arc::new(Schema::new(columns)))
+                Ok(ctx.get_binding(project.table_index())?.schema().clone())
             }
             OperatorKind::LogicalAggregate(meta) => {
                 let agg = LogicalAggregate::borrow_raw_parts(meta, &self.common);
-                let columns = agg
-                    .exprs()
-                    .borrow::<List>()
-                    .members()
-                    .iter()
-                    .chain(agg.keys().borrow::<List>().members())
-                    .map(|e| {
-                        let column = *e.borrow::<ColumnAssign>().column();
-                        let column_meta = ctx.get_column_meta(&column);
-                        Arc::new(Field::new(
-                            column_meta.name.clone(),
-                            column_meta.data_type.clone(),
-                            true,
-                        ))
-                    })
-                    .collect_vec();
-
-                Ok(Arc::new(Schema::new(columns)))
+                Ok(ctx.get_binding(agg.aggregate_table_index())?.schema().clone())
             }
             OperatorKind::PhysicalHashAggregate(meta) => {
                 let agg = PhysicalHashAggregate::borrow_raw_parts(meta, &self.common);
-                let columns = agg
-                    .keys()
-                    .borrow::<List>()
-                    .members()
-                    .iter()
-                    .chain(agg.exprs().borrow::<List>().members())
-                    .map(|e| {
-                        let column = *e.borrow::<ColumnAssign>().column();
-                        let column_meta = ctx.get_column_meta(&column);
-                        Arc::new(Field::new(
-                            column_meta.name.clone(),
-                            column_meta.data_type.clone(),
-                            true,
-                        ))
-                    })
-                    .collect_vec();
-
-                Ok(Arc::new(Schema::new(columns)))
+                Ok(ctx.get_binding(agg.aggregate_table_index())?.schema().clone())
             }
             OperatorKind::LogicalRemap(meta) => {
                 let remap = LogicalRemap::borrow_raw_parts(meta, &self.common);

@@ -158,11 +158,6 @@ pub fn column_ref(column: Column) -> Arc<Scalar> {
     ColumnRef::new(column).into_scalar()
 }
 
-/// Creates a new assignment of some column to an scalar expression.
-pub fn column_assign(column: Column, expr: Arc<Scalar>) -> Arc<Scalar> {
-    ColumnAssign::new(column, expr).into_scalar()
-}
-
 /// Creates a literal of type boolean.
 pub fn boolean(v: impl Into<Option<bool>>) -> Arc<Scalar> {
     Literal::new(ScalarValue::Boolean(v.into())).into_scalar()

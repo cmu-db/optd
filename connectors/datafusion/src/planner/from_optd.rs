@@ -289,7 +289,6 @@ impl OptdQueryPlannerContext<'_> {
                 let node = ColumnRef::borrow_raw_parts(meta, &expr.common);
                 self.try_from_optd_column_ref(node)
             }
-            optd_core::ir::ScalarKind::ColumnAssign(_meta) => todo!("This should be removed"),
             optd_core::ir::ScalarKind::BinaryOp(meta) => {
                 let node = BinaryOp::borrow_raw_parts(meta, &expr.common);
                 self.try_from_optd_binary_op(node)
