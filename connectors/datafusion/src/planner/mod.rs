@@ -6,10 +6,6 @@ use std::{collections::HashMap, sync::Arc};
 
 use datafusion::{
     catalog::memory::DataSourceExec,
-    common::{
-        DFSchema,
-        tree_node::{TransformedResult, TreeNode},
-    },
     datasource::{physical_plan::ParquetSource, source_as_provider},
     error::DataFusionError,
     execution::{SessionState, context::QueryPlanner},
@@ -26,12 +22,12 @@ use optd_core::{
     error::Result as OptdResult,
     ir::{
         Column, IRContext,
-        catalog::{DataSourceId, Field, Schema},
+        catalog::DataSourceId,
         explain::quick_explain,
         statistics::{ColumnStatistics, TableStatistics},
     },
 };
-use snafu::{ResultExt, Snafu};
+use snafu::Snafu;
 
 use crate::OptdExtensionConfig;
 
@@ -210,7 +206,11 @@ impl OptdQueryPlanner {
             })?;
 
         let optd_physical = optd_logical.clone();
+        let _ = optd_physical.cardinality(&ctx.inner);
+        let _ = optd_physical.output_columns(&ctx.inner);
 
+        let explain_str = quick_explain(&optd_physical, &ctx.inner);
+        println!("{}", explain_str);
         let logical_plan = ctx
             .try_from_optd_plan(&optd_physical)
             .map_err(|e| match e {

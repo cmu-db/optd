@@ -53,6 +53,10 @@ impl Explain for LogicalAggregateBorrowed<'_> {
         option: &crate::ir::explain::ExplainOption,
     ) -> pretty_xmlish::Pretty<'a> {
         let mut fields = Vec::new();
+        fields.push((
+            ".aggregate_table_index",
+            Pretty::display(&self.aggregate_table_index()),
+        ));
         let exprs = self.exprs().explain(ctx, option);
         let keys = self.keys().explain(ctx, option);
         fields.push((".exprs", exprs));

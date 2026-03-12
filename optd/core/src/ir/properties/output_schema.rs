@@ -186,7 +186,7 @@ impl Derive<OutputSchema> for Operator {
                 let binder = ctx.binder.read().unwrap();
                 let binding = binder.get_binding(remap.table_index()).unwrap();
 
-                Ok(binding.schema().inner().clone())
+                Ok(binding.schema().clone())
             }
         }
     }

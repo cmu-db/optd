@@ -55,8 +55,10 @@ impl Rule for LogicalSelectJoinTransposeRule {
         let inner = join.inner().clone();
 
         let used_columns = select.predicate().used_columns();
-        let is_bound_by_outer = used_columns.is_subset(&outer.output_columns(ctx));
-        let is_bound_by_inner = used_columns.is_subset(&inner.output_columns(ctx));
+        let outer_output_columns = outer.output_columns(ctx)?;
+        let inner_output_columns = inner.output_columns(ctx)?;
+        let is_bound_by_outer = used_columns.is_subset(outer_output_columns.as_ref());
+        let is_bound_by_inner = used_columns.is_subset(inner_output_columns.as_ref());
 
         let maybe_transformed = match (is_bound_by_outer, is_bound_by_inner) {
             (false, false) => None,

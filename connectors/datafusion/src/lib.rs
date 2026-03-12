@@ -2,7 +2,6 @@ mod catalog;
 mod extension;
 mod planner;
 mod table;
-mod value;
 
 use std::sync::Arc;
 

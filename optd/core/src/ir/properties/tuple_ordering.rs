@@ -2,6 +2,7 @@
 //! which specifies the ordering of tuples based on specified columns and their
 //! directions (ascending/descending).
 
+use crate::error::Result;
 use crate::ir::operator::*;
 use crate::ir::{Column, Operator, OperatorCategory, OperatorKind};
 use bitvec::{boxed::BitBox, vec::BitVec};
@@ -162,8 +163,8 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
         &self,
         ordering: &TupleOrdering,
         ctx: &crate::ir::context::IRContext,
-    ) -> Option<std::sync::Arc<[TupleOrdering]>> {
-        match &self.kind {
+    ) -> Result<Option<std::sync::Arc<[TupleOrdering]>>> {
+        let satisfied = match &self.kind {
             OperatorKind::Group(_) => None,
             OperatorKind::LogicalGet(_)
             | OperatorKind::LogicalJoin(_)
@@ -177,56 +178,66 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
                 assert_eq!(self.kind.category(), OperatorCategory::Logical);
                 None
             }
-            OperatorKind::EnforcerSort(meta) => {
-                (&meta.tuple_ordering >= ordering).then(|| vec![TupleOrdering::default(); 1].into())
-            }
+            OperatorKind::EnforcerSort(meta) => (&meta.tuple_ordering >= ordering)
+                .then(|| Arc::<[TupleOrdering]>::from(vec![TupleOrdering::default(); 1])),
             OperatorKind::PhysicalTableScan(_) => {
                 // TODO(yuchen): if we can obtain ordering information from catalog, then we can use that.
-                ordering.is_empty().then_some(Arc::new([]))
+                ordering
+                    .is_empty()
+                    .then_some(Arc::<[TupleOrdering]>::from(Vec::new()))
             }
             OperatorKind::PhysicalNLJoin(meta) => {
                 let join = PhysicalNLJoin::borrow_raw_parts(meta, &self.common);
 
-                let output_from_outer = join.outer().output_columns(ctx);
+                let output_from_outer = join.outer().output_columns(ctx)?;
                 ordering
                     .iter_columns()
                     .all(|col| output_from_outer.contains(col))
-                    .then(|| vec![ordering.clone(), TupleOrdering::default()].into())
+                    .then(|| {
+                        Arc::<[TupleOrdering]>::from(vec![
+                            ordering.clone(),
+                            TupleOrdering::default(),
+                        ])
+                    })
             }
             OperatorKind::PhysicalHashJoin(_) => {
                 // Hash join does not maintain tuple ordering.
                 ordering
                     .is_empty()
-                    .then(|| vec![ordering.clone(); 2].into())
+                    .then(|| Arc::<[TupleOrdering]>::from(vec![ordering.clone(); 2]))
             }
             OperatorKind::PhysicalFilter(meta) => {
                 let filter = PhysicalFilter::borrow_raw_parts(meta, &self.common);
-                let output_from_input = filter.input().output_columns(ctx);
+                let output_from_input = filter.input().output_columns(ctx)?;
                 ordering
                     .iter_columns()
                     .all(|col| output_from_input.contains(col))
-                    .then(|| vec![ordering.clone()].into())
+                    .then(|| Arc::<[TupleOrdering]>::from(vec![ordering.clone()]))
             }
             OperatorKind::PhysicalProject(meta) => {
                 let project = PhysicalProject::borrow_raw_parts(meta, &self.common);
-                let output_from_input = project.input().output_columns(ctx);
+                let output_from_input = project.input().output_columns(ctx)?;
                 ordering
                     .iter_columns()
                     .all(|col| output_from_input.contains(col))
-                    .then(|| vec![ordering.clone()].into())
+                    .then(|| Arc::<[TupleOrdering]>::from(vec![ordering.clone()]))
             }
-            OperatorKind::MockScan(meta) => {
-                (&meta.spec.mocked_provided_ordering >= ordering).then_some(Arc::new([]))
-            }
+            OperatorKind::MockScan(meta) => (&meta.spec.mocked_provided_ordering >= ordering)
+                .then_some(Arc::<[TupleOrdering]>::from(Vec::new())),
             OperatorKind::PhysicalHashAggregate(_meta) => {
                 // Hash aggregate does not maintain tuple ordering.
-                ordering.is_empty().then(|| vec![ordering.clone()].into())
+                ordering
+                    .is_empty()
+                    .then(|| Arc::<[TupleOrdering]>::from(vec![ordering.clone()]))
             }
             OperatorKind::LogicalRemap(_) => {
                 // Hash aggregate does not maintain tuple ordering.
-                ordering.is_empty().then(|| vec![ordering.clone()].into())
+                ordering
+                    .is_empty()
+                    .then(|| Arc::<[TupleOrdering]>::from(vec![ordering.clone()]))
             }
-        }
+        };
+        Ok(satisfied)
     }
 }
 
@@ -249,9 +260,12 @@ mod tests {
             (Column(1, 1), TupleOrderingDirection::Desc),
         ]);
 
-        let t1 = ctx.mock_scan(1, vec![0, 1, 2], 100.);
+        let t1 = ctx.mock_scan(1, 3, 100.);
         let exact_enforcer = EnforcerSort::new(required.clone(), t1.clone()).into_operator();
-        let res = exact_enforcer.try_satisfy(&required, &ctx).unwrap();
+        let res = exact_enforcer
+            .try_satisfy(&required, &ctx)
+            .unwrap()
+            .unwrap();
         assert_eq!(res.len(), 1);
         assert_eq!(res[0], TupleOrdering::default());
 
@@ -261,22 +275,25 @@ mod tests {
             (Column(1, 2), TupleOrderingDirection::Asc),
         ]);
         let stronger_enforcer = EnforcerSort::new(stronger_provided, t1.clone()).into_operator();
-        let res = stronger_enforcer.try_satisfy(&required, &ctx).unwrap();
+        let res = stronger_enforcer
+            .try_satisfy(&required, &ctx)
+            .unwrap()
+            .unwrap();
         assert_eq!(res.len(), 1);
         assert_eq!(res[0], TupleOrdering::default());
 
         let weaker_provided =
             TupleOrdering::from_iter([(Column(1, 0), TupleOrderingDirection::Asc)]);
         let weaker_enforcer = EnforcerSort::new(weaker_provided, t1.clone()).into_operator();
-        assert_eq!(None, weaker_enforcer.try_satisfy(&required, &ctx));
+        assert_eq!(None, weaker_enforcer.try_satisfy(&required, &ctx).unwrap());
     }
 
     #[test]
     fn physical_nljoin_try_satisfy_ordering() {
         let ctx = IRContext::with_empty_magic();
 
-        let m1 = ctx.mock_scan(1, vec![0, 1], 100.);
-        let m2 = ctx.mock_scan(1, vec![2, 3], 100.);
+        let m1 = ctx.mock_scan(1, 2, 100.);
+        let m2 = ctx.mock_scan(2, 2, 100.);
         let join_cond = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();
         let join1 = PhysicalNLJoin::new(JoinType::Inner, m1.clone(), m2.clone(), join_cond.clone())
             .into_operator();
@@ -284,11 +301,11 @@ mod tests {
 
         // Both satisfy the empty ordering.
         let empty = TupleOrdering::default();
-        let res = join1.try_satisfy(&empty, &ctx).unwrap();
+        let res = join1.try_satisfy(&empty, &ctx).unwrap().unwrap();
         assert_eq!(res[0], empty);
         assert_eq!(res[1], empty);
 
-        let res = join1.try_satisfy(&empty, &ctx).unwrap();
+        let res = join1.try_satisfy(&empty, &ctx).unwrap().unwrap();
         assert_eq!(res[0], empty);
         assert_eq!(res[1], empty);
 
@@ -298,29 +315,35 @@ mod tests {
         ]);
 
         // Only satisifies when t1 is the outer side.
-        let res = join1.try_satisfy(&ordering_from_t1, &ctx).unwrap();
+        let res = join1.try_satisfy(&ordering_from_t1, &ctx).unwrap().unwrap();
         assert_eq!(res[0], ordering_from_t1);
         assert_eq!(res[1], empty);
 
-        assert_eq!(None, join2.try_satisfy(&ordering_from_t1, &ctx));
+        assert_eq!(None, join2.try_satisfy(&ordering_from_t1, &ctx).unwrap());
 
         // Both should not satisfy.
         let columns_from_both_sides = TupleOrdering::from_iter([
             (Column(1, 0), TupleOrderingDirection::Asc),
-            (Column(2, 2), TupleOrderingDirection::Desc),
+            (Column(2, 0), TupleOrderingDirection::Desc),
         ]);
-        assert_eq!(None, join1.try_satisfy(&columns_from_both_sides, &ctx));
-        assert_eq!(None, join2.try_satisfy(&columns_from_both_sides, &ctx));
+        assert_eq!(
+            None,
+            join1.try_satisfy(&columns_from_both_sides, &ctx).unwrap()
+        );
+        assert_eq!(
+            None,
+            join2.try_satisfy(&columns_from_both_sides, &ctx).unwrap()
+        );
     }
 
     #[test]
     fn physical_table_scan_try_satisfy_ordering() {
         let ctx = IRContext::with_course_tables();
-        let t1 = ctx.mock_scan(1, vec![0, 1], 10.);
+        let t1 = ctx.mock_scan(1, 2, 10.);
 
         // Satisfies empty ordering
         let ordering = TupleOrdering::default();
-        let res = t1.try_satisfy(&ordering, &ctx).unwrap();
+        let res = t1.try_satisfy(&ordering, &ctx).unwrap().unwrap();
         assert_eq!(res.len(), 0);
 
         // Does not satisfies the ordering [0, 1]. (for detecting regressions).
@@ -328,6 +351,6 @@ mod tests {
             (Column(1, 0), TupleOrderingDirection::Asc),
             (Column(1, 1), TupleOrderingDirection::Asc),
         ]);
-        assert_eq!(None, t1.try_satisfy(&ordering, &ctx));
+        assert_eq!(None, t1.try_satisfy(&ordering, &ctx).unwrap());
     }
 }

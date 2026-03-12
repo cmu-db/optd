@@ -20,7 +20,9 @@ define_node!(
     /// - keys: The grouping keys.
     PhysicalHashAggregate, PhysicalHashAggregateBorrowed {
         properties: OperatorProperties,
-        metadata: PhysicalHashAggregateMetadata {},
+        metadata: PhysicalHashAggregateMetadata {
+            aggregate_table_index: i64,
+        },
         inputs: {
             operators: [input],
             scalars: [exprs, keys],
@@ -30,9 +32,16 @@ define_node!(
 impl_operator_conversion!(PhysicalHashAggregate, PhysicalHashAggregateBorrowed);
 
 impl PhysicalHashAggregate {
-    pub fn new(input: Arc<Operator>, exprs: Arc<Scalar>, keys: Arc<Scalar>) -> Self {
+    pub fn new(
+        aggregate_table_index: i64,
+        input: Arc<Operator>,
+        exprs: Arc<Scalar>,
+        keys: Arc<Scalar>,
+    ) -> Self {
         Self {
-            meta: PhysicalHashAggregateMetadata {},
+            meta: PhysicalHashAggregateMetadata {
+                aggregate_table_index,
+            },
             common: IRCommon::new(Arc::new([input]), Arc::new([exprs, keys])),
         }
     }
@@ -47,6 +56,10 @@ impl Explain for PhysicalHashAggregateBorrowed<'_> {
         let mut fields = Vec::new();
         let exprs = self.exprs().explain(ctx, option);
         let keys = self.keys().explain(ctx, option);
+        fields.push((
+            ".aggregate_table_index",
+            Pretty::display(&self.aggregate_table_index()),
+        ));
         fields.push((".exprs", exprs));
         fields.push((".keys", keys));
         fields.extend(self.common.explain_operator_properties(ctx, option));

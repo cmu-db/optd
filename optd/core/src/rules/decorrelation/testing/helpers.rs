@@ -1,9 +1,10 @@
+use crate::error::Result;
 use crate::ir::builder::{column_assign, column_ref};
 use crate::ir::convert::IntoScalar;
 use crate::ir::explain::quick_explain;
 use crate::ir::operator::{
     LogicalAggregate, LogicalDependentJoin, LogicalJoin, LogicalOrderBy, LogicalProject,
-    LogicalRemap, LogicalSelect, MockScan, Operator, OperatorKind, join::JoinType,
+    LogicalSelect, MockScan, Operator, OperatorKind, join::JoinType,
 };
 use crate::ir::scalar::{
     BinaryOp, BinaryOpKind, ColumnAssign, ColumnRef, List, Literal, NaryOp, NaryOpKind, ScalarKind,
@@ -45,7 +46,7 @@ pub(super) fn create_domain_with_aliases(
         .iter()
         .map(|c| column_assign(*c, column_ref(*c)))
         .collect();
-    let domain_distinct = domain_project.logical_aggregate(std::iter::empty(), group_keys);
+    let domain_distinct = domain_project.logical_aggregate(0, std::iter::empty(), group_keys);
 
     let remap_assigns: Vec<_> = from_cols
         .iter()
@@ -266,15 +267,15 @@ fn combine_rows(left: &Row, right: &Row) -> Row {
 }
 
 /// Interpret a logical plan over mock data and return produced rows.
-fn eval_op(op: &Arc<Operator>, env: &[Row], data: &MockData, ctx: &IRContext) -> Vec<Row> {
-    match &op.kind {
+fn eval_op(op: &Arc<Operator>, env: &[Row], data: &MockData, ctx: &IRContext) -> Result<Vec<Row>> {
+    let rows = match &op.kind {
         OperatorKind::MockScan(meta) => {
             let scan = MockScan::borrow_raw_parts(meta, &op.common);
             data.get(scan.table_index()).cloned().unwrap_or_default()
         }
         OperatorKind::LogicalSelect(meta) => {
             let sel = LogicalSelect::borrow_raw_parts(meta, &op.common);
-            eval_op(sel.input(), env, data, ctx)
+            eval_op(sel.input(), env, data, ctx)?
                 .into_iter()
                 .filter(|r| matches!(as_bool(eval_scalar(sel.predicate(), r, env)), Some(true)))
                 .collect()
@@ -287,7 +288,7 @@ fn eval_op(op: &Arc<Operator>, env: &[Row], data: &MockData, ctx: &IRContext) ->
                 .unwrap()
                 .members()
                 .to_vec();
-            eval_op(proj.input(), env, data, ctx)
+            eval_op(proj.input(), env, data, ctx)?
                 .into_iter()
                 .map(|r| {
                     let mut out = Row::new();
@@ -333,10 +334,10 @@ fn eval_op(op: &Arc<Operator>, env: &[Row], data: &MockData, ctx: &IRContext) ->
         }
         OperatorKind::LogicalAggregate(meta) => {
             let agg = LogicalAggregate::borrow_raw_parts(meta, &op.common);
-            let input_rows = eval_op(agg.input(), env, data, ctx);
+            let input_rows = eval_op(agg.input(), env, data, ctx)?;
             let key_members = agg.keys().try_borrow::<List>().unwrap().members().to_vec();
             if key_members.is_empty() {
-                return vec![Row::new()];
+                return Ok(vec![Row::new()]);
             }
             let mut groups: BTreeMap<Vec<(Column, Option<i32>)>, Row> = BTreeMap::new();
             for r in input_rows {
@@ -360,12 +361,12 @@ fn eval_op(op: &Arc<Operator>, env: &[Row], data: &MockData, ctx: &IRContext) ->
         }
         OperatorKind::LogicalOrderBy(meta) => {
             let order = LogicalOrderBy::borrow_raw_parts(meta, &op.common);
-            eval_op(order.input(), env, data, ctx)
+            eval_op(order.input(), env, data, ctx)?
         }
         OperatorKind::LogicalJoin(meta) => {
             let join = LogicalJoin::borrow_raw_parts(meta, &op.common);
-            let left_rows = eval_op(join.outer(), env, data, ctx);
-            let right_rows = eval_op(join.inner(), env, data, ctx);
+            let left_rows = eval_op(join.outer(), env, data, ctx)?;
+            let right_rows = eval_op(join.inner(), env, data, ctx)?;
             match join.join_type() {
                 JoinType::Inner => {
                     let mut out = Vec::new();
@@ -384,7 +385,7 @@ fn eval_op(op: &Arc<Operator>, env: &[Row], data: &MockData, ctx: &IRContext) ->
                 }
                 JoinType::Left => {
                     let right_cols: Vec<Column> =
-                        join.inner().output_columns(ctx).iter().copied().collect();
+                        join.inner().output_columns(ctx)?.iter().copied().collect();
                     let mut out = Vec::new();
                     for l in &left_rows {
                         let mut matched = false;
@@ -414,12 +415,12 @@ fn eval_op(op: &Arc<Operator>, env: &[Row], data: &MockData, ctx: &IRContext) ->
         OperatorKind::LogicalDependentJoin(meta) => {
             let dep = LogicalDependentJoin::borrow_raw_parts(meta, &op.common);
             assert_eq!(*dep.join_type(), JoinType::Inner);
-            let outer_rows = eval_op(dep.outer(), env, data, ctx);
+            let outer_rows = eval_op(dep.outer(), env, data, ctx)?;
             let mut out = Vec::new();
             for l in &outer_rows {
                 let mut new_env = env.to_vec();
                 new_env.push(l.clone());
-                let inner_rows = eval_op(dep.inner(), &new_env, data, ctx);
+                let inner_rows = eval_op(dep.inner(), &new_env, data, ctx)?;
                 for r in &inner_rows {
                     let row = combine_rows(l, r);
                     if matches!(as_bool(eval_scalar(dep.join_cond(), &row, env)), Some(true)) {
@@ -430,7 +431,8 @@ fn eval_op(op: &Arc<Operator>, env: &[Row], data: &MockData, ctx: &IRContext) ->
             out
         }
         _ => panic!("unsupported operator in semantic test evaluator"),
-    }
+    };
+    Ok(rows)
 }
 
 /// Convert rows into a multiset keyed by selected output columns.
@@ -457,16 +459,16 @@ fn assert_executed_equivalence(
     num_rows_low: usize,
     num_rows_high: usize,
     num_iterations: usize,
-) {
+) -> Result<()> {
     let mut schemas = BTreeMap::new();
     collect_mock_schemas(&input, &mut schemas);
     collect_mock_schemas(&expected, &mut schemas);
-    let mut compare_cols: Vec<Column> = input.output_columns(ctx).iter().copied().collect();
+    let mut compare_cols: Vec<Column> = input.output_columns(ctx)?.iter().copied().collect();
     compare_cols.sort_by_key(|c| c.0);
     for seed in 0..num_iterations {
         let data = generate_mock_data(&schemas, seed as u64, num_rows_low, num_rows_high);
-        let in_rows = rows_to_bag(eval_op(&input, &[], &data, ctx), &compare_cols);
-        let ex_rows = rows_to_bag(eval_op(&expected, &[], &data, ctx), &compare_cols);
+        let in_rows = rows_to_bag(eval_op(&input, &[], &data, ctx)?, &compare_cols);
+        let ex_rows = rows_to_bag(eval_op(&expected, &[], &data, ctx)?, &compare_cols);
         if in_rows != ex_rows {
             panic!(
                 "semantic mismatch for seed {seed}\nmock data: {data:?}\ninput plan:\n{}\nexpected plan:\n{}\ninput rows: {in_rows:?}\nexpected rows: {ex_rows:?}",
@@ -475,13 +477,18 @@ fn assert_executed_equivalence(
             );
         }
     }
+    Ok(())
 }
 
 // --- Helper functions to test the rule ---
 
 /// Applies the unnesting rule and asserts the result matches expected.
-pub(super) fn assert_unnesting(ctx: &IRContext, input: Arc<Operator>, expected: Arc<Operator>) {
-    let res = UnnestingRule::new().apply(input.clone(), &ctx);
+pub(super) fn assert_unnesting(
+    ctx: &IRContext,
+    input: Arc<Operator>,
+    expected: Arc<Operator>,
+) -> Result<()> {
+    let res = UnnestingRule::new().apply(input.clone(), &ctx)?;
     if res != expected {
         panic!(
             "Unnested plan does not match expected plan\n\nactual:\n{}\n\nexpected:\n{}",
@@ -491,5 +498,5 @@ pub(super) fn assert_unnesting(ctx: &IRContext, input: Arc<Operator>, expected: 
     }
 
     // We execute tests on these plans with tables of size 8-12, 32 times each
-    assert_executed_equivalence(ctx, input, expected, 8, 12, 32);
+    assert_executed_equivalence(ctx, input, expected, 8, 12, 32)
 }

@@ -57,11 +57,12 @@ impl Rule for LogicalJoinInnerAssocRule {
         let a = join_lower.outer().clone();
         let b = join_lower.inner().clone();
         let c = join_upper.inner().clone();
+        let join_input_columns = b.output_columns(ctx)?.as_ref() | c.output_columns(ctx)?.as_ref();
 
         if !join_upper
             .join_cond()
             .used_columns()
-            .is_subset(&(&*b.output_columns(ctx) | &*c.output_columns(ctx)))
+            .is_subset(&join_input_columns)
         {
             return Ok(vec![]);
         }

@@ -1,8 +1,12 @@
 //! The builder module provides helper functions to construct IR nodes such as
 //! operators and scalar expressions in a more ergonomic way.
 
+use arrow_schema::Field;
+use itertools::Itertools;
+
 use crate::ir::{
     Column, DataType, Group, GroupId, IRContext, Operator, Scalar, ScalarValue,
+    binder::Binding,
     catalog::Schema,
     convert::{IntoOperator, IntoScalar},
     operator::{
@@ -12,6 +16,7 @@ use crate::ir::{
     },
     properties::OperatorProperties,
     scalar::*,
+    table_ref::TableRef,
 };
 use std::sync::Arc;
 
@@ -21,10 +26,22 @@ pub fn group(group_id: GroupId, properties: Arc<OperatorProperties>) -> Arc<Oper
 
 impl IRContext {
     /// Creates a mock scan operator.
-    pub fn mock_scan(&self, table_index: i64, columns: Vec<usize>, card: f64) -> Arc<Operator> {
+    pub fn mock_scan(&self, table_index: i64, num_columns: usize, card: f64) -> Arc<Operator> {
         use crate::ir::operator::{MockScan, MockSpec};
 
-        let spec = MockSpec::new_test_only(table_index, columns, card);
+        let binding = Binding::new(
+            TableRef::bare(format!("mock#{table_index}")),
+            Arc::new(Schema::new(
+                (0..num_columns)
+                    .map(|i| Arc::new(Field::new(format!("col{i}"), DataType::Int32, true)))
+                    .collect_vec(),
+            )),
+            table_index,
+        );
+        let mut guard = self.binder.write().unwrap();
+
+        guard.bindings.insert(table_index, binding);
+        let spec = MockSpec::new_test_only(table_index, num_columns, card);
         MockScan::with_mock_spec(table_index, spec).into_operator()
     }
 
@@ -118,18 +135,21 @@ impl Operator {
 
     pub fn logical_aggregate(
         self: Arc<Self>,
+        aggregate_table_index: i64,
         exprs: impl IntoIterator<Item = Arc<Scalar>>,
         keys: impl IntoIterator<Item = Arc<Scalar>>,
     ) -> Arc<Self> {
-        LogicalAggregate::new(0, self, list(exprs), list(keys)).into_operator()
+        LogicalAggregate::new(aggregate_table_index, self, list(exprs), list(keys)).into_operator()
     }
 
     pub fn hash_aggregate(
         self: Arc<Self>,
+        aggregate_table_index: i64,
         exprs: impl IntoIterator<Item = Arc<Scalar>>,
         keys: impl IntoIterator<Item = Arc<Scalar>>,
     ) -> Arc<Self> {
-        PhysicalHashAggregate::new(self, list(exprs), list(keys)).into_operator()
+        PhysicalHashAggregate::new(aggregate_table_index, self, list(exprs), list(keys))
+            .into_operator()
     }
 }
 

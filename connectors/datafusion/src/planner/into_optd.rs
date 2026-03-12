@@ -133,6 +133,7 @@ impl OptdQueryPlannerContext<'_> {
         &mut self,
         node: &logical_plan::Projection,
     ) -> Result<Arc<optd_core::ir::Operator>> {
+        self.inner.binder_begin_scope();
         let input = self.try_into_optd_plan(&node.input)?;
 
         // Note: projection create unnamed binding with no table ref.
@@ -148,6 +149,7 @@ impl OptdQueryPlannerContext<'_> {
             .try_collect()
             .map(List::new)?;
         let project = LogicalProject::new(table_index, input, projections.into_scalar());
+        self.inner.binder_end_scope();
         Ok(project.into_operator())
     }
 
@@ -155,6 +157,7 @@ impl OptdQueryPlannerContext<'_> {
         &mut self,
         node: &logical_plan::SubqueryAlias,
     ) -> Result<Arc<optd_core::ir::Operator>> {
+        self.inner.binder_begin_scope();
         let input = self.try_into_optd_plan(&node.input)?;
         let table_ref = Self::into_optd_table_ref(&node.alias);
         let table_index = self
@@ -163,6 +166,7 @@ impl OptdQueryPlannerContext<'_> {
             .context(OptdSnafu)?;
 
         let remap = LogicalRemap::new(table_index, input);
+        self.inner.binder_end_scope();
         Ok(remap.into_operator())
     }
 
@@ -212,10 +216,6 @@ impl OptdQueryPlannerContext<'_> {
                 "do not support filters in TableScan, filters: {:?}",
                 node.filters
             );
-        }
-
-        if node.fetch.is_some() {
-            whatever!("do not support fetch in TableScan, fetch: {:?}", node.fetch);
         }
 
         self.table_reference_to_source
@@ -339,7 +339,7 @@ impl OptdQueryPlannerContext<'_> {
             whatever!("does not support order by in aggregate")
         }
 
-        if agg_func.params.null_treatment.is_none() {
+        if agg_func.params.null_treatment.is_some() {
             whatever!("does not support special null treatment in aggregate")
         }
 

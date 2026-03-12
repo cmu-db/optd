@@ -30,8 +30,9 @@ impl crate::ir::properties::TrySatisfy<Arc<Required>> for Operator {
         &self,
         property: &Arc<Required>,
         ctx: &IRContext,
-    ) -> Option<std::sync::Arc<[Arc<Required>]>> {
-        self.try_satisfy(&property.tuple_ordering, ctx)
+    ) -> crate::error::Result<Option<std::sync::Arc<[Arc<Required>]>>> {
+        Ok(self
+            .try_satisfy(&property.tuple_ordering, ctx)?
             .map(|inputs_required| {
                 inputs_required
                     .iter()
@@ -41,6 +42,6 @@ impl crate::ir::properties::TrySatisfy<Arc<Required>> for Operator {
                         })
                     })
                     .collect()
-            })
+            }))
     }
 }

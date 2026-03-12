@@ -278,7 +278,7 @@ impl MemoTable {
 
     fn infer_properties(&self, operator: Arc<Operator>) {
         operator.get_property::<Cardinality>(&self.ctx);
-        operator.get_property::<OutputColumns>(&self.ctx);
+        let _ = operator.get_property::<OutputColumns>(&self.ctx);
     }
 
     /// Inserts a scalar into the memo table's scalar deduplication map.
@@ -680,14 +680,14 @@ mod tests {
     fn insert_new_operator() {
         let ctx = IRContext::with_empty_magic();
         let mut memo = MemoTable::new(ctx.clone());
-        let join = ctx.mock_scan(1, vec![1], 0.).logical_join(
-            ctx.mock_scan(2, vec![2], 0.),
+        let join = ctx.mock_scan(1, 1, 0.).logical_join(
+            ctx.mock_scan(2, 1, 0.),
             boolean(true),
             JoinType::Inner,
         );
 
-        let join_dup = ctx.mock_scan(1, vec![1], 0.).logical_join(
-            ctx.mock_scan(2, vec![2], 0.),
+        let join_dup = ctx.mock_scan(1, 1, 0.).logical_join(
+            ctx.mock_scan(2, 1, 0.),
             boolean(true),
             JoinType::Inner,
         );
@@ -703,15 +703,15 @@ mod tests {
     fn insert_operator_into_group() {
         let ctx = IRContext::with_empty_magic();
         let mut memo = MemoTable::new(ctx.clone());
-        let join = ctx.mock_scan(1, vec![1], 0.).logical_join(
-            ctx.mock_scan(2, vec![2], 0.),
+        let join = ctx.mock_scan(1, 1, 0.).logical_join(
+            ctx.mock_scan(2, 1, 0.),
             boolean(true),
             JoinType::Inner,
         );
         let group_id = memo.insert_new_operator(join).unwrap();
 
-        let join_commuted = ctx.mock_scan(2, vec![2], 0.).logical_join(
-            ctx.mock_scan(1, vec![1], 0.),
+        let join_commuted = ctx.mock_scan(2, 1, 0.).logical_join(
+            ctx.mock_scan(1, 1, 0.),
             boolean(true),
             JoinType::Inner,
         );
@@ -730,8 +730,8 @@ mod tests {
         let ctx = IRContext::with_empty_magic();
         let mut memo = MemoTable::new(ctx.clone());
 
-        let m1 = ctx.mock_scan(1, vec![1], 0.);
-        let m1_alias = ctx.mock_scan(2, vec![1], 0.);
+        let m1 = ctx.mock_scan(1, 1, 0.);
+        let m1_alias = ctx.mock_scan(2, 1, 0.);
 
         let g1 = memo
             .insert_new_operator(m1.clone().logical_select(boolean(true)))
@@ -761,9 +761,9 @@ mod tests {
         let ctx = IRContext::with_empty_magic();
         let mut memo = MemoTable::new(ctx.clone());
 
-        let m1 = ctx.mock_scan(1, vec![1], 0.);
+        let m1 = ctx.mock_scan(1, 1, 0.);
         trace!("\n{}", quick_explain(&m1, &memo.ctx));
-        let m1_alias = ctx.mock_scan(2, vec![1], 0.);
+        let m1_alias = ctx.mock_scan(2, 1, 0.);
 
         let g1 = memo
             .insert_new_operator(
@@ -802,8 +802,8 @@ mod tests {
         let ctx = IRContext::with_empty_magic();
         let mut memo = MemoTable::new(ctx.clone());
 
-        let m1 = ctx.mock_scan(1, vec![1], 0.);
-        let m1_alias = ctx.mock_scan(2, vec![1], 0.);
+        let m1 = ctx.mock_scan(1, 1, 0.);
+        let m1_alias = ctx.mock_scan(2, 1, 0.);
         memo.insert_new_operator(
             m1.clone()
                 .logical_select(boolean(true))

@@ -1,8 +1,12 @@
 use std::{sync::Arc, vec};
 
 use datafusion::{
+    common::DFSchema,
     execution::FunctionRegistry,
-    logical_expr::{self, Expr as DFExpr, LogicalPlan as DFLogicalPlan, logical_plan},
+    logical_expr::{
+        self, Expr as DFExpr, LogicalPlan as DFLogicalPlan, logical_plan, projection_schema,
+        utils::{enumerate_grouping_sets, exprlist_to_fields, grouping_set_to_exprlist},
+    },
 };
 use itertools::Itertools;
 use optd_core::ir::{
@@ -58,6 +62,57 @@ impl OptdQueryPlannerContext<'_> {
         }
     }
 
+    fn try_new_df_projection(
+        &self,
+        table_index: &i64,
+        exprs: Vec<DFExpr>,
+        input: Arc<DFLogicalPlan>,
+    ) -> Result<logical_expr::Projection> {
+        let binding = self.inner.get_binding(table_index).context(OptdSnafu)?;
+        let table_ref = binding.table_ref();
+        let schema = projection_schema(&input, &exprs).context(DataFusionSnafu)?;
+        let alias = Self::from_optd_table_ref(table_ref);
+        let schema = schema.as_ref().clone().replace_qualifier(alias);
+        logical_expr::Projection::try_new_with_schema(exprs, input, Arc::new(schema))
+            .context(DataFusionSnafu)
+    }
+
+    fn try_new_df_aggregate(
+        &self,
+        aggregate_table_index: &i64,
+        input: Arc<DFLogicalPlan>,
+        group_expr: Vec<DFExpr>,
+        aggr_expr: Vec<DFExpr>,
+    ) -> Result<logical_expr::Aggregate> {
+        let group_expr = enumerate_grouping_sets(group_expr).context(DataFusionSnafu)?;
+        let grouping_expr: Vec<&DFExpr> =
+            grouping_set_to_exprlist(group_expr.as_slice()).context(DataFusionSnafu)?;
+
+        let mut qualified_fields =
+            exprlist_to_fields(grouping_expr, &input).context(DataFusionSnafu)?;
+
+        let binding = self
+            .inner
+            .get_binding(aggregate_table_index)
+            .context(OptdSnafu)?;
+        let table_ref = binding.table_ref();
+
+        let alias = Self::from_optd_table_ref(table_ref);
+        qualified_fields.extend(
+            exprlist_to_fields(aggr_expr.as_slice(), &input)
+                .context(DataFusionSnafu)?
+                .into_iter()
+                .map(|(_, field)| (Some(alias.clone()), field)),
+        );
+
+        let schema =
+            DFSchema::new_with_metadata(qualified_fields, input.schema().metadata().clone())
+                .context(DataFusionSnafu)?;
+
+        logical_expr::Aggregate::try_new_with_schema(input, group_expr, aggr_expr, Arc::new(schema))
+            .context(DataFusionSnafu)
+    }
+
     pub fn try_from_optd_logical_aggregate(
         &mut self,
         node: LogicalAggregateBorrowed<'_>,
@@ -76,9 +131,15 @@ impl OptdQueryPlannerContext<'_> {
             .iter()
             .map(|e| self.try_from_optd_scalar_expr(e))
             .try_collect()?;
-        let aggregate = logical_plan::Aggregate::try_new(Arc::new(input), group_expr, aggr_expr)
-            .context(DataFusionSnafu)?;
 
+        let aggregate = self.try_new_df_aggregate(
+            node.aggregate_table_index(),
+            Arc::new(input),
+            group_expr,
+            aggr_expr,
+        )?;
+
+        println!("Constructed Aggregate");
         Ok(DFLogicalPlan::Aggregate(aggregate))
     }
     pub fn try_from_optd_logical_remap(
@@ -90,11 +151,7 @@ impl OptdQueryPlannerContext<'_> {
         let binding = binder
             .get_binding(node.table_index())
             .whatever_context("binding not found")?;
-        let (table_ref, _) = binding
-            .schema
-            .iter()
-            .next()
-            .whatever_context("table does not contain any columns")?;
+        let table_ref = binding.table_ref();
 
         let alias = Self::from_optd_table_ref(table_ref);
 
@@ -115,27 +172,10 @@ impl OptdQueryPlannerContext<'_> {
             .map(|e| self.try_from_optd_scalar_expr(e))
             .try_collect()?;
         let input = self.try_from_optd_plan(node.input())?;
-        let binder = self.inner.binder.read().unwrap();
-        let binding = binder
-            .get_binding(node.table_index())
-            .whatever_context("binding not found")?;
-        let (table_ref, _) = binding
-            .schema
-            .iter()
-            .next()
-            .whatever_context("table does not contain any columns")?;
 
-        let alias = Self::from_optd_table_ref(table_ref);
-        let projection =
-            logical_plan::Projection::try_new(exprs, Arc::new(input)).context(DataFusionSnafu)?;
+        let projection = self.try_new_df_projection(node.table_index(), exprs, Arc::new(input))?;
 
-        let subquery_alias = logical_plan::SubqueryAlias::try_new(
-            Arc::new(DFLogicalPlan::Projection(projection)),
-            alias,
-        )
-        .context(DataFusionSnafu)?;
-
-        Ok(DFLogicalPlan::SubqueryAlias(subquery_alias))
+        Ok(DFLogicalPlan::Projection(projection))
     }
 
     pub fn try_from_optd_logical_join(
@@ -221,11 +261,7 @@ impl OptdQueryPlannerContext<'_> {
         let binding = binder
             .get_binding(node.table_index())
             .whatever_context("binding not found")?;
-        let (table_ref, _) = binding
-            .schema
-            .iter()
-            .next()
-            .whatever_context("table does not contain any columns")?;
+        let table_ref = binding.table_ref();
         let name = Self::from_optd_table_ref(table_ref);
 
         let table_source = self

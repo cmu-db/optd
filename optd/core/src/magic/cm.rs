@@ -98,9 +98,9 @@ mod tests {
     fn sort_at_lower_cardinality_is_cheaper() {
         let ctx = IRContext::with_empty_magic();
 
-        let m1 = ctx.mock_scan(1, vec![0, 1], 100.);
+        let m1 = ctx.mock_scan(1, 2, 100.);
 
-        let m2 = ctx.mock_scan(1, vec![2, 3], 100.);
+        let m2 = ctx.mock_scan(1, 2, 100.);
 
         let join_cond = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();
 

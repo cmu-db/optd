@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use arrow_schema::{Field, SchemaRef};
+use arrow_schema::{Field, FieldRef, SchemaRef};
 use snafu::{OptionExt, whatever};
 
 use crate::error::{Error, Result};
@@ -9,7 +9,7 @@ use crate::ir::table_ref::TableRef;
 
 pub struct BindContext {
     next_table_index: i64,
-    bindings: HashMap<i64, Binding>,
+    pub bindings: HashMap<i64, Binding>,
     scopes: Vec<Vec<(TableRef, i64)>>,
 }
 
@@ -48,13 +48,11 @@ impl BindContext {
             .whatever_context("run out of table index")?;
         let table_ref =
             table_ref.unwrap_or_else(|| TableRef::bare(format!("__internal_#{table_index}")));
+        OptdSchema::try_from_qualified_schema(table_ref.clone(), schema.as_ref())
+            .map_err(|message| Error::Schema { message })?;
         self.bindings.insert(
             table_index,
-            Binding::new(
-                OptdSchema::try_from_qualified_schema(table_ref.clone(), &schema)
-                    .map_err(|message| Error::Schema { message })?,
-                table_index,
-            ),
+            Binding::new(table_ref.clone(), schema, table_index),
         );
         let scope = self.scopes.last_mut().unwrap();
         scope.push((table_ref, table_index));
@@ -107,13 +105,15 @@ impl BindContext {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Binding {
-    pub schema: OptdSchema,
+    pub table_ref: TableRef,
+    pub schema: SchemaRef,
     pub table_index: i64,
 }
 
 impl Binding {
-    pub fn new(schema: OptdSchema, table_index: i64) -> Self {
+    pub fn new(table_ref: TableRef, schema: SchemaRef, table_index: i64) -> Self {
         Self {
+            table_ref,
             schema,
             table_index,
         }
@@ -123,8 +123,16 @@ impl Binding {
         self.schema.column_with_name(column_name)
     }
 
-    pub fn schema(&self) -> &OptdSchema {
+    pub fn schema(&self) -> &SchemaRef {
         &self.schema
+    }
+
+    pub fn table_ref(&self) -> &TableRef {
+        &self.table_ref
+    }
+
+    pub fn field(&self, index: usize) -> Option<&FieldRef> {
+        self.schema.fields().get(index)
     }
 }
 #[cfg(test)]

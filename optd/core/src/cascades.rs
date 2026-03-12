@@ -297,7 +297,7 @@ impl Cascades {
 
         let op_cost = self.ctx.cm.compute_operator_cost(&operator, &self.ctx)?;
 
-        let inputs_required = operator.try_satisfy(required, &self.ctx)?;
+        let inputs_required = operator.try_satisfy(required, &self.ctx).ok()??;
 
         let mut best_inputs = Vec::with_capacity(operator.input_operators().len());
         let mut best_input_costs = Vec::with_capacity(operator.input_operators().len());

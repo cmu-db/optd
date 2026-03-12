@@ -50,9 +50,9 @@ impl Explain for MockScanBorrowed<'_> {
 }
 
 impl MockSpec {
-    pub fn new_test_only(table_index: i64, ids: Vec<usize>, card: f64) -> Self {
+    pub fn new_test_only(table_index: i64, num_columns: usize, card: f64) -> Self {
         let mocked_output_columns =
-            Arc::new(ids.iter().map(|id| Column(table_index, *id)).collect());
+            Arc::new((0..num_columns).map(|id| Column(table_index, id)).collect());
         let mocked_card = Cardinality::new(card);
         Self {
             mocked_output_columns,

@@ -59,8 +59,8 @@ pub fn split_equi_and_non_equi_conditions<'ir>(
     join: &LogicalJoinBorrowed<'ir>,
     ctx: &IRContext,
 ) -> crate::error::Result<SplittedJoinConds> {
-    let outer_columns = join.outer().output_columns(ctx);
-    let inner_columns = join.inner().output_columns(ctx);
+    let outer_columns = join.outer().output_columns(ctx)?;
+    let inner_columns = join.inner().output_columns(ctx)?;
 
     let maybe_get_join_keys = |eq: BinaryOpBorrowed<'_>| {
         let lhs = eq.lhs().try_borrow::<ColumnRef>().ok()?;

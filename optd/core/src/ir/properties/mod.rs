@@ -76,5 +76,5 @@ impl GetProperty for crate::ir::Operator {}
 
 /// Trait for checking if an operator can satisfy a given property.
 pub trait TrySatisfy<P> {
-    fn try_satisfy(&self, property: &P, ctx: &IRContext) -> Option<Arc<[P]>>;
+    fn try_satisfy(&self, property: &P, ctx: &IRContext) -> crate::error::Result<Option<Arc<[P]>>>;
 }

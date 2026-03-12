@@ -7,7 +7,7 @@ use optd_core::ir::{
     Column, ScalarValue as OptdScalarValue, operator::join::JoinType as OptdJoinType,
     table_ref::TableRef,
 };
-use snafu::{OptionExt, ResultExt, whatever};
+use snafu::{ResultExt, whatever};
 
 use crate::planner::{OptdQueryPlannerContext, OptdSnafu, Result};
 
@@ -49,8 +49,7 @@ impl OptdQueryPlannerContext<'_> {
         let column = self
             .inner
             .get_column_by_name(table_ref.as_ref(), column_name)
-            .context(OptdSnafu)?
-            .whatever_context("column not found")?;
+            .context(OptdSnafu)?;
         Ok(column)
     }
 
