@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use arrow_schema::{DataType, Field, Schema, SchemaBuilder};
+use arrow_schema::{DataType, Field, Schema};
 use itertools::Itertools;
 
 use optd_core::{

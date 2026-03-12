@@ -4,7 +4,7 @@
 use crate::error::Result;
 use crate::ir::binder::Binding;
 use crate::ir::{
-    Column, ColumnMeta, DataType, binder::BindContext, catalog::Catalog, cost::CostModel,
+    Column, ColumnMeta, binder::BindContext, catalog::Catalog, cost::CostModel,
     properties::CardinalityEstimator, table_ref::TableRef,
 };
 use arrow_schema::{Field, SchemaRef};
@@ -66,10 +66,6 @@ impl IRContext {
             data_type: field.data_type().clone(),
             name: field.name().clone(),
         }
-    }
-
-    pub fn define_column(&self, data_type: DataType, name: Option<String>) -> Column {
-        todo!("remove this")
     }
 
     pub fn get_column_name(&self, column: &Column) -> Result<(TableRef, Arc<Field>)> {
