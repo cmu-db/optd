@@ -7,7 +7,7 @@ use crate::ir::Operator;
 use crate::ir::catalog::DataSourceId;
 use crate::ir::{
     OperatorKind,
-    catalog::{Field, Schema},
+    catalog::Field,
     operator::{
         EnforcerSort, LogicalAggregate, LogicalDependentJoin, LogicalGet, LogicalJoin,
         LogicalLimit, LogicalOrderBy, LogicalProject, LogicalRemap, LogicalSelect, LogicalSubquery,
@@ -16,15 +16,16 @@ use crate::ir::{
     },
     properties::{Derive, GetProperty, PropertyMarker},
     scalar::{ColumnRef, List},
+    schema::OptdSchema,
+    table_ref::TableRef,
 };
-use arrow_schema::SchemaRef;
 use itertools::Itertools;
 use std::sync::Arc;
 
 pub struct OutputSchema;
 
 impl PropertyMarker for OutputSchema {
-    type Output = Result<SchemaRef>;
+    type Output = Result<OptdSchema>;
 }
 
 impl Derive<OutputSchema> for Operator {
@@ -41,25 +42,11 @@ impl Derive<OutputSchema> for Operator {
             }
             OperatorKind::LogicalGet(meta) => {
                 let get = LogicalGet::borrow_raw_parts(meta, &self.common);
-                let meta = ctx.catalog.describe_table(DataSourceId(*get.table_index()));
-                Ok(Arc::new(Schema::new(
-                    get.projections()
-                        .iter()
-                        .map(|i| meta.schema.field(*i).clone())
-                        .collect_vec(),
-                )))
+                compute_scan_schema(get.table_index(), get.projections(), ctx)
             }
             OperatorKind::PhysicalTableScan(meta) => {
                 let scan = PhysicalTableScan::borrow_raw_parts(meta, &self.common);
-                let meta = ctx
-                    .catalog
-                    .describe_table(DataSourceId(*scan.table_index()));
-                Ok(Arc::new(Schema::new(
-                    scan.projections()
-                        .iter()
-                        .map(|i| meta.schema.field(*i).clone())
-                        .collect_vec(),
-                )))
+                compute_scan_schema(scan.table_index(), scan.projections(), ctx)
             }
             OperatorKind::LogicalSelect(meta) => {
                 let select = LogicalSelect::borrow_raw_parts(meta, &self.common);
@@ -103,11 +90,11 @@ impl Derive<OutputSchema> for Operator {
             }
             OperatorKind::LogicalProject(meta) => {
                 let project = LogicalProject::borrow_raw_parts(meta, &self.common);
-                Ok(ctx.get_binding(project.table_index())?.schema().clone())
+                compute_binding_schema(project.table_index(), ctx)
             }
             OperatorKind::PhysicalProject(meta) => {
                 let project = PhysicalProject::borrow_raw_parts(meta, &self.common);
-                Ok(ctx.get_binding(project.table_index())?.schema().clone())
+                compute_binding_schema(project.table_index(), ctx)
             }
             OperatorKind::LogicalAggregate(meta) => {
                 let agg = LogicalAggregate::borrow_raw_parts(meta, &self.common);
@@ -119,16 +106,60 @@ impl Derive<OutputSchema> for Operator {
             }
             OperatorKind::LogicalRemap(meta) => {
                 let remap = LogicalRemap::borrow_raw_parts(meta, &self.common);
-                Ok(ctx.get_binding(remap.table_index())?.schema().clone())
+                compute_binding_schema(remap.table_index(), ctx)
             }
         }
     }
 }
 
 impl Operator {
-    pub fn output_schema(&self, ctx: &crate::ir::context::IRContext) -> Result<SchemaRef> {
+    pub fn output_schema(&self, ctx: &crate::ir::context::IRContext) -> Result<OptdSchema> {
         self.get_property::<OutputSchema>(ctx)
     }
+}
+
+fn new_optd_schema(
+    qualified_fields: Vec<(TableRef, Arc<Field>)>,
+    metadata: std::collections::HashMap<String, String>,
+) -> Result<OptdSchema> {
+    OptdSchema::new_with_metadata(qualified_fields, metadata)
+        .map_err(|message| crate::error::Error::Schema { message })
+}
+
+fn compute_binding_schema(
+    table_index: &i64,
+    ctx: &crate::ir::context::IRContext,
+) -> Result<OptdSchema> {
+    let binding = ctx.get_binding(table_index)?;
+    let table_ref = binding.table_ref().clone();
+    let metadata = binding.schema().metadata().clone();
+    let qualified_fields = binding
+        .schema()
+        .fields()
+        .iter()
+        .cloned()
+        .map(|field| (table_ref.clone(), field))
+        .collect_vec();
+    new_optd_schema(qualified_fields, metadata)
+}
+
+fn compute_scan_schema(
+    table_index: &i64,
+    projections: &[usize],
+    ctx: &crate::ir::context::IRContext,
+) -> Result<OptdSchema> {
+    let meta = ctx.catalog.describe_table(DataSourceId(*table_index));
+    let table_ref = ctx
+        .get_binding(table_index)
+        .ok()
+        .map(|binding| binding.table_ref().clone())
+        .unwrap_or_else(|| TableRef::bare(meta.name.clone()));
+    let metadata = meta.schema.metadata().clone();
+    let qualified_fields = projections
+        .iter()
+        .map(|i| (table_ref.clone(), Arc::new(meta.schema.field(*i).clone())))
+        .collect_vec();
+    new_optd_schema(qualified_fields, metadata)
 }
 
 /// Computes the output schema for join operators based on their join type.
@@ -139,21 +170,27 @@ fn compute_join_schema(
     inner: &Operator,
     join_type: &JoinType,
     ctx: &crate::ir::IRContext,
-) -> Result<SchemaRef> {
+) -> Result<OptdSchema> {
     let (outer_nullable, inner_nullable, mark_field) = match join_type {
         JoinType::Inner => (false, false, None),
         JoinType::Left => (false, true, None),
         JoinType::Single => (false, true, None),
         JoinType::Mark(mark_column) => {
-            let mark_meta = ctx.get_column_meta(mark_column);
+            let (mark_table_ref, mark_meta) = {
+                let (table_ref, field) = ctx.get_column_name(mark_column)?;
+                (table_ref, field)
+            };
             (
                 false,
                 true,
-                Some(Arc::new(Field::new(
-                    mark_meta.name.clone(),
-                    mark_meta.data_type.clone(),
-                    true,
-                ))),
+                Some((
+                    mark_table_ref,
+                    Arc::new(Field::new(
+                        mark_meta.name().clone(),
+                        mark_meta.data_type().clone(),
+                        true,
+                    )),
+                )),
             )
         }
     };
@@ -161,43 +198,57 @@ fn compute_join_schema(
     let inner_schema = inner.output_schema(ctx)?;
     let outer_schema = outer.output_schema(ctx)?;
 
-    let map_all_fields_to_nullable = |schema: &Schema| {
-        Arc::new(Schema::new(
-            schema
-                .fields()
-                .iter()
-                .map(|x| Arc::new(Field::new(x.name().clone(), x.data_type().clone(), true)))
-                .collect_vec(),
-        ))
+    let map_all_fields_to_nullable = |schema: &OptdSchema| {
+        let metadata = schema.inner().metadata().clone();
+        let qualified_fields = schema
+            .iter()
+            .map(|(table_ref, field)| {
+                (
+                    table_ref.clone(),
+                    Arc::new(Field::new(
+                        field.name().clone(),
+                        field.data_type().clone(),
+                        true,
+                    )),
+                )
+            })
+            .collect_vec();
+        new_optd_schema(qualified_fields, metadata)
     };
 
     let outer_schema = if outer_nullable {
-        map_all_fields_to_nullable(&outer_schema)
+        map_all_fields_to_nullable(&outer_schema)?
     } else {
         outer_schema
     };
     let inner_schema = if inner_nullable {
-        map_all_fields_to_nullable(&inner_schema)
+        map_all_fields_to_nullable(&inner_schema)?
     } else {
         inner_schema
     };
 
-    Ok(Arc::new(Schema::new(
-        outer_schema
-            .fields()
-            .iter()
-            .cloned()
-            .chain(inner_schema.fields().iter().cloned())
-            .chain(mark_field)
-            .collect_vec(),
-    )))
+    let mut metadata = outer_schema.inner().metadata().clone();
+    metadata.extend(inner_schema.inner().metadata().clone());
+
+    let qualified_fields = outer_schema
+        .iter()
+        .map(|(table_ref, field)| (table_ref.clone(), field.clone()))
+        .chain(
+            inner_schema
+                .iter()
+                .map(|(table_ref, field)| (table_ref.clone(), field.clone())),
+        )
+        .chain(mark_field)
+        .collect_vec();
+
+    new_optd_schema(qualified_fields, metadata)
 }
 
 fn compute_aggregate_schema(
     keys: &crate::ir::Scalar,
     aggregate_table_index: &i64,
     ctx: &crate::ir::IRContext,
-) -> Result<SchemaRef> {
+) -> Result<OptdSchema> {
     let key_fields = keys
         .borrow::<List>()
         .members()
@@ -207,15 +258,24 @@ fn compute_aggregate_schema(
                 Ok(key) => key,
                 Err(_) => whatever!("aggregate key must be a column reference"),
             };
-            Ok(ctx.get_column_name(key.column())?.1)
+            ctx.get_column_name(key.column())
         })
         .collect::<Result<Vec<_>>>()?;
 
     let aggregate_binding = ctx.get_binding(aggregate_table_index)?;
-    Ok(Arc::new(Schema::new(
-        key_fields
-            .into_iter()
-            .chain(aggregate_binding.schema().fields().iter().cloned())
-            .collect_vec(),
-    )))
+    let aggregate_table_ref = aggregate_binding.table_ref().clone();
+    let metadata = aggregate_binding.schema().metadata().clone();
+    let qualified_fields = key_fields
+        .into_iter()
+        .chain(
+            aggregate_binding
+                .schema()
+                .fields()
+                .iter()
+                .cloned()
+                .map(|field| (aggregate_table_ref.clone(), field)),
+        )
+        .collect_vec();
+
+    new_optd_schema(qualified_fields, metadata)
 }
