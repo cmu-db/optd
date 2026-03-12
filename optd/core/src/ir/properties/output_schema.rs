@@ -15,6 +15,7 @@ use crate::ir::{
         PhysicalTableScan, join::JoinType,
     },
     properties::{Derive, GetProperty, PropertyMarker},
+    scalar::{ColumnRef, List},
 };
 use arrow_schema::SchemaRef;
 use itertools::Itertools;
@@ -110,18 +111,15 @@ impl Derive<OutputSchema> for Operator {
             }
             OperatorKind::LogicalAggregate(meta) => {
                 let agg = LogicalAggregate::borrow_raw_parts(meta, &self.common);
-                Ok(ctx.get_binding(agg.aggregate_table_index())?.schema().clone())
+                compute_aggregate_schema(agg.keys(), agg.aggregate_table_index(), ctx)
             }
             OperatorKind::PhysicalHashAggregate(meta) => {
                 let agg = PhysicalHashAggregate::borrow_raw_parts(meta, &self.common);
-                Ok(ctx.get_binding(agg.aggregate_table_index())?.schema().clone())
+                compute_aggregate_schema(agg.keys(), agg.aggregate_table_index(), ctx)
             }
             OperatorKind::LogicalRemap(meta) => {
                 let remap = LogicalRemap::borrow_raw_parts(meta, &self.common);
-                let binder = ctx.binder.read().unwrap();
-                let binding = binder.get_binding(remap.table_index()).unwrap();
-
-                Ok(binding.schema().clone())
+                Ok(ctx.get_binding(remap.table_index())?.schema().clone())
             }
         }
     }
@@ -191,6 +189,33 @@ fn compute_join_schema(
             .cloned()
             .chain(inner_schema.fields().iter().cloned())
             .chain(mark_field)
+            .collect_vec(),
+    )))
+}
+
+fn compute_aggregate_schema(
+    keys: &crate::ir::Scalar,
+    aggregate_table_index: &i64,
+    ctx: &crate::ir::IRContext,
+) -> Result<SchemaRef> {
+    let key_fields = keys
+        .borrow::<List>()
+        .members()
+        .iter()
+        .map(|key| {
+            let key = match key.try_borrow::<ColumnRef>() {
+                Ok(key) => key,
+                Err(_) => whatever!("aggregate key must be a column reference"),
+            };
+            Ok(ctx.get_column_name(key.column())?.1)
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let aggregate_binding = ctx.get_binding(aggregate_table_index)?;
+    Ok(Arc::new(Schema::new(
+        key_fields
+            .into_iter()
+            .chain(aggregate_binding.schema().fields().iter().cloned())
             .collect_vec(),
     )))
 }
