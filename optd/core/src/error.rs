@@ -14,29 +14,9 @@ pub enum Error {
         #[snafu(source(from(Box<dyn std::error::Error + Send + Sync>, Some)))]
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
-    #[snafu(display("Connector error: {}", message))]
-    Connector { message: String },
-    #[snafu(display("Schema error: {}", message))]
-    Schema { message: SchemaError },
-}
-
-#[macro_export]
-macro_rules! connector_err {
-    ($fmt:literal$(, $($arg:expr),* $(,)?)?) => {
-        return core::result::Result::Err($crate::error::Error::Connector {
-            message: format!($fmt$(, $($arg),*)*),
-        });
-    };
-    ($source:expr, $fmt:literal$(, $($arg:expr),* $(,)?)*) => {
-        match $source {
-            core::result::Result::Ok(v) => v,
-            core::result::Result::Err(e) => {
-                return core::result::Result::Err($crate::error::Error::Connector {
-                    message: format!($fmt$(, $($arg),*)*),
-                });
-            }
-        }
-    };
+    #[snafu(visibility(pub(crate)))]
+    #[snafu(display("Schema error: {}", source))]
+    Schema { source: SchemaError },
 }
 
 pub type Result<T> = core::result::Result<T, Error>;

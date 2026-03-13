@@ -2,7 +2,7 @@
 //! allowing retrieval of the output schema based on the operator type and its
 //! metadata.
 
-use crate::error::{Result, whatever};
+use crate::error::{Result, SchemaSnafu, whatever};
 use crate::ir::Operator;
 use crate::ir::catalog::DataSourceId;
 use crate::ir::{
@@ -20,6 +20,7 @@ use crate::ir::{
     table_ref::TableRef,
 };
 use itertools::Itertools;
+use snafu::ResultExt;
 use std::sync::Arc;
 
 pub struct OutputSchema;
@@ -122,8 +123,7 @@ fn new_optd_schema(
     qualified_fields: Vec<(TableRef, Arc<Field>)>,
     metadata: std::collections::HashMap<String, String>,
 ) -> Result<OptdSchema> {
-    OptdSchema::new_with_metadata(qualified_fields, metadata)
-        .map_err(|message| crate::error::Error::Schema { message })
+    OptdSchema::new_with_metadata(qualified_fields, metadata).context(SchemaSnafu)
 }
 
 fn compute_binding_schema(

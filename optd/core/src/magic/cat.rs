@@ -3,9 +3,9 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use anyhow::bail;
 use tracing::info;
 
+use crate::error::{Result as OptdResult, whatever};
 use crate::ir::{catalog::*, statistics::TableStatistics};
 
 pub struct MagicCatalog(RwLock<MagicCatalogInner>);
@@ -88,10 +88,10 @@ impl Catalog for MagicCatalog {
         reader.tables.get(&table_id).cloned().unwrap()
     }
 
-    fn try_describe_table_with_name(&self, table_name: &str) -> anyhow::Result<TableMetadata> {
+    fn try_describe_table_with_name(&self, table_name: &str) -> OptdResult<TableMetadata> {
         let reader = self.0.read().unwrap();
         let Some(table_id) = reader.name_to_id.get(table_name) else {
-            bail!("Table {} not found", table_name);
+            whatever!("Table {} not found", table_name);
         };
         Ok(reader.tables.get(table_id).cloned().unwrap())
     }
@@ -129,5 +129,24 @@ mod tests {
 
         let output = cat.describe_table(t1);
         assert_eq!(output.schema, schema);
+    }
+
+    #[test]
+    fn describe_table_with_name() {
+        let cat = MagicCatalog::new();
+        let schema = Arc::new(mock_table_schema("t1"));
+        cat.try_create_table("t1".to_string(), schema.clone()).unwrap();
+
+        let output = cat.try_describe_table_with_name("t1").unwrap();
+        assert_eq!(output.schema, schema);
+        assert_eq!(output.name, "t1");
+    }
+
+    #[test]
+    fn describe_missing_table_with_name() {
+        let cat = MagicCatalog::new();
+
+        let err = cat.try_describe_table_with_name("missing").unwrap_err();
+        assert!(err.to_string().contains("Table missing not found"));
     }
 }

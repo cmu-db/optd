@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use arrow_schema::{Field, FieldRef, SchemaRef};
-use snafu::{OptionExt, whatever};
+use snafu::{OptionExt, ResultExt, whatever};
 
-use crate::error::{Error, Result};
+use crate::error::{Result, SchemaSnafu};
 use crate::ir::schema::OptdSchema;
 use crate::ir::table_ref::TableRef;
 
@@ -49,7 +49,7 @@ impl BindContext {
         let table_ref =
             table_ref.unwrap_or_else(|| TableRef::bare(format!("__internal_#{table_index}")));
         OptdSchema::try_from_qualified_schema(table_ref.clone(), schema.as_ref())
-            .map_err(|message| Error::Schema { message })?;
+            .context(SchemaSnafu)?;
         self.bindings.insert(
             table_index,
             Binding::new(table_ref.clone(), schema, table_index),
