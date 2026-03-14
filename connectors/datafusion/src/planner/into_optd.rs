@@ -9,16 +9,19 @@ use datafusion::{
     scalar::ScalarValue as DFScalarValue,
 };
 use itertools::{Either, Itertools};
-use optd_core::ir::{
-    Scalar, ScalarValue, builder as optd_builder,
-    catalog::Schema,
-    convert::{IntoOperator, IntoScalar},
-    operator::{
-        LogicalAggregate, LogicalGet, LogicalJoin, LogicalLimit, LogicalOrderBy, LogicalProject,
-        LogicalRemap, LogicalSelect,
+use optd_core::{
+    error::CatalogSnafu,
+    ir::{
+        Scalar, ScalarValue, builder as optd_builder,
+        catalog::Schema,
+        convert::{IntoOperator, IntoScalar},
+        operator::{
+            LogicalAggregate, LogicalGet, LogicalJoin, LogicalLimit, LogicalOrderBy,
+            LogicalProject, LogicalRemap, LogicalSelect,
+        },
+        properties::TupleOrderingDirection,
+        scalar::{Cast, ColumnRef, Function, Like, List, NaryOp, NaryOpKind},
     },
-    properties::TupleOrderingDirection,
-    scalar::{Cast, ColumnRef, Function, Like, List, NaryOp, NaryOpKind},
 };
 use snafu::{ResultExt, whatever};
 
@@ -221,6 +224,13 @@ impl OptdQueryPlannerContext<'_> {
         self.table_reference_to_source
             .insert(node.table_name.clone(), Arc::clone(&node.source));
         let table_ref = Self::into_optd_table_ref(&node.table_name);
+        let data_source_id = self
+            .inner
+            .catalog
+            .table_by_ref(&table_ref)
+            .context(CatalogSnafu)
+            .context(OptdSnafu)?
+            .id;
 
         let table_index = self
             .inner
@@ -233,7 +243,7 @@ impl OptdQueryPlannerContext<'_> {
             .unwrap_or_else(|| (0..node.projected_schema.inner().fields().len()).collect_vec())
             .into();
 
-        let logical_get = LogicalGet::new(table_index, projections);
+        let logical_get = LogicalGet::new(data_source_id, table_index, projections);
         Ok(logical_get.into_operator())
     }
 }

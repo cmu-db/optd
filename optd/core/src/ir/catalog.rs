@@ -4,43 +4,56 @@
 pub use arrow_schema::Field;
 pub use arrow_schema::Schema;
 pub use arrow_schema::SchemaRef;
+use snafu::prelude::*;
 
-use crate::error::Result as OptdResult;
-use crate::ir::statistics::TableStatistics;
+use crate::ir::{
+    statistics::TableStatistics,
+    table_ref::{ResolvedTableRef, TableRef},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DataSourceId(pub i64);
+
+#[derive(Debug, Snafu)]
+pub enum CatalogError {
+    #[snafu(display("Table '{}' already exists with id {}", table, existing_id.0))]
+    TableAlreadyExists {
+        table: ResolvedTableRef,
+        existing_id: DataSourceId,
+    },
+    #[snafu(display("Table '{}' not found", table))]
+    TableNotFound { table: TableRef },
+    #[snafu(display("Data source {} not found", data_source_id.0))]
+    DataSourceNotFound { data_source_id: DataSourceId },
+}
+
+pub type Result<T> = core::result::Result<T, CatalogError>;
 
 /// Contains metadata information about a table.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableMetadata {
     pub id: DataSourceId,
-    pub name: String,
+    pub table: ResolvedTableRef,
     pub schema: SchemaRef,
     pub stats: Option<TableStatistics>,
 }
 
 pub trait Catalog: Send + Sync + 'static {
     /// Creates a table.
-    fn try_create_table(
-        &self,
-        table_name: String,
-        schema: SchemaRef,
-    ) -> Result<DataSourceId, DataSourceId>;
+    fn try_create_table(&self, table: TableRef, schema: SchemaRef) -> Result<DataSourceId>;
 
     /// Creates a table with stats.
     fn try_create_table_with_stats(
         &self,
-        table_name: String,
+        table: TableRef,
         schema: SchemaRef,
         stats: TableStatistics,
-    ) -> Result<DataSourceId, DataSourceId>;
+    ) -> Result<DataSourceId>;
 
     /// Describes the schema of a table with identifier `table_id`.
-    fn describe_table(&self, table_id: DataSourceId) -> TableMetadata;
-    /// Describes the schema of a table with name `table_name`.
-    fn try_describe_table_with_name(&self, table_name: &str) -> OptdResult<TableMetadata>;
+    fn table(&self, table_id: DataSourceId) -> Result<TableMetadata>;
+    /// Describes the schema of a table with reference `table`.
+    fn table_by_ref(&self, table: &TableRef) -> Result<TableMetadata>;
 
-    /// TODO(yuchen): This is a mock.
-    fn set_table_stats(&self, table_id: DataSourceId, stats: TableStatistics);
+    fn set_table_stats(&self, table_id: DataSourceId, stats: TableStatistics) -> Result<()>;
 }

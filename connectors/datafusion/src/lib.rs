@@ -37,8 +37,10 @@ pub fn create_optd_session_context(
     config: SessionConfig,
     runtime: Arc<RuntimeEnv>,
 ) -> SessionContext {
+    let optd_extension = Arc::new(OptdExtension::default());
     let config = config
         .with_option_extension(OptdExtensionConfig::default())
+        .with_extension(optd_extension)
         .set_bool("optd.optd_enabled", true)
         .set_bool("optd.optd_strict_mode", false);
     let state = SessionStateBuilder::new()

@@ -5,50 +5,61 @@ use std::{
 
 use tracing::info;
 
-use crate::error::{Result as OptdResult, whatever};
-use crate::ir::{catalog::*, statistics::TableStatistics};
+use crate::ir::{
+    catalog::*,
+    statistics::TableStatistics,
+    table_ref::{ResolvedTableRef, TableRef},
+};
 
-pub struct MagicCatalog(RwLock<MagicCatalogInner>);
+pub struct MagicCatalog {
+    inner: RwLock<MagicCatalogInner>,
+    default_catalog: String,
+    default_schema: String,
+}
 
 pub struct MagicCatalogInner {
     tables: HashMap<DataSourceId, TableMetadata>,
-    name_to_id: HashMap<String, DataSourceId>,
+    table_to_id: HashMap<ResolvedTableRef, DataSourceId>,
     next_table_id: i64,
 }
 
-impl Default for MagicCatalog {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl MagicCatalog {
-    pub fn new() -> Self {
-        Self(RwLock::new(MagicCatalogInner {
-            tables: HashMap::new(),
-            name_to_id: HashMap::new(),
-            next_table_id: 1,
-        }))
+    pub fn new(default_catalog: &str, default_schema: &str) -> Self {
+        Self {
+            inner: RwLock::new(MagicCatalogInner {
+                tables: HashMap::new(),
+                table_to_id: HashMap::new(),
+                next_table_id: 1,
+            }),
+            default_catalog: default_catalog.into(),
+            default_schema: default_schema.into(),
+        }
+    }
+
+    fn resolve_table_ref(&self, table: TableRef) -> ResolvedTableRef {
+        table.resolve(&self.default_catalog, &self.default_schema)
     }
 }
 
 impl Catalog for MagicCatalog {
-    fn try_create_table(
-        &self,
-        table_name: String,
-        schema: Arc<Schema>,
-    ) -> Result<DataSourceId, DataSourceId> {
-        let mut writer = self.0.write().unwrap();
+    fn try_create_table(&self, table: TableRef, schema: Arc<Schema>) -> Result<DataSourceId> {
+        let mut writer = self.inner.write().unwrap();
         let id = DataSourceId(writer.next_table_id);
-        match writer.name_to_id.entry(table_name.clone()) {
-            Entry::Occupied(occupied) => return Err(*occupied.get()),
+        let table = self.resolve_table_ref(table);
+        match writer.table_to_id.entry(table.clone()) {
+            Entry::Occupied(occupied) => {
+                return Err(CatalogError::TableAlreadyExists {
+                    table,
+                    existing_id: *occupied.get(),
+                });
+            }
             Entry::Vacant(vacant) => vacant.insert(id),
         };
         writer.tables.insert(
             id,
             TableMetadata {
                 id,
-                name: table_name,
+                table,
                 schema,
                 stats: None,
             },
@@ -59,21 +70,27 @@ impl Catalog for MagicCatalog {
 
     fn try_create_table_with_stats(
         &self,
-        table_name: String,
+        table: TableRef,
         schema: SchemaRef,
         stats: TableStatistics,
-    ) -> Result<DataSourceId, DataSourceId> {
-        let mut writer = self.0.write().unwrap();
+    ) -> Result<DataSourceId> {
+        let mut writer = self.inner.write().unwrap();
         let id = DataSourceId(writer.next_table_id);
-        match writer.name_to_id.entry(table_name.clone()) {
-            Entry::Occupied(occupied) => return Err(*occupied.get()),
+        let table = self.resolve_table_ref(table);
+        match writer.table_to_id.entry(table.clone()) {
+            Entry::Occupied(occupied) => {
+                return Err(CatalogError::TableAlreadyExists {
+                    table,
+                    existing_id: *occupied.get(),
+                });
+            }
             Entry::Vacant(vacant) => vacant.insert(id),
         };
         writer.tables.insert(
             id,
             TableMetadata {
                 id,
-                name: table_name,
+                table,
                 schema,
                 stats: Some(stats),
             },
@@ -82,24 +99,47 @@ impl Catalog for MagicCatalog {
         Ok(id)
     }
 
-    fn describe_table(&self, table_id: DataSourceId) -> TableMetadata {
+    fn table(&self, table_id: DataSourceId) -> Result<TableMetadata> {
         info!(?table_id, "describe");
-        let reader = self.0.read().unwrap();
-        reader.tables.get(&table_id).cloned().unwrap()
+        let reader = self.inner.read().unwrap();
+        reader
+            .tables
+            .get(&table_id)
+            .cloned()
+            .ok_or(CatalogError::DataSourceNotFound {
+                data_source_id: table_id,
+            })
     }
 
-    fn try_describe_table_with_name(&self, table_name: &str) -> OptdResult<TableMetadata> {
-        let reader = self.0.read().unwrap();
-        let Some(table_id) = reader.name_to_id.get(table_name) else {
-            whatever!("Table {} not found", table_name);
+    fn table_by_ref(&self, table: &TableRef) -> Result<TableMetadata> {
+        let reader = self.inner.read().unwrap();
+        let resolved = table
+            .clone()
+            .resolve(&self.default_catalog, &self.default_schema);
+        let Some(table_id) = reader.table_to_id.get(&resolved) else {
+            return Err(CatalogError::TableNotFound {
+                table: table.clone(),
+            });
         };
-        Ok(reader.tables.get(table_id).cloned().unwrap())
+        reader
+            .tables
+            .get(table_id)
+            .cloned()
+            .ok_or(CatalogError::DataSourceNotFound {
+                data_source_id: *table_id,
+            })
     }
 
-    fn set_table_stats(&self, table_id: DataSourceId, stats: TableStatistics) {
-        let mut writer = self.0.write().unwrap();
-        let table = writer.tables.get_mut(&table_id).unwrap();
+    fn set_table_stats(&self, table_id: DataSourceId, stats: TableStatistics) -> Result<()> {
+        let mut writer = self.inner.write().unwrap();
+        let table = writer
+            .tables
+            .get_mut(&table_id)
+            .ok_or(CatalogError::DataSourceNotFound {
+                data_source_id: table_id,
+            })?;
         table.stats = Some(stats);
+        Ok(())
     }
 }
 
@@ -119,34 +159,35 @@ mod tests {
 
     #[test]
     fn create_table() {
-        let cat = MagicCatalog::new();
+        let cat = MagicCatalog::new("optd", "public");
         let schema = Arc::new(mock_table_schema("t1"));
         let t1 = cat
-            .try_create_table("t1".to_string(), schema.clone())
+            .try_create_table(TableRef::bare("t1"), schema.clone())
             .unwrap();
-        let another_t1 = cat.try_create_table("t1".to_string(), schema.clone());
+        let another_t1 = cat.try_create_table(TableRef::bare("t1"), schema.clone());
         assert!(another_t1.is_err());
 
-        let output = cat.describe_table(t1);
+        let output = cat.table(t1).unwrap();
         assert_eq!(output.schema, schema);
     }
 
     #[test]
     fn describe_table_with_name() {
-        let cat = MagicCatalog::new();
+        let cat = MagicCatalog::new("optd", "public");
         let schema = Arc::new(mock_table_schema("t1"));
-        cat.try_create_table("t1".to_string(), schema.clone()).unwrap();
+        cat.try_create_table(TableRef::bare("t1"), schema.clone())
+            .unwrap();
 
-        let output = cat.try_describe_table_with_name("t1").unwrap();
+        let output = cat.table_by_ref(&TableRef::bare("t1")).unwrap();
         assert_eq!(output.schema, schema);
-        assert_eq!(output.name, "t1");
+        assert_eq!(output.table.table.as_ref(), "t1");
     }
 
     #[test]
     fn describe_missing_table_with_name() {
-        let cat = MagicCatalog::new();
+        let cat = MagicCatalog::new("optd", "public");
 
-        let err = cat.try_describe_table_with_name("missing").unwrap_err();
-        assert!(err.to_string().contains("Table missing not found"));
+        let err = cat.table_by_ref(&TableRef::bare("missing")).unwrap_err();
+        assert!(err.to_string().contains("Table 'missing' not found"));
     }
 }

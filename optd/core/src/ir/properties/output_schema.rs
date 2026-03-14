@@ -2,9 +2,8 @@
 //! allowing retrieval of the output schema based on the operator type and its
 //! metadata.
 
-use crate::error::{Result, SchemaSnafu, whatever};
+use crate::error::{CatalogSnafu, Result, SchemaSnafu, whatever};
 use crate::ir::Operator;
-use crate::ir::catalog::DataSourceId;
 use crate::ir::{
     OperatorKind,
     catalog::Field,
@@ -43,11 +42,21 @@ impl Derive<OutputSchema> for Operator {
             }
             OperatorKind::LogicalGet(meta) => {
                 let get = LogicalGet::borrow_raw_parts(meta, &self.common);
-                compute_scan_schema(get.table_index(), get.projections(), ctx)
+                compute_scan_schema(
+                    *get.data_source_id(),
+                    get.table_index(),
+                    get.projections(),
+                    ctx,
+                )
             }
             OperatorKind::PhysicalTableScan(meta) => {
                 let scan = PhysicalTableScan::borrow_raw_parts(meta, &self.common);
-                compute_scan_schema(scan.table_index(), scan.projections(), ctx)
+                compute_scan_schema(
+                    *scan.data_source_id(),
+                    scan.table_index(),
+                    scan.projections(),
+                    ctx,
+                )
             }
             OperatorKind::LogicalSelect(meta) => {
                 let select = LogicalSelect::borrow_raw_parts(meta, &self.common);
@@ -144,16 +153,17 @@ fn compute_binding_schema(
 }
 
 fn compute_scan_schema(
+    data_source_id: crate::ir::catalog::DataSourceId,
     table_index: &i64,
     projections: &[usize],
     ctx: &crate::ir::context::IRContext,
 ) -> Result<OptdSchema> {
-    let meta = ctx.catalog.describe_table(DataSourceId(*table_index));
+    let meta = ctx.catalog.table(data_source_id).context(CatalogSnafu)?;
     let table_ref = ctx
         .get_binding(table_index)
         .ok()
         .map(|binding| binding.table_ref().clone())
-        .unwrap_or_else(|| TableRef::bare(meta.name.clone()));
+        .unwrap_or_else(|| TableRef::from(&meta.table));
     let metadata = meta.schema.metadata().clone();
     let qualified_fields = projections
         .iter()

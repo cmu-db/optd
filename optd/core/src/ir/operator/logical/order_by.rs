@@ -162,8 +162,8 @@ mod tests {
             ),
         ];
 
-        let order_by = LogicalOrderBy::new(ctx.mock_scan(1, 3, 100.), ordered_exprs)
-            .into_operator();
+        let order_by =
+            LogicalOrderBy::new(ctx.mock_scan(1, 3, 100.), ordered_exprs).into_operator();
 
         let res = order_by
             .borrow::<LogicalOrderBy>()

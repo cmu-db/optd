@@ -2,7 +2,7 @@ use snafu::prelude::*;
 
 pub use snafu::whatever;
 
-use crate::ir::schema::SchemaError;
+use crate::ir::{catalog::CatalogError, schema::SchemaError};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -17,6 +17,9 @@ pub enum Error {
     #[snafu(visibility(pub(crate)))]
     #[snafu(display("Schema error: {}", source))]
     Schema { source: SchemaError },
+    #[snafu(visibility(pub))]
+    #[snafu(display("Catalog error: {}", source))]
+    Catalog { source: CatalogError },
 }
 
 pub type Result<T> = core::result::Result<T, Error>;

@@ -11,6 +11,12 @@ pub struct ResolvedTableRef {
     pub table: Arc<str>,
 }
 
+impl std::fmt::Display for ResolvedTableRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}.{}", self.catalog, self.schema, self.table)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum TableRef {
     /// An unqualified table reference, e.g. "table"
@@ -142,6 +148,26 @@ impl TableRef {
                 schema: default_schema.into(),
                 table,
             },
+        }
+    }
+}
+
+impl From<ResolvedTableRef> for TableRef {
+    fn from(value: ResolvedTableRef) -> Self {
+        Self::Full {
+            catalog: value.catalog,
+            schema: value.schema,
+            table: value.table,
+        }
+    }
+}
+
+impl From<&ResolvedTableRef> for TableRef {
+    fn from(value: &ResolvedTableRef) -> Self {
+        Self::Full {
+            catalog: value.catalog.clone(),
+            schema: value.schema.clone(),
+            table: value.table.clone(),
         }
     }
 }

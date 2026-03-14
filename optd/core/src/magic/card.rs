@@ -1,6 +1,5 @@
 use crate::ir::{
     Operator, Scalar,
-    catalog::DataSourceId,
     operator::{join::JoinType, *},
     properties::{Cardinality, CardinalityEstimator},
     scalar::*,
@@ -59,8 +58,9 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
             OperatorKind::LogicalGet(meta) => {
                 match ctx
                     .catalog
-                    .describe_table(DataSourceId(meta.table_index))
-                    .stats
+                    .table(meta.data_source_id)
+                    .ok()
+                    .and_then(|table| table.stats)
                 {
                     Some(stats) => Cardinality::with_count_lossy(stats.row_count),
                     None => Cardinality::with_count_lossy(
@@ -71,8 +71,9 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
             OperatorKind::PhysicalTableScan(meta) => {
                 match ctx
                     .catalog
-                    .describe_table(DataSourceId(meta.table_index))
-                    .stats
+                    .table(meta.data_source_id)
+                    .ok()
+                    .and_then(|table| table.stats)
                 {
                     Some(stats) => Cardinality::with_count_lossy(stats.row_count),
                     None => Cardinality::with_count_lossy(

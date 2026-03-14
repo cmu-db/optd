@@ -38,7 +38,11 @@ impl Rule for LogicalGetAsPhysicalTableScanRule {
         _ctx: &crate::ir::IRContext,
     ) -> crate::error::Result<Vec<std::sync::Arc<crate::ir::Operator>>> {
         let get = operator.try_borrow::<LogicalGet>().unwrap();
-        let table_scan = PhysicalTableScan::new(*get.table_index(), get.projections().clone());
+        let table_scan = PhysicalTableScan::new(
+            *get.data_source_id(),
+            *get.table_index(),
+            get.projections().clone(),
+        );
         Ok(vec![table_scan.into_operator()])
     }
 }

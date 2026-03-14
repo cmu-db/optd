@@ -1,23 +1,17 @@
-mod auto_stats;
-mod udtf;
+pub mod auto_stats;
+pub mod udtf;
 
 use datafusion::{
-    catalog::CatalogProviderList,
-    common::{DataFusionError, Result, exec_err, not_impl_err},
-    datasource::TableProvider,
+    common::{DataFusionError, Result},
     execution::runtime_env::RuntimeEnv,
-    logical_expr::{CreateExternalTable, LogicalPlanBuilder},
+    logical_expr::LogicalPlanBuilder,
     prelude::{DataFrame, SessionConfig, SessionContext},
     sql::TableReference,
 };
 use datafusion_cli::cli_context::CliSessionContext;
-use optd_catalog::{CatalogServiceHandle, RegisterTableRequest};
-use optd_datafusion::{OptdCatalogProvider, OptdCatalogProviderList, create_optd_session_context};
-use std::collections::HashMap;
+use optd_core::ir::table_ref::TableRef as OptdTableRef;
+use optd_datafusion::{OptdExtension, create_optd_session_context};
 use std::sync::Arc;
-
-use crate::auto_stats::{AutoStatsConfig, compute_table_statistics};
-use crate::udtf::{ListSnapshotsFunction, ListTablesAtSnapshotFunction};
 
 /// The optd CLI session context for executing queries in DataFusion
 /// with optd features.
@@ -32,21 +26,6 @@ impl OptdCliSessionContext {
         Self {
             inner: create_optd_session_context(config, runtime),
         }
-    }
-
-    /// Registers snapshot query UDTFs.
-    pub fn register_udtfs(&self) {
-        let catalog_handle = self.get_catalog_handle();
-
-        self.inner.register_udtf(
-            "list_snapshots",
-            Arc::new(ListSnapshotsFunction::new(catalog_handle.clone())),
-        );
-
-        self.inner.register_udtf(
-            "list_tables_at_snapshot",
-            Arc::new(ListTablesAtSnapshotFunction::new(catalog_handle)),
-        );
     }
 
     /// Refreshes catalogs.
@@ -71,175 +50,41 @@ impl OptdCliSessionContext {
         Ok(DataFrame::new(self.inner.state(), plan))
     }
 
-    /// Handles CREATE EXTERNAL TABLE.
-    async fn create_external_table(&self, cmd: &CreateExternalTable) -> Result<DataFrame> {
-        let exist = self.inner.table_exist(cmd.name.clone())?;
-
-        if cmd.temporary {
-            return not_impl_err!("Temporary tables not supported");
-        }
-
-        if exist {
-            match cmd.if_not_exists {
-                true => return self.return_empty_dataframe(),
-                false => {
-                    return exec_err!("Table '{}' already exists", cmd.name);
-                }
-            }
-        }
-
-        let table_provider: Arc<dyn TableProvider> = self.create_custom_table(cmd).await?;
-        self.register_table(cmd.name.clone(), table_provider)?;
-
-        // Persist to catalog
-        if let Some(catalog_handle) = self.get_catalog_handle() {
-            // Parse schema from table name
-            let full_name = cmd.name.to_string();
-            let (schema_name, table_name) = Self::parse_table_name(&full_name);
-
-            let request = RegisterTableRequest {
-                table_name: table_name.to_string(),
-                schema_name: schema_name.map(|s| s.to_string()),
-                location: cmd.location.clone(),
-                file_format: cmd.file_type.clone(),
-                compression: Self::extract_compression(&cmd.options),
-                options: cmd.options.clone(),
-            };
-
-            catalog_handle
-                .register_external_table(request)
-                .await
-                .map_err(|e| DataFusionError::External(Box::new(e)))?;
-
-            // Auto-compute statistics
-            let config = AutoStatsConfig::default();
-
-            if let Ok(Some(stats)) =
-                compute_table_statistics(&cmd.location, &cmd.file_type, &config).await
-            {
-                // Store statistics
-                if let Err(e) = catalog_handle
-                    .set_table_statistics(schema_name, table_name, stats)
-                    .await
-                {
-                    eprintln!("Warning: Failed to store statistics: {}", e);
-                }
-            }
-        }
-
-        self.return_empty_dataframe()
-    }
-
-    async fn create_custom_table(
-        &self,
-        cmd: &CreateExternalTable,
-    ) -> Result<Arc<dyn TableProvider>> {
-        let state = self.inner.state_ref().read().clone();
-        let file_type = cmd.file_type.to_uppercase();
-        let factory = state
-            .table_factories()
-            .get(file_type.as_str())
-            .ok_or_else(|| {
-                DataFusionError::Execution(format!("Unable to find factory for {}", cmd.file_type))
-            })?;
-        let table = (*factory).create(&state, cmd).await?;
-        Ok(table)
-    }
-
-    pub fn register_table(
+    fn register_optd_table(
         &self,
         table_ref: impl Into<TableReference>,
-        provider: Arc<dyn TableProvider>,
-    ) -> Result<Option<Arc<dyn TableProvider>>> {
+        schema: datafusion::arrow::datatypes::SchemaRef,
+    ) -> Result<()> {
         let table_ref: TableReference = table_ref.into();
-        let table = table_ref.table().to_owned();
-        self.inner
-            .state_ref()
-            .read()
-            .schema_for_ref(table_ref)?
-            .register_table(table, provider)
-    }
-
-    /// Extracts the catalog handle from the wrapped catalog list.
-    fn get_catalog_handle(&self) -> Option<CatalogServiceHandle> {
+        let optd_table_ref = Self::into_optd_table_ref(&table_ref);
         let state = self.inner.state();
-        let catalog_list = state.catalog_list();
+        let extension = state
+            .config()
+            .get_extension::<OptdExtension>()
+            .ok_or_else(|| DataFusionError::Execution("Missing optd session extension".into()))?;
 
-        let optd_list = catalog_list
-            .as_any()
-            .downcast_ref::<OptdCatalogProviderList>()?;
-
-        let catalog = optd_list.catalog("datafusion")?;
-
-        let optd_catalog = catalog.as_any().downcast_ref::<OptdCatalogProvider>()?;
-
-        optd_catalog.catalog_handle().cloned()
-    }
-
-    /// Extracts compression option from `CreateExternalTable` options.
-    fn extract_compression(options: &HashMap<String, String>) -> Option<String> {
-        options
-            .get("format.compression")
-            .or_else(|| options.get("compression"))
-            .cloned()
-    }
-
-    /// Parses a table name into (schema_name, table_name).
-    fn parse_table_name(full_name: &str) -> (Option<&str>, &str) {
-        if let Some(dot_pos) = full_name.find('.') {
-            let schema = &full_name[..dot_pos];
-            let table = &full_name[dot_pos + 1..];
-            (Some(schema), table)
-        } else {
-            (None, full_name)
-        }
-    }
-
-    /// Handles DROP TABLE.
-    async fn drop_external_table(&self, table_name: &str, if_exists: bool) -> Result<DataFrame> {
-        // Check if table exists in DataFusion.
-        let table_exists = self
-            .inner
-            .state()
-            .catalog_list()
-            .catalog("datafusion")
-            .and_then(|cat| cat.schema("public"))
-            .map(|schema| schema.table_exist(table_name))
-            .unwrap_or(false);
-
-        if !table_exists {
-            if if_exists {
-                return self.return_empty_dataframe();
-            } else {
-                return Err(DataFusionError::Plan(format!(
-                    "Table '{}' doesn't exist",
-                    table_name
-                )));
-            }
-        }
-
-        // Deregister from DataFusion
-        self.inner
-            .state()
-            .catalog_list()
-            .catalog("datafusion")
-            .and_then(|cat| cat.schema("public"))
-            .and_then(|schema| schema.deregister_table(table_name).ok())
-            .ok_or_else(|| {
-                DataFusionError::Plan(format!("Failed to deregister table '{}'", table_name))
+        extension
+            .catalog()
+            .try_create_table(optd_table_ref, schema)
+            .map_err(|e| {
+                DataFusionError::External(Box::new(optd_core::error::Error::Catalog { source: e }))
             })?;
 
-        if let Some(catalog_handle) = self.get_catalog_handle() {
-            // Parse schema from table name
-            let (schema_name, pure_table_name) = Self::parse_table_name(table_name);
+        Ok(())
+    }
 
-            catalog_handle
-                .drop_external_table(schema_name, pure_table_name)
-                .await
-                .map_err(|e| DataFusionError::External(Box::new(e)))?;
+    fn into_optd_table_ref(table_ref: &TableReference) -> OptdTableRef {
+        match table_ref {
+            TableReference::Bare { table } => OptdTableRef::bare(table.clone()),
+            TableReference::Partial { schema, table } => {
+                OptdTableRef::partial(schema.clone(), table.clone())
+            }
+            TableReference::Full {
+                catalog,
+                schema,
+                table,
+            } => OptdTableRef::full(catalog.clone(), schema.clone(), table.clone()),
         }
-
-        self.return_empty_dataframe()
     }
 }
 
@@ -279,7 +124,8 @@ impl CliSessionContext for OptdCliSessionContext {
         'life0: 'async_trait,
         Self: 'async_trait,
     {
-        let fut = async {
+        let fut = async move {
+            let df = self.inner.execute_logical_plan(plan.clone()).await?;
             if let datafusion::logical_expr::LogicalPlan::Statement(stmt) = &plan {
                 match stmt {
                     datafusion::logical_expr::Statement::TransactionStart(_) => {
@@ -299,18 +145,23 @@ impl CliSessionContext for OptdCliSessionContext {
             } else if let datafusion::logical_expr::LogicalPlan::Ddl(ddl) = &plan {
                 match ddl {
                     datafusion::logical_expr::DdlStatement::CreateExternalTable(create_table) => {
-                        return self.create_external_table(create_table).await;
+                        self.register_optd_table(
+                            create_table.name.clone(),
+                            create_table.schema.inner().clone(),
+                        )?;
                     }
-                    datafusion::logical_expr::DdlStatement::DropTable(drop_table) => {
-                        let table_name = drop_table.name.to_string();
-                        return self
-                            .drop_external_table(&table_name, drop_table.if_exists)
-                            .await;
+                    datafusion::logical_expr::DdlStatement::CreateMemoryTable(create_table) => {
+                        let schema = create_table.input.schema();
+                        self.register_optd_table(
+                            create_table.name.clone(),
+                            schema.inner().clone(),
+                        )?;
                     }
+                    datafusion::logical_expr::DdlStatement::DropTable(drop_table) => {}
                     _ => (),
                 }
             }
-            self.inner.execute_logical_plan(plan).await
+            Ok(df)
         };
 
         Box::pin(fut)

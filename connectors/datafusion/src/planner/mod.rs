@@ -19,17 +19,18 @@ use datafusion::{
     sql::TableReference,
 };
 use optd_core::{
-    error::Result as OptdResult,
+    error::{CatalogSnafu, Result as OptdResult},
     ir::{
         Column, IRContext,
         catalog::DataSourceId,
         explain::quick_explain,
         statistics::{ColumnStatistics, TableStatistics},
     },
+    magic::{MagicCardinalityEstimator, MagicCostModel},
 };
-use snafu::Snafu;
+use snafu::{OptionExt, ResultExt, Snafu};
 
-use crate::OptdExtensionConfig;
+use crate::{OptdExtension, OptdExtensionConfig};
 
 const DEFAULT_ROW_COUNT: usize = 1000;
 
@@ -114,6 +115,22 @@ fn precision_to_string<T: ToString + PartialOrd + Eq + Clone + std::fmt::Debug>(
 }
 
 impl OptdQueryPlanner {
+    fn optd_extension(session_state: &SessionState) -> Result<Arc<OptdExtension>> {
+        session_state
+            .config()
+            .get_extension::<OptdExtension>()
+            .whatever_context("missing optd session extension")
+    }
+
+    fn ir_context(session_state: &SessionState) -> Result<IRContext> {
+        let extension = Self::optd_extension(session_state)?;
+        Ok(IRContext::new(
+            extension.catalog(),
+            Arc::new(MagicCardinalityEstimator),
+            Arc::new(MagicCostModel),
+        ))
+    }
+
     pub async fn collect_statistics(
         tables: &[(DataSourceId, i64, TableScan)],
         ctx: &IRContext,
@@ -126,49 +143,54 @@ impl OptdQueryPlanner {
                 .await
                 .unwrap();
 
-            ctx.catalog.set_table_stats(
-                *source,
-                exec.partition_statistics(None)
-                    .map(|statistics| {
-                        let column_statistics = statistics.column_statistics;
+            ctx.catalog
+                .set_table_stats(
+                    *source,
+                    exec.partition_statistics(None)
+                        .map(|statistics| {
+                            let column_statistics = statistics.column_statistics;
 
-                        let row_count = precision_value_or(statistics.num_rows, DEFAULT_ROW_COUNT);
-                        let size_bytes = precision_to_option(&statistics.total_byte_size);
+                            let row_count =
+                                precision_value_or(statistics.num_rows, DEFAULT_ROW_COUNT);
+                            let size_bytes = precision_to_option(&statistics.total_byte_size);
 
-                        TableStatistics {
-                            row_count,
-                            size_bytes,
-                            column_statistics: column_statistics
-                                .iter()
-                                .enumerate()
-                                .map(|(index, column_stat)| {
-                                    let column = Column(*table_index, index);
-                                    let column_meta = ctx.get_column_meta(&column);
+                            TableStatistics {
+                                row_count,
+                                size_bytes,
+                                column_statistics: column_statistics
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(index, column_stat)| {
+                                        let column = Column(*table_index, index);
+                                        let column_meta = ctx.get_column_meta(&column);
 
-                                    ColumnStatistics {
-                                        column_id: column.0,
-                                        column_type: format!("{:?}", column_meta.data_type),
-                                        name: column_meta.name.clone(),
-                                        // TODO(Aditya): populate with stuff from HLL, digests, etc.
-                                        advanced_stats: Vec::new(),
-                                        min_value: precision_to_string(&column_stat.min_value),
-                                        max_value: precision_to_string(&column_stat.max_value),
-                                        null_count: precision_to_option(&column_stat.null_count),
-                                        distinct_count: precision_to_option(
-                                            &column_stat.distinct_count,
-                                        ),
-                                    }
-                                })
-                                .collect(),
-                        }
-                    })
-                    .unwrap_or_else(|_| TableStatistics {
-                        row_count: DEFAULT_ROW_COUNT,
-                        size_bytes: None,
-                        // TODO(Aditya): add some default column stats?
-                        column_statistics: vec![],
-                    }),
-            );
+                                        ColumnStatistics {
+                                            column_id: column.0,
+                                            column_type: format!("{:?}", column_meta.data_type),
+                                            name: column_meta.name.clone(),
+                                            // TODO(Aditya): populate with stuff from HLL, digests, etc.
+                                            advanced_stats: Vec::new(),
+                                            min_value: precision_to_string(&column_stat.min_value),
+                                            max_value: precision_to_string(&column_stat.max_value),
+                                            null_count: precision_to_option(
+                                                &column_stat.null_count,
+                                            ),
+                                            distinct_count: precision_to_option(
+                                                &column_stat.distinct_count,
+                                            ),
+                                        }
+                                    })
+                                    .collect(),
+                            }
+                        })
+                        .unwrap_or_else(|_| TableStatistics {
+                            row_count: DEFAULT_ROW_COUNT,
+                            size_bytes: None,
+                            // TODO(Aditya): add some default column stats?
+                            column_statistics: vec![],
+                        }),
+                )
+                .context(CatalogSnafu)?;
         }
         Ok(())
     }
@@ -191,7 +213,8 @@ impl OptdQueryPlanner {
                 .await;
         }
 
-        let inner = IRContext::with_empty_magic();
+        let inner =
+            Self::ir_context(session_state).map_err(|e| DataFusionError::External(e.into()))?;
         let mut ctx = OptdQueryPlannerContext::new(inner, session_state);
         let (actual_logical_plan, mut explain) = match logical_plan {
             LogicalPlan::Explain(explain) => (explain.plan.as_ref(), Some(explain.clone())),

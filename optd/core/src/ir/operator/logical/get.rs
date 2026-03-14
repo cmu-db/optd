@@ -2,6 +2,7 @@
 
 use crate::ir::{
     IRCommon,
+    catalog::DataSourceId,
     explain::Explain,
     macros::{define_node, impl_operator_conversion},
     properties::OperatorProperties,
@@ -19,6 +20,7 @@ define_node!(
     LogicalGet, LogicalGetBorrowed {
         properties: OperatorProperties,
         metadata: LogicalGetMetadata {
+            data_source_id: DataSourceId,
             table_index: i64,
             projections: Arc<[usize]>,
         },
@@ -31,9 +33,10 @@ define_node!(
 impl_operator_conversion!(LogicalGet, LogicalGetBorrowed);
 
 impl LogicalGet {
-    pub fn new(table_index: i64, projections: Arc<[usize]>) -> Self {
+    pub fn new(data_source_id: DataSourceId, table_index: i64, projections: Arc<[usize]>) -> Self {
         Self {
             meta: LogicalGetMetadata {
+                data_source_id,
                 table_index,
                 projections,
             },
@@ -48,7 +51,8 @@ impl Explain for LogicalGetBorrowed<'_> {
         ctx: &crate::ir::IRContext,
         option: &crate::ir::explain::ExplainOption,
     ) -> pretty_xmlish::Pretty<'a> {
-        let mut fields = Vec::with_capacity(2);
+        let mut fields = Vec::with_capacity(3);
+        fields.push((".data_source_id", Pretty::display(&self.data_source_id().0)));
         fields.push((".table_index", Pretty::display(&self.table_index())));
         fields.extend(self.common.explain_operator_properties(ctx, option));
         Pretty::childless_record("LogicalGet", fields)

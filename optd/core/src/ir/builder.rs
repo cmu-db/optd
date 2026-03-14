@@ -7,7 +7,7 @@ use itertools::Itertools;
 use crate::ir::{
     Column, DataType, Group, GroupId, IRContext, Operator, Scalar, ScalarValue,
     binder::Binding,
-    catalog::Schema,
+    catalog::{DataSourceId, Schema},
     convert::{IntoOperator, IntoScalar},
     operator::{
         LogicalAggregate, LogicalDependentJoin, LogicalGet, LogicalJoin, LogicalProject,
@@ -52,7 +52,7 @@ impl IRContext {
         projections: Option<Arc<[usize]>>,
     ) -> Arc<Operator> {
         let projections = projections.unwrap_or_else(|| (0..schema.fields().len()).collect());
-        LogicalGet::new(table_index, projections).into_operator()
+        LogicalGet::new(DataSourceId(table_index), table_index, projections).into_operator()
     }
 
     pub fn table_scan(
@@ -62,7 +62,7 @@ impl IRContext {
         projections: Option<Arc<[usize]>>,
     ) -> Arc<Operator> {
         let projections = projections.unwrap_or_else(|| (0..schema.fields().len()).collect());
-        PhysicalTableScan::new(table_index, projections).into_operator()
+        PhysicalTableScan::new(DataSourceId(table_index), table_index, projections).into_operator()
     }
 }
 
