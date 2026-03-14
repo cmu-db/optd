@@ -61,38 +61,7 @@ impl Catalog for MagicCatalog {
                 id,
                 table,
                 schema,
-                stats: None,
-            },
-        );
-        writer.next_table_id += 1;
-        Ok(id)
-    }
-
-    fn create_table_with_stats(
-        &self,
-        table: TableRef,
-        schema: SchemaRef,
-        stats: TableStatistics,
-    ) -> Result<DataSourceId> {
-        let mut writer = self.inner.write().unwrap();
-        let id = DataSourceId(writer.next_table_id);
-        let table = self.resolve_table_ref(table);
-        match writer.table_to_id.entry(table.clone()) {
-            Entry::Occupied(occupied) => {
-                return Err(CatalogError::TableAlreadyExists {
-                    table,
-                    existing_id: *occupied.get(),
-                });
-            }
-            Entry::Vacant(vacant) => vacant.insert(id),
-        };
-        writer.tables.insert(
-            id,
-            TableMetadata {
-                id,
-                table,
-                schema,
-                stats: Some(stats),
+                statistics: None,
             },
         );
         writer.next_table_id += 1;
@@ -149,7 +118,7 @@ impl Catalog for MagicCatalog {
         Ok(())
     }
 
-    fn set_table_stats(&self, table_id: DataSourceId, stats: TableStatistics) -> Result<()> {
+    fn set_table_statistics(&self, table_id: DataSourceId, stats: TableStatistics) -> Result<()> {
         let mut writer = self.inner.write().unwrap();
         let table = writer
             .tables
@@ -157,7 +126,7 @@ impl Catalog for MagicCatalog {
             .ok_or(CatalogError::DataSourceNotFound {
                 data_source_id: table_id,
             })?;
-        table.stats = Some(stats);
+        table.statistics = Some(stats);
         Ok(())
     }
 }

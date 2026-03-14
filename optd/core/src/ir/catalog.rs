@@ -11,9 +11,14 @@ use crate::ir::{
     table_ref::{ResolvedTableRef, TableRef},
 };
 
+/// A stable identifier for a catalog-registered data source.
+///
+/// This id remains the canonical handle for a table even when name-based
+/// lookups are resolved separately.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DataSourceId(pub i64);
 
+/// Errors related to the catalog functionalities.
 #[derive(Debug, Snafu)]
 pub enum CatalogError {
     #[snafu(display("Table '{}' already exists with id {}", table, existing_id.0))]
@@ -38,32 +43,32 @@ pub enum CatalogError {
 
 pub type Result<T> = core::result::Result<T, CatalogError>;
 
-/// Contains metadata information about a table.
+/// Metadata recorded for a table known to the catalog.
+///
+/// Returned by catalog lookup APIs to provide the table's stable id, resolved
+/// name, schema, and any available statistics.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableMetadata {
+    /// Stable identifier assigned by the catalog for this table.
     pub id: DataSourceId,
+    /// Fully resolved catalog, schema, and table name.
     pub table: ResolvedTableRef,
+    /// Arrow schema describing the table's columns.
     pub schema: SchemaRef,
-    pub stats: Option<TableStatistics>,
+    /// Optional statistics recorded for the table.
+    pub statistics: Option<TableStatistics>,
 }
 
+/// Catalog interface for registering and resolving table metadata.
+///
+/// optd uses this abstraction to inspect schemas, stable table identities, and
+/// optional statistics during planning and execution.
 pub trait Catalog: Send + Sync + 'static {
     /// Registers `table` with the provided `schema` and returns its stable data source id.
     ///
     /// Returns [`CatalogError::TableAlreadyExists`] if the resolved table reference has
     /// already been registered.
     fn create_table(&self, table: TableRef, schema: SchemaRef) -> Result<DataSourceId>;
-
-    /// Registers `table` with the provided `schema` and initial `stats`.
-    ///
-    /// Returns the allocated data source id, or [`CatalogError::TableAlreadyExists`] if
-    /// the resolved table reference already exists.
-    fn create_table_with_stats(
-        &self,
-        table: TableRef,
-        schema: SchemaRef,
-        stats: TableStatistics,
-    ) -> Result<DataSourceId>;
 
     /// Returns the metadata associated with `table_id`.
     ///
@@ -86,5 +91,5 @@ pub trait Catalog: Send + Sync + 'static {
     /// Replaces the stored statistics for `table_id`.
     ///
     /// Returns [`CatalogError::DataSourceNotFound`] when the id is unknown.
-    fn set_table_stats(&self, table_id: DataSourceId, stats: TableStatistics) -> Result<()>;
+    fn set_table_statistics(&self, table_id: DataSourceId, stats: TableStatistics) -> Result<()>;
 }

@@ -56,7 +56,7 @@ impl IRContext {
 
         // catalog.set_table_row_count(course, 10);
         catalog
-            .set_table_stats(
+            .set_table_statistics(
                 course,
                 TableStatistics {
                     row_count: 10,
@@ -101,7 +101,7 @@ impl IRContext {
 
         // catalog.set_table_row_count(schedule, 25);
         catalog
-            .set_table_stats(
+            .set_table_statistics(
                 schedule,
                 TableStatistics {
                     row_count: 25,
@@ -157,7 +157,7 @@ impl IRContext {
 
         // catalog.set_table_row_count(staff, 200);
         catalog
-            .set_table_stats(
+            .set_table_statistics(
                 staff,
                 TableStatistics {
                     row_count: 200,
@@ -226,7 +226,9 @@ impl IRContext {
                 let table_id = catalog
                     .create_table(TableRef::bare(table_name), schema)
                     .unwrap();
-                catalog.set_table_stats(table_id, table_statistics).unwrap();
+                catalog
+                    .set_table_statistics(table_id, table_statistics)
+                    .unwrap();
             };
 
         for (i, table_statistics) in tables_statistics.into_iter().enumerate() {

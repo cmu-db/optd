@@ -60,7 +60,7 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                     .catalog
                     .table(meta.data_source_id)
                     .ok()
-                    .and_then(|table| table.stats)
+                    .and_then(|table| table.statistics)
                 {
                     Some(stats) => Cardinality::with_count_lossy(stats.row_count),
                     None => Cardinality::with_count_lossy(
@@ -73,7 +73,7 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                     .catalog
                     .table(meta.data_source_id)
                     .ok()
-                    .and_then(|table| table.stats)
+                    .and_then(|table| table.statistics)
                 {
                     Some(stats) => Cardinality::with_count_lossy(stats.row_count),
                     None => Cardinality::with_count_lossy(

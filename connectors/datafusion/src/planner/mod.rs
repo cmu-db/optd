@@ -144,7 +144,7 @@ impl OptdQueryPlanner {
                 .unwrap();
 
             ctx.catalog
-                .set_table_stats(
+                .set_table_statistics(
                     *source,
                     exec.partition_statistics(None)
                         .map(|statistics| {
