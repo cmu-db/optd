@@ -42,7 +42,7 @@ impl MagicCatalog {
 }
 
 impl Catalog for MagicCatalog {
-    fn try_create_table(&self, table: TableRef, schema: Arc<Schema>) -> Result<DataSourceId> {
+    fn create_table(&self, table: TableRef, schema: Arc<Schema>) -> Result<DataSourceId> {
         let mut writer = self.inner.write().unwrap();
         let id = DataSourceId(writer.next_table_id);
         let table = self.resolve_table_ref(table);
@@ -68,7 +68,7 @@ impl Catalog for MagicCatalog {
         Ok(id)
     }
 
-    fn try_create_table_with_stats(
+    fn create_table_with_stats(
         &self,
         table: TableRef,
         schema: SchemaRef,
@@ -125,9 +125,28 @@ impl Catalog for MagicCatalog {
             .tables
             .get(table_id)
             .cloned()
-            .ok_or(CatalogError::DataSourceNotFound {
+            .ok_or(CatalogError::DanglingTableReference {
+                table: resolved,
                 data_source_id: *table_id,
             })
+    }
+
+    fn drop_table(&self, table: TableRef) -> Result<()> {
+        let mut writer = self.inner.write().unwrap();
+        let resolved = self.resolve_table_ref(table.clone());
+        let Some(table_id) = writer.table_to_id.get(&resolved).copied() else {
+            return Err(CatalogError::TableNotFound { table });
+        };
+
+        writer
+            .tables
+            .remove(&table_id)
+            .ok_or(CatalogError::DanglingTableReference {
+                table: resolved.clone(),
+                data_source_id: table_id,
+            })?;
+        writer.table_to_id.remove(&resolved);
+        Ok(())
     }
 
     fn set_table_stats(&self, table_id: DataSourceId, stats: TableStatistics) -> Result<()> {
@@ -162,9 +181,9 @@ mod tests {
         let cat = MagicCatalog::new("optd", "public");
         let schema = Arc::new(mock_table_schema("t1"));
         let t1 = cat
-            .try_create_table(TableRef::bare("t1"), schema.clone())
+            .create_table(TableRef::bare("t1"), schema.clone())
             .unwrap();
-        let another_t1 = cat.try_create_table(TableRef::bare("t1"), schema.clone());
+        let another_t1 = cat.create_table(TableRef::bare("t1"), schema.clone());
         assert!(another_t1.is_err());
 
         let output = cat.table(t1).unwrap();
@@ -175,7 +194,7 @@ mod tests {
     fn describe_table_with_name() {
         let cat = MagicCatalog::new("optd", "public");
         let schema = Arc::new(mock_table_schema("t1"));
-        cat.try_create_table(TableRef::bare("t1"), schema.clone())
+        cat.create_table(TableRef::bare("t1"), schema.clone())
             .unwrap();
 
         let output = cat.table_by_ref(&TableRef::bare("t1")).unwrap();
@@ -189,5 +208,38 @@ mod tests {
 
         let err = cat.table_by_ref(&TableRef::bare("missing")).unwrap_err();
         assert!(err.to_string().contains("Table 'missing' not found"));
+    }
+
+    #[test]
+    fn drop_table_removes_lookup_and_allows_recreate() {
+        let cat = MagicCatalog::new("optd", "public");
+        let schema = Arc::new(mock_table_schema("t1"));
+        let first_id = cat
+            .create_table(TableRef::bare("t1"), schema.clone())
+            .unwrap();
+
+        cat.drop_table(TableRef::bare("t1")).unwrap();
+
+        assert!(matches!(
+            cat.table(first_id),
+            Err(CatalogError::DataSourceNotFound { data_source_id }) if data_source_id == first_id
+        ));
+        assert!(matches!(
+            cat.table_by_ref(&TableRef::bare("t1")),
+            Err(CatalogError::TableNotFound { .. })
+        ));
+
+        let second_id = cat.create_table(TableRef::bare("t1"), schema).unwrap();
+        assert_ne!(first_id, second_id);
+    }
+
+    #[test]
+    fn drop_missing_table_with_name() {
+        let cat = MagicCatalog::new("optd", "public");
+
+        assert!(matches!(
+            cat.drop_table(TableRef::bare("missing")),
+            Err(CatalogError::TableNotFound { .. })
+        ));
     }
 }

@@ -50,7 +50,7 @@ impl IRContext {
             ]));
 
             catalog
-                .try_create_table(TableRef::bare("course"), schema)
+                .create_table(TableRef::bare("course"), schema)
                 .unwrap()
         };
 
@@ -95,7 +95,7 @@ impl IRContext {
             ]));
 
             catalog
-                .try_create_table(TableRef::bare("schedule"), schema)
+                .create_table(TableRef::bare("schedule"), schema)
                 .unwrap()
         };
 
@@ -151,7 +151,7 @@ impl IRContext {
             ]));
 
             catalog
-                .try_create_table(TableRef::bare("staff"), schema)
+                .create_table(TableRef::bare("staff"), schema)
                 .unwrap()
         };
 
@@ -224,7 +224,7 @@ impl IRContext {
                     .collect_vec();
                 let schema = Arc::new(Schema::new(fields));
                 let table_id = catalog
-                    .try_create_table(TableRef::bare(table_name), schema)
+                    .create_table(TableRef::bare(table_name), schema)
                     .unwrap();
                 catalog.set_table_stats(table_id, table_statistics).unwrap();
             };

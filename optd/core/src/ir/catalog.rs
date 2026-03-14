@@ -25,6 +25,15 @@ pub enum CatalogError {
     TableNotFound { table: TableRef },
     #[snafu(display("Data source {} not found", data_source_id.0))]
     DataSourceNotFound { data_source_id: DataSourceId },
+    #[snafu(display(
+        "Catalog entry for table '{}' points to missing data source {}",
+        table,
+        data_source_id.0
+    ))]
+    DanglingTableReference {
+        table: ResolvedTableRef,
+        data_source_id: DataSourceId,
+    },
 }
 
 pub type Result<T> = core::result::Result<T, CatalogError>;
@@ -39,21 +48,43 @@ pub struct TableMetadata {
 }
 
 pub trait Catalog: Send + Sync + 'static {
-    /// Creates a table.
-    fn try_create_table(&self, table: TableRef, schema: SchemaRef) -> Result<DataSourceId>;
+    /// Registers `table` with the provided `schema` and returns its stable data source id.
+    ///
+    /// Returns [`CatalogError::TableAlreadyExists`] if the resolved table reference has
+    /// already been registered.
+    fn create_table(&self, table: TableRef, schema: SchemaRef) -> Result<DataSourceId>;
 
-    /// Creates a table with stats.
-    fn try_create_table_with_stats(
+    /// Registers `table` with the provided `schema` and initial `stats`.
+    ///
+    /// Returns the allocated data source id, or [`CatalogError::TableAlreadyExists`] if
+    /// the resolved table reference already exists.
+    fn create_table_with_stats(
         &self,
         table: TableRef,
         schema: SchemaRef,
         stats: TableStatistics,
     ) -> Result<DataSourceId>;
 
-    /// Describes the schema of a table with identifier `table_id`.
+    /// Returns the metadata associated with `table_id`.
+    ///
+    /// Returns [`CatalogError::DataSourceNotFound`] when the id is unknown.
     fn table(&self, table_id: DataSourceId) -> Result<TableMetadata>;
-    /// Describes the schema of a table with reference `table`.
+    /// Returns the metadata associated with `table`.
+    ///
+    /// Implementations may resolve partially qualified references using their default
+    /// catalog and schema. Returns [`CatalogError::TableNotFound`] when the table is
+    /// unknown.
     fn table_by_ref(&self, table: &TableRef) -> Result<TableMetadata>;
 
+    /// Removes `table` from the catalog.
+    ///
+    /// Implementations may resolve partially qualified references using their default
+    /// catalog and schema. Returns [`CatalogError::TableNotFound`] when the table is
+    /// unknown.
+    fn drop_table(&self, table: TableRef) -> Result<()>;
+
+    /// Replaces the stored statistics for `table_id`.
+    ///
+    /// Returns [`CatalogError::DataSourceNotFound`] when the id is unknown.
     fn set_table_stats(&self, table_id: DataSourceId, stats: TableStatistics) -> Result<()>;
 }
