@@ -68,8 +68,8 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                     ),
                 }
             }
-            OperatorKind::LogicalJoin(meta) => {
-                let join = LogicalJoin::borrow_raw_parts(meta, &op.common);
+            OperatorKind::Join(meta) => {
+                let join = Join::borrow_raw_parts(meta, &op.common);
                 estimate_join(
                     join.join_type(),
                     join.outer().as_ref(),
@@ -85,27 +85,6 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                     join.inner().as_ref(),
                     join.join_cond().as_ref(),
                 )
-            }
-            OperatorKind::PhysicalNLJoin(meta) => {
-                let join = PhysicalNLJoin::borrow_raw_parts(meta, &op.common);
-                let selectivity = if let Ok(literal) = join.join_cond().try_borrow::<Literal>() {
-                    match literal.value() {
-                        crate::ir::ScalarValue::Boolean(Some(true)) => 1.,
-                        crate::ir::ScalarValue::Boolean(_) => 0.,
-                        _ => unreachable!("join condition must be boolean"),
-                    }
-                } else {
-                    Self::MAGIC_JOIN_COND_SELECTIVITY
-                };
-                let left_card = join.outer().cardinality(ctx);
-                let right_card = join.inner().cardinality(ctx);
-                selectivity * left_card * right_card
-            }
-            OperatorKind::PhysicalHashJoin(meta) => {
-                let join = PhysicalHashJoin::borrow_raw_parts(meta, &op.common);
-                let left_card = join.build_side().cardinality(ctx);
-                let right_card = join.probe_side().cardinality(ctx);
-                Self::MAGIC_JOIN_COND_SELECTIVITY * left_card * right_card
             }
             OperatorKind::LogicalSelect(meta) => {
                 let filter = LogicalSelect::borrow_raw_parts(meta, &op.common);

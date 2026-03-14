@@ -8,10 +8,9 @@ use crate::ir::{
     OperatorKind,
     catalog::Field,
     operator::{
-        EnforcerSort, Get, LogicalAggregate, LogicalDependentJoin, LogicalJoin, LogicalLimit,
+        EnforcerSort, Get, Join, LogicalAggregate, LogicalDependentJoin, LogicalLimit,
         LogicalOrderBy, LogicalProject, LogicalRemap, LogicalSelect, LogicalSubquery,
-        PhysicalFilter, PhysicalHashAggregate, PhysicalHashJoin, PhysicalNLJoin, PhysicalProject,
-        join::JoinType,
+        PhysicalFilter, PhysicalHashAggregate, PhysicalProject, join::JoinType,
     },
     properties::{Derive, GetProperty, PropertyMarker},
     scalar::{ColumnRef, List},
@@ -65,21 +64,13 @@ impl Derive<OutputSchema> for Operator {
                 let filter = PhysicalFilter::borrow_raw_parts(meta, &self.common);
                 filter.input().output_schema(ctx)
             }
-            OperatorKind::LogicalJoin(meta) => {
-                let join = LogicalJoin::borrow_raw_parts(meta, &self.common);
+            OperatorKind::Join(meta) => {
+                let join = Join::borrow_raw_parts(meta, &self.common);
                 compute_join_schema(join.outer(), join.inner(), join.join_type(), ctx)
             }
             OperatorKind::LogicalDependentJoin(meta) => {
                 let join = LogicalDependentJoin::borrow_raw_parts(meta, &self.common);
                 compute_join_schema(join.outer(), join.inner(), join.join_type(), ctx)
-            }
-            OperatorKind::PhysicalNLJoin(meta) => {
-                let join = PhysicalNLJoin::borrow_raw_parts(meta, &self.common);
-                compute_join_schema(join.outer(), join.inner(), join.join_type(), ctx)
-            }
-            OperatorKind::PhysicalHashJoin(meta) => {
-                let join = PhysicalHashJoin::borrow_raw_parts(meta, &self.common);
-                compute_join_schema(join.build_side(), join.probe_side(), join.join_type(), ctx)
             }
             OperatorKind::EnforcerSort(meta) => {
                 let sort = EnforcerSort::borrow_raw_parts(meta, &self.common);

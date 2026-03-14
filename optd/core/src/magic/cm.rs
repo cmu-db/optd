@@ -58,11 +58,21 @@ impl CostModel for MagicCostModel {
                 let card = op.cardinality(ctx);
                 Ok(Self::scan_cost(card))
             }
-            OperatorKind::LogicalJoin(meta) => {
-                let join = LogicalJoin::borrow_raw_parts(meta, &op.common);
-                let outer_card = join.outer().cardinality(ctx);
-                let inner_card = join.inner().cardinality(ctx);
-                Ok(Self::nl_join_cost(outer_card, inner_card))
+            OperatorKind::Join(meta) => {
+                let join = Join::borrow_raw_parts(meta, &op.common);
+                match join.implementation() {
+                    Some(JoinImplementation::Hash(_)) => {
+                        let build_card = join.build_side().unwrap().cardinality(ctx);
+                        let probe_card = join.probe_side().unwrap().cardinality(ctx);
+                        let cost = (build_card.as_f64() * 2. + probe_card.as_f64()) * Cost::UNIT;
+                        Ok(cost)
+                    }
+                    _ => {
+                        let outer_card = join.outer().cardinality(ctx);
+                        let inner_card = join.inner().cardinality(ctx);
+                        Ok(Self::nl_join_cost(outer_card, inner_card))
+                    }
+                }
             }
             OperatorKind::LogicalDependentJoin(meta) => {
                 let join = LogicalDependentJoin::borrow_raw_parts(meta, &op.common);
@@ -97,19 +107,6 @@ impl CostModel for MagicCostModel {
             OperatorKind::EnforcerSort(_) => {
                 let input_card = op.input_operators()[0].cardinality(ctx);
                 Ok(Self::sort_cost(input_card))
-            }
-            OperatorKind::PhysicalNLJoin(meta) => {
-                let join = PhysicalNLJoin::borrow_raw_parts(meta, &op.common);
-                let outer_card = join.outer().cardinality(ctx);
-                let inner_card = join.inner().cardinality(ctx);
-                Ok(Self::nl_join_cost(outer_card, inner_card))
-            }
-            OperatorKind::PhysicalHashJoin(meta) => {
-                let join = PhysicalHashJoin::borrow_raw_parts(meta, &op.common);
-                let build_card = join.build_side().cardinality(ctx);
-                let probe_card = join.probe_side().cardinality(ctx);
-                let cost = (build_card.as_f64() * 2. + probe_card.as_f64()) * Cost::UNIT;
-                Ok(cost)
             }
             OperatorKind::PhysicalFilter(meta) => {
                 let filter = PhysicalFilter::borrow_raw_parts(meta, &op.common);
@@ -168,13 +165,13 @@ mod tests {
         // plan with sort on top.
         let op1 = EnforcerSort::new(
             tuple_ordering.clone(),
-            PhysicalNLJoin::new(JoinType::Inner, m1.clone(), m2.clone(), join_cond.clone())
+            Join::nested_loop(JoinType::Inner, m1.clone(), m2.clone(), join_cond.clone())
                 .into_operator(),
         )
         .into_operator();
 
         // plan with sort passed down.
-        let op2 = PhysicalNLJoin::new(
+        let op2 = Join::nested_loop(
             JoinType::Inner,
             EnforcerSort::new(tuple_ordering, m1).into_operator(),
             m2,
@@ -206,14 +203,14 @@ mod tests {
         let outer = ctx.mock_scan(1, 2, 100.);
         let inner = ctx.mock_scan(2, 2, 50.);
         let join_cond = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();
-        let logical_join = LogicalJoin::new(
+        let logical_join = Join::logical(
             JoinType::Inner,
             outer.clone(),
             inner.clone(),
             join_cond.clone(),
         )
         .into_operator();
-        let physical_join = PhysicalNLJoin::new(
+        let physical_join = Join::nested_loop(
             JoinType::Inner,
             outer.clone(),
             inner.clone(),

@@ -2,7 +2,7 @@
 //! the operator is still logical or has been lowered to a physical scan.
 
 use crate::ir::{
-    IRCommon, OperatorCategory,
+    IRCommon,
     catalog::DataSourceId,
     explain::Explain,
     macros::{define_node, impl_operator_conversion},
@@ -24,7 +24,7 @@ define_node!(
             data_source_id: DataSourceId,
             table_index: i64,
             projections: Arc<[usize]>,
-            implementation: GetImplementation,
+            implementation: Option<GetImplementation>,
         },
         inputs: {
             operators: [],
@@ -36,17 +36,7 @@ impl_operator_conversion!(Get, GetBorrowed);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GetImplementation {
-    Logical,
     TableScan,
-}
-
-impl GetImplementation {
-    pub const fn category(&self) -> OperatorCategory {
-        match self {
-            Self::Logical => OperatorCategory::Logical,
-            Self::TableScan => OperatorCategory::Physical,
-        }
-    }
 }
 
 impl Get {
@@ -54,7 +44,7 @@ impl Get {
         data_source_id: DataSourceId,
         table_index: i64,
         projections: Arc<[usize]>,
-        implementation: GetImplementation,
+        implementation: Option<GetImplementation>,
     ) -> Self {
         Self {
             meta: GetMetadata {
@@ -72,12 +62,7 @@ impl Get {
         table_index: i64,
         projections: Arc<[usize]>,
     ) -> Self {
-        Self::new(
-            data_source_id,
-            table_index,
-            projections,
-            GetImplementation::Logical,
-        )
+        Self::new(data_source_id, table_index, projections, None)
     }
 
     pub fn table_scan(
@@ -89,7 +74,7 @@ impl Get {
             data_source_id,
             table_index,
             projections,
-            GetImplementation::TableScan,
+            Some(GetImplementation::TableScan),
         )
     }
 }

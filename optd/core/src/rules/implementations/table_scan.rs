@@ -1,7 +1,7 @@
 use crate::ir::{
     OperatorKind,
     convert::IntoOperator,
-    operator::{Get, GetImplementation},
+    operator::Get,
     rule::{OperatorPattern, Rule},
 };
 
@@ -18,7 +18,7 @@ impl Default for LogicalGetAsPhysicalTableScanRule {
 impl LogicalGetAsPhysicalTableScanRule {
     pub fn new() -> Self {
         let pattern = OperatorPattern::with_top_matches(
-            |kind| matches!(kind, OperatorKind::Get(meta) if meta.implementation == GetImplementation::Logical),
+            |kind| matches!(kind, OperatorKind::Get(meta) if meta.implementation.is_none()),
         );
         Self { pattern }
     }
@@ -77,7 +77,7 @@ mod tests {
         assert_eq!(get.data_source_id(), &DataSourceId(1));
         assert_eq!(get.table_index(), &1);
         assert!(get.projections().is_empty());
-        assert_eq!(get.implementation(), &GetImplementation::TableScan);
+        assert_eq!(get.implementation(), &Some(GetImplementation::TableScan));
 
         let table_scan = Get::table_scan(DataSourceId(1), 1, Arc::new([])).into_operator();
         assert_eq!(after.kind, table_scan.kind);

@@ -33,8 +33,6 @@ pub use logical::select::*;
 pub use logical::subquery::*;
 pub use physical::filter::*;
 pub use physical::hash_aggregate::*;
-pub use physical::hash_join::*;
-pub use physical::nl_join::*;
 pub use physical::project::*;
 
 pub mod join {
@@ -53,7 +51,7 @@ pub enum OperatorKind {
     Group(GroupMetadata),
     MockScan(MockScanMetadata),
     Get(GetMetadata),
-    LogicalJoin(LogicalJoinMetadata),
+    Join(JoinMetadata),
     LogicalDependentJoin(LogicalDependentJoinMetadata),
     LogicalSelect(LogicalSelectMetadata),
     LogicalProject(LogicalProjectMetadata),
@@ -63,8 +61,6 @@ pub enum OperatorKind {
     LogicalRemap(LogicalRemapMetadata),
     LogicalSubquery(LogicalSubqueryMetadata),
     EnforcerSort(EnforcerSortMetadata),
-    PhysicalNLJoin(PhysicalNLJoinMetadata),
-    PhysicalHashJoin(PhysicalHashJoinMetadata),
     PhysicalFilter(PhysicalFilterMetadata),
     PhysicalProject(PhysicalProjectMetadata),
     PhysicalHashAggregate(PhysicalHashAggregateMetadata),
@@ -84,8 +80,16 @@ impl OperatorKind {
         use OperatorKind::*;
         match self {
             Group(_) => OperatorCategory::Placeholder,
-            Get(meta) => meta.implementation.category(),
-            LogicalJoin(_) => OperatorCategory::Logical,
+            Get(meta) => meta
+                .implementation
+                .is_some()
+                .then(|| OperatorCategory::Physical)
+                .unwrap_or(OperatorCategory::Logical),
+            Join(meta) => meta
+                .implementation
+                .is_some()
+                .then(|| OperatorCategory::Physical)
+                .unwrap_or(OperatorCategory::Logical),
             LogicalDependentJoin(_) => OperatorCategory::Logical,
             LogicalProject(_) => OperatorCategory::Logical,
             LogicalAggregate(_) => OperatorCategory::Logical,
@@ -97,8 +101,6 @@ impl OperatorKind {
             EnforcerSort(_) => OperatorCategory::Enforcer,
             PhysicalFilter(_) => OperatorCategory::Physical,
             PhysicalProject(_) => OperatorCategory::Physical,
-            PhysicalHashJoin(_) => OperatorCategory::Physical,
-            PhysicalNLJoin(_) => OperatorCategory::Physical,
             PhysicalHashAggregate(_) => OperatorCategory::Physical,
             MockScan(_) => OperatorCategory::Physical,
         }
@@ -212,8 +214,8 @@ impl Explain for Operator {
             OperatorKind::Get(meta) => {
                 Get::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::LogicalJoin(meta) => {
-                LogicalJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            OperatorKind::Join(meta) => {
+                Join::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             OperatorKind::LogicalDependentJoin(meta) => {
                 LogicalDependentJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)
@@ -229,12 +231,6 @@ impl Explain for Operator {
             }
             OperatorKind::EnforcerSort(meta) => {
                 EnforcerSort::borrow_raw_parts(meta, &self.common).explain(ctx, option)
-            }
-            OperatorKind::PhysicalNLJoin(meta) => {
-                PhysicalNLJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)
-            }
-            OperatorKind::PhysicalHashJoin(meta) => {
-                PhysicalHashJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             OperatorKind::PhysicalFilter(meta) => {
                 PhysicalFilter::borrow_raw_parts(meta, &self.common).explain(ctx, option)

@@ -12,10 +12,10 @@ use itertools::Itertools;
 use optd_core::ir::{
     Operator, OperatorKind, Scalar,
     operator::{
-        Get, GetBorrowed, LogicalAggregate, LogicalAggregateBorrowed, LogicalJoin,
-        LogicalJoinBorrowed, LogicalLimit, LogicalLimitBorrowed, LogicalProject,
-        LogicalProjectBorrowed, LogicalRemap, LogicalRemapBorrowed, LogicalSelect,
-        LogicalSelectBorrowed, split_equi_and_non_equi_conditions,
+        Get, GetBorrowed, Join, JoinBorrowed, LogicalAggregate, LogicalAggregateBorrowed,
+        LogicalLimit, LogicalLimitBorrowed, LogicalProject, LogicalProjectBorrowed, LogicalRemap,
+        LogicalRemapBorrowed, LogicalSelect, LogicalSelectBorrowed,
+        split_equi_and_non_equi_conditions,
     },
     scalar::{
         BinaryOp, BinaryOpBorrowed, BinaryOpKind, Cast, CastBorrowed, ColumnRef, ColumnRefBorrowed,
@@ -38,8 +38,8 @@ impl OptdQueryPlannerContext<'_> {
                 let node = LogicalSelect::borrow_raw_parts(meta, &optd_plan.common);
                 self.try_from_optd_logical_select(node)
             }
-            OperatorKind::LogicalJoin(meta) => {
-                let node = LogicalJoin::borrow_raw_parts(meta, &optd_plan.common);
+            OperatorKind::Join(meta) => {
+                let node = Join::borrow_raw_parts(meta, &optd_plan.common);
                 self.try_from_optd_logical_join(node)
             }
             OperatorKind::LogicalProject(meta) => {
@@ -138,8 +138,6 @@ impl OptdQueryPlannerContext<'_> {
             group_expr,
             aggr_expr,
         )?;
-
-        println!("Constructed Aggregate");
         Ok(DFLogicalPlan::Aggregate(aggregate))
     }
     pub fn try_from_optd_logical_remap(
@@ -178,10 +176,7 @@ impl OptdQueryPlannerContext<'_> {
         Ok(DFLogicalPlan::Projection(projection))
     }
 
-    pub fn try_from_optd_logical_join(
-        &mut self,
-        node: LogicalJoinBorrowed<'_>,
-    ) -> Result<DFLogicalPlan> {
+    pub fn try_from_optd_logical_join(&mut self, node: JoinBorrowed<'_>) -> Result<DFLogicalPlan> {
         let outer = self.try_from_optd_plan(node.outer())?;
         let inner = self.try_from_optd_plan(node.inner())?;
         let (equi_conds, non_equi_conds) =

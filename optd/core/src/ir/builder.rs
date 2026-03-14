@@ -10,9 +10,8 @@ use crate::ir::{
     catalog::{DataSourceId, Schema},
     convert::{IntoOperator, IntoScalar},
     operator::{
-        Get, LogicalAggregate, LogicalDependentJoin, LogicalJoin, LogicalProject, LogicalRemap,
-        LogicalSelect, PhysicalFilter, PhysicalHashAggregate, PhysicalHashJoin, PhysicalNLJoin,
-        PhysicalProject, join::JoinType,
+        Get, Join, JoinSide, LogicalAggregate, LogicalDependentJoin, LogicalProject, LogicalRemap,
+        LogicalSelect, PhysicalFilter, PhysicalHashAggregate, PhysicalProject, join::JoinType,
     },
     properties::OperatorProperties,
     scalar::*,
@@ -73,7 +72,7 @@ impl Operator {
         join_cond: Arc<Scalar>,
         join_type: JoinType,
     ) -> Arc<Self> {
-        LogicalJoin::new(join_type, self, inner, join_cond).into_operator()
+        Join::logical(join_type, self, inner, join_cond).into_operator()
     }
 
     /// Creates a dependent (correlated) join.
@@ -92,7 +91,7 @@ impl Operator {
         join_cond: Arc<Scalar>,
         join_type: JoinType,
     ) -> Arc<Self> {
-        PhysicalNLJoin::new(join_type, self, inner, join_cond).into_operator()
+        Join::nested_loop(join_type, self, inner, join_cond).into_operator()
     }
 
     pub fn hash_join(
@@ -102,7 +101,24 @@ impl Operator {
         non_equi_conds: Arc<Scalar>,
         join_type: JoinType,
     ) -> Arc<Self> {
-        PhysicalHashJoin::new(join_type, self, probe_side, keys, non_equi_conds).into_operator()
+        let join_cond = NaryOp::new(
+            NaryOpKind::And,
+            keys.iter()
+                .map(|(l, r)| column_ref(*l).eq(column_ref(*r)))
+                .chain(std::iter::once(non_equi_conds))
+                .collect(),
+        )
+        .into_scalar();
+
+        Join::hash(
+            join_type,
+            self,
+            probe_side,
+            join_cond,
+            JoinSide::Outer,
+            keys,
+        )
+        .into_operator()
     }
 
     pub fn logical_select(self: Arc<Self>, predicate: Arc<Scalar>) -> Arc<Self> {

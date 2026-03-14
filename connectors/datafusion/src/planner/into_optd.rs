@@ -16,8 +16,8 @@ use optd_core::{
         catalog::Schema,
         convert::{IntoOperator, IntoScalar},
         operator::{
-            Get, GetImplementation, LogicalAggregate, LogicalJoin, LogicalLimit, LogicalOrderBy,
-            LogicalProject, LogicalRemap, LogicalSelect,
+            Get, Join, LogicalAggregate, LogicalLimit, LogicalOrderBy, LogicalProject,
+            LogicalRemap, LogicalSelect,
         },
         properties::TupleOrderingDirection,
         scalar::{Cast, ColumnRef, Function, Like, List, NaryOp, NaryOpKind},
@@ -194,7 +194,7 @@ impl OptdQueryPlannerContext<'_> {
         }
 
         let join_cond = NaryOp::new(NaryOpKind::And, terms.into()).into_scalar();
-        let join = LogicalJoin::new(join_type, left, right, join_cond);
+        let join = Join::logical(join_type, left, right, join_cond);
 
         Ok(join.into_operator())
     }
@@ -243,12 +243,7 @@ impl OptdQueryPlannerContext<'_> {
             .unwrap_or_else(|| (0..node.projected_schema.inner().fields().len()).collect_vec())
             .into();
 
-        let logical_get = Get::new(
-            data_source_id,
-            table_index,
-            projections,
-            GetImplementation::Logical,
-        );
+        let logical_get = Get::new(data_source_id, table_index, projections, None);
         Ok(logical_get.into_operator())
     }
 }

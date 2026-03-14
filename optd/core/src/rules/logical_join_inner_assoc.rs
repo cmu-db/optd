@@ -2,7 +2,7 @@ use snafu::ensure_whatever;
 
 use crate::ir::{
     IRContext, OperatorKind,
-    operator::{LogicalJoin, join::JoinType},
+    operator::{Join, join::JoinType},
     rule::{OperatorPattern, Rule},
 };
 
@@ -21,7 +21,7 @@ impl Default for LogicalJoinInnerAssocRule {
 impl LogicalJoinInnerAssocRule {
     pub fn new() -> Self {
         const OUTER: usize = 0;
-        let is_inner_join = |kind: &OperatorKind| matches!(kind, OperatorKind::LogicalJoin(meta) if meta.join_type == JoinType::Inner);
+        let is_inner_join = |kind: &OperatorKind| matches!(kind, OperatorKind::Join(meta) if meta.implementation.is_none() && meta.join_type == JoinType::Inner);
         let mut pattern = OperatorPattern::with_top_matches(is_inner_join);
         pattern.add_input_operator_pattern(OUTER, OperatorPattern::with_top_matches(is_inner_join));
         Self { pattern }
@@ -43,12 +43,12 @@ impl Rule for LogicalJoinInnerAssocRule {
         ctx: &IRContext,
     ) -> crate::error::Result<Vec<std::sync::Arc<crate::ir::Operator>>> {
         // ((a JOIN b, cond_low) JOIN c, cond_up) → (a JOIN (b JOIN c, cond_up), cond_low)
-        let join_upper = operator.try_borrow::<LogicalJoin>().unwrap();
+        let join_upper = operator.try_borrow::<Join>().unwrap();
         ensure_whatever!(
             join_upper.join_type().eq(&JoinType::Inner),
             "join upper must be inner join"
         );
-        let join_lower = join_upper.outer().try_borrow::<LogicalJoin>().unwrap();
+        let join_lower = join_upper.outer().try_borrow::<Join>().unwrap();
         ensure_whatever!(
             join_lower.join_type().eq(&JoinType::Inner),
             "join_lower must be inner join"
@@ -94,9 +94,9 @@ mod tests {
         let c = MockScan::with_mock_spec(3, MockSpec::default()).into_operator();
         let cond_upper = Literal::boolean(true).into_scalar();
         let cond_lower = Literal::boolean(false).into_scalar();
-        let join_ab = LogicalJoin::new(JoinType::Inner, a.clone(), b.clone(), cond_lower.clone())
+        let join_ab = Join::logical(JoinType::Inner, a.clone(), b.clone(), cond_lower.clone())
             .into_operator();
-        let inner_joins = LogicalJoin::new(
+        let inner_joins = Join::logical(
             JoinType::Inner,
             join_ab.clone(),
             c.clone(),
@@ -108,10 +108,10 @@ mod tests {
         let rule = LogicalJoinInnerAssocRule::new();
         assert!(rule.pattern.matches_without_expand(&inner_joins));
         let res = rule.transform(&inner_joins, &ctx).unwrap().pop().unwrap();
-        let new_upper = res.try_borrow::<LogicalJoin>().unwrap();
+        let new_upper = res.try_borrow::<Join>().unwrap();
         let a_ref = new_upper.outer().try_borrow::<MockScan>().unwrap();
 
-        let new_lower = new_upper.inner().try_borrow::<LogicalJoin>().unwrap();
+        let new_lower = new_upper.inner().try_borrow::<Join>().unwrap();
         let b_ref = new_lower.outer().try_borrow::<MockScan>().unwrap();
         let c_ref = new_lower.inner().try_borrow::<MockScan>().unwrap();
 
@@ -137,10 +137,10 @@ mod tests {
         );
 
         // This rule does not apply to left outer joins.
-        let left_outer_joins = LogicalJoin::new(
+        let left_outer_joins = Join::logical(
             JoinType::Left,
             {
-                LogicalJoin::new(JoinType::Left, a.clone(), b.clone(), cond_lower.clone())
+                Join::logical(JoinType::Left, a.clone(), b.clone(), cond_lower.clone())
                     .into_operator()
             },
             c.clone(),

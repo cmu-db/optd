@@ -2,7 +2,7 @@ use super::helpers::{assert_unnesting, create_domain_with_aliases, make_cols, nu
 use crate::ir::builder::{boolean, column_assign, column_ref, mock_scan_with_columns};
 use crate::ir::convert::IntoOperator;
 use crate::ir::explain::quick_explain;
-use crate::ir::operator::{LogicalJoin, LogicalOrderBy, Operator, OperatorKind, join::JoinType};
+use crate::ir::operator::{Join, LogicalOrderBy, Operator, OperatorKind, join::JoinType};
 use crate::ir::properties::TupleOrderingDirection;
 use crate::ir::{Column, DataType, IRContext};
 use crate::rules::decorrelation::UnnestingRule;
@@ -851,7 +851,7 @@ fn test_left_join_right_cclass_not_propagated() {
 
     let res = UnnestingRule::new().apply(input_plan, &ctx).unwrap();
     let root_join = match &res.kind {
-        OperatorKind::LogicalJoin(meta) => LogicalJoin::borrow_raw_parts(meta, &res.common),
+        OperatorKind::Join(meta) => Join::borrow_raw_parts(meta, &res.common),
         _ => panic!(
             "expected decorrelated root to be a join, got:\n{}",
             quick_explain(&res, &ctx)

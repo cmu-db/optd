@@ -1,10 +1,8 @@
 use crate::ir::{
     OperatorKind,
-    builder::boolean,
-    convert::IntoScalar,
-    operator::{LogicalJoin, join::JoinType, split_equi_and_non_equi_conditions},
+    convert::IntoOperator,
+    operator::{Join, JoinSide, join::JoinType, split_equi_and_non_equi_conditions},
     rule::{OperatorPattern, Rule},
-    scalar::{NaryOp, NaryOpKind},
 };
 
 pub struct LogicalJoinAsPhysicalHashJoinRule {
@@ -22,8 +20,9 @@ impl LogicalJoinAsPhysicalHashJoinRule {
         let pattern = OperatorPattern::with_top_matches(|kind| {
             matches!(
                 kind,
-                OperatorKind::LogicalJoin(meta)
-                    if matches!(meta.join_type, JoinType::Inner | JoinType::Left)
+                OperatorKind::Join(meta)
+                    if meta.implementation.is_none()
+                        && matches!(meta.join_type, JoinType::Inner | JoinType::Left)
             )
         });
         Self { pattern }
@@ -44,7 +43,7 @@ impl Rule for LogicalJoinAsPhysicalHashJoinRule {
         operator: &crate::ir::Operator,
         ctx: &crate::ir::IRContext,
     ) -> crate::error::Result<Vec<std::sync::Arc<crate::ir::Operator>>> {
-        let join = operator.try_borrow::<LogicalJoin>().unwrap();
+        let join = operator.try_borrow::<Join>().unwrap();
 
         let (equi_conds, non_equi_conds) = split_equi_and_non_equi_conditions(&join, ctx)?;
 
@@ -52,20 +51,18 @@ impl Rule for LogicalJoinAsPhysicalHashJoinRule {
             return Ok(vec![]);
         }
 
-        let build_side = join.outer().clone();
-        let probe_side = join.inner().clone();
+        debug_assert!(!non_equi_conds.is_empty() || !equi_conds.is_empty());
 
-        let non_equi_conds = match &non_equi_conds[..] {
-            [] => boolean(true),
-            [singleton] => singleton.clone(),
-            terms => NaryOp::new(NaryOpKind::And, terms.into()).into_scalar(),
-        };
-
-        Ok(vec![build_side.hash_join(
-            probe_side,
-            equi_conds.into(),
-            non_equi_conds,
-            *join.join_type(),
-        )])
+        Ok(vec![
+            Join::hash(
+                *join.join_type(),
+                join.outer().clone(),
+                join.inner().clone(),
+                join.join_cond().clone(),
+                JoinSide::Outer,
+                equi_conds.into(),
+            )
+            .into_operator(),
+        ])
     }
 }

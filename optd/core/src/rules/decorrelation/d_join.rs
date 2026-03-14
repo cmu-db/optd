@@ -30,8 +30,7 @@ use crate::ir::IRContext;
 use crate::ir::convert::{IntoOperator, IntoScalar};
 use crate::ir::operator::join::JoinType;
 use crate::ir::operator::{
-    LogicalAggregate, LogicalDependentJoinBorrowed, LogicalJoin, LogicalProject, LogicalRemap,
-    Operator,
+    Join, LogicalAggregate, LogicalDependentJoinBorrowed, LogicalProject, LogicalRemap, Operator,
 };
 use crate::ir::scalar::{BinaryOp, BinaryOpKind, ColumnAssign, ColumnRef, List};
 use crate::ir::{Column, Scalar};
@@ -207,6 +206,6 @@ impl UnnestingRule {
         }
 
         let new_cond = Scalar::combine_conjuncts(new_conds);
-        Ok(LogicalJoin::new(join_type, new_outer, new_inner, new_cond).into_operator())
+        Ok(Join::logical(join_type, new_outer, new_inner, new_cond).into_operator())
     }
 }

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::ir::convert::{IntoOperator, IntoScalar};
-use crate::ir::operator::{LogicalJoin, LogicalSelect, Operator, join::JoinType};
+use crate::ir::operator::{Join, LogicalSelect, Operator, join::JoinType};
 use crate::ir::rule::{OperatorPattern, Rule};
 use crate::ir::scalar::{NaryOp, NaryOpKind};
 use crate::ir::{IRContext, OperatorKind};
@@ -44,8 +44,11 @@ impl Rule for LogicalSelectSimplifyRule {
         if predicate.is_true_scalar() {
             return Ok(vec![select.input().clone()]);
         }
-        if let OperatorKind::LogicalJoin(join_meta) = &select.input().kind {
-            let join = LogicalJoin::borrow_raw_parts(join_meta, &select.input().common);
+        if let OperatorKind::Join(join_meta) = &select.input().kind {
+            if join_meta.implementation.is_some() {
+                return Ok(vec![]);
+            }
+            let join = Join::borrow_raw_parts(join_meta, &select.input().common);
             if !matches!(join.join_type(), &JoinType::Inner) {
                 return Ok(vec![]);
             }
@@ -56,7 +59,7 @@ impl Rule for LogicalSelectSimplifyRule {
                 NaryOp::new(NaryOpKind::And, vec![join_cond, predicate].into()).into_scalar()
             };
             Ok(vec![
-                LogicalJoin::new(
+                Join::logical(
                     JoinType::Inner,
                     join.outer().clone(),
                     join.inner().clone(),

@@ -205,9 +205,14 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
         let satisfied = match &self.kind {
             OperatorKind::Group(_) => None,
             OperatorKind::Get(_) => satisfy_scan_ordering(ordering),
-            OperatorKind::LogicalJoin(meta) => {
-                let join = LogicalJoin::borrow_raw_parts(meta, &self.common);
-                satisfy_nl_join_ordering(join.outer(), ordering, ctx)?
+            OperatorKind::Join(meta) => {
+                let join = Join::borrow_raw_parts(meta, &self.common);
+                match join.implementation() {
+                    Some(JoinImplementation::Hash(_)) => ordering
+                        .is_empty()
+                        .then(|| Arc::<[TupleOrdering]>::from(vec![ordering.clone(); 2])),
+                    _ => satisfy_nl_join_ordering(join.outer(), ordering, ctx)?,
+                }
             }
             OperatorKind::LogicalDependentJoin(meta) => {
                 let join = LogicalDependentJoin::borrow_raw_parts(meta, &self.common);
@@ -242,16 +247,6 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
             }
             OperatorKind::EnforcerSort(meta) => (&meta.tuple_ordering >= ordering)
                 .then(|| Arc::<[TupleOrdering]>::from(vec![TupleOrdering::default(); 1])),
-            OperatorKind::PhysicalNLJoin(meta) => {
-                let join = PhysicalNLJoin::borrow_raw_parts(meta, &self.common);
-                satisfy_nl_join_ordering(join.outer(), ordering, ctx)?
-            }
-            OperatorKind::PhysicalHashJoin(_) => {
-                // Hash join does not maintain tuple ordering.
-                ordering
-                    .is_empty()
-                    .then(|| Arc::<[TupleOrdering]>::from(vec![ordering.clone(); 2]))
-            }
             OperatorKind::PhysicalFilter(meta) => {
                 let filter = PhysicalFilter::borrow_raw_parts(meta, &self.common);
                 satisfy_passthrough_ordering(filter.input(), ordering, ctx)?
@@ -326,7 +321,7 @@ mod tests {
         let m1 = ctx.mock_scan(1, 2, 100.);
         let m2 = ctx.mock_scan(2, 2, 100.);
         let join_cond = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();
-        let join1 = PhysicalNLJoin::new(JoinType::Inner, m1.clone(), m2.clone(), join_cond.clone())
+        let join1 = Join::nested_loop(JoinType::Inner, m1.clone(), m2.clone(), join_cond.clone())
             .into_operator();
         let join2 = join1.clone_with_inputs(Some(Arc::new([m2, m1])), None);
 
@@ -412,7 +407,7 @@ mod tests {
         let m1 = ctx.mock_scan(1, 2, 100.);
         let m2 = ctx.mock_scan(2, 2, 100.);
         let join_cond = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();
-        let join1 = LogicalJoin::new(JoinType::Inner, m1.clone(), m2.clone(), join_cond.clone())
+        let join1 = Join::logical(JoinType::Inner, m1.clone(), m2.clone(), join_cond.clone())
             .into_operator();
         let join2 = join1.clone_with_inputs(Some(Arc::new([m2, m1])), None);
 

@@ -3,8 +3,8 @@ use crate::ir::builder::{column_assign, column_ref};
 use crate::ir::convert::IntoScalar;
 use crate::ir::explain::quick_explain;
 use crate::ir::operator::{
-    LogicalAggregate, LogicalDependentJoin, LogicalJoin, LogicalOrderBy, LogicalProject,
-    LogicalSelect, MockScan, Operator, OperatorKind, join::JoinType,
+    Join, LogicalAggregate, LogicalDependentJoin, LogicalOrderBy, LogicalProject, LogicalSelect,
+    MockScan, Operator, OperatorKind, join::JoinType,
 };
 use crate::ir::scalar::{
     BinaryOp, BinaryOpKind, ColumnAssign, ColumnRef, List, Literal, NaryOp, NaryOpKind, ScalarKind,
@@ -363,8 +363,8 @@ fn eval_op(op: &Arc<Operator>, env: &[Row], data: &MockData, ctx: &IRContext) ->
             let order = LogicalOrderBy::borrow_raw_parts(meta, &op.common);
             eval_op(order.input(), env, data, ctx)?
         }
-        OperatorKind::LogicalJoin(meta) => {
-            let join = LogicalJoin::borrow_raw_parts(meta, &op.common);
+        OperatorKind::Join(meta) => {
+            let join = Join::borrow_raw_parts(meta, &op.common);
             let left_rows = eval_op(join.outer(), env, data, ctx)?;
             let right_rows = eval_op(join.inner(), env, data, ctx)?;
             match join.join_type() {

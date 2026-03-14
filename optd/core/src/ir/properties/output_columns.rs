@@ -8,7 +8,7 @@ use crate::{
     ir::{
         Column, ColumnSet, OperatorKind,
         operator::{
-            Get, LogicalAggregate, LogicalDependentJoin, LogicalJoin, LogicalProject, LogicalRemap,
+            Get, Join, LogicalAggregate, LogicalDependentJoin, LogicalProject, LogicalRemap,
             PhysicalHashAggregate, PhysicalProject, join::JoinType,
         },
         properties::{Derive, GetProperty, PropertyMarker},
@@ -41,8 +41,8 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                         .collect(),
                 ))
             }
-            OperatorKind::LogicalJoin(meta) => {
-                let join = LogicalJoin::borrow_raw_parts(meta, &self.common);
+            OperatorKind::Join(meta) => {
+                let join = Join::borrow_raw_parts(meta, &self.common);
                 match join.join_type() {
                     JoinType::Mark(mark_column) => {
                         let outer_columns = join.outer().output_columns(ctx)?;
@@ -79,9 +79,7 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                     }
                 }
             }
-            OperatorKind::PhysicalNLJoin(_)
-            | OperatorKind::PhysicalHashJoin(_)
-            | OperatorKind::LogicalSelect(_)
+            OperatorKind::LogicalSelect(_)
             | OperatorKind::LogicalLimit(_)
             | OperatorKind::PhysicalFilter(_)
             | OperatorKind::LogicalOrderBy(_)

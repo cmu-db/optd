@@ -1,5 +1,5 @@
-//! The logical join operator joins two input relations based on a join
-//! condition.
+//! The join operator joins two input relations based on a join condition. Its
+//! metadata tracks whether a physical implementation has been selected.
 
 use crate::ir::{
     Column, IRCommon, IRContext, Operator, Scalar,
@@ -15,12 +15,14 @@ use std::sync::Arc;
 define_node!(
     /// Metadata:
     /// - join_type: The type of join (e.g., Inner, Left, Mark, Single).
+    /// - implementation: The selected physical implementation, if any.
     /// Scalars:
     /// - join_cond: The join conditions to join on
-    LogicalJoin, LogicalJoinBorrowed {
+    Join, JoinBorrowed {
         properties: OperatorProperties,
-        metadata: LogicalJoinMetadata {
+        metadata: JoinMetadata {
             join_type: JoinType,
+            implementation: Option<JoinImplementation>,
         },
         inputs: {
             operators: [outer, inner],
@@ -28,7 +30,7 @@ define_node!(
         }
     }
 );
-impl_operator_conversion!(LogicalJoin, LogicalJoinBorrowed);
+impl_operator_conversion!(Join, JoinBorrowed);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum JoinType {
@@ -38,17 +40,83 @@ pub enum JoinType {
     Mark(Column),
 }
 
-impl LogicalJoin {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum JoinImplementation {
+    NestedLoop,
+    Hash(HashJoinImplementation),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct HashJoinImplementation {
+    pub build_side: JoinSide,
+    pub keys: Arc<[(Column, Column)]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum JoinSide {
+    Outer,
+    Inner,
+}
+
+impl Join {
     pub fn new(
         join_type: JoinType,
         outer: Arc<Operator>,
         inner: Arc<Operator>,
         join_cond: Arc<Scalar>,
+        implementation: Option<JoinImplementation>,
     ) -> Self {
         Self {
-            meta: LogicalJoinMetadata { join_type },
+            meta: JoinMetadata {
+                join_type,
+                implementation,
+            },
             common: IRCommon::new(Arc::new([outer, inner]), Arc::new([join_cond])),
         }
+    }
+
+    pub fn logical(
+        join_type: JoinType,
+        outer: Arc<Operator>,
+        inner: Arc<Operator>,
+        join_cond: Arc<Scalar>,
+    ) -> Self {
+        Self::new(join_type, outer, inner, join_cond, None)
+    }
+
+    pub fn nested_loop(
+        join_type: JoinType,
+        outer: Arc<Operator>,
+        inner: Arc<Operator>,
+        join_cond: Arc<Scalar>,
+    ) -> Self {
+        Self::new(
+            join_type,
+            outer,
+            inner,
+            join_cond,
+            Some(JoinImplementation::NestedLoop),
+        )
+    }
+
+    pub fn hash(
+        join_type: JoinType,
+        outer: Arc<Operator>,
+        inner: Arc<Operator>,
+        join_cond: Arc<Scalar>,
+        build_side: JoinSide,
+        keys: Arc<[(Column, Column)]>,
+    ) -> Self {
+        Self::new(
+            join_type,
+            outer,
+            inner,
+            join_cond,
+            Some(JoinImplementation::Hash(HashJoinImplementation {
+                build_side,
+                keys,
+            })),
+        )
     }
 }
 
@@ -56,7 +124,7 @@ type SplittedJoinConds = (Vec<(Column, Column)>, Vec<Arc<Scalar>>);
 
 /// Best effort splitting equi join conditions from non equi join conditions.
 pub fn split_equi_and_non_equi_conditions<'ir>(
-    join: &LogicalJoinBorrowed<'ir>,
+    join: &JoinBorrowed<'ir>,
     ctx: &IRContext,
 ) -> crate::error::Result<SplittedJoinConds> {
     let outer_columns = join.outer().output_columns(ctx)?;
@@ -105,17 +173,47 @@ pub fn split_equi_and_non_equi_conditions<'ir>(
     }
 }
 
-impl Explain for LogicalJoinBorrowed<'_> {
+impl JoinBorrowed<'_> {
+    pub fn hash_implementation(&self) -> Option<&HashJoinImplementation> {
+        match self.implementation() {
+            Some(JoinImplementation::Hash(hash)) => Some(hash),
+            _ => None,
+        }
+    }
+
+    pub fn build_side(&self) -> Option<&Arc<Operator>> {
+        let build_side = self.hash_implementation()?.build_side;
+        Some(match build_side {
+            JoinSide::Outer => self.outer(),
+            JoinSide::Inner => self.inner(),
+        })
+    }
+
+    pub fn probe_side(&self) -> Option<&Arc<Operator>> {
+        let build_side = self.hash_implementation()?.build_side;
+        Some(match build_side {
+            JoinSide::Outer => self.inner(),
+            JoinSide::Inner => self.outer(),
+        })
+    }
+}
+
+impl Explain for JoinBorrowed<'_> {
     fn explain<'a>(
         &self,
         ctx: &crate::ir::IRContext,
         option: &crate::ir::explain::ExplainOption,
     ) -> pretty_xmlish::Pretty<'a> {
-        let mut fields = Vec::with_capacity(3);
+        let mut fields = Vec::with_capacity(5);
         fields.push((".join_type", Pretty::debug(self.join_type())));
+        fields.push((".implementation", Pretty::debug(self.implementation())));
         fields.push((".join_cond", self.join_cond().explain(ctx, option)));
+        if let Some(hash) = self.hash_implementation() {
+            fields.push((".build_side", Pretty::debug(&hash.build_side)));
+            fields.push((".hash_keys", Pretty::debug(&hash.keys)));
+        }
         fields.extend(self.common.explain_operator_properties(ctx, option));
         let children = self.common.explain_input_operators(ctx, option);
-        Pretty::simple_record("LogicalJoin", fields, children)
+        Pretty::simple_record("Join", fields, children)
     }
 }

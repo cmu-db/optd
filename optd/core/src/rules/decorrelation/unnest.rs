@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::error::Result;
 use crate::ir::convert::{IntoOperator, IntoScalar};
 use crate::ir::operator::{
-    LogicalAggregate, LogicalDependentJoin, LogicalJoin, LogicalOrderBy, LogicalProject,
-    LogicalRemap, LogicalSelect, Operator, OperatorKind, join::JoinType,
+    Join, LogicalAggregate, LogicalDependentJoin, LogicalOrderBy, LogicalProject, LogicalRemap,
+    LogicalSelect, Operator, OperatorKind, join::JoinType,
 };
 use crate::ir::rule::Rule;
 use crate::ir::scalar::{BinaryOp, BinaryOpKind, ColumnAssign, ColumnRef, List};
@@ -61,7 +61,7 @@ impl UnnestingRule {
         }
         let mut chain = domains.remove(0);
         for next_domain in domains {
-            chain = LogicalJoin::new(
+            chain = Join::logical(
                 JoinType::Inner,
                 chain,
                 next_domain,
@@ -81,7 +81,7 @@ impl UnnestingRule {
         let Some(chain) = Self::build_domain_chain(info, unnesting, seen_outer_refs, false) else {
             return op;
         };
-        LogicalJoin::new(
+        Join::logical(
             JoinType::Inner,
             chain,
             op,
@@ -438,7 +438,7 @@ impl UnnestingRule {
                         }
                     }
                     Ok(
-                        LogicalJoin::new(JoinType::Left, domain_input, agg, join_cond)
+                        Join::logical(JoinType::Left, domain_input, agg, join_cond)
                             .into_operator(),
                     )
                 } else {
@@ -483,8 +483,8 @@ impl UnnestingRule {
                     Ok(unnested)
                 }
             }
-            OperatorKind::LogicalJoin(ref meta) => {
-                let node = LogicalJoin::borrow_raw_parts(meta, &op.common);
+            OperatorKind::Join(ref meta) => {
+                let node = Join::borrow_raw_parts(meta, &op.common);
                 let left = node.outer();
                 let right = node.inner();
 
@@ -517,10 +517,8 @@ impl UnnestingRule {
                         ctx,
                     )?;
                     let new_cond = info.rewrite_columns(node.join_cond().clone());
-                    return Ok(
-                        LogicalJoin::new(join_type, new_left, right.clone(), new_cond)
-                            .into_operator(),
-                    );
+                    return Ok(Join::logical(join_type, new_left, right.clone(), new_cond)
+                        .into_operator());
                 }
 
                 if left_accessing.is_empty() && !outputs_unmatched_left {
@@ -532,10 +530,8 @@ impl UnnestingRule {
                         ctx,
                     )?;
                     let new_cond = info.rewrite_columns(node.join_cond().clone());
-                    return Ok(
-                        LogicalJoin::new(join_type, left.clone(), new_right, new_cond)
-                            .into_operator(),
-                    );
+                    return Ok(Join::logical(join_type, left.clone(), new_right, new_cond)
+                        .into_operator());
                 }
 
                 // Unnest both sides
@@ -645,7 +641,7 @@ impl UnnestingRule {
                     }
                 }
 
-                Ok(LogicalJoin::new(
+                Ok(Join::logical(
                     join_type,
                     new_left,
                     new_right,
