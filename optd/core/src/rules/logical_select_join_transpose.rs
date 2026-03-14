@@ -1,6 +1,6 @@
 use crate::ir::{
     IRContext, OperatorKind,
-    operator::{Join, LogicalSelect, join::JoinType},
+    operator::{Join, Select, join::JoinType},
     rule::{OperatorPattern, Rule},
 };
 
@@ -17,9 +17,8 @@ impl Default for LogicalSelectJoinTransposeRule {
 impl LogicalSelectJoinTransposeRule {
     pub fn new() -> Self {
         const INPUT: usize = 0;
-        let mut pattern = OperatorPattern::with_top_matches(|kind| {
-            matches!(kind, OperatorKind::LogicalSelect(_))
-        });
+        let mut pattern =
+            OperatorPattern::with_top_matches(|kind| matches!(kind, OperatorKind::Select(_)));
         pattern.add_input_operator_pattern(
             INPUT,
             OperatorPattern::with_top_matches(|kind| {
@@ -49,7 +48,7 @@ impl Rule for LogicalSelectJoinTransposeRule {
         operator: &crate::ir::Operator,
         ctx: &IRContext,
     ) -> crate::error::Result<Vec<std::sync::Arc<crate::ir::Operator>>> {
-        let select = operator.try_borrow::<LogicalSelect>().unwrap();
+        let select = operator.try_borrow::<Select>().unwrap();
         let join = select.input().try_borrow::<Join>().unwrap();
 
         let outer = join.outer().clone();

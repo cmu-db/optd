@@ -31,9 +31,6 @@ pub use logical::project::*;
 pub use logical::remap::*;
 pub use logical::select::*;
 pub use logical::subquery::*;
-pub use physical::filter::*;
-pub use physical::hash_aggregate::*;
-pub use physical::project::*;
 
 pub mod join {
     pub use super::logical::join::JoinType;
@@ -53,17 +50,14 @@ pub enum OperatorKind {
     Get(GetMetadata),
     Join(JoinMetadata),
     LogicalDependentJoin(LogicalDependentJoinMetadata),
-    LogicalSelect(LogicalSelectMetadata),
-    LogicalProject(LogicalProjectMetadata),
-    LogicalAggregate(LogicalAggregateMetadata),
+    Select(SelectMetadata),
+    Project(ProjectMetadata),
+    Aggregate(AggregateMetadata),
     LogicalLimit(LogicalLimitMetadata),
     LogicalOrderBy(LogicalOrderByMetadata),
     LogicalRemap(LogicalRemapMetadata),
     LogicalSubquery(LogicalSubqueryMetadata),
     EnforcerSort(EnforcerSortMetadata),
-    PhysicalFilter(PhysicalFilterMetadata),
-    PhysicalProject(PhysicalProjectMetadata),
-    PhysicalHashAggregate(PhysicalHashAggregateMetadata),
 }
 
 #[derive(Debug, PartialEq)]
@@ -91,17 +85,18 @@ impl OperatorKind {
                 .then(|| OperatorCategory::Physical)
                 .unwrap_or(OperatorCategory::Logical),
             LogicalDependentJoin(_) => OperatorCategory::Logical,
-            LogicalProject(_) => OperatorCategory::Logical,
-            LogicalAggregate(_) => OperatorCategory::Logical,
+            Project(_) => OperatorCategory::Logical,
+            Aggregate(meta) => meta
+                .implementation
+                .is_some()
+                .then(|| OperatorCategory::Physical)
+                .unwrap_or(OperatorCategory::Logical),
             LogicalLimit(_) => OperatorCategory::Logical,
             LogicalOrderBy(_) => OperatorCategory::Logical,
             LogicalRemap(_) => OperatorCategory::Logical,
-            LogicalSelect(_) => OperatorCategory::Logical,
+            Select(_) => OperatorCategory::Logical,
             LogicalSubquery(_) => OperatorCategory::Logical,
             EnforcerSort(_) => OperatorCategory::Enforcer,
-            PhysicalFilter(_) => OperatorCategory::Physical,
-            PhysicalProject(_) => OperatorCategory::Physical,
-            PhysicalHashAggregate(_) => OperatorCategory::Physical,
             MockScan(_) => OperatorCategory::Physical,
         }
     }
@@ -110,8 +105,8 @@ impl OperatorKind {
     pub fn maybe_produce_columns(&self) -> bool {
         match self {
             OperatorKind::Get(_) => true,
-            OperatorKind::LogicalProject(_) | OperatorKind::PhysicalProject(_) => true,
-            OperatorKind::LogicalAggregate(_) | OperatorKind::PhysicalHashAggregate(_) => true,
+            OperatorKind::Project(_) => true,
+            OperatorKind::Aggregate(_) => true,
             OperatorKind::MockScan(_) => true,
             _other => false,
         }
@@ -220,8 +215,8 @@ impl Explain for Operator {
             OperatorKind::LogicalDependentJoin(meta) => {
                 LogicalDependentJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::LogicalSelect(meta) => {
-                LogicalSelect::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            OperatorKind::Select(meta) => {
+                Select::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             OperatorKind::LogicalLimit(meta) => {
                 LogicalLimit::borrow_raw_parts(meta, &self.common).explain(ctx, option)
@@ -232,20 +227,11 @@ impl Explain for Operator {
             OperatorKind::EnforcerSort(meta) => {
                 EnforcerSort::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::PhysicalFilter(meta) => {
-                PhysicalFilter::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            OperatorKind::Project(meta) => {
+                Project::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::LogicalProject(meta) => {
-                LogicalProject::borrow_raw_parts(meta, &self.common).explain(ctx, option)
-            }
-            OperatorKind::PhysicalProject(meta) => {
-                PhysicalProject::borrow_raw_parts(meta, &self.common).explain(ctx, option)
-            }
-            OperatorKind::LogicalAggregate(meta) => {
-                LogicalAggregate::borrow_raw_parts(meta, &self.common).explain(ctx, option)
-            }
-            OperatorKind::PhysicalHashAggregate(meta) => {
-                PhysicalHashAggregate::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            OperatorKind::Aggregate(meta) => {
+                Aggregate::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             OperatorKind::LogicalRemap(meta) => {
                 LogicalRemap::borrow_raw_parts(meta, &self.common).explain(ctx, option)

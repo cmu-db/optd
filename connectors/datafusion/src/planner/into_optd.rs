@@ -16,8 +16,7 @@ use optd_core::{
         catalog::Schema,
         convert::{IntoOperator, IntoScalar},
         operator::{
-            Get, Join, LogicalAggregate, LogicalLimit, LogicalOrderBy, LogicalProject,
-            LogicalRemap, LogicalSelect,
+            Aggregate, Get, Join, LogicalLimit, LogicalOrderBy, LogicalRemap, Project, Select,
         },
         properties::TupleOrderingDirection,
         scalar::{Cast, ColumnRef, Function, Like, List, NaryOp, NaryOpKind},
@@ -127,7 +126,7 @@ impl OptdQueryPlannerContext<'_> {
             .context(OptdSnafu)?;
 
         let aggregate =
-            LogicalAggregate::new(table_index, input, exprs.into_scalar(), keys.into_scalar());
+            Aggregate::logical(table_index, input, exprs.into_scalar(), keys.into_scalar());
 
         Ok(aggregate.into_operator())
     }
@@ -151,7 +150,7 @@ impl OptdQueryPlannerContext<'_> {
             .map(|e| self.try_into_optd_scalar_expr(e, node.input.schema()))
             .try_collect()
             .map(List::new)?;
-        let project = LogicalProject::new(table_index, input, projections.into_scalar());
+        let project = Project::new(table_index, input, projections.into_scalar());
         self.inner.binder_end_scope();
         Ok(project.into_operator())
     }
@@ -206,7 +205,7 @@ impl OptdQueryPlannerContext<'_> {
         let input = self.try_into_optd_plan(node.input.as_ref())?;
         let predicate = self.try_into_optd_scalar_expr(&node.predicate, node.input.schema())?;
 
-        let select = LogicalSelect::new(input, predicate);
+        let select = Select::new(input, predicate);
         Ok(select.into_operator())
     }
 

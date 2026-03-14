@@ -8,8 +8,7 @@ use crate::{
     ir::{
         Column, ColumnSet, OperatorKind,
         operator::{
-            Get, Join, LogicalAggregate, LogicalDependentJoin, LogicalProject, LogicalRemap,
-            PhysicalHashAggregate, PhysicalProject, join::JoinType,
+            Aggregate, Get, Join, LogicalDependentJoin, LogicalRemap, Project, join::JoinType,
         },
         properties::{Derive, GetProperty, PropertyMarker},
         scalar::{ColumnRef, List},
@@ -79,9 +78,8 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                     }
                 }
             }
-            OperatorKind::LogicalSelect(_)
+            OperatorKind::Select(_)
             | OperatorKind::LogicalLimit(_)
-            | OperatorKind::PhysicalFilter(_)
             | OperatorKind::LogicalOrderBy(_)
             | OperatorKind::EnforcerSort(_)
             | OperatorKind::LogicalSubquery(_) => {
@@ -96,40 +94,16 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                 Ok(Arc::new(set))
             }
             OperatorKind::MockScan(meta) => Ok(meta.spec.mocked_output_columns.clone()),
-            OperatorKind::LogicalProject(meta) => {
-                let project = LogicalProject::borrow_raw_parts(meta, &self.common);
+            OperatorKind::Project(meta) => {
+                let project = Project::borrow_raw_parts(meta, &self.common);
                 let projections = project.projections().try_borrow::<List>().unwrap();
                 let set = (0..projections.members().len())
                     .map(|i| Column(*project.table_index(), i))
                     .collect();
                 Ok(Arc::new(set))
             }
-            OperatorKind::PhysicalProject(meta) => {
-                let project = PhysicalProject::borrow_raw_parts(meta, &self.common);
-                let projections = project.projections().try_borrow::<List>().unwrap();
-                let set = (0..projections.members().len())
-                    .map(|i| Column(*project.table_index(), i))
-                    .collect();
-                Ok(Arc::new(set))
-            }
-            OperatorKind::LogicalAggregate(meta) => {
-                let agg = LogicalAggregate::borrow_raw_parts(meta, &self.common);
-                let exprs = agg.exprs().borrow::<List>();
-                let keys = agg.keys().borrow::<List>();
-
-                let set = (0..exprs.members().len())
-                    .map(|i| Column(*agg.aggregate_table_index(), i))
-                    .chain(
-                        keys.members()
-                            .iter()
-                            .map(|e| e.borrow::<ColumnRef>().column().clone()),
-                    )
-                    .collect();
-
-                Ok(Arc::new(set))
-            }
-            OperatorKind::PhysicalHashAggregate(meta) => {
-                let agg = PhysicalHashAggregate::borrow_raw_parts(meta, &self.common);
+            OperatorKind::Aggregate(meta) => {
+                let agg = Aggregate::borrow_raw_parts(meta, &self.common);
                 let exprs = agg.exprs().borrow::<List>();
                 let keys = agg.keys().borrow::<List>();
 

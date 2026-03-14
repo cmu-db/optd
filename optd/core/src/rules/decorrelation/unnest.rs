@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::error::Result;
 use crate::ir::convert::{IntoOperator, IntoScalar};
 use crate::ir::operator::{
-    Join, LogicalAggregate, LogicalDependentJoin, LogicalOrderBy, LogicalProject, LogicalRemap,
-    LogicalSelect, Operator, OperatorKind, join::JoinType,
+    Aggregate, Join, LogicalDependentJoin, LogicalOrderBy, LogicalRemap, Operator, OperatorKind,
+    Project, Select, join::JoinType,
 };
 use crate::ir::rule::Rule;
 use crate::ir::scalar::{BinaryOp, BinaryOpKind, ColumnAssign, ColumnRef, List};
@@ -250,8 +250,8 @@ impl UnnestingRule {
 
         // Then unnest this operator
         match op.kind {
-            OperatorKind::LogicalSelect(ref meta) => {
-                let node = LogicalSelect::borrow_raw_parts(meta, &op.common);
+            OperatorKind::Select(ref meta) => {
+                let node = Select::borrow_raw_parts(meta, &op.common);
                 info.update_cclasses_equivalences(node.predicate());
                 let new_input = self.unnest_inner(
                     node.input().clone(),
@@ -264,7 +264,7 @@ impl UnnestingRule {
                 if new_cond.is_true_scalar() {
                     Ok(new_input)
                 } else {
-                    let mut rewritten_op = LogicalSelect::new(new_input, new_cond).into_operator();
+                    let mut rewritten_op = Select::new(new_input, new_cond).into_operator();
                     let rule = LogicalSelectSimplifyRule::new();
                     let simplified = rule.transform(rewritten_op.as_ref(), ctx);
                     if let Ok(v) = simplified
@@ -275,8 +275,8 @@ impl UnnestingRule {
                     Ok(rewritten_op)
                 }
             }
-            OperatorKind::LogicalProject(ref meta) => {
-                let node = LogicalProject::borrow_raw_parts(meta, &op.common);
+            OperatorKind::Project(ref meta) => {
+                let node = Project::borrow_raw_parts(meta, &op.common);
                 let new_input = self.unnest_inner(
                     node.input().clone(),
                     info,
@@ -360,8 +360,8 @@ impl UnnestingRule {
                     Some(Arc::from(new_exprs)),
                 )))
             }
-            OperatorKind::LogicalAggregate(ref meta) => {
-                let node = LogicalAggregate::borrow_raw_parts(meta, &op.common);
+            OperatorKind::Aggregate(ref meta) => {
+                let node = Aggregate::borrow_raw_parts(meta, &op.common);
                 let new_input = self.unnest_inner(
                     node.input().clone(),
                     info,
@@ -391,8 +391,7 @@ impl UnnestingRule {
                     }
                 }
                 let final_keys = List::new(new_keys_vec.into()).into_scalar();
-                let agg =
-                    LogicalAggregate::new(0, new_input, new_exprs, final_keys).into_operator();
+                let agg = Aggregate::logical(0, new_input, new_exprs, final_keys).into_operator();
 
                 if node
                     .keys()

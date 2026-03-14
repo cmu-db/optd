@@ -80,23 +80,25 @@ impl CostModel for MagicCostModel {
                 let inner_card = join.inner().cardinality(ctx);
                 Ok(Self::nl_join_cost(outer_card, inner_card))
             }
-            OperatorKind::LogicalSelect(meta) => {
-                let filter = LogicalSelect::borrow_raw_parts(meta, &op.common);
+            OperatorKind::Select(meta) => {
+                let filter = Select::borrow_raw_parts(meta, &op.common);
                 let input_card = filter.input().cardinality(ctx);
                 Ok(Self::filter_cost(input_card))
             }
             OperatorKind::LogicalLimit(_meta) => Ok(Cost::ZERO),
-            OperatorKind::LogicalProject(meta) => {
-                let project = LogicalProject::borrow_raw_parts(meta, &op.common);
+            OperatorKind::Project(meta) => {
+                let project = Project::borrow_raw_parts(meta, &op.common);
                 let input_card = project.input().cardinality(ctx);
                 Ok(Self::project_cost(input_card))
             }
-            OperatorKind::LogicalAggregate(meta) => {
-                let agg = LogicalAggregate::borrow_raw_parts(meta, &op.common);
-                let num_exprs = agg.exprs().borrow::<List>().members().len();
-                let input_card = agg.input().cardinality(ctx);
-                Ok(Self::hash_aggregate_cost(input_card, num_exprs))
-            }
+            OperatorKind::Aggregate(meta) => match meta.implementation {
+                None | Some(AggregateImplementation::Hash) => {
+                    let agg = Aggregate::borrow_raw_parts(meta, &op.common);
+                    let num_exprs = agg.exprs().borrow::<List>().members().len();
+                    let input_card = agg.input().cardinality(ctx);
+                    Ok(Self::hash_aggregate_cost(input_card, num_exprs))
+                }
+            },
             OperatorKind::LogicalOrderBy(meta) => {
                 let order_by = LogicalOrderBy::borrow_raw_parts(meta, &op.common);
                 let input_card = order_by.input().cardinality(ctx);
@@ -108,16 +110,6 @@ impl CostModel for MagicCostModel {
                 let input_card = op.input_operators()[0].cardinality(ctx);
                 Ok(Self::sort_cost(input_card))
             }
-            OperatorKind::PhysicalFilter(meta) => {
-                let filter = PhysicalFilter::borrow_raw_parts(meta, &op.common);
-                let input_card = filter.input().cardinality(ctx);
-                Ok(Self::filter_cost(input_card))
-            }
-            OperatorKind::PhysicalProject(meta) => {
-                let project = PhysicalProject::borrow_raw_parts(meta, &op.common);
-                let input_card = project.input().cardinality(ctx);
-                Ok(Self::project_cost(input_card))
-            }
             OperatorKind::MockScan(meta) => {
                 meta.spec
                     .mocked_operator_cost
@@ -125,12 +117,6 @@ impl CostModel for MagicCostModel {
                         message: "mock scan is missing operator cost".into(),
                         source: None,
                     })
-            }
-            OperatorKind::PhysicalHashAggregate(meta) => {
-                let agg = PhysicalHashAggregate::borrow_raw_parts(meta, &op.common);
-                let num_exprs = agg.exprs().borrow::<List>().members().len();
-                let input_card = agg.input().cardinality(ctx);
-                Ok(Self::hash_aggregate_cost(input_card, num_exprs))
             }
         }
     }
@@ -236,8 +222,8 @@ mod tests {
             ctx.cm.compute_operator_cost(&physical_join, &ctx).unwrap()
         );
 
-        let logical_select = LogicalSelect::new(outer.clone(), join_cond.clone()).into_operator();
-        let physical_filter = PhysicalFilter::new(outer.clone(), join_cond.clone()).into_operator();
+        let logical_select = Select::new(outer.clone(), join_cond.clone()).into_operator();
+        let physical_filter = Select::new(outer.clone(), join_cond.clone()).into_operator();
         assert_eq!(
             ctx.cm.compute_operator_cost(&logical_select, &ctx).unwrap(),
             ctx.cm
@@ -248,10 +234,8 @@ mod tests {
         let projections =
             List::new(vec![column_ref(Column(1, 0)), column_ref(Column(1, 1))].into())
                 .into_scalar();
-        let logical_project =
-            LogicalProject::new(3, outer.clone(), projections.clone()).into_operator();
-        let physical_project =
-            PhysicalProject::new(3, outer.clone(), projections.clone()).into_operator();
+        let logical_project = Project::new(3, outer.clone(), projections.clone()).into_operator();
+        let physical_project = Project::new(3, outer.clone(), projections.clone()).into_operator();
         assert_eq!(
             ctx.cm
                 .compute_operator_cost(&logical_project, &ctx)
@@ -264,9 +248,8 @@ mod tests {
         let exprs = List::new(vec![column_ref(Column(1, 1))].into()).into_scalar();
         let keys = List::new(vec![column_ref(Column(1, 0))].into()).into_scalar();
         let logical_agg =
-            LogicalAggregate::new(4, outer.clone(), exprs.clone(), keys.clone()).into_operator();
-        let physical_agg =
-            PhysicalHashAggregate::new(4, outer.clone(), exprs, keys).into_operator();
+            Aggregate::logical(4, outer.clone(), exprs.clone(), keys.clone()).into_operator();
+        let physical_agg = Aggregate::hash(4, outer.clone(), exprs, keys).into_operator();
         assert_eq!(
             ctx.cm.compute_operator_cost(&logical_agg, &ctx).unwrap(),
             ctx.cm.compute_operator_cost(&physical_agg, &ctx).unwrap()
@@ -311,7 +294,7 @@ mod tests {
         assert!(
             ctx.cm
                 .compute_operator_cost(
-                    &LogicalSelect::new(ctx.mock_scan(3, 1, 10.), boolean(true)).into_operator(),
+                    &Select::new(ctx.mock_scan(3, 1, 10.), boolean(true)).into_operator(),
                     &ctx
                 )
                 .is_ok()

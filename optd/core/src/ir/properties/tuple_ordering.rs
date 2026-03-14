@@ -218,12 +218,12 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
                 let join = LogicalDependentJoin::borrow_raw_parts(meta, &self.common);
                 satisfy_nl_join_ordering(join.outer(), ordering, ctx)?
             }
-            OperatorKind::LogicalProject(meta) => {
-                let project = LogicalProject::borrow_raw_parts(meta, &self.common);
+            OperatorKind::Project(meta) => {
+                let project = Project::borrow_raw_parts(meta, &self.common);
                 satisfy_passthrough_ordering(project.input(), ordering, ctx)?
             }
-            OperatorKind::LogicalSelect(meta) => {
-                let select = LogicalSelect::borrow_raw_parts(meta, &self.common);
+            OperatorKind::Select(meta) => {
+                let select = Select::borrow_raw_parts(meta, &self.common);
                 satisfy_passthrough_ordering(select.input(), ordering, ctx)?
             }
             OperatorKind::LogicalLimit(_) => {
@@ -240,24 +240,15 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
                         })
                     })
             }
-            OperatorKind::LogicalAggregate(_) => satisfy_aggregate_ordering(ordering),
+            OperatorKind::Aggregate(_) => satisfy_aggregate_ordering(ordering),
             OperatorKind::LogicalSubquery(_) => {
                 assert_eq!(self.kind.category(), OperatorCategory::Logical);
                 todo!("try_satisfy for LogicalSubquery")
             }
             OperatorKind::EnforcerSort(meta) => (&meta.tuple_ordering >= ordering)
                 .then(|| Arc::<[TupleOrdering]>::from(vec![TupleOrdering::default(); 1])),
-            OperatorKind::PhysicalFilter(meta) => {
-                let filter = PhysicalFilter::borrow_raw_parts(meta, &self.common);
-                satisfy_passthrough_ordering(filter.input(), ordering, ctx)?
-            }
-            OperatorKind::PhysicalProject(meta) => {
-                let project = PhysicalProject::borrow_raw_parts(meta, &self.common);
-                satisfy_passthrough_ordering(project.input(), ordering, ctx)?
-            }
             OperatorKind::MockScan(meta) => (&meta.spec.mocked_provided_ordering >= ordering)
                 .then_some(Arc::<[TupleOrdering]>::from(Vec::new())),
-            OperatorKind::PhysicalHashAggregate(_meta) => satisfy_aggregate_ordering(ordering),
             OperatorKind::LogicalRemap(_) => ordering
                 .is_empty()
                 .then(|| Arc::<[TupleOrdering]>::from(vec![ordering.clone()])),
@@ -432,7 +423,7 @@ mod tests {
         let ctx = IRContext::with_empty_magic();
         let input = ctx.mock_scan(1, 2, 100.);
         let predicate = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();
-        let select = LogicalSelect::new(input, predicate).into_operator();
+        let select = Select::new(input, predicate).into_operator();
 
         let ordering = TupleOrdering::from_iter([
             (Column(1, 0), TupleOrderingDirection::Asc),
@@ -449,7 +440,7 @@ mod tests {
     fn logical_project_try_satisfy_ordering() {
         let ctx = IRContext::with_empty_magic();
         let input = ctx.mock_scan(1, 2, 100.);
-        let project = LogicalProject::new(
+        let project = Project::new(
             3,
             input,
             List::new(
@@ -475,7 +466,7 @@ mod tests {
     fn logical_aggregate_try_satisfy_ordering() {
         let ctx = IRContext::with_empty_magic();
         let input = ctx.mock_scan(1, 2, 100.);
-        let aggregate = LogicalAggregate::new(
+        let aggregate = Aggregate::logical(
             2,
             input,
             List::new(Vec::new().into()).into_scalar(),

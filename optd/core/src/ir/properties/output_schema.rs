@@ -8,9 +8,8 @@ use crate::ir::{
     OperatorKind,
     catalog::Field,
     operator::{
-        EnforcerSort, Get, Join, LogicalAggregate, LogicalDependentJoin, LogicalLimit,
-        LogicalOrderBy, LogicalProject, LogicalRemap, LogicalSelect, LogicalSubquery,
-        PhysicalFilter, PhysicalHashAggregate, PhysicalProject, join::JoinType,
+        Aggregate, EnforcerSort, Get, Join, LogicalDependentJoin, LogicalLimit, LogicalOrderBy,
+        LogicalRemap, LogicalSubquery, Project, Select, join::JoinType,
     },
     properties::{Derive, GetProperty, PropertyMarker},
     scalar::{ColumnRef, List},
@@ -48,8 +47,8 @@ impl Derive<OutputSchema> for Operator {
                     ctx,
                 )
             }
-            OperatorKind::LogicalSelect(meta) => {
-                let select = LogicalSelect::borrow_raw_parts(meta, &self.common);
+            OperatorKind::Select(meta) => {
+                let select = Select::borrow_raw_parts(meta, &self.common);
                 select.input().output_schema(ctx)
             }
             OperatorKind::LogicalLimit(meta) => {
@@ -59,10 +58,6 @@ impl Derive<OutputSchema> for Operator {
             OperatorKind::LogicalSubquery(meta) => {
                 let subquery = LogicalSubquery::borrow_raw_parts(meta, &self.common);
                 subquery.input().output_schema(ctx)
-            }
-            OperatorKind::PhysicalFilter(meta) => {
-                let filter = PhysicalFilter::borrow_raw_parts(meta, &self.common);
-                filter.input().output_schema(ctx)
             }
             OperatorKind::Join(meta) => {
                 let join = Join::borrow_raw_parts(meta, &self.common);
@@ -80,20 +75,12 @@ impl Derive<OutputSchema> for Operator {
                 let order_by = LogicalOrderBy::borrow_raw_parts(meta, &self.common);
                 order_by.input().output_schema(ctx)
             }
-            OperatorKind::LogicalProject(meta) => {
-                let project = LogicalProject::borrow_raw_parts(meta, &self.common);
+            OperatorKind::Project(meta) => {
+                let project = Project::borrow_raw_parts(meta, &self.common);
                 compute_binding_schema(project.table_index(), ctx)
             }
-            OperatorKind::PhysicalProject(meta) => {
-                let project = PhysicalProject::borrow_raw_parts(meta, &self.common);
-                compute_binding_schema(project.table_index(), ctx)
-            }
-            OperatorKind::LogicalAggregate(meta) => {
-                let agg = LogicalAggregate::borrow_raw_parts(meta, &self.common);
-                compute_aggregate_schema(agg.keys(), agg.aggregate_table_index(), ctx)
-            }
-            OperatorKind::PhysicalHashAggregate(meta) => {
-                let agg = PhysicalHashAggregate::borrow_raw_parts(meta, &self.common);
+            OperatorKind::Aggregate(meta) => {
+                let agg = Aggregate::borrow_raw_parts(meta, &self.common);
                 compute_aggregate_schema(agg.keys(), agg.aggregate_table_index(), ctx)
             }
             OperatorKind::LogicalRemap(meta) => {

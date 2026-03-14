@@ -3,8 +3,8 @@ use crate::ir::builder::{column_assign, column_ref};
 use crate::ir::convert::IntoScalar;
 use crate::ir::explain::quick_explain;
 use crate::ir::operator::{
-    Join, LogicalAggregate, LogicalDependentJoin, LogicalOrderBy, LogicalProject, LogicalSelect,
-    MockScan, Operator, OperatorKind, join::JoinType,
+    Aggregate, Join, LogicalDependentJoin, LogicalOrderBy, MockScan, Operator, OperatorKind,
+    Project, Select, join::JoinType,
 };
 use crate::ir::scalar::{
     BinaryOp, BinaryOpKind, ColumnAssign, ColumnRef, List, Literal, NaryOp, NaryOpKind, ScalarKind,
@@ -273,15 +273,15 @@ fn eval_op(op: &Arc<Operator>, env: &[Row], data: &MockData, ctx: &IRContext) ->
             let scan = MockScan::borrow_raw_parts(meta, &op.common);
             data.get(scan.table_index()).cloned().unwrap_or_default()
         }
-        OperatorKind::LogicalSelect(meta) => {
-            let sel = LogicalSelect::borrow_raw_parts(meta, &op.common);
+        OperatorKind::Select(meta) => {
+            let sel = Select::borrow_raw_parts(meta, &op.common);
             eval_op(sel.input(), env, data, ctx)?
                 .into_iter()
                 .filter(|r| matches!(as_bool(eval_scalar(sel.predicate(), r, env)), Some(true)))
                 .collect()
         }
-        OperatorKind::LogicalProject(meta) => {
-            let proj = LogicalProject::borrow_raw_parts(meta, &op.common);
+        OperatorKind::Project(meta) => {
+            let proj = Project::borrow_raw_parts(meta, &op.common);
             let members = proj
                 .projections()
                 .try_borrow::<List>()
@@ -332,8 +332,8 @@ fn eval_op(op: &Arc<Operator>, env: &[Row], data: &MockData, ctx: &IRContext) ->
             //     })
             //     .collect()
         }
-        OperatorKind::LogicalAggregate(meta) => {
-            let agg = LogicalAggregate::borrow_raw_parts(meta, &op.common);
+        OperatorKind::Aggregate(meta) => {
+            let agg = Aggregate::borrow_raw_parts(meta, &op.common);
             let input_rows = eval_op(agg.input(), env, data, ctx)?;
             let key_members = agg.keys().try_borrow::<List>().unwrap().members().to_vec();
             if key_members.is_empty() {

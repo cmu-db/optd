@@ -10,8 +10,8 @@ use crate::ir::{
     catalog::{DataSourceId, Schema},
     convert::{IntoOperator, IntoScalar},
     operator::{
-        Get, Join, JoinSide, LogicalAggregate, LogicalDependentJoin, LogicalProject, LogicalRemap,
-        LogicalSelect, PhysicalFilter, PhysicalHashAggregate, PhysicalProject, join::JoinType,
+        Aggregate, Get, Join, JoinSide, LogicalDependentJoin, LogicalRemap, Project, Select,
+        join::JoinType,
     },
     properties::OperatorProperties,
     scalar::*,
@@ -122,11 +122,11 @@ impl Operator {
     }
 
     pub fn logical_select(self: Arc<Self>, predicate: Arc<Scalar>) -> Arc<Self> {
-        LogicalSelect::new(self, predicate).into_operator()
+        Select::new(self, predicate).into_operator()
     }
 
     pub fn physical_filter(self: Arc<Self>, predicate: Arc<Scalar>) -> Arc<Self> {
-        PhysicalFilter::new(self, predicate).into_operator()
+        Select::new(self, predicate).into_operator()
     }
 
     pub fn logical_project(
@@ -134,7 +134,7 @@ impl Operator {
         table_index: i64,
         projections: impl IntoIterator<Item = Arc<Scalar>>,
     ) -> Arc<Self> {
-        LogicalProject::new(table_index, self, list(projections)).into_operator()
+        Project::new(table_index, self, list(projections)).into_operator()
     }
 
     pub fn physical_project(
@@ -142,7 +142,7 @@ impl Operator {
         table_index: i64,
         projections: impl IntoIterator<Item = Arc<Scalar>>,
     ) -> Arc<Self> {
-        PhysicalProject::new(table_index, self, list(projections)).into_operator()
+        Project::new(table_index, self, list(projections)).into_operator()
     }
 
     pub fn logical_remap(self: Arc<Self>, table_index: i64) -> Arc<Self> {
@@ -155,7 +155,7 @@ impl Operator {
         exprs: impl IntoIterator<Item = Arc<Scalar>>,
         keys: impl IntoIterator<Item = Arc<Scalar>>,
     ) -> Arc<Self> {
-        LogicalAggregate::new(aggregate_table_index, self, list(exprs), list(keys)).into_operator()
+        Aggregate::logical(aggregate_table_index, self, list(exprs), list(keys)).into_operator()
     }
 
     pub fn hash_aggregate(
@@ -164,8 +164,7 @@ impl Operator {
         exprs: impl IntoIterator<Item = Arc<Scalar>>,
         keys: impl IntoIterator<Item = Arc<Scalar>>,
     ) -> Arc<Self> {
-        PhysicalHashAggregate::new(aggregate_table_index, self, list(exprs), list(keys))
-            .into_operator()
+        Aggregate::hash(aggregate_table_index, self, list(exprs), list(keys)).into_operator()
     }
 }
 

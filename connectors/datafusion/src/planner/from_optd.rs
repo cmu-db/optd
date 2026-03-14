@@ -12,10 +12,9 @@ use itertools::Itertools;
 use optd_core::ir::{
     Operator, OperatorKind, Scalar,
     operator::{
-        Get, GetBorrowed, Join, JoinBorrowed, LogicalAggregate, LogicalAggregateBorrowed,
-        LogicalLimit, LogicalLimitBorrowed, LogicalProject, LogicalProjectBorrowed, LogicalRemap,
-        LogicalRemapBorrowed, LogicalSelect, LogicalSelectBorrowed,
-        split_equi_and_non_equi_conditions,
+        Aggregate, AggregateBorrowed, Get, GetBorrowed, Join, JoinBorrowed, LogicalLimit,
+        LogicalLimitBorrowed, LogicalRemap, LogicalRemapBorrowed, Project, ProjectBorrowed, Select,
+        SelectBorrowed, split_equi_and_non_equi_conditions,
     },
     scalar::{
         BinaryOp, BinaryOpBorrowed, BinaryOpKind, Cast, CastBorrowed, ColumnRef, ColumnRefBorrowed,
@@ -34,24 +33,24 @@ impl OptdQueryPlannerContext<'_> {
                 let node = Get::borrow_raw_parts(meta, &optd_plan.common);
                 self.try_from_optd_logical_get(node)
             }
-            OperatorKind::LogicalSelect(meta) => {
-                let node = LogicalSelect::borrow_raw_parts(meta, &optd_plan.common);
+            OperatorKind::Select(meta) => {
+                let node = Select::borrow_raw_parts(meta, &optd_plan.common);
                 self.try_from_optd_logical_select(node)
             }
             OperatorKind::Join(meta) => {
                 let node = Join::borrow_raw_parts(meta, &optd_plan.common);
                 self.try_from_optd_logical_join(node)
             }
-            OperatorKind::LogicalProject(meta) => {
-                let node = LogicalProject::borrow_raw_parts(meta, &optd_plan.common);
+            OperatorKind::Project(meta) => {
+                let node = Project::borrow_raw_parts(meta, &optd_plan.common);
                 self.try_from_optd_logical_project(node)
             }
             OperatorKind::LogicalRemap(meta) => {
                 let node = LogicalRemap::borrow_raw_parts(meta, &optd_plan.common);
                 self.try_from_optd_logical_remap(node)
             }
-            OperatorKind::LogicalAggregate(meta) => {
-                let node = LogicalAggregate::borrow_raw_parts(meta, &optd_plan.common);
+            OperatorKind::Aggregate(meta) => {
+                let node = Aggregate::borrow_raw_parts(meta, &optd_plan.common);
                 self.try_from_optd_logical_aggregate(node)
             }
             OperatorKind::LogicalLimit(meta) => {
@@ -115,7 +114,7 @@ impl OptdQueryPlannerContext<'_> {
 
     pub fn try_from_optd_logical_aggregate(
         &mut self,
-        node: LogicalAggregateBorrowed<'_>,
+        node: AggregateBorrowed<'_>,
     ) -> Result<DFLogicalPlan> {
         let input = self.try_from_optd_plan(node.input())?;
 
@@ -161,7 +160,7 @@ impl OptdQueryPlannerContext<'_> {
 
     pub fn try_from_optd_logical_project(
         &mut self,
-        node: LogicalProjectBorrowed<'_>,
+        node: ProjectBorrowed<'_>,
     ) -> Result<DFLogicalPlan> {
         let projection_list = node.projections().borrow::<List>();
         let exprs = projection_list
@@ -214,7 +213,7 @@ impl OptdQueryPlannerContext<'_> {
 
     pub fn try_from_optd_logical_select(
         &mut self,
-        node: LogicalSelectBorrowed<'_>,
+        node: SelectBorrowed<'_>,
     ) -> Result<DFLogicalPlan> {
         let input = self.try_from_optd_plan(node.input())?;
         let predicate = self.try_from_optd_scalar_expr(node.predicate())?;

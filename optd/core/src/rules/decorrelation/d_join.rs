@@ -30,7 +30,7 @@ use crate::ir::IRContext;
 use crate::ir::convert::{IntoOperator, IntoScalar};
 use crate::ir::operator::join::JoinType;
 use crate::ir::operator::{
-    Join, LogicalAggregate, LogicalDependentJoinBorrowed, LogicalProject, LogicalRemap, Operator,
+    Aggregate, Join, LogicalDependentJoinBorrowed, LogicalRemap, Operator, Project,
 };
 use crate::ir::scalar::{BinaryOp, BinaryOpKind, ColumnAssign, ColumnRef, List};
 use crate::ir::{Column, Scalar};
@@ -63,8 +63,7 @@ impl UnnestingRule {
         let project_list = List::new(project_scalars.into()).into_scalar();
         // TODO(yuchen): fix this
         let table_index: i64 = 0;
-        let domain_project =
-            LogicalProject::new(table_index, outer.clone(), project_list).into_operator();
+        let domain_project = Project::new(table_index, outer.clone(), project_list).into_operator();
         let group_keys: Vec<Arc<Scalar>> = outer_refs
             .iter()
             .map(|c| ColumnAssign::new(*c, ColumnRef::new(*c).into_scalar()).into_scalar())
@@ -72,7 +71,7 @@ impl UnnestingRule {
         let group_keys_list = List::new(group_keys.into()).into_scalar();
         let empty_exprs_list = List::new(vec![].into()).into_scalar();
         let domain_distinct =
-            LogicalAggregate::new(0, domain_project, empty_exprs_list, group_keys_list)
+            Aggregate::logical(0, domain_project, empty_exprs_list, group_keys_list)
                 .into_operator();
         let remap_keys: Vec<Arc<Scalar>> = outer_refs
             .iter()

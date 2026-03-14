@@ -1,5 +1,5 @@
-//! The logical projection operator selects specific columns or expressions
-//! from the input data.
+//! The project operator selects specific columns or expressions from the input
+//! data.
 
 use crate::ir::{
     IRCommon, Operator, Scalar,
@@ -15,9 +15,9 @@ define_node!(
     /// - table_index: table index of the project node.
     /// Scalars:
     /// - projections: The expressions to project.
-    LogicalProject, LogicalProjectBorrowed {
+    Project, ProjectBorrowed {
         properties: OperatorProperties,
-        metadata: LogicalProjectMetadata {
+        metadata: ProjectMetadata {
             table_index: i64,
         },
         inputs: {
@@ -26,18 +26,18 @@ define_node!(
         }
     }
 );
-impl_operator_conversion!(LogicalProject, LogicalProjectBorrowed);
+impl_operator_conversion!(Project, ProjectBorrowed);
 
-impl LogicalProject {
+impl Project {
     pub fn new(table_index: i64, input: Arc<Operator>, projections: Arc<Scalar>) -> Self {
         Self {
-            meta: LogicalProjectMetadata { table_index },
+            meta: ProjectMetadata { table_index },
             common: IRCommon::new(Arc::new([input]), Arc::new([projections])),
         }
     }
 }
 
-impl Explain for LogicalProjectBorrowed<'_> {
+impl Explain for ProjectBorrowed<'_> {
     fn explain<'a>(
         &self,
         ctx: &crate::ir::IRContext,
@@ -49,6 +49,6 @@ impl Explain for LogicalProjectBorrowed<'_> {
         fields.push((".projections", projecions_explained));
         fields.extend(self.common.explain_operator_properties(ctx, option));
         let children = self.common.explain_input_operators(ctx, option);
-        Pretty::simple_record("LogicalProject", fields, children)
+        Pretty::simple_record("Project", fields, children)
     }
 }
