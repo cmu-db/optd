@@ -295,7 +295,7 @@ impl Cascades {
             return costed_expr;
         }
 
-        let op_cost = self.ctx.cm.compute_operator_cost(&operator, &self.ctx)?;
+        let op_cost = self.ctx.cm.compute_operator_cost(&operator, &self.ctx).ok()?;
 
         let inputs_required = operator.try_satisfy(required, &self.ctx).ok()??;
 
@@ -329,7 +329,8 @@ impl Cascades {
         let total_cost =
             self.ctx
                 .cm
-                .compute_total_with_input_costs(&operator, &best_input_costs, &self.ctx)?;
+                .compute_total_with_input_costs(&operator, &best_input_costs, &self.ctx)
+                .ok()?;
         info!(%op_cost, %total_cost, "optimized");
         Some(CostedExpr::new(
             expr,

@@ -1,7 +1,10 @@
 //! This module defines the necessary components of the cost model used by the
 //! optd operators
 
-use crate::ir::{IRContext, Operator, explain::quick_explain, properties::Cardinality};
+use crate::{
+    error::Result,
+    ir::{IRContext, Operator, explain::quick_explain, properties::Cardinality},
+};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
@@ -78,7 +81,7 @@ impl std::ops::Mul<Cost> for f64 {
 pub trait CostModel: Send + Sync + 'static {
     /// Computes the cost of the given operator, excluding input costs.
     /// This should be implemented by specific cost models per operator
-    fn compute_operator_cost(&self, op: &Operator, ctx: &IRContext) -> Option<Cost>;
+    fn compute_operator_cost(&self, op: &Operator, ctx: &IRContext) -> Result<Cost>;
 
     /// Computes the total cost of the given operator, given input costs.
     fn compute_total_with_input_costs(
@@ -86,7 +89,7 @@ pub trait CostModel: Send + Sync + 'static {
         op: &Operator,
         input_costs: &[Cost],
         ctx: &IRContext,
-    ) -> Option<Cost> {
+    ) -> Result<Cost> {
         assert_eq!(
             op.input_operators().len(),
             input_costs.len(),
@@ -94,12 +97,12 @@ pub trait CostModel: Send + Sync + 'static {
             quick_explain(Arc::new(op.clone()), ctx),
         );
         let operator_cost = self.compute_operator_cost(op, ctx)?;
-        Some(input_costs.iter().fold(operator_cost, |c1, c2| c1 + *c2))
+        Ok(input_costs.iter().fold(operator_cost, |c1, c2| c1 + *c2))
     }
 
     /// Recursively computes the costs of the input operators of the given
     /// operator, down to leaf nodes.
-    fn compute_input_costs(&self, op: &Operator, ctx: &IRContext) -> Option<Vec<Cost>> {
+    fn compute_input_costs(&self, op: &Operator, ctx: &IRContext) -> Result<Vec<Cost>> {
         op.input_operators()
             .iter()
             .map(|input_op| self.compute_total_cost(input_op, ctx))
@@ -108,7 +111,7 @@ pub trait CostModel: Send + Sync + 'static {
 
     /// Recursively computes the total cost of the given operator, including
     /// all input costs, down to leaf nodes.
-    fn compute_total_cost(&self, op: &Operator, ctx: &IRContext) -> Option<Cost> {
+    fn compute_total_cost(&self, op: &Operator, ctx: &IRContext) -> Result<Cost> {
         let input_costs = self.compute_input_costs(op, ctx)?;
         self.compute_total_with_input_costs(op, &input_costs, ctx)
     }
