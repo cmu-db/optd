@@ -36,7 +36,6 @@ pub use physical::hash_aggregate::*;
 pub use physical::hash_join::*;
 pub use physical::nl_join::*;
 pub use physical::project::*;
-pub use physical::table_scan::*;
 
 pub mod join {
     pub use super::logical::join::JoinType;
@@ -53,7 +52,7 @@ use crate::ir::{Column, Group, GroupId, GroupMetadata, IRCommon, Scalar};
 pub enum OperatorKind {
     Group(GroupMetadata),
     MockScan(MockScanMetadata),
-    LogicalGet(LogicalGetMetadata),
+    Get(GetMetadata),
     LogicalJoin(LogicalJoinMetadata),
     LogicalDependentJoin(LogicalDependentJoinMetadata),
     LogicalSelect(LogicalSelectMetadata),
@@ -64,7 +63,6 @@ pub enum OperatorKind {
     LogicalRemap(LogicalRemapMetadata),
     LogicalSubquery(LogicalSubqueryMetadata),
     EnforcerSort(EnforcerSortMetadata),
-    PhysicalTableScan(PhysicalTableScanMetadata),
     PhysicalNLJoin(PhysicalNLJoinMetadata),
     PhysicalHashJoin(PhysicalHashJoinMetadata),
     PhysicalFilter(PhysicalFilterMetadata),
@@ -86,7 +84,7 @@ impl OperatorKind {
         use OperatorKind::*;
         match self {
             Group(_) => OperatorCategory::Placeholder,
-            LogicalGet(_) => OperatorCategory::Logical,
+            Get(meta) => meta.implementation.category(),
             LogicalJoin(_) => OperatorCategory::Logical,
             LogicalDependentJoin(_) => OperatorCategory::Logical,
             LogicalProject(_) => OperatorCategory::Logical,
@@ -101,7 +99,6 @@ impl OperatorKind {
             PhysicalProject(_) => OperatorCategory::Physical,
             PhysicalHashJoin(_) => OperatorCategory::Physical,
             PhysicalNLJoin(_) => OperatorCategory::Physical,
-            PhysicalTableScan(_) => OperatorCategory::Physical,
             PhysicalHashAggregate(_) => OperatorCategory::Physical,
             MockScan(_) => OperatorCategory::Physical,
         }
@@ -110,7 +107,7 @@ impl OperatorKind {
     /// Returns true if the operator may produce columns as output.
     pub fn maybe_produce_columns(&self) -> bool {
         match self {
-            OperatorKind::LogicalGet(_) | OperatorKind::PhysicalTableScan(_) => true,
+            OperatorKind::Get(_) => true,
             OperatorKind::LogicalProject(_) | OperatorKind::PhysicalProject(_) => true,
             OperatorKind::LogicalAggregate(_) | OperatorKind::PhysicalHashAggregate(_) => true,
             OperatorKind::MockScan(_) => true,
@@ -212,8 +209,8 @@ impl Explain for Operator {
             OperatorKind::MockScan(meta) => {
                 MockScan::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::LogicalGet(meta) => {
-                LogicalGet::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            OperatorKind::Get(meta) => {
+                Get::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             OperatorKind::LogicalJoin(meta) => {
                 LogicalJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)
@@ -232,9 +229,6 @@ impl Explain for Operator {
             }
             OperatorKind::EnforcerSort(meta) => {
                 EnforcerSort::borrow_raw_parts(meta, &self.common).explain(ctx, option)
-            }
-            OperatorKind::PhysicalTableScan(meta) => {
-                PhysicalTableScan::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             OperatorKind::PhysicalNLJoin(meta) => {
                 PhysicalNLJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)

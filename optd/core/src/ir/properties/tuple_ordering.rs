@@ -204,7 +204,7 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
     ) -> Result<Option<std::sync::Arc<[TupleOrdering]>>> {
         let satisfied = match &self.kind {
             OperatorKind::Group(_) => None,
-            OperatorKind::LogicalGet(_) => satisfy_scan_ordering(ordering),
+            OperatorKind::Get(_) => satisfy_scan_ordering(ordering),
             OperatorKind::LogicalJoin(meta) => {
                 let join = LogicalJoin::borrow_raw_parts(meta, &self.common);
                 satisfy_nl_join_ordering(join.outer(), ordering, ctx)?
@@ -242,7 +242,6 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
             }
             OperatorKind::EnforcerSort(meta) => (&meta.tuple_ordering >= ordering)
                 .then(|| Arc::<[TupleOrdering]>::from(vec![TupleOrdering::default(); 1])),
-            OperatorKind::PhysicalTableScan(_) => satisfy_scan_ordering(ordering),
             OperatorKind::PhysicalNLJoin(meta) => {
                 let join = PhysicalNLJoin::borrow_raw_parts(meta, &self.common);
                 satisfy_nl_join_ordering(join.outer(), ordering, ctx)?

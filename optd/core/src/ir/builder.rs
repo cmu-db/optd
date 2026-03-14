@@ -10,9 +10,9 @@ use crate::ir::{
     catalog::{DataSourceId, Schema},
     convert::{IntoOperator, IntoScalar},
     operator::{
-        LogicalAggregate, LogicalDependentJoin, LogicalGet, LogicalJoin, LogicalProject,
-        LogicalRemap, LogicalSelect, PhysicalFilter, PhysicalHashAggregate, PhysicalHashJoin,
-        PhysicalNLJoin, PhysicalProject, PhysicalTableScan, join::JoinType,
+        Get, LogicalAggregate, LogicalDependentJoin, LogicalJoin, LogicalProject, LogicalRemap,
+        LogicalSelect, PhysicalFilter, PhysicalHashAggregate, PhysicalHashJoin, PhysicalNLJoin,
+        PhysicalProject, join::JoinType,
     },
     properties::OperatorProperties,
     scalar::*,
@@ -52,7 +52,7 @@ impl IRContext {
         projections: Option<Arc<[usize]>>,
     ) -> Arc<Operator> {
         let projections = projections.unwrap_or_else(|| (0..schema.fields().len()).collect());
-        LogicalGet::new(DataSourceId(table_index), table_index, projections).into_operator()
+        Get::logical(DataSourceId(table_index), table_index, projections).into_operator()
     }
 
     pub fn table_scan(
@@ -62,7 +62,7 @@ impl IRContext {
         projections: Option<Arc<[usize]>>,
     ) -> Arc<Operator> {
         let projections = projections.unwrap_or_else(|| (0..schema.fields().len()).collect());
-        PhysicalTableScan::new(DataSourceId(table_index), table_index, projections).into_operator()
+        Get::table_scan(DataSourceId(table_index), table_index, projections).into_operator()
     }
 }
 

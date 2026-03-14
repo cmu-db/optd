@@ -16,7 +16,7 @@ use optd_core::{
         catalog::Schema,
         convert::{IntoOperator, IntoScalar},
         operator::{
-            LogicalAggregate, LogicalGet, LogicalJoin, LogicalLimit, LogicalOrderBy,
+            Get, GetImplementation, LogicalAggregate, LogicalJoin, LogicalLimit, LogicalOrderBy,
             LogicalProject, LogicalRemap, LogicalSelect,
         },
         properties::TupleOrderingDirection,
@@ -243,7 +243,12 @@ impl OptdQueryPlannerContext<'_> {
             .unwrap_or_else(|| (0..node.projected_schema.inner().fields().len()).collect_vec())
             .into();
 
-        let logical_get = LogicalGet::new(data_source_id, table_index, projections);
+        let logical_get = Get::new(
+            data_source_id,
+            table_index,
+            projections,
+            GetImplementation::Logical,
+        );
         Ok(logical_get.into_operator())
     }
 }

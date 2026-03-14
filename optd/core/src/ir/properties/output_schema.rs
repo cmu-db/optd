@@ -8,10 +8,10 @@ use crate::ir::{
     OperatorKind,
     catalog::Field,
     operator::{
-        EnforcerSort, LogicalAggregate, LogicalDependentJoin, LogicalGet, LogicalJoin,
-        LogicalLimit, LogicalOrderBy, LogicalProject, LogicalRemap, LogicalSelect, LogicalSubquery,
+        EnforcerSort, Get, LogicalAggregate, LogicalDependentJoin, LogicalJoin, LogicalLimit,
+        LogicalOrderBy, LogicalProject, LogicalRemap, LogicalSelect, LogicalSubquery,
         PhysicalFilter, PhysicalHashAggregate, PhysicalHashJoin, PhysicalNLJoin, PhysicalProject,
-        PhysicalTableScan, join::JoinType,
+        join::JoinType,
     },
     properties::{Derive, GetProperty, PropertyMarker},
     scalar::{ColumnRef, List},
@@ -40,17 +40,8 @@ impl Derive<OutputSchema> for Operator {
             OperatorKind::MockScan(_) => {
                 whatever!("should not derive output schema for MockScan operator")
             }
-            OperatorKind::LogicalGet(meta) => {
-                let get = LogicalGet::borrow_raw_parts(meta, &self.common);
-                compute_scan_schema(
-                    *get.data_source_id(),
-                    get.table_index(),
-                    get.projections(),
-                    ctx,
-                )
-            }
-            OperatorKind::PhysicalTableScan(meta) => {
-                let scan = PhysicalTableScan::borrow_raw_parts(meta, &self.common);
+            OperatorKind::Get(meta) => {
+                let scan = Get::borrow_raw_parts(meta, &self.common);
                 compute_scan_schema(
                     *scan.data_source_id(),
                     scan.table_index(),

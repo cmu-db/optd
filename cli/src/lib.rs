@@ -82,9 +82,12 @@ impl OptdCliSessionContext {
             .get_extension::<OptdExtension>()
             .ok_or_else(|| DataFusionError::Execution("Missing optd session extension".into()))?;
 
-        extension.catalog().drop_table(optd_table_ref).map_err(|e| {
-            DataFusionError::External(Box::new(optd_core::error::Error::Catalog { source: e }))
-        })?;
+        extension
+            .catalog()
+            .drop_table(optd_table_ref)
+            .map_err(|e| {
+                DataFusionError::External(Box::new(optd_core::error::Error::Catalog { source: e }))
+            })?;
 
         Ok(())
     }

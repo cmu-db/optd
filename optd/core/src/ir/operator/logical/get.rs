@@ -1,7 +1,8 @@
-//! The logical get operator is a scan on some data source.
+//! The get operator is a scan on some data source. Its metadata tracks whether
+//! the operator is still logical or has been lowered to a physical scan.
 
 use crate::ir::{
-    IRCommon,
+    IRCommon, OperatorCategory,
     catalog::DataSourceId,
     explain::Explain,
     macros::{define_node, impl_operator_conversion},
@@ -17,12 +18,13 @@ define_node!(
     ///                 starting from this column.
     /// - projections: The list of column indices to project from this table.
     /// Scalars: (none)
-    LogicalGet, LogicalGetBorrowed {
+    Get, GetBorrowed {
         properties: OperatorProperties,
-        metadata: LogicalGetMetadata {
+        metadata: GetMetadata {
             data_source_id: DataSourceId,
             table_index: i64,
             projections: Arc<[usize]>,
+            implementation: GetImplementation,
         },
         inputs: {
             operators: [],
@@ -30,31 +32,79 @@ define_node!(
         }
     }
 );
-impl_operator_conversion!(LogicalGet, LogicalGetBorrowed);
+impl_operator_conversion!(Get, GetBorrowed);
 
-impl LogicalGet {
-    pub fn new(data_source_id: DataSourceId, table_index: i64, projections: Arc<[usize]>) -> Self {
-        Self {
-            meta: LogicalGetMetadata {
-                data_source_id,
-                table_index,
-                projections,
-            },
-            common: IRCommon::empty(),
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GetImplementation {
+    Logical,
+    TableScan,
+}
+
+impl GetImplementation {
+    pub const fn category(&self) -> OperatorCategory {
+        match self {
+            Self::Logical => OperatorCategory::Logical,
+            Self::TableScan => OperatorCategory::Physical,
         }
     }
 }
 
-impl Explain for LogicalGetBorrowed<'_> {
+impl Get {
+    pub fn new(
+        data_source_id: DataSourceId,
+        table_index: i64,
+        projections: Arc<[usize]>,
+        implementation: GetImplementation,
+    ) -> Self {
+        Self {
+            meta: GetMetadata {
+                data_source_id,
+                table_index,
+                projections,
+                implementation,
+            },
+            common: IRCommon::empty(),
+        }
+    }
+
+    pub fn logical(
+        data_source_id: DataSourceId,
+        table_index: i64,
+        projections: Arc<[usize]>,
+    ) -> Self {
+        Self::new(
+            data_source_id,
+            table_index,
+            projections,
+            GetImplementation::Logical,
+        )
+    }
+
+    pub fn table_scan(
+        data_source_id: DataSourceId,
+        table_index: i64,
+        projections: Arc<[usize]>,
+    ) -> Self {
+        Self::new(
+            data_source_id,
+            table_index,
+            projections,
+            GetImplementation::TableScan,
+        )
+    }
+}
+
+impl Explain for GetBorrowed<'_> {
     fn explain<'a>(
         &self,
         ctx: &crate::ir::IRContext,
         option: &crate::ir::explain::ExplainOption,
     ) -> pretty_xmlish::Pretty<'a> {
-        let mut fields = Vec::with_capacity(3);
+        let mut fields = Vec::with_capacity(4);
         fields.push((".data_source_id", Pretty::display(&self.data_source_id().0)));
         fields.push((".table_index", Pretty::display(&self.table_index())));
+        fields.push((".implementation", Pretty::debug(self.implementation())));
         fields.extend(self.common.explain_operator_properties(ctx, option));
-        Pretty::childless_record("LogicalGet", fields)
+        Pretty::childless_record("Get", fields)
     }
 }

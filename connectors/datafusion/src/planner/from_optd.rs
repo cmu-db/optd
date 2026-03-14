@@ -12,7 +12,7 @@ use itertools::Itertools;
 use optd_core::ir::{
     Operator, OperatorKind, Scalar,
     operator::{
-        LogicalAggregate, LogicalAggregateBorrowed, LogicalGet, LogicalGetBorrowed, LogicalJoin,
+        Get, GetBorrowed, LogicalAggregate, LogicalAggregateBorrowed, LogicalJoin,
         LogicalJoinBorrowed, LogicalLimit, LogicalLimitBorrowed, LogicalProject,
         LogicalProjectBorrowed, LogicalRemap, LogicalRemapBorrowed, LogicalSelect,
         LogicalSelectBorrowed, split_equi_and_non_equi_conditions,
@@ -30,8 +30,8 @@ use crate::planner::{DataFusionSnafu, OptdQueryPlannerContext, OptdSnafu, Result
 impl OptdQueryPlannerContext<'_> {
     pub fn try_from_optd_plan(&mut self, optd_plan: &Operator) -> Result<DFLogicalPlan> {
         match &optd_plan.kind {
-            OperatorKind::LogicalGet(meta) => {
-                let node = LogicalGet::borrow_raw_parts(meta, &optd_plan.common);
+            OperatorKind::Get(meta) => {
+                let node = Get::borrow_raw_parts(meta, &optd_plan.common);
                 self.try_from_optd_logical_get(node)
             }
             OperatorKind::LogicalSelect(meta) => {
@@ -253,10 +253,7 @@ impl OptdQueryPlannerContext<'_> {
         }))
     }
 
-    pub fn try_from_optd_logical_get(
-        &mut self,
-        node: LogicalGetBorrowed<'_>,
-    ) -> Result<DFLogicalPlan> {
+    pub fn try_from_optd_logical_get(&mut self, node: GetBorrowed<'_>) -> Result<DFLogicalPlan> {
         let binder = self.inner.binder.read().unwrap();
         let binding = binder
             .get_binding(node.table_index())

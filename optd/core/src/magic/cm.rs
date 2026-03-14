@@ -54,7 +54,7 @@ impl CostModel for MagicCostModel {
         use crate::ir::OperatorKind;
         match &op.kind {
             OperatorKind::Group(_) => whatever!("cannot compute cost for Group operator"),
-            OperatorKind::LogicalGet(_) => {
+            OperatorKind::Get(_) => {
                 let card = op.cardinality(ctx);
                 Ok(Self::scan_cost(card))
             }
@@ -98,10 +98,6 @@ impl CostModel for MagicCostModel {
                 let input_card = op.input_operators()[0].cardinality(ctx);
                 Ok(Self::sort_cost(input_card))
             }
-            OperatorKind::PhysicalTableScan(_) => {
-                let card = op.cardinality(ctx);
-                Ok(Self::scan_cost(card))
-            }
             OperatorKind::PhysicalNLJoin(meta) => {
                 let join = PhysicalNLJoin::borrow_raw_parts(meta, &op.common);
                 let outer_card = join.outer().cardinality(ctx);
@@ -125,13 +121,14 @@ impl CostModel for MagicCostModel {
                 let input_card = project.input().cardinality(ctx);
                 Ok(Self::project_cost(input_card))
             }
-            OperatorKind::MockScan(meta) => meta
-                .spec
-                .mocked_operator_cost
-                .ok_or_else(|| crate::error::Error::Whatever {
-                    message: "mock scan is missing operator cost".into(),
-                    source: None,
-                }),
+            OperatorKind::MockScan(meta) => {
+                meta.spec
+                    .mocked_operator_cost
+                    .ok_or_else(|| crate::error::Error::Whatever {
+                        message: "mock scan is missing operator cost".into(),
+                        source: None,
+                    })
+            }
             OperatorKind::PhysicalHashAggregate(meta) => {
                 let agg = PhysicalHashAggregate::borrow_raw_parts(meta, &op.common);
                 let num_exprs = agg.exprs().borrow::<List>().members().len();
@@ -236,7 +233,9 @@ mod tests {
         )
         .into_operator();
         assert_eq!(
-            ctx.cm.compute_operator_cost(&logical_dep_join, &ctx).unwrap(),
+            ctx.cm
+                .compute_operator_cost(&logical_dep_join, &ctx)
+                .unwrap(),
             ctx.cm.compute_operator_cost(&physical_join, &ctx).unwrap()
         );
 
@@ -244,7 +243,9 @@ mod tests {
         let physical_filter = PhysicalFilter::new(outer.clone(), join_cond.clone()).into_operator();
         assert_eq!(
             ctx.cm.compute_operator_cost(&logical_select, &ctx).unwrap(),
-            ctx.cm.compute_operator_cost(&physical_filter, &ctx).unwrap()
+            ctx.cm
+                .compute_operator_cost(&physical_filter, &ctx)
+                .unwrap()
         );
 
         let projections =
@@ -255,8 +256,12 @@ mod tests {
         let physical_project =
             PhysicalProject::new(3, outer.clone(), projections.clone()).into_operator();
         assert_eq!(
-            ctx.cm.compute_operator_cost(&logical_project, &ctx).unwrap(),
-            ctx.cm.compute_operator_cost(&physical_project, &ctx).unwrap()
+            ctx.cm
+                .compute_operator_cost(&logical_project, &ctx)
+                .unwrap(),
+            ctx.cm
+                .compute_operator_cost(&physical_project, &ctx)
+                .unwrap()
         );
 
         let exprs = List::new(vec![column_ref(Column(1, 1))].into()).into_scalar();
@@ -278,7 +283,9 @@ mod tests {
         .into_operator();
         let enforcer_sort = EnforcerSort::new(ordering, outer).into_operator();
         assert_eq!(
-            ctx.cm.compute_operator_cost(&logical_order_by, &ctx).unwrap(),
+            ctx.cm
+                .compute_operator_cost(&logical_order_by, &ctx)
+                .unwrap(),
             ctx.cm.compute_operator_cost(&enforcer_sort, &ctx).unwrap()
         );
     }
@@ -292,12 +299,18 @@ mod tests {
         let subquery = LogicalSubquery::new(input.clone()).into_operator();
         let remap = LogicalRemap::new(2, input).into_operator();
 
-        assert_eq!(ctx.cm.compute_operator_cost(&limit, &ctx).unwrap(), Cost::ZERO);
+        assert_eq!(
+            ctx.cm.compute_operator_cost(&limit, &ctx).unwrap(),
+            Cost::ZERO
+        );
         assert_eq!(
             ctx.cm.compute_operator_cost(&subquery, &ctx).unwrap(),
             Cost::ZERO
         );
-        assert_eq!(ctx.cm.compute_operator_cost(&remap, &ctx).unwrap(), Cost::ZERO);
+        assert_eq!(
+            ctx.cm.compute_operator_cost(&remap, &ctx).unwrap(),
+            Cost::ZERO
+        );
         assert!(
             ctx.cm
                 .compute_operator_cost(

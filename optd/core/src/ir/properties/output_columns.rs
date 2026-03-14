@@ -8,9 +8,8 @@ use crate::{
     ir::{
         Column, ColumnSet, OperatorKind,
         operator::{
-            LogicalAggregate, LogicalDependentJoin, LogicalGet, LogicalJoin, LogicalProject,
-            LogicalRemap, PhysicalHashAggregate, PhysicalProject, PhysicalTableScan,
-            join::JoinType,
+            Get, LogicalAggregate, LogicalDependentJoin, LogicalJoin, LogicalProject, LogicalRemap,
+            PhysicalHashAggregate, PhysicalProject, join::JoinType,
         },
         properties::{Derive, GetProperty, PropertyMarker},
         scalar::{ColumnRef, List},
@@ -33,17 +32,8 @@ impl Derive<OutputColumns> for crate::ir::Operator {
             OperatorKind::Group(_) => {
                 whatever!("Right now group's properties should always be set.")
             }
-            OperatorKind::LogicalGet(meta) => {
-                let node = LogicalGet::borrow_raw_parts(meta, &self.common);
-                Ok(Arc::new(
-                    node.projections()
-                        .iter()
-                        .map(|x| Column(*node.table_index(), *x))
-                        .collect(),
-                ))
-            }
-            OperatorKind::PhysicalTableScan(meta) => {
-                let node = PhysicalTableScan::borrow_raw_parts(meta, &self.common);
+            OperatorKind::Get(meta) => {
+                let node = Get::borrow_raw_parts(meta, &self.common);
                 Ok(Arc::new(
                     node.projections()
                         .iter()

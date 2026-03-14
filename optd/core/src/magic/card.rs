@@ -55,20 +55,7 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                 // Relies on the normalized expression's cardinality estimation.
                 panic!("right now should always be set");
             }
-            OperatorKind::LogicalGet(meta) => {
-                match ctx
-                    .catalog
-                    .table(meta.data_source_id)
-                    .ok()
-                    .and_then(|table| table.statistics)
-                {
-                    Some(stats) => Cardinality::with_count_lossy(stats.row_count),
-                    None => Cardinality::with_count_lossy(
-                        MagicCardinalityEstimator::MAGIC_DEFAULT_CARDINALITY,
-                    ),
-                }
-            }
-            OperatorKind::PhysicalTableScan(meta) => {
+            OperatorKind::Get(meta) => {
                 match ctx
                     .catalog
                     .table(meta.data_source_id)
