@@ -158,6 +158,44 @@ impl crate::ir::properties::PropertyMarker for TupleOrdering {
     type Output = Self;
 }
 
+fn satisfy_scan_ordering(ordering: &TupleOrdering) -> Option<Arc<[TupleOrdering]>> {
+    // TODO(yuchen): if we can obtain ordering information from catalog, then we can use that.
+    ordering
+        .is_empty()
+        .then_some(Arc::<[TupleOrdering]>::from(Vec::new()))
+}
+
+fn satisfy_passthrough_ordering(
+    input: &Operator,
+    ordering: &TupleOrdering,
+    ctx: &crate::ir::context::IRContext,
+) -> Result<Option<Arc<[TupleOrdering]>>> {
+    let output_from_input = input.output_columns(ctx)?;
+    Ok(ordering
+        .iter_columns()
+        .all(|col| output_from_input.contains(col))
+        .then(|| Arc::<[TupleOrdering]>::from(vec![ordering.clone()])))
+}
+
+fn satisfy_nl_join_ordering(
+    outer: &Operator,
+    ordering: &TupleOrdering,
+    ctx: &crate::ir::context::IRContext,
+) -> Result<Option<Arc<[TupleOrdering]>>> {
+    let output_from_outer = outer.output_columns(ctx)?;
+    Ok(ordering
+        .iter_columns()
+        .all(|col| output_from_outer.contains(col))
+        .then(|| Arc::<[TupleOrdering]>::from(vec![ordering.clone(), TupleOrdering::default()])))
+}
+
+fn satisfy_aggregate_ordering(ordering: &TupleOrdering) -> Option<Arc<[TupleOrdering]>> {
+    // Hash aggregate does not maintain tuple ordering.
+    ordering
+        .is_empty()
+        .then(|| Arc::<[TupleOrdering]>::from(vec![ordering.clone()]))
+}
+
 impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
     fn try_satisfy(
         &self,
@@ -166,39 +204,48 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
     ) -> Result<Option<std::sync::Arc<[TupleOrdering]>>> {
         let satisfied = match &self.kind {
             OperatorKind::Group(_) => None,
-            OperatorKind::LogicalGet(_)
-            | OperatorKind::LogicalJoin(_)
-            | OperatorKind::LogicalDependentJoin(_)
-            | OperatorKind::LogicalProject(_)
-            | OperatorKind::LogicalSelect(_)
-            | OperatorKind::LogicalLimit(_)
-            | OperatorKind::LogicalOrderBy(_)
-            | OperatorKind::LogicalAggregate(_)
-            | OperatorKind::LogicalSubquery(_) => {
+            OperatorKind::LogicalGet(_) => satisfy_scan_ordering(ordering),
+            OperatorKind::LogicalJoin(meta) => {
+                let join = LogicalJoin::borrow_raw_parts(meta, &self.common);
+                satisfy_nl_join_ordering(join.outer(), ordering, ctx)?
+            }
+            OperatorKind::LogicalDependentJoin(meta) => {
+                let join = LogicalDependentJoin::borrow_raw_parts(meta, &self.common);
+                satisfy_nl_join_ordering(join.outer(), ordering, ctx)?
+            }
+            OperatorKind::LogicalProject(meta) => {
+                let project = LogicalProject::borrow_raw_parts(meta, &self.common);
+                satisfy_passthrough_ordering(project.input(), ordering, ctx)?
+            }
+            OperatorKind::LogicalSelect(meta) => {
+                let select = LogicalSelect::borrow_raw_parts(meta, &self.common);
+                satisfy_passthrough_ordering(select.input(), ordering, ctx)?
+            }
+            OperatorKind::LogicalLimit(_) => {
+                todo!("try_satisfy for LogicalLimit")
+            }
+            OperatorKind::LogicalOrderBy(meta) => {
+                let order_by = LogicalOrderBy::borrow_raw_parts(meta, &self.common);
+                order_by
+                    .try_extract_tuple_ordering()
+                    .ok()
+                    .and_then(|provided_ordering| {
+                        (&provided_ordering >= ordering).then(|| {
+                            Arc::<[TupleOrdering]>::from(vec![TupleOrdering::default(); 1])
+                        })
+                    })
+            }
+            OperatorKind::LogicalAggregate(_) => satisfy_aggregate_ordering(ordering),
+            OperatorKind::LogicalSubquery(_) => {
                 assert_eq!(self.kind.category(), OperatorCategory::Logical);
-                None
+                todo!("try_satisfy for LogicalSubquery")
             }
             OperatorKind::EnforcerSort(meta) => (&meta.tuple_ordering >= ordering)
                 .then(|| Arc::<[TupleOrdering]>::from(vec![TupleOrdering::default(); 1])),
-            OperatorKind::PhysicalTableScan(_) => {
-                // TODO(yuchen): if we can obtain ordering information from catalog, then we can use that.
-                ordering
-                    .is_empty()
-                    .then_some(Arc::<[TupleOrdering]>::from(Vec::new()))
-            }
+            OperatorKind::PhysicalTableScan(_) => satisfy_scan_ordering(ordering),
             OperatorKind::PhysicalNLJoin(meta) => {
                 let join = PhysicalNLJoin::borrow_raw_parts(meta, &self.common);
-
-                let output_from_outer = join.outer().output_columns(ctx)?;
-                ordering
-                    .iter_columns()
-                    .all(|col| output_from_outer.contains(col))
-                    .then(|| {
-                        Arc::<[TupleOrdering]>::from(vec![
-                            ordering.clone(),
-                            TupleOrdering::default(),
-                        ])
-                    })
+                satisfy_nl_join_ordering(join.outer(), ordering, ctx)?
             }
             OperatorKind::PhysicalHashJoin(_) => {
                 // Hash join does not maintain tuple ordering.
@@ -208,34 +255,18 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
             }
             OperatorKind::PhysicalFilter(meta) => {
                 let filter = PhysicalFilter::borrow_raw_parts(meta, &self.common);
-                let output_from_input = filter.input().output_columns(ctx)?;
-                ordering
-                    .iter_columns()
-                    .all(|col| output_from_input.contains(col))
-                    .then(|| Arc::<[TupleOrdering]>::from(vec![ordering.clone()]))
+                satisfy_passthrough_ordering(filter.input(), ordering, ctx)?
             }
             OperatorKind::PhysicalProject(meta) => {
                 let project = PhysicalProject::borrow_raw_parts(meta, &self.common);
-                let output_from_input = project.input().output_columns(ctx)?;
-                ordering
-                    .iter_columns()
-                    .all(|col| output_from_input.contains(col))
-                    .then(|| Arc::<[TupleOrdering]>::from(vec![ordering.clone()]))
+                satisfy_passthrough_ordering(project.input(), ordering, ctx)?
             }
             OperatorKind::MockScan(meta) => (&meta.spec.mocked_provided_ordering >= ordering)
                 .then_some(Arc::<[TupleOrdering]>::from(Vec::new())),
-            OperatorKind::PhysicalHashAggregate(_meta) => {
-                // Hash aggregate does not maintain tuple ordering.
-                ordering
-                    .is_empty()
-                    .then(|| Arc::<[TupleOrdering]>::from(vec![ordering.clone()]))
-            }
-            OperatorKind::LogicalRemap(_) => {
-                // Hash aggregate does not maintain tuple ordering.
-                ordering
-                    .is_empty()
-                    .then(|| Arc::<[TupleOrdering]>::from(vec![ordering.clone()]))
-            }
+            OperatorKind::PhysicalHashAggregate(_meta) => satisfy_aggregate_ordering(ordering),
+            OperatorKind::LogicalRemap(_) => ordering
+                .is_empty()
+                .then(|| Arc::<[TupleOrdering]>::from(vec![ordering.clone()])),
         };
         Ok(satisfied)
     }
@@ -245,7 +276,8 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
 mod tests {
     use super::*;
     use crate::ir::{
-        IRContext, ScalarValue,
+        DataType, IRContext, ScalarValue,
+        catalog::{Field, Schema},
         convert::{IntoOperator, IntoScalar},
         operator::join::JoinType,
         properties::TrySatisfy,
@@ -352,5 +384,142 @@ mod tests {
             (Column(1, 1), TupleOrderingDirection::Asc),
         ]);
         assert_eq!(None, t1.try_satisfy(&ordering, &ctx).unwrap());
+    }
+
+    #[test]
+    fn logical_get_try_satisfy_ordering() {
+        let ctx = IRContext::with_empty_magic();
+        let schema = Schema::new(vec![
+            Field::new("t1.c0", DataType::Int32, false),
+            Field::new("t1.c1", DataType::Int32, false),
+        ]);
+        let t1 = ctx.logical_get(1, &schema, None);
+
+        let empty = TupleOrdering::default();
+        let res = t1.try_satisfy(&empty, &ctx).unwrap().unwrap();
+        assert_eq!(res.len(), 0);
+
+        let ordering = TupleOrdering::from_iter([
+            (Column(1, 0), TupleOrderingDirection::Asc),
+            (Column(1, 1), TupleOrderingDirection::Asc),
+        ]);
+        assert_eq!(None, t1.try_satisfy(&ordering, &ctx).unwrap());
+    }
+
+    #[test]
+    fn logical_join_try_satisfy_ordering() {
+        let ctx = IRContext::with_empty_magic();
+
+        let m1 = ctx.mock_scan(1, 2, 100.);
+        let m2 = ctx.mock_scan(2, 2, 100.);
+        let join_cond = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();
+        let join1 = LogicalJoin::new(JoinType::Inner, m1.clone(), m2.clone(), join_cond.clone())
+            .into_operator();
+        let join2 = join1.clone_with_inputs(Some(Arc::new([m2, m1])), None);
+
+        let empty = TupleOrdering::default();
+        let res = join1.try_satisfy(&empty, &ctx).unwrap().unwrap();
+        assert_eq!(res[0], empty);
+        assert_eq!(res[1], empty);
+
+        let ordering_from_t1 = TupleOrdering::from_iter([
+            (Column(1, 0), TupleOrderingDirection::Asc),
+            (Column(1, 1), TupleOrderingDirection::Desc),
+        ]);
+        let res = join1.try_satisfy(&ordering_from_t1, &ctx).unwrap().unwrap();
+        assert_eq!(res[0], ordering_from_t1);
+        assert_eq!(res[1], empty);
+
+        assert_eq!(None, join2.try_satisfy(&ordering_from_t1, &ctx).unwrap());
+    }
+
+    #[test]
+    fn logical_select_try_satisfy_ordering() {
+        let ctx = IRContext::with_empty_magic();
+        let input = ctx.mock_scan(1, 2, 100.);
+        let predicate = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();
+        let select = LogicalSelect::new(input, predicate).into_operator();
+
+        let ordering = TupleOrdering::from_iter([
+            (Column(1, 0), TupleOrderingDirection::Asc),
+            (Column(1, 1), TupleOrderingDirection::Desc),
+        ]);
+        let res = select.try_satisfy(&ordering, &ctx).unwrap().unwrap();
+        assert_eq!(res[0], ordering);
+
+        let invalid = TupleOrdering::from_iter([(Column(2, 0), TupleOrderingDirection::Asc)]);
+        assert_eq!(None, select.try_satisfy(&invalid, &ctx).unwrap());
+    }
+
+    #[test]
+    fn logical_project_try_satisfy_ordering() {
+        let ctx = IRContext::with_empty_magic();
+        let input = ctx.mock_scan(1, 2, 100.);
+        let project = LogicalProject::new(
+            3,
+            input,
+            List::new(
+                vec![
+                    ColumnRef::new(Column(1, 0)).into_scalar(),
+                    ColumnRef::new(Column(1, 1)).into_scalar(),
+                ]
+                .into(),
+            )
+            .into_scalar(),
+        )
+        .into_operator();
+
+        let ordering = TupleOrdering::from_iter([(Column(1, 0), TupleOrderingDirection::Asc)]);
+        let res = project.try_satisfy(&ordering, &ctx).unwrap().unwrap();
+        assert_eq!(res[0], ordering);
+
+        let invalid = TupleOrdering::from_iter([(Column(3, 0), TupleOrderingDirection::Asc)]);
+        assert_eq!(None, project.try_satisfy(&invalid, &ctx).unwrap());
+    }
+
+    #[test]
+    fn logical_aggregate_try_satisfy_ordering() {
+        let ctx = IRContext::with_empty_magic();
+        let input = ctx.mock_scan(1, 2, 100.);
+        let aggregate = LogicalAggregate::new(
+            2,
+            input,
+            List::new(Vec::new().into()).into_scalar(),
+            List::new(vec![ColumnRef::new(Column(1, 0)).into_scalar()].into()).into_scalar(),
+        )
+        .into_operator();
+
+        let empty = TupleOrdering::default();
+        let res = aggregate.try_satisfy(&empty, &ctx).unwrap().unwrap();
+        assert_eq!(res[0], empty);
+
+        let ordering = TupleOrdering::from_iter([(Column(1, 0), TupleOrderingDirection::Asc)]);
+        assert_eq!(None, aggregate.try_satisfy(&ordering, &ctx).unwrap());
+    }
+
+    #[test]
+    fn logical_order_by_try_satisfy_ordering() {
+        let ctx = IRContext::with_empty_magic();
+        let order_by = LogicalOrderBy::new(
+            ctx.mock_scan(1, 3, 100.),
+            vec![
+                (
+                    ColumnRef::new(Column(1, 0)).into_scalar(),
+                    TupleOrderingDirection::Asc,
+                ),
+                (
+                    ColumnRef::new(Column(1, 1)).into_scalar(),
+                    TupleOrderingDirection::Desc,
+                ),
+            ],
+        )
+        .into_operator();
+
+        let required = TupleOrdering::from_iter([(Column(1, 0), TupleOrderingDirection::Asc)]);
+        let res = order_by.try_satisfy(&required, &ctx).unwrap().unwrap();
+        assert_eq!(res[0], TupleOrdering::default());
+
+        let invalid = TupleOrdering::from_iter([(Column(1, 1), TupleOrderingDirection::Asc)]);
+        assert_eq!(None, order_by.try_satisfy(&invalid, &ctx).unwrap());
     }
 }
