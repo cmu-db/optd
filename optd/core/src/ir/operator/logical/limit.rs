@@ -15,7 +15,7 @@ define_node!(
     /// Scalars:
     /// - skip: Number of rows to skip before fetch.
     /// - fetch: Maximum number of rows to fetch.
-    LogicalLimit, LogicalLimitBorrowed {
+    Limit, LimitBorrowed {
         properties: OperatorProperties,
         metadata: LimitMetadata {},
         inputs: {
@@ -24,9 +24,9 @@ define_node!(
         }
     }
 );
-impl_operator_conversion!(LogicalLimit, LogicalLimitBorrowed);
+impl_operator_conversion!(Limit, LimitBorrowed);
 
-impl LogicalLimit {
+impl Limit {
     pub fn new(input: Arc<Operator>, skip: Arc<Scalar>, fetch: Arc<Scalar>) -> Self {
         Self {
             meta: LimitMetadata {},
@@ -35,7 +35,7 @@ impl LogicalLimit {
     }
 }
 
-impl Explain for LogicalLimitBorrowed<'_> {
+impl Explain for LimitBorrowed<'_> {
     fn explain<'a>(
         &self,
         ctx: &crate::ir::IRContext,

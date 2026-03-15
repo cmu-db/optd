@@ -85,7 +85,7 @@ impl CostModel for MagicCostModel {
                 let input_card = filter.input().cardinality(ctx);
                 Ok(Self::filter_cost(input_card))
             }
-            OperatorKind::LogicalLimit(_meta) => Ok(Cost::ZERO),
+            OperatorKind::Limit(_meta) => Ok(Cost::ZERO),
             OperatorKind::Project(meta) => {
                 let project = Project::borrow_raw_parts(meta, &op.common);
                 let input_card = project.input().cardinality(ctx);
@@ -275,7 +275,7 @@ mod tests {
         let ctx = IRContext::with_empty_magic();
         let input = ctx.mock_scan(1, 2, 100.);
 
-        let limit = LogicalLimit::new(input.clone(), int64(10), int64(20)).into_operator();
+        let limit = Limit::new(input.clone(), int64(10), int64(20)).into_operator();
         let subquery = Subquery::new(input.clone()).into_operator();
         let remap = Remap::new(2, input).into_operator();
 

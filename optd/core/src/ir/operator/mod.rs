@@ -53,7 +53,7 @@ pub enum OperatorKind {
     Select(SelectMetadata),
     Project(ProjectMetadata),
     Aggregate(AggregateMetadata),
-    LogicalLimit(LimitMetadata),
+    Limit(LimitMetadata),
     OrderBy(OrderByMetadata),
     Remap(RemapMetadata),
     Subquery(SubqueryMetadata),
@@ -91,7 +91,7 @@ impl OperatorKind {
                 .is_some()
                 .then(|| OperatorCategory::Physical)
                 .unwrap_or(OperatorCategory::Logical),
-            LogicalLimit(_) => OperatorCategory::Logical,
+            Limit(_) => OperatorCategory::Logical,
             OrderBy(_) => OperatorCategory::Logical,
             Remap(_) => OperatorCategory::Logical,
             Select(_) => OperatorCategory::Logical,
@@ -218,8 +218,8 @@ impl Explain for Operator {
             OperatorKind::Select(meta) => {
                 Select::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::LogicalLimit(meta) => {
-                LogicalLimit::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            OperatorKind::Limit(meta) => {
+                Limit::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             OperatorKind::OrderBy(meta) => {
                 OrderBy::borrow_raw_parts(meta, &self.common).explain(ctx, option)

@@ -12,10 +12,11 @@ use itertools::Itertools;
 use optd_core::ir::{
     Operator, OperatorKind, Scalar,
     operator::{
-        Aggregate, AggregateBorrowed, Get, GetBorrowed, Join, JoinBorrowed, LogicalLimit,
-        LogicalLimitBorrowed, Project, ProjectBorrowed, Remap, RemapBorrowed, Select,
+        Aggregate, AggregateBorrowed, EnforcerSort, EnforcerSortBorrowed, Get, GetBorrowed, Join,
+        JoinBorrowed, Limit, LimitBorrowed, Project, ProjectBorrowed, Remap, RemapBorrowed, Select,
         SelectBorrowed, split_equi_and_non_equi_conditions,
     },
+    properties::TupleOrderingDirection,
     scalar::{
         BinaryOp, BinaryOpBorrowed, BinaryOpKind, Cast, CastBorrowed, ColumnRef, ColumnRefBorrowed,
         Function, FunctionBorrowed, FunctionKind, Like, LikeBorrowed, List, Literal,
@@ -53,9 +54,13 @@ impl OptdQueryPlannerContext<'_> {
                 let node = Aggregate::borrow_raw_parts(meta, &optd_plan.common);
                 self.try_from_optd_aggregate(node)
             }
-            OperatorKind::LogicalLimit(meta) => {
-                let node = LogicalLimit::borrow_raw_parts(meta, &optd_plan.common);
+            OperatorKind::Limit(meta) => {
+                let node = Limit::borrow_raw_parts(meta, &optd_plan.common);
                 self.try_from_optd_limit(node)
+            }
+            OperatorKind::EnforcerSort(meta) => {
+                let node = EnforcerSort::borrow_raw_parts(meta, &optd_plan.common);
+                self.try_from_optd_enforcer_sort(node)
             }
             kind => whatever!("unsupported operator type {kind:?}"),
         }
@@ -213,7 +218,7 @@ impl OptdQueryPlannerContext<'_> {
         Ok(DFLogicalPlan::Filter(filter))
     }
 
-    pub fn try_from_optd_limit(&mut self, node: LogicalLimitBorrowed<'_>) -> Result<DFLogicalPlan> {
+    pub fn try_from_optd_limit(&mut self, node: LimitBorrowed<'_>) -> Result<DFLogicalPlan> {
         let input = self.try_from_optd_plan(node.input())?;
         let skip_expr = self.try_from_optd_scalar_expr(node.skip())?;
         let fetch_expr = self.try_from_optd_scalar_expr(node.fetch())?;
@@ -232,6 +237,28 @@ impl OptdQueryPlannerContext<'_> {
             skip,
             fetch,
             input: Arc::new(input),
+        }))
+    }
+
+    pub fn try_from_optd_enforcer_sort(
+        &mut self,
+        node: EnforcerSortBorrowed<'_>,
+    ) -> Result<DFLogicalPlan> {
+        let input = self.try_from_optd_plan(node.input())?;
+        let expr = node
+            .tuple_ordering()
+            .iter()
+            .map(|(column, direction)| {
+                let expr = DFExpr::Column(self.try_from_optd_column(column)?);
+                let asc = matches!(direction, TupleOrderingDirection::Asc);
+                Ok(logical_expr::expr::Sort::new(expr, asc, !asc))
+            })
+            .try_collect()?;
+
+        Ok(DFLogicalPlan::Sort(logical_plan::Sort {
+            expr,
+            input: Arc::new(input),
+            fetch: None,
         }))
     }
 

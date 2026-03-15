@@ -15,7 +15,7 @@ use optd_core::{
         Scalar, ScalarValue, builder as optd_builder,
         catalog::Schema,
         convert::{IntoOperator, IntoScalar},
-        operator::{Aggregate, Get, Join, LogicalLimit, OrderBy, Project, Remap, Select},
+        operator::{Aggregate, Get, Join, Limit, OrderBy, Project, Remap, Select},
         properties::TupleOrderingDirection,
         scalar::{Cast, ColumnRef, Function, Like, List, NaryOp, NaryOpKind},
     },
@@ -59,7 +59,7 @@ impl OptdQueryPlannerContext<'_> {
             None => optd_builder::literal(ScalarValue::Int64(None)),
         };
 
-        Ok(LogicalLimit::new(input, skip, fetch).into_operator())
+        Ok(Limit::new(input, skip, fetch).into_operator())
     }
 
     pub fn try_into_optd_order_by(

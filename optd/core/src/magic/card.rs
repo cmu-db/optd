@@ -100,8 +100,8 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
 
                 selectivity * filter.input().cardinality(ctx)
             }
-            OperatorKind::LogicalLimit(meta) => {
-                let limit = LogicalLimit::borrow_raw_parts(meta, &op.common);
+            OperatorKind::Limit(meta) => {
+                let limit = Limit::borrow_raw_parts(meta, &op.common);
                 let input_card = limit.input().cardinality(ctx);
                 let remaining = extract_skip_bound(limit.skip().as_ref())
                     .map(|skip| (input_card.as_f64() - skip as f64).max(0.0))

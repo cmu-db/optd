@@ -77,7 +77,7 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                 }
             }
             OperatorKind::Select(_)
-            | OperatorKind::LogicalLimit(_)
+            | OperatorKind::Limit(_)
             | OperatorKind::OrderBy(_)
             | OperatorKind::EnforcerSort(_)
             | OperatorKind::Subquery(_) => {

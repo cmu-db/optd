@@ -8,8 +8,8 @@ use crate::ir::{
     OperatorKind,
     catalog::Field,
     operator::{
-        Aggregate, DependentJoin, EnforcerSort, Get, Join, LogicalLimit, OrderBy, Project, Remap,
-        Select, Subquery, join::JoinType,
+        Aggregate, DependentJoin, EnforcerSort, Get, Join, Limit, OrderBy, Project, Remap, Select,
+        Subquery, join::JoinType,
     },
     properties::{Derive, GetProperty, PropertyMarker},
     scalar::{ColumnRef, List},
@@ -51,8 +51,8 @@ impl Derive<OutputSchema> for Operator {
                 let select = Select::borrow_raw_parts(meta, &self.common);
                 select.input().output_schema(ctx)
             }
-            OperatorKind::LogicalLimit(meta) => {
-                let limit = LogicalLimit::borrow_raw_parts(meta, &self.common);
+            OperatorKind::Limit(meta) => {
+                let limit = Limit::borrow_raw_parts(meta, &self.common);
                 limit.input().output_schema(ctx)
             }
             OperatorKind::Subquery(meta) => {
