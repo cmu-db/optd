@@ -131,6 +131,10 @@ impl Derive<OutputColumns> for crate::ir::Operator {
         &self,
         ctx: &crate::ir::context::IRContext,
     ) -> <OutputColumns as PropertyMarker>::Output {
+        if let Some(set) = self.common.properties.output_columns.get() {
+            return Ok(set.clone());
+        }
+
         let set = <Self as Derive<OutputColumns>>::derive_by_compute(self, ctx)?;
         Ok(self
             .common
@@ -144,5 +148,34 @@ impl Derive<OutputColumns> for crate::ir::Operator {
 impl crate::ir::Operator {
     pub fn output_columns(&self, ctx: &crate::ir::context::IRContext) -> Result<Arc<ColumnSet>> {
         self.get_property::<OutputColumns>(ctx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ir::{
+        Group, GroupId, IRContext,
+        convert::IntoOperator,
+        properties::OperatorProperties,
+    };
+    use std::sync::Arc;
+
+    #[test]
+    fn group_output_columns_uses_cached_properties() {
+        let ctx = IRContext::with_empty_magic();
+        let input = ctx.mock_scan(1, 2, 100.);
+        let expected = input.output_columns(&ctx).unwrap();
+
+        let group = Group::new(GroupId(42), input.properties().clone()).into_operator();
+
+        assert_eq!(group.output_columns(&ctx).unwrap().as_ref(), expected.as_ref());
+    }
+
+    #[test]
+    fn group_output_columns_errors_without_cached_properties() {
+        let ctx = IRContext::with_empty_magic();
+        let group = Group::new(GroupId(42), Arc::new(OperatorProperties::default())).into_operator();
+
+        assert!(group.output_columns(&ctx).is_err());
     }
 }

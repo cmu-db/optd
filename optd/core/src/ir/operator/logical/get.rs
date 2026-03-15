@@ -86,7 +86,7 @@ impl Explain for GetBorrowed<'_> {
         ctx: &crate::ir::IRContext,
         option: &crate::ir::explain::ExplainOption,
     ) -> pretty_xmlish::Pretty<'a> {
-        let mut fields = Vec::with_capacity(4);
+        let mut fields = Vec::with_capacity(5);
         fields.push((".data_source_id", Pretty::display(&self.data_source_id().0)));
         fields.push((".table_index", Pretty::display(&self.table_index())));
         fields.push((".implementation", Pretty::debug(self.implementation())));

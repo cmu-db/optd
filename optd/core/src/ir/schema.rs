@@ -59,7 +59,7 @@ impl OptdSchema {
     ) -> Result<Self, SchemaError> {
         let table_ref = table_ref.into();
         let schema = Self::new(schema.clone().into(), vec![table_ref; schema.fields.len()]);
-        schema.check_names()?;
+        // schema.check_names()?;
         Ok(schema)
     }
 
@@ -119,6 +119,19 @@ impl OptdSchema {
     /// Iterate over the qualifiers and fields in the DFSchema
     pub fn iter(&self) -> impl Iterator<Item = (&TableRef, &FieldRef)> {
         self.table_refs.iter().zip(self.inner.fields().iter())
+    }
+}
+
+impl std::fmt::Display for OptdSchema {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "fields:[{}]",
+            self.iter()
+                .map(|(q, f)| format!("{q}.{}", f.name()))
+                .collect::<Vec<String>>()
+                .join(", "),
+        )
     }
 }
 

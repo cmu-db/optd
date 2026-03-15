@@ -63,6 +63,7 @@ impl IRContext {
         let binding = guard.get_binding(table_index).unwrap();
         let field = binding.field(*column_index).unwrap();
         ColumnMeta {
+            table_ref: binding.table_ref().clone(),
             data_type: field.data_type().clone(),
             name: field.name().clone(),
         }

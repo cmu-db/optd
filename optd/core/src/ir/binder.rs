@@ -127,6 +127,13 @@ impl Binding {
         &self.schema
     }
 
+    pub fn optd_schema(&self) -> OptdSchema {
+        OptdSchema::new(
+            self.schema.clone(),
+            std::iter::repeat_n(self.table_ref.clone(), self.schema.fields().len()).collect(),
+        )
+    }
+
     pub fn table_ref(&self) -> &TableRef {
         &self.table_ref
     }

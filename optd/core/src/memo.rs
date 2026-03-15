@@ -133,11 +133,11 @@ pub struct MemoTable {
     id_to_group_ids: UnionFind<GroupId>,
     groups: BTreeMap<GroupId, MemoGroup>,
     id_allocator: IdAllocator,
-    ctx: IRContext,
+    ctx: Arc<IRContext>,
 }
 
 impl MemoTable {
-    pub fn new(ctx: IRContext) -> Self {
+    pub fn new(ctx: Arc<IRContext>) -> Self {
         Self {
             scalar_dedup: Default::default(),
             scalar_id_to_key: Default::default(),
@@ -665,7 +665,7 @@ mod tests {
 
     #[test]
     fn insert_scalar() {
-        let mut memo = MemoTable::new(IRContext::with_empty_magic());
+        let mut memo = MemoTable::new(Arc::new(IRContext::with_empty_magic()));
         let scalar = column_ref(Column(1, 1)).eq(int32(799));
         let scalar_from_clone = scalar.clone();
         let scalar_dup = column_ref(Column(1, 1)).eq(int32(799));
@@ -678,7 +678,7 @@ mod tests {
 
     #[test]
     fn insert_new_operator() {
-        let ctx = IRContext::with_empty_magic();
+        let ctx = Arc::new(IRContext::with_empty_magic());
         let mut memo = MemoTable::new(ctx.clone());
         let join = ctx.mock_scan(1, 1, 0.).logical_join(
             ctx.mock_scan(2, 1, 0.),
@@ -701,7 +701,7 @@ mod tests {
 
     #[test]
     fn insert_operator_into_group() {
-        let ctx = IRContext::with_empty_magic();
+        let ctx = Arc::new(IRContext::with_empty_magic());
         let mut memo = MemoTable::new(ctx.clone());
         let join = ctx.mock_scan(1, 1, 0.).logical_join(
             ctx.mock_scan(2, 1, 0.),
@@ -727,7 +727,7 @@ mod tests {
 
     #[test]
     fn parent_group_merge() {
-        let ctx = IRContext::with_empty_magic();
+        let ctx = Arc::new(IRContext::with_empty_magic());
         let mut memo = MemoTable::new(ctx.clone());
 
         let m1 = ctx.mock_scan(1, 1, 0.);
@@ -758,7 +758,7 @@ mod tests {
     #[test]
     #[tracing_test::traced_test]
     fn cascading_group_merges() {
-        let ctx = IRContext::with_empty_magic();
+        let ctx = Arc::new(IRContext::with_empty_magic());
         let mut memo = MemoTable::new(ctx.clone());
 
         let m1 = ctx.mock_scan(1, 1, 0.);
@@ -790,7 +790,7 @@ mod tests {
 
     #[test]
     fn insert_partial_binding() {
-        let ctx = IRContext::with_empty_magic();
+        let ctx = Arc::new(IRContext::with_empty_magic());
         let mut memo = MemoTable::new(ctx.clone());
 
         let m1 = ctx.mock_scan(1, 1, 0.);

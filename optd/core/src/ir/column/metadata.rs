@@ -1,12 +1,13 @@
 //! This module defines a metadata type for columns in tables. See column/mod.rs
 //! for information about the base column type
 
-use crate::ir::DataType;
+use crate::ir::{DataType, table_ref::TableRef};
 
 /// Note that the column data type only stores the column identifier, all other
 /// metadata (data type, name) is stored in the ColumnMeta type and accessible
 /// from a column meta store given a column
 pub struct ColumnMeta {
+    pub table_ref: TableRef,
     pub data_type: DataType,
     pub name: String,
 }

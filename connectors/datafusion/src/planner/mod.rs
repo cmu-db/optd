@@ -19,16 +19,20 @@ use datafusion::{
     sql::TableReference,
 };
 use optd_core::{
+    cascades::Cascades,
     error::{CatalogSnafu, Result as OptdResult},
     ir::{
         Column, IRContext,
         catalog::DataSourceId,
         explain::quick_explain,
+        rule::RuleSet,
         statistics::{ColumnStatistics, TableStatistics},
     },
     magic::{MagicCardinalityEstimator, MagicCostModel},
+    rules,
 };
 use snafu::{OptionExt, ResultExt, Snafu};
+use tracing::warn;
 
 use crate::{OptdExtension, OptdExtensionConfig};
 
@@ -64,13 +68,13 @@ pub enum OptdDFConnectorError {
 pub type Result<T> = std::result::Result<T, OptdDFConnectorError>;
 
 pub struct OptdQueryPlannerContext<'a> {
-    pub inner: IRContext,
+    pub inner: Arc<IRContext>,
     pub session_state: &'a SessionState,
     pub table_reference_to_source: HashMap<TableReference, Arc<dyn TableSource + 'static>>,
 }
 
 impl<'a> OptdQueryPlannerContext<'a> {
-    pub fn new(inner: IRContext, session_state: &'a SessionState) -> Self {
+    pub fn new(inner: Arc<IRContext>, session_state: &'a SessionState) -> Self {
         Self {
             inner,
             session_state,
@@ -122,13 +126,13 @@ impl OptdQueryPlanner {
             .whatever_context("missing optd session extension")
     }
 
-    fn ir_context(session_state: &SessionState) -> Result<IRContext> {
+    fn ir_context(session_state: &SessionState) -> Result<Arc<IRContext>> {
         let extension = Self::optd_extension(session_state)?;
-        Ok(IRContext::new(
+        Ok(Arc::new(IRContext::new(
             extension.catalog(),
             Arc::new(MagicCardinalityEstimator),
             Arc::new(MagicCostModel),
-        ))
+        )))
     }
 
     pub async fn collect_statistics(
@@ -228,12 +232,31 @@ impl OptdQueryPlanner {
                 err => DataFusionError::External(err.into()),
             })?;
 
-        let optd_physical = optd_logical.clone();
-        let _ = optd_physical.cardinality(&ctx.inner);
-        let _ = optd_physical.output_columns(&ctx.inner);
+        let rule_set = RuleSet::builder()
+            .add_rule(rules::LogicalGetAsPhysicalTableScanRule::new())
+            .add_rule(rules::LogicalAggregateAsPhysicalHashAggregateRule::new())
+            .add_rule(rules::LogicalJoinAsPhysicalHashJoinRule::new())
+            .add_rule(rules::LogicalJoinAsPhysicalNLJoinRule::new())
+            .add_rule(rules::LogicalSelectSimplifyRule::new())
+            .add_rule(rules::LogicalJoinInnerCommuteRule::new())
+            .add_rule(rules::LogicalJoinInnerAssocRule::new())
+            .build();
 
-        let explain_str = quick_explain(&optd_physical, &ctx.inner);
-        println!("{}", explain_str);
+        let opt = Arc::new(Cascades::new(ctx.inner.clone(), rule_set));
+
+        let Some(optd_physical) = opt.optimize(&optd_logical, Arc::default()).await else {
+            {
+                opt.memo.read().await.dump();
+            }
+            warn!("optimization failed");
+            return self
+                .create_physical_plan_default(logical_plan, session_state)
+                .await;
+        };
+
+        println!("optd-logical\n{}", quick_explain(&optd_logical, &opt.ctx));
+        println!("optd-physical\n{}", quick_explain(&optd_physical, &opt.ctx));
+
         let logical_plan = ctx
             .try_from_optd_plan(&optd_physical)
             .map_err(|e| match e {

@@ -68,7 +68,7 @@ async fn integration() -> Result<(), Box<dyn std::error::Error>> {
         .compact() // Optional: use compact format
         .init();
 
-    let ctx = IRContext::with_empty_magic();
+    let ctx = Arc::new(IRContext::with_empty_magic());
     let schema = Arc::new(Schema::new(vec![
         Field::new("v1", DataType::Int64, true),
         Field::new("v2", DataType::Int64, false),

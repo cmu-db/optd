@@ -29,6 +29,7 @@ mod types;
 pub use column::*;
 pub use context::IRContext;
 pub use group::*;
+use itertools::Itertools;
 pub use operator::{Operator, OperatorCategory, OperatorKind};
 use pretty_xmlish::Pretty;
 pub use scalar::{Scalar, ScalarKind};
@@ -120,7 +121,7 @@ impl<P: Default> IRCommon<P> {
 impl IRCommon<OperatorProperties> {
     pub fn explain_operator_properties<'a>(
         &self,
-        _ctx: &IRContext,
+        ctx: &IRContext,
         _option: &ExplainOption,
     ) -> Vec<(&'static str, Pretty<'a>)> {
         let mut fields = Vec::with_capacity(2);
@@ -134,7 +135,16 @@ impl IRCommon<OperatorProperties> {
             .properties
             .output_columns
             .get()
-            .map(|x| format!("{x}"))
+            .map(|set| {
+                let x = set
+                    .iter()
+                    .map(|col| {
+                        let meta = ctx.get_column_meta(col);
+                        format!("{}({col}): {}", meta.name, meta.data_type)
+                    })
+                    .collect_vec();
+                format!("{:?}", x)
+            })
             .unwrap_or("?".to_string());
         fields.push(("(.output_columns)", Pretty::display(&output_columns)));
         fields.push(("(.cardinality)", Pretty::display(&cardinality)));

@@ -16,12 +16,12 @@ pub struct Column(pub i64, pub usize);
 
 impl std::fmt::Display for Column {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "v#{}.{}", self.0, self.1)
+        write!(f, "#{}.{}", self.0, self.1)
     }
 }
 
 impl std::fmt::Debug for Column {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "v#{}.{}", self.0, self.1)
+        write!(f, "#{}.{}", self.0, self.1)
     }
 }

@@ -18,13 +18,13 @@ use crate::{
 
 pub struct Cascades {
     pub memo: tokio::sync::RwLock<MemoTable>,
-    pub ctx: IRContext,
+    pub ctx: Arc<IRContext>,
     pub rule_set: RuleSet,
 }
 
 impl Cascades {
     /// Creates a new Cascades optimizer instance.
-    pub fn new(ctx: IRContext, rule_set: RuleSet) -> Self {
+    pub fn new(ctx: Arc<IRContext>, rule_set: RuleSet) -> Self {
         Self {
             memo: tokio::sync::RwLock::new(MemoTable::new(ctx.clone())),
             ctx,
