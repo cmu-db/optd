@@ -32,8 +32,9 @@ define_node!(
 );
 impl_operator_conversion!(Aggregate, AggregateBorrowed);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum AggregateImplementation {
+    #[default]
     Hash,
 }
 

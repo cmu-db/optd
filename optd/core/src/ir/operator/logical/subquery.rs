@@ -41,6 +41,6 @@ impl Explain for SubqueryBorrowed<'_> {
         let mut fields = Vec::new();
         fields.extend(self.common.explain_operator_properties(ctx, option));
         let children = self.common.explain_input_operators(ctx, option);
-        Pretty::simple_record("LogicalSubquery", fields, children)
+        Pretty::simple_record("Subquery", fields, children)
     }
 }

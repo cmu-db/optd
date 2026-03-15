@@ -100,7 +100,7 @@ impl Explain for OrderByBorrowed<'_> {
         fields.extend(metadata);
         let children = self.common.explain_input_operators(ctx, option);
 
-        Pretty::simple_record("LogicalOrderBy", fields, children)
+        Pretty::simple_record("OrderBy", fields, children)
     }
 }
 

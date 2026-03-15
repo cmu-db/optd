@@ -11,22 +11,22 @@ use crate::ir::{
     table_ref::{ResolvedTableRef, TableRef},
 };
 
-pub struct MagicCatalog {
-    inner: RwLock<MagicCatalogInner>,
+pub struct MemoryCatalog {
+    inner: RwLock<MemoryCatalogInner>,
     default_catalog: String,
     default_schema: String,
 }
 
-pub struct MagicCatalogInner {
+pub struct MemoryCatalogInner {
     tables: HashMap<DataSourceId, TableMetadata>,
     table_to_id: HashMap<ResolvedTableRef, DataSourceId>,
     next_table_id: i64,
 }
 
-impl MagicCatalog {
+impl MemoryCatalog {
     pub fn new(default_catalog: &str, default_schema: &str) -> Self {
         Self {
-            inner: RwLock::new(MagicCatalogInner {
+            inner: RwLock::new(MemoryCatalogInner {
                 tables: HashMap::new(),
                 table_to_id: HashMap::new(),
                 next_table_id: 1,
@@ -41,7 +41,7 @@ impl MagicCatalog {
     }
 }
 
-impl Catalog for MagicCatalog {
+impl Catalog for MemoryCatalog {
     fn create_table(&self, table: TableRef, schema: Arc<Schema>) -> Result<DataSourceId> {
         let mut writer = self.inner.write().unwrap();
         let id = DataSourceId(writer.next_table_id);
@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn create_table() {
-        let cat = MagicCatalog::new("optd", "public");
+        let cat = MemoryCatalog::new("optd", "public");
         let schema = Arc::new(mock_table_schema("t1"));
         let t1 = cat
             .create_table(TableRef::bare("t1"), schema.clone())
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn describe_table_with_name() {
-        let cat = MagicCatalog::new("optd", "public");
+        let cat = MemoryCatalog::new("optd", "public");
         let schema = Arc::new(mock_table_schema("t1"));
         cat.create_table(TableRef::bare("t1"), schema.clone())
             .unwrap();
@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn describe_missing_table_with_name() {
-        let cat = MagicCatalog::new("optd", "public");
+        let cat = MemoryCatalog::new("optd", "public");
 
         let err = cat.table_by_ref(&TableRef::bare("missing")).unwrap_err();
         assert!(err.to_string().contains("Table 'missing' not found"));
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn drop_table_removes_lookup_and_allows_recreate() {
-        let cat = MagicCatalog::new("optd", "public");
+        let cat = MemoryCatalog::new("optd", "public");
         let schema = Arc::new(mock_table_schema("t1"));
         let first_id = cat
             .create_table(TableRef::bare("t1"), schema.clone())
@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn drop_missing_table_with_name() {
-        let cat = MagicCatalog::new("optd", "public");
+        let cat = MemoryCatalog::new("optd", "public");
 
         assert!(matches!(
             cat.drop_table(TableRef::bare("missing")),

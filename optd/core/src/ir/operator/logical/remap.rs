@@ -45,6 +45,6 @@ impl Explain for RemapBorrowed<'_> {
         fields.push((".table_index", Pretty::display(&self.table_index())));
         fields.extend(self.common.explain_operator_properties(ctx, option));
         let children = self.common.explain_input_operators(ctx, option);
-        Pretty::simple_record("LogicalRemap", fields, children)
+        Pretty::simple_record("Remap", fields, children)
     }
 }

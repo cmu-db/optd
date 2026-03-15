@@ -734,11 +734,11 @@ mod tests {
         let m1_alias = ctx.mock_scan(2, 1, 0.);
 
         let g1 = memo
-            .insert_new_operator(m1.clone().logical_select(boolean(true)))
+            .insert_new_operator(m1.clone().select(boolean(true)))
             .unwrap();
 
         let g2 = memo
-            .insert_new_operator(m1_alias.clone().logical_select(boolean(true)))
+            .insert_new_operator(m1_alias.clone().select(boolean(true)))
             .unwrap();
 
         let m1_group_id = memo.insert_operator(m1.clone()).unwrap_err();
@@ -766,20 +766,11 @@ mod tests {
         let m1_alias = ctx.mock_scan(2, 1, 0.);
 
         let g1 = memo
-            .insert_new_operator(
-                m1.clone()
-                    .logical_select(boolean(true))
-                    .logical_select(boolean(true)),
-            )
+            .insert_new_operator(m1.clone().select(boolean(true)).select(boolean(true)))
             .unwrap();
 
         let g2 = memo
-            .insert_new_operator(
-                m1_alias
-                    .clone()
-                    .logical_select(boolean(true))
-                    .logical_select(boolean(true)),
-            )
+            .insert_new_operator(m1_alias.clone().select(boolean(true)).select(boolean(true)))
             .unwrap();
 
         let m1_group_id = memo.insert_operator(m1.clone()).unwrap_err();
@@ -804,20 +795,11 @@ mod tests {
 
         let m1 = ctx.mock_scan(1, 1, 0.);
         let m1_alias = ctx.mock_scan(2, 1, 0.);
-        memo.insert_new_operator(
-            m1.clone()
-                .logical_select(boolean(true))
-                .logical_select(boolean(true)),
-        )
-        .unwrap();
+        memo.insert_new_operator(m1.clone().select(boolean(true)).select(boolean(true)))
+            .unwrap();
 
-        memo.insert_new_operator(
-            m1_alias
-                .clone()
-                .logical_select(boolean(true))
-                .logical_select(boolean(true)),
-        )
-        .unwrap();
+        memo.insert_new_operator(m1_alias.clone().select(boolean(true)).select(boolean(true)))
+            .unwrap();
 
         let m1_group_id = memo.insert_operator(m1.clone()).unwrap_err();
 
@@ -828,10 +810,10 @@ mod tests {
             .properties
             .clone();
 
-        let m1_select_binding = group(m1_group_id, properties).logical_select(boolean(true));
+        let m1_select_binding = group(m1_group_id, properties).select(boolean(true));
 
         let into_group_id = memo
-            .insert_operator(m1_alias.clone().logical_select(boolean(true)))
+            .insert_operator(m1_alias.clone().select(boolean(true)))
             .unwrap_err();
 
         let res = memo.insert_operator_into_group(m1_select_binding, into_group_id);

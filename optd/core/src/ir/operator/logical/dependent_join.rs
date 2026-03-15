@@ -55,6 +55,6 @@ impl Explain for DependentJoinBorrowed<'_> {
         fields.push((".join_cond", self.join_cond().explain(ctx, option)));
         fields.extend(self.common.explain_operator_properties(ctx, option));
         let children = self.common.explain_input_operators(ctx, option);
-        Pretty::simple_record("LogicalDependentJoin", fields, children)
+        Pretty::simple_record("DependentJoin", fields, children)
     }
 }

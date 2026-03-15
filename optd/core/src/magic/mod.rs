@@ -5,8 +5,8 @@
 //! - a mock catalog implementation [`MagicCatalog`]
 
 mod card;
-mod cat;
 mod cm;
+mod memory_catalog;
 
 use std::sync::Arc;
 
@@ -17,22 +17,22 @@ use crate::ir::{
     table_ref::TableRef,
 };
 pub use card::MagicCardinalityEstimator;
-pub use cat::MagicCatalog;
 pub use cm::MagicCostModel;
 use itertools::Itertools;
+pub use memory_catalog::MemoryCatalog;
 
 use crate::ir::IRContext;
 
 impl IRContext {
     pub fn with_empty_magic() -> Self {
         Self::new(
-            Arc::new(MagicCatalog::new("optd", "public")),
+            Arc::new(MemoryCatalog::new("optd", "public")),
             Arc::new(MagicCardinalityEstimator),
             Arc::new(MagicCostModel),
         )
     }
 
-    pub fn with_magic_catalog(cat: MagicCatalog) -> Self {
+    pub fn with_magic_catalog(cat: MemoryCatalog) -> Self {
         Self::new(
             Arc::new(cat),
             Arc::new(MagicCardinalityEstimator),
@@ -41,7 +41,7 @@ impl IRContext {
     }
 
     pub fn with_course_tables() -> Self {
-        let catalog = MagicCatalog::new("optd", "public");
+        let catalog = MemoryCatalog::new("optd", "public");
         let course = {
             let schema = Arc::new(Schema::new(vec![
                 // TODO: these .to_strings are not required?
@@ -213,7 +213,7 @@ impl IRContext {
 
     /// Creates a context with table `t1` to `t{count}`, each has `width` number of columns.
     pub fn with_numbered_tables(tables_statistics: Vec<TableStatistics>, width: usize) -> Self {
-        let catalog = MagicCatalog::new("optd", "public");
+        let catalog = MemoryCatalog::new("optd", "public");
 
         let create_numbered_table =
             |table_name: String, width: usize, table_statistics: TableStatistics| {

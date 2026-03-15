@@ -40,8 +40,9 @@ pub enum JoinType {
     Mark(Column),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum JoinImplementation {
+    #[default]
     NestedLoop,
     Hash(HashJoinImplementation),
 }

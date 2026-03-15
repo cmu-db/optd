@@ -46,6 +46,6 @@ impl Explain for LimitBorrowed<'_> {
         fields.push((".fetch", self.fetch().explain(ctx, option)));
         fields.extend(self.common.explain_operator_properties(ctx, option));
         let children = self.common.explain_input_operators(ctx, option);
-        Pretty::simple_record("LogicalLimit", fields, children)
+        Pretty::simple_record("Limit", fields, children)
     }
 }

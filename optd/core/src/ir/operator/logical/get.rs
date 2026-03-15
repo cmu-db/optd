@@ -34,8 +34,9 @@ define_node!(
 );
 impl_operator_conversion!(Get, GetBorrowed);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum GetImplementation {
+    #[default]
     TableScan,
 }
 

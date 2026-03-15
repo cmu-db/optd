@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use datafusion::common::{config::ConfigExtension, extensions_options};
-use optd_core::{ir::catalog::Catalog, magic::MagicCatalog};
+use optd_core::{ir::catalog::Catalog, magic::MemoryCatalog};
 
 extensions_options! {
    /// optd configuration in datafusion.
@@ -34,7 +34,7 @@ impl OptdExtension {
 
 impl Default for OptdExtension {
     fn default() -> Self {
-        Self::new(Arc::new(MagicCatalog::new("datafusion", "public")))
+        Self::new(Arc::new(MemoryCatalog::new("datafusion", "public")))
     }
 }
 

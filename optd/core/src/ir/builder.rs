@@ -120,15 +120,11 @@ impl Operator {
         .into_operator()
     }
 
-    pub fn logical_select(self: Arc<Self>, predicate: Arc<Scalar>) -> Arc<Self> {
+    pub fn select(self: Arc<Self>, predicate: Arc<Scalar>) -> Arc<Self> {
         Select::new(self, predicate).into_operator()
     }
 
-    pub fn physical_filter(self: Arc<Self>, predicate: Arc<Scalar>) -> Arc<Self> {
-        Select::new(self, predicate).into_operator()
-    }
-
-    pub fn logical_project(
+    pub fn project(
         self: Arc<Self>,
         table_index: i64,
         projections: impl IntoIterator<Item = Arc<Scalar>>,
@@ -136,15 +132,7 @@ impl Operator {
         Project::new(table_index, self, list(projections)).into_operator()
     }
 
-    pub fn physical_project(
-        self: Arc<Self>,
-        table_index: i64,
-        projections: impl IntoIterator<Item = Arc<Scalar>>,
-    ) -> Arc<Self> {
-        Project::new(table_index, self, list(projections)).into_operator()
-    }
-
-    pub fn logical_remap(self: Arc<Self>, table_index: i64) -> Arc<Self> {
+    pub fn remap(self: Arc<Self>, table_index: i64) -> Arc<Self> {
         Remap::new(table_index, self).into_operator()
     }
 

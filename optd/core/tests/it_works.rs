@@ -121,9 +121,9 @@ async fn integration() -> Result<(), Box<dyn std::error::Error>> {
             column_ref(Column(m1_table_index, 1)).eq(column_ref(Column(m2_table_index, 0))),
             JoinType::Inner,
         )
-        .logical_select(column_ref(Column(m1_table_index, 2)).eq(int32(799)))
-        .logical_select(column_ref(Column(m3_table_index, 1)).eq(int32(445)))
-        .logical_project(
+        .select(column_ref(Column(m1_table_index, 2)).eq(int32(799)))
+        .select(column_ref(Column(m3_table_index, 1)).eq(int32(445)))
+        .project(
             4,
             [
                 column_ref(Column(m1_table_index, 2)),
