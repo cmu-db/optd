@@ -74,8 +74,8 @@ impl CostModel for MagicCostModel {
                     }
                 }
             }
-            OperatorKind::LogicalDependentJoin(meta) => {
-                let join = LogicalDependentJoin::borrow_raw_parts(meta, &op.common);
+            OperatorKind::DependentJoin(meta) => {
+                let join = DependentJoin::borrow_raw_parts(meta, &op.common);
                 let outer_card = join.outer().cardinality(ctx);
                 let inner_card = join.inner().cardinality(ctx);
                 Ok(Self::nl_join_cost(outer_card, inner_card))
@@ -99,13 +99,13 @@ impl CostModel for MagicCostModel {
                     Ok(Self::hash_aggregate_cost(input_card, num_exprs))
                 }
             },
-            OperatorKind::LogicalOrderBy(meta) => {
-                let order_by = LogicalOrderBy::borrow_raw_parts(meta, &op.common);
+            OperatorKind::OrderBy(meta) => {
+                let order_by = OrderBy::borrow_raw_parts(meta, &op.common);
                 let input_card = order_by.input().cardinality(ctx);
                 Ok(Self::sort_cost(input_card))
             }
-            OperatorKind::LogicalSubquery(_) => Ok(Cost::ZERO),
-            OperatorKind::LogicalRemap(_) => Ok(Cost::ZERO),
+            OperatorKind::Subquery(_) => Ok(Cost::ZERO),
+            OperatorKind::Remap(_) => Ok(Cost::ZERO),
             OperatorKind::EnforcerSort(_) => {
                 let input_card = op.input_operators()[0].cardinality(ctx);
                 Ok(Self::sort_cost(input_card))
@@ -208,7 +208,7 @@ mod tests {
             ctx.cm.compute_operator_cost(&physical_join, &ctx).unwrap()
         );
 
-        let logical_dep_join = LogicalDependentJoin::new(
+        let logical_dep_join = DependentJoin::new(
             JoinType::Inner,
             outer.clone(),
             inner.clone(),
@@ -256,7 +256,7 @@ mod tests {
         );
 
         let ordering = TupleOrdering::from_iter([(Column(1, 0), TupleOrderingDirection::Asc)]);
-        let logical_order_by = LogicalOrderBy::new(
+        let logical_order_by = OrderBy::new(
             outer.clone(),
             vec![(column_ref(Column(1, 0)), TupleOrderingDirection::Asc)],
         )
@@ -276,8 +276,8 @@ mod tests {
         let input = ctx.mock_scan(1, 2, 100.);
 
         let limit = LogicalLimit::new(input.clone(), int64(10), int64(20)).into_operator();
-        let subquery = LogicalSubquery::new(input.clone()).into_operator();
-        let remap = LogicalRemap::new(2, input).into_operator();
+        let subquery = Subquery::new(input.clone()).into_operator();
+        let remap = Remap::new(2, input).into_operator();
 
         assert_eq!(
             ctx.cm.compute_operator_cost(&limit, &ctx).unwrap(),

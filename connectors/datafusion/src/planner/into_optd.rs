@@ -15,9 +15,7 @@ use optd_core::{
         Scalar, ScalarValue, builder as optd_builder,
         catalog::Schema,
         convert::{IntoOperator, IntoScalar},
-        operator::{
-            Aggregate, Get, Join, LogicalLimit, LogicalOrderBy, LogicalRemap, Project, Select,
-        },
+        operator::{Aggregate, Get, Join, LogicalLimit, OrderBy, Project, Remap, Select},
         properties::TupleOrderingDirection,
         scalar::{Cast, ColumnRef, Function, Like, List, NaryOp, NaryOpKind},
     },
@@ -32,14 +30,14 @@ impl OptdQueryPlannerContext<'_> {
         df_logical_plan: &DFLogicalPlan,
     ) -> Result<Arc<optd_core::ir::Operator>> {
         match df_logical_plan {
-            DFLogicalPlan::TableScan(table_scan) => self.try_into_optd_logical_get(table_scan),
-            DFLogicalPlan::Filter(filter) => self.try_into_optd_logical_select(filter),
-            DFLogicalPlan::Join(join) => self.try_into_optd_logical_join(join),
-            DFLogicalPlan::Projection(project) => self.try_into_optd_logical_project(project),
-            DFLogicalPlan::Aggregate(aggregate) => self.try_into_optd_logical_aggregate(aggregate),
-            DFLogicalPlan::Sort(sort) => self.try_into_optd_logical_order_by(sort),
-            DFLogicalPlan::SubqueryAlias(alias) => self.try_into_optd_logical_remap(alias),
-            DFLogicalPlan::Limit(limit) => self.try_into_optd_logical_limit(limit),
+            DFLogicalPlan::TableScan(table_scan) => self.try_into_optd_get(table_scan),
+            DFLogicalPlan::Filter(filter) => self.try_into_optd_select(filter),
+            DFLogicalPlan::Join(join) => self.try_into_optd_join(join),
+            DFLogicalPlan::Projection(project) => self.try_into_optd_project(project),
+            DFLogicalPlan::Aggregate(aggregate) => self.try_into_optd_aggregate(aggregate),
+            DFLogicalPlan::Sort(sort) => self.try_into_optd_order_by(sort),
+            DFLogicalPlan::SubqueryAlias(alias) => self.try_into_optd_remap(alias),
+            DFLogicalPlan::Limit(limit) => self.try_into_optd_limit(limit),
 
             plan => {
                 whatever!("Unsupported DataFusion logical plan: {}", plan);
@@ -47,7 +45,7 @@ impl OptdQueryPlannerContext<'_> {
         }
     }
 
-    pub fn try_into_optd_logical_limit(
+    pub fn try_into_optd_limit(
         &mut self,
         node: &logical_plan::Limit,
     ) -> Result<Arc<optd_core::ir::Operator>> {
@@ -64,7 +62,7 @@ impl OptdQueryPlannerContext<'_> {
         Ok(LogicalLimit::new(input, skip, fetch).into_operator())
     }
 
-    pub fn try_into_optd_logical_order_by(
+    pub fn try_into_optd_order_by(
         &mut self,
         node: &logical_plan::Sort,
     ) -> Result<Arc<optd_core::ir::Operator>> {
@@ -87,10 +85,10 @@ impl OptdQueryPlannerContext<'_> {
             })
             .try_collect()?;
 
-        Ok(LogicalOrderBy::new(input, ordering_exprs).into_operator())
+        Ok(OrderBy::new(input, ordering_exprs).into_operator())
     }
 
-    pub fn try_into_optd_logical_aggregate(
+    pub fn try_into_optd_aggregate(
         &mut self,
         node: &logical_plan::Aggregate,
     ) -> Result<Arc<optd_core::ir::Operator>> {
@@ -131,7 +129,7 @@ impl OptdQueryPlannerContext<'_> {
         Ok(aggregate.into_operator())
     }
 
-    pub fn try_into_optd_logical_project(
+    pub fn try_into_optd_project(
         &mut self,
         node: &logical_plan::Projection,
     ) -> Result<Arc<optd_core::ir::Operator>> {
@@ -155,7 +153,7 @@ impl OptdQueryPlannerContext<'_> {
         Ok(project.into_operator())
     }
 
-    pub fn try_into_optd_logical_remap(
+    pub fn try_into_optd_remap(
         &mut self,
         node: &logical_plan::SubqueryAlias,
     ) -> Result<Arc<optd_core::ir::Operator>> {
@@ -167,12 +165,12 @@ impl OptdQueryPlannerContext<'_> {
             .add_binding(Some(table_ref), node.schema.inner().clone())
             .context(OptdSnafu)?;
 
-        let remap = LogicalRemap::new(table_index, input);
+        let remap = Remap::new(table_index, input);
         self.inner.binder_end_scope();
         Ok(remap.into_operator())
     }
 
-    pub fn try_into_optd_logical_join(
+    pub fn try_into_optd_join(
         &mut self,
         node: &logical_plan::Join,
     ) -> Result<Arc<optd_core::ir::Operator>> {
@@ -198,7 +196,7 @@ impl OptdQueryPlannerContext<'_> {
         Ok(join.into_operator())
     }
 
-    pub fn try_into_optd_logical_select(
+    pub fn try_into_optd_select(
         &mut self,
         node: &logical_plan::Filter,
     ) -> Result<Arc<optd_core::ir::Operator>> {
@@ -209,7 +207,7 @@ impl OptdQueryPlannerContext<'_> {
         Ok(select.into_operator())
     }
 
-    pub fn try_into_optd_logical_get(
+    pub fn try_into_optd_get(
         &mut self,
         node: &logical_plan::TableScan,
     ) -> Result<Arc<optd_core::ir::Operator>> {

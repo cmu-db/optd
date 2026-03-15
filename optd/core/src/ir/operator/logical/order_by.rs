@@ -19,9 +19,9 @@ define_node!(
     ///               expression (true for ascending, false for descending).
     /// Scalars:
     /// - exprs: The expression array to order by.
-    LogicalOrderBy, LogicalOrderByBorrowed {
+    OrderBy, OrderByBorrowed {
         properties: OperatorProperties,
-        metadata: LogicalOrderByMetadata {
+        metadata: OrderByMetadata {
             directions: BitBox,
         },
         inputs: {
@@ -30,9 +30,9 @@ define_node!(
         }
     }
 );
-impl_operator_conversion!(LogicalOrderBy, LogicalOrderByBorrowed);
+impl_operator_conversion!(OrderBy, OrderByBorrowed);
 
-impl LogicalOrderBy {
+impl OrderBy {
     pub fn new(
         input: Arc<Operator>,
         ordered_exprs: Vec<(Arc<Scalar>, TupleOrderingDirection)>,
@@ -42,7 +42,7 @@ impl LogicalOrderBy {
             .map(|(expr, direction)| (expr, direction == TupleOrderingDirection::Asc))
             .unzip();
         Self {
-            meta: LogicalOrderByMetadata {
+            meta: OrderByMetadata {
                 directions: directions.into_boxed_bitslice(),
             },
             common: IRCommon::new(Arc::new([input]), exprs.into()),
@@ -50,7 +50,7 @@ impl LogicalOrderBy {
     }
 }
 
-impl LogicalOrderByBorrowed<'_> {
+impl OrderByBorrowed<'_> {
     /// Try extracts the associated tuple ordering if all the ordered exprs are of type [`ColumnRef`].
     /// On error, returns a list of all scalar expressions that are not [`ColumnRef`].
     pub fn try_extract_tuple_ordering(&self) -> Result<TupleOrdering, Vec<Arc<Scalar>>> {
@@ -75,7 +75,7 @@ impl LogicalOrderByBorrowed<'_> {
     }
 }
 
-impl Explain for LogicalOrderByBorrowed<'_> {
+impl Explain for OrderByBorrowed<'_> {
     fn explain<'a>(
         &self,
         ctx: &crate::ir::IRContext,
@@ -127,11 +127,10 @@ mod tests {
                 TupleOrderingDirection::Asc,
             ),
         ];
-        let order_by =
-            LogicalOrderBy::new(ctx.mock_scan(1, 3, 100.), ordered_exprs).into_operator();
+        let order_by = OrderBy::new(ctx.mock_scan(1, 3, 100.), ordered_exprs).into_operator();
 
         let res = order_by
-            .borrow::<LogicalOrderBy>()
+            .borrow::<OrderBy>()
             .try_extract_tuple_ordering()
             .unwrap()
             .iter_columns()
@@ -162,11 +161,10 @@ mod tests {
             ),
         ];
 
-        let order_by =
-            LogicalOrderBy::new(ctx.mock_scan(1, 3, 100.), ordered_exprs).into_operator();
+        let order_by = OrderBy::new(ctx.mock_scan(1, 3, 100.), ordered_exprs).into_operator();
 
         let res = order_by
-            .borrow::<LogicalOrderBy>()
+            .borrow::<OrderBy>()
             .try_extract_tuple_ordering()
             .unwrap_err();
 

@@ -7,9 +7,7 @@ use crate::{
     error::Result,
     ir::{
         Column, ColumnSet, OperatorKind,
-        operator::{
-            Aggregate, Get, Join, LogicalDependentJoin, LogicalRemap, Project, join::JoinType,
-        },
+        operator::{Aggregate, DependentJoin, Get, Join, Project, Remap, join::JoinType},
         properties::{Derive, GetProperty, PropertyMarker},
         scalar::{ColumnRef, List},
     },
@@ -59,8 +57,8 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                     }
                 }
             }
-            OperatorKind::LogicalDependentJoin(meta) => {
-                let join = LogicalDependentJoin::borrow_raw_parts(meta, &self.common);
+            OperatorKind::DependentJoin(meta) => {
+                let join = DependentJoin::borrow_raw_parts(meta, &self.common);
                 match join.join_type() {
                     JoinType::Mark(mark_column) => {
                         let outer_columns = join.outer().output_columns(ctx)?;
@@ -80,9 +78,9 @@ impl Derive<OutputColumns> for crate::ir::Operator {
             }
             OperatorKind::Select(_)
             | OperatorKind::LogicalLimit(_)
-            | OperatorKind::LogicalOrderBy(_)
+            | OperatorKind::OrderBy(_)
             | OperatorKind::EnforcerSort(_)
-            | OperatorKind::LogicalSubquery(_) => {
+            | OperatorKind::Subquery(_) => {
                 let set = self.input_operators().iter().try_fold(
                     ColumnSet::default(),
                     |mut set, op| {
@@ -118,8 +116,8 @@ impl Derive<OutputColumns> for crate::ir::Operator {
 
                 Ok(Arc::new(set))
             }
-            OperatorKind::LogicalRemap(meta) => {
-                let remap = LogicalRemap::borrow_raw_parts(meta, &self.common);
+            OperatorKind::Remap(meta) => {
+                let remap = Remap::borrow_raw_parts(meta, &self.common);
                 let input_columns = remap.input().output_columns(ctx)?;
                 let set = (0..input_columns.len())
                     .map(|i| Column(*remap.table_index(), i))

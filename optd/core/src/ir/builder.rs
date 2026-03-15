@@ -10,8 +10,7 @@ use crate::ir::{
     catalog::{DataSourceId, Schema},
     convert::{IntoOperator, IntoScalar},
     operator::{
-        Aggregate, Get, Join, JoinSide, LogicalDependentJoin, LogicalRemap, Project, Select,
-        join::JoinType,
+        Aggregate, DependentJoin, Get, Join, JoinSide, Project, Remap, Select, join::JoinType,
     },
     properties::OperatorProperties,
     scalar::*,
@@ -82,7 +81,7 @@ impl Operator {
         join_cond: Arc<Scalar>,
         join_type: JoinType,
     ) -> Arc<Self> {
-        LogicalDependentJoin::new(join_type, self, inner, join_cond).into_operator()
+        DependentJoin::new(join_type, self, inner, join_cond).into_operator()
     }
 
     pub fn nl_join(
@@ -146,7 +145,7 @@ impl Operator {
     }
 
     pub fn logical_remap(self: Arc<Self>, table_index: i64) -> Arc<Self> {
-        LogicalRemap::new(table_index, self).into_operator()
+        Remap::new(table_index, self).into_operator()
     }
 
     pub fn logical_aggregate(

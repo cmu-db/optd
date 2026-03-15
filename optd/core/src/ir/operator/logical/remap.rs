@@ -13,9 +13,9 @@ define_node!(
     /// Metadata: (none)
     /// Scalars:
     /// - mappings: A list defining the remapping of columns to new aliases.
-    LogicalRemap, LogicalRemapBorrowed {
+    Remap, RemapBorrowed {
         properties: OperatorProperties,
-        metadata: LogicalRemapMetadata {
+        metadata: RemapMetadata {
             table_index: i64,
         },
         inputs: {
@@ -24,18 +24,18 @@ define_node!(
         },
     }
 );
-impl_operator_conversion!(LogicalRemap, LogicalRemapBorrowed);
+impl_operator_conversion!(Remap, RemapBorrowed);
 
-impl LogicalRemap {
+impl Remap {
     pub fn new(table_index: i64, input: Arc<Operator>) -> Self {
         Self {
-            meta: LogicalRemapMetadata { table_index },
+            meta: RemapMetadata { table_index },
             common: IRCommon::with_input_operators_only(Arc::new([input])),
         }
     }
 }
 
-impl Explain for LogicalRemapBorrowed<'_> {
+impl Explain for RemapBorrowed<'_> {
     fn explain<'a>(
         &self,
         ctx: &crate::ir::IRContext,

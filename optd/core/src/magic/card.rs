@@ -77,8 +77,8 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                     join.join_cond().as_ref(),
                 )
             }
-            OperatorKind::LogicalDependentJoin(meta) => {
-                let join = LogicalDependentJoin::borrow_raw_parts(meta, &op.common);
+            OperatorKind::DependentJoin(meta) => {
+                let join = DependentJoin::borrow_raw_parts(meta, &op.common);
                 estimate_join(
                     join.join_type(),
                     join.outer().as_ref(),
@@ -112,16 +112,12 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                     .map(Cardinality::new)
                     .unwrap_or_else(|| Cardinality::new(remaining))
             }
-            OperatorKind::LogicalOrderBy(meta) => {
-                LogicalOrderBy::borrow_raw_parts(meta, &op.common)
-                    .input()
-                    .cardinality(ctx)
-            }
-            OperatorKind::LogicalSubquery(meta) => {
-                LogicalSubquery::borrow_raw_parts(meta, &op.common)
-                    .input()
-                    .cardinality(ctx)
-            }
+            OperatorKind::OrderBy(meta) => OrderBy::borrow_raw_parts(meta, &op.common)
+                .input()
+                .cardinality(ctx),
+            OperatorKind::Subquery(meta) => Subquery::borrow_raw_parts(meta, &op.common)
+                .input()
+                .cardinality(ctx),
             OperatorKind::EnforcerSort(meta) => EnforcerSort::borrow_raw_parts(meta, &op.common)
                 .input()
                 .cardinality(ctx),
@@ -137,7 +133,7 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                     Self::MAGIC_GROUP_BY_KEY_NDV_FACTOR.powi(i32::try_from(len).unwrap()),
                 )
             }
-            OperatorKind::LogicalRemap(meta) => LogicalRemap::borrow_raw_parts(meta, &op.common)
+            OperatorKind::Remap(meta) => Remap::borrow_raw_parts(meta, &op.common)
                 .input()
                 .cardinality(ctx),
         }

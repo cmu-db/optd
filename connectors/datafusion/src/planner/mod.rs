@@ -343,7 +343,7 @@ impl OptdQueryPlanner {
     //     };
 
     //     let res = self
-    //         .try_into_optd_logical_plan(actual_logical_plan, &ctx, session_state)
+    //         .try_into_optd_plan(actual_logical_plan, &ctx, session_state)
     //         .map_err(|e| DataFusionError::External(e.into()));
 
     //     let Ok(optd_logical) = res else {

@@ -8,7 +8,7 @@ use crate::{
     ir::{
         Group, GroupId, IRCommon, IRContext, Operator,
         convert::IntoOperator,
-        operator::LogicalOrderBy,
+        operator::OrderBy,
         properties::{OperatorProperties, Required, TrySatisfy},
         rule::{OperatorPattern, Rule, RuleSet},
     },
@@ -278,7 +278,7 @@ impl Cascades {
         };
 
         // TODO(yuchen): Properly add this as a rule:
-        if let Ok(logical_order_by) = operator.try_borrow::<LogicalOrderBy>()
+        if let Ok(logical_order_by) = operator.try_borrow::<OrderBy>()
             && let Ok(tuple_ordering) = logical_order_by.try_extract_tuple_ordering()
         {
             let input_group_id = expr.key().input_operators()[0];

@@ -12,27 +12,27 @@ use std::sync::Arc;
 define_node!(
     /// Metadata: (none)
     /// Scalars: (none)
-    LogicalSubquery, LogicalSubqueryBorrowed {
+    Subquery, SubqueryBorrowed {
         properties: OperatorProperties,
-        metadata: LogicalSubqueryMetadata {},
+        metadata: SubqueryMetadata {},
         inputs: {
             operators: [input],
             scalars: [],
         }
     }
 );
-impl_operator_conversion!(LogicalSubquery, LogicalSubqueryBorrowed);
+impl_operator_conversion!(Subquery, SubqueryBorrowed);
 
-impl LogicalSubquery {
+impl Subquery {
     pub fn new(input: Arc<Operator>) -> Self {
         Self {
-            meta: LogicalSubqueryMetadata {},
+            meta: SubqueryMetadata {},
             common: IRCommon::with_input_operators_only(Arc::new([input])),
         }
     }
 }
 
-impl Explain for LogicalSubqueryBorrowed<'_> {
+impl Explain for SubqueryBorrowed<'_> {
     fn explain<'a>(
         &self,
         ctx: &crate::ir::IRContext,

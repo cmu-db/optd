@@ -214,8 +214,8 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
                     _ => satisfy_nl_join_ordering(join.outer(), ordering, ctx)?,
                 }
             }
-            OperatorKind::LogicalDependentJoin(meta) => {
-                let join = LogicalDependentJoin::borrow_raw_parts(meta, &self.common);
+            OperatorKind::DependentJoin(meta) => {
+                let join = DependentJoin::borrow_raw_parts(meta, &self.common);
                 satisfy_nl_join_ordering(join.outer(), ordering, ctx)?
             }
             OperatorKind::Project(meta) => {
@@ -229,8 +229,8 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
             OperatorKind::LogicalLimit(_) => {
                 todo!("try_satisfy for LogicalLimit")
             }
-            OperatorKind::LogicalOrderBy(meta) => {
-                let order_by = LogicalOrderBy::borrow_raw_parts(meta, &self.common);
+            OperatorKind::OrderBy(meta) => {
+                let order_by = OrderBy::borrow_raw_parts(meta, &self.common);
                 order_by
                     .try_extract_tuple_ordering()
                     .ok()
@@ -241,7 +241,7 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
                     })
             }
             OperatorKind::Aggregate(_) => satisfy_aggregate_ordering(ordering),
-            OperatorKind::LogicalSubquery(_) => {
+            OperatorKind::Subquery(_) => {
                 assert_eq!(self.kind.category(), OperatorCategory::Logical);
                 todo!("try_satisfy for LogicalSubquery")
             }
@@ -249,7 +249,7 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
                 .then(|| Arc::<[TupleOrdering]>::from(vec![TupleOrdering::default(); 1])),
             OperatorKind::MockScan(meta) => (&meta.spec.mocked_provided_ordering >= ordering)
                 .then_some(Arc::<[TupleOrdering]>::from(Vec::new())),
-            OperatorKind::LogicalRemap(_) => ordering
+            OperatorKind::Remap(_) => ordering
                 .is_empty()
                 .then(|| Arc::<[TupleOrdering]>::from(vec![ordering.clone()])),
         };
@@ -485,7 +485,7 @@ mod tests {
     #[test]
     fn logical_order_by_try_satisfy_ordering() {
         let ctx = IRContext::with_empty_magic();
-        let order_by = LogicalOrderBy::new(
+        let order_by = OrderBy::new(
             ctx.mock_scan(1, 3, 100.),
             vec![
                 (

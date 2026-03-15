@@ -49,14 +49,14 @@ pub enum OperatorKind {
     MockScan(MockScanMetadata),
     Get(GetMetadata),
     Join(JoinMetadata),
-    LogicalDependentJoin(LogicalDependentJoinMetadata),
+    DependentJoin(DependentJoinMetadata),
     Select(SelectMetadata),
     Project(ProjectMetadata),
     Aggregate(AggregateMetadata),
-    LogicalLimit(LogicalLimitMetadata),
-    LogicalOrderBy(LogicalOrderByMetadata),
-    LogicalRemap(LogicalRemapMetadata),
-    LogicalSubquery(LogicalSubqueryMetadata),
+    LogicalLimit(LimitMetadata),
+    OrderBy(OrderByMetadata),
+    Remap(RemapMetadata),
+    Subquery(SubqueryMetadata),
     EnforcerSort(EnforcerSortMetadata),
 }
 
@@ -84,7 +84,7 @@ impl OperatorKind {
                 .is_some()
                 .then(|| OperatorCategory::Physical)
                 .unwrap_or(OperatorCategory::Logical),
-            LogicalDependentJoin(_) => OperatorCategory::Logical,
+            DependentJoin(_) => OperatorCategory::Logical,
             Project(_) => OperatorCategory::Logical,
             Aggregate(meta) => meta
                 .implementation
@@ -92,10 +92,10 @@ impl OperatorKind {
                 .then(|| OperatorCategory::Physical)
                 .unwrap_or(OperatorCategory::Logical),
             LogicalLimit(_) => OperatorCategory::Logical,
-            LogicalOrderBy(_) => OperatorCategory::Logical,
-            LogicalRemap(_) => OperatorCategory::Logical,
+            OrderBy(_) => OperatorCategory::Logical,
+            Remap(_) => OperatorCategory::Logical,
             Select(_) => OperatorCategory::Logical,
-            LogicalSubquery(_) => OperatorCategory::Logical,
+            Subquery(_) => OperatorCategory::Logical,
             EnforcerSort(_) => OperatorCategory::Enforcer,
             MockScan(_) => OperatorCategory::Physical,
         }
@@ -212,8 +212,8 @@ impl Explain for Operator {
             OperatorKind::Join(meta) => {
                 Join::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::LogicalDependentJoin(meta) => {
-                LogicalDependentJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            OperatorKind::DependentJoin(meta) => {
+                DependentJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             OperatorKind::Select(meta) => {
                 Select::borrow_raw_parts(meta, &self.common).explain(ctx, option)
@@ -221,8 +221,8 @@ impl Explain for Operator {
             OperatorKind::LogicalLimit(meta) => {
                 LogicalLimit::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::LogicalOrderBy(meta) => {
-                LogicalOrderBy::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            OperatorKind::OrderBy(meta) => {
+                OrderBy::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             OperatorKind::EnforcerSort(meta) => {
                 EnforcerSort::borrow_raw_parts(meta, &self.common).explain(ctx, option)
@@ -233,11 +233,11 @@ impl Explain for Operator {
             OperatorKind::Aggregate(meta) => {
                 Aggregate::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::LogicalRemap(meta) => {
-                LogicalRemap::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            OperatorKind::Remap(meta) => {
+                Remap::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::LogicalSubquery(meta) => {
-                LogicalSubquery::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            OperatorKind::Subquery(meta) => {
+                Subquery::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
         }
     }

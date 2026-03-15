@@ -8,8 +8,8 @@ use crate::ir::{
     OperatorKind,
     catalog::Field,
     operator::{
-        Aggregate, EnforcerSort, Get, Join, LogicalDependentJoin, LogicalLimit, LogicalOrderBy,
-        LogicalRemap, LogicalSubquery, Project, Select, join::JoinType,
+        Aggregate, DependentJoin, EnforcerSort, Get, Join, LogicalLimit, OrderBy, Project, Remap,
+        Select, Subquery, join::JoinType,
     },
     properties::{Derive, GetProperty, PropertyMarker},
     scalar::{ColumnRef, List},
@@ -55,24 +55,24 @@ impl Derive<OutputSchema> for Operator {
                 let limit = LogicalLimit::borrow_raw_parts(meta, &self.common);
                 limit.input().output_schema(ctx)
             }
-            OperatorKind::LogicalSubquery(meta) => {
-                let subquery = LogicalSubquery::borrow_raw_parts(meta, &self.common);
+            OperatorKind::Subquery(meta) => {
+                let subquery = Subquery::borrow_raw_parts(meta, &self.common);
                 subquery.input().output_schema(ctx)
             }
             OperatorKind::Join(meta) => {
                 let join = Join::borrow_raw_parts(meta, &self.common);
                 compute_join_schema(join.outer(), join.inner(), join.join_type(), ctx)
             }
-            OperatorKind::LogicalDependentJoin(meta) => {
-                let join = LogicalDependentJoin::borrow_raw_parts(meta, &self.common);
+            OperatorKind::DependentJoin(meta) => {
+                let join = DependentJoin::borrow_raw_parts(meta, &self.common);
                 compute_join_schema(join.outer(), join.inner(), join.join_type(), ctx)
             }
             OperatorKind::EnforcerSort(meta) => {
                 let sort = EnforcerSort::borrow_raw_parts(meta, &self.common);
                 sort.input().output_schema(ctx)
             }
-            OperatorKind::LogicalOrderBy(meta) => {
-                let order_by = LogicalOrderBy::borrow_raw_parts(meta, &self.common);
+            OperatorKind::OrderBy(meta) => {
+                let order_by = OrderBy::borrow_raw_parts(meta, &self.common);
                 order_by.input().output_schema(ctx)
             }
             OperatorKind::Project(meta) => {
@@ -83,8 +83,8 @@ impl Derive<OutputSchema> for Operator {
                 let agg = Aggregate::borrow_raw_parts(meta, &self.common);
                 compute_aggregate_schema(agg.keys(), agg.aggregate_table_index(), ctx)
             }
-            OperatorKind::LogicalRemap(meta) => {
-                let remap = LogicalRemap::borrow_raw_parts(meta, &self.common);
+            OperatorKind::Remap(meta) => {
+                let remap = Remap::borrow_raw_parts(meta, &self.common);
                 compute_binding_schema(remap.table_index(), ctx)
             }
         }

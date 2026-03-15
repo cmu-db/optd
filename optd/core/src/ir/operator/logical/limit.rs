@@ -17,7 +17,7 @@ define_node!(
     /// - fetch: Maximum number of rows to fetch.
     LogicalLimit, LogicalLimitBorrowed {
         properties: OperatorProperties,
-        metadata: LogicalLimitMetadata {},
+        metadata: LimitMetadata {},
         inputs: {
             operators: [input],
             scalars: [skip, fetch],
@@ -29,7 +29,7 @@ impl_operator_conversion!(LogicalLimit, LogicalLimitBorrowed);
 impl LogicalLimit {
     pub fn new(input: Arc<Operator>, skip: Arc<Scalar>, fetch: Arc<Scalar>) -> Self {
         Self {
-            meta: LogicalLimitMetadata {},
+            meta: LimitMetadata {},
             common: IRCommon::new(Arc::new([input]), Arc::new([skip, fetch])),
         }
     }
