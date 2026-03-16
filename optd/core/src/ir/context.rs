@@ -81,11 +81,7 @@ impl IRContext {
         Ok((binding.table_ref().clone(), field.clone()))
     }
 
-    pub fn get_column_by_name(
-        &self,
-        table_ref: Option<&TableRef>,
-        column_name: &str,
-    ) -> Result<Column> {
+    pub fn col(&self, table_ref: Option<&TableRef>, column_name: &str) -> Result<Column> {
         let binder = self.binder.read().unwrap();
         match table_ref {
             Some(table_ref) => {

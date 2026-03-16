@@ -68,7 +68,7 @@ mod tests {
         let input = ctx.mock_scan(1, 2, 10.);
         let exprs = List::new(vec![column_ref(crate::ir::Column(1, 1))].into()).into_scalar();
         let keys = List::new(vec![column_ref(crate::ir::Column(1, 0))].into()).into_scalar();
-        let aggregate = Aggregate::logical(2, input, exprs.clone(), keys.clone()).into_operator();
+        let aggregate = Aggregate::new(2, input, exprs.clone(), keys.clone(), None).into_operator();
 
         let rule = LogicalAggregateAsPhysicalHashAggregateRule::new();
         let transformed = rule.transform(aggregate.as_ref(), &ctx).unwrap();

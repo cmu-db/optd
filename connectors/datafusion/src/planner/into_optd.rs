@@ -123,8 +123,13 @@ impl OptdQueryPlannerContext<'_> {
             .add_binding(None, Arc::new(aggrgate_schema))
             .context(OptdSnafu)?;
 
-        let aggregate =
-            Aggregate::logical(table_index, input, exprs.into_scalar(), keys.into_scalar());
+        let aggregate = Aggregate::new(
+            table_index,
+            input,
+            exprs.into_scalar(),
+            keys.into_scalar(),
+            None,
+        );
 
         Ok(aggregate.into_operator())
     }

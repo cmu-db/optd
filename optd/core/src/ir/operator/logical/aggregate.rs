@@ -54,30 +54,6 @@ impl Aggregate {
             common: IRCommon::new(Arc::new([input]), Arc::new([exprs, keys])),
         }
     }
-
-    pub fn logical(
-        aggregate_table_index: i64,
-        input: Arc<Operator>,
-        exprs: Arc<Scalar>,
-        keys: Arc<Scalar>,
-    ) -> Self {
-        Self::new(aggregate_table_index, input, exprs, keys, None)
-    }
-
-    pub fn hash(
-        aggregate_table_index: i64,
-        input: Arc<Operator>,
-        exprs: Arc<Scalar>,
-        keys: Arc<Scalar>,
-    ) -> Self {
-        Self::new(
-            aggregate_table_index,
-            input,
-            exprs,
-            keys,
-            Some(AggregateImplementation::Hash),
-        )
-    }
 }
 
 impl Explain for AggregateBorrowed<'_> {

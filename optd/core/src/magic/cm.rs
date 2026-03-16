@@ -248,8 +248,15 @@ mod tests {
         let exprs = List::new(vec![column_ref(Column(1, 1))].into()).into_scalar();
         let keys = List::new(vec![column_ref(Column(1, 0))].into()).into_scalar();
         let logical_agg =
-            Aggregate::logical(4, outer.clone(), exprs.clone(), keys.clone()).into_operator();
-        let physical_agg = Aggregate::hash(4, outer.clone(), exprs, keys).into_operator();
+            Aggregate::new(4, outer.clone(), exprs.clone(), keys.clone(), None).into_operator();
+        let physical_agg = Aggregate::new(
+            4,
+            outer.clone(),
+            exprs,
+            keys,
+            Some(AggregateImplementation::Hash),
+        )
+        .into_operator();
         assert_eq!(
             ctx.cm.compute_operator_cost(&logical_agg, &ctx).unwrap(),
             ctx.cm.compute_operator_cost(&physical_agg, &ctx).unwrap()

@@ -466,11 +466,12 @@ mod tests {
     fn logical_aggregate_try_satisfy_ordering() {
         let ctx = IRContext::with_empty_magic();
         let input = ctx.mock_scan(1, 2, 100.);
-        let aggregate = Aggregate::logical(
+        let aggregate = Aggregate::new(
             2,
             input,
             List::new(Vec::new().into()).into_scalar(),
             List::new(vec![ColumnRef::new(Column(1, 0)).into_scalar()].into()).into_scalar(),
+            None,
         )
         .into_operator();
 

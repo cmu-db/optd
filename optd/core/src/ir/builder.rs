@@ -10,7 +10,8 @@ use crate::ir::{
     catalog::{DataSourceId, Schema},
     convert::{IntoOperator, IntoScalar},
     operator::{
-        Aggregate, DependentJoin, Get, Join, JoinSide, Project, Remap, Select, join::JoinType,
+        Aggregate, AggregateImplementation, DependentJoin, Get, Join, JoinSide, Project, Remap,
+        Select, join::JoinType,
     },
     properties::OperatorProperties,
     scalar::*,
@@ -142,7 +143,7 @@ impl Operator {
         exprs: impl IntoIterator<Item = Arc<Scalar>>,
         keys: impl IntoIterator<Item = Arc<Scalar>>,
     ) -> Arc<Self> {
-        Aggregate::logical(aggregate_table_index, self, list(exprs), list(keys)).into_operator()
+        Aggregate::new(aggregate_table_index, self, list(exprs), list(keys), None).into_operator()
     }
 
     pub fn hash_aggregate(
@@ -151,7 +152,14 @@ impl Operator {
         exprs: impl IntoIterator<Item = Arc<Scalar>>,
         keys: impl IntoIterator<Item = Arc<Scalar>>,
     ) -> Arc<Self> {
-        Aggregate::hash(aggregate_table_index, self, list(exprs), list(keys)).into_operator()
+        Aggregate::new(
+            aggregate_table_index,
+            self,
+            list(exprs),
+            list(keys),
+            Some(AggregateImplementation::Hash),
+        )
+        .into_operator()
     }
 }
 

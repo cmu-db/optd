@@ -48,7 +48,7 @@ impl OptdQueryPlannerContext<'_> {
         let table_ref = table_ref.map(Self::into_optd_table_ref);
         let column = self
             .inner
-            .get_column_by_name(table_ref.as_ref(), column_name)
+            .col(table_ref.as_ref(), column_name)
             .context(OptdSnafu)?;
         Ok(column)
     }
