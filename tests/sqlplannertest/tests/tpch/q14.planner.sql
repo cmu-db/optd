@@ -13,6 +13,6 @@ WHERE
 
 /*
 Error
-External error: error converting aggregate expressions: Unsupported df logical expr: CASE WHEN part.p_type LIKE Utf8View("PROMO%") THEN __common_expr_1 ELSE Decimal128(Some(0),38,4) END
+External error: error converting projection: Conversion from DataFusion ScalarValue Float64(100) is not implemented
 */
 

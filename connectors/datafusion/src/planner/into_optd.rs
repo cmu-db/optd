@@ -18,7 +18,7 @@ use optd_core::{
         convert::{IntoOperator, IntoScalar},
         operator::{Aggregate, Get, Join, Limit, OrderBy, Project, Remap, Select},
         properties::TupleOrderingDirection,
-        scalar::{Cast, ColumnRef, Function, Like, List, NaryOp, NaryOpKind},
+        scalar::{Case as OptdCase, Cast, ColumnRef, Function, Like, List, NaryOp, NaryOpKind},
     },
 };
 use snafu::{ResultExt, whatever};
@@ -279,6 +279,7 @@ impl OptdQueryPlannerContext<'_> {
             }
             DFExpr::Cast(cast) => self.try_into_optd_cast(cast, input_schema),
             DFExpr::Like(like) => self.try_into_optd_like(like, input_schema),
+            DFExpr::Case(case) => self.try_into_optd_case(case, input_schema),
             expr => {
                 whatever!("Unsupported df logical expr: {}", expr);
             }
@@ -308,6 +309,7 @@ impl OptdQueryPlannerContext<'_> {
     ) -> Result<Arc<Scalar>> {
         let op_kind = match &binary_expr.op {
             logical_expr::Operator::Eq => Either::Left(optd_core::ir::scalar::BinaryOpKind::Eq),
+            logical_expr::Operator::NotEq => Either::Left(optd_core::ir::scalar::BinaryOpKind::Ne),
             logical_expr::Operator::Plus => Either::Left(optd_core::ir::scalar::BinaryOpKind::Plus),
             logical_expr::Operator::Minus => {
                 Either::Left(optd_core::ir::scalar::BinaryOpKind::Minus)
@@ -420,5 +422,34 @@ impl OptdQueryPlannerContext<'_> {
             node.escape_char,
         );
         Ok(like.into_scalar())
+    }
+
+    pub fn try_into_optd_case(
+        &mut self,
+        node: &logical_expr::expr::Case,
+        input_schema: &DFSchema,
+    ) -> Result<Arc<Scalar>> {
+        let expr = node
+            .expr
+            .as_ref()
+            .map(|expr| self.try_into_optd_scalar_expr(expr, input_schema))
+            .transpose()?;
+        let when_then_expr: Vec<_> = node
+            .when_then_expr
+            .iter()
+            .map(|(when, then)| {
+                Ok((
+                    self.try_into_optd_scalar_expr(when, input_schema)?,
+                    self.try_into_optd_scalar_expr(then, input_schema)?,
+                ))
+            })
+            .collect::<Result<_>>()?;
+        let else_expr = node
+            .else_expr
+            .as_ref()
+            .map(|expr| self.try_into_optd_scalar_expr(expr, input_schema))
+            .transpose()?;
+
+        Ok(OptdCase::new(expr, when_then_expr.into(), else_expr).into_scalar())
     }
 }

@@ -11,6 +11,7 @@
 //! when needed.
 
 mod binary_op;
+mod case;
 mod cast;
 mod column_ref;
 mod function;
@@ -22,6 +23,7 @@ mod nary_op;
 use std::sync::Arc;
 
 pub use binary_op::*;
+pub use case::*;
 pub use cast::*;
 pub use column_ref::*;
 pub use function::*;
@@ -46,6 +48,7 @@ pub enum ScalarKind {
     Function(FunctionMetadata),
     Cast(CastMetadata),
     Like(LikeMetadata),
+    Case(CaseMetadata),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -89,7 +92,8 @@ impl Scalar {
             | ScalarKind::List(_)
             | ScalarKind::Cast(_)
             | ScalarKind::Like(_)
-            | ScalarKind::Function(_) => self.input_scalars().iter().fold(
+            | ScalarKind::Function(_)
+            | ScalarKind::Case(_) => self.input_scalars().iter().fold(
                 ColumnSet::default(),
                 |mut used_columns, scalar| {
                     used_columns |= &scalar.used_columns();
@@ -190,6 +194,9 @@ impl Explain for Scalar {
             }
             ScalarKind::Like(meta) => {
                 Like::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            ScalarKind::Case(meta) => {
+                Case::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
         }
     }

@@ -18,7 +18,8 @@ use optd_core::ir::{
     },
     properties::TupleOrderingDirection,
     scalar::{
-        BinaryOp, BinaryOpBorrowed, BinaryOpKind, Cast, CastBorrowed, ColumnRef, ColumnRefBorrowed,
+        BinaryOp, BinaryOpBorrowed, BinaryOpKind, Case as OptdCase,
+        CaseBorrowed as OptdCaseBorrowed, Cast, CastBorrowed, ColumnRef, ColumnRefBorrowed,
         Function, FunctionBorrowed, FunctionKind, Like, LikeBorrowed, List, Literal,
         LiteralBorrowed, NaryOp, NaryOpBorrowed, NaryOpKind,
     },
@@ -317,10 +318,19 @@ mod tests {
         logical_expr::{self, Expr as DFExpr, LogicalPlan as DFLogicalPlan},
         prelude::SessionConfig,
     };
+    use optd_core::ir::scalar::Case as OptdCase;
 
     use crate::create_optd_session_context;
 
     use super::super::{OptdQueryPlanner, OptdQueryPlannerContext};
+
+    fn new_test_ctx() -> OptdQueryPlannerContext<'static> {
+        let session_ctx =
+            create_optd_session_context(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
+        let session_state = Box::leak(Box::new(session_ctx.state()));
+        let inner = OptdQueryPlanner::create_context(session_state).unwrap();
+        OptdQueryPlannerContext::new(inner, session_state)
+    }
 
     #[test]
     fn try_new_df_projection_restores_binding_aliases() {
@@ -415,6 +425,88 @@ mod tests {
             "sum(lineitem.l_quantity)"
         );
     }
+
+    #[test]
+    fn case_expr_round_trips_without_base_expr() {
+        let mut ctx = new_test_ctx();
+        let expr = DFExpr::Case(logical_expr::expr::Case::new(
+            None,
+            vec![(
+                Box::new(logical_expr::binary_expr(
+                    DFExpr::Literal(datafusion::scalar::ScalarValue::Int64(Some(1)), None),
+                    logical_expr::Operator::Eq,
+                    DFExpr::Literal(datafusion::scalar::ScalarValue::Int64(Some(1)), None),
+                )),
+                Box::new(DFExpr::Literal(
+                    datafusion::scalar::ScalarValue::Utf8(Some("match".into())),
+                    None,
+                )),
+            )],
+            Some(Box::new(DFExpr::Literal(
+                datafusion::scalar::ScalarValue::Utf8(Some("miss".into())),
+                None,
+            ))),
+        ));
+
+        let optd_expr = ctx
+            .try_into_optd_scalar_expr(&expr, &DFSchema::empty())
+            .unwrap();
+        let optd_case = optd_expr.borrow::<OptdCase>();
+        assert!(optd_case.expr().is_none());
+        assert_eq!(optd_case.when_then_expr().len(), 1);
+        assert!(optd_case.else_expr().is_some());
+
+        let restored = ctx.try_from_optd_scalar_expr(optd_expr.as_ref()).unwrap();
+        assert_eq!(restored, expr);
+    }
+
+    #[test]
+    fn case_expr_round_trips_with_base_expr() {
+        let mut ctx = new_test_ctx();
+        let expr = DFExpr::Case(logical_expr::expr::Case::new(
+            Some(Box::new(DFExpr::Literal(
+                datafusion::scalar::ScalarValue::Int64(Some(2)),
+                None,
+            ))),
+            vec![
+                (
+                    Box::new(DFExpr::Literal(
+                        datafusion::scalar::ScalarValue::Int64(Some(1)),
+                        None,
+                    )),
+                    Box::new(DFExpr::Literal(
+                        datafusion::scalar::ScalarValue::Utf8(Some("one".into())),
+                        None,
+                    )),
+                ),
+                (
+                    Box::new(DFExpr::Literal(
+                        datafusion::scalar::ScalarValue::Int64(Some(2)),
+                        None,
+                    )),
+                    Box::new(DFExpr::Literal(
+                        datafusion::scalar::ScalarValue::Utf8(Some("two".into())),
+                        None,
+                    )),
+                ),
+            ],
+            Some(Box::new(DFExpr::Literal(
+                datafusion::scalar::ScalarValue::Utf8(Some("other".into())),
+                None,
+            ))),
+        ));
+
+        let optd_expr = ctx
+            .try_into_optd_scalar_expr(&expr, &DFSchema::empty())
+            .unwrap();
+        let optd_case = optd_expr.borrow::<OptdCase>();
+        assert!(optd_case.expr().is_some());
+        assert_eq!(optd_case.when_then_expr().len(), 2);
+        assert!(optd_case.else_expr().is_some());
+
+        let restored = ctx.try_from_optd_scalar_expr(optd_expr.as_ref()).unwrap();
+        assert_eq!(restored, expr);
+    }
 }
 
 impl OptdQueryPlannerContext<'_> {
@@ -451,6 +543,10 @@ impl OptdQueryPlannerContext<'_> {
                 let node = Like::borrow_raw_parts(meta, &expr.common);
                 self.try_from_optd_like(node)
             }
+            optd_core::ir::ScalarKind::Case(meta) => {
+                let node = OptdCase::borrow_raw_parts(meta, &expr.common);
+                self.try_from_optd_case(node)
+            }
         }
     }
 
@@ -474,6 +570,7 @@ impl OptdQueryPlannerContext<'_> {
             BinaryOpKind::Divide => logical_expr::Operator::Divide,
             BinaryOpKind::Modulo => logical_expr::Operator::Modulo,
             BinaryOpKind::Eq => logical_expr::Operator::Eq,
+            BinaryOpKind::Ne => logical_expr::Operator::NotEq,
             BinaryOpKind::IsNotDistinctFrom => logical_expr::Operator::IsNotDistinctFrom,
             BinaryOpKind::Lt => logical_expr::Operator::Lt,
             BinaryOpKind::Le => logical_expr::Operator::LtEq,
@@ -560,5 +657,33 @@ impl OptdQueryPlannerContext<'_> {
                 Ok(DFExpr::WindowFunction(Box::new(func)))
             }
         }
+    }
+
+    pub fn try_from_optd_case(&mut self, node: OptdCaseBorrowed<'_>) -> Result<DFExpr> {
+        let expr = node
+            .expr()
+            .map(|expr| self.try_from_optd_scalar_expr(expr))
+            .transpose()?
+            .map(Box::new);
+        let when_then_expr = node
+            .when_then_expr()
+            .map(|(when, then)| {
+                Ok((
+                    Box::new(self.try_from_optd_scalar_expr(when)?),
+                    Box::new(self.try_from_optd_scalar_expr(then)?),
+                ))
+            })
+            .try_collect()?;
+        let else_expr = node
+            .else_expr()
+            .map(|expr| self.try_from_optd_scalar_expr(expr))
+            .transpose()?
+            .map(Box::new);
+
+        Ok(DFExpr::Case(logical_expr::expr::Case::new(
+            expr,
+            when_then_expr,
+            else_expr,
+        )))
     }
 }

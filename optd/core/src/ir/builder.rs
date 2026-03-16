@@ -17,7 +17,7 @@ use crate::{
         },
         properties::OperatorProperties,
         scalar::{
-            BinaryOp, BinaryOpKind, Cast, ColumnRef, Function, Like, List, Literal, NaryOp,
+            BinaryOp, BinaryOpKind, Case, Cast, ColumnRef, Function, Like, List, Literal, NaryOp,
             NaryOpKind,
         },
         table_ref::TableRef,
@@ -448,6 +448,7 @@ fn derive_scalar_descriptor(
                 | BinaryOpKind::Divide
                 | BinaryOpKind::Modulo => lhs.data_type.clone(),
                 BinaryOpKind::Eq
+                | BinaryOpKind::Ne
                 | BinaryOpKind::IsNotDistinctFrom
                 | BinaryOpKind::Lt
                 | BinaryOpKind::Le
@@ -505,6 +506,35 @@ fn derive_scalar_descriptor(
                     .collect::<Result<Vec<_>>>()?
                     .into_iter()
                     .any(|term| term.nullable),
+            })
+        }
+        ScalarKind::Case(meta) => {
+            let case = Case::borrow_raw_parts(meta, &scalar.common);
+            let result = case
+                .when_then_expr()
+                .next()
+                .map(|(_, then)| then)
+                .or_else(|| case.else_expr())
+                .whatever_context("case expression should have at least one THEN or ELSE branch")
+                .and_then(|expr| derive_scalar_descriptor(ctx, expr.as_ref(), position))?;
+
+            let then_nullable = case
+                .when_then_expr()
+                .map(|(_, then)| derive_scalar_descriptor(ctx, then.as_ref(), position))
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .any(|term| term.nullable);
+            let else_nullable = case
+                .else_expr()
+                .map(|expr| derive_scalar_descriptor(ctx, expr.as_ref(), position))
+                .transpose()?
+                .map(|term| term.nullable)
+                .unwrap_or(true);
+
+            Ok(DerivedScalarDescriptor {
+                name: format!("expr{position}"),
+                data_type: result.data_type,
+                nullable: then_nullable || else_nullable,
             })
         }
         ScalarKind::List(_) => whatever!("cannot derive a field for a scalar list expression"),

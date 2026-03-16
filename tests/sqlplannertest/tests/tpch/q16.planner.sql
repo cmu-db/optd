@@ -32,6 +32,6 @@ order by
 
 /*
 Error
-External error: Unsupported binary expr op: !=
+External error: Unsupported df logical expr: part.p_size IN ([Int32(49), Int32(14), Int32(23), Int32(45), Int32(19), Int32(3), Int32(36), Int32(9)])
 */
 
