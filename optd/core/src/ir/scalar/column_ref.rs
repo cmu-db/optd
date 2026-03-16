@@ -41,6 +41,11 @@ impl Explain for ColumnRefBorrowed<'_> {
         _option: &crate::ir::explain::ExplainOption,
     ) -> pretty_xmlish::Pretty<'a> {
         let meta = ctx.get_column_meta(self.column());
-        Pretty::display(&format!("{}({})", meta.name, self.column()))
+        Pretty::display(&format!(
+            "{}.{}({})",
+            meta.table_ref,
+            meta.name,
+            self.column()
+        ))
     }
 }

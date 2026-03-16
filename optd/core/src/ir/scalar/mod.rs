@@ -10,7 +10,6 @@
 //! associated metadata. This can be "downcast" to the specific scalar type
 //! when needed.
 
-mod assign;
 mod binary_op;
 mod cast;
 mod column_ref;
@@ -22,7 +21,6 @@ mod nary_op;
 
 use std::sync::Arc;
 
-pub use assign::*;
 pub use binary_op::*;
 pub use cast::*;
 pub use column_ref::*;
@@ -42,7 +40,6 @@ use crate::ir::{
 pub enum ScalarKind {
     Literal(LiteralMetadata),
     ColumnRef(ColumnRefMetadata),
-    ColumnAssign(ColumnAssignMetadata),
     BinaryOp(BinaryOpMetadata),
     NaryOp(NaryOpMetadata),
     List(ListMetadata),
@@ -89,7 +86,6 @@ impl Scalar {
             ScalarKind::ColumnRef(meta) => ColumnSet::from_iter(std::iter::once(meta.column)),
             ScalarKind::BinaryOp(_)
             | ScalarKind::NaryOp(_)
-            | ScalarKind::ColumnAssign(_)
             | ScalarKind::List(_)
             | ScalarKind::Cast(_)
             | ScalarKind::Like(_)
@@ -182,9 +178,6 @@ impl Explain for Scalar {
             }
             ScalarKind::NaryOp(meta) => {
                 NaryOp::borrow_raw_parts(meta, &self.common).explain(ctx, option)
-            }
-            ScalarKind::ColumnAssign(meta) => {
-                ColumnAssign::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             ScalarKind::List(meta) => {
                 List::borrow_raw_parts(meta, &self.common).explain(ctx, option)

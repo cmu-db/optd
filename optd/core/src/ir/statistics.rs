@@ -16,12 +16,7 @@ pub struct TableStatistics {
 /// Column statistics (external tables use column_id=0, name for identification)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ColumnStatistics {
-    pub column_id: i64,
-    pub column_type: DataType,
-    pub name: String,
-    pub advanced_stats: Vec<AdvanceColumnStatistics>,
-
-    /// Minimum value in the column (serialized as string)
+    /// Minimum value in the column (serialized as JSON string)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_value: Option<String>,
     /// Maximum value in the column (serialized as string)
@@ -33,27 +28,11 @@ pub struct ColumnStatistics {
     /// Number of distinct values (NDV)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub distinct_count: Option<usize>,
+    /// Advanced Statistics
+    pub advanced_stats: Vec<AdvanceColumnStatistics>,
 }
 
 impl ColumnStatistics {
-    pub fn new(
-        column_id: i64,
-        column_type: DataType,
-        name: String,
-        advanced_stats: Vec<AdvanceColumnStatistics>,
-    ) -> Self {
-        Self {
-            column_id,
-            column_type,
-            name,
-            advanced_stats,
-            min_value: None,
-            max_value: None,
-            null_count: None,
-            distinct_count: None,
-        }
-    }
-
     pub fn add_advanced_stat(&mut self, stat: AdvanceColumnStatistics) {
         self.advanced_stats.push(stat);
     }

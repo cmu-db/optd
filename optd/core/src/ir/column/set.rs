@@ -41,6 +41,10 @@ impl ColumnSet {
         self.0.is_empty()
     }
 
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
     pub fn as_hash_set(self) -> HashSet<Column> {
         self.0
     }

@@ -1,7 +1,7 @@
 //! The logical remap operator remaps columns in a relation to new aliases.
 
 use crate::ir::{
-    IRCommon, Operator, Scalar,
+    IRCommon, Operator,
     explain::Explain,
     macros::{define_node, impl_operator_conversion},
     properties::OperatorProperties,
@@ -13,37 +13,38 @@ define_node!(
     /// Metadata: (none)
     /// Scalars:
     /// - mappings: A list defining the remapping of columns to new aliases.
-    LogicalRemap, LogicalRemapBorrowed {
+    Remap, RemapBorrowed {
         properties: OperatorProperties,
-        metadata: LogicalRemapMetadata {},
+        metadata: RemapMetadata {
+            table_index: i64,
+        },
         inputs: {
             operators: [input],
-            scalars: [mappings],
+            scalars: [],
         },
     }
 );
-impl_operator_conversion!(LogicalRemap, LogicalRemapBorrowed);
+impl_operator_conversion!(Remap, RemapBorrowed);
 
-impl LogicalRemap {
-    pub fn new(input: Arc<Operator>, mappings: Arc<Scalar>) -> Self {
+impl Remap {
+    pub fn new(table_index: i64, input: Arc<Operator>) -> Self {
         Self {
-            meta: LogicalRemapMetadata {},
-            common: IRCommon::new(Arc::new([input]), Arc::new([mappings])),
+            meta: RemapMetadata { table_index },
+            common: IRCommon::with_input_operators_only(Arc::new([input])),
         }
     }
 }
 
-impl Explain for LogicalRemapBorrowed<'_> {
+impl Explain for RemapBorrowed<'_> {
     fn explain<'a>(
         &self,
         ctx: &crate::ir::IRContext,
         option: &crate::ir::explain::ExplainOption,
     ) -> pretty_xmlish::Pretty<'a> {
         let mut fields = Vec::new();
-        let projecions_explained = self.mappings().explain(ctx, option);
-        fields.push((".mappings", projecions_explained));
+        fields.push((".table_index", Pretty::display(&self.table_index())));
         fields.extend(self.common.explain_operator_properties(ctx, option));
         let children = self.common.explain_input_operators(ctx, option);
-        Pretty::simple_record("LogicalRemap", fields, children)
+        Pretty::simple_record("Remap", fields, children)
     }
 }

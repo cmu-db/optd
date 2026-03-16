@@ -6,6 +6,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use crate::error::Result;
 use crate::ir::convert::IntoOperator;
 use crate::ir::convert::IntoScalar;
 use crate::ir::operator::{LogicalRemap, Operator};
@@ -235,21 +236,21 @@ impl<'a> Unnesting<'a> {
 pub(super) fn compute_accessing_set(
     op: &Arc<Operator>,
     ctx: &IRContext,
-) -> (HashSet<*const Operator>, HashSet<Column>) {
+) -> Result<(HashSet<*const Operator>, HashSet<Column>)> {
     fn compute(
         op: &Arc<Operator>,
         operators: &mut HashSet<*const Operator>,
         outer_refs: &mut HashSet<Column>,
         ctx: &IRContext,
-    ) {
+    ) -> Result<()> {
         // We say an operator is accessing an outer ref if it uses a column
         // that is not available to it from a downstream operator
         let available = op
             .input_operators()
             .iter()
-            .fold(ColumnSet::default(), |acc, child| {
-                acc | &child.output_columns(ctx)
-            });
+            .try_fold(ColumnSet::default(), |acc, child| {
+                Ok(acc | child.output_columns(ctx)?.as_ref())
+            })?;
         let mut non_bound_cols = HashSet::new();
         for scalar in op.input_scalars() {
             non_bound_cols.extend((scalar.used_columns() - &available).as_hash_set());
@@ -258,14 +259,15 @@ pub(super) fn compute_accessing_set(
             operators.insert(Arc::as_ptr(op));
             outer_refs.extend(non_bound_cols);
         }
-        op.input_operators()
-            .iter()
-            .for_each(|c| compute(c, operators, outer_refs, ctx));
+        for child in op.input_operators() {
+            compute(child, operators, outer_refs, ctx)?;
+        }
+        Ok(())
     }
 
     let (mut operators, mut outer_refs) = (HashSet::new(), HashSet::new());
-    compute(op, &mut operators, &mut outer_refs, ctx);
-    (operators, outer_refs)
+    compute(op, &mut operators, &mut outer_refs, ctx)?;
+    Ok((operators, outer_refs))
 }
 
 /// Check if an operator (by pointer) is contained within a subtree.
@@ -284,10 +286,10 @@ pub(super) fn remap_right_output_collisions(
     mut right: Arc<Operator>,
     unnesting: &mut Unnesting<'_>,
     ctx: &IRContext,
-) -> (Arc<Operator>, HashMap<Column, Column>) {
+) -> Result<(Arc<Operator>, HashMap<Column, Column>)> {
     let mut right_remap: HashMap<Column, Column> = HashMap::new();
     let mut remap_members = Vec::new();
-    let mut right_cols_vec: Vec<Column> = right.output_columns(ctx).iter().copied().collect();
+    let mut right_cols_vec: Vec<Column> = right.output_columns(ctx)?.iter().copied().collect();
     right_cols_vec.sort_by_key(|c| c.0);
     for col in right_cols_vec {
         let out_col = if left_output_cols.contains(&col) {
@@ -302,8 +304,10 @@ pub(super) fn remap_right_output_collisions(
     }
     if !right_remap.is_empty() {
         let remap_list = List::new(remap_members.into()).into_scalar();
-        right = LogicalRemap::new(right, remap_list).into_operator();
+        // TODO(yuchen): fix this
+        let table_index = 0;
+        right = LogicalRemap::new(table_index, right).into_operator();
         unnesting.remap_repr_values(&right_remap);
     }
-    (right, right_remap)
+    Ok((right, right_remap))
 }

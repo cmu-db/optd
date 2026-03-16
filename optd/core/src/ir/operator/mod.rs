@@ -24,18 +24,13 @@ pub use enforcer::sort::*;
 pub use logical::aggregate::*;
 pub use logical::dependent_join::*;
 pub use logical::get::*;
-pub use logical::join::{LogicalJoin, LogicalJoinBorrowed, LogicalJoinMetadata};
+pub use logical::join::*;
+pub use logical::limit::*;
 pub use logical::order_by::*;
 pub use logical::project::*;
 pub use logical::remap::*;
 pub use logical::select::*;
 pub use logical::subquery::*;
-pub use physical::filter::*;
-pub use physical::hash_aggregate::*;
-pub use physical::hash_join::*;
-pub use physical::nl_join::*;
-pub use physical::project::*;
-pub use physical::table_scan::*;
 
 pub mod join {
     pub use super::logical::join::JoinType;
@@ -52,22 +47,17 @@ use crate::ir::{Column, Group, GroupId, GroupMetadata, IRCommon, Scalar};
 pub enum OperatorKind {
     Group(GroupMetadata),
     MockScan(MockScanMetadata),
-    LogicalGet(LogicalGetMetadata),
-    LogicalJoin(LogicalJoinMetadata),
-    LogicalDependentJoin(LogicalDependentJoinMetadata),
-    LogicalSelect(LogicalSelectMetadata),
-    LogicalProject(LogicalProjectMetadata),
-    LogicalAggregate(LogicalAggregateMetadata),
-    LogicalOrderBy(LogicalOrderByMetadata),
-    LogicalRemap(LogicalRemapMetadata),
-    LogicalSubquery(LogicalSubqueryMetadata),
+    Get(GetMetadata),
+    Join(JoinMetadata),
+    DependentJoin(DependentJoinMetadata),
+    Select(SelectMetadata),
+    Project(ProjectMetadata),
+    Aggregate(AggregateMetadata),
+    Limit(LimitMetadata),
+    OrderBy(OrderByMetadata),
+    Remap(RemapMetadata),
+    Subquery(SubqueryMetadata),
     EnforcerSort(EnforcerSortMetadata),
-    PhysicalTableScan(PhysicalTableScanMetadata),
-    PhysicalNLJoin(PhysicalNLJoinMetadata),
-    PhysicalHashJoin(PhysicalHashJoinMetadata),
-    PhysicalFilter(PhysicalFilterMetadata),
-    PhysicalProject(PhysicalProjectMetadata),
-    PhysicalHashAggregate(PhysicalHashAggregateMetadata),
 }
 
 #[derive(Debug, PartialEq)]
@@ -84,22 +74,35 @@ impl OperatorKind {
         use OperatorKind::*;
         match self {
             Group(_) => OperatorCategory::Placeholder,
-            LogicalGet(_) => OperatorCategory::Logical,
-            LogicalJoin(_) => OperatorCategory::Logical,
-            LogicalDependentJoin(_) => OperatorCategory::Logical,
-            LogicalProject(_) => OperatorCategory::Logical,
-            LogicalAggregate(_) => OperatorCategory::Logical,
-            LogicalOrderBy(_) => OperatorCategory::Logical,
-            LogicalRemap(_) => OperatorCategory::Logical,
-            LogicalSelect(_) => OperatorCategory::Logical,
-            LogicalSubquery(_) => OperatorCategory::Logical,
+            Get(meta) => {
+                if meta.implementation.is_some() {
+                    OperatorCategory::Physical
+                } else {
+                    OperatorCategory::Logical
+                }
+            }
+            Join(meta) => {
+                if meta.implementation.is_some() {
+                    OperatorCategory::Physical
+                } else {
+                    OperatorCategory::Logical
+                }
+            }
+            DependentJoin(_) => OperatorCategory::Logical,
+            Project(_) => OperatorCategory::Logical,
+            Aggregate(meta) => {
+                if meta.implementation.is_some() {
+                    OperatorCategory::Physical
+                } else {
+                    OperatorCategory::Logical
+                }
+            }
+            Limit(_) => OperatorCategory::Logical,
+            OrderBy(_) => OperatorCategory::Logical,
+            Remap(_) => OperatorCategory::Logical,
+            Select(_) => OperatorCategory::Logical,
+            Subquery(_) => OperatorCategory::Logical,
             EnforcerSort(_) => OperatorCategory::Enforcer,
-            PhysicalFilter(_) => OperatorCategory::Physical,
-            PhysicalProject(_) => OperatorCategory::Physical,
-            PhysicalHashJoin(_) => OperatorCategory::Physical,
-            PhysicalNLJoin(_) => OperatorCategory::Physical,
-            PhysicalTableScan(_) => OperatorCategory::Physical,
-            PhysicalHashAggregate(_) => OperatorCategory::Physical,
             MockScan(_) => OperatorCategory::Physical,
         }
     }
@@ -107,9 +110,9 @@ impl OperatorKind {
     /// Returns true if the operator may produce columns as output.
     pub fn maybe_produce_columns(&self) -> bool {
         match self {
-            OperatorKind::LogicalGet(_) | OperatorKind::PhysicalTableScan(_) => true,
-            OperatorKind::LogicalProject(_) | OperatorKind::PhysicalProject(_) => true,
-            OperatorKind::LogicalAggregate(_) | OperatorKind::PhysicalHashAggregate(_) => true,
+            OperatorKind::Get(_) => true,
+            OperatorKind::Project(_) => true,
+            OperatorKind::Aggregate(_) => true,
             OperatorKind::MockScan(_) => true,
             _other => false,
         }
@@ -209,53 +212,38 @@ impl Explain for Operator {
             OperatorKind::MockScan(meta) => {
                 MockScan::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::LogicalGet(meta) => {
-                LogicalGet::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            OperatorKind::Get(meta) => {
+                Get::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::LogicalJoin(meta) => {
-                LogicalJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            OperatorKind::Join(meta) => {
+                Join::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::LogicalDependentJoin(meta) => {
-                LogicalDependentJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            OperatorKind::DependentJoin(meta) => {
+                DependentJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::LogicalSelect(meta) => {
-                LogicalSelect::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            OperatorKind::Select(meta) => {
+                Select::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::LogicalOrderBy(meta) => {
-                LogicalOrderBy::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            OperatorKind::Limit(meta) => {
+                Limit::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            OperatorKind::OrderBy(meta) => {
+                OrderBy::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             OperatorKind::EnforcerSort(meta) => {
                 EnforcerSort::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::PhysicalTableScan(meta) => {
-                PhysicalTableScan::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            OperatorKind::Project(meta) => {
+                Project::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::PhysicalNLJoin(meta) => {
-                PhysicalNLJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            OperatorKind::Aggregate(meta) => {
+                Aggregate::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::PhysicalHashJoin(meta) => {
-                PhysicalHashJoin::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            OperatorKind::Remap(meta) => {
+                Remap::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
-            OperatorKind::PhysicalFilter(meta) => {
-                PhysicalFilter::borrow_raw_parts(meta, &self.common).explain(ctx, option)
-            }
-            OperatorKind::LogicalProject(meta) => {
-                LogicalProject::borrow_raw_parts(meta, &self.common).explain(ctx, option)
-            }
-            OperatorKind::PhysicalProject(meta) => {
-                PhysicalProject::borrow_raw_parts(meta, &self.common).explain(ctx, option)
-            }
-            OperatorKind::LogicalAggregate(meta) => {
-                LogicalAggregate::borrow_raw_parts(meta, &self.common).explain(ctx, option)
-            }
-            OperatorKind::PhysicalHashAggregate(meta) => {
-                PhysicalHashAggregate::borrow_raw_parts(meta, &self.common).explain(ctx, option)
-            }
-            OperatorKind::LogicalRemap(meta) => {
-                LogicalRemap::borrow_raw_parts(meta, &self.common).explain(ctx, option)
-            }
-            OperatorKind::LogicalSubquery(meta) => {
-                LogicalSubquery::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            OperatorKind::Subquery(meta) => {
+                Subquery::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
         }
     }

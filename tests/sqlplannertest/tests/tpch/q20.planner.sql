@@ -39,6 +39,6 @@ order by
 
 /*
 Error
-External error: Connector error: Unsupported join type: LeftSemi
+External error: Unsupported join type: LeftSemi
 */
 

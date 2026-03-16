@@ -46,7 +46,6 @@ limit 100;
 
 /*
 Error
-Internal error: Assertion failed: col.name() == matching_name: Input field name ps_supplycost) does not match with the projection expression min(partsupp.ps_supplycost).
-This issue was likely caused by a bug in DataFusion's code. Please help us to resolve this by filing a bug report in our issue tracker: https://github.com/apache/datafusion/issues
+Schema error: No field named partsupp.ps_partkey. Valid fields are "__internal_#11".ps_partkey, "__internal_#11".__always_true, "__internal_#11"."min(partsupp.ps_supplycost)".
 */
 

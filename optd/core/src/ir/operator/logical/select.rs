@@ -1,4 +1,4 @@
-//! The logical select operator filters incoming data based on some predicate.
+//! The select operator filters incoming data based on some predicate.
 
 use crate::ir::{
     IRCommon, Operator, Scalar,
@@ -13,27 +13,27 @@ define_node!(
     /// Metadata: (none)
     /// Scalars:
     /// - predicate: The predicate to filter rows by.
-    LogicalSelect, LogicalSelectBorrowed {
+    Select, SelectBorrowed {
         properties: OperatorProperties,
-        metadata: LogicalSelectMetadata {},
+        metadata: SelectMetadata {},
         inputs: {
             operators: [input],
             scalars: [predicate],
         }
     }
 );
-impl_operator_conversion!(LogicalSelect, LogicalSelectBorrowed);
+impl_operator_conversion!(Select, SelectBorrowed);
 
-impl LogicalSelect {
+impl Select {
     pub fn new(input: Arc<Operator>, predicate: Arc<Scalar>) -> Self {
         Self {
-            meta: LogicalSelectMetadata {},
+            meta: SelectMetadata {},
             common: IRCommon::new(Arc::new([input]), Arc::new([predicate])),
         }
     }
 }
 
-impl Explain for LogicalSelectBorrowed<'_> {
+impl Explain for SelectBorrowed<'_> {
     fn explain<'a>(
         &self,
         ctx: &crate::ir::IRContext,
@@ -43,6 +43,6 @@ impl Explain for LogicalSelectBorrowed<'_> {
         fields.push((".predicate", self.predicate().explain(ctx, option)));
         fields.extend(self.common.explain_operator_properties(ctx, option));
         let children = self.common.explain_input_operators(ctx, option);
-        Pretty::simple_record("LogicalSelect", fields, children)
+        Pretty::simple_record("Select", fields, children)
     }
 }
