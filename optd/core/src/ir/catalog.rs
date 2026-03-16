@@ -88,8 +88,10 @@ pub trait Catalog: Send + Sync + 'static {
     /// unknown.
     fn drop_table(&self, table: TableRef) -> Result<()>;
 
-    /// Replaces the stored statistics for `table_id`.
+    /// Replaces the stored statistics for `table`.
     ///
-    /// Returns [`CatalogError::DataSourceNotFound`] when the id is unknown.
-    fn set_table_statistics(&self, table_id: DataSourceId, stats: TableStatistics) -> Result<()>;
+    /// Implementations may resolve partially qualified references using their default
+    /// catalog and schema. Returns [`CatalogError::TableNotFound`] when the table is
+    /// unknown.
+    fn set_table_statistics(&self, table: TableRef, stats: TableStatistics) -> Result<()>;
 }

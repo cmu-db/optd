@@ -216,8 +216,6 @@ impl OptdQueryPlannerContext<'_> {
             );
         }
 
-        self.table_reference_to_source
-            .insert(node.table_name.clone(), Arc::clone(&node.source));
         let table_ref = Self::into_optd_table_ref(&node.table_name);
         let data_source_id = self
             .inner

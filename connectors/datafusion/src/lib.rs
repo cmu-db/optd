@@ -5,7 +5,6 @@ mod table;
 
 use std::sync::Arc;
 
-pub use catalog::{OptdCatalogProvider, OptdCatalogProviderList, OptdSchemaProvider};
 use datafusion::arrow::array::RecordBatch;
 use datafusion::common::plan_datafusion_err;
 use datafusion::config::ConfigOptions;

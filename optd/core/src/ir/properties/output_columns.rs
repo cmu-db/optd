@@ -154,9 +154,7 @@ impl crate::ir::Operator {
 #[cfg(test)]
 mod tests {
     use crate::ir::{
-        Group, GroupId, IRContext,
-        convert::IntoOperator,
-        properties::OperatorProperties,
+        Group, GroupId, IRContext, convert::IntoOperator, properties::OperatorProperties,
     };
     use std::sync::Arc;
 
@@ -168,13 +166,17 @@ mod tests {
 
         let group = Group::new(GroupId(42), input.properties().clone()).into_operator();
 
-        assert_eq!(group.output_columns(&ctx).unwrap().as_ref(), expected.as_ref());
+        assert_eq!(
+            group.output_columns(&ctx).unwrap().as_ref(),
+            expected.as_ref()
+        );
     }
 
     #[test]
     fn group_output_columns_errors_without_cached_properties() {
         let ctx = IRContext::with_empty_magic();
-        let group = Group::new(GroupId(42), Arc::new(OperatorProperties::default())).into_operator();
+        let group =
+            Group::new(GroupId(42), Arc::new(OperatorProperties::default())).into_operator();
 
         assert!(group.output_columns(&ctx).is_err());
     }

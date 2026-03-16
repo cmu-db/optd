@@ -9,7 +9,7 @@ use datafusion::{
     datasource::{physical_plan::ParquetSource, source_as_provider},
     error::DataFusionError,
     execution::{SessionState, context::QueryPlanner},
-    logical_expr::{LogicalPlan, PlanType, Statement, StringifiedPlan, TableScan, TableSource},
+    logical_expr::{LogicalPlan, PlanType, Statement, StringifiedPlan, TableSource},
     physical_plan::{
         ExecutionPlan, displayable,
         explain::ExplainExec,
@@ -20,10 +20,9 @@ use datafusion::{
 };
 use optd_core::{
     cascades::Cascades,
-    error::{CatalogSnafu, Result as OptdResult},
+    error::CatalogSnafu,
     ir::{
-        Column, IRContext,
-        catalog::DataSourceId,
+        IRContext,
         explain::quick_explain,
         rule::RuleSet,
         statistics::{ColumnStatistics, TableStatistics},
@@ -81,6 +80,65 @@ impl<'a> OptdQueryPlannerContext<'a> {
             table_reference_to_source: HashMap::new(),
         }
     }
+
+    pub async fn collect_statistics(
+        &self,
+        ctx: &IRContext,
+        session_state: &SessionState,
+    ) -> Result<()> {
+        for (table_reference, source) in self.table_reference_to_source.iter() {
+            let table_ref = Self::into_optd_table_ref(&table_reference);
+            let provider = source_as_provider(&source).context(DataFusionSnafu)?;
+            let exec = provider
+                .scan(session_state, None, &[], None)
+                .await
+                .context(DataFusionSnafu)?;
+
+            ctx.catalog
+                .set_table_statistics(
+                    table_ref,
+                    exec.partition_statistics(None)
+                        .map(|statistics| {
+                            let column_statistics = statistics.column_statistics;
+
+                            let row_count =
+                                precision_value_or(statistics.num_rows, DEFAULT_ROW_COUNT);
+                            let size_bytes = precision_to_option(&statistics.total_byte_size);
+
+                            TableStatistics {
+                                row_count,
+                                size_bytes,
+                                column_statistics: column_statistics
+                                    .iter()
+                                    .map(|column_stat| {
+                                        ColumnStatistics {
+                                            // TODO(Aditya): populate with stuff from HLL, digests, etc.
+                                            advanced_stats: Vec::new(),
+                                            min_value: precision_to_string(&column_stat.min_value),
+                                            max_value: precision_to_string(&column_stat.max_value),
+                                            null_count: precision_to_option(
+                                                &column_stat.null_count,
+                                            ),
+                                            distinct_count: precision_to_option(
+                                                &column_stat.distinct_count,
+                                            ),
+                                        }
+                                    })
+                                    .collect(),
+                            }
+                        })
+                        .unwrap_or_else(|_| TableStatistics {
+                            row_count: DEFAULT_ROW_COUNT,
+                            size_bytes: None,
+                            // TODO(Aditya): add some default column stats?
+                            column_statistics: vec![],
+                        }),
+                )
+                .context(CatalogSnafu)
+                .context(OptdSnafu)?
+        }
+        Ok(())
+    }
 }
 
 /// Extract value from Precision, returning default if Absent.
@@ -133,70 +191,6 @@ impl OptdQueryPlanner {
             Arc::new(MagicCardinalityEstimator),
             Arc::new(MagicCostModel),
         )))
-    }
-
-    pub async fn collect_statistics(
-        tables: &[(DataSourceId, i64, TableScan)],
-        ctx: &IRContext,
-        session_state: &SessionState,
-    ) -> OptdResult<()> {
-        for (source, table_index, node) in tables {
-            let provider = source_as_provider(&node.source).unwrap();
-            let exec = provider
-                .scan(session_state, node.projection.as_ref(), &[], None)
-                .await
-                .unwrap();
-
-            ctx.catalog
-                .set_table_statistics(
-                    *source,
-                    exec.partition_statistics(None)
-                        .map(|statistics| {
-                            let column_statistics = statistics.column_statistics;
-
-                            let row_count =
-                                precision_value_or(statistics.num_rows, DEFAULT_ROW_COUNT);
-                            let size_bytes = precision_to_option(&statistics.total_byte_size);
-
-                            TableStatistics {
-                                row_count,
-                                size_bytes,
-                                column_statistics: column_statistics
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(index, column_stat)| {
-                                        let column = Column(*table_index, index);
-                                        let column_meta = ctx.get_column_meta(&column);
-
-                                        ColumnStatistics {
-                                            column_id: column.0,
-                                            column_type: format!("{:?}", column_meta.data_type),
-                                            name: column_meta.name.clone(),
-                                            // TODO(Aditya): populate with stuff from HLL, digests, etc.
-                                            advanced_stats: Vec::new(),
-                                            min_value: precision_to_string(&column_stat.min_value),
-                                            max_value: precision_to_string(&column_stat.max_value),
-                                            null_count: precision_to_option(
-                                                &column_stat.null_count,
-                                            ),
-                                            distinct_count: precision_to_option(
-                                                &column_stat.distinct_count,
-                                            ),
-                                        }
-                                    })
-                                    .collect(),
-                            }
-                        })
-                        .unwrap_or_else(|_| TableStatistics {
-                            row_count: DEFAULT_ROW_COUNT,
-                            size_bytes: None,
-                            // TODO(Aditya): add some default column stats?
-                            column_statistics: vec![],
-                        }),
-                )
-                .context(CatalogSnafu)?;
-        }
-        Ok(())
     }
 }
 

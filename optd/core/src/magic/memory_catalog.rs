@@ -118,14 +118,20 @@ impl Catalog for MemoryCatalog {
         Ok(())
     }
 
-    fn set_table_statistics(&self, table_id: DataSourceId, stats: TableStatistics) -> Result<()> {
+    fn set_table_statistics(&self, table: TableRef, stats: TableStatistics) -> Result<()> {
         let mut writer = self.inner.write().unwrap();
-        let table = writer
-            .tables
-            .get_mut(&table_id)
-            .ok_or(CatalogError::DataSourceNotFound {
-                data_source_id: table_id,
-            })?;
+        let resolved = self.resolve_table_ref(table.clone());
+        let Some(table_id) = writer.table_to_id.get(&resolved).copied() else {
+            return Err(CatalogError::TableNotFound { table });
+        };
+        let table =
+            writer
+                .tables
+                .get_mut(&table_id)
+                .ok_or(CatalogError::DanglingTableReference {
+                    table: resolved,
+                    data_source_id: table_id,
+                })?;
         table.statistics = Some(stats);
         Ok(())
     }
@@ -210,5 +216,23 @@ mod tests {
             cat.drop_table(TableRef::bare("missing")),
             Err(CatalogError::TableNotFound { .. })
         ));
+    }
+
+    #[test]
+    fn set_table_statistics_with_name() {
+        let cat = MemoryCatalog::new("optd", "public");
+        let schema = Arc::new(mock_table_schema("t1"));
+        cat.create_table(TableRef::bare("t1"), schema).unwrap();
+
+        let stats = TableStatistics {
+            row_count: 10,
+            column_statistics: vec![],
+            size_bytes: Some(80),
+        };
+        cat.set_table_statistics(TableRef::bare("t1"), stats.clone())
+            .unwrap();
+
+        let output = cat.table_by_ref(&TableRef::bare("t1")).unwrap();
+        assert_eq!(output.statistics, Some(stats));
     }
 }

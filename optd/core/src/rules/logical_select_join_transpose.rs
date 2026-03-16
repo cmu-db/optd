@@ -62,11 +62,11 @@ impl Rule for LogicalSelectJoinTransposeRule {
 
         let maybe_transformed = match (is_bound_by_outer, is_bound_by_inner) {
             (false, false) => None,
-            (true, false) => Some(
-                outer
-                    .select(select.predicate().clone())
-                    .logical_join(inner, join.join_cond().clone(), *join.join_type()),
-            ),
+            (true, false) => Some(outer.select(select.predicate().clone()).logical_join(
+                inner,
+                join.join_cond().clone(),
+                *join.join_type(),
+            )),
             (false, true) => Some(outer.logical_join(
                 inner.select(select.predicate().clone()),
                 join.join_cond().clone(),
