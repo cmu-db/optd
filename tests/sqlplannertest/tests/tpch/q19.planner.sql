@@ -33,6 +33,6 @@ WHERE
 
 /*
 Error
-External error: Connector error: Unsupported df logical expr: part.p_container IN ([Utf8View("SM CASE"), Utf8View("SM BOX"), Utf8View("SM PACK"), Utf8View("SM PKG")])
+External error: Unsupported df logical expr: part.p_container IN ([Utf8View("SM CASE"), Utf8View("SM BOX"), Utf8View("SM PACK"), Utf8View("SM PKG")])
 */
 

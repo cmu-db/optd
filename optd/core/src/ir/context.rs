@@ -92,7 +92,12 @@ impl IRContext {
                             .column_with_name(column_name)
                             .map(|(index, _)| Column(binding.table_index, index))
                     })
-                    .whatever_context("column not found")
+                    .with_whatever_context(|| {
+                        format!(
+                            "col {table_ref}.{column_name} not found, current local bindings: {:?}",
+                            binder.get_local_bindings()
+                        )
+                    })
             }
 
             None => {
@@ -105,7 +110,7 @@ impl IRContext {
                         x.column_with_name(column_name)
                             .map(|(index, _)| Column(x.table_index, index))
                     })
-                    .whatever_context("column not found")
+                    .with_whatever_context(|| format!("col {column_name} not found"))
             }
         }
     }

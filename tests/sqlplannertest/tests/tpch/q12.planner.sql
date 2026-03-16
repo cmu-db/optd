@@ -24,6 +24,6 @@ ORDER BY
 
 /*
 Error
-External error: Connector error: Unsupported df logical expr: CASE WHEN orders.o_orderpriority = Utf8View("1-URGENT") OR orders.o_orderpriority = Utf8View("2-HIGH") THEN Int64(1) ELSE Int64(0) END
+External error: optd internal error: col lineitem.l_orderkey not found, current local bindings: [Binding { table_ref: Bare { table: "orders" }, schema: Schema { fields: [Field { name: "o_orderkey", data_type: Int32 }, Field { name: "o_orderpriority", data_type: Utf8View }], metadata: {} }, table_index: 1 }, Binding { table_ref: Bare { table: "__internal_#3" }, schema: Schema { fields: [Field { name: "l_orderkey", data_type: Int32 }, Field { name: "l_shipmode", data_type: Utf8View }], metadata: {} }, table_index: 3 }]
 */
 

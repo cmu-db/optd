@@ -5,18 +5,17 @@ use datafusion::{
     common::{DataFusionError, Result},
     execution::runtime_env::RuntimeEnv,
     logical_expr::LogicalPlanBuilder,
+    logical_expr::LogicalPlan,
     prelude::{DataFrame, SessionConfig, SessionContext},
-    sql::TableReference,
 };
 use datafusion_cli::cli_context::CliSessionContext;
-use optd_core::ir::table_ref::TableRef as OptdTableRef;
-use optd_datafusion::{OptdExtension, create_optd_session_context};
+use optd_datafusion::OptdSessionContext;
 use std::sync::Arc;
 
 /// The optd CLI session context for executing queries in DataFusion
 /// with optd features.
 pub struct OptdCliSessionContext {
-    inner: SessionContext,
+    inner: OptdSessionContext,
 }
 
 impl OptdCliSessionContext {
@@ -24,7 +23,7 @@ impl OptdCliSessionContext {
     /// and a runtime environment.
     pub fn new_with_config_rt(config: SessionConfig, runtime: Arc<RuntimeEnv>) -> Self {
         Self {
-            inner: create_optd_session_context(config, runtime),
+            inner: OptdSessionContext::new_with_config_rt(config, runtime),
         }
     }
 
@@ -41,69 +40,13 @@ impl OptdCliSessionContext {
 
     /// Returns a reference to the inner `SessionContext`.
     pub fn inner(&self) -> &SessionContext {
-        &self.inner
+        self.inner.inner()
     }
 
     /// Returns an empty DataFrame.
     pub fn return_empty_dataframe(&self) -> Result<DataFrame> {
         let plan = LogicalPlanBuilder::empty(false).build()?;
-        Ok(DataFrame::new(self.inner.state(), plan))
-    }
-
-    fn create_table(
-        &self,
-        table_ref: impl Into<TableReference>,
-        schema: datafusion::arrow::datatypes::SchemaRef,
-    ) -> Result<()> {
-        let table_ref: TableReference = table_ref.into();
-        let optd_table_ref = Self::into_optd_table_ref(&table_ref);
-        let state = self.inner.state();
-        let extension = state
-            .config()
-            .get_extension::<OptdExtension>()
-            .ok_or_else(|| DataFusionError::Execution("Missing optd session extension".into()))?;
-
-        extension
-            .catalog()
-            .create_table(optd_table_ref, schema)
-            .map_err(|e| {
-                DataFusionError::External(Box::new(optd_core::error::Error::Catalog { source: e }))
-            })?;
-
-        Ok(())
-    }
-
-    fn drop_table(&self, table_ref: impl Into<TableReference>) -> Result<()> {
-        let table_ref: TableReference = table_ref.into();
-        let optd_table_ref = Self::into_optd_table_ref(&table_ref);
-        let state = self.inner.state();
-        let extension = state
-            .config()
-            .get_extension::<OptdExtension>()
-            .ok_or_else(|| DataFusionError::Execution("Missing optd session extension".into()))?;
-
-        extension
-            .catalog()
-            .drop_table(optd_table_ref)
-            .map_err(|e| {
-                DataFusionError::External(Box::new(optd_core::error::Error::Catalog { source: e }))
-            })?;
-
-        Ok(())
-    }
-
-    fn into_optd_table_ref(table_ref: &TableReference) -> OptdTableRef {
-        match table_ref {
-            TableReference::Bare { table } => OptdTableRef::bare(table.clone()),
-            TableReference::Partial { schema, table } => {
-                OptdTableRef::partial(schema.clone(), table.clone())
-            }
-            TableReference::Full {
-                catalog,
-                schema,
-                table,
-            } => OptdTableRef::full(catalog.clone(), schema.clone(), table.clone()),
-        }
+        Ok(DataFrame::new(self.inner().state(), plan))
     }
 }
 
@@ -145,7 +88,7 @@ impl CliSessionContext for OptdCliSessionContext {
     {
         let fut = async move {
             let df = self.inner.execute_logical_plan(plan.clone()).await?;
-            if let datafusion::logical_expr::LogicalPlan::Statement(stmt) = &plan {
+            if let LogicalPlan::Statement(stmt) = &plan {
                 match stmt {
                     datafusion::logical_expr::Statement::TransactionStart(_) => {
                         println!("START TRANSACTION");
@@ -158,23 +101,6 @@ impl CliSessionContext for OptdCliSessionContext {
                             TransactionConclusion::Rollback => println!("ROLLBACK"),
                         }
                         return self.return_empty_dataframe();
-                    }
-                    _ => (),
-                }
-            } else if let datafusion::logical_expr::LogicalPlan::Ddl(ddl) = &plan {
-                match ddl {
-                    datafusion::logical_expr::DdlStatement::CreateExternalTable(create_table) => {
-                        self.create_table(
-                            create_table.name.clone(),
-                            create_table.schema.inner().clone(),
-                        )?;
-                    }
-                    datafusion::logical_expr::DdlStatement::CreateMemoryTable(create_table) => {
-                        let schema = create_table.input.schema();
-                        self.create_table(create_table.name.clone(), schema.inner().clone())?;
-                    }
-                    datafusion::logical_expr::DdlStatement::DropTable(drop_table) => {
-                        self.drop_table(drop_table.name.clone())?;
                     }
                     _ => (),
                 }

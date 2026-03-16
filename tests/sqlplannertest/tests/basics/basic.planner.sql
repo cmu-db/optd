@@ -18,40 +18,76 @@ select * from t1, t2, t3 where t1.t1v1 = t2.t2v1 and t1.t1v2 < 2 and t2.t2v2 = t
 
 /*
 logical_plan after optd-initial:
-+----------------------------------------------------------------------------------------------------------------------+
-| LogicalJoin                                                                                                          |
-| ├── .join_type: Inner                                                                                                |
-| ├── .join_cond: (t2.t2v2(v#3) = t3.t3v1(v#4))                                                                        |
-| ├── (.output_columns): {v#0, v#1, v#2, v#3, v#4, v#5}                                                                |
-| ├── (.cardinality): 1.44                                                                                             |
-| ├── LogicalJoin                                                                                                      |
-| │   ├── .join_type: Inner                                                                                            |
-| │   ├── .join_cond: (t1.t1v1(v#0) = t2.t2v1(v#2))                                                                    |
-| │   ├── (.output_columns): {v#0, v#1, v#2, v#3}                                                                      |
-| │   ├── (.cardinality): 1.20                                                                                         |
-| │   ├── LogicalSelect { .predicate: t1.t1v2(v#1) < 2::integer, (.output_columns): {v#0, v#1}, (.cardinality): 1.00 } |
-| │   │   └── LogicalGet { .source: 1, (.output_columns): {v#0, v#1}, (.cardinality): 10.00 }                          |
-| │   └── LogicalGet { .source: 2, (.output_columns): {v#2, v#3}, (.cardinality): 3.00 }                               |
-| └── LogicalGet { .source: 3, (.output_columns): {v#4, v#5}, (.cardinality): 3.00 }                                   |
-+----------------------------------------------------------------------------------------------------------------------+
+Join
+├── .join_type: Inner
+├── .implementation: None
+├── .join_cond: (t2.t2v2(#2.1) = t3.t3v1(#3.0))
+├── (.output_columns): t3.t3v1(#3.0), t2.t2v1(#2.0), t2.t2v2(#2.1), t3.t3v2(#3.1), t1.t1v1(#1.0), t1.t1v2(#1.1)
+├── (.cardinality): 1.44
+├── Join
+│   ├── .join_type: Inner
+│   ├── .implementation: None
+│   ├── .join_cond: (t1.t1v1(#1.0) = t2.t2v1(#2.0))
+│   ├── (.output_columns): t2.t2v2(#2.1), t1.t1v1(#1.0), t1.t1v2(#1.1), t2.t2v1(#2.0)
+│   ├── (.cardinality): 1.20
+│   ├── Select
+│   │   ├── .predicate: t1.t1v2(#1.1) < 2::integer
+│   │   ├── (.output_columns): t1.t1v2(#1.1), t1.t1v1(#1.0)
+│   │   ├── (.cardinality): 1.00
+│   │   └── Get
+│   │       ├── .data_source_id: 1
+│   │       ├── .table_index: 1
+│   │       ├── .implementation: None
+│   │       ├── (.output_columns): t1.t1v2(#1.1), t1.t1v1(#1.0)
+│   │       └── (.cardinality): 10.00
+│   └── Get
+│       ├── .data_source_id: 2
+│       ├── .table_index: 2
+│       ├── .implementation: None
+│       ├── (.output_columns): t2.t2v1(#2.0), t2.t2v2(#2.1)
+│       └── (.cardinality): 3.00
+└── Get
+    ├── .data_source_id: 3
+    ├── .table_index: 3
+    ├── .implementation: None
+    ├── (.output_columns): t3.t3v1(#3.0), t3.t3v2(#3.1)
+    └── (.cardinality): 3.00
 
 physical_plan after optd-finalized:
-+-----------------------------------------------------------------------------------------------------------------------+
-| PhysicalHashJoin                                                                                                      |
-| ├── .join_type: Inner                                                                                                 |
-| ├── .join_conds: (t2.t2v2(v#3) = t3.t3v1(v#4)) AND (true::boolean)                                                    |
-| ├── (.output_columns): {v#0, v#1, v#2, v#3, v#4, v#5}                                                                 |
-| ├── (.cardinality): 1.44                                                                                              |
-| ├── PhysicalHashJoin                                                                                                  |
-| │   ├── .join_type: Inner                                                                                             |
-| │   ├── .join_conds: (t1.t1v1(v#0) = t2.t2v1(v#2)) AND (true::boolean)                                                |
-| │   ├── (.output_columns): {v#0, v#1, v#2, v#3}                                                                       |
-| │   ├── (.cardinality): 1.20                                                                                          |
-| │   ├── PhysicalFilter { .predicate: t1.t1v2(v#1) < 2::integer, (.output_columns): {v#0, v#1}, (.cardinality): 1.00 } |
-| │   │   └── PhysicalTableScan { .source: 1, (.output_columns): {v#0, v#1}, (.cardinality): 10.00 }                    |
-| │   └── PhysicalTableScan { .source: 2, (.output_columns): {v#2, v#3}, (.cardinality): 3.00 }                         |
-| └── PhysicalTableScan { .source: 3, (.output_columns): {v#4, v#5}, (.cardinality): 3.00 }                             |
-+-----------------------------------------------------------------------------------------------------------------------+
+Join
+├── .join_type: Inner
+├── .implementation: Some(Hash { build_side: Outer, keys: [(#2.1, #3.0)] })
+├── .join_cond: (t2.t2v2(#2.1) = t3.t3v1(#3.0))
+├── (.output_columns): t3.t3v1(#3.0), t2.t2v1(#2.0), t2.t2v2(#2.1), t3.t3v2(#3.1), t1.t1v1(#1.0), t1.t1v2(#1.1)
+├── (.cardinality): 1.44
+├── Join
+│   ├── .join_type: Inner
+│   ├── .implementation: Some(Hash { build_side: Outer, keys: [(#1.0, #2.0)] })
+│   ├── .join_cond: (t1.t1v1(#1.0) = t2.t2v1(#2.0))
+│   ├── (.output_columns): t2.t2v2(#2.1), t1.t1v1(#1.0), t1.t1v2(#1.1), t2.t2v1(#2.0)
+│   ├── (.cardinality): 1.20
+│   ├── Select
+│   │   ├── .predicate: t1.t1v2(#1.1) < 2::integer
+│   │   ├── (.output_columns): t1.t1v2(#1.1), t1.t1v1(#1.0)
+│   │   ├── (.cardinality): 1.00
+│   │   └── Get
+│   │       ├── .data_source_id: 1
+│   │       ├── .table_index: 1
+│   │       ├── .implementation: None
+│   │       ├── (.output_columns): t1.t1v2(#1.1), t1.t1v1(#1.0)
+│   │       └── (.cardinality): 10.00
+│   └── Get
+│       ├── .data_source_id: 2
+│       ├── .table_index: 2
+│       ├── .implementation: None
+│       ├── (.output_columns): t2.t2v1(#2.0), t2.t2v2(#2.1)
+│       └── (.cardinality): 3.00
+└── Get
+    ├── .data_source_id: 3
+    ├── .table_index: 3
+    ├── .implementation: None
+    ├── (.output_columns): t3.t3v1(#3.0), t3.t3v2(#3.1)
+    └── (.cardinality): 3.00
 
 1 1 1 201 201 300
 */

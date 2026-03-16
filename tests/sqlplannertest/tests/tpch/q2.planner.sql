@@ -46,7 +46,6 @@ limit 100;
 
 /*
 Error
-Internal error: Assertion failed: col.name() == matching_name: Input field name ps_supplycost) does not match with the projection expression min(partsupp.ps_supplycost).
-This issue was likely caused by a bug in DataFusion's code. Please help us to resolve this by filing a bug report in our issue tracker: https://github.com/apache/datafusion/issues
+External error: optd internal error: col part.p_partkey not found, current local bindings: [Binding { table_ref: Bare { table: "__internal_#2" }, schema: Schema { fields: [Field { name: "p_partkey", data_type: Int32 }, Field { name: "p_mfgr", data_type: Utf8View }], metadata: {} }, table_index: 2 }, Binding { table_ref: Bare { table: "partsupp" }, schema: Schema { fields: [Field { name: "ps_partkey", data_type: Int32 }, Field { name: "ps_suppkey", data_type: Int32 }, Field { name: "ps_supplycost", data_type: Decimal128(15, 2) }], metadata: {} }, table_index: 3 }]
 */
 

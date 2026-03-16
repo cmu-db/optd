@@ -226,8 +226,9 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
                 let select = Select::borrow_raw_parts(meta, &self.common);
                 satisfy_passthrough_ordering(select.input(), ordering, ctx)?
             }
-            OperatorKind::Limit(_) => {
-                todo!("try_satisfy for LogicalLimit")
+            OperatorKind::Limit(meta) => {
+                let limit = Limit::borrow_raw_parts(meta, &self.common);
+                satisfy_passthrough_ordering(limit.input(), ordering, ctx)?
             }
             OperatorKind::OrderBy(meta) => {
                 let order_by = OrderBy::borrow_raw_parts(meta, &self.common);

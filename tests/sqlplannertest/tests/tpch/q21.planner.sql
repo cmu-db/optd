@@ -42,6 +42,6 @@ limit 100;
 
 /*
 Error
-External error: Connector error: Unsupported join type: LeftAnti
+External error: optd internal error: col l1.l_orderkey not found, current local bindings: [Binding { table_ref: Bare { table: "__internal_#5" }, schema: Schema { fields: [Field { name: "s_name", data_type: Utf8View }, Field { name: "s_nationkey", data_type: Int32 }, Field { name: "l_orderkey", data_type: Int32 }, Field { name: "l_suppkey", data_type: Int32 }], metadata: {} }, table_index: 5 }, Binding { table_ref: Bare { table: "__internal_#7" }, schema: Schema { fields: [Field { name: "o_orderkey", data_type: Int32 }], metadata: {} }, table_index: 7 }]
 */
 
