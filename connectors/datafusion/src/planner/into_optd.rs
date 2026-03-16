@@ -19,11 +19,14 @@ use optd_core::{
         operator::{Aggregate, Get, Join, Limit, OrderBy, Project, Remap, Select},
         properties::TupleOrderingDirection,
         scalar::{Cast, ColumnRef, Function, Like, List, NaryOp, NaryOpKind},
+        schema::SchemaError,
     },
 };
 use snafu::{ResultExt, whatever};
 
-use crate::planner::{DataFusionSnafu, OptdQueryPlannerContext, OptdSnafu, Result};
+use crate::planner::{
+    DataFusionSnafu, OptdDFConnectorError, OptdQueryPlannerContext, OptdSnafu, Result,
+};
 
 impl OptdQueryPlannerContext<'_> {
     pub fn try_into_optd_plan(
@@ -106,7 +109,8 @@ impl OptdQueryPlannerContext<'_> {
             .iter()
             .map(|e| self.try_into_optd_scalar_expr(e, node.input.schema()))
             .try_collect()
-            .map(List::new)?;
+            .map(List::new)
+            .with_whatever_context(|e| format!("error converting aggregate expressions: {e}"))?;
         let keys = node
             .group_expr
             .iter()
@@ -152,7 +156,8 @@ impl OptdQueryPlannerContext<'_> {
             .iter()
             .map(|e| self.try_into_optd_scalar_expr(e, node.input.schema()))
             .try_collect()
-            .map(List::new)?;
+            .map(List::new)
+            .whatever_context("error converting projection")?;
         self.inner.binder_end_scope();
 
         // Note: projection create unnamed binding with no table ref.
@@ -286,7 +291,11 @@ impl OptdQueryPlannerContext<'_> {
         &self,
         column: &datafusion::common::Column,
     ) -> Result<Arc<Scalar>> {
-        let column = self.try_get_optd_column(column.relation.as_ref(), &column.name)?;
+        let column = match self.try_get_optd_column(column.relation.as_ref(), &column.name) {
+            Ok(column) => column,
+            // attempt to match unmatched table_ref.
+            Err(_) => self.try_get_optd_column(None, &column.name)?,
+        };
         Ok(ColumnRef::new(column).into_scalar())
     }
 

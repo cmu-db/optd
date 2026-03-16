@@ -216,6 +216,8 @@ impl OptdQueryPlanner {
             _ => (logical_plan, None),
         };
 
+        println!("actual_logical:\n{}", actual_logical_plan);
+
         let optd_logical = ctx
             .try_into_optd_plan(actual_logical_plan)
             .map_err(|e| match e {

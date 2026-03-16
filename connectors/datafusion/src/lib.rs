@@ -12,6 +12,7 @@ use datafusion::error::DataFusionError;
 use datafusion::execution::SessionStateBuilder;
 use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::logical_expr::{DdlStatement, LogicalPlan};
+use datafusion::optimizer as df_optimizer;
 use datafusion::prelude::{DataFrame, SessionConfig, SessionContext};
 use datafusion::sql::TableReference;
 use datafusion::sql::parser::DFParser;
@@ -34,6 +35,35 @@ impl SessionStateBuilderOptdExt for datafusion::execution::SessionStateBuilder {
     }
 }
 
+pub fn default_datafusion_rules() -> Vec<Arc<dyn df_optimizer::OptimizerRule + Sync + Send>> {
+    vec![
+        Arc::new(df_optimizer::optimize_unions::OptimizeUnions::new()),
+        Arc::new(df_optimizer::simplify_expressions::SimplifyExpressions::new()),
+        Arc::new(df_optimizer::replace_distinct_aggregate::ReplaceDistinctWithAggregate::new()),
+        Arc::new(df_optimizer::eliminate_join::EliminateJoin::new()),
+        Arc::new(df_optimizer::decorrelate_predicate_subquery::DecorrelatePredicateSubquery::new()),
+        Arc::new(df_optimizer::scalar_subquery_to_join::ScalarSubqueryToJoin::new()),
+        Arc::new(df_optimizer::decorrelate_lateral_join::DecorrelateLateralJoin::new()),
+        Arc::new(df_optimizer::extract_equijoin_predicate::ExtractEquijoinPredicate::new()),
+        Arc::new(df_optimizer::eliminate_duplicated_expr::EliminateDuplicatedExpr::new()),
+        Arc::new(df_optimizer::eliminate_filter::EliminateFilter::new()),
+        Arc::new(df_optimizer::eliminate_cross_join::EliminateCrossJoin::new()),
+        Arc::new(df_optimizer::eliminate_limit::EliminateLimit::new()),
+        Arc::new(df_optimizer::propagate_empty_relation::PropagateEmptyRelation::new()),
+        Arc::new(df_optimizer::filter_null_join_keys::FilterNullJoinKeys::default()),
+        Arc::new(df_optimizer::eliminate_outer_join::EliminateOuterJoin::new()),
+        // Filters can't be pushed down past Limits, we should do PushDownFilter after PushDownLimit
+        Arc::new(df_optimizer::push_down_limit::PushDownLimit::new()),
+        Arc::new(df_optimizer::push_down_filter::PushDownFilter::new()),
+        Arc::new(df_optimizer::single_distinct_to_groupby::SingleDistinctToGroupBy::new()),
+        // The previous optimizations added expressions and projections,
+        // that might benefit from the following rules
+        Arc::new(df_optimizer::eliminate_group_by_constant::EliminateGroupByConstant::new()),
+        Arc::new(df_optimizer::common_subexpr_eliminate::CommonSubexprEliminate::new()),
+        // Arc::new(df_optimizer::optimize_projections::OptimizeProjections::new()),
+    ]
+}
+
 pub fn create_optd_session_context(
     config: SessionConfig,
     runtime: Arc<RuntimeEnv>,
@@ -48,6 +78,7 @@ pub fn create_optd_session_context(
         .with_config(config)
         .with_runtime_env(runtime)
         .with_default_features()
+        .with_optimizer_rules(default_datafusion_rules())
         .with_optd_planner()
         .build();
     SessionContext::new_with_state(state)
