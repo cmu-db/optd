@@ -83,8 +83,8 @@ impl<'a> OptdQueryPlannerContext<'a> {
 
     pub async fn collect_statistics(&self) -> Result<()> {
         for (table_reference, source) in self.table_reference_to_source.iter() {
-            let table_ref = Self::into_optd_table_ref(&table_reference);
-            let provider = source_as_provider(&source).context(DataFusionSnafu)?;
+            let table_ref = Self::into_optd_table_ref(table_reference);
+            let provider = source_as_provider(source).context(DataFusionSnafu)?;
             let exec = provider
                 .scan(self.session_state, None, &[], None)
                 .await

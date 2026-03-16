@@ -74,23 +74,29 @@ impl OperatorKind {
         use OperatorKind::*;
         match self {
             Group(_) => OperatorCategory::Placeholder,
-            Get(meta) => meta
-                .implementation
-                .is_some()
-                .then(|| OperatorCategory::Physical)
-                .unwrap_or(OperatorCategory::Logical),
-            Join(meta) => meta
-                .implementation
-                .is_some()
-                .then(|| OperatorCategory::Physical)
-                .unwrap_or(OperatorCategory::Logical),
+            Get(meta) => {
+                if meta.implementation.is_some() {
+                    OperatorCategory::Physical
+                } else {
+                    OperatorCategory::Logical
+                }
+            }
+            Join(meta) => {
+                if meta.implementation.is_some() {
+                    OperatorCategory::Physical
+                } else {
+                    OperatorCategory::Logical
+                }
+            }
             DependentJoin(_) => OperatorCategory::Logical,
             Project(_) => OperatorCategory::Logical,
-            Aggregate(meta) => meta
-                .implementation
-                .is_some()
-                .then(|| OperatorCategory::Physical)
-                .unwrap_or(OperatorCategory::Logical),
+            Aggregate(meta) => {
+                if meta.implementation.is_some() {
+                    OperatorCategory::Physical
+                } else {
+                    OperatorCategory::Logical
+                }
+            }
             Limit(_) => OperatorCategory::Logical,
             OrderBy(_) => OperatorCategory::Logical,
             Remap(_) => OperatorCategory::Logical,

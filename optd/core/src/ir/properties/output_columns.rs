@@ -110,7 +110,7 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                     .chain(
                         keys.members()
                             .iter()
-                            .map(|e| e.borrow::<ColumnRef>().column().clone()),
+                            .map(|e| *e.borrow::<ColumnRef>().column()),
                     )
                     .collect();
 
