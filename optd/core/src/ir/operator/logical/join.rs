@@ -44,19 +44,44 @@ pub enum JoinType {
 pub enum JoinImplementation {
     #[default]
     NestedLoop,
-    Hash(HashJoinImplementation),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct HashJoinImplementation {
-    pub build_side: JoinSide,
-    pub keys: Arc<[(Column, Column)]>,
+    Hash {
+        build_side: JoinSide,
+        keys: Arc<[(Column, Column)]>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum JoinSide {
     Outer,
     Inner,
+}
+
+impl JoinImplementation {
+    pub fn nested_loop() -> Self {
+        Self::NestedLoop
+    }
+
+    pub fn hash(build_side: JoinSide, keys: Arc<[(Column, Column)]>) -> Self {
+        Self::Hash { build_side, keys }
+    }
+
+    pub fn build_side(&self) -> Option<JoinSide> {
+        match self {
+            Self::Hash { build_side, .. } => Some(*build_side),
+            Self::NestedLoop => None,
+        }
+    }
+
+    pub fn hash_keys(&self) -> Option<&Arc<[(Column, Column)]>> {
+        match self {
+            Self::Hash { keys, .. } => Some(keys),
+            Self::NestedLoop => None,
+        }
+    }
+
+    pub fn is_hash(&self) -> bool {
+        matches!(self, Self::Hash { .. })
+    }
 }
 
 impl Join {
@@ -96,7 +121,7 @@ impl Join {
             outer,
             inner,
             join_cond,
-            Some(JoinImplementation::NestedLoop),
+            Some(JoinImplementation::nested_loop()),
         )
     }
 
@@ -113,10 +138,7 @@ impl Join {
             outer,
             inner,
             join_cond,
-            Some(JoinImplementation::Hash(HashJoinImplementation {
-                build_side,
-                keys,
-            })),
+            Some(JoinImplementation::hash(build_side, keys)),
         )
     }
 }
@@ -175,15 +197,19 @@ pub fn split_equi_and_non_equi_conditions<'ir>(
 }
 
 impl JoinBorrowed<'_> {
-    pub fn hash_implementation(&self) -> Option<&HashJoinImplementation> {
+    pub fn hash_implementation(&self) -> Option<&JoinImplementation> {
         match self.implementation() {
-            Some(JoinImplementation::Hash(hash)) => Some(hash),
+            Some(implementation) if implementation.is_hash() => Some(implementation),
             _ => None,
         }
     }
 
+    pub fn hash_keys(&self) -> Option<&Arc<[(Column, Column)]>> {
+        self.hash_implementation()?.hash_keys()
+    }
+
     pub fn build_side(&self) -> Option<&Arc<Operator>> {
-        let build_side = self.hash_implementation()?.build_side;
+        let build_side = self.hash_implementation()?.build_side()?;
         Some(match build_side {
             JoinSide::Outer => self.outer(),
             JoinSide::Inner => self.inner(),
@@ -191,7 +217,7 @@ impl JoinBorrowed<'_> {
     }
 
     pub fn probe_side(&self) -> Option<&Arc<Operator>> {
-        let build_side = self.hash_implementation()?.build_side;
+        let build_side = self.hash_implementation()?.build_side()?;
         Some(match build_side {
             JoinSide::Outer => self.inner(),
             JoinSide::Inner => self.outer(),
@@ -209,10 +235,6 @@ impl Explain for JoinBorrowed<'_> {
         fields.push((".join_type", Pretty::debug(self.join_type())));
         fields.push((".implementation", Pretty::debug(self.implementation())));
         fields.push((".join_cond", self.join_cond().explain(ctx, option)));
-        if let Some(hash) = self.hash_implementation() {
-            fields.push((".build_side", Pretty::debug(&hash.build_side)));
-            fields.push((".hash_keys", Pretty::debug(&hash.keys)));
-        }
         fields.extend(self.common.explain_operator_properties(ctx, option));
         let children = self.common.explain_input_operators(ctx, option);
         Pretty::simple_record("Join", fields, children)

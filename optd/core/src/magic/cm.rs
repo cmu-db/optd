@@ -61,7 +61,7 @@ impl CostModel for MagicCostModel {
             OperatorKind::Join(meta) => {
                 let join = Join::borrow_raw_parts(meta, &op.common);
                 match join.implementation() {
-                    Some(JoinImplementation::Hash(_)) => {
+                    Some(implementation) if implementation.is_hash() => {
                         let build_card = join.build_side().unwrap().cardinality(ctx);
                         let probe_card = join.probe_side().unwrap().cardinality(ctx);
                         let cost = (build_card.as_f64() * 2. + probe_card.as_f64()) * Cost::UNIT;

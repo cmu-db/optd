@@ -81,20 +81,17 @@ impl<'a> OptdQueryPlannerContext<'a> {
         }
     }
 
-    pub async fn collect_statistics(
-        &self,
-        ctx: &IRContext,
-        session_state: &SessionState,
-    ) -> Result<()> {
+    pub async fn collect_statistics(&self) -> Result<()> {
         for (table_reference, source) in self.table_reference_to_source.iter() {
             let table_ref = Self::into_optd_table_ref(&table_reference);
             let provider = source_as_provider(&source).context(DataFusionSnafu)?;
             let exec = provider
-                .scan(session_state, None, &[], None)
+                .scan(self.session_state, None, &[], None)
                 .await
                 .context(DataFusionSnafu)?;
 
-            ctx.catalog
+            self.inner
+                .catalog
                 .set_table_statistics(
                     table_ref,
                     exec.partition_statistics(None)
@@ -184,7 +181,7 @@ impl OptdQueryPlanner {
             .whatever_context("missing optd session extension")
     }
 
-    fn ir_context(session_state: &SessionState) -> Result<Arc<IRContext>> {
+    fn create_context(session_state: &SessionState) -> Result<Arc<IRContext>> {
         let extension = Self::optd_extension(session_state)?;
         Ok(Arc::new(IRContext::new(
             extension.catalog(),
@@ -212,7 +209,7 @@ impl OptdQueryPlanner {
         }
 
         let inner =
-            Self::ir_context(session_state).map_err(|e| DataFusionError::External(e.into()))?;
+            Self::create_context(session_state).map_err(|e| DataFusionError::External(e.into()))?;
         let mut ctx = OptdQueryPlannerContext::new(inner, session_state);
         let (actual_logical_plan, mut explain) = match logical_plan {
             LogicalPlan::Explain(explain) => (explain.plan.as_ref(), Some(explain.clone())),
@@ -225,6 +222,11 @@ impl OptdQueryPlanner {
                 OptdDFConnectorError::DataFusionError { source } => source,
                 err => DataFusionError::External(err.into()),
             })?;
+
+        ctx.collect_statistics().await.map_err(|e| match e {
+            OptdDFConnectorError::DataFusionError { source } => source,
+            err => DataFusionError::External(err.into()),
+        })?;
 
         let rule_set = RuleSet::builder()
             .add_rule(rules::LogicalGetAsPhysicalTableScanRule::new())
@@ -247,9 +249,6 @@ impl OptdQueryPlanner {
                 .create_physical_plan_default(logical_plan, session_state)
                 .await;
         };
-
-        println!("optd-logical\n{}", quick_explain(&optd_logical, &opt.ctx));
-        println!("optd-physical\n{}", quick_explain(&optd_physical, &opt.ctx));
 
         let logical_plan = ctx
             .try_from_optd_plan(&optd_physical)
@@ -277,17 +276,29 @@ impl OptdQueryPlanner {
             ));
         }
 
-        // if let Some(x) = explain.as_mut() {
-        //     let s = quick_explain(&optd_physical, &ctx.inner);
-        //     x.stringified_plans.push(StringifiedPlan::new(
-        //         PlanType::OptimizedPhysicalPlan {
-        //             optimizer_name: "optd-finalized".to_string(),
-        //         },
-        //         s.clone(),
-        //     ));
-        //     x.stringified_plans
-        //         .push(StringifiedPlan::new(PlanType::FinalPhysicalPlan, physical_plan));
-        // }
+        if let Some(x) = explain.as_mut() {
+            let s = quick_explain(&optd_logical, &opt.ctx);
+            x.stringified_plans.push(StringifiedPlan::new(
+                PlanType::OptimizedPhysicalPlan {
+                    optimizer_name: "optd-initial".to_string(),
+                },
+                s.clone(),
+            ));
+            x.stringified_plans
+                .push(StringifiedPlan::new(PlanType::FinalLogicalPlan, s));
+        }
+
+        if let Some(x) = explain.as_mut() {
+            let s = quick_explain(&optd_physical, &opt.ctx);
+            x.stringified_plans.push(StringifiedPlan::new(
+                PlanType::OptimizedPhysicalPlan {
+                    optimizer_name: "optd-finalized".to_string(),
+                },
+                s.clone(),
+            ));
+            x.stringified_plans
+                .push(StringifiedPlan::new(PlanType::FinalPhysicalPlan, s));
+        }
 
         if let Some(x) = explain.as_mut() {
             let config = &session_state.config_options().explain;

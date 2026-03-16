@@ -208,7 +208,7 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
             OperatorKind::Join(meta) => {
                 let join = Join::borrow_raw_parts(meta, &self.common);
                 match join.implementation() {
-                    Some(JoinImplementation::Hash(_)) => ordering
+                    Some(implementation) if implementation.is_hash() => ordering
                         .is_empty()
                         .then(|| Arc::<[TupleOrdering]>::from(vec![ordering.clone(); 2])),
                     _ => satisfy_nl_join_ordering(join.outer(), ordering, ctx)?,

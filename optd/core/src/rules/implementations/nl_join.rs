@@ -104,7 +104,7 @@ mod tests {
         assert_eq!(&JoinType::Inner, nl_join.join_type());
         assert_eq!(
             nl_join.implementation(),
-            &Some(JoinImplementation::NestedLoop)
+            &Some(JoinImplementation::nested_loop())
         );
         assert_eq!(
             &ScalarValue::Boolean(Some(true)),
