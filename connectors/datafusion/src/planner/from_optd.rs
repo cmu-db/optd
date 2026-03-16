@@ -313,12 +313,14 @@ mod tests {
     use datafusion::{
         arrow::datatypes::{DataType, Field, Schema},
         common::{Column, DFSchema},
+        execution::FunctionRegistry,
         execution::runtime_env::RuntimeEnv,
         functions_aggregate::expr_fn::sum,
         logical_expr::{self, Expr as DFExpr, LogicalPlan as DFLogicalPlan},
         prelude::SessionConfig,
+        scalar::ScalarValue,
     };
-    use optd_core::ir::scalar::Case as OptdCase;
+    use optd_core::ir::scalar::{Case as OptdCase, Function, FunctionKind};
 
     use crate::create_optd_session_context;
 
@@ -503,6 +505,27 @@ mod tests {
         assert!(optd_case.expr().is_some());
         assert_eq!(optd_case.when_then_expr().len(), 2);
         assert!(optd_case.else_expr().is_some());
+
+        let restored = ctx.try_from_optd_scalar_expr(optd_expr.as_ref()).unwrap();
+        assert_eq!(restored, expr);
+    }
+
+    #[test]
+    fn scalar_function_expr_round_trips() {
+        let mut ctx = new_test_ctx();
+        let udf = ctx.session_state.udf("lower").unwrap();
+        let expr = DFExpr::ScalarFunction(logical_expr::expr::ScalarFunction::new_udf(
+            udf,
+            vec![DFExpr::Literal(ScalarValue::Utf8(Some("ABC".into())), None)],
+        ));
+
+        let optd_expr = ctx
+            .try_into_optd_scalar_expr(&expr, &DFSchema::empty())
+            .unwrap();
+        let optd_function = optd_expr.borrow::<Function>();
+        assert_eq!(optd_function.kind(), &FunctionKind::Scalar);
+        assert_eq!(optd_function.id().as_ref(), "lower");
+        assert_eq!(optd_function.params().len(), 1);
 
         let restored = ctx.try_from_optd_scalar_expr(optd_expr.as_ref()).unwrap();
         assert_eq!(restored, expr);

@@ -41,6 +41,21 @@ define_node!(
 impl_scalar_conversion!(Function, FunctionBorrowed);
 
 impl Function {
+    pub fn new_scalar(
+        id: impl Into<Arc<str>>,
+        params: Arc<[Arc<Scalar>]>,
+        return_type: DataType,
+    ) -> Self {
+        Self {
+            meta: FunctionMetadata {
+                id: id.into(),
+                kind: FunctionKind::Scalar,
+                return_type,
+            },
+            common: IRCommon::with_input_scalars_only(params),
+        }
+    }
+
     pub fn new_aggregate(
         id: impl Into<Arc<str>>,
         params: Arc<[Arc<Scalar>]>,

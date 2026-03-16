@@ -19,6 +19,6 @@ WHERE
 
 /*
 Error
-External error: error converting projection: Conversion from DataFusion ScalarValue Float64(0.2) is not implemented
+Schema error: No field named lineitem.l_partkey. Valid fields are "__internal_#5".l_partkey, "__internal_#5".__always_true, "__internal_#5"."avg(lineitem.l_quantity)".
 */
 

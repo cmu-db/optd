@@ -141,7 +141,7 @@ impl IRCommon<OperatorProperties> {
                 set.iter()
                     .map(|col| {
                         let meta = ctx.get_column_meta(col);
-                        format!("{}.{}({col})", meta.table_ref, meta.name)
+                        format!("{}({col})", meta.name)
                     })
                     .sorted()
                     .join(", ")

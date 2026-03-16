@@ -4,7 +4,7 @@ use datafusion::{
     common::DFSchema,
     logical_expr::{
         self, Cast as DFCast, Expr as DFExpr, ExprSchemable, Like as DFLike,
-        LogicalPlan as DFLogicalPlan, expr::AggregateFunction, logical_plan,
+        LogicalPlan as DFLogicalPlan, expr::AggregateFunction, expr::ScalarFunction, logical_plan,
     },
     scalar::ScalarValue as DFScalarValue,
 };
@@ -277,6 +277,9 @@ impl OptdQueryPlannerContext<'_> {
             DFExpr::AggregateFunction(agg_func) => {
                 self.try_into_optd_aggregate_func(agg_func, input_schema)
             }
+            DFExpr::ScalarFunction(scalar_func) => {
+                self.try_into_optd_scalar_func(scalar_func, input_schema)
+            }
             DFExpr::Cast(cast) => self.try_into_optd_cast(cast, input_schema),
             DFExpr::Like(like) => self.try_into_optd_like(like, input_schema),
             DFExpr::Case(case) => self.try_into_optd_case(case, input_schema),
@@ -395,6 +398,26 @@ impl OptdQueryPlannerContext<'_> {
             Function::new_aggregate(func_name.to_string(), params.into(), return_type)
                 .into_scalar(),
         )
+    }
+
+    pub fn try_into_optd_scalar_func(
+        &mut self,
+        scalar_func: &ScalarFunction,
+        input_schema: &DFSchema,
+    ) -> Result<Arc<Scalar>> {
+        let func_name = scalar_func.name();
+
+        let params: Vec<_> = scalar_func
+            .args
+            .iter()
+            .map(|x| self.try_into_optd_scalar_expr(x, input_schema))
+            .try_collect()?;
+
+        let return_type = DFExpr::ScalarFunction(scalar_func.clone())
+            .get_type(input_schema)
+            .context(DataFusionSnafu)?;
+
+        Ok(Function::new_scalar(func_name.to_string(), params.into(), return_type).into_scalar())
     }
 
     pub fn try_into_optd_cast(
