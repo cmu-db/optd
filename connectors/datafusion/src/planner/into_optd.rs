@@ -12,7 +12,8 @@ use itertools::{Either, Itertools};
 use optd_core::{
     error::CatalogSnafu,
     ir::{
-        Scalar, ScalarValue, builder as optd_builder_v2,
+        Scalar,
+        builder::{self as optd_builder, literal},
         catalog::Schema,
         convert::{IntoOperator, IntoScalar},
         operator::{Aggregate, Get, Join, Limit, OrderBy, Project, Remap, Select},
@@ -52,11 +53,11 @@ impl OptdQueryPlannerContext<'_> {
         let input = self.try_into_optd_plan(&node.input)?;
         let skip = match &node.skip {
             Some(skip) => self.try_into_optd_scalar_expr(skip, node.input.schema())?,
-            None => optd_builder_v2::literal(0_i64),
+            None => optd_builder::literal(0_i64),
         };
         let fetch = match &node.fetch {
             Some(fetch) => self.try_into_optd_scalar_expr(fetch, node.input.schema())?,
-            None => optd_builder_v2::literal(ScalarValue::Int64(None)),
+            None => optd_builder::literal(0_i64),
         };
 
         Ok(Limit::new(input, skip, fetch).into_operator())
@@ -66,9 +67,6 @@ impl OptdQueryPlannerContext<'_> {
         &mut self,
         node: &logical_plan::Sort,
     ) -> Result<Arc<optd_core::ir::Operator>> {
-        if node.fetch.is_some() {
-            whatever!("Does not handle fetch in sort yet")
-        }
         let input = self.try_into_optd_plan(&node.input)?;
 
         let ordering_exprs = node
@@ -85,7 +83,16 @@ impl OptdQueryPlannerContext<'_> {
             })
             .try_collect()?;
 
-        Ok(OrderBy::new(input, ordering_exprs).into_operator())
+        let operator = OrderBy::new(input, ordering_exprs).into_operator();
+
+        Ok(node
+            .fetch
+            .map(|n| {
+                let skip = literal(0);
+                let fetch = literal(Some(n as u64));
+                Limit::new(operator.clone(), skip, fetch).into_operator()
+            })
+            .unwrap_or_else(|| operator))
     }
 
     pub fn try_into_optd_aggregate(
@@ -284,7 +291,7 @@ impl OptdQueryPlannerContext<'_> {
     }
 
     pub fn try_into_optd_literal(&self, literal: &DFScalarValue) -> Result<Arc<Scalar>> {
-        Self::try_into_optd_scalar_value(literal.clone()).map(optd_builder_v2::literal)
+        Self::try_into_optd_scalar_value(literal.clone()).map(optd_builder::literal)
     }
 
     pub fn try_into_optd_scalar_op(

@@ -229,6 +229,7 @@ impl OptdQueryPlannerContext<'_> {
             expr => Some(Box::new(expr)),
         };
         let fetch = match fetch_expr {
+            DFExpr::Literal(datafusion::scalar::ScalarValue::Int64(Some(0)), _) => None,
             DFExpr::Literal(datafusion::scalar::ScalarValue::Int64(None), _) => None,
             expr => Some(Box::new(expr)),
         };
