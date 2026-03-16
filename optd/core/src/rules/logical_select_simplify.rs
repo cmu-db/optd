@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::ir::convert::{IntoOperator, IntoScalar};
-use crate::ir::operator::{LogicalJoin, LogicalSelect, Operator, join::JoinType};
+use crate::ir::operator::{Join, Operator, Select, join::JoinType};
 use crate::ir::rule::{OperatorPattern, Rule};
 use crate::ir::scalar::{NaryOp, NaryOpKind};
 use crate::ir::{IRContext, OperatorKind};
@@ -18,8 +18,7 @@ impl Default for LogicalSelectSimplifyRule {
 
 impl LogicalSelectSimplifyRule {
     pub fn new() -> Self {
-        let is_logical_select =
-            |kind: &OperatorKind| matches!(kind, OperatorKind::LogicalSelect(_));
+        let is_logical_select = |kind: &OperatorKind| matches!(kind, OperatorKind::Select(_));
         let pattern = OperatorPattern::with_top_matches(is_logical_select);
         Self { pattern }
     }
@@ -39,13 +38,16 @@ impl Rule for LogicalSelectSimplifyRule {
         operator: &Operator,
         _ctx: &IRContext,
     ) -> crate::error::Result<Vec<Arc<Operator>>> {
-        let select = operator.try_borrow::<LogicalSelect>().unwrap();
+        let select = operator.try_borrow::<Select>().unwrap();
         let predicate = select.predicate().clone();
         if predicate.is_true_scalar() {
             return Ok(vec![select.input().clone()]);
         }
-        if let OperatorKind::LogicalJoin(join_meta) = &select.input().kind {
-            let join = LogicalJoin::borrow_raw_parts(join_meta, &select.input().common);
+        if let OperatorKind::Join(join_meta) = &select.input().kind {
+            if join_meta.implementation.is_some() {
+                return Ok(vec![]);
+            }
+            let join = Join::borrow_raw_parts(join_meta, &select.input().common);
             if !matches!(join.join_type(), &JoinType::Inner) {
                 return Ok(vec![]);
             }
@@ -56,11 +58,12 @@ impl Rule for LogicalSelectSimplifyRule {
                 NaryOp::new(NaryOpKind::And, vec![join_cond, predicate].into()).into_scalar()
             };
             Ok(vec![
-                LogicalJoin::new(
+                Join::new(
                     JoinType::Inner,
                     join.outer().clone(),
                     join.inner().clone(),
                     merged_cond,
+                    None,
                 )
                 .into_operator(),
             ])

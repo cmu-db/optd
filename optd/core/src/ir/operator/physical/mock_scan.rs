@@ -43,15 +43,16 @@ impl Explain for MockScanBorrowed<'_> {
         option: &crate::ir::explain::ExplainOption,
     ) -> pretty_xmlish::Pretty<'a> {
         let mut fields = Vec::with_capacity(2);
-        fields.push((".mock_id", Pretty::display(self.mock_id())));
+        fields.push((".table_index", Pretty::display(self.table_index())));
         fields.extend(self.common.explain_operator_properties(ctx, option));
         Pretty::childless_record("MockScan", fields)
     }
 }
 
 impl MockSpec {
-    pub fn new_test_only(ids: Vec<Column>, card: f64) -> Self {
-        let mocked_output_columns = Arc::new(ids.iter().copied().collect());
+    pub fn new_test_only(table_index: i64, num_columns: usize, card: f64) -> Self {
+        let mocked_output_columns =
+            Arc::new((0..num_columns).map(|id| Column(table_index, id)).collect());
         let mocked_card = Cardinality::new(card);
         Self {
             mocked_output_columns,
@@ -90,7 +91,7 @@ define_node!(
     MockScan, MockScanBorrowed {
         properties: OperatorProperties,
         metadata: MockScanMetadata {
-            mock_id: usize,
+            table_index: i64,
             spec: Arc<MockSpec>,
         },
         inputs: {
@@ -102,10 +103,10 @@ define_node!(
 impl_operator_conversion!(MockScan, MockScanBorrowed);
 
 impl MockScan {
-    pub fn with_mock_spec(id: usize, spec: MockSpec) -> Self {
+    pub fn with_mock_spec(table_index: i64, spec: MockSpec) -> Self {
         Self {
             meta: MockScanMetadata {
-                mock_id: id,
+                table_index,
                 spec: Arc::new(spec),
             },
             common: IRCommon::empty(),

@@ -13,43 +13,67 @@ use pretty_xmlish::Pretty;
 use std::sync::Arc;
 
 define_node!(
-    /// Metadata: (none)
+    /// Metadata:
+    /// - implementation: The selected physical implementation, if any.
     /// Scalars:
     /// - exprs: The aggregate expressions to compute.
     /// - keys: The grouping keys.
-    LogicalAggregate, LogicalAggregateBorrowed {
+    Aggregate, AggregateBorrowed {
         properties: OperatorProperties,
-        metadata: LogicalAggregateMetadata {},
+        metadata: AggregateMetadata {
+            aggregate_table_index: i64,
+            implementation: Option<AggregateImplementation>,
+        },
         inputs: {
             operators: [input],
             scalars: [exprs, keys],
         }
     }
 );
-impl_operator_conversion!(LogicalAggregate, LogicalAggregateBorrowed);
+impl_operator_conversion!(Aggregate, AggregateBorrowed);
 
-impl LogicalAggregate {
-    pub fn new(input: Arc<Operator>, exprs: Arc<Scalar>, keys: Arc<Scalar>) -> Self {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum AggregateImplementation {
+    #[default]
+    Hash,
+}
+
+impl Aggregate {
+    pub fn new(
+        aggregate_table_index: i64,
+        input: Arc<Operator>,
+        exprs: Arc<Scalar>,
+        keys: Arc<Scalar>,
+        implementation: Option<AggregateImplementation>,
+    ) -> Self {
         Self {
-            meta: LogicalAggregateMetadata {},
+            meta: AggregateMetadata {
+                aggregate_table_index,
+                implementation,
+            },
             common: IRCommon::new(Arc::new([input]), Arc::new([exprs, keys])),
         }
     }
 }
 
-impl Explain for LogicalAggregateBorrowed<'_> {
+impl Explain for AggregateBorrowed<'_> {
     fn explain<'a>(
         &self,
         ctx: &crate::ir::IRContext,
         option: &crate::ir::explain::ExplainOption,
     ) -> pretty_xmlish::Pretty<'a> {
         let mut fields = Vec::new();
+        fields.push((
+            ".aggregate_table_index",
+            Pretty::display(&self.aggregate_table_index()),
+        ));
+        fields.push((".implementation", Pretty::debug(self.implementation())));
         let exprs = self.exprs().explain(ctx, option);
         let keys = self.keys().explain(ctx, option);
         fields.push((".exprs", exprs));
         fields.push((".keys", keys));
         fields.extend(self.common.explain_operator_properties(ctx, option));
         let children = self.common.explain_input_operators(ctx, option);
-        Pretty::simple_record("LogicalAggregate", fields, children)
+        Pretty::simple_record("Aggregate", fields, children)
     }
 }

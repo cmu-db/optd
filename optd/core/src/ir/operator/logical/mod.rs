@@ -7,6 +7,7 @@ pub mod aggregate;
 pub mod dependent_join;
 pub mod get;
 pub mod join;
+pub mod limit;
 pub mod order_by;
 pub mod project;
 pub mod remap;

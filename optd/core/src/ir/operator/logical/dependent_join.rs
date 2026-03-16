@@ -17,9 +17,9 @@ define_node!(
     /// - join_type: The type of join (e.g., Inner, Left, Mark, Single).
     /// Scalars:
     /// - join_cond: The join conditions to join on
-    LogicalDependentJoin, LogicalDependentJoinBorrowed {
+    DependentJoin, DependentJoinBorrowed {
         properties: OperatorProperties,
-        metadata: LogicalDependentJoinMetadata {
+        metadata: DependentJoinMetadata {
             join_type: JoinType,
         },
         inputs: {
@@ -28,9 +28,9 @@ define_node!(
         }
     }
 );
-impl_operator_conversion!(LogicalDependentJoin, LogicalDependentJoinBorrowed);
+impl_operator_conversion!(DependentJoin, DependentJoinBorrowed);
 
-impl LogicalDependentJoin {
+impl DependentJoin {
     pub fn new(
         join_type: JoinType,
         outer: Arc<Operator>,
@@ -38,13 +38,13 @@ impl LogicalDependentJoin {
         join_cond: Arc<Scalar>,
     ) -> Self {
         Self {
-            meta: LogicalDependentJoinMetadata { join_type },
+            meta: DependentJoinMetadata { join_type },
             common: IRCommon::new(Arc::new([outer, inner]), Arc::new([join_cond])),
         }
     }
 }
 
-impl Explain for LogicalDependentJoinBorrowed<'_> {
+impl Explain for DependentJoinBorrowed<'_> {
     fn explain<'a>(
         &self,
         ctx: &crate::ir::IRContext,
@@ -55,6 +55,6 @@ impl Explain for LogicalDependentJoinBorrowed<'_> {
         fields.push((".join_cond", self.join_cond().explain(ctx, option)));
         fields.extend(self.common.explain_operator_properties(ctx, option));
         let children = self.common.explain_input_operators(ctx, option);
-        Pretty::simple_record("LogicalDependentJoin", fields, children)
+        Pretty::simple_record("DependentJoin", fields, children)
     }
 }

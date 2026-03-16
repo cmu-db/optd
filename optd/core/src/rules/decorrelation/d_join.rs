@@ -25,12 +25,12 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use crate::error::Result;
 use crate::ir::IRContext;
 use crate::ir::convert::{IntoOperator, IntoScalar};
 use crate::ir::operator::join::JoinType;
 use crate::ir::operator::{
-    LogicalAggregate, LogicalDependentJoinBorrowed, LogicalJoin, LogicalProject, LogicalRemap,
-    Operator,
+    Aggregate, Join, LogicalDependentJoinBorrowed, LogicalRemap, Operator, Project,
 };
 use crate::ir::scalar::{BinaryOp, BinaryOpKind, ColumnAssign, ColumnRef, List};
 use crate::ir::{Column, Scalar};
@@ -61,7 +61,9 @@ impl UnnestingRule {
             .map(|c| ColumnRef::new(*c).into_scalar())
             .collect();
         let project_list = List::new(project_scalars.into()).into_scalar();
-        let domain_project = LogicalProject::new(outer.clone(), project_list).into_operator();
+        // TODO(yuchen): fix this
+        let table_index: i64 = 0;
+        let domain_project = Project::new(table_index, outer.clone(), project_list).into_operator();
         let group_keys: Vec<Arc<Scalar>> = outer_refs
             .iter()
             .map(|c| ColumnAssign::new(*c, ColumnRef::new(*c).into_scalar()).into_scalar())
@@ -69,7 +71,7 @@ impl UnnestingRule {
         let group_keys_list = List::new(group_keys.into()).into_scalar();
         let empty_exprs_list = List::new(vec![].into()).into_scalar();
         let domain_distinct =
-            LogicalAggregate::new(domain_project, empty_exprs_list, group_keys_list)
+            Aggregate::logical(0, domain_project, empty_exprs_list, group_keys_list)
                 .into_operator();
         let remap_keys: Vec<Arc<Scalar>> = outer_refs
             .iter()
@@ -80,7 +82,9 @@ impl UnnestingRule {
             })
             .collect();
         let remap_list = List::new(remap_keys.into()).into_scalar();
-        let domain_d = LogicalRemap::new(domain_distinct, remap_list).into_operator();
+        // TODO(yuchen): fix this
+        let table_index = 0;
+        let domain_d = LogicalRemap::new(table_index, domain_distinct).into_operator();
 
         (domain_repr, domain_d)
     }
@@ -93,7 +97,7 @@ impl UnnestingRule {
         mut parent_unnesting: Option<&mut Unnesting<'_>>,
         parent_accessing: Option<&HashSet<*const Operator>>,
         ctx: &IRContext,
-    ) -> Arc<Operator> {
+    ) -> Result<Arc<Operator>> {
         // We currently only support inner dependent joins!
         // TODO: Support left outer, single, and mark joins
         let join_type = *dep_join.join_type();
@@ -107,7 +111,7 @@ impl UnnestingRule {
                 .filter(|&&op_ptr| is_contained_in(op_ptr, dep_join.outer()))
                 .copied()
                 .collect();
-            let op = self.unnest(dep_join.outer().clone(), pu, &acc_left, ctx);
+            let op = self.unnest(dep_join.outer().clone(), pu, &acc_left, ctx)?;
             let cond = pu.rewrite_columns(dep_join.join_cond().clone());
             (op, cond)
         } else {
@@ -115,9 +119,9 @@ impl UnnestingRule {
         };
 
         // Create a new unnesting struct
-        let (accessing_operators, accessing_cols) = compute_accessing_set(dep_join.inner(), ctx);
+        let (accessing_operators, accessing_cols) = compute_accessing_set(dep_join.inner(), ctx)?;
         let mut outer_refs = HashSet::new();
-        let outer_outputs = new_outer.output_columns(ctx);
+        let outer_outputs = new_outer.output_columns(ctx)?;
         for c in &accessing_cols {
             if outer_outputs.contains(c) {
                 outer_refs.insert(*c);
@@ -145,10 +149,10 @@ impl UnnestingRule {
             &mut unnesting,
             &accessing_operators,
             ctx,
-        );
-        let new_outer_cols = new_outer.output_columns(ctx);
+        )?;
+        let new_outer_cols = new_outer.output_columns(ctx)?;
         let (new_inner, remap) =
-            remap_right_output_collisions(&new_outer_cols, new_inner, &mut unnesting, ctx);
+            remap_right_output_collisions(new_outer_cols.as_ref(), new_inner, &mut unnesting, ctx)?;
 
         // Add equality to join condition
         let mut new_conds = Vec::new();
@@ -166,7 +170,7 @@ impl UnnestingRule {
         // If this nested elimination is inside an already-decorrelating scope,
         // reconcile parent-vs-inner representative choices
         let mut nested_repr_choices = Vec::new();
-        let new_inner_cols = new_inner.output_columns(ctx);
+        let new_inner_cols = new_inner.output_columns(ctx)?;
         if let Some(parent) = parent_unnesting.as_deref() {
             for outer_col in parent.collect_outer_refs_recursive() {
                 let parent_repr = parent
@@ -201,6 +205,6 @@ impl UnnestingRule {
         }
 
         let new_cond = Scalar::combine_conjuncts(new_conds);
-        LogicalJoin::new(join_type, new_outer, new_inner, new_cond).into_operator()
+        Ok(Join::new(join_type, new_outer, new_inner, new_cond, None).into_operator())
     }
 }

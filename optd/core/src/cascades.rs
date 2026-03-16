@@ -8,7 +8,7 @@ use crate::{
     ir::{
         Group, GroupId, IRCommon, IRContext, Operator,
         convert::IntoOperator,
-        operator::LogicalOrderBy,
+        operator::OrderBy,
         properties::{OperatorProperties, Required, TrySatisfy},
         rule::{OperatorPattern, Rule, RuleSet},
     },
@@ -18,13 +18,13 @@ use crate::{
 
 pub struct Cascades {
     pub memo: tokio::sync::RwLock<MemoTable>,
-    pub ctx: IRContext,
+    pub ctx: Arc<IRContext>,
     pub rule_set: RuleSet,
 }
 
 impl Cascades {
     /// Creates a new Cascades optimizer instance.
-    pub fn new(ctx: IRContext, rule_set: RuleSet) -> Self {
+    pub fn new(ctx: Arc<IRContext>, rule_set: RuleSet) -> Self {
         Self {
             memo: tokio::sync::RwLock::new(MemoTable::new(ctx.clone())),
             ctx,
@@ -278,7 +278,7 @@ impl Cascades {
         };
 
         // TODO(yuchen): Properly add this as a rule:
-        if let Ok(logical_order_by) = operator.try_borrow::<LogicalOrderBy>()
+        if let Ok(logical_order_by) = operator.try_borrow::<OrderBy>()
             && let Ok(tuple_ordering) = logical_order_by.try_extract_tuple_ordering()
         {
             let input_group_id = expr.key().input_operators()[0];
@@ -295,9 +295,13 @@ impl Cascades {
             return costed_expr;
         }
 
-        let op_cost = self.ctx.cm.compute_operator_cost(&operator, &self.ctx)?;
+        let op_cost = self
+            .ctx
+            .cm
+            .compute_operator_cost(&operator, &self.ctx)
+            .ok()?;
 
-        let inputs_required = operator.try_satisfy(required, &self.ctx)?;
+        let inputs_required = operator.try_satisfy(required, &self.ctx).ok()??;
 
         let mut best_inputs = Vec::with_capacity(operator.input_operators().len());
         let mut best_input_costs = Vec::with_capacity(operator.input_operators().len());
@@ -326,10 +330,11 @@ impl Cascades {
             best_input_costs.push(costed_expr.total_cost);
         }
 
-        let total_cost =
-            self.ctx
-                .cm
-                .compute_total_with_input_costs(&operator, &best_input_costs, &self.ctx)?;
+        let total_cost = self
+            .ctx
+            .cm
+            .compute_total_with_input_costs(&operator, &best_input_costs, &self.ctx)
+            .ok()?;
         info!(%op_cost, %total_cost, "optimized");
         Some(CostedExpr::new(
             expr,

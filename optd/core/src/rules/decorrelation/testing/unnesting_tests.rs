@@ -2,7 +2,7 @@ use super::helpers::{assert_unnesting, create_domain_with_aliases, make_cols, nu
 use crate::ir::builder::{boolean, column_assign, column_ref, mock_scan_with_columns};
 use crate::ir::convert::IntoOperator;
 use crate::ir::explain::quick_explain;
-use crate::ir::operator::{LogicalJoin, LogicalOrderBy, Operator, OperatorKind, join::JoinType};
+use crate::ir::operator::{Join, LogicalOrderBy, Operator, OperatorKind, join::JoinType};
 use crate::ir::properties::TupleOrderingDirection;
 use crate::ir::{Column, DataType, IRContext};
 use crate::rules::decorrelation::UnnestingRule;
@@ -49,7 +49,7 @@ fn test_simple_unnesting() {
         )
     };
 
-    assert_unnesting(&ctx, input_plan, expected_plan);
+    assert_unnesting(&ctx, input_plan, expected_plan).unwrap();
 }
 
 /// Test Nesting & Scope: 2 nested dependent joins
@@ -148,7 +148,7 @@ fn test_deep_nesting_and_scope() {
         )
     };
 
-    assert_unnesting(&ctx, input_plan, expected_plan);
+    assert_unnesting(&ctx, input_plan, expected_plan).unwrap();
 }
 
 /// Test Nested Dependent Joins with Intermediate Outer Ref Access:
@@ -236,7 +236,7 @@ fn test_nested_dep_join_intermediate_select_preserves_outer_ref() {
         )
     };
 
-    assert_unnesting(&ctx, input_plan, expected_plan);
+    assert_unnesting(&ctx, input_plan, expected_plan).unwrap();
 }
 
 /// Test Complex Operators: Aggregates + Domain
@@ -309,7 +309,7 @@ fn test_complex_operators() {
         )
     };
 
-    assert_unnesting(&ctx, input_plan, expected_plan);
+    assert_unnesting(&ctx, input_plan, expected_plan).unwrap();
 }
 
 /// Test Join Equivalence Merging: Decorrelate without domain joins
@@ -378,7 +378,7 @@ fn test_join_equivalence_merging() {
         )
     };
 
-    assert_unnesting(&ctx, input_plan, expected_plan);
+    assert_unnesting(&ctx, input_plan, expected_plan).unwrap();
 }
 
 /// Test Multi-Outer Refs with Non-Equi Predicate (Domain Retained):
@@ -480,7 +480,7 @@ fn test_multi_outer_refs_domain_retained() {
         )
     };
 
-    assert_unnesting(&ctx, input_plan, expected_plan);
+    assert_unnesting(&ctx, input_plan, expected_plan).unwrap();
 }
 
 /// Test Deep Nesting with Multiple Dependencies:
@@ -605,7 +605,7 @@ fn test_deep_nesting_multiple_dependencies() {
         )
     };
 
-    assert_unnesting(&ctx, input_plan, expected_plan);
+    assert_unnesting(&ctx, input_plan, expected_plan).unwrap();
 }
 
 /// Test Nested Dependent Joins + Regular Join + OrderBy + Map:
@@ -811,7 +811,7 @@ fn test_nested_dep_join_regular_join_orderby_project_domain_vs_repr() {
         )
     };
 
-    assert_unnesting(&ctx, input_plan, expected_plan);
+    assert_unnesting(&ctx, input_plan, expected_plan).unwrap();
 }
 
 /// Test Left Join Right-Side Equivalence Is Not Used As Outer Representative:
@@ -849,9 +849,9 @@ fn test_left_join_right_cclass_not_propagated() {
         left_branch.logical_dependent_join(right_branch, boolean(true), JoinType::Inner)
     };
 
-    let res = UnnestingRule::new().apply(input_plan, &ctx);
+    let res = UnnestingRule::new().apply(input_plan, &ctx).unwrap();
     let root_join = match &res.kind {
-        OperatorKind::LogicalJoin(meta) => LogicalJoin::borrow_raw_parts(meta, &res.common),
+        OperatorKind::Join(meta) => Join::borrow_raw_parts(meta, &res.common),
         _ => panic!(
             "expected decorrelated root to be a join, got:\n{}",
             quick_explain(&res, &ctx)
@@ -943,5 +943,5 @@ fn test_partial_repr_resolution_all_or_nothing() {
         )
     };
 
-    assert_unnesting(&ctx, input_plan, expected_plan);
+    assert_unnesting(&ctx, input_plan, expected_plan).unwrap();
 }

@@ -1,7 +1,6 @@
 use crate::ir::{
     Operator, Scalar,
-    operator::join::JoinType,
-    operator::*,
+    operator::{join::JoinType, *},
     properties::{Cardinality, CardinalityEstimator},
     scalar::*,
 };
@@ -56,22 +55,21 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                 // Relies on the normalized expression's cardinality estimation.
                 panic!("right now should always be set");
             }
-            OperatorKind::LogicalGet(meta) => match ctx.cat.describe_table(meta.source).stats {
-                Some(stats) => Cardinality::with_count_lossy(stats.row_count),
-                None => Cardinality::with_count_lossy(
-                    MagicCardinalityEstimator::MAGIC_DEFAULT_CARDINALITY,
-                ),
-            },
-            OperatorKind::PhysicalTableScan(meta) => {
-                match ctx.cat.describe_table(meta.source).stats {
+            OperatorKind::Get(meta) => {
+                match ctx
+                    .catalog
+                    .table(meta.data_source_id)
+                    .ok()
+                    .and_then(|table| table.statistics)
+                {
                     Some(stats) => Cardinality::with_count_lossy(stats.row_count),
                     None => Cardinality::with_count_lossy(
                         MagicCardinalityEstimator::MAGIC_DEFAULT_CARDINALITY,
                     ),
                 }
             }
-            OperatorKind::LogicalJoin(meta) => {
-                let join = LogicalJoin::borrow_raw_parts(meta, &op.common);
+            OperatorKind::Join(meta) => {
+                let join = Join::borrow_raw_parts(meta, &op.common);
                 estimate_join(
                     join.join_type(),
                     join.outer().as_ref(),
@@ -79,8 +77,8 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                     join.join_cond().as_ref(),
                 )
             }
-            OperatorKind::LogicalDependentJoin(meta) => {
-                let join = LogicalDependentJoin::borrow_raw_parts(meta, &op.common);
+            OperatorKind::DependentJoin(meta) => {
+                let join = DependentJoin::borrow_raw_parts(meta, &op.common);
                 estimate_join(
                     join.join_type(),
                     join.outer().as_ref(),
@@ -88,29 +86,8 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                     join.join_cond().as_ref(),
                 )
             }
-            OperatorKind::PhysicalNLJoin(meta) => {
-                let join = PhysicalNLJoin::borrow_raw_parts(meta, &op.common);
-                let selectivity = if let Ok(literal) = join.join_cond().try_borrow::<Literal>() {
-                    match literal.value() {
-                        crate::ir::ScalarValue::Boolean(Some(true)) => 1.,
-                        crate::ir::ScalarValue::Boolean(_) => 0.,
-                        _ => unreachable!("join condition must be boolean"),
-                    }
-                } else {
-                    Self::MAGIC_JOIN_COND_SELECTIVITY
-                };
-                let left_card = join.outer().cardinality(ctx);
-                let right_card = join.inner().cardinality(ctx);
-                selectivity * left_card * right_card
-            }
-            OperatorKind::PhysicalHashJoin(meta) => {
-                let join = PhysicalHashJoin::borrow_raw_parts(meta, &op.common);
-                let left_card = join.build_side().cardinality(ctx);
-                let right_card = join.probe_side().cardinality(ctx);
-                Self::MAGIC_JOIN_COND_SELECTIVITY * left_card * right_card
-            }
-            OperatorKind::LogicalSelect(meta) => {
-                let filter = LogicalSelect::borrow_raw_parts(meta, &op.common);
+            OperatorKind::Select(meta) => {
+                let filter = Select::borrow_raw_parts(meta, &op.common);
                 let selectivity = if let Ok(literal) = filter.predicate().try_borrow::<Literal>() {
                     match literal.value() {
                         crate::ir::ScalarValue::Boolean(Some(true)) => 1.,
@@ -123,63 +100,76 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
 
                 selectivity * filter.input().cardinality(ctx)
             }
-            OperatorKind::PhysicalFilter(meta) => {
-                let filter = PhysicalFilter::borrow_raw_parts(meta, &op.common);
-                let selectivity = if let Ok(literal) = filter.predicate().try_borrow::<Literal>() {
-                    match literal.value() {
-                        crate::ir::ScalarValue::Boolean(Some(true)) => 1.,
-                        crate::ir::ScalarValue::Boolean(_) => 0.,
-                        _ => unreachable!("join condition must be boolean"),
-                    }
-                } else {
-                    Self::MAGIC_PREDICATE_SELECTIVITY
-                };
+            OperatorKind::Limit(meta) => {
+                let limit = Limit::borrow_raw_parts(meta, &op.common);
+                let input_card = limit.input().cardinality(ctx);
+                let remaining = extract_skip_bound(limit.skip().as_ref())
+                    .map(|skip| (input_card.as_f64() - skip as f64).max(0.0))
+                    .unwrap_or(input_card.as_f64());
 
-                selectivity * filter.input().cardinality(ctx)
+                extract_fetch_bound(limit.fetch().as_ref())
+                    .map(|fetch| remaining.min(fetch as f64))
+                    .map(Cardinality::new)
+                    .unwrap_or_else(|| Cardinality::new(remaining))
             }
-            OperatorKind::LogicalOrderBy(meta) => {
-                LogicalOrderBy::borrow_raw_parts(meta, &op.common)
-                    .input()
-                    .cardinality(ctx)
-            }
-            OperatorKind::LogicalSubquery(meta) => {
-                LogicalSubquery::borrow_raw_parts(meta, &op.common)
-                    .input()
-                    .cardinality(ctx)
-            }
+            OperatorKind::OrderBy(meta) => OrderBy::borrow_raw_parts(meta, &op.common)
+                .input()
+                .cardinality(ctx),
+            OperatorKind::Subquery(meta) => Subquery::borrow_raw_parts(meta, &op.common)
+                .input()
+                .cardinality(ctx),
             OperatorKind::EnforcerSort(meta) => EnforcerSort::borrow_raw_parts(meta, &op.common)
                 .input()
                 .cardinality(ctx),
             OperatorKind::MockScan(meta) => meta.spec.mocked_card,
-            OperatorKind::LogicalProject(meta) => {
-                LogicalProject::borrow_raw_parts(meta, &op.common)
-                    .input()
-                    .cardinality(ctx)
-            }
-            OperatorKind::PhysicalProject(meta) => {
-                PhysicalProject::borrow_raw_parts(meta, &op.common)
-                    .input()
-                    .cardinality(ctx)
-            }
-            OperatorKind::LogicalAggregate(meta) => {
-                let agg = LogicalAggregate::borrow_raw_parts(meta, &op.common);
+            OperatorKind::Project(meta) => Project::borrow_raw_parts(meta, &op.common)
+                .input()
+                .cardinality(ctx),
+            OperatorKind::Aggregate(meta) => {
+                let agg = Aggregate::borrow_raw_parts(meta, &op.common);
                 let len = agg.keys().borrow::<List>().members().len();
 
                 Cardinality::new(
                     Self::MAGIC_GROUP_BY_KEY_NDV_FACTOR.powi(i32::try_from(len).unwrap()),
                 )
             }
-            OperatorKind::PhysicalHashAggregate(meta) => {
-                let agg = PhysicalHashAggregate::borrow_raw_parts(meta, &op.common);
-                let len = agg.keys().borrow::<List>().members().len();
-
-                Cardinality::new(
-                    Self::MAGIC_GROUP_BY_KEY_NDV_FACTOR.powi(i32::try_from(len).unwrap()),
-                )
-            }
-            OperatorKind::LogicalRemap(meta) => LogicalRemap::borrow_raw_parts(meta, &op.common)
+            OperatorKind::Remap(meta) => Remap::borrow_raw_parts(meta, &op.common)
                 .input()
                 .cardinality(ctx),
         }
+    }
+}
+
+fn extract_skip_bound(skip: &Scalar) -> Option<u64> {
+    let literal = skip.try_borrow::<Literal>().ok()?;
+    match literal.value() {
+        crate::ir::ScalarValue::Int8(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::Int16(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::Int32(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::Int64(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::UInt8(Some(v)) => Some(u64::from(*v)),
+        crate::ir::ScalarValue::UInt16(Some(v)) => Some(u64::from(*v)),
+        crate::ir::ScalarValue::UInt32(Some(v)) => Some(u64::from(*v)),
+        crate::ir::ScalarValue::UInt64(Some(v)) => Some(*v),
+        _ => None,
+    }
+}
+
+fn extract_fetch_bound(fetch: &Scalar) -> Option<u64> {
+    let literal = fetch.try_borrow::<Literal>().ok()?;
+    match literal.value() {
+        crate::ir::ScalarValue::Int8(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::Int16(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::Int32(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::Int64(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::UInt8(Some(v)) => Some(u64::from(*v)),
+        crate::ir::ScalarValue::UInt16(Some(v)) => Some(u64::from(*v)),
+        crate::ir::ScalarValue::UInt32(Some(v)) => Some(u64::from(*v)),
+        crate::ir::ScalarValue::UInt64(Some(v)) => Some(*v),
+        crate::ir::ScalarValue::Int8(None)
+        | crate::ir::ScalarValue::Int16(None)
+        | crate::ir::ScalarValue::Int32(None)
+        | crate::ir::ScalarValue::Int64(None) => None,
+        _ => None,
     }
 }

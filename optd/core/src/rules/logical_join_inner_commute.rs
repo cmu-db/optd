@@ -3,7 +3,7 @@ use snafu::ensure_whatever;
 use crate::ir::{
     OperatorKind,
     convert::IntoOperator,
-    operator::{LogicalJoin, join::JoinType},
+    operator::{Join, join::JoinType},
     rule::{OperatorPattern, Rule},
 };
 
@@ -25,7 +25,7 @@ impl Default for LogicalJoinInnerCommuteRule {
 impl LogicalJoinInnerCommuteRule {
     pub fn new() -> Self {
         let pattern = OperatorPattern::with_top_matches(
-            |kind| matches!(kind, OperatorKind::LogicalJoin(meta) if meta.join_type == JoinType::Inner),
+            |kind| matches!(kind, OperatorKind::Join(meta) if meta.implementation.is_none() && meta.join_type == JoinType::Inner),
         );
         Self { pattern }
     }
@@ -45,7 +45,7 @@ impl Rule for LogicalJoinInnerCommuteRule {
         operator: &crate::ir::Operator,
         _ctx: &crate::ir::IRContext,
     ) -> crate::error::Result<Vec<std::sync::Arc<crate::ir::Operator>>> {
-        let join = operator.try_borrow::<LogicalJoin>().unwrap();
+        let join = operator.try_borrow::<Join>().unwrap();
         ensure_whatever!(
             join.join_type().eq(&JoinType::Inner),
             "join must be inner join"
@@ -53,11 +53,12 @@ impl Rule for LogicalJoinInnerCommuteRule {
 
         let new_outer = join.inner().clone();
         let new_inner = join.outer().clone();
-        let join_commuted = LogicalJoin::new(
+        let join_commuted = Join::new(
             JoinType::Inner,
             new_outer,
             new_inner,
             join.join_cond().clone(),
+            None,
         );
         Ok(vec![join_commuted.into_operator()])
     }
@@ -79,11 +80,12 @@ mod tests {
         let m_outer = MockScan::with_mock_spec(1, MockSpec::default()).into_operator();
         let m_inner = MockScan::with_mock_spec(2, MockSpec::default()).into_operator();
         let join_cond = Literal::boolean(true).into_scalar();
-        let inner_join = LogicalJoin::new(
+        let inner_join = Join::new(
             JoinType::Inner,
             m_outer.clone(),
             m_inner.clone(),
             join_cond.clone(),
+            None,
         )
         .into_operator();
 
@@ -91,16 +93,16 @@ mod tests {
         assert!(rule.pattern.matches_without_expand(&inner_join));
         let ctx = IRContext::with_empty_magic();
         let res = rule.transform(&inner_join, &ctx).unwrap().pop().unwrap();
-        let commuted = res.try_borrow::<LogicalJoin>().unwrap();
+        let commuted = res.try_borrow::<Join>().unwrap();
 
         let new_outer = commuted.outer().try_borrow::<MockScan>().unwrap();
         let new_inner = commuted.inner().try_borrow::<MockScan>().unwrap();
 
-        assert_eq!(new_outer.mock_id(), &2);
-        assert_eq!(new_inner.mock_id(), &1);
+        assert_eq!(new_outer.table_index(), &2);
+        assert_eq!(new_inner.table_index(), &1);
 
         let left_outer_join =
-            LogicalJoin::new(JoinType::Left, m_outer, m_inner, join_cond).into_operator();
+            Join::new(JoinType::Left, m_outer, m_inner, join_cond, None).into_operator();
         assert!(!rule.pattern.matches_without_expand(&left_outer_join));
     }
 }

@@ -4,7 +4,6 @@ use std::{convert::Infallible, str::FromStr};
 
 use crate::ir::DataType;
 
-// TODO(yuchen): Might require implementation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ScalarValue {
     /// True or false.

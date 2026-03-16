@@ -19,9 +19,9 @@ define_node!(
     ///               expression (true for ascending, false for descending).
     /// Scalars:
     /// - exprs: The expression array to order by.
-    LogicalOrderBy, LogicalOrderByBorrowed {
+    OrderBy, OrderByBorrowed {
         properties: OperatorProperties,
-        metadata: LogicalOrderByMetadata {
+        metadata: OrderByMetadata {
             directions: BitBox,
         },
         inputs: {
@@ -30,9 +30,9 @@ define_node!(
         }
     }
 );
-impl_operator_conversion!(LogicalOrderBy, LogicalOrderByBorrowed);
+impl_operator_conversion!(OrderBy, OrderByBorrowed);
 
-impl LogicalOrderBy {
+impl OrderBy {
     pub fn new(
         input: Arc<Operator>,
         ordered_exprs: Vec<(Arc<Scalar>, TupleOrderingDirection)>,
@@ -42,7 +42,7 @@ impl LogicalOrderBy {
             .map(|(expr, direction)| (expr, direction == TupleOrderingDirection::Asc))
             .unzip();
         Self {
-            meta: LogicalOrderByMetadata {
+            meta: OrderByMetadata {
                 directions: directions.into_boxed_bitslice(),
             },
             common: IRCommon::new(Arc::new([input]), exprs.into()),
@@ -50,7 +50,7 @@ impl LogicalOrderBy {
     }
 }
 
-impl LogicalOrderByBorrowed<'_> {
+impl OrderByBorrowed<'_> {
     /// Try extracts the associated tuple ordering if all the ordered exprs are of type [`ColumnRef`].
     /// On error, returns a list of all scalar expressions that are not [`ColumnRef`].
     pub fn try_extract_tuple_ordering(&self) -> Result<TupleOrdering, Vec<Arc<Scalar>>> {
@@ -75,7 +75,7 @@ impl LogicalOrderByBorrowed<'_> {
     }
 }
 
-impl Explain for LogicalOrderByBorrowed<'_> {
+impl Explain for OrderByBorrowed<'_> {
     fn explain<'a>(
         &self,
         ctx: &crate::ir::IRContext,
@@ -100,61 +100,70 @@ impl Explain for LogicalOrderByBorrowed<'_> {
         fields.extend(metadata);
         let children = self.common.explain_input_operators(ctx, option);
 
-        Pretty::simple_record("LogicalOrderBy", fields, children)
+        Pretty::simple_record("OrderBy", fields, children)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::ir::{
-        ColumnSet, IRContext, ScalarValue,
+        ColumnSet, ScalarValue,
         convert::{IntoOperator, IntoScalar},
         scalar::*,
+        table_ref::TableRef,
+        test_utils::{test_col, test_ctx_with_tables},
     };
 
     use super::*;
 
     #[test]
-    fn try_extract_tuple_ordering_success() {
-        let ctx = IRContext::with_empty_magic();
+    fn try_extract_tuple_ordering_success() -> crate::error::Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 3)])?;
+        let input = ctx.logical_get(TableRef::bare("t1"), None)?.build();
+        let c0 = test_col(&ctx, "t1", "c0")?;
+        let c1 = test_col(&ctx, "t1", "c1")?;
+        let c2 = test_col(&ctx, "t1", "c2")?;
         let ordered_exprs = vec![
             (
-                ColumnRef::new(Column(0)).into_scalar(),
+                ColumnRef::new(c0).into_scalar(),
                 TupleOrderingDirection::Asc,
             ),
             (
-                ColumnRef::new(Column(2)).into_scalar(),
+                ColumnRef::new(c2).into_scalar(),
                 TupleOrderingDirection::Asc,
             ),
         ];
-        let order_by = LogicalOrderBy::new(ctx.mock_scan(1, vec![0, 1, 2], 100.), ordered_exprs)
-            .into_operator();
+        let order_by = OrderBy::new(input, ordered_exprs).into_operator();
 
         let res = order_by
-            .borrow::<LogicalOrderBy>()
+            .borrow::<OrderBy>()
             .try_extract_tuple_ordering()
             .unwrap()
             .iter_columns()
             .cloned()
             .collect::<ColumnSet>();
 
-        assert!(res.contains(&Column(0)));
-        assert!(res.contains(&Column(2)));
-        assert!(!res.contains(&Column(1)));
+        assert!(res.contains(&c0));
+        assert!(res.contains(&c2));
+        assert!(!res.contains(&c1));
+        Ok(())
     }
 
     #[test]
-    fn try_extract_tuple_ordering_error() {
-        let ctx = IRContext::with_empty_magic();
+    fn try_extract_tuple_ordering_error() -> crate::error::Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 3)])?;
+        let input = ctx.logical_get(TableRef::bare("t1"), None)?.build();
+        let c0 = test_col(&ctx, "t1", "c0")?;
+        let c2 = test_col(&ctx, "t1", "c2")?;
         let ordered_exprs = vec![
             (
-                ColumnRef::new(Column(0)).into_scalar(),
+                ColumnRef::new(c0).into_scalar(),
                 TupleOrderingDirection::Asc,
             ),
             (
                 BinaryOp::new(
                     BinaryOpKind::Plus,
-                    ColumnRef::new(Column(2)).into_scalar(),
+                    ColumnRef::new(c2).into_scalar(),
                     Literal::new(ScalarValue::Int32(Some(1))).into_scalar(),
                 )
                 .into_scalar(),
@@ -162,15 +171,15 @@ mod tests {
             ),
         ];
 
-        let order_by = LogicalOrderBy::new(ctx.mock_scan(1, vec![0, 1, 2], 100.), ordered_exprs)
-            .into_operator();
+        let order_by = OrderBy::new(input, ordered_exprs).into_operator();
 
         let res = order_by
-            .borrow::<LogicalOrderBy>()
+            .borrow::<OrderBy>()
             .try_extract_tuple_ordering()
             .unwrap_err();
 
         assert_eq!(res.len(), 1);
-        assert!(res[0].try_borrow::<BinaryOp>().is_ok())
+        assert!(res[0].try_borrow::<BinaryOp>().is_ok());
+        Ok(())
     }
 }

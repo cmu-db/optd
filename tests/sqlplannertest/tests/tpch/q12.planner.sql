@@ -24,6 +24,6 @@ ORDER BY
 
 /*
 Error
-External error: Connector error: Unsupported df logical expr: CASE WHEN orders.o_orderpriority = Utf8View("1-URGENT") OR orders.o_orderpriority = Utf8View("2-HIGH") THEN Int64(1) ELSE Int64(0) END
+External error: error converting aggregate expressions: Unsupported df logical expr: CASE WHEN orders.o_orderpriority = Utf8View("1-URGENT") OR orders.o_orderpriority = Utf8View("2-HIGH") THEN Int64(1) ELSE Int64(0) END
 */
 

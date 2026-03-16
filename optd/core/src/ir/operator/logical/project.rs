@@ -1,5 +1,5 @@
-//! The logical projection operator selects specific columns or expressions
-//! from the input data.
+//! The project operator selects specific columns or expressions from the input
+//! data.
 
 use crate::ir::{
     IRCommon, Operator, Scalar,
@@ -11,30 +11,33 @@ use pretty_xmlish::Pretty;
 use std::sync::Arc;
 
 define_node!(
-    /// Metadata: (none)
+    /// Metadata:
+    /// - table_index: table index of the project node.
     /// Scalars:
     /// - projections: The expressions to project.
-    LogicalProject, LogicalProjectBorrowed {
+    Project, ProjectBorrowed {
         properties: OperatorProperties,
-        metadata: LogicalProjectMetadata {},
+        metadata: ProjectMetadata {
+            table_index: i64,
+        },
         inputs: {
             operators: [input],
             scalars: [projections],
         }
     }
 );
-impl_operator_conversion!(LogicalProject, LogicalProjectBorrowed);
+impl_operator_conversion!(Project, ProjectBorrowed);
 
-impl LogicalProject {
-    pub fn new(input: Arc<Operator>, projections: Arc<Scalar>) -> Self {
+impl Project {
+    pub fn new(table_index: i64, input: Arc<Operator>, projections: Arc<Scalar>) -> Self {
         Self {
-            meta: LogicalProjectMetadata {},
+            meta: ProjectMetadata { table_index },
             common: IRCommon::new(Arc::new([input]), Arc::new([projections])),
         }
     }
 }
 
-impl Explain for LogicalProjectBorrowed<'_> {
+impl Explain for ProjectBorrowed<'_> {
     fn explain<'a>(
         &self,
         ctx: &crate::ir::IRContext,
@@ -42,9 +45,10 @@ impl Explain for LogicalProjectBorrowed<'_> {
     ) -> pretty_xmlish::Pretty<'a> {
         let mut fields = Vec::new();
         let projecions_explained = self.projections().explain(ctx, option);
+        fields.push((".table_index", Pretty::display(&self.table_index())));
         fields.push((".projections", projecions_explained));
         fields.extend(self.common.explain_operator_properties(ctx, option));
         let children = self.common.explain_input_operators(ctx, option);
-        Pretty::simple_record("LogicalProject", fields, children)
+        Pretty::simple_record("Project", fields, children)
     }
 }

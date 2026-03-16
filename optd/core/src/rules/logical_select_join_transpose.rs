@@ -1,6 +1,6 @@
 use crate::ir::{
     IRContext, OperatorKind,
-    operator::{LogicalJoin, LogicalSelect, join::JoinType},
+    operator::{Join, Select, join::JoinType},
     rule::{OperatorPattern, Rule},
 };
 
@@ -17,16 +17,16 @@ impl Default for LogicalSelectJoinTransposeRule {
 impl LogicalSelectJoinTransposeRule {
     pub fn new() -> Self {
         const INPUT: usize = 0;
-        let mut pattern = OperatorPattern::with_top_matches(|kind| {
-            matches!(kind, OperatorKind::LogicalSelect(_))
-        });
+        let mut pattern =
+            OperatorPattern::with_top_matches(|kind| matches!(kind, OperatorKind::Select(_)));
         pattern.add_input_operator_pattern(
             INPUT,
             OperatorPattern::with_top_matches(|kind| {
                 matches!(
                     kind,
-                    OperatorKind::LogicalJoin(meta)
-                        if matches!(meta.join_type, JoinType::Inner | JoinType::Left)
+                    OperatorKind::Join(meta)
+                        if meta.implementation.is_none()
+                            && matches!(meta.join_type, JoinType::Inner | JoinType::Left)
                 )
             }),
         );
@@ -48,28 +48,40 @@ impl Rule for LogicalSelectJoinTransposeRule {
         operator: &crate::ir::Operator,
         ctx: &IRContext,
     ) -> crate::error::Result<Vec<std::sync::Arc<crate::ir::Operator>>> {
-        let select = operator.try_borrow::<LogicalSelect>().unwrap();
-        let join = select.input().try_borrow::<LogicalJoin>().unwrap();
+        let select = operator.try_borrow::<Select>().unwrap();
+        let join = select.input().try_borrow::<Join>().unwrap();
 
         let outer = join.outer().clone();
         let inner = join.inner().clone();
 
         let used_columns = select.predicate().used_columns();
-        let is_bound_by_outer = used_columns.is_subset(&outer.output_columns(ctx));
-        let is_bound_by_inner = used_columns.is_subset(&inner.output_columns(ctx));
+        let outer_output_columns = outer.output_columns(ctx)?;
+        let inner_output_columns = inner.output_columns(ctx)?;
+        let is_bound_by_outer = used_columns.is_subset(outer_output_columns.as_ref());
+        let is_bound_by_inner = used_columns.is_subset(inner_output_columns.as_ref());
 
         let maybe_transformed = match (is_bound_by_outer, is_bound_by_inner) {
             (false, false) => None,
             (true, false) => Some(
                 outer
-                    .logical_select(select.predicate().clone())
-                    .logical_join(inner, join.join_cond().clone(), *join.join_type()),
+                    .with_ctx(ctx)
+                    .select(select.predicate().clone())
+                    .logical_join(inner, join.join_cond().clone(), *join.join_type())
+                    .build(),
             ),
-            (false, true) => Some(outer.logical_join(
-                inner.logical_select(select.predicate().clone()),
-                join.join_cond().clone(),
-                *join.join_type(),
-            )),
+            (false, true) => Some(
+                outer
+                    .with_ctx(ctx)
+                    .logical_join(
+                        inner
+                            .with_ctx(ctx)
+                            .select(select.predicate().clone())
+                            .build(),
+                        join.join_cond().clone(),
+                        *join.join_type(),
+                    )
+                    .build(),
+            ),
             // Wrong: false,
             (true, true) => None,
         };

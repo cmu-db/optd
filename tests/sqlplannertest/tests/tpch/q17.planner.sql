@@ -19,6 +19,6 @@ WHERE
 
 /*
 Error
-External error: Connector error: Conversion from DataFusion ScalarValue 0.2 is not implemented
+External error: error converting projection: Conversion from DataFusion ScalarValue Float64(0.2) is not implemented
 */
 

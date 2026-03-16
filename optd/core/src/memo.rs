@@ -133,11 +133,11 @@ pub struct MemoTable {
     id_to_group_ids: UnionFind<GroupId>,
     groups: BTreeMap<GroupId, MemoGroup>,
     id_allocator: IdAllocator,
-    ctx: IRContext,
+    ctx: Arc<IRContext>,
 }
 
 impl MemoTable {
-    pub fn new(ctx: IRContext) -> Self {
+    pub fn new(ctx: Arc<IRContext>) -> Self {
         Self {
             scalar_dedup: Default::default(),
             scalar_id_to_key: Default::default(),
@@ -278,7 +278,7 @@ impl MemoTable {
 
     fn infer_properties(&self, operator: Arc<Operator>) {
         operator.get_property::<Cardinality>(&self.ctx);
-        operator.get_property::<OutputColumns>(&self.ctx);
+        let _ = operator.get_property::<OutputColumns>(&self.ctx);
     }
 
     /// Inserts a scalar into the memo table's scalar deduplication map.
@@ -661,14 +661,15 @@ mod tests {
     use super::*;
     use crate::ir::{
         Column, IRContext, builder::*, explain::quick_explain, operator::join::JoinType,
+        table_ref::TableRef, test_utils::test_ctx_with_tables,
     };
 
     #[test]
     fn insert_scalar() {
-        let mut memo = MemoTable::new(IRContext::with_empty_magic());
-        let scalar = column_ref(Column(1)).eq(int32(799));
+        let mut memo = MemoTable::new(Arc::new(IRContext::with_empty_magic()));
+        let scalar = column_ref(Column(1, 1)).eq(int32(799));
         let scalar_from_clone = scalar.clone();
-        let scalar_dup = column_ref(Column(1)).eq(int32(799));
+        let scalar_dup = column_ref(Column(1, 1)).eq(int32(799));
         let id = memo.insert_scalar(scalar).unwrap();
         let res = memo.insert_scalar(scalar_from_clone);
         assert_eq!(Err(id), res);
@@ -677,44 +678,49 @@ mod tests {
     }
 
     #[test]
-    fn insert_new_operator() {
-        let ctx = IRContext::with_empty_magic();
+    fn insert_new_operator() -> crate::error::Result<()> {
+        let ctx = Arc::new(test_ctx_with_tables(&[("t1", 1), ("t2", 1)])?);
         let mut memo = MemoTable::new(ctx.clone());
-        let join = ctx.mock_scan(1, vec![1], 0.).logical_join(
-            ctx.mock_scan(2, vec![2], 0.),
-            boolean(true),
-            JoinType::Inner,
-        );
-
-        let join_dup = ctx.mock_scan(1, vec![1], 0.).logical_join(
-            ctx.mock_scan(2, vec![2], 0.),
-            boolean(true),
-            JoinType::Inner,
-        );
+        let m1 = ctx.logical_get(TableRef::bare("t1"), None)?.build();
+        let m2 = ctx.logical_get(TableRef::bare("t2"), None)?.build();
+        let join = m1
+            .clone()
+            .with_ctx(ctx.as_ref())
+            .logical_join(m2.clone(), boolean(true), JoinType::Inner)
+            .build();
+        let join_dup = m1
+            .clone()
+            .with_ctx(ctx.as_ref())
+            .logical_join(m2.clone(), boolean(true), JoinType::Inner)
+            .build();
 
         let group_id = memo.insert_new_operator(join.clone()).unwrap();
         let res = memo.insert_new_operator(join);
         assert_eq!(Err(group_id), res);
         let res = memo.insert_new_operator(join_dup);
         assert_eq!(Err(group_id), res);
+
+        Ok(())
     }
 
     #[test]
-    fn insert_operator_into_group() {
-        let ctx = IRContext::with_empty_magic();
+    fn insert_operator_into_group() -> crate::error::Result<()> {
+        let ctx = Arc::new(test_ctx_with_tables(&[("t1", 1), ("t2", 1)])?);
         let mut memo = MemoTable::new(ctx.clone());
-        let join = ctx.mock_scan(1, vec![1], 0.).logical_join(
-            ctx.mock_scan(2, vec![2], 0.),
-            boolean(true),
-            JoinType::Inner,
-        );
+        let m1 = ctx.logical_get(TableRef::bare("t1"), None)?.build();
+        let m2 = ctx.logical_get(TableRef::bare("t2"), None)?.build();
+        let join = m1
+            .clone()
+            .with_ctx(ctx.as_ref())
+            .logical_join(m2.clone(), boolean(true), JoinType::Inner)
+            .build();
         let group_id = memo.insert_new_operator(join).unwrap();
 
-        let join_commuted = ctx.mock_scan(2, vec![2], 0.).logical_join(
-            ctx.mock_scan(1, vec![1], 0.),
-            boolean(true),
-            JoinType::Inner,
-        );
+        let join_commuted = m2
+            .clone()
+            .with_ctx(ctx.as_ref())
+            .logical_join(m1, boolean(true), JoinType::Inner)
+            .build();
         let res = memo.insert_operator_into_group(join_commuted.clone(), group_id);
         assert!(res.is_ok());
 
@@ -723,22 +729,29 @@ mod tests {
 
         let group = memo.get_memo_group(&group_id);
         assert_eq!(2, group.exploration.borrow().exprs.len());
+        Ok(())
     }
 
     #[test]
-    fn parent_group_merge() {
-        let ctx = IRContext::with_empty_magic();
+    fn parent_group_merge() -> crate::error::Result<()> {
+        let ctx = Arc::new(test_ctx_with_tables(&[("t1", 1), ("t2", 1)])?);
         let mut memo = MemoTable::new(ctx.clone());
 
-        let m1 = ctx.mock_scan(1, vec![1], 0.);
-        let m1_alias = ctx.mock_scan(2, vec![1], 0.);
+        let m1 = ctx.logical_get(TableRef::bare("t1"), None)?.build();
+        let m1_alias = ctx.logical_get(TableRef::bare("t2"), None).unwrap().build();
 
         let g1 = memo
-            .insert_new_operator(m1.clone().logical_select(boolean(true)))
+            .insert_new_operator(m1.clone().with_ctx(&ctx).select(boolean(true)).build())
             .unwrap();
 
         let g2 = memo
-            .insert_new_operator(m1_alias.clone().logical_select(boolean(true)))
+            .insert_new_operator(
+                m1_alias
+                    .clone()
+                    .with_ctx(&ctx)
+                    .select(boolean(true))
+                    .build(),
+            )
             .unwrap();
 
         let m1_group_id = memo.insert_operator(m1.clone()).unwrap_err();
@@ -753,23 +766,27 @@ mod tests {
         let g1_group = memo.get_memo_group(&g1);
         let g2_group = memo.get_memo_group(&g2);
         assert_eq!(g1_group.group_id, g2_group.group_id);
+
+        Ok(())
     }
 
     #[test]
     #[tracing_test::traced_test]
     fn cascading_group_merges() {
-        let ctx = IRContext::with_empty_magic();
+        let ctx = Arc::new(test_ctx_with_tables(&[("t1", 1), ("t2", 1)]).unwrap());
         let mut memo = MemoTable::new(ctx.clone());
 
-        let m1 = ctx.mock_scan(1, vec![1], 0.);
+        let m1 = ctx.logical_get(TableRef::bare("t1"), None).unwrap().build();
         trace!("\n{}", quick_explain(&m1, &memo.ctx));
-        let m1_alias = ctx.mock_scan(2, vec![1], 0.);
+        let m1_alias = ctx.logical_get(TableRef::bare("t2"), None).unwrap().build();
 
         let g1 = memo
             .insert_new_operator(
                 m1.clone()
-                    .logical_select(boolean(true))
-                    .logical_select(boolean(true)),
+                    .with_ctx(&ctx)
+                    .select(boolean(true))
+                    .select(boolean(true))
+                    .build(),
             )
             .unwrap();
 
@@ -777,8 +794,10 @@ mod tests {
             .insert_new_operator(
                 m1_alias
                     .clone()
-                    .logical_select(boolean(true))
-                    .logical_select(boolean(true)),
+                    .with_ctx(&ctx)
+                    .select(boolean(true))
+                    .select(boolean(true))
+                    .build(),
             )
             .unwrap();
 
@@ -798,24 +817,28 @@ mod tests {
     }
 
     #[test]
-    fn insert_partial_binding() {
-        let ctx = IRContext::with_empty_magic();
+    fn insert_partial_binding() -> crate::error::Result<()> {
+        let ctx = Arc::new(test_ctx_with_tables(&[("t1", 1), ("t2", 1)])?);
         let mut memo = MemoTable::new(ctx.clone());
 
-        let m1 = ctx.mock_scan(1, vec![1], 0.);
-        let m1_alias = ctx.mock_scan(2, vec![1], 0.);
+        let m1 = ctx.logical_get(TableRef::bare("t1"), None)?.build();
+        let m1_alias = ctx.logical_get(TableRef::bare("t2"), None)?.build();
         memo.insert_new_operator(
             m1.clone()
-                .logical_select(boolean(true))
-                .logical_select(boolean(true)),
+                .with_ctx(&ctx)
+                .select(boolean(true))
+                .select(boolean(true))
+                .build(),
         )
         .unwrap();
 
         memo.insert_new_operator(
             m1_alias
                 .clone()
-                .logical_select(boolean(true))
-                .logical_select(boolean(true)),
+                .with_ctx(&ctx)
+                .select(boolean(true))
+                .select(boolean(true))
+                .build(),
         )
         .unwrap();
 
@@ -828,13 +851,24 @@ mod tests {
             .properties
             .clone();
 
-        let m1_select_binding = group(m1_group_id, properties).logical_select(boolean(true));
+        let m1_select_binding = group(m1_group_id, properties)
+            .with_ctx(&ctx)
+            .select(boolean(true))
+            .build();
 
         let into_group_id = memo
-            .insert_operator(m1_alias.clone().logical_select(boolean(true)))
+            .insert_operator(
+                m1_alias
+                    .clone()
+                    .with_ctx(&ctx)
+                    .select(boolean(true))
+                    .build(),
+            )
             .unwrap_err();
 
         let res = memo.insert_operator_into_group(m1_select_binding, into_group_id);
         assert_eq!(Err(into_group_id), res);
+
+        Ok(())
     }
 }
