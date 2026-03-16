@@ -10,8 +10,8 @@ use crate::ir::{
     catalog::{DataSourceId, Schema},
     convert::{IntoOperator, IntoScalar},
     operator::{
-        Aggregate, AggregateImplementation, DependentJoin, Get, Join, JoinSide, Project, Remap,
-        Select, join::JoinType,
+        Aggregate, AggregateImplementation, DependentJoin, Get, Join, JoinImplementation, JoinSide,
+        Project, Remap, Select, join::JoinType,
     },
     properties::OperatorProperties,
     scalar::*,
@@ -72,7 +72,7 @@ impl Operator {
         join_cond: Arc<Scalar>,
         join_type: JoinType,
     ) -> Arc<Self> {
-        Join::logical(join_type, self, inner, join_cond).into_operator()
+        Join::new(join_type, self, inner, join_cond, None).into_operator()
     }
 
     /// Creates a dependent (correlated) join.
@@ -91,7 +91,14 @@ impl Operator {
         join_cond: Arc<Scalar>,
         join_type: JoinType,
     ) -> Arc<Self> {
-        Join::nested_loop(join_type, self, inner, join_cond).into_operator()
+        Join::new(
+            join_type,
+            self,
+            inner,
+            join_cond,
+            Some(JoinImplementation::nested_loop()),
+        )
+        .into_operator()
     }
 
     pub fn hash_join(
@@ -110,13 +117,12 @@ impl Operator {
         )
         .into_scalar();
 
-        Join::hash(
+        Join::new(
             join_type,
             self,
             probe_side,
             join_cond,
-            JoinSide::Outer,
-            keys,
+            Some(JoinImplementation::hash(JoinSide::Outer, keys)),
         )
         .into_operator()
     }

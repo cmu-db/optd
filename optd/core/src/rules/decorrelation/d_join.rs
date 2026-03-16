@@ -205,6 +205,6 @@ impl UnnestingRule {
         }
 
         let new_cond = Scalar::combine_conjuncts(new_conds);
-        Ok(Join::logical(join_type, new_outer, new_inner, new_cond).into_operator())
+        Ok(Join::new(join_type, new_outer, new_inner, new_cond, None).into_operator())
     }
 }

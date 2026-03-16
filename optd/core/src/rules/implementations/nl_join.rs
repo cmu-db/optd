@@ -1,7 +1,7 @@
 use crate::ir::{
     OperatorKind,
     convert::IntoOperator,
-    operator::{Join, join::JoinType},
+    operator::{Join, JoinImplementation, join::JoinType},
     rule::{OperatorPattern, Rule},
 };
 
@@ -44,11 +44,12 @@ impl Rule for LogicalJoinAsPhysicalNLJoinRule {
         _ctx: &crate::ir::IRContext,
     ) -> crate::error::Result<Vec<std::sync::Arc<crate::ir::Operator>>> {
         let join = operator.try_borrow::<Join>().unwrap();
-        let nl_join = Join::nested_loop(
+        let nl_join = Join::new(
             *join.join_type(),
             join.outer().clone(),
             join.inner().clone(),
             join.join_cond().clone(),
+            Some(JoinImplementation::nested_loop()),
         );
         Ok(vec![nl_join.into_operator()])
     }
@@ -71,11 +72,12 @@ mod tests {
         let m_outer = MockScan::with_mock_spec(1, MockSpec::default()).into_operator();
         let m_inner = MockScan::with_mock_spec(2, MockSpec::default()).into_operator();
         let join_cond = Literal::boolean(true).into_scalar();
-        let inner_join = Join::logical(
+        let inner_join = Join::new(
             JoinType::Inner,
             m_outer.clone(),
             m_inner.clone(),
             join_cond.clone(),
+            None,
         )
         .into_operator();
 

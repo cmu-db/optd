@@ -151,17 +151,24 @@ mod tests {
         // plan with sort on top.
         let op1 = EnforcerSort::new(
             tuple_ordering.clone(),
-            Join::nested_loop(JoinType::Inner, m1.clone(), m2.clone(), join_cond.clone())
-                .into_operator(),
+            Join::new(
+                JoinType::Inner,
+                m1.clone(),
+                m2.clone(),
+                join_cond.clone(),
+                Some(JoinImplementation::nested_loop()),
+            )
+            .into_operator(),
         )
         .into_operator();
 
         // plan with sort passed down.
-        let op2 = Join::nested_loop(
+        let op2 = Join::new(
             JoinType::Inner,
             EnforcerSort::new(tuple_ordering, m1).into_operator(),
             m2,
             join_cond.clone(),
+            Some(JoinImplementation::nested_loop()),
         )
         .into_operator();
 
@@ -189,18 +196,20 @@ mod tests {
         let outer = ctx.mock_scan(1, 2, 100.);
         let inner = ctx.mock_scan(2, 2, 50.);
         let join_cond = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();
-        let logical_join = Join::logical(
+        let logical_join = Join::new(
             JoinType::Inner,
             outer.clone(),
             inner.clone(),
             join_cond.clone(),
+            None,
         )
         .into_operator();
-        let physical_join = Join::nested_loop(
+        let physical_join = Join::new(
             JoinType::Inner,
             outer.clone(),
             inner.clone(),
             join_cond.clone(),
+            Some(JoinImplementation::nested_loop()),
         )
         .into_operator();
         assert_eq!(

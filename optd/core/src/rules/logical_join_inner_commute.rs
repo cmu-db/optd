@@ -53,11 +53,12 @@ impl Rule for LogicalJoinInnerCommuteRule {
 
         let new_outer = join.inner().clone();
         let new_inner = join.outer().clone();
-        let join_commuted = Join::logical(
+        let join_commuted = Join::new(
             JoinType::Inner,
             new_outer,
             new_inner,
             join.join_cond().clone(),
+            None,
         );
         Ok(vec![join_commuted.into_operator()])
     }
@@ -79,11 +80,12 @@ mod tests {
         let m_outer = MockScan::with_mock_spec(1, MockSpec::default()).into_operator();
         let m_inner = MockScan::with_mock_spec(2, MockSpec::default()).into_operator();
         let join_cond = Literal::boolean(true).into_scalar();
-        let inner_join = Join::logical(
+        let inner_join = Join::new(
             JoinType::Inner,
             m_outer.clone(),
             m_inner.clone(),
             join_cond.clone(),
+            None,
         )
         .into_operator();
 
@@ -100,7 +102,7 @@ mod tests {
         assert_eq!(new_inner.table_index(), &1);
 
         let left_outer_join =
-            Join::logical(JoinType::Left, m_outer, m_inner, join_cond).into_operator();
+            Join::new(JoinType::Left, m_outer, m_inner, join_cond, None).into_operator();
         assert!(!rule.pattern.matches_without_expand(&left_outer_join));
     }
 }

@@ -9,6 +9,7 @@ use std::sync::{Arc, LazyLock};
 
 pub mod binder;
 pub mod builder;
+pub mod builder_v2;
 pub mod catalog;
 mod column;
 mod context;

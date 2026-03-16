@@ -1,7 +1,9 @@
 use crate::ir::{
     OperatorKind,
     convert::IntoOperator,
-    operator::{Join, JoinSide, join::JoinType, split_equi_and_non_equi_conditions},
+    operator::{
+        Join, JoinImplementation, JoinSide, join::JoinType, split_equi_and_non_equi_conditions,
+    },
     rule::{OperatorPattern, Rule},
 };
 
@@ -54,13 +56,12 @@ impl Rule for LogicalJoinAsPhysicalHashJoinRule {
         debug_assert!(!non_equi_conds.is_empty() || !equi_conds.is_empty());
 
         Ok(vec![
-            Join::hash(
+            Join::new(
                 *join.join_type(),
                 join.outer().clone(),
                 join.inner().clone(),
                 join.join_cond().clone(),
-                JoinSide::Outer,
-                equi_conds.into(),
+                Some(JoinImplementation::hash(JoinSide::Outer, equi_conds.into())),
             )
             .into_operator(),
         ])

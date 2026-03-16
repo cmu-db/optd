@@ -94,13 +94,20 @@ mod tests {
         let c = MockScan::with_mock_spec(3, MockSpec::default()).into_operator();
         let cond_upper = Literal::boolean(true).into_scalar();
         let cond_lower = Literal::boolean(false).into_scalar();
-        let join_ab = Join::logical(JoinType::Inner, a.clone(), b.clone(), cond_lower.clone())
-            .into_operator();
-        let inner_joins = Join::logical(
+        let join_ab = Join::new(
+            JoinType::Inner,
+            a.clone(),
+            b.clone(),
+            cond_lower.clone(),
+            None,
+        )
+        .into_operator();
+        let inner_joins = Join::new(
             JoinType::Inner,
             join_ab.clone(),
             c.clone(),
             cond_upper.clone(),
+            None,
         )
         .into_operator();
 
@@ -137,14 +144,21 @@ mod tests {
         );
 
         // This rule does not apply to left outer joins.
-        let left_outer_joins = Join::logical(
+        let left_outer_joins = Join::new(
             JoinType::Left,
             {
-                Join::logical(JoinType::Left, a.clone(), b.clone(), cond_lower.clone())
-                    .into_operator()
+                Join::new(
+                    JoinType::Left,
+                    a.clone(),
+                    b.clone(),
+                    cond_lower.clone(),
+                    None,
+                )
+                .into_operator()
             },
             c.clone(),
             cond_upper.clone(),
+            None,
         )
         .into_operator();
         assert!(!rule.pattern.matches_without_expand(&left_outer_joins));

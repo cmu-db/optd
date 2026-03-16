@@ -100,47 +100,6 @@ impl Join {
             common: IRCommon::new(Arc::new([outer, inner]), Arc::new([join_cond])),
         }
     }
-
-    pub fn logical(
-        join_type: JoinType,
-        outer: Arc<Operator>,
-        inner: Arc<Operator>,
-        join_cond: Arc<Scalar>,
-    ) -> Self {
-        Self::new(join_type, outer, inner, join_cond, None)
-    }
-
-    pub fn nested_loop(
-        join_type: JoinType,
-        outer: Arc<Operator>,
-        inner: Arc<Operator>,
-        join_cond: Arc<Scalar>,
-    ) -> Self {
-        Self::new(
-            join_type,
-            outer,
-            inner,
-            join_cond,
-            Some(JoinImplementation::nested_loop()),
-        )
-    }
-
-    pub fn hash(
-        join_type: JoinType,
-        outer: Arc<Operator>,
-        inner: Arc<Operator>,
-        join_cond: Arc<Scalar>,
-        build_side: JoinSide,
-        keys: Arc<[(Column, Column)]>,
-    ) -> Self {
-        Self::new(
-            join_type,
-            outer,
-            inner,
-            join_cond,
-            Some(JoinImplementation::hash(build_side, keys)),
-        )
-    }
 }
 
 type SplittedJoinConds = (Vec<(Column, Column)>, Vec<Arc<Scalar>>);

@@ -61,11 +61,12 @@ impl UnnestingRule {
         }
         let mut chain = domains.remove(0);
         for next_domain in domains {
-            chain = Join::logical(
+            chain = Join::new(
                 JoinType::Inner,
                 chain,
                 next_domain,
                 crate::ir::scalar::Literal::boolean(true).into_scalar(),
+                None,
             )
             .into_operator();
         }
@@ -81,11 +82,12 @@ impl UnnestingRule {
         let Some(chain) = Self::build_domain_chain(info, unnesting, seen_outer_refs, false) else {
             return op;
         };
-        Join::logical(
+        Join::new(
             JoinType::Inner,
             chain,
             op,
             crate::ir::scalar::Literal::boolean(true).into_scalar(),
+            None,
         )
         .into_operator()
     }
@@ -436,10 +438,7 @@ impl UnnestingRule {
                             info.clear_scoped_repr_of(c);
                         }
                     }
-                    Ok(
-                        Join::logical(JoinType::Left, domain_input, agg, join_cond)
-                            .into_operator(),
-                    )
+                    Ok(Join::new(JoinType::Left, domain_input, agg, join_cond, None).into_operator())
                 } else {
                     Ok(agg)
                 }
@@ -516,7 +515,7 @@ impl UnnestingRule {
                         ctx,
                     )?;
                     let new_cond = info.rewrite_columns(node.join_cond().clone());
-                    return Ok(Join::logical(join_type, new_left, right.clone(), new_cond)
+                    return Ok(Join::new(join_type, new_left, right.clone(), new_cond, None)
                         .into_operator());
                 }
 
@@ -529,7 +528,7 @@ impl UnnestingRule {
                         ctx,
                     )?;
                     let new_cond = info.rewrite_columns(node.join_cond().clone());
-                    return Ok(Join::logical(join_type, left.clone(), new_right, new_cond)
+                    return Ok(Join::new(join_type, left.clone(), new_right, new_cond, None)
                         .into_operator());
                 }
 
@@ -640,11 +639,12 @@ impl UnnestingRule {
                     }
                 }
 
-                Ok(Join::logical(
+                Ok(Join::new(
                     join_type,
                     new_left,
                     new_right,
                     Scalar::combine_conjuncts(join_conds),
+                    None,
                 )
                 .into_operator())
             }

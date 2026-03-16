@@ -312,8 +312,14 @@ mod tests {
         let m1 = ctx.mock_scan(1, 2, 100.);
         let m2 = ctx.mock_scan(2, 2, 100.);
         let join_cond = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();
-        let join1 = Join::nested_loop(JoinType::Inner, m1.clone(), m2.clone(), join_cond.clone())
-            .into_operator();
+        let join1 = Join::new(
+            JoinType::Inner,
+            m1.clone(),
+            m2.clone(),
+            join_cond.clone(),
+            Some(JoinImplementation::nested_loop()),
+        )
+        .into_operator();
         let join2 = join1.clone_with_inputs(Some(Arc::new([m2, m1])), None);
 
         // Both satisfy the empty ordering.
@@ -398,8 +404,14 @@ mod tests {
         let m1 = ctx.mock_scan(1, 2, 100.);
         let m2 = ctx.mock_scan(2, 2, 100.);
         let join_cond = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();
-        let join1 = Join::logical(JoinType::Inner, m1.clone(), m2.clone(), join_cond.clone())
-            .into_operator();
+        let join1 = Join::new(
+            JoinType::Inner,
+            m1.clone(),
+            m2.clone(),
+            join_cond.clone(),
+            None,
+        )
+        .into_operator();
         let join2 = join1.clone_with_inputs(Some(Arc::new([m2, m1])), None);
 
         let empty = TupleOrdering::default();

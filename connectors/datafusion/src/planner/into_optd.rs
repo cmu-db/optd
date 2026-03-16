@@ -195,7 +195,7 @@ impl OptdQueryPlannerContext<'_> {
         }
 
         let join_cond = NaryOp::new(NaryOpKind::And, terms.into()).into_scalar();
-        let join = Join::logical(join_type, left, right, join_cond);
+        let join = Join::new(join_type, left, right, join_cond, None);
 
         Ok(join.into_operator())
     }
