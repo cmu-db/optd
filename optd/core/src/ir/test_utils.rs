@@ -12,7 +12,7 @@ use crate::{
     magic::MemoryCatalog,
 };
 
-pub(crate) fn test_ctx_with_tables(tables: &[(&str, usize)]) -> crate::error::Result<IRContext> {
+pub fn test_ctx_with_tables(tables: &[(&str, usize)]) -> crate::error::Result<IRContext> {
     let catalog = MemoryCatalog::new("optd", "public");
     for (table_name, width) in tables {
         let schema = Arc::new(Schema::new(
@@ -27,10 +27,6 @@ pub(crate) fn test_ctx_with_tables(tables: &[(&str, usize)]) -> crate::error::Re
     Ok(IRContext::with_memory_catalog(catalog))
 }
 
-pub(crate) fn test_col(
-    ctx: &IRContext,
-    table: &str,
-    column: &str,
-) -> crate::error::Result<Column> {
+pub fn test_col(ctx: &IRContext, table: &str, column: &str) -> crate::error::Result<Column> {
     ctx.col(Some(&TableRef::bare(table)), column)
 }

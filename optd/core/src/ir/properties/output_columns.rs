@@ -155,13 +155,15 @@ impl crate::ir::Operator {
 mod tests {
     use crate::ir::{
         Group, GroupId, IRContext, convert::IntoOperator, properties::OperatorProperties,
+        table_ref::TableRef,
+        test_utils::test_ctx_with_tables,
     };
     use std::sync::Arc;
 
     #[test]
-    fn group_output_columns_uses_cached_properties() {
-        let ctx = IRContext::with_empty_magic();
-        let input = ctx.mock_scan(1, 2, 100.);
+    fn group_output_columns_uses_cached_properties() -> crate::error::Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 2)])?;
+        let input = ctx.logical_get(TableRef::bare("t1"), None)?.build();
         let expected = input.output_columns(&ctx).unwrap();
 
         let group = Group::new(GroupId(42), input.properties().clone()).into_operator();
@@ -170,6 +172,7 @@ mod tests {
             group.output_columns(&ctx).unwrap().as_ref(),
             expected.as_ref()
         );
+        Ok(())
     }
 
     #[test]

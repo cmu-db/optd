@@ -67,11 +67,16 @@ impl Rule for LogicalJoinInnerAssocRule {
             return Ok(vec![]);
         }
 
-        let new_join_upper = a.logical_join(
-            b.logical_join(c, join_upper.join_cond().clone(), JoinType::Inner),
-            join_lower.join_cond().clone(),
-            JoinType::Inner,
-        );
+        let new_join_upper = a
+            .with_ctx(ctx)
+            .logical_join(
+                b.with_ctx(ctx)
+                    .logical_join(c, join_upper.join_cond().clone(), JoinType::Inner)
+                    .build(),
+                join_lower.join_cond().clone(),
+                JoinType::Inner,
+            )
+            .build();
         Ok(vec![new_join_upper])
     }
 }

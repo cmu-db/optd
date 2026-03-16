@@ -163,10 +163,6 @@ impl JoinBorrowed<'_> {
         }
     }
 
-    pub fn hash_keys(&self) -> Option<&Arc<[(Column, Column)]>> {
-        self.hash_implementation()?.hash_keys()
-    }
-
     pub fn build_side(&self) -> Option<&Arc<Operator>> {
         let build_side = self.hash_implementation()?.build_side()?;
         Some(match build_side {

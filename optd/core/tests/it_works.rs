@@ -1,18 +1,18 @@
 use std::sync::Arc;
 
-use arrow_schema::{DataType, Field, Schema};
 use itertools::Itertools;
 
 use optd_core::{
     cascades::Cascades,
     ir::{
-        Column, IRContext, Operator,
-        builder_v2::*,
+        Operator,
+        builder::*,
         explain::quick_explain,
         operator::join::JoinType,
         properties::{Required, TupleOrdering, TupleOrderingDirection},
         rule::RuleSet,
         table_ref::TableRef,
+        test_utils::{test_col, test_ctx_with_tables},
     },
     rules,
 };
@@ -68,27 +68,17 @@ async fn integration() -> Result<(), Box<dyn std::error::Error>> {
         .compact() // Optional: use compact format
         .init();
 
-    let ctx = Arc::new(IRContext::with_empty_magic());
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("v1", DataType::Int64, true),
-        Field::new("v2", DataType::Int64, false),
-        Field::new("v3", DataType::Int64, false),
-    ]));
-    let m1_table_index = ctx.add_binding(Some(TableRef::bare("m1")), schema.clone())?;
-    let m1 = ctx.logical_get(m1_table_index, &schema, None);
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("v4", DataType::Int64, true),
-        Field::new("v5", DataType::Int64, false),
-    ]));
-    let m2_table_index = ctx.add_binding(Some(TableRef::bare("m2")), schema.clone())?;
-    let m2 = ctx.logical_get(m2_table_index, &schema, None);
+    let ctx = Arc::new(test_ctx_with_tables(&[("m1", 3), ("m2", 2), ("m3", 2)])?);
 
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("v6", DataType::Int64, true),
-        Field::new("v7", DataType::Int64, false),
-    ]));
-    let m3_table_index = ctx.add_binding(Some(TableRef::bare("m3")), schema.clone())?;
-    let m3 = ctx.logical_get(m3_table_index, &schema, None);
+    let m1 = ctx.logical_get(TableRef::bare("m1"), None)?.build();
+    let m2 = ctx.logical_get(TableRef::bare("m2"), None)?.build();
+    let m3 = ctx.logical_get(TableRef::bare("m3"), None)?.build();
+    let m1_c0 = test_col(&ctx, "m1", "c0")?;
+    let m1_c1 = test_col(&ctx, "m1", "c1")?;
+    let m1_c2 = test_col(&ctx, "m1", "c2")?;
+    let m2_c0 = test_col(&ctx, "m2", "c0")?;
+    let m2_c1 = test_col(&ctx, "m2", "c1")?;
+    let m3_c1 = test_col(&ctx, "m3", "c1")?;
 
     // CREATE TABLE m1(v1 int, v2 int, v3 int);
     // CREATE TABLE m2(v4 int, v5 int);
@@ -105,31 +95,21 @@ async fn integration() -> Result<(), Box<dyn std::error::Error>> {
     // WHERE m3.v7 = 445 AND m1.v3 = 799 ORDER BY v4;
 
     let required = Arc::new(Required {
-        tuple_ordering: TupleOrdering::from_iter([(
-            Column(m2_table_index, 1),
-            TupleOrderingDirection::Asc,
-        )]),
+        tuple_ordering: TupleOrdering::from_iter([(m2_c1, TupleOrderingDirection::Asc)]),
     });
     let join_m1_m2_and_m3 = m1
-        .logical_join(
-            m2,
-            column_ref(Column(m1_table_index, 0)).eq(column_ref(Column(m2_table_index, 0))),
-            JoinType::Inner,
-        )
-        .logical_join(
-            m3,
-            column_ref(Column(m1_table_index, 1)).eq(column_ref(Column(m2_table_index, 0))),
-            JoinType::Inner,
-        )
-        .select(column_ref(Column(m1_table_index, 2)).eq(int32(799)))
-        .select(column_ref(Column(m3_table_index, 1)).eq(int32(445)))
+        .with_ctx(&ctx)
+        .logical_join(m2, column_ref(m1_c0).eq(column_ref(m2_c0)), JoinType::Inner)
+        .logical_join(m3, column_ref(m1_c1).eq(column_ref(m2_c0)), JoinType::Inner)
+        .select(column_ref(m1_c2).eq(int32(799)))
+        .select(column_ref(m3_c1).eq(int32(445)))
+        .build();
+    let join_m1_m2_and_m3 = ctx
         .project(
-            4,
-            [
-                column_ref(Column(m1_table_index, 2)),
-                column_ref(Column(m1_table_index, 0)).plus(int32(1)),
-            ],
-        );
+            join_m1_m2_and_m3,
+            [column_ref(m1_c2), column_ref(m1_c0).plus(int32(1))],
+        )?
+        .build();
 
     let rule_set = RuleSet::builder()
         .add_rule(rules::LogicalGetAsPhysicalTableScanRule::new())

@@ -12,7 +12,7 @@ use itertools::{Either, Itertools};
 use optd_core::{
     error::CatalogSnafu,
     ir::{
-        Scalar, ScalarValue, builder_v2 as optd_builder_v2,
+        Scalar, ScalarValue, builder as optd_builder_v2,
         catalog::Schema,
         convert::{IntoOperator, IntoScalar},
         operator::{Aggregate, Get, Join, Limit, OrderBy, Project, Remap, Select},

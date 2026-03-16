@@ -260,7 +260,7 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::builder_v2::column_ref;
+    use crate::ir::builder::column_ref;
     use crate::ir::{
         ScalarValue,
         convert::{IntoOperator, IntoScalar},
@@ -274,7 +274,7 @@ mod tests {
     #[test]
     fn enforcer_sort_try_satisify_ordering() -> crate::error::Result<()> {
         let ctx = test_ctx_with_tables(&[("t1", 3)])?;
-        let t1 = ctx.logical_get_v2(TableRef::bare("t1"), None)?.build();
+        let t1 = ctx.logical_get(TableRef::bare("t1"), None)?.build();
         let required = TupleOrdering::from_iter([
             (test_col(&ctx, "t1", "c0")?, TupleOrderingDirection::Asc),
             (test_col(&ctx, "t1", "c1")?, TupleOrderingDirection::Desc),
@@ -306,18 +306,18 @@ mod tests {
     fn physical_nljoin_try_satisfy_ordering() -> crate::error::Result<()> {
         let ctx = test_ctx_with_tables(&[("t1", 2), ("t2", 2)])?;
 
-        let m1 = ctx.table_scan_v2(TableRef::bare("t1"), None)?.build();
-        let m2 = ctx.table_scan_v2(TableRef::bare("t2"), None)?.build();
+        let m1 = ctx.table_scan(TableRef::bare("t1"), None)?.build();
+        let m2 = ctx.table_scan(TableRef::bare("t2"), None)?.build();
         let join_cond = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();
         let join1 = m1
             .clone()
             .with_ctx(&ctx)
-            .nl_join(m2.clone(), join_cond.clone(), JoinType::Inner)
+            .nested_loop(m2.clone(), join_cond.clone(), JoinType::Inner)
             .build();
         let join2 = m2
             .clone()
             .with_ctx(&ctx)
-            .nl_join(m1, join_cond, JoinType::Inner)
+            .nested_loop(m1, join_cond, JoinType::Inner)
             .build();
 
         // Both satisfy the empty ordering.
@@ -355,7 +355,7 @@ mod tests {
     #[test]
     fn physical_table_scan_try_satisfy_ordering() -> crate::error::Result<()> {
         let ctx = test_ctx_with_tables(&[("t1", 2)])?;
-        let t1 = ctx.table_scan_v2(TableRef::bare("t1"), None)?.build();
+        let t1 = ctx.table_scan(TableRef::bare("t1"), None)?.build();
 
         let ordering = TupleOrdering::default();
         let res = t1.try_satisfy(&ordering, &ctx)?.unwrap();
@@ -372,7 +372,7 @@ mod tests {
     #[test]
     fn logical_get_try_satisfy_ordering() -> crate::error::Result<()> {
         let ctx = test_ctx_with_tables(&[("t1", 2)])?;
-        let t1 = ctx.logical_get_v2(TableRef::bare("t1"), None)?.build();
+        let t1 = ctx.logical_get(TableRef::bare("t1"), None)?.build();
 
         let empty = TupleOrdering::default();
         let res = t1.try_satisfy(&empty, &ctx)?.unwrap();
@@ -390,8 +390,8 @@ mod tests {
     fn logical_join_try_satisfy_ordering() -> crate::error::Result<()> {
         let ctx = test_ctx_with_tables(&[("t1", 2), ("t2", 2)])?;
 
-        let m1 = ctx.logical_get_v2(TableRef::bare("t1"), None)?.build();
-        let m2 = ctx.logical_get_v2(TableRef::bare("t2"), None)?.build();
+        let m1 = ctx.logical_get(TableRef::bare("t1"), None)?.build();
+        let m2 = ctx.logical_get(TableRef::bare("t2"), None)?.build();
         let join_cond = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();
         let join1 = m1
             .clone()
@@ -424,8 +424,8 @@ mod tests {
     #[test]
     fn logical_select_try_satisfy_ordering() -> crate::error::Result<()> {
         let ctx = test_ctx_with_tables(&[("t1", 2), ("t2", 1)])?;
-        let input = ctx.logical_get_v2(TableRef::bare("t1"), None)?.build();
-        let _other = ctx.logical_get_v2(TableRef::bare("t2"), None)?.build();
+        let input = ctx.logical_get(TableRef::bare("t1"), None)?.build();
+        let _other = ctx.logical_get(TableRef::bare("t2"), None)?.build();
         let predicate = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();
         let select = input.with_ctx(&ctx).select(predicate).build();
 
@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn logical_project_try_satisfy_ordering() -> crate::error::Result<()> {
         let ctx = test_ctx_with_tables(&[("t1", 2)])?;
-        let input = ctx.logical_get_v2(TableRef::bare("t1"), None)?.build();
+        let input = ctx.logical_get(TableRef::bare("t1"), None)?.build();
         let c0 = test_col(&ctx, "t1", "c0")?;
         let c1 = test_col(&ctx, "t1", "c1")?;
         let project = ctx
@@ -472,7 +472,7 @@ mod tests {
     #[test]
     fn logical_aggregate_try_satisfy_ordering() -> crate::error::Result<()> {
         let ctx = test_ctx_with_tables(&[("t1", 2)])?;
-        let input = ctx.logical_get_v2(TableRef::bare("t1"), None)?.build();
+        let input = ctx.logical_get(TableRef::bare("t1"), None)?.build();
         let c0 = test_col(&ctx, "t1", "c0")?;
         let aggregate = input
             .with_ctx(&ctx)
@@ -491,7 +491,7 @@ mod tests {
     #[test]
     fn logical_order_by_try_satisfy_ordering() -> crate::error::Result<()> {
         let ctx = test_ctx_with_tables(&[("t1", 3)])?;
-        let input = ctx.logical_get_v2(TableRef::bare("t1"), None)?.build();
+        let input = ctx.logical_get(TableRef::bare("t1"), None)?.build();
         let c0 = test_col(&ctx, "t1", "c0")?;
         let c1 = test_col(&ctx, "t1", "c1")?;
         let order_by = OrderBy::new(

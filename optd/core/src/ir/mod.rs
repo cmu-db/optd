@@ -9,7 +9,6 @@ use std::sync::{Arc, LazyLock};
 
 pub mod binder;
 pub mod builder;
-pub mod builder_v2;
 pub mod catalog;
 mod column;
 mod context;
@@ -25,8 +24,8 @@ pub mod scalar;
 pub mod schema;
 pub mod statistics;
 pub mod table_ref;
-#[cfg(test)]
-pub(crate) mod test_utils;
+#[doc(hidden)]
+pub mod test_utils;
 mod types;
 
 pub use column::*;
