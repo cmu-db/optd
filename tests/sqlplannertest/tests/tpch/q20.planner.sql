@@ -39,6 +39,6 @@ order by
 
 /*
 Error
-External error: optd internal error: col nation.n_nationkey not found, current local bindings: [Binding { table_ref: Bare { table: "supplier" }, schema: Schema { fields: [Field { name: "s_suppkey", data_type: Int32 }, Field { name: "s_name", data_type: Utf8View }, Field { name: "s_address", data_type: Utf8View }, Field { name: "s_nationkey", data_type: Int32 }], metadata: {} }, table_index: 1 }, Binding { table_ref: Bare { table: "__internal_#3" }, schema: Schema { fields: [Field { name: "n_nationkey", data_type: Int32 }], metadata: {} }, table_index: 3 }]
+External error: Unsupported join type: LeftSemi
 */
 

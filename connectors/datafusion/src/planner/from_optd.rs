@@ -73,6 +73,16 @@ impl OptdQueryPlannerContext<'_> {
         input: Arc<DFLogicalPlan>,
     ) -> Result<logical_expr::Projection> {
         let binding = self.inner.get_binding(table_index).context(OptdSnafu)?;
+        let exprs = binding
+            .schema()
+            .fields()
+            .iter()
+            .zip_eq(exprs)
+            .map(|(field, expr)| {
+                expr.alias_if_changed(field.name().to_string())
+                    .context(DataFusionSnafu)
+            })
+            .collect::<Result<Vec<_>>>()?;
         let table_ref = binding.table_ref();
         let schema = projection_schema(&input, &exprs).context(DataFusionSnafu)?;
         let alias = Self::from_optd_table_ref(table_ref);
@@ -99,6 +109,16 @@ impl OptdQueryPlannerContext<'_> {
             .inner
             .get_binding(aggregate_table_index)
             .context(OptdSnafu)?;
+        let aggr_expr = binding
+            .schema()
+            .fields()
+            .iter()
+            .zip_eq(aggr_expr)
+            .map(|(field, expr)| {
+                expr.alias_if_changed(field.name().to_string())
+                    .context(DataFusionSnafu)
+            })
+            .collect::<Result<Vec<_>>>()?;
         let table_ref = binding.table_ref();
 
         let alias = Self::from_optd_table_ref(table_ref);
@@ -282,6 +302,118 @@ impl OptdQueryPlannerContext<'_> {
             logical_plan::TableScan::try_new(name, table_source.clone(), projections, vec![], None)
                 .whatever_context("failed to create TableScan")?;
         Ok(DFLogicalPlan::TableScan(table_scan))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use datafusion::{
+        arrow::datatypes::{DataType, Field, Schema},
+        common::{Column, DFSchema},
+        execution::runtime_env::RuntimeEnv,
+        functions_aggregate::expr_fn::sum,
+        logical_expr::{self, Expr as DFExpr, LogicalPlan as DFLogicalPlan},
+        prelude::SessionConfig,
+    };
+
+    use crate::create_optd_session_context;
+
+    use super::super::{OptdQueryPlanner, OptdQueryPlannerContext};
+
+    #[test]
+    fn try_new_df_projection_restores_binding_aliases() {
+        let session_ctx =
+            create_optd_session_context(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
+        let session_state = session_ctx.state();
+        let inner = OptdQueryPlanner::create_context(&session_state).unwrap();
+        let ctx = OptdQueryPlannerContext::new(inner.clone(), &session_state);
+
+        let input_schema = Arc::new(Schema::new(vec![
+            Field::new("l_extendedprice", DataType::Int64, false),
+            Field::new("l_discount", DataType::Int64, false),
+            Field::new("l_quantity", DataType::Int64, false),
+        ]));
+        let input_schema =
+            DFSchema::try_from_qualified_schema("lineitem", input_schema.as_ref()).unwrap();
+        let input = DFLogicalPlan::EmptyRelation(logical_expr::EmptyRelation {
+            produce_one_row: false,
+            schema: Arc::new(input_schema),
+        });
+
+        let project_schema = Arc::new(Schema::new(vec![
+            Field::new("__common_expr_1", DataType::Int64, false),
+            Field::new("l_quantity", DataType::Int64, false),
+        ]));
+        let table_index = inner.add_binding(None, project_schema).unwrap();
+
+        let exprs = vec![
+            logical_expr::binary_expr(
+                DFExpr::Column(Column::from_qualified_name("lineitem.l_extendedprice")),
+                logical_expr::Operator::Minus,
+                DFExpr::Column(Column::from_qualified_name("lineitem.l_discount")),
+            ),
+            DFExpr::Column(Column::from_qualified_name("lineitem.l_quantity")),
+        ];
+
+        let projection = ctx
+            .try_new_df_projection(&table_index, exprs, Arc::new(input))
+            .unwrap();
+
+        assert_eq!(projection.schema.field(0).name(), "__common_expr_1");
+        assert_eq!(projection.schema.field(1).name(), "l_quantity");
+        assert_eq!(
+            projection.expr[0].schema_name().to_string(),
+            "__common_expr_1"
+        );
+    }
+
+    #[test]
+    fn try_new_df_aggregate_restores_binding_aliases() {
+        let session_ctx =
+            create_optd_session_context(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
+        let session_state = session_ctx.state();
+        let inner = OptdQueryPlanner::create_context(&session_state).unwrap();
+        let ctx = OptdQueryPlannerContext::new(inner.clone(), &session_state);
+
+        let input_schema = Arc::new(Schema::new(vec![
+            Field::new("l_returnflag", DataType::Utf8, false),
+            Field::new("l_quantity", DataType::Int64, false),
+        ]));
+        let input_schema =
+            DFSchema::try_from_qualified_schema("__internal_#2", input_schema.as_ref()).unwrap();
+        let input = DFLogicalPlan::EmptyRelation(logical_expr::EmptyRelation {
+            produce_one_row: false,
+            schema: Arc::new(input_schema),
+        });
+
+        let aggregate_schema = Arc::new(Schema::new(vec![Field::new(
+            "sum(lineitem.l_quantity)",
+            DataType::Int64,
+            false,
+        )]));
+        let table_index = inner.add_binding(None, aggregate_schema).unwrap();
+
+        let aggregate = ctx
+            .try_new_df_aggregate(
+                &table_index,
+                Arc::new(input),
+                vec![DFExpr::Column(Column::from_qualified_name(
+                    "__internal_#2.l_returnflag",
+                ))],
+                vec![sum(DFExpr::Column(Column::from_qualified_name(
+                    "__internal_#2.l_quantity",
+                )))],
+            )
+            .unwrap();
+
+        assert_eq!(aggregate.schema.field(0).name(), "l_returnflag");
+        assert_eq!(aggregate.schema.field(1).name(), "sum(lineitem.l_quantity)");
+        assert_eq!(
+            aggregate.aggr_expr[0].schema_name().to_string(),
+            "sum(lineitem.l_quantity)"
+        );
     }
 }
 

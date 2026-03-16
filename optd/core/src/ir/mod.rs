@@ -143,6 +143,7 @@ impl IRCommon<OperatorProperties> {
                         let meta = ctx.get_column_meta(col);
                         format!("{}.{}({col})", meta.table_ref, meta.name)
                     })
+                    .sorted()
                     .join(", ")
             })
             .unwrap_or("?".to_string());

@@ -13,6 +13,6 @@ WHERE
 
 /*
 Error
-External error: optd internal error: col lineitem.l_partkey not found, current local bindings: [Binding { table_ref: Bare { table: "__internal_#2" }, schema: Schema { fields: [Field { name: "l_partkey", data_type: Int32 }, Field { name: "l_extendedprice", data_type: Decimal128(15, 2) }, Field { name: "l_discount", data_type: Decimal128(15, 2) }], metadata: {} }, table_index: 2 }, Binding { table_ref: Bare { table: "part" }, schema: Schema { fields: [Field { name: "p_partkey", data_type: Int32 }, Field { name: "p_type", data_type: Utf8View }], metadata: {} }, table_index: 3 }]
+External error: error converting aggregate expressions: Unsupported df logical expr: CASE WHEN part.p_type LIKE Utf8View("PROMO%") THEN __common_expr_1 ELSE Decimal128(Some(0),38,4) END
 */
 

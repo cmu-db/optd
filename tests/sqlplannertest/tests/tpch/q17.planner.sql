@@ -19,6 +19,6 @@ WHERE
 
 /*
 Error
-External error: optd internal error: col part.p_partkey not found, current local bindings: [Binding { table_ref: Bare { table: "lineitem" }, schema: Schema { fields: [Field { name: "l_partkey", data_type: Int32 }, Field { name: "l_quantity", data_type: Decimal128(15, 2) }, Field { name: "l_extendedprice", data_type: Decimal128(15, 2) }], metadata: {} }, table_index: 1 }, Binding { table_ref: Bare { table: "__internal_#3" }, schema: Schema { fields: [Field { name: "p_partkey", data_type: Int32 }], metadata: {} }, table_index: 3 }]
+External error: error converting projection: Conversion from DataFusion ScalarValue Float64(0.2) is not implemented
 */
 

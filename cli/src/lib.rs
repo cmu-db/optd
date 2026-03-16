@@ -4,8 +4,8 @@ pub mod udtf;
 use datafusion::{
     common::{DataFusionError, Result},
     execution::runtime_env::RuntimeEnv,
-    logical_expr::LogicalPlanBuilder,
     logical_expr::LogicalPlan,
+    logical_expr::LogicalPlanBuilder,
     prelude::{DataFrame, SessionConfig, SessionContext},
 };
 use datafusion_cli::cli_context::CliSessionContext;

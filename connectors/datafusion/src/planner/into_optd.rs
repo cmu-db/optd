@@ -19,14 +19,11 @@ use optd_core::{
         operator::{Aggregate, Get, Join, Limit, OrderBy, Project, Remap, Select},
         properties::TupleOrderingDirection,
         scalar::{Cast, ColumnRef, Function, Like, List, NaryOp, NaryOpKind},
-        schema::SchemaError,
     },
 };
 use snafu::{ResultExt, whatever};
 
-use crate::planner::{
-    DataFusionSnafu, OptdDFConnectorError, OptdQueryPlannerContext, OptdSnafu, Result,
-};
+use crate::planner::{DataFusionSnafu, OptdQueryPlannerContext, OptdSnafu, Result};
 
 impl OptdQueryPlannerContext<'_> {
     pub fn try_into_optd_plan(
@@ -88,14 +85,15 @@ impl OptdQueryPlannerContext<'_> {
 
         let operator = OrderBy::new(input, ordering_exprs).into_operator();
 
-        Ok(node
-            .fetch
-            .map(|n| {
-                let skip = literal(0);
-                let fetch = literal(Some(n as u64));
-                Limit::new(operator.clone(), skip, fetch).into_operator()
-            })
-            .unwrap_or_else(|| operator))
+        let Some(fetch) = node.fetch else {
+            return Ok(operator);
+        };
+
+        let fetch = i64::try_from(fetch).whatever_context("sort fetch exceeds i64 range")?;
+        let skip = literal(0_i64);
+        let fetch = literal(Some(fetch));
+
+        Ok(Limit::new(operator, skip, fetch).into_operator())
     }
 
     pub fn try_into_optd_aggregate(
@@ -157,7 +155,7 @@ impl OptdQueryPlannerContext<'_> {
             .map(|e| self.try_into_optd_scalar_expr(e, node.input.schema()))
             .try_collect()
             .map(List::new)
-            .whatever_context("error converting projection")?;
+            .with_whatever_context(|e| format!("error converting projection: {e}"))?;
         self.inner.binder_end_scope();
 
         // Note: projection create unnamed binding with no table ref.

@@ -46,6 +46,6 @@ limit 100;
 
 /*
 Error
-External error: optd internal error: col part.p_partkey not found, current local bindings: [Binding { table_ref: Bare { table: "__internal_#2" }, schema: Schema { fields: [Field { name: "p_partkey", data_type: Int32 }, Field { name: "p_mfgr", data_type: Utf8View }], metadata: {} }, table_index: 2 }, Binding { table_ref: Bare { table: "partsupp" }, schema: Schema { fields: [Field { name: "ps_partkey", data_type: Int32 }, Field { name: "ps_suppkey", data_type: Int32 }, Field { name: "ps_supplycost", data_type: Decimal128(15, 2) }], metadata: {} }, table_index: 3 }]
+Schema error: No field named partsupp.ps_partkey. Valid fields are "__internal_#11".ps_partkey, "__internal_#11".__always_true, "__internal_#11"."min(partsupp.ps_supplycost)".
 */
 
