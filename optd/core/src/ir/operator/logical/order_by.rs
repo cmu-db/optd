@@ -124,8 +124,14 @@ mod tests {
         let c1 = test_col(&ctx, "t1", "c1")?;
         let c2 = test_col(&ctx, "t1", "c2")?;
         let ordered_exprs = vec![
-            (ColumnRef::new(c0).into_scalar(), TupleOrderingDirection::Asc),
-            (ColumnRef::new(c2).into_scalar(), TupleOrderingDirection::Asc),
+            (
+                ColumnRef::new(c0).into_scalar(),
+                TupleOrderingDirection::Asc,
+            ),
+            (
+                ColumnRef::new(c2).into_scalar(),
+                TupleOrderingDirection::Asc,
+            ),
         ];
         let order_by = OrderBy::new(input, ordered_exprs).into_operator();
 

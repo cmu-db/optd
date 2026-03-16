@@ -71,11 +71,7 @@ mod tests {
         let rule = LogicalGetAsPhysicalTableScanRule::new();
         assert!(rule.pattern.matches_without_expand(&logical_get));
 
-        let after = rule
-            .transform(&logical_get, &ctx)
-            .unwrap()
-            .pop()
-            .unwrap();
+        let after = rule.transform(&logical_get, &ctx).unwrap().pop().unwrap();
         let get = after.try_borrow::<Get>().unwrap();
 
         assert_eq!(get.data_source_id(), logical_get_borrowed.data_source_id());

@@ -155,8 +155,7 @@ impl crate::ir::Operator {
 mod tests {
     use crate::ir::{
         Group, GroupId, IRContext, convert::IntoOperator, properties::OperatorProperties,
-        table_ref::TableRef,
-        test_utils::test_ctx_with_tables,
+        table_ref::TableRef, test_utils::test_ctx_with_tables,
     };
     use std::sync::Arc;
 
