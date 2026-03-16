@@ -135,7 +135,7 @@ impl OptdQueryPlannerContext<'_> {
     ) -> Result<Arc<optd_core::ir::Operator>> {
         self.inner.binder_begin_scope();
         let input = self.try_into_optd_plan(&node.input)?;
-
+        self.inner.binder_end_scope();
         // Note: projection create unnamed binding with no table ref.
         let table_index = self
             .inner
@@ -149,7 +149,6 @@ impl OptdQueryPlannerContext<'_> {
             .try_collect()
             .map(List::new)?;
         let project = Project::new(table_index, input, projections.into_scalar());
-        self.inner.binder_end_scope();
         Ok(project.into_operator())
     }
 
@@ -160,13 +159,12 @@ impl OptdQueryPlannerContext<'_> {
         self.inner.binder_begin_scope();
         let input = self.try_into_optd_plan(&node.input)?;
         let table_ref = Self::into_optd_table_ref(&node.alias);
+        self.inner.binder_end_scope();
         let table_index = self
             .inner
             .add_binding(Some(table_ref), node.schema.inner().clone())
             .context(OptdSnafu)?;
-
         let remap = Remap::new(table_index, input);
-        self.inner.binder_end_scope();
         Ok(remap.into_operator())
     }
 

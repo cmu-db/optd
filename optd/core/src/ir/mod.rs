@@ -136,14 +136,12 @@ impl IRCommon<OperatorProperties> {
             .output_columns
             .get()
             .map(|set| {
-                let x = set
-                    .iter()
+                set.iter()
                     .map(|col| {
                         let meta = ctx.get_column_meta(col);
-                        format!("{}({col}): {}", meta.name, meta.data_type)
+                        format!("{}.{}({col})", meta.table_ref, meta.name)
                     })
-                    .collect_vec();
-                format!("{:?}", x)
+                    .join(", ")
             })
             .unwrap_or("?".to_string());
         fields.push(("(.output_columns)", Pretty::display(&output_columns)));
