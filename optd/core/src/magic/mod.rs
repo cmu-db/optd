@@ -32,7 +32,7 @@ impl IRContext {
         )
     }
 
-    pub fn with_magic_catalog(cat: MemoryCatalog) -> Self {
+    pub fn with_memory_catalog(cat: MemoryCatalog) -> Self {
         Self::new(
             Arc::new(cat),
             Arc::new(MagicCardinalityEstimator),
@@ -178,7 +178,7 @@ impl IRContext {
             )
             .unwrap();
 
-        Self::with_magic_catalog(catalog)
+        Self::with_memory_catalog(catalog)
     }
 
     /// Creates a context with table `t1` to `t{count}`, each has `width` number of columns.
@@ -204,6 +204,6 @@ impl IRContext {
             create_numbered_table(format!("t{i}"), width, table_statistics);
         }
 
-        Self::with_magic_catalog(catalog)
+        Self::with_memory_catalog(catalog)
     }
 }

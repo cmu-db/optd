@@ -4,12 +4,14 @@
 use std::sync::Arc;
 
 use arrow_schema::{Field, Schema, SchemaRef};
+use itertools::Itertools;
 use snafu::ResultExt;
 
 use crate::{
     error::{CatalogSnafu, Result, whatever},
     ir::{
         Column, DataType, IRContext, Operator, Scalar, ScalarKind, ScalarValue,
+        binder::Binding,
         convert::{IntoOperator, IntoScalar},
         operator::{
             Aggregate, AggregateImplementation, DependentJoin, Get, GetImplementation, Join,
@@ -28,10 +30,6 @@ pub struct OptdOperatorBuilder<'a> {
     operator: Arc<Operator>,
 }
 
-pub struct OptdScalarBuilder {
-    scalar_expr: Arc<Scalar>,
-}
-
 impl IRContext {
     pub fn operator_builder<'a>(&'a self, operator: Arc<Operator>) -> OptdOperatorBuilder<'a> {
         OptdOperatorBuilder {
@@ -41,6 +39,18 @@ impl IRContext {
     }
 
     pub fn logical_get_v2<'a>(
+        &'a self,
+        table_ref: impl Into<TableRef>,
+        projections: Option<Arc<[usize]>>,
+    ) -> Result<OptdOperatorBuilder<'a>> {
+        self.build_get_inner(table_ref.into(), projections, None)
+            .map(|operator| OptdOperatorBuilder {
+                ctx: self,
+                operator,
+            })
+    }
+
+    pub fn table_scan_v2<'a>(
         &'a self,
         table_ref: impl Into<TableRef>,
         projections: Option<Arc<[usize]>>,
@@ -56,16 +66,23 @@ impl IRContext {
         })
     }
 
-    pub fn table_scan_v2<'a>(
-        &'a self,
-        table_ref: impl Into<TableRef>,
-        projections: Option<Arc<[usize]>>,
-    ) -> Result<OptdOperatorBuilder<'a>> {
-        self.build_get_inner(table_ref.into(), projections, None)
-            .map(|operator| OptdOperatorBuilder {
-                ctx: self,
-                operator,
-            })
+    pub fn mock_scan(&self, table_index: i64, num_columns: usize, card: f64) -> Arc<Operator> {
+        use crate::ir::operator::{MockScan, MockSpec};
+
+        let binding = Binding::new(
+            TableRef::bare(format!("mock#{table_index}")),
+            Arc::new(Schema::new(
+                (0..num_columns)
+                    .map(|i| Arc::new(Field::new(format!("col{i}"), DataType::Int32, true)))
+                    .collect_vec(),
+            )),
+            table_index,
+        );
+        let mut guard = self.binder.write().unwrap();
+
+        guard.bindings.insert(table_index, binding);
+        let spec = MockSpec::new_test_only(table_index, num_columns, card);
+        MockScan::with_mock_spec(table_index, spec).into_operator()
     }
 
     pub fn project(
@@ -248,86 +265,29 @@ impl<'a> OptdOperatorBuilder<'a> {
     }
 }
 
-impl Scalar {
-    pub fn builder(self: Arc<Self>) -> OptdScalarBuilder {
-        OptdScalarBuilder { scalar_expr: self }
-    }
-}
-
-impl OptdScalarBuilder {
-    pub fn build(self) -> Arc<Scalar> {
-        self.scalar_expr
-    }
-
-    pub fn binary_op(self, rhs: Arc<Scalar>, op_kind: BinaryOpKind) -> Self {
-        Self {
-            scalar_expr: BinaryOp::new(op_kind, self.scalar_expr, rhs).into_scalar(),
-        }
-    }
-
-    pub fn plus(self, rhs: Arc<Scalar>) -> Self {
-        self.binary_op(rhs, BinaryOpKind::Plus)
-    }
-
-    pub fn eq(self, rhs: Arc<Scalar>) -> Self {
-        self.binary_op(rhs, BinaryOpKind::Eq)
-    }
-
-    pub fn lt(self, rhs: Arc<Scalar>) -> Self {
-        self.binary_op(rhs, BinaryOpKind::Lt)
-    }
-
-    pub fn le(self, rhs: Arc<Scalar>) -> Self {
-        self.binary_op(rhs, BinaryOpKind::Le)
-    }
-
-    pub fn gt(self, rhs: Arc<Scalar>) -> Self {
-        self.binary_op(rhs, BinaryOpKind::Gt)
-    }
-
-    pub fn ge(self, rhs: Arc<Scalar>) -> Self {
-        self.binary_op(rhs, BinaryOpKind::Ge)
-    }
-
-    pub fn nary_op(self, rhs: Arc<Scalar>, op_kind: NaryOpKind) -> Self {
-        let scalar_expr = if let Ok(nary_op) = self.scalar_expr.try_borrow::<NaryOp>()
-            && nary_op.op_kind() == &op_kind
-        {
-            let terms = nary_op
-                .terms()
-                .iter()
-                .cloned()
-                .chain(std::iter::once(rhs))
-                .collect();
-            NaryOp::new(op_kind, terms).into_scalar()
-        } else {
-            NaryOp::new(op_kind, Arc::new([self.scalar_expr, rhs])).into_scalar()
-        };
-
-        Self { scalar_expr }
-    }
-
-    pub fn and(self, rhs: Arc<Scalar>) -> Self {
-        self.nary_op(rhs, NaryOpKind::And)
-    }
-
-    pub fn or(self, rhs: Arc<Scalar>) -> Self {
-        self.nary_op(rhs, NaryOpKind::Or)
-    }
-}
-
+/// Creates a raw column reference.
 pub fn column_ref(column: Column) -> Arc<Scalar> {
     ColumnRef::new(column).into_scalar()
 }
 
+/// Creates a literal of type boolean.
 pub fn boolean(v: impl Into<Option<bool>>) -> Arc<Scalar> {
     Literal::new(ScalarValue::Boolean(v.into())).into_scalar()
+}
+
+pub fn utf8<'a>(v: impl Into<Option<&'a str>>) -> Arc<Scalar> {
+    Literal::new(ScalarValue::Utf8(v.into().map(|x| x.to_string()))).into_scalar()
+}
+
+pub fn utf8_view<'a>(v: impl Into<Option<&'a str>>) -> Arc<Scalar> {
+    Literal::new(ScalarValue::Utf8View(v.into().map(|x| x.to_string()))).into_scalar()
 }
 
 pub fn literal<T: Into<ScalarValue>>(v: T) -> Arc<Scalar> {
     Literal::new(v.into()).into_scalar()
 }
 
+/// Creates a literal of type integer (i32).
 pub fn int32(v: impl Into<Option<i32>>) -> Arc<Scalar> {
     Literal::new(ScalarValue::Int32(v.into())).into_scalar()
 }
@@ -352,6 +312,60 @@ pub fn like(
 
 pub fn list(members: impl IntoIterator<Item = Arc<Scalar>>) -> Arc<Scalar> {
     List::new(members.into_iter().collect()).into_scalar()
+}
+
+impl Scalar {
+    pub fn binary_op(self: Arc<Self>, rhs: Arc<Self>, op_kind: BinaryOpKind) -> Arc<Self> {
+        BinaryOp::new(op_kind, self, rhs).into_scalar()
+    }
+
+    pub fn plus(self: Arc<Self>, rhs: Arc<Self>) -> Arc<Self> {
+        self.binary_op(rhs, BinaryOpKind::Plus)
+    }
+
+    pub fn eq(self: Arc<Self>, rhs: Arc<Self>) -> Arc<Self> {
+        self.binary_op(rhs, BinaryOpKind::Eq)
+    }
+
+    pub fn lt(self: Arc<Self>, rhs: Arc<Self>) -> Arc<Self> {
+        self.binary_op(rhs, BinaryOpKind::Lt)
+    }
+
+    pub fn le(self: Arc<Self>, rhs: Arc<Self>) -> Arc<Self> {
+        self.binary_op(rhs, BinaryOpKind::Le)
+    }
+
+    pub fn gt(self: Arc<Self>, rhs: Arc<Self>) -> Arc<Self> {
+        self.binary_op(rhs, BinaryOpKind::Gt)
+    }
+
+    pub fn ge(self: Arc<Self>, rhs: Arc<Self>) -> Arc<Self> {
+        self.binary_op(rhs, BinaryOpKind::Ge)
+    }
+
+    pub fn nary_op(self: Arc<Self>, rhs: Arc<Self>, op_kind: NaryOpKind) -> Arc<Self> {
+        if let Ok(nary_op) = self.try_borrow::<NaryOp>()
+            && nary_op.op_kind() == &op_kind
+        {
+            let terms = nary_op
+                .terms()
+                .iter()
+                .cloned()
+                .chain(std::iter::once(rhs))
+                .collect();
+            NaryOp::new(op_kind, terms).into_scalar()
+        } else {
+            NaryOp::new(op_kind, Arc::new([self, rhs])).into_scalar()
+        }
+    }
+
+    pub fn and(self: Arc<Self>, rhs: Arc<Self>) -> Arc<Self> {
+        self.nary_op(rhs, NaryOpKind::And)
+    }
+
+    pub fn or(self: Arc<Self>, rhs: Arc<Self>) -> Arc<Self> {
+        self.nary_op(rhs, NaryOpKind::Or)
+    }
 }
 
 fn projected_schema(schema: SchemaRef, projections: &[usize]) -> Result<SchemaRef> {
@@ -568,7 +582,7 @@ mod tests {
                 ])),
             )
             .unwrap();
-        IRContext::with_magic_catalog(catalog)
+        IRContext::with_memory_catalog(catalog)
     }
 
     #[test]

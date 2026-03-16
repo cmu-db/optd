@@ -660,7 +660,8 @@ mod tests {
 
     use super::*;
     use crate::ir::{
-        Column, IRContext, builder::*, explain::quick_explain, operator::join::JoinType,
+        Column, IRContext, builder::*, builder_v2::*, explain::quick_explain,
+        operator::join::JoinType,
     };
 
     #[test]

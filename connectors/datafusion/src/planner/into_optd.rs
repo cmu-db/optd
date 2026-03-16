@@ -12,7 +12,7 @@ use itertools::{Either, Itertools};
 use optd_core::{
     error::CatalogSnafu,
     ir::{
-        Scalar, ScalarValue, builder as optd_builder,
+        Scalar, ScalarValue, builder_v2 as optd_builder_v2,
         catalog::Schema,
         convert::{IntoOperator, IntoScalar},
         operator::{Aggregate, Get, Join, Limit, OrderBy, Project, Remap, Select},
@@ -52,11 +52,11 @@ impl OptdQueryPlannerContext<'_> {
         let input = self.try_into_optd_plan(&node.input)?;
         let skip = match &node.skip {
             Some(skip) => self.try_into_optd_scalar_expr(skip, node.input.schema())?,
-            None => optd_builder::literal(0_i64),
+            None => optd_builder_v2::literal(0_i64),
         };
         let fetch = match &node.fetch {
             Some(fetch) => self.try_into_optd_scalar_expr(fetch, node.input.schema())?,
-            None => optd_builder::literal(ScalarValue::Int64(None)),
+            None => optd_builder_v2::literal(ScalarValue::Int64(None)),
         };
 
         Ok(Limit::new(input, skip, fetch).into_operator())
@@ -284,7 +284,7 @@ impl OptdQueryPlannerContext<'_> {
     }
 
     pub fn try_into_optd_literal(&self, literal: &DFScalarValue) -> Result<Arc<Scalar>> {
-        Self::try_into_optd_scalar_value(literal.clone()).map(optd_builder::literal)
+        Self::try_into_optd_scalar_value(literal.clone()).map(optd_builder_v2::literal)
     }
 
     pub fn try_into_optd_scalar_op(

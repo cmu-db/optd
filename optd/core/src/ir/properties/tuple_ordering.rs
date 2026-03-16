@@ -260,264 +260,255 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ir::builder_v2::column_ref;
     use crate::ir::{
-        DataType, IRContext, ScalarValue,
-        catalog::{Field, Schema},
+        ScalarValue,
         convert::{IntoOperator, IntoScalar},
         operator::join::JoinType,
         properties::TrySatisfy,
         scalar::*,
+        table_ref::TableRef,
+        test_utils::{test_col, test_ctx_with_tables},
     };
 
     #[test]
-    fn enforcer_sort_try_satisify_ordering() {
-        let ctx = IRContext::with_empty_magic();
+    fn enforcer_sort_try_satisify_ordering() -> crate::error::Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 3)])?;
+        let t1 = ctx.logical_get_v2(TableRef::bare("t1"), None)?.build();
         let required = TupleOrdering::from_iter([
-            (Column(1, 0), TupleOrderingDirection::Asc),
-            (Column(1, 1), TupleOrderingDirection::Desc),
+            (test_col(&ctx, "t1", "c0")?, TupleOrderingDirection::Asc),
+            (test_col(&ctx, "t1", "c1")?, TupleOrderingDirection::Desc),
         ]);
 
-        let t1 = ctx.mock_scan(1, 3, 100.);
         let exact_enforcer = EnforcerSort::new(required.clone(), t1.clone()).into_operator();
-        let res = exact_enforcer
-            .try_satisfy(&required, &ctx)
-            .unwrap()
-            .unwrap();
+        let res = exact_enforcer.try_satisfy(&required, &ctx)?.unwrap();
         assert_eq!(res.len(), 1);
         assert_eq!(res[0], TupleOrdering::default());
 
         let stronger_provided = TupleOrdering::from_iter([
-            (Column(1, 0), TupleOrderingDirection::Asc),
-            (Column(1, 1), TupleOrderingDirection::Desc),
-            (Column(1, 2), TupleOrderingDirection::Asc),
+            (test_col(&ctx, "t1", "c0")?, TupleOrderingDirection::Asc),
+            (test_col(&ctx, "t1", "c1")?, TupleOrderingDirection::Desc),
+            (test_col(&ctx, "t1", "c2")?, TupleOrderingDirection::Asc),
         ]);
         let stronger_enforcer = EnforcerSort::new(stronger_provided, t1.clone()).into_operator();
-        let res = stronger_enforcer
-            .try_satisfy(&required, &ctx)
-            .unwrap()
-            .unwrap();
+        let res = stronger_enforcer.try_satisfy(&required, &ctx)?.unwrap();
         assert_eq!(res.len(), 1);
         assert_eq!(res[0], TupleOrdering::default());
 
         let weaker_provided =
-            TupleOrdering::from_iter([(Column(1, 0), TupleOrderingDirection::Asc)]);
-        let weaker_enforcer = EnforcerSort::new(weaker_provided, t1.clone()).into_operator();
-        assert_eq!(None, weaker_enforcer.try_satisfy(&required, &ctx).unwrap());
+            TupleOrdering::from_iter([(test_col(&ctx, "t1", "c0")?, TupleOrderingDirection::Asc)]);
+        let weaker_enforcer = EnforcerSort::new(weaker_provided, t1).into_operator();
+        assert_eq!(None, weaker_enforcer.try_satisfy(&required, &ctx)?);
+        Ok(())
     }
 
     #[test]
-    fn physical_nljoin_try_satisfy_ordering() {
-        let ctx = IRContext::with_empty_magic();
+    fn physical_nljoin_try_satisfy_ordering() -> crate::error::Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 2), ("t2", 2)])?;
 
-        let m1 = ctx.mock_scan(1, 2, 100.);
-        let m2 = ctx.mock_scan(2, 2, 100.);
+        let m1 = ctx.table_scan_v2(TableRef::bare("t1"), None)?.build();
+        let m2 = ctx.table_scan_v2(TableRef::bare("t2"), None)?.build();
         let join_cond = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();
-        let join1 = Join::new(
-            JoinType::Inner,
-            m1.clone(),
-            m2.clone(),
-            join_cond.clone(),
-            Some(JoinImplementation::nested_loop()),
-        )
-        .into_operator();
-        let join2 = join1.clone_with_inputs(Some(Arc::new([m2, m1])), None);
+        let join1 = m1
+            .clone()
+            .with_ctx(&ctx)
+            .nl_join(m2.clone(), join_cond.clone(), JoinType::Inner)
+            .build();
+        let join2 = m2
+            .clone()
+            .with_ctx(&ctx)
+            .nl_join(m1, join_cond, JoinType::Inner)
+            .build();
 
         // Both satisfy the empty ordering.
         let empty = TupleOrdering::default();
-        let res = join1.try_satisfy(&empty, &ctx).unwrap().unwrap();
+        let res = join1.try_satisfy(&empty, &ctx)?.unwrap();
         assert_eq!(res[0], empty);
         assert_eq!(res[1], empty);
 
-        let res = join1.try_satisfy(&empty, &ctx).unwrap().unwrap();
+        let res = join1.try_satisfy(&empty, &ctx)?.unwrap();
         assert_eq!(res[0], empty);
         assert_eq!(res[1], empty);
 
         let ordering_from_t1 = TupleOrdering::from_iter([
-            (Column(1, 0), TupleOrderingDirection::Asc),
-            (Column(1, 1), TupleOrderingDirection::Desc),
+            (test_col(&ctx, "t1", "c0")?, TupleOrderingDirection::Asc),
+            (test_col(&ctx, "t1", "c1")?, TupleOrderingDirection::Desc),
         ]);
 
         // Only satisifies when t1 is the outer side.
-        let res = join1.try_satisfy(&ordering_from_t1, &ctx).unwrap().unwrap();
+        let res = join1.try_satisfy(&ordering_from_t1, &ctx)?.unwrap();
         assert_eq!(res[0], ordering_from_t1);
         assert_eq!(res[1], empty);
 
-        assert_eq!(None, join2.try_satisfy(&ordering_from_t1, &ctx).unwrap());
+        assert_eq!(None, join2.try_satisfy(&ordering_from_t1, &ctx)?);
 
         // Both should not satisfy.
         let columns_from_both_sides = TupleOrdering::from_iter([
-            (Column(1, 0), TupleOrderingDirection::Asc),
-            (Column(2, 0), TupleOrderingDirection::Desc),
+            (test_col(&ctx, "t1", "c0")?, TupleOrderingDirection::Asc),
+            (test_col(&ctx, "t2", "c0")?, TupleOrderingDirection::Desc),
         ]);
-        assert_eq!(
-            None,
-            join1.try_satisfy(&columns_from_both_sides, &ctx).unwrap()
-        );
-        assert_eq!(
-            None,
-            join2.try_satisfy(&columns_from_both_sides, &ctx).unwrap()
-        );
+        assert_eq!(None, join1.try_satisfy(&columns_from_both_sides, &ctx)?);
+        assert_eq!(None, join2.try_satisfy(&columns_from_both_sides, &ctx)?);
+        Ok(())
     }
 
     #[test]
-    fn physical_table_scan_try_satisfy_ordering() {
-        let ctx = IRContext::with_course_tables();
-        let t1 = ctx.mock_scan(1, 2, 10.);
+    fn physical_table_scan_try_satisfy_ordering() -> crate::error::Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 2)])?;
+        let t1 = ctx.table_scan_v2(TableRef::bare("t1"), None)?.build();
 
-        // Satisfies empty ordering
         let ordering = TupleOrdering::default();
-        let res = t1.try_satisfy(&ordering, &ctx).unwrap().unwrap();
+        let res = t1.try_satisfy(&ordering, &ctx)?.unwrap();
         assert_eq!(res.len(), 0);
 
-        // Does not satisfies the ordering [0, 1]. (for detecting regressions).
         let ordering = TupleOrdering::from_iter([
-            (Column(1, 0), TupleOrderingDirection::Asc),
-            (Column(1, 1), TupleOrderingDirection::Asc),
+            (test_col(&ctx, "t1", "c0")?, TupleOrderingDirection::Asc),
+            (test_col(&ctx, "t1", "c1")?, TupleOrderingDirection::Asc),
         ]);
-        assert_eq!(None, t1.try_satisfy(&ordering, &ctx).unwrap());
+        assert_eq!(None, t1.try_satisfy(&ordering, &ctx)?);
+        Ok(())
     }
 
     #[test]
-    fn logical_get_try_satisfy_ordering() {
-        let ctx = IRContext::with_empty_magic();
-        let schema = Schema::new(vec![
-            Field::new("t1.c0", DataType::Int32, false),
-            Field::new("t1.c1", DataType::Int32, false),
-        ]);
-        let t1 = ctx.logical_get(1, &schema, None);
+    fn logical_get_try_satisfy_ordering() -> crate::error::Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 2)])?;
+        let t1 = ctx.logical_get_v2(TableRef::bare("t1"), None)?.build();
 
         let empty = TupleOrdering::default();
-        let res = t1.try_satisfy(&empty, &ctx).unwrap().unwrap();
+        let res = t1.try_satisfy(&empty, &ctx)?.unwrap();
         assert_eq!(res.len(), 0);
 
         let ordering = TupleOrdering::from_iter([
-            (Column(1, 0), TupleOrderingDirection::Asc),
-            (Column(1, 1), TupleOrderingDirection::Asc),
+            (test_col(&ctx, "t1", "c0")?, TupleOrderingDirection::Asc),
+            (test_col(&ctx, "t1", "c1")?, TupleOrderingDirection::Asc),
         ]);
-        assert_eq!(None, t1.try_satisfy(&ordering, &ctx).unwrap());
+        assert_eq!(None, t1.try_satisfy(&ordering, &ctx)?);
+        Ok(())
     }
 
     #[test]
-    fn logical_join_try_satisfy_ordering() {
-        let ctx = IRContext::with_empty_magic();
+    fn logical_join_try_satisfy_ordering() -> crate::error::Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 2), ("t2", 2)])?;
 
-        let m1 = ctx.mock_scan(1, 2, 100.);
-        let m2 = ctx.mock_scan(2, 2, 100.);
+        let m1 = ctx.logical_get_v2(TableRef::bare("t1"), None)?.build();
+        let m2 = ctx.logical_get_v2(TableRef::bare("t2"), None)?.build();
         let join_cond = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();
-        let join1 = Join::new(
-            JoinType::Inner,
-            m1.clone(),
-            m2.clone(),
-            join_cond.clone(),
-            None,
-        )
-        .into_operator();
-        let join2 = join1.clone_with_inputs(Some(Arc::new([m2, m1])), None);
+        let join1 = m1
+            .clone()
+            .with_ctx(&ctx)
+            .logical_join(m2.clone(), join_cond.clone(), JoinType::Inner)
+            .build();
+        let join2 = m2
+            .clone()
+            .with_ctx(&ctx)
+            .logical_join(m1, join_cond, JoinType::Inner)
+            .build();
 
         let empty = TupleOrdering::default();
-        let res = join1.try_satisfy(&empty, &ctx).unwrap().unwrap();
+        let res = join1.try_satisfy(&empty, &ctx)?.unwrap();
         assert_eq!(res[0], empty);
         assert_eq!(res[1], empty);
 
         let ordering_from_t1 = TupleOrdering::from_iter([
-            (Column(1, 0), TupleOrderingDirection::Asc),
-            (Column(1, 1), TupleOrderingDirection::Desc),
+            (test_col(&ctx, "t1", "c0")?, TupleOrderingDirection::Asc),
+            (test_col(&ctx, "t1", "c1")?, TupleOrderingDirection::Desc),
         ]);
-        let res = join1.try_satisfy(&ordering_from_t1, &ctx).unwrap().unwrap();
+        let res = join1.try_satisfy(&ordering_from_t1, &ctx)?.unwrap();
         assert_eq!(res[0], ordering_from_t1);
         assert_eq!(res[1], empty);
 
-        assert_eq!(None, join2.try_satisfy(&ordering_from_t1, &ctx).unwrap());
+        assert_eq!(None, join2.try_satisfy(&ordering_from_t1, &ctx)?);
+        Ok(())
     }
 
     #[test]
-    fn logical_select_try_satisfy_ordering() {
-        let ctx = IRContext::with_empty_magic();
-        let input = ctx.mock_scan(1, 2, 100.);
+    fn logical_select_try_satisfy_ordering() -> crate::error::Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 2), ("t2", 1)])?;
+        let input = ctx.logical_get_v2(TableRef::bare("t1"), None)?.build();
+        let _other = ctx.logical_get_v2(TableRef::bare("t2"), None)?.build();
         let predicate = Literal::new(ScalarValue::Boolean(Some(true))).into_scalar();
-        let select = Select::new(input, predicate).into_operator();
+        let select = input.with_ctx(&ctx).select(predicate).build();
 
         let ordering = TupleOrdering::from_iter([
-            (Column(1, 0), TupleOrderingDirection::Asc),
-            (Column(1, 1), TupleOrderingDirection::Desc),
+            (test_col(&ctx, "t1", "c0")?, TupleOrderingDirection::Asc),
+            (test_col(&ctx, "t1", "c1")?, TupleOrderingDirection::Desc),
         ]);
-        let res = select.try_satisfy(&ordering, &ctx).unwrap().unwrap();
+        let res = select.try_satisfy(&ordering, &ctx)?.unwrap();
         assert_eq!(res[0], ordering);
 
-        let invalid = TupleOrdering::from_iter([(Column(2, 0), TupleOrderingDirection::Asc)]);
-        assert_eq!(None, select.try_satisfy(&invalid, &ctx).unwrap());
+        let invalid =
+            TupleOrdering::from_iter([(test_col(&ctx, "t2", "c0")?, TupleOrderingDirection::Asc)]);
+        assert_eq!(None, select.try_satisfy(&invalid, &ctx)?);
+        Ok(())
     }
 
     #[test]
-    fn logical_project_try_satisfy_ordering() {
-        let ctx = IRContext::with_empty_magic();
-        let input = ctx.mock_scan(1, 2, 100.);
-        let project = Project::new(
-            3,
-            input,
-            List::new(
-                vec![
-                    ColumnRef::new(Column(1, 0)).into_scalar(),
-                    ColumnRef::new(Column(1, 1)).into_scalar(),
-                ]
-                .into(),
-            )
-            .into_scalar(),
-        )
-        .into_operator();
+    fn logical_project_try_satisfy_ordering() -> crate::error::Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 2)])?;
+        let input = ctx.logical_get_v2(TableRef::bare("t1"), None)?.build();
+        let c0 = test_col(&ctx, "t1", "c0")?;
+        let c1 = test_col(&ctx, "t1", "c1")?;
+        let project = ctx
+            .project(input, [column_ref(c0), column_ref(c1)])?
+            .build();
 
-        let ordering = TupleOrdering::from_iter([(Column(1, 0), TupleOrderingDirection::Asc)]);
-        let res = project.try_satisfy(&ordering, &ctx).unwrap().unwrap();
+        let ordering = TupleOrdering::from_iter([(c0, TupleOrderingDirection::Asc)]);
+        let res = project.try_satisfy(&ordering, &ctx)?.unwrap();
         assert_eq!(res[0], ordering);
 
-        let invalid = TupleOrdering::from_iter([(Column(3, 0), TupleOrderingDirection::Asc)]);
-        assert_eq!(None, project.try_satisfy(&invalid, &ctx).unwrap());
+        let project_node = project.try_borrow::<Project>().unwrap();
+        let project_table_ref = ctx
+            .get_binding(project_node.table_index())?
+            .table_ref()
+            .clone();
+        let invalid = TupleOrdering::from_iter([(
+            ctx.col(Some(&project_table_ref), "c0")?,
+            TupleOrderingDirection::Asc,
+        )]);
+        assert_eq!(None, project.try_satisfy(&invalid, &ctx)?);
+        Ok(())
     }
 
     #[test]
-    fn logical_aggregate_try_satisfy_ordering() {
-        let ctx = IRContext::with_empty_magic();
-        let input = ctx.mock_scan(1, 2, 100.);
-        let aggregate = Aggregate::new(
-            2,
-            input,
-            List::new(Vec::new().into()).into_scalar(),
-            List::new(vec![ColumnRef::new(Column(1, 0)).into_scalar()].into()).into_scalar(),
-            None,
-        )
-        .into_operator();
+    fn logical_aggregate_try_satisfy_ordering() -> crate::error::Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 2)])?;
+        let input = ctx.logical_get_v2(TableRef::bare("t1"), None)?.build();
+        let c0 = test_col(&ctx, "t1", "c0")?;
+        let aggregate = input
+            .with_ctx(&ctx)
+            .logical_aggregate(Vec::new(), [column_ref(c0)])?
+            .build();
 
         let empty = TupleOrdering::default();
-        let res = aggregate.try_satisfy(&empty, &ctx).unwrap().unwrap();
+        let res = aggregate.try_satisfy(&empty, &ctx)?.unwrap();
         assert_eq!(res[0], empty);
 
-        let ordering = TupleOrdering::from_iter([(Column(1, 0), TupleOrderingDirection::Asc)]);
-        assert_eq!(None, aggregate.try_satisfy(&ordering, &ctx).unwrap());
+        let ordering = TupleOrdering::from_iter([(c0, TupleOrderingDirection::Asc)]);
+        assert_eq!(None, aggregate.try_satisfy(&ordering, &ctx)?);
+        Ok(())
     }
 
     #[test]
-    fn logical_order_by_try_satisfy_ordering() {
-        let ctx = IRContext::with_empty_magic();
+    fn logical_order_by_try_satisfy_ordering() -> crate::error::Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 3)])?;
+        let input = ctx.logical_get_v2(TableRef::bare("t1"), None)?.build();
+        let c0 = test_col(&ctx, "t1", "c0")?;
+        let c1 = test_col(&ctx, "t1", "c1")?;
         let order_by = OrderBy::new(
-            ctx.mock_scan(1, 3, 100.),
+            input,
             vec![
-                (
-                    ColumnRef::new(Column(1, 0)).into_scalar(),
-                    TupleOrderingDirection::Asc,
-                ),
-                (
-                    ColumnRef::new(Column(1, 1)).into_scalar(),
-                    TupleOrderingDirection::Desc,
-                ),
+                (column_ref(c0), TupleOrderingDirection::Asc),
+                (column_ref(c1), TupleOrderingDirection::Desc),
             ],
         )
         .into_operator();
 
-        let required = TupleOrdering::from_iter([(Column(1, 0), TupleOrderingDirection::Asc)]);
-        let res = order_by.try_satisfy(&required, &ctx).unwrap().unwrap();
+        let required = TupleOrdering::from_iter([(c0, TupleOrderingDirection::Asc)]);
+        let res = order_by.try_satisfy(&required, &ctx)?.unwrap();
         assert_eq!(res[0], TupleOrdering::default());
 
-        let invalid = TupleOrdering::from_iter([(Column(1, 1), TupleOrderingDirection::Asc)]);
-        assert_eq!(None, order_by.try_satisfy(&invalid, &ctx).unwrap());
+        let invalid = TupleOrdering::from_iter([(c1, TupleOrderingDirection::Asc)]);
+        assert_eq!(None, order_by.try_satisfy(&invalid, &ctx)?);
+        Ok(())
     }
 }

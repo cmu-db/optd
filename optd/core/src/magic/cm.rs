@@ -126,7 +126,7 @@ impl CostModel for MagicCostModel {
 mod tests {
 
     use crate::ir::{
-        builder::{boolean, column_ref, int64},
+        builder_v2::{boolean, column_ref, int64},
         convert::{IntoOperator, IntoScalar},
         cost::Cost,
         operator::{join::JoinType, *},

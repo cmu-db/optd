@@ -56,7 +56,7 @@ mod tests {
     use super::*;
     use crate::ir::{
         IRContext,
-        builder::column_ref,
+        builder_v2::column_ref,
         convert::{IntoOperator, IntoScalar},
         operator::Aggregate,
         scalar::List,

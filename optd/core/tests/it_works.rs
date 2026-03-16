@@ -7,7 +7,7 @@ use optd_core::{
     cascades::Cascades,
     ir::{
         Column, IRContext, Operator,
-        builder::*,
+        builder_v2::*,
         explain::quick_explain,
         operator::join::JoinType,
         properties::{Required, TupleOrdering, TupleOrderingDirection},

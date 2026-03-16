@@ -25,6 +25,8 @@ pub mod scalar;
 pub mod schema;
 pub mod statistics;
 pub mod table_ref;
+#[cfg(test)]
+pub(crate) mod test_utils;
 mod types;
 
 pub use column::*;
