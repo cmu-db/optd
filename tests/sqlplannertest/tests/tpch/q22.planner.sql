@@ -39,6 +39,6 @@ order by
 
 /*
 Error
-This feature is not implemented: Substring could not be planned by registered expr planner. Hint: Please try with `unicode_expressions` DataFusion feature enabled
+External error: Unsupported df logical expr: substr(customer.c_phone, Int64(1), Int64(2)) IN ([Utf8View("13"), Utf8View("31"), Utf8View("23"), Utf8View("29"), Utf8View("30"), Utf8View("18"), Utf8View("17")])
 */
 
