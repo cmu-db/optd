@@ -27,6 +27,7 @@ datafusion = { version = "52.0.0", default-features = false, features = [
     "parquet",
     "sql",
     "unicode_expressions",
+    "datetime_expressions",
 ] }
 
 arrow-schema = { version = "57.2.0", default-features = false }

@@ -39,6 +39,6 @@ order by
 
 /*
 Error
-This feature is not implemented: Extract not supported by ExprPlanner: [Literal(Utf8("YEAR"), None), Column(Column { relation: Some(Bare { table: "orders" }), name: "o_orderdate" })]
+Schema error: Schema contains duplicate unqualified field name n_nationkey
 */
 
