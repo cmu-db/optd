@@ -102,7 +102,7 @@ mod tests {
         assert_eq!(new_inner.table_index(), &1);
 
         let left_outer_join =
-            Join::new(JoinType::Left, m_outer, m_inner, join_cond, None).into_operator();
+            Join::new(JoinType::LeftOuter, m_outer, m_inner, join_cond, None).into_operator();
         assert!(!rule.pattern.matches_without_expand(&left_outer_join));
     }
 }

@@ -34,9 +34,19 @@ impl_operator_conversion!(Join, JoinBorrowed);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum JoinType {
+    /// Returns rows that satisfy the join condition, with columns from both inputs.
     Inner,
-    Left,
+    /// Returns all outer rows and null-extends unmatched inner rows.
+    LeftOuter,
+    /// Returns all outer rows and at most one matching inner row, null-extending when absent.
     Single,
+    /// Returns outer rows that have at least one matching inner row.
+    /// The output schema contains only outer columns.
+    LeftSemi,
+    /// Returns outer rows that have no matching inner rows.
+    /// The output schema contains only outer columns.
+    LeftAnti,
+    /// Returns outer rows together with a nullable mark column that indicates match existence.
     Mark(Column),
 }
 

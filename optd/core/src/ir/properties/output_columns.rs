@@ -40,41 +40,11 @@ impl Derive<OutputColumns> for crate::ir::Operator {
             }
             OperatorKind::Join(meta) => {
                 let join = Join::borrow_raw_parts(meta, &self.common);
-                match join.join_type() {
-                    JoinType::Mark(mark_column) => {
-                        let outer_columns = join.outer().output_columns(ctx)?;
-                        let set = outer_columns
-                            .iter()
-                            .cloned()
-                            .chain(std::iter::once(*mark_column))
-                            .collect();
-                        Ok(Arc::new(set))
-                    }
-                    _ => {
-                        let outer_columns = join.outer().output_columns(ctx)?;
-                        let inner_columns = join.inner().output_columns(ctx)?;
-                        Ok(Arc::new(outer_columns.as_ref() | inner_columns.as_ref()))
-                    }
-                }
+                derive_join_output_columns(join.outer(), join.inner(), join.join_type(), ctx)
             }
             OperatorKind::DependentJoin(meta) => {
                 let join = DependentJoin::borrow_raw_parts(meta, &self.common);
-                match join.join_type() {
-                    JoinType::Mark(mark_column) => {
-                        let outer_columns = join.outer().output_columns(ctx)?;
-                        let set = outer_columns
-                            .iter()
-                            .cloned()
-                            .chain(std::iter::once(*mark_column))
-                            .collect();
-                        Ok(Arc::new(set))
-                    }
-                    _ => {
-                        let outer_columns = join.outer().output_columns(ctx)?;
-                        let inner_columns = join.inner().output_columns(ctx)?;
-                        Ok(Arc::new(outer_columns.as_ref() | inner_columns.as_ref()))
-                    }
-                }
+                derive_join_output_columns(join.outer(), join.inner(), join.join_type(), ctx)
             }
             OperatorKind::Select(_)
             | OperatorKind::Limit(_)
@@ -151,11 +121,36 @@ impl crate::ir::Operator {
     }
 }
 
+fn derive_join_output_columns(
+    outer: &crate::ir::Operator,
+    inner: &crate::ir::Operator,
+    join_type: &JoinType,
+    ctx: &crate::ir::IRContext,
+) -> Result<Arc<ColumnSet>> {
+    let outer_columns = outer.output_columns(ctx)?;
+    match join_type {
+        JoinType::LeftSemi | JoinType::LeftAnti => Ok(outer_columns),
+        JoinType::Mark(mark_column) => {
+            let set = outer_columns
+                .iter()
+                .cloned()
+                .chain(std::iter::once(*mark_column))
+                .collect();
+            Ok(Arc::new(set))
+        }
+        JoinType::Inner | JoinType::LeftOuter | JoinType::Single => {
+            let inner_columns = inner.output_columns(ctx)?;
+            Ok(Arc::new(outer_columns.as_ref() | inner_columns.as_ref()))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::ir::{
-        Group, GroupId, IRContext, convert::IntoOperator, properties::OperatorProperties,
-        table_ref::TableRef, test_utils::test_ctx_with_tables,
+        Group, GroupId, IRContext, builder::boolean, convert::IntoOperator,
+        operator::join::JoinType, properties::OperatorProperties, table_ref::TableRef,
+        test_utils::test_ctx_with_tables,
     };
     use std::sync::Arc;
 
@@ -181,5 +176,43 @@ mod tests {
             Group::new(GroupId(42), Arc::new(OperatorProperties::default())).into_operator();
 
         assert!(group.output_columns(&ctx).is_err());
+    }
+
+    #[test]
+    fn left_semi_join_output_columns_use_only_outer_columns() -> crate::error::Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 2), ("t2", 3)])?;
+        let outer = ctx.logical_get(TableRef::bare("t1"), None)?.build();
+        let inner = ctx.logical_get(TableRef::bare("t2"), None)?.build();
+        let expected = outer.output_columns(&ctx)?;
+
+        let join = outer
+            .with_ctx(&ctx)
+            .logical_join(inner, boolean(true), JoinType::LeftSemi)
+            .build();
+
+        let output_columns = join.output_columns(&ctx)?;
+
+        assert_eq!(output_columns.as_ref(), expected.as_ref());
+
+        Ok(())
+    }
+
+    #[test]
+    fn left_anti_join_output_columns_use_only_outer_columns() -> crate::error::Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 2), ("t2", 3)])?;
+        let outer = ctx.logical_get(TableRef::bare("t1"), None)?.build();
+        let inner = ctx.logical_get(TableRef::bare("t2"), None)?.build();
+        let expected = outer.output_columns(&ctx)?;
+
+        let join = outer
+            .with_ctx(&ctx)
+            .logical_join(inner, boolean(true), JoinType::LeftAnti)
+            .build();
+
+        let output_columns = join.output_columns(&ctx)?;
+
+        assert_eq!(output_columns.as_ref(), expected.as_ref());
+
+        Ok(())
     }
 }
