@@ -18,10 +18,10 @@ use optd_core::ir::{
     },
     properties::TupleOrderingDirection,
     scalar::{
-        BinaryOp, BinaryOpBorrowed, BinaryOpKind, Case as OptdCase,
-        CaseBorrowed as OptdCaseBorrowed, Cast, CastBorrowed, ColumnRef, ColumnRefBorrowed,
-        Function, FunctionBorrowed, FunctionKind, Like, LikeBorrowed, List, Literal,
-        LiteralBorrowed, NaryOp, NaryOpBorrowed, NaryOpKind,
+        BinaryOp, BinaryOpBorrowed, BinaryOpKind, Case, CaseBorrowed, Cast, CastBorrowed,
+        ColumnRef, ColumnRefBorrowed, Function, FunctionBorrowed, FunctionKind, InList,
+        InListBorrowed, Like, LikeBorrowed, List, Literal, LiteralBorrowed, NaryOp, NaryOpBorrowed,
+        NaryOpKind,
     },
 };
 use snafu::{OptionExt, ResultExt, whatever};
@@ -320,7 +320,7 @@ mod tests {
         prelude::SessionConfig,
         scalar::ScalarValue,
     };
-    use optd_core::ir::scalar::{Case as OptdCase, Function, FunctionKind};
+    use optd_core::ir::scalar::{Case, Function, FunctionKind};
 
     use crate::create_optd_session_context;
 
@@ -453,7 +453,7 @@ mod tests {
         let optd_expr = ctx
             .try_into_optd_scalar_expr(&expr, &DFSchema::empty())
             .unwrap();
-        let optd_case = optd_expr.borrow::<OptdCase>();
+        let optd_case = optd_expr.borrow::<Case>();
         assert!(optd_case.expr().is_none());
         assert_eq!(optd_case.when_then_expr().len(), 1);
         assert!(optd_case.else_expr().is_some());
@@ -501,12 +501,12 @@ mod tests {
         let optd_expr = ctx
             .try_into_optd_scalar_expr(&expr, &DFSchema::empty())
             .unwrap();
-        let optd_case = optd_expr.borrow::<OptdCase>();
+        let optd_case = optd_expr.borrow::<Case>();
         assert!(optd_case.expr().is_some());
         assert_eq!(optd_case.when_then_expr().len(), 2);
         assert!(optd_case.else_expr().is_some());
 
-        let restored = ctx.try_from_optd_scalar_expr(optd_expr.as_ref()).unwrap();
+        let restored = ctx.try_from_optd_scalar_expr(&optd_expr).unwrap();
         assert_eq!(restored, expr);
     }
 
@@ -567,8 +567,12 @@ impl OptdQueryPlannerContext<'_> {
                 self.try_from_optd_like(node)
             }
             optd_core::ir::ScalarKind::Case(meta) => {
-                let node = OptdCase::borrow_raw_parts(meta, &expr.common);
+                let node = Case::borrow_raw_parts(meta, &expr.common);
                 self.try_from_optd_case(node)
+            }
+            optd_core::ir::ScalarKind::InList(meta) => {
+                let node = InList::borrow_raw_parts(meta, &expr.common);
+                self.try_from_optd_in_list(node)
             }
         }
     }
@@ -682,7 +686,7 @@ impl OptdQueryPlannerContext<'_> {
         }
     }
 
-    pub fn try_from_optd_case(&mut self, node: OptdCaseBorrowed<'_>) -> Result<DFExpr> {
+    pub fn try_from_optd_case(&mut self, node: CaseBorrowed<'_>) -> Result<DFExpr> {
         let expr = node
             .expr()
             .map(|expr| self.try_from_optd_scalar_expr(expr))
@@ -707,6 +711,22 @@ impl OptdQueryPlannerContext<'_> {
             expr,
             when_then_expr,
             else_expr,
+        )))
+    }
+
+    pub fn try_from_optd_in_list(&mut self, node: InListBorrowed<'_>) -> Result<DFExpr> {
+        let expr = self.try_from_optd_scalar_expr(node.expr())?;
+        let list = node.list().borrow::<List>();
+        let list = list
+            .members()
+            .iter()
+            .map(|e| self.try_from_optd_scalar_expr(e))
+            .try_collect()?;
+
+        Ok(DFExpr::InList(logical_expr::expr::InList::new(
+            Box::new(expr),
+            list,
+            *node.negated(),
         )))
     }
 }

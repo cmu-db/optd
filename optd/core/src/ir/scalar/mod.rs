@@ -15,6 +15,7 @@ mod case;
 mod cast;
 mod column_ref;
 mod function;
+mod in_list;
 mod like;
 mod list;
 mod literal;
@@ -27,6 +28,7 @@ pub use case::*;
 pub use cast::*;
 pub use column_ref::*;
 pub use function::*;
+pub use in_list::*;
 pub use like::*;
 pub use list::*;
 pub use literal::*;
@@ -47,6 +49,7 @@ pub enum ScalarKind {
     List(ListMetadata),
     Function(FunctionMetadata),
     Cast(CastMetadata),
+    InList(InListMetadata),
     Like(LikeMetadata),
     Case(CaseMetadata),
 }
@@ -91,6 +94,7 @@ impl Scalar {
             | ScalarKind::NaryOp(_)
             | ScalarKind::List(_)
             | ScalarKind::Cast(_)
+            | ScalarKind::InList(_)
             | ScalarKind::Like(_)
             | ScalarKind::Function(_)
             | ScalarKind::Case(_) => self.input_scalars().iter().fold(
@@ -191,6 +195,9 @@ impl Explain for Scalar {
             }
             ScalarKind::Cast(meta) => {
                 Cast::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            ScalarKind::InList(meta) => {
+                InList::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             ScalarKind::Like(meta) => {
                 Like::borrow_raw_parts(meta, &self.common).explain(ctx, option)

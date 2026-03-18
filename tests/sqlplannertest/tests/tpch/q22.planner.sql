@@ -39,6 +39,6 @@ order by
 
 /*
 Error
-External error: Unsupported df logical expr: substr(customer.c_phone, Int64(1), Int64(2)) IN ([Utf8View("13"), Utf8View("31"), Utf8View("23"), Utf8View("29"), Utf8View("30"), Utf8View("18"), Utf8View("17")])
+External error: Unsupported join type: LeftAnti
 */
 

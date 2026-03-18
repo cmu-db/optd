@@ -18,7 +18,7 @@ use optd_core::{
         convert::{IntoOperator, IntoScalar},
         operator::{Aggregate, Get, Join, Limit, OrderBy, Project, Remap, Select},
         properties::TupleOrderingDirection,
-        scalar::{Case as OptdCase, Cast, ColumnRef, Function, Like, List, NaryOp, NaryOpKind},
+        scalar::{Case, Cast, ColumnRef, Function, InList, Like, List, NaryOp, NaryOpKind},
     },
 };
 use snafu::{ResultExt, whatever};
@@ -283,6 +283,7 @@ impl OptdQueryPlannerContext<'_> {
             DFExpr::Cast(cast) => self.try_into_optd_cast(cast, input_schema),
             DFExpr::Like(like) => self.try_into_optd_like(like, input_schema),
             DFExpr::Case(case) => self.try_into_optd_case(case, input_schema),
+            DFExpr::InList(in_list) => self.try_into_optd_in_list(in_list, input_schema),
             expr => {
                 whatever!("Unsupported df logical expr: {}", expr);
             }
@@ -473,6 +474,22 @@ impl OptdQueryPlannerContext<'_> {
             .map(|expr| self.try_into_optd_scalar_expr(expr, input_schema))
             .transpose()?;
 
-        Ok(OptdCase::new(expr, when_then_expr.into(), else_expr).into_scalar())
+        Ok(Case::new(expr, when_then_expr.into(), else_expr).into_scalar())
+    }
+
+    pub fn try_into_optd_in_list(
+        &mut self,
+        node: &logical_expr::expr::InList,
+        input_schema: &DFSchema,
+    ) -> Result<Arc<Scalar>> {
+        let expr = self.try_into_optd_scalar_expr(&node.expr, input_schema)?;
+        let list = node
+            .list
+            .iter()
+            .map(|e| self.try_into_optd_scalar_expr(e, input_schema))
+            .try_collect()
+            .map(List::new)?;
+
+        Ok(InList::new(expr, list.into_scalar(), node.negated).into_scalar())
     }
 }
