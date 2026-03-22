@@ -8,8 +8,8 @@ use super::{
 use crate::ir::{
     Column, ColumnSet, IRContext, Operator, Scalar,
     convert::{IntoOperator, IntoScalar},
-    operator::{LogicalJoin, LogicalProject, LogicalSelect, join::JoinType},
-    scalar::{ColumnAssign, ColumnRef, List},
+    operator::{Join, Project, Select, join::JoinType},
+    scalar::List,
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -39,10 +39,10 @@ impl RulePass for ScalarSimplificationRulePass {
 impl RulePass for MergeSelectRulePass {
     fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Arc<Operator> {
         rewrite_bottom_up(root, ctx, &|op, _ctx| {
-            let Ok(select) = op.try_borrow::<LogicalSelect>() else {
+            let Ok(select) = op.try_borrow::<Select>() else {
                 return op;
             };
-            let Ok(inner_select) = select.input().try_borrow::<LogicalSelect>() else {
+            let Ok(inner_select) = select.input().try_borrow::<Select>() else {
                 return op;
             };
 
@@ -50,7 +50,7 @@ impl RulePass for MergeSelectRulePass {
                 inner_select.predicate().clone(),
                 select.predicate().clone(),
             ]);
-            LogicalSelect::new(inner_select.input().clone(), merged).into_operator()
+            Select::new(inner_select.input().clone(), merged).into_operator()
         })
     }
 }
@@ -58,13 +58,14 @@ impl RulePass for MergeSelectRulePass {
 impl RulePass for PushSelectThroughProjectRulePass {
     fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Arc<Operator> {
         rewrite_bottom_up(root, ctx, &|op, _ctx| {
-            let Ok(select) = op.try_borrow::<LogicalSelect>() else {
+            let Ok(select) = op.try_borrow::<Select>() else {
                 return op;
             };
-            let Ok(project) = select.input().try_borrow::<LogicalProject>() else {
+            let Ok(project) = select.input().try_borrow::<Project>() else {
                 return op;
             };
-            let Some(substitutions) = extract_projection_substitutions(project.projections())
+            let Some(substitutions) =
+                extract_projection_substitutions(*project.table_index(), project.projections())
             else {
                 return op;
             };
@@ -74,9 +75,13 @@ impl RulePass for PushSelectThroughProjectRulePass {
             }
 
             let pushed_predicate = substitute_columns(select.predicate().clone(), &substitutions);
-            let pushed_input =
-                LogicalSelect::new(project.input().clone(), pushed_predicate).into_operator();
-            LogicalProject::new(pushed_input, project.projections().clone()).into_operator()
+            let pushed_input = Select::new(project.input().clone(), pushed_predicate).into_operator();
+            Project::new(
+                *project.table_index(),
+                pushed_input,
+                project.projections().clone(),
+            )
+            .into_operator()
         })
     }
 }
@@ -84,15 +89,19 @@ impl RulePass for PushSelectThroughProjectRulePass {
 impl RulePass for PushSelectThroughJoinRulePass {
     fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Arc<Operator> {
         rewrite_bottom_up(root, ctx, &|op, rule_ctx| {
-            let Ok(select) = op.try_borrow::<LogicalSelect>() else {
+            let Ok(select) = op.try_borrow::<Select>() else {
                 return op;
             };
-            let Ok(join) = select.input().try_borrow::<LogicalJoin>() else {
+            let Ok(join) = select.input().try_borrow::<Join>() else {
                 return op;
             };
 
-            let outer_cols = join.outer().output_columns(rule_ctx);
-            let inner_cols = join.inner().output_columns(rule_ctx);
+            let Ok(outer_cols) = join.outer().output_columns(rule_ctx) else {
+                return op;
+            };
+            let Ok(inner_cols) = join.inner().output_columns(rule_ctx) else {
+                return op;
+            };
             let mut outer_filters = Vec::new();
             let mut inner_filters = Vec::new();
             let mut join_conds = Vec::new();
@@ -100,9 +109,9 @@ impl RulePass for PushSelectThroughJoinRulePass {
 
             for cond in split_conjuncts(join.join_cond().clone()) {
                 let used = cond.used_columns();
-                if used.is_subset(&outer_cols) {
+                if used.is_subset(outer_cols.as_ref()) {
                     outer_filters.push(cond);
-                } else if used.is_subset(&inner_cols) {
+                } else if used.is_subset(inner_cols.as_ref()) {
                     inner_filters.push(cond);
                 } else {
                     join_conds.push(cond);
@@ -113,16 +122,16 @@ impl RulePass for PushSelectThroughJoinRulePass {
                 let used = cond.used_columns();
                 match join.join_type() {
                     JoinType::Inner => {
-                        if used.is_subset(&outer_cols) {
+                        if used.is_subset(outer_cols.as_ref()) {
                             outer_filters.push(cond);
-                        } else if used.is_subset(&inner_cols) {
+                        } else if used.is_subset(inner_cols.as_ref()) {
                             inner_filters.push(cond);
                         } else {
                             join_conds.push(cond);
                         }
                     }
                     JoinType::Left => {
-                        if used.is_subset(&outer_cols) {
+                        if used.is_subset(outer_cols.as_ref()) {
                             outer_filters.push(cond);
                         } else {
                             top_filters.push(cond);
@@ -135,30 +144,29 @@ impl RulePass for PushSelectThroughJoinRulePass {
             let new_outer = if outer_filters.is_empty() {
                 join.outer().clone()
             } else {
-                LogicalSelect::new(
-                    join.outer().clone(),
-                    combine_conjuncts_simplified(outer_filters),
-                )
-                .into_operator()
+                Select::new(join.outer().clone(), combine_conjuncts_simplified(outer_filters))
+                    .into_operator()
             };
             let new_inner = if inner_filters.is_empty() {
                 join.inner().clone()
             } else {
-                LogicalSelect::new(
-                    join.inner().clone(),
-                    combine_conjuncts_simplified(inner_filters),
-                )
-                .into_operator()
+                Select::new(join.inner().clone(), combine_conjuncts_simplified(inner_filters))
+                    .into_operator()
             };
             let new_join_cond = combine_conjuncts_simplified(join_conds);
-            let new_join = LogicalJoin::new(*join.join_type(), new_outer, new_inner, new_join_cond)
-                .into_operator();
+            let new_join = Join::new(
+                *join.join_type(),
+                new_outer,
+                new_inner,
+                new_join_cond,
+                join.implementation().clone(),
+            )
+            .into_operator();
 
             if top_filters.is_empty() {
                 new_join
             } else {
-                LogicalSelect::new(new_join, combine_conjuncts_simplified(top_filters))
-                    .into_operator()
+                Select::new(new_join, combine_conjuncts_simplified(top_filters)).into_operator()
             }
         })
     }
@@ -167,13 +175,16 @@ impl RulePass for PushSelectThroughJoinRulePass {
 impl RulePass for MergeProjectRulePass {
     fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Arc<Operator> {
         rewrite_bottom_up(root, ctx, &|op, _ctx| {
-            let Ok(project) = op.try_borrow::<LogicalProject>() else {
+            let Ok(project) = op.try_borrow::<Project>() else {
                 return op;
             };
-            let Ok(inner_project) = project.input().try_borrow::<LogicalProject>() else {
+            let Ok(inner_project) = project.input().try_borrow::<Project>() else {
                 return op;
             };
-            let Some(substitutions) = extract_projection_substitutions(inner_project.projections())
+            let Some(substitutions) = extract_projection_substitutions(
+                *inner_project.table_index(),
+                inner_project.projections(),
+            )
             else {
                 return op;
             };
@@ -181,24 +192,14 @@ impl RulePass for MergeProjectRulePass {
                 return op;
             };
 
-            let mut merged_members = Vec::with_capacity(outer_list.members().len());
-            for member in outer_list.members() {
-                if let Ok(assign) = member.try_borrow::<ColumnAssign>() {
-                    let expr = substitute_columns(assign.expr().clone(), &substitutions);
-                    merged_members.push(ColumnAssign::new(*assign.column(), expr).into_scalar());
-                } else if let Ok(column_ref) = member.try_borrow::<ColumnRef>() {
-                    let expr = substitutions
-                        .get(column_ref.column())
-                        .cloned()
-                        .unwrap_or_else(|| member.clone());
-                    merged_members
-                        .push(ColumnAssign::new(*column_ref.column(), expr).into_scalar());
-                } else {
-                    return op;
-                }
-            }
+            let merged_members = outer_list
+                .members()
+                .iter()
+                .map(|member| substitute_columns(member.clone(), &substitutions))
+                .collect::<Vec<_>>();
 
-            LogicalProject::new(
+            Project::new(
+                *project.table_index(),
                 inner_project.input().clone(),
                 List::new(Arc::from(merged_members)).into_scalar(),
             )
@@ -208,18 +209,13 @@ impl RulePass for MergeProjectRulePass {
 }
 
 fn extract_projection_substitutions(
+    table_index: i64,
     projections: &Arc<Scalar>,
 ) -> Option<HashMap<Column, Arc<Scalar>>> {
     let list = projections.try_borrow::<List>().ok()?;
     let mut substitutions = HashMap::with_capacity(list.members().len());
-    for member in list.members() {
-        if let Ok(assign) = member.try_borrow::<ColumnAssign>() {
-            substitutions.insert(*assign.column(), assign.expr().clone());
-        } else if let Ok(column_ref) = member.try_borrow::<ColumnRef>() {
-            substitutions.insert(*column_ref.column(), member.clone());
-        } else {
-            return None;
-        }
+    for (idx, member) in list.members().iter().enumerate() {
+        substitutions.insert(Column(table_index, idx), member.clone());
     }
     Some(substitutions)
 }

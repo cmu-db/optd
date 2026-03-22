@@ -3,10 +3,10 @@ use crate::ir::{
     Column, ColumnSet, IRContext, Operator,
     convert::{IntoOperator, IntoScalar},
     operator::{
-        LogicalAggregate, LogicalDependentJoin, LogicalGet, LogicalJoin, LogicalOrderBy,
-        LogicalProject, LogicalRemap, LogicalSelect, OperatorKind,
+        Aggregate, DependentJoin, Get, Join, OperatorKind, OrderBy, Project, Remap, Select,
+        Subquery,
     },
-    scalar::{ColumnAssign, ColumnRef, List},
+    scalar::List,
 };
 use std::sync::Arc;
 
@@ -14,15 +14,17 @@ pub(super) struct ColumnPruningRulePass;
 
 impl RulePass for ColumnPruningRulePass {
     fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Arc<Operator> {
-        let required = root.output_columns(ctx).as_ref().clone();
-        prune_operator(root, &required, ctx)
+        let Ok(required) = root.output_columns(ctx) else {
+            return root;
+        };
+        prune_operator(root, required.as_ref(), ctx)
     }
 }
 
 fn prune_operator(op: Arc<Operator>, required: &ColumnSet, ctx: &IRContext) -> Arc<Operator> {
     match &op.kind {
-        OperatorKind::LogicalSelect(meta) => {
-            let select = LogicalSelect::borrow_raw_parts(meta, &op.common);
+        OperatorKind::Select(meta) => {
+            let select = Select::borrow_raw_parts(meta, &op.common);
             let predicate = simplify_scalar_recursively(select.predicate().clone());
 
             let mut input_required = required.clone();
@@ -32,35 +34,28 @@ fn prune_operator(op: Arc<Operator>, required: &ColumnSet, ctx: &IRContext) -> A
             if predicate.is_true_scalar() {
                 new_input
             } else {
-                LogicalSelect::new(new_input, predicate).into_operator()
+                Select::new(new_input, predicate).into_operator()
             }
         }
-        OperatorKind::LogicalProject(meta) => {
-            let project = LogicalProject::borrow_raw_parts(meta, &op.common);
+        OperatorKind::Project(meta) => {
+            let project = Project::borrow_raw_parts(meta, &op.common);
             let list = project.projections().try_borrow::<List>().unwrap();
             let members = list.members();
             let mut kept = Vec::new();
             let mut input_required = ColumnSet::default();
-            for member in members {
-                let keep = if let Ok(assign) = member.try_borrow::<ColumnAssign>() {
-                    Some(*assign.column())
-                } else if let Ok(column_ref) = member.try_borrow::<ColumnRef>() {
-                    Some(*column_ref.column())
-                } else {
-                    None
-                }
-                .map(|column| required.contains(&column))
-                .unwrap_or(true);
+            for (idx, member) in members.iter().enumerate() {
+                let output_col = Column(*project.table_index(), idx);
+                let keep = required.contains(&output_col);
                 if keep {
                     kept.push(member.clone());
                     input_required |= &member.used_columns();
                 }
             }
             if kept.is_empty()
-                && let Some(first) = members.first()
+                && !members.is_empty()
             {
-                kept.push(first.clone());
-                input_required |= &first.used_columns();
+                kept.push(members[0].clone());
+                input_required |= &members[0].used_columns();
             }
 
             let new_input = prune_operator(project.input().clone(), &input_required, ctx);
@@ -69,68 +64,65 @@ fn prune_operator(op: Arc<Operator>, required: &ColumnSet, ctx: &IRContext) -> A
             } else {
                 List::new(Arc::from(kept)).into_scalar()
             };
-            LogicalProject::new(new_input, new_projections).into_operator()
+            Project::new(*project.table_index(), new_input, new_projections).into_operator()
         }
-        OperatorKind::LogicalRemap(meta) => {
-            let remap = LogicalRemap::borrow_raw_parts(meta, &op.common);
-            let list = remap.mappings().try_borrow::<List>().unwrap();
-            let members = list.members();
-            let mut kept = Vec::new();
-            let mut input_required = ColumnSet::default();
-            for member in members {
-                let keep = member
-                    .try_borrow::<ColumnAssign>()
-                    .map(|assign| required.contains(assign.column()))
-                    .unwrap_or(true);
-                if keep {
-                    kept.push(member.clone());
-                    input_required |= &member.used_columns();
+        OperatorKind::Remap(meta) => {
+            let remap = Remap::borrow_raw_parts(meta, &op.common);
+            let mut input_required = remap
+                .input()
+                .output_columns(ctx)
+                .ok()
+                .map(|cols| cols.as_ref().clone())
+                .unwrap_or_default();
+
+            if let Ok(schema) = remap.input().output_schema(ctx) {
+                let input_columns = schema
+                    .iter()
+                    .map(|(table_ref, field)| ctx.col(Some(table_ref), field.name()).ok())
+                    .collect::<Option<Vec<_>>>();
+
+                if let Some(input_columns) = input_columns {
+                    let mut mapped = required
+                        .iter()
+                        .filter(|column| column.0 == *remap.table_index())
+                        .filter_map(|column| input_columns.get(column.1).copied())
+                        .collect::<Vec<_>>();
+                    if mapped.is_empty() && !input_columns.is_empty() {
+                        mapped.push(input_columns[0]);
+                    }
+                    input_required = mapped.into_iter().collect();
                 }
-            }
-            if kept.is_empty()
-                && let Some(first) = members.first()
-            {
-                kept.push(first.clone());
-                input_required |= &first.used_columns();
             }
 
             let new_input = prune_operator(remap.input().clone(), &input_required, ctx);
-            let new_mappings = if kept.as_slice() == members {
-                remap.mappings().clone()
-            } else {
-                List::new(Arc::from(kept)).into_scalar()
-            };
-            LogicalRemap::new(new_input, new_mappings).into_operator()
+            Remap::new(*remap.table_index(), new_input).into_operator()
         }
-        OperatorKind::LogicalAggregate(meta) => {
-            let agg = LogicalAggregate::borrow_raw_parts(meta, &op.common);
+        OperatorKind::Aggregate(meta) => {
+            let agg = Aggregate::borrow_raw_parts(meta, &op.common);
             let exprs_list = agg.exprs().try_borrow::<List>().unwrap();
             let exprs = exprs_list.members();
-            let keys_list = agg.keys().try_borrow::<List>().unwrap();
+            let keys_list = agg.keys().borrow::<List>();
             let keys = keys_list.members();
 
             let mut kept_exprs = exprs
                 .iter()
-                .filter(|expr| {
-                    expr.try_borrow::<ColumnAssign>()
-                        .map(|assign| required.contains(assign.column()))
-                        .unwrap_or(true)
-                })
-                .cloned()
+                .enumerate()
+                .filter(|(idx, _expr)| required.contains(&Column(*agg.aggregate_table_index(), *idx)))
+                .map(|(_idx, expr)| expr.clone())
                 .collect::<Vec<_>>();
 
             if kept_exprs.is_empty()
                 && keys.is_empty()
-                && let Some(first) = exprs.first()
+                && !exprs.is_empty()
             {
-                kept_exprs.push(first.clone());
+                kept_exprs.push(exprs[0].clone());
             }
 
             let mut input_required = ColumnSet::default();
             for expr in &kept_exprs {
                 input_required |= &expr.used_columns();
             }
-            for key in keys {
+            for key in keys.iter() {
                 input_required |= &key.used_columns();
             }
 
@@ -140,12 +132,23 @@ fn prune_operator(op: Arc<Operator>, required: &ColumnSet, ctx: &IRContext) -> A
             } else {
                 List::new(Arc::from(kept_exprs)).into_scalar()
             };
-            LogicalAggregate::new(new_input, new_exprs, agg.keys().clone()).into_operator()
+            Aggregate::new(
+                *agg.aggregate_table_index(),
+                new_input,
+                new_exprs,
+                agg.keys().clone(),
+                *agg.implementation(),
+            )
+            .into_operator()
         }
-        OperatorKind::LogicalJoin(meta) => {
-            let join = LogicalJoin::borrow_raw_parts(meta, &op.common);
-            let outer_cols = join.outer().output_columns(ctx);
-            let inner_cols = join.inner().output_columns(ctx);
+        OperatorKind::Join(meta) => {
+            let join = Join::borrow_raw_parts(meta, &op.common);
+            let Ok(outer_cols) = join.outer().output_columns(ctx) else {
+                return op;
+            };
+            let Ok(inner_cols) = join.inner().output_columns(ctx) else {
+                return op;
+            };
             let used = join.join_cond().used_columns();
 
             let mut outer_required = required.clone() & outer_cols.as_ref();
@@ -155,18 +158,23 @@ fn prune_operator(op: Arc<Operator>, required: &ColumnSet, ctx: &IRContext) -> A
 
             let new_outer = prune_operator(join.outer().clone(), &outer_required, ctx);
             let new_inner = prune_operator(join.inner().clone(), &inner_required, ctx);
-            LogicalJoin::new(
+            Join::new(
                 *join.join_type(),
                 new_outer,
                 new_inner,
                 join.join_cond().clone(),
+                join.implementation().clone(),
             )
             .into_operator()
         }
-        OperatorKind::LogicalDependentJoin(meta) => {
-            let join = LogicalDependentJoin::borrow_raw_parts(meta, &op.common);
-            let outer_cols = join.outer().output_columns(ctx);
-            let inner_cols = join.inner().output_columns(ctx);
+        OperatorKind::DependentJoin(meta) => {
+            let join = DependentJoin::borrow_raw_parts(meta, &op.common);
+            let Ok(outer_cols) = join.outer().output_columns(ctx) else {
+                return op;
+            };
+            let Ok(inner_cols) = join.inner().output_columns(ctx) else {
+                return op;
+            };
             let used = join.join_cond().used_columns();
 
             let mut outer_required = required.clone() & outer_cols.as_ref();
@@ -176,7 +184,7 @@ fn prune_operator(op: Arc<Operator>, required: &ColumnSet, ctx: &IRContext) -> A
 
             let new_outer = prune_operator(join.outer().clone(), &outer_required, ctx);
             let new_inner = prune_operator(join.inner().clone(), &inner_required, ctx);
-            LogicalDependentJoin::new(
+            DependentJoin::new(
                 *join.join_type(),
                 new_outer,
                 new_inner,
@@ -184,23 +192,23 @@ fn prune_operator(op: Arc<Operator>, required: &ColumnSet, ctx: &IRContext) -> A
             )
             .into_operator()
         }
-        OperatorKind::LogicalOrderBy(meta) => {
-            let order_by = LogicalOrderBy::borrow_raw_parts(meta, &op.common);
+        OperatorKind::OrderBy(meta) => {
+            let order_by = OrderBy::borrow_raw_parts(meta, &op.common);
             let mut input_required = required.clone();
-            for expr in order_by.exprs() {
+            for expr in order_by.exprs().iter() {
                 input_required |= &expr.used_columns();
             }
             let new_input = prune_operator(order_by.input().clone(), &input_required, ctx);
             Arc::new(op.clone_with_inputs(Some(Arc::new([new_input])), None))
         }
-        OperatorKind::LogicalGet(meta) => {
-            let get = LogicalGet::borrow_raw_parts(meta, &op.common);
+        OperatorKind::Get(meta) => {
+            let get = Get::borrow_raw_parts(meta, &op.common);
             let mut kept = get
                 .projections()
                 .iter()
                 .copied()
                 .filter(|index| {
-                    let column = Column(get.first_column().0 + index);
+                    let column = Column(*get.table_index(), *index);
                     required.contains(&column)
                 })
                 .collect::<Vec<_>>();
@@ -212,22 +220,30 @@ fn prune_operator(op: Arc<Operator>, required: &ColumnSet, ctx: &IRContext) -> A
             if kept.as_slice() == get.projections().as_ref() {
                 op
             } else {
-                LogicalGet::new(*get.source(), *get.first_column(), Arc::from(kept)).into_operator()
+                Get::new(
+                    *get.data_source_id(),
+                    *get.table_index(),
+                    Arc::from(kept),
+                    *get.implementation(),
+                )
+                .into_operator()
             }
         }
-        OperatorKind::LogicalSubquery(_) => {
-            let input = op.input_operators()[0].clone();
-            let input_required = required.clone();
-            let new_input = prune_operator(input, &input_required, ctx);
-            Arc::new(op.clone_with_inputs(Some(Arc::new([new_input])), None))
+        OperatorKind::Subquery(meta) => {
+            let subquery = Subquery::borrow_raw_parts(meta, &op.common);
+            let new_input = prune_operator(subquery.input().clone(), required, ctx);
+            Subquery::new(new_input).into_operator()
         }
         _ => {
             let new_inputs = op
                 .input_operators()
                 .iter()
                 .map(|input| {
-                    let all_cols = input.output_columns(ctx).as_ref().clone();
-                    prune_operator(input.clone(), &all_cols, ctx)
+                    if let Ok(all_cols) = input.output_columns(ctx) {
+                        prune_operator(input.clone(), all_cols.as_ref(), ctx)
+                    } else {
+                        input.clone()
+                    }
                 })
                 .collect::<Vec<_>>();
             if new_inputs.as_slice() == op.input_operators() {
