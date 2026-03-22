@@ -1,4 +1,7 @@
-use crate::ir::{IRContext, Operator};
+use crate::{
+    error::Result,
+    ir::{IRContext, Operator},
+};
 
 use std::sync::Arc;
 
@@ -7,7 +10,7 @@ use std::sync::Arc;
 pub(super) trait RulePass {
     /// Applies this simplification pass to `root` and returns the rewritten
     /// root operator.
-    fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Arc<Operator>;
+    fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Result<Arc<Operator>>;
 }
 
 /// Recursively rewrites an operator tree in bottom-up order.
@@ -15,15 +18,19 @@ pub(super) trait RulePass {
 /// Child operators are rewritten first, then the current operator is rebuilt
 /// only if any input changed, and finally `rewrite` is applied to the current
 /// node.
-pub(super) fn rewrite_bottom_up<F>(op: Arc<Operator>, ctx: &IRContext, rewrite: &F) -> Arc<Operator>
+pub(super) fn rewrite_bottom_up<F>(
+    op: Arc<Operator>,
+    ctx: &IRContext,
+    rewrite: &F,
+) -> Result<Arc<Operator>>
 where
-    F: Fn(Arc<Operator>, &IRContext) -> Arc<Operator>,
+    F: Fn(Arc<Operator>, &IRContext) -> Result<Arc<Operator>>,
 {
     let new_inputs = op
         .input_operators()
         .iter()
         .map(|input| rewrite_bottom_up(input.clone(), ctx, rewrite))
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>>>()?;
 
     let op_with_new_inputs = if new_inputs.as_slice() == op.input_operators() {
         op

@@ -35,7 +35,7 @@ fn pushes_predicates_to_join_inputs_and_merges_selects() {
         .select(column_ref(t2_c0).eq(int32(20)).and(boolean(true)))
         .build();
 
-    let simplified = SimplificationPass::new().apply(plan, &ctx);
+    let simplified = SimplificationPass::new().apply(plan, &ctx).unwrap();
     let join = simplified.try_borrow::<Join>().unwrap();
     assert!(join.join_cond().is_true_scalar());
 
@@ -74,7 +74,10 @@ fn pushes_filter_through_project_and_merges_projects() {
     let first_project = ctx
         .project(
             get,
-            [column_ref(Column(get_table_index, 0)), column_ref(Column(get_table_index, 1))],
+            [
+                column_ref(Column(get_table_index, 0)),
+                column_ref(Column(get_table_index, 1)),
+            ],
         )
         .unwrap()
         .build();
@@ -85,7 +88,10 @@ fn pushes_filter_through_project_and_merges_projects() {
     let second_project = ctx
         .project(
             first_project,
-            [column_ref(alias_left).plus(int32(1)), column_ref(alias_right)],
+            [
+                column_ref(alias_left).plus(int32(1)),
+                column_ref(alias_right),
+            ],
         )
         .unwrap()
         .build();
@@ -97,14 +103,16 @@ fn pushes_filter_through_project_and_merges_projects() {
         .select(column_ref(out).gt(int32(5)))
         .build();
 
-    let simplified = SimplificationPass::new().apply(plan, &ctx);
+    let simplified = SimplificationPass::new().apply(plan, &ctx).unwrap();
     let project = simplified.try_borrow::<Project>().unwrap();
     let filter = project.input().try_borrow::<Select>().unwrap();
     let get = filter.input().try_borrow::<Get>().unwrap();
-    assert!(filter
-        .predicate()
-        .used_columns()
-        .contains(&Column(*get.table_index(), 0)));
+    assert!(
+        filter
+            .predicate()
+            .used_columns()
+            .contains(&Column(*get.table_index(), 0))
+    );
     assert!(!filter.predicate().used_columns().contains(&alias_left));
 }
 
@@ -125,7 +133,10 @@ fn prunes_get_projections_from_required_columns() {
     let first_project = ctx
         .project(
             get,
-            [column_ref(Column(get_table_index, 0)), column_ref(Column(get_table_index, 2))],
+            [
+                column_ref(Column(get_table_index, 0)),
+                column_ref(Column(get_table_index, 2)),
+            ],
         )
         .unwrap()
         .build();
@@ -136,7 +147,7 @@ fn prunes_get_projections_from_required_columns() {
         .unwrap()
         .build();
 
-    let simplified = SimplificationPass::new().apply(plan, &ctx);
+    let simplified = SimplificationPass::new().apply(plan, &ctx).unwrap();
     let project = simplified.try_borrow::<Project>().unwrap();
     let get = project.input().try_borrow::<Get>().unwrap();
     assert_eq!(get.projections().as_ref(), &[0]);

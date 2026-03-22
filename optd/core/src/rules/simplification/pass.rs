@@ -6,7 +6,10 @@ use super::{
     },
     rule::RulePass,
 };
-use crate::ir::{IRContext, Operator};
+use crate::{
+    error::Result,
+    ir::{IRContext, Operator},
+};
 use std::sync::Arc;
 
 /// The maximum number of iterations simplification should run, if it hasn't
@@ -37,7 +40,7 @@ impl SimplificationPass {
         }
     }
 
-    pub fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Arc<Operator> {
+    pub fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Result<Arc<Operator>> {
         let rules: [&dyn RulePass; 6] = [
             &ScalarSimplificationRulePass,
             &MergeSelectRulePass,
@@ -51,15 +54,15 @@ impl SimplificationPass {
         for _ in 0..self.max_iterations {
             let mut next = current.clone();
             for rule in rules {
-                next = rule.apply(next, ctx);
+                next = rule.apply(next, ctx)?;
             }
 
             if next == current {
-                return next;
+                return Ok(next);
             }
             current = next;
         }
 
-        current
+        Ok(current)
     }
 }
