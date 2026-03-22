@@ -45,7 +45,6 @@ use std::sync::Arc;
 
 use itertools::{Either, Itertools};
 
-use crate::ir::builder::boolean;
 use crate::ir::{
     Column, ColumnSet, IRContext, Operator, Scalar,
     catalog::DataSourceId,
@@ -98,7 +97,12 @@ impl AdvancedCardinalityEstimator {
 /// Returns `table_stats.row_count` if available, otherwise
 /// [`AdvancedCardinalityEstimator::FALLBACK_DEFAULT_CARDINALITY`].
 fn estimate_scan(ctx: &IRContext, source: DataSourceId) -> Cardinality {
-    match ctx.cat.describe_table(source).stats {
+    match ctx
+        .catalog
+        .table(source)
+        .ok()
+        .and_then(|table| table.statistics)
+    {
         Some(stats) => Cardinality::with_count_lossy(stats.row_count),
         None => Cardinality::with_count_lossy(
             AdvancedCardinalityEstimator::FALLBACK_DEFAULT_CARDINALITY,
@@ -136,7 +140,10 @@ fn estimate_aggregate(keys: &[Arc<Scalar>], input: &Operator, ctx: &IRContext) -
             .try_borrow::<ColumnRef>()
             .ok()
             .and_then(|col_ref| column_stats(ctx, *col_ref.column()))
-            .and_then(|(table_stats, offset)| ndv(&table_stats.column_statistics[offset]))
+            .and_then(|(table_stats, offset)| {
+                let col_stats = table_stats.column_statistics.get(offset)?;
+                ndv(col_stats)
+            })
             .map(|n| n as f64)
             .unwrap_or_else(|| {
                 input_card.as_f64() * AdvancedCardinalityEstimator::FALLBACK_GROUP_BY_NDV_FACTOR
@@ -171,11 +178,11 @@ fn join_cond_selectivity(join_cond: &Scalar) -> f64 {
 ///   Single     → min(sel · |L| · |R|, |L|)  (at-most-one match per left row)
 ///   Otherwise  → sel · |L| · |R|            (standard cross-product model)
 fn estimate_fallback_join(
+    ctx: &IRContext,
     join_type: &JoinType,
     outer: &Operator,
     inner: &Operator,
     join_cond: &Scalar,
-    ctx: &IRContext,
 ) -> Cardinality {
     let left_card = outer.cardinality(ctx);
     let right_card = inner.cardinality(ctx);
@@ -195,11 +202,11 @@ fn estimate_fallback_join(
 /// Decompose a join condition into equi-key pairs and a non-equi remainder.
 ///
 /// Returns `(keys, non_equi_cond)` where `keys` lists `(outer_col, inner_col)`
-/// equi-join pairs and `non_equi_cond` is the remaining predicate (literal
-/// `TRUE` when no non-equi conditions remain).
+/// equi-join pairs and `non_equi_cond` is `None` when no non-equi conditions
+/// remain (i.e. the remainder is trivially TRUE) and `Some(scalar)` otherwise.
 ///
 /// Recognized patterns:
-/// - `col_outer = col_inner` → single equi-key, non_equi = TRUE
+/// - `col_outer = col_inner` → single equi-key, non_equi = None
 /// - `(col_outer = col_inner) AND ...` → multiple equi-keys, non-equi remainder
 /// - anything else → no equi-keys, full condition as non_equi
 ///
@@ -209,7 +216,7 @@ fn extract_equi_and_non_equi(
     join_cond: &Arc<Scalar>,
     outer_cols: &ColumnSet,
     inner_cols: &ColumnSet,
-) -> (Vec<(Column, Column)>, Arc<Scalar>) {
+) -> (Vec<(Column, Column)>, Option<Arc<Scalar>>) {
     // If `eq` is a `col_outer = col_inner` equality, return `(outer_col, inner_col)`.
     let try_get_equi_key = |eq: BinaryOpBorrowed<'_>| -> Option<(Column, Column)> {
         let lhs = eq.lhs().try_borrow::<ColumnRef>().ok()?;
@@ -231,8 +238,8 @@ fn extract_equi_and_non_equi(
         && binop.is_eq()
     {
         return match try_get_equi_key(binop) {
-            Some(key) => (vec![key], boolean(true)),
-            None => (vec![], join_cond.clone()),
+            Some(key) => (vec![key], None),
+            None => (vec![], Some(join_cond.clone())),
         };
     }
 
@@ -252,58 +259,20 @@ fn extract_equi_and_non_equi(
             });
 
         let non_equi_scalar = match &non_equi[..] {
-            [] => boolean(true),
-            [singleton] => singleton.clone(),
-            terms => NaryOp::new(NaryOpKind::And, terms.into()).into_scalar(),
+            [] => None,
+            [singleton] => Some(singleton.clone()),
+            terms => Some(NaryOp::new(NaryOpKind::And, terms.into()).into_scalar()),
         };
         return (keys, non_equi_scalar);
     }
 
     // Case 3: Anything else (non-equi condition, literal, etc.) — no keys.
-    (vec![], join_cond.clone())
+    (vec![], Some(join_cond.clone()))
 }
 
 // ---------------------------------------------------------------------------
 // Statistics lookup helpers
 // ---------------------------------------------------------------------------
-
-/// Resolve an IR [`Column`] to its owning [`TableStatistics`] and the offset
-/// of the column within that table's `column_statistics` vector.
-///
-/// Returns `None` (triggering a fallback in the caller) when any of:
-/// - The column has no `source` (i.e. it is a derived/computed column).
-/// - The source table has no statistics in the catalog.
-/// - The column offset exceeds the statistics vector length.
-///
-/// **Assumption:** Column IDs are allocated contiguously per table starting
-/// from `first_column_id`, so `offset = column.0 - first_column_id` gives the
-/// position in `column_statistics`.
-// TODO(perf): Replace `Arc<Mutex<HashMap>>` on `source_to_first_column_id`
-// with a `RwLock` or freeze the map into a plain `Arc<HashMap>` before
-// optimization begins, since `add_base_table_columns` is the only writer and
-// runs during plan construction (before Cascades optimization). This would
-// eliminate mutex contention when `column_stats()` is called many times during
-// optimization.
-fn column_stats(ctx: &IRContext, column: Column) -> Option<(TableStatistics, usize)> {
-    let meta = ctx.get_column_meta(&column);
-    // Provenance lookup: only base-table columns carry a source.
-    // Derived columns (expressions, subqueries) have source = None.
-    let source = meta.source?;
-    let table_meta = ctx.cat.describe_table(source);
-    let stats = table_meta.stats?;
-    let first_col = ctx
-        .source_to_first_column_id
-        .lock()
-        .unwrap()
-        .get(&source)?
-        .0;
-    let offset = column.0.checked_sub(first_col)?;
-    if offset < stats.column_statistics.len() {
-        Some((stats, offset))
-    } else {
-        None
-    }
-}
 
 /// Extract the deserialized HLL sketch from a column's advanced statistics.
 ///
@@ -365,6 +334,49 @@ fn ndv(col_stats: &ColumnStatistics) -> Option<usize> {
     None
 }
 
+/// Look up the [`TableStatistics`] and column offset for a given [`Column`].
+///
+/// Delegates to [`IRContext::column_stats`] which caches results per
+/// `table_index`, so repeated lookups for columns from the same table
+/// avoid re-hitting the binder and catalog.
+fn column_stats(ctx: &IRContext, column: Column) -> Option<(TableStatistics, usize)> {
+    ctx.column_stats(&column)
+}
+
+fn extract_skip_bound(skip: &Scalar) -> Option<u64> {
+    let literal = skip.try_borrow::<Literal>().ok()?;
+    match literal.value() {
+        crate::ir::ScalarValue::Int8(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::Int16(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::Int32(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::Int64(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::UInt8(Some(v)) => Some(u64::from(*v)),
+        crate::ir::ScalarValue::UInt16(Some(v)) => Some(u64::from(*v)),
+        crate::ir::ScalarValue::UInt32(Some(v)) => Some(u64::from(*v)),
+        crate::ir::ScalarValue::UInt64(Some(v)) => Some(*v),
+        _ => None,
+    }
+}
+
+fn extract_fetch_bound(fetch: &Scalar) -> Option<u64> {
+    let literal = fetch.try_borrow::<Literal>().ok()?;
+    match literal.value() {
+        crate::ir::ScalarValue::Int8(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::Int16(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::Int32(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::Int64(Some(v)) => u64::try_from(*v).ok(),
+        crate::ir::ScalarValue::UInt8(Some(v)) => Some(u64::from(*v)),
+        crate::ir::ScalarValue::UInt16(Some(v)) => Some(u64::from(*v)),
+        crate::ir::ScalarValue::UInt32(Some(v)) => Some(u64::from(*v)),
+        crate::ir::ScalarValue::UInt64(Some(v)) => Some(*v),
+        crate::ir::ScalarValue::Int8(None)
+        | crate::ir::ScalarValue::Int16(None)
+        | crate::ir::ScalarValue::Int32(None)
+        | crate::ir::ScalarValue::Int64(None) => None,
+        _ => None,
+    }
+}
+
 impl CardinalityEstimator for AdvancedCardinalityEstimator {
     fn estimate(&self, op: &Operator, ctx: &IRContext) -> Cardinality {
         use crate::ir::OperatorKind;
@@ -373,146 +385,82 @@ impl CardinalityEstimator for AdvancedCardinalityEstimator {
             OperatorKind::Group(_) => {
                 unreachable!("Group nodes must have cardinality set before estimation")
             }
-
-            // --- Stats-driven: Scan ---
-            OperatorKind::LogicalGet(meta) => estimate_scan(ctx, meta.source),
-            OperatorKind::PhysicalTableScan(meta) => estimate_scan(ctx, meta.source),
-
-            // --- Stats-driven: Filter ---
-            OperatorKind::LogicalSelect(meta) => {
-                let filter = LogicalSelect::borrow_raw_parts(meta, &op.common);
+            OperatorKind::Get(meta) => estimate_scan(ctx, meta.data_source_id),
+            OperatorKind::Select(meta) => {
+                let filter = Select::borrow_raw_parts(meta, &op.common);
                 estimate_filter(filter.input(), filter.predicate(), ctx)
             }
-            OperatorKind::PhysicalFilter(meta) => {
-                let filter = PhysicalFilter::borrow_raw_parts(meta, &op.common);
-                estimate_filter(filter.input(), filter.predicate(), ctx)
-            }
+            OperatorKind::Join(meta) => {
+                let join = Join::borrow_raw_parts(meta, &op.common);
+                let join_type = join.join_type();
+                let join_cond = join.join_cond();
+                let outer = join.outer();
+                let inner = join.inner();
 
-            // --- Stats-driven: PhysicalHashJoin (equi-join + non-equi conditions) ---
-            OperatorKind::PhysicalHashJoin(meta) => {
-                let join = PhysicalHashJoin::borrow_raw_parts(meta, &op.common);
-                let build_card = join.build_side().cardinality(ctx);
-                let probe_card = join.probe_side().cardinality(ctx);
+                // TODO(AC): Fix this unwrap.
+                let outer_cols = outer.output_columns(ctx).unwrap();
+                let inner_cols = inner.output_columns(ctx).unwrap();
 
-                selectivity::equijoin_cardinality(
-                    join.keys(),
-                    join.non_equi_conds(),
-                    join.join_type(),
-                    build_card,
-                    probe_card,
-                    ctx,
-                )
-            }
-
-            // --- Stats-driven: LogicalJoin (equi-join keys extracted from condition) ---
-            OperatorKind::LogicalJoin(meta) => {
-                let join = LogicalJoin::borrow_raw_parts(meta, &op.common);
-                let outer_cols = join.outer().output_columns(ctx);
-                let inner_cols = join.inner().output_columns(ctx);
                 let (keys, non_equi) =
-                    extract_equi_and_non_equi(join.join_cond(), &outer_cols, &inner_cols);
+                    extract_equi_and_non_equi(join_cond, &outer_cols, &inner_cols);
+
                 if keys.is_empty() {
-                    estimate_fallback_join(
-                        join.join_type(),
-                        join.outer().as_ref(),
-                        join.inner().as_ref(),
-                        join.join_cond().as_ref(),
-                        ctx,
-                    )
+                    estimate_fallback_join(ctx, join_type, outer, inner, join_cond)
                 } else {
-                    let outer_card = join.outer().cardinality(ctx);
-                    let inner_card = join.inner().cardinality(ctx);
+                    let outer_card = outer.cardinality(ctx);
+                    let inner_card = inner.cardinality(ctx);
                     selectivity::equijoin_cardinality(
                         &keys,
-                        &non_equi,
-                        join.join_type(),
-                        outer_card,
-                        inner_card,
+                        non_equi.as_deref(),
+                        join_type,
+                        outer.cardinality(ctx),
+                        inner.cardinality(ctx),
                         ctx,
                     )
                 }
             }
-
-            // --- Fallback: dependent join (correlated subquery; stats-driven infeasible) ---
-            OperatorKind::LogicalDependentJoin(meta) => {
-                let join = LogicalDependentJoin::borrow_raw_parts(meta, &op.common);
+            OperatorKind::DependentJoin(meta) => {
+                let join = DependentJoin::borrow_raw_parts(meta, &op.common);
                 estimate_fallback_join(
+                    ctx,
                     join.join_type(),
                     join.outer().as_ref(),
                     join.inner().as_ref(),
                     join.join_cond().as_ref(),
-                    ctx,
                 )
             }
-
-            // --- Stats-driven: PhysicalNLJoin (equi-join keys extracted from condition) ---
-            OperatorKind::PhysicalNLJoin(meta) => {
-                let join = PhysicalNLJoin::borrow_raw_parts(meta, &op.common);
-                let outer_cols = join.outer().output_columns(ctx);
-                let inner_cols = join.inner().output_columns(ctx);
-                let (keys, non_equi) =
-                    extract_equi_and_non_equi(join.join_cond(), &outer_cols, &inner_cols);
-                if keys.is_empty() {
-                    estimate_fallback_join(
-                        join.join_type(),
-                        join.outer().as_ref(),
-                        join.inner().as_ref(),
-                        join.join_cond().as_ref(),
-                        ctx,
-                    )
-                } else {
-                    let outer_card = join.outer().cardinality(ctx);
-                    let inner_card = join.inner().cardinality(ctx);
-                    selectivity::equijoin_cardinality(
-                        &keys,
-                        &non_equi,
-                        join.join_type(),
-                        outer_card,
-                        inner_card,
-                        ctx,
-                    )
-                }
-            }
-
-            // --- Stats-driven: aggregates ---
-            OperatorKind::LogicalAggregate(meta) => {
-                let agg = LogicalAggregate::borrow_raw_parts(meta, &op.common);
+            OperatorKind::Aggregate(meta) => {
+                let agg = Aggregate::borrow_raw_parts(meta, &op.common);
                 estimate_aggregate(agg.keys().borrow::<List>().members(), agg.input(), ctx)
             }
-            OperatorKind::PhysicalHashAggregate(meta) => {
-                let agg = PhysicalHashAggregate::borrow_raw_parts(meta, &op.common);
-                estimate_aggregate(agg.keys().borrow::<List>().members(), agg.input(), ctx)
-            }
-
-            // --- Pass-through: these operators do not change row count ---
-            OperatorKind::LogicalOrderBy(meta) => {
-                LogicalOrderBy::borrow_raw_parts(meta, &op.common)
-                    .input()
-                    .cardinality(ctx)
-            }
-            OperatorKind::LogicalSubquery(meta) => {
-                LogicalSubquery::borrow_raw_parts(meta, &op.common)
-                    .input()
-                    .cardinality(ctx)
-            }
+            OperatorKind::OrderBy(meta) => OrderBy::borrow_raw_parts(meta, &op.common)
+                .input()
+                .cardinality(ctx),
+            OperatorKind::Subquery(meta) => Subquery::borrow_raw_parts(meta, &op.common)
+                .input()
+                .cardinality(ctx),
             OperatorKind::EnforcerSort(meta) => EnforcerSort::borrow_raw_parts(meta, &op.common)
                 .input()
                 .cardinality(ctx),
-            OperatorKind::LogicalProject(meta) => {
-                LogicalProject::borrow_raw_parts(meta, &op.common)
-                    .input()
-                    .cardinality(ctx)
-            }
-            OperatorKind::PhysicalProject(meta) => {
-                PhysicalProject::borrow_raw_parts(meta, &op.common)
-                    .input()
-                    .cardinality(ctx)
-            }
-            OperatorKind::LogicalRemap(meta) => LogicalRemap::borrow_raw_parts(meta, &op.common)
+            OperatorKind::Project(meta) => Project::borrow_raw_parts(meta, &op.common)
                 .input()
                 .cardinality(ctx),
-
+            OperatorKind::Remap(meta) => Remap::borrow_raw_parts(meta, &op.common)
+                .input()
+                .cardinality(ctx),
             OperatorKind::MockScan(meta) => meta.spec.mocked_card,
+            OperatorKind::Limit(meta) => {
+                let limit = Limit::borrow_raw_parts(meta, &op.common);
+                let input_card = limit.input().cardinality(ctx);
+                let remaining = extract_skip_bound(limit.skip().as_ref())
+                    .map(|skip| (input_card.as_f64() - skip as f64).max(0.0))
+                    .unwrap_or(input_card.as_f64());
+
+                extract_fetch_bound(limit.fetch().as_ref())
+                    .map(|fetch| remaining.min(fetch as f64))
+                    .map(Cardinality::new)
+                    .unwrap_or_else(|| Cardinality::new(remaining))
+            }
         }
     }
 }

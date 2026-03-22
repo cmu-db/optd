@@ -604,10 +604,10 @@ struct JoinEdge {
 // same table pay repeated deep-clone costs.
 pub fn equijoin_cardinality(
     keys: &[(Column, Column)],
-    non_equi_conds: &Scalar,
+    non_equi_conds: Option<&Scalar>,
     join_type: &JoinType,
-    build_card: Cardinality,
-    probe_card: Cardinality,
+    outer_card: Cardinality,
+    inner_card: Cardinality,
     ctx: &IRContext,
 ) -> Cardinality {
     // -----------------------------------------------------------------------
@@ -618,25 +618,25 @@ pub fn equijoin_cardinality(
     // -----------------------------------------------------------------------
     let mut edges: Vec<JoinEdge> = Vec::with_capacity(keys.len());
 
-    for (build_col, probe_col) in keys {
+    for (outer_col, inner_col) in keys {
         match (
-            &column_stats(ctx, *build_col),
-            &column_stats(ctx, *probe_col),
+            &column_stats(ctx, *outer_col),
+            &column_stats(ctx, *inner_col),
         ) {
-            (Some((build_ts, build_off)), Some((probe_ts, probe_off))) => {
-                let Some(build_cs) = build_ts.column_statistics.get(*build_off) else {
+            (Some((outer_ts, outer_off)), Some((inner_ts, inner_off))) => {
+                let Some(build_cs) = outer_ts.column_statistics.get(*outer_off) else {
                     edges.push(JoinEdge {
-                        build_col: *build_col,
-                        probe_col: *probe_col,
+                        build_col: *outer_col,
+                        probe_col: *inner_col,
                         selectivity: AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
                         had_stats: false,
                     });
                     continue;
                 };
-                let Some(probe_cs) = probe_ts.column_statistics.get(*probe_off) else {
+                let Some(probe_cs) = inner_ts.column_statistics.get(*inner_off) else {
                     edges.push(JoinEdge {
-                        build_col: *build_col,
-                        probe_col: *probe_col,
+                        build_col: *outer_col,
+                        probe_col: *inner_col,
                         selectivity: AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
                         had_stats: false,
                     });
@@ -647,7 +647,9 @@ pub fn equijoin_cardinality(
                 // no rows can match on this key → entire join produces 0 rows.
                 // Check ALL key pairs, including those that will become
                 // non-spanning-tree edges in Phase B.
-                if !domains_overlap(build_cs, probe_cs) {
+                let build_type = &ctx.get_column_meta(outer_col).data_type;
+                let probe_type = &ctx.get_column_meta(inner_col).data_type;
+                if !domains_overlap(build_cs, build_type, probe_cs, probe_type) {
                     return Cardinality::new(0.0);
                 }
 
@@ -670,8 +672,8 @@ pub fn equijoin_cardinality(
                         // a. the ndv of other table is assumed <= n
                         // b. the ndv of other table is assumed = row_count if available
                         (_, _) => {
-                            let br = build_ts.row_count;
-                            let pr = probe_ts.row_count;
+                            let br = outer_ts.row_count;
+                            let pr = inner_ts.row_count;
                             if br > 0 && pr > 0 {
                                 (1.0 / br.max(pr) as f64, true)
                             } else {
@@ -685,8 +687,8 @@ pub fn equijoin_cardinality(
                 };
 
                 edges.push(JoinEdge {
-                    build_col: *build_col,
-                    probe_col: *probe_col,
+                    build_col: *outer_col,
+                    probe_col: *inner_col,
                     selectivity: sel,
                     had_stats,
                 });
@@ -701,8 +703,8 @@ pub fn equijoin_cardinality(
             // when column stats are absent.
             (_, _) => {
                 edges.push(JoinEdge {
-                    build_col: *build_col,
-                    probe_col: *probe_col,
+                    build_col: *outer_col,
+                    probe_col: *inner_col,
                     selectivity: AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
                     had_stats: false,
                 });
@@ -745,13 +747,13 @@ pub fn equijoin_cardinality(
 
     // Apply selectivity of non-equi conditions (e.g. range predicates like x.b < y.b).
     // These are treated as a post-join filter on the equi-join result.
-    // When non_equi_conds is literal TRUE, filter_selectivity returns 1.0 (no effect).
-    let inner_card = build_card.as_f64() * probe_card.as_f64() * selectivity;
-    let non_equi_sel = filter_selectivity(non_equi_conds, ctx);
+    // When non_equi_conds is None or literal TRUE, filter_selectivity returns 1.0 (no effect).
+    let inner_card = outer_card.as_f64() * inner_card.as_f64() * selectivity;
+    let non_equi_sel = non_equi_conds.map_or(1.0, |cond| filter_selectivity(cond, ctx));
     let inner_result = inner_card * non_equi_sel;
 
     // Adjust for join type.
-    let left = build_card.as_f64();
+    let left = outer_card.as_f64();
     let adjusted = match *join_type {
         JoinType::Inner => inner_result,
         JoinType::Left => inner_result.max(left),
@@ -952,10 +954,11 @@ fn range_selectivity_col_lit(
     let (stats, offset) = column_stats(ctx, col_meta.column)?;
     let col_stats = stats.column_statistics.get(offset)?;
     let table_row_count = stats.row_count;
+    let col_type = &ctx.get_column_meta(&col_meta.column).data_type;
 
     // Parse min/max using the column's DataType.
-    let min = parse_stat_value(col_stats.min_value.as_ref()?, &col_stats.column_type)?;
-    let max = parse_stat_value(col_stats.max_value.as_ref()?, &col_stats.column_type)?;
+    let min = parse_stat_value(col_stats.min_value.as_ref()?, col_type)?;
+    let max = parse_stat_value(col_stats.max_value.as_ref()?, col_type)?;
     let domain = max - min;
     if domain <= 0.0 {
         // Zero-width or inverted domain; degenerate case — fall back.
@@ -1144,8 +1147,9 @@ fn or_ranges_tautology(terms: &[std::sync::Arc<Scalar>], ctx: &IRContext) -> Opt
     let (stats, offset) = column_stats(ctx, target_col)?;
     let col_stats = stats.column_statistics.get(offset)?;
     let table_row_count = stats.row_count;
-    let min = parse_stat_value(col_stats.min_value.as_ref()?, &col_stats.column_type)?;
-    let max = parse_stat_value(col_stats.max_value.as_ref()?, &col_stats.column_type)?;
+    let col_type = &ctx.get_column_meta(&target_col).data_type;
+    let min = parse_stat_value(col_stats.min_value.as_ref()?, col_type)?;
+    let max = parse_stat_value(col_stats.max_value.as_ref()?, col_type)?;
     if min >= max {
         return None;
     }
@@ -1192,11 +1196,16 @@ fn or_ranges_tautology(terms: &[std::sync::Arc<Scalar>], ctx: &IRContext) -> Opt
 ///
 /// Returns `true` (assumes overlap) when min/max are unavailable or non-numeric,
 /// since we cannot prove disjointness.
-fn domains_overlap(a: &ColumnStatistics, b: &ColumnStatistics) -> bool {
+fn domains_overlap(
+    a: &ColumnStatistics,
+    a_type: &DataType,
+    b: &ColumnStatistics,
+    b_type: &DataType,
+) -> bool {
     let a_min = match a
         .min_value
         .as_ref()
-        .and_then(|v| parse_stat_value(v, &a.column_type))
+        .and_then(|v| parse_stat_value(v, a_type))
     {
         Some(v) => v,
         None => return true, // Can't determine, assume overlap
@@ -1204,7 +1213,7 @@ fn domains_overlap(a: &ColumnStatistics, b: &ColumnStatistics) -> bool {
     let a_max = match a
         .max_value
         .as_ref()
-        .and_then(|v| parse_stat_value(v, &a.column_type))
+        .and_then(|v| parse_stat_value(v, a_type))
     {
         Some(v) => v,
         None => return true,
@@ -1212,7 +1221,7 @@ fn domains_overlap(a: &ColumnStatistics, b: &ColumnStatistics) -> bool {
     let b_min = match b
         .min_value
         .as_ref()
-        .and_then(|v| parse_stat_value(v, &b.column_type))
+        .and_then(|v| parse_stat_value(v, b_type))
     {
         Some(v) => v,
         None => return true,
@@ -1220,7 +1229,7 @@ fn domains_overlap(a: &ColumnStatistics, b: &ColumnStatistics) -> bool {
     let b_max = match b
         .max_value
         .as_ref()
-        .and_then(|v| parse_stat_value(v, &b.column_type))
+        .and_then(|v| parse_stat_value(v, b_type))
     {
         Some(v) => v,
         None => return true,

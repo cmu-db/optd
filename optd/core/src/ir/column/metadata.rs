@@ -10,9 +10,6 @@ pub struct ColumnMeta {
     pub table_ref: TableRef,
     pub data_type: DataType,
     pub name: String,
-    /// The data source (table) this column originates from, if any.
-    /// `None` for computed columns (projections, expressions).
-    pub source: Option<DataSourceId>,
 }
 
 // /// The context for a given execution needs to store metadata for all columns
