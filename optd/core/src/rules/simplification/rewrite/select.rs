@@ -1,46 +1,21 @@
-use super::{
+use super::super::{
     rule::{RulePass, rewrite_bottom_up},
-    scalar::{
-        combine_conjuncts_simplified, simplify_scalar_recursively, split_conjuncts,
-        substitute_columns,
-    },
+    scalar::{combine_conjuncts_simplified, split_conjuncts, substitute_columns},
 };
+use super::extract_projection_substitutions;
 use crate::{
     error::Result,
     ir::{
-        Column, ColumnSet, IRContext, Operator, Scalar,
-        convert::{IntoOperator, IntoScalar},
+        ColumnSet, IRContext, Operator,
+        convert::IntoOperator,
         operator::{Join, Project, Select, join::JoinType},
-        scalar::List,
     },
 };
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
-pub(super) struct ScalarSimplificationRulePass;
-pub(super) struct MergeSelectRulePass;
-pub(super) struct PushSelectThroughProjectRulePass;
-pub(super) struct PushSelectThroughJoinRulePass;
-pub(super) struct MergeProjectRulePass;
-
-impl RulePass for ScalarSimplificationRulePass {
-    fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Result<Arc<Operator>> {
-        rewrite_bottom_up(root, ctx, &|op, _ctx| {
-            let rewritten_scalars = op
-                .input_scalars()
-                .iter()
-                .map(|scalar| simplify_scalar_recursively(scalar.clone()))
-                .collect::<Vec<_>>();
-            if rewritten_scalars.as_slice() == op.input_scalars() {
-                Ok(op)
-            } else {
-                Ok(Arc::new(op.clone_with_inputs(
-                    None,
-                    Some(Arc::from(rewritten_scalars)),
-                )))
-            }
-        })
-    }
-}
+pub struct MergeSelectRulePass;
+pub struct PushSelectThroughProjectRulePass;
+pub struct PushSelectThroughJoinRulePass;
 
 impl RulePass for MergeSelectRulePass {
     fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Result<Arc<Operator>> {
@@ -95,7 +70,7 @@ impl RulePass for PushSelectThroughProjectRulePass {
 
 impl RulePass for PushSelectThroughJoinRulePass {
     fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Result<Arc<Operator>> {
-        rewrite_bottom_up(root, ctx, &|op, rule_ctx| {
+        rewrite_bottom_up(root, ctx, &|op, ctx| {
             let Ok(select) = op.try_borrow::<Select>() else {
                 return Ok(op);
             };
@@ -103,8 +78,8 @@ impl RulePass for PushSelectThroughJoinRulePass {
                 return Ok(op);
             };
 
-            let outer_cols = join.outer().output_columns(rule_ctx)?;
-            let inner_cols = join.inner().output_columns(rule_ctx)?;
+            let outer_cols = join.outer().output_columns(ctx)?;
+            let inner_cols = join.inner().output_columns(ctx)?;
             let mut outer_filters = Vec::new();
             let mut inner_filters = Vec::new();
             let mut join_conds = Vec::new();
@@ -182,51 +157,4 @@ impl RulePass for PushSelectThroughJoinRulePass {
             }
         })
     }
-}
-
-impl RulePass for MergeProjectRulePass {
-    fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Result<Arc<Operator>> {
-        rewrite_bottom_up(root, ctx, &|op, _ctx| {
-            let Ok(project) = op.try_borrow::<Project>() else {
-                return Ok(op);
-            };
-            let Ok(inner_project) = project.input().try_borrow::<Project>() else {
-                return Ok(op);
-            };
-            let Some(substitutions) = extract_projection_substitutions(
-                *inner_project.table_index(),
-                inner_project.projections(),
-            ) else {
-                return Ok(op);
-            };
-            let Ok(outer_list) = project.projections().try_borrow::<List>() else {
-                return Ok(op);
-            };
-
-            let merged_members = outer_list
-                .members()
-                .iter()
-                .map(|member| substitute_columns(member.clone(), &substitutions))
-                .collect::<Vec<_>>();
-
-            Ok(Project::new(
-                *project.table_index(),
-                inner_project.input().clone(),
-                List::new(Arc::from(merged_members)).into_scalar(),
-            )
-            .into_operator())
-        })
-    }
-}
-
-fn extract_projection_substitutions(
-    table_index: i64,
-    projections: &Arc<Scalar>,
-) -> Option<HashMap<Column, Arc<Scalar>>> {
-    let list = projections.try_borrow::<List>().ok()?;
-    let mut substitutions = HashMap::with_capacity(list.members().len());
-    for (idx, member) in list.members().iter().enumerate() {
-        substitutions.insert(Column(table_index, idx), member.clone());
-    }
-    Some(substitutions)
 }
