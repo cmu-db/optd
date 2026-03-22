@@ -68,51 +68,22 @@ pub fn create_optd_session_context(
     config: SessionConfig,
     runtime: Arc<RuntimeEnv>,
 ) -> SessionContext {
-    let config = if config
-        .options()
-        .extensions
-        .get::<OptdExtensionConfig>()
-        .is_some()
-    {
-        config
-    } else {
-        config.with_option_extension(OptdExtensionConfig::default())
-    };
-
     let optd_extension = Arc::new(OptdExtension::default());
 
-    let optd_only = config
-        .options()
-        .extensions
-        .get::<OptdExtensionConfig>()
-        .map(|conf| conf.optd_only)
-        .unwrap_or(false);
-
-    let config = if optd_only {
-        config
-            .with_extension(optd_extension)
-            .set_bool("optd.optd_enabled", true)
-            .set_bool("optd.optd_strict_mode", true)
-            .set_usize("datafusion.optimizer.max_passes", 0)
-    } else {
-        config
-            .with_extension(optd_extension)
-            .set_bool("optd.optd_enabled", true)
-            .set_bool("optd.optd_strict_mode", false)
-    };
-
-    let builder = SessionStateBuilder::new()
+    let config = config
+        .with_option_extension(OptdExtensionConfig::default())
+        .with_extension(optd_extension)
+        .set_bool("optd.optd_enabled", true)
+        .set_bool("optd.optd_strict_mode", false)
+        // disable datafusion logical optimizer.
+        .set_usize("datafusion.optimizer.max_passes", 0);
+    let state = SessionStateBuilder::new()
         .with_config(config)
         .with_runtime_env(runtime)
-        .with_default_features();
-    let builder = if optd_only {
-        builder
-            .with_optimizer_rules(vec![])
-            .with_physical_optimizer_rules(vec![])
-    } else {
-        builder.with_optimizer_rules(default_datafusion_rules())
-    };
-    let state = builder.with_optd_planner().build();
+        .with_default_features()
+        .with_optimizer_rules(default_datafusion_rules())
+        .with_optd_planner()
+        .build();
     SessionContext::new_with_state(state)
 }
 
