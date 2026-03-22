@@ -25,7 +25,13 @@ Project { .table_index: 3, .projections: __internal_#2.sum(lineitem.l_extendedpr
             └── (.cardinality): 0.00
 
 physical_plan after optd-finalized:
-SAME TEXT AS ABOVE
+Project { .table_index: 3, .projections: __internal_#2.sum(lineitem.l_extendedprice * lineitem.l_discount)(#2.0), (.output_columns): __internal_#3.revenue_loss(#3.0), (.cardinality): 1.00 }
+└── Aggregate { .aggregate_table_index: 2, .implementation: None, .exprs: sum(lineitem.l_extendedprice(#1.5) * lineitem.l_discount(#1.6)), .keys: [], (.output_columns): __internal_#2.sum(lineitem.l_extendedprice * lineitem.l_discount)(#2.0), (.cardinality): 1.00 }
+    └── Select
+        ├── .predicate: (lineitem.l_shipdate(#1.10) >= 2023-01-01::date32) AND (lineitem.l_shipdate(#1.10) < 2024-01-01::date32) AND (lineitem.l_discount(#1.6) >= 5::decimal128(15, 2)) AND (lineitem.l_discount(#1.6) <= 7::decimal128(15, 2)) AND (lineitem.l_quantity(#1.4) < 2400::decimal128(15, 2))
+        ├── (.output_columns): lineitem.l_discount(#1.6), lineitem.l_extendedprice(#1.5), lineitem.l_quantity(#1.4), lineitem.l_shipdate(#1.10)
+        ├── (.cardinality): 0.00
+        └── Get { .data_source_id: 8, .table_index: 1, .implementation: None, (.output_columns): lineitem.l_discount(#1.6), lineitem.l_extendedprice(#1.5), lineitem.l_quantity(#1.4), lineitem.l_shipdate(#1.10), (.cardinality): 0.00 }
 
 NULL
 */

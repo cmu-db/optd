@@ -173,6 +173,14 @@ fn precision_to_string<T: ToString + PartialOrd + Eq + Clone + std::fmt::Debug>(
     }
 }
 
+fn warm_explain_properties(op: &Arc<optd_core::ir::Operator>, ctx: &IRContext) {
+    for input in op.input_operators() {
+        warm_explain_properties(input, ctx);
+    }
+    let _ = op.output_columns(ctx);
+    let _ = op.cardinality(ctx);
+}
+
 impl OptdQueryPlanner {
     fn optd_extension(session_state: &SessionState) -> Result<Arc<OptdExtension>> {
         session_state
@@ -263,6 +271,10 @@ impl OptdQueryPlanner {
             .await?;
 
         if let Some(x) = explain.as_mut() {
+            // `quick_explain` only displays cached operator properties.
+            // Precompute them on the original logical tree so we don't print `?`
+            // for `(.output_columns)` and `(.cardinality)` in explain output.
+            warm_explain_properties(&optd_logical, &ctx.inner);
             let s = quick_explain(&optd_logical, &ctx.inner);
             x.stringified_plans.push(StringifiedPlan::new(
                 PlanType::OptimizedLogicalPlan {

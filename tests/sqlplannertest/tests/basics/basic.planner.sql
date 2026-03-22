@@ -49,13 +49,13 @@ Project
 └── Join
     ├── .join_type: Inner
     ├── .implementation: Some(Hash { build_side: Outer, keys: [(#2.1, #3.0)] })
-    ├── .join_cond: (t2.t2v2(#2.1) = t3.t3v1(#3.0))
+    ├── .join_cond: t2.t2v2(#2.1) = t3.t3v1(#3.0)
     ├── (.output_columns): t1.t1v1(#1.0), t1.t1v2(#1.1), t2.t2v1(#2.0), t2.t2v2(#2.1), t3.t3v1(#3.0), t3.t3v2(#3.1)
     ├── (.cardinality): 1.44
     ├── Join
     │   ├── .join_type: Inner
     │   ├── .implementation: Some(Hash { build_side: Outer, keys: [(#1.0, #2.0)] })
-    │   ├── .join_cond: (t1.t1v1(#1.0) = t2.t2v1(#2.0))
+    │   ├── .join_cond: t1.t1v1(#1.0) = t2.t2v1(#2.0)
     │   ├── (.output_columns): t1.t1v1(#1.0), t1.t1v2(#1.1), t2.t2v1(#2.0), t2.t2v2(#2.1)
     │   ├── (.cardinality): 1.20
     │   ├── Select { .predicate: t1.t1v2(#1.1) < 2::integer, (.output_columns): t1.t1v1(#1.0), t1.t1v2(#1.1), (.cardinality): 1.00 }
