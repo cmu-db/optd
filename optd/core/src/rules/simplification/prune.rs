@@ -13,6 +13,7 @@ use crate::{
 };
 use std::sync::Arc;
 
+/// Prunes unused columns from operator inputs.
 pub(super) struct ColumnPruningRulePass;
 
 impl RulePass for ColumnPruningRulePass {

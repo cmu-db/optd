@@ -11,6 +11,7 @@ pub use select::{
     MergeSelectRulePass, PushSelectThroughJoinRulePass, PushSelectThroughProjectRulePass,
 };
 
+/// Builds column substitutions for the outputs of a `Project`.
 fn extract_projection_substitutions(
     table_index: i64,
     projections: &Arc<Scalar>,

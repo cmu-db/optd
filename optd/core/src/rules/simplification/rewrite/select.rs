@@ -13,8 +13,11 @@ use crate::{
 };
 use std::sync::Arc;
 
+/// Merges adjacent `Select` operators into one predicate.
 pub struct MergeSelectRulePass;
+/// Pushes a `Select` below a `Project` when the predicate can be rewritten.
 pub struct PushSelectThroughProjectRulePass;
+/// Pushes filter conjuncts from a `Select` into a `Join` and its inputs.
 pub struct PushSelectThroughJoinRulePass;
 
 impl RulePass for MergeSelectRulePass {

@@ -14,6 +14,7 @@ use crate::{
 };
 use std::sync::Arc;
 
+/// Merges adjacent `Project` operators into one projection list.
 pub struct MergeProjectRulePass;
 
 impl RulePass for MergeProjectRulePass {

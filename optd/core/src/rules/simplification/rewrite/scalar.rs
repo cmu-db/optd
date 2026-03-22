@@ -8,6 +8,7 @@ use crate::{
 };
 use std::sync::Arc;
 
+/// Simplifies scalar inputs attached to each operator.
 pub struct ScalarSimplificationRulePass;
 
 impl RulePass for ScalarSimplificationRulePass {

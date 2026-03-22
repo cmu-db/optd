@@ -34,12 +34,14 @@ impl Default for SimplificationPass {
 }
 
 impl SimplificationPass {
+    /// Creates a simplification pass with the default iteration limit.
     pub fn new() -> Self {
         Self {
             max_iterations: MAX_ITERATIONS,
         }
     }
 
+    /// Applies simplification rules until the plan reaches a fixed point.
     pub fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Result<Arc<Operator>> {
         let rules: [&dyn RulePass; 6] = [
             &ScalarSimplificationRulePass,
