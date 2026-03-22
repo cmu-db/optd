@@ -14,7 +14,7 @@ use crate::{
 use std::sync::Arc;
 
 /// Prunes unused columns from operator inputs.
-pub(super) struct ColumnPruningRulePass;
+pub struct ColumnPruningRulePass;
 
 impl RulePass for ColumnPruningRulePass {
     fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Result<Arc<Operator>> {

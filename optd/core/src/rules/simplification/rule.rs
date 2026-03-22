@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 /// A simplification pass that rewrites an operator tree into an equivalent,
 /// typically simpler, form.
-pub(super) trait RulePass {
+pub trait RulePass {
     /// Applies this simplification pass to `root` and returns the rewritten
     /// root operator.
     fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Result<Arc<Operator>>;
@@ -18,7 +18,7 @@ pub(super) trait RulePass {
 /// Child operators are rewritten first, then the current operator is rebuilt
 /// only if any input changed, and finally `rewrite` is applied to the current
 /// node.
-pub(super) fn rewrite_bottom_up<F>(
+pub fn rewrite_bottom_up<F>(
     op: Arc<Operator>,
     ctx: &IRContext,
     rewrite: &F,

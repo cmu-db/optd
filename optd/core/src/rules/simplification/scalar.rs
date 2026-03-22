@@ -6,7 +6,7 @@ use crate::ir::{
 use std::{collections::HashMap, sync::Arc};
 
 /// Splits a predicate into a flat list of conjuncts.
-pub(super) fn split_conjuncts(predicate: Arc<Scalar>) -> Vec<Arc<Scalar>> {
+pub fn split_conjuncts(predicate: Arc<Scalar>) -> Vec<Arc<Scalar>> {
     if let Ok(and) = predicate.try_borrow::<NaryOp>()
         && and.is_and()
     {
@@ -20,12 +20,12 @@ pub(super) fn split_conjuncts(predicate: Arc<Scalar>) -> Vec<Arc<Scalar>> {
 }
 
 /// Combines conjuncts and simplifies the result.
-pub(super) fn combine_conjuncts_simplified(predicates: Vec<Arc<Scalar>>) -> Arc<Scalar> {
+pub fn combine_conjuncts_simplified(predicates: Vec<Arc<Scalar>>) -> Arc<Scalar> {
     simplify_scalar_recursively(Scalar::combine_conjuncts(predicates))
 }
 
 /// Replaces column references using `substitutions` and simplifies the result.
-pub(super) fn substitute_columns(
+pub fn substitute_columns(
     scalar: Arc<Scalar>,
     substitutions: &HashMap<Column, Arc<Scalar>>,
 ) -> Arc<Scalar> {
@@ -50,7 +50,7 @@ pub(super) fn substitute_columns(
 }
 
 /// Simplifies a scalar expression bottom-up.
-pub(super) fn simplify_scalar_recursively(scalar: Arc<Scalar>) -> Arc<Scalar> {
+pub fn simplify_scalar_recursively(scalar: Arc<Scalar>) -> Arc<Scalar> {
     let rewritten_inputs = scalar
         .input_scalars()
         .iter()
