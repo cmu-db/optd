@@ -39,6 +39,6 @@ order by
 
 /*
 Error
-External error: Unsupported join type: LeftSemi
+External error: error converting projection: Conversion from DataFusion ScalarValue Float64(0.5) is not implemented
 */
 

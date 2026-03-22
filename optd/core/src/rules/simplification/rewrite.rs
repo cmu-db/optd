@@ -137,6 +137,13 @@ impl RulePass for PushSelectThroughJoinRulePass {
                             top_filters.push(cond);
                         }
                     }
+                    JoinType::LeftSemi | JoinType::LeftAnti => {
+                        if used.is_subset(outer_cols.as_ref()) {
+                            outer_filters.push(cond);
+                        } else {
+                            top_filters.push(cond);
+                        }
+                    }
                     JoinType::Single | JoinType::Mark(_) => top_filters.push(cond),
                 }
             }

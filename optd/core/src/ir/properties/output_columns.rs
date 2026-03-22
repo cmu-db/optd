@@ -50,6 +50,10 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                             .collect();
                         Ok(Arc::new(set))
                     }
+                    JoinType::LeftSemi | JoinType::LeftAnti => {
+                        let outer_columns = join.outer().output_columns(ctx)?;
+                        Ok(outer_columns)
+                    }
                     _ => {
                         let outer_columns = join.outer().output_columns(ctx)?;
                         let inner_columns = join.inner().output_columns(ctx)?;
@@ -68,6 +72,10 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                             .chain(std::iter::once(*mark_column))
                             .collect();
                         Ok(Arc::new(set))
+                    }
+                    JoinType::LeftSemi | JoinType::LeftAnti => {
+                        let outer_columns = join.outer().output_columns(ctx)?;
+                        Ok(outer_columns)
                     }
                     _ => {
                         let outer_columns = join.outer().output_columns(ctx)?;

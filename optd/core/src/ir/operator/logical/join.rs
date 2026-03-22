@@ -36,6 +36,8 @@ impl_operator_conversion!(Join, JoinBorrowed);
 pub enum JoinType {
     Inner,
     Left,
+    LeftSemi,
+    LeftAnti,
     Single,
     Mark(Column),
 }

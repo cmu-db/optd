@@ -111,6 +111,8 @@ impl OptdQueryPlannerContext<'_> {
         match join_type {
             DFJoinType::Inner => Ok(OptdJoinType::Inner),
             DFJoinType::Left => Ok(OptdJoinType::Left),
+            DFJoinType::LeftSemi => Ok(OptdJoinType::LeftSemi),
+            DFJoinType::LeftAnti => Ok(OptdJoinType::LeftAnti),
             v => whatever!("Unsupported join type: {}", v),
         }
     }
@@ -119,6 +121,8 @@ impl OptdQueryPlannerContext<'_> {
         match join_type {
             OptdJoinType::Inner => Ok(DFJoinType::Inner),
             OptdJoinType::Left => Ok(DFJoinType::Left),
+            OptdJoinType::LeftSemi => Ok(DFJoinType::LeftSemi),
+            OptdJoinType::LeftAnti => Ok(DFJoinType::LeftAnti),
             // TODO: add single and mark join.
             v => whatever!("Unsupported join type: {:?}", v),
         }

@@ -38,6 +38,17 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                 let left_card = outer.cardinality(ctx);
                 let right_card = inner.cardinality(ctx);
                 match *join_type {
+                    JoinType::LeftSemi => {
+                        let selectivity = join_selectivity(join_cond);
+                        (selectivity * left_card * right_card)
+                            .map(|value| value.min(left_card.as_f64()))
+                    }
+                    JoinType::LeftAnti => {
+                        let selectivity = join_selectivity(join_cond);
+                        let semi = (selectivity * left_card * right_card)
+                            .map(|value| value.min(left_card.as_f64()));
+                        left_card.map(|value| (value - semi.as_f64()).max(0.0))
+                    }
                     JoinType::Mark(_) => left_card,
                     JoinType::Single => {
                         let selectivity = join_selectivity(join_cond);

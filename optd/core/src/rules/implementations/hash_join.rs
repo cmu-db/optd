@@ -24,7 +24,13 @@ impl LogicalJoinAsPhysicalHashJoinRule {
                 kind,
                 OperatorKind::Join(meta)
                     if meta.implementation.is_none()
-                        && matches!(meta.join_type, JoinType::Inner | JoinType::Left)
+                        && matches!(
+                            meta.join_type,
+                            JoinType::Inner
+                                | JoinType::Left
+                                | JoinType::LeftSemi
+                                | JoinType::LeftAnti
+                        )
             )
         });
         Self { pattern }

@@ -60,16 +60,16 @@ impl Rule for LogicalSelectJoinTransposeRule {
         let is_bound_by_outer = used_columns.is_subset(outer_output_columns.as_ref());
         let is_bound_by_inner = used_columns.is_subset(inner_output_columns.as_ref());
 
-        let maybe_transformed = match (is_bound_by_outer, is_bound_by_inner) {
-            (false, false) => None,
-            (true, false) => Some(
+        let maybe_transformed = match (*join.join_type(), is_bound_by_outer, is_bound_by_inner) {
+            (JoinType::Inner, false, false) => None,
+            (JoinType::Inner, true, false) => Some(
                 outer
                     .with_ctx(ctx)
                     .select(select.predicate().clone())
                     .logical_join(inner, join.join_cond().clone(), *join.join_type())
                     .build(),
             ),
-            (false, true) => Some(
+            (JoinType::Inner, false, true) => Some(
                 outer
                     .with_ctx(ctx)
                     .logical_join(
@@ -82,8 +82,18 @@ impl Rule for LogicalSelectJoinTransposeRule {
                     )
                     .build(),
             ),
-            // Wrong: false,
-            (true, true) => None,
+            (JoinType::Inner, true, true) => None,
+            // For LEFT join, only predicates bound to the preserved (outer) side
+            // can be pushed below the join without changing null-extension semantics.
+            (JoinType::Left, true, false) => Some(
+                outer
+                    .with_ctx(ctx)
+                    .select(select.predicate().clone())
+                    .logical_join(inner, join.join_cond().clone(), *join.join_type())
+                    .build(),
+            ),
+            (JoinType::Left, _, _) => None,
+            _ => None,
         };
 
         Ok(maybe_transformed.into_iter().collect())

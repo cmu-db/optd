@@ -32,6 +32,6 @@ order by
 
 /*
 Error
-External error: Unsupported join type: LeftAnti
+External error: error converting aggregate expressions: optd internal error: col alias1 not found
 */
 

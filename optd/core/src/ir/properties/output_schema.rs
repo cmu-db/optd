@@ -153,6 +153,7 @@ fn compute_join_schema(
     let (outer_nullable, inner_nullable, mark_field) = match join_type {
         JoinType::Inner => (false, false, None),
         JoinType::Left => (false, true, None),
+        JoinType::LeftSemi | JoinType::LeftAnti => (false, false, None),
         JoinType::Single => (false, true, None),
         JoinType::Mark(mark_column) => {
             let (mark_table_ref, mark_meta) = {
@@ -207,18 +208,27 @@ fn compute_join_schema(
     };
 
     let mut metadata = outer_schema.inner().metadata().clone();
-    metadata.extend(inner_schema.inner().metadata().clone());
+    if !matches!(join_type, JoinType::LeftSemi | JoinType::LeftAnti) {
+        metadata.extend(inner_schema.inner().metadata().clone());
+    }
 
-    let qualified_fields = outer_schema
-        .iter()
-        .map(|(table_ref, field)| (table_ref.clone(), field.clone()))
-        .chain(
-            inner_schema
-                .iter()
-                .map(|(table_ref, field)| (table_ref.clone(), field.clone())),
-        )
-        .chain(mark_field)
-        .collect_vec();
+    let qualified_fields = if matches!(join_type, JoinType::LeftSemi | JoinType::LeftAnti) {
+        outer_schema
+            .iter()
+            .map(|(table_ref, field)| (table_ref.clone(), field.clone()))
+            .collect_vec()
+    } else {
+        outer_schema
+            .iter()
+            .map(|(table_ref, field)| (table_ref.clone(), field.clone()))
+            .chain(
+                inner_schema
+                    .iter()
+                    .map(|(table_ref, field)| (table_ref.clone(), field.clone())),
+            )
+            .chain(mark_field)
+            .collect_vec()
+    };
 
     new_optd_schema(qualified_fields, metadata)
 }
