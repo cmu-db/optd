@@ -407,8 +407,6 @@ impl CardinalityEstimator for AdvancedCardinalityEstimator {
                 if keys.is_empty() {
                     estimate_fallback_join(ctx, join_type, outer, inner, join_cond)
                 } else {
-                    let outer_card = outer.cardinality(ctx);
-                    let inner_card = inner.cardinality(ctx);
                     selectivity::equijoin_cardinality(
                         &keys,
                         non_equi.as_deref(),

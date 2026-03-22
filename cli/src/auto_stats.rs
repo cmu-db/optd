@@ -171,7 +171,7 @@
 //                 if distinct_count.is_none() {
 //                     distinct_count = stats.distinct_count_opt().map(|d| d as usize);
 //                 }
-// 
+//
 //                // TODO(AC): if distinct count is still none, create HLL?
 //            }
 //         }
