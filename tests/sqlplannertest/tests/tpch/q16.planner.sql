@@ -32,6 +32,6 @@ order by
 
 /*
 Error
-External error: Unsupported binary expr op: !=
+External error: Unsupported join type: LeftAnti
 */
 

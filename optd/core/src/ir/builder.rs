@@ -448,6 +448,7 @@ fn derive_scalar_descriptor(
                 | BinaryOpKind::Divide
                 | BinaryOpKind::Modulo => lhs.data_type.clone(),
                 BinaryOpKind::Eq
+                | BinaryOpKind::NotEq
                 | BinaryOpKind::IsNotDistinctFrom
                 | BinaryOpKind::Lt
                 | BinaryOpKind::Le

@@ -474,6 +474,7 @@ impl OptdQueryPlannerContext<'_> {
             BinaryOpKind::Divide => logical_expr::Operator::Divide,
             BinaryOpKind::Modulo => logical_expr::Operator::Modulo,
             BinaryOpKind::Eq => logical_expr::Operator::Eq,
+            BinaryOpKind::NotEq => logical_expr::Operator::NotEq,
             BinaryOpKind::IsNotDistinctFrom => logical_expr::Operator::IsNotDistinctFrom,
             BinaryOpKind::Lt => logical_expr::Operator::Lt,
             BinaryOpKind::Le => logical_expr::Operator::LtEq,

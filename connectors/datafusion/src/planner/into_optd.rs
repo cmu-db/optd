@@ -18,7 +18,7 @@ use optd_core::{
         convert::{IntoOperator, IntoScalar},
         operator::{Aggregate, Get, Join, Limit, OrderBy, Project, Remap, Select},
         properties::TupleOrderingDirection,
-        scalar::{Cast, ColumnRef, Function, Like, List, NaryOp, NaryOpKind},
+        scalar::{BinaryOpKind, Cast, ColumnRef, Function, Like, List, NaryOp, NaryOpKind},
     },
 };
 use snafu::{ResultExt, whatever};
@@ -279,6 +279,8 @@ impl OptdQueryPlannerContext<'_> {
             }
             DFExpr::Cast(cast) => self.try_into_optd_cast(cast, input_schema),
             DFExpr::Like(like) => self.try_into_optd_like(like, input_schema),
+            DFExpr::Between(between) => self.try_into_optd_between(between, input_schema),
+            DFExpr::InList(in_list) => self.try_into_optd_in_list(in_list, input_schema),
             expr => {
                 whatever!("Unsupported df logical expr: {}", expr);
             }
@@ -308,6 +310,9 @@ impl OptdQueryPlannerContext<'_> {
     ) -> Result<Arc<Scalar>> {
         let op_kind = match &binary_expr.op {
             logical_expr::Operator::Eq => Either::Left(optd_core::ir::scalar::BinaryOpKind::Eq),
+            logical_expr::Operator::NotEq => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::NotEq)
+            }
             logical_expr::Operator::Plus => Either::Left(optd_core::ir::scalar::BinaryOpKind::Plus),
             logical_expr::Operator::Minus => {
                 Either::Left(optd_core::ir::scalar::BinaryOpKind::Minus)
@@ -420,5 +425,64 @@ impl OptdQueryPlannerContext<'_> {
             node.escape_char,
         );
         Ok(like.into_scalar())
+    }
+
+    pub fn try_into_optd_between(
+        &mut self,
+        node: &logical_expr::expr::Between,
+        input_schema: &DFSchema,
+    ) -> Result<Arc<Scalar>> {
+        let expr = self.try_into_optd_scalar_expr(node.expr.as_ref(), input_schema)?;
+        let low = self.try_into_optd_scalar_expr(node.low.as_ref(), input_schema)?;
+        let high = self.try_into_optd_scalar_expr(node.high.as_ref(), input_schema)?;
+
+        let desugared = if node.negated {
+            let below = expr.clone().binary_op(low, BinaryOpKind::Lt);
+            let above = expr.binary_op(high, BinaryOpKind::Gt);
+            NaryOp::new(NaryOpKind::Or, vec![below, above].into()).into_scalar()
+        } else {
+            let ge_low = expr.clone().binary_op(low, BinaryOpKind::Ge);
+            let le_high = expr.binary_op(high, BinaryOpKind::Le);
+            NaryOp::new(NaryOpKind::And, vec![ge_low, le_high].into()).into_scalar()
+        };
+
+        Ok(desugared)
+    }
+
+    pub fn try_into_optd_in_list(
+        &mut self,
+        node: &logical_expr::expr::InList,
+        input_schema: &DFSchema,
+    ) -> Result<Arc<Scalar>> {
+        let expr = self.try_into_optd_scalar_expr(node.expr.as_ref(), input_schema)?;
+        let cmp_kind = if node.negated {
+            BinaryOpKind::NotEq
+        } else {
+            BinaryOpKind::Eq
+        };
+
+        let terms: Vec<_> = node
+            .list
+            .iter()
+            .map(|item| {
+                let rhs = self.try_into_optd_scalar_expr(item, input_schema)?;
+                Ok(expr.clone().binary_op(rhs, cmp_kind))
+            })
+            .try_collect()?;
+
+        if terms.is_empty() {
+            return Ok(literal(node.negated));
+        }
+
+        if terms.len() == 1 {
+            return Ok(terms.into_iter().next().unwrap());
+        }
+
+        let op = if node.negated {
+            NaryOpKind::And
+        } else {
+            NaryOpKind::Or
+        };
+        Ok(NaryOp::new(op, terms.into()).into_scalar())
     }
 }
