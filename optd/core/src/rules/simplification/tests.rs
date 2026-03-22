@@ -1,11 +1,11 @@
 use super::SimplificationPass;
 use crate::ir::{
-    Column, DataType,
+    Column,
     builder::*,
-    catalog::DataSourceId,
-    operator::{LogicalGet, LogicalJoin, LogicalProject, LogicalSelect, join::JoinType},
+    operator::{Get, Join, Project, Select, join::JoinType},
+    table_ref::TableRef,
+    test_utils::test_ctx_with_tables,
 };
-use arrow_schema::{DataType as ArrowDataType, Field, Schema};
 
 // Input plan tree:
 // LogicalSelect [c3 = 20 AND true]
@@ -22,32 +22,36 @@ use arrow_schema::{DataType as ArrowDataType, Field, Schema};
 //     MockScan [c3, c4]
 #[test]
 fn pushes_predicates_to_join_inputs_and_merges_selects() {
-    let ctx = crate::ir::IRContext::with_empty_magic();
-    let left = ctx.mock_scan(1, vec![1, 2], 100.);
-    let right = ctx.mock_scan(2, vec![3, 4], 100.);
+    let ctx = test_ctx_with_tables(&[("t1", 2), ("t2", 2)]).unwrap();
+    let left = ctx.logical_get(TableRef::bare("t1"), None).unwrap().build();
+    let right = ctx.logical_get(TableRef::bare("t2"), None).unwrap().build();
+    let t1_c0 = ctx.col(Some(&TableRef::bare("t1")), "c0").unwrap();
+    let t2_c0 = ctx.col(Some(&TableRef::bare("t2")), "c0").unwrap();
 
     let plan = left
+        .with_ctx(&ctx)
         .logical_join(right, boolean(true), JoinType::Inner)
-        .logical_select(column_ref(Column(1)).eq(int32(10)))
-        .logical_select(column_ref(Column(3)).eq(int32(20)).and(boolean(true)));
+        .select(column_ref(t1_c0).eq(int32(10)))
+        .select(column_ref(t2_c0).eq(int32(20)).and(boolean(true)))
+        .build();
 
     let simplified = SimplificationPass::new().apply(plan, &ctx);
-    let join = simplified.try_borrow::<LogicalJoin>().unwrap();
+    let join = simplified.try_borrow::<Join>().unwrap();
     assert!(join.join_cond().is_true_scalar());
 
-    let left_filter = join.outer().try_borrow::<LogicalSelect>().unwrap();
+    let left_filter = join.outer().try_borrow::<Select>().unwrap();
     assert!(
         left_filter
             .predicate()
             .used_columns()
-            .is_subset(&left_filter.input().output_columns(&ctx))
+            .is_subset(left_filter.input().output_columns(&ctx).unwrap().as_ref())
     );
-    let right_filter = join.inner().try_borrow::<LogicalSelect>().unwrap();
+    let right_filter = join.inner().try_borrow::<Select>().unwrap();
     assert!(
         right_filter
             .predicate()
             .used_columns()
-            .is_subset(&right_filter.input().output_columns(&ctx))
+            .is_subset(right_filter.input().output_columns(&ctx).unwrap().as_ref())
     );
 }
 
@@ -63,33 +67,44 @@ fn pushes_predicates_to_join_inputs_and_merges_selects() {
 //     MockScan [c1, c2]
 #[test]
 fn pushes_filter_through_project_and_merges_projects() {
-    let ctx = crate::ir::IRContext::with_empty_magic();
-    let scan = ctx.mock_scan(1, vec![1, 2], 100.);
-    let alias_left = ctx.define_column(DataType::Int32, None);
-    let alias_right = ctx.define_column(DataType::Int32, None);
-    let out = ctx.define_column(DataType::Int32, None);
+    let ctx = test_ctx_with_tables(&[("t1", 2)]).unwrap();
+    let get = ctx.logical_get(TableRef::bare("t1"), None).unwrap().build();
+    let get_table_index = *get.borrow::<Get>().table_index();
 
-    let plan = scan
-        .logical_project([
-            column_assign(alias_left, column_ref(Column(1))),
-            column_assign(alias_right, column_ref(Column(2))),
-        ])
-        .logical_project([
-            column_assign(out, column_ref(alias_left).plus(int32(1))),
-            column_ref(alias_right),
-        ])
-        .logical_select(column_ref(out).gt(int32(5)));
+    let first_project = ctx
+        .project(
+            get,
+            [column_ref(Column(get_table_index, 0)), column_ref(Column(get_table_index, 1))],
+        )
+        .unwrap()
+        .build();
+    let first_table_index = *first_project.borrow::<Project>().table_index();
+    let alias_left = Column(first_table_index, 0);
+    let alias_right = Column(first_table_index, 1);
+
+    let second_project = ctx
+        .project(
+            first_project,
+            [column_ref(alias_left).plus(int32(1)), column_ref(alias_right)],
+        )
+        .unwrap()
+        .build();
+    let second_table_index = *second_project.borrow::<Project>().table_index();
+    let out = Column(second_table_index, 0);
+
+    let plan = second_project
+        .with_ctx(&ctx)
+        .select(column_ref(out).gt(int32(5)))
+        .build();
 
     let simplified = SimplificationPass::new().apply(plan, &ctx);
-    let project = simplified.try_borrow::<LogicalProject>().unwrap();
-    let filter = project.input().try_borrow::<LogicalSelect>().unwrap();
-    assert!(
-        filter
-            .input()
-            .try_borrow::<crate::ir::operator::MockScan>()
-            .is_ok()
-    );
-    assert!(filter.predicate().used_columns().contains(&Column(1)));
+    let project = simplified.try_borrow::<Project>().unwrap();
+    let filter = project.input().try_borrow::<Select>().unwrap();
+    let get = filter.input().try_borrow::<Get>().unwrap();
+    assert!(filter
+        .predicate()
+        .used_columns()
+        .contains(&Column(*get.table_index(), 0)));
     assert!(!filter.predicate().used_columns().contains(&alias_left));
 }
 
@@ -103,22 +118,26 @@ fn pushes_filter_through_project_and_merges_projects() {
 //   LogicalGet [projections = [0]]
 #[test]
 fn prunes_get_projections_from_required_columns() {
-    let ctx = crate::ir::IRContext::with_empty_magic();
-    let schema = Schema::new(vec![
-        Field::new("a", ArrowDataType::Int32, true),
-        Field::new("b", ArrowDataType::Int32, true),
-        Field::new("c", ArrowDataType::Int32, true),
-    ]);
-    let get = ctx.logical_get(DataSourceId(1), &schema, None);
-    let mut cols = get.output_columns(&ctx).iter().copied().collect::<Vec<_>>();
-    cols.sort_by_key(|col| col.0);
+    let ctx = test_ctx_with_tables(&[("t1", 3)]).unwrap();
+    let get = ctx.logical_get(TableRef::bare("t1"), None).unwrap().build();
+    let get_table_index = *get.borrow::<Get>().table_index();
 
-    let plan = get
-        .logical_project([column_ref(cols[0]), column_ref(cols[2])])
-        .logical_project([column_ref(cols[0])]);
+    let first_project = ctx
+        .project(
+            get,
+            [column_ref(Column(get_table_index, 0)), column_ref(Column(get_table_index, 2))],
+        )
+        .unwrap()
+        .build();
+    let first_project_index = *first_project.borrow::<Project>().table_index();
+
+    let plan = ctx
+        .project(first_project, [column_ref(Column(first_project_index, 0))])
+        .unwrap()
+        .build();
 
     let simplified = SimplificationPass::new().apply(plan, &ctx);
-    let project = simplified.try_borrow::<LogicalProject>().unwrap();
-    let get = project.input().try_borrow::<LogicalGet>().unwrap();
+    let project = simplified.try_borrow::<Project>().unwrap();
+    let get = project.input().try_borrow::<Get>().unwrap();
     assert_eq!(get.projections().as_ref(), &[0]);
 }

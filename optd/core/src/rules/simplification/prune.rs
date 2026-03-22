@@ -1,7 +1,7 @@
 use super::{rule::RulePass, scalar::simplify_scalar_recursively};
 use crate::ir::{
     Column, ColumnSet, IRContext, Operator,
-    convert::{IntoOperator, IntoScalar},
+    convert::IntoOperator,
     operator::{
         Aggregate, DependentJoin, Get, Join, OperatorKind, OrderBy, Project, Remap, Select,
         Subquery,
@@ -41,58 +41,23 @@ fn prune_operator(op: Arc<Operator>, required: &ColumnSet, ctx: &IRContext) -> A
             let project = Project::borrow_raw_parts(meta, &op.common);
             let list = project.projections().try_borrow::<List>().unwrap();
             let members = list.members();
-            let mut kept = Vec::new();
             let mut input_required = ColumnSet::default();
-            for (idx, member) in members.iter().enumerate() {
-                let output_col = Column(*project.table_index(), idx);
-                let keep = required.contains(&output_col);
-                if keep {
-                    kept.push(member.clone());
-                    input_required |= &member.used_columns();
-                }
-            }
-            if kept.is_empty()
-                && !members.is_empty()
-            {
-                kept.push(members[0].clone());
-                input_required |= &members[0].used_columns();
+            for member in members.iter() {
+                input_required |= &member.used_columns();
             }
 
             let new_input = prune_operator(project.input().clone(), &input_required, ctx);
-            let new_projections = if kept.as_slice() == members {
-                project.projections().clone()
-            } else {
-                List::new(Arc::from(kept)).into_scalar()
-            };
-            Project::new(*project.table_index(), new_input, new_projections).into_operator()
+            Project::new(*project.table_index(), new_input, project.projections().clone())
+                .into_operator()
         }
         OperatorKind::Remap(meta) => {
             let remap = Remap::borrow_raw_parts(meta, &op.common);
-            let mut input_required = remap
+            let input_required = remap
                 .input()
                 .output_columns(ctx)
                 .ok()
                 .map(|cols| cols.as_ref().clone())
                 .unwrap_or_default();
-
-            if let Ok(schema) = remap.input().output_schema(ctx) {
-                let input_columns = schema
-                    .iter()
-                    .map(|(table_ref, field)| ctx.col(Some(table_ref), field.name()).ok())
-                    .collect::<Option<Vec<_>>>();
-
-                if let Some(input_columns) = input_columns {
-                    let mut mapped = required
-                        .iter()
-                        .filter(|column| column.0 == *remap.table_index())
-                        .filter_map(|column| input_columns.get(column.1).copied())
-                        .collect::<Vec<_>>();
-                    if mapped.is_empty() && !input_columns.is_empty() {
-                        mapped.push(input_columns[0]);
-                    }
-                    input_required = mapped.into_iter().collect();
-                }
-            }
 
             let new_input = prune_operator(remap.input().clone(), &input_required, ctx);
             Remap::new(*remap.table_index(), new_input).into_operator()
@@ -104,22 +69,8 @@ fn prune_operator(op: Arc<Operator>, required: &ColumnSet, ctx: &IRContext) -> A
             let keys_list = agg.keys().borrow::<List>();
             let keys = keys_list.members();
 
-            let mut kept_exprs = exprs
-                .iter()
-                .enumerate()
-                .filter(|(idx, _expr)| required.contains(&Column(*agg.aggregate_table_index(), *idx)))
-                .map(|(_idx, expr)| expr.clone())
-                .collect::<Vec<_>>();
-
-            if kept_exprs.is_empty()
-                && keys.is_empty()
-                && !exprs.is_empty()
-            {
-                kept_exprs.push(exprs[0].clone());
-            }
-
             let mut input_required = ColumnSet::default();
-            for expr in &kept_exprs {
+            for expr in exprs.iter() {
                 input_required |= &expr.used_columns();
             }
             for key in keys.iter() {
@@ -127,15 +78,10 @@ fn prune_operator(op: Arc<Operator>, required: &ColumnSet, ctx: &IRContext) -> A
             }
 
             let new_input = prune_operator(agg.input().clone(), &input_required, ctx);
-            let new_exprs = if kept_exprs.as_slice() == exprs {
-                agg.exprs().clone()
-            } else {
-                List::new(Arc::from(kept_exprs)).into_scalar()
-            };
             Aggregate::new(
                 *agg.aggregate_table_index(),
                 new_input,
-                new_exprs,
+                agg.exprs().clone(),
                 agg.keys().clone(),
                 *agg.implementation(),
             )
