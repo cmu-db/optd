@@ -30,7 +30,7 @@ OrderBy { ordering_exprs: [ custdist(#8.1) DESC, c_count(#8.0) DESC ], (.output_
                 └── Project { .table_index: 4, .projections: [ c_custkey(#1.0), count(orders.o_orderkey)(#3.0) ], (.output_columns): c_custkey(#4.0), count(orders.o_orderkey)(#4.1), (.cardinality): 0.20 }
                     └── Aggregate { .aggregate_table_index: 3, .implementation: None, .exprs: [ count(o_orderkey(#2.0)) ], .keys: [ c_custkey(#1.0) ], (.output_columns): c_custkey(#1.0), count(orders.o_orderkey)(#3.0), (.cardinality): 0.20 }
                         └── Join
-                            ├── .join_type: Left
+                            ├── .join_type: LeftOuter
                             ├── .implementation: None
                             ├── .join_cond: (c_custkey(#1.0) = o_custkey(#2.1))
                             ├── (.output_columns): c_acctbal(#1.5), c_address(#1.2), c_comment(#1.7), c_custkey(#1.0), c_mktsegment(#1.6), c_name(#1.1), c_nationkey(#1.3), c_phone(#1.4), o_clerk(#2.6), o_comment(#2.8), o_custkey(#2.1), o_orderdate(#2.4), o_orderkey(#2.0), o_orderpriority(#2.5), o_orderstatus(#2.2), o_shippriority(#2.7), o_totalprice(#2.3)
@@ -48,7 +48,7 @@ EnforcerSort { tuple_ordering: [(#8.1, Desc), (#8.0, Desc)], (.output_columns): 
                 └── Project { .table_index: 4, .projections: [ c_custkey(#1.0), count(orders.o_orderkey)(#3.0) ], (.output_columns): c_custkey(#4.0), count(orders.o_orderkey)(#4.1), (.cardinality): 0.20 }
                     └── Aggregate { .aggregate_table_index: 3, .implementation: None, .exprs: [ count(o_orderkey(#2.0)) ], .keys: [ c_custkey(#1.0) ], (.output_columns): c_custkey(#1.0), count(orders.o_orderkey)(#3.0), (.cardinality): 0.20 }
                         └── Join
-                            ├── .join_type: Left
+                            ├── .join_type: LeftOuter
                             ├── .implementation: None
                             ├── .join_cond: (c_custkey(#1.0) = o_custkey(#2.1))
                             ├── (.output_columns): c_acctbal(#1.5), c_address(#1.2), c_comment(#1.7), c_custkey(#1.0), c_mktsegment(#1.6), c_name(#1.1), c_nationkey(#1.3), c_phone(#1.4), o_clerk(#2.6), o_comment(#2.8), o_custkey(#2.1), o_orderdate(#2.4), o_orderkey(#2.0), o_orderpriority(#2.5), o_orderstatus(#2.2), o_shippriority(#2.7), o_totalprice(#2.3)
