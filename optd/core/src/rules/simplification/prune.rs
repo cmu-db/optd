@@ -44,13 +44,9 @@ fn prune_operator(
             }
         }
         OperatorKind::Project(meta) => {
+            // TODO(yuchen): only pass columns needed to construct the columns required by the parent operator.
             let project = Project::borrow_raw_parts(meta, &op.common);
-            let list = project.projections().try_borrow::<List>().unwrap();
-            let members = list.members();
-            let mut input_required = ColumnSet::default();
-            for member in members.iter() {
-                input_required |= &member.used_columns();
-            }
+            let input_required = project.projections().used_columns();
 
             let new_input = prune_operator(project.input().clone(), &input_required, ctx)?;
             Project::new(
