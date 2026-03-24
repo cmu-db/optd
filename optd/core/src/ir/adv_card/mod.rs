@@ -57,8 +57,9 @@ use crate::ir::{
 };
 use synopses::{distinct::HyperLogLog, utils::Murmur2Hash64a};
 
+const DEFAULT_HLL_P: usize = 12;
 /// Canonical HLL type for catalog storage and deserialization.
-pub type StoredHLL = HyperLogLog<Vec<u8>, BuildHasherDefault<Murmur2Hash64a>, 12>;
+pub type StoredHLL = HyperLogLog<Vec<u8>, BuildHasherDefault<Murmur2Hash64a>, DEFAULT_HLL_P>;
 
 pub struct AdvancedCardinalityEstimator;
 
