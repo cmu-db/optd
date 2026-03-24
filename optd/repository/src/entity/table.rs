@@ -1,4 +1,4 @@
-use sea_orm::entity::prelude::*;
+use sea_orm::{ActiveValue::Set, entity::prelude::*};
 
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
@@ -40,13 +40,12 @@ pub struct Model {
     /// The name of the table, e.g. `my_table`.
     pub table_name: String,
 
-    /// The `data_path` of the table.
-    pub path: String,
-
-    /// Whether the `path` is relative to the `path` of the schema (`true`)
-    /// or an absolute path (`false`).
-    pub path_is_relative: bool,
-
+    // TODO(yuchen): handle paths.
+    // /// The `data_path` of the table.
+    // pub path: String,
+    // /// Whether the `path` is relative to the `path` of the schema (`true`)
+    // /// or an absolute path (`false`).
+    // pub path_is_relative: bool,
     #[sea_orm(belongs_to, from = "schema_id", to = "schema_id")]
     pub schema: HasOne<super::schema::Entity>,
 
@@ -54,4 +53,11 @@ pub struct Model {
     pub columns: HasMany<super::column::Entity>,
 }
 
-impl ActiveModelBehavior for ActiveModel {}
+impl ActiveModelBehavior for ActiveModel {
+    fn new() -> Self {
+        Self {
+            table_uuid: Set(Uuid::new_v4()),
+            ..ActiveModelTrait::default()
+        }
+    }
+}

@@ -1,4 +1,7 @@
-use optd_repository::entity::{prelude::*, *};
+use optd_repository::{
+    api::snapshot::{SnapshotInfo, commit_snapshot, get_current_snapshot_info},
+    entity::{prelude::*, *},
+};
 use sea_orm::Database;
 
 #[tokio::main]
@@ -12,9 +15,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .sync(&db)
         .await?;
 
-    let one_snapshot = Snapshot::load().one(&db).await?;
+    commit_snapshot(&db, SnapshotInfo::default()).await?;
 
-    assert!(one_snapshot.is_none());
+    let one_snapshot = get_current_snapshot_info(&db).await?;
+
+    assert!(one_snapshot.is_some());
 
     Ok(())
 }

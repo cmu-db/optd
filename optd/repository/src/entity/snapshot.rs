@@ -1,4 +1,7 @@
-use sea_orm::entity::prelude::*;
+use sea_orm::{
+    entity::prelude::*,
+    sea_query::prelude::{Utc, chrono},
+};
 
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
@@ -8,7 +11,8 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub snapshot_id: i64,
     /// The timestamp at which the snapshot was created.
-    pub snapshot_time: DateTime,
+    #[sea_orm(default_expr = "Expr::current_timestamp()")]
+    pub snapshot_time: chrono::DateTime<Utc>,
     /// A continuously increasing number that is incremented whenever the schema is changed,
     /// e.g., by creating a table. This allows for caching of schema information if only
     /// data is changed.

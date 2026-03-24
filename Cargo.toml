@@ -52,6 +52,7 @@ sea-orm-migration = { version = "2.0.0-rc", features = [
     "sqlx-sqlite",
 ] }
 dotenvy = "0.15.7"
+uuid = { version = "1", features = ["v4"] }
 
 [workspace.package]
 version = "0.1.0"

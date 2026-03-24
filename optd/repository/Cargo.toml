@@ -9,3 +9,4 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 sea-orm = { workspace = true }
 sea-orm-migration = { workspace = true }
 dotenvy = { workspace = true }
+uuid = { workspace = true }

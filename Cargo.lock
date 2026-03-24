@@ -4197,6 +4197,7 @@ dependencies = [
  "sea-orm",
  "sea-orm-migration",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
