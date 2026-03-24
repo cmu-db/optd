@@ -4200,6 +4200,7 @@ dependencies = [
 name = "optd-repository"
 version = "0.1.0"
 dependencies = [
+ "arrow-schema 57.3.0",
  "derive_more",
  "dotenvy",
  "sea-orm",

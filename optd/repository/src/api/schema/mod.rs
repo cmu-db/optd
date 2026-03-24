@@ -11,8 +11,7 @@ pub use get_all_schema_infos::*;
 #[derive(Debug, Clone, PartialEq, Eq, DerivePartialModel)]
 #[sea_orm(entity = "schema::Entity")]
 pub struct SchemaInfo {
-    #[sea_orm(from_col = "schema_id")]
-    pub id: i64,
+    pub schema_id: i64,
     pub schema_uuid: Uuid,
     pub schema_name: String,
 }
