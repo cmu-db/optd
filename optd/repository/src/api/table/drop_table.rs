@@ -7,7 +7,7 @@ use crate::{
     entity::{column, prelude::*, table},
 };
 
-pub async fn drop_table<C>(
+pub async fn drop_tables<C>(
     table_ids: &[i64],
     db: &C,
     current_snapshot: &mut SnapshotInfo,

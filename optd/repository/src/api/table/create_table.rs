@@ -1,4 +1,4 @@
-use sea_orm::{ActiveValue::Set, ConnectionTrait, DbErr, EntityTrait};
+use sea_orm::{ActiveValue::Set, ConnectionTrait, DbErr, EntityTrait, prelude::Uuid};
 
 use crate::{
     api::{
@@ -8,53 +8,94 @@ use crate::{
     entity::{column, prelude::*, table},
 };
 
-pub async fn create_table<C>(
-    schema_id: i64,
-    table_name: &str,
-    columns: &[ColumnInfo],
+pub async fn create_tables<C>(
+    tables: &[TableInfo],
     db: &C,
     current_snapshot: &mut SnapshotInfo,
-) -> Result<TableInfo, DbErr>
+) -> Result<Vec<TableInfo>, DbErr>
 where
     C: ConnectionTrait,
 {
-    let table_id = current_snapshot.get_next_catalog_id();
-    let table_uuid = uuid::Uuid::new_v4();
-
-    let model = table::ActiveModel {
-        table_id: Set(table_id),
-        table_uuid: Set(table_uuid),
-        begin_snapshot: Set(current_snapshot.snapshot_id),
-        end_snapshot: Set(None),
-        schema_id: Set(schema_id),
-        table_name: Set(table_name.to_owned()),
-        ..Default::default()
-    };
-
-    Table::insert(model).exec(db).await?;
-
-    let mut column_models = Vec::new();
-    let mut next_column_order = 0;
-    let created_columns = normalize_columns(
-        columns,
-        table_id,
-        None,
-        current_snapshot,
-        &mut next_column_order,
-        &mut column_models,
-    );
-
-    if !column_models.is_empty() {
-        Column::insert_many(column_models).exec(db).await?;
+    if tables.is_empty() {
+        return Ok(Vec::new());
     }
 
-    Ok(TableInfo {
-        id: table_id,
-        schema_id,
-        table_uuid,
-        table_name: table_name.to_owned(),
-        columns: created_columns,
-    })
+    let PreparedTables {
+        normalized_tables,
+        table_models,
+        column_models,
+    } = prepare_tables(tables, current_snapshot);
+
+    Table::insert_many(table_models)
+        .exec_without_returning(db)
+        .await?;
+
+    if !column_models.is_empty() {
+        Column::insert_many(column_models)
+            .exec_without_returning(db)
+            .await?;
+    }
+
+    Ok(normalized_tables)
+}
+
+struct PreparedTables {
+    normalized_tables: Vec<TableInfo>,
+    table_models: Vec<table::ActiveModel>,
+    column_models: Vec<column::ActiveModel>,
+}
+
+fn prepare_tables(tables: &[TableInfo], current_snapshot: &mut SnapshotInfo) -> PreparedTables {
+    let mut normalized_tables = Vec::with_capacity(tables.len());
+    let mut table_models = Vec::with_capacity(tables.len());
+    let mut column_models = Vec::new();
+
+    for table in tables {
+        let table_id = if table.id > 0 {
+            table.id
+        } else {
+            current_snapshot.get_next_catalog_id()
+        };
+        let table_uuid = if table.table_uuid.is_nil() {
+            Uuid::new_v4()
+        } else {
+            table.table_uuid
+        };
+
+        table_models.push(table::ActiveModel {
+            table_id: Set(table_id),
+            table_uuid: Set(table_uuid),
+            begin_snapshot: Set(current_snapshot.snapshot_id),
+            end_snapshot: Set(None),
+            schema_id: Set(table.schema_id),
+            table_name: Set(table.table_name.clone()),
+            ..Default::default()
+        });
+
+        let mut next_column_order = 0;
+        let columns = normalize_columns(
+            &table.columns,
+            table_id,
+            None,
+            current_snapshot,
+            &mut next_column_order,
+            &mut column_models,
+        );
+
+        normalized_tables.push(TableInfo {
+            id: table_id,
+            schema_id: table.schema_id,
+            table_uuid,
+            table_name: table.table_name.clone(),
+            columns,
+        });
+    }
+
+    PreparedTables {
+        normalized_tables,
+        table_models,
+        column_models,
+    }
 }
 
 fn normalize_columns(
