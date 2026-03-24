@@ -9,7 +9,7 @@ use crate::{
         snapshot::SnapshotInfo,
         table::{ColumnInfo, TableInfo},
     },
-    entity::{column, prelude::Table, table},
+    entity::{column, prelude::*, table},
 };
 
 pub async fn get_all_table_infos<C>(
@@ -76,7 +76,7 @@ where
 }
 
 fn build_column_tree(columns: Vec<column::Model>) -> Vec<ColumnInfo> {
-    let mut columns_by_parent = HashMap::new();
+    let mut columns_by_parent: HashMap<Option<i64>, Vec<FlatColumnInfo>> = HashMap::new();
 
     for column in columns {
         columns_by_parent
