@@ -1,5 +1,6 @@
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+    ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect,
 };
 
 use crate::{
@@ -14,9 +15,14 @@ pub async fn get_all_schema_infos<C>(
 where
     C: ConnectionTrait,
 {
+    let snapshot_id = current_snapshot.snapshot_id;
     Schema::find()
-        .filter(schema::Column::BeginSnapshot.lte(current_snapshot.snapshot_id))
-        .filter(schema::Column::EndSnapshot.is_null())
+        .filter(schema::Column::BeginSnapshot.lte(snapshot_id))
+        .filter(
+            Condition::any()
+                .add(schema::Column::EndSnapshot.is_null())
+                .add(schema::Column::EndSnapshot.gt(snapshot_id)),
+        )
         .select_only()
         .column_as(schema::Column::SchemaId, "id")
         .column(schema::Column::SchemaUuid)
