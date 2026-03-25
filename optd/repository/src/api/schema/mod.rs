@@ -1,4 +1,5 @@
 mod create_schema;
+mod drop_schema;
 mod get_all_schema_infos;
 
 use sea_orm::{DerivePartialModel, prelude::Uuid};
@@ -6,6 +7,7 @@ use sea_orm::{DerivePartialModel, prelude::Uuid};
 use crate::entity::schema;
 
 pub use create_schema::*;
+pub use drop_schema::*;
 pub use get_all_schema_infos::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, DerivePartialModel)]

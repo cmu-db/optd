@@ -1,6 +1,4 @@
-use sea_orm::{
-    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect, sea_query::Expr,
-};
+use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, sea_query::Expr};
 
 use crate::{
     api::snapshot::SnapshotInfo,
@@ -19,32 +17,19 @@ where
         return Ok(());
     }
 
-    let active_table_ids = Table::find()
-        .select_only()
-        .column(table::Column::TableId)
-        .filter(table::Column::EndSnapshot.is_null())
-        .filter(table::Column::TableId.is_in(table_ids.iter().copied()))
-        .into_tuple::<i64>()
-        .all(db)
-        .await?;
-
-    if active_table_ids.is_empty() {
-        return Ok(());
-    }
-
     let end_snapshot = current_snapshot.snapshot_id;
 
     Table::update_many()
         .col_expr(table::Column::EndSnapshot, Expr::value(end_snapshot))
         .filter(table::Column::EndSnapshot.is_null())
-        .filter(table::Column::TableId.is_in(active_table_ids.iter().copied()))
+        .filter(table::Column::TableId.is_in(table_ids.iter().copied()))
         .exec(db)
         .await?;
 
     Column::update_many()
         .col_expr(column::Column::EndSnapshot, Expr::value(end_snapshot))
         .filter(column::Column::EndSnapshot.is_null())
-        .filter(column::Column::TableId.is_in(active_table_ids.into_iter()))
+        .filter(column::Column::TableId.is_in(table_ids.iter().copied()))
         .exec(db)
         .await?;
 

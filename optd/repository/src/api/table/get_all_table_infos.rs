@@ -64,7 +64,7 @@ where
     Ok(tables
         .into_iter()
         .map(|table| TableInfo {
-            id: table.table_id,
+            table_id: table.table_id,
             schema_id: table.schema_id,
             table_uuid: table.table_uuid,
             table_name: table.table_name,
@@ -106,7 +106,7 @@ fn build_children(
         .map(|column| {
             let id = column.id;
             ColumnInfo {
-                id,
+                column_id: id,
                 column_name: column.column_name,
                 column_type: column.column_type,
                 initial_default: column.initial_default,

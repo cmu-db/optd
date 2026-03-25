@@ -1,7 +1,4 @@
-use optd_repository::{
-    api::snapshot::{SnapshotInfo, commit_snapshot, get_current_snapshot_info},
-    entity::{prelude::*, *},
-};
+use optd_repository::api::snapshot::{SnapshotInfo, commit_snapshot, get_current_snapshot_info};
 use sea_orm::Database;
 
 #[tokio::main]

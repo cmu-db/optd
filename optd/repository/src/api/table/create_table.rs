@@ -12,16 +12,15 @@ pub async fn create_tables<C>(
     tables: &[TableInfo],
     db: &C,
     current_snapshot: &mut SnapshotInfo,
-) -> Result<Vec<TableInfo>, DbErr>
+) -> Result<(), DbErr>
 where
     C: ConnectionTrait,
 {
     if tables.is_empty() {
-        return Ok(Vec::new());
+        return Ok(());
     }
 
     let PreparedTables {
-        normalized_tables,
         table_models,
         column_models,
     } = prepare_tables(tables, current_snapshot);
@@ -36,23 +35,21 @@ where
             .await?;
     }
 
-    Ok(normalized_tables)
+    Ok(())
 }
 
 struct PreparedTables {
-    normalized_tables: Vec<TableInfo>,
     table_models: Vec<table::ActiveModel>,
     column_models: Vec<column::ActiveModel>,
 }
 
 fn prepare_tables(tables: &[TableInfo], current_snapshot: &mut SnapshotInfo) -> PreparedTables {
-    let mut normalized_tables = Vec::with_capacity(tables.len());
     let mut table_models = Vec::with_capacity(tables.len());
     let mut column_models = Vec::new();
 
     for table in tables {
-        let table_id = if table.id > 0 {
-            table.id
+        let table_id = if table.table_id > 0 {
+            table.table_id
         } else {
             current_snapshot.get_next_catalog_id()
         };
@@ -73,7 +70,7 @@ fn prepare_tables(tables: &[TableInfo], current_snapshot: &mut SnapshotInfo) -> 
         });
 
         let mut next_column_order = 0;
-        let columns = normalize_columns(
+        let _columns = normalize_columns(
             &table.columns,
             table_id,
             None,
@@ -81,18 +78,9 @@ fn prepare_tables(tables: &[TableInfo], current_snapshot: &mut SnapshotInfo) -> 
             &mut next_column_order,
             &mut column_models,
         );
-
-        normalized_tables.push(TableInfo {
-            id: table_id,
-            schema_id: table.schema_id,
-            table_uuid,
-            table_name: table.table_name.clone(),
-            columns,
-        });
     }
 
     PreparedTables {
-        normalized_tables,
         table_models,
         column_models,
     }
@@ -109,8 +97,8 @@ fn normalize_columns(
     columns
         .iter()
         .map(|column| {
-            let column_id = if column.id > 0 {
-                column.id
+            let column_id = if column.column_id > 0 {
+                column.column_id
             } else {
                 current_snapshot.get_next_catalog_id()
             };
@@ -141,7 +129,7 @@ fn normalize_columns(
             );
 
             ColumnInfo {
-                id: column_id,
+                column_id,
                 column_name: column.column_name.clone(),
                 column_type: column.column_type.clone(),
                 initial_default: column.initial_default.clone(),
