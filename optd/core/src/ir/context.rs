@@ -1,15 +1,17 @@
 //! IRContext holds shared context for the IR, including catalog access,
 //! cardinality estimation, and cost modeling.
 
+use std::collections::HashMap;
+
 use crate::error::Result;
 use crate::ir::binder::Binding;
 use crate::ir::{
     Column, ColumnMeta, binder::BindContext, catalog::Catalog, cost::CostModel,
-    properties::CardinalityEstimator, table_ref::TableRef,
+    properties::CardinalityEstimator, statistics::TableStatistics, table_ref::TableRef,
 };
 use arrow_schema::{Field, SchemaRef};
 use snafu::OptionExt;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 #[derive(Clone)]
 pub struct IRContext {
@@ -21,6 +23,12 @@ pub struct IRContext {
     pub cm: Arc<dyn CostModel>,
 
     pub binder: Arc<RwLock<BindContext>>,
+
+    /// Per-table_index cache of `TableStatistics`, populated lazily during
+    /// cardinality estimation. Keyed by `table_index` (the binding id from
+    /// `Column(table_index, _)`). `None` values are cached too — a missing
+    /// entry in the catalog is recorded so we don't retry.
+    stats_cache: Arc<Mutex<HashMap<i64, Option<TableStatistics>>>>,
 }
 
 impl IRContext {
@@ -34,6 +42,7 @@ impl IRContext {
             catalog: cat,
             cm: cost,
             binder: Arc::new(RwLock::new(BindContext::new())),
+            stats_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -55,6 +64,29 @@ impl IRContext {
 
     pub fn binder_end_scope(&self) {
         self.binder.write().unwrap().end_scope()
+    }
+
+    /// Look up the [`TableStatistics`] and column offset for a given [`Column`].
+    ///
+    /// Results are cached per `table_index` so repeated lookups for columns
+    /// from the same table avoid re-hitting the binder and catalog.
+    pub fn column_stats(&self, column: &Column) -> Option<(TableStatistics, usize)> {
+        let Column(table_index, column_index) = *column;
+        let mut cache = self.stats_cache.lock().unwrap();
+        let stats = cache
+            .entry(table_index)
+            .or_insert_with(|| {
+                let guard = self.binder.read().unwrap();
+                let binding = guard.get_binding(&table_index)?;
+                let table_ref = binding.table_ref().clone();
+                drop(guard);
+                self.catalog
+                    .table_by_ref(&table_ref)
+                    .ok()
+                    .and_then(|tm| tm.statistics)
+            })
+            .clone()?;
+        Some((stats, column_index))
     }
 
     pub fn get_column_meta(&self, column: &Column) -> ColumnMeta {

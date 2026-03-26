@@ -46,6 +46,6 @@ limit 100;
 
 /*
 Error
-Schema error: No field named partsupp.ps_partkey. Valid fields are "__internal_#11".ps_partkey, "__internal_#11".__always_true, "__internal_#11"."min(partsupp.ps_supplycost)".
+External error: Unsupported df logical expr: (<subquery>)
 */
 

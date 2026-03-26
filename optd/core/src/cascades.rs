@@ -13,7 +13,7 @@ use crate::{
         rule::{OperatorPattern, Rule, RuleSet},
     },
     memo::{CostedExpr, Exploration, MemoGroupExpr, MemoTable, Optimization, Status, WithId},
-    rules::EnforceTupleOrderingRule,
+    rules::{EnforceTupleOrderingRule, SimplificationPass},
 };
 
 pub struct Cascades {
@@ -38,7 +38,10 @@ impl Cascades {
         plan: &Arc<Operator>,
         required: Arc<Required>,
     ) -> Option<Arc<Operator>> {
-        let group_id = self.insert_new_operator(plan).await;
+        let simplified = SimplificationPass::new()
+            .apply(plan.clone(), &self.ctx)
+            .ok()?;
+        let group_id = self.insert_new_operator(&simplified).await;
         let fut = self.find_best_costed_expr_for(group_id, required);
         let rx = fut.await;
         let best_root = {

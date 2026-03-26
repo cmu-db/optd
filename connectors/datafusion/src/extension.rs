@@ -10,6 +10,8 @@ extensions_options! {
        pub optd_enabled: bool, default = true
        /// Should fail on any unsupported features.
        pub optd_strict_mode: bool, default = false
+       /// Disable DataFusion optimizers and run optd optimization only.
+       pub optd_only: bool, default = false
    }
 }
 

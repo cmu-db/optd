@@ -132,10 +132,10 @@
 //     let num_row_groups = metadata.num_row_groups();
 //     let mut column_statistics = Vec::new();
 
-//     for col_idx in 0..schema.num_columns() {
-//         let field = &schema.columns()[col_idx];
-//         let col_name = field.name().to_string();
-//         let col_type = format!("{:?}", field.physical_type());
+//    for col_idx in 0..schema.num_columns() {
+//        let field = &schema.columns()[col_idx];
+//        let col_name = field.name().to_string();
+//        let col_type = parquet_physical_to_data_type(field.physical_type());
 
 //         // Aggregate statistics across all row groups
 //         let mut global_min: Option<String> = None;
@@ -171,7 +171,9 @@
 //                 if distinct_count.is_none() {
 //                     distinct_count = stats.distinct_count_opt().map(|d| d as usize);
 //                 }
-//             }
+//
+//                // TODO(AC): if distinct count is still none, create HLL?
+//            }
 //         }
 
 //         column_statistics.push(ColumnStatistics {
@@ -189,9 +191,25 @@
 //     Ok(column_statistics)
 // }
 
-// /// Converts Parquet statistics to string representation.
+// /// Converts a Parquet physical type to an Arrow DataType.
+// fn parquet_physical_to_data_type(physical_type: parquet::basic::Type) -> optd_core::ir::DataType {
+//     use optd_core::ir::DataType;
+//     match physical_type {
+//         parquet::basic::Type::BOOLEAN => DataType::Boolean,
+//         parquet::basic::Type::INT32 => DataType::Int32,
+//         parquet::basic::Type::INT64 => DataType::Int64,
+//         parquet::basic::Type::INT96 => DataType::Int64, // deprecated, approximate
+//         parquet::basic::Type::FLOAT => DataType::Float32,
+//         parquet::basic::Type::DOUBLE => DataType::Float64,
+//         parquet::basic::Type::BYTE_ARRAY | parquet::basic::Type::FIXED_LEN_BYTE_ARRAY => {
+//             DataType::Utf8
+//         }
+//     }
+// }
+
+// /// Converts Parquet statistics to a String representation.
 // ///
-// /// Returns min or max value as string. For optimizer integration, use proper ScalarValue.
+// /// Returns min or max value as a string.
 // fn parquet_stat_to_string(
 //     stats: &parquet::file::statistics::Statistics,
 //     is_min: bool,

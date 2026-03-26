@@ -173,6 +173,14 @@ fn precision_to_string<T: ToString + PartialOrd + Eq + Clone + std::fmt::Debug>(
     }
 }
 
+fn warm_explain_properties(op: &Arc<optd_core::ir::Operator>, ctx: &IRContext) {
+    for input in op.input_operators() {
+        warm_explain_properties(input, ctx);
+    }
+    let _ = op.output_columns(ctx);
+    let _ = op.cardinality(ctx);
+}
+
 impl OptdQueryPlanner {
     fn optd_extension(session_state: &SessionState) -> Result<Arc<OptdExtension>> {
         session_state
@@ -263,6 +271,10 @@ impl OptdQueryPlanner {
             .await?;
 
         if let Some(x) = explain.as_mut() {
+            // `quick_explain` only displays cached operator properties.
+            // Precompute them on the original logical tree so we don't print `?`
+            // for `(.output_columns)` and `(.cardinality)` in explain output.
+            warm_explain_properties(&optd_logical, &ctx.inner);
             let s = quick_explain(&optd_logical, &ctx.inner);
             x.stringified_plans.push(StringifiedPlan::new(
                 PlanType::OptimizedLogicalPlan {
@@ -512,14 +524,20 @@ impl QueryPlanner for OptdQueryPlanner {
         Self: 'ret,
     {
         Box::pin(async move {
-            let (optd_enabled, optd_strict_mode) = {
+            let (optd_enabled, optd_strict_mode, optd_only) = {
                 session_state
                     .config_options()
                     .extensions
                     .get::<OptdExtensionConfig>()
-                    .map(|conf| (conf.optd_enabled, conf.optd_strict_mode))
-                    .unwrap_or((true, false))
+                    .map(|conf| (conf.optd_enabled, conf.optd_strict_mode, conf.optd_only))
+                    .unwrap_or((true, false, false))
             };
+
+            if optd_only && !optd_enabled {
+                return Err(DataFusionError::Plan(
+                    "optd.optd_only requires optd.optd_enabled = true".to_string(),
+                ));
+            }
 
             if !optd_enabled {
                 return self
@@ -533,7 +551,7 @@ impl QueryPlanner for OptdQueryPlanner {
 
             match res {
                 Err(e) => {
-                    if optd_strict_mode {
+                    if optd_strict_mode || optd_only {
                         Err(e)
                     } else {
                         eprintln!(
