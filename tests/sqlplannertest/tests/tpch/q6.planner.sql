@@ -25,7 +25,13 @@ Project { .table_index: 3, .projections: sum(lineitem.l_extendedprice * lineitem
             └── (.cardinality): 0.00
 
 physical_plan after optd-finalized:
-SAME TEXT AS ABOVE
+Project { .table_index: 3, .projections: sum(lineitem.l_extendedprice * lineitem.l_discount)(#2.0), (.output_columns): revenue_loss(#3.0), (.cardinality): 1.00 }
+└── Aggregate { .aggregate_table_index: 2, .implementation: None, .exprs: [ sum(l_extendedprice(#1.5) * l_discount(#1.6)) ], .keys: [], (.output_columns): sum(lineitem.l_extendedprice * lineitem.l_discount)(#2.0), (.cardinality): 1.00 }
+    └── Select
+        ├── .predicate: (l_shipdate(#1.10) >= 2023-01-01::date32) AND (l_shipdate(#1.10) < 2024-01-01::date32) AND (l_discount(#1.6) >= 5::decimal128(15, 2)) AND (l_discount(#1.6) <= 7::decimal128(15, 2)) AND (l_quantity(#1.4) < 2400::decimal128(15, 2))
+        ├── (.output_columns): l_discount(#1.6), l_extendedprice(#1.5), l_quantity(#1.4), l_shipdate(#1.10)
+        ├── (.cardinality): 0.00
+        └── Get { .data_source_id: 8, .table_index: 1, .implementation: None, (.output_columns): l_discount(#1.6), l_extendedprice(#1.5), l_quantity(#1.4), l_shipdate(#1.10), (.cardinality): 0.00 }
 
 NULL
 */
