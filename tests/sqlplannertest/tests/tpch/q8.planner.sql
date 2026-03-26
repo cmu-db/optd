@@ -39,9 +39,9 @@ order by
 
 /*
 logical_plan after optd-initial:
-OrderBy { ordering_exprs: [ o_year(#15.0) ASC ], (.output_columns): mkt_share(#15.1), o_year(#15.0), (.cardinality): 0.00 }
-└── Project { .table_index: 15, .projections: [ o_year(#13.0), sum(CASE WHEN all_nations.nation = Utf8("IRAQ") THEN all_nations.volume ELSE Int64(0) END)(#14.0) / sum(all_nations.volume)(#14.1) ], (.output_columns): mkt_share(#15.1), o_year(#15.0), (.cardinality): 0.00 }
-    └── Aggregate { .aggregate_table_index: 14, .implementation: None, .exprs: [ sum(CASE WHEN nation(#13.2) = IRAQ::utf8_view THEN volume(#13.1) ELSE 0::decimal128(38, 4) END), sum(volume(#13.1)) ], .keys: [ o_year(#13.0) ], (.output_columns): o_year(#13.0), sum(CASE WHEN all_nations.nation = Utf8("IRAQ") THEN all_nations.volume ELSE Int64(0) END)(#14.0), sum(all_nations.volume)(#14.1), (.cardinality): 0.00 }
+OrderBy { ordering_exprs: [ o_year(#16.0) ASC ], (.output_columns): mkt_share(#16.1), o_year(#16.0), (.cardinality): 0.00 }
+└── Project { .table_index: 16, .projections: [ o_year(#13.0), sum(CASE WHEN all_nations.nation = Utf8("IRAQ") THEN all_nations.volume ELSE Int64(0) END)(#15.0) / sum(all_nations.volume)(#15.1) ], (.output_columns): mkt_share(#16.1), o_year(#16.0), (.cardinality): 0.00 }
+    └── Aggregate { .key_table_index: 14, .aggregate_table_index: 15, .implementation: None, .exprs: [ sum(CASE WHEN nation(#13.2) = IRAQ::utf8_view THEN volume(#13.1) ELSE 0::decimal128(38, 4) END), sum(volume(#13.1)) ], .keys: [ o_year(#13.0) ], (.output_columns): all_nations.o_year(#14.0), sum(CASE WHEN all_nations.nation = Utf8("IRAQ") THEN all_nations.volume ELSE Int64(0) END)(#15.0), sum(all_nations.volume)(#15.1), (.cardinality): 0.00 }
         └── Remap { .table_index: 13, (.output_columns): nation(#13.2), o_year(#13.0), volume(#13.1), (.cardinality): 0.00 }
             └── Project { .table_index: 12, .projections: [ date_part(YEAR::utf8, o_orderdate(#11.36)), l_extendedprice(#11.21) * 1::decimal128(20, 0) - l_discount(#11.22), n_name(#11.50) ], (.output_columns): nation(#12.2), o_year(#12.0), volume(#12.1), (.cardinality): 0.00 }
                 └── Project
@@ -76,9 +76,9 @@ OrderBy { ordering_exprs: [ o_year(#15.0) ASC ], (.output_columns): mkt_share(#1
                             └── Get { .data_source_id: 2, .table_index: 10, .implementation: None, (.output_columns): r_comment(#10.2), r_name(#10.1), r_regionkey(#10.0), (.cardinality): 0.00 }
 
 physical_plan after optd-finalized:
-EnforcerSort { tuple_ordering: [(#15.0, Asc)], (.output_columns): mkt_share(#15.1), o_year(#15.0), (.cardinality): 0.00 }
-└── Project { .table_index: 15, .projections: [ o_year(#13.0), sum(CASE WHEN all_nations.nation = Utf8("IRAQ") THEN all_nations.volume ELSE Int64(0) END)(#14.0) / sum(all_nations.volume)(#14.1) ], (.output_columns): mkt_share(#15.1), o_year(#15.0), (.cardinality): 0.00 }
-    └── Aggregate { .aggregate_table_index: 14, .implementation: None, .exprs: [ sum(CASE WHEN nation(#13.2) = IRAQ::utf8_view THEN volume(#13.1) ELSE 0::decimal128(38, 4) END), sum(volume(#13.1)) ], .keys: [ o_year(#13.0) ], (.output_columns): o_year(#13.0), sum(CASE WHEN all_nations.nation = Utf8("IRAQ") THEN all_nations.volume ELSE Int64(0) END)(#14.0), sum(all_nations.volume)(#14.1), (.cardinality): 0.00 }
+EnforcerSort { tuple_ordering: [(#16.0, Asc)], (.output_columns): mkt_share(#16.1), o_year(#16.0), (.cardinality): 0.00 }
+└── Project { .table_index: 16, .projections: [ o_year(#13.0), sum(CASE WHEN all_nations.nation = Utf8("IRAQ") THEN all_nations.volume ELSE Int64(0) END)(#15.0) / sum(all_nations.volume)(#15.1) ], (.output_columns): mkt_share(#16.1), o_year(#16.0), (.cardinality): 0.00 }
+    └── Aggregate { .key_table_index: 14, .aggregate_table_index: 15, .implementation: None, .exprs: [ sum(CASE WHEN nation(#13.2) = IRAQ::utf8_view THEN volume(#13.1) ELSE 0::decimal128(38, 4) END), sum(volume(#13.1)) ], .keys: [ o_year(#13.0) ], (.output_columns): all_nations.o_year(#14.0), sum(CASE WHEN all_nations.nation = Utf8("IRAQ") THEN all_nations.volume ELSE Int64(0) END)(#15.0), sum(all_nations.volume)(#15.1), (.cardinality): 0.00 }
         └── Remap { .table_index: 13, (.output_columns): nation(#13.2), o_year(#13.0), volume(#13.1), (.cardinality): 0.00 }
             └── Project { .table_index: 12, .projections: [ date_part(YEAR::utf8, o_orderdate(#4.4)), l_extendedprice(#2.5) * 1::decimal128(20, 0) - l_discount(#2.6), n_name(#7.1) ], (.output_columns): nation(#12.2), o_year(#12.0), volume(#12.1), (.cardinality): 0.00 }
                 └── Join

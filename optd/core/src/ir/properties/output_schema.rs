@@ -12,7 +12,6 @@ use crate::ir::{
         Subquery, join::JoinType,
     },
     properties::{Derive, GetProperty, PropertyMarker},
-    scalar::{ColumnRef, List},
     schema::OptdSchema,
     table_ref::TableRef,
 };
@@ -83,7 +82,7 @@ impl Derive<OutputSchema> for Operator {
             }
             OperatorKind::Aggregate(meta) => {
                 let agg = Aggregate::borrow_raw_parts(meta, &self.common);
-                compute_aggregate_schema(agg.keys(), agg.aggregate_table_index(), ctx)
+                compute_aggregate_schema(agg.key_table_index(), agg.aggregate_table_index(), ctx)
             }
             OperatorKind::Remap(meta) => {
                 let remap = Remap::borrow_raw_parts(meta, &self.common);
@@ -251,39 +250,37 @@ fn collect_qualified_fields(schema: &OptdSchema) -> impl Iterator<Item = Qualifi
 }
 
 fn compute_aggregate_schema(
-    keys: &crate::ir::Scalar,
+    key_table_index: &i64,
     aggregate_table_index: &i64,
     ctx: &crate::ir::IRContext,
 ) -> Result<OptdSchema> {
-    let key_fields = keys
-        .borrow::<List>()
-        .members()
+    let key_binding = ctx.get_binding(key_table_index)?;
+    let key_table_ref = key_binding.table_ref().clone();
+    let metadata = key_binding.schema().metadata().clone();
+    let qualified_fields = key_binding
+        .schema()
+        .fields()
         .iter()
-        .map(|key| {
-            let key = match key.try_borrow::<ColumnRef>() {
-                Ok(key) => key,
-                Err(_) => whatever!("aggregate key must be a column reference"),
-            };
-            ctx.get_column_name(key.column())
-        })
-        .collect::<Result<Vec<_>>>()?;
+        .cloned()
+        .map(|field| (key_table_ref.clone(), field))
+        .collect_vec();
+
+    let key_schema = new_optd_schema(qualified_fields, metadata)?;
 
     let aggregate_binding = ctx.get_binding(aggregate_table_index)?;
     let aggregate_table_ref = aggregate_binding.table_ref().clone();
     let metadata = aggregate_binding.schema().metadata().clone();
-    let qualified_fields = key_fields
-        .into_iter()
-        .chain(
-            aggregate_binding
-                .schema()
-                .fields()
-                .iter()
-                .cloned()
-                .map(|field| (aggregate_table_ref.clone(), field)),
-        )
+    let qualified_fields = aggregate_binding
+        .schema()
+        .fields()
+        .iter()
+        .cloned()
+        .map(|field| (aggregate_table_ref.clone(), field))
         .collect_vec();
 
-    new_optd_schema(qualified_fields, metadata)
+    let aggregate_schema = new_optd_schema(qualified_fields, metadata)?;
+
+    key_schema.join(&aggregate_schema).context(SchemaSnafu)
 }
 
 #[cfg(test)]

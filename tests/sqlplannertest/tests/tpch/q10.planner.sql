@@ -34,10 +34,10 @@ LIMIT 20;
 
 /*
 logical_plan after optd-initial:
-Limit { .skip: 0::bigint, .fetch: 20::bigint, (.output_columns): c_acctbal(#6.3), c_address(#6.5), c_comment(#6.7), c_custkey(#6.0), c_name(#6.1), c_phone(#6.6), n_name(#6.4), revenue(#6.2), (.cardinality): 0.00 }
-└── OrderBy { ordering_exprs: [ revenue(#6.2) DESC ], (.output_columns): c_acctbal(#6.3), c_address(#6.5), c_comment(#6.7), c_custkey(#6.0), c_name(#6.1), c_phone(#6.6), n_name(#6.4), revenue(#6.2), (.cardinality): 0.00 }
-    └── Project { .table_index: 6, .projections: [ c_custkey(#1.0), c_name(#1.1), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#5.0), c_acctbal(#1.5), n_name(#4.1), c_address(#1.2), c_phone(#1.4), c_comment(#1.7) ], (.output_columns): c_acctbal(#6.3), c_address(#6.5), c_comment(#6.7), c_custkey(#6.0), c_name(#6.1), c_phone(#6.6), n_name(#6.4), revenue(#6.2), (.cardinality): 0.00 }
-        └── Aggregate { .aggregate_table_index: 5, .implementation: None, .exprs: sum(l_extendedprice(#3.5) * 1::decimal128(20, 0) - l_discount(#3.6)), .keys: [ c_custkey(#1.0), c_name(#1.1), c_acctbal(#1.5), c_phone(#1.4), n_name(#4.1), c_address(#1.2), c_comment(#1.7) ], (.output_columns): c_acctbal(#1.5), c_address(#1.2), c_comment(#1.7), c_custkey(#1.0), c_name(#1.1), c_phone(#1.4), n_name(#4.1), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#5.0), (.cardinality): 0.00 }
+Limit { .skip: 0::bigint, .fetch: 20::bigint, (.output_columns): c_acctbal(#7.3), c_address(#7.5), c_comment(#7.7), c_custkey(#7.0), c_name(#7.1), c_phone(#7.6), n_name(#7.4), revenue(#7.2), (.cardinality): 0.00 }
+└── OrderBy { ordering_exprs: [ revenue(#7.2) DESC ], (.output_columns): c_acctbal(#7.3), c_address(#7.5), c_comment(#7.7), c_custkey(#7.0), c_name(#7.1), c_phone(#7.6), n_name(#7.4), revenue(#7.2), (.cardinality): 0.00 }
+    └── Project { .table_index: 7, .projections: [ c_custkey(#1.0), c_name(#1.1), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#6.0), c_acctbal(#1.5), n_name(#4.1), c_address(#1.2), c_phone(#1.4), c_comment(#1.7) ], (.output_columns): c_acctbal(#7.3), c_address(#7.5), c_comment(#7.7), c_custkey(#7.0), c_name(#7.1), c_phone(#7.6), n_name(#7.4), revenue(#7.2), (.cardinality): 0.00 }
+        └── Aggregate { .key_table_index: 5, .aggregate_table_index: 6, .implementation: None, .exprs: sum(l_extendedprice(#3.5) * 1::decimal128(20, 0) - l_discount(#3.6)), .keys: [ c_custkey(#1.0), c_name(#1.1), c_acctbal(#1.5), c_phone(#1.4), n_name(#4.1), c_address(#1.2), c_comment(#1.7) ], (.output_columns): customer.c_acctbal(#5.2), customer.c_address(#5.5), customer.c_comment(#5.6), customer.c_custkey(#5.0), customer.c_name(#5.1), customer.c_phone(#5.3), nation.n_name(#5.4), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#6.0), (.cardinality): 0.00 }
             └── Join
                 ├── .join_type: Inner
                 ├── .implementation: None
@@ -59,19 +59,20 @@ Limit { .skip: 0::bigint, .fetch: 20::bigint, (.output_columns): c_acctbal(#6.3)
                 └── Get { .data_source_id: 1, .table_index: 4, .implementation: None, (.output_columns): n_comment(#4.3), n_name(#4.1), n_nationkey(#4.0), n_regionkey(#4.2), (.cardinality): 0.00 }
 
 physical_plan after optd-finalized:
-Limit { .skip: 0::bigint, .fetch: 20::bigint, (.output_columns): c_acctbal(#6.3), c_address(#6.5), c_comment(#6.7), c_custkey(#6.0), c_name(#6.1), c_phone(#6.6), n_name(#6.4), revenue(#6.2), (.cardinality): 0.00 }
-└── EnforcerSort { tuple_ordering: [(#6.2, Desc)], (.output_columns): c_acctbal(#6.3), c_address(#6.5), c_comment(#6.7), c_custkey(#6.0), c_name(#6.1), c_phone(#6.6), n_name(#6.4), revenue(#6.2), (.cardinality): 0.00 }
+Limit { .skip: 0::bigint, .fetch: 20::bigint, (.output_columns): c_acctbal(#7.3), c_address(#7.5), c_comment(#7.7), c_custkey(#7.0), c_name(#7.1), c_phone(#7.6), n_name(#7.4), revenue(#7.2), (.cardinality): 0.00 }
+└── EnforcerSort { tuple_ordering: [(#7.2, Desc)], (.output_columns): c_acctbal(#7.3), c_address(#7.5), c_comment(#7.7), c_custkey(#7.0), c_name(#7.1), c_phone(#7.6), n_name(#7.4), revenue(#7.2), (.cardinality): 0.00 }
     └── Project
-        ├── .table_index: 6
-        ├── .projections: [ c_custkey(#1.0), c_name(#1.1), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#5.0), c_acctbal(#1.5), n_name(#4.1), c_address(#1.2), c_phone(#1.4), c_comment(#1.7) ]
-        ├── (.output_columns): c_acctbal(#6.3), c_address(#6.5), c_comment(#6.7), c_custkey(#6.0), c_name(#6.1), c_phone(#6.6), n_name(#6.4), revenue(#6.2)
+        ├── .table_index: 7
+        ├── .projections: [ c_custkey(#1.0), c_name(#1.1), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#6.0), c_acctbal(#1.5), n_name(#4.1), c_address(#1.2), c_phone(#1.4), c_comment(#1.7) ]
+        ├── (.output_columns): c_acctbal(#7.3), c_address(#7.5), c_comment(#7.7), c_custkey(#7.0), c_name(#7.1), c_phone(#7.6), n_name(#7.4), revenue(#7.2)
         ├── (.cardinality): 0.00
         └── Aggregate
-            ├── .aggregate_table_index: 5
+            ├── .key_table_index: 5
+            ├── .aggregate_table_index: 6
             ├── .implementation: None
             ├── .exprs: sum(l_extendedprice(#3.5) * 1::decimal128(20, 0) - l_discount(#3.6))
             ├── .keys: [ c_custkey(#1.0), c_name(#1.1), c_acctbal(#1.5), c_phone(#1.4), n_name(#4.1), c_address(#1.2), c_comment(#1.7) ]
-            ├── (.output_columns): c_acctbal(#1.5), c_address(#1.2), c_comment(#1.7), c_custkey(#1.0), c_name(#1.1), c_phone(#1.4), n_name(#4.1), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#5.0)
+            ├── (.output_columns): customer.c_acctbal(#5.2), customer.c_address(#5.5), customer.c_comment(#5.6), customer.c_custkey(#5.0), customer.c_name(#5.1), customer.c_phone(#5.3), nation.n_name(#5.4), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#6.0)
             ├── (.cardinality): 0.00
             └── Join
                 ├── .join_type: Inner

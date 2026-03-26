@@ -39,27 +39,28 @@ order by
 
 /*
 logical_plan after optd-initial:
-OrderBy { ordering_exprs: [ cntrycode(#13.0) ASC ], (.output_columns): cntrycode(#13.0), numcust(#13.1), totacctbal(#13.2), (.cardinality): 0.00 }
-└── Project { .table_index: 13, .projections: [ cntrycode(#11.0), count(Int64(1))(#12.0), sum(custsale.c_acctbal)(#12.1) ], (.output_columns): cntrycode(#13.0), numcust(#13.1), totacctbal(#13.2), (.cardinality): 0.00 }
+OrderBy { ordering_exprs: [ cntrycode(#15.0) ASC ], (.output_columns): cntrycode(#15.0), numcust(#15.1), totacctbal(#15.2), (.cardinality): 0.00 }
+└── Project { .table_index: 15, .projections: [ cntrycode(#12.0), count(Int64(1))(#14.0), sum(custsale.c_acctbal)(#14.1) ], (.output_columns): cntrycode(#15.0), numcust(#15.1), totacctbal(#15.2), (.cardinality): 0.00 }
     └── Aggregate
-        ├── .aggregate_table_index: 12
+        ├── .key_table_index: 13
+        ├── .aggregate_table_index: 14
         ├── .implementation: None
-        ├── .exprs: [ count(1::bigint), sum(c_acctbal(#11.1)) ]
-        ├── .keys: [ cntrycode(#11.0) ]
-        ├── (.output_columns): cntrycode(#11.0), count(Int64(1))(#12.0), sum(custsale.c_acctbal)(#12.1)
+        ├── .exprs: [ count(1::bigint), sum(c_acctbal(#12.1)) ]
+        ├── .keys: [ cntrycode(#12.0) ]
+        ├── (.output_columns): count(Int64(1))(#14.0), custsale.cntrycode(#13.0), sum(custsale.c_acctbal)(#14.1)
         ├── (.cardinality): 0.00
-        └── Remap { .table_index: 11, (.output_columns): c_acctbal(#11.1), cntrycode(#11.0), (.cardinality): 0.00 }
-            └── Project { .table_index: 10, .projections: [ substr(c_phone(#9.4), 1::bigint, 2::bigint), c_acctbal(#9.5) ], (.output_columns): c_acctbal(#10.1), cntrycode(#10.0), (.cardinality): 0.00 }
+        └── Remap { .table_index: 12, (.output_columns): c_acctbal(#12.1), cntrycode(#12.0), (.cardinality): 0.00 }
+            └── Project { .table_index: 11, .projections: [ substr(c_phone(#10.4), 1::bigint, 2::bigint), c_acctbal(#10.5) ], (.output_columns): c_acctbal(#11.1), cntrycode(#11.0), (.cardinality): 0.00 }
                 └── Project
-                    ├── .table_index: 9
+                    ├── .table_index: 10
                     ├── .projections: [ c_custkey(#1.0), c_name(#1.1), c_address(#1.2), c_nationkey(#1.3), c_phone(#1.4), c_acctbal(#1.5), c_mktsegment(#1.6), c_comment(#1.7) ]
-                    ├── (.output_columns): c_acctbal(#9.5), c_address(#9.2), c_comment(#9.7), c_custkey(#9.0), c_mktsegment(#9.6), c_name(#9.1), c_nationkey(#9.3), c_phone(#9.4)
+                    ├── (.output_columns): c_acctbal(#10.5), c_address(#10.2), c_comment(#10.7), c_custkey(#10.0), c_mktsegment(#10.6), c_name(#10.1), c_nationkey(#10.3), c_phone(#10.4)
                     ├── (.cardinality): 0.00
                     └── Join
                         ├── .join_type: Inner
                         ├── .implementation: None
-                        ├── .join_cond: (CAST (c_acctbal(#1.5) AS Decimal128(19, 6)) > avg(customer.c_acctbal)(#8.0))
-                        ├── (.output_columns): avg(customer.c_acctbal)(#8.0), c_acctbal(#1.5), c_address(#1.2), c_comment(#1.7), c_custkey(#1.0), c_mktsegment(#1.6), c_name(#1.1), c_nationkey(#1.3), c_phone(#1.4)
+                        ├── .join_cond: (CAST (c_acctbal(#1.5) AS Decimal128(19, 6)) > avg(customer.c_acctbal)(#9.0))
+                        ├── (.output_columns): avg(customer.c_acctbal)(#9.0), c_acctbal(#1.5), c_address(#1.2), c_comment(#1.7), c_custkey(#1.0), c_mktsegment(#1.6), c_name(#1.1), c_nationkey(#1.3), c_phone(#1.4)
                         ├── (.cardinality): 0.00
                         ├── Join
                         │   ├── .join_type: LeftAnti
@@ -92,9 +93,9 @@ OrderBy { ordering_exprs: [ cntrycode(#13.0) ASC ], (.output_columns): cntrycode
                         │               ├── .implementation: None
                         │               ├── (.output_columns): o_clerk(#2.6), o_comment(#2.8), o_custkey(#2.1), o_orderdate(#2.4), o_orderkey(#2.0), o_orderpriority(#2.5), o_orderstatus(#2.2), o_shippriority(#2.7), o_totalprice(#2.3)
                         │               └── (.cardinality): 0.00
-                        └── Remap { .table_index: 8, (.output_columns): avg(customer.c_acctbal)(#8.0), (.cardinality): 1.00 }
-                            └── Project { .table_index: 7, .projections: avg(customer.c_acctbal)(#6.0), (.output_columns): avg(customer.c_acctbal)(#7.0), (.cardinality): 1.00 }
-                                └── Aggregate { .aggregate_table_index: 6, .implementation: None, .exprs: avg(c_acctbal(#5.5)), .keys: [], (.output_columns): avg(customer.c_acctbal)(#6.0), (.cardinality): 1.00 }
+                        └── Remap { .table_index: 9, (.output_columns): avg(customer.c_acctbal)(#9.0), (.cardinality): 1.00 }
+                            └── Project { .table_index: 8, .projections: avg(customer.c_acctbal)(#7.0), (.output_columns): avg(customer.c_acctbal)(#8.0), (.cardinality): 1.00 }
+                                └── Aggregate { .key_table_index: 6, .aggregate_table_index: 7, .implementation: None, .exprs: avg(c_acctbal(#5.5)), .keys: [], (.output_columns): avg(customer.c_acctbal)(#7.0), (.cardinality): 1.00 }
                                     └── Select
                                         ├── .predicate: (c_acctbal(#5.5) > 0::decimal128(15, 2)) AND (substr(c_phone(#5.4), 1::bigint, 2::bigint) IN [13::utf8_view, 31::utf8_view, 23::utf8_view, 29::utf8_view, 30::utf8_view, 18::utf8_view, 17::utf8_view])
                                         ├── (.output_columns): c_acctbal(#5.5), c_address(#5.2), c_comment(#5.7), c_custkey(#5.0), c_mktsegment(#5.6), c_name(#5.1), c_nationkey(#5.3), c_phone(#5.4)
@@ -107,22 +108,23 @@ OrderBy { ordering_exprs: [ cntrycode(#13.0) ASC ], (.output_columns): cntrycode
                                             └── (.cardinality): 0.00
 
 physical_plan after optd-finalized:
-EnforcerSort { tuple_ordering: [(#13.0, Asc)], (.output_columns): cntrycode(#13.0), numcust(#13.1), totacctbal(#13.2), (.cardinality): 0.00 }
-└── Project { .table_index: 13, .projections: [ cntrycode(#11.0), count(Int64(1))(#12.0), sum(custsale.c_acctbal)(#12.1) ], (.output_columns): cntrycode(#13.0), numcust(#13.1), totacctbal(#13.2), (.cardinality): 0.00 }
+EnforcerSort { tuple_ordering: [(#15.0, Asc)], (.output_columns): cntrycode(#15.0), numcust(#15.1), totacctbal(#15.2), (.cardinality): 0.00 }
+└── Project { .table_index: 15, .projections: [ cntrycode(#12.0), count(Int64(1))(#14.0), sum(custsale.c_acctbal)(#14.1) ], (.output_columns): cntrycode(#15.0), numcust(#15.1), totacctbal(#15.2), (.cardinality): 0.00 }
     └── Aggregate
-        ├── .aggregate_table_index: 12
+        ├── .key_table_index: 13
+        ├── .aggregate_table_index: 14
         ├── .implementation: None
-        ├── .exprs: [ count(1::bigint), sum(c_acctbal(#11.1)) ]
-        ├── .keys: [ cntrycode(#11.0) ]
-        ├── (.output_columns): cntrycode(#11.0), count(Int64(1))(#12.0), sum(custsale.c_acctbal)(#12.1)
+        ├── .exprs: [ count(1::bigint), sum(c_acctbal(#12.1)) ]
+        ├── .keys: [ cntrycode(#12.0) ]
+        ├── (.output_columns): count(Int64(1))(#14.0), custsale.cntrycode(#13.0), sum(custsale.c_acctbal)(#14.1)
         ├── (.cardinality): 0.00
-        └── Remap { .table_index: 11, (.output_columns): c_acctbal(#11.1), cntrycode(#11.0), (.cardinality): 0.00 }
-            └── Project { .table_index: 10, .projections: [ substr(c_phone(#1.4), 1::bigint, 2::bigint), c_acctbal(#1.5) ], (.output_columns): c_acctbal(#10.1), cntrycode(#10.0), (.cardinality): 0.00 }
+        └── Remap { .table_index: 12, (.output_columns): c_acctbal(#12.1), cntrycode(#12.0), (.cardinality): 0.00 }
+            └── Project { .table_index: 11, .projections: [ substr(c_phone(#1.4), 1::bigint, 2::bigint), c_acctbal(#1.5) ], (.output_columns): c_acctbal(#11.1), cntrycode(#11.0), (.cardinality): 0.00 }
                 └── Join
                     ├── .join_type: Inner
                     ├── .implementation: None
-                    ├── .join_cond: CAST (c_acctbal(#1.5) AS Decimal128(19, 6)) > avg(customer.c_acctbal)(#8.0)
-                    ├── (.output_columns): avg(customer.c_acctbal)(#8.0), c_acctbal(#1.5), c_custkey(#1.0), c_phone(#1.4)
+                    ├── .join_cond: CAST (c_acctbal(#1.5) AS Decimal128(19, 6)) > avg(customer.c_acctbal)(#9.0)
+                    ├── (.output_columns): avg(customer.c_acctbal)(#9.0), c_acctbal(#1.5), c_custkey(#1.0), c_phone(#1.4)
                     ├── (.cardinality): 0.00
                     ├── Join { .join_type: LeftAnti, .implementation: None, .join_cond: c_custkey(#1.0) = o_custkey(#4.1), (.output_columns): c_acctbal(#1.5), c_custkey(#1.0), c_phone(#1.4), (.cardinality): 0.00 }
                     │   ├── Select
@@ -145,9 +147,9 @@ EnforcerSort { tuple_ordering: [(#13.0, Asc)], (.output_columns): cntrycode(#13.
                     │               ├── .implementation: None
                     │               ├── (.output_columns): o_clerk(#2.6), o_comment(#2.8), o_custkey(#2.1), o_orderdate(#2.4), o_orderkey(#2.0), o_orderpriority(#2.5), o_orderstatus(#2.2), o_shippriority(#2.7), o_totalprice(#2.3)
                     │               └── (.cardinality): 0.00
-                    └── Remap { .table_index: 8, (.output_columns): avg(customer.c_acctbal)(#8.0), (.cardinality): 1.00 }
-                        └── Project { .table_index: 7, .projections: avg(customer.c_acctbal)(#6.0), (.output_columns): avg(customer.c_acctbal)(#7.0), (.cardinality): 1.00 }
-                            └── Aggregate { .aggregate_table_index: 6, .implementation: None, .exprs: [ avg(c_acctbal(#5.5)) ], .keys: [], (.output_columns): avg(customer.c_acctbal)(#6.0), (.cardinality): 1.00 }
+                    └── Remap { .table_index: 9, (.output_columns): avg(customer.c_acctbal)(#9.0), (.cardinality): 1.00 }
+                        └── Project { .table_index: 8, .projections: avg(customer.c_acctbal)(#7.0), (.output_columns): avg(customer.c_acctbal)(#8.0), (.cardinality): 1.00 }
+                            └── Aggregate { .key_table_index: 6, .aggregate_table_index: 7, .implementation: None, .exprs: [ avg(c_acctbal(#5.5)) ], .keys: [], (.output_columns): avg(customer.c_acctbal)(#7.0), (.cardinality): 1.00 }
                                 └── Select
                                     ├── .predicate: (c_acctbal(#5.5) > 0::decimal128(15, 2)) AND (substr(c_phone(#5.4), 1::bigint, 2::bigint) IN [13::utf8_view, 31::utf8_view, 23::utf8_view, 29::utf8_view, 30::utf8_view, 18::utf8_view, 17::utf8_view])
                                     ├── (.output_columns): c_acctbal(#5.5), c_phone(#5.4)

@@ -9,7 +9,7 @@ use crate::{
         Column, ColumnSet, OperatorKind,
         operator::{Aggregate, DependentJoin, Get, Join, Project, Remap, join::JoinType},
         properties::{Derive, GetProperty, PropertyMarker},
-        scalar::{ColumnRef, List},
+        scalar::List,
     },
 };
 use std::sync::Arc;
@@ -77,11 +77,7 @@ impl Derive<OutputColumns> for crate::ir::Operator {
 
                 let set = (0..exprs.members().len())
                     .map(|i| Column(*agg.aggregate_table_index(), i))
-                    .chain(
-                        keys.members()
-                            .iter()
-                            .map(|e| *e.borrow::<ColumnRef>().column()),
-                    )
+                    .chain((0..keys.members().len()).map(|i| Column(*agg.key_table_index(), i)))
                     .collect();
 
                 Ok(Arc::new(set))

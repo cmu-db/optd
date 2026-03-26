@@ -23,9 +23,9 @@ order by
 
 /*
 logical_plan after optd-initial:
-OrderBy { ordering_exprs: [ o_orderpriority(#6.0) ASC ], (.output_columns): o_orderpriority(#6.0), order_count(#6.1), (.cardinality): 0.00 }
-└── Project { .table_index: 6, .projections: [ o_orderpriority(#1.5), count(Int64(1))(#5.0) ], (.output_columns): o_orderpriority(#6.0), order_count(#6.1), (.cardinality): 0.00 }
-    └── Aggregate { .aggregate_table_index: 5, .implementation: None, .exprs: [ count(1::bigint) ], .keys: [ o_orderpriority(#1.5) ], (.output_columns): count(Int64(1))(#5.0), o_orderpriority(#1.5), (.cardinality): 0.00 }
+OrderBy { ordering_exprs: [ o_orderpriority(#7.0) ASC ], (.output_columns): o_orderpriority(#7.0), order_count(#7.1), (.cardinality): 0.00 }
+└── Project { .table_index: 7, .projections: [ o_orderpriority(#1.5), count(Int64(1))(#6.0) ], (.output_columns): o_orderpriority(#7.0), order_count(#7.1), (.cardinality): 0.00 }
+    └── Aggregate { .key_table_index: 5, .aggregate_table_index: 6, .implementation: None, .exprs: [ count(1::bigint) ], .keys: [ o_orderpriority(#1.5) ], (.output_columns): count(Int64(1))(#6.0), orders.o_orderpriority(#5.0), (.cardinality): 0.00 }
         └── Join { .join_type: LeftSemi, .implementation: None, .join_cond: (o_orderkey(#1.0) = l_orderkey(#4.0)), (.output_columns): o_clerk(#1.6), o_comment(#1.8), o_custkey(#1.1), o_orderdate(#1.4), o_orderkey(#1.0), o_orderpriority(#1.5), o_orderstatus(#1.2), o_shippriority(#1.7), o_totalprice(#1.3), (.cardinality): 0.00 }
             ├── Select { .predicate: (o_orderdate(#1.4) >= 1993-07-01::date32) AND (o_orderdate(#1.4) < 1993-10-01::date32), (.output_columns): o_clerk(#1.6), o_comment(#1.8), o_custkey(#1.1), o_orderdate(#1.4), o_orderkey(#1.0), o_orderpriority(#1.5), o_orderstatus(#1.2), o_shippriority(#1.7), o_totalprice(#1.3), (.cardinality): 0.00 }
             │   └── Get { .data_source_id: 7, .table_index: 1, .implementation: None, (.output_columns): o_clerk(#1.6), o_comment(#1.8), o_custkey(#1.1), o_orderdate(#1.4), o_orderkey(#1.0), o_orderpriority(#1.5), o_orderstatus(#1.2), o_shippriority(#1.7), o_totalprice(#1.3), (.cardinality): 0.00 }
@@ -50,9 +50,9 @@ OrderBy { ordering_exprs: [ o_orderpriority(#6.0) ASC ], (.output_columns): o_or
                             └── (.cardinality): 0.00
 
 physical_plan after optd-finalized:
-EnforcerSort { tuple_ordering: [(#6.0, Asc)], (.output_columns): o_orderpriority(#6.0), order_count(#6.1), (.cardinality): 0.00 }
-└── Project { .table_index: 6, .projections: [ o_orderpriority(#1.5), count(Int64(1))(#5.0) ], (.output_columns): o_orderpriority(#6.0), order_count(#6.1), (.cardinality): 0.00 }
-    └── Aggregate { .aggregate_table_index: 5, .implementation: None, .exprs: [ count(1::bigint) ], .keys: [ o_orderpriority(#1.5) ], (.output_columns): count(Int64(1))(#5.0), o_orderpriority(#1.5), (.cardinality): 0.00 }
+EnforcerSort { tuple_ordering: [(#7.0, Asc)], (.output_columns): o_orderpriority(#7.0), order_count(#7.1), (.cardinality): 0.00 }
+└── Project { .table_index: 7, .projections: [ o_orderpriority(#1.5), count(Int64(1))(#6.0) ], (.output_columns): o_orderpriority(#7.0), order_count(#7.1), (.cardinality): 0.00 }
+    └── Aggregate { .key_table_index: 5, .aggregate_table_index: 6, .implementation: None, .exprs: [ count(1::bigint) ], .keys: [ o_orderpriority(#1.5) ], (.output_columns): count(Int64(1))(#6.0), orders.o_orderpriority(#5.0), (.cardinality): 0.00 }
         └── Join { .join_type: LeftSemi, .implementation: None, .join_cond: o_orderkey(#1.0) = l_orderkey(#4.0), (.output_columns): o_orderdate(#1.4), o_orderkey(#1.0), o_orderpriority(#1.5), (.cardinality): 0.00 }
             ├── Select { .predicate: (o_orderdate(#1.4) >= 1993-07-01::date32) AND (o_orderdate(#1.4) < 1993-10-01::date32), (.output_columns): o_orderdate(#1.4), o_orderkey(#1.0), o_orderpriority(#1.5), (.cardinality): 0.00 }
             │   └── Get { .data_source_id: 7, .table_index: 1, .implementation: None, (.output_columns): o_orderdate(#1.4), o_orderkey(#1.0), o_orderpriority(#1.5), (.cardinality): 0.00 }

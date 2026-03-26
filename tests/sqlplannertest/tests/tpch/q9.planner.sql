@@ -34,9 +34,9 @@ ORDER BY
 
 /*
 logical_plan after optd-initial:
-OrderBy { ordering_exprs: [ nation(#11.0) ASC, o_year(#11.1) DESC ], (.output_columns): nation(#11.0), o_year(#11.1), sum_profit(#11.2), (.cardinality): 0.00 }
-└── Project { .table_index: 11, .projections: [ nation(#9.0), o_year(#9.1), sum(profit.amount)(#10.0) ], (.output_columns): nation(#11.0), o_year(#11.1), sum_profit(#11.2), (.cardinality): 0.00 }
-    └── Aggregate { .aggregate_table_index: 10, .implementation: None, .exprs: [ sum(amount(#9.2)) ], .keys: [ nation(#9.0), o_year(#9.1) ], (.output_columns): nation(#9.0), o_year(#9.1), sum(profit.amount)(#10.0), (.cardinality): 0.00 }
+OrderBy { ordering_exprs: [ nation(#12.0) ASC, o_year(#12.1) DESC ], (.output_columns): nation(#12.0), o_year(#12.1), sum_profit(#12.2), (.cardinality): 0.00 }
+└── Project { .table_index: 12, .projections: [ nation(#9.0), o_year(#9.1), sum(profit.amount)(#11.0) ], (.output_columns): nation(#12.0), o_year(#12.1), sum_profit(#12.2), (.cardinality): 0.00 }
+    └── Aggregate { .key_table_index: 10, .aggregate_table_index: 11, .implementation: None, .exprs: [ sum(amount(#9.2)) ], .keys: [ nation(#9.0), o_year(#9.1) ], (.output_columns): profit.nation(#10.0), profit.o_year(#10.1), sum(profit.amount)(#11.0), (.cardinality): 0.00 }
         └── Remap { .table_index: 9, (.output_columns): amount(#9.2), nation(#9.0), o_year(#9.1), (.cardinality): 0.00 }
             └── Project { .table_index: 8, .projections: [ n_name(#7.47), date_part(YEAR::utf8, o_orderdate(#7.41)), l_extendedprice(#7.21) * 1::decimal128(20, 0) - l_discount(#7.22) - ps_supplycost(#7.35) * l_quantity(#7.20) ], (.output_columns): amount(#8.2), nation(#8.0), o_year(#8.1), (.cardinality): 0.00 }
                 └── Project
@@ -68,9 +68,9 @@ OrderBy { ordering_exprs: [ nation(#11.0) ASC, o_year(#11.1) DESC ], (.output_co
                         └── Get { .data_source_id: 1, .table_index: 6, .implementation: None, (.output_columns): n_comment(#6.3), n_name(#6.1), n_nationkey(#6.0), n_regionkey(#6.2), (.cardinality): 0.00 }
 
 physical_plan after optd-finalized:
-EnforcerSort { tuple_ordering: [(#11.0, Asc), (#11.1, Desc)], (.output_columns): nation(#11.0), o_year(#11.1), sum_profit(#11.2), (.cardinality): 0.00 }
-└── Project { .table_index: 11, .projections: [ nation(#9.0), o_year(#9.1), sum(profit.amount)(#10.0) ], (.output_columns): nation(#11.0), o_year(#11.1), sum_profit(#11.2), (.cardinality): 0.00 }
-    └── Aggregate { .aggregate_table_index: 10, .implementation: None, .exprs: [ sum(amount(#9.2)) ], .keys: [ nation(#9.0), o_year(#9.1) ], (.output_columns): nation(#9.0), o_year(#9.1), sum(profit.amount)(#10.0), (.cardinality): 0.00 }
+EnforcerSort { tuple_ordering: [(#12.0, Asc), (#12.1, Desc)], (.output_columns): nation(#12.0), o_year(#12.1), sum_profit(#12.2), (.cardinality): 0.00 }
+└── Project { .table_index: 12, .projections: [ nation(#9.0), o_year(#9.1), sum(profit.amount)(#11.0) ], (.output_columns): nation(#12.0), o_year(#12.1), sum_profit(#12.2), (.cardinality): 0.00 }
+    └── Aggregate { .key_table_index: 10, .aggregate_table_index: 11, .implementation: None, .exprs: [ sum(amount(#9.2)) ], .keys: [ nation(#9.0), o_year(#9.1) ], (.output_columns): profit.nation(#10.0), profit.o_year(#10.1), sum(profit.amount)(#11.0), (.cardinality): 0.00 }
         └── Remap { .table_index: 9, (.output_columns): amount(#9.2), nation(#9.0), o_year(#9.1), (.cardinality): 0.00 }
             └── Project { .table_index: 8, .projections: [ n_name(#6.1), date_part(YEAR::utf8, o_orderdate(#5.4)), l_extendedprice(#2.5) * 1::decimal128(20, 0) - l_discount(#2.6) - ps_supplycost(#4.3) * l_quantity(#2.4) ], (.output_columns): amount(#8.2), nation(#8.0), o_year(#8.1), (.cardinality): 0.00 }
                 └── Join

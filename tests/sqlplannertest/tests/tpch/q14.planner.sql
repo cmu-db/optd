@@ -13,8 +13,8 @@ WHERE
 
 /*
 logical_plan after optd-initial:
-Project { .table_index: 5, .projections: 100::float64 * CAST (sum(CASE WHEN part.p_type LIKE Utf8("PROMO%") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#4.0) AS Float64) / CAST (sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#4.1) AS Float64), (.output_columns): promo_revenue(#5.0), (.cardinality): 1.00 }
-└── Aggregate { .aggregate_table_index: 4, .implementation: None, .exprs: [ sum(CASE WHEN p_type(#3.21) LIKE PROMO%::utf8_view THEN __common_expr_1(#3.0) ELSE 0::decimal128(38, 4) END), sum(__common_expr_1(#3.0)) ], .keys: [], (.output_columns): sum(CASE WHEN part.p_type LIKE Utf8("PROMO%") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#4.0), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#4.1), (.cardinality): 1.00 }
+Project { .table_index: 6, .projections: 100::float64 * CAST (sum(CASE WHEN part.p_type LIKE Utf8("PROMO%") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#5.0) AS Float64) / CAST (sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#5.1) AS Float64), (.output_columns): promo_revenue(#6.0), (.cardinality): 1.00 }
+└── Aggregate { .key_table_index: 4, .aggregate_table_index: 5, .implementation: None, .exprs: [ sum(CASE WHEN p_type(#3.21) LIKE PROMO%::utf8_view THEN __common_expr_1(#3.0) ELSE 0::decimal128(38, 4) END), sum(__common_expr_1(#3.0)) ], .keys: [], (.output_columns): sum(CASE WHEN part.p_type LIKE Utf8("PROMO%") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#5.0), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#5.1), (.cardinality): 1.00 }
     └── Project
         ├── .table_index: 3
         ├── .projections:
@@ -57,8 +57,8 @@ Project { .table_index: 5, .projections: 100::float64 * CAST (sum(CASE WHEN part
             └── Get { .data_source_id: 3, .table_index: 2, .implementation: None, (.output_columns): p_brand(#2.3), p_comment(#2.8), p_container(#2.6), p_mfgr(#2.2), p_name(#2.1), p_partkey(#2.0), p_retailprice(#2.7), p_size(#2.5), p_type(#2.4), (.cardinality): 0.00 }
 
 physical_plan after optd-finalized:
-Project { .table_index: 5, .projections: 100::float64 * CAST (sum(CASE WHEN part.p_type LIKE Utf8("PROMO%") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#4.0) AS Float64) / CAST (sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#4.1) AS Float64), (.output_columns): promo_revenue(#5.0), (.cardinality): 1.00 }
-└── Aggregate { .aggregate_table_index: 4, .implementation: None, .exprs: [ sum(CASE WHEN p_type(#3.21) LIKE PROMO%::utf8_view THEN __common_expr_1(#3.0) ELSE 0::decimal128(38, 4) END), sum(__common_expr_1(#3.0)) ], .keys: [], (.output_columns): sum(CASE WHEN part.p_type LIKE Utf8("PROMO%") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#4.0), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#4.1), (.cardinality): 1.00 }
+Project { .table_index: 6, .projections: 100::float64 * CAST (sum(CASE WHEN part.p_type LIKE Utf8("PROMO%") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#5.0) AS Float64) / CAST (sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#5.1) AS Float64), (.output_columns): promo_revenue(#6.0), (.cardinality): 1.00 }
+└── Aggregate { .key_table_index: 4, .aggregate_table_index: 5, .implementation: None, .exprs: [ sum(CASE WHEN p_type(#3.21) LIKE PROMO%::utf8_view THEN __common_expr_1(#3.0) ELSE 0::decimal128(38, 4) END), sum(__common_expr_1(#3.0)) ], .keys: [], (.output_columns): sum(CASE WHEN part.p_type LIKE Utf8("PROMO%") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#5.0), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#5.1), (.cardinality): 1.00 }
     └── Project
         ├── .table_index: 3
         ├── .projections:

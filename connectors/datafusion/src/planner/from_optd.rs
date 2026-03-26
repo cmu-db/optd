@@ -94,11 +94,23 @@ impl OptdQueryPlannerContext<'_> {
 
     fn try_new_df_aggregate(
         &self,
+        key_table_index: &i64,
         aggregate_table_index: &i64,
         input: Arc<DFLogicalPlan>,
         group_expr: Vec<DFExpr>,
         aggr_expr: Vec<DFExpr>,
     ) -> Result<logical_expr::Aggregate> {
+        let key_binding = self.inner.get_binding(key_table_index).context(OptdSnafu)?;
+        let group_expr = key_binding
+            .schema()
+            .fields()
+            .iter()
+            .zip_eq(group_expr)
+            .map(|(field, expr)| {
+                expr.alias_if_changed(field.name().to_string())
+                    .context(DataFusionSnafu)
+            })
+            .collect::<Result<Vec<_>>>()?;
         let group_expr = enumerate_grouping_sets(group_expr).context(DataFusionSnafu)?;
         let grouping_expr: Vec<&DFExpr> =
             grouping_set_to_exprlist(group_expr.as_slice()).context(DataFusionSnafu)?;
@@ -106,11 +118,11 @@ impl OptdQueryPlannerContext<'_> {
         let mut qualified_fields =
             exprlist_to_fields(grouping_expr, &input).context(DataFusionSnafu)?;
 
-        let binding = self
+        let aggregate_binding = self
             .inner
             .get_binding(aggregate_table_index)
             .context(OptdSnafu)?;
-        let aggr_expr = binding
+        let aggr_expr = aggregate_binding
             .schema()
             .fields()
             .iter()
@@ -120,7 +132,7 @@ impl OptdQueryPlannerContext<'_> {
                     .context(DataFusionSnafu)
             })
             .collect::<Result<Vec<_>>>()?;
-        let table_ref = binding.table_ref();
+        let table_ref = aggregate_binding.table_ref();
 
         let alias = Self::from_optd_table_ref(table_ref);
         qualified_fields.extend(
@@ -158,6 +170,7 @@ impl OptdQueryPlannerContext<'_> {
             .try_collect()?;
 
         let aggregate = self.try_new_df_aggregate(
+            node.key_table_index(),
             node.aggregate_table_index(),
             Arc::new(input),
             group_expr,
@@ -405,11 +418,18 @@ mod tests {
             DataType::Int64,
             false,
         )]));
-        let table_index = inner.add_binding(None, aggregate_schema).unwrap();
+        let key_schema = Arc::new(Schema::new(vec![Field::new(
+            "l_quantity",
+            DataType::Int64,
+            false,
+        )]));
+        let aggregate_table_index = inner.add_binding(None, aggregate_schema).unwrap();
+        let key_table_index = inner.add_binding(None, key_schema).unwrap();
 
         let aggregate = ctx
             .try_new_df_aggregate(
-                &table_index,
+                &key_table_index,
+                &aggregate_table_index,
                 Arc::new(input),
                 vec![DFExpr::Column(Column::from_qualified_name(
                     "__internal_#2.l_returnflag",

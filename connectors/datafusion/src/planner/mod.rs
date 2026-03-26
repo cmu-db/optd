@@ -223,6 +223,7 @@ impl OptdQueryPlanner {
             LogicalPlan::Explain(explain) => (explain.plan.as_ref(), Some(explain.clone())),
             _ => (logical_plan, None),
         };
+        println!("actual_logical:\n{}", actual_logical_plan);
 
         let optd_logical = ctx
             .try_into_optd_plan(actual_logical_plan)
@@ -257,6 +258,15 @@ impl OptdQueryPlanner {
                 .create_physical_plan_default(logical_plan, session_state)
                 .await;
         };
+
+        println!(
+            "optd_logical:\n{}",
+            quick_explain(&optd_logical, &ctx.inner)
+        );
+        println!(
+            "optd_physical:\n{}",
+            quick_explain(&optd_physical, &ctx.inner)
+        );
 
         let logical_plan = ctx
             .try_from_optd_plan(&optd_physical)

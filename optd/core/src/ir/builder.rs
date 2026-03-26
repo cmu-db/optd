@@ -228,13 +228,16 @@ impl<'a> OptdOperatorBuilder<'a> {
     ) -> Result<Self> {
         let exprs: Vec<_> = exprs.into_iter().collect();
         let keys: Vec<_> = keys.into_iter().collect();
-        let schema = derive_aggregate_schema(self.ctx, self.operator.as_ref(), &exprs)?;
-        let table_index = self.ctx.add_binding(None, schema)?;
+        let aggregate_schema = derive_aggregate_schema(self.ctx, self.operator.as_ref(), &exprs)?;
+        let key_schema = derive_aggregate_schema(self.ctx, self.operator.as_ref(), &keys)?;
+        let key_table_index = self.ctx.add_binding(None, key_schema)?;
+        let aggregate_table_index = self.ctx.add_binding(None, aggregate_schema)?;
 
         Ok(Self {
             ctx: self.ctx,
             operator: Aggregate::new(
-                table_index,
+                key_table_index,
+                aggregate_table_index,
                 self.operator,
                 list(exprs),
                 list(keys),

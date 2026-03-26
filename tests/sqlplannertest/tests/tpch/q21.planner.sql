@@ -42,10 +42,10 @@ limit 100;
 
 /*
 logical_plan after optd-initial:
-Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): numwait(#15.1), s_name(#15.0), (.cardinality): 0.00 }
-└── OrderBy { ordering_exprs: [ numwait(#15.1) DESC, s_name(#15.0) ASC ], (.output_columns): numwait(#15.1), s_name(#15.0), (.cardinality): 0.00 }
-    └── Project { .table_index: 15, .projections: [ s_name(#1.1), count(Int64(1))(#14.0) ], (.output_columns): numwait(#15.1), s_name(#15.0), (.cardinality): 0.00 }
-        └── Aggregate { .aggregate_table_index: 14, .implementation: None, .exprs: [ count(1::bigint) ], .keys: [ s_name(#1.1) ], (.output_columns): count(Int64(1))(#14.0), s_name(#1.1), (.cardinality): 0.00 }
+Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): numwait(#16.1), s_name(#16.0), (.cardinality): 0.00 }
+└── OrderBy { ordering_exprs: [ numwait(#16.1) DESC, s_name(#16.0) ASC ], (.output_columns): numwait(#16.1), s_name(#16.0), (.cardinality): 0.00 }
+    └── Project { .table_index: 16, .projections: [ s_name(#1.1), count(Int64(1))(#15.0) ], (.output_columns): numwait(#16.1), s_name(#16.0), (.cardinality): 0.00 }
+        └── Aggregate { .key_table_index: 14, .aggregate_table_index: 15, .implementation: None, .exprs: [ count(1::bigint) ], .keys: [ s_name(#1.1) ], (.output_columns): count(Int64(1))(#15.0), supplier.s_name(#14.0), (.cardinality): 0.00 }
             └── Join
                 ├── .join_type: LeftAnti
                 ├── .implementation: None
@@ -98,10 +98,10 @@ Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): numwait(#15.1)
                                 └── Get { .data_source_id: 8, .table_index: 10, .implementation: None, (.output_columns): l_comment(#10.15), l_commitdate(#10.11), l_discount(#10.6), l_extendedprice(#10.5), l_linenumber(#10.3), l_linestatus(#10.9), l_orderkey(#10.0), l_partkey(#10.1), l_quantity(#10.4), l_receiptdate(#10.12), l_returnflag(#10.8), l_shipdate(#10.10), l_shipinstruct(#10.13), l_shipmode(#10.14), l_suppkey(#10.2), l_tax(#10.7), (.cardinality): 0.00 }
 
 physical_plan after optd-finalized:
-Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): numwait(#15.1), s_name(#15.0), (.cardinality): 0.00 }
-└── EnforcerSort { tuple_ordering: [(#15.1, Desc), (#15.0, Asc)], (.output_columns): numwait(#15.1), s_name(#15.0), (.cardinality): 0.00 }
-    └── Project { .table_index: 15, .projections: [ s_name(#1.1), count(Int64(1))(#14.0) ], (.output_columns): numwait(#15.1), s_name(#15.0), (.cardinality): 0.00 }
-        └── Aggregate { .aggregate_table_index: 14, .implementation: None, .exprs: [ count(1::bigint) ], .keys: [ s_name(#1.1) ], (.output_columns): count(Int64(1))(#14.0), s_name(#1.1), (.cardinality): 0.00 }
+Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): numwait(#16.1), s_name(#16.0), (.cardinality): 0.00 }
+└── EnforcerSort { tuple_ordering: [(#16.1, Desc), (#16.0, Asc)], (.output_columns): numwait(#16.1), s_name(#16.0), (.cardinality): 0.00 }
+    └── Project { .table_index: 16, .projections: [ s_name(#1.1), count(Int64(1))(#15.0) ], (.output_columns): numwait(#16.1), s_name(#16.0), (.cardinality): 0.00 }
+        └── Aggregate { .key_table_index: 14, .aggregate_table_index: 15, .implementation: None, .exprs: [ count(1::bigint) ], .keys: [ s_name(#1.1) ], (.output_columns): count(Int64(1))(#15.0), supplier.s_name(#14.0), (.cardinality): 0.00 }
             └── Join
                 ├── .join_type: LeftAnti
                 ├── .implementation: None

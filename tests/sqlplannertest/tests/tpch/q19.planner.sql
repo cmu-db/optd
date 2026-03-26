@@ -33,8 +33,8 @@ WHERE
 
 /*
 logical_plan after optd-initial:
-Project { .table_index: 4, .projections: sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#3.0), (.output_columns): revenue(#4.0), (.cardinality): 1.00 }
-└── Aggregate { .aggregate_table_index: 3, .implementation: None, .exprs: sum(l_extendedprice(#1.5) * 1::decimal128(20, 0) - l_discount(#1.6)), .keys: [], (.output_columns): sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#3.0), (.cardinality): 1.00 }
+Project { .table_index: 5, .projections: sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#4.0), (.output_columns): revenue(#5.0), (.cardinality): 1.00 }
+└── Aggregate { .key_table_index: 3, .aggregate_table_index: 4, .implementation: None, .exprs: sum(l_extendedprice(#1.5) * 1::decimal128(20, 0) - l_discount(#1.6)), .keys: [], (.output_columns): sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#4.0), (.cardinality): 1.00 }
     └── Join
         ├── .join_type: Inner
         ├── .implementation: None
@@ -47,8 +47,8 @@ Project { .table_index: 4, .projections: sum(lineitem.l_extendedprice * Int64(1)
             └── Get { .data_source_id: 3, .table_index: 2, .implementation: None, (.output_columns): p_brand(#2.3), p_comment(#2.8), p_container(#2.6), p_mfgr(#2.2), p_name(#2.1), p_partkey(#2.0), p_retailprice(#2.7), p_size(#2.5), p_type(#2.4), (.cardinality): 0.00 }
 
 physical_plan after optd-finalized:
-Project { .table_index: 4, .projections: sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#3.0), (.output_columns): revenue(#4.0), (.cardinality): 1.00 }
-└── Aggregate { .aggregate_table_index: 3, .implementation: None, .exprs: sum(l_extendedprice(#1.5) * 1::decimal128(20, 0) - l_discount(#1.6)), .keys: [], (.output_columns): sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#3.0), (.cardinality): 1.00 }
+Project { .table_index: 5, .projections: sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#4.0), (.output_columns): revenue(#5.0), (.cardinality): 1.00 }
+└── Aggregate { .key_table_index: 3, .aggregate_table_index: 4, .implementation: None, .exprs: sum(l_extendedprice(#1.5) * 1::decimal128(20, 0) - l_discount(#1.6)), .keys: [], (.output_columns): sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#4.0), (.cardinality): 1.00 }
     └── Join
         ├── .join_type: Inner
         ├── .implementation: None

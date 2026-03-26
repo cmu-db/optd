@@ -41,9 +41,9 @@ ORDER BY
 
 /*
 logical_plan after optd-initial:
-OrderBy { ordering_exprs: [ supp_nation(#12.0) ASC, cust_nation(#12.1) ASC, l_year(#12.2) ASC ], (.output_columns): cust_nation(#12.1), l_year(#12.2), revenue(#12.3), supp_nation(#12.0), (.cardinality): 0.00 }
-└── Project { .table_index: 12, .projections: [ supp_nation(#10.0), cust_nation(#10.1), l_year(#10.2), sum(shipping.volume)(#11.0) ], (.output_columns): cust_nation(#12.1), l_year(#12.2), revenue(#12.3), supp_nation(#12.0), (.cardinality): 0.00 }
-    └── Aggregate { .aggregate_table_index: 11, .implementation: None, .exprs: [ sum(volume(#10.3)) ], .keys: [ supp_nation(#10.0), cust_nation(#10.1), l_year(#10.2) ], (.output_columns): cust_nation(#10.1), l_year(#10.2), sum(shipping.volume)(#11.0), supp_nation(#10.0), (.cardinality): 0.00 }
+OrderBy { ordering_exprs: [ supp_nation(#13.0) ASC, cust_nation(#13.1) ASC, l_year(#13.2) ASC ], (.output_columns): cust_nation(#13.1), l_year(#13.2), revenue(#13.3), supp_nation(#13.0), (.cardinality): 0.00 }
+└── Project { .table_index: 13, .projections: [ supp_nation(#10.0), cust_nation(#10.1), l_year(#10.2), sum(shipping.volume)(#12.0) ], (.output_columns): cust_nation(#13.1), l_year(#13.2), revenue(#13.3), supp_nation(#13.0), (.cardinality): 0.00 }
+    └── Aggregate { .key_table_index: 11, .aggregate_table_index: 12, .implementation: None, .exprs: [ sum(volume(#10.3)) ], .keys: [ supp_nation(#10.0), cust_nation(#10.1), l_year(#10.2) ], (.output_columns): shipping.cust_nation(#11.1), shipping.l_year(#11.2), shipping.supp_nation(#11.0), sum(shipping.volume)(#12.0), (.cardinality): 0.00 }
         └── Remap { .table_index: 10, (.output_columns): cust_nation(#10.1), l_year(#10.2), supp_nation(#10.0), volume(#10.3), (.cardinality): 0.00 }
             └── Project { .table_index: 9, .projections: [ n_name(#6.1), n_name(#8.1), date_part(YEAR::utf8, l_shipdate(#2.10)), l_extendedprice(#2.5) * 1::decimal128(20, 0) - l_discount(#2.6) ], (.output_columns): cust_nation(#9.1), l_year(#9.2), supp_nation(#9.0), volume(#9.3), (.cardinality): 0.00 }
                 └── Join
@@ -74,9 +74,9 @@ OrderBy { ordering_exprs: [ supp_nation(#12.0) ASC, cust_nation(#12.1) ASC, l_ye
                             └── Get { .data_source_id: 1, .table_index: 7, .implementation: None, (.output_columns): n_comment(#7.3), n_name(#7.1), n_nationkey(#7.0), n_regionkey(#7.2), (.cardinality): 0.00 }
 
 physical_plan after optd-finalized:
-EnforcerSort { tuple_ordering: [(#12.0, Asc), (#12.1, Asc), (#12.2, Asc)], (.output_columns): cust_nation(#12.1), l_year(#12.2), revenue(#12.3), supp_nation(#12.0), (.cardinality): 0.00 }
-└── Project { .table_index: 12, .projections: [ supp_nation(#10.0), cust_nation(#10.1), l_year(#10.2), sum(shipping.volume)(#11.0) ], (.output_columns): cust_nation(#12.1), l_year(#12.2), revenue(#12.3), supp_nation(#12.0), (.cardinality): 0.00 }
-    └── Aggregate { .aggregate_table_index: 11, .implementation: None, .exprs: [ sum(volume(#10.3)) ], .keys: [ supp_nation(#10.0), cust_nation(#10.1), l_year(#10.2) ], (.output_columns): cust_nation(#10.1), l_year(#10.2), sum(shipping.volume)(#11.0), supp_nation(#10.0), (.cardinality): 0.00 }
+EnforcerSort { tuple_ordering: [(#13.0, Asc), (#13.1, Asc), (#13.2, Asc)], (.output_columns): cust_nation(#13.1), l_year(#13.2), revenue(#13.3), supp_nation(#13.0), (.cardinality): 0.00 }
+└── Project { .table_index: 13, .projections: [ supp_nation(#10.0), cust_nation(#10.1), l_year(#10.2), sum(shipping.volume)(#12.0) ], (.output_columns): cust_nation(#13.1), l_year(#13.2), revenue(#13.3), supp_nation(#13.0), (.cardinality): 0.00 }
+    └── Aggregate { .key_table_index: 11, .aggregate_table_index: 12, .implementation: None, .exprs: [ sum(volume(#10.3)) ], .keys: [ supp_nation(#10.0), cust_nation(#10.1), l_year(#10.2) ], (.output_columns): shipping.cust_nation(#11.1), shipping.l_year(#11.2), shipping.supp_nation(#11.0), sum(shipping.volume)(#12.0), (.cardinality): 0.00 }
         └── Remap { .table_index: 10, (.output_columns): cust_nation(#10.1), l_year(#10.2), supp_nation(#10.0), volume(#10.3), (.cardinality): 0.00 }
             └── Project { .table_index: 9, .projections: [ n_name(#6.1), n_name(#8.1), date_part(YEAR::utf8, l_shipdate(#2.10)), l_extendedprice(#2.5) * 1::decimal128(20, 0) - l_discount(#2.6) ], (.output_columns): cust_nation(#9.1), l_year(#9.2), supp_nation(#9.0), volume(#9.3), (.cardinality): 0.00 }
                 └── Join

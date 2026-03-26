@@ -14,7 +14,7 @@ use optd_core::{
     ir::{
         Scalar,
         builder::{self as optd_builder, literal},
-        catalog::Schema,
+        catalog::{Field, Schema},
         convert::{IntoOperator, IntoScalar},
         operator::{Aggregate, Get, Join, Limit, OrderBy, Project, Remap, Select},
         properties::TupleOrderingDirection,
@@ -102,6 +102,12 @@ impl OptdQueryPlannerContext<'_> {
     ) -> Result<Arc<optd_core::ir::Operator>> {
         let input = self.try_into_optd_plan(&node.input)?;
 
+        let keys = node
+            .group_expr
+            .iter()
+            .map(|e| self.try_into_optd_scalar_expr(e, node.input.schema()))
+            .try_collect()
+            .map(List::new)?;
         let exprs = node
             .aggr_expr
             .iter()
@@ -109,31 +115,54 @@ impl OptdQueryPlannerContext<'_> {
             .try_collect()
             .map(List::new)
             .with_whatever_context(|e| format!("error converting aggregate expressions: {e}"))?;
-        let keys = node
+
+        let key_schema = node
             .group_expr
             .iter()
-            .map(|e| self.try_into_optd_scalar_expr(e, node.input.schema()))
-            .try_collect()
-            .map(List::new)?;
+            .map(|e| {
+                e.to_field(node.input.schema())
+                    .and_then(|(_, field)| {
+                        Ok(Arc::new(Field::new(
+                            e.name_for_alias()?,
+                            field.data_type().clone(),
+                            field.is_nullable(),
+                        )))
+                    })
+                    .context(DataFusionSnafu)
+            })
+            .collect::<Result<Vec<_>>>()
+            .map(Schema::new)?;
+
+        let key_table_index = self
+            .inner
+            .add_binding(None, Arc::new(key_schema))
+            .context(OptdSnafu)?;
 
         let aggrgate_schema = node
             .aggr_expr
             .iter()
             .map(|e| {
                 e.to_field(node.input.schema())
-                    .map(|(_, field)| field)
+                    .and_then(|(_, field)| {
+                        Ok(Arc::new(Field::new(
+                            e.name_for_alias()?,
+                            field.data_type().clone(),
+                            field.is_nullable(),
+                        )))
+                    })
                     .context(DataFusionSnafu)
             })
             .collect::<Result<Vec<_>>>()
             .map(Schema::new)?;
 
-        let table_index = self
+        let aggregate_table_index = self
             .inner
             .add_binding(None, Arc::new(aggrgate_schema))
             .context(OptdSnafu)?;
 
         let aggregate = Aggregate::new(
-            table_index,
+            key_table_index,
+            aggregate_table_index,
             input,
             exprs.into_scalar(),
             keys.into_scalar(),

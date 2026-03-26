@@ -26,9 +26,9 @@ ORDER BY
 
 /*
 logical_plan after optd-initial:
-OrderBy { ordering_exprs: [ revenue(#8.1) DESC ], (.output_columns): nation(#8.0), revenue(#8.1), (.cardinality): 0.00 }
-└── Project { .table_index: 8, .projections: [ n_name(#5.1), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#7.0) ], (.output_columns): nation(#8.0), revenue(#8.1), (.cardinality): 0.00 }
-    └── Aggregate { .aggregate_table_index: 7, .implementation: None, .exprs: sum(l_extendedprice(#3.5) * 1::decimal128(20, 0) - l_discount(#3.6)), .keys: [ n_name(#5.1) ], (.output_columns): n_name(#5.1), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#7.0), (.cardinality): 0.00 }
+OrderBy { ordering_exprs: [ revenue(#9.1) DESC ], (.output_columns): nation(#9.0), revenue(#9.1), (.cardinality): 0.00 }
+└── Project { .table_index: 9, .projections: [ n_name(#5.1), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#8.0) ], (.output_columns): nation(#9.0), revenue(#9.1), (.cardinality): 0.00 }
+    └── Aggregate { .key_table_index: 7, .aggregate_table_index: 8, .implementation: None, .exprs: sum(l_extendedprice(#3.5) * 1::decimal128(20, 0) - l_discount(#3.6)), .keys: [ n_name(#5.1) ], (.output_columns): nation.n_name(#7.0), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#8.0), (.cardinality): 0.00 }
         └── Join
             ├── .join_type: Inner
             ├── .implementation: None
@@ -59,9 +59,16 @@ OrderBy { ordering_exprs: [ revenue(#8.1) DESC ], (.output_columns): nation(#8.0
                 └── Get { .data_source_id: 2, .table_index: 6, .implementation: None, (.output_columns): r_comment(#6.2), r_name(#6.1), r_regionkey(#6.0), (.cardinality): 0.00 }
 
 physical_plan after optd-finalized:
-EnforcerSort { tuple_ordering: [(#8.1, Desc)], (.output_columns): nation(#8.0), revenue(#8.1), (.cardinality): 0.00 }
-└── Project { .table_index: 8, .projections: [ n_name(#5.1), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#7.0) ], (.output_columns): nation(#8.0), revenue(#8.1), (.cardinality): 0.00 }
-    └── Aggregate { .aggregate_table_index: 7, .implementation: None, .exprs: sum(l_extendedprice(#3.5) * 1::decimal128(20, 0) - l_discount(#3.6)), .keys: [ n_name(#5.1) ], (.output_columns): n_name(#5.1), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#7.0), (.cardinality): 0.00 }
+EnforcerSort { tuple_ordering: [(#9.1, Desc)], (.output_columns): nation(#9.0), revenue(#9.1), (.cardinality): 0.00 }
+└── Project { .table_index: 9, .projections: [ n_name(#5.1), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#8.0) ], (.output_columns): nation(#9.0), revenue(#9.1), (.cardinality): 0.00 }
+    └── Aggregate
+        ├── .key_table_index: 7
+        ├── .aggregate_table_index: 8
+        ├── .implementation: None
+        ├── .exprs: sum(l_extendedprice(#3.5) * 1::decimal128(20, 0) - l_discount(#3.6))
+        ├── .keys: [ n_name(#5.1) ]
+        ├── (.output_columns): nation.n_name(#7.0), sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#8.0)
+        ├── (.cardinality): 0.00
         └── Join
             ├── .join_type: Inner
             ├── .implementation: None

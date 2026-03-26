@@ -80,6 +80,7 @@ fn prune_operator(
 
             let new_input = prune_operator(agg.input().clone(), &input_required, ctx)?;
             Aggregate::new(
+                *agg.key_table_index(),
                 *agg.aggregate_table_index(),
                 new_input,
                 agg.exprs().clone(),
