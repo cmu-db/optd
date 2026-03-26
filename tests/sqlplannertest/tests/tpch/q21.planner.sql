@@ -42,6 +42,6 @@ limit 100;
 
 /*
 Error
-External error: Unsupported join type: LeftSemi
+External error: Unsupported df logical expr: EXISTS (<subquery>)
 */
 
