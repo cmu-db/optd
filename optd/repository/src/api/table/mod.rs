@@ -4,6 +4,8 @@ mod get_all_table_infos;
 
 use sea_orm::prelude::Uuid;
 
+use crate::entity::column::ColumnType;
+
 pub use create_table::*;
 pub use drop_table::*;
 pub use get_all_table_infos::*;
@@ -21,8 +23,9 @@ pub struct TableInfo {
 pub struct ColumnInfo {
     pub column_id: i64,
     pub column_name: String,
-    pub column_type: String,
+    pub column_type: ColumnType,
     pub initial_default: Option<String>,
+    // Change after we have `ScalarValue::try_from_string` that converts a string into a target data type.
     pub default_value: Option<String>,
     pub nulls_allowed: bool,
     pub children: Vec<ColumnInfo>,

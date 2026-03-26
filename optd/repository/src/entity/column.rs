@@ -1,3 +1,10 @@
+use std::{
+    fmt::{self, Display},
+    ops::{Deref, DerefMut},
+    str::FromStr,
+};
+
+use arrow_schema::{ArrowError, DataType};
 use sea_orm::entity::prelude::*;
 
 #[sea_orm::model]
@@ -43,7 +50,7 @@ pub struct Model {
     pub column_name: String,
 
     /// The type of this version of the column as defined in the list of data types.
-    pub column_type: String,
+    pub column_type: ColumnType,
 
     /// The initial default value as the column is being created (e.g., in `ALTER TABLE`),
     /// encoded as a string.
@@ -73,3 +80,47 @@ pub struct Model {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+#[derive(Clone, Debug, PartialEq, Eq, DeriveValueType)]
+#[sea_orm(value_type = "String", column_type = "Text")]
+pub struct ColumnType(pub DataType);
+
+impl Display for ColumnType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl FromStr for ColumnType {
+    type Err = ArrowError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.parse()?))
+    }
+}
+
+impl From<DataType> for ColumnType {
+    fn from(value: DataType) -> Self {
+        Self(value)
+    }
+}
+
+impl From<ColumnType> for DataType {
+    fn from(value: ColumnType) -> Self {
+        value.0
+    }
+}
+
+impl Deref for ColumnType {
+    type Target = DataType;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for ColumnType {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}

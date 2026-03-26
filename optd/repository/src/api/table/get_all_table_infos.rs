@@ -121,7 +121,7 @@ fn build_children(
 struct FlatColumnInfo {
     id: i64,
     column_name: String,
-    column_type: String,
+    column_type: column::ColumnType,
     initial_default: Option<String>,
     default_value: Option<String>,
     nulls_allowed: bool,
