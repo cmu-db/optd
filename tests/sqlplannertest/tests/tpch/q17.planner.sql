@@ -19,6 +19,6 @@ WHERE
 
 /*
 Error
-External error: error converting projection: Conversion from DataFusion ScalarValue Float64(0.2) is not implemented
+External error: Unsupported df logical expr: (<subquery>)
 */
 

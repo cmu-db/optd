@@ -39,6 +39,6 @@ order by
 
 /*
 Error
-External error: Unsupported join type: LeftSemi
+External error: Unsupported df logical expr: supplier.s_suppkey IN (<subquery>)
 */
 

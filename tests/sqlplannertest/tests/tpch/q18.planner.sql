@@ -35,6 +35,6 @@ limit 100;
 
 /*
 Error
-External error: Unsupported join type: LeftSemi
+External error: Unsupported df logical expr: orders.o_orderkey IN (<subquery>)
 */
 
