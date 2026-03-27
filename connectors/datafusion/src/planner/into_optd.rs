@@ -120,10 +120,11 @@ impl OptdQueryPlannerContext<'_> {
             .group_expr
             .iter()
             .map(|e| {
+                let (_, name) = e.qualified_name();
                 e.to_field(node.input.schema())
                     .and_then(|(_, field)| {
                         Ok(Arc::new(Field::new(
-                            e.name_for_alias()?,
+                            name,
                             field.data_type().clone(),
                             field.is_nullable(),
                         )))
@@ -142,10 +143,11 @@ impl OptdQueryPlannerContext<'_> {
             .aggr_expr
             .iter()
             .map(|e| {
+                let (_, name) = e.qualified_name();
                 e.to_field(node.input.schema())
                     .and_then(|(_, field)| {
                         Ok(Arc::new(Field::new(
-                            e.name_for_alias()?,
+                            name,
                             field.data_type().clone(),
                             field.is_nullable(),
                         )))

@@ -1,16 +1,17 @@
 use std::{sync::Arc, vec};
 
 use datafusion::{
-    common::DFSchema,
+    common::{Column, DFSchema},
     execution::FunctionRegistry,
     logical_expr::{
         self, Expr as DFExpr, LogicalPlan as DFLogicalPlan, logical_plan, projection_schema,
-        utils::{enumerate_grouping_sets, exprlist_to_fields, grouping_set_to_exprlist},
+        utils::{enumerate_grouping_sets, exprlist_to_fields},
     },
 };
 use itertools::Itertools;
 use optd_core::ir::{
     Operator, OperatorKind, Scalar,
+    catalog::Field,
     operator::{
         Aggregate, AggregateBorrowed, EnforcerSort, EnforcerSortBorrowed, Get, GetBorrowed, Join,
         JoinBorrowed, Limit, LimitBorrowed, Project, ProjectBorrowed, Remap, RemapBorrowed, Select,
@@ -23,6 +24,7 @@ use optd_core::ir::{
         InListBorrowed, Like, LikeBorrowed, List, Literal, LiteralBorrowed, NaryOp, NaryOpBorrowed,
         NaryOpKind,
     },
+    table_ref::TableRef,
 };
 use snafu::{OptionExt, ResultExt, whatever};
 
@@ -92,6 +94,20 @@ impl OptdQueryPlannerContext<'_> {
             .context(DataFusionSnafu)
     }
 
+    fn alias_if_changed(expr: DFExpr, table_ref: &TableRef, field: &Field) -> Result<DFExpr> {
+        if table_ref.table().contains("__internal_#") {
+            expr.alias_if_changed(field.name().clone())
+                .context(DataFusionSnafu)
+        } else {
+            let column_name = Column::new(
+                Some(Self::from_optd_table_ref(table_ref)),
+                field.name().clone(),
+            )
+            .to_string();
+            expr.alias_if_changed(column_name).context(DataFusionSnafu)
+        }
+    }
+
     fn try_new_df_aggregate(
         &self,
         key_table_index: &i64,
@@ -101,38 +117,51 @@ impl OptdQueryPlannerContext<'_> {
         aggr_expr: Vec<DFExpr>,
     ) -> Result<logical_expr::Aggregate> {
         let key_binding = self.inner.get_binding(key_table_index).context(OptdSnafu)?;
+        let table_ref = key_binding.table_ref();
+        let key_alias = Self::from_optd_table_ref(table_ref);
+        let group_qualifiers: Vec<_> = key_binding
+            .schema()
+            .fields()
+            .iter()
+            .zip_eq(group_expr.iter())
+            .map(|(field, expr)| match expr {
+                DFExpr::Column(column) if field.name() == &column.name => column.relation.clone(),
+                _ => Some(key_alias.clone()),
+            })
+            .collect_vec();
+
         let group_expr = key_binding
             .schema()
             .fields()
             .iter()
             .zip_eq(group_expr)
             .map(|(field, expr)| {
-                expr.alias_if_changed(field.name().to_string())
-                    .context(DataFusionSnafu)
+                // expr.alias_if_changed(field.name().to_string())
+                //     .context(DataFusionSnafu)
+                Self::alias_if_changed(expr, table_ref, field)
             })
             .collect::<Result<Vec<_>>>()?;
         let group_expr = enumerate_grouping_sets(group_expr).context(DataFusionSnafu)?;
-        let grouping_expr: Vec<&DFExpr> =
-            grouping_set_to_exprlist(group_expr.as_slice()).context(DataFusionSnafu)?;
-
-        let mut qualified_fields =
-            exprlist_to_fields(grouping_expr, &input).context(DataFusionSnafu)?;
+        let mut qualified_fields: Vec<_> = key_binding
+            .schema()
+            .fields()
+            .iter()
+            .zip_eq(group_qualifiers)
+            .map(|(field, qualifier)| (qualifier, field.clone()))
+            .collect_vec();
 
         let aggregate_binding = self
             .inner
             .get_binding(aggregate_table_index)
             .context(OptdSnafu)?;
+        let table_ref = aggregate_binding.table_ref();
         let aggr_expr = aggregate_binding
             .schema()
             .fields()
             .iter()
             .zip_eq(aggr_expr)
-            .map(|(field, expr)| {
-                expr.alias_if_changed(field.name().to_string())
-                    .context(DataFusionSnafu)
-            })
+            .map(|(field, expr)| Self::alias_if_changed(expr, table_ref, field))
             .collect::<Result<Vec<_>>>()?;
-        let table_ref = aggregate_binding.table_ref();
 
         let alias = Self::from_optd_table_ref(table_ref);
         qualified_fields.extend(
@@ -446,6 +475,63 @@ mod tests {
             aggregate.aggr_expr[0].schema_name().to_string(),
             "sum(lineitem.l_quantity)"
         );
+    }
+
+    #[test]
+    fn try_new_df_aggregate_keeps_group_keys_bindable_by_qualified_name() {
+        let session_ctx =
+            create_optd_session_context(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
+        let session_state = session_ctx.state();
+        let inner = OptdQueryPlanner::create_context(&session_state).unwrap();
+        let ctx = OptdQueryPlannerContext::new(inner.clone(), &session_state);
+
+        let input_schema = Arc::new(Schema::new(vec![
+            Field::new("p_brand", DataType::Utf8, false),
+            Field::new("p_partkey", DataType::Int64, false),
+        ]));
+        let input_schema =
+            DFSchema::try_from_qualified_schema("part", input_schema.as_ref()).unwrap();
+        let input = DFLogicalPlan::EmptyRelation(logical_expr::EmptyRelation {
+            produce_one_row: false,
+            schema: Arc::new(input_schema),
+        });
+
+        let key_schema = Arc::new(Schema::new(vec![Field::new(
+            "p_brand",
+            DataType::Utf8,
+            false,
+        )]));
+        let aggregate_schema = Arc::new(Schema::new(vec![Field::new(
+            "sum(part.p_partkey)",
+            DataType::Int64,
+            false,
+        )]));
+        let key_table_index = inner.add_binding(None, key_schema).unwrap();
+        let aggregate_table_index = inner.add_binding(None, aggregate_schema).unwrap();
+
+        let aggregate = ctx
+            .try_new_df_aggregate(
+                &key_table_index,
+                &aggregate_table_index,
+                Arc::new(input),
+                vec![DFExpr::Column(Column::from_qualified_name("part.p_brand"))],
+                vec![sum(DFExpr::Column(Column::from_qualified_name(
+                    "part.p_partkey",
+                )))],
+            )
+            .unwrap();
+
+        assert!(
+            aggregate
+                .schema
+                .has_column(&Column::from_qualified_name("part.p_brand"))
+        );
+
+        logical_expr::Projection::try_new(
+            vec![DFExpr::Column(Column::from_qualified_name("part.p_brand"))],
+            Arc::new(DFLogicalPlan::Aggregate(aggregate)),
+        )
+        .unwrap();
     }
 
     #[test]

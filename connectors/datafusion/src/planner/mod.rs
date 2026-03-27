@@ -259,14 +259,16 @@ impl OptdQueryPlanner {
                 .await;
         };
 
-        println!(
-            "optd_logical:\n{}",
-            quick_explain(&optd_logical, &ctx.inner)
-        );
+        warm_explain_properties(&optd_logical, &ctx.inner);
+        // println!(
+        //     "optd_logical:\n{}",
+        //     quick_explain(&optd_logical, &ctx.inner)
+        // );
         println!(
             "optd_physical:\n{}",
             quick_explain(&optd_physical, &ctx.inner)
         );
+        // println!("binder:\n{:?}", ctx.inner.binder);
 
         let logical_plan = ctx
             .try_from_optd_plan(&optd_physical)
@@ -300,6 +302,7 @@ impl OptdQueryPlanner {
 
         if let Some(x) = explain.as_mut() {
             let s = quick_explain(&optd_logical, &opt.ctx);
+
             x.stringified_plans.push(StringifiedPlan::new(
                 PlanType::OptimizedPhysicalPlan {
                     optimizer_name: "optd-initial".to_string(),
