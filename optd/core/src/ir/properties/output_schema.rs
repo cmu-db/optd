@@ -12,13 +12,14 @@ use crate::ir::{
         Subquery, join::JoinType,
     },
     properties::{Derive, GetProperty, PropertyMarker},
-    scalar::{ColumnRef, List},
     schema::OptdSchema,
     table_ref::TableRef,
 };
 use itertools::Itertools;
 use snafu::ResultExt;
 use std::sync::Arc;
+
+type QualifiedField = (TableRef, Arc<Field>);
 
 pub struct OutputSchema;
 
@@ -81,7 +82,7 @@ impl Derive<OutputSchema> for Operator {
             }
             OperatorKind::Aggregate(meta) => {
                 let agg = Aggregate::borrow_raw_parts(meta, &self.common);
-                compute_aggregate_schema(agg.keys(), agg.aggregate_table_index(), ctx)
+                compute_aggregate_schema(agg.key_table_index(), agg.aggregate_table_index(), ctx)
             }
             OperatorKind::Remap(meta) => {
                 let remap = Remap::borrow_raw_parts(meta, &self.common);
@@ -150,19 +151,68 @@ fn compute_join_schema(
     join_type: &JoinType,
     ctx: &crate::ir::IRContext,
 ) -> Result<OptdSchema> {
-    let (outer_nullable, inner_nullable, mark_field) = match join_type {
-        JoinType::Inner => (false, false, None),
-        JoinType::Left => (false, true, None),
-        JoinType::Single => (false, true, None),
-        JoinType::Mark(mark_column) => {
-            let (mark_table_ref, mark_meta) = {
-                let (table_ref, field) = ctx.get_column_name(mark_column)?;
-                (table_ref, field)
+    let outer_schema = outer.output_schema(ctx)?;
+    let inner_schema = inner.output_schema(ctx)?;
+
+    match join_schema_shape(join_type, ctx)? {
+        JoinSchemaShape::OuterOnly => Ok(outer_schema),
+        JoinSchemaShape::Combined {
+            outer_nullable,
+            inner_nullable,
+            mark_field,
+        } => {
+            let outer_schema = if outer_nullable {
+                make_schema_nullable(&outer_schema)?
+            } else {
+                outer_schema
             };
-            (
-                false,
-                true,
-                Some((
+            let inner_schema = if inner_nullable {
+                make_schema_nullable(&inner_schema)?
+            } else {
+                inner_schema
+            };
+
+            let mut metadata = outer_schema.inner().metadata().clone();
+            metadata.extend(inner_schema.inner().metadata().clone());
+
+            let qualified_fields = collect_qualified_fields(&outer_schema)
+                .chain(collect_qualified_fields(&inner_schema))
+                .chain(mark_field)
+                .collect_vec();
+
+            new_optd_schema(qualified_fields, metadata)
+        }
+    }
+}
+
+enum JoinSchemaShape {
+    OuterOnly,
+    Combined {
+        outer_nullable: bool,
+        inner_nullable: bool,
+        mark_field: Option<QualifiedField>,
+    },
+}
+
+fn join_schema_shape(join_type: &JoinType, ctx: &crate::ir::IRContext) -> Result<JoinSchemaShape> {
+    match join_type {
+        JoinType::Inner => Ok(JoinSchemaShape::Combined {
+            outer_nullable: false,
+            inner_nullable: false,
+            mark_field: None,
+        }),
+        JoinType::LeftOuter | JoinType::Single => Ok(JoinSchemaShape::Combined {
+            outer_nullable: false,
+            inner_nullable: true,
+            mark_field: None,
+        }),
+        JoinType::LeftSemi | JoinType::LeftAnti => Ok(JoinSchemaShape::OuterOnly),
+        JoinType::Mark(mark_column) => {
+            let (mark_table_ref, mark_meta) = ctx.get_column_name(mark_column)?;
+            Ok(JoinSchemaShape::Combined {
+                outer_nullable: false,
+                inner_nullable: true,
+                mark_field: Some((
                     mark_table_ref,
                     Arc::new(Field::new(
                         mark_meta.name().clone(),
@@ -170,91 +220,126 @@ fn compute_join_schema(
                         true,
                     )),
                 )),
-            )
-        }
-    };
-
-    let inner_schema = inner.output_schema(ctx)?;
-    let outer_schema = outer.output_schema(ctx)?;
-
-    let map_all_fields_to_nullable = |schema: &OptdSchema| {
-        let metadata = schema.inner().metadata().clone();
-        let qualified_fields = schema
-            .iter()
-            .map(|(table_ref, field)| {
-                (
-                    table_ref.clone(),
-                    Arc::new(Field::new(
-                        field.name().clone(),
-                        field.data_type().clone(),
-                        true,
-                    )),
-                )
             })
-            .collect_vec();
-        new_optd_schema(qualified_fields, metadata)
-    };
+        }
+    }
+}
 
-    let outer_schema = if outer_nullable {
-        map_all_fields_to_nullable(&outer_schema)?
-    } else {
-        outer_schema
-    };
-    let inner_schema = if inner_nullable {
-        map_all_fields_to_nullable(&inner_schema)?
-    } else {
-        inner_schema
-    };
-
-    let mut metadata = outer_schema.inner().metadata().clone();
-    metadata.extend(inner_schema.inner().metadata().clone());
-
-    let qualified_fields = outer_schema
+fn make_schema_nullable(schema: &OptdSchema) -> Result<OptdSchema> {
+    let metadata = schema.inner().metadata().clone();
+    let qualified_fields = schema
         .iter()
-        .map(|(table_ref, field)| (table_ref.clone(), field.clone()))
-        .chain(
-            inner_schema
-                .iter()
-                .map(|(table_ref, field)| (table_ref.clone(), field.clone())),
-        )
-        .chain(mark_field)
+        .map(|(table_ref, field)| {
+            (
+                table_ref.clone(),
+                Arc::new(Field::new(
+                    field.name().clone(),
+                    field.data_type().clone(),
+                    true,
+                )),
+            )
+        })
         .collect_vec();
-
     new_optd_schema(qualified_fields, metadata)
 }
 
+fn collect_qualified_fields(schema: &OptdSchema) -> impl Iterator<Item = QualifiedField> + '_ {
+    schema
+        .iter()
+        .map(|(table_ref, field)| (table_ref.clone(), field.clone()))
+}
+
 fn compute_aggregate_schema(
-    keys: &crate::ir::Scalar,
+    key_table_index: &i64,
     aggregate_table_index: &i64,
     ctx: &crate::ir::IRContext,
 ) -> Result<OptdSchema> {
-    let key_fields = keys
-        .borrow::<List>()
-        .members()
+    let key_binding = ctx.get_binding(key_table_index)?;
+    let key_table_ref = key_binding.table_ref().clone();
+    let metadata = key_binding.schema().metadata().clone();
+    let qualified_fields = key_binding
+        .schema()
+        .fields()
         .iter()
-        .map(|key| {
-            let key = match key.try_borrow::<ColumnRef>() {
-                Ok(key) => key,
-                Err(_) => whatever!("aggregate key must be a column reference"),
-            };
-            ctx.get_column_name(key.column())
-        })
-        .collect::<Result<Vec<_>>>()?;
+        .cloned()
+        .map(|field| (key_table_ref.clone(), field))
+        .collect_vec();
+
+    let key_schema = new_optd_schema(qualified_fields, metadata)?;
 
     let aggregate_binding = ctx.get_binding(aggregate_table_index)?;
     let aggregate_table_ref = aggregate_binding.table_ref().clone();
     let metadata = aggregate_binding.schema().metadata().clone();
-    let qualified_fields = key_fields
-        .into_iter()
-        .chain(
-            aggregate_binding
-                .schema()
-                .fields()
-                .iter()
-                .cloned()
-                .map(|field| (aggregate_table_ref.clone(), field)),
-        )
+    let qualified_fields = aggregate_binding
+        .schema()
+        .fields()
+        .iter()
+        .cloned()
+        .map(|field| (aggregate_table_ref.clone(), field))
         .collect_vec();
 
-    new_optd_schema(qualified_fields, metadata)
+    let aggregate_schema = new_optd_schema(qualified_fields, metadata)?;
+
+    key_schema.join(&aggregate_schema).context(SchemaSnafu)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::{
+        builder::boolean, operator::join::JoinType, table_ref::TableRef,
+        test_utils::test_ctx_with_tables,
+    };
+
+    #[test]
+    fn left_semi_join_output_schema_uses_only_outer_columns() -> Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 2), ("t2", 3)])?;
+        let outer = ctx.logical_get(TableRef::bare("t1"), None)?.build();
+        let inner = ctx.logical_get(TableRef::bare("t2"), None)?.build();
+
+        let join = outer
+            .with_ctx(&ctx)
+            .logical_join(inner, boolean(true), JoinType::LeftSemi)
+            .build();
+
+        let schema = join.output_schema(&ctx)?;
+        let fields = schema.iter().collect_vec();
+
+        assert_eq!(fields.len(), 2);
+        assert!(
+            fields
+                .iter()
+                .all(|(table_ref, _)| **table_ref == TableRef::bare("t1"))
+        );
+        assert_eq!(fields[0].1.name(), "c0");
+        assert_eq!(fields[1].1.name(), "c1");
+
+        Ok(())
+    }
+
+    #[test]
+    fn left_anti_join_output_schema_uses_only_outer_columns() -> Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 2), ("t2", 3)])?;
+        let outer = ctx.logical_get(TableRef::bare("t1"), None)?.build();
+        let inner = ctx.logical_get(TableRef::bare("t2"), None)?.build();
+
+        let join = outer
+            .with_ctx(&ctx)
+            .logical_join(inner, boolean(true), JoinType::LeftAnti)
+            .build();
+
+        let schema = join.output_schema(&ctx)?;
+        let fields = schema.iter().collect_vec();
+
+        assert_eq!(fields.len(), 2);
+        assert!(
+            fields
+                .iter()
+                .all(|(table_ref, _)| **table_ref == TableRef::bare("t1"))
+        );
+        assert_eq!(fields[0].1.name(), "c0");
+        assert_eq!(fields[1].1.name(), "c1");
+
+        Ok(())
+    }
 }

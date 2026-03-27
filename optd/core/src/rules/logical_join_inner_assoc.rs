@@ -150,10 +150,10 @@ mod tests {
 
         // This rule does not apply to left outer joins.
         let left_outer_joins = Join::new(
-            JoinType::Left,
+            JoinType::LeftOuter,
             {
                 Join::new(
-                    JoinType::Left,
+                    JoinType::LeftOuter,
                     a.clone(),
                     b.clone(),
                     cond_lower.clone(),

@@ -20,7 +20,7 @@
         o_orderpriority
     order by
         o_orderpriority;
-  desc: TPC-H Q4 (TODO: enable this test after support LeftSemi join or disable semi join conversion in datafusion)
+  desc: TPC-H Q4
   before: ["include_sql:schema.sql", "include_sql:strict.sql"]
   tasks:
     - explain

@@ -1,16 +1,17 @@
 use std::{sync::Arc, vec};
 
 use datafusion::{
-    common::DFSchema,
+    common::{Column, DFSchema},
     execution::FunctionRegistry,
     logical_expr::{
         self, Expr as DFExpr, LogicalPlan as DFLogicalPlan, logical_plan, projection_schema,
-        utils::{enumerate_grouping_sets, exprlist_to_fields, grouping_set_to_exprlist},
+        utils::{enumerate_grouping_sets, exprlist_to_fields},
     },
 };
 use itertools::Itertools;
 use optd_core::ir::{
     Operator, OperatorKind, Scalar,
+    catalog::Field,
     operator::{
         Aggregate, AggregateBorrowed, EnforcerSort, EnforcerSortBorrowed, Get, GetBorrowed, Join,
         JoinBorrowed, Limit, LimitBorrowed, Project, ProjectBorrowed, Remap, RemapBorrowed, Select,
@@ -18,10 +19,12 @@ use optd_core::ir::{
     },
     properties::TupleOrderingDirection,
     scalar::{
-        BinaryOp, BinaryOpBorrowed, BinaryOpKind, Cast, CastBorrowed, ColumnRef, ColumnRefBorrowed,
-        Function, FunctionBorrowed, FunctionKind, Like, LikeBorrowed, List, Literal,
-        LiteralBorrowed, NaryOp, NaryOpBorrowed, NaryOpKind,
+        BinaryOp, BinaryOpBorrowed, BinaryOpKind, Case, CaseBorrowed, Cast, CastBorrowed,
+        ColumnRef, ColumnRefBorrowed, Function, FunctionBorrowed, FunctionKind, InList,
+        InListBorrowed, Like, LikeBorrowed, List, Literal, LiteralBorrowed, NaryOp, NaryOpBorrowed,
+        NaryOpKind,
     },
+    table_ref::TableRef,
 };
 use snafu::{OptionExt, ResultExt, whatever};
 
@@ -91,35 +94,74 @@ impl OptdQueryPlannerContext<'_> {
             .context(DataFusionSnafu)
     }
 
+    fn alias_if_changed(expr: DFExpr, table_ref: &TableRef, field: &Field) -> Result<DFExpr> {
+        if table_ref.table().contains("__internal_#") {
+            expr.alias_if_changed(field.name().clone())
+                .context(DataFusionSnafu)
+        } else {
+            let column_name = Column::new(
+                Some(Self::from_optd_table_ref(table_ref)),
+                field.name().clone(),
+            )
+            .to_string();
+            expr.alias_if_changed(column_name).context(DataFusionSnafu)
+        }
+    }
+
     fn try_new_df_aggregate(
         &self,
+        key_table_index: &i64,
         aggregate_table_index: &i64,
         input: Arc<DFLogicalPlan>,
         group_expr: Vec<DFExpr>,
         aggr_expr: Vec<DFExpr>,
     ) -> Result<logical_expr::Aggregate> {
+        let key_binding = self.inner.get_binding(key_table_index).context(OptdSnafu)?;
+        let table_ref = key_binding.table_ref();
+        let key_alias = Self::from_optd_table_ref(table_ref);
+        let group_qualifiers: Vec<_> = key_binding
+            .schema()
+            .fields()
+            .iter()
+            .zip_eq(group_expr.iter())
+            .map(|(field, expr)| match expr {
+                DFExpr::Column(column) if field.name() == &column.name => column.relation.clone(),
+                _ => Some(key_alias.clone()),
+            })
+            .collect_vec();
+
+        let group_expr = key_binding
+            .schema()
+            .fields()
+            .iter()
+            .zip_eq(group_expr)
+            .map(|(field, expr)| {
+                // expr.alias_if_changed(field.name().to_string())
+                //     .context(DataFusionSnafu)
+                Self::alias_if_changed(expr, table_ref, field)
+            })
+            .collect::<Result<Vec<_>>>()?;
         let group_expr = enumerate_grouping_sets(group_expr).context(DataFusionSnafu)?;
-        let grouping_expr: Vec<&DFExpr> =
-            grouping_set_to_exprlist(group_expr.as_slice()).context(DataFusionSnafu)?;
+        let mut qualified_fields: Vec<_> = key_binding
+            .schema()
+            .fields()
+            .iter()
+            .zip_eq(group_qualifiers)
+            .map(|(field, qualifier)| (qualifier, field.clone()))
+            .collect_vec();
 
-        let mut qualified_fields =
-            exprlist_to_fields(grouping_expr, &input).context(DataFusionSnafu)?;
-
-        let binding = self
+        let aggregate_binding = self
             .inner
             .get_binding(aggregate_table_index)
             .context(OptdSnafu)?;
-        let aggr_expr = binding
+        let table_ref = aggregate_binding.table_ref();
+        let aggr_expr = aggregate_binding
             .schema()
             .fields()
             .iter()
             .zip_eq(aggr_expr)
-            .map(|(field, expr)| {
-                expr.alias_if_changed(field.name().to_string())
-                    .context(DataFusionSnafu)
-            })
+            .map(|(field, expr)| Self::alias_if_changed(expr, table_ref, field))
             .collect::<Result<Vec<_>>>()?;
-        let table_ref = binding.table_ref();
 
         let alias = Self::from_optd_table_ref(table_ref);
         qualified_fields.extend(
@@ -157,6 +199,7 @@ impl OptdQueryPlannerContext<'_> {
             .try_collect()?;
 
         let aggregate = self.try_new_df_aggregate(
+            node.key_table_index(),
             node.aggregate_table_index(),
             Arc::new(input),
             group_expr,
@@ -312,15 +355,26 @@ mod tests {
     use datafusion::{
         arrow::datatypes::{DataType, Field, Schema},
         common::{Column, DFSchema},
+        execution::FunctionRegistry,
         execution::runtime_env::RuntimeEnv,
         functions_aggregate::expr_fn::sum,
         logical_expr::{self, Expr as DFExpr, LogicalPlan as DFLogicalPlan},
         prelude::SessionConfig,
+        scalar::ScalarValue,
     };
+    use optd_core::ir::scalar::{Case, Function, FunctionKind};
 
     use crate::create_optd_session_context;
 
     use super::super::{OptdQueryPlanner, OptdQueryPlannerContext};
+
+    fn new_test_ctx() -> OptdQueryPlannerContext<'static> {
+        let session_ctx =
+            create_optd_session_context(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
+        let session_state = Box::leak(Box::new(session_ctx.state()));
+        let inner = OptdQueryPlanner::create_context(session_state).unwrap();
+        OptdQueryPlannerContext::new(inner, session_state)
+    }
 
     #[test]
     fn try_new_df_projection_restores_binding_aliases() {
@@ -393,11 +447,18 @@ mod tests {
             DataType::Int64,
             false,
         )]));
-        let table_index = inner.add_binding(None, aggregate_schema).unwrap();
+        let key_schema = Arc::new(Schema::new(vec![Field::new(
+            "l_quantity",
+            DataType::Int64,
+            false,
+        )]));
+        let aggregate_table_index = inner.add_binding(None, aggregate_schema).unwrap();
+        let key_table_index = inner.add_binding(None, key_schema).unwrap();
 
         let aggregate = ctx
             .try_new_df_aggregate(
-                &table_index,
+                &key_table_index,
+                &aggregate_table_index,
                 Arc::new(input),
                 vec![DFExpr::Column(Column::from_qualified_name(
                     "__internal_#2.l_returnflag",
@@ -414,6 +475,166 @@ mod tests {
             aggregate.aggr_expr[0].schema_name().to_string(),
             "sum(lineitem.l_quantity)"
         );
+    }
+
+    #[test]
+    fn try_new_df_aggregate_keeps_group_keys_bindable_by_qualified_name() {
+        let session_ctx =
+            create_optd_session_context(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
+        let session_state = session_ctx.state();
+        let inner = OptdQueryPlanner::create_context(&session_state).unwrap();
+        let ctx = OptdQueryPlannerContext::new(inner.clone(), &session_state);
+
+        let input_schema = Arc::new(Schema::new(vec![
+            Field::new("p_brand", DataType::Utf8, false),
+            Field::new("p_partkey", DataType::Int64, false),
+        ]));
+        let input_schema =
+            DFSchema::try_from_qualified_schema("part", input_schema.as_ref()).unwrap();
+        let input = DFLogicalPlan::EmptyRelation(logical_expr::EmptyRelation {
+            produce_one_row: false,
+            schema: Arc::new(input_schema),
+        });
+
+        let key_schema = Arc::new(Schema::new(vec![Field::new(
+            "p_brand",
+            DataType::Utf8,
+            false,
+        )]));
+        let aggregate_schema = Arc::new(Schema::new(vec![Field::new(
+            "sum(part.p_partkey)",
+            DataType::Int64,
+            false,
+        )]));
+        let key_table_index = inner.add_binding(None, key_schema).unwrap();
+        let aggregate_table_index = inner.add_binding(None, aggregate_schema).unwrap();
+
+        let aggregate = ctx
+            .try_new_df_aggregate(
+                &key_table_index,
+                &aggregate_table_index,
+                Arc::new(input),
+                vec![DFExpr::Column(Column::from_qualified_name("part.p_brand"))],
+                vec![sum(DFExpr::Column(Column::from_qualified_name(
+                    "part.p_partkey",
+                )))],
+            )
+            .unwrap();
+
+        assert!(
+            aggregate
+                .schema
+                .has_column(&Column::from_qualified_name("part.p_brand"))
+        );
+
+        logical_expr::Projection::try_new(
+            vec![DFExpr::Column(Column::from_qualified_name("part.p_brand"))],
+            Arc::new(DFLogicalPlan::Aggregate(aggregate)),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn case_expr_round_trips_without_base_expr() {
+        let mut ctx = new_test_ctx();
+        let expr = DFExpr::Case(logical_expr::expr::Case::new(
+            None,
+            vec![(
+                Box::new(logical_expr::binary_expr(
+                    DFExpr::Literal(datafusion::scalar::ScalarValue::Int64(Some(1)), None),
+                    logical_expr::Operator::Eq,
+                    DFExpr::Literal(datafusion::scalar::ScalarValue::Int64(Some(1)), None),
+                )),
+                Box::new(DFExpr::Literal(
+                    datafusion::scalar::ScalarValue::Utf8(Some("match".into())),
+                    None,
+                )),
+            )],
+            Some(Box::new(DFExpr::Literal(
+                datafusion::scalar::ScalarValue::Utf8(Some("miss".into())),
+                None,
+            ))),
+        ));
+
+        let optd_expr = ctx
+            .try_into_optd_scalar_expr(&expr, &DFSchema::empty())
+            .unwrap();
+        let optd_case = optd_expr.borrow::<Case>();
+        assert!(optd_case.expr().is_none());
+        assert_eq!(optd_case.when_then_expr().len(), 1);
+        assert!(optd_case.else_expr().is_some());
+
+        let restored = ctx.try_from_optd_scalar_expr(optd_expr.as_ref()).unwrap();
+        assert_eq!(restored, expr);
+    }
+
+    #[test]
+    fn case_expr_round_trips_with_base_expr() {
+        let mut ctx = new_test_ctx();
+        let expr = DFExpr::Case(logical_expr::expr::Case::new(
+            Some(Box::new(DFExpr::Literal(
+                datafusion::scalar::ScalarValue::Int64(Some(2)),
+                None,
+            ))),
+            vec![
+                (
+                    Box::new(DFExpr::Literal(
+                        datafusion::scalar::ScalarValue::Int64(Some(1)),
+                        None,
+                    )),
+                    Box::new(DFExpr::Literal(
+                        datafusion::scalar::ScalarValue::Utf8(Some("one".into())),
+                        None,
+                    )),
+                ),
+                (
+                    Box::new(DFExpr::Literal(
+                        datafusion::scalar::ScalarValue::Int64(Some(2)),
+                        None,
+                    )),
+                    Box::new(DFExpr::Literal(
+                        datafusion::scalar::ScalarValue::Utf8(Some("two".into())),
+                        None,
+                    )),
+                ),
+            ],
+            Some(Box::new(DFExpr::Literal(
+                datafusion::scalar::ScalarValue::Utf8(Some("other".into())),
+                None,
+            ))),
+        ));
+
+        let optd_expr = ctx
+            .try_into_optd_scalar_expr(&expr, &DFSchema::empty())
+            .unwrap();
+        let optd_case = optd_expr.borrow::<Case>();
+        assert!(optd_case.expr().is_some());
+        assert_eq!(optd_case.when_then_expr().len(), 2);
+        assert!(optd_case.else_expr().is_some());
+
+        let restored = ctx.try_from_optd_scalar_expr(&optd_expr).unwrap();
+        assert_eq!(restored, expr);
+    }
+
+    #[test]
+    fn scalar_function_expr_round_trips() {
+        let mut ctx = new_test_ctx();
+        let udf = ctx.session_state.udf("lower").unwrap();
+        let expr = DFExpr::ScalarFunction(logical_expr::expr::ScalarFunction::new_udf(
+            udf,
+            vec![DFExpr::Literal(ScalarValue::Utf8(Some("ABC".into())), None)],
+        ));
+
+        let optd_expr = ctx
+            .try_into_optd_scalar_expr(&expr, &DFSchema::empty())
+            .unwrap();
+        let optd_function = optd_expr.borrow::<Function>();
+        assert_eq!(optd_function.kind(), &FunctionKind::Scalar);
+        assert_eq!(optd_function.id().as_ref(), "lower");
+        assert_eq!(optd_function.params().len(), 1);
+
+        let restored = ctx.try_from_optd_scalar_expr(optd_expr.as_ref()).unwrap();
+        assert_eq!(restored, expr);
     }
 }
 
@@ -451,6 +672,14 @@ impl OptdQueryPlannerContext<'_> {
                 let node = Like::borrow_raw_parts(meta, &expr.common);
                 self.try_from_optd_like(node)
             }
+            optd_core::ir::ScalarKind::Case(meta) => {
+                let node = Case::borrow_raw_parts(meta, &expr.common);
+                self.try_from_optd_case(node)
+            }
+            optd_core::ir::ScalarKind::InList(meta) => {
+                let node = InList::borrow_raw_parts(meta, &expr.common);
+                self.try_from_optd_in_list(node)
+            }
         }
     }
 
@@ -474,6 +703,7 @@ impl OptdQueryPlannerContext<'_> {
             BinaryOpKind::Divide => logical_expr::Operator::Divide,
             BinaryOpKind::Modulo => logical_expr::Operator::Modulo,
             BinaryOpKind::Eq => logical_expr::Operator::Eq,
+            BinaryOpKind::Ne => logical_expr::Operator::NotEq,
             BinaryOpKind::IsNotDistinctFrom => logical_expr::Operator::IsNotDistinctFrom,
             BinaryOpKind::Lt => logical_expr::Operator::Lt,
             BinaryOpKind::Le => logical_expr::Operator::LtEq,
@@ -560,5 +790,49 @@ impl OptdQueryPlannerContext<'_> {
                 Ok(DFExpr::WindowFunction(Box::new(func)))
             }
         }
+    }
+
+    pub fn try_from_optd_case(&mut self, node: CaseBorrowed<'_>) -> Result<DFExpr> {
+        let expr = node
+            .expr()
+            .map(|expr| self.try_from_optd_scalar_expr(expr))
+            .transpose()?
+            .map(Box::new);
+        let when_then_expr = node
+            .when_then_expr()
+            .map(|(when, then)| {
+                Ok((
+                    Box::new(self.try_from_optd_scalar_expr(when)?),
+                    Box::new(self.try_from_optd_scalar_expr(then)?),
+                ))
+            })
+            .try_collect()?;
+        let else_expr = node
+            .else_expr()
+            .map(|expr| self.try_from_optd_scalar_expr(expr))
+            .transpose()?
+            .map(Box::new);
+
+        Ok(DFExpr::Case(logical_expr::expr::Case::new(
+            expr,
+            when_then_expr,
+            else_expr,
+        )))
+    }
+
+    pub fn try_from_optd_in_list(&mut self, node: InListBorrowed<'_>) -> Result<DFExpr> {
+        let expr = self.try_from_optd_scalar_expr(node.expr())?;
+        let list = node.list().borrow::<List>();
+        let list = list
+            .members()
+            .iter()
+            .map(|e| self.try_from_optd_scalar_expr(e))
+            .try_collect()?;
+
+        Ok(DFExpr::InList(logical_expr::expr::InList::new(
+            Box::new(expr),
+            list,
+            *node.negated(),
+        )))
     }
 }

@@ -21,6 +21,7 @@ define_node!(
     Aggregate, AggregateBorrowed {
         properties: OperatorProperties,
         metadata: AggregateMetadata {
+            key_table_index: i64,
             aggregate_table_index: i64,
             implementation: Option<AggregateImplementation>,
         },
@@ -40,6 +41,7 @@ pub enum AggregateImplementation {
 
 impl Aggregate {
     pub fn new(
+        key_table_index: i64,
         aggregate_table_index: i64,
         input: Arc<Operator>,
         exprs: Arc<Scalar>,
@@ -48,6 +50,7 @@ impl Aggregate {
     ) -> Self {
         Self {
             meta: AggregateMetadata {
+                key_table_index,
                 aggregate_table_index,
                 implementation,
             },
@@ -63,6 +66,7 @@ impl Explain for AggregateBorrowed<'_> {
         option: &crate::ir::explain::ExplainOption,
     ) -> pretty_xmlish::Pretty<'a> {
         let mut fields = Vec::new();
+        fields.push((".key_table_index", Pretty::display(&self.key_table_index())));
         fields.push((
             ".aggregate_table_index",
             Pretty::display(&self.aggregate_table_index()),
