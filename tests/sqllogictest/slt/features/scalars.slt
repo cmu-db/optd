@@ -1,0 +1,84 @@
+statement ok
+set optd.optd_only = true;
+
+statement ok
+set optd.optd_strict_mode = true;
+
+statement ok
+CREATE TABLE numbers(id int, grp int, val int, bonus int, note varchar);
+
+statement ok
+CREATE TABLE pairs(lhs int, rhs int);
+
+statement ok
+INSERT INTO numbers VALUES
+  (1, 1, 10, 0, 'Alpha'),
+  (2, 1, 20, 5, 'alphabet'),
+  (3, 2, 15, 5, 'Beta'),
+  (4, 2, 30, 10, 'gamma'),
+  (5, 3, 8, 0, 'delta');
+
+statement ok
+INSERT INTO pairs VALUES
+  (1, 1),
+  (2, 1),
+  (NULL, NULL),
+  (3, NULL);
+
+query
+SELECT id, val + bonus AS total, val % 7 AS remainder
+FROM numbers
+ORDER BY id;
+----
+1 10 3
+2 25 6
+3 20 1
+4 40 2
+5 8 1
+
+query
+SELECT id, CAST(val AS bigint) + CAST(bonus AS bigint) AS widened_total
+FROM numbers
+WHERE CAST(val AS bigint) >= 20 OR CAST(bonus AS bigint) = 5
+ORDER BY id;
+----
+2 25
+3 20
+4 40
+
+query
+SELECT id, note
+FROM numbers
+WHERE note LIKE 'Al%' OR note NOT LIKE '%ta'
+ORDER BY id;
+----
+1 Alpha
+2 alphabet
+4 gamma
+
+query
+SELECT id
+FROM numbers
+WHERE note ILIKE 'al%'
+ORDER BY id;
+----
+1
+2
+
+query
+SELECT lhs, rhs
+FROM pairs
+WHERE lhs IS NOT DISTINCT FROM rhs
+ORDER BY lhs;
+----
+1 1
+NULL NULL
+
+query
+SELECT id
+FROM numbers
+ORDER BY val DESC
+LIMIT 2 OFFSET 1;
+----
+2
+3

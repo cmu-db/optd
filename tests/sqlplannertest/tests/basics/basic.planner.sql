@@ -5,6 +5,7 @@ create table t3(t3v1 int, t3v2 int);
 insert into t1 values (0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6), (7, 7), (8, 8), (9, 9);
 insert into t2 values (0, 200), (1, 201), (2, 202);
 insert into t3 values (201, 300), (202, 301), (203, 302);
+set optd.optd_only = true;
 set optd.optd_strict_mode = true;
 
 /*
