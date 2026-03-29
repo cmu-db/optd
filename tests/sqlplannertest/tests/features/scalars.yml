@@ -1,0 +1,72 @@
+- sql: |
+    create table numbers(id int, grp int, val int, bonus int, note varchar);
+    create table pairs(lhs int, rhs int);
+    insert into numbers values
+      (1, 1, 10, 0, 'Alpha'),
+      (2, 1, 20, 5, 'alphabet'),
+      (3, 2, 15, 5, 'Beta'),
+      (4, 2, 30, 10, 'gamma'),
+      (5, 3, 8, 0, 'delta');
+    insert into pairs values
+      (1, 1),
+      (2, 1),
+      (NULL, NULL),
+      (3, NULL);
+    set optd.optd_only = true;
+    set optd.optd_strict_mode = true;
+  desc: Setup scalar feature tables.
+  tasks:
+    - execute
+- sql: |
+    select id, val + bonus as total, val % 7 as remainder
+    from numbers
+    order by id;
+  desc: Arithmetic projections with aliases and modulo.
+  tasks:
+    - explain
+    - execute
+- sql: |
+    select id, cast(val as bigint) + cast(bonus as bigint) as widened_total
+    from numbers
+    where cast(val as bigint) >= 20 or cast(bonus as bigint) = 5
+    order by id;
+  desc: Casts in projections and disjunctive filters.
+  tasks:
+    - explain
+    - execute
+- sql: |
+    select id, note
+    from numbers
+    where note like 'Al%' or note not like '%ta'
+    order by id;
+  desc: LIKE and NOT LIKE predicates.
+  tasks:
+    - explain
+    - execute
+- sql: |
+    select id
+    from numbers
+    where note ilike 'al%'
+    order by id;
+  desc: Case insensitive LIKE predicates.
+  tasks:
+    - explain
+    - execute
+- sql: |
+    select lhs, rhs
+    from pairs
+    where lhs is not distinct from rhs
+    order by lhs;
+  desc: IS NOT DISTINCT FROM including NULL-safe equality.
+  tasks:
+    - explain
+    - execute
+- sql: |
+    select id
+    from numbers
+    order by val desc
+    limit 2 offset 1;
+  desc: ORDER BY with LIMIT and OFFSET.
+  tasks:
+    - explain
+    - execute

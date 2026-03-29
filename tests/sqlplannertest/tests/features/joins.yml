@@ -1,0 +1,69 @@
+- sql: |
+    create table numbers(id int, grp int, val int, bonus int, note varchar);
+    create table dim(id int, category varchar, enabled int);
+    create table grp_offsets(grp int, shift int, label varchar);
+    create table tags(id int, tag varchar);
+    insert into numbers values
+      (1, 1, 10, 0, 'Alpha'),
+      (2, 1, 20, 5, 'alphabet'),
+      (3, 2, 15, 5, 'Beta'),
+      (4, 2, 30, 10, 'gamma'),
+      (5, 3, 8, 0, 'delta');
+    insert into dim values
+      (1, 'odd', 1),
+      (2, 'even', 1),
+      (3, 'odd', 0),
+      (4, 'even', 1),
+      (6, 'missing', 1);
+    insert into grp_offsets values
+      (1, 100, 'g1'),
+      (2, 200, 'g2'),
+      (4, 400, 'g4');
+    insert into tags values
+      (1, 'x'),
+      (2, 'y'),
+      (4, 'z');
+    set optd.optd_only = true;
+    set optd.optd_strict_mode = true;
+  desc: Setup join feature tables.
+  tasks:
+    - execute
+- sql: |
+    select n.id, d.category
+    from numbers n
+    join dim d on n.id = d.id
+    where d.enabled = 1
+    order by n.id;
+  desc: Inner joins with aliases and post-join filters.
+  tasks:
+    - explain
+    - execute
+- sql: |
+    select n.id, g.label
+    from numbers n
+    left join grp_offsets g on n.grp = g.grp and n.val < g.shift
+    order by n.id;
+  desc: Left joins with equi and non-equi join predicates.
+  tasks:
+    - explain
+    - execute
+- sql: |
+    select n.id, d.category, t.tag
+    from numbers n
+    join dim d on n.id = d.id
+    join tags t on n.id = t.id
+    where n.val >= 10
+    order by n.id;
+  desc: Multi-join plans over three relations.
+  tasks:
+    - explain
+    - execute
+- sql: |
+    select a.id as left_id, b.id as right_id
+    from numbers a
+    join numbers b on a.grp = b.grp and a.id < b.id
+    order by left_id, right_id;
+  desc: Self joins with mixed equi and inequality conditions.
+  tasks:
+    - explain
+    - execute
