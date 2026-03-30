@@ -12,6 +12,7 @@ use crate::ir::{
         Subquery, join::JoinType,
     },
     properties::{Derive, GetProperty, PropertyMarker},
+    scalar::{ColumnRef, List, ScalarKind},
     schema::OptdSchema,
     table_ref::TableRef,
 };
@@ -82,7 +83,12 @@ impl Derive<OutputSchema> for Operator {
             }
             OperatorKind::Aggregate(meta) => {
                 let agg = Aggregate::borrow_raw_parts(meta, &self.common);
-                compute_aggregate_schema(agg.key_table_index(), agg.aggregate_table_index(), ctx)
+                compute_aggregate_schema(
+                    agg.key_table_index(),
+                    agg.aggregate_table_index(),
+                    agg.keys(),
+                    ctx,
+                )
             }
             OperatorKind::Remap(meta) => {
                 let remap = Remap::borrow_raw_parts(meta, &self.common);
@@ -252,18 +258,26 @@ fn collect_qualified_fields(schema: &OptdSchema) -> impl Iterator<Item = Qualifi
 fn compute_aggregate_schema(
     key_table_index: &i64,
     aggregate_table_index: &i64,
+    keys: &crate::ir::Scalar,
     ctx: &crate::ir::IRContext,
 ) -> Result<OptdSchema> {
     let key_binding = ctx.get_binding(key_table_index)?;
     let key_table_ref = key_binding.table_ref().clone();
+    let key_exprs = keys.borrow::<List>();
     let metadata = key_binding.schema().metadata().clone();
     let qualified_fields = key_binding
         .schema()
         .fields()
         .iter()
         .cloned()
-        .map(|field| (key_table_ref.clone(), field))
-        .collect_vec();
+        .zip_eq(key_exprs.members().iter())
+        .map(|(field, key_expr)| {
+            Ok((
+                aggregate_key_qualifier(&key_table_ref, &field, key_expr, ctx)?,
+                field,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
 
     let key_schema = new_optd_schema(qualified_fields, metadata)?;
 
@@ -283,13 +297,38 @@ fn compute_aggregate_schema(
     key_schema.join(&aggregate_schema).context(SchemaSnafu)
 }
 
+fn aggregate_key_qualifier(
+    default_table_ref: &TableRef,
+    bound_field: &Arc<Field>,
+    key_expr: &crate::ir::Scalar,
+    ctx: &crate::ir::IRContext,
+) -> Result<TableRef> {
+    match &key_expr.kind {
+        ScalarKind::ColumnRef(meta) => {
+            let column = ColumnRef::borrow_raw_parts(meta, &key_expr.common);
+            let (source_table_ref, source_field) = ctx.get_column_name(column.column())?;
+            if source_field.name() == bound_field.name() {
+                Ok(source_table_ref)
+            } else {
+                Ok(default_table_ref.clone())
+            }
+        }
+        _ => Ok(default_table_ref.clone()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ir::{
-        builder::boolean, operator::join::JoinType, table_ref::TableRef,
+        builder::{boolean, column_ref, list},
+        catalog::{Field as CatalogField, Schema as CatalogSchema},
+        convert::IntoOperator,
+        operator::{Aggregate, join::JoinType},
+        table_ref::TableRef,
         test_utils::test_ctx_with_tables,
     };
+    use std::sync::Arc;
 
     #[test]
     fn left_semi_join_output_schema_uses_only_outer_columns() -> Result<()> {
@@ -339,6 +378,85 @@ mod tests {
         );
         assert_eq!(fields[0].1.name(), "c0");
         assert_eq!(fields[1].1.name(), "c1");
+
+        Ok(())
+    }
+
+    #[test]
+    fn aggregate_output_schema_keeps_passthrough_key_qualifier() -> Result<()> {
+        let ctx = test_ctx_with_tables(&[("part", 2)])?;
+        let input = ctx.logical_get(TableRef::bare("part"), None)?.build();
+        let key_table_index = ctx.add_binding(
+            None,
+            Arc::new(CatalogSchema::new(vec![CatalogField::new(
+                "c0",
+                crate::ir::DataType::Int32,
+                false,
+            )])),
+        )?;
+        let aggregate_table_index = ctx.add_binding(
+            None,
+            Arc::new(CatalogSchema::new(Vec::<CatalogField>::new())),
+        )?;
+
+        let aggregate = Aggregate::new(
+            key_table_index,
+            aggregate_table_index,
+            input,
+            list([]),
+            list([column_ref(crate::ir::test_utils::test_col(
+                &ctx, "part", "c0",
+            )?)]),
+            None,
+        )
+        .into_operator();
+
+        let schema = aggregate.output_schema(&ctx)?;
+        let fields = schema.iter().collect_vec();
+
+        assert_eq!(fields.len(), 1);
+        assert_eq!(*fields[0].0, TableRef::bare("part"));
+        assert_eq!(fields[0].1.name(), "c0");
+
+        Ok(())
+    }
+
+    #[test]
+    fn aggregate_output_schema_uses_internal_qualifier_for_renamed_key() -> Result<()> {
+        let ctx = test_ctx_with_tables(&[("part", 2)])?;
+        let input = ctx.logical_get(TableRef::bare("part"), None)?.build();
+        let key_table_index = ctx.add_binding(
+            None,
+            Arc::new(CatalogSchema::new(vec![CatalogField::new(
+                "alias1",
+                crate::ir::DataType::Int32,
+                false,
+            )])),
+        )?;
+        let aggregate_table_index = ctx.add_binding(
+            None,
+            Arc::new(CatalogSchema::new(Vec::<CatalogField>::new())),
+        )?;
+        let key_binding = ctx.get_binding(&key_table_index)?;
+
+        let aggregate = Aggregate::new(
+            key_table_index,
+            aggregate_table_index,
+            input,
+            list([]),
+            list([column_ref(crate::ir::test_utils::test_col(
+                &ctx, "part", "c0",
+            )?)]),
+            None,
+        )
+        .into_operator();
+
+        let schema = aggregate.output_schema(&ctx)?;
+        let fields = schema.iter().collect_vec();
+
+        assert_eq!(fields.len(), 1);
+        assert_eq!(*fields[0].0, key_binding.table_ref);
+        assert_eq!(fields[0].1.name(), "alias1");
 
         Ok(())
     }

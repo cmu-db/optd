@@ -4,14 +4,15 @@ use datafusion::{
     common::{Column, DFSchema},
     execution::FunctionRegistry,
     logical_expr::{
-        self, Expr as DFExpr, LogicalPlan as DFLogicalPlan, logical_plan, projection_schema,
-        utils::{enumerate_grouping_sets, exprlist_to_fields},
+        self, Expr as DFExpr, LogicalPlan as DFLogicalPlan, logical_plan,
+        utils::enumerate_grouping_sets,
     },
 };
 use itertools::Itertools;
 use optd_core::ir::{
     Operator, OperatorKind, Scalar,
     catalog::Field,
+    convert::IntoOperator,
     operator::{
         Aggregate, AggregateBorrowed, EnforcerSort, EnforcerSortBorrowed, Get, GetBorrowed, Join,
         JoinBorrowed, Limit, LimitBorrowed, Project, ProjectBorrowed, Remap, RemapBorrowed, Select,
@@ -24,6 +25,7 @@ use optd_core::ir::{
         InListBorrowed, Like, LikeBorrowed, List, Literal, LiteralBorrowed, NaryOp, NaryOpBorrowed,
         NaryOpKind,
     },
+    schema::OptdSchema,
     table_ref::TableRef,
 };
 use snafu::{OptionExt, ResultExt, whatever};
@@ -76,20 +78,9 @@ impl OptdQueryPlannerContext<'_> {
         input: Arc<DFLogicalPlan>,
     ) -> Result<logical_expr::Projection> {
         let binding = self.inner.get_binding(table_index).context(OptdSnafu)?;
-        let exprs = binding
-            .schema()
-            .fields()
-            .iter()
-            .zip_eq(exprs)
-            .map(|(field, expr)| {
-                expr.alias_if_changed(field.name().to_string())
-                    .context(DataFusionSnafu)
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let table_ref = binding.table_ref();
-        let schema = projection_schema(&input, &exprs).context(DataFusionSnafu)?;
-        let alias = Self::from_optd_table_ref(table_ref);
-        let schema = schema.as_ref().clone().replace_qualifier(alias);
+        let optd_schema = binding.optd_schema();
+        let exprs = Self::alias_exprs_for_schema(exprs, &optd_schema)?;
+        let schema = Self::df_schema_from_optd_schema(&optd_schema)?;
         logical_expr::Projection::try_new_with_schema(exprs, input, Arc::new(schema))
             .context(DataFusionSnafu)
     }
@@ -110,72 +101,50 @@ impl OptdQueryPlannerContext<'_> {
 
     fn try_new_df_aggregate(
         &self,
-        key_table_index: &i64,
-        aggregate_table_index: &i64,
+        output_schema: &OptdSchema,
         input: Arc<DFLogicalPlan>,
         group_expr: Vec<DFExpr>,
         aggr_expr: Vec<DFExpr>,
     ) -> Result<logical_expr::Aggregate> {
-        let key_binding = self.inner.get_binding(key_table_index).context(OptdSnafu)?;
-        let table_ref = key_binding.table_ref();
-        let key_alias = Self::from_optd_table_ref(table_ref);
-        let group_qualifiers: Vec<_> = key_binding
-            .schema()
-            .fields()
+        let qualified_fields = output_schema
             .iter()
-            .zip_eq(group_expr.iter())
-            .map(|(field, expr)| match expr {
-                DFExpr::Column(column) if field.name() == &column.name => column.relation.clone(),
-                _ => Some(key_alias.clone()),
-            })
+            .map(|(table_ref, field)| (table_ref.clone(), field.clone()))
             .collect_vec();
-
-        let group_expr = key_binding
-            .schema()
-            .fields()
-            .iter()
-            .zip_eq(group_expr)
-            .map(|(field, expr)| {
-                // expr.alias_if_changed(field.name().to_string())
-                //     .context(DataFusionSnafu)
-                Self::alias_if_changed(expr, table_ref, field)
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let (group_fields, aggr_fields) = qualified_fields.split_at(group_expr.len());
+        let group_expr = Self::alias_exprs_for_qualified_fields(group_expr, group_fields)?;
         let group_expr = enumerate_grouping_sets(group_expr).context(DataFusionSnafu)?;
-        let mut qualified_fields: Vec<_> = key_binding
-            .schema()
-            .fields()
-            .iter()
-            .zip_eq(group_qualifiers)
-            .map(|(field, qualifier)| (qualifier, field.clone()))
-            .collect_vec();
-
-        let aggregate_binding = self
-            .inner
-            .get_binding(aggregate_table_index)
-            .context(OptdSnafu)?;
-        let table_ref = aggregate_binding.table_ref();
-        let aggr_expr = aggregate_binding
-            .schema()
-            .fields()
-            .iter()
-            .zip_eq(aggr_expr)
-            .map(|(field, expr)| Self::alias_if_changed(expr, table_ref, field))
-            .collect::<Result<Vec<_>>>()?;
-
-        let alias = Self::from_optd_table_ref(table_ref);
-        qualified_fields.extend(
-            exprlist_to_fields(aggr_expr.as_slice(), &input)
-                .context(DataFusionSnafu)?
-                .into_iter()
-                .map(|(_, field)| (Some(alias.clone()), field)),
-        );
-
-        let schema =
-            DFSchema::new_with_metadata(qualified_fields, input.schema().metadata().clone())
-                .context(DataFusionSnafu)?;
+        let aggr_expr = Self::alias_exprs_for_qualified_fields(aggr_expr, aggr_fields)?;
+        let schema = Self::df_schema_from_optd_schema(output_schema)?;
 
         logical_expr::Aggregate::try_new_with_schema(input, group_expr, aggr_expr, Arc::new(schema))
+            .context(DataFusionSnafu)
+    }
+
+    fn alias_exprs_for_schema(exprs: Vec<DFExpr>, optd_schema: &OptdSchema) -> Result<Vec<DFExpr>> {
+        let qualified_fields = optd_schema
+            .iter()
+            .map(|(table_ref, field)| (table_ref.clone(), field.clone()))
+            .collect_vec();
+        Self::alias_exprs_for_qualified_fields(exprs, qualified_fields.as_slice())
+    }
+
+    fn alias_exprs_for_qualified_fields(
+        exprs: Vec<DFExpr>,
+        qualified_fields: &[(TableRef, Arc<Field>)],
+    ) -> Result<Vec<DFExpr>> {
+        qualified_fields
+            .iter()
+            .zip_eq(exprs)
+            .map(|((table_ref, field), expr)| Self::alias_if_changed(expr, table_ref, field))
+            .collect()
+    }
+
+    fn df_schema_from_optd_schema(optd_schema: &OptdSchema) -> Result<DFSchema> {
+        let qualified_fields = optd_schema
+            .iter()
+            .map(|(table_ref, field)| (Some(Self::from_optd_table_ref(table_ref)), field.clone()))
+            .collect_vec();
+        DFSchema::new_with_metadata(qualified_fields, optd_schema.inner().metadata().clone())
             .context(DataFusionSnafu)
     }
 
@@ -183,6 +152,18 @@ impl OptdQueryPlannerContext<'_> {
         &mut self,
         node: AggregateBorrowed<'_>,
     ) -> Result<DFLogicalPlan> {
+        let output_schema = Aggregate::new(
+            *node.key_table_index(),
+            *node.aggregate_table_index(),
+            node.input().clone(),
+            node.exprs().clone(),
+            node.keys().clone(),
+            *node.implementation(),
+        )
+        .into_operator()
+        .output_schema(&self.inner)
+        .context(OptdSnafu)?;
+
         let input = self.try_from_optd_plan(node.input())?;
 
         let keys = node.keys().borrow::<List>();
@@ -198,13 +179,8 @@ impl OptdQueryPlannerContext<'_> {
             .map(|e| self.try_from_optd_scalar_expr(e))
             .try_collect()?;
 
-        let aggregate = self.try_new_df_aggregate(
-            node.key_table_index(),
-            node.aggregate_table_index(),
-            Arc::new(input),
-            group_expr,
-            aggr_expr,
-        )?;
+        let aggregate =
+            self.try_new_df_aggregate(&output_schema, Arc::new(input), group_expr, aggr_expr)?;
         Ok(DFLogicalPlan::Aggregate(aggregate))
     }
     pub fn try_from_optd_remap(&mut self, node: RemapBorrowed<'_>) -> Result<DFLogicalPlan> {
@@ -362,7 +338,11 @@ mod tests {
         prelude::SessionConfig,
         scalar::ScalarValue,
     };
-    use optd_core::ir::scalar::{Case, Function, FunctionKind};
+    use optd_core::ir::{
+        scalar::{Case, Function, FunctionKind},
+        schema::OptdSchema,
+        table_ref::TableRef,
+    };
 
     use crate::create_optd_session_context;
 
@@ -452,13 +432,30 @@ mod tests {
             DataType::Int64,
             false,
         )]));
-        let aggregate_table_index = inner.add_binding(None, aggregate_schema).unwrap();
-        let key_table_index = inner.add_binding(None, key_schema).unwrap();
+        let _aggregate_table_index = inner.add_binding(None, aggregate_schema).unwrap();
+        let _key_table_index = inner.add_binding(None, key_schema).unwrap();
+        let output_schema = OptdSchema::new_with_metadata(
+            vec![
+                (
+                    TableRef::bare("__internal_#3"),
+                    Arc::new(Field::new("l_returnflag", DataType::Utf8, false)),
+                ),
+                (
+                    TableRef::bare("__internal_#4"),
+                    Arc::new(Field::new(
+                        "sum(lineitem.l_quantity)",
+                        DataType::Int64,
+                        false,
+                    )),
+                ),
+            ],
+            Default::default(),
+        )
+        .unwrap();
 
         let aggregate = ctx
             .try_new_df_aggregate(
-                &key_table_index,
-                &aggregate_table_index,
+                &output_schema,
                 Arc::new(input),
                 vec![DFExpr::Column(Column::from_qualified_name(
                     "__internal_#2.l_returnflag",
@@ -506,13 +503,26 @@ mod tests {
             DataType::Int64,
             false,
         )]));
-        let key_table_index = inner.add_binding(None, key_schema).unwrap();
-        let aggregate_table_index = inner.add_binding(None, aggregate_schema).unwrap();
+        let _key_table_index = inner.add_binding(None, key_schema).unwrap();
+        let _aggregate_table_index = inner.add_binding(None, aggregate_schema).unwrap();
+        let output_schema = OptdSchema::new_with_metadata(
+            vec![
+                (
+                    TableRef::bare("part"),
+                    Arc::new(Field::new("p_brand", DataType::Utf8, false)),
+                ),
+                (
+                    TableRef::bare("__internal_#4"),
+                    Arc::new(Field::new("sum(part.p_partkey)", DataType::Int64, false)),
+                ),
+            ],
+            Default::default(),
+        )
+        .unwrap();
 
         let aggregate = ctx
             .try_new_df_aggregate(
-                &key_table_index,
-                &aggregate_table_index,
+                &output_schema,
                 Arc::new(input),
                 vec![DFExpr::Column(Column::from_qualified_name("part.p_brand"))],
                 vec![sum(DFExpr::Column(Column::from_qualified_name(
