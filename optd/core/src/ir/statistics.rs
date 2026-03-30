@@ -15,11 +15,10 @@ pub struct TableStatistics {
 /// Column statistics (external tables use column_id=0, name for identification)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ColumnStatistics {
-    /// TODO(Aditya): Move this to Value?
     /// Minimum value in the column (serialized as JSON string)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_value: Option<String>,
-    /// Maximum value in the column (serialized as JSON string)
+    /// Maximum value in the column (serialized as string)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_value: Option<String>,
     /// Total number of null values

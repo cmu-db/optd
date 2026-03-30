@@ -10,6 +10,7 @@ mod memory_catalog;
 
 use std::sync::Arc;
 
+use crate::ir::IRContext;
 use crate::ir::{
     DataType,
     catalog::*,
@@ -20,8 +21,6 @@ pub use card::MagicCardinalityEstimator;
 pub use cm::MagicCostModel;
 use itertools::Itertools;
 pub use memory_catalog::MemoryCatalog;
-
-use crate::ir::IRContext;
 
 impl IRContext {
     pub fn with_empty_magic() -> Self {
@@ -53,7 +52,6 @@ impl IRContext {
             catalog.create_table(course.clone(), schema).unwrap();
         }
 
-        // catalog.set_table_row_count(course, 10);
         catalog
             .set_table_statistics(
                 course,
@@ -91,7 +89,6 @@ impl IRContext {
             catalog.create_table(schedule.clone(), schema).unwrap();
         }
 
-        // catalog.set_table_row_count(schedule, 25);
         catalog
             .set_table_statistics(
                 schedule,
@@ -137,7 +134,6 @@ impl IRContext {
             catalog.create_table(staff.clone(), schema).unwrap();
         }
 
-        // catalog.set_table_row_count(staff, 200);
         catalog
             .set_table_statistics(
                 staff,

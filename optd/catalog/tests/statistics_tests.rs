@@ -82,7 +82,7 @@
 // fn col_stats(column_name: &str, stats_type: &str, data: serde_json::Value) -> ColumnStatistics {
 //     ColumnStatistics {
 //         column_id: 0,
-//         column_type: String::new(),
+//         column_type: optd_core::ir::DataType::Utf8,
 //         name: column_name.to_string(),
 //         advanced_stats: vec![AdvanceColumnStatistics {
 //             stats_type: stats_type.to_string(),

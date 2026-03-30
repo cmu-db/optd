@@ -7,6 +7,7 @@
 
 use std::sync::{Arc, LazyLock};
 
+pub mod adv_card;
 pub mod binder;
 pub mod builder;
 pub mod catalog;

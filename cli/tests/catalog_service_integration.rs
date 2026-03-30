@@ -104,8 +104,8 @@
 //         .find(|c| c.name == "age")
 //         .expect("Should have statistics for 'age' column");
 
-//     assert_eq!(age_stats.name, "age");
-//     assert_eq!(age_stats.column_type, "int32");
+//    assert_eq!(age_stats.name, "age");
+//    assert_eq!(age_stats.column_type, optd_core::ir::DataType::Int32);
 
 //     // Verify the ndv statistic was actually persisted
 //     assert_eq!(

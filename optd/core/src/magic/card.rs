@@ -92,6 +92,7 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
                     match literal.value() {
                         crate::ir::ScalarValue::Boolean(Some(true)) => 1.,
                         crate::ir::ScalarValue::Boolean(_) => 0.,
+                        // TODO(AC/Yuchen): Join condition?
                         _ => unreachable!("join condition must be boolean"),
                     }
                 } else {
@@ -128,10 +129,11 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
             OperatorKind::Aggregate(meta) => {
                 let agg = Aggregate::borrow_raw_parts(meta, &op.common);
                 let len = agg.keys().borrow::<List>().members().len();
-
-                Cardinality::new(
-                    Self::MAGIC_GROUP_BY_KEY_NDV_FACTOR.powi(i32::try_from(len).unwrap()),
-                )
+                if len == 0 {
+                    return Cardinality::UNIT;
+                }
+                let factor = Self::MAGIC_GROUP_BY_KEY_NDV_FACTOR.powi(i32::try_from(len).unwrap());
+                factor * agg.input().cardinality(ctx)
             }
             OperatorKind::Remap(meta) => Remap::borrow_raw_parts(meta, &op.common)
                 .input()
