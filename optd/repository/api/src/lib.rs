@@ -1,3 +1,5 @@
+pub use optd_repository_entity as entity;
+
 pub mod schema;
 pub mod snapshot;
 pub mod table;

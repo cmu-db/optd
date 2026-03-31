@@ -1,7 +1,8 @@
 use sea_orm::{ActiveValue::Set, ConnectionTrait, DbErr, EntityTrait};
 
 use crate::{
-    api::{schema::CreateSchemaInfo, snapshot::SnapshotInfo},
+    schema::CreateSchemaInfo,
+    snapshot::SnapshotInfo,
     entity::{prelude::*, schema},
 };
 

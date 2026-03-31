@@ -1,8 +1,8 @@
 use sea_orm::{ActiveValue::Set, ConnectionTrait, DbErr, EntityTrait};
 
 use crate::{
-    api::snapshot::SnapshotInfo,
     entity::{prelude::*, snapshot},
+    snapshot::SnapshotInfo,
 };
 
 /// Commits the current snapshot metadata.

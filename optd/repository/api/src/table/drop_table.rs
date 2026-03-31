@@ -3,7 +3,8 @@ use sea_orm::{
 };
 
 use crate::{
-    api::{snapshot::SnapshotInfo, table::DropTableInfo},
+    snapshot::SnapshotInfo,
+    table::DropTableInfo,
     entity::{column, prelude::*, table},
 };
 

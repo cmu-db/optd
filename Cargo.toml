@@ -5,6 +5,9 @@ members = [
     "connectors/datafusion",
     "optd/core",
     "optd/repository",
+    "optd/repository/api",
+    "optd/repository/entity",
+    "optd/repository/migration",
     "synopses",
     "tests/sqllogictest",
     "tests/sqlplannertest",
@@ -12,7 +15,9 @@ members = [
 
 default-members = [
     "optd/core",
-    "optd/repository",
+    "optd/repository/api",
+    "optd/repository/entity",
+    "optd/repository/migration",
     "connectors/datafusion",
     "synopses",
     "tests/sqllogictest",

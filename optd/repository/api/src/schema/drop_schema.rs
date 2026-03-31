@@ -4,7 +4,8 @@ use sea_orm::{
 };
 
 use crate::{
-    api::{schema::DropSchemaInfo, snapshot::SnapshotInfo},
+    schema::DropSchemaInfo,
+    snapshot::SnapshotInfo,
     entity::{prelude::*, schema, table},
 };
 

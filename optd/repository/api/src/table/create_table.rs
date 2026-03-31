@@ -5,10 +5,8 @@ use sea_orm::{
 };
 
 use crate::{
-    api::{
-        snapshot::SnapshotInfo,
-        table::{CreateColumnInfo, CreateTableInfo},
-    },
+    snapshot::SnapshotInfo,
+    table::{CreateColumnInfo, CreateTableInfo},
     entity::{column, prelude::*, schema, table},
 };
 

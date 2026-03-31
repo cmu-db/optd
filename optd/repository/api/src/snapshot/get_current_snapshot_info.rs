@@ -1,6 +1,6 @@
 use sea_orm::{ConnectionTrait, DbErr, EntityTrait, QueryOrder, QuerySelect};
 
-use crate::{api::snapshot::SnapshotInfo, entity::snapshot};
+use crate::{entity::snapshot, snapshot::SnapshotInfo};
 
 pub async fn get_current_snapshot_info<C>(db: &C) -> Result<Option<SnapshotInfo>, DbErr>
 where

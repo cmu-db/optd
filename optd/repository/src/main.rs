@@ -1,4 +1,4 @@
-use optd_repository::api::snapshot::{SnapshotInfo, commit_snapshot};
+use optd_repository_api::snapshot::{SnapshotInfo, commit_snapshot};
 use sea_orm::{Database, DatabaseConnection};
 
 #[tokio::main]
@@ -7,8 +7,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let database_url = std::env::var("DATABASE_URL")?;
     let db = Database::connect(database_url).await?;
     // let db = Database::connect("sqlite::memory:").await?;
-
-    db.get_schema_registry("optd_repository::entity::*")
+    db.get_schema_registry("optd_repository_entity::*")
         .sync(&db)
         .await?;
 

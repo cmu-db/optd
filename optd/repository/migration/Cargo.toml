@@ -1,0 +1,13 @@
+[package]
+name = "optd-repository-migration"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "optd_repository_migration"
+path = "src/lib.rs"
+
+[dependencies]
+sea-orm-migration = { workspace = true }
+tokio = { workspace = true }

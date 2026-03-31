@@ -1,21 +1,23 @@
 use sea_orm::{
-    ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QueryOrder,
-    QuerySelect,
+    ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect,
 };
 
 use crate::{
-    api::{schema::SchemaInfo, snapshot::SnapshotInfo},
+    schema::{GetSchemaInfo, SchemaInfo},
+    snapshot::SnapshotInfo,
     entity::{prelude::Schema, schema},
 };
 
-pub async fn get_all_schema_infos<C>(
+pub async fn get_schema<C>(
+    info: GetSchemaInfo,
     db: &C,
     current_snapshot: &mut SnapshotInfo,
-) -> Result<Vec<SchemaInfo>, DbErr>
+) -> Result<Option<SchemaInfo>, DbErr>
 where
     C: ConnectionTrait,
 {
     let snapshot_id = current_snapshot.snapshot_id;
+
     Schema::find()
         .filter(schema::Column::BeginSnapshot.lte(snapshot_id))
         .filter(
@@ -23,12 +25,12 @@ where
                 .add(schema::Column::EndSnapshot.is_null())
                 .add(schema::Column::EndSnapshot.gt(snapshot_id)),
         )
+        .filter(schema::Column::SchemaId.eq(info.schema_id))
         .select_only()
         .column(schema::Column::SchemaId)
         .column(schema::Column::SchemaUuid)
         .column(schema::Column::SchemaName)
-        .order_by_asc(schema::Column::SchemaName)
         .into_partial_model::<SchemaInfo>()
-        .all(db)
+        .one(db)
         .await
 }

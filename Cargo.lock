@@ -3961,18 +3961,34 @@ dependencies = [
 ]
 
 [[package]]
-name = "optd-repository"
+name = "optd-repository-api"
+version = "0.1.0"
+dependencies = [
+ "arrow-schema",
+ "dotenvy",
+ "itertools 0.14.0",
+ "optd-core",
+ "optd-repository-entity",
+ "sea-orm",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "optd-repository-entity"
 version = "0.1.0"
 dependencies = [
  "arrow-schema",
  "derive_more",
- "dotenvy",
- "itertools 0.14.0",
- "optd-core",
  "sea-orm",
+]
+
+[[package]]
+name = "optd-repository-migration"
+version = "0.1.0"
+dependencies = [
  "sea-orm-migration",
  "tokio",
- "uuid",
 ]
 
 [[package]]
@@ -4694,6 +4710,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71fe3824f5629716b1589be05dacd749f6aa084c87e00e016714a8cdfccc997c"
 dependencies = [
  "bytecheck",
+]
+
+[[package]]
+name = "repository"
+version = "0.1.0"
+dependencies = [
+ "arrow-schema",
+ "derive_more",
+ "dotenvy",
+ "itertools 0.14.0",
+ "optd-core",
+ "optd-repository-api",
+ "optd-repository-entity",
+ "optd-repository-migration",
+ "sea-orm",
+ "sea-orm-migration",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
