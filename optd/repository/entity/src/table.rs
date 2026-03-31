@@ -39,18 +39,12 @@ pub struct Model {
 
     /// The name of the table, e.g. `my_table`.
     pub table_name: String,
-
     // TODO(yuchen): handle paths.
     // /// The `data_path` of the table.
     // pub path: String,
     // /// Whether the `path` is relative to the `path` of the schema (`true`)
     // /// or an absolute path (`false`).
     // pub path_is_relative: bool,
-    #[sea_orm(belongs_to, from = "schema_id", to = "schema_id")]
-    pub schema: HasOne<super::schema::Entity>,
-
-    #[sea_orm(has_many)]
-    pub columns: HasMany<super::column::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {

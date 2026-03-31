@@ -74,9 +74,6 @@ pub struct Model {
     /// This is `NULL` for top-level and non-nested columns.
     /// For example, for `STRUCT` types, this refers to the parent struct column.
     pub parent_column: Option<i64>,
-
-    #[sea_orm(belongs_to, from = "table_id", to = "table_id")]
-    pub table: HasOne<super::table::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

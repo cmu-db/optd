@@ -15,6 +15,7 @@ members = [
 
 default-members = [
     "optd/core",
+    "optd/repository",
     "optd/repository/api",
     "optd/repository/entity",
     "optd/repository/migration",

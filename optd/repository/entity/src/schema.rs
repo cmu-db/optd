@@ -32,8 +32,6 @@ pub struct Model {
     // /// Whether the `path` is relative to the `data_path` of the catalog
     // /// (`true`) or an absolute path (`false`).
     // pub path_is_relative: bool,
-    #[sea_orm(has_many)]
-    pub tables: HasMany<super::table::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {

@@ -8,3 +8,4 @@ repository.workspace = true
 sea-orm = { workspace = true }
 arrow-schema = { workspace = true }
 derive_more = { version = "2.1.1", features = ["display"] }
+uuid = { workspace = true }

@@ -1,5 +1,5 @@
 [package]
-name = "repository"
+name = "optd-repository"
 version.workspace = true
 edition.workspace = true
 repository.workspace = true

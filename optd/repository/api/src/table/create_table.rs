@@ -5,9 +5,9 @@ use sea_orm::{
 };
 
 use crate::{
+    entity::{column, prelude::*, schema, table},
     snapshot::SnapshotInfo,
     table::{CreateColumnInfo, CreateTableInfo},
-    entity::{column, prelude::*, schema, table},
 };
 
 pub async fn create_table<C>(
@@ -95,7 +95,7 @@ fn prepare_columns(
         .enumerate()
         .map(|(i, column)| column::ActiveModel {
             table_id: Set(table_id),
-            column_id: Set(current_snapshot.get_next_catalog_id()),
+            column_id: Set(i as i64),
             begin_snapshot: Set(current_snapshot.snapshot_id),
             end_snapshot: Set(None),
             column_order: Set(i as i64),
