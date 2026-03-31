@@ -12,3 +12,5 @@ dotenvy = { workspace = true }
 uuid = { workspace = true }
 arrow-schema = { workspace = true }
 derive_more = { version = "2.1.1", features = ["display"] }
+itertools = { workspace = true }
+optd-core = { path = "../core" }

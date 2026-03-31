@@ -1,6 +1,7 @@
 mod create_schema;
 mod drop_schema;
-mod get_all_schema_infos;
+mod get_all_schemas;
+mod get_schema;
 
 use sea_orm::{DerivePartialModel, prelude::Uuid};
 
@@ -8,7 +9,23 @@ use crate::entity::schema;
 
 pub use create_schema::*;
 pub use drop_schema::*;
-pub use get_all_schema_infos::*;
+pub use get_all_schemas::*;
+pub use get_schema::*;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateSchemaInfo {
+    pub schema_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DropSchemaInfo {
+    pub schema_id: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GetSchemaInfo {
+    pub schema_id: i64,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, DerivePartialModel)]
 #[sea_orm(entity = "schema::Entity")]

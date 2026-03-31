@@ -1,30 +1,34 @@
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect, sea_query::Expr,
+    ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect,
+    sea_query::Expr,
 };
 
 use crate::{
-    api::snapshot::SnapshotInfo,
+    api::{schema::DropSchemaInfo, snapshot::SnapshotInfo},
     entity::{prelude::*, schema, table},
 };
 
-pub async fn drop_schemas<C>(
-    schema_ids: &[i64],
+pub async fn drop_schema<C>(
+    info: DropSchemaInfo,
     db: &C,
     current_snapshot: &mut SnapshotInfo,
 ) -> Result<(), DbErr>
 where
     C: ConnectionTrait,
 {
-    if schema_ids.is_empty() {
-        return Ok(());
-    }
+    let snapshot_id = current_snapshot.snapshot_id;
 
     if let Some((schema_id, table_name)) = Table::find()
+        .filter(table::Column::BeginSnapshot.lte(snapshot_id))
+        .filter(
+            Condition::any()
+                .add(table::Column::EndSnapshot.is_null())
+                .add(table::Column::EndSnapshot.gt(snapshot_id)),
+        )
+        .filter(table::Column::SchemaId.eq(info.schema_id))
         .select_only()
         .column(table::Column::SchemaId)
         .column(table::Column::TableName)
-        .filter(table::Column::EndSnapshot.is_null())
-        .filter(table::Column::SchemaId.is_in(schema_ids.iter().copied()))
         .into_tuple::<(i64, String)>()
         .one(db)
         .await?
@@ -34,12 +38,10 @@ where
         )));
     }
 
-    let end_snapshot = current_snapshot.snapshot_id;
-
     Schema::update_many()
-        .col_expr(schema::Column::EndSnapshot, Expr::value(end_snapshot))
+        .col_expr(schema::Column::EndSnapshot, Expr::value(snapshot_id))
         .filter(schema::Column::EndSnapshot.is_null())
-        .filter(schema::Column::SchemaId.is_in(schema_ids.iter().copied()))
+        .filter(schema::Column::SchemaId.eq(info.schema_id))
         .exec(db)
         .await?;
 

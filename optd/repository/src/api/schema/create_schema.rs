@@ -1,26 +1,27 @@
 use sea_orm::{ActiveValue::Set, ConnectionTrait, DbErr, EntityTrait};
 
 use crate::{
-    api::snapshot::SnapshotInfo,
+    api::{schema::CreateSchemaInfo, snapshot::SnapshotInfo},
     entity::{prelude::*, schema},
 };
 
 pub async fn create_new_schema<C>(
-    schema_name: &str,
+    info: CreateSchemaInfo,
     db: &C,
     current_snapshot: &mut SnapshotInfo,
-) -> Result<(), DbErr>
+) -> Result<i64, DbErr>
 where
     C: ConnectionTrait,
 {
+    let schema_id = current_snapshot.get_next_catalog_id();
     let model = schema::ActiveModel {
-        schema_id: Set(current_snapshot.get_next_catalog_id()),
+        schema_id: Set(schema_id),
         begin_snapshot: Set(current_snapshot.snapshot_id),
         end_snapshot: Set(None),
-        schema_name: Set(schema_name.to_owned()),
+        schema_name: Set(info.schema_name),
         ..Default::default()
     };
 
     Schema::insert(model).exec(db).await?;
-    Ok(())
+    Ok(schema_id)
 }

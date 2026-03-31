@@ -20,7 +20,6 @@ where
     C: ConnectionTrait,
 {
     let snapshot_id = current_snapshot.snapshot_id;
-
     let tables = Table::find()
         .filter(table::Column::BeginSnapshot.lte(snapshot_id))
         .filter(
@@ -63,66 +62,40 @@ where
 
     Ok(tables
         .into_iter()
-        .map(|table| TableInfo {
-            table_id: table.table_id,
-            schema_id: table.schema_id,
-            table_uuid: table.table_uuid,
-            table_name: table.table_name,
-            columns: build_column_tree(
-                columns_by_table.remove(&table.table_id).unwrap_or_default(),
-            ),
+        .map(|table| {
+            Ok(TableInfo {
+                table_id: table.table_id,
+                schema_id: table.schema_id,
+                table_uuid: table.table_uuid,
+                table_name: table.table_name,
+                columns: build_columns(
+                    columns_by_table.remove(&table.table_id).unwrap_or_default(),
+                )?,
+            })
         })
-        .collect())
+        .collect::<Result<Vec<_>, DbErr>>()?)
 }
 
-fn build_column_tree(columns: Vec<column::Model>) -> Vec<ColumnInfo> {
-    let mut columns_by_parent: HashMap<Option<i64>, Vec<FlatColumnInfo>> = HashMap::new();
-
-    for column in columns {
-        columns_by_parent
-            .entry(column.parent_column)
-            .or_default()
-            .push(FlatColumnInfo {
-                id: column.column_id,
-                column_name: column.column_name,
-                column_type: column.column_type,
-                initial_default: column.initial_default,
-                default_value: column.default_value,
-                nulls_allowed: column.nulls_allowed,
-            });
-    }
-
-    build_children(None, &mut columns_by_parent)
-}
-
-fn build_children(
-    parent_column: Option<i64>,
-    columns_by_parent: &mut HashMap<Option<i64>, Vec<FlatColumnInfo>>,
-) -> Vec<ColumnInfo> {
-    columns_by_parent
-        .remove(&parent_column)
-        .unwrap_or_default()
+fn build_columns(columns: Vec<column::Model>) -> Result<Vec<ColumnInfo>, DbErr> {
+    Ok(columns
         .into_iter()
         .map(|column| {
-            let id = column.id;
-            ColumnInfo {
-                column_id: id,
+            if column.parent_column.is_some() {
+                return Err(DbErr::Custom(format!(
+                    "Nested columns are not supported for table_id {}",
+                    column.table_id
+                )));
+            }
+
+            Ok(ColumnInfo {
+                column_id: column.column_id,
                 column_name: column.column_name,
                 column_type: column.column_type,
+                nulls_allowed: column.nulls_allowed,
                 initial_default: column.initial_default,
                 default_value: column.default_value,
-                nulls_allowed: column.nulls_allowed,
-                children: build_children(Some(id), columns_by_parent),
-            }
+                children: Vec::new(),
+            })
         })
-        .collect()
-}
-
-struct FlatColumnInfo {
-    id: i64,
-    column_name: String,
-    column_type: column::ColumnType,
-    initial_default: Option<String>,
-    default_value: Option<String>,
-    nulls_allowed: bool,
+        .collect::<Result<Vec<_>, DbErr>>()?)
 }

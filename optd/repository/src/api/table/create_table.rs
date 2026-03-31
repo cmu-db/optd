@@ -1,142 +1,118 @@
-use sea_orm::{ActiveValue::Set, ConnectionTrait, DbErr, EntityTrait, prelude::Uuid};
+use optd_core::ir::table_ref::TableRef;
+use sea_orm::{
+    ActiveValue::Set, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter,
+    QuerySelect, prelude::Uuid,
+};
 
 use crate::{
     api::{
         snapshot::SnapshotInfo,
-        table::{ColumnInfo, TableInfo},
+        table::{CreateColumnInfo, CreateTableInfo},
     },
-    entity::{column, prelude::*, table},
+    entity::{column, prelude::*, schema, table},
 };
 
-pub async fn create_tables<C>(
-    tables: &[TableInfo],
+pub async fn create_table<C>(
+    info: CreateTableInfo,
     db: &C,
     current_snapshot: &mut SnapshotInfo,
-) -> Result<(), DbErr>
+) -> Result<i64, DbErr>
 where
     C: ConnectionTrait,
 {
-    if tables.is_empty() {
-        return Ok(());
-    }
+    let snapshot_id = current_snapshot.snapshot_id;
+    let schema_name = target_schema_name(&info.table_name);
+    let table_name = info.table_name.table();
 
-    let PreparedTables {
-        table_models,
-        column_models,
-    } = prepare_tables(tables, current_snapshot);
+    let schema_id = Schema::find()
+        .filter(schema::Column::BeginSnapshot.lte(snapshot_id))
+        .filter(
+            Condition::any()
+                .add(schema::Column::EndSnapshot.is_null())
+                .add(schema::Column::EndSnapshot.gt(snapshot_id)),
+        )
+        .filter(schema::Column::SchemaName.eq(schema_name))
+        .select_only()
+        .column(schema::Column::SchemaId)
+        .into_tuple::<i64>()
+        .one(db)
+        .await?
+        .ok_or_else(|| {
+            DbErr::Custom(format!(
+                "Schema '{schema_name}' does not exist at snapshot {snapshot_id}"
+            ))
+        })?;
 
-    Table::insert_many(table_models)
-        .exec_without_returning(db)
+    let existing_table_id = Table::find()
+        .filter(table::Column::BeginSnapshot.lte(snapshot_id))
+        .filter(
+            Condition::any()
+                .add(table::Column::EndSnapshot.is_null())
+                .add(table::Column::EndSnapshot.gt(snapshot_id)),
+        )
+        .filter(table::Column::SchemaId.eq(schema_id))
+        .filter(table::Column::TableName.eq(table_name))
+        .select_only()
+        .column(table::Column::TableId)
+        .into_tuple::<i64>()
+        .one(db)
         .await?;
 
-    if !column_models.is_empty() {
-        Column::insert_many(column_models)
-            .exec_without_returning(db)
-            .await?;
+    if existing_table_id.is_some() {
+        return Err(DbErr::Custom(format!(
+            "Table '{}.{}' already exists",
+            schema_name, table_name
+        )));
     }
 
-    Ok(())
+    let table_id = current_snapshot.get_next_catalog_id();
+    let table_model = table::ActiveModel {
+        table_id: Set(table_id),
+        table_uuid: Set(Uuid::new_v4()),
+        begin_snapshot: Set(snapshot_id),
+        end_snapshot: Set(None),
+        schema_id: Set(schema_id),
+        table_name: Set(table_name.to_owned()),
+        ..Default::default()
+    };
+
+    let column_models = prepare_columns(info.columns, table_id, current_snapshot);
+
+    Table::insert(table_model).exec(db).await?;
+
+    if !column_models.is_empty() {
+        Column::insert_many(column_models).exec(db).await?;
+    }
+
+    Ok(table_id)
 }
 
-struct PreparedTables {
-    table_models: Vec<table::ActiveModel>,
-    column_models: Vec<column::ActiveModel>,
-}
-
-fn prepare_tables(tables: &[TableInfo], current_snapshot: &mut SnapshotInfo) -> PreparedTables {
-    let mut table_models = Vec::with_capacity(tables.len());
-    let mut column_models = Vec::new();
-
-    for table in tables {
-        let table_id = if table.table_id > 0 {
-            table.table_id
-        } else {
-            current_snapshot.get_next_catalog_id()
-        };
-        let table_uuid = if table.table_uuid.is_nil() {
-            Uuid::new_v4()
-        } else {
-            table.table_uuid
-        };
-
-        table_models.push(table::ActiveModel {
+fn prepare_columns(
+    columns: Vec<CreateColumnInfo>,
+    table_id: i64,
+    current_snapshot: &mut SnapshotInfo,
+) -> Vec<column::ActiveModel> {
+    columns
+        .into_iter()
+        .enumerate()
+        .map(|(i, column)| column::ActiveModel {
             table_id: Set(table_id),
-            table_uuid: Set(table_uuid),
+            column_id: Set(current_snapshot.get_next_catalog_id()),
             begin_snapshot: Set(current_snapshot.snapshot_id),
             end_snapshot: Set(None),
-            schema_id: Set(table.schema_id),
-            table_name: Set(table.table_name.clone()),
+            column_order: Set(i as i64),
+            column_name: Set(column.column_name),
+            column_type: Set(column.column_type),
+            initial_default: Set(column.initial_default),
+            default_value: Set(column.default_value),
+            nulls_allowed: Set(column.nulls_allowed),
+            parent_column: Set(None),
             ..Default::default()
-        });
-
-        let mut next_column_order = 0;
-        let _columns = normalize_columns(
-            &table.columns,
-            table_id,
-            None,
-            current_snapshot,
-            &mut next_column_order,
-            &mut column_models,
-        );
-    }
-
-    PreparedTables {
-        table_models,
-        column_models,
-    }
-}
-
-fn normalize_columns(
-    columns: &[ColumnInfo],
-    table_id: i64,
-    parent_column: Option<i64>,
-    current_snapshot: &mut SnapshotInfo,
-    next_column_order: &mut i64,
-    column_models: &mut Vec<column::ActiveModel>,
-) -> Vec<ColumnInfo> {
-    columns
-        .iter()
-        .map(|column| {
-            let column_id = if column.column_id > 0 {
-                column.column_id
-            } else {
-                current_snapshot.get_next_catalog_id()
-            };
-
-            column_models.push(column::ActiveModel {
-                table_id: Set(table_id),
-                column_id: Set(column_id),
-                begin_snapshot: Set(current_snapshot.snapshot_id),
-                end_snapshot: Set(None),
-                column_order: Set(*next_column_order),
-                column_name: Set(column.column_name.clone()),
-                column_type: Set(column.column_type.clone()),
-                initial_default: Set(column.initial_default.clone()),
-                default_value: Set(column.default_value.clone()),
-                nulls_allowed: Set(column.nulls_allowed),
-                parent_column: Set(parent_column),
-                ..Default::default()
-            });
-            *next_column_order += 1;
-
-            let children = normalize_columns(
-                &column.children,
-                table_id,
-                Some(column_id),
-                current_snapshot,
-                next_column_order,
-                column_models,
-            );
-
-            ColumnInfo {
-                column_id,
-                column_name: column.column_name.clone(),
-                column_type: column.column_type.clone(),
-                initial_default: column.initial_default.clone(),
-                default_value: column.default_value.clone(),
-                nulls_allowed: column.nulls_allowed,
-                children,
-            }
         })
         .collect()
+}
+
+/// Extract the schema name from table reference, otherwise use `public` as the default.
+fn target_schema_name(table_ref: &TableRef) -> &str {
+    table_ref.schema().unwrap_or("public")
 }
