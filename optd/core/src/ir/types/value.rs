@@ -10,16 +10,16 @@ use std::{
 
 use arrow::{
     array::{
-        Array, ArrayRef, BooleanArray, Date32Array, Date64Array, Decimal32Array, Decimal64Array,
-        Decimal128Array, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
-        StringArray, StringViewArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
+        Array, ArrayRef, BooleanArray, Date32Array, Date64Array, Decimal128Array, Decimal32Array,
+        Decimal64Array, Float32Array, Float64Array, Int16Array, Int32Array, Int64Array, Int8Array,
+        StringArray, StringViewArray, UInt16Array, UInt32Array, UInt64Array, UInt8Array,
     },
-    compute::kernels::cast::{CastOptions, cast_with_options},
+    compute::kernels::cast::{cast_with_options, CastOptions},
     util::display::FormatOptions,
 };
 
 use crate::{
-    error::{Result, whatever},
+    error::{whatever, Result},
     ir::DataType,
 };
 
@@ -569,6 +569,87 @@ mod tests {
                 .cast_to_with_options(&DataType::Int32, &options)
                 .unwrap(),
             ScalarValue::Int32(None)
+        );
+    }
+
+    fn assert_string_round_trip(value: ScalarValue) {
+        let data_type = value.data_type();
+        let string_value = value.cast_to(&DataType::Utf8).unwrap();
+        match string_value {
+            ScalarValue::Utf8(Some(string_value)) => {
+                assert_eq!(
+                    ScalarValue::try_from_string(string_value, &data_type).unwrap(),
+                    value
+                );
+            }
+            ScalarValue::Utf8(None) => {
+                assert_eq!(ScalarValue::Utf8(None).cast_to(&data_type).unwrap(), value);
+            }
+            other => panic!("expected utf8 scalar after cast, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scalar_values_round_trip_through_utf8_casts() {
+        for value in [
+            ScalarValue::Boolean(Some(true)),
+            ScalarValue::Boolean(None),
+            ScalarValue::Float32(Some(1.5)),
+            ScalarValue::Float32(None),
+            ScalarValue::Float64(Some(-2.25)),
+            ScalarValue::Float64(None),
+            ScalarValue::Int8(Some(-8)),
+            ScalarValue::Int8(None),
+            ScalarValue::Int16(Some(-16)),
+            ScalarValue::Int16(None),
+            ScalarValue::Int32(Some(-32)),
+            ScalarValue::Int32(None),
+            ScalarValue::Int64(Some(-64)),
+            ScalarValue::Int64(None),
+            ScalarValue::UInt8(Some(8)),
+            ScalarValue::UInt8(None),
+            ScalarValue::UInt16(Some(16)),
+            ScalarValue::UInt16(None),
+            ScalarValue::UInt32(Some(32)),
+            ScalarValue::UInt32(None),
+            ScalarValue::UInt64(Some(64)),
+            ScalarValue::UInt64(None),
+            ScalarValue::Utf8(Some("hello".to_string())),
+            ScalarValue::Utf8(None),
+            ScalarValue::Utf8View(Some("view".to_string())),
+            ScalarValue::Utf8View(None),
+            ScalarValue::Date32(Some(1)),
+            ScalarValue::Date32(None),
+            ScalarValue::Date64(Some(86_400_000)),
+            ScalarValue::Date64(None),
+            ScalarValue::Decimal32(Some(1234), 6, 2),
+            ScalarValue::Decimal32(None, 6, 2),
+            ScalarValue::Decimal64(Some(5678), 8, 2),
+            ScalarValue::Decimal64(None, 8, 2),
+            ScalarValue::Decimal128(Some(9012), 10, 2),
+            ScalarValue::Decimal128(None, 10, 2),
+        ] {
+            assert_string_round_trip(value);
+        }
+    }
+
+    #[test]
+    fn scalar_values_try_from_string_matches_utf8_round_trip_targets() {
+        assert_eq!(
+            ScalarValue::try_from_string("42".to_string(), &DataType::Int32).unwrap(),
+            ScalarValue::Int32(Some(42))
+        );
+        assert_eq!(
+            ScalarValue::try_from_string("1970-01-02".to_string(), &DataType::Date32).unwrap(),
+            ScalarValue::Date32(Some(1))
+        );
+        assert_eq!(
+            ScalarValue::try_from_string("12.34".to_string(), &DataType::Decimal64(8, 2)).unwrap(),
+            ScalarValue::Decimal64(Some(1234), 8, 2)
+        );
+        assert_eq!(
+            ScalarValue::try_from_string("view".to_string(), &DataType::Utf8View).unwrap(),
+            ScalarValue::Utf8View(Some("view".to_string()))
         );
     }
 }
