@@ -1,12 +1,32 @@
 //! A module for representing nullable scalar values in the IR.
 
+use snafu::ResultExt;
 use std::{
     convert::Infallible,
     hash::{Hash, Hasher},
     str::FromStr,
+    sync::Arc,
 };
 
-use crate::ir::DataType;
+use arrow::{
+    array::{
+        Array, ArrayRef, BooleanArray, Date32Array, Date64Array, Decimal32Array, Decimal64Array,
+        Decimal128Array, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
+        StringArray, StringViewArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
+    },
+    compute::kernels::cast::{CastOptions, cast_with_options},
+    util::display::FormatOptions,
+};
+
+use crate::{
+    error::{Result, whatever},
+    ir::DataType,
+};
+
+const DEFAULT_CAST_OPTIONS: CastOptions<'static> = CastOptions {
+    safe: false,
+    format_options: FormatOptions::new(),
+};
 
 #[derive(Debug, Clone)]
 pub enum ScalarValue {
@@ -95,6 +115,117 @@ impl ScalarValue {
                 DataType::Decimal128(*precision, *scale)
             }
         }
+    }
+
+    fn to_array(&self) -> Result<ArrayRef> {
+        let array: ArrayRef = match self {
+            ScalarValue::Boolean(value) => Arc::new(BooleanArray::from(vec![*value])),
+            ScalarValue::Float32(value) => Arc::new(Float32Array::from(vec![*value])),
+            ScalarValue::Float64(value) => Arc::new(Float64Array::from(vec![*value])),
+            ScalarValue::Int8(value) => Arc::new(Int8Array::from(vec![*value])),
+            ScalarValue::Int16(value) => Arc::new(Int16Array::from(vec![*value])),
+            ScalarValue::Int32(value) => Arc::new(Int32Array::from(vec![*value])),
+            ScalarValue::Int64(value) => Arc::new(Int64Array::from(vec![*value])),
+            ScalarValue::UInt8(value) => Arc::new(UInt8Array::from(vec![*value])),
+            ScalarValue::UInt16(value) => Arc::new(UInt16Array::from(vec![*value])),
+            ScalarValue::UInt32(value) => Arc::new(UInt32Array::from(vec![*value])),
+            ScalarValue::UInt64(value) => Arc::new(UInt64Array::from(vec![*value])),
+            ScalarValue::Utf8(value) => Arc::new(StringArray::from(vec![value.clone()])),
+            ScalarValue::Utf8View(value) => Arc::new(StringViewArray::from(vec![value.clone()])),
+            ScalarValue::Date32(value) => Arc::new(Date32Array::from(vec![*value])),
+            ScalarValue::Date64(value) => Arc::new(Date64Array::from(vec![*value])),
+            ScalarValue::Decimal32(value, precision, scale) => {
+                let array = whatever!(
+                    Decimal32Array::from(vec![*value]).with_precision_and_scale(*precision, *scale),
+                    "invalid decimal32 scalar metadata precision={precision}, scale={scale}"
+                );
+                Arc::new(array)
+            }
+            ScalarValue::Decimal64(value, precision, scale) => {
+                let array = whatever!(
+                    Decimal64Array::from(vec![*value]).with_precision_and_scale(*precision, *scale),
+                    "invalid decimal64 scalar metadata precision={precision}, scale={scale}"
+                );
+                Arc::new(array)
+            }
+            ScalarValue::Decimal128(value, precision, scale) => {
+                let array = whatever!(
+                    Decimal128Array::from(vec![*value])
+                        .with_precision_and_scale(*precision, *scale),
+                    "invalid decimal128 scalar metadata precision={precision}, scale={scale}"
+                );
+                Arc::new(array)
+            }
+        };
+
+        Ok(array)
+    }
+
+    fn try_from_array(array: &dyn Array, index: usize) -> Result<Self> {
+        if index >= array.len() {
+            whatever!(
+                "array index {index} out of bounds for scalar extraction from len={}",
+                array.len()
+            );
+        }
+
+        macro_rules! extract_primitive {
+            ($array_ty:ty, $variant:ident) => {{
+                let array = array.as_any().downcast_ref::<$array_ty>().unwrap();
+                ScalarValue::$variant((!array.is_null(index)).then(|| array.value(index)))
+            }};
+        }
+
+        Ok(match array.data_type() {
+            DataType::Boolean => extract_primitive!(BooleanArray, Boolean),
+            DataType::Float32 => extract_primitive!(Float32Array, Float32),
+            DataType::Float64 => extract_primitive!(Float64Array, Float64),
+            DataType::Int8 => extract_primitive!(Int8Array, Int8),
+            DataType::Int16 => extract_primitive!(Int16Array, Int16),
+            DataType::Int32 => extract_primitive!(Int32Array, Int32),
+            DataType::Int64 => extract_primitive!(Int64Array, Int64),
+            DataType::UInt8 => extract_primitive!(UInt8Array, UInt8),
+            DataType::UInt16 => extract_primitive!(UInt16Array, UInt16),
+            DataType::UInt32 => extract_primitive!(UInt32Array, UInt32),
+            DataType::UInt64 => extract_primitive!(UInt64Array, UInt64),
+            DataType::Utf8 => {
+                let array = array.as_any().downcast_ref::<StringArray>().unwrap();
+                ScalarValue::Utf8((!array.is_null(index)).then(|| array.value(index).to_string()))
+            }
+            DataType::Utf8View => {
+                let array = array.as_any().downcast_ref::<StringViewArray>().unwrap();
+                ScalarValue::Utf8View(
+                    (!array.is_null(index)).then(|| array.value(index).to_string()),
+                )
+            }
+            DataType::Date32 => extract_primitive!(Date32Array, Date32),
+            DataType::Date64 => extract_primitive!(Date64Array, Date64),
+            DataType::Decimal32(precision, scale) => {
+                let array = array.as_any().downcast_ref::<Decimal32Array>().unwrap();
+                ScalarValue::Decimal32(
+                    (!array.is_null(index)).then(|| array.value(index)),
+                    *precision,
+                    *scale,
+                )
+            }
+            DataType::Decimal64(precision, scale) => {
+                let array = array.as_any().downcast_ref::<Decimal64Array>().unwrap();
+                ScalarValue::Decimal64(
+                    (!array.is_null(index)).then(|| array.value(index)),
+                    *precision,
+                    *scale,
+                )
+            }
+            DataType::Decimal128(precision, scale) => {
+                let array = array.as_any().downcast_ref::<Decimal128Array>().unwrap();
+                ScalarValue::Decimal128(
+                    (!array.is_null(index)).then(|| array.value(index)),
+                    *precision,
+                    *scale,
+                )
+            }
+            other => whatever!("unsupported scalar cast target type {other}"),
+        })
     }
 }
 
@@ -249,7 +380,7 @@ impl From<Option<&str>> for ScalarValue {
 impl FromStr for ScalarValue {
     type Err = Infallible;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         Ok(s.into())
     }
 }
@@ -331,12 +462,56 @@ impl std::fmt::Display for ScalarValue {
     }
 }
 
+impl ScalarValue {
+    pub fn try_from_nullable_string(value: Option<String>, target_type: &DataType) -> Result<Self> {
+        ScalarValue::Utf8(value).cast_to(target_type)
+    }
+
+    pub fn try_into_nullable_string(&self) -> Result<Option<String>> {
+        match self.cast_to(&DataType::Utf8)? {
+            ScalarValue::Utf8(value) => Ok(value),
+            other => whatever!(
+                "expected utf8 scalar after casting {} to utf8, got {}",
+                self.data_type(),
+                other.data_type()
+            ),
+        }
+    }
+
+    pub fn cast_to(&self, target_type: &DataType) -> Result<Self> {
+        self.cast_to_with_options(target_type, &DEFAULT_CAST_OPTIONS)
+    }
+
+    pub fn cast_to_with_options(
+        &self,
+        target_type: &DataType,
+        options: &CastOptions<'_>,
+    ) -> Result<Self> {
+        if self.data_type() == *target_type {
+            return Ok(self.clone());
+        }
+
+        let scalar_array = self.to_array()?;
+        let cast_arr = cast_with_options(&scalar_array, target_type, options)
+            .with_whatever_context(|_| {
+                format!(
+                    "failed to cast scalar value from {} to {}",
+                    self.data_type(),
+                    target_type
+                )
+            })?;
+
+        Self::try_from_array(cast_arr.as_ref(), 0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
 
     use super::ScalarValue;
     use crate::ir::DataType;
+    use arrow::{compute::kernels::cast::CastOptions, util::display::FormatOptions};
 
     #[test]
     fn float_values_report_types_and_nullability() {
@@ -369,5 +544,155 @@ mod tests {
         set.insert(nan32_a.clone());
         assert!(set.contains(&nan32_b));
         assert!(!set.contains(&nan32_c));
+    }
+
+    #[test]
+    fn scalar_values_cast_via_arrow_kernels() {
+        assert_eq!(
+            ScalarValue::Utf8(Some("42".to_string()))
+                .cast_to(&DataType::Int32)
+                .unwrap(),
+            ScalarValue::Int32(Some(42))
+        );
+        assert_eq!(
+            ScalarValue::Int32(Some(42))
+                .cast_to(&DataType::Utf8)
+                .unwrap(),
+            ScalarValue::Utf8(Some("42".to_string()))
+        );
+        assert_eq!(
+            ScalarValue::Utf8(Some("view".to_string()))
+                .cast_to(&DataType::Utf8View)
+                .unwrap(),
+            ScalarValue::Utf8View(Some("view".to_string()))
+        );
+    }
+
+    #[test]
+    fn scalar_values_safe_casts_return_null() {
+        let options = CastOptions {
+            safe: true,
+            format_options: FormatOptions::new(),
+        };
+
+        assert_eq!(
+            ScalarValue::Utf8(Some("abc".to_string()))
+                .cast_to_with_options(&DataType::Int32, &options)
+                .unwrap(),
+            ScalarValue::Int32(None)
+        );
+    }
+
+    fn assert_string_round_trip(value: ScalarValue) {
+        let data_type = value.data_type();
+        let string_value = value.try_into_nullable_string().unwrap();
+        assert_eq!(
+            ScalarValue::try_from_nullable_string(string_value, &data_type).unwrap(),
+            value
+        );
+    }
+
+    #[test]
+    fn scalar_values_round_trip_through_utf8_casts() {
+        for value in [
+            ScalarValue::Boolean(Some(true)),
+            ScalarValue::Boolean(None),
+            ScalarValue::Float32(Some(1.5)),
+            ScalarValue::Float32(None),
+            ScalarValue::Float64(Some(-2.25)),
+            ScalarValue::Float64(None),
+            ScalarValue::Int8(Some(-8)),
+            ScalarValue::Int8(None),
+            ScalarValue::Int16(Some(-16)),
+            ScalarValue::Int16(None),
+            ScalarValue::Int32(Some(-32)),
+            ScalarValue::Int32(None),
+            ScalarValue::Int64(Some(-64)),
+            ScalarValue::Int64(None),
+            ScalarValue::UInt8(Some(8)),
+            ScalarValue::UInt8(None),
+            ScalarValue::UInt16(Some(16)),
+            ScalarValue::UInt16(None),
+            ScalarValue::UInt32(Some(32)),
+            ScalarValue::UInt32(None),
+            ScalarValue::UInt64(Some(64)),
+            ScalarValue::UInt64(None),
+            ScalarValue::Utf8(Some("hello".to_string())),
+            ScalarValue::Utf8(None),
+            ScalarValue::Utf8View(Some("view".to_string())),
+            ScalarValue::Utf8View(None),
+            ScalarValue::Date32(Some(1)),
+            ScalarValue::Date32(None),
+            ScalarValue::Date64(Some(86_400_000)),
+            ScalarValue::Date64(None),
+            ScalarValue::Decimal32(Some(1234), 6, 2),
+            ScalarValue::Decimal32(None, 6, 2),
+            ScalarValue::Decimal64(Some(5678), 8, 2),
+            ScalarValue::Decimal64(None, 8, 2),
+            ScalarValue::Decimal128(Some(9012), 10, 2),
+            ScalarValue::Decimal128(None, 10, 2),
+        ] {
+            assert_string_round_trip(value);
+        }
+    }
+
+    #[test]
+    fn scalar_values_try_from_nullable_string_matches_utf8_round_trip_targets() {
+        assert_eq!(
+            ScalarValue::try_from_nullable_string(Some("42".to_string()), &DataType::Int32)
+                .unwrap(),
+            ScalarValue::Int32(Some(42))
+        );
+        assert_eq!(
+            ScalarValue::try_from_nullable_string(
+                Some("1970-01-02".to_string()),
+                &DataType::Date32
+            )
+            .unwrap(),
+            ScalarValue::Date32(Some(1))
+        );
+        assert_eq!(
+            ScalarValue::try_from_nullable_string(
+                Some("12.34".to_string()),
+                &DataType::Decimal64(8, 2)
+            )
+            .unwrap(),
+            ScalarValue::Decimal64(Some(1234), 8, 2)
+        );
+        assert_eq!(
+            ScalarValue::try_from_nullable_string(Some("view".to_string()), &DataType::Utf8View)
+                .unwrap(),
+            ScalarValue::Utf8View(Some("view".to_string()))
+        );
+        assert_eq!(
+            ScalarValue::try_from_nullable_string(None, &DataType::Int32).unwrap(),
+            ScalarValue::Int32(None)
+        );
+    }
+
+    #[test]
+    fn scalar_values_try_to_string_matches_utf8_casts() {
+        assert_eq!(
+            ScalarValue::Int32(Some(42))
+                .try_into_nullable_string()
+                .unwrap(),
+            Some("42".to_string())
+        );
+        assert_eq!(
+            ScalarValue::Date32(Some(1))
+                .try_into_nullable_string()
+                .unwrap(),
+            Some("1970-01-02".to_string())
+        );
+        assert_eq!(
+            ScalarValue::Decimal64(Some(1234), 8, 2)
+                .try_into_nullable_string()
+                .unwrap(),
+            Some("12.34".to_string())
+        );
+        assert_eq!(
+            ScalarValue::Int32(None).try_into_nullable_string().unwrap(),
+            None
+        );
     }
 }
