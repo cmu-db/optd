@@ -756,9 +756,11 @@ pub fn equijoin_cardinality(
     let left = outer_card.as_f64();
     let adjusted = match *join_type {
         JoinType::Inner => inner_result,
-        JoinType::Left => inner_result.max(left),
+        JoinType::LeftOuter => inner_result.max(left),
         JoinType::Mark(_) => left,
         JoinType::Single => inner_result.min(left),
+        JoinType::LeftSemi => todo!(),
+        JoinType::LeftAnti => todo!(),
     };
 
     Cardinality::new(adjusted)

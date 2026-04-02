@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use arrow_schema::{Field, Schema, SchemaRef};
-use snafu::ResultExt;
+use snafu::{OptionExt, ResultExt};
 
 use crate::{
     error::{CatalogSnafu, Result, whatever},
@@ -17,8 +17,8 @@ use crate::{
         },
         properties::OperatorProperties,
         scalar::{
-            BinaryOp, BinaryOpKind, Cast, ColumnRef, Function, Like, List, Literal, NaryOp,
-            NaryOpKind,
+            BinaryOp, BinaryOpKind, Case, Cast, ColumnRef, Function, InList, Like, List, Literal,
+            NaryOp, NaryOpKind,
         },
         table_ref::TableRef,
     },
@@ -228,13 +228,16 @@ impl<'a> OptdOperatorBuilder<'a> {
     ) -> Result<Self> {
         let exprs: Vec<_> = exprs.into_iter().collect();
         let keys: Vec<_> = keys.into_iter().collect();
-        let schema = derive_aggregate_schema(self.ctx, self.operator.as_ref(), &exprs)?;
-        let table_index = self.ctx.add_binding(None, schema)?;
+        let aggregate_schema = derive_aggregate_schema(self.ctx, self.operator.as_ref(), &exprs)?;
+        let key_schema = derive_aggregate_schema(self.ctx, self.operator.as_ref(), &keys)?;
+        let key_table_index = self.ctx.add_binding(None, key_schema)?;
+        let aggregate_table_index = self.ctx.add_binding(None, aggregate_schema)?;
 
         Ok(Self {
             ctx: self.ctx,
             operator: Aggregate::new(
-                table_index,
+                key_table_index,
+                aggregate_table_index,
                 self.operator,
                 list(exprs),
                 list(keys),
@@ -288,6 +291,10 @@ pub fn like(
     escape_char: Option<char>,
 ) -> Arc<Scalar> {
     Like::new(expr, pattern, negated, case_insensative, escape_char).into_scalar()
+}
+
+pub fn in_list(expr: Arc<Scalar>, list: Arc<Scalar>, negated: bool) -> Arc<Scalar> {
+    InList::new(expr, list, negated).into_scalar()
 }
 
 pub fn list(members: impl IntoIterator<Item = Arc<Scalar>>) -> Arc<Scalar> {
@@ -448,6 +455,7 @@ fn derive_scalar_descriptor(
                 | BinaryOpKind::Divide
                 | BinaryOpKind::Modulo => lhs.data_type.clone(),
                 BinaryOpKind::Eq
+                | BinaryOpKind::Ne
                 | BinaryOpKind::IsNotDistinctFrom
                 | BinaryOpKind::Lt
                 | BinaryOpKind::Le
@@ -494,8 +502,26 @@ fn derive_scalar_descriptor(
                 nullable: expr.nullable,
             })
         }
-        ScalarKind::Like(_meta) => {
-            let like = Like::borrow_raw_parts_from_scalar(scalar);
+        ScalarKind::InList(meta) => {
+            let in_expr = InList::borrow_raw_parts(meta, &scalar.common);
+            let expr = derive_scalar_descriptor(ctx, in_expr.expr(), position)?;
+            let list = in_expr.list().borrow::<List>();
+            let list_nullable = list
+                .members()
+                .iter()
+                .map(|term| derive_scalar_descriptor(ctx, term.as_ref(), position))
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .any(|term| term.nullable);
+
+            Ok(DerivedScalarDescriptor {
+                name: format!("in{position}"),
+                data_type: DataType::Boolean,
+                nullable: expr.nullable || list_nullable,
+            })
+        }
+        ScalarKind::Like(meta) => {
+            let like = Like::borrow_raw_parts(meta, &scalar.common);
             Ok(DerivedScalarDescriptor {
                 name: format!("like{position}"),
                 data_type: DataType::Boolean,
@@ -507,29 +533,36 @@ fn derive_scalar_descriptor(
                     .any(|term| term.nullable),
             })
         }
-        ScalarKind::List(_) => whatever!("cannot derive a field for a scalar list expression"),
-    }
-}
+        ScalarKind::Case(meta) => {
+            let case = Case::borrow_raw_parts(meta, &scalar.common);
+            let result = case
+                .when_then_expr()
+                .next()
+                .map(|(_, then)| then)
+                .or_else(|| case.else_expr())
+                .whatever_context("case expression should have at least one THEN or ELSE branch")
+                .and_then(|expr| derive_scalar_descriptor(ctx, expr.as_ref(), position))?;
 
-impl Like {
-    fn borrow_raw_parts_from_scalar(scalar: &Scalar) -> crate::ir::scalar::LikeBorrowed<'_> {
-        match &scalar.kind {
-            ScalarKind::Like(meta) => Like::borrow_raw_parts(meta, &scalar.common),
-            _ => unreachable!("caller guarantees scalar kind"),
+            let then_nullable = case
+                .when_then_expr()
+                .map(|(_, then)| derive_scalar_descriptor(ctx, then.as_ref(), position))
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .any(|term| term.nullable);
+            let else_nullable = case
+                .else_expr()
+                .map(|expr| derive_scalar_descriptor(ctx, expr.as_ref(), position))
+                .transpose()?
+                .map(|term| term.nullable)
+                .unwrap_or(true);
+
+            Ok(DerivedScalarDescriptor {
+                name: format!("expr{position}"),
+                data_type: result.data_type,
+                nullable: then_nullable || else_nullable,
+            })
         }
-    }
-}
-
-trait WhateverContextExt<T> {
-    fn whatever_context(self, message: impl Into<String>) -> Result<T>;
-}
-
-impl<T> WhateverContextExt<T> for Option<T> {
-    fn whatever_context(self, message: impl Into<String>) -> Result<T> {
-        self.ok_or_else(|| crate::error::Error::Whatever {
-            message: message.into(),
-            source: None,
-        })
+        ScalarKind::List(_) => whatever!("cannot derive a field for a scalar list expression"),
     }
 }
 
@@ -631,6 +664,52 @@ mod tests {
         assert_eq!(binding.schema().fields().len(), 1);
         assert_eq!(binding.schema().field(0).name(), "count");
         assert_eq!(binding.schema().field(0).data_type(), &DataType::Int64);
+        Ok(())
+    }
+
+    #[test]
+    fn project_builder_derives_in_scalar_as_boolean() -> Result<()> {
+        let ctx = test_ctx();
+        let get = ctx.logical_get(TableRef::bare("t1"), None)?.build();
+
+        let projected = ctx
+            .project(
+                get,
+                [in_list(
+                    column_ref(ctx.col(Some(&TableRef::bare("t1")), "v2")?),
+                    list([int32(7), int32(8)]),
+                    false,
+                )],
+            )?
+            .build();
+        let project = projected.borrow::<Project>();
+        let binding = ctx.get_binding(project.table_index())?;
+
+        assert_eq!(binding.schema().field(0).name(), "in0");
+        assert_eq!(binding.schema().field(0).data_type(), &DataType::Boolean);
+        assert!(!binding.schema().field(0).is_nullable());
+        Ok(())
+    }
+
+    #[test]
+    fn project_builder_marks_in_nullable_when_list_contains_null() -> Result<()> {
+        let ctx = test_ctx();
+        let get = ctx.logical_get(TableRef::bare("t1"), None)?.build();
+
+        let projected = ctx
+            .project(
+                get,
+                [in_list(
+                    column_ref(ctx.col(Some(&TableRef::bare("t1")), "v2")?),
+                    list([int32(7), int32(None)]),
+                    false,
+                )],
+            )?
+            .build();
+        let project = projected.borrow::<Project>();
+        let binding = ctx.get_binding(project.table_index())?;
+
+        assert!(binding.schema().field(0).is_nullable());
         Ok(())
     }
 }

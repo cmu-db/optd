@@ -7,6 +7,7 @@ use crate::error::{Result, SchemaSnafu};
 use crate::ir::schema::OptdSchema;
 use crate::ir::table_ref::TableRef;
 
+#[derive(Debug)]
 pub struct BindContext {
     next_table_index: i64,
     pub bindings: HashMap<i64, Binding>,

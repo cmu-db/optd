@@ -223,6 +223,7 @@ impl OptdQueryPlanner {
             LogicalPlan::Explain(explain) => (explain.plan.as_ref(), Some(explain.clone())),
             _ => (logical_plan, None),
         };
+        println!("actual_logical:\n{}", actual_logical_plan);
 
         let optd_logical = ctx
             .try_into_optd_plan(actual_logical_plan)
@@ -240,7 +241,7 @@ impl OptdQueryPlanner {
             .add_rule(rules::LogicalGetAsPhysicalTableScanRule::new())
             .add_rule(rules::LogicalAggregateAsPhysicalHashAggregateRule::new())
             .add_rule(rules::LogicalJoinAsPhysicalHashJoinRule::new())
-            .add_rule(rules::LogicalJoinAsPhysicalNLJoinRule::new())
+            .add_rule(rules::LogicalJoinAsPhysicalNestedLoopRule::new())
             .add_rule(rules::LogicalSelectSimplifyRule::new())
             .add_rule(rules::LogicalJoinInnerCommuteRule::new())
             .add_rule(rules::LogicalJoinInnerAssocRule::new())
@@ -257,6 +258,17 @@ impl OptdQueryPlanner {
                 .create_physical_plan_default(logical_plan, session_state)
                 .await;
         };
+
+        warm_explain_properties(&optd_logical, &ctx.inner);
+        // println!(
+        //     "optd_logical:\n{}",
+        //     quick_explain(&optd_logical, &ctx.inner)
+        // );
+        println!(
+            "optd_physical:\n{}",
+            quick_explain(&optd_physical, &ctx.inner)
+        );
+        // println!("binder:\n{:?}", ctx.inner.binder);
 
         let logical_plan = ctx
             .try_from_optd_plan(&optd_physical)
@@ -290,6 +302,7 @@ impl OptdQueryPlanner {
 
         if let Some(x) = explain.as_mut() {
             let s = quick_explain(&optd_logical, &opt.ctx);
+
             x.stringified_plans.push(StringifiedPlan::new(
                 PlanType::OptimizedPhysicalPlan {
                     optimizer_name: "optd-initial".to_string(),

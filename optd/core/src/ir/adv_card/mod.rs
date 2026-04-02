@@ -447,7 +447,6 @@ impl CardinalityEstimator for AdvancedCardinalityEstimator {
             OperatorKind::Remap(meta) => Remap::borrow_raw_parts(meta, &op.common)
                 .input()
                 .cardinality(ctx),
-            OperatorKind::MockScan(meta) => meta.spec.mocked_card,
             OperatorKind::Limit(meta) => {
                 let limit = Limit::borrow_raw_parts(meta, &op.common);
                 let input_card = limit.input().cardinality(ctx);

@@ -74,9 +74,9 @@ pub fn create_optd_session_context(
         .with_option_extension(OptdExtensionConfig::default())
         .with_extension(optd_extension)
         .set_bool("optd.optd_enabled", true)
-        .set_bool("optd.optd_strict_mode", false)
-        // disable datafusion logical optimizer.
-        .set_usize("datafusion.optimizer.max_passes", 0);
+        .set_bool("optd.optd_strict_mode", false);
+    // disable datafusion logical optimizer.
+    // .set_usize("datafusion.optimizer.max_passes", 0);
     let state = SessionStateBuilder::new()
         .with_config(config)
         .with_runtime_env(runtime)

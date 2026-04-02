@@ -4,7 +4,7 @@ use datafusion::{
     common::DFSchema,
     logical_expr::{
         self, Cast as DFCast, Expr as DFExpr, ExprSchemable, Like as DFLike,
-        LogicalPlan as DFLogicalPlan, expr::AggregateFunction, logical_plan,
+        LogicalPlan as DFLogicalPlan, expr::AggregateFunction, expr::ScalarFunction, logical_plan,
     },
     scalar::ScalarValue as DFScalarValue,
 };
@@ -14,11 +14,11 @@ use optd_core::{
     ir::{
         Scalar,
         builder::{self as optd_builder, literal},
-        catalog::Schema,
+        catalog::{Field, Schema},
         convert::{IntoOperator, IntoScalar},
         operator::{Aggregate, Get, Join, Limit, OrderBy, Project, Remap, Select},
         properties::TupleOrderingDirection,
-        scalar::{Cast, ColumnRef, Function, Like, List, NaryOp, NaryOpKind},
+        scalar::{Case, Cast, ColumnRef, Function, InList, Like, List, NaryOp, NaryOpKind},
     },
 };
 use snafu::{ResultExt, whatever};
@@ -102,6 +102,12 @@ impl OptdQueryPlannerContext<'_> {
     ) -> Result<Arc<optd_core::ir::Operator>> {
         let input = self.try_into_optd_plan(&node.input)?;
 
+        let keys = node
+            .group_expr
+            .iter()
+            .map(|e| self.try_into_optd_scalar_expr(e, node.input.schema()))
+            .try_collect()
+            .map(List::new)?;
         let exprs = node
             .aggr_expr
             .iter()
@@ -109,31 +115,56 @@ impl OptdQueryPlannerContext<'_> {
             .try_collect()
             .map(List::new)
             .with_whatever_context(|e| format!("error converting aggregate expressions: {e}"))?;
-        let keys = node
+
+        let key_schema = node
             .group_expr
             .iter()
-            .map(|e| self.try_into_optd_scalar_expr(e, node.input.schema()))
-            .try_collect()
-            .map(List::new)?;
-
-        let aggrgate_schema = node
-            .aggr_expr
-            .iter()
             .map(|e| {
+                let (_, name) = e.qualified_name();
                 e.to_field(node.input.schema())
-                    .map(|(_, field)| field)
+                    .and_then(|(_, field)| {
+                        Ok(Arc::new(Field::new(
+                            name,
+                            field.data_type().clone(),
+                            field.is_nullable(),
+                        )))
+                    })
                     .context(DataFusionSnafu)
             })
             .collect::<Result<Vec<_>>>()
             .map(Schema::new)?;
 
-        let table_index = self
+        let key_table_index = self
+            .inner
+            .add_binding(None, Arc::new(key_schema))
+            .context(OptdSnafu)?;
+
+        let aggrgate_schema = node
+            .aggr_expr
+            .iter()
+            .map(|e| {
+                let (_, name) = e.qualified_name();
+                e.to_field(node.input.schema())
+                    .and_then(|(_, field)| {
+                        Ok(Arc::new(Field::new(
+                            name,
+                            field.data_type().clone(),
+                            field.is_nullable(),
+                        )))
+                    })
+                    .context(DataFusionSnafu)
+            })
+            .collect::<Result<Vec<_>>>()
+            .map(Schema::new)?;
+
+        let aggregate_table_index = self
             .inner
             .add_binding(None, Arc::new(aggrgate_schema))
             .context(OptdSnafu)?;
 
         let aggregate = Aggregate::new(
-            table_index,
+            key_table_index,
+            aggregate_table_index,
             input,
             exprs.into_scalar(),
             keys.into_scalar(),
@@ -277,8 +308,13 @@ impl OptdQueryPlannerContext<'_> {
             DFExpr::AggregateFunction(agg_func) => {
                 self.try_into_optd_aggregate_func(agg_func, input_schema)
             }
+            DFExpr::ScalarFunction(scalar_func) => {
+                self.try_into_optd_scalar_func(scalar_func, input_schema)
+            }
             DFExpr::Cast(cast) => self.try_into_optd_cast(cast, input_schema),
             DFExpr::Like(like) => self.try_into_optd_like(like, input_schema),
+            DFExpr::Case(case) => self.try_into_optd_case(case, input_schema),
+            DFExpr::InList(in_list) => self.try_into_optd_in_list(in_list, input_schema),
             expr => {
                 whatever!("Unsupported df logical expr: {}", expr);
             }
@@ -308,6 +344,7 @@ impl OptdQueryPlannerContext<'_> {
     ) -> Result<Arc<Scalar>> {
         let op_kind = match &binary_expr.op {
             logical_expr::Operator::Eq => Either::Left(optd_core::ir::scalar::BinaryOpKind::Eq),
+            logical_expr::Operator::NotEq => Either::Left(optd_core::ir::scalar::BinaryOpKind::Ne),
             logical_expr::Operator::Plus => Either::Left(optd_core::ir::scalar::BinaryOpKind::Plus),
             logical_expr::Operator::Minus => {
                 Either::Left(optd_core::ir::scalar::BinaryOpKind::Minus)
@@ -395,6 +432,26 @@ impl OptdQueryPlannerContext<'_> {
         )
     }
 
+    pub fn try_into_optd_scalar_func(
+        &mut self,
+        scalar_func: &ScalarFunction,
+        input_schema: &DFSchema,
+    ) -> Result<Arc<Scalar>> {
+        let func_name = scalar_func.name();
+
+        let params: Vec<_> = scalar_func
+            .args
+            .iter()
+            .map(|x| self.try_into_optd_scalar_expr(x, input_schema))
+            .try_collect()?;
+
+        let return_type = DFExpr::ScalarFunction(scalar_func.clone())
+            .get_type(input_schema)
+            .context(DataFusionSnafu)?;
+
+        Ok(Function::new_scalar(func_name.to_string(), params.into(), return_type).into_scalar())
+    }
+
     pub fn try_into_optd_cast(
         &mut self,
         node: &DFCast,
@@ -420,5 +477,50 @@ impl OptdQueryPlannerContext<'_> {
             node.escape_char,
         );
         Ok(like.into_scalar())
+    }
+
+    pub fn try_into_optd_case(
+        &mut self,
+        node: &logical_expr::expr::Case,
+        input_schema: &DFSchema,
+    ) -> Result<Arc<Scalar>> {
+        let expr = node
+            .expr
+            .as_ref()
+            .map(|expr| self.try_into_optd_scalar_expr(expr, input_schema))
+            .transpose()?;
+        let when_then_expr: Vec<_> = node
+            .when_then_expr
+            .iter()
+            .map(|(when, then)| {
+                Ok((
+                    self.try_into_optd_scalar_expr(when, input_schema)?,
+                    self.try_into_optd_scalar_expr(then, input_schema)?,
+                ))
+            })
+            .collect::<Result<_>>()?;
+        let else_expr = node
+            .else_expr
+            .as_ref()
+            .map(|expr| self.try_into_optd_scalar_expr(expr, input_schema))
+            .transpose()?;
+
+        Ok(Case::new(expr, when_then_expr.into(), else_expr).into_scalar())
+    }
+
+    pub fn try_into_optd_in_list(
+        &mut self,
+        node: &logical_expr::expr::InList,
+        input_schema: &DFSchema,
+    ) -> Result<Arc<Scalar>> {
+        let expr = self.try_into_optd_scalar_expr(&node.expr, input_schema)?;
+        let list = node
+            .list
+            .iter()
+            .map(|e| self.try_into_optd_scalar_expr(e, input_schema))
+            .try_collect()
+            .map(List::new)?;
+
+        Ok(InList::new(expr, list.into_scalar(), node.negated).into_scalar())
     }
 }
