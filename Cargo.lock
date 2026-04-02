@@ -3437,6 +3437,7 @@ dependencies = [
 name = "optd-core"
 version = "0.1.0"
 dependencies = [
+ "arrow",
  "arrow-schema",
  "bitvec",
  "chrono",
