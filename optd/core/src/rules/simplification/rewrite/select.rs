@@ -1,3 +1,5 @@
+use snafu::whatever;
+
 use super::super::{
     rule::{RulePass, rewrite_bottom_up},
     scalar::{combine_conjuncts_simplified, split_conjuncts, substitute_columns},
@@ -111,7 +113,7 @@ impl RulePass for PushSelectThroughJoinRulePass {
                             join_conds.push(cond);
                         }
                     }
-                    JoinType::Left => {
+                    JoinType::LeftOuter => {
                         if used.is_subset(outer_cols.as_ref()) {
                             outer_filters.push(cond);
                         } else {
@@ -119,6 +121,9 @@ impl RulePass for PushSelectThroughJoinRulePass {
                         }
                     }
                     JoinType::Single | JoinType::Mark(_) => top_filters.push(cond),
+                    &JoinType::LeftSemi | &JoinType::LeftAnti => {
+                        whatever!("does not handle LeftSemi, and LeftAnti Joins yet")
+                    }
                 }
             }
 

@@ -11,15 +11,15 @@ use crate::ir::{
 // LogicalSelect [c3 = 20 AND true]
 //   LogicalSelect [c1 = 10]
 //     LogicalJoin [Inner, cond = true]
-//       MockScan [c1, c2]
-//       MockScan [c3, c4]
+//       LogicalGet [t1.c0, t1.c1]
+//       LogicalGet [t2.c0, t2.c1]
 //
 // Output plan tree:
 // LogicalJoin [Inner, cond = true]
 //   LogicalSelect [c1 = 10]
-//     MockScan [c1, c2]
+//     LogicalGet [t1.c0, t1.c1]
 //   LogicalSelect [c3 = 20]
-//     MockScan [c3, c4]
+//     LogicalGet [t2.c0, t2.c1]
 #[test]
 fn pushes_predicates_to_join_inputs_and_merges_selects() {
     let ctx = test_ctx_with_tables(&[("t1", 2), ("t2", 2)]).unwrap();
@@ -59,12 +59,12 @@ fn pushes_predicates_to_join_inputs_and_merges_selects() {
 // LogicalSelect [out > 5]
 //   LogicalProject [out := alias_left + 1, alias_right]
 //     LogicalProject [alias_left := c1, alias_right := c2]
-//       MockScan [c1, c2]
+//       LogicalGet [t1.c0, t1.c1]
 //
 // Output plan tree:
 // LogicalProject [out := c1 + 1, alias_right := c2]
 //   LogicalSelect [c1 + 1 > 5]
-//     MockScan [c1, c2]
+//     LogicalGet [t1.c0, t1.c1]
 #[test]
 fn pushes_filter_through_project_and_merges_projects() {
     let ctx = test_ctx_with_tables(&[("t1", 2)]).unwrap();

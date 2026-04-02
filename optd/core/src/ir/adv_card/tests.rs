@@ -311,11 +311,11 @@
 
 // #[test]
 // fn test_column_without_source_fallback() {
-//     // Use a mock scan (columns have source=None) to test fallback
+//     // Use an unbound column to test fallback behavior.
 //     let ctx = adv_ctx();
-//     let scan = ctx.mock_scan(0, vec![0, 1], 500.0);
+//     let scan = todo!();
 
-//     // Column created by mock_scan has source=None
+//     // This column intentionally has no source binding.
 //     let col = Column(0);
 //     let pred = column_ref(col).eq(int32(42));
 //     let filtered = scan.logical_select(pred);

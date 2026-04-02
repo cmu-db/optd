@@ -63,6 +63,8 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_into_optd_scalar_value(value: DFScalarValue) -> Result<OptdScalarValue> {
         match value {
             DFScalarValue::Boolean(v) => Ok(OptdScalarValue::Boolean(v)),
+            DFScalarValue::Float32(v) => Ok(OptdScalarValue::Float32(v)),
+            DFScalarValue::Float64(v) => Ok(OptdScalarValue::Float64(v)),
             DFScalarValue::Int8(v) => Ok(OptdScalarValue::Int8(v)),
             DFScalarValue::Int16(v) => Ok(OptdScalarValue::Int16(v)),
             DFScalarValue::Int32(v) => Ok(OptdScalarValue::Int32(v)),
@@ -89,6 +91,8 @@ impl OptdQueryPlannerContext<'_> {
     pub fn from_optd_value(value: OptdScalarValue) -> DFScalarValue {
         match value {
             OptdScalarValue::Boolean(v) => DFScalarValue::Boolean(v),
+            OptdScalarValue::Float32(v) => DFScalarValue::Float32(v),
+            OptdScalarValue::Float64(v) => DFScalarValue::Float64(v),
             OptdScalarValue::Int8(v) => DFScalarValue::Int8(v),
             OptdScalarValue::Int16(v) => DFScalarValue::Int16(v),
             OptdScalarValue::Int32(v) => DFScalarValue::Int32(v),
@@ -110,7 +114,9 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_into_optd_join_type(join_type: DFJoinType) -> Result<OptdJoinType> {
         match join_type {
             DFJoinType::Inner => Ok(OptdJoinType::Inner),
-            DFJoinType::Left => Ok(OptdJoinType::Left),
+            DFJoinType::Left => Ok(OptdJoinType::LeftOuter),
+            DFJoinType::LeftSemi => Ok(OptdJoinType::LeftSemi),
+            DFJoinType::LeftAnti => Ok(OptdJoinType::LeftAnti),
             v => whatever!("Unsupported join type: {}", v),
         }
     }
@@ -118,7 +124,9 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_from_optd_join_type(join_type: &OptdJoinType) -> Result<DFJoinType> {
         match join_type {
             OptdJoinType::Inner => Ok(DFJoinType::Inner),
-            OptdJoinType::Left => Ok(DFJoinType::Left),
+            OptdJoinType::LeftOuter => Ok(DFJoinType::Left),
+            OptdJoinType::LeftSemi => Ok(DFJoinType::LeftSemi),
+            OptdJoinType::LeftAnti => Ok(DFJoinType::LeftAnti),
             // TODO: add single and mark join.
             v => whatever!("Unsupported join type: {:?}", v),
         }

@@ -248,8 +248,6 @@ impl crate::ir::properties::TrySatisfy<TupleOrdering> for Operator {
             }
             OperatorKind::EnforcerSort(meta) => (&meta.tuple_ordering >= ordering)
                 .then(|| Arc::<[TupleOrdering]>::from(vec![TupleOrdering::default(); 1])),
-            OperatorKind::MockScan(meta) => (&meta.spec.mocked_provided_ordering >= ordering)
-                .then_some(Arc::<[TupleOrdering]>::from(Vec::new())),
             OperatorKind::Remap(_) => ordering
                 .is_empty()
                 .then(|| Arc::<[TupleOrdering]>::from(vec![ordering.clone()])),

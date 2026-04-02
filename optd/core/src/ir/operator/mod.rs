@@ -15,7 +15,6 @@
 
 mod enforcer;
 mod logical;
-mod physical;
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -36,8 +35,6 @@ pub mod join {
     pub use super::logical::join::JoinType;
 }
 
-pub use physical::mock_scan::*;
-
 use crate::ir::explain::Explain;
 use crate::ir::properties::OperatorProperties;
 use crate::ir::{Column, Group, GroupId, GroupMetadata, IRCommon, Scalar};
@@ -46,7 +43,6 @@ use crate::ir::{Column, Group, GroupId, GroupMetadata, IRCommon, Scalar};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OperatorKind {
     Group(GroupMetadata),
-    MockScan(MockScanMetadata),
     Get(GetMetadata),
     Join(JoinMetadata),
     DependentJoin(DependentJoinMetadata),
@@ -103,7 +99,6 @@ impl OperatorKind {
             Select(_) => OperatorCategory::Logical,
             Subquery(_) => OperatorCategory::Logical,
             EnforcerSort(_) => OperatorCategory::Enforcer,
-            MockScan(_) => OperatorCategory::Physical,
         }
     }
 
@@ -113,7 +108,6 @@ impl OperatorKind {
             OperatorKind::Get(_) => true,
             OperatorKind::Project(_) => true,
             OperatorKind::Aggregate(_) => true,
-            OperatorKind::MockScan(_) => true,
             _other => false,
         }
     }
@@ -208,9 +202,6 @@ impl Explain for Operator {
         match &self.kind {
             OperatorKind::Group(meta) => {
                 Group::borrow_raw_parts(meta, &self.common).explain(ctx, option)
-            }
-            OperatorKind::MockScan(meta) => {
-                MockScan::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             OperatorKind::Get(meta) => {
                 Get::borrow_raw_parts(meta, &self.common).explain(ctx, option)

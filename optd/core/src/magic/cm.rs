@@ -114,14 +114,6 @@ impl CostModel for MagicCostModel {
                 let input_card = op.input_operators()[0].cardinality(ctx);
                 Ok(Self::sort_cost(input_card))
             }
-            OperatorKind::MockScan(meta) => {
-                meta.spec
-                    .mocked_operator_cost
-                    .ok_or_else(|| crate::error::Error::Whatever {
-                        message: "mock scan is missing operator cost".into(),
-                        source: None,
-                    })
-            }
         }
     }
 }

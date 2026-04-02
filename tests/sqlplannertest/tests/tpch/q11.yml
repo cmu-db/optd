@@ -26,7 +26,7 @@
             )
     order by
         value desc;
-  desc: TPC-H Q11 (TODO: enable this test after fixing column name resolution issue)
+  desc: TPC-H Q11
   before: ["include_sql:schema.sql", "include_sql:strict.sql"]
   tasks:
     - explain

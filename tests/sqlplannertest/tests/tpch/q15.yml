@@ -32,7 +32,6 @@
         )
     ORDER BY
         s_suppkey;
-  desc: TPC-H Q15 (TODO: enabled this test after fixing column name resolution issue)
   before: ["include_sql:schema.sql", "include_sql:strict.sql"]
   tasks:
     - explain

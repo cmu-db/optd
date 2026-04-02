@@ -40,6 +40,7 @@ impl Rule for LogicalAggregateAsPhysicalHashAggregateRule {
     ) -> crate::error::Result<Vec<std::sync::Arc<crate::ir::Operator>>> {
         let logical_agg = operator.try_borrow::<Aggregate>().unwrap();
         let hash_agg = Aggregate::new(
+            *logical_agg.key_table_index(),
             *logical_agg.aggregate_table_index(),
             logical_agg.input().clone(),
             logical_agg.exprs().clone(),
@@ -94,7 +95,8 @@ mod tests {
         let rule = LogicalAggregateAsPhysicalHashAggregateRule::new();
         assert!(!rule.pattern().top_matches(&OperatorKind::Aggregate(
             crate::ir::operator::AggregateMetadata {
-                aggregate_table_index: 1,
+                key_table_index: 1,
+                aggregate_table_index: 2,
                 implementation: Some(AggregateImplementation::Hash),
             }
         )));

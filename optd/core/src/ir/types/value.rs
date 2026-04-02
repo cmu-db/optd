@@ -1,13 +1,21 @@
 //! A module for representing nullable scalar values in the IR.
 
-use std::{convert::Infallible, str::FromStr};
+use std::{
+    convert::Infallible,
+    hash::{Hash, Hasher},
+    str::FromStr,
+};
 
 use crate::ir::DataType;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub enum ScalarValue {
     /// True or false.
     Boolean(Option<bool>),
+    /// 32-bit float.
+    Float32(Option<f32>),
+    /// 64-bit float.
+    Float64(Option<f64>),
     /// Signed 8-bit integer.
     Int8(Option<i8>),
     /// Signed 16-bit integer.
@@ -32,11 +40,11 @@ pub enum ScalarValue {
     Date32(Option<i32>),
     /// Date stored as a signed 64-bit int milliseconds since UNIX epoch 1970-01-01.
     Date64(Option<i64>),
-    /// 32bit decimal, using the i32 to represent the decimal, precision scale
+    /// 32-bit decimal, using the i32 to represent the decimal, precision scale.
     Decimal32(Option<i32>, u8, i8),
-    /// 64bit decimal, using the i64 to represent the decimal, precision scale
+    /// 64-bit decimal, using the i64 to represent the decimal, precision scale.
     Decimal64(Option<i64>, u8, i8),
-    /// 128bit decimal, using the i128 to represent the decimal, precision scale
+    /// 128-bit decimal, using the i128 to represent the decimal, precision scale.
     Decimal128(Option<i128>, u8, i8),
 }
 
@@ -44,6 +52,8 @@ impl ScalarValue {
     pub fn is_null(&self) -> bool {
         match self {
             ScalarValue::Boolean(v) => v.is_none(),
+            ScalarValue::Float32(v) => v.is_none(),
+            ScalarValue::Float64(v) => v.is_none(),
             ScalarValue::Int8(v) => v.is_none(),
             ScalarValue::Int16(v) => v.is_none(),
             ScalarValue::Int32(v) => v.is_none(),
@@ -65,6 +75,8 @@ impl ScalarValue {
     pub fn data_type(&self) -> DataType {
         match self {
             ScalarValue::Boolean(_) => DataType::Boolean,
+            ScalarValue::Float32(_) => DataType::Float32,
+            ScalarValue::Float64(_) => DataType::Float64,
             ScalarValue::Int8(_) => DataType::Int8,
             ScalarValue::Int16(_) => DataType::Int16,
             ScalarValue::Int32(_) => DataType::Int32,
@@ -86,6 +98,113 @@ impl ScalarValue {
     }
 }
 
+impl PartialEq for ScalarValue {
+    fn eq(&self, other: &Self) -> bool {
+        use ScalarValue::*;
+
+        match (self, other) {
+            (Boolean(v1), Boolean(v2)) => v1 == v2,
+            (Boolean(_), _) => false,
+            (Float32(v1), Float32(v2)) => match (v1, v2) {
+                (Some(f1), Some(f2)) => f1.to_bits() == f2.to_bits(),
+                _ => v1 == v2,
+            },
+            (Float32(_), _) => false,
+            (Float64(v1), Float64(v2)) => match (v1, v2) {
+                (Some(f1), Some(f2)) => f1.to_bits() == f2.to_bits(),
+                _ => v1 == v2,
+            },
+            (Float64(_), _) => false,
+            (Int8(v1), Int8(v2)) => v1 == v2,
+            (Int8(_), _) => false,
+            (Int16(v1), Int16(v2)) => v1 == v2,
+            (Int16(_), _) => false,
+            (Int32(v1), Int32(v2)) => v1 == v2,
+            (Int32(_), _) => false,
+            (Int64(v1), Int64(v2)) => v1 == v2,
+            (Int64(_), _) => false,
+            (UInt8(v1), UInt8(v2)) => v1 == v2,
+            (UInt8(_), _) => false,
+            (UInt16(v1), UInt16(v2)) => v1 == v2,
+            (UInt16(_), _) => false,
+            (UInt32(v1), UInt32(v2)) => v1 == v2,
+            (UInt32(_), _) => false,
+            (UInt64(v1), UInt64(v2)) => v1 == v2,
+            (UInt64(_), _) => false,
+            (Utf8(v1), Utf8(v2)) => v1 == v2,
+            (Utf8(_), _) => false,
+            (Utf8View(v1), Utf8View(v2)) => v1 == v2,
+            (Utf8View(_), _) => false,
+            (Date32(v1), Date32(v2)) => v1 == v2,
+            (Date32(_), _) => false,
+            (Date64(v1), Date64(v2)) => v1 == v2,
+            (Date64(_), _) => false,
+            (Decimal32(v1, p1, s1), Decimal32(v2, p2, s2)) => v1 == v2 && p1 == p2 && s1 == s2,
+            (Decimal32(_, _, _), _) => false,
+            (Decimal64(v1, p1, s1), Decimal64(v2, p2, s2)) => v1 == v2 && p1 == p2 && s1 == s2,
+            (Decimal64(_, _, _), _) => false,
+            (Decimal128(v1, p1, s1), Decimal128(v2, p2, s2)) => v1 == v2 && p1 == p2 && s1 == s2,
+            (Decimal128(_, _, _), _) => false,
+        }
+    }
+}
+
+impl Eq for ScalarValue {}
+
+struct Fl<T>(T);
+
+macro_rules! hash_float_value {
+    ($(($t:ty, $i:ty)),+ $(,)?) => {
+        $(
+            impl Hash for Fl<$t> {
+                fn hash<H: Hasher>(&self, state: &mut H) {
+                    state.write(&<$i>::from_ne_bytes(self.0.to_ne_bytes()).to_ne_bytes())
+                }
+            }
+        )+
+    };
+}
+
+hash_float_value!((f32, u32), (f64, u64));
+
+impl Hash for ScalarValue {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        use ScalarValue::*;
+
+        match self {
+            Boolean(v) => v.hash(state),
+            Float32(v) => v.map(Fl).hash(state),
+            Float64(v) => v.map(Fl).hash(state),
+            Int8(v) => v.hash(state),
+            Int16(v) => v.hash(state),
+            Int32(v) => v.hash(state),
+            Int64(v) => v.hash(state),
+            UInt8(v) => v.hash(state),
+            UInt16(v) => v.hash(state),
+            UInt32(v) => v.hash(state),
+            UInt64(v) => v.hash(state),
+            Utf8(v) | Utf8View(v) => v.hash(state),
+            Date32(v) => v.hash(state),
+            Date64(v) => v.hash(state),
+            Decimal32(v, p, s) => {
+                v.hash(state);
+                p.hash(state);
+                s.hash(state);
+            }
+            Decimal64(v, p, s) => {
+                v.hash(state);
+                p.hash(state);
+                s.hash(state);
+            }
+            Decimal128(v, p, s) => {
+                v.hash(state);
+                p.hash(state);
+                s.hash(state);
+            }
+        }
+    }
+}
+
 macro_rules! impl_scalar {
     ($ty:ty, $scalar:tt) => {
         impl From<$ty> for ScalarValue {
@@ -102,6 +221,8 @@ macro_rules! impl_scalar {
     };
 }
 
+impl_scalar!(f32, Float32);
+impl_scalar!(f64, Float64);
 impl_scalar!(i8, Int8);
 impl_scalar!(i16, Int16);
 impl_scalar!(i32, Int32);
@@ -162,6 +283,8 @@ impl std::fmt::Display for ScalarValue {
             ScalarValue::Int32(v) => fmt_optional(f, v, "integer"),
             ScalarValue::Int64(v) => fmt_optional(f, v, "bigint"),
             ScalarValue::Boolean(v) => fmt_optional(f, v, "boolean"),
+            ScalarValue::Float32(v) => fmt_optional(f, v, "float32"),
+            ScalarValue::Float64(v) => fmt_optional(f, v, "float64"),
             ScalarValue::Utf8(v) => fmt_optional(f, v, "utf8"),
             ScalarValue::Utf8View(v) => fmt_optional(f, v, "utf8_view"),
             ScalarValue::Int8(v) => fmt_optional(f, v, "int8"),
@@ -205,5 +328,46 @@ impl std::fmt::Display for ScalarValue {
                 None => write!(f, "null::decimal128({}, {})", precision, scale),
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::ScalarValue;
+    use crate::ir::DataType;
+
+    #[test]
+    fn float_values_report_types_and_nullability() {
+        assert_eq!(
+            ScalarValue::Float32(Some(1.0)).data_type(),
+            DataType::Float32
+        );
+        assert_eq!(
+            ScalarValue::Float64(Some(1.0)).data_type(),
+            DataType::Float64
+        );
+        assert!(ScalarValue::Float32(None).is_null());
+        assert!(ScalarValue::Float64(None).is_null());
+    }
+
+    #[test]
+    fn float_values_compare_and_hash_by_bits() {
+        let nan32_a = ScalarValue::Float32(Some(f32::from_bits(0x7fc0_0001)));
+        let nan32_b = ScalarValue::Float32(Some(f32::from_bits(0x7fc0_0001)));
+        let nan32_c = ScalarValue::Float32(Some(f32::from_bits(0x7fc0_0002)));
+
+        assert_eq!(nan32_a, nan32_b);
+        assert_ne!(nan32_a, nan32_c);
+
+        let neg_zero = ScalarValue::Float64(Some(-0.0));
+        let pos_zero = ScalarValue::Float64(Some(0.0));
+        assert_ne!(neg_zero, pos_zero);
+
+        let mut set = HashSet::new();
+        set.insert(nan32_a.clone());
+        assert!(set.contains(&nan32_b));
+        assert!(!set.contains(&nan32_c));
     }
 }
