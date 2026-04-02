@@ -10,16 +10,16 @@ use std::{
 
 use arrow::{
     array::{
-        Array, ArrayRef, BooleanArray, Date32Array, Date64Array, Decimal128Array, Decimal32Array,
-        Decimal64Array, Float32Array, Float64Array, Int16Array, Int32Array, Int64Array, Int8Array,
-        StringArray, StringViewArray, UInt16Array, UInt32Array, UInt64Array, UInt8Array,
+        Array, ArrayRef, BooleanArray, Date32Array, Date64Array, Decimal32Array, Decimal64Array,
+        Decimal128Array, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
+        StringArray, StringViewArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
     },
-    compute::kernels::cast::{cast_with_options, CastOptions},
+    compute::kernels::cast::{CastOptions, cast_with_options},
     util::display::FormatOptions,
 };
 
 use crate::{
-    error::{whatever, Result},
+    error::{Result, whatever},
     ir::DataType,
 };
 
@@ -463,8 +463,19 @@ impl std::fmt::Display for ScalarValue {
 }
 
 impl ScalarValue {
-    pub fn try_from_string(value: String, target_type: &DataType) -> Result<Self> {
-        ScalarValue::from(value).cast_to(target_type)
+    pub fn try_from_nullable_string(value: Option<String>, target_type: &DataType) -> Result<Self> {
+        ScalarValue::Utf8(value).cast_to(target_type)
+    }
+
+    pub fn try_into_nullable_string(&self) -> Result<Option<String>> {
+        match self.cast_to(&DataType::Utf8)? {
+            ScalarValue::Utf8(value) => Ok(value),
+            other => whatever!(
+                "expected utf8 scalar after casting {} to utf8, got {}",
+                self.data_type(),
+                other.data_type()
+            ),
+        }
     }
 
     pub fn cast_to(&self, target_type: &DataType) -> Result<Self> {
@@ -574,19 +585,11 @@ mod tests {
 
     fn assert_string_round_trip(value: ScalarValue) {
         let data_type = value.data_type();
-        let string_value = value.cast_to(&DataType::Utf8).unwrap();
-        match string_value {
-            ScalarValue::Utf8(Some(string_value)) => {
-                assert_eq!(
-                    ScalarValue::try_from_string(string_value, &data_type).unwrap(),
-                    value
-                );
-            }
-            ScalarValue::Utf8(None) => {
-                assert_eq!(ScalarValue::Utf8(None).cast_to(&data_type).unwrap(), value);
-            }
-            other => panic!("expected utf8 scalar after cast, got {other:?}"),
-        }
+        let string_value = value.try_into_nullable_string().unwrap();
+        assert_eq!(
+            ScalarValue::try_from_nullable_string(string_value, &data_type).unwrap(),
+            value
+        );
     }
 
     #[test]
@@ -634,22 +637,62 @@ mod tests {
     }
 
     #[test]
-    fn scalar_values_try_from_string_matches_utf8_round_trip_targets() {
+    fn scalar_values_try_from_nullable_string_matches_utf8_round_trip_targets() {
         assert_eq!(
-            ScalarValue::try_from_string("42".to_string(), &DataType::Int32).unwrap(),
+            ScalarValue::try_from_nullable_string(Some("42".to_string()), &DataType::Int32)
+                .unwrap(),
             ScalarValue::Int32(Some(42))
         );
         assert_eq!(
-            ScalarValue::try_from_string("1970-01-02".to_string(), &DataType::Date32).unwrap(),
+            ScalarValue::try_from_nullable_string(
+                Some("1970-01-02".to_string()),
+                &DataType::Date32
+            )
+            .unwrap(),
             ScalarValue::Date32(Some(1))
         );
         assert_eq!(
-            ScalarValue::try_from_string("12.34".to_string(), &DataType::Decimal64(8, 2)).unwrap(),
+            ScalarValue::try_from_nullable_string(
+                Some("12.34".to_string()),
+                &DataType::Decimal64(8, 2)
+            )
+            .unwrap(),
             ScalarValue::Decimal64(Some(1234), 8, 2)
         );
         assert_eq!(
-            ScalarValue::try_from_string("view".to_string(), &DataType::Utf8View).unwrap(),
+            ScalarValue::try_from_nullable_string(Some("view".to_string()), &DataType::Utf8View)
+                .unwrap(),
             ScalarValue::Utf8View(Some("view".to_string()))
+        );
+        assert_eq!(
+            ScalarValue::try_from_nullable_string(None, &DataType::Int32).unwrap(),
+            ScalarValue::Int32(None)
+        );
+    }
+
+    #[test]
+    fn scalar_values_try_to_string_matches_utf8_casts() {
+        assert_eq!(
+            ScalarValue::Int32(Some(42))
+                .try_into_nullable_string()
+                .unwrap(),
+            Some("42".to_string())
+        );
+        assert_eq!(
+            ScalarValue::Date32(Some(1))
+                .try_into_nullable_string()
+                .unwrap(),
+            Some("1970-01-02".to_string())
+        );
+        assert_eq!(
+            ScalarValue::Decimal64(Some(1234), 8, 2)
+                .try_into_nullable_string()
+                .unwrap(),
+            Some("12.34".to_string())
+        );
+        assert_eq!(
+            ScalarValue::Int32(None).try_into_nullable_string().unwrap(),
+            None
         );
     }
 }
