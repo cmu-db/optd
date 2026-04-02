@@ -1,11 +1,15 @@
 mod commit_snapshot_info;
 mod get_current_snapshot_info;
+mod get_snapshot_info;
+mod get_snapshot_info_at;
 
 use crate::entity::snapshot;
 use sea_orm::DerivePartialModel;
 
 pub use commit_snapshot_info::*;
 pub use get_current_snapshot_info::*;
+pub use get_snapshot_info::*;
+pub use get_snapshot_info_at::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, DerivePartialModel)]
 #[sea_orm(entity = "snapshot::Entity")]

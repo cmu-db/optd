@@ -3983,10 +3983,12 @@ name = "optd-repository-api"
 version = "0.1.0"
 dependencies = [
  "arrow-schema",
+ "chrono",
  "dotenvy",
  "itertools 0.14.0",
  "optd-core",
  "optd-repository-entity",
+ "optd-repository-migration",
  "sea-orm",
  "tokio",
  "uuid",

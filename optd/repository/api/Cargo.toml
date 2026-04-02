@@ -11,5 +11,9 @@ dotenvy = { workspace = true }
 uuid = { workspace = true }
 arrow-schema = { workspace = true }
 itertools = { workspace = true }
+chrono = { workspace = true }
 optd-core = { path = "../../core" }
 optd-repository-entity = { path = "../entity" }
+
+[dev-dependencies]
+optd-repository-migration = { path = "../migration" }
