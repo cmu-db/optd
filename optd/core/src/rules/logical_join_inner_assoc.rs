@@ -86,17 +86,19 @@ mod tests {
     use crate::ir::{
         ScalarValue,
         convert::{IntoOperator, IntoScalar},
-        operator::{MockScan, MockSpec},
         scalar::Literal,
+        table_ref::TableRef,
+        test_utils::test_ctx_with_tables,
     };
 
     use super::*;
 
     #[test]
-    fn logical_join_inner_assoc_behavior() {
-        let a = MockScan::with_mock_spec(1, MockSpec::default()).into_operator();
-        let b = MockScan::with_mock_spec(2, MockSpec::default()).into_operator();
-        let c = MockScan::with_mock_spec(3, MockSpec::default()).into_operator();
+    fn logical_join_inner_assoc_behavior() -> crate::error::Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 1), ("t2", 1), ("t3", 1)])?;
+        let a = ctx.table_scan(TableRef::bare("t1"), None)?.build();
+        let b = ctx.table_scan(TableRef::bare("t2"), None)?.build();
+        let c = ctx.table_scan(TableRef::bare("t3"), None)?.build();
         let cond_upper = Literal::boolean(true).into_scalar();
         let cond_lower = Literal::boolean(false).into_scalar();
         let join_ab = Join::new(
@@ -116,20 +118,16 @@ mod tests {
         )
         .into_operator();
 
-        let ctx = IRContext::with_empty_magic();
         let rule = LogicalJoinInnerAssocRule::new();
         assert!(rule.pattern.matches_without_expand(&inner_joins));
         let res = rule.transform(&inner_joins, &ctx).unwrap().pop().unwrap();
         let new_upper = res.try_borrow::<Join>().unwrap();
-        let a_ref = new_upper.outer().try_borrow::<MockScan>().unwrap();
 
         let new_lower = new_upper.inner().try_borrow::<Join>().unwrap();
-        let b_ref = new_lower.outer().try_borrow::<MockScan>().unwrap();
-        let c_ref = new_lower.inner().try_borrow::<MockScan>().unwrap();
 
-        assert_eq!(&1, a_ref.table_index());
-        assert_eq!(&2, b_ref.table_index());
-        assert_eq!(&3, c_ref.table_index(),);
+        assert_eq!(new_upper.outer(), &a);
+        assert_eq!(new_lower.outer(), &b);
+        assert_eq!(new_lower.inner(), &c);
         assert_eq!(
             &ScalarValue::Boolean(Some(false)),
             new_upper
@@ -170,5 +168,6 @@ mod tests {
 
         // Join between two non join operator does not qualify.
         assert!(!rule.pattern.matches_without_expand(&join_ab));
+        Ok(())
     }
 }

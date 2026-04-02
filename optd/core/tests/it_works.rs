@@ -114,7 +114,7 @@ async fn integration() -> Result<(), Box<dyn std::error::Error>> {
     let rule_set = RuleSet::builder()
         .add_rule(rules::LogicalGetAsPhysicalTableScanRule::new())
         .add_rule(rules::LogicalJoinAsPhysicalHashJoinRule::new())
-        .add_rule(rules::LogicalJoinAsPhysicalNLJoinRule::new())
+        .add_rule(rules::LogicalJoinAsPhysicalNestedLoopRule::new())
         .add_rule(rules::LogicalSelectSimplifyRule::new())
         .add_rule(rules::LogicalSelectJoinTransposeRule::new())
         .add_rule(rules::LogicalJoinInnerCommuteRule::new())

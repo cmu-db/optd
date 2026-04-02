@@ -122,7 +122,6 @@ impl CardinalityEstimator for MagicCardinalityEstimator {
             OperatorKind::EnforcerSort(meta) => EnforcerSort::borrow_raw_parts(meta, &op.common)
                 .input()
                 .cardinality(ctx),
-            OperatorKind::MockScan(meta) => meta.spec.mocked_card,
             OperatorKind::Project(meta) => Project::borrow_raw_parts(meta, &op.common)
                 .input()
                 .cardinality(ctx),

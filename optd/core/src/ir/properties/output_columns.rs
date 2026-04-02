@@ -61,7 +61,6 @@ impl Derive<OutputColumns> for crate::ir::Operator {
                 )?;
                 Ok(Arc::new(set))
             }
-            OperatorKind::MockScan(meta) => Ok(meta.spec.mocked_output_columns.clone()),
             OperatorKind::Project(meta) => {
                 let project = Project::borrow_raw_parts(meta, &self.common);
                 let projections = project.projections().try_borrow::<List>().unwrap();

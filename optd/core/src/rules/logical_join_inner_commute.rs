@@ -67,18 +67,16 @@ impl Rule for LogicalJoinInnerCommuteRule {
 #[cfg(test)]
 mod tests {
     use crate::ir::{
-        IRContext,
-        convert::IntoScalar,
-        operator::{MockScan, MockSpec},
-        scalar::Literal,
+        convert::IntoScalar, scalar::Literal, table_ref::TableRef, test_utils::test_ctx_with_tables,
     };
 
     use super::*;
 
     #[test]
-    fn logical_join_inner_commute_behavior() {
-        let m_outer = MockScan::with_mock_spec(1, MockSpec::default()).into_operator();
-        let m_inner = MockScan::with_mock_spec(2, MockSpec::default()).into_operator();
+    fn logical_join_inner_commute_behavior() -> crate::error::Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 1), ("t2", 1)])?;
+        let m_outer = ctx.table_scan(TableRef::bare("t1"), None)?.build();
+        let m_inner = ctx.table_scan(TableRef::bare("t2"), None)?.build();
         let join_cond = Literal::boolean(true).into_scalar();
         let inner_join = Join::new(
             JoinType::Inner,
@@ -91,18 +89,15 @@ mod tests {
 
         let rule = LogicalJoinInnerCommuteRule::new();
         assert!(rule.pattern.matches_without_expand(&inner_join));
-        let ctx = IRContext::with_empty_magic();
         let res = rule.transform(&inner_join, &ctx).unwrap().pop().unwrap();
         let commuted = res.try_borrow::<Join>().unwrap();
 
-        let new_outer = commuted.outer().try_borrow::<MockScan>().unwrap();
-        let new_inner = commuted.inner().try_borrow::<MockScan>().unwrap();
-
-        assert_eq!(new_outer.table_index(), &2);
-        assert_eq!(new_inner.table_index(), &1);
+        assert_eq!(commuted.outer(), &m_inner);
+        assert_eq!(commuted.inner(), &m_outer);
 
         let left_outer_join =
             Join::new(JoinType::LeftOuter, m_outer, m_inner, join_cond, None).into_operator();
         assert!(!rule.pattern.matches_without_expand(&left_outer_join));
+        Ok(())
     }
 }

@@ -37,9 +37,6 @@ impl Derive<OutputSchema> for Operator {
             OperatorKind::Group(_) => {
                 whatever!("should not derive output schema for Group operator")
             }
-            OperatorKind::MockScan(_) => {
-                whatever!("should not derive output schema for MockScan operator")
-            }
             OperatorKind::Get(meta) => {
                 let scan = Get::borrow_raw_parts(meta, &self.common);
                 compute_scan_schema(

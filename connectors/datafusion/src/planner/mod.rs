@@ -241,7 +241,7 @@ impl OptdQueryPlanner {
             .add_rule(rules::LogicalGetAsPhysicalTableScanRule::new())
             .add_rule(rules::LogicalAggregateAsPhysicalHashAggregateRule::new())
             .add_rule(rules::LogicalJoinAsPhysicalHashJoinRule::new())
-            .add_rule(rules::LogicalJoinAsPhysicalNLJoinRule::new())
+            .add_rule(rules::LogicalJoinAsPhysicalNestedLoopRule::new())
             .add_rule(rules::LogicalSelectSimplifyRule::new())
             .add_rule(rules::LogicalJoinInnerCommuteRule::new())
             .add_rule(rules::LogicalJoinInnerAssocRule::new())

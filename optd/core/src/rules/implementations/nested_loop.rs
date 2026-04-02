@@ -1,37 +1,36 @@
 use crate::ir::{
     OperatorKind,
     convert::IntoOperator,
-    operator::{Join, JoinImplementation, join::JoinType},
+    operator::{Join, JoinImplementation},
     rule::{OperatorPattern, Rule},
 };
 
-pub struct LogicalJoinAsPhysicalNLJoinRule {
+pub struct LogicalJoinAsPhysicalNestedLoopRule {
     pattern: OperatorPattern,
 }
 
-impl Default for LogicalJoinAsPhysicalNLJoinRule {
+impl Default for LogicalJoinAsPhysicalNestedLoopRule {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl LogicalJoinAsPhysicalNLJoinRule {
+impl LogicalJoinAsPhysicalNestedLoopRule {
     pub fn new() -> Self {
         let pattern = OperatorPattern::with_top_matches(|kind| {
             matches!(
                 kind,
                 OperatorKind::Join(meta)
                     if meta.implementation.is_none()
-                        && matches!(meta.join_type, JoinType::Inner | JoinType::LeftOuter)
             )
         });
         Self { pattern }
     }
 }
 
-impl Rule for LogicalJoinAsPhysicalNLJoinRule {
+impl Rule for LogicalJoinAsPhysicalNestedLoopRule {
     fn name(&self) -> &'static str {
-        "logical_join_as_physical_nl_join"
+        "logical_join_as_physical_nested_loop"
     }
 
     fn pattern(&self) -> &OperatorPattern {
@@ -58,19 +57,21 @@ impl Rule for LogicalJoinAsPhysicalNLJoinRule {
 #[cfg(test)]
 mod tests {
     use crate::ir::{
-        IRContext, ScalarValue,
+        ScalarValue,
         convert::IntoScalar,
-        operator::{JoinImplementation, MockScan, MockSpec, join::JoinType},
+        operator::{JoinImplementation, join::JoinType},
         scalar::Literal,
+        table_ref::TableRef,
+        test_utils::test_ctx_with_tables,
     };
 
     use super::*;
 
     #[test]
-    fn logical_join_as_physical_nl_join_behavior() {
-        let ctx = IRContext::with_empty_magic();
-        let m_outer = MockScan::with_mock_spec(1, MockSpec::default()).into_operator();
-        let m_inner = MockScan::with_mock_spec(2, MockSpec::default()).into_operator();
+    fn logical_join_as_physical_nl_join_behavior() -> crate::error::Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 1), ("t2", 1)])?;
+        let m_outer = ctx.table_scan(TableRef::bare("t1"), None)?.build();
+        let m_inner = ctx.table_scan(TableRef::bare("t2"), None)?.build();
         let join_cond = Literal::boolean(true).into_scalar();
         let inner_join = Join::new(
             JoinType::Inner,
@@ -81,28 +82,14 @@ mod tests {
         )
         .into_operator();
 
-        let rule = LogicalJoinAsPhysicalNLJoinRule::new();
+        let rule = LogicalJoinAsPhysicalNestedLoopRule::new();
         assert!(rule.pattern.matches_without_expand(&inner_join));
         let after = rule.transform(&inner_join, &ctx).unwrap().pop().unwrap();
 
         let nl_join = after.try_borrow::<Join>().unwrap();
 
-        assert_eq!(
-            &1,
-            nl_join
-                .outer()
-                .try_borrow::<MockScan>()
-                .unwrap()
-                .table_index()
-        );
-        assert_eq!(
-            &2,
-            nl_join
-                .inner()
-                .try_borrow::<MockScan>()
-                .unwrap()
-                .table_index()
-        );
+        assert_eq!(nl_join.outer(), &m_outer);
+        assert_eq!(nl_join.inner(), &m_inner);
         assert_eq!(&JoinType::Inner, nl_join.join_type());
         assert_eq!(
             nl_join.implementation(),
@@ -112,5 +99,6 @@ mod tests {
             &ScalarValue::Boolean(Some(true)),
             nl_join.join_cond().try_borrow::<Literal>().unwrap().value()
         );
+        Ok(())
     }
 }
