@@ -15,7 +15,7 @@ use arrow::{
         StringArray, StringViewArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
     },
     compute::kernels::cast::{CastOptions, cast_with_options},
-    util::display::FormatOptions,
+    util::display::{DurationFormat, FormatOptions},
 };
 
 use crate::{
@@ -23,9 +23,12 @@ use crate::{
     ir::DataType,
 };
 
+const DEFAULT_FORMAT_OPTIONS: FormatOptions<'static> =
+    FormatOptions::new().with_duration_format(DurationFormat::Pretty);
+
 const DEFAULT_CAST_OPTIONS: CastOptions<'static> = CastOptions {
     safe: false,
-    format_options: FormatOptions::new(),
+    format_options: DEFAULT_FORMAT_OPTIONS,
 };
 
 #[derive(Debug, Clone)]
@@ -463,8 +466,8 @@ impl std::fmt::Display for ScalarValue {
 }
 
 impl ScalarValue {
-    pub fn try_from_nullable_string(value: Option<String>, target_type: &DataType) -> Result<Self> {
-        ScalarValue::Utf8(value).cast_to(target_type)
+    pub fn try_from_string(value: String, target_type: &DataType) -> Result<Self> {
+        ScalarValue::Utf8(Some(value)).cast_to(target_type)
     }
 
     pub fn try_into_nullable_string(&self) -> Result<Option<String>> {
@@ -509,9 +512,9 @@ impl ScalarValue {
 mod tests {
     use std::collections::HashSet;
 
-    use super::ScalarValue;
+    use super::{DEFAULT_FORMAT_OPTIONS, ScalarValue};
     use crate::ir::DataType;
-    use arrow::{compute::kernels::cast::CastOptions, util::display::FormatOptions};
+    use arrow::compute::kernels::cast::CastOptions;
 
     #[test]
     fn float_values_report_types_and_nullability() {
@@ -572,7 +575,7 @@ mod tests {
     fn scalar_values_safe_casts_return_null() {
         let options = CastOptions {
             safe: true,
-            format_options: FormatOptions::new(),
+            format_options: DEFAULT_FORMAT_OPTIONS,
         };
 
         assert_eq!(
@@ -585,11 +588,17 @@ mod tests {
 
     fn assert_string_round_trip(value: ScalarValue) {
         let data_type = value.data_type();
-        let string_value = value.try_into_nullable_string().unwrap();
-        assert_eq!(
-            ScalarValue::try_from_nullable_string(string_value, &data_type).unwrap(),
-            value
-        );
+        match value.try_into_nullable_string().unwrap() {
+            Some(string_value) => {
+                assert_eq!(
+                    ScalarValue::try_from_string(string_value, &data_type).unwrap(),
+                    value
+                );
+            }
+            None => {
+                assert_eq!(ScalarValue::Utf8(None).cast_to(&data_type).unwrap(), value);
+            }
+        }
     }
 
     #[test]
@@ -637,36 +646,22 @@ mod tests {
     }
 
     #[test]
-    fn scalar_values_try_from_nullable_string_matches_utf8_round_trip_targets() {
+    fn scalar_values_try_from_string_matches_utf8_round_trip_targets() {
         assert_eq!(
-            ScalarValue::try_from_nullable_string(Some("42".to_string()), &DataType::Int32)
-                .unwrap(),
+            ScalarValue::try_from_string("42".to_string(), &DataType::Int32).unwrap(),
             ScalarValue::Int32(Some(42))
         );
         assert_eq!(
-            ScalarValue::try_from_nullable_string(
-                Some("1970-01-02".to_string()),
-                &DataType::Date32
-            )
-            .unwrap(),
+            ScalarValue::try_from_string("1970-01-02".to_string(), &DataType::Date32).unwrap(),
             ScalarValue::Date32(Some(1))
         );
         assert_eq!(
-            ScalarValue::try_from_nullable_string(
-                Some("12.34".to_string()),
-                &DataType::Decimal64(8, 2)
-            )
-            .unwrap(),
+            ScalarValue::try_from_string("12.34".to_string(), &DataType::Decimal64(8, 2)).unwrap(),
             ScalarValue::Decimal64(Some(1234), 8, 2)
         );
         assert_eq!(
-            ScalarValue::try_from_nullable_string(Some("view".to_string()), &DataType::Utf8View)
-                .unwrap(),
+            ScalarValue::try_from_string("view".to_string(), &DataType::Utf8View).unwrap(),
             ScalarValue::Utf8View(Some("view".to_string()))
-        );
-        assert_eq!(
-            ScalarValue::try_from_nullable_string(None, &DataType::Int32).unwrap(),
-            ScalarValue::Int32(None)
         );
     }
 
