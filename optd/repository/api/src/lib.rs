@@ -75,22 +75,82 @@ impl<T: TransactionTrait> Repository<T> {
         table::get_all_table_infos(&self.db, &mut current_snapshot).await
     }
 
-    pub async fn get_table(&self, info: table::GetTableInfo) -> Result<table::TableInfo, DbErr> {
-        todo!()
+    pub async fn get_table(&self, info: table::GetTableInfo) -> Result<table::TableInfo, DbErr>
+    where
+        T: ConnectionTrait,
+    {
+        let table_id = info.table_id;
+        let mut current_snapshot = snapshot::get_current_snapshot_info(&self.db)
+            .await?
+            .unwrap_or_default();
+        table::get_table(info, &self.db, &mut current_snapshot)
+            .await?
+            .ok_or_else(|| DbErr::RecordNotFound(format!("table {table_id} not found")))
     }
+
     pub async fn create_schema(&self, info: schema::CreateSchemaInfo) -> Result<i64, DbErr> {
-        todo!()
+        self.db
+            .transaction::<_, _, DbErr>(|txn| {
+                Box::pin(async move {
+                    let changes_made = ChangesMade::CreateSchema(info.schema_name.clone());
+                    let mut current_snapshot = snapshot::get_current_snapshot_info(txn)
+                        .await?
+                        .unwrap_or_default();
+                    let schema_id =
+                        schema::create_new_schema(info, txn, &mut current_snapshot).await?;
+                    let new_snapshot_id = snapshot::commit_snapshot(txn, current_snapshot).await?;
+                    snapshot::log_snapshot_changes(txn, new_snapshot_id, &[changes_made]).await?;
+                    Ok(schema_id)
+                })
+            })
+            .await
+            .map_err(|err| match err {
+                sea_orm::TransactionError::Connection(err)
+                | sea_orm::TransactionError::Transaction(err) => err,
+            })
     }
+
     pub async fn drop_schema(&self, info: schema::DropSchemaInfo) -> Result<(), DbErr> {
-        todo!()
+        self.db
+            .transaction::<_, _, DbErr>(|txn| {
+                Box::pin(async move {
+                    let changes_made = ChangesMade::DropSchema(info.schema_id);
+                    let mut current_snapshot = snapshot::get_current_snapshot_info(txn)
+                        .await?
+                        .unwrap_or_default();
+                    schema::drop_schema(info, txn, &mut current_snapshot).await?;
+                    let new_snapshot_id = snapshot::commit_snapshot(txn, current_snapshot).await?;
+                    snapshot::log_snapshot_changes(txn, new_snapshot_id, &[changes_made]).await?;
+                    Ok(())
+                })
+            })
+            .await
+            .map_err(|err| match err {
+                sea_orm::TransactionError::Connection(err)
+                | sea_orm::TransactionError::Transaction(err) => err,
+            })
     }
-    pub async fn get_schema(
-        &self,
-        info: schema::GetSchemaInfo,
-    ) -> Result<schema::SchemaInfo, DbErr> {
-        todo!()
+
+    pub async fn get_schema(&self, info: schema::GetSchemaInfo) -> Result<schema::SchemaInfo, DbErr>
+    where
+        T: ConnectionTrait,
+    {
+        let schema_id = info.schema_id;
+        let mut current_snapshot = snapshot::get_current_snapshot_info(&self.db)
+            .await?
+            .unwrap_or_default();
+        schema::get_schema(info, &self.db, &mut current_snapshot)
+            .await?
+            .ok_or_else(|| DbErr::RecordNotFound(format!("schema {schema_id} not found")))
     }
-    pub async fn get_all_schemas(&self) -> Result<Vec<schema::SchemaInfo>, DbErr> {
-        todo!()
+
+    pub async fn get_all_schemas(&self) -> Result<Vec<schema::SchemaInfo>, DbErr>
+    where
+        T: ConnectionTrait,
+    {
+        let mut current_snapshot = snapshot::get_current_snapshot_info(&self.db)
+            .await?
+            .unwrap_or_default();
+        schema::get_all_schema_infos(&self.db, &mut current_snapshot).await
     }
 }
