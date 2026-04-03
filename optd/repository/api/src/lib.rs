@@ -1,6 +1,6 @@
 pub use optd_repository_entity as entity;
 use optd_repository_entity::snapshot_changes::ChangesMade;
-use sea_orm::{DbErr, TransactionTrait};
+use sea_orm::{ConnectionTrait, DbErr, TransactionTrait};
 
 pub mod schema;
 pub mod snapshot;
@@ -65,8 +65,14 @@ impl<T: TransactionTrait> Repository<T> {
             })
     }
 
-    pub async fn get_all_tables(&self) -> Result<Vec<table::TableInfo>, DbErr> {
-        todo!()
+    pub async fn get_all_tables(&self) -> Result<Vec<table::TableInfo>, DbErr>
+    where
+        T: ConnectionTrait,
+    {
+        let mut current_snapshot = snapshot::get_current_snapshot_info(&self.db)
+            .await?
+            .unwrap_or_default();
+        table::get_all_table_infos(&self.db, &mut current_snapshot).await
     }
 
     pub async fn get_table(&self, info: table::GetTableInfo) -> Result<table::TableInfo, DbErr> {
