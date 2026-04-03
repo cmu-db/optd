@@ -53,7 +53,7 @@ pub struct Model {
 impl ActiveModelBehavior for ActiveModel {}
 
 #[derive(Debug, Clone, PartialEq, derive_more::Display)]
-pub enum ChangeCategory {
+pub enum ChangesMade {
     #[display("created_schema:{_0}")]
     CreateSchema(String),
     #[display("created_table:{_0}")]
@@ -78,7 +78,7 @@ pub enum ChangeCategory {
     AlterView(i64),
 }
 
-impl FromStr for ChangeCategory {
+impl FromStr for ChangesMade {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {

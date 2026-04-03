@@ -6,7 +6,7 @@ use crate::{
 };
 
 /// Commits the current snapshot metadata.
-pub async fn commit_snapshot<C>(db: &C, current_snapshot: SnapshotInfo) -> Result<(), DbErr>
+pub async fn commit_snapshot<C>(db: &C, current_snapshot: SnapshotInfo) -> Result<i64, DbErr>
 where
     C: ConnectionTrait,
 {
@@ -17,6 +17,6 @@ where
         ..Default::default()
     };
 
-    Snapshot::insert(model).exec(db).await?;
-    Ok(())
+    let result = Snapshot::insert(model).exec(db).await?;
+    Ok(result.last_insert_id)
 }
