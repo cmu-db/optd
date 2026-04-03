@@ -1,8 +1,6 @@
 use itertools::Itertools;
 use sea_orm::{ConnectionTrait, DbErr, EntityTrait};
 
-use crate::snapshot::SnapshotInfo;
-
 use crate::entity::{
     prelude::*,
     snapshot_changes::{self, ChangesMade},

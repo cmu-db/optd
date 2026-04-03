@@ -44,12 +44,31 @@ impl<T: TransactionTrait> Repository<T> {
     }
 
     pub async fn drop_table(&mut self, info: table::DropTableInfo) -> Result<i64, DbErr> {
-        todo!()
+        self.db
+            .transaction::<_, _, DbErr>(|txn| {
+                Box::pin(async move {
+                    let table_id = info.table_id;
+                    let changes_made = ChangesMade::DropTable(table_id);
+                    let mut current_snapshot = snapshot::get_current_snapshot_info(txn)
+                        .await?
+                        .unwrap_or_default();
+                    table::drop_table(info, txn, &mut current_snapshot).await?;
+                    let new_snapshot_id = snapshot::commit_snapshot(txn, current_snapshot).await?;
+                    snapshot::log_snapshot_changes(txn, new_snapshot_id, &[changes_made]).await?;
+                    Ok(table_id)
+                })
+            })
+            .await
+            .map_err(|err| match err {
+                sea_orm::TransactionError::Connection(err)
+                | sea_orm::TransactionError::Transaction(err) => err,
+            })
     }
 
     pub async fn get_all_tables(&self) -> Result<Vec<table::TableInfo>, DbErr> {
         todo!()
     }
+
     pub async fn get_table(&self, info: table::GetTableInfo) -> Result<table::TableInfo, DbErr> {
         todo!()
     }
