@@ -9,8 +9,8 @@ use std::sync::Arc;
 use crate::error::Result;
 use crate::ir::convert::IntoOperator;
 use crate::ir::convert::IntoScalar;
-use crate::ir::operator::{LogicalRemap, Operator};
-use crate::ir::scalar::{BinaryOpKind, ColumnAssign, ColumnRef, List, NaryOpKind};
+use crate::ir::operator::{Operator, Remap};
+use crate::ir::scalar::{BinaryOpKind, ColumnRef, NaryOpKind};
 use crate::ir::{Column, ColumnSet, IRContext, Scalar, ScalarKind};
 use crate::utility::union_find::UnionFind;
 
@@ -138,8 +138,8 @@ impl<'a> Unnesting<'a> {
             refs.extend(info.get_outer_refs().iter().copied());
             scope = info.get_parent().map(|p| p.get_info());
         }
-        refs.sort_by_key(|c| c.0);
-        refs.dedup_by_key(|c| c.0);
+        refs.sort();
+        refs.dedup();
         refs
     }
 
@@ -183,6 +183,23 @@ impl<'a> Unnesting<'a> {
     pub(super) fn merge_col_eq_from(&mut self, other: &Unnesting<'_>) {
         for col in other.cclasses.keys() {
             self.cclasses.merge(col, &other.cclasses.find(col));
+        }
+    }
+
+    // Project/remap/aggregate rebuilds create fresh table-index namespaces in
+    // the new IR. Preserve equivalence information by teaching the current
+    // scope which old output column now corresponds to which new one.
+    pub(super) fn propagate_passthrough_mapping(&mut self, mapping: &HashMap<Column, Column>) {
+        for (source, target) in mapping {
+            self.cclasses.merge(source, target);
+        }
+
+        for outer_col in self.collect_outer_refs_recursive() {
+            if let Some(resolved) = self.resolve_col(outer_col)
+                && let Some(mapped) = mapping.get(&resolved)
+            {
+                self.set_scoped_repr_of(outer_col, *mapped);
+            }
         }
     }
 
@@ -287,27 +304,21 @@ pub(super) fn remap_right_output_collisions(
     unnesting: &mut Unnesting<'_>,
     ctx: &IRContext,
 ) -> Result<(Arc<Operator>, HashMap<Column, Column>)> {
-    let mut right_remap: HashMap<Column, Column> = HashMap::new();
-    let mut remap_members = Vec::new();
-    let mut right_cols_vec: Vec<Column> = right.output_columns(ctx)?.iter().copied().collect();
-    right_cols_vec.sort_by_key(|c| c.0);
-    for col in right_cols_vec {
-        let out_col = if left_output_cols.contains(&col) {
-            let fresh = ctx.define_column(ctx.get_column_meta(&col).data_type.clone(), None);
-            right_remap.insert(col, fresh);
-            fresh
-        } else {
-            col
-        };
-        remap_members
-            .push(ColumnAssign::new(out_col, ColumnRef::new(col).into_scalar()).into_scalar());
+    let right_cols = right.output_columns_in_order(ctx)?;
+    if !right_cols.iter().any(|col| left_output_cols.contains(col)) {
+        return Ok((right, HashMap::new()));
     }
-    if !right_remap.is_empty() {
-        let remap_list = List::new(remap_members.into()).into_scalar();
-        // TODO(yuchen): fix this
-        let table_index = 0;
-        right = LogicalRemap::new(table_index, right).into_operator();
-        unnesting.remap_repr_values(&right_remap);
-    }
+
+    // `Remap` is the cheapest way in the current IR to assign a fresh
+    // table_index to the entire right subtree while preserving column order.
+    let table_index = ctx.add_binding(None, right.output_schema(ctx)?.inner().clone())?;
+    let right_remap = right_cols
+        .into_iter()
+        .enumerate()
+        .map(|(idx, col)| (col, Column(table_index, idx)))
+        .collect::<HashMap<_, _>>();
+    right = Remap::new(table_index, right).into_operator();
+    unnesting.remap_repr_values(&right_remap);
+
     Ok((right, right_remap))
 }
