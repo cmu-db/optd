@@ -65,7 +65,7 @@ fn build_columns(columns: Vec<column::Model>) -> Result<Vec<ColumnInfo>, DbErr> 
             }
 
             Ok(ColumnInfo {
-                column_id: column.column_id,
+                column_id: column.column_id as u64,
                 column_name: column.column_name,
                 column_type: column.column_type,
                 nulls_allowed: column.nulls_allowed,

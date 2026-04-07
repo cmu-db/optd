@@ -28,7 +28,7 @@ pub struct Model {
     /// The total number of rows in the table.
     ///
     /// This value can be approximate.
-    pub record_count: u64,
+    pub record_count: i64,
 
     /// The next row identifier for newly inserted rows.
     ///
@@ -38,7 +38,7 @@ pub struct Model {
     /// The total file size (in bytes) of all data files in the table.
     ///
     /// This value can be approximate.
-    pub file_size_bytes: u64,
+    pub file_size_bytes: i64,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

@@ -242,6 +242,9 @@ impl<T: TransactionTrait> Repository<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use optd_core::ir::statistics::{ColumnStatistics, TableStatistics};
     use optd_core::ir::table_ref::TableRef;
     use optd_repository_entity::{column::ColumnType, prelude::SnapshotChanges};
     use optd_repository_migration::{Migrator, MigratorTrait};
@@ -397,6 +400,102 @@ mod tests {
                 .await?
                 .iter()
                 .all(|table| table.table_id != table_id)
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn repository_table_stats_lifecycle_commits_snapshots_and_logs_changes(
+    ) -> Result<(), DbErr> {
+        let (mut repo, db) = setup_repository().await?;
+        let schema_name = format!("schema_{}", Uuid::new_v4().simple());
+        let table_name = format!("table_{}", Uuid::new_v4().simple());
+        repo.create_schema(schema::CreateSchemaInfo { schema_name: schema_name.clone() })
+            .await?;
+
+        let table_id = repo
+            .create_table(table::CreateTableInfo {
+                table_name: TableRef::partial(schema_name, table_name),
+                columns: vec![
+                    table::CreateColumnInfo {
+                        column_name: "id".to_owned(),
+                        column_type: ColumnType(arrow_schema::DataType::Int64),
+                        nulls_allowed: false,
+                        initial_default: None,
+                        default_value: None,
+                    },
+                    table::CreateColumnInfo {
+                        column_name: "note".to_owned(),
+                        column_type: ColumnType(arrow_schema::DataType::Utf8),
+                        nulls_allowed: true,
+                        initial_default: None,
+                        default_value: None,
+                    },
+                ],
+            })
+            .await?;
+
+        assert_eq!(
+            repo.get_table_stats(stats::GetTableStatsInfo { table_id }).await?,
+            None
+        );
+        assert!(repo.get_all_table_stats().await?.is_empty());
+
+        let table = repo.get_table(table::GetTableInfo { table_id }).await?;
+        let expected_stats = TableStatistics {
+            row_count: 42,
+            size_bytes: Some(4096),
+            column_statistics: HashMap::from([
+                (
+                    table.columns[0].column_id as usize,
+                    ColumnStatistics {
+                        min_value: Some("1".to_owned()),
+                        max_value: Some("42".to_owned()),
+                        null_count: Some(0),
+                        distinct_count: Some(42),
+                        advanced_stats: vec![],
+                    },
+                ),
+                (
+                    table.columns[1].column_id as usize,
+                    ColumnStatistics {
+                        min_value: Some("\"alpha\"".to_owned()),
+                        max_value: Some("\"omega\"".to_owned()),
+                        null_count: Some(3),
+                        distinct_count: Some(11),
+                        advanced_stats: vec![],
+                    },
+                ),
+            ]),
+        };
+
+        let snapshot_before_stats_update = current_snapshot_id(&db).await?;
+        repo.update_table_stats(stats::UpdateTableStatsInfo {
+            table_id,
+            stats: expected_stats.clone(),
+        })
+        .await?;
+
+        assert!(current_snapshot_id(&db).await? > snapshot_before_stats_update);
+        assert_eq!(
+            latest_changes(&db).await?,
+            format!("updated_table_stats:{table_id}")
+        );
+        assert_eq!(
+            repo.get_table_stats(stats::GetTableStatsInfo { table_id })
+                .await?,
+            Some(stats::TableStatsInfo {
+                table_id,
+                stats: expected_stats.clone(),
+            })
+        );
+        assert_eq!(
+            repo.get_all_table_stats().await?,
+            vec![stats::TableStatsInfo {
+                table_id,
+                stats: expected_stats,
+            }]
         );
 
         Ok(())

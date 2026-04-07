@@ -15,7 +15,7 @@ pub struct Model {
     pub table_id: i64,
 
     /// Refers to a `column_id` from the `ducklake_column` table.
-    pub column_id: u64,
+    pub column_id: i64,
 
     /// Refers to a `snapshot_id` from the `optd_snapshot` table.
     ///
@@ -50,11 +50,11 @@ pub struct Model {
 
     /// The number of distinct values in the column.
     /// NOTE: This is not part of the DuckLake specification.
-    pub distinct_count: Option<u64>,
+    pub distinct_count: Option<i64>,
 
     /// The number of `NULL` values in the column.
     /// NOTE: This is not part of the DuckLake specification.
-    pub null_count: Option<u64>,
+    pub null_count: Option<i64>,
 
     /// Additional statistics encoded as a string.
     ///

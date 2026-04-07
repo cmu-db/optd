@@ -55,18 +55,20 @@ pub(crate) fn build_table_stats_info(
     Ok(TableStatsInfo {
         table_id: table_stats.table_id,
         stats: TableStatistics {
-            row_count: table_stats.record_count as usize,
-            size_bytes: Some(table_stats.file_size_bytes as usize),
+            row_count: table_stats.record_count as u64 as usize,
+            size_bytes: Some(table_stats.file_size_bytes as u64 as usize),
             column_statistics: column_stats
                 .into_iter()
                 .map(|column_stat| {
                     (
-                        column_stat.column_id as usize,
+                        column_stat.column_id as u64 as usize,
                         ColumnStatistics {
                             min_value: column_stat.min_value,
                             max_value: column_stat.max_value,
-                            null_count: column_stat.null_count.map(|v| v as usize),
-                            distinct_count: column_stat.distinct_count.map(|value| value as usize),
+                            null_count: column_stat.null_count.map(|v| v as u64 as usize),
+                            distinct_count: column_stat
+                                .distinct_count
+                                .map(|value| value as u64 as usize),
                             advanced_stats: vec![],
                         },
                     )
