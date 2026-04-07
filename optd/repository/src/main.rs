@@ -1,7 +1,11 @@
+use std::collections::HashMap;
+
+use optd_core::ir::statistics::{ColumnStatistics, TableStatistics};
 use optd_core::ir::table_ref::TableRef;
 use optd_repository_api::{
     Repository,
     schema::{CreateSchemaInfo, DropSchemaInfo, GetSchemaInfo},
+    stats::{GetTableStatsInfo, TableStatsInfo, UpdateTableStatsInfo},
     table::{CreateColumnInfo, CreateTableInfo, DropTableInfo, GetTableInfo},
 };
 use optd_repository_entity::column::ColumnType;
@@ -69,15 +73,114 @@ async fn smoke_test_all_apis(db: &DatabaseConnection) -> Result<(), Box<dyn std:
             ],
         })
         .await?;
-    assert_eq!(
-        repo.get_table(GetTableInfo { table_id }).await?.table_name,
-        table_name
-    );
+    let fetched_table = repo.get_table(GetTableInfo { table_id }).await?;
+    assert_eq!(fetched_table.table_name, table_name);
     assert!(
         repo.get_all_tables()
             .await?
             .iter()
             .any(|table| table.table_id == table_id)
+    );
+
+    let initial_stats = TableStatistics {
+        row_count: 42,
+        size_bytes: Some(4096),
+        column_statistics: HashMap::from([
+            (
+                fetched_table.columns[0].column_id as usize,
+                ColumnStatistics {
+                    min_value: Some("1".to_owned()),
+                    max_value: Some("42".to_owned()),
+                    null_count: Some(0),
+                    distinct_count: Some(42),
+                    advanced_stats: vec![],
+                },
+            ),
+            (
+                fetched_table.columns[1].column_id as usize,
+                ColumnStatistics {
+                    min_value: Some("\"alpha\"".to_owned()),
+                    max_value: Some("\"omega\"".to_owned()),
+                    null_count: Some(3),
+                    distinct_count: Some(11),
+                    advanced_stats: vec![],
+                },
+            ),
+        ]),
+    };
+
+    assert_eq!(
+        repo.get_table_stats(GetTableStatsInfo { table_id }).await?,
+        None
+    );
+
+    repo.update_table_stats(UpdateTableStatsInfo {
+        table_id,
+        stats: initial_stats.clone(),
+    })
+    .await?;
+
+    assert_eq!(
+        repo.get_table_stats(GetTableStatsInfo { table_id }).await?,
+        Some(TableStatsInfo {
+            table_id,
+            stats: initial_stats.clone(),
+        })
+    );
+    assert_eq!(
+        repo.get_all_table_stats().await?,
+        vec![TableStatsInfo {
+            table_id,
+            stats: initial_stats,
+        }]
+    );
+
+    let updated_stats = TableStatistics {
+        row_count: 84,
+        size_bytes: Some(8192),
+        column_statistics: HashMap::from([
+            (
+                fetched_table.columns[0].column_id as usize,
+                ColumnStatistics {
+                    min_value: Some("10".to_owned()),
+                    max_value: Some("99".to_owned()),
+                    null_count: Some(0),
+                    distinct_count: Some(64),
+                    advanced_stats: vec![],
+                },
+            ),
+            (
+                fetched_table.columns[1].column_id as usize,
+                ColumnStatistics {
+                    min_value: Some("\"beta\"".to_owned()),
+                    max_value: Some("\"zeta\"".to_owned()),
+                    null_count: Some(1),
+                    distinct_count: Some(17),
+                    advanced_stats: vec![],
+                },
+            ),
+        ]),
+    };
+
+    repo.update_table_stats(UpdateTableStatsInfo {
+        table_id,
+        stats: updated_stats.clone(),
+    })
+    .await?;
+
+    assert_eq!(
+        repo.get_table_stats(GetTableStatsInfo { table_id }).await?,
+        Some(TableStatsInfo {
+            table_id,
+            stats: updated_stats.clone(),
+        })
+    );
+    assert_eq!(
+        repo.get_all_table_stats().await?,
+        vec![TableStatsInfo {
+            table_id,
+            stats: updated_stats,
+        }]
     );
 
     repo.drop_table(DropTableInfo { table_id }).await?;
