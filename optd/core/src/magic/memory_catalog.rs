@@ -42,7 +42,16 @@ impl MemoryCatalog {
 }
 
 impl Catalog for MemoryCatalog {
-    fn create_table(&self, table: TableRef, schema: Arc<Schema>) -> Result<DataSourceId> {
+    fn kind(&self) -> &str {
+        "memory"
+    }
+
+    fn create_table(
+        &self,
+        table: TableRef,
+        schema: Arc<Schema>,
+        definition: Option<String>,
+    ) -> Result<DataSourceId> {
         let mut writer = self.inner.write().unwrap();
         let id = DataSourceId(writer.next_table_id);
         let table = self.resolve_table_ref(table);
@@ -62,6 +71,7 @@ impl Catalog for MemoryCatalog {
                 table,
                 schema,
                 statistics: None,
+                definition,
             },
         );
         writer.next_table_id += 1;
@@ -156,9 +166,9 @@ mod tests {
         let cat = MemoryCatalog::new("optd", "public");
         let schema = Arc::new(mock_table_schema("t1"));
         let t1 = cat
-            .create_table(TableRef::bare("t1"), schema.clone())
+            .create_table(TableRef::bare("t1"), schema.clone(), None)
             .unwrap();
-        let another_t1 = cat.create_table(TableRef::bare("t1"), schema.clone());
+        let another_t1 = cat.create_table(TableRef::bare("t1"), schema.clone(), None);
         assert!(another_t1.is_err());
 
         let output = cat.table(t1).unwrap();
@@ -169,7 +179,7 @@ mod tests {
     fn describe_table_with_name() {
         let cat = MemoryCatalog::new("optd", "public");
         let schema = Arc::new(mock_table_schema("t1"));
-        cat.create_table(TableRef::bare("t1"), schema.clone())
+        cat.create_table(TableRef::bare("t1"), schema.clone(), None)
             .unwrap();
 
         let output = cat.table_by_ref(&TableRef::bare("t1")).unwrap();
@@ -190,7 +200,7 @@ mod tests {
         let cat = MemoryCatalog::new("optd", "public");
         let schema = Arc::new(mock_table_schema("t1"));
         let first_id = cat
-            .create_table(TableRef::bare("t1"), schema.clone())
+            .create_table(TableRef::bare("t1"), schema.clone(), None)
             .unwrap();
 
         cat.drop_table(TableRef::bare("t1")).unwrap();
@@ -204,7 +214,9 @@ mod tests {
             Err(CatalogError::TableNotFound { .. })
         ));
 
-        let second_id = cat.create_table(TableRef::bare("t1"), schema).unwrap();
+        let second_id = cat
+            .create_table(TableRef::bare("t1"), schema, None)
+            .unwrap();
         assert_ne!(first_id, second_id);
     }
 
@@ -222,7 +234,8 @@ mod tests {
     fn set_table_statistics_with_name() {
         let cat = MemoryCatalog::new("optd", "public");
         let schema = Arc::new(mock_table_schema("t1"));
-        cat.create_table(TableRef::bare("t1"), schema).unwrap();
+        cat.create_table(TableRef::bare("t1"), schema, None)
+            .unwrap();
 
         let stats = TableStatistics {
             row_count: 10,

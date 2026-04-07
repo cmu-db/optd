@@ -71,6 +71,7 @@ async fn smoke_test_all_apis(db: &DatabaseConnection) -> Result<(), Box<dyn std:
                     default_value: None,
                 },
             ],
+            definition: None,
         })
         .await?;
     let fetched_table = repo.get_table(GetTableInfo { table_id }).await?;

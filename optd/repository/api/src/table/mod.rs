@@ -20,6 +20,7 @@ pub use get_table::*;
 pub struct CreateTableInfo {
     pub table_name: TableRef,
     pub columns: Vec<CreateColumnInfo>,
+    pub definition: Option<String>,
     // TODO(yuchen): Constraints (primary key, unique, etc.)
     // pub constraints: Constraints,
 }
@@ -75,6 +76,7 @@ pub struct TableInfo {
     pub table_uuid: Uuid,
     pub table_name: String,
     pub columns: Vec<ColumnInfo>,
+    pub definition: Option<String>,
 }
 
 impl TableInfo {

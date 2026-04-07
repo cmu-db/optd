@@ -71,6 +71,7 @@ where
         end_snapshot: Set(None),
         schema_id: Set(schema_id),
         table_name: Set(table_name.to_owned()),
+        definition: Set(info.definition),
         ..Default::default()
     };
 

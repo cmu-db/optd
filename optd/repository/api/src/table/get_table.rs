@@ -3,9 +3,9 @@ use sea_orm::{
 };
 
 use crate::{
+    entity::{column, prelude::*, table},
     snapshot::SnapshotInfo,
     table::{ColumnInfo, GetTableInfo, TableInfo},
-    entity::{column, prelude::*, table},
 };
 
 pub async fn get_table<C>(
@@ -50,6 +50,7 @@ where
         table_uuid: table.table_uuid,
         table_name: table.table_name,
         columns: build_columns(columns)?,
+        definition: table.definition,
     }))
 }
 

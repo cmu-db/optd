@@ -3,6 +3,7 @@ mod extension;
 mod planner;
 mod table;
 
+use core::fmt;
 use std::sync::Arc;
 
 use datafusion::arrow::array::RecordBatch;
@@ -11,7 +12,7 @@ use datafusion::config::ConfigOptions;
 use datafusion::error::DataFusionError;
 use datafusion::execution::SessionStateBuilder;
 use datafusion::execution::runtime_env::RuntimeEnv;
-use datafusion::logical_expr::{DdlStatement, LogicalPlan};
+use datafusion::logical_expr::{CreateExternalTable, DdlStatement, LogicalPlan};
 use datafusion::optimizer as df_optimizer;
 use datafusion::prelude::{DataFrame, SessionConfig, SessionContext};
 use datafusion::sql::TableReference;
@@ -23,7 +24,12 @@ pub use table::{OptdTable, OptdTableProvider};
 
 pub use optd_core::error::Error as OptdError;
 pub use optd_core::error::Result as OptdResult;
+use optd_core::ir::catalog::Catalog;
 use optd_core::ir::table_ref::TableRef as OptdTableRef;
+use optd_core::magic::MemoryCatalog;
+use optd_repository_api::optd_catalog::RepositoryCatalog;
+use optd_repository_migration::{Migrator, MigratorTrait};
+use sea_orm::Database;
 
 pub trait SessionStateBuilderOptdExt: Sized {
     fn with_optd_planner(self) -> Self;
@@ -68,7 +74,35 @@ pub fn create_optd_session_context(
     config: SessionConfig,
     runtime: Arc<RuntimeEnv>,
 ) -> SessionContext {
-    let optd_extension = Arc::new(OptdExtension::default());
+    create_optd_session_context_with_catalog(
+        config,
+        runtime,
+        Arc::new(MemoryCatalog::new("datafusion", "public")),
+    )
+}
+
+pub fn memory_catalog() -> Arc<dyn Catalog> {
+    Arc::new(MemoryCatalog::new("datafusion", "public"))
+}
+
+pub async fn repository_catalog_from_url(
+    database_url: &str,
+) -> Result<Arc<dyn Catalog>, DataFusionError> {
+    let db = Database::connect(database_url)
+        .await
+        .map_err(|err| DataFusionError::External(Box::new(err)))?;
+    Migrator::up(&db, None)
+        .await
+        .map_err(|err| DataFusionError::External(Box::new(err)))?;
+    Ok(Arc::new(RepositoryCatalog::new(db, "datafusion", "public")))
+}
+
+pub fn create_optd_session_context_with_catalog(
+    config: SessionConfig,
+    runtime: Arc<RuntimeEnv>,
+    catalog: Arc<dyn Catalog>,
+) -> SessionContext {
+    let optd_extension = Arc::new(OptdExtension::new(catalog));
 
     let config = config
         .with_option_extension(OptdExtensionConfig::default())
@@ -91,10 +125,46 @@ pub struct OptdSessionContext {
     inner: SessionContext,
 }
 
+pub struct ProperlyFormattedCreateExternalTable<'a>(&'a CreateExternalTable);
+
+impl<'a> fmt::Display for ProperlyFormattedCreateExternalTable<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "CREATE EXTERNAL TABLE ")?;
+        if self.0.if_not_exists {
+            write!(f, "IF NOT EXISTS ")?;
+        }
+        write!(f, "{} ", self.0.name)?;
+        write!(f, "STORED AS {} ", self.0.file_type)?;
+        if !self.0.order_exprs.is_empty() {
+            write!(f, "WITH ORDER (")?;
+            let mut first = true;
+            for expr in self.0.order_exprs.iter().flatten() {
+                if !first {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{expr}")?;
+                first = false;
+            }
+            write!(f, ") ")?;
+        }
+        write!(f, "LOCATION '{}'", self.0.location)
+    }
+}
+
 impl OptdSessionContext {
     pub fn new_with_config_rt(config: SessionConfig, runtime: Arc<RuntimeEnv>) -> Self {
         Self {
             inner: create_optd_session_context(config, runtime),
+        }
+    }
+
+    pub fn new_with_config_rt_catalog(
+        config: SessionConfig,
+        runtime: Arc<RuntimeEnv>,
+        catalog: Arc<dyn Catalog>,
+    ) -> Self {
+        Self {
+            inner: create_optd_session_context_with_catalog(config, runtime, catalog),
         }
     }
 
@@ -116,20 +186,25 @@ impl OptdSessionContext {
         plan: LogicalPlan,
     ) -> Result<DataFrame, DataFusionError> {
         let df = self.inner.execute_logical_plan(plan.clone()).await?;
-        self.sync_optd_catalog_from_plan(&plan)?;
+        self.sync_optd_catalog_from_plan(&plan).await?;
         Ok(df)
     }
 
-    fn sync_optd_catalog_from_plan(&self, plan: &LogicalPlan) -> Result<(), DataFusionError> {
+    async fn sync_optd_catalog_from_plan(&self, plan: &LogicalPlan) -> Result<(), DataFusionError> {
         if let LogicalPlan::Ddl(ddl) = plan {
             match ddl {
-                DdlStatement::CreateExternalTable(create_table) => self.create_table(
-                    create_table.name.clone(),
-                    create_table.schema.inner().clone(),
-                ),
+                DdlStatement::CreateExternalTable(create_table) => {
+                    let definition = ProperlyFormattedCreateExternalTable(create_table).to_string();
+
+                    self.create_table_from_registered_provider(
+                        create_table.name.clone(),
+                        Some(definition),
+                    )
+                    .await
+                }
                 DdlStatement::CreateMemoryTable(create_table) => {
-                    let schema = create_table.input.schema();
-                    self.create_table(create_table.name.clone(), schema.inner().clone())
+                    self.create_table_from_registered_provider(create_table.name.clone(), None)
+                        .await
                 }
                 DdlStatement::DropTable(drop_table) => self.drop_table(drop_table.name.clone()),
                 _ => Ok(()),
@@ -143,6 +218,7 @@ impl OptdSessionContext {
         &self,
         table_ref: impl Into<TableReference>,
         schema: datafusion::arrow::datatypes::SchemaRef,
+        definition: Option<String>,
     ) -> Result<(), DataFusionError> {
         let table_ref: TableReference = table_ref.into();
         let optd_table_ref = Self::into_optd_table_ref(&table_ref);
@@ -154,12 +230,22 @@ impl OptdSessionContext {
 
         extension
             .catalog()
-            .create_table(optd_table_ref, schema)
+            .create_table(optd_table_ref, schema, definition)
             .map_err(|e| {
                 DataFusionError::External(Box::new(optd_core::error::Error::Catalog { source: e }))
             })?;
 
         Ok(())
+    }
+
+    async fn create_table_from_registered_provider(
+        &self,
+        table_ref: impl Into<TableReference>,
+        definition: Option<String>,
+    ) -> Result<(), DataFusionError> {
+        let table_ref: TableReference = table_ref.into();
+        let provider = self.inner.table_provider(table_ref.clone()).await?;
+        self.create_table(table_ref, provider.schema(), definition)
     }
 
     fn drop_table(&self, table_ref: impl Into<TableReference>) -> Result<(), DataFusionError> {
@@ -206,6 +292,18 @@ impl DataFusionDB {
         let config = SessionConfig::from(config_options).with_information_schema(true);
 
         let ctx = OptdSessionContext::new_with_config_rt(config, Arc::new(RuntimeEnv::default()));
+        Ok(Self { ctx })
+    }
+
+    pub async fn new_with_catalog(catalog: Arc<dyn Catalog>) -> Result<Self, DataFusionError> {
+        let config_options = ConfigOptions::from_env()?;
+        let config = SessionConfig::from(config_options).with_information_schema(true);
+
+        let ctx = OptdSessionContext::new_with_config_rt_catalog(
+            config,
+            Arc::new(RuntimeEnv::default()),
+            catalog,
+        );
         Ok(Self { ctx })
     }
 

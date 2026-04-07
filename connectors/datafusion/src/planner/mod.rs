@@ -108,11 +108,29 @@ impl<'a> OptdQueryPlannerContext<'a> {
                                 column_statistics: column_statistics
                                     .iter()
                                     .map(|column_stat| {
+                                        let min_value = column_stat
+                                            .min_value
+                                            .get_value()
+                                            .and_then(|v| {
+                                                Self::try_into_optd_scalar_value(v.clone()).ok()
+                                            })
+                                            .and_then(|x| {
+                                                x.try_into_nullable_string().ok().flatten()
+                                            });
+                                        let max_value = column_stat
+                                            .max_value
+                                            .get_value()
+                                            .and_then(|v| {
+                                                Self::try_into_optd_scalar_value(v.clone()).ok()
+                                            })
+                                            .and_then(|x| {
+                                                x.try_into_nullable_string().ok().flatten()
+                                            });
                                         ColumnStatistics {
                                             // TODO(Aditya): populate with stuff from HLL, digests, etc.
                                             advanced_stats: Vec::new(),
-                                            min_value: precision_to_string(&column_stat.min_value),
-                                            max_value: precision_to_string(&column_stat.max_value),
+                                            min_value,
+                                            max_value,
                                             null_count: precision_to_option(
                                                 &column_stat.null_count,
                                             ),
@@ -164,15 +182,6 @@ fn precision_to_option<T: Copy + PartialOrd + Eq + std::fmt::Debug>(
 
 /// Extract value from Precision as Option<String>.
 /// TODO(Aditya): this should not be required after we move from `String` to `Value`.
-fn precision_to_string<T: ToString + PartialOrd + Eq + Clone + std::fmt::Debug>(
-    precision: &datafusion::common::stats::Precision<T>,
-) -> Option<String> {
-    match precision {
-        datafusion::common::stats::Precision::Exact(v) => Some(v.to_string()),
-        datafusion::common::stats::Precision::Inexact(v) => Some(v.to_string()),
-        datafusion::common::stats::Precision::Absent => None,
-    }
-}
 
 fn warm_explain_properties(op: &Arc<optd_core::ir::Operator>, ctx: &IRContext) {
     for input in op.input_operators() {
@@ -224,7 +233,6 @@ impl OptdQueryPlanner {
             LogicalPlan::Explain(explain) => (explain.plan.as_ref(), Some(explain.clone())),
             _ => (logical_plan, None),
         };
-        println!("actual_logical:\n{}", actual_logical_plan);
 
         let optd_logical = ctx
             .try_into_optd_plan(actual_logical_plan)
@@ -265,10 +273,7 @@ impl OptdQueryPlanner {
         //     "optd_logical:\n{}",
         //     quick_explain(&optd_logical, &ctx.inner)
         // );
-        println!(
-            "optd_physical:\n{}",
-            quick_explain(&optd_physical, &ctx.inner)
-        );
+
         // println!("binder:\n{:?}", ctx.inner.binder);
 
         let logical_plan = ctx

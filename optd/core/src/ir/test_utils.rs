@@ -21,7 +21,7 @@ pub fn test_ctx_with_tables(tables: &[(&str, usize)]) -> crate::error::Result<IR
                 .collect::<Vec<_>>(),
         ));
         catalog
-            .create_table(TableRef::bare(*table_name), schema)
+            .create_table(TableRef::bare(*table_name), schema, None)
             .context(CatalogSnafu)?;
     }
     Ok(IRContext::with_memory_catalog(catalog))

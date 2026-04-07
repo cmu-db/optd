@@ -50,7 +50,7 @@ impl IRContext {
                 Field::new("course.credit".to_string(), DataType::Int32, false),
             ]));
 
-            catalog.create_table(course.clone(), schema).unwrap();
+            catalog.create_table(course.clone(), schema, None).unwrap();
         }
 
         catalog
@@ -91,7 +91,9 @@ impl IRContext {
                 Field::new("schedule.has_lecture".to_string(), DataType::Boolean, false),
             ]));
 
-            catalog.create_table(schedule.clone(), schema).unwrap();
+            catalog
+                .create_table(schedule.clone(), schema, None)
+                .unwrap();
         }
 
         catalog
@@ -140,7 +142,7 @@ impl IRContext {
                 Field::new("staff.oh_length".to_string(), DataType::Int32, false),
             ]));
 
-            catalog.create_table(staff.clone(), schema).unwrap();
+            catalog.create_table(staff.clone(), schema, None).unwrap();
         }
 
         catalog
@@ -203,7 +205,9 @@ impl IRContext {
                     .collect_vec();
                 let schema = Arc::new(Schema::new(fields));
                 let table_ref = TableRef::bare(table_name);
-                catalog.create_table(table_ref.clone(), schema).unwrap();
+                catalog
+                    .create_table(table_ref.clone(), schema, None)
+                    .unwrap();
                 catalog
                     .set_table_statistics(table_ref, table_statistics)
                     .unwrap();

@@ -28,6 +28,8 @@ futures = "0.3.31"
 parquet = "57.2"
 serde_json = "1"
 optd-core = { version = "0.1.0", path = "../optd/core" }
+optd-repository-api = { path = "../optd/repository/api", version = "0.1" }
+sea-orm = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

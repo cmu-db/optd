@@ -39,6 +39,10 @@ pub struct Model {
 
     /// The name of the table, e.g. `my_table`.
     pub table_name: String,
+
+    /// The SQL definition of the table, e.g. `CREATE TABLE my_table (...)`.
+    /// Note: This is not part of the DuckLake specification.
+    pub definition: Option<String>,
     // TODO(yuchen): handle paths.
     // /// The `data_path` of the table.
     // pub path: String,

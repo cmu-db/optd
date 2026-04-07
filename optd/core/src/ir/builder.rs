@@ -593,6 +593,7 @@ mod tests {
                     Field::new("v2", DataType::Int32, false),
                     Field::new("v3", DataType::Boolean, true),
                 ])),
+                None,
             )
             .unwrap();
         IRContext::with_memory_catalog(catalog)

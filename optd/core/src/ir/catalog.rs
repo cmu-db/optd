@@ -39,6 +39,8 @@ pub enum CatalogError {
         table: ResolvedTableRef,
         data_source_id: DataSourceId,
     },
+    #[snafu(display("Catalog backend error: {}", message))]
+    Backend { message: String },
 }
 
 pub type Result<T> = core::result::Result<T, CatalogError>;
@@ -57,6 +59,8 @@ pub struct TableMetadata {
     pub schema: SchemaRef,
     /// Optional statistics recorded for the table.
     pub statistics: Option<TableStatistics>,
+    /// Optional SQL definition for the table.
+    pub definition: Option<String>,
 }
 
 /// Catalog interface for registering and resolving table metadata.
@@ -64,11 +68,20 @@ pub struct TableMetadata {
 /// optd uses this abstraction to inspect schemas, stable table identities, and
 /// optional statistics during planning and execution.
 pub trait Catalog: Send + Sync + 'static {
+    fn kind(&self) -> &str {
+        "unknown"
+    }
+
     /// Registers `table` with the provided `schema` and returns its stable data source id.
     ///
     /// Returns [`CatalogError::TableAlreadyExists`] if the resolved table reference has
     /// already been registered.
-    fn create_table(&self, table: TableRef, schema: SchemaRef) -> Result<DataSourceId>;
+    fn create_table(
+        &self,
+        table: TableRef,
+        schema: SchemaRef,
+        definition: Option<String>,
+    ) -> Result<DataSourceId>;
 
     /// Returns the metadata associated with `table_id`.
     ///

@@ -5,9 +5,9 @@ use sea_orm::{
 };
 
 use crate::{
+    entity::{column, prelude::*, table},
     snapshot::SnapshotInfo,
     table::{ColumnInfo, TableInfo},
-    entity::{column, prelude::*, table},
 };
 
 pub async fn get_all_table_infos<C>(
@@ -69,6 +69,7 @@ where
                 columns: build_columns(
                     columns_by_table.remove(&table.table_id).unwrap_or_default(),
                 )?,
+                definition: table.definition,
             })
         })
         .collect::<Result<Vec<_>, DbErr>>()?)
