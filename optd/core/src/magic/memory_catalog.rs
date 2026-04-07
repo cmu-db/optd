@@ -46,6 +46,10 @@ impl Catalog for MemoryCatalog {
         "memory"
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self as &dyn std::any::Any
+    }
+
     fn create_table(
         &self,
         table: TableRef,

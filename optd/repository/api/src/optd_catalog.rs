@@ -274,6 +274,10 @@ impl Catalog for RepositoryCatalog {
                 .map_err(Self::backend_error)
         })
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self as &dyn std::any::Any
+    }
 }
 
 #[cfg(test)]

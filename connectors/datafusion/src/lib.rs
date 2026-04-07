@@ -1,4 +1,3 @@
-mod catalog;
 mod extension;
 mod planner;
 mod table;

@@ -1,6 +1,8 @@
 //! Definitions for the catalog interface.
 //! optd uses the catalog interface to get schema information about tables.
 
+use std::any::Any;
+
 pub use arrow_schema::Field;
 pub use arrow_schema::Schema;
 pub use arrow_schema::SchemaRef;
@@ -71,6 +73,8 @@ pub trait Catalog: Send + Sync + 'static {
     fn kind(&self) -> &str {
         "unknown"
     }
+
+    fn as_any(&self) -> &dyn Any;
 
     /// Registers `table` with the provided `schema` and returns its stable data source id.
     ///
