@@ -27,7 +27,7 @@ pub struct Model {
     /// to the file's `field_id`. This identifier should remain consistent
     /// throughout all versions of the column, until it's dropped.
     /// The `column_id` must be unique per table.
-    pub column_id: i64,
+    pub column_id: u64,
 
     /// Refers to a `snapshot_id` from the `optd_snapshot` table.
     ///

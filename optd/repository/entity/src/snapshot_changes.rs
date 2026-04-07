@@ -76,6 +76,8 @@ pub enum ChangesMade {
     AlterTable(i64),
     #[display("altered_view:{_0}")]
     AlterView(i64),
+    #[display("updated_table_stats:{_0}")]
+    UpdateTableStats(i64),
 }
 
 impl FromStr for ChangesMade {
@@ -97,6 +99,7 @@ impl FromStr for ChangesMade {
             "dropped_view" => Ok(Self::DropView(parse_id()?)),
             "altered_table" => Ok(Self::AlterTable(parse_id()?)),
             "altered_view" => Ok(Self::AlterView(parse_id()?)),
+            "updated_table_stats" => Ok(Self::UpdateTableStats(parse_id()?)),
             _ => Err(s.to_string()),
         }
     }

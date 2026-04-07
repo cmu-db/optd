@@ -12,22 +12,22 @@ pub use drop_schema::*;
 pub use get_all_schemas::*;
 pub use get_schema::*;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CreateSchemaInfo {
     pub schema_name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DropSchemaInfo {
     pub schema_id: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GetSchemaInfo {
     pub schema_id: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, DerivePartialModel)]
+#[derive(Debug, Clone, PartialEq, DerivePartialModel)]
 #[sea_orm(entity = "schema::Entity")]
 pub struct SchemaInfo {
     pub schema_id: i64,

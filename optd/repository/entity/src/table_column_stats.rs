@@ -15,7 +15,7 @@ pub struct Model {
     pub table_id: i64,
 
     /// Refers to a `column_id` from the `ducklake_column` table.
-    pub column_id: i64,
+    pub column_id: u64,
 
     /// Refers to a `snapshot_id` from the `optd_snapshot` table.
     ///
@@ -47,6 +47,14 @@ pub struct Model {
     /// This does not have to be exact but must be an upper bound.
     /// The value must be cast to the actual type for accurate comparison.
     pub max_value: Option<String>,
+
+    /// The number of distinct values in the column.
+    /// NOTE: This is not part of the DuckLake specification.
+    pub distinct_count: Option<u64>,
+
+    /// The number of `NULL` values in the column.
+    /// NOTE: This is not part of the DuckLake specification.
+    pub null_count: Option<u64>,
 
     /// Additional statistics encoded as a string.
     ///

@@ -91,7 +91,7 @@ impl TableInfo {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColumnInfo {
-    pub column_id: i64,
+    pub column_id: u64,
     pub column_name: String,
     pub column_type: ColumnType,
     pub nulls_allowed: bool,

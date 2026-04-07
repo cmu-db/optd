@@ -226,7 +226,7 @@ mod tests {
 
         let stats = TableStatistics {
             row_count: 10,
-            column_statistics: vec![],
+            column_statistics: HashMap::new(),
             size_bytes: Some(80),
         };
         cat.set_table_statistics(TableRef::bare("t1"), stats.clone())

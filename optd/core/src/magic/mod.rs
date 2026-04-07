@@ -8,6 +8,7 @@ mod card;
 mod cm;
 mod memory_catalog;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::ir::IRContext;
@@ -57,22 +58,26 @@ impl IRContext {
                 course,
                 TableStatistics {
                     row_count: 10,
-                    column_statistics: vec![
-                        ColumnStatistics {
-                            advanced_stats: vec![],
-                            min_value: Some("0".to_string()),
-                            max_value: Some("9".to_string()),
-                            null_count: Some(0),
-                            distinct_count: Some(10),
-                        },
-                        ColumnStatistics {
-                            advanced_stats: vec![],
-                            min_value: Some("3".to_string()),
-                            max_value: Some("15".to_string()),
-                            null_count: Some(0),
-                            distinct_count: Some(5),
-                        },
-                    ],
+                    column_statistics: HashMap::from_iter(
+                        [
+                            ColumnStatistics {
+                                advanced_stats: vec![],
+                                min_value: Some("0".to_string()),
+                                max_value: Some("9".to_string()),
+                                null_count: Some(0),
+                                distinct_count: Some(10),
+                            },
+                            ColumnStatistics {
+                                advanced_stats: vec![],
+                                min_value: Some("3".to_string()),
+                                max_value: Some("15".to_string()),
+                                null_count: Some(0),
+                                distinct_count: Some(5),
+                            },
+                        ]
+                        .into_iter()
+                        .enumerate(),
+                    ),
                     size_bytes: Some((4 + 4) * 10),
                 },
             )
@@ -94,29 +99,33 @@ impl IRContext {
                 schedule,
                 TableStatistics {
                     row_count: 25,
-                    column_statistics: vec![
-                        ColumnStatistics {
-                            advanced_stats: vec![],
-                            min_value: Some("0".to_string()),
-                            max_value: Some("6".to_string()),
-                            null_count: Some(0),
-                            distinct_count: Some(7),
-                        },
-                        ColumnStatistics {
-                            advanced_stats: vec![],
-                            min_value: Some("0".to_string()),
-                            max_value: Some("9".to_string()),
-                            null_count: Some(0),
-                            distinct_count: Some(10),
-                        },
-                        ColumnStatistics {
-                            advanced_stats: vec![],
-                            min_value: Some("0".to_string()),
-                            max_value: Some("1".to_string()),
-                            null_count: Some(0),
-                            distinct_count: Some(2),
-                        },
-                    ],
+                    column_statistics: HashMap::from_iter(
+                        [
+                            ColumnStatistics {
+                                advanced_stats: vec![],
+                                min_value: Some("0".to_string()),
+                                max_value: Some("6".to_string()),
+                                null_count: Some(0),
+                                distinct_count: Some(7),
+                            },
+                            ColumnStatistics {
+                                advanced_stats: vec![],
+                                min_value: Some("0".to_string()),
+                                max_value: Some("9".to_string()),
+                                null_count: Some(0),
+                                distinct_count: Some(10),
+                            },
+                            ColumnStatistics {
+                                advanced_stats: vec![],
+                                min_value: Some("0".to_string()),
+                                max_value: Some("1".to_string()),
+                                null_count: Some(0),
+                                distinct_count: Some(2),
+                            },
+                        ]
+                        .into_iter()
+                        .enumerate(),
+                    ),
                     size_bytes: Some((4 + 4 + 1) * 10),
                 },
             )
@@ -139,36 +148,40 @@ impl IRContext {
                 staff,
                 TableStatistics {
                     row_count: 200,
-                    column_statistics: vec![
-                        ColumnStatistics {
-                            advanced_stats: vec![],
-                            min_value: Some("0".to_string()),
-                            max_value: Some("199".to_string()),
-                            null_count: Some(0),
-                            distinct_count: Some(200),
-                        },
-                        ColumnStatistics {
-                            advanced_stats: vec![],
-                            min_value: Some("0".to_string()),
-                            max_value: Some("6".to_string()),
-                            null_count: Some(0),
-                            distinct_count: Some(7),
-                        },
-                        ColumnStatistics {
-                            advanced_stats: vec![],
-                            min_value: Some("0".to_string()),
-                            max_value: Some("9".to_string()),
-                            null_count: Some(0),
-                            distinct_count: Some(10),
-                        },
-                        ColumnStatistics {
-                            advanced_stats: vec![],
-                            min_value: Some("0".to_string()),
-                            max_value: Some("2".to_string()),
-                            null_count: Some(0),
-                            distinct_count: Some(3),
-                        },
-                    ],
+                    column_statistics: HashMap::from_iter(
+                        [
+                            ColumnStatistics {
+                                advanced_stats: vec![],
+                                min_value: Some("0".to_string()),
+                                max_value: Some("199".to_string()),
+                                null_count: Some(0),
+                                distinct_count: Some(200),
+                            },
+                            ColumnStatistics {
+                                advanced_stats: vec![],
+                                min_value: Some("0".to_string()),
+                                max_value: Some("6".to_string()),
+                                null_count: Some(0),
+                                distinct_count: Some(7),
+                            },
+                            ColumnStatistics {
+                                advanced_stats: vec![],
+                                min_value: Some("0".to_string()),
+                                max_value: Some("9".to_string()),
+                                null_count: Some(0),
+                                distinct_count: Some(10),
+                            },
+                            ColumnStatistics {
+                                advanced_stats: vec![],
+                                min_value: Some("0".to_string()),
+                                max_value: Some("2".to_string()),
+                                null_count: Some(0),
+                                distinct_count: Some(3),
+                            },
+                        ]
+                        .into_iter()
+                        .enumerate(),
+                    ),
                     size_bytes: Some((4 + 4 + 4 + 4) * 10),
                 },
             )

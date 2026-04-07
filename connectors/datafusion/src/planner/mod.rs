@@ -121,6 +121,7 @@ impl<'a> OptdQueryPlannerContext<'a> {
                                             ),
                                         }
                                     })
+                                    .enumerate()
                                     .collect(),
                             }
                         })
@@ -128,7 +129,7 @@ impl<'a> OptdQueryPlannerContext<'a> {
                             row_count: DEFAULT_ROW_COUNT,
                             size_bytes: None,
                             // TODO(Aditya): add some default column stats?
-                            column_statistics: vec![],
+                            column_statistics: HashMap::new(),
                         }),
                 )
                 .context(CatalogSnafu)
