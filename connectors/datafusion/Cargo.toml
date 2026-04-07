@@ -8,7 +8,6 @@ repository.workspace = true
 datafusion = { workspace = true }
 tracing = { workspace = true, features = ["log"] }
 optd-core = { path = "../../optd/core", version = "0.1" }
-optd-catalog = { path = "../../optd/catalog", version = "0.1" }
 itertools = { workspace = true }
 async-trait = { workspace = true }
 snafu = { workspace = true }
