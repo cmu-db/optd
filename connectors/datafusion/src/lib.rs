@@ -59,7 +59,7 @@ pub fn default_datafusion_rules() -> Vec<Arc<dyn df_optimizer::OptimizerRule + S
         Arc::new(df_optimizer::eliminate_outer_join::EliminateOuterJoin::new()),
         // Filters can't be pushed down past Limits, we should do PushDownFilter after PushDownLimit
         Arc::new(df_optimizer::push_down_limit::PushDownLimit::new()),
-        Arc::new(df_optimizer::push_down_filter::PushDownFilter::new()),
+        // Arc::new(df_optimizer::push_down_filter::PushDownFilter::new()),
         Arc::new(df_optimizer::single_distinct_to_groupby::SingleDistinctToGroupBy::new()),
         // The previous optimizations added expressions and projections,
         // that might benefit from the following rules
