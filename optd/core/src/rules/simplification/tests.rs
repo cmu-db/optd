@@ -55,6 +55,43 @@ fn pushes_predicates_to_join_inputs_and_merges_selects() {
     );
 }
 
+fn assert_pushes_filter_to_outer_for_semi_or_anti(join_type: JoinType) {
+    let ctx = test_ctx_with_tables(&[("t1", 2), ("t2", 2)]).unwrap();
+    let left = ctx.logical_get(TableRef::bare("t1"), None).unwrap().build();
+    let right = ctx.logical_get(TableRef::bare("t2"), None).unwrap().build();
+    let t1_c0 = ctx.col(Some(&TableRef::bare("t1")), "c0").unwrap();
+
+    let plan = left
+        .with_ctx(&ctx)
+        .logical_join(right, boolean(true), join_type)
+        .select(column_ref(t1_c0).eq(int32(10)))
+        .build();
+
+    let simplified = SimplificationPass::new().apply(plan, &ctx).unwrap();
+    let join = simplified.try_borrow::<Join>().unwrap();
+    assert_eq!(join.join_type(), &join_type);
+    assert!(join.join_cond().is_true_scalar());
+    assert!(join.inner().try_borrow::<Select>().is_err());
+
+    let outer_filter = join.outer().try_borrow::<Select>().unwrap();
+    assert!(
+        outer_filter
+            .predicate()
+            .used_columns()
+            .is_subset(outer_filter.input().output_columns(&ctx).unwrap().as_ref())
+    );
+}
+
+#[test]
+fn pushes_predicates_to_outer_input_for_left_semi_join() {
+    assert_pushes_filter_to_outer_for_semi_or_anti(JoinType::LeftSemi);
+}
+
+#[test]
+fn pushes_predicates_to_outer_input_for_left_anti_join() {
+    assert_pushes_filter_to_outer_for_semi_or_anti(JoinType::LeftAnti);
+}
+
 // Input plan tree:
 // LogicalSelect [out > 5]
 //   LogicalProject [out := alias_left + 1, alias_right]
