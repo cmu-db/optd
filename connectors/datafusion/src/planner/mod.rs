@@ -30,7 +30,7 @@ use optd_core::{
     magic::{MagicCardinalityEstimator, MagicCostModel},
     rules,
 };
-use snafu::{OptionExt, ResultExt, Snafu};
+use snafu::{OptionExt, ResultExt, Snafu, whatever};
 use tracing::warn;
 
 use crate::{OptdExtension, OptdExtensionConfig};
@@ -253,25 +253,28 @@ impl OptdQueryPlanner {
             .add_rule(rules::LogicalJoinInnerAssocRule::new())
             .build();
 
+        warm_explain_properties(&optd_logical, &ctx.inner);
+        println!(
+            "optd_logical:\n{}",
+            quick_explain(&optd_logical, &ctx.inner)
+        );
+
         let opt = Arc::new(Cascades::new(ctx.inner.clone(), rule_set));
 
-        let Some(optd_physical) = opt.optimize(&optd_logical, Arc::default()).await else {
-            {
-                opt.memo.read().await.dump();
+        let optd_physical = match opt.optimize(&optd_logical, Arc::default()).await {
+            Ok(plan) => plan,
+            Err(e) => {
+                {
+                    opt.memo.read().await.dump();
+                }
+                return Err(DataFusionError::External(e.into()));
             }
-            warn!("optimization failed");
-            return self
-                .create_physical_plan_default(logical_plan, session_state)
-                .await;
         };
 
-        warm_explain_properties(&optd_logical, &ctx.inner);
-        // println!(
-        //     "optd_logical:\n{}",
-        //     quick_explain(&optd_logical, &ctx.inner)
-        // );
-
-        // println!("binder:\n{:?}", ctx.inner.binder);
+        println!(
+            "optd_physical:\n{}",
+            quick_explain(&optd_logical, &ctx.inner)
+        );
 
         let logical_plan = ctx
             .try_from_optd_plan(&optd_physical)
