@@ -1,9 +1,9 @@
 use sea_orm::{ActiveValue::Set, ConnectionTrait, DbErr, EntityTrait};
 
 use crate::{
+    entity::{prelude::*, schema},
     schema::CreateSchemaInfo,
     snapshot::SnapshotInfo,
-    entity::{prelude::*, schema},
 };
 
 pub async fn create_new_schema<C>(

@@ -1,11 +1,9 @@
-use sea_orm::{
-    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, sea_query::Expr,
-};
+use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, sea_query::Expr};
 
 use crate::{
+    entity::{column, prelude::*, table},
     snapshot::SnapshotInfo,
     table::DropTableInfo,
-    entity::{column, prelude::*, table},
 };
 
 pub async fn drop_table<C>(

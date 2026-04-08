@@ -3,9 +3,9 @@ use sea_orm::{
 };
 
 use crate::{
+    entity::{prelude::Schema, schema},
     schema::{GetSchemaInfo, SchemaInfo},
     snapshot::SnapshotInfo,
-    entity::{prelude::Schema, schema},
 };
 
 pub async fn get_schema<C>(

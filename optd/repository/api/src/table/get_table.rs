@@ -55,7 +55,7 @@ where
 }
 
 fn build_columns(columns: Vec<column::Model>) -> Result<Vec<ColumnInfo>, DbErr> {
-    Ok(columns
+    columns
         .into_iter()
         .map(|column| {
             if column.parent_column.is_some() {
@@ -75,5 +75,5 @@ fn build_columns(columns: Vec<column::Model>) -> Result<Vec<ColumnInfo>, DbErr> 
                 children: Vec::new(),
             })
         })
-        .collect::<Result<Vec<_>, DbErr>>()?)
+        .collect::<Result<Vec<_>, DbErr>>()
 }

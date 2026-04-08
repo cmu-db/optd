@@ -113,19 +113,21 @@ where
         .stats
         .column_statistics
         .into_iter()
-        .map(|(column_id, column_stats)| table_column_stats::ActiveModel {
-            table_id: Set(info.table_id),
-            column_id: Set(column_id as i64),
-            begin_snapshot: Set(snapshot_id),
-            end_snapshot: Set(None),
-            contains_null: Set(column_stats.null_count.map(|n| n > 0).unwrap_or(true)),
-            contains_nan: Set(true),
-            min_value: Set(column_stats.min_value),
-            max_value: Set(column_stats.max_value),
-            distinct_count: Set(column_stats.distinct_count.map(|v| v as i64)),
-            null_count: Set(column_stats.null_count.map(|v| v as i64)),
-            ..Default::default()
-        })
+        .map(
+            |(column_id, column_stats)| table_column_stats::ActiveModel {
+                table_id: Set(info.table_id),
+                column_id: Set(column_id as i64),
+                begin_snapshot: Set(snapshot_id),
+                end_snapshot: Set(None),
+                contains_null: Set(column_stats.null_count.map(|n| n > 0).unwrap_or(true)),
+                contains_nan: Set(true),
+                min_value: Set(column_stats.min_value),
+                max_value: Set(column_stats.max_value),
+                distinct_count: Set(column_stats.distinct_count.map(|v| v as i64)),
+                null_count: Set(column_stats.null_count.map(|v| v as i64)),
+                ..Default::default()
+            },
+        )
         .collect::<Vec<_>>();
 
     if !column_stats_models.is_empty() {

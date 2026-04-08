@@ -4,9 +4,9 @@ use sea_orm::{
 };
 
 use crate::{
+    entity::{prelude::*, schema, table},
     schema::DropSchemaInfo,
     snapshot::SnapshotInfo,
-    entity::{prelude::*, schema, table},
 };
 
 pub async fn drop_schema<C>(

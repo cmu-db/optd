@@ -180,9 +180,6 @@ fn precision_to_option<T: Copy + PartialOrd + Eq + std::fmt::Debug>(
     }
 }
 
-/// Extract value from Precision as Option<String>.
-/// TODO(Aditya): this should not be required after we move from `String` to `Value`.
-
 fn warm_explain_properties(op: &Arc<optd_core::ir::Operator>, ctx: &IRContext) {
     for input in op.input_operators() {
         warm_explain_properties(input, ctx);

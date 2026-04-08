@@ -58,7 +58,7 @@ where
             .push(column);
     }
 
-    Ok(tables
+    tables
         .into_iter()
         .map(|table| {
             Ok(TableInfo {
@@ -72,11 +72,11 @@ where
                 definition: table.definition,
             })
         })
-        .collect::<Result<Vec<_>, DbErr>>()?)
+        .collect::<Result<Vec<_>, DbErr>>()
 }
 
 fn build_columns(columns: Vec<column::Model>) -> Result<Vec<ColumnInfo>, DbErr> {
-    Ok(columns
+    columns
         .into_iter()
         .map(|column| {
             if column.parent_column.is_some() {
@@ -96,5 +96,5 @@ fn build_columns(columns: Vec<column::Model>) -> Result<Vec<ColumnInfo>, DbErr> 
                 children: Vec::new(),
             })
         })
-        .collect::<Result<Vec<_>, DbErr>>()?)
+        .collect::<Result<Vec<_>, DbErr>>()
 }

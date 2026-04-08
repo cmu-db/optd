@@ -122,12 +122,12 @@ impl OptdQueryPlannerContext<'_> {
             .map(|e| {
                 let (_, name) = e.qualified_name();
                 e.to_field(node.input.schema())
-                    .and_then(|(_, field)| {
-                        Ok(Arc::new(Field::new(
+                    .map(|(_, field)| {
+                        Arc::new(Field::new(
                             name,
                             field.data_type().clone(),
                             field.is_nullable(),
-                        )))
+                        ))
                     })
                     .context(DataFusionSnafu)
             })
@@ -145,12 +145,12 @@ impl OptdQueryPlannerContext<'_> {
             .map(|e| {
                 let (_, name) = e.qualified_name();
                 e.to_field(node.input.schema())
-                    .and_then(|(_, field)| {
-                        Ok(Arc::new(Field::new(
+                    .map(|(_, field)| {
+                        Arc::new(Field::new(
                             name,
                             field.data_type().clone(),
                             field.is_nullable(),
-                        )))
+                        ))
                     })
                     .context(DataFusionSnafu)
             })
