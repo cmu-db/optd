@@ -1,0 +1,871 @@
+{
+  "suite": "tpch",
+  "query_id": "q12",
+  "desc": "TPC-H Q12",
+  "sql_hash": "f643f3a1c63c329437678c18dd8900968a0964524daa609de893871d105ee7e3",
+  "dataset_fingerprint": "e6f49ff93063915cf919ea2e3befae49d687a8344b628cd287cbc92c1d37bcbc",
+  "plan_hash": "86a1aa6d640591728250071a0afbff04353df87e9bd0a3f04ef52dcc05512e2b",
+  "nodes": [
+    {
+      "node_path": "0",
+      "operator_kind": "EnforcerSort",
+      "short_explain": "EnforcerSort { tuple_ordering: [(#5.0, Asc)], (.output_columns): `__internal_#5`.`high_priority_orders`(#5.1), `__internal_#5`.`l_shipmode`(#5.0), `__internal_#5`.`low_priority_orders`(#5.2), (.cardinality): 720686400.00 }",
+      "subtree_fingerprint": "86a1aa6d640591728250071a0afbff04353df87e9bd0a3f04ef52dcc05512e2b",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#5",
+          "name": "l_shipmode",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#5",
+          "name": "high_priority_orders",
+          "data_type": "Int64",
+          "nullable": true
+        },
+        {
+          "ordinal": 2,
+          "relation": "__internal_#5",
+          "name": "low_priority_orders",
+          "data_type": "Int64",
+          "nullable": true
+        }
+      ],
+      "estimated": {
+        "row_count": 720686400.0000001,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 2,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 2,
+            "min_value": "MAIL",
+            "max_value": "SHIP"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 2,
+            "min_value": "620",
+            "max_value": "647"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 2,
+            "min_value": "943",
+            "max_value": "945"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 360343200.00000006,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0",
+      "operator_kind": "Project",
+      "short_explain": "Project { .table_index: 5, .projections: [ `lineitem`.`l_shipmode`(#2.14), `__internal_#4`.`sum(CASE WHEN orders.o_orderpriority = Utf8(\"1-URGENT\") OR orders.o_orderpriority = Utf8(\"2-HIGH\") THEN Int64(1) ELSE Int64(0) END)`(#4.0), `__internal_#4`.`sum(CASE WHEN orders.o_orderpriority != Utf8(\"1-URGENT\") AND orders.o_orderpriority != Utf8(\"2-HIGH\") THEN Int64(1) ELSE Int64(0) END)`(#4.1) ], (.output_columns): `__internal_#5`.`high_priority_orders`(#5.1), `__internal_#5`.`l_shipmode`(#5.0), `__internal_#5`.`low_priority_orders`(#5.2), (.cardinality): 720686400.00 }",
+      "subtree_fingerprint": "377f52e439ea46e07ff4f0a2c9020870dccfc5c4e9227b08860d5a5f763a5b30",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#5",
+          "name": "l_shipmode",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#5",
+          "name": "high_priority_orders",
+          "data_type": "Int64",
+          "nullable": true
+        },
+        {
+          "ordinal": 2,
+          "relation": "__internal_#5",
+          "name": "low_priority_orders",
+          "data_type": "Int64",
+          "nullable": true
+        }
+      ],
+      "estimated": {
+        "row_count": 720686400.0000001,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 2,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 2,
+            "min_value": "MAIL",
+            "max_value": "SHIP"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 2,
+            "min_value": "620",
+            "max_value": "647"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 2,
+            "min_value": "943",
+            "max_value": "945"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 360343200.00000006,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0",
+      "operator_kind": "Aggregate",
+      "short_explain": "Aggregate",
+      "subtree_fingerprint": "f118385ba25d601b9cf40c6ca0a612d1b728d0fe17ac1cbe0253b3ce3f25c2b4",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "lineitem",
+          "name": "l_shipmode",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#4",
+          "name": "sum(CASE WHEN orders.o_orderpriority = Utf8(\"1-URGENT\") OR orders.o_orderpriority = Utf8(\"2-HIGH\") THEN Int64(1) ELSE Int64(0) END)",
+          "data_type": "Int64",
+          "nullable": true
+        },
+        {
+          "ordinal": 2,
+          "relation": "__internal_#4",
+          "name": "sum(CASE WHEN orders.o_orderpriority != Utf8(\"1-URGENT\") AND orders.o_orderpriority != Utf8(\"2-HIGH\") THEN Int64(1) ELSE Int64(0) END)",
+          "data_type": "Int64",
+          "nullable": true
+        }
+      ],
+      "estimated": {
+        "row_count": 720686400.0000001,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 2,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 2,
+            "min_value": "MAIL",
+            "max_value": "SHIP"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 2,
+            "min_value": "620",
+            "max_value": "647"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 2,
+            "min_value": "943",
+            "max_value": "945"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 360343200.00000006,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0",
+      "operator_kind": "Join",
+      "short_explain": "Join { .join_type: Inner, .implementation: Some(Hash { build_side: Outer, keys: [(#2.0, #1.0)] }), .join_cond: `orders`.`o_orderkey`(#1.0) = `lineitem`.`l_orderkey`(#2.0), (.output_columns): `lineitem`.`l_commitdate`(#2.11), `lineitem`.`l_orderkey`(#2.0), `lineitem`.`l_receiptdate`(#2.12), `lineitem`.`l_shipdate`(#2.10), `lineitem`.`l_shipmode`(#2.14), `orders`.`o_orderkey`(#1.0), `orders`.`o_orderpriority`(#1.5), (.cardinality): 3603432000.00 }",
+      "subtree_fingerprint": "2e0f2c284c2db0b16d7fae6d5d69c08c85bb823802ed966ddf4723f2a13a0ebc",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "lineitem",
+          "name": "l_orderkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "lineitem",
+          "name": "l_shipdate",
+          "data_type": "Date32",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "lineitem",
+          "name": "l_commitdate",
+          "data_type": "Date32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "lineitem",
+          "name": "l_receiptdate",
+          "data_type": "Date32",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "lineitem",
+          "name": "l_shipmode",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "orders",
+          "name": "o_orderkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 6,
+          "relation": "orders",
+          "name": "o_orderpriority",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 3603432000.0000005,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 3155,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 2950,
+            "min_value": "256",
+            "max_value": "599905"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 381,
+            "min_value": "1993-12-02",
+            "max_value": "1994-12-19"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 384,
+            "min_value": "1993-12-03",
+            "max_value": "1994-12-28"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 365,
+            "min_value": "1994-01-01",
+            "max_value": "1994-12-31"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 2,
+            "min_value": "MAIL",
+            "max_value": "SHIP"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 2950,
+            "min_value": "256",
+            "max_value": "599905"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "1-URGENT",
+            "max_value": "5-LOW"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1142133.755942948,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0",
+      "operator_kind": "Select",
+      "short_explain": "Select",
+      "subtree_fingerprint": "f6129fe77ee3d066731e83a5ee218ea15d981ef8222ad25aaa643d1063ce9f1f",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "lineitem",
+          "name": "l_orderkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "lineitem",
+          "name": "l_shipdate",
+          "data_type": "Date32",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "lineitem",
+          "name": "l_commitdate",
+          "data_type": "Date32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "lineitem",
+          "name": "l_receiptdate",
+          "data_type": "Date32",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "lineitem",
+          "name": "l_shipmode",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 60057.200000000004,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 3155,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 2950,
+            "min_value": "256",
+            "max_value": "599905"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 381,
+            "min_value": "1993-12-02",
+            "max_value": "1994-12-19"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 384,
+            "min_value": "1993-12-03",
+            "max_value": "1994-12-28"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 365,
+            "min_value": "1994-01-01",
+            "max_value": "1994-12-31"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 2,
+            "min_value": "MAIL",
+            "max_value": "SHIP"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 19.03556259904913,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "ec303c90ddbe63e7cea6bc6d0d5b7adec81adf71d5202ce07708abd47894e3e1",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "lineitem",
+          "name": "l_orderkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "lineitem",
+          "name": "l_shipdate",
+          "data_type": "Date32",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "lineitem",
+          "name": "l_commitdate",
+          "data_type": "Date32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "lineitem",
+          "name": "l_receiptdate",
+          "data_type": "Date32",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "lineitem",
+          "name": "l_shipmode",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 600572.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "1992-01-03",
+            "max_value": "1998-12-01"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "1992-01-31",
+            "max_value": "1998-10-31"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "1992-01-04",
+            "max_value": "1998-12-27"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "AIR",
+            "max_value": "TRUCK"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 600572,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 150000,
+            "min_value": "1",
+            "max_value": "600000"
+          },
+          {
+            "null_count": 284374,
+            "distinct_count": 2525,
+            "min_value": "1992-01-03",
+            "max_value": "1998-12-01"
+          },
+          {
+            "null_count": 330236,
+            "distinct_count": 2466,
+            "min_value": "1992-01-31",
+            "max_value": "1998-10-31"
+          },
+          {
+            "null_count": 271638,
+            "distinct_count": 2547,
+            "min_value": "1992-01-04",
+            "max_value": "1998-12-27"
+          },
+          {
+            "null_count": 592380,
+            "distinct_count": 7,
+            "min_value": "AIR",
+            "max_value": "TRUCK"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.4735052583204012,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.5498691247677214,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.4522988084692593,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.9863596704475067,
+            "min_value_match": true,
+            "max_value_match": true
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.1",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "1a81e2a15d00dbdd1c0d1ee48f48829e09c49ea7cebf6235e2c21eb8c69e3631",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "orders",
+          "name": "o_orderkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "orders",
+          "name": "o_orderpriority",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 150000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "1-URGENT",
+            "max_value": "5-LOW"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 150000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 150000,
+            "min_value": "1",
+            "max_value": "600000"
+          },
+          {
+            "null_count": 76272,
+            "distinct_count": 5,
+            "min_value": "1-URGENT",
+            "max_value": "5-LOW"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.50848,
+            "min_value_match": true,
+            "max_value_match": true
+          }
+        ]
+      }
+    }
+  ]
+}

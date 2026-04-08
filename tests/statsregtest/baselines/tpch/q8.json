@@ -1,0 +1,3760 @@
+{
+  "suite": "tpch",
+  "query_id": "q8",
+  "desc": "TPC-H Q8 without top-most limit node",
+  "sql_hash": "578051642c11d508fcc3e10556ab55824c3bf47ff0b2c00752fd85e41345b1ab",
+  "dataset_fingerprint": "e6f49ff93063915cf919ea2e3befae49d687a8344b628cd287cbc92c1d37bcbc",
+  "plan_hash": "b565ba47d7cb59cb6f7dd2f6281f5f4fb629bdcf889637e8dae9e19896ae7079",
+  "nodes": [
+    {
+      "node_path": "0",
+      "operator_kind": "EnforcerSort",
+      "short_explain": "EnforcerSort { tuple_ordering: [(#16.0, Asc)], (.output_columns): `__internal_#16`.`mkt_share`(#16.1), `__internal_#16`.`o_year`(#16.0), (.cardinality): 27674357760000000000.00 }",
+      "subtree_fingerprint": "b565ba47d7cb59cb6f7dd2f6281f5f4fb629bdcf889637e8dae9e19896ae7079",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#16",
+          "name": "o_year",
+          "data_type": "Int32",
+          "nullable": true
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#16",
+          "name": "mkt_share",
+          "data_type": "Decimal128(38, 8)",
+          "nullable": true
+        }
+      ],
+      "estimated": {
+        "row_count": 2.767435776e+19,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 2,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 2,
+            "min_value": "1995",
+            "max_value": "1996"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "Some(0),38,8",
+            "max_value": "Some(0),38,8"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.383717888e+19,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0",
+      "operator_kind": "Project",
+      "short_explain": "Project { .table_index: 16, .projections: [ `all_nations`.`o_year`(#13.0), `__internal_#15`.`sum(CASE WHEN all_nations.nation = Utf8(\"IRAQ\") THEN all_nations.volume ELSE Int64(0) END)`(#15.0) / `__internal_#15`.`sum(all_nations.volume)`(#15.1) ], (.output_columns): `__internal_#16`.`mkt_share`(#16.1), `__internal_#16`.`o_year`(#16.0), (.cardinality): 27674357760000000000.00 }",
+      "subtree_fingerprint": "65914a66f55ca7473dde2553e8bb077a5c18ae7c8ad636c84d90825c39450b96",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#16",
+          "name": "o_year",
+          "data_type": "Int32",
+          "nullable": true
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#16",
+          "name": "mkt_share",
+          "data_type": "Decimal128(38, 8)",
+          "nullable": true
+        }
+      ],
+      "estimated": {
+        "row_count": 2.767435776e+19,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 2,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 2,
+            "min_value": "1995",
+            "max_value": "1996"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "Some(0),38,8",
+            "max_value": "Some(0),38,8"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.383717888e+19,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0",
+      "operator_kind": "Aggregate",
+      "short_explain": "Aggregate { .key_table_index: 14, .aggregate_table_index: 15, .implementation: None, .exprs: [ sum(CASE WHEN `all_nations`.`nation`(#13.2) = IRAQ::utf8_view THEN `all_nations`.`volume`(#13.1) ELSE 0::decimal128(38, 4) END), sum(`all_nations`.`volume`(#13.1)) ], .keys: [ `all_nations`.`o_year`(#13.0) ], (.output_columns): `__internal_#14`.`o_year`(#14.0), `__internal_#15`.`sum(CASE WHEN all_nations.nation = Utf8(\"IRAQ\") THEN all_nations.volume ELSE Int64(0) END)`(#15.0), `__internal_#15`.`sum(all_nations.volume)`(#15.1), (.cardinality): 27674357760000000000.00 }",
+      "subtree_fingerprint": "3ec6d9ee0b2f8bf950f8c08ad7645cc71f1cef3972329f18e656df8a50faf9e0",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "all_nations",
+          "name": "o_year",
+          "data_type": "Int32",
+          "nullable": true
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#15",
+          "name": "sum(CASE WHEN all_nations.nation = Utf8(\"IRAQ\") THEN all_nations.volume ELSE Int64(0) END)",
+          "data_type": "Decimal128(38, 4)",
+          "nullable": true
+        },
+        {
+          "ordinal": 2,
+          "relation": "__internal_#15",
+          "name": "sum(all_nations.volume)",
+          "data_type": "Decimal128(38, 4)",
+          "nullable": true
+        }
+      ],
+      "estimated": {
+        "row_count": 2.767435776e+19,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 2,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 2,
+            "min_value": "1995",
+            "max_value": "1996"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "Some(0),38,4",
+            "max_value": "Some(0),38,4"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 2,
+            "min_value": "Some(44592211395),38,4",
+            "max_value": "Some(55230839328),38,4"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.383717888e+19,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0",
+      "operator_kind": "Remap",
+      "short_explain": "Remap { .table_index: 13, (.output_columns): `all_nations`.`nation`(#13.2), `all_nations`.`o_year`(#13.0), `all_nations`.`volume`(#13.1), (.cardinality): 138371788800000000000.00 }",
+      "subtree_fingerprint": "5d66dbbf11749b655eb85224aa48a0c9dacd703170f7a20b0e811d416e31f5e5",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "all_nations",
+          "name": "o_year",
+          "data_type": "Int32",
+          "nullable": true
+        },
+        {
+          "ordinal": 1,
+          "relation": "all_nations",
+          "name": "volume",
+          "data_type": "Decimal128(38, 4)",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "all_nations",
+          "name": "nation",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 1.383717888e+20,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 282,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 2,
+            "min_value": "1995",
+            "max_value": "1996"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 282,
+            "min_value": "Some(14434828),38,4",
+            "max_value": "Some(908102448),38,4"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "ARGENTINA",
+            "max_value": "UNITED STATES"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 4.906801021276596e+17,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0",
+      "operator_kind": "Project",
+      "short_explain": "Project { .table_index: 12, .projections: [ date_part(YEAR::utf8, `orders`.`o_orderdate`(#4.4)), `lineitem`.`l_extendedprice`(#2.5) * 1::decimal128(20, 0) - `lineitem`.`l_discount`(#2.6), `n1`.`n_name`(#7.1) ], (.output_columns): `__internal_#12`.`nation`(#12.2), `__internal_#12`.`o_year`(#12.0), `__internal_#12`.`volume`(#12.1), (.cardinality): 138371788800000000000.00 }",
+      "subtree_fingerprint": "b154980e0f44f4b3ec6da53abf3d380d4e7b68fb4157ce1ce25a1751556d5a13",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#12",
+          "name": "o_year",
+          "data_type": "Int32",
+          "nullable": true
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#12",
+          "name": "volume",
+          "data_type": "Decimal128(38, 4)",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "__internal_#12",
+          "name": "nation",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 1.383717888e+20,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 282,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 2,
+            "min_value": "1995",
+            "max_value": "1996"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 282,
+            "min_value": "Some(14434828),38,4",
+            "max_value": "Some(908102448),38,4"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "ARGENTINA",
+            "max_value": "UNITED STATES"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 4.906801021276596e+17,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0",
+      "operator_kind": "Join",
+      "short_explain": "Join",
+      "subtree_fingerprint": "5a5008c0ea7308518598e177f7e227122fb84be06cb5ba9e88c77e8ea24f4e71",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "orders",
+          "name": "o_orderkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "orders",
+          "name": "o_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "orders",
+          "name": "o_orderdate",
+          "data_type": "Date32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "region",
+          "name": "r_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "region",
+          "name": "r_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "n1",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 6,
+          "relation": "n1",
+          "name": "n_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 7,
+          "relation": "n1",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 8,
+          "relation": "n1",
+          "name": "n_comment",
+          "data_type": "Utf8View",
+          "nullable": true
+        },
+        {
+          "ordinal": 9,
+          "relation": "customer",
+          "name": "c_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 10,
+          "relation": "customer",
+          "name": "c_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 11,
+          "relation": "n2",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 12,
+          "relation": "n2",
+          "name": "n_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 13,
+          "relation": "n2",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 14,
+          "relation": "n2",
+          "name": "n_comment",
+          "data_type": "Utf8View",
+          "nullable": true
+        },
+        {
+          "ordinal": 15,
+          "relation": "supplier",
+          "name": "s_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 16,
+          "relation": "supplier",
+          "name": "s_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 17,
+          "relation": "part",
+          "name": "p_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 18,
+          "relation": "part",
+          "name": "p_type",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 19,
+          "relation": "lineitem",
+          "name": "l_orderkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 20,
+          "relation": "lineitem",
+          "name": "l_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 21,
+          "relation": "lineitem",
+          "name": "l_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 22,
+          "relation": "lineitem",
+          "name": "l_extendedprice",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        },
+        {
+          "ordinal": 23,
+          "relation": "lineitem",
+          "name": "l_discount",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 1.383717888e+20,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 282,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 280,
+            "min_value": "3235",
+            "max_value": "598914"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 266,
+            "min_value": "40",
+            "max_value": "14980"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 227,
+            "min_value": "1995-01-01",
+            "max_value": "1996-12-31"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "1",
+            "max_value": "1"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "AMERICA",
+            "max_value": "AMERICA"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "1",
+            "max_value": "24"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "ARGENTINA",
+            "max_value": "UNITED STATES"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "1",
+            "max_value": "1"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "al foxes promise slyly according to the regular accounts. bold requests alon",
+            "max_value": "y final packages. slow foxes cajole quickly. quickly silent platelets breach ironic accounts. unusual pinto be"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 266,
+            "min_value": "40",
+            "max_value": "14980"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "1",
+            "max_value": "24"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "0",
+            "max_value": "24"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "ALGERIA",
+            "max_value": "VIETNAM"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "4"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": " haggle. carefully final deposits detect slyly agai",
+            "max_value": "y final packages. slow foxes cajole quickly. quickly silent platelets breach ironic accounts. unusual pinto be"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 210,
+            "min_value": "4",
+            "max_value": "999"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "0",
+            "max_value": "24"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 129,
+            "min_value": "157",
+            "max_value": "19991"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "ECONOMY ANODIZED STEEL",
+            "max_value": "ECONOMY ANODIZED STEEL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 280,
+            "min_value": "3235",
+            "max_value": "598914"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 129,
+            "min_value": "157",
+            "max_value": "19991"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 210,
+            "min_value": "4",
+            "max_value": "999"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 276,
+            "min_value": "Some(153562),15,2",
+            "max_value": "Some(9172752),15,2"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 11,
+            "min_value": "Some(0),15,2",
+            "max_value": "Some(10),15,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 4.906801021276596e+17,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0",
+      "operator_kind": "Join",
+      "short_explain": "Join",
+      "subtree_fingerprint": "f1fa717be74f0af03036bcd5f30cd3d5cc3e03b89e8e8a5ecc5594225ed4f1c7",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "orders",
+          "name": "o_orderkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "orders",
+          "name": "o_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "orders",
+          "name": "o_orderdate",
+          "data_type": "Date32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "region",
+          "name": "r_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "region",
+          "name": "r_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "n1",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 6,
+          "relation": "n1",
+          "name": "n_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 7,
+          "relation": "n1",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 8,
+          "relation": "n1",
+          "name": "n_comment",
+          "data_type": "Utf8View",
+          "nullable": true
+        },
+        {
+          "ordinal": 9,
+          "relation": "customer",
+          "name": "c_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 10,
+          "relation": "customer",
+          "name": "c_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 180000000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 8922,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 8922,
+            "min_value": "2",
+            "max_value": "599972"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1939,
+            "min_value": "5",
+            "max_value": "14983"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 731,
+            "min_value": "1995-01-01",
+            "max_value": "1996-12-31"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "1",
+            "max_value": "1"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "AMERICA",
+            "max_value": "AMERICA"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "1",
+            "max_value": "24"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "ARGENTINA",
+            "max_value": "UNITED STATES"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "1",
+            "max_value": "1"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "al foxes promise slyly according to the regular accounts. bold requests alon",
+            "max_value": "y final packages. slow foxes cajole quickly. quickly silent platelets breach ironic accounts. unusual pinto be"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1939,
+            "min_value": "5",
+            "max_value": "14983"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "1",
+            "max_value": "24"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 20174.848688634836,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.0",
+      "operator_kind": "Select",
+      "short_explain": "Select",
+      "subtree_fingerprint": "e7458ed0eb2195b553549edb2b202582831a6dbf1b6244ec5b09119d84879ace",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "orders",
+          "name": "o_orderkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "orders",
+          "name": "o_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "orders",
+          "name": "o_orderdate",
+          "data_type": "Date32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 15000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 45624,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 45624,
+            "min_value": "1",
+            "max_value": "599974"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 9745,
+            "min_value": "1",
+            "max_value": "14999"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 731,
+            "min_value": "1995-01-01",
+            "max_value": "1996-12-31"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 3.0416,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.0.0",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "449cad7c56b29e8bd5bc12b48369cd881a551af6755bf5dec50003e85621c9fb",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "orders",
+          "name": "o_orderkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "orders",
+          "name": "o_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "orders",
+          "name": "o_orderdate",
+          "data_type": "Date32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 150000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "1992-01-01",
+            "max_value": "1998-08-02"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 150000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 150000,
+            "min_value": "1",
+            "max_value": "600000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 10000,
+            "min_value": "1",
+            "max_value": "14999"
+          },
+          {
+            "null_count": 76272,
+            "distinct_count": 2406,
+            "min_value": "1992-01-01",
+            "max_value": "1998-08-02"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.50848,
+            "min_value_match": true,
+            "max_value_match": true
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.1",
+      "operator_kind": "Join",
+      "short_explain": "Join",
+      "subtree_fingerprint": "d65a79b9e6ed85c130fb782200cdc0cfeccb258766caf30455537a02f3469a70",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "region",
+          "name": "r_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "region",
+          "name": "r_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "n1",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "n1",
+          "name": "n_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "n1",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "n1",
+          "name": "n_comment",
+          "data_type": "Utf8View",
+          "nullable": true
+        },
+        {
+          "ordinal": 6,
+          "relation": "customer",
+          "name": "c_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 7,
+          "relation": "customer",
+          "name": "c_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 30000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 2977,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "1",
+            "max_value": "1"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "AMERICA",
+            "max_value": "AMERICA"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "1",
+            "max_value": "24"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "ARGENTINA",
+            "max_value": "UNITED STATES"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "1",
+            "max_value": "1"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "al foxes promise slyly according to the regular accounts. bold requests alon",
+            "max_value": "y final packages. slow foxes cajole quickly. quickly silent platelets breach ironic accounts. unusual pinto be"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 2977,
+            "min_value": "3",
+            "max_value": "15000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "1",
+            "max_value": "24"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 10.077258985555929,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.1.0",
+      "operator_kind": "Join",
+      "short_explain": "Join",
+      "subtree_fingerprint": "24c480383357d2b35577419e815f3042ee07d1c1366e71488558e03b8d35ad4a",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "region",
+          "name": "r_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "region",
+          "name": "r_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "n1",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "n1",
+          "name": "n_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "n1",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "n1",
+          "name": "n_comment",
+          "data_type": "Utf8View",
+          "nullable": true
+        }
+      ],
+      "estimated": {
+        "row_count": 5.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 5,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "1",
+            "max_value": "1"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "AMERICA",
+            "max_value": "AMERICA"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "1",
+            "max_value": "24"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "ARGENTINA",
+            "max_value": "UNITED STATES"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "1",
+            "max_value": "1"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "al foxes promise slyly according to the regular accounts. bold requests alon",
+            "max_value": "y final packages. slow foxes cajole quickly. quickly silent platelets breach ironic accounts. unusual pinto be"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.1.0.0",
+      "operator_kind": "Select",
+      "short_explain": "Select",
+      "subtree_fingerprint": "0a643a8f0ba3384edd91b8b7492352d66c2f41cdf2da58de0935fcd211f21219",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "region",
+          "name": "r_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "region",
+          "name": "r_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 0.5,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 1,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "1",
+            "max_value": "1"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "AMERICA",
+            "max_value": "AMERICA"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 2.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.1.0.0.0",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "1f92a189c31c584abd2abbb9a4d5883feaa148ccfe55c7c1345db07117809245",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "region",
+          "name": "r_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "region",
+          "name": "r_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 5.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "AFRICA",
+            "max_value": "MIDDLE EAST"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 5,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "4"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "AFRICA",
+            "max_value": "MIDDLE EAST"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.1.0.1",
+      "operator_kind": "Remap",
+      "short_explain": "Remap",
+      "subtree_fingerprint": "1b6155745efc7943f2bbe5cf702f74093e8dbc8e963ab2d8ac45083a2d75fe99",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "n1",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "n1",
+          "name": "n_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "n1",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "n1",
+          "name": "n_comment",
+          "data_type": "Utf8View",
+          "nullable": true
+        }
+      ],
+      "estimated": {
+        "row_count": 25.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 25,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "0",
+            "max_value": "24"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "ALGERIA",
+            "max_value": "VIETNAM"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "4"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": " haggle. carefully final deposits detect slyly agai",
+            "max_value": "y final packages. slow foxes cajole quickly. quickly silent platelets breach ironic accounts. unusual pinto be"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.1.0.1.0",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "f45305929291111a3d9cc83778d26190491f7ee82451c17c31277ae09ff52480",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "nation",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "nation",
+          "name": "n_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "nation",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "nation",
+          "name": "n_comment",
+          "data_type": "Utf8View",
+          "nullable": true
+        }
+      ],
+      "estimated": {
+        "row_count": 25.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "ALGERIA",
+            "max_value": "VIETNAM"
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": " haggle. carefully final deposits detect slyly agai",
+            "max_value": "y final packages. slow foxes cajole quickly. quickly silent plau"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 25,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "0",
+            "max_value": "24"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "ALGERIA",
+            "max_value": "VIETNAM"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "4"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": " haggle. carefully final deposits detect slyly agai",
+            "max_value": "y final packages. slow foxes cajole quickly. quickly silent platelets breach ironic accounts. unusual pinto be"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.1.1",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "fae5e6b7da81de6ebd8d3acc6c2329d1e7c509ddbad271da2f129e1ecd6a2fdd",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "customer",
+          "name": "c_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "customer",
+          "name": "c_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 15000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 15000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 15000,
+            "min_value": "1",
+            "max_value": "15000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "0",
+            "max_value": "24"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.1",
+      "operator_kind": "Join",
+      "short_explain": "Join",
+      "subtree_fingerprint": "f9bf9900ad2ac92f57e0c4a80df2002df9b9fab88c6c0da580f7ebd205094b84",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "n2",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "n2",
+          "name": "n_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "n2",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "n2",
+          "name": "n_comment",
+          "data_type": "Utf8View",
+          "nullable": true
+        },
+        {
+          "ordinal": 4,
+          "relation": "supplier",
+          "name": "s_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "supplier",
+          "name": "s_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 6,
+          "relation": "part",
+          "name": "p_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 7,
+          "relation": "part",
+          "name": "p_type",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 8,
+          "relation": "lineitem",
+          "name": "l_orderkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 9,
+          "relation": "lineitem",
+          "name": "l_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 10,
+          "relation": "lineitem",
+          "name": "l_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 11,
+          "relation": "lineitem",
+          "name": "l_extendedprice",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        },
+        {
+          "ordinal": 12,
+          "relation": "lineitem",
+          "name": "l_discount",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 1921830400000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 4485,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "0",
+            "max_value": "24"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "ALGERIA",
+            "max_value": "VIETNAM"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "4"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": " haggle. carefully final deposits detect slyly agai",
+            "max_value": "y final packages. slow foxes cajole quickly. quickly silent platelets breach ironic accounts. unusual pinto be"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 433,
+            "min_value": "2",
+            "max_value": "999"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "0",
+            "max_value": "24"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 147,
+            "min_value": "157",
+            "max_value": "19991"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "ECONOMY ANODIZED STEEL",
+            "max_value": "ECONOMY ANODIZED STEEL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 4420,
+            "min_value": "69",
+            "max_value": "599938"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 147,
+            "min_value": "157",
+            "max_value": "19991"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 433,
+            "min_value": "2",
+            "max_value": "999"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 3322,
+            "min_value": "Some(94402),15,2",
+            "max_value": "Some(9504950),15,2"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 11,
+            "min_value": "Some(0),15,2",
+            "max_value": "Some(10),15,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 428501761.4269788,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.1.0",
+      "operator_kind": "Join",
+      "short_explain": "Join",
+      "subtree_fingerprint": "4689d5aedb575c757cf8104b5926fda81acc7f14ceb882cbbbed4d013c4f9749",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "n2",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "n2",
+          "name": "n_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "n2",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "n2",
+          "name": "n_comment",
+          "data_type": "Utf8View",
+          "nullable": true
+        },
+        {
+          "ordinal": 4,
+          "relation": "supplier",
+          "name": "s_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "supplier",
+          "name": "s_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 10000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 1000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "0",
+            "max_value": "24"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "ALGERIA",
+            "max_value": "VIETNAM"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "4"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": " haggle. carefully final deposits detect slyly agai",
+            "max_value": "y final packages. slow foxes cajole quickly. quickly silent platelets breach ironic accounts. unusual pinto be"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1000,
+            "min_value": "1",
+            "max_value": "1000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "0",
+            "max_value": "24"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 10.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.1.0.0",
+      "operator_kind": "Remap",
+      "short_explain": "Remap",
+      "subtree_fingerprint": "e9d807bc2464edd27cd3daa47855da495ad8f1747ea3cd643aba455e32b9ef59",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "n2",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "n2",
+          "name": "n_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "n2",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "n2",
+          "name": "n_comment",
+          "data_type": "Utf8View",
+          "nullable": true
+        }
+      ],
+      "estimated": {
+        "row_count": 25.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 25,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "0",
+            "max_value": "24"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "ALGERIA",
+            "max_value": "VIETNAM"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "4"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": " haggle. carefully final deposits detect slyly agai",
+            "max_value": "y final packages. slow foxes cajole quickly. quickly silent platelets breach ironic accounts. unusual pinto be"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.1.0.0.0",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "f45305929291111a3d9cc83778d26190491f7ee82451c17c31277ae09ff52480",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "nation",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "nation",
+          "name": "n_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "nation",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "nation",
+          "name": "n_comment",
+          "data_type": "Utf8View",
+          "nullable": true
+        }
+      ],
+      "estimated": {
+        "row_count": 25.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "ALGERIA",
+            "max_value": "VIETNAM"
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": " haggle. carefully final deposits detect slyly agai",
+            "max_value": "y final packages. slow foxes cajole quickly. quickly silent plau"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 25,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "0",
+            "max_value": "24"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "ALGERIA",
+            "max_value": "VIETNAM"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "4"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": " haggle. carefully final deposits detect slyly agai",
+            "max_value": "y final packages. slow foxes cajole quickly. quickly silent platelets breach ironic accounts. unusual pinto be"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.1.0.1",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "74c27c1cbc641f1b1340bd23f5cf01ebbb72e0ede812206cf249fc81a3309b7f",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "supplier",
+          "name": "s_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "supplier",
+          "name": "s_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 1000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 1000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1000,
+            "min_value": "1",
+            "max_value": "1000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "0",
+            "max_value": "24"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.1.1",
+      "operator_kind": "Join",
+      "short_explain": "Join",
+      "subtree_fingerprint": "a0ed97f82b5bd067cdf4ca8cde9b6d15f1f549d6d32c7c44fcd849c18f4b101c",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "part",
+          "name": "p_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "part",
+          "name": "p_type",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "lineitem",
+          "name": "l_orderkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "lineitem",
+          "name": "l_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "lineitem",
+          "name": "l_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "lineitem",
+          "name": "l_extendedprice",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        },
+        {
+          "ordinal": 6,
+          "relation": "lineitem",
+          "name": "l_discount",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 480457600.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 4485,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 147,
+            "min_value": "157",
+            "max_value": "19991"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "ECONOMY ANODIZED STEEL",
+            "max_value": "ECONOMY ANODIZED STEEL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 4420,
+            "min_value": "69",
+            "max_value": "599938"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 147,
+            "min_value": "157",
+            "max_value": "19991"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 433,
+            "min_value": "2",
+            "max_value": "999"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 3322,
+            "min_value": "Some(94402),15,2",
+            "max_value": "Some(9504950),15,2"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 11,
+            "min_value": "Some(0),15,2",
+            "max_value": "Some(10),15,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 107125.4403567447,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.1.1.0",
+      "operator_kind": "Select",
+      "short_explain": "Select",
+      "subtree_fingerprint": "54b829367e51817439eb040b8bb7bdafbf312665518ae382f29818394e0c3f1e",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "part",
+          "name": "p_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "part",
+          "name": "p_type",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 2000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 147,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 147,
+            "min_value": "157",
+            "max_value": "19991"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "ECONOMY ANODIZED STEEL",
+            "max_value": "ECONOMY ANODIZED STEEL"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 13.605442176870747,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.1.1.0.0",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "ca5d2dcc4e7cf38768ee152f6f7ea96b75bf163179eea2ac31d1fb7f9f0edd9c",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "part",
+          "name": "p_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "part",
+          "name": "p_type",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 20000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "ECONOMY ANODIZED BRASS",
+            "max_value": "STANDARD POLISHED TIN"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 20000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 20000,
+            "min_value": "1",
+            "max_value": "20000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 150,
+            "min_value": "ECONOMY ANODIZED BRASS",
+            "max_value": "STANDARD POLISHED TIN"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.1.1.1",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "4ff177d69c2b9cb4672bdccdb9e498fe2a1fe8983fc3888dcaad48a59ba7c9e9",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "lineitem",
+          "name": "l_orderkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "lineitem",
+          "name": "l_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "lineitem",
+          "name": "l_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "lineitem",
+          "name": "l_extendedprice",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "lineitem",
+          "name": "l_discount",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 600572.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "Some(90100),15,2",
+            "max_value": "Some(9594950),15,2"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "Some(0),15,2",
+            "max_value": "Some(10),15,2"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 600572,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 150000,
+            "min_value": "1",
+            "max_value": "600000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 20000,
+            "min_value": "1",
+            "max_value": "20000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1000,
+            "min_value": "1",
+            "max_value": "1000"
+          },
+          {
+            "null_count": 391903,
+            "distinct_count": 100814,
+            "min_value": "Some(90100),15,2",
+            "max_value": "Some(9594950),15,2"
+          },
+          {
+            "null_count": 584188,
+            "distinct_count": 11,
+            "min_value": "Some(0),15,2",
+            "max_value": "Some(10),15,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.6525495694104954,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.9727193408950134,
+            "min_value_match": true,
+            "max_value_match": true
+          }
+        ]
+      }
+    }
+  ]
+}

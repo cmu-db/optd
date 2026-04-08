@@ -1,0 +1,815 @@
+{
+  "suite": "tpch",
+  "query_id": "q13",
+  "desc": "TPC-H Q13",
+  "sql_hash": "1071a1fec00b0856bf4038f2ea67d112f4d78c580208775275d1cff58356c38d",
+  "dataset_fingerprint": "e6f49ff93063915cf919ea2e3befae49d687a8344b628cd287cbc92c1d37bcbc",
+  "plan_hash": "65937b4e72c916e47448e9762f2003a4afe44d70197c5367fd601b7ac3873025",
+  "nodes": [
+    {
+      "node_path": "0",
+      "operator_kind": "EnforcerSort",
+      "short_explain": "EnforcerSort { tuple_ordering: [(#10.1, Desc), (#10.0, Desc)], (.output_columns): `__internal_#10`.`c_count`(#10.0), `__internal_#10`.`custdist`(#10.1), (.cardinality): 3600000.00 }",
+      "subtree_fingerprint": "65937b4e72c916e47448e9762f2003a4afe44d70197c5367fd601b7ac3873025",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#10",
+          "name": "c_count",
+          "data_type": "Int64",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#10",
+          "name": "custdist",
+          "data_type": "Int64",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 3600000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 37,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 37,
+            "min_value": "0",
+            "max_value": "36"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 34,
+            "min_value": "1",
+            "max_value": "5000"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 97297.2972972973,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0",
+      "operator_kind": "Project",
+      "short_explain": "Project",
+      "subtree_fingerprint": "3c06ffd17639134109aafe76f5da441c574b93b687edf931b7036e9f794673a4",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#10",
+          "name": "c_count",
+          "data_type": "Int64",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#10",
+          "name": "custdist",
+          "data_type": "Int64",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 3600000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 37,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 37,
+            "min_value": "0",
+            "max_value": "36"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 34,
+            "min_value": "1",
+            "max_value": "5000"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 97297.2972972973,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0",
+      "operator_kind": "Aggregate",
+      "short_explain": "Aggregate",
+      "subtree_fingerprint": "cee9df2f2d74881851f3682e4df511b163b89d300ccc5ca51995e9448cf3a7a5",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "c_orders",
+          "name": "c_count",
+          "data_type": "Int64",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#9",
+          "name": "count(Int64(1))",
+          "data_type": "Int64",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 3600000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 37,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 37,
+            "min_value": "0",
+            "max_value": "36"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 34,
+            "min_value": "1",
+            "max_value": "5000"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 97297.2972972973,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0",
+      "operator_kind": "Remap",
+      "short_explain": "Remap { .table_index: 7, (.output_columns): `c_orders`.`c_count`(#7.1), `c_orders`.`c_custkey`(#7.0), (.cardinality): 18000000.00 }",
+      "subtree_fingerprint": "b8a1f2ac4eb17f2a653e5ba0498b48c8aee7da00d2fd9ace312963870a0f8f8e",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "c_orders",
+          "name": "c_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "c_orders",
+          "name": "c_count",
+          "data_type": "Int64",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 18000000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 15000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 15000,
+            "min_value": "1",
+            "max_value": "15000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 37,
+            "min_value": "0",
+            "max_value": "36"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1200.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0",
+      "operator_kind": "Project",
+      "short_explain": "Project",
+      "subtree_fingerprint": "c3074576bd4927fb99d1deb1ae635cc213bc9c716fe77176f29599de68e0acee",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#6",
+          "name": "c_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#6",
+          "name": "c_count",
+          "data_type": "Int64",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 18000000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 15000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 15000,
+            "min_value": "1",
+            "max_value": "15000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 37,
+            "min_value": "0",
+            "max_value": "36"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1200.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0",
+      "operator_kind": "Aggregate",
+      "short_explain": "Aggregate",
+      "subtree_fingerprint": "0f3d820f1b55f7a2512f1a1208442cc019d6558e04fd2648aae78430ec4db798",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "customer",
+          "name": "c_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#4",
+          "name": "count(orders.o_orderkey)",
+          "data_type": "Int64",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 18000000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 15000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 15000,
+            "min_value": "1",
+            "max_value": "15000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 37,
+            "min_value": "0",
+            "max_value": "36"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1200.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0",
+      "operator_kind": "Join",
+      "short_explain": "Join",
+      "subtree_fingerprint": "39ccade9ad93bf6ea65c27b11c005fc372a1a6f469656f41aa9980cc8f7dae6f",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "customer",
+          "name": "c_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "orders",
+          "name": "o_orderkey",
+          "data_type": "Int32",
+          "nullable": true
+        },
+        {
+          "ordinal": 2,
+          "relation": "orders",
+          "name": "o_custkey",
+          "data_type": "Int32",
+          "nullable": true
+        },
+        {
+          "ordinal": 3,
+          "relation": "orders",
+          "name": "o_comment",
+          "data_type": "Utf8View",
+          "nullable": true
+        }
+      ],
+      "estimated": {
+        "row_count": 90000000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 153318,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 15000,
+            "min_value": "1",
+            "max_value": "15000"
+          },
+          {
+            "null_count": 5000,
+            "distinct_count": 148318,
+            "min_value": "1",
+            "max_value": "600000"
+          },
+          {
+            "null_count": 5000,
+            "distinct_count": 10000,
+            "min_value": "1",
+            "max_value": "14999"
+          },
+          {
+            "null_count": 5000,
+            "distinct_count": 148090,
+            "min_value": " Tiresias about the blithely ironic a",
+            "max_value": "zzle. slyly special platele"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 587.0152232614565,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.0",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "b3de57d8f117bdcc13b49eb75387ef6b826fa7d4f48ac7c1699b5700a49bbf2b",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "customer",
+          "name": "c_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 15000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 15000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 15000,
+            "min_value": "1",
+            "max_value": "15000"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.1",
+      "operator_kind": "Select",
+      "short_explain": "Select",
+      "subtree_fingerprint": "5e56181ada0643fcd8f34b6e7ab364adec5bc857d5421506517540a2b448b921",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "orders",
+          "name": "o_orderkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "orders",
+          "name": "o_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "orders",
+          "name": "o_comment",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 15000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 148318,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 148318,
+            "min_value": "1",
+            "max_value": "600000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 10000,
+            "min_value": "1",
+            "max_value": "14999"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 148090,
+            "min_value": " Tiresias about the blithely ironic a",
+            "max_value": "zzle. slyly special platele"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 9.887866666666667,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.1.0",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "7a7474899124f7f76b9f5c8c96efb22290fe91a06da6c06639297257d14030e3",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "orders",
+          "name": "o_orderkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "orders",
+          "name": "o_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "orders",
+          "name": "o_comment",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 150000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": " Tiresias about the blithely ironic a",
+            "max_value": "zzle. slyly special platele"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 150000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 150000,
+            "min_value": "1",
+            "max_value": "600000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 10000,
+            "min_value": "1",
+            "max_value": "14999"
+          },
+          {
+            "null_count": 9464,
+            "distinct_count": 140335,
+            "min_value": " Tiresias about the blithely ironic a",
+            "max_value": "zzle. slyly special platele"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.06309333333333333,
+            "min_value_match": true,
+            "max_value_match": true
+          }
+        ]
+      }
+    }
+  ]
+}

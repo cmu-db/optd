@@ -1,0 +1,1409 @@
+{
+  "suite": "tpch",
+  "query_id": "q16",
+  "desc": "TPC-H Q16",
+  "sql_hash": "93828464e6c7ab77ed773bb0a3240e3a242fe37b8c5ebe671b4c4d7960c247c5",
+  "dataset_fingerprint": "e6f49ff93063915cf919ea2e3befae49d687a8344b628cd287cbc92c1d37bcbc",
+  "plan_hash": "a622a64ee63155292af06fc74581069b08523de08c7dc1e06c4d22424a64c6c1",
+  "nodes": [
+    {
+      "node_path": "0",
+      "operator_kind": "EnforcerSort",
+      "short_explain": "EnforcerSort { tuple_ordering: [(#11.3, Desc), (#11.0, Asc), (#11.1, Asc), (#11.2, Asc)], (.output_columns): `__internal_#11`.`p_brand`(#11.0), `__internal_#11`.`p_size`(#11.2), `__internal_#11`.`p_type`(#11.1), `__internal_#11`.`supplier_cnt`(#11.3), (.cardinality): 32768.00 }",
+      "subtree_fingerprint": "a622a64ee63155292af06fc74581069b08523de08c7dc1e06c4d22424a64c6c1",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#11",
+          "name": "p_brand",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#11",
+          "name": "p_type",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "__internal_#11",
+          "name": "p_size",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "__internal_#11",
+          "name": "supplier_cnt",
+          "data_type": "Int64",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 32768.00000000002,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 2762,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 24,
+            "min_value": "Brand#11",
+            "max_value": "Brand#55"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 145,
+            "min_value": "ECONOMY ANODIZED BRASS",
+            "max_value": "STANDARD POLISHED TIN"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 8,
+            "min_value": "3",
+            "max_value": "49"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "3",
+            "max_value": "12"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 11.86386676321507,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0",
+      "operator_kind": "Project",
+      "short_explain": "Project { .table_index: 11, .projections: [ `part`.`p_brand`(#2.3), `part`.`p_type`(#2.4), `part`.`p_size`(#2.5), `__internal_#9`.`count(alias1)`(#9.0) ], (.output_columns): `__internal_#11`.`p_brand`(#11.0), `__internal_#11`.`p_size`(#11.2), `__internal_#11`.`p_type`(#11.1), `__internal_#11`.`supplier_cnt`(#11.3), (.cardinality): 32768.00 }",
+      "subtree_fingerprint": "08e1e21811a190afce337b76f770e590c1aca9e1d983350ebd7f68f4df308d58",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#11",
+          "name": "p_brand",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#11",
+          "name": "p_type",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "__internal_#11",
+          "name": "p_size",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "__internal_#11",
+          "name": "supplier_cnt",
+          "data_type": "Int64",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 32768.00000000002,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 2762,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 24,
+            "min_value": "Brand#11",
+            "max_value": "Brand#55"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 145,
+            "min_value": "ECONOMY ANODIZED BRASS",
+            "max_value": "STANDARD POLISHED TIN"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 8,
+            "min_value": "3",
+            "max_value": "49"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "3",
+            "max_value": "12"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 11.86386676321507,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0",
+      "operator_kind": "Aggregate",
+      "short_explain": "Aggregate { .key_table_index: 8, .aggregate_table_index: 9, .implementation: None, .exprs: [ count(`__internal_#6`.`alias1`(#6.3)) ], .keys: [ `part`.`p_brand`(#2.3), `part`.`p_type`(#2.4), `part`.`p_size`(#2.5) ], (.output_columns): `__internal_#8`.`p_brand`(#8.0), `__internal_#8`.`p_size`(#8.2), `__internal_#8`.`p_type`(#8.1), `__internal_#9`.`count(alias1)`(#9.0), (.cardinality): 32768.00 }",
+      "subtree_fingerprint": "4f2cc21c4f0d1e08d01f66f40ad82e9c00436c257a16aa79ec26133163e2dc42",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "part",
+          "name": "p_brand",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "part",
+          "name": "p_type",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "part",
+          "name": "p_size",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "__internal_#9",
+          "name": "count(alias1)",
+          "data_type": "Int64",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 32768.00000000002,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 2762,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 24,
+            "min_value": "Brand#11",
+            "max_value": "Brand#55"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 145,
+            "min_value": "ECONOMY ANODIZED BRASS",
+            "max_value": "STANDARD POLISHED TIN"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 8,
+            "min_value": "3",
+            "max_value": "49"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "3",
+            "max_value": "12"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 11.86386676321507,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0",
+      "operator_kind": "Aggregate",
+      "short_explain": "Aggregate { .key_table_index: 6, .aggregate_table_index: 7, .implementation: None, .exprs: [], .keys: [ `part`.`p_brand`(#2.3), `part`.`p_type`(#2.4), `part`.`p_size`(#2.5), `partsupp`.`ps_suppkey`(#1.1) ], (.output_columns): `__internal_#6`.`alias1`(#6.3), `__internal_#6`.`p_brand`(#6.0), `__internal_#6`.`p_size`(#6.2), `__internal_#6`.`p_type`(#6.1), (.cardinality): 4096000.00 }",
+      "subtree_fingerprint": "faebc8e4a687ade51b3d1a53fa414fbdb00fd673b16d259a6cf17ef3680fb18b",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "part",
+          "name": "p_brand",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "part",
+          "name": "p_type",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "part",
+          "name": "p_size",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "__internal_#6",
+          "name": "alias1",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 4096000.000000002,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 11632,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 24,
+            "min_value": "Brand#11",
+            "max_value": "Brand#55"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 145,
+            "min_value": "ECONOMY ANODIZED BRASS",
+            "max_value": "STANDARD POLISHED TIN"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 8,
+            "min_value": "3",
+            "max_value": "49"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 999,
+            "min_value": "1",
+            "max_value": "1000"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 352.1320495185696,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0",
+      "operator_kind": "Join",
+      "short_explain": "Join { .join_type: LeftAnti, .implementation: None, .join_cond: `partsupp`.`ps_suppkey`(#1.1) = `__correlated_sq_1`.`s_suppkey`(#5.0), (.output_columns): `part`.`p_brand`(#2.3), `part`.`p_partkey`(#2.0), `part`.`p_size`(#2.5), `part`.`p_type`(#2.4), `partsupp`.`ps_partkey`(#1.0), `partsupp`.`ps_suppkey`(#1.1), (.cardinality): 2560000000.00 }",
+      "subtree_fingerprint": "bade3dc78a6fcabf521d4025faac22eb7b71017ececf391f469325b6bd9d230d",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "part",
+          "name": "p_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "part",
+          "name": "p_brand",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "part",
+          "name": "p_type",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "part",
+          "name": "p_size",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "partsupp",
+          "name": "ps_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "partsupp",
+          "name": "ps_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 2560000000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 11635,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 2911,
+            "min_value": "4",
+            "max_value": "19994"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 24,
+            "min_value": "Brand#11",
+            "max_value": "Brand#55"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 145,
+            "min_value": "ECONOMY ANODIZED BRASS",
+            "max_value": "STANDARD POLISHED TIN"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 8,
+            "min_value": "3",
+            "max_value": "49"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 2911,
+            "min_value": "4",
+            "max_value": "19994"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 999,
+            "min_value": "1",
+            "max_value": "1000"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 220025.78427159434,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0",
+      "operator_kind": "Join",
+      "short_explain": "Join { .join_type: Inner, .implementation: Some(Hash { build_side: Outer, keys: [(#2.0, #1.0)] }), .join_cond: `partsupp`.`ps_partkey`(#1.0) = `part`.`p_partkey`(#2.0), (.output_columns): `part`.`p_brand`(#2.3), `part`.`p_partkey`(#2.0), `part`.`p_size`(#2.5), `part`.`p_type`(#2.4), `partsupp`.`ps_partkey`(#1.0), `partsupp`.`ps_suppkey`(#1.1), (.cardinality): 64000000.00 }",
+      "subtree_fingerprint": "3b93e0cd3421fd99d1993e71ae12a08458c30e43d847f78bdea53f1afd07edbf",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "part",
+          "name": "p_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "part",
+          "name": "p_brand",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "part",
+          "name": "p_type",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "part",
+          "name": "p_size",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "partsupp",
+          "name": "ps_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "partsupp",
+          "name": "ps_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 64000000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 11644,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 2911,
+            "min_value": "4",
+            "max_value": "19994"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 24,
+            "min_value": "Brand#11",
+            "max_value": "Brand#55"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 145,
+            "min_value": "ECONOMY ANODIZED BRASS",
+            "max_value": "STANDARD POLISHED TIN"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 8,
+            "min_value": "3",
+            "max_value": "49"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 2911,
+            "min_value": "4",
+            "max_value": "19994"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1000,
+            "min_value": "1",
+            "max_value": "1000"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 5496.392992098935,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0",
+      "operator_kind": "Select",
+      "short_explain": "Select",
+      "subtree_fingerprint": "a608740ca2954142f12c5993703d146f328ad6a126a82940dfe480a5231ffa10",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "part",
+          "name": "p_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "part",
+          "name": "p_brand",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "part",
+          "name": "p_type",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "part",
+          "name": "p_size",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 2000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 2911,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 2911,
+            "min_value": "4",
+            "max_value": "19994"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 24,
+            "min_value": "Brand#11",
+            "max_value": "Brand#55"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 145,
+            "min_value": "ECONOMY ANODIZED BRASS",
+            "max_value": "STANDARD POLISHED TIN"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 8,
+            "min_value": "3",
+            "max_value": "49"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.4555,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.0",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "07dec0c525b060e8012246becdfc65ce569eb324fe8392b2db890987ce2da5f8",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "part",
+          "name": "p_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "part",
+          "name": "p_brand",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "part",
+          "name": "p_type",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "part",
+          "name": "p_size",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 20000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "Brand#11",
+            "max_value": "Brand#55"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "ECONOMY ANODIZED BRASS",
+            "max_value": "STANDARD POLISHED TIN"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "1",
+            "max_value": "50"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 20000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 20000,
+            "min_value": "1",
+            "max_value": "20000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "Brand#11",
+            "max_value": "Brand#55"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 150,
+            "min_value": "ECONOMY ANODIZED BRASS",
+            "max_value": "STANDARD POLISHED TIN"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 50,
+            "min_value": "1",
+            "max_value": "50"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.1",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "dbee0433bc44ed8f20de10d2d266de330be3307749aa8eefd7ed1db427f9f17b",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "partsupp",
+          "name": "ps_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "partsupp",
+          "name": "ps_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 80000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 80000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 20000,
+            "min_value": "1",
+            "max_value": "20000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1000,
+            "min_value": "1",
+            "max_value": "1000"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.1",
+      "operator_kind": "Remap",
+      "short_explain": "Remap { .table_index: 5, (.output_columns): `__correlated_sq_1`.`s_suppkey`(#5.0), (.cardinality): 100.00 }",
+      "subtree_fingerprint": "89ee829dc0a44fa868d045f956f4d374021b09e0ab622a6795c6fd410122c777",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__correlated_sq_1",
+          "name": "s_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 100.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 1,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "358",
+            "max_value": "358"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 100.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.1.0",
+      "operator_kind": "Project",
+      "short_explain": "Project { .table_index: 4, .projections: [ `supplier`.`s_suppkey`(#3.0) ], (.output_columns): `__internal_#4`.`s_suppkey`(#4.0), (.cardinality): 100.00 }",
+      "subtree_fingerprint": "74b8494761dd916f9974d6b6aae6ab1016da2b9253f8559a1a5bed9e9d64de42",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#4",
+          "name": "s_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 100.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 1,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "358",
+            "max_value": "358"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 100.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.1.0.0",
+      "operator_kind": "Select",
+      "short_explain": "Select",
+      "subtree_fingerprint": "bcce2e7ef6df566171966fcfff480938e5fef04874788067b5289f3b1d113055",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "supplier",
+          "name": "s_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "supplier",
+          "name": "s_comment",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 100.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 1,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "358",
+            "max_value": "358"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "ans. ironicCustomer  requests cajole carefullyComplaintsy regular reque",
+            "max_value": "ans. ironicCustomer  requests cajole carefullyComplaintsy regular reque"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 100.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.1.0.0.0",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "b401d28f37f163f123597ef04b377a3f572dff96b2aa55f19d407a7abe82efe1",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "supplier",
+          "name": "s_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "supplier",
+          "name": "s_comment",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 1000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": " according to the bravely quick dolphins. deposit",
+            "max_value": "ymptotes. blithely regular theodolites are slyly according to ti"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 1000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1000,
+            "min_value": "1",
+            "max_value": "1000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1000,
+            "min_value": " according to the bravely quick dolphins. deposit",
+            "max_value": "ymptotes. blithely regular theodolites are slyly according to the "
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": false
+          }
+        ]
+      }
+    }
+  ]
+}

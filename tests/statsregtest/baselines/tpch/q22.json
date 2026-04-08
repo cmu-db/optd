@@ -1,0 +1,1901 @@
+{
+  "suite": "tpch",
+  "query_id": "q22",
+  "desc": "TPC-H Q22",
+  "sql_hash": "c6d257a66b06cdc07ec58b4e4cb53a5c821dbe0c602e7c36266ed51c5ede360e",
+  "dataset_fingerprint": "e6f49ff93063915cf919ea2e3befae49d687a8344b628cd287cbc92c1d37bcbc",
+  "plan_hash": "0f33f7070d525d8fee9d0e5f90e0d65f03ae1c7f426432139f0fe1de30b59216",
+  "nodes": [
+    {
+      "node_path": "0",
+      "operator_kind": "EnforcerSort",
+      "short_explain": "EnforcerSort { tuple_ordering: [(#15.0, Asc)], (.output_columns): `__internal_#15`.`cntrycode`(#15.0), `__internal_#15`.`numcust`(#15.1), `__internal_#15`.`totacctbal`(#15.2), (.cardinality): 7200000.00 }",
+      "subtree_fingerprint": "0f33f7070d525d8fee9d0e5f90e0d65f03ae1c7f426432139f0fe1de30b59216",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#15",
+          "name": "cntrycode",
+          "data_type": "Utf8View",
+          "nullable": true
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#15",
+          "name": "numcust",
+          "data_type": "Int64",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "__internal_#15",
+          "name": "totacctbal",
+          "data_type": "Decimal128(25, 2)",
+          "nullable": true
+        }
+      ],
+      "estimated": {
+        "row_count": 7200000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 7,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 7,
+            "min_value": "13",
+            "max_value": "31"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 6,
+            "min_value": "85",
+            "max_value": "99"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 7,
+            "min_value": "Some(63269346),25,2",
+            "max_value": "Some(73801252),25,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1028571.4285714285,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0",
+      "operator_kind": "Project",
+      "short_explain": "Project { .table_index: 15, .projections: [ `custsale`.`cntrycode`(#12.0), `__internal_#14`.`count(Int64(1))`(#14.0), `__internal_#14`.`sum(custsale.c_acctbal)`(#14.1) ], (.output_columns): `__internal_#15`.`cntrycode`(#15.0), `__internal_#15`.`numcust`(#15.1), `__internal_#15`.`totacctbal`(#15.2), (.cardinality): 7200000.00 }",
+      "subtree_fingerprint": "3e9b6dd99c745fda5e5a6612c9c93456ed73bfaf2ec91e206b5af4a0d7273c15",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#15",
+          "name": "cntrycode",
+          "data_type": "Utf8View",
+          "nullable": true
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#15",
+          "name": "numcust",
+          "data_type": "Int64",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "__internal_#15",
+          "name": "totacctbal",
+          "data_type": "Decimal128(25, 2)",
+          "nullable": true
+        }
+      ],
+      "estimated": {
+        "row_count": 7200000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 7,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 7,
+            "min_value": "13",
+            "max_value": "31"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 6,
+            "min_value": "85",
+            "max_value": "99"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 7,
+            "min_value": "Some(63269346),25,2",
+            "max_value": "Some(73801252),25,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1028571.4285714285,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0",
+      "operator_kind": "Aggregate",
+      "short_explain": "Aggregate { .key_table_index: 13, .aggregate_table_index: 14, .implementation: None, .exprs: [ count(1::bigint), sum(`custsale`.`c_acctbal`(#12.1)) ], .keys: [ `custsale`.`cntrycode`(#12.0) ], (.output_columns): `__internal_#13`.`cntrycode`(#13.0), `__internal_#14`.`count(Int64(1))`(#14.0), `__internal_#14`.`sum(custsale.c_acctbal)`(#14.1), (.cardinality): 7200000.00 }",
+      "subtree_fingerprint": "ef3a119f354b84cff8768c32ccfc6ed716858a270a05d6899decdb2280cd0c56",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "custsale",
+          "name": "cntrycode",
+          "data_type": "Utf8View",
+          "nullable": true
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#14",
+          "name": "count(Int64(1))",
+          "data_type": "Int64",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "__internal_#14",
+          "name": "sum(custsale.c_acctbal)",
+          "data_type": "Decimal128(25, 2)",
+          "nullable": true
+        }
+      ],
+      "estimated": {
+        "row_count": 7200000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 7,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 7,
+            "min_value": "13",
+            "max_value": "31"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 6,
+            "min_value": "85",
+            "max_value": "99"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 7,
+            "min_value": "Some(63269346),25,2",
+            "max_value": "Some(73801252),25,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1028571.4285714285,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0",
+      "operator_kind": "Remap",
+      "short_explain": "Remap { .table_index: 12, (.output_columns): `custsale`.`c_acctbal`(#12.1), `custsale`.`cntrycode`(#12.0), (.cardinality): 36000000.00 }",
+      "subtree_fingerprint": "f26a4a7b16f4da58ce049d729fc76e318e2c66fc162b08d66b69ff2160eddede",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "custsale",
+          "name": "cntrycode",
+          "data_type": "Utf8View",
+          "nullable": true
+        },
+        {
+          "ordinal": 1,
+          "relation": "custsale",
+          "name": "c_acctbal",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 36000000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 641,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 7,
+            "min_value": "13",
+            "max_value": "31"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 641,
+            "min_value": "Some(499143),15,2",
+            "max_value": "Some(998613),15,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 56162.24648985959,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0",
+      "operator_kind": "Project",
+      "short_explain": "Project { .table_index: 11, .projections: [ substr(`customer`.`c_phone`(#1.4), 1::bigint, 2::bigint), `customer`.`c_acctbal`(#1.5) ], (.output_columns): `__internal_#11`.`c_acctbal`(#11.1), `__internal_#11`.`cntrycode`(#11.0), (.cardinality): 36000000.00 }",
+      "subtree_fingerprint": "6ae12a704508b18ec7e9940efdf79146883f5c4e8f9c4a366861b214b645e173",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#11",
+          "name": "cntrycode",
+          "data_type": "Utf8View",
+          "nullable": true
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#11",
+          "name": "c_acctbal",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 36000000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 641,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 7,
+            "min_value": "13",
+            "max_value": "31"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 641,
+            "min_value": "Some(499143),15,2",
+            "max_value": "Some(998613),15,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 56162.24648985959,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0",
+      "operator_kind": "Join",
+      "short_explain": "Join { .join_type: Inner, .implementation: None, .join_cond: CAST (`customer`.`c_acctbal`(#1.5) AS Decimal128(19, 6)) > `__scalar_sq_2`.`avg(customer.c_acctbal)`(#9.0), (.output_columns): `__scalar_sq_2`.`avg(customer.c_acctbal)`(#9.0), `customer`.`c_acctbal`(#1.5), `customer`.`c_custkey`(#1.0), `customer`.`c_phone`(#1.4), (.cardinality): 36000000.00 }",
+      "subtree_fingerprint": "8ca133afa24253ddaf409cd626042356c019714dafb7945090f34b93ea2fe3f9",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__scalar_sq_2",
+          "name": "avg(customer.c_acctbal)",
+          "data_type": "Decimal128(19, 6)",
+          "nullable": true
+        },
+        {
+          "ordinal": 1,
+          "relation": "customer",
+          "name": "c_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "customer",
+          "name": "c_phone",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "customer",
+          "name": "c_acctbal",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 36000000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 641,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "Some(4989499970),19,6",
+            "max_value": "Some(4989499970),19,6"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 641,
+            "min_value": "6",
+            "max_value": "14982"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 641,
+            "min_value": "13-110-384-5263",
+            "max_value": "31-998-100-5010"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 641,
+            "min_value": "Some(499143),15,2",
+            "max_value": "Some(998613),15,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 56162.24648985959,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0",
+      "operator_kind": "Remap",
+      "short_explain": "Remap { .table_index: 9, (.output_columns): `__scalar_sq_2`.`avg(customer.c_acctbal)`(#9.0), (.cardinality): 1.00 }",
+      "subtree_fingerprint": "e4e500d0817bc7d427780f1ddacd18d25a08377d4bcbf144f12bbc247b8107c9",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__scalar_sq_2",
+          "name": "avg(customer.c_acctbal)",
+          "data_type": "Decimal128(19, 6)",
+          "nullable": true
+        }
+      ],
+      "estimated": {
+        "row_count": 1.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 1,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "Some(4989499970),19,6",
+            "max_value": "Some(4989499970),19,6"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.0",
+      "operator_kind": "Project",
+      "short_explain": "Project { .table_index: 8, .projections: [ `__internal_#7`.`avg(customer.c_acctbal)`(#7.0) ], (.output_columns): `__internal_#8`.`avg(customer.c_acctbal)`(#8.0), (.cardinality): 1.00 }",
+      "subtree_fingerprint": "5637e817d7423ce967b3fdd60f0b0c95cc8aaba5daf361dda1f457fb1a3cb765",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#8",
+          "name": "avg(customer.c_acctbal)",
+          "data_type": "Decimal128(19, 6)",
+          "nullable": true
+        }
+      ],
+      "estimated": {
+        "row_count": 1.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 1,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "Some(4989499970),19,6",
+            "max_value": "Some(4989499970),19,6"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.0.0",
+      "operator_kind": "Aggregate",
+      "short_explain": "Aggregate { .key_table_index: 6, .aggregate_table_index: 7, .implementation: None, .exprs: [ avg(`customer`.`c_acctbal`(#5.5)) ], .keys: [], (.output_columns): `__internal_#7`.`avg(customer.c_acctbal)`(#7.0), (.cardinality): 1.00 }",
+      "subtree_fingerprint": "7ffaff4e1ff7243b70266622cd449dfeb443ea2b5885530cb1ff68da43e46905",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#7",
+          "name": "avg(customer.c_acctbal)",
+          "data_type": "Decimal128(19, 6)",
+          "nullable": true
+        }
+      ],
+      "estimated": {
+        "row_count": 1.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 1,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "Some(4989499970),19,6",
+            "max_value": "Some(4989499970),19,6"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.0.0.0",
+      "operator_kind": "Select",
+      "short_explain": "Select",
+      "subtree_fingerprint": "bb75e1a884e4de2a73ffc78f6fc3cd1db597f229bdc45cc930cfcdad2ea29597",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "customer",
+          "name": "c_phone",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "customer",
+          "name": "c_acctbal",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 1500.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 3741,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 3741,
+            "min_value": "13-101-822-9474",
+            "max_value": "31-998-100-5010"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 3734,
+            "min_value": "Some(207),15,2",
+            "max_value": "Some(999381),15,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 2.494,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.0.0.0.0",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "f1fb8d8902b3a6385c3385f55a65b83020ae5c14b3711e8f1c54490ba9962ca4",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "customer",
+          "name": "c_phone",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "customer",
+          "name": "c_acctbal",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 15000.0,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "10-103-318-6809",
+            "max_value": "34-999-121-7718"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "Some(-99995),15,2",
+            "max_value": "Some(999972),15,2"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 15000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 15000,
+            "min_value": "10-103-318-6809",
+            "max_value": "34-999-121-7718"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 14887,
+            "min_value": "Some(-99995),15,2",
+            "max_value": "Some(999972),15,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.1",
+      "operator_kind": "Join",
+      "short_explain": "Join { .join_type: LeftAnti, .implementation: None, .join_cond: `customer`.`c_custkey`(#1.0) = `__correlated_sq_1`.`o_custkey`(#4.1), (.output_columns): `customer`.`c_acctbal`(#1.5), `customer`.`c_custkey`(#1.0), `customer`.`c_phone`(#1.4), (.cardinality): 90000000.00 }",
+      "subtree_fingerprint": "8ce9e3113e7acb3a9624db00616944d258a59e18e2a58b39e6afd93527455bed",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "customer",
+          "name": "c_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "customer",
+          "name": "c_phone",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "customer",
+          "name": "c_acctbal",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 90000000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 1360,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1360,
+            "min_value": "6",
+            "max_value": "15000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1360,
+            "min_value": "13-110-384-5263",
+            "max_value": "31-998-100-5010"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1360,
+            "min_value": "Some(-99172),15,2",
+            "max_value": "Some(998613),15,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 66176.4705882353,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.1.0",
+      "operator_kind": "Select",
+      "short_explain": "Select",
+      "subtree_fingerprint": "7b7aba66e67ae008eba1e08991e19a63c339c1f473a03f356d15196e24dec3e8",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "customer",
+          "name": "c_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "customer",
+          "name": "c_phone",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "customer",
+          "name": "c_acctbal",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 1500.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 4115,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 4115,
+            "min_value": "2",
+            "max_value": "15000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 4115,
+            "min_value": "13-101-822-9474",
+            "max_value": "31-998-100-5010"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 4108,
+            "min_value": "Some(-99616),15,2",
+            "max_value": "Some(999381),15,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 2.743333333333333,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.1.0.0",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "d58832c14de036a9857150c22de17ec85454c0419dde1b5894ffd5fcb23de19a",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "customer",
+          "name": "c_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "customer",
+          "name": "c_phone",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "customer",
+          "name": "c_acctbal",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 15000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "10-103-318-6809",
+            "max_value": "34-999-121-7718"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "Some(-99995),15,2",
+            "max_value": "Some(999972),15,2"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 15000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 15000,
+            "min_value": "1",
+            "max_value": "15000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 15000,
+            "min_value": "10-103-318-6809",
+            "max_value": "34-999-121-7718"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 14887,
+            "min_value": "Some(-99995),15,2",
+            "max_value": "Some(999972),15,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.1.1",
+      "operator_kind": "Remap",
+      "short_explain": "Remap",
+      "subtree_fingerprint": "fc94687a346831a7bf8443135124b00cd633f1c89992e6255f9e39284c9d91d7",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__correlated_sq_1",
+          "name": "o_orderkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "__correlated_sq_1",
+          "name": "o_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "__correlated_sq_1",
+          "name": "o_orderstatus",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "__correlated_sq_1",
+          "name": "o_totalprice",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "__correlated_sq_1",
+          "name": "o_orderdate",
+          "data_type": "Date32",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "__correlated_sq_1",
+          "name": "o_orderpriority",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 6,
+          "relation": "__correlated_sq_1",
+          "name": "o_clerk",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 7,
+          "relation": "__correlated_sq_1",
+          "name": "o_shippriority",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 8,
+          "relation": "__correlated_sq_1",
+          "name": "o_comment",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 150000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 150000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 150000,
+            "min_value": "1",
+            "max_value": "600000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 10000,
+            "min_value": "1",
+            "max_value": "14999"
+          },
+          {
+            "null_count": 76272,
+            "distinct_count": 3,
+            "min_value": "F",
+            "max_value": "P"
+          },
+          {
+            "null_count": 76272,
+            "distinct_count": 73621,
+            "min_value": "Some(83340),15,2",
+            "max_value": "Some(47912921),15,2"
+          },
+          {
+            "null_count": 76272,
+            "distinct_count": 2406,
+            "min_value": "1992-01-01",
+            "max_value": "1998-08-02"
+          },
+          {
+            "null_count": 76272,
+            "distinct_count": 5,
+            "min_value": "1-URGENT",
+            "max_value": "5-LOW"
+          },
+          {
+            "null_count": 76272,
+            "distinct_count": 1000,
+            "min_value": "Clerk#000000001",
+            "max_value": "Clerk#000001000"
+          },
+          {
+            "null_count": 76272,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          },
+          {
+            "null_count": 9464,
+            "distinct_count": 140335,
+            "min_value": " Tiresias about the blithely ironic a",
+            "max_value": "zzle. slyly special platele"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.1.1.0",
+      "operator_kind": "Project",
+      "short_explain": "Project",
+      "subtree_fingerprint": "463385579ef2c4f57ff802a309d40a55bb770e243572305f48fa554f933ba293",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#3",
+          "name": "o_orderkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#3",
+          "name": "o_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "__internal_#3",
+          "name": "o_orderstatus",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "__internal_#3",
+          "name": "o_totalprice",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "__internal_#3",
+          "name": "o_orderdate",
+          "data_type": "Date32",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "__internal_#3",
+          "name": "o_orderpriority",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 6,
+          "relation": "__internal_#3",
+          "name": "o_clerk",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 7,
+          "relation": "__internal_#3",
+          "name": "o_shippriority",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 8,
+          "relation": "__internal_#3",
+          "name": "o_comment",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 150000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 150000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 150000,
+            "min_value": "1",
+            "max_value": "600000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 10000,
+            "min_value": "1",
+            "max_value": "14999"
+          },
+          {
+            "null_count": 76272,
+            "distinct_count": 3,
+            "min_value": "F",
+            "max_value": "P"
+          },
+          {
+            "null_count": 76272,
+            "distinct_count": 73621,
+            "min_value": "Some(83340),15,2",
+            "max_value": "Some(47912921),15,2"
+          },
+          {
+            "null_count": 76272,
+            "distinct_count": 2406,
+            "min_value": "1992-01-01",
+            "max_value": "1998-08-02"
+          },
+          {
+            "null_count": 76272,
+            "distinct_count": 5,
+            "min_value": "1-URGENT",
+            "max_value": "5-LOW"
+          },
+          {
+            "null_count": 92656,
+            "distinct_count": 1000,
+            "min_value": "Clerk#000000001",
+            "max_value": "Clerk#000001000"
+          },
+          {
+            "null_count": 76272,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          },
+          {
+            "null_count": 9464,
+            "distinct_count": 140335,
+            "min_value": " Tiresias about the blithely ironic a",
+            "max_value": "zzle. slyly special platele"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.1.1.0.0",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "ee6bc8a92f330d9fa9a48e24b03173083fbb6fa5de9402f6df5e5b91ae75e104",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "orders",
+          "name": "o_orderkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "orders",
+          "name": "o_custkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "orders",
+          "name": "o_orderstatus",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "orders",
+          "name": "o_totalprice",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "orders",
+          "name": "o_orderdate",
+          "data_type": "Date32",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "orders",
+          "name": "o_orderpriority",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 6,
+          "relation": "orders",
+          "name": "o_clerk",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 7,
+          "relation": "orders",
+          "name": "o_shippriority",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 8,
+          "relation": "orders",
+          "name": "o_comment",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 150000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "F",
+            "max_value": "P"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "Some(83340),15,2",
+            "max_value": "Some(47912921),15,2"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "1992-01-01",
+            "max_value": "1998-08-02"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "1-URGENT",
+            "max_value": "5-LOW"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "Clerk#000000001",
+            "max_value": "Clerk#000001000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "0",
+            "max_value": "0"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": " Tiresias about the blithely ironic a",
+            "max_value": "zzle. slyly special platele"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 150000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 150000,
+            "min_value": "1",
+            "max_value": "600000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 10000,
+            "min_value": "1",
+            "max_value": "14999"
+          },
+          {
+            "null_count": 76272,
+            "distinct_count": 3,
+            "min_value": "F",
+            "max_value": "P"
+          },
+          {
+            "null_count": 76272,
+            "distinct_count": 73621,
+            "min_value": "Some(83340),15,2",
+            "max_value": "Some(47912921),15,2"
+          },
+          {
+            "null_count": 76272,
+            "distinct_count": 2406,
+            "min_value": "1992-01-01",
+            "max_value": "1998-08-02"
+          },
+          {
+            "null_count": 76272,
+            "distinct_count": 5,
+            "min_value": "1-URGENT",
+            "max_value": "5-LOW"
+          },
+          {
+            "null_count": 100848,
+            "distinct_count": 1000,
+            "min_value": "Clerk#000000001",
+            "max_value": "Clerk#000001000"
+          },
+          {
+            "null_count": 117232,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          },
+          {
+            "null_count": 9464,
+            "distinct_count": 140335,
+            "min_value": " Tiresias about the blithely ironic a",
+            "max_value": "zzle. slyly special platele"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.50848,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.50848,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.50848,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.50848,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.67232,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.7815466666666666,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.06309333333333333,
+            "min_value_match": true,
+            "max_value_match": true
+          }
+        ]
+      }
+    }
+  ]
+}

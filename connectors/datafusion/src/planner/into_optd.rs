@@ -256,15 +256,10 @@ impl OptdQueryPlannerContext<'_> {
         &mut self,
         node: &logical_plan::TableScan,
     ) -> Result<Arc<optd_core::ir::Operator>> {
-        if !node.filters.is_empty() {
-            whatever!(
-                "do not support filters in TableScan, filters: {:?}",
-                node.filters
-            );
-        }
-
-        self.table_reference_to_source
-            .insert(node.table_name.clone(), node.source.clone());
+        let provider =
+            datafusion::datasource::source_as_provider(&node.source).context(DataFusionSnafu)?;
+        self.table_reference_to_provider
+            .insert(node.table_name.clone(), provider);
 
         let table_ref = Self::into_optd_table_ref(&node.table_name);
         let data_source_id = self
@@ -287,7 +282,24 @@ impl OptdQueryPlannerContext<'_> {
             .into();
 
         let logical_get = Get::new(data_source_id, table_index, projections, None);
-        Ok(logical_get.into_operator())
+        let logical_get = logical_get.into_operator();
+
+        if node.filters.is_empty() {
+            return Ok(logical_get);
+        }
+
+        let predicates: Vec<_> = node
+            .filters
+            .iter()
+            .map(|expr| self.try_into_optd_scalar_expr(expr, node.projected_schema.as_ref()))
+            .try_collect()?;
+
+        let predicate = match predicates.as_slice() {
+            [predicate] => predicate.clone(),
+            _ => NaryOp::new(NaryOpKind::And, predicates.into()).into_scalar(),
+        };
+
+        Ok(Select::new(logical_get, predicate).into_operator())
     }
 }
 

@@ -18,7 +18,7 @@ use datafusion::sql::TableReference;
 use datafusion::sql::parser::DFParser;
 use datafusion::sql::sqlparser::dialect::dialect_from_str;
 pub use extension::{OptdExtension, OptdExtensionConfig};
-pub use planner::OptdQueryPlanner;
+pub use planner::{OptdPlanArtifacts, OptdQueryPlanner};
 pub use table::{OptdTable, OptdTableProvider};
 
 pub use optd_core::error::Error as OptdError;
@@ -100,6 +100,17 @@ impl OptdSessionContext {
 
     pub fn inner(&self) -> &SessionContext {
         &self.inner
+    }
+
+    pub async fn plan_sql_artifacts(
+        &self,
+        sql: &str,
+    ) -> Result<OptdPlanArtifacts, DataFusionError> {
+        let dataframe = self.inner.sql(sql).await?;
+        let logical_plan = self.inner.state().optimize(dataframe.logical_plan())?;
+        OptdQueryPlanner::default()
+            .plan_artifacts(&logical_plan, self.inner.clone())
+            .await
     }
 
     pub async fn refresh_catalogs(&self) -> datafusion::common::Result<()> {
@@ -204,13 +215,32 @@ impl DataFusionDB {
     pub async fn new() -> Result<Self, DataFusionError> {
         let config_options = ConfigOptions::from_env()?;
         let config = SessionConfig::from(config_options).with_information_schema(true);
+        Self::new_with_session_config(config).await
+    }
 
+    pub async fn new_with_session_config(config: SessionConfig) -> Result<Self, DataFusionError> {
         let ctx = OptdSessionContext::new_with_config_rt(config, Arc::new(RuntimeEnv::default()));
         Ok(Self { ctx })
     }
 
+    pub async fn new_with_advanced_cardinality() -> Result<Self, DataFusionError> {
+        let config_options = ConfigOptions::from_env()?;
+        let config = SessionConfig::from(config_options)
+            .with_information_schema(true)
+            .with_option_extension(OptdExtensionConfig::default())
+            .set_bool("optd.optd_use_advanced_cardinality", true);
+        Self::new_with_session_config(config).await
+    }
+
     pub fn session_context(&self) -> &SessionContext {
         self.ctx.inner()
+    }
+
+    pub async fn plan_sql_artifacts(
+        &self,
+        sql: &str,
+    ) -> Result<OptdPlanArtifacts, DataFusionError> {
+        self.ctx.plan_sql_artifacts(sql).await
     }
 
     pub async fn execute_one(&self, sql: &str) -> Result<Vec<RecordBatch>, DataFusionError> {

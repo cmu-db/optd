@@ -1,0 +1,4608 @@
+{
+  "suite": "tpch",
+  "query_id": "q2",
+  "desc": "TPC-H Q2",
+  "sql_hash": "99ecfbbe755461bae71eea4da1e1e16fa623c67ac82896f571abf9a4b4b405aa",
+  "dataset_fingerprint": "e6f49ff93063915cf919ea2e3befae49d687a8344b628cd287cbc92c1d37bcbc",
+  "plan_hash": "eb662d6668025085621e9d316faded5fb5f7d319539e380cd3684f3ef65f6952",
+  "nodes": [
+    {
+      "node_path": "0",
+      "operator_kind": "Limit",
+      "short_explain": "Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): `__internal_#17`.`n_name`(#17.2), `__internal_#17`.`p_mfgr`(#17.4), `__internal_#17`.`p_partkey`(#17.3), `__internal_#17`.`s_acctbal`(#17.0), `__internal_#17`.`s_address`(#17.5), `__internal_#17`.`s_comment`(#17.7), `__internal_#17`.`s_name`(#17.1), `__internal_#17`.`s_phone`(#17.6), (.cardinality): 100.00 }",
+      "subtree_fingerprint": "eb662d6668025085621e9d316faded5fb5f7d319539e380cd3684f3ef65f6952",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#17",
+          "name": "s_acctbal",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#17",
+          "name": "s_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "__internal_#17",
+          "name": "n_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "__internal_#17",
+          "name": "p_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "__internal_#17",
+          "name": "p_mfgr",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "__internal_#17",
+          "name": "s_address",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 6,
+          "relation": "__internal_#17",
+          "name": "s_phone",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 7,
+          "relation": "__internal_#17",
+          "name": "s_comment",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 100.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 46,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": "Some(-41518),15,2",
+            "max_value": "Some(984400),15,2"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": "Supplier#000000006",
+            "max_value": "Supplier#000000991"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "ALGERIA",
+            "max_value": "MOZAMBIQUE"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 46,
+            "min_value": "100",
+            "max_value": "19966"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "Manufacturer#1",
+            "max_value": "Manufacturer#5"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": " ESOHA53rEW5G7Z75w5hJ",
+            "max_value": "yaX50kwIVnFeY3"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": "10-553-675-3578",
+            "max_value": "26-940-594-4852"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": "ackages. carefully special accounts use slyly. slyly silent i",
+            "max_value": "ular packages. deposits nag slyly abo"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 2.1739130434782608,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0",
+      "operator_kind": "EnforcerSort",
+      "short_explain": "EnforcerSort { tuple_ordering: [(#17.0, Desc), (#17.2, Asc), (#17.1, Asc), (#17.3, Asc)], (.output_columns): `__internal_#17`.`n_name`(#17.2), `__internal_#17`.`p_mfgr`(#17.4), `__internal_#17`.`p_partkey`(#17.3), `__internal_#17`.`s_acctbal`(#17.0), `__internal_#17`.`s_address`(#17.5), `__internal_#17`.`s_comment`(#17.7), `__internal_#17`.`s_name`(#17.1), `__internal_#17`.`s_phone`(#17.6), (.cardinality): 262144000000000000.00 }",
+      "subtree_fingerprint": "e9fb8981ab4c6978a19de62e59f673429833c5dc055ca0acd50d239d9338fea1",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#17",
+          "name": "s_acctbal",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#17",
+          "name": "s_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "__internal_#17",
+          "name": "n_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "__internal_#17",
+          "name": "p_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "__internal_#17",
+          "name": "p_mfgr",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "__internal_#17",
+          "name": "s_address",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 6,
+          "relation": "__internal_#17",
+          "name": "s_phone",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 7,
+          "relation": "__internal_#17",
+          "name": "s_comment",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 2.62144e+17,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 46,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": "Some(-41518),15,2",
+            "max_value": "Some(984400),15,2"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": "Supplier#000000006",
+            "max_value": "Supplier#000000991"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "ALGERIA",
+            "max_value": "MOZAMBIQUE"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 46,
+            "min_value": "100",
+            "max_value": "19966"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "Manufacturer#1",
+            "max_value": "Manufacturer#5"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": " ESOHA53rEW5G7Z75w5hJ",
+            "max_value": "yaX50kwIVnFeY3"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": "10-553-675-3578",
+            "max_value": "26-940-594-4852"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": "ackages. carefully special accounts use slyly. slyly silent i",
+            "max_value": "ular packages. deposits nag slyly abo"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 5698782608695652.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0",
+      "operator_kind": "Project",
+      "short_explain": "Project { .table_index: 17, .projections: [ `supplier`.`s_acctbal`(#3.5), `supplier`.`s_name`(#3.1), `nation`.`n_name`(#4.1), `part`.`p_partkey`(#1.0), `part`.`p_mfgr`(#1.2), `supplier`.`s_address`(#3.2), `supplier`.`s_phone`(#3.4), `supplier`.`s_comment`(#3.6) ], (.output_columns): `__internal_#17`.`n_name`(#17.2), `__internal_#17`.`p_mfgr`(#17.4), `__internal_#17`.`p_partkey`(#17.3), `__internal_#17`.`s_acctbal`(#17.0), `__internal_#17`.`s_address`(#17.5), `__internal_#17`.`s_comment`(#17.7), `__internal_#17`.`s_name`(#17.1), `__internal_#17`.`s_phone`(#17.6), (.cardinality): 262144000000000000.00 }",
+      "subtree_fingerprint": "118bcc15349c15bfdb01d248f8df68c567faa4d34cbc180a53abdce4ede391fc",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#17",
+          "name": "s_acctbal",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#17",
+          "name": "s_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "__internal_#17",
+          "name": "n_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "__internal_#17",
+          "name": "p_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "__internal_#17",
+          "name": "p_mfgr",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "__internal_#17",
+          "name": "s_address",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 6,
+          "relation": "__internal_#17",
+          "name": "s_phone",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 7,
+          "relation": "__internal_#17",
+          "name": "s_comment",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 2.62144e+17,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 46,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": "Some(-41518),15,2",
+            "max_value": "Some(984400),15,2"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": "Supplier#000000006",
+            "max_value": "Supplier#000000991"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "ALGERIA",
+            "max_value": "MOZAMBIQUE"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 46,
+            "min_value": "100",
+            "max_value": "19966"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "Manufacturer#1",
+            "max_value": "Manufacturer#5"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": " ESOHA53rEW5G7Z75w5hJ",
+            "max_value": "yaX50kwIVnFeY3"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": "10-553-675-3578",
+            "max_value": "26-940-594-4852"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": "ackages. carefully special accounts use slyly. slyly silent i",
+            "max_value": "ular packages. deposits nag slyly abo"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 5698782608695652.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0",
+      "operator_kind": "Join",
+      "short_explain": "Join",
+      "subtree_fingerprint": "3f8ad211bfb1848ee53a30b679824bc6abe61ddd858e154a87cc31402c893627",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__scalar_sq_1",
+          "name": "min(partsupp.ps_supplycost)",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": true
+        },
+        {
+          "ordinal": 1,
+          "relation": "__scalar_sq_1",
+          "name": "ps_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "__scalar_sq_1",
+          "name": "__always_true",
+          "data_type": "Boolean",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "part",
+          "name": "p_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "part",
+          "name": "p_mfgr",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "part",
+          "name": "p_type",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 6,
+          "relation": "part",
+          "name": "p_size",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 7,
+          "relation": "region",
+          "name": "r_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 8,
+          "relation": "region",
+          "name": "r_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 9,
+          "relation": "nation",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 10,
+          "relation": "nation",
+          "name": "n_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 11,
+          "relation": "nation",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 12,
+          "relation": "supplier",
+          "name": "s_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 13,
+          "relation": "supplier",
+          "name": "s_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 14,
+          "relation": "supplier",
+          "name": "s_address",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 15,
+          "relation": "supplier",
+          "name": "s_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 16,
+          "relation": "supplier",
+          "name": "s_phone",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 17,
+          "relation": "supplier",
+          "name": "s_acctbal",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        },
+        {
+          "ordinal": 18,
+          "relation": "supplier",
+          "name": "s_comment",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 19,
+          "relation": "partsupp",
+          "name": "ps_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 20,
+          "relation": "partsupp",
+          "name": "ps_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 21,
+          "relation": "partsupp",
+          "name": "ps_supplycost",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 2.62144e+17,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 46,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 46,
+            "min_value": "Some(1509),15,2",
+            "max_value": "Some(99061),15,2"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 46,
+            "min_value": "100",
+            "max_value": "19966"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "true",
+            "max_value": "true"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 46,
+            "min_value": "100",
+            "max_value": "19966"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "Manufacturer#1",
+            "max_value": "Manufacturer#5"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "ECONOMY ANODIZED TIN",
+            "max_value": "STANDARD POLISHED TIN"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "4",
+            "max_value": "4"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "AFRICA",
+            "max_value": "AFRICA"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "16"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "ALGERIA",
+            "max_value": "MOZAMBIQUE"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": "6",
+            "max_value": "991"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": "Supplier#000000006",
+            "max_value": "Supplier#000000991"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": " ESOHA53rEW5G7Z75w5hJ",
+            "max_value": "yaX50kwIVnFeY3"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "16"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": "10-553-675-3578",
+            "max_value": "26-940-594-4852"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": "Some(-41518),15,2",
+            "max_value": "Some(984400),15,2"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": "ackages. carefully special accounts use slyly. slyly silent i",
+            "max_value": "ular packages. deposits nag slyly abo"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 46,
+            "min_value": "100",
+            "max_value": "19966"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 38,
+            "min_value": "6",
+            "max_value": "991"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 46,
+            "min_value": "Some(1509),15,2",
+            "max_value": "Some(99061),15,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 5698782608695652.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0",
+      "operator_kind": "Remap",
+      "short_explain": "Remap { .table_index: 14, (.output_columns): `__scalar_sq_1`.`__always_true`(#14.2), `__scalar_sq_1`.`min(partsupp.ps_supplycost)`(#14.0), `__scalar_sq_1`.`ps_partkey`(#14.1), (.cardinality): 12800000.00 }",
+      "subtree_fingerprint": "9a9b7463254c5f912182bb35402f4d531f69db8fa9244149d7189650dba28b76",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__scalar_sq_1",
+          "name": "min(partsupp.ps_supplycost)",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": true
+        },
+        {
+          "ordinal": 1,
+          "relation": "__scalar_sq_1",
+          "name": "ps_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "__scalar_sq_1",
+          "name": "__always_true",
+          "data_type": "Boolean",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 12800000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 10883,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 10335,
+            "min_value": "Some(112),15,2",
+            "max_value": "Some(99997),15,2"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 10883,
+            "min_value": "1",
+            "max_value": "20000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "true",
+            "max_value": "true"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1176.1462831939723,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0",
+      "operator_kind": "Project",
+      "short_explain": "Project",
+      "subtree_fingerprint": "760af343cdc2b848a17be29dc64bcff8f18977d0e2f60760d4f91364bb60a3a7",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "__internal_#13",
+          "name": "min(partsupp.ps_supplycost)",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": true
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#13",
+          "name": "ps_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "__internal_#13",
+          "name": "__always_true",
+          "data_type": "Boolean",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 12800000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 10883,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 10335,
+            "min_value": "Some(112),15,2",
+            "max_value": "Some(99997),15,2"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 10883,
+            "min_value": "1",
+            "max_value": "20000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "true",
+            "max_value": "true"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1176.1462831939723,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0",
+      "operator_kind": "Aggregate",
+      "short_explain": "Aggregate",
+      "subtree_fingerprint": "8dda347180bd6993974a61cc3fb53139db77acc4270694157f3092acac001ea8",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "partsupp",
+          "name": "ps_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "__internal_#11",
+          "name": "min(partsupp.ps_supplycost)",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": true
+        }
+      ],
+      "estimated": {
+        "row_count": 12800000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 10883,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 10883,
+            "min_value": "1",
+            "max_value": "20000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 10335,
+            "min_value": "Some(112),15,2",
+            "max_value": "Some(99997),15,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1176.1462831939723,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.0",
+      "operator_kind": "Join",
+      "short_explain": "Join",
+      "subtree_fingerprint": "42c1b0f0687731d6ea78017221802deccee4be4a03a1ee72fbfff7a2ac057da5",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "region",
+          "name": "r_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "region",
+          "name": "r_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "nation",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "nation",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "supplier",
+          "name": "s_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "supplier",
+          "name": "s_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 6,
+          "relation": "partsupp",
+          "name": "ps_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 7,
+          "relation": "partsupp",
+          "name": "ps_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 8,
+          "relation": "partsupp",
+          "name": "ps_supplycost",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 64000000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 14320,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "AFRICA",
+            "max_value": "AFRICA"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "16"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 179,
+            "min_value": "2",
+            "max_value": "998"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "16"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 10883,
+            "min_value": "1",
+            "max_value": "20000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 179,
+            "min_value": "2",
+            "max_value": "998"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 13376,
+            "min_value": "Some(112),15,2",
+            "max_value": "Some(99997),15,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 4469.27374301676,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.0.0",
+      "operator_kind": "Join",
+      "short_explain": "Join",
+      "subtree_fingerprint": "a24eed8bb2cebb9c541031e627ddc7c002d28aa99ac2e7fb114f85e32dccc69d",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "region",
+          "name": "r_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "region",
+          "name": "r_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "nation",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "nation",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "supplier",
+          "name": "s_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "supplier",
+          "name": "s_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 2000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 179,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "AFRICA",
+            "max_value": "AFRICA"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "16"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 179,
+            "min_value": "2",
+            "max_value": "998"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "16"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 11.1731843575419,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.0.0.0",
+      "operator_kind": "Join",
+      "short_explain": "Join",
+      "subtree_fingerprint": "2c8e35f5ebead5e86a0885e778aa3810c24b7024d5d39d818d3244237aef80be",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "region",
+          "name": "r_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "region",
+          "name": "r_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "nation",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "nation",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 5.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 5,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "AFRICA",
+            "max_value": "AFRICA"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "16"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.0.0.0.0",
+      "operator_kind": "Select",
+      "short_explain": "Select",
+      "subtree_fingerprint": "2d0ac6a2df9b42dc08b6f5bc1413fc9120f6801acf880836b534c90027d0be0c",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "region",
+          "name": "r_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "region",
+          "name": "r_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 0.5,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 1,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "AFRICA",
+            "max_value": "AFRICA"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 2.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.0.0.0.0.0",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "1f92a189c31c584abd2abbb9a4d5883feaa148ccfe55c7c1345db07117809245",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "region",
+          "name": "r_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "region",
+          "name": "r_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 5.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "AFRICA",
+            "max_value": "MIDDLE EAST"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 5,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "4"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "AFRICA",
+            "max_value": "MIDDLE EAST"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.0.0.0.1",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "d7d9e0db883455c0fe4b891a069eef52a51ba91d41f9508d84d33e75beffe42a",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "nation",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "nation",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 25.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 25,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "0",
+            "max_value": "24"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "4"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.0.0.1",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "74c27c1cbc641f1b1340bd23f5cf01ebbb72e0ede812206cf249fc81a3309b7f",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "supplier",
+          "name": "s_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "supplier",
+          "name": "s_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 1000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 1000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1000,
+            "min_value": "1",
+            "max_value": "1000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "0",
+            "max_value": "24"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.0.0.0.0.1",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "796b383568f97ecdf85151d90ad994a6b2de3fd48748bb5f361e0ff92839dfbf",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "partsupp",
+          "name": "ps_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "partsupp",
+          "name": "ps_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "partsupp",
+          "name": "ps_supplycost",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 80000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "Some(101),15,2",
+            "max_value": "Some(99999),15,2"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 80000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 20000,
+            "min_value": "1",
+            "max_value": "20000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1000,
+            "min_value": "1",
+            "max_value": "1000"
+          },
+          {
+            "null_count": 40000,
+            "distinct_count": 33021,
+            "min_value": "Some(101),15,2",
+            "max_value": "Some(99999),15,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.5,
+            "min_value_match": true,
+            "max_value_match": true
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.1",
+      "operator_kind": "Join",
+      "short_explain": "Join",
+      "subtree_fingerprint": "51906b30be0dcb3a25f35d59ee4dff27e9d664cbd996112b2c007c682ee3b90e",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "part",
+          "name": "p_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "part",
+          "name": "p_mfgr",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "part",
+          "name": "p_type",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "part",
+          "name": "p_size",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "region",
+          "name": "r_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "region",
+          "name": "r_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 6,
+          "relation": "nation",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 7,
+          "relation": "nation",
+          "name": "n_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 8,
+          "relation": "nation",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 9,
+          "relation": "supplier",
+          "name": "s_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 10,
+          "relation": "supplier",
+          "name": "s_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 11,
+          "relation": "supplier",
+          "name": "s_address",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 12,
+          "relation": "supplier",
+          "name": "s_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 13,
+          "relation": "supplier",
+          "name": "s_phone",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 14,
+          "relation": "supplier",
+          "name": "s_acctbal",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        },
+        {
+          "ordinal": 15,
+          "relation": "supplier",
+          "name": "s_comment",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 16,
+          "relation": "partsupp",
+          "name": "ps_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 17,
+          "relation": "partsupp",
+          "name": "ps_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 18,
+          "relation": "partsupp",
+          "name": "ps_supplycost",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 51200000000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 66,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 46,
+            "min_value": "100",
+            "max_value": "19966"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "Manufacturer#1",
+            "max_value": "Manufacturer#5"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "ECONOMY ANODIZED TIN",
+            "max_value": "STANDARD POLISHED TIN"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "4",
+            "max_value": "4"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "AFRICA",
+            "max_value": "AFRICA"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "16"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "ALGERIA",
+            "max_value": "MOZAMBIQUE"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 54,
+            "min_value": "6",
+            "max_value": "991"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 54,
+            "min_value": "Supplier#000000006",
+            "max_value": "Supplier#000000991"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 54,
+            "min_value": " ESOHA53rEW5G7Z75w5hJ",
+            "max_value": "yyNSJAG9UXcWit4SeMkEIrNcdVq5"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "16"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 54,
+            "min_value": "10-219-531-3554",
+            "max_value": "26-940-594-4852"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 54,
+            "min_value": "Some(-81217),15,2",
+            "max_value": "Some(984400),15,2"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 54,
+            "min_value": " express deposits against the dependencies use blithel",
+            "max_value": "ular pinto beans are among the fluffily bold acco"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 46,
+            "min_value": "100",
+            "max_value": "19966"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 54,
+            "min_value": "6",
+            "max_value": "991"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 66,
+            "min_value": "Some(1509),15,2",
+            "max_value": "Some(99061),15,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 775757575.7575758,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.1.0",
+      "operator_kind": "Select",
+      "short_explain": "Select",
+      "subtree_fingerprint": "1e22ad9bc7fbd65714a774ff8fed5738fdbbaa5dfd76fb5fb39508dbeca500a9",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "part",
+          "name": "p_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "part",
+          "name": "p_mfgr",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "part",
+          "name": "p_type",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "part",
+          "name": "p_size",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 2000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 85,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 85,
+            "min_value": "100",
+            "max_value": "19966"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "Manufacturer#1",
+            "max_value": "Manufacturer#5"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 29,
+            "min_value": "ECONOMY ANODIZED TIN",
+            "max_value": "STANDARD POLISHED TIN"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "4",
+            "max_value": "4"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 23.529411764705884,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.1.0.0",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "10e2f581b33d69a85bbcc800afa8cc1fa89afd84b6a877dc46bd2e53b51609d0",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "part",
+          "name": "p_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "part",
+          "name": "p_mfgr",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "part",
+          "name": "p_type",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "part",
+          "name": "p_size",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 20000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "Manufacturer#1",
+            "max_value": "Manufacturer#5"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "ECONOMY ANODIZED BRASS",
+            "max_value": "STANDARD POLISHED TIN"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "1",
+            "max_value": "50"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 20000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 20000,
+            "min_value": "1",
+            "max_value": "20000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "Manufacturer#1",
+            "max_value": "Manufacturer#5"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 150,
+            "min_value": "ECONOMY ANODIZED BRASS",
+            "max_value": "STANDARD POLISHED TIN"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 50,
+            "min_value": "1",
+            "max_value": "50"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.1.1",
+      "operator_kind": "Join",
+      "short_explain": "Join",
+      "subtree_fingerprint": "977ab1a4c2db0b01f34d7449508aceb32572d0eb9a55bbf2a25aad844e5a6809",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "region",
+          "name": "r_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "region",
+          "name": "r_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "nation",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "nation",
+          "name": "n_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "nation",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "supplier",
+          "name": "s_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 6,
+          "relation": "supplier",
+          "name": "s_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 7,
+          "relation": "supplier",
+          "name": "s_address",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 8,
+          "relation": "supplier",
+          "name": "s_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 9,
+          "relation": "supplier",
+          "name": "s_phone",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 10,
+          "relation": "supplier",
+          "name": "s_acctbal",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        },
+        {
+          "ordinal": 11,
+          "relation": "supplier",
+          "name": "s_comment",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 12,
+          "relation": "partsupp",
+          "name": "ps_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 13,
+          "relation": "partsupp",
+          "name": "ps_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 14,
+          "relation": "partsupp",
+          "name": "ps_supplycost",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 64000000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 14320,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "AFRICA",
+            "max_value": "AFRICA"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "16"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "ALGERIA",
+            "max_value": "MOZAMBIQUE"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 179,
+            "min_value": "2",
+            "max_value": "998"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 179,
+            "min_value": "Supplier#000000002",
+            "max_value": "Supplier#000000998"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 179,
+            "min_value": " 7bts1RIiMsy35F6V7 lC",
+            "max_value": "zAAIv68BEXvllrfgsW,i8e"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "16"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 179,
+            "min_value": "10-108-564-6160",
+            "max_value": "26-958-723-2164"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 179,
+            "min_value": "Some(-89199),15,2",
+            "max_value": "Some(984400),15,2"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 179,
+            "min_value": " according to the ironic packages.",
+            "max_value": "yly final accounts could are carefully. fluffily ironic instruct"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 10883,
+            "min_value": "1",
+            "max_value": "20000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 179,
+            "min_value": "2",
+            "max_value": "998"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 13376,
+            "min_value": "Some(112),15,2",
+            "max_value": "Some(99997),15,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 4469.27374301676,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.1.1.0",
+      "operator_kind": "Join",
+      "short_explain": "Join",
+      "subtree_fingerprint": "54594d732023d89267a5d3fa02f01d5b96440378e361bc4c1bf99f17ff93cd99",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "region",
+          "name": "r_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "region",
+          "name": "r_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "nation",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "nation",
+          "name": "n_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "nation",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "supplier",
+          "name": "s_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 6,
+          "relation": "supplier",
+          "name": "s_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 7,
+          "relation": "supplier",
+          "name": "s_address",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 8,
+          "relation": "supplier",
+          "name": "s_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 9,
+          "relation": "supplier",
+          "name": "s_phone",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 10,
+          "relation": "supplier",
+          "name": "s_acctbal",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        },
+        {
+          "ordinal": 11,
+          "relation": "supplier",
+          "name": "s_comment",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 2000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 179,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "AFRICA",
+            "max_value": "AFRICA"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "16"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "ALGERIA",
+            "max_value": "MOZAMBIQUE"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 179,
+            "min_value": "2",
+            "max_value": "998"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 179,
+            "min_value": "Supplier#000000002",
+            "max_value": "Supplier#000000998"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 179,
+            "min_value": " 7bts1RIiMsy35F6V7 lC",
+            "max_value": "zAAIv68BEXvllrfgsW,i8e"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "16"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 179,
+            "min_value": "10-108-564-6160",
+            "max_value": "26-958-723-2164"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 179,
+            "min_value": "Some(-89199),15,2",
+            "max_value": "Some(984400),15,2"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 179,
+            "min_value": " according to the ironic packages.",
+            "max_value": "yly final accounts could are carefully. fluffily ironic instruct"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 11.1731843575419,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.1.1.0.0",
+      "operator_kind": "Join",
+      "short_explain": "Join",
+      "subtree_fingerprint": "62bff32733d38d27c83cd3b91554bad58dff4496d621f8e5eca297481feadf28",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "region",
+          "name": "r_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "region",
+          "name": "r_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "nation",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "nation",
+          "name": "n_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "nation",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 5.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 5,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "AFRICA",
+            "max_value": "AFRICA"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "16"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "ALGERIA",
+            "max_value": "MOZAMBIQUE"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.1.1.0.0.0",
+      "operator_kind": "Select",
+      "short_explain": "Select",
+      "subtree_fingerprint": "2d0ac6a2df9b42dc08b6f5bc1413fc9120f6801acf880836b534c90027d0be0c",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "region",
+          "name": "r_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "region",
+          "name": "r_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 0.5,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": null,
+            "max_value": null
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 1,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "0",
+            "max_value": "0"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1,
+            "min_value": "AFRICA",
+            "max_value": "AFRICA"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 2.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.1.1.0.0.0.0",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "1f92a189c31c584abd2abbb9a4d5883feaa148ccfe55c7c1345db07117809245",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "region",
+          "name": "r_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "region",
+          "name": "r_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 5.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "AFRICA",
+            "max_value": "MIDDLE EAST"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 5,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "4"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "AFRICA",
+            "max_value": "MIDDLE EAST"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.1.1.0.0.1",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "11d4ee54214812f5cb77c0a97d8f7d3b4c6c44bcf2bc82f913d1de5c2f052190",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "nation",
+          "name": "n_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "nation",
+          "name": "n_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "nation",
+          "name": "n_regionkey",
+          "data_type": "Int32",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 25.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "ALGERIA",
+            "max_value": "VIETNAM"
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 25,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "0",
+            "max_value": "24"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "ALGERIA",
+            "max_value": "VIETNAM"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 5,
+            "min_value": "0",
+            "max_value": "4"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.1.1.0.1",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "38c54bfd952dbeb6f7904f32960c139002b0640a40bc90f5c42af976cc67304b",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "supplier",
+          "name": "s_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "supplier",
+          "name": "s_name",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "supplier",
+          "name": "s_address",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 3,
+          "relation": "supplier",
+          "name": "s_nationkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 4,
+          "relation": "supplier",
+          "name": "s_phone",
+          "data_type": "Utf8View",
+          "nullable": false
+        },
+        {
+          "ordinal": 5,
+          "relation": "supplier",
+          "name": "s_acctbal",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        },
+        {
+          "ordinal": 6,
+          "relation": "supplier",
+          "name": "s_comment",
+          "data_type": "Utf8View",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 1000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "Supplier#000000001",
+            "max_value": "Supplier#000001000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": " 0L8yoIwSCP4EJyESI 6bVH9k",
+            "max_value": "zzfDhdtZcvmVzA8rNFU,Yctj1zBN"
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "10-108-564-6160",
+            "max_value": "34-998-900-4911"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "Some(-96620),15,2",
+            "max_value": "Some(999346),15,2"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": " according to the bravely quick dolphins. deposit",
+            "max_value": "ymptotes. blithely regular theodolites are slyly according to ti"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 1000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 1000,
+            "min_value": "1",
+            "max_value": "1000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1000,
+            "min_value": "Supplier#000000001",
+            "max_value": "Supplier#000001000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1000,
+            "min_value": " 0L8yoIwSCP4EJyESI 6bVH9k",
+            "max_value": "zzfDhdtZcvmVzA8rNFU,Yctj1zBN"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 25,
+            "min_value": "0",
+            "max_value": "24"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1000,
+            "min_value": "10-108-564-6160",
+            "max_value": "34-998-900-4911"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 999,
+            "min_value": "Some(-96620),15,2",
+            "max_value": "Some(999346),15,2"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1000,
+            "min_value": " according to the bravely quick dolphins. deposit",
+            "max_value": "ymptotes. blithely regular theodolites are slyly according to the "
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.0,
+            "min_value_match": true,
+            "max_value_match": false
+          }
+        ]
+      }
+    },
+    {
+      "node_path": "0.0.0.0.1.1.1",
+      "operator_kind": "Get",
+      "short_explain": "Get",
+      "subtree_fingerprint": "796b383568f97ecdf85151d90ad994a6b2de3fd48748bb5f361e0ff92839dfbf",
+      "output_schema": [
+        {
+          "ordinal": 0,
+          "relation": "partsupp",
+          "name": "ps_partkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 1,
+          "relation": "partsupp",
+          "name": "ps_suppkey",
+          "data_type": "Int32",
+          "nullable": false
+        },
+        {
+          "ordinal": 2,
+          "relation": "partsupp",
+          "name": "ps_supplycost",
+          "data_type": "Decimal128(15, 2)",
+          "nullable": false
+        }
+      ],
+      "estimated": {
+        "row_count": 80000.0,
+        "columns": [
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": null,
+            "distinct_count": null,
+            "min_value": "NULL",
+            "max_value": "NULL"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": null,
+            "min_value": "Some(101),15,2",
+            "max_value": "Some(99999),15,2"
+          }
+        ]
+      },
+      "exact": {
+        "row_count": 80000,
+        "columns": [
+          {
+            "null_count": 0,
+            "distinct_count": 20000,
+            "min_value": "1",
+            "max_value": "20000"
+          },
+          {
+            "null_count": 0,
+            "distinct_count": 1000,
+            "min_value": "1",
+            "max_value": "1000"
+          },
+          {
+            "null_count": 40000,
+            "distinct_count": 33021,
+            "min_value": "Some(101),15,2",
+            "max_value": "Some(99999),15,2"
+          }
+        ]
+      },
+      "error": {
+        "row_count_q_error": 1.0,
+        "columns": [
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": null,
+            "min_value_match": false,
+            "max_value_match": false
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.5,
+            "min_value_match": true,
+            "max_value_match": true
+          }
+        ]
+      }
+    }
+  ]
+}
