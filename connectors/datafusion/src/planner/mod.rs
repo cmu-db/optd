@@ -30,8 +30,7 @@ use optd_core::{
     magic::{MagicCardinalityEstimator, MagicCostModel},
     rules,
 };
-use snafu::{OptionExt, ResultExt, Snafu, whatever};
-use tracing::warn;
+use snafu::{OptionExt, ResultExt, Snafu};
 
 use crate::{OptdExtension, OptdExtensionConfig};
 
@@ -254,10 +253,6 @@ impl OptdQueryPlanner {
             .build();
 
         warm_explain_properties(&optd_logical, &ctx.inner);
-        println!(
-            "optd_logical:\n{}",
-            quick_explain(&optd_logical, &ctx.inner)
-        );
 
         let opt = Arc::new(Cascades::new(ctx.inner.clone(), rule_set));
 
@@ -270,11 +265,6 @@ impl OptdQueryPlanner {
                 return Err(DataFusionError::External(e.into()));
             }
         };
-
-        println!(
-            "optd_physical:\n{}",
-            quick_explain(&optd_logical, &ctx.inner)
-        );
 
         let logical_plan = ctx
             .try_from_optd_plan(&optd_physical)

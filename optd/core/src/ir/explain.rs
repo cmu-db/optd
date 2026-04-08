@@ -21,7 +21,7 @@ where
     let pretty = v.as_ref().explain(ctx, &option);
     let mut out = String::with_capacity(114514);
     let mut config = pretty_xmlish::PrettyConfig {
-        width: 70,
+        width: 35,
         need_boundaries: false,
         ..Default::default()
     };

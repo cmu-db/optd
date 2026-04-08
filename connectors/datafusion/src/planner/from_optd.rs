@@ -86,7 +86,7 @@ impl OptdQueryPlannerContext<'_> {
     }
 
     fn alias_if_changed(expr: DFExpr, table_ref: &TableRef, field: &Field) -> Result<DFExpr> {
-        if table_ref.table().contains("__internal_#") {
+        if table_ref.table().contains("__#") {
             expr.alias_if_changed(field.name().clone())
                 .context(DataFusionSnafu)
         } else {
@@ -416,7 +416,7 @@ mod tests {
             Field::new("l_quantity", DataType::Int64, false),
         ]));
         let input_schema =
-            DFSchema::try_from_qualified_schema("__internal_#2", input_schema.as_ref()).unwrap();
+            DFSchema::try_from_qualified_schema("__#2", input_schema.as_ref()).unwrap();
         let input = DFLogicalPlan::EmptyRelation(logical_expr::EmptyRelation {
             produce_one_row: false,
             schema: Arc::new(input_schema),
@@ -437,11 +437,11 @@ mod tests {
         let output_schema = OptdSchema::new_with_metadata(
             vec![
                 (
-                    TableRef::bare("__internal_#3"),
+                    TableRef::bare("__#3"),
                     Arc::new(Field::new("l_returnflag", DataType::Utf8, false)),
                 ),
                 (
-                    TableRef::bare("__internal_#4"),
+                    TableRef::bare("__#4"),
                     Arc::new(Field::new(
                         "sum(lineitem.l_quantity)",
                         DataType::Int64,
@@ -458,10 +458,10 @@ mod tests {
                 &output_schema,
                 Arc::new(input),
                 vec![DFExpr::Column(Column::from_qualified_name(
-                    "__internal_#2.l_returnflag",
+                    "__#2.l_returnflag",
                 ))],
                 vec![sum(DFExpr::Column(Column::from_qualified_name(
-                    "__internal_#2.l_quantity",
+                    "__#2.l_quantity",
                 )))],
             )
             .unwrap();
@@ -512,7 +512,7 @@ mod tests {
                     Arc::new(Field::new("p_brand", DataType::Utf8, false)),
                 ),
                 (
-                    TableRef::bare("__internal_#4"),
+                    TableRef::bare("__#4"),
                     Arc::new(Field::new("sum(part.p_partkey)", DataType::Int64, false)),
                 ),
             ],

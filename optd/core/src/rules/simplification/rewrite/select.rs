@@ -1,5 +1,3 @@
-use snafu::whatever;
-
 use super::super::{
     rule::{RulePass, rewrite_bottom_up},
     scalar::{combine_conjuncts_simplified, split_conjuncts, substitute_columns},

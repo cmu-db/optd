@@ -413,14 +413,25 @@ impl std::fmt::Display for ScalarValue {
             }
         }
 
+        fn fmt_quoted<T: std::fmt::Display>(
+            f: &mut std::fmt::Formatter<'_>,
+            optional: &Option<T>,
+            type_name: &str,
+        ) -> std::fmt::Result {
+            match optional {
+                Some(v) => write!(f, "'{v}'::{type_name}"),
+                None => write!(f, "null::{type_name}"),
+            }
+        }
+
         match self {
             ScalarValue::Int32(v) => fmt_optional(f, v, "integer"),
             ScalarValue::Int64(v) => fmt_optional(f, v, "bigint"),
             ScalarValue::Boolean(v) => fmt_optional(f, v, "boolean"),
             ScalarValue::Float32(v) => fmt_optional(f, v, "float32"),
             ScalarValue::Float64(v) => fmt_optional(f, v, "float64"),
-            ScalarValue::Utf8(v) => fmt_optional(f, v, "utf8"),
-            ScalarValue::Utf8View(v) => fmt_optional(f, v, "utf8_view"),
+            ScalarValue::Utf8(v) => fmt_quoted(f, v, "utf8"),
+            ScalarValue::Utf8View(v) => fmt_quoted(f, v, "utf8_view"),
             ScalarValue::Int8(v) => fmt_optional(f, v, "int8"),
             ScalarValue::Int16(v) => fmt_optional(f, v, "int16"),
             ScalarValue::UInt8(v) => fmt_optional(f, v, "uint8"),
