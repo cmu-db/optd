@@ -23,22 +23,25 @@ Project
 ├── .projections: [ `t1`.`t1v1`(#1.0), `t1`.`t1v2`(#1.1), `t2`.`t2v1`(#2.0), `t2`.`t2v2`(#2.1), `t3`.`t3v1`(#3.0), `t3`.`t3v2`(#3.1) ]
 ├── (.output_columns): `__internal_#4`.`t1v1`(#4.0), `__internal_#4`.`t1v2`(#4.1), `__internal_#4`.`t2v1`(#4.2), `__internal_#4`.`t2v2`(#4.3), `__internal_#4`.`t3v1`(#4.4), `__internal_#4`.`t3v2`(#4.5)
 ├── (.cardinality): 1.44
-└── Join
-    ├── .join_type: Inner
-    ├── .implementation: None
-    ├── .join_cond: (`t2`.`t2v2`(#2.1) = `t3`.`t3v1`(#3.0))
+└── Select
+    ├── .predicate: `t1`.`t1v2`(#1.1) < 2::integer
     ├── (.output_columns): `t1`.`t1v1`(#1.0), `t1`.`t1v2`(#1.1), `t2`.`t2v1`(#2.0), `t2`.`t2v2`(#2.1), `t3`.`t3v1`(#3.0), `t3`.`t3v2`(#3.1)
     ├── (.cardinality): 1.44
-    ├── Join
-    │   ├── .join_type: Inner
-    │   ├── .implementation: None
-    │   ├── .join_cond: (`t1`.`t1v1`(#1.0) = `t2`.`t2v1`(#2.0))
-    │   ├── (.output_columns): `t1`.`t1v1`(#1.0), `t1`.`t1v2`(#1.1), `t2`.`t2v1`(#2.0), `t2`.`t2v2`(#2.1)
-    │   ├── (.cardinality): 1.20
-    │   ├── Select { .predicate: `t1`.`t1v2`(#1.1) < 2::integer, (.output_columns): `t1`.`t1v1`(#1.0), `t1`.`t1v2`(#1.1), (.cardinality): 1.00 }
-    │   │   └── Get { .data_source_id: 1, .table_index: 1, .implementation: None, (.output_columns): `t1`.`t1v1`(#1.0), `t1`.`t1v2`(#1.1), (.cardinality): 10.00 }
-    │   └── Get { .data_source_id: 2, .table_index: 2, .implementation: None, (.output_columns): `t2`.`t2v1`(#2.0), `t2`.`t2v2`(#2.1), (.cardinality): 3.00 }
-    └── Get { .data_source_id: 3, .table_index: 3, .implementation: None, (.output_columns): `t3`.`t3v1`(#3.0), `t3`.`t3v2`(#3.1), (.cardinality): 3.00 }
+    └── Join
+        ├── .join_type: Inner
+        ├── .implementation: None
+        ├── .join_cond: (`t2`.`t2v2`(#2.1) = `t3`.`t3v1`(#3.0))
+        ├── (.output_columns): `t1`.`t1v1`(#1.0), `t1`.`t1v2`(#1.1), `t2`.`t2v1`(#2.0), `t2`.`t2v2`(#2.1), `t3`.`t3v1`(#3.0), `t3`.`t3v2`(#3.1)
+        ├── (.cardinality): 14.40
+        ├── Join
+        │   ├── .join_type: Inner
+        │   ├── .implementation: None
+        │   ├── .join_cond: (`t1`.`t1v1`(#1.0) = `t2`.`t2v1`(#2.0))
+        │   ├── (.output_columns): `t1`.`t1v1`(#1.0), `t1`.`t1v2`(#1.1), `t2`.`t2v1`(#2.0), `t2`.`t2v2`(#2.1)
+        │   ├── (.cardinality): 12.00
+        │   ├── Get { .data_source_id: 1, .table_index: 1, .implementation: None, (.output_columns): `t1`.`t1v1`(#1.0), `t1`.`t1v2`(#1.1), (.cardinality): 10.00 }
+        │   └── Get { .data_source_id: 2, .table_index: 2, .implementation: None, (.output_columns): `t2`.`t2v1`(#2.0), `t2`.`t2v2`(#2.1), (.cardinality): 3.00 }
+        └── Get { .data_source_id: 3, .table_index: 3, .implementation: None, (.output_columns): `t3`.`t3v1`(#3.0), `t3`.`t3v2`(#3.1), (.cardinality): 3.00 }
 
 physical_plan after optd-finalized:
 Project

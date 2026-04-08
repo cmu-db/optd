@@ -121,8 +121,8 @@ impl RulePass for PushSelectThroughJoinRulePass {
                         }
                     }
                     JoinType::Single | JoinType::Mark(_) => top_filters.push(cond),
-                    &JoinType::LeftSemi | &JoinType::LeftAnti => {
-                        whatever!("does not handle LeftSemi, and LeftAnti Joins yet")
+                    JoinType::LeftSemi | JoinType::LeftAnti => {
+                        top_filters.push(cond);
                     }
                 }
             }
