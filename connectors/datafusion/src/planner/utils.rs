@@ -62,7 +62,9 @@ impl OptdQueryPlannerContext<'_> {
 
     pub fn try_into_optd_scalar_value(value: DFScalarValue) -> Result<OptdScalarValue> {
         match value {
+            DFScalarValue::Null => Ok(OptdScalarValue::Null),
             DFScalarValue::Boolean(v) => Ok(OptdScalarValue::Boolean(v)),
+            DFScalarValue::Float16(v) => Ok(OptdScalarValue::Float16(v)),
             DFScalarValue::Float32(v) => Ok(OptdScalarValue::Float32(v)),
             DFScalarValue::Float64(v) => Ok(OptdScalarValue::Float64(v)),
             DFScalarValue::Int8(v) => Ok(OptdScalarValue::Int8(v)),
@@ -75,11 +77,47 @@ impl OptdQueryPlannerContext<'_> {
             DFScalarValue::UInt64(v) => Ok(OptdScalarValue::UInt64(v)),
             DFScalarValue::Utf8(v) => Ok(OptdScalarValue::Utf8(v)),
             DFScalarValue::Utf8View(v) => Ok(OptdScalarValue::Utf8View(v)),
+            DFScalarValue::LargeUtf8(v) => Ok(OptdScalarValue::LargeUtf8(v)),
+            DFScalarValue::Binary(v) => Ok(OptdScalarValue::Binary(v)),
+            DFScalarValue::BinaryView(v) => Ok(OptdScalarValue::BinaryView(v)),
+            DFScalarValue::FixedSizeBinary(size, v) => Ok(OptdScalarValue::FixedSizeBinary(size, v)),
+            DFScalarValue::LargeBinary(v) => Ok(OptdScalarValue::LargeBinary(v)),
+            DFScalarValue::List(v) => Ok(OptdScalarValue::List(v)),
+            DFScalarValue::Struct(v) => Ok(OptdScalarValue::Struct(v)),
+            DFScalarValue::Map(v) => Ok(OptdScalarValue::Map(v)),
             DFScalarValue::Decimal32(v, p, s) => Ok(OptdScalarValue::Decimal32(v, p, s)),
             DFScalarValue::Decimal64(v, p, s) => Ok(OptdScalarValue::Decimal64(v, p, s)),
             DFScalarValue::Decimal128(v, p, s) => Ok(OptdScalarValue::Decimal128(v, p, s)),
+            DFScalarValue::Decimal256(v, p, s) => Ok(OptdScalarValue::Decimal256(v, p, s)),
             DFScalarValue::Date32(v) => Ok(OptdScalarValue::Date32(v)),
             DFScalarValue::Date64(v) => Ok(OptdScalarValue::Date64(v)),
+            DFScalarValue::Time32Second(v) => Ok(OptdScalarValue::Time32Second(v)),
+            DFScalarValue::Time32Millisecond(v) => Ok(OptdScalarValue::Time32Millisecond(v)),
+            DFScalarValue::Time64Microsecond(v) => Ok(OptdScalarValue::Time64Microsecond(v)),
+            DFScalarValue::Time64Nanosecond(v) => Ok(OptdScalarValue::Time64Nanosecond(v)),
+            DFScalarValue::TimestampSecond(v, tz) => Ok(OptdScalarValue::TimestampSecond(v, tz)),
+            DFScalarValue::TimestampMillisecond(v, tz) => {
+                Ok(OptdScalarValue::TimestampMillisecond(v, tz))
+            }
+            DFScalarValue::TimestampMicrosecond(v, tz) => {
+                Ok(OptdScalarValue::TimestampMicrosecond(v, tz))
+            }
+            DFScalarValue::TimestampNanosecond(v, tz) => {
+                Ok(OptdScalarValue::TimestampNanosecond(v, tz))
+            }
+            DFScalarValue::IntervalYearMonth(v) => Ok(OptdScalarValue::IntervalYearMonth(v)),
+            DFScalarValue::IntervalDayTime(v) => Ok(OptdScalarValue::IntervalDayTime(v)),
+            DFScalarValue::IntervalMonthDayNano(v) => {
+                Ok(OptdScalarValue::IntervalMonthDayNano(v))
+            }
+            DFScalarValue::DurationSecond(v) => Ok(OptdScalarValue::DurationSecond(v)),
+            DFScalarValue::DurationMillisecond(v) => {
+                Ok(OptdScalarValue::DurationMillisecond(v))
+            }
+            DFScalarValue::DurationMicrosecond(v) => {
+                Ok(OptdScalarValue::DurationMicrosecond(v))
+            }
+            DFScalarValue::DurationNanosecond(v) => Ok(OptdScalarValue::DurationNanosecond(v)),
             value => whatever!(
                 "Conversion from DataFusion ScalarValue {:?} is not implemented",
                 value
@@ -90,7 +128,9 @@ impl OptdQueryPlannerContext<'_> {
     /// Converts an optd `ScalarValue` to a DataFusion `ScalarValue``.
     pub fn from_optd_value(value: OptdScalarValue) -> DFScalarValue {
         match value {
+            OptdScalarValue::Null => DFScalarValue::Null,
             OptdScalarValue::Boolean(v) => DFScalarValue::Boolean(v),
+            OptdScalarValue::Float16(v) => DFScalarValue::Float16(v),
             OptdScalarValue::Float32(v) => DFScalarValue::Float32(v),
             OptdScalarValue::Float64(v) => DFScalarValue::Float64(v),
             OptdScalarValue::Int8(v) => DFScalarValue::Int8(v),
@@ -103,11 +143,41 @@ impl OptdQueryPlannerContext<'_> {
             OptdScalarValue::UInt64(v) => DFScalarValue::UInt64(v),
             OptdScalarValue::Utf8(v) => DFScalarValue::Utf8(v),
             OptdScalarValue::Utf8View(v) => DFScalarValue::Utf8View(v),
+            OptdScalarValue::LargeUtf8(v) => DFScalarValue::LargeUtf8(v),
+            OptdScalarValue::Binary(v) => DFScalarValue::Binary(v),
+            OptdScalarValue::BinaryView(v) => DFScalarValue::BinaryView(v),
+            OptdScalarValue::FixedSizeBinary(size, v) => DFScalarValue::FixedSizeBinary(size, v),
+            OptdScalarValue::LargeBinary(v) => DFScalarValue::LargeBinary(v),
+            OptdScalarValue::List(v) => DFScalarValue::List(v),
+            OptdScalarValue::Struct(v) => DFScalarValue::Struct(v),
+            OptdScalarValue::Map(v) => DFScalarValue::Map(v),
             OptdScalarValue::Decimal32(v, p, s) => DFScalarValue::Decimal32(v, p, s),
             OptdScalarValue::Decimal64(v, p, s) => DFScalarValue::Decimal64(v, p, s),
             OptdScalarValue::Decimal128(v, p, s) => DFScalarValue::Decimal128(v, p, s),
+            OptdScalarValue::Decimal256(v, p, s) => DFScalarValue::Decimal256(v, p, s),
             OptdScalarValue::Date32(v) => DFScalarValue::Date32(v),
             OptdScalarValue::Date64(v) => DFScalarValue::Date64(v),
+            OptdScalarValue::Time32Second(v) => DFScalarValue::Time32Second(v),
+            OptdScalarValue::Time32Millisecond(v) => DFScalarValue::Time32Millisecond(v),
+            OptdScalarValue::Time64Microsecond(v) => DFScalarValue::Time64Microsecond(v),
+            OptdScalarValue::Time64Nanosecond(v) => DFScalarValue::Time64Nanosecond(v),
+            OptdScalarValue::TimestampSecond(v, tz) => DFScalarValue::TimestampSecond(v, tz),
+            OptdScalarValue::TimestampMillisecond(v, tz) => {
+                DFScalarValue::TimestampMillisecond(v, tz)
+            }
+            OptdScalarValue::TimestampMicrosecond(v, tz) => {
+                DFScalarValue::TimestampMicrosecond(v, tz)
+            }
+            OptdScalarValue::TimestampNanosecond(v, tz) => {
+                DFScalarValue::TimestampNanosecond(v, tz)
+            }
+            OptdScalarValue::IntervalYearMonth(v) => DFScalarValue::IntervalYearMonth(v),
+            OptdScalarValue::IntervalDayTime(v) => DFScalarValue::IntervalDayTime(v),
+            OptdScalarValue::IntervalMonthDayNano(v) => DFScalarValue::IntervalMonthDayNano(v),
+            OptdScalarValue::DurationSecond(v) => DFScalarValue::DurationSecond(v),
+            OptdScalarValue::DurationMillisecond(v) => DFScalarValue::DurationMillisecond(v),
+            OptdScalarValue::DurationMicrosecond(v) => DFScalarValue::DurationMicrosecond(v),
+            OptdScalarValue::DurationNanosecond(v) => DFScalarValue::DurationNanosecond(v),
         }
     }
 
