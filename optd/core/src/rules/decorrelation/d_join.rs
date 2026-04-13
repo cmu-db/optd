@@ -170,7 +170,9 @@ impl UnnestingRule {
                             .into_scalar(),
                     );
                     nested_repr_choices.push((outer_col, l));
-                } else if matches!(join_type, JoinType::Inner) && let Some(r) = inner_repr {
+                } else if matches!(join_type, JoinType::Inner)
+                    && let Some(r) = inner_repr
+                {
                     nested_repr_choices.push((outer_col, r));
                 }
             }
