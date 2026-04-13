@@ -322,7 +322,8 @@ impl UnnestingRule {
                     ctx,
                 )?;
                 let ordered_input_cols = new_input.output_columns_in_order(ctx)?;
-                let table_index = ctx.add_binding(None, new_input.output_schema(ctx)?.inner().clone())?;
+                let table_index =
+                    ctx.add_binding(None, new_input.output_schema(ctx)?.inner().clone())?;
                 let remapped = Remap::new(table_index, new_input).into_operator();
                 let passthrough_mapping = ordered_input_cols
                     .into_iter()
@@ -438,7 +439,10 @@ impl UnnestingRule {
                             info.clear_scoped_repr_of(c);
                         }
                     }
-                    Ok(Join::new(JoinType::LeftOuter, domain_input, agg, join_cond, None).into_operator())
+                    Ok(
+                        Join::new(JoinType::LeftOuter, domain_input, agg, join_cond, None)
+                            .into_operator(),
+                    )
                 } else {
                     Ok(agg)
                 }
@@ -515,8 +519,10 @@ impl UnnestingRule {
                         ctx,
                     )?;
                     let new_cond = info.rewrite_columns(node.join_cond().clone());
-                    return Ok(Join::new(join_type, new_left, right.clone(), new_cond, None)
-                        .into_operator());
+                    return Ok(
+                        Join::new(join_type, new_left, right.clone(), new_cond, None)
+                            .into_operator(),
+                    );
                 }
 
                 if left_accessing.is_empty() && !outputs_unmatched_left {
@@ -528,8 +534,10 @@ impl UnnestingRule {
                         ctx,
                     )?;
                     let new_cond = info.rewrite_columns(node.join_cond().clone());
-                    return Ok(Join::new(join_type, left.clone(), new_right, new_cond, None)
-                        .into_operator());
+                    return Ok(
+                        Join::new(join_type, left.clone(), new_right, new_cond, None)
+                            .into_operator(),
+                    );
                 }
 
                 // Unnest both sides

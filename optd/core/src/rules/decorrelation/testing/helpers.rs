@@ -9,9 +9,7 @@ use crate::ir::operator::{
     Aggregate, DependentJoin, Get, Join, Operator, OperatorKind, OrderBy, Project, Remap, Select,
     join::JoinType,
 };
-use crate::ir::scalar::{
-    BinaryOp, BinaryOpKind, ColumnRef, List, Literal, NaryOp, ScalarKind,
-};
+use crate::ir::scalar::{BinaryOp, BinaryOpKind, ColumnRef, List, Literal, NaryOp, ScalarKind};
 use crate::ir::table_ref::TableRef;
 use crate::ir::{Column, DataType, IRContext, Scalar};
 use crate::rules::decorrelation::UnnestingRule;
@@ -66,17 +64,16 @@ pub(super) fn make_cols(ctx: &IRContext, n: usize) -> Vec<Column> {
     ));
     let next_table = ctx.binder.read().unwrap().bindings.len() + 1;
     let table_ref = TableRef::bare(format!("__mock_{next_table}"));
-    ctx.catalog.create_table(table_ref.clone(), schema.clone()).unwrap();
+    ctx.catalog
+        .create_table(table_ref.clone(), schema.clone())
+        .unwrap();
     let table_index = ctx.add_binding(Some(table_ref), schema).unwrap();
     (0..n).map(|idx| Column(table_index, idx)).collect()
 }
 
 // Build a `Get` over an existing mock binding, preserving the supplied
 // projection order.
-pub(super) fn mock_scan_with_columns(
-    table_id: i64,
-    cols: Vec<Column>,
-) -> Arc<Operator> {
+pub(super) fn mock_scan_with_columns(table_id: i64, cols: Vec<Column>) -> Arc<Operator> {
     assert!(!cols.is_empty(), "mock scan requires at least one column");
     let table_index = cols[0].0;
     let projections = cols
@@ -150,7 +147,10 @@ pub(super) fn create_domain_with_aliases(
         ctx,
         input,
         std::iter::empty::<Arc<Scalar>>(),
-        from_cols.into_iter().map(ColumnRef::new).map(IntoScalar::into_scalar),
+        from_cols
+            .into_iter()
+            .map(ColumnRef::new)
+            .map(IntoScalar::into_scalar),
     )?;
     Ok((domain, outputs))
 }
@@ -177,7 +177,11 @@ fn canonicalize_plan(op: &Arc<Operator>) -> String {
         }
         match &op.kind {
             OperatorKind::Get(meta) => {
-                register_table(map, next, *Get::borrow_raw_parts(meta, &op.common).table_index());
+                register_table(
+                    map,
+                    next,
+                    *Get::borrow_raw_parts(meta, &op.common).table_index(),
+                );
             }
             OperatorKind::Project(meta) => {
                 register_table(
@@ -192,7 +196,11 @@ fn canonicalize_plan(op: &Arc<Operator>) -> String {
                 register_table(map, next, *agg.aggregate_table_index());
             }
             OperatorKind::Remap(meta) => {
-                register_table(map, next, *Remap::borrow_raw_parts(meta, &op.common).table_index());
+                register_table(
+                    map,
+                    next,
+                    *Remap::borrow_raw_parts(meta, &op.common).table_index(),
+                );
             }
             OperatorKind::Join(meta) => {
                 if let JoinType::Mark(col) = Join::borrow_raw_parts(meta, &op.common).join_type() {

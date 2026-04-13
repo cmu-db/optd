@@ -189,7 +189,9 @@ fn derive_output_columns_in_order(
         OperatorKind::Project(meta) => {
             let project = Project::borrow_raw_parts(meta, &op.common);
             let len = project.projections().borrow::<List>().members().len();
-            Ok((0..len).map(|idx| Column(*project.table_index(), idx)).collect())
+            Ok((0..len)
+                .map(|idx| Column(*project.table_index(), idx))
+                .collect())
         }
         OperatorKind::Aggregate(meta) => {
             let aggregate = Aggregate::borrow_raw_parts(meta, &op.common);
@@ -203,7 +205,9 @@ fn derive_output_columns_in_order(
         OperatorKind::Remap(meta) => {
             let remap = Remap::borrow_raw_parts(meta, &op.common);
             let len = remap.input().output_columns_in_order(ctx)?.len();
-            Ok((0..len).map(|idx| Column(*remap.table_index(), idx)).collect())
+            Ok((0..len)
+                .map(|idx| Column(*remap.table_index(), idx))
+                .collect())
         }
         OperatorKind::Select(meta) => {
             let select = Select::borrow_raw_parts(meta, &op.common);

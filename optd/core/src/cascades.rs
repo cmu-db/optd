@@ -38,9 +38,7 @@ impl Cascades {
         plan: &Arc<Operator>,
         required: Arc<Required>,
     ) -> Option<Arc<Operator>> {
-        let decorrelated = UnnestingRule::new()
-            .apply(plan.clone(), &self.ctx)
-            .ok()?;
+        let decorrelated = UnnestingRule::new().apply(plan.clone(), &self.ctx).ok()?;
         let simplified = SimplificationPass::new()
             .apply(decorrelated, &self.ctx)
             .ok()?;

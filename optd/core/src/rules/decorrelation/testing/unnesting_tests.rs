@@ -3,12 +3,12 @@ use super::helpers::{
     make_cols, mock_scan_with_columns, null_safe_eq, project_with_outputs,
 };
 use crate::error::Result;
+use crate::ir::IRContext;
 use crate::ir::builder::{boolean, column_ref};
 use crate::ir::convert::IntoOperator;
 use crate::ir::explain::quick_explain;
 use crate::ir::operator::{Join, OperatorKind, OrderBy, join::JoinType};
 use crate::ir::properties::TupleOrderingDirection;
-use crate::ir::IRContext;
 use crate::rules::decorrelation::UnnestingRule;
 
 /// Test Simple Unnesting: A very simple select pull-up
@@ -35,8 +35,8 @@ fn test_simple_unnesting() -> Result<()> {
         let t1 = t1_cols[0];
         let t2 = t2_cols[0];
         let left_branch = mock_scan_with_columns(1, t1_cols);
-        let right_branch = mock_scan_with_columns(2, t2_cols)
-            .logical_select(column_ref(t2).eq(column_ref(t1)));
+        let right_branch =
+            mock_scan_with_columns(2, t2_cols).logical_select(column_ref(t2).eq(column_ref(t1)));
         left_branch.logical_dependent_join(right_branch, boolean(true), JoinType::Inner)
     };
 
@@ -46,8 +46,8 @@ fn test_simple_unnesting() -> Result<()> {
         let t1 = t1_cols[0];
         let t2 = t2_cols[0];
         let left_branch = mock_scan_with_columns(1, t1_cols);
-        let right_branch = mock_scan_with_columns(2, t2_cols)
-            .logical_select(column_ref(t2).eq(column_ref(t2)));
+        let right_branch =
+            mock_scan_with_columns(2, t2_cols).logical_select(column_ref(t2).eq(column_ref(t2)));
         left_branch.logical_join(
             right_branch,
             null_safe_eq(column_ref(t1), column_ref(t2)),
@@ -668,8 +668,11 @@ fn test_nested_dep_join_regular_join_orderby_project_domain_vs_repr() -> Result<
                             .gt(column_ref(t2c0))
                             .and(column_ref(t3c1).gt(column_ref(t1c0))),
                     );
-                    let (projected, projected_cols) =
-                        project_with_outputs(&input_ctx, select_input, [column_ref(t3c0), column_ref(t3c1)])?;
+                    let (projected, projected_cols) = project_with_outputs(
+                        &input_ctx,
+                        select_input,
+                        [column_ref(t3c0), column_ref(t3c1)],
+                    )?;
                     OrderBy::new(
                         projected,
                         vec![(column_ref(projected_cols[0]), TupleOrderingDirection::Asc)],
@@ -681,8 +684,11 @@ fn test_nested_dep_join_regular_join_orderby_project_domain_vs_repr() -> Result<
                 let right_regular = {
                     let select_input = mock_scan_with_columns(4, t4_cols)
                         .logical_select(column_ref(t4c0).eq(column_ref(t2c0)));
-                    let (projected, projected_cols) =
-                        project_with_outputs(&input_ctx, select_input, [column_ref(t4c0), column_ref(t4c1)])?;
+                    let (projected, projected_cols) = project_with_outputs(
+                        &input_ctx,
+                        select_input,
+                        [column_ref(t4c0), column_ref(t4c1)],
+                    )?;
                     let p4b = projected_cols[1];
                     (projected, p4b)
                 };
@@ -941,8 +947,10 @@ fn test_partial_repr_resolution_all_or_nothing() -> Result<()> {
         let domain_outputs = right_branch.output_columns_in_order(&expected_ctx)?[..2].to_vec();
         left_branch.logical_join(
             right_branch,
-            null_safe_eq(column_ref(t1c0), column_ref(domain_outputs[0]))
-                .and(null_safe_eq(column_ref(t1c1), column_ref(domain_outputs[1]))),
+            null_safe_eq(column_ref(t1c0), column_ref(domain_outputs[0])).and(null_safe_eq(
+                column_ref(t1c1),
+                column_ref(domain_outputs[1]),
+            )),
             JoinType::Inner,
         )
     };
