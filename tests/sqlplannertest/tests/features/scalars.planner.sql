@@ -12,8 +12,6 @@ insert into pairs values
   (2, 1),
   (NULL, NULL),
   (3, NULL);
-set optd.optd_only = true;
-set optd.optd_strict_mode = true;
 
 /*
 5
@@ -28,42 +26,39 @@ order by id;
 /*
 logical_plan after optd-initial:
 OrderBy
-├── ordering_exprs: [ __internal_#2.id(#2.0) ASC ]
-├── (.output_columns): __internal_#2.id(#2.0), __internal_#2.remainder(#2.2), __internal_#2.total(#2.1)
+├── ordering_exprs: [ `__internal_#2`.`id`(#2.0) ASC ]
+├── (.output_columns): `__internal_#2`.`id`(#2.0), `__internal_#2`.`remainder`(#2.2), `__internal_#2`.`total`(#2.1)
 ├── (.cardinality): 5.00
 └── Project
     ├── .table_index: 2
-    ├── .projections:
-    │   ┌── numbers.id(#1.0)
-    │   ├── numbers.val(#1.2) + numbers.bonus(#1.3)
-    │   └── CAST (numbers.val(#1.2) AS Int64) % 7::bigint
-    ├── (.output_columns): __internal_#2.id(#2.0), __internal_#2.remainder(#2.2), __internal_#2.total(#2.1)
+    ├── .projections: [ `numbers`.`id`(#1.0), `numbers`.`val`(#1.2) + `numbers`.`bonus`(#1.3), CAST (`numbers`.`val`(#1.2) AS Int64) % 7::bigint ]
+    ├── (.output_columns): `__internal_#2`.`id`(#2.0), `__internal_#2`.`remainder`(#2.2), `__internal_#2`.`total`(#2.1)
     ├── (.cardinality): 5.00
     └── Get
         ├── .data_source_id: 1
         ├── .table_index: 1
         ├── .implementation: None
-        ├── (.output_columns): numbers.bonus(#1.3), numbers.grp(#1.1), numbers.id(#1.0), numbers.note(#1.4), numbers.val(#1.2)
+        ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`grp`(#1.1), `numbers`.`id`(#1.0), `numbers`.`note`(#1.4), `numbers`.`val`(#1.2)
         └── (.cardinality): 5.00
 
 physical_plan after optd-finalized:
 EnforcerSort
 ├── tuple_ordering: [(#2.0, Asc)]
-├── (.output_columns): __internal_#2.id(#2.0), __internal_#2.remainder(#2.2), __internal_#2.total(#2.1)
+├── (.output_columns): `__internal_#2`.`id`(#2.0), `__internal_#2`.`remainder`(#2.2), `__internal_#2`.`total`(#2.1)
 ├── (.cardinality): 5.00
 └── Project
     ├── .table_index: 2
     ├── .projections:
-    │   ┌── numbers.id(#1.0)
-    │   ├── numbers.val(#1.2) + numbers.bonus(#1.3)
-    │   └── CAST (numbers.val(#1.2) AS Int64) % 7::bigint
-    ├── (.output_columns): __internal_#2.id(#2.0), __internal_#2.remainder(#2.2), __internal_#2.total(#2.1)
+    │   ┌── `numbers`.`id`(#1.0)
+    │   ├── `numbers`.`val`(#1.2) + `numbers`.`bonus`(#1.3)
+    │   └── CAST (`numbers`.`val`(#1.2) AS Int64) % 7::bigint
+    ├── (.output_columns): `__internal_#2`.`id`(#2.0), `__internal_#2`.`remainder`(#2.2), `__internal_#2`.`total`(#2.1)
     ├── (.cardinality): 5.00
     └── Get
         ├── .data_source_id: 1
         ├── .table_index: 1
         ├── .implementation: None
-        ├── (.output_columns): numbers.bonus(#1.3), numbers.id(#1.0), numbers.val(#1.2)
+        ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`id`(#1.0), `numbers`.`val`(#1.2)
         └── (.cardinality): 5.00
 
 1 10 3
@@ -82,44 +77,46 @@ order by id;
 /*
 logical_plan after optd-initial:
 OrderBy
-├── ordering_exprs: [ __internal_#2.id(#2.0) ASC ]
-├── (.output_columns): __internal_#2.id(#2.0), __internal_#2.widened_total(#2.1)
+├── ordering_exprs: [ `__internal_#2`.`id`(#2.0) ASC ]
+├── (.output_columns): `__internal_#2`.`id`(#2.0), `__internal_#2`.`widened_total`(#2.1)
 ├── (.cardinality): 0.50
 └── Project
     ├── .table_index: 2
-    ├── .projections: [ numbers.id(#1.0), CAST (numbers.val(#1.2) AS Int64) + CAST (numbers.bonus(#1.3) AS Int64) ]
-    ├── (.output_columns): __internal_#2.id(#2.0), __internal_#2.widened_total(#2.1)
+    ├── .projections: [ `numbers`.`id`(#1.0), CAST (`numbers`.`val`(#1.2) AS Int64) + CAST (`numbers`.`bonus`(#1.3) AS Int64) ]
+    ├── (.output_columns): `__internal_#2`.`id`(#2.0), `__internal_#2`.`widened_total`(#2.1)
     ├── (.cardinality): 0.50
     └── Select
-        ├── .predicate: (CAST (numbers.val(#1.2) AS Int64) >= 20::bigint) OR (CAST (numbers.bonus(#1.3) AS Int64) = 5::bigint)
-        ├── (.output_columns): numbers.bonus(#1.3), numbers.grp(#1.1), numbers.id(#1.0), numbers.note(#1.4), numbers.val(#1.2)
+        ├── .predicate: (`numbers`.`val`(#1.2) >= 20::integer) OR (`numbers`.`bonus`(#1.3) = 5::integer)
+        ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`grp`(#1.1), `numbers`.`id`(#1.0), `numbers`.`note`(#1.4), `numbers`.`val`(#1.2)
         ├── (.cardinality): 0.50
         └── Get
             ├── .data_source_id: 1
             ├── .table_index: 1
             ├── .implementation: None
-            ├── (.output_columns): numbers.bonus(#1.3), numbers.grp(#1.1), numbers.id(#1.0), numbers.note(#1.4), numbers.val(#1.2)
+            ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`grp`(#1.1), `numbers`.`id`(#1.0), `numbers`.`note`(#1.4), `numbers`.`val`(#1.2)
             └── (.cardinality): 5.00
 
 physical_plan after optd-finalized:
 EnforcerSort
 ├── tuple_ordering: [(#2.0, Asc)]
-├── (.output_columns): __internal_#2.id(#2.0), __internal_#2.widened_total(#2.1)
+├── (.output_columns): `__internal_#2`.`id`(#2.0), `__internal_#2`.`widened_total`(#2.1)
 ├── (.cardinality): 0.50
 └── Project
     ├── .table_index: 2
-    ├── .projections: [ numbers.id(#1.0), CAST (numbers.val(#1.2) AS Int64) + CAST (numbers.bonus(#1.3) AS Int64) ]
-    ├── (.output_columns): __internal_#2.id(#2.0), __internal_#2.widened_total(#2.1)
+    ├── .projections:
+    │   ┌── `numbers`.`id`(#1.0)
+    │   └── CAST (`numbers`.`val`(#1.2) AS Int64) + CAST (`numbers`.`bonus`(#1.3) AS Int64)
+    ├── (.output_columns): `__internal_#2`.`id`(#2.0), `__internal_#2`.`widened_total`(#2.1)
     ├── (.cardinality): 0.50
     └── Select
-        ├── .predicate: (CAST (numbers.val(#1.2) AS Int64) >= 20::bigint) OR (CAST (numbers.bonus(#1.3) AS Int64) = 5::bigint)
-        ├── (.output_columns): numbers.bonus(#1.3), numbers.id(#1.0), numbers.val(#1.2)
+        ├── .predicate: (`numbers`.`val`(#1.2) >= 20::integer) OR (`numbers`.`bonus`(#1.3) = 5::integer)
+        ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`id`(#1.0), `numbers`.`val`(#1.2)
         ├── (.cardinality): 0.50
         └── Get
             ├── .data_source_id: 1
             ├── .table_index: 1
             ├── .implementation: None
-            ├── (.output_columns): numbers.bonus(#1.3), numbers.id(#1.0), numbers.val(#1.2)
+            ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`id`(#1.0), `numbers`.`val`(#1.2)
             └── (.cardinality): 5.00
 
 2 25
@@ -136,41 +133,44 @@ order by id;
 /*
 logical_plan after optd-initial:
 OrderBy
-├── ordering_exprs: [ __internal_#2.id(#2.0) ASC ]
-├── (.output_columns): __internal_#2.id(#2.0), __internal_#2.note(#2.1)
+├── ordering_exprs: [ `__internal_#2`.`id`(#2.0) ASC ]
+├── (.output_columns): `__internal_#2`.`id`(#2.0), `__internal_#2`.`note`(#2.1)
 ├── (.cardinality): 0.50
 └── Project
     ├── .table_index: 2
-    ├── .projections: [ numbers.id(#1.0), numbers.note(#1.4) ]
-    ├── (.output_columns): __internal_#2.id(#2.0), __internal_#2.note(#2.1)
+    ├── .projections: [ `numbers`.`id`(#1.0), `numbers`.`note`(#1.4) ]
+    ├── (.output_columns): `__internal_#2`.`id`(#2.0), `__internal_#2`.`note`(#2.1)
     ├── (.cardinality): 0.50
     └── Select
-        ├── .predicate: (numbers.note(#1.4) LIKE CAST (Al%::utf8 AS Utf8View)) OR (numbers.note(#1.4) NOT LIKE CAST (%ta::utf8 AS Utf8View))
-        ├── (.output_columns): numbers.bonus(#1.3), numbers.grp(#1.1), numbers.id(#1.0), numbers.note(#1.4), numbers.val(#1.2)
+        ├── .predicate: (`numbers`.`note`(#1.4) LIKE Al%::utf8_view) OR (`numbers`.`note`(#1.4) NOT LIKE %ta::utf8_view)
+        ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`grp`(#1.1), `numbers`.`id`(#1.0), `numbers`.`note`(#1.4), `numbers`.`val`(#1.2)
         ├── (.cardinality): 0.50
         └── Get
             ├── .data_source_id: 1
             ├── .table_index: 1
             ├── .implementation: None
-            ├── (.output_columns): numbers.bonus(#1.3), numbers.grp(#1.1), numbers.id(#1.0), numbers.note(#1.4), numbers.val(#1.2)
+            ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`grp`(#1.1), `numbers`.`id`(#1.0), `numbers`.`note`(#1.4), `numbers`.`val`(#1.2)
             └── (.cardinality): 5.00
 
 physical_plan after optd-finalized:
-EnforcerSort { tuple_ordering: [(#2.0, Asc)], (.output_columns): __internal_#2.id(#2.0), __internal_#2.note(#2.1), (.cardinality): 0.50 }
+EnforcerSort
+├── tuple_ordering: [(#2.0, Asc)]
+├── (.output_columns): `__internal_#2`.`id`(#2.0), `__internal_#2`.`note`(#2.1)
+├── (.cardinality): 0.50
 └── Project
     ├── .table_index: 2
-    ├── .projections: [ numbers.id(#1.0), numbers.note(#1.4) ]
-    ├── (.output_columns): __internal_#2.id(#2.0), __internal_#2.note(#2.1)
+    ├── .projections: [ `numbers`.`id`(#1.0), `numbers`.`note`(#1.4) ]
+    ├── (.output_columns): `__internal_#2`.`id`(#2.0), `__internal_#2`.`note`(#2.1)
     ├── (.cardinality): 0.50
     └── Select
-        ├── .predicate: (numbers.note(#1.4) LIKE CAST (Al%::utf8 AS Utf8View)) OR (numbers.note(#1.4) NOT LIKE CAST (%ta::utf8 AS Utf8View))
-        ├── (.output_columns): numbers.id(#1.0), numbers.note(#1.4)
+        ├── .predicate: (`numbers`.`note`(#1.4) LIKE Al%::utf8_view) OR (`numbers`.`note`(#1.4) NOT LIKE %ta::utf8_view)
+        ├── (.output_columns): `numbers`.`id`(#1.0), `numbers`.`note`(#1.4)
         ├── (.cardinality): 0.50
         └── Get
             ├── .data_source_id: 1
             ├── .table_index: 1
             ├── .implementation: None
-            ├── (.output_columns): numbers.id(#1.0), numbers.note(#1.4)
+            ├── (.output_columns): `numbers`.`id`(#1.0), `numbers`.`note`(#1.4)
             └── (.cardinality): 5.00
 
 1 Alpha
@@ -186,42 +186,38 @@ order by id;
 
 /*
 logical_plan after optd-initial:
-OrderBy { ordering_exprs: [ __internal_#2.id(#2.0) ASC ], (.output_columns): __internal_#2.id(#2.0), (.cardinality): 0.50 }
-└── Project
-    ├── .table_index: 2
-    ├── .projections: [ numbers.id(#1.0) ]
-    ├── (.output_columns): __internal_#2.id(#2.0)
-    ├── (.cardinality): 0.50
+OrderBy { ordering_exprs: [ `__internal_#2`.`id`(#2.0) ASC ], (.output_columns): `__internal_#2`.`id`(#2.0), (.cardinality): 0.50 }
+└── Project { .table_index: 2, .projections: [ `numbers`.`id`(#1.0) ], (.output_columns): `__internal_#2`.`id`(#2.0), (.cardinality): 0.50 }
     └── Select
-        ├── .predicate: numbers.note(#1.4) ILIKE CAST (al%::utf8 AS Utf8View)
-        ├── (.output_columns): numbers.bonus(#1.3), numbers.grp(#1.1), numbers.id(#1.0), numbers.note(#1.4), numbers.val(#1.2)
+        ├── .predicate: `numbers`.`note`(#1.4) ILIKE al%::utf8_view
+        ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`grp`(#1.1), `numbers`.`id`(#1.0), `numbers`.`note`(#1.4), `numbers`.`val`(#1.2)
         ├── (.cardinality): 0.50
         └── Get
             ├── .data_source_id: 1
             ├── .table_index: 1
             ├── .implementation: None
-            ├── (.output_columns): numbers.bonus(#1.3), numbers.grp(#1.1), numbers.id(#1.0), numbers.note(#1.4), numbers.val(#1.2)
+            ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`grp`(#1.1), `numbers`.`id`(#1.0), `numbers`.`note`(#1.4), `numbers`.`val`(#1.2)
             └── (.cardinality): 5.00
 
 physical_plan after optd-finalized:
 EnforcerSort
 ├── tuple_ordering: [(#2.0, Asc)]
-├── (.output_columns): __internal_#2.id(#2.0)
+├── (.output_columns): `__internal_#2`.`id`(#2.0)
 ├── (.cardinality): 0.50
 └── Project
     ├── .table_index: 2
-    ├── .projections: [ numbers.id(#1.0) ]
-    ├── (.output_columns): __internal_#2.id(#2.0)
+    ├── .projections: [ `numbers`.`id`(#1.0) ]
+    ├── (.output_columns): `__internal_#2`.`id`(#2.0)
     ├── (.cardinality): 0.50
     └── Select
-        ├── .predicate: numbers.note(#1.4) ILIKE CAST (al%::utf8 AS Utf8View)
-        ├── (.output_columns): numbers.id(#1.0), numbers.note(#1.4)
+        ├── .predicate: `numbers`.`note`(#1.4) ILIKE al%::utf8_view
+        ├── (.output_columns): `numbers`.`id`(#1.0), `numbers`.`note`(#1.4)
         ├── (.cardinality): 0.50
         └── Get
             ├── .data_source_id: 1
             ├── .table_index: 1
             ├── .implementation: None
-            ├── (.output_columns): numbers.id(#1.0), numbers.note(#1.4)
+            ├── (.output_columns): `numbers`.`id`(#1.0), `numbers`.`note`(#1.4)
             └── (.cardinality): 5.00
 
 1
@@ -237,44 +233,44 @@ order by lhs;
 /*
 logical_plan after optd-initial:
 OrderBy
-├── ordering_exprs: [ __internal_#2.lhs(#2.0) ASC ]
-├── (.output_columns): __internal_#2.lhs(#2.0), __internal_#2.rhs(#2.1)
+├── ordering_exprs: [ `__internal_#2`.`lhs`(#2.0) ASC ]
+├── (.output_columns): `__internal_#2`.`lhs`(#2.0), `__internal_#2`.`rhs`(#2.1)
 ├── (.cardinality): 0.40
 └── Project
     ├── .table_index: 2
-    ├── .projections: [ pairs.lhs(#1.0), pairs.rhs(#1.1) ]
-    ├── (.output_columns): __internal_#2.lhs(#2.0), __internal_#2.rhs(#2.1)
+    ├── .projections: [ `pairs`.`lhs`(#1.0), `pairs`.`rhs`(#1.1) ]
+    ├── (.output_columns): `__internal_#2`.`lhs`(#2.0), `__internal_#2`.`rhs`(#2.1)
     ├── (.cardinality): 0.40
     └── Select
-        ├── .predicate: pairs.lhs(#1.0) IS NOT DISTINCT FROM pairs.rhs(#1.1)
-        ├── (.output_columns): pairs.lhs(#1.0), pairs.rhs(#1.1)
+        ├── .predicate: `pairs`.`lhs`(#1.0) IS NOT DISTINCT FROM `pairs`.`rhs`(#1.1)
+        ├── (.output_columns): `pairs`.`lhs`(#1.0), `pairs`.`rhs`(#1.1)
         ├── (.cardinality): 0.40
         └── Get
             ├── .data_source_id: 2
             ├── .table_index: 1
             ├── .implementation: None
-            ├── (.output_columns): pairs.lhs(#1.0), pairs.rhs(#1.1)
+            ├── (.output_columns): `pairs`.`lhs`(#1.0), `pairs`.`rhs`(#1.1)
             └── (.cardinality): 4.00
 
 physical_plan after optd-finalized:
 EnforcerSort
 ├── tuple_ordering: [(#2.0, Asc)]
-├── (.output_columns): __internal_#2.lhs(#2.0), __internal_#2.rhs(#2.1)
+├── (.output_columns): `__internal_#2`.`lhs`(#2.0), `__internal_#2`.`rhs`(#2.1)
 ├── (.cardinality): 0.40
 └── Project
     ├── .table_index: 2
-    ├── .projections: [ pairs.lhs(#1.0), pairs.rhs(#1.1) ]
-    ├── (.output_columns): __internal_#2.lhs(#2.0), __internal_#2.rhs(#2.1)
+    ├── .projections: [ `pairs`.`lhs`(#1.0), `pairs`.`rhs`(#1.1) ]
+    ├── (.output_columns): `__internal_#2`.`lhs`(#2.0), `__internal_#2`.`rhs`(#2.1)
     ├── (.cardinality): 0.40
     └── Select
-        ├── .predicate: pairs.lhs(#1.0) IS NOT DISTINCT FROM pairs.rhs(#1.1)
-        ├── (.output_columns): pairs.lhs(#1.0), pairs.rhs(#1.1)
+        ├── .predicate: `pairs`.`lhs`(#1.0) IS NOT DISTINCT FROM `pairs`.`rhs`(#1.1)
+        ├── (.output_columns): `pairs`.`lhs`(#1.0), `pairs`.`rhs`(#1.1)
         ├── (.cardinality): 0.40
         └── Get
             ├── .data_source_id: 2
             ├── .table_index: 1
             ├── .implementation: None
-            ├── (.output_columns): pairs.lhs(#1.0), pairs.rhs(#1.1)
+            ├── (.output_columns): `pairs`.`lhs`(#1.0), `pairs`.`rhs`(#1.1)
             └── (.cardinality): 4.00
 
 1 1
@@ -289,54 +285,56 @@ limit 2 offset 1;
 
 /*
 logical_plan after optd-initial:
-Limit { .skip: 1::bigint, .fetch: 2::bigint, (.output_columns): __internal_#3.id(#3.0), (.cardinality): 2.00 }
-└── Project
-    ├── .table_index: 3
-    ├── .projections: [ __internal_#2.id(#2.0) ]
-    ├── (.output_columns): __internal_#3.id(#3.0)
-    ├── (.cardinality): 5.00
-    └── OrderBy
-        ├── ordering_exprs: [ __internal_#2.val(#2.1) DESC ]
-        ├── (.output_columns): __internal_#2.id(#2.0), __internal_#2.val(#2.1)
-        ├── (.cardinality): 5.00
-        └── Project
-            ├── .table_index: 2
-            ├── .projections: [ numbers.id(#1.0), numbers.val(#1.2) ]
-            ├── (.output_columns): __internal_#2.id(#2.0), __internal_#2.val(#2.1)
+Project { .table_index: 3, .projections: [ `__internal_#2`.`id`(#2.0) ], (.output_columns): `__internal_#3`.`id`(#3.0), (.cardinality): 2.00 }
+└── Limit { .skip: 1::bigint, .fetch: 2::bigint, (.output_columns): `__internal_#2`.`id`(#2.0), `__internal_#2`.`val`(#2.1), (.cardinality): 2.00 }
+    └── Limit { .skip: 0::bigint, .fetch: 3::bigint, (.output_columns): `__internal_#2`.`id`(#2.0), `__internal_#2`.`val`(#2.1), (.cardinality): 3.00 }
+        └── OrderBy
+            ├── ordering_exprs: [ `__internal_#2`.`val`(#2.1) DESC ]
+            ├── (.output_columns): `__internal_#2`.`id`(#2.0), `__internal_#2`.`val`(#2.1)
             ├── (.cardinality): 5.00
-            └── Get
-                ├── .data_source_id: 1
-                ├── .table_index: 1
-                ├── .implementation: None
-                ├── (.output_columns): numbers.bonus(#1.3), numbers.grp(#1.1), numbers.id(#1.0), numbers.note(#1.4), numbers.val(#1.2)
-                └── (.cardinality): 5.00
+            └── Project
+                ├── .table_index: 2
+                ├── .projections: [ `numbers`.`id`(#1.0), `numbers`.`val`(#1.2) ]
+                ├── (.output_columns): `__internal_#2`.`id`(#2.0), `__internal_#2`.`val`(#2.1)
+                ├── (.cardinality): 5.00
+                └── Get
+                    ├── .data_source_id: 1
+                    ├── .table_index: 1
+                    ├── .implementation: None
+                    ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`grp`(#1.1), `numbers`.`id`(#1.0), `numbers`.`note`(#1.4), `numbers`.`val`(#1.2)
+                    └── (.cardinality): 5.00
 
 physical_plan after optd-finalized:
-Limit
-├── .skip: 1::bigint
-├── .fetch: 2::bigint
-├── (.output_columns): __internal_#3.id(#3.0)
+Project
+├── .table_index: 3
+├── .projections: [ `__internal_#2`.`id`(#2.0) ]
+├── (.output_columns): `__internal_#3`.`id`(#3.0)
 ├── (.cardinality): 2.00
-└── Project
-    ├── .table_index: 3
-    ├── .projections: [ __internal_#2.id(#2.0) ]
-    ├── (.output_columns): __internal_#3.id(#3.0)
-    ├── (.cardinality): 5.00
-    └── EnforcerSort
-        ├── tuple_ordering: [(#2.1, Desc)]
-        ├── (.output_columns): __internal_#2.id(#2.0), __internal_#2.val(#2.1)
-        ├── (.cardinality): 5.00
-        └── Project
-            ├── .table_index: 2
-            ├── .projections: [ numbers.id(#1.0), numbers.val(#1.2) ]
-            ├── (.output_columns): __internal_#2.id(#2.0), __internal_#2.val(#2.1)
+└── Limit
+    ├── .skip: 1::bigint
+    ├── .fetch: 2::bigint
+    ├── (.output_columns): `__internal_#2`.`id`(#2.0), `__internal_#2`.`val`(#2.1)
+    ├── (.cardinality): 2.00
+    └── Limit
+        ├── .skip: 0::bigint
+        ├── .fetch: 3::bigint
+        ├── (.output_columns): `__internal_#2`.`id`(#2.0), `__internal_#2`.`val`(#2.1)
+        ├── (.cardinality): 3.00
+        └── EnforcerSort
+            ├── tuple_ordering: [(#2.1, Desc)]
+            ├── (.output_columns): `__internal_#2`.`id`(#2.0), `__internal_#2`.`val`(#2.1)
             ├── (.cardinality): 5.00
-            └── Get
-                ├── .data_source_id: 1
-                ├── .table_index: 1
-                ├── .implementation: None
-                ├── (.output_columns): numbers.id(#1.0), numbers.val(#1.2)
-                └── (.cardinality): 5.00
+            └── Project
+                ├── .table_index: 2
+                ├── .projections: [ `numbers`.`id`(#1.0), `numbers`.`val`(#1.2) ]
+                ├── (.output_columns): `__internal_#2`.`id`(#2.0), `__internal_#2`.`val`(#2.1)
+                ├── (.cardinality): 5.00
+                └── Get
+                    ├── .data_source_id: 1
+                    ├── .table_index: 1
+                    ├── .implementation: None
+                    ├── (.output_columns): `numbers`.`id`(#1.0), `numbers`.`val`(#1.2)
+                    └── (.cardinality): 5.00
 
 2
 3

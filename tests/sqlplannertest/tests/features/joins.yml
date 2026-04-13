@@ -23,8 +23,6 @@
       (1, 'x'),
       (2, 'y'),
       (4, 'z');
-    set optd.optd_only = true;
-    set optd.optd_strict_mode = true;
   desc: Setup join feature tables.
   tasks:
     - execute

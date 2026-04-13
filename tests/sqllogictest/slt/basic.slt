@@ -1,10 +1,4 @@
 statement ok
-set optd.optd_only = true;
-
-statement ok
-set optd.optd_strict_mode = true;
-
-statement ok
 CREATE TABLE t1(v1 int);
 
 statement ok

@@ -13,8 +13,6 @@
       (3, 'odd', 0),
       (4, 'even', 1),
       (6, 'missing', 1);
-    set optd.optd_only = true;
-    set optd.optd_strict_mode = true;
   desc: Setup aggregate feature tables.
   tasks:
     - execute
