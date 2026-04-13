@@ -74,10 +74,14 @@ impl UnnestingRule {
         parent_accessing: Option<&HashSet<*const Operator>>,
         ctx: &IRContext,
     ) -> Result<Arc<Operator>> {
-        // We currently only support inner dependent joins!
-        // TODO: Support left outer, single, and mark joins
         let join_type = *dep_join.join_type();
-        assert_eq!(join_type, JoinType::Inner);
+        assert!(
+            matches!(
+                join_type,
+                JoinType::Inner | JoinType::LeftSemi | JoinType::LeftAnti
+            ),
+            "unsupported dependent join type: {join_type:?}"
+        );
 
         // In the nested case we have to unnest the left-hand side first
         let (new_outer, condition) = if let Some(ref mut pu) = parent_unnesting {
@@ -166,7 +170,7 @@ impl UnnestingRule {
                             .into_scalar(),
                     );
                     nested_repr_choices.push((outer_col, l));
-                } else if let Some(r) = inner_repr {
+                } else if matches!(join_type, JoinType::Inner) && let Some(r) = inner_repr {
                     nested_repr_choices.push((outer_col, r));
                 }
             }

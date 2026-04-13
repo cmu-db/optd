@@ -882,6 +882,87 @@ fn test_left_join_right_cclass_not_propagated() -> Result<()> {
     Ok(())
 }
 
+/// Test Nested Left-Preserving Dependent Join Does Not Propagate Inner Representative:
+///
+/// INPUT:
+/// DependentJoin
+/// |--- Scan(T1) [v0]
+/// |--- DependentJoin (LeftSemi or LeftAnti)
+///      |--- Scan(T2) [v1]
+///      |--- Select [T3.v2 = T1.v0]
+///           |--- Scan(T3) [v2]
+///
+/// EXPECTATION:
+/// The top-level decorrelated join condition must not use T3.v2 as the
+/// representative for T1.v0, because left-semi and left-anti joins do not
+/// expose right-side columns in their output.
+fn assert_nested_left_preserving_dep_join_keeps_domain_repr(
+    nested_join_type: JoinType,
+) -> Result<()> {
+    let ctx = IRContext::with_empty_magic();
+    let t1_cols = make_cols(&ctx, 1);
+    let t2_cols = make_cols(&ctx, 1);
+    let t3_cols = make_cols(&ctx, 1);
+    let t1 = t1_cols[0];
+    let t2 = t2_cols[0];
+    let t3 = t3_cols[0];
+
+    let input_plan = {
+        let left_branch = mock_scan_with_columns(1, t1_cols);
+        let right_branch = {
+            let nested_outer = mock_scan_with_columns(2, t2_cols);
+            let nested_inner = mock_scan_with_columns(3, t3_cols)
+                .logical_select(column_ref(t3).eq(column_ref(t1)));
+            nested_outer.logical_dependent_join(nested_inner, boolean(true), nested_join_type)
+        };
+        left_branch.logical_dependent_join(right_branch, boolean(true), JoinType::Inner)
+    };
+
+    let res = UnnestingRule::new().apply(input_plan, &ctx)?;
+
+    let root_join = match &res.kind {
+        OperatorKind::Join(meta) => Join::borrow_raw_parts(meta, &res.common),
+        _ => panic!(
+            "expected decorrelated root to be a join, got:\n{}",
+            quick_explain(&res, &ctx)
+        ),
+    };
+    let used_cols = root_join.join_cond().used_columns();
+    assert!(
+        used_cols.contains(&t1),
+        "top join condition should reference outer column; plan:\n{}",
+        quick_explain(&res, &ctx)
+    );
+    assert!(
+        !used_cols.contains(&t3),
+        "top join condition must not use inner-only semi/anti column as outer repr; plan:\n{}",
+        quick_explain(&res, &ctx)
+    );
+    assert!(
+        used_cols.iter().any(|c| *c != t1 && *c != t2 && *c != t3),
+        "expected a domain representative column in top join condition; plan:\n{}",
+        quick_explain(&res, &ctx)
+    );
+    assert!(
+        !root_join.inner().output_columns(&ctx)?.contains(&t3),
+        "nested semi/anti join output must not expose the inner scan column; plan:\n{}",
+        quick_explain(&res, &ctx)
+    );
+    Ok(())
+}
+
+/// Test Nested Left-Semi Join Keeps Domain Representative
+#[test]
+fn test_nested_left_semi_inner_repr_not_propagated() -> Result<()> {
+    assert_nested_left_preserving_dep_join_keeps_domain_repr(JoinType::LeftSemi)
+}
+
+/// Test Nested Left-Anti Join Keeps Domain Representative
+#[test]
+fn test_nested_left_anti_inner_repr_not_propagated() -> Result<()> {
+    assert_nested_left_preserving_dep_join_keeps_domain_repr(JoinType::LeftAnti)
+}
+
 /// Test Partial Representative Resolution Is All-Or-Nothing:
 ///
 /// INPUT:

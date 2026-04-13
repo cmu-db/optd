@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use datafusion::{
-    common::DFSchema,
+    common::{Column as DFColumn, DFSchema},
     logical_expr::{
         self, Cast as DFCast, Expr as DFExpr, ExprSchemable, Like as DFLike,
         LogicalPlan as DFLogicalPlan, expr::AggregateFunction, expr::ScalarFunction, logical_plan,
@@ -16,7 +16,10 @@ use optd_core::{
         builder::{self as optd_builder, literal},
         catalog::{Field, Schema},
         convert::{IntoOperator, IntoScalar},
-        operator::{Aggregate, Get, Join, Limit, OrderBy, Project, Remap, Select},
+        operator::{
+            Aggregate, DependentJoin, Get, Join, Limit, OrderBy, Project, Remap, Select,
+            join::JoinType,
+        },
         properties::TupleOrderingDirection,
         scalar::{Case, Cast, ColumnRef, Function, InList, Like, List, NaryOp, NaryOpKind},
     },
@@ -26,6 +29,310 @@ use snafu::{ResultExt, whatever};
 use crate::planner::{DataFusionSnafu, OptdQueryPlannerContext, OptdSnafu, Result};
 
 impl OptdQueryPlannerContext<'_> {
+    fn strip_alias(expr: &DFExpr) -> &DFExpr {
+        match expr {
+            DFExpr::Alias(alias) => Self::strip_alias(&alias.expr),
+            _ => expr,
+        }
+    }
+
+    fn aggregate_function_in_expr(expr: &DFExpr) -> Option<&AggregateFunction> {
+        match Self::strip_alias(expr) {
+            DFExpr::AggregateFunction(agg_func) => Some(agg_func),
+            _ => None,
+        }
+    }
+
+    fn validate_aggregate_function(agg_func: &AggregateFunction) -> Result<()> {
+        if agg_func.params.filter.is_some() {
+            whatever!("does not support filter in aggregate")
+        }
+
+        if !agg_func.params.order_by.is_empty() {
+            whatever!("does not support order by in aggregate")
+        }
+
+        if agg_func.params.null_treatment.is_some() {
+            whatever!("does not support special null treatment in aggregate")
+        }
+
+        Ok(())
+    }
+
+    fn df_conjuncts<'a>(expr: &'a DFExpr, conjuncts: &mut Vec<&'a DFExpr>) {
+        if let DFExpr::BinaryExpr(binary_expr) = expr
+            && binary_expr.op == logical_expr::Operator::And
+        {
+            Self::df_conjuncts(&binary_expr.left, conjuncts);
+            Self::df_conjuncts(&binary_expr.right, conjuncts);
+            return;
+        }
+
+        conjuncts.push(expr);
+    }
+
+    fn flush_residual_filter(
+        &mut self,
+        input: Arc<optd_core::ir::Operator>,
+        predicates: &mut Vec<DFExpr>,
+        input_schema: &DFSchema,
+    ) -> Result<Arc<optd_core::ir::Operator>> {
+        if predicates.is_empty() {
+            return Ok(input);
+        }
+
+        let predicate = predicates
+            .drain(..)
+            .map(|expr| self.try_into_optd_scalar_expr(&expr, input_schema))
+            .collect::<Result<Vec<_>>>()?;
+        let predicate = Scalar::combine_conjuncts(predicate);
+
+        Ok(Select::new(input, predicate).into_operator())
+    }
+
+    fn scalar_subquery_in_expr<'a>(
+        expr: &'a DFExpr,
+    ) -> Option<&'a logical_expr::logical_plan::Subquery> {
+        match expr {
+            DFExpr::ScalarSubquery(subquery) => Some(subquery),
+            DFExpr::Alias(alias) => Self::scalar_subquery_in_expr(&alias.expr),
+            DFExpr::Cast(cast) => Self::scalar_subquery_in_expr(&cast.expr),
+            _ => None,
+        }
+    }
+
+    fn try_into_optd_scalar_expr_with_subquery_column(
+        &mut self,
+        node: &DFExpr,
+        input_schema: &DFSchema,
+        subquery_column: optd_core::ir::Column,
+    ) -> Result<Arc<optd_core::ir::Scalar>> {
+        match node {
+            DFExpr::ScalarSubquery(_) => Ok(ColumnRef::new(subquery_column).into_scalar()),
+            DFExpr::Alias(alias) => self.try_into_optd_scalar_expr_with_subquery_column(
+                &alias.expr,
+                input_schema,
+                subquery_column,
+            ),
+            DFExpr::Cast(cast) => {
+                let input = self.try_into_optd_scalar_expr_with_subquery_column(
+                    &cast.expr,
+                    input_schema,
+                    subquery_column,
+                )?;
+                Ok(Cast::new(cast.data_type.clone(), input).into_scalar())
+            }
+            _ => self.try_into_optd_scalar_expr(node, input_schema),
+        }
+    }
+
+    fn try_into_optd_binary_compare_op(
+        op: &logical_expr::Operator,
+    ) -> Result<optd_core::ir::scalar::BinaryOpKind> {
+        match op {
+            logical_expr::Operator::Eq => Ok(optd_core::ir::scalar::BinaryOpKind::Eq),
+            logical_expr::Operator::NotEq => Ok(optd_core::ir::scalar::BinaryOpKind::Ne),
+            logical_expr::Operator::Lt => Ok(optd_core::ir::scalar::BinaryOpKind::Lt),
+            logical_expr::Operator::LtEq => Ok(optd_core::ir::scalar::BinaryOpKind::Le),
+            logical_expr::Operator::Gt => Ok(optd_core::ir::scalar::BinaryOpKind::Gt),
+            logical_expr::Operator::GtEq => Ok(optd_core::ir::scalar::BinaryOpKind::Ge),
+            logical_expr::Operator::IsNotDistinctFrom => {
+                Ok(optd_core::ir::scalar::BinaryOpKind::IsNotDistinctFrom)
+            }
+            op => whatever!("Unsupported scalar-subquery comparison op: {}", op),
+        }
+    }
+
+    fn try_into_optd_in_subquery(
+        &mut self,
+        outer: Arc<optd_core::ir::Operator>,
+        node: &logical_expr::expr::InSubquery,
+        input_schema: &DFSchema,
+    ) -> Result<Arc<optd_core::ir::Operator>> {
+        let inner = self.try_into_optd_plan(&node.subquery.subquery)?;
+        let inner_cols = inner
+            .output_columns_in_order(&self.inner)
+            .context(OptdSnafu)?;
+        if inner_cols.len() != 1 {
+            whatever!(
+                "InSubquery should return exactly one column, found {}",
+                inner_cols.len()
+            );
+        }
+
+        let expr = self.try_into_optd_scalar_expr(&node.expr, input_schema)?;
+        let subquery_value = ColumnRef::new(inner_cols[0]).into_scalar();
+        let join_cond = expr.eq(subquery_value);
+        let join_type = if node.negated {
+            JoinType::LeftAnti
+        } else {
+            JoinType::LeftSemi
+        };
+
+        Ok(DependentJoin::new(join_type, outer, inner, join_cond).into_operator())
+    }
+
+    fn try_into_optd_exists(
+        &mut self,
+        outer: Arc<optd_core::ir::Operator>,
+        node: &logical_expr::expr::Exists,
+    ) -> Result<Arc<optd_core::ir::Operator>> {
+        let inner = self.try_into_optd_plan(&node.subquery.subquery)?;
+        let join_type = if node.negated {
+            JoinType::LeftAnti
+        } else {
+            JoinType::LeftSemi
+        };
+
+        Ok(DependentJoin::new(join_type, outer, inner, literal(true)).into_operator())
+    }
+
+    fn try_into_optd_scalar_subquery_compare(
+        &mut self,
+        outer: Arc<optd_core::ir::Operator>,
+        node: &logical_expr::BinaryExpr,
+        input_schema: &DFSchema,
+    ) -> Result<Arc<optd_core::ir::Operator>> {
+        let lhs_subquery = Self::scalar_subquery_in_expr(&node.left);
+        let rhs_subquery = Self::scalar_subquery_in_expr(&node.right);
+        let subquery = match (lhs_subquery, rhs_subquery) {
+            (Some(_), Some(_)) => {
+                whatever!("does not support binary predicates with scalar subqueries on both sides")
+            }
+            (Some(subquery), None) | (None, Some(subquery)) => subquery,
+            (None, None) => whatever!("binary expr does not contain a scalar subquery"),
+        };
+
+        let inner = self.try_into_optd_plan(&subquery.subquery)?;
+        let inner_cols = inner
+            .output_columns_in_order(&self.inner)
+            .context(OptdSnafu)?;
+        if inner_cols.len() != 1 {
+            whatever!(
+                "ScalarSubquery should return exactly one column, found {}",
+                inner_cols.len()
+            );
+        }
+
+        let lhs = self.try_into_optd_scalar_expr_with_subquery_column(
+            &node.left,
+            input_schema,
+            inner_cols[0],
+        )?;
+        let rhs = self.try_into_optd_scalar_expr_with_subquery_column(
+            &node.right,
+            input_schema,
+            inner_cols[0],
+        )?;
+        let op_kind = Self::try_into_optd_binary_compare_op(&node.op)?;
+        let join_cond = lhs.binary_op(rhs, op_kind);
+
+        Ok(DependentJoin::new(JoinType::Inner, outer, inner, join_cond).into_operator())
+    }
+
+    fn try_rewrite_distinct_aggregate(
+        &mut self,
+        node: &logical_plan::Aggregate,
+    ) -> Result<Option<Arc<optd_core::ir::Operator>>> {
+        let aggregate_functions = node
+            .aggr_expr
+            .iter()
+            .map(|expr| match Self::aggregate_function_in_expr(expr) {
+                Some(agg_func) => Ok(agg_func),
+                None => whatever!("aggregate expression should be an aggregate function: {expr}"),
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        for agg_func in &aggregate_functions {
+            Self::validate_aggregate_function(agg_func)?;
+        }
+
+        let Some(first_distinct) = aggregate_functions
+            .iter()
+            .find(|agg_func| agg_func.params.distinct)
+        else {
+            return Ok(None);
+        };
+
+        if aggregate_functions
+            .iter()
+            .any(|agg_func| !agg_func.params.distinct)
+        {
+            whatever!("does not support mixing DISTINCT and non-DISTINCT aggregates");
+        }
+
+        if first_distinct.params.args.is_empty() {
+            whatever!("DISTINCT aggregate must have at least one argument");
+        }
+
+        if aggregate_functions
+            .iter()
+            .any(|agg_func| agg_func.params.args != first_distinct.params.args)
+        {
+            whatever!("does not support DISTINCT aggregates with different arguments");
+        }
+
+        let inner_group_expr = node
+            .group_expr
+            .iter()
+            .cloned()
+            .chain(first_distinct.params.args.iter().cloned())
+            .collect_vec();
+        let inner_aggregate =
+            logical_plan::Aggregate::try_new(Arc::clone(&node.input), inner_group_expr, vec![])
+                .context(DataFusionSnafu)?;
+        let inner_plan = DFLogicalPlan::Aggregate(inner_aggregate);
+
+        let outer_group_expr = node
+            .group_expr
+            .iter()
+            .enumerate()
+            .map(|(idx, expr)| {
+                let (_, name) = expr.qualified_name();
+                DFExpr::Column(DFColumn::from(inner_plan.schema().qualified_field(idx))).alias(name)
+            })
+            .collect_vec();
+
+        let distinct_arg_offset = node.group_expr.len();
+        let rewritten_args = (0..first_distinct.params.args.len())
+            .map(|idx| {
+                DFExpr::Column(DFColumn::from(
+                    inner_plan
+                        .schema()
+                        .qualified_field(distinct_arg_offset + idx),
+                ))
+            })
+            .collect_vec();
+
+        let outer_aggr_expr = aggregate_functions
+            .iter()
+            .zip_eq(node.aggr_expr.iter())
+            .map(|(agg_func, original_expr)| {
+                let (_, name) = original_expr.qualified_name();
+                DFExpr::AggregateFunction(AggregateFunction::new_udf(
+                    Arc::clone(&agg_func.func),
+                    rewritten_args.clone(),
+                    false,
+                    agg_func.params.filter.clone(),
+                    agg_func.params.order_by.clone(),
+                    agg_func.params.null_treatment.clone(),
+                ))
+                .alias(name)
+            })
+            .collect_vec();
+
+        let outer_aggregate = logical_plan::Aggregate::try_new_with_schema(
+            Arc::new(inner_plan),
+            outer_group_expr,
+            outer_aggr_expr,
+            Arc::clone(&node.schema),
+        )
+        .context(DataFusionSnafu)?;
+
+        self.try_into_optd_plan(&DFLogicalPlan::Aggregate(outer_aggregate))
+            .map(Some)
+    }
+
     pub fn try_into_optd_plan(
         &mut self,
         df_logical_plan: &DFLogicalPlan,
@@ -100,6 +407,10 @@ impl OptdQueryPlannerContext<'_> {
         &mut self,
         node: &logical_plan::Aggregate,
     ) -> Result<Arc<optd_core::ir::Operator>> {
+        if let Some(rewritten) = self.try_rewrite_distinct_aggregate(node)? {
+            return Ok(rewritten);
+        }
+
         let input = self.try_into_optd_plan(&node.input)?;
 
         let keys = node
@@ -246,10 +557,41 @@ impl OptdQueryPlannerContext<'_> {
         node: &logical_plan::Filter,
     ) -> Result<Arc<optd_core::ir::Operator>> {
         let input = self.try_into_optd_plan(node.input.as_ref())?;
-        let predicate = self.try_into_optd_scalar_expr(&node.predicate, node.input.schema())?;
+        let mut current = input;
+        let mut residual = Vec::new();
+        let mut conjuncts = Vec::new();
+        Self::df_conjuncts(&node.predicate, &mut conjuncts);
 
-        let select = Select::new(input, predicate);
-        Ok(select.into_operator())
+        for conjunct in conjuncts {
+            match conjunct {
+                DFExpr::InSubquery(in_subquery) => {
+                    current =
+                        self.flush_residual_filter(current, &mut residual, node.input.schema())?;
+                    current =
+                        self.try_into_optd_in_subquery(current, in_subquery, node.input.schema())?;
+                }
+                DFExpr::Exists(exists) => {
+                    current =
+                        self.flush_residual_filter(current, &mut residual, node.input.schema())?;
+                    current = self.try_into_optd_exists(current, exists)?;
+                }
+                DFExpr::BinaryExpr(binary_expr)
+                    if Self::scalar_subquery_in_expr(&binary_expr.left).is_some()
+                        || Self::scalar_subquery_in_expr(&binary_expr.right).is_some() =>
+                {
+                    current =
+                        self.flush_residual_filter(current, &mut residual, node.input.schema())?;
+                    current = self.try_into_optd_scalar_subquery_compare(
+                        current,
+                        binary_expr,
+                        node.input.schema(),
+                    )?;
+                }
+                expr => residual.push(expr.clone()),
+            }
+        }
+
+        self.flush_residual_filter(current, &mut residual, node.input.schema())
     }
 
     pub fn try_into_optd_get(
@@ -300,6 +642,7 @@ impl OptdQueryPlannerContext<'_> {
     ) -> Result<Arc<optd_core::ir::Scalar>> {
         match node {
             DFExpr::Column(column) => self.try_into_optd_column_ref(column),
+            DFExpr::OuterReferenceColumn(_, column) => self.try_into_optd_outer_column_ref(column),
             DFExpr::Literal(literal, _) => self.try_into_optd_literal(literal),
             DFExpr::BinaryExpr(binary_expr) => {
                 self.try_into_optd_scalar_op(binary_expr, input_schema)
@@ -315,6 +658,7 @@ impl OptdQueryPlannerContext<'_> {
             DFExpr::Like(like) => self.try_into_optd_like(like, input_schema),
             DFExpr::Case(case) => self.try_into_optd_case(case, input_schema),
             DFExpr::InList(in_list) => self.try_into_optd_in_list(in_list, input_schema),
+            DFExpr::Between(between) => self.try_into_optd_between(between, input_schema),
             expr => {
                 whatever!("Unsupported df logical expr: {}", expr);
             }
@@ -330,6 +674,14 @@ impl OptdQueryPlannerContext<'_> {
             // attempt to match unmatched table_ref.
             Err(_) => self.try_get_optd_column(None, &column.name)?,
         };
+        Ok(ColumnRef::new(column).into_scalar())
+    }
+
+    pub fn try_into_optd_outer_column_ref(
+        &self,
+        column: &datafusion::common::Column,
+    ) -> Result<Arc<Scalar>> {
+        let column = self.try_get_optd_column(column.relation.as_ref(), &column.name)?;
         Ok(ColumnRef::new(column).into_scalar())
     }
 
@@ -390,21 +742,7 @@ impl OptdQueryPlannerContext<'_> {
             whatever!("does not support distinct aggregate")
         }
 
-        if agg_func.params.filter.is_some() {
-            whatever!("does not support filter in aggregate")
-        }
-
-        if agg_func.params.filter.is_some() {
-            whatever!("does not support filter in aggregate")
-        }
-
-        if !agg_func.params.order_by.is_empty() {
-            whatever!("does not support order by in aggregate")
-        }
-
-        if agg_func.params.null_treatment.is_some() {
-            whatever!("does not support special null treatment in aggregate")
-        }
+        Self::validate_aggregate_function(agg_func)?;
 
         let func_name = agg_func.func.name();
 
@@ -506,6 +844,22 @@ impl OptdQueryPlannerContext<'_> {
             .transpose()?;
 
         Ok(Case::new(expr, when_then_expr.into(), else_expr).into_scalar())
+    }
+
+    pub fn try_into_optd_between(
+        &mut self,
+        node: &logical_expr::expr::Between,
+        input_schema: &DFSchema,
+    ) -> Result<Arc<Scalar>> {
+        let expr = self.try_into_optd_scalar_expr(&node.expr, input_schema)?;
+        let low = self.try_into_optd_scalar_expr(&node.low, input_schema)?;
+        let high = self.try_into_optd_scalar_expr(&node.high, input_schema)?;
+
+        if node.negated {
+            Ok(expr.clone().lt(low).or(expr.gt(high)))
+        } else {
+            Ok(expr.clone().ge(low).and(expr.le(high)))
+        }
     }
 
     pub fn try_into_optd_in_list(

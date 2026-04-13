@@ -80,6 +80,7 @@ impl OptdQueryPlannerContext<'_> {
             DFScalarValue::Decimal128(v, p, s) => Ok(OptdScalarValue::Decimal128(v, p, s)),
             DFScalarValue::Date32(v) => Ok(OptdScalarValue::Date32(v)),
             DFScalarValue::Date64(v) => Ok(OptdScalarValue::Date64(v)),
+            DFScalarValue::IntervalMonthDayNano(v) => Ok(OptdScalarValue::IntervalMonthDayNano(v)),
             value => whatever!(
                 "Conversion from DataFusion ScalarValue {:?} is not implemented",
                 value
@@ -108,6 +109,7 @@ impl OptdQueryPlannerContext<'_> {
             OptdScalarValue::Decimal128(v, p, s) => DFScalarValue::Decimal128(v, p, s),
             OptdScalarValue::Date32(v) => DFScalarValue::Date32(v),
             OptdScalarValue::Date64(v) => DFScalarValue::Date64(v),
+            OptdScalarValue::IntervalMonthDayNano(v) => DFScalarValue::IntervalMonthDayNano(v),
         }
     }
 

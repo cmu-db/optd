@@ -12,9 +12,11 @@ use arrow::{
     array::{
         Array, ArrayRef, BooleanArray, Date32Array, Date64Array, Decimal32Array, Decimal64Array,
         Decimal128Array, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
-        StringArray, StringViewArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
+        IntervalMonthDayNanoArray, StringArray, StringViewArray, UInt8Array, UInt16Array,
+        UInt32Array, UInt64Array,
     },
     compute::kernels::cast::{CastOptions, cast_with_options},
+    datatypes::IntervalMonthDayNano,
     util::display::{DurationFormat, FormatOptions},
 };
 
@@ -69,6 +71,8 @@ pub enum ScalarValue {
     Decimal64(Option<i64>, u8, i8),
     /// 128-bit decimal, using the i128 to represent the decimal, precision scale.
     Decimal128(Option<i128>, u8, i8),
+    /// Month-day-nano interval stored in Arrow's packed i128 representation.
+    IntervalMonthDayNano(Option<IntervalMonthDayNano>),
 }
 
 impl ScalarValue {
@@ -92,6 +96,7 @@ impl ScalarValue {
             ScalarValue::Decimal32(v, _, _) => v.is_none(),
             ScalarValue::Decimal64(v, _, _) => v.is_none(),
             ScalarValue::Decimal128(v, _, _) => v.is_none(),
+            ScalarValue::IntervalMonthDayNano(v) => v.is_none(),
         }
     }
 
@@ -116,6 +121,9 @@ impl ScalarValue {
             ScalarValue::Decimal64(_, precision, scale) => DataType::Decimal64(*precision, *scale),
             ScalarValue::Decimal128(_, precision, scale) => {
                 DataType::Decimal128(*precision, *scale)
+            }
+            ScalarValue::IntervalMonthDayNano(_) => {
+                DataType::Interval(arrow_schema::IntervalUnit::MonthDayNano)
             }
         }
     }
@@ -158,6 +166,9 @@ impl ScalarValue {
                     "invalid decimal128 scalar metadata precision={precision}, scale={scale}"
                 );
                 Arc::new(array)
+            }
+            ScalarValue::IntervalMonthDayNano(value) => {
+                Arc::new(IntervalMonthDayNanoArray::from(vec![*value]))
             }
         };
 
@@ -227,6 +238,15 @@ impl ScalarValue {
                     *scale,
                 )
             }
+            DataType::Interval(arrow_schema::IntervalUnit::MonthDayNano) => {
+                let array = array
+                    .as_any()
+                    .downcast_ref::<IntervalMonthDayNanoArray>()
+                    .unwrap();
+                ScalarValue::IntervalMonthDayNano(
+                    (!array.is_null(index)).then(|| array.value(index)),
+                )
+            }
             other => whatever!("unsupported scalar cast target type {other}"),
         })
     }
@@ -279,6 +299,8 @@ impl PartialEq for ScalarValue {
             (Decimal64(_, _, _), _) => false,
             (Decimal128(v1, p1, s1), Decimal128(v2, p2, s2)) => v1 == v2 && p1 == p2 && s1 == s2,
             (Decimal128(_, _, _), _) => false,
+            (IntervalMonthDayNano(v1), IntervalMonthDayNano(v2)) => v1 == v2,
+            (IntervalMonthDayNano(_), _) => false,
         }
     }
 }
@@ -335,6 +357,7 @@ impl Hash for ScalarValue {
                 p.hash(state);
                 s.hash(state);
             }
+            IntervalMonthDayNano(v) => v.hash(state),
         }
     }
 }
@@ -460,6 +483,10 @@ impl std::fmt::Display for ScalarValue {
             ScalarValue::Decimal128(v, precision, scale) => match v {
                 Some(val) => write!(f, "{}::decimal128({}, {})", val, precision, scale),
                 None => write!(f, "null::decimal128({}, {})", precision, scale),
+            },
+            ScalarValue::IntervalMonthDayNano(v) => match v {
+                Some(val) => write!(f, "{val:?}::interval_month_day_nano"),
+                None => write!(f, "null::interval_month_day_nano"),
             },
         }
     }

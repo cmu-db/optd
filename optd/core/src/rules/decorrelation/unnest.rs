@@ -196,11 +196,11 @@ impl UnnestingRule {
             let mut available_cols: Vec<Column> = available.iter().copied().collect();
             available_cols.sort();
             let mut seen_outer_refs_vec: Vec<Column> = seen_outer_refs.iter().copied().collect();
+            seen_outer_refs_vec.retain(|c| info.is_outer_ref_recursive(c));
             seen_outer_refs_vec.sort();
             let mut chosen_reprs: Vec<(Column, Column)> = Vec::new();
             let mut can_resolve_all = true;
             for c in &seen_outer_refs_vec {
-                assert!(info.is_outer_ref_recursive(c));
                 let target_class = info.get_cclass_of(c);
                 if let Some(chosen) = available_cols
                     .iter()
