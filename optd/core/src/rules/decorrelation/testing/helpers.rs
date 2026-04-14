@@ -65,7 +65,7 @@ pub(super) fn make_cols(ctx: &IRContext, n: usize) -> Vec<Column> {
     let next_table = ctx.binder.read().unwrap().bindings.len() + 1;
     let table_ref = TableRef::bare(format!("__mock_{next_table}"));
     ctx.catalog
-        .create_table(table_ref.clone(), schema.clone())
+        .create_table(table_ref.clone(), schema.clone(), None)
         .unwrap();
     let table_index = ctx.add_binding(Some(table_ref), schema).unwrap();
     (0..n).map(|idx| Column(table_index, idx)).collect()
