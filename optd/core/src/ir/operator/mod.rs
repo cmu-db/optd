@@ -123,6 +123,7 @@ pub struct Operator {
     /// The operator type and associated metadata.
     pub kind: OperatorKind,
     /// The input operators and scalars.
+    #[cfg_attr(feature = "serde", serde(rename = "_common"))]
     pub common: IRCommon<OperatorProperties>,
 }
 

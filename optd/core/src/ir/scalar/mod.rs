@@ -65,6 +65,7 @@ pub enum ScalarKind {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Scalar {
     pub kind: ScalarKind,
+    #[cfg_attr(feature = "serde", serde(rename = "_common"))]
     pub common: IRCommon<ScalarProperties>,
 }
 

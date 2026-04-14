@@ -16,7 +16,7 @@ use datafusion::{
         joins::{HashJoinExec, NestedLoopJoinExec, SortMergeJoinExec},
     },
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
-    sql::TableReference,
+    sql::{TableReference, unparser::plan_to_sql},
 };
 use optd_core::{
     cascades::Cascades,
@@ -30,6 +30,7 @@ use optd_core::{
     magic::{MagicCardinalityEstimator, MagicCostModel},
     rules,
 };
+use optd_repository_api::optd_catalog::RepositoryCatalog;
 use snafu::{OptionExt, ResultExt, Snafu};
 
 use crate::{OptdExtension, OptdExtensionConfig};
@@ -203,6 +204,32 @@ impl OptdQueryPlanner {
             Arc::new(MagicCostModel),
         )))
     }
+
+    async fn log_query_instance(
+        session_state: &SessionState,
+        actual_logical_plan: &LogicalPlan,
+        optd_logical: &Arc<optd_core::ir::Operator>,
+        optd_physical: &Arc<optd_core::ir::Operator>,
+    ) -> datafusion::common::Result<()> {
+        let extension =
+            Self::optd_extension(session_state).map_err(|e| DataFusionError::External(e.into()))?;
+        let catalog = extension.catalog();
+        let Some(repository_catalog) = catalog.as_any().downcast_ref::<RepositoryCatalog>() else {
+            return Ok(());
+        };
+
+        let sql = plan_to_sql(actual_logical_plan)?.to_string();
+        let initial_plan = serde_json::to_value(optd_logical.as_ref())
+            .map_err(|err| DataFusionError::External(Box::new(err)))?;
+        let final_plan = serde_json::to_value(optd_physical.as_ref())
+            .map_err(|err| DataFusionError::External(Box::new(err)))?;
+
+        repository_catalog
+            .log_query_instance(sql, Some(initial_plan), Some(final_plan))
+            .await
+            .map(|_| ())
+            .map_err(|err| DataFusionError::External(Box::new(err)))
+    }
 }
 
 impl OptdQueryPlanner {
@@ -277,6 +304,14 @@ impl OptdQueryPlanner {
             .default
             .create_physical_plan(&logical_plan, session_state)
             .await?;
+
+        Self::log_query_instance(
+            session_state,
+            actual_logical_plan,
+            &optd_logical,
+            &optd_physical,
+        )
+        .await?;
 
         if let Some(x) = explain.as_mut() {
             // `quick_explain` only displays cached operator properties.

@@ -11,6 +11,7 @@ use sea_orm::DatabaseConnection;
 use crate::{
     Repository,
     entity::column::ColumnType,
+    query::{LogQueryInstanceInfo, QueryPlan},
     schema::{CreateSchemaInfo, SchemaInfo},
     stats::UpdateTableStatsInfo,
     table::{CreateColumnInfo, CreateTableInfo, GetTableInfo, TableInfo},
@@ -170,6 +171,23 @@ impl RepositoryCatalog {
             })
         })
     }
+
+    pub async fn log_query_instance(
+        &self,
+        sql: String,
+        initial_plan: Option<QueryPlan>,
+        final_plan: Option<QueryPlan>,
+    ) -> Result<i64, sea_orm::DbErr> {
+        let repo = Repository::new(self.db.clone());
+        let snapshot_id = repo.reader().await?.snapshot().snapshot_id;
+        repo.log_query_instance(LogQueryInstanceInfo {
+            sql,
+            snapshot_id,
+            initial_plan,
+            final_plan,
+        })
+        .await
+    }
 }
 
 impl Catalog for RepositoryCatalog {
@@ -291,7 +309,7 @@ mod tests {
         table_ref::TableRef,
     };
     use optd_repository_migration::{Migrator, MigratorTrait};
-    use sea_orm::{Database, DbErr};
+    use sea_orm::{Database, DbErr, prelude::Json};
 
     use super::RepositoryCatalog;
 
@@ -362,6 +380,40 @@ mod tests {
             catalog.table_by_ref(&table_ref),
             Err(optd_core::ir::catalog::CatalogError::TableNotFound { .. })
         ));
+
+        Ok(())
+    }
+
+    #[test]
+    fn repository_catalog_logs_query_instances() -> Result<(), DbErr> {
+        let runtime = tokio::runtime::Runtime::new().expect("failed to create runtime");
+        let db_path = std::env::temp_dir().join(format!(
+            "optd-repository-catalog-{}.db",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let db_url = format!("sqlite://{}?mode=rwc", db_path.display());
+        let db = runtime.block_on(async {
+            let db = Database::connect(&db_url).await?;
+            Migrator::up(&db, None).await?;
+            Ok::<_, DbErr>(db)
+        })?;
+        let catalog = RepositoryCatalog::new(db.clone(), "datafusion", "public");
+
+        let instance_id = runtime.block_on(catalog.log_query_instance(
+            "SELECT 1".to_owned(),
+            Some(Json::String("initial".to_owned())),
+            Some(Json::String("final".to_owned())),
+        ))?;
+
+        let repo = crate::Repository::new(db);
+        let instance = runtime.block_on(repo.get_query_instance(instance_id))?;
+        let query = runtime.block_on(repo.get_query(instance.query_id))?;
+        assert_eq!(query.sql, "SELECT 1");
+        assert_eq!(
+            instance.initial_plan,
+            Some(Json::String("initial".to_owned()))
+        );
+        assert_eq!(instance.final_plan, Some(Json::String("final".to_owned())));
 
         Ok(())
     }
