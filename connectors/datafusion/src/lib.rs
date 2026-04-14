@@ -1,6 +1,5 @@
 mod extension;
 mod planner;
-mod table;
 
 use core::fmt;
 use std::sync::Arc;
@@ -19,7 +18,6 @@ use datafusion::sql::parser::DFParser;
 use datafusion::sql::sqlparser::dialect::dialect_from_str;
 pub use extension::{OptdExtension, OptdExtensionConfig};
 pub use planner::OptdQueryPlanner;
-pub use table::{OptdTable, OptdTableProvider};
 
 pub use optd_core::error::Error as OptdError;
 pub use optd_core::error::Result as OptdResult;
