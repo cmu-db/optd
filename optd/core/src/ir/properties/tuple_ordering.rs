@@ -9,6 +9,7 @@ use bitvec::{boxed::BitBox, vec::BitVec};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TupleOrderingDirection {
     Asc,
     Desc,
@@ -37,6 +38,7 @@ impl std::fmt::Display for TupleOrderingDirection {
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TupleOrdering(Arc<TupleOrderingInner>);
 
 impl PartialOrd for TupleOrdering {
@@ -71,6 +73,7 @@ impl std::fmt::Debug for TupleOrdering {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 struct TupleOrderingInner {
     /// The specified columns to be ordered on.
     columns: Box<[Column]>,

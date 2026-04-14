@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 // TODO: Full type signature in optd, right now just use id.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FunctionKind {
     Scalar,
     Aggregate,

@@ -1,0 +1,15 @@
+[package]
+name = "optd-repository-migration"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "optd_repository_migration"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+sea-orm-migration = { workspace = true }
+optd-repository-entity = { path = "../entity" }

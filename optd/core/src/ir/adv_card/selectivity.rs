@@ -502,7 +502,7 @@ fn equality_selectivity_col_lit(
     };
 
     let (stats, offset) = column_stats(ctx, col_meta.column)?;
-    let col_stats = stats.column_statistics.get(offset)?;
+    let col_stats = stats.column_statistics.get(&offset)?;
     let table_row_count = stats.row_count;
     let distinct = ndv(col_stats).unwrap_or(table_row_count);
 
@@ -624,7 +624,7 @@ pub fn equijoin_cardinality(
             &column_stats(ctx, *inner_col),
         ) {
             (Some((outer_ts, outer_off)), Some((inner_ts, inner_off))) => {
-                let Some(build_cs) = outer_ts.column_statistics.get(*outer_off) else {
+                let Some(build_cs) = outer_ts.column_statistics.get(outer_off) else {
                     edges.push(JoinEdge {
                         build_col: *outer_col,
                         probe_col: *inner_col,
@@ -633,7 +633,7 @@ pub fn equijoin_cardinality(
                     });
                     continue;
                 };
-                let Some(probe_cs) = inner_ts.column_statistics.get(*inner_off) else {
+                let Some(probe_cs) = inner_ts.column_statistics.get(inner_off) else {
                     edges.push(JoinEdge {
                         build_col: *outer_col,
                         probe_col: *inner_col,
@@ -954,7 +954,7 @@ fn range_selectivity_col_lit(
     };
 
     let (stats, offset) = column_stats(ctx, col_meta.column)?;
-    let col_stats = stats.column_statistics.get(offset)?;
+    let col_stats = stats.column_statistics.get(&offset)?;
     let table_row_count = stats.row_count;
     let col_type = &ctx.get_column_meta(&col_meta.column).data_type;
 
@@ -1147,7 +1147,7 @@ fn or_ranges_tautology(terms: &[std::sync::Arc<Scalar>], ctx: &IRContext) -> Opt
 
     // Look up column stats for min/max.
     let (stats, offset) = column_stats(ctx, target_col)?;
-    let col_stats = stats.column_statistics.get(offset)?;
+    let col_stats = stats.column_statistics.get(&offset)?;
     let table_row_count = stats.row_count;
     let col_type = &ctx.get_column_meta(&target_col).data_type;
     let min = parse_stat_value(col_stats.min_value.as_ref()?, col_type)?;

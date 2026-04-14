@@ -29,6 +29,7 @@ define_node!(
 impl_scalar_conversion!(BinaryOp, BinaryOpBorrowed);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BinaryOpKind {
     Plus,
     Minus,
@@ -37,11 +38,39 @@ pub enum BinaryOpKind {
     Modulo,
     Eq,
     Ne,
+    IsDistinctFrom,
     IsNotDistinctFrom,
     Lt,
     Le,
     Gt,
     Ge,
+    RegexMatch,
+    RegexIMatch,
+    RegexNotMatch,
+    RegexNotIMatch,
+    LikeMatch,
+    ILikeMatch,
+    NotLikeMatch,
+    NotILikeMatch,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    BitwiseShiftRight,
+    BitwiseShiftLeft,
+    StringConcat,
+    AtArrow,
+    ArrowAt,
+    Arrow,
+    LongArrow,
+    HashArrow,
+    HashLongArrow,
+    AtAt,
+    IntegerDivide,
+    HashMinus,
+    AtQuestion,
+    Question,
+    QuestionAnd,
+    QuestionPipe,
 }
 
 impl std::fmt::Display for BinaryOpKind {
@@ -54,11 +83,39 @@ impl std::fmt::Display for BinaryOpKind {
             BinaryOpKind::Modulo => "%",
             BinaryOpKind::Eq => "=",
             BinaryOpKind::Ne => "!=",
+            BinaryOpKind::IsDistinctFrom => "IS DISTINCT FROM",
             BinaryOpKind::IsNotDistinctFrom => "IS NOT DISTINCT FROM",
             BinaryOpKind::Lt => "<",
             BinaryOpKind::Le => "<=",
             BinaryOpKind::Gt => ">",
             BinaryOpKind::Ge => ">=",
+            BinaryOpKind::RegexMatch => "~",
+            BinaryOpKind::RegexIMatch => "~*",
+            BinaryOpKind::RegexNotMatch => "!~",
+            BinaryOpKind::RegexNotIMatch => "!~*",
+            BinaryOpKind::LikeMatch => "~~",
+            BinaryOpKind::ILikeMatch => "~~*",
+            BinaryOpKind::NotLikeMatch => "!~~",
+            BinaryOpKind::NotILikeMatch => "!~~*",
+            BinaryOpKind::BitwiseAnd => "&",
+            BinaryOpKind::BitwiseOr => "|",
+            BinaryOpKind::BitwiseXor => "BIT_XOR",
+            BinaryOpKind::BitwiseShiftRight => ">>",
+            BinaryOpKind::BitwiseShiftLeft => "<<",
+            BinaryOpKind::StringConcat => "||",
+            BinaryOpKind::AtArrow => "@>",
+            BinaryOpKind::ArrowAt => "<@",
+            BinaryOpKind::Arrow => "->",
+            BinaryOpKind::LongArrow => "->>",
+            BinaryOpKind::HashArrow => "#>",
+            BinaryOpKind::HashLongArrow => "#>>",
+            BinaryOpKind::AtAt => "@@",
+            BinaryOpKind::IntegerDivide => "DIV",
+            BinaryOpKind::HashMinus => "#-",
+            BinaryOpKind::AtQuestion => "@?",
+            BinaryOpKind::Question => "?",
+            BinaryOpKind::QuestionAnd => "?&",
+            BinaryOpKind::QuestionPipe => "?|",
         };
         write!(f, "{s}")
     }
@@ -100,6 +157,10 @@ impl BinaryOpBorrowed<'_> {
 
     pub fn is_not_distinct_from(&self) -> bool {
         matches!(self.op_kind(), BinaryOpKind::IsNotDistinctFrom)
+    }
+
+    pub fn is_distinct_from(&self) -> bool {
+        matches!(self.op_kind(), BinaryOpKind::IsDistinctFrom)
     }
 
     pub fn is_lt(&self) -> bool {

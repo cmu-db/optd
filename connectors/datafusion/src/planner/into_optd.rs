@@ -122,12 +122,12 @@ impl OptdQueryPlannerContext<'_> {
             .map(|e| {
                 let (_, name) = e.qualified_name();
                 e.to_field(node.input.schema())
-                    .and_then(|(_, field)| {
-                        Ok(Arc::new(Field::new(
+                    .map(|(_, field)| {
+                        Arc::new(Field::new(
                             name,
                             field.data_type().clone(),
                             field.is_nullable(),
-                        )))
+                        ))
                     })
                     .context(DataFusionSnafu)
             })
@@ -145,12 +145,12 @@ impl OptdQueryPlannerContext<'_> {
             .map(|e| {
                 let (_, name) = e.qualified_name();
                 e.to_field(node.input.schema())
-                    .and_then(|(_, field)| {
-                        Ok(Arc::new(Field::new(
+                    .map(|(_, field)| {
+                        Arc::new(Field::new(
                             name,
                             field.data_type().clone(),
                             field.is_nullable(),
-                        )))
+                        ))
                     })
                     .context(DataFusionSnafu)
             })
@@ -315,6 +315,8 @@ impl OptdQueryPlannerContext<'_> {
             DFExpr::Like(like) => self.try_into_optd_like(like, input_schema),
             DFExpr::Case(case) => self.try_into_optd_case(case, input_schema),
             DFExpr::InList(in_list) => self.try_into_optd_in_list(in_list, input_schema),
+            DFExpr::IsNull(expr) => self.try_into_optd_is_null(expr, input_schema),
+            DFExpr::IsNotNull(expr) => self.try_into_optd_is_not_null(expr, input_schema),
             expr => {
                 whatever!("Unsupported df logical expr: {}", expr);
             }
@@ -362,13 +364,92 @@ impl OptdQueryPlannerContext<'_> {
             logical_expr::Operator::LtEq => Either::Left(optd_core::ir::scalar::BinaryOpKind::Le),
             logical_expr::Operator::Gt => Either::Left(optd_core::ir::scalar::BinaryOpKind::Gt),
             logical_expr::Operator::GtEq => Either::Left(optd_core::ir::scalar::BinaryOpKind::Ge),
+            logical_expr::Operator::IsDistinctFrom => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::IsDistinctFrom)
+            }
             logical_expr::Operator::IsNotDistinctFrom => {
                 Either::Left(optd_core::ir::scalar::BinaryOpKind::IsNotDistinctFrom)
             }
+            logical_expr::Operator::RegexMatch => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::RegexMatch)
+            }
+            logical_expr::Operator::RegexIMatch => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::RegexIMatch)
+            }
+            logical_expr::Operator::RegexNotMatch => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::RegexNotMatch)
+            }
+            logical_expr::Operator::RegexNotIMatch => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::RegexNotIMatch)
+            }
+            logical_expr::Operator::LikeMatch => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::LikeMatch)
+            }
+            logical_expr::Operator::ILikeMatch => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::ILikeMatch)
+            }
+            logical_expr::Operator::NotLikeMatch => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::NotLikeMatch)
+            }
+            logical_expr::Operator::NotILikeMatch => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::NotILikeMatch)
+            }
             logical_expr::Operator::And => Either::Right(optd_core::ir::scalar::NaryOpKind::And),
             logical_expr::Operator::Or => Either::Right(optd_core::ir::scalar::NaryOpKind::Or),
-            op => {
-                whatever!("Unsupported binary expr op: {}", op);
+            logical_expr::Operator::BitwiseAnd => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::BitwiseAnd)
+            }
+            logical_expr::Operator::BitwiseOr => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::BitwiseOr)
+            }
+            logical_expr::Operator::BitwiseXor => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::BitwiseXor)
+            }
+            logical_expr::Operator::BitwiseShiftRight => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::BitwiseShiftRight)
+            }
+            logical_expr::Operator::BitwiseShiftLeft => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::BitwiseShiftLeft)
+            }
+            logical_expr::Operator::StringConcat => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::StringConcat)
+            }
+            logical_expr::Operator::AtArrow => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::AtArrow)
+            }
+            logical_expr::Operator::ArrowAt => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::ArrowAt)
+            }
+            logical_expr::Operator::Arrow => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::Arrow)
+            }
+            logical_expr::Operator::LongArrow => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::LongArrow)
+            }
+            logical_expr::Operator::HashArrow => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::HashArrow)
+            }
+            logical_expr::Operator::HashLongArrow => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::HashLongArrow)
+            }
+            logical_expr::Operator::AtAt => Either::Left(optd_core::ir::scalar::BinaryOpKind::AtAt),
+            logical_expr::Operator::IntegerDivide => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::IntegerDivide)
+            }
+            logical_expr::Operator::HashMinus => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::HashMinus)
+            }
+            logical_expr::Operator::AtQuestion => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::AtQuestion)
+            }
+            logical_expr::Operator::Question => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::Question)
+            }
+            logical_expr::Operator::QuestionAnd => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::QuestionAnd)
+            }
+            logical_expr::Operator::QuestionPipe => {
+                Either::Left(optd_core::ir::scalar::BinaryOpKind::QuestionPipe)
             }
         };
 
@@ -522,5 +603,23 @@ impl OptdQueryPlannerContext<'_> {
             .map(List::new)?;
 
         Ok(InList::new(expr, list.into_scalar(), node.negated).into_scalar())
+    }
+
+    pub fn try_into_optd_is_null(
+        &mut self,
+        expr: &DFExpr,
+        input_schema: &DFSchema,
+    ) -> Result<Arc<Scalar>> {
+        let expr = self.try_into_optd_scalar_expr(expr, input_schema)?;
+        Ok(optd_builder::is_null(expr))
+    }
+
+    pub fn try_into_optd_is_not_null(
+        &mut self,
+        expr: &DFExpr,
+        input_schema: &DFSchema,
+    ) -> Result<Arc<Scalar>> {
+        let expr = self.try_into_optd_scalar_expr(expr, input_schema)?;
+        Ok(optd_builder::is_not_null(expr))
     }
 }

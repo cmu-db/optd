@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 /// Uniquely identifies an equivalent class in the optimizer.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GroupId(pub i64);
 
 impl std::fmt::Display for GroupId {

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -5,7 +7,7 @@ use serde_json::Value;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TableStatistics {
     pub row_count: usize,
-    pub column_statistics: Vec<ColumnStatistics>,
+    pub column_statistics: HashMap<usize, ColumnStatistics>,
 
     /// File size in bytes
     #[serde(skip_serializing_if = "Option::is_none")]

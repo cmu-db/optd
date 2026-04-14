@@ -261,6 +261,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "add this to bench suite later"]
     fn hll_massive_parallel() {
         let n_distinct = 100000;
         let n_jobs = 16;

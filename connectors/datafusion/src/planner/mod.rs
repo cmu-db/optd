@@ -16,7 +16,7 @@ use datafusion::{
         joins::{HashJoinExec, NestedLoopJoinExec, SortMergeJoinExec},
     },
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
-    sql::TableReference,
+    sql::{TableReference, unparser::plan_to_sql},
 };
 use optd_core::{
     cascades::Cascades,
@@ -30,8 +30,8 @@ use optd_core::{
     magic::{MagicCardinalityEstimator, MagicCostModel},
     rules,
 };
+use optd_repository_api::optd_catalog::RepositoryCatalog;
 use snafu::{OptionExt, ResultExt, Snafu};
-use tracing::warn;
 
 use crate::{OptdExtension, OptdExtensionConfig};
 
@@ -108,11 +108,29 @@ impl<'a> OptdQueryPlannerContext<'a> {
                                 column_statistics: column_statistics
                                     .iter()
                                     .map(|column_stat| {
+                                        let min_value = column_stat
+                                            .min_value
+                                            .get_value()
+                                            .and_then(|v| {
+                                                Self::try_into_optd_scalar_value(v.clone()).ok()
+                                            })
+                                            .and_then(|x| {
+                                                x.try_into_nullable_string().ok().flatten()
+                                            });
+                                        let max_value = column_stat
+                                            .max_value
+                                            .get_value()
+                                            .and_then(|v| {
+                                                Self::try_into_optd_scalar_value(v.clone()).ok()
+                                            })
+                                            .and_then(|x| {
+                                                x.try_into_nullable_string().ok().flatten()
+                                            });
                                         ColumnStatistics {
                                             // TODO(Aditya): populate with stuff from HLL, digests, etc.
                                             advanced_stats: Vec::new(),
-                                            min_value: precision_to_string(&column_stat.min_value),
-                                            max_value: precision_to_string(&column_stat.max_value),
+                                            min_value,
+                                            max_value,
                                             null_count: precision_to_option(
                                                 &column_stat.null_count,
                                             ),
@@ -121,6 +139,7 @@ impl<'a> OptdQueryPlannerContext<'a> {
                                             ),
                                         }
                                     })
+                                    .enumerate()
                                     .collect(),
                             }
                         })
@@ -128,7 +147,7 @@ impl<'a> OptdQueryPlannerContext<'a> {
                             row_count: DEFAULT_ROW_COUNT,
                             size_bytes: None,
                             // TODO(Aditya): add some default column stats?
-                            column_statistics: vec![],
+                            column_statistics: HashMap::new(),
                         }),
                 )
                 .context(CatalogSnafu)
@@ -161,18 +180,6 @@ fn precision_to_option<T: Copy + PartialOrd + Eq + std::fmt::Debug>(
     }
 }
 
-/// Extract value from Precision as Option<String>.
-/// TODO(Aditya): this should not be required after we move from `String` to `Value`.
-fn precision_to_string<T: ToString + PartialOrd + Eq + Clone + std::fmt::Debug>(
-    precision: &datafusion::common::stats::Precision<T>,
-) -> Option<String> {
-    match precision {
-        datafusion::common::stats::Precision::Exact(v) => Some(v.to_string()),
-        datafusion::common::stats::Precision::Inexact(v) => Some(v.to_string()),
-        datafusion::common::stats::Precision::Absent => None,
-    }
-}
-
 fn warm_explain_properties(op: &Arc<optd_core::ir::Operator>, ctx: &IRContext) {
     for input in op.input_operators() {
         warm_explain_properties(input, ctx);
@@ -196,6 +203,32 @@ impl OptdQueryPlanner {
             Arc::new(MagicCardinalityEstimator),
             Arc::new(MagicCostModel),
         )))
+    }
+
+    async fn log_query_instance(
+        session_state: &SessionState,
+        actual_logical_plan: &LogicalPlan,
+        optd_logical: &Arc<optd_core::ir::Operator>,
+        optd_physical: &Arc<optd_core::ir::Operator>,
+    ) -> datafusion::common::Result<()> {
+        let extension =
+            Self::optd_extension(session_state).map_err(|e| DataFusionError::External(e.into()))?;
+        let catalog = extension.catalog();
+        let Some(repository_catalog) = catalog.as_any().downcast_ref::<RepositoryCatalog>() else {
+            return Ok(());
+        };
+
+        let sql = plan_to_sql(actual_logical_plan)?.to_string();
+        let initial_plan = serde_json::to_value(optd_logical.as_ref())
+            .map_err(|err| DataFusionError::External(Box::new(err)))?;
+        let final_plan = serde_json::to_value(optd_physical.as_ref())
+            .map_err(|err| DataFusionError::External(Box::new(err)))?;
+
+        repository_catalog
+            .log_query_instance(sql, Some(initial_plan), Some(final_plan))
+            .await
+            .map(|_| ())
+            .map_err(|err| DataFusionError::External(Box::new(err)))
     }
 }
 
@@ -223,7 +256,6 @@ impl OptdQueryPlanner {
             LogicalPlan::Explain(explain) => (explain.plan.as_ref(), Some(explain.clone())),
             _ => (logical_plan, None),
         };
-        println!("actual_logical:\n{}", actual_logical_plan);
 
         let optd_logical = ctx
             .try_into_optd_plan(actual_logical_plan)
@@ -247,28 +279,19 @@ impl OptdQueryPlanner {
             .add_rule(rules::LogicalJoinInnerAssocRule::new())
             .build();
 
+        warm_explain_properties(&optd_logical, &ctx.inner);
+
         let opt = Arc::new(Cascades::new(ctx.inner.clone(), rule_set));
 
-        let Some(optd_physical) = opt.optimize(&optd_logical, Arc::default()).await else {
-            {
-                opt.memo.read().await.dump();
+        let optd_physical = match opt.optimize(&optd_logical, Arc::default()).await {
+            Ok(plan) => plan,
+            Err(e) => {
+                {
+                    opt.memo.read().await.dump();
+                }
+                return Err(DataFusionError::External(e.into()));
             }
-            warn!("optimization failed");
-            return self
-                .create_physical_plan_default(logical_plan, session_state)
-                .await;
         };
-
-        warm_explain_properties(&optd_logical, &ctx.inner);
-        // println!(
-        //     "optd_logical:\n{}",
-        //     quick_explain(&optd_logical, &ctx.inner)
-        // );
-        println!(
-            "optd_physical:\n{}",
-            quick_explain(&optd_physical, &ctx.inner)
-        );
-        // println!("binder:\n{:?}", ctx.inner.binder);
 
         let logical_plan = ctx
             .try_from_optd_plan(&optd_physical)
@@ -281,6 +304,14 @@ impl OptdQueryPlanner {
             .default
             .create_physical_plan(&logical_plan, session_state)
             .await?;
+
+        Self::log_query_instance(
+            session_state,
+            actual_logical_plan,
+            &optd_logical,
+            &optd_physical,
+        )
+        .await?;
 
         if let Some(x) = explain.as_mut() {
             // `quick_explain` only displays cached operator properties.
