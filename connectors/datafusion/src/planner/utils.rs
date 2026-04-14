@@ -80,7 +80,9 @@ impl OptdQueryPlannerContext<'_> {
             DFScalarValue::LargeUtf8(v) => Ok(OptdScalarValue::LargeUtf8(v)),
             DFScalarValue::Binary(v) => Ok(OptdScalarValue::Binary(v)),
             DFScalarValue::BinaryView(v) => Ok(OptdScalarValue::BinaryView(v)),
-            DFScalarValue::FixedSizeBinary(size, v) => Ok(OptdScalarValue::FixedSizeBinary(size, v)),
+            DFScalarValue::FixedSizeBinary(size, v) => {
+                Ok(OptdScalarValue::FixedSizeBinary(size, v))
+            }
             DFScalarValue::LargeBinary(v) => Ok(OptdScalarValue::LargeBinary(v)),
             DFScalarValue::List(v) => Ok(OptdScalarValue::List(v)),
             DFScalarValue::Struct(v) => Ok(OptdScalarValue::Struct(v)),
@@ -107,16 +109,10 @@ impl OptdQueryPlannerContext<'_> {
             }
             DFScalarValue::IntervalYearMonth(v) => Ok(OptdScalarValue::IntervalYearMonth(v)),
             DFScalarValue::IntervalDayTime(v) => Ok(OptdScalarValue::IntervalDayTime(v)),
-            DFScalarValue::IntervalMonthDayNano(v) => {
-                Ok(OptdScalarValue::IntervalMonthDayNano(v))
-            }
+            DFScalarValue::IntervalMonthDayNano(v) => Ok(OptdScalarValue::IntervalMonthDayNano(v)),
             DFScalarValue::DurationSecond(v) => Ok(OptdScalarValue::DurationSecond(v)),
-            DFScalarValue::DurationMillisecond(v) => {
-                Ok(OptdScalarValue::DurationMillisecond(v))
-            }
-            DFScalarValue::DurationMicrosecond(v) => {
-                Ok(OptdScalarValue::DurationMicrosecond(v))
-            }
+            DFScalarValue::DurationMillisecond(v) => Ok(OptdScalarValue::DurationMillisecond(v)),
+            DFScalarValue::DurationMicrosecond(v) => Ok(OptdScalarValue::DurationMicrosecond(v)),
             DFScalarValue::DurationNanosecond(v) => Ok(OptdScalarValue::DurationNanosecond(v)),
             value => whatever!(
                 "Conversion from DataFusion ScalarValue {:?} is not implemented",

@@ -1,4 +1,4 @@
-//! N-ary scalar operations like AND, OR.
+//! N-ary scalar operations for logical operators like AND, OR.
 
 use crate::ir::{
     IRCommon, Scalar,

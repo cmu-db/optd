@@ -11,26 +11,25 @@ use std::{
 
 use arrow::{
     array::{
-        new_null_array, Array, ArrayRef, BinaryArray, BinaryViewArray, BinaryViewBuilder,
-        BooleanArray, Date32Array, Date64Array, Decimal32Array, Decimal64Array,
-        Decimal128Array, Decimal256Array, DurationMicrosecondArray,
-        DurationMillisecondArray, DurationNanosecondArray, DurationSecondArray,
-        FixedSizeBinaryArray, FixedSizeBinaryBuilder, Float16Array, Float32Array, Float64Array,
-        Int8Array, Int16Array, Int32Array, Int64Array, IntervalDayTimeArray,
-        IntervalMonthDayNanoArray, IntervalYearMonthArray, LargeBinaryArray, LargeStringArray,
-        ListArray, MapArray, StringArray, StringViewArray, StringViewBuilder, StructArray,
-        Time32MillisecondArray, Time32SecondArray, Time64MicrosecondArray,
+        Array, ArrayRef, BinaryArray, BinaryViewArray, BinaryViewBuilder, BooleanArray,
+        Date32Array, Date64Array, Decimal32Array, Decimal64Array, Decimal128Array, Decimal256Array,
+        DurationMicrosecondArray, DurationMillisecondArray, DurationNanosecondArray,
+        DurationSecondArray, FixedSizeBinaryArray, FixedSizeBinaryBuilder, Float16Array,
+        Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
+        IntervalDayTimeArray, IntervalMonthDayNanoArray, IntervalYearMonthArray, LargeBinaryArray,
+        LargeStringArray, ListArray, MapArray, StringArray, StringViewArray, StringViewBuilder,
+        StructArray, Time32MillisecondArray, Time32SecondArray, Time64MicrosecondArray,
         Time64NanosecondArray, TimestampMicrosecondArray, TimestampMillisecondArray,
         TimestampNanosecondArray, TimestampSecondArray, UInt8Array, UInt16Array, UInt32Array,
-        UInt64Array,
+        UInt64Array, new_null_array,
     },
-    compute::kernels::cast::{cast_with_options, CastOptions},
-    datatypes::{i256, IntervalDayTime, IntervalMonthDayNano, IntervalUnit, TimeUnit},
-    util::display::{array_value_to_string, DurationFormat, FormatOptions},
+    compute::kernels::cast::{CastOptions, cast_with_options},
+    datatypes::{IntervalDayTime, IntervalMonthDayNano, IntervalUnit, TimeUnit, i256},
+    util::display::{DurationFormat, FormatOptions, array_value_to_string},
 };
 
 use crate::{
-    error::{whatever, Result},
+    error::{Result, whatever},
     ir::DataType,
 };
 
@@ -215,7 +214,9 @@ impl ScalarValue {
             ScalarValue::Time32Millisecond(_) => DataType::Time32(TimeUnit::Millisecond),
             ScalarValue::Time64Microsecond(_) => DataType::Time64(TimeUnit::Microsecond),
             ScalarValue::Time64Nanosecond(_) => DataType::Time64(TimeUnit::Nanosecond),
-            ScalarValue::TimestampSecond(_, tz) => DataType::Timestamp(TimeUnit::Second, tz.clone()),
+            ScalarValue::TimestampSecond(_, tz) => {
+                DataType::Timestamp(TimeUnit::Second, tz.clone())
+            }
             ScalarValue::TimestampMillisecond(_, tz) => {
                 DataType::Timestamp(TimeUnit::Millisecond, tz.clone())
             }
@@ -227,9 +228,7 @@ impl ScalarValue {
             }
             ScalarValue::IntervalYearMonth(_) => DataType::Interval(IntervalUnit::YearMonth),
             ScalarValue::IntervalDayTime(_) => DataType::Interval(IntervalUnit::DayTime),
-            ScalarValue::IntervalMonthDayNano(_) => {
-                DataType::Interval(IntervalUnit::MonthDayNano)
-            }
+            ScalarValue::IntervalMonthDayNano(_) => DataType::Interval(IntervalUnit::MonthDayNano),
             ScalarValue::DurationSecond(_) => DataType::Duration(TimeUnit::Second),
             ScalarValue::DurationMillisecond(_) => DataType::Duration(TimeUnit::Millisecond),
             ScalarValue::DurationMicrosecond(_) => DataType::Duration(TimeUnit::Microsecond),
@@ -327,9 +326,9 @@ impl ScalarValue {
             ScalarValue::TimestampMicrosecond(value, tz) => Arc::new(
                 TimestampMicrosecondArray::from(vec![*value]).with_timezone_opt(tz.clone()),
             ),
-            ScalarValue::TimestampNanosecond(value, tz) => Arc::new(
-                TimestampNanosecondArray::from(vec![*value]).with_timezone_opt(tz.clone()),
-            ),
+            ScalarValue::TimestampNanosecond(value, tz) => {
+                Arc::new(TimestampNanosecondArray::from(vec![*value]).with_timezone_opt(tz.clone()))
+            }
             ScalarValue::IntervalYearMonth(value) => {
                 Arc::new(IntervalYearMonthArray::from(vec![*value]))
             }
@@ -440,7 +439,10 @@ impl ScalarValue {
                 )
             }
             DataType::FixedSizeBinary(size) => {
-                let array = array.as_any().downcast_ref::<FixedSizeBinaryArray>().unwrap();
+                let array = array
+                    .as_any()
+                    .downcast_ref::<FixedSizeBinaryArray>()
+                    .unwrap();
                 ScalarValue::FixedSizeBinary(
                     *size,
                     (!array.is_null(index)).then(|| array.value(index).to_vec()),
@@ -454,7 +456,11 @@ impl ScalarValue {
             }
             DataType::List(_) => {
                 let array = array.slice(index, 1);
-                let array = array.as_any().downcast_ref::<ListArray>().unwrap().to_owned();
+                let array = array
+                    .as_any()
+                    .downcast_ref::<ListArray>()
+                    .unwrap()
+                    .to_owned();
                 ScalarValue::List(Arc::new(array))
             }
             DataType::Struct(_) => {
@@ -468,7 +474,11 @@ impl ScalarValue {
             }
             DataType::Map(_, _) => {
                 let array = array.slice(index, 1);
-                let array = array.as_any().downcast_ref::<MapArray>().unwrap().to_owned();
+                let array = array
+                    .as_any()
+                    .downcast_ref::<MapArray>()
+                    .unwrap()
+                    .to_owned();
                 ScalarValue::Map(Arc::new(array))
             }
             DataType::Date32 => extract_primitive!(Date32Array, Date32),
@@ -486,7 +496,10 @@ impl ScalarValue {
                 extract_primitive!(Time64NanosecondArray, Time64Nanosecond)
             }
             DataType::Timestamp(TimeUnit::Second, tz) => {
-                let array = array.as_any().downcast_ref::<TimestampSecondArray>().unwrap();
+                let array = array
+                    .as_any()
+                    .downcast_ref::<TimestampSecondArray>()
+                    .unwrap();
                 ScalarValue::TimestampSecond(
                     (!array.is_null(index)).then(|| array.value(index)),
                     tz.clone(),
@@ -630,9 +643,7 @@ impl PartialEq for ScalarValue {
             (Binary(_), _) => false,
             (BinaryView(v1), BinaryView(v2)) => v1 == v2,
             (BinaryView(_), _) => false,
-            (FixedSizeBinary(size1, v1), FixedSizeBinary(size2, v2)) => {
-                size1 == size2 && v1 == v2
-            }
+            (FixedSizeBinary(size1, v1), FixedSizeBinary(size2, v2)) => size1 == size2 && v1 == v2,
             (FixedSizeBinary(_, _), _) => false,
             (LargeBinary(v1), LargeBinary(v2)) => v1 == v2,
             (LargeBinary(_), _) => false,
@@ -664,9 +675,7 @@ impl PartialEq for ScalarValue {
                 v1 == v2 && tz1 == tz2
             }
             (TimestampMicrosecond(_, _), _) => false,
-            (TimestampNanosecond(v1, tz1), TimestampNanosecond(v2, tz2)) => {
-                v1 == v2 && tz1 == tz2
-            }
+            (TimestampNanosecond(v1, tz1), TimestampNanosecond(v2, tz2)) => v1 == v2 && tz1 == tz2,
             (TimestampNanosecond(_, _), _) => false,
             (IntervalYearMonth(v1), IntervalYearMonth(v2)) => v1 == v2,
             (IntervalYearMonth(_), _) => false,
@@ -682,21 +691,13 @@ impl PartialEq for ScalarValue {
             (DurationMicrosecond(_), _) => false,
             (DurationNanosecond(v1), DurationNanosecond(v2)) => v1 == v2,
             (DurationNanosecond(_), _) => false,
-            (Decimal32(v1, p1, s1), Decimal32(v2, p2, s2)) => {
-                v1 == v2 && p1 == p2 && s1 == s2
-            }
+            (Decimal32(v1, p1, s1), Decimal32(v2, p2, s2)) => v1 == v2 && p1 == p2 && s1 == s2,
             (Decimal32(_, _, _), _) => false,
-            (Decimal64(v1, p1, s1), Decimal64(v2, p2, s2)) => {
-                v1 == v2 && p1 == p2 && s1 == s2
-            }
+            (Decimal64(v1, p1, s1), Decimal64(v2, p2, s2)) => v1 == v2 && p1 == p2 && s1 == s2,
             (Decimal64(_, _, _), _) => false,
-            (Decimal128(v1, p1, s1), Decimal128(v2, p2, s2)) => {
-                v1 == v2 && p1 == p2 && s1 == s2
-            }
+            (Decimal128(v1, p1, s1), Decimal128(v2, p2, s2)) => v1 == v2 && p1 == p2 && s1 == s2,
             (Decimal128(_, _, _), _) => false,
-            (Decimal256(v1, p1, s1), Decimal256(v2, p2, s2)) => {
-                v1 == v2 && p1 == p2 && s1 == s2
-            }
+            (Decimal256(v1, p1, s1), Decimal256(v2, p2, s2)) => v1 == v2 && p1 == p2 && s1 == s2,
             (Decimal256(_, _, _), _) => false,
         }
     }
@@ -1092,11 +1093,11 @@ mod tests {
     use crate::ir::DataType;
     use arrow::{
         array::{
-            ArrayRef, Int32Array, Int32Builder, ListArray, MapBuilder, StringArray,
-            StringBuilder, StructArray,
+            ArrayRef, Int32Array, Int32Builder, ListArray, MapBuilder, StringArray, StringBuilder,
+            StructArray,
         },
         compute::kernels::cast::CastOptions,
-        datatypes::{i256, Field, Int32Type, IntervalDayTimeType},
+        datatypes::{Field, Int32Type, IntervalDayTimeType, i256},
     };
 
     #[test]
@@ -1308,11 +1309,7 @@ mod tests {
                 Arc::new(StringArray::from(vec![Some("x")])) as ArrayRef,
             ),
         ]);
-        let mut map_builder = MapBuilder::new(
-            None,
-            StringBuilder::new(),
-            Int32Builder::new(),
-        );
+        let mut map_builder = MapBuilder::new(None, StringBuilder::new(), Int32Builder::new());
         map_builder.keys().append_value("k");
         map_builder.values().append_value(7);
         map_builder.append(true).unwrap();

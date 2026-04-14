@@ -16,6 +16,8 @@ mod cast;
 mod column_ref;
 mod function;
 mod in_list;
+mod is_not_null;
+mod is_null;
 mod like;
 mod list;
 mod literal;
@@ -29,6 +31,8 @@ pub use cast::*;
 pub use column_ref::*;
 pub use function::*;
 pub use in_list::*;
+pub use is_not_null::*;
+pub use is_null::*;
 pub use like::*;
 pub use list::*;
 pub use literal::*;
@@ -50,6 +54,8 @@ pub enum ScalarKind {
     Function(FunctionMetadata),
     Cast(CastMetadata),
     InList(InListMetadata),
+    IsNull(IsNullMetadata),
+    IsNotNull(IsNotNullMetadata),
     Like(LikeMetadata),
     Case(CaseMetadata),
 }
@@ -95,6 +101,8 @@ impl Scalar {
             | ScalarKind::List(_)
             | ScalarKind::Cast(_)
             | ScalarKind::InList(_)
+            | ScalarKind::IsNull(_)
+            | ScalarKind::IsNotNull(_)
             | ScalarKind::Like(_)
             | ScalarKind::Function(_)
             | ScalarKind::Case(_) => self.input_scalars().iter().fold(
@@ -126,6 +134,22 @@ impl Scalar {
                 let rhs = self.input_scalars()[1].clone();
                 if lhs == rhs {
                     Literal::boolean(true).into_scalar()
+                } else {
+                    self
+                }
+            }
+            ScalarKind::IsNull(_) => {
+                let expr = self.input_scalars()[0].clone();
+                if let Ok(literal) = expr.try_borrow::<Literal>() {
+                    Literal::boolean(literal.value().is_null()).into_scalar()
+                } else {
+                    self
+                }
+            }
+            ScalarKind::IsNotNull(_) => {
+                let expr = self.input_scalars()[0].clone();
+                if let Ok(literal) = expr.try_borrow::<Literal>() {
+                    Literal::boolean(!literal.value().is_null()).into_scalar()
                 } else {
                     self
                 }
@@ -198,6 +222,12 @@ impl Explain for Scalar {
             }
             ScalarKind::InList(meta) => {
                 InList::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            ScalarKind::IsNull(meta) => {
+                IsNull::borrow_raw_parts(meta, &self.common).explain(ctx, option)
+            }
+            ScalarKind::IsNotNull(meta) => {
+                IsNotNull::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
             ScalarKind::Like(meta) => {
                 Like::borrow_raw_parts(meta, &self.common).explain(ctx, option)
