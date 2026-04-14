@@ -1,6 +1,8 @@
 pub mod prelude;
 
 pub mod column;
+pub mod query;
+pub mod query_instance;
 pub mod schema;
 pub mod snapshot;
 pub mod snapshot_changes;
