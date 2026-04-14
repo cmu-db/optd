@@ -60,7 +60,7 @@ OrderBy { ordering_exprs: "__#16.o_year"(#16.0) ASC, (.output_columns): [ "__#16
                 ├── (.output_columns): [ "__#12.nation"(#12.2), "__#12.o_year"(#12.0), "__#12.volume"(#12.1) ]
                 ├── (.cardinality): 0.00
                 └── Select
-                    ├── .predicate: ("__#11.r_name"(#11.58) = 'AMERICA'::utf8_view) AND (("__#11.o_orderdate"(#11.36) >= 1995-01-01::date32) AND ("__#11.o_orderdate"(#11.36) <= 1996-12-31::date32)) AND ("__#11.p_type"(#11.4) = 'ECONOMY ANODIZED STEEL'::utf8_view)
+                    ├── .predicate: ("__#11.r_name"(#11.58) = 'AMERICA'::utf8_view) AND ("__#11.o_orderdate"(#11.36) >= 1995-01-01::date32) AND ("__#11.o_orderdate"(#11.36) <= 1996-12-31::date32) AND ("__#11.p_type"(#11.4) = 'ECONOMY ANODIZED STEEL'::utf8_view)
                     ├── (.output_columns):
                     │   ┌── "__#11.c_acctbal"(#11.46)
                     │   ├── "__#11.c_address"(#11.43)

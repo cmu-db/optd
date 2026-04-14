@@ -58,7 +58,7 @@ OrderBy { ordering_exprs: [ "__#13.supp_nation"(#13.0) ASC, "__#13.cust_nation"(
                 ├── (.output_columns): [ "__#9.cust_nation"(#9.1), "__#9.l_year"(#9.2), "__#9.supp_nation"(#9.0), "__#9.volume"(#9.3) ]
                 ├── (.cardinality): 0.00
                 └── Select
-                    ├── .predicate: ((("n1.n_name"(#6.1) = 'FRANCE'::utf8_view) AND ("n2.n_name"(#8.1) = 'GERMANY'::utf8_view)) OR (("n1.n_name"(#6.1) = 'GERMANY'::utf8_view) AND ("n2.n_name"(#8.1) = 'FRANCE'::utf8_view))) AND (("lineitem.l_shipdate"(#2.10) >= 1995-01-01::date32) AND ("lineitem.l_shipdate"(#2.10) <= 1996-12-31::date32))
+                    ├── .predicate: ((("n1.n_name"(#6.1) = 'FRANCE'::utf8_view) AND ("n2.n_name"(#8.1) = 'GERMANY'::utf8_view)) OR (("n1.n_name"(#6.1) = 'GERMANY'::utf8_view) AND ("n2.n_name"(#8.1) = 'FRANCE'::utf8_view))) AND ("lineitem.l_shipdate"(#2.10) >= 1995-01-01::date32) AND ("lineitem.l_shipdate"(#2.10) <= 1996-12-31::date32)
                     ├── (.output_columns):
                     │   ┌── "customer.c_acctbal"(#4.5)
                     │   ├── "customer.c_address"(#4.2)

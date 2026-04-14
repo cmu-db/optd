@@ -14,7 +14,7 @@ logical_plan after optd-initial:
 Project { .table_index: 4, .projections: "__#3.sum(lineitem.l_extendedprice * lineitem.l_discount)"(#3.0), (.output_columns): "__#4.revenue_loss"(#4.0), (.cardinality): 1.00 }
 └── Aggregate { .key_table_index: 2, .aggregate_table_index: 3, .implementation: None, .exprs: sum("lineitem.l_extendedprice"(#1.5) * "lineitem.l_discount"(#1.6)), .keys: [], (.output_columns): "__#3.sum(lineitem.l_extendedprice * lineitem.l_discount)"(#3.0), (.cardinality): 1.00 }
     └── Select
-        ├── .predicate: ("lineitem.l_shipdate"(#1.10) >= 2023-01-01::date32) AND ("lineitem.l_shipdate"(#1.10) < 2024-01-01::date32) AND (("lineitem.l_discount"(#1.6) >= 5::decimal128(15, 2)) AND ("lineitem.l_discount"(#1.6) <= 7::decimal128(15, 2))) AND ("lineitem.l_quantity"(#1.4) < 2400::decimal128(15, 2))
+        ├── .predicate: ("lineitem.l_shipdate"(#1.10) >= 2023-01-01::date32) AND ("lineitem.l_shipdate"(#1.10) < 2024-01-01::date32) AND ("lineitem.l_discount"(#1.6) >= 5::decimal128(15, 2)) AND ("lineitem.l_discount"(#1.6) <= 7::decimal128(15, 2)) AND ("lineitem.l_quantity"(#1.4) < 2400::decimal128(15, 2))
         ├── (.output_columns):
         │   ┌── "lineitem.l_comment"(#1.15)
         │   ├── "lineitem.l_commitdate"(#1.11)
