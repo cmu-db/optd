@@ -10,7 +10,7 @@ use sea_orm::{
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "optd_query_instance")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
+    #[sea_orm(primary_key)]
     pub id: i64,
 
     /// Refers to a `query_id` from the `optd_query` table.

@@ -3,6 +3,7 @@ use optd_repository_entity::snapshot_changes::ChangesMade;
 use sea_orm::{ConnectionTrait, DbErr, TransactionTrait};
 
 pub mod optd_catalog;
+pub mod query;
 pub mod schema;
 pub mod snapshot;
 pub mod stats;
@@ -20,6 +21,11 @@ pub enum RepositoryRequest {
     UpdateTableStats(stats::UpdateTableStatsInfo),
     GetTableStats(stats::GetTableStatsInfo),
     GetAllTableStats,
+    LogQueryInstance(query::LogQueryInstanceInfo),
+    GetQuery(i64),
+    GetQueryBySql(String),
+    GetQueryInstance(i64),
+    GetQueryInstances(query::QueryInstanceSelector),
 }
 
 /// Repository API entry point backed by database connection.
@@ -217,6 +223,33 @@ impl<T: ConnectionTrait> Repository<T> {
         self.get_all_table_stats_at(snapshot::SnapshotSelector::Current)
             .await
     }
+
+    /// Returns a query by id.
+    pub async fn get_query(&self, query_id: i64) -> Result<query::QueryInfo, DbErr> {
+        query::get_query(&self.db, query_id)
+            .await?
+            .ok_or_else(|| DbErr::RecordNotFound(format!("query {query_id} not found")))
+    }
+
+    /// Returns the query that exactly matches `sql`, if one exists.
+    pub async fn get_query_by_sql(&self, sql: &str) -> Result<Option<query::QueryInfo>, DbErr> {
+        query::get_query_by_sql(&self.db, sql).await
+    }
+
+    /// Returns a query instance by id.
+    pub async fn get_query_instance(&self, id: i64) -> Result<query::QueryInstanceInfo, DbErr> {
+        query::get_query_instance(&self.db, id)
+            .await?
+            .ok_or_else(|| DbErr::RecordNotFound(format!("query instance {id} not found")))
+    }
+
+    /// Returns query instances matching `selector`.
+    pub async fn get_query_instances(
+        &self,
+        selector: query::QueryInstanceSelector,
+    ) -> Result<Vec<query::QueryInstanceInfo>, DbErr> {
+        query::get_query_instances(&self.db, selector).await
+    }
 }
 
 impl<T: TransactionTrait> Repository<T> {
@@ -343,6 +376,20 @@ impl<T: TransactionTrait> Repository<T> {
                 .await,
         )
     }
+
+    /// Logs a query instance, reusing an existing query id when the SQL matches exactly.
+    pub async fn log_query_instance(
+        &self,
+        info: query::LogQueryInstanceInfo,
+    ) -> Result<i64, DbErr> {
+        flatten_transaction_err(
+            self.db
+                .transaction::<_, _, DbErr>(|txn| {
+                    Box::pin(async move { query::log_query_instance(txn, info).await })
+                })
+                .await,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -353,7 +400,7 @@ mod tests {
     use optd_core::ir::table_ref::TableRef;
     use optd_repository_entity::{column::ColumnType, prelude::SnapshotChanges};
     use optd_repository_migration::{Migrator, MigratorTrait};
-    use sea_orm::{Database, DatabaseConnection, EntityTrait};
+    use sea_orm::{Database, DatabaseConnection, EntityTrait, prelude::Json};
     use uuid::Uuid;
 
     use super::*;
@@ -679,6 +726,89 @@ mod tests {
             .schema_name,
             schema_name
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn repository_query_instances_reuse_exact_sql_matches() -> Result<(), DbErr> {
+        let (repo, db) = setup_repository().await?;
+        let snapshot = current_snapshot(&db).await?;
+        let sql = "select * from t where id = 1".to_owned();
+        let initial_plan = Json::String("initial plan".to_owned());
+        let final_plan = Json::String("final plan".to_owned());
+
+        let first_instance_id = repo
+            .log_query_instance(query::LogQueryInstanceInfo {
+                sql: sql.clone(),
+                snapshot_id: snapshot.snapshot_id,
+                initial_plan: Some(initial_plan.clone()),
+                final_plan: Some(final_plan.clone()),
+            })
+            .await?;
+        let first_instance = repo.get_query_instance(first_instance_id).await?;
+        assert_eq!(first_instance.snapshot_id, snapshot.snapshot_id);
+        assert_eq!(first_instance.initial_plan, Some(initial_plan));
+        assert_eq!(first_instance.final_plan, Some(final_plan));
+
+        let query = repo.get_query(first_instance.query_id).await?;
+        assert_eq!(query.sql, sql);
+        assert_eq!(repo.get_query_by_sql(&sql).await?, Some(query.clone()));
+
+        let second_instance_id = repo
+            .log_query_instance(query::LogQueryInstanceInfo {
+                sql: sql.clone(),
+                snapshot_id: snapshot.snapshot_id,
+                initial_plan: None,
+                final_plan: None,
+            })
+            .await?;
+        let second_instance = repo.get_query_instance(second_instance_id).await?;
+        assert_eq!(second_instance.query_id, first_instance.query_id);
+        assert_ne!(second_instance.id, first_instance.id);
+        assert_eq!(
+            repo.get_query_instances(query::QueryInstanceSelector::QueryId(query.query_id))
+                .await?
+                .into_iter()
+                .map(|instance| instance.id)
+                .collect::<Vec<_>>(),
+            vec![first_instance_id, second_instance_id]
+        );
+        assert_eq!(
+            repo.get_query_instances(query::QueryInstanceSelector::Sql(sql.clone()))
+                .await?
+                .into_iter()
+                .map(|instance| instance.id)
+                .collect::<Vec<_>>(),
+            vec![first_instance_id, second_instance_id]
+        );
+
+        let different_sql_instance_id = repo
+            .log_query_instance(query::LogQueryInstanceInfo {
+                sql: "SELECT * FROM t WHERE id = 1".to_owned(),
+                snapshot_id: snapshot.snapshot_id,
+                initial_plan: None,
+                final_plan: None,
+            })
+            .await?;
+        let different_sql_instance = repo.get_query_instance(different_sql_instance_id).await?;
+        assert_ne!(different_sql_instance.query_id, first_instance.query_id);
+        assert!(
+            repo.get_query_instances(query::QueryInstanceSelector::Sql(
+                "select * from missing".to_owned()
+            ))
+            .await?
+            .is_empty()
+        );
+
+        assert!(matches!(
+            repo.get_query(999_999).await,
+            Err(DbErr::RecordNotFound(message)) if message == "query 999999 not found"
+        ));
+        assert!(matches!(
+            repo.get_query_instance(999_999).await,
+            Err(DbErr::RecordNotFound(message)) if message == "query instance 999999 not found"
+        ));
 
         Ok(())
     }

@@ -76,6 +76,17 @@ impl MigrationTrait for Migration {
             )
             .await?;
         manager
+            .create_index(
+                Index::create()
+                    .name("idx-optd-query-sql")
+                    .table(optd_repository_entity::query::Entity)
+                    .col(optd_repository_entity::query::Column::Sql)
+                    .unique()
+                    .if_not_exists()
+                    .to_owned(),
+            )
+            .await?;
+        manager
             .create_table(
                 schema
                     .create_table_from_entity(optd_repository_entity::query_instance::Entity)
