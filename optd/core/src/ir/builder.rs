@@ -17,8 +17,8 @@ use crate::{
         },
         properties::OperatorProperties,
         scalar::{
-            BinaryOp, BinaryOpKind, Case, Cast, ColumnRef, Function, InList, Like, List, Literal,
-            NaryOp, NaryOpKind,
+            BinaryOp, BinaryOpKind, Case, Cast, ColumnRef, Function, InList, IsNotNull, IsNull,
+            Like, List, Literal, NaryOp, NaryOpKind,
         },
         table_ref::TableRef,
     },
@@ -297,6 +297,14 @@ pub fn in_list(expr: Arc<Scalar>, list: Arc<Scalar>, negated: bool) -> Arc<Scala
     InList::new(expr, list, negated).into_scalar()
 }
 
+pub fn is_null(expr: Arc<Scalar>) -> Arc<Scalar> {
+    IsNull::new(expr).into_scalar()
+}
+
+pub fn is_not_null(expr: Arc<Scalar>) -> Arc<Scalar> {
+    IsNotNull::new(expr).into_scalar()
+}
+
 pub fn list(members: impl IntoIterator<Item = Arc<Scalar>>) -> Arc<Scalar> {
     List::new(members.into_iter().collect()).into_scalar()
 }
@@ -331,19 +339,25 @@ impl Scalar {
     }
 
     pub fn nary_op(self: Arc<Self>, rhs: Arc<Self>, op_kind: NaryOpKind) -> Arc<Self> {
+        let mut terms = Vec::new();
+
         if let Ok(nary_op) = self.try_borrow::<NaryOp>()
             && nary_op.op_kind() == &op_kind
         {
-            let terms = nary_op
-                .terms()
-                .iter()
-                .cloned()
-                .chain(std::iter::once(rhs))
-                .collect();
-            NaryOp::new(op_kind, terms).into_scalar()
+            terms.extend(nary_op.terms().iter().cloned());
         } else {
-            NaryOp::new(op_kind, Arc::new([self, rhs])).into_scalar()
+            terms.push(self);
         }
+
+        if let Ok(nary_op) = rhs.try_borrow::<NaryOp>()
+            && nary_op.op_kind() == &op_kind
+        {
+            terms.extend(nary_op.terms().iter().cloned());
+        } else {
+            terms.push(rhs);
+        }
+
+        NaryOp::new(op_kind, terms.into()).into_scalar()
     }
 
     pub fn and(self: Arc<Self>, rhs: Arc<Self>) -> Arc<Self> {
@@ -352,6 +366,14 @@ impl Scalar {
 
     pub fn or(self: Arc<Self>, rhs: Arc<Self>) -> Arc<Self> {
         self.nary_op(rhs, NaryOpKind::Or)
+    }
+
+    pub fn is_null(self: Arc<Self>) -> Arc<Self> {
+        crate::ir::builder::is_null(self)
+    }
+
+    pub fn is_not_null(self: Arc<Self>) -> Arc<Self> {
+        crate::ir::builder::is_not_null(self)
     }
 }
 
@@ -453,14 +475,42 @@ fn derive_scalar_descriptor(
                 | BinaryOpKind::Minus
                 | BinaryOpKind::Multiply
                 | BinaryOpKind::Divide
-                | BinaryOpKind::Modulo => lhs.data_type.clone(),
+                | BinaryOpKind::Modulo
+                | BinaryOpKind::BitwiseAnd
+                | BinaryOpKind::BitwiseOr
+                | BinaryOpKind::BitwiseXor
+                | BinaryOpKind::BitwiseShiftRight
+                | BinaryOpKind::BitwiseShiftLeft
+                | BinaryOpKind::StringConcat
+                | BinaryOpKind::Arrow
+                | BinaryOpKind::LongArrow
+                | BinaryOpKind::HashArrow
+                | BinaryOpKind::HashLongArrow
+                | BinaryOpKind::IntegerDivide
+                | BinaryOpKind::HashMinus => lhs.data_type.clone(),
                 BinaryOpKind::Eq
                 | BinaryOpKind::Ne
+                | BinaryOpKind::IsDistinctFrom
                 | BinaryOpKind::IsNotDistinctFrom
                 | BinaryOpKind::Lt
                 | BinaryOpKind::Le
                 | BinaryOpKind::Gt
-                | BinaryOpKind::Ge => DataType::Boolean,
+                | BinaryOpKind::Ge
+                | BinaryOpKind::RegexMatch
+                | BinaryOpKind::RegexIMatch
+                | BinaryOpKind::RegexNotMatch
+                | BinaryOpKind::RegexNotIMatch
+                | BinaryOpKind::LikeMatch
+                | BinaryOpKind::ILikeMatch
+                | BinaryOpKind::NotLikeMatch
+                | BinaryOpKind::NotILikeMatch
+                | BinaryOpKind::AtArrow
+                | BinaryOpKind::ArrowAt
+                | BinaryOpKind::AtAt
+                | BinaryOpKind::AtQuestion
+                | BinaryOpKind::Question
+                | BinaryOpKind::QuestionAnd
+                | BinaryOpKind::QuestionPipe => DataType::Boolean,
             };
 
             Ok(DerivedScalarDescriptor {
@@ -518,6 +568,24 @@ fn derive_scalar_descriptor(
                 name: format!("in{position}"),
                 data_type: DataType::Boolean,
                 nullable: expr.nullable || list_nullable,
+            })
+        }
+        ScalarKind::IsNull(meta) => {
+            let is_null = IsNull::borrow_raw_parts(meta, &scalar.common);
+            let _ = derive_scalar_descriptor(ctx, is_null.expr(), position)?;
+            Ok(DerivedScalarDescriptor {
+                name: format!("is_null{position}"),
+                data_type: DataType::Boolean,
+                nullable: false,
+            })
+        }
+        ScalarKind::IsNotNull(meta) => {
+            let is_not_null = IsNotNull::borrow_raw_parts(meta, &scalar.common);
+            let _ = derive_scalar_descriptor(ctx, is_not_null.expr(), position)?;
+            Ok(DerivedScalarDescriptor {
+                name: format!("is_not_null{position}"),
+                data_type: DataType::Boolean,
+                nullable: false,
             })
         }
         ScalarKind::Like(meta) => {
@@ -593,6 +661,7 @@ mod tests {
                     Field::new("v2", DataType::Int32, false),
                     Field::new("v3", DataType::Boolean, true),
                 ])),
+                None,
             )
             .unwrap();
         IRContext::with_memory_catalog(catalog)

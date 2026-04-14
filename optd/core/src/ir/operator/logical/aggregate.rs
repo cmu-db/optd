@@ -34,6 +34,7 @@ define_node!(
 impl_operator_conversion!(Aggregate, AggregateBorrowed);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AggregateImplementation {
     #[default]
     Hash,

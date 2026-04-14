@@ -47,8 +47,7 @@ impl BindContext {
         let table_index = self
             .get_next_table_index()
             .whatever_context("run out of table index")?;
-        let table_ref =
-            table_ref.unwrap_or_else(|| TableRef::bare(format!("__internal_#{table_index}")));
+        let table_ref = table_ref.unwrap_or_else(|| TableRef::bare(format!("__#{table_index}")));
         OptdSchema::try_from_qualified_schema(table_ref.clone(), schema.as_ref())
             .context(SchemaSnafu)?;
         self.bindings.insert(

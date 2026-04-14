@@ -1,4 +1,4 @@
-//! N-ary scalar operations like AND, OR.
+//! N-ary scalar operations for logical operators like AND, OR.
 
 use crate::ir::{
     IRCommon, Scalar,
@@ -29,6 +29,7 @@ define_node!(
 impl_scalar_conversion!(NaryOp, NaryOpBorrowed);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum NaryOpKind {
     And,
     Or,

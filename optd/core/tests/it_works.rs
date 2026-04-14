@@ -4,6 +4,7 @@ use itertools::Itertools;
 
 use optd_core::{
     cascades::Cascades,
+    error::Result as OptdResult,
     ir::{
         Operator,
         builder::*,
@@ -21,7 +22,7 @@ async fn optimize_plan(
     opt: Arc<Cascades>,
     initial_plan: &Arc<Operator>,
     required: Arc<Required>,
-) -> Option<Arc<Operator>> {
+) -> OptdResult<Arc<Operator>> {
     println!("available rules:");
     for rule in opt.rule_set.iter() {
         println!("- {}", rule.name());
@@ -37,7 +38,7 @@ async fn optimize_plan(
     }
     let initial_explained = quick_explain(initial_plan, &opt.ctx);
     println!("{initial_explained}");
-    let optimized = optimized.unwrap();
+    let optimized = optimized?;
     let optimized_explained = quick_explain(&optimized, &opt.ctx);
 
     let initial_explained = initial_explained.split('\n').collect::<Vec<&str>>();
@@ -55,7 +56,7 @@ async fn optimize_plan(
                 println!("{}       {r}", " ".repeat(initial_len))
             }
         });
-    Some(optimized)
+    Ok(optimized)
 }
 
 #[tokio::test]

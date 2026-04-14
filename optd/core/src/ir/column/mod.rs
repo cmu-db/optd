@@ -12,6 +12,7 @@ pub use set::ColumnSet;
 /// The column is represented as (table_index, column_index), where each table index
 /// is globally unique in a query plan.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Column(pub i64, pub usize);
 
 impl std::fmt::Display for Column {

@@ -32,7 +32,6 @@ mod types;
 pub use column::*;
 pub use context::IRContext;
 pub use group::*;
-use itertools::Itertools;
 pub use operator::{Operator, OperatorCategory, OperatorKind};
 use pretty_xmlish::Pretty;
 pub use scalar::{Scalar, ScalarKind};
@@ -46,11 +45,13 @@ use crate::ir::{
 
 /// The portion of the IR shared by all nodes.
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct IRCommon<P> {
     /// The input operators.
     input_operators: Arc<[Arc<Operator>]>,
     /// The input scalars.
     input_scalars: Arc<[Arc<Scalar>]>,
+    #[cfg_attr(feature = "serde", serde(skip))]
     properties: Arc<P>,
 }
 
@@ -139,16 +140,23 @@ impl IRCommon<OperatorProperties> {
             .output_columns
             .get()
             .map(|set| {
-                set.iter()
+                let mut columns = set
+                    .iter()
                     .map(|col| {
                         let meta = ctx.get_column_meta(col);
-                        format!("`{}`.`{}`({col})", meta.table_ref, meta.name)
+                        format!("\"{}.{}\"({col})", meta.table_ref, meta.name)
                     })
-                    .sorted()
-                    .join(", ")
+                    .collect::<Vec<_>>();
+                columns.sort();
+                Pretty::Array(
+                    columns
+                        .into_iter()
+                        .map(|column| Pretty::display(&column))
+                        .collect(),
+                )
             })
-            .unwrap_or("?".to_string());
-        fields.push(("(.output_columns)", Pretty::display(&output_columns)));
+            .unwrap_or_else(|| Pretty::display(&"?"));
+        fields.push(("(.output_columns)", output_columns));
         fields.push(("(.cardinality)", Pretty::display(&cardinality)));
         fields
     }
