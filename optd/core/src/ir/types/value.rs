@@ -725,7 +725,7 @@ fn hash_nested_scalar<H: Hasher>(array: &dyn Array, state: &mut H) {
     array.data_type().hash(state);
     array.len().hash(state);
     array.null_count().hash(state);
-    if array.len() > 0 {
+    if !array.is_empty() {
         array_value_to_string(array, 0)
             .expect("nested scalar should be displayable")
             .hash(state);
