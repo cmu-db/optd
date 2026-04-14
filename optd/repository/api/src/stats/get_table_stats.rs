@@ -12,7 +12,7 @@ use crate::{
 pub async fn get_table_stats<C>(
     info: GetTableStatsInfo,
     db: &C,
-    current_snapshot: &mut SnapshotInfo,
+    current_snapshot: &SnapshotInfo,
 ) -> Result<Option<TableStatsInfo>, DbErr>
 where
     C: ConnectionTrait,

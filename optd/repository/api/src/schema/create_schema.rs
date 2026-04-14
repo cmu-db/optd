@@ -3,21 +3,20 @@ use sea_orm::{ActiveValue::Set, ConnectionTrait, DbErr, EntityTrait};
 use crate::{
     entity::{prelude::*, schema},
     schema::CreateSchemaInfo,
-    snapshot::SnapshotInfo,
 };
 
 pub async fn create_new_schema<C>(
     info: CreateSchemaInfo,
+    schema_id: i64,
     db: &C,
-    current_snapshot: &mut SnapshotInfo,
+    begin_snapshot: i64,
 ) -> Result<i64, DbErr>
 where
     C: ConnectionTrait,
 {
-    let schema_id = current_snapshot.get_next_catalog_id();
     let model = schema::ActiveModel {
         schema_id: Set(schema_id),
-        begin_snapshot: Set(current_snapshot.snapshot_id),
+        begin_snapshot: Set(begin_snapshot),
         end_snapshot: Set(None),
         schema_name: Set(info.schema_name),
         ..Default::default()

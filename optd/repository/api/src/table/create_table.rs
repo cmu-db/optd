@@ -6,28 +6,28 @@ use sea_orm::{
 
 use crate::{
     entity::{column, prelude::*, schema, table},
-    snapshot::SnapshotInfo,
     table::{CreateColumnInfo, CreateTableInfo},
 };
 
 pub async fn create_table<C>(
     info: CreateTableInfo,
+    table_id: i64,
     db: &C,
-    current_snapshot: &mut SnapshotInfo,
+    read_snapshot: i64,
+    begin_snapshot: i64,
 ) -> Result<i64, DbErr>
 where
     C: ConnectionTrait,
 {
-    let snapshot_id = current_snapshot.snapshot_id;
     let schema_name = target_schema_name(&info.table_name);
     let table_name = info.table_name.table();
 
     let schema_id = Schema::find()
-        .filter(schema::Column::BeginSnapshot.lte(snapshot_id))
+        .filter(schema::Column::BeginSnapshot.lte(read_snapshot))
         .filter(
             Condition::any()
                 .add(schema::Column::EndSnapshot.is_null())
-                .add(schema::Column::EndSnapshot.gt(snapshot_id)),
+                .add(schema::Column::EndSnapshot.gt(read_snapshot)),
         )
         .filter(schema::Column::SchemaName.eq(schema_name))
         .select_only()
@@ -37,16 +37,16 @@ where
         .await?
         .ok_or_else(|| {
             DbErr::Custom(format!(
-                "Schema '{schema_name}' does not exist at snapshot {snapshot_id}"
+                "Schema '{schema_name}' does not exist at snapshot {read_snapshot}"
             ))
         })?;
 
     let existing_table_id = Table::find()
-        .filter(table::Column::BeginSnapshot.lte(snapshot_id))
+        .filter(table::Column::BeginSnapshot.lte(read_snapshot))
         .filter(
             Condition::any()
                 .add(table::Column::EndSnapshot.is_null())
-                .add(table::Column::EndSnapshot.gt(snapshot_id)),
+                .add(table::Column::EndSnapshot.gt(read_snapshot)),
         )
         .filter(table::Column::SchemaId.eq(schema_id))
         .filter(table::Column::TableName.eq(table_name))
@@ -63,11 +63,10 @@ where
         )));
     }
 
-    let table_id = current_snapshot.get_next_catalog_id();
     let table_model = table::ActiveModel {
         table_id: Set(table_id),
         table_uuid: Set(Uuid::new_v4()),
-        begin_snapshot: Set(snapshot_id),
+        begin_snapshot: Set(begin_snapshot),
         end_snapshot: Set(None),
         schema_id: Set(schema_id),
         table_name: Set(table_name.to_owned()),
@@ -75,7 +74,7 @@ where
         ..Default::default()
     };
 
-    let column_models = prepare_columns(info.columns, table_id, current_snapshot);
+    let column_models = prepare_columns(info.columns, table_id, begin_snapshot);
 
     Table::insert(table_model).exec(db).await?;
 
@@ -89,7 +88,7 @@ where
 fn prepare_columns(
     columns: Vec<CreateColumnInfo>,
     table_id: i64,
-    current_snapshot: &mut SnapshotInfo,
+    begin_snapshot: i64,
 ) -> Vec<column::ActiveModel> {
     columns
         .into_iter()
@@ -97,7 +96,7 @@ fn prepare_columns(
         .map(|(i, column)| column::ActiveModel {
             table_id: Set(table_id),
             column_id: Set(i as i64),
-            begin_snapshot: Set(current_snapshot.snapshot_id),
+            begin_snapshot: Set(begin_snapshot),
             end_snapshot: Set(None),
             column_order: Set(i as i64),
             column_name: Set(column.column_name),

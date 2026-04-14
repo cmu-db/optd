@@ -5,26 +5,24 @@ use sea_orm::{
 
 use crate::{
     entity::{column, prelude::*, table, table_column_stats, table_stats},
-    snapshot::SnapshotInfo,
     stats::UpdateTableStatsInfo,
 };
 
 pub async fn update_table_stats<C>(
     info: UpdateTableStatsInfo,
     db: &C,
-    current_snapshot: &mut SnapshotInfo,
+    read_snapshot: i64,
+    write_snapshot: i64,
 ) -> Result<(), DbErr>
 where
     C: ConnectionTrait,
 {
-    let snapshot_id = current_snapshot.snapshot_id;
-
     let table_exists = Table::find()
-        .filter(table::Column::BeginSnapshot.lte(snapshot_id))
+        .filter(table::Column::BeginSnapshot.lte(read_snapshot))
         .filter(
             Condition::any()
                 .add(table::Column::EndSnapshot.is_null())
-                .add(table::Column::EndSnapshot.gt(snapshot_id)),
+                .add(table::Column::EndSnapshot.gt(read_snapshot)),
         )
         .filter(table::Column::TableId.eq(info.table_id))
         .select_only()
@@ -42,11 +40,11 @@ where
     }
 
     let active_columns = Column::find()
-        .filter(column::Column::BeginSnapshot.lte(snapshot_id))
+        .filter(column::Column::BeginSnapshot.lte(read_snapshot))
         .filter(
             Condition::any()
                 .add(column::Column::EndSnapshot.is_null())
-                .add(column::Column::EndSnapshot.gt(snapshot_id)),
+                .add(column::Column::EndSnapshot.gt(read_snapshot)),
         )
         .filter(column::Column::TableId.eq(info.table_id))
         .select_only()
@@ -69,11 +67,11 @@ where
     }
 
     let next_row_id = TableStats::find()
-        .filter(table_stats::Column::BeginSnapshot.lte(snapshot_id))
+        .filter(table_stats::Column::BeginSnapshot.lte(read_snapshot))
         .filter(
             Condition::any()
                 .add(table_stats::Column::EndSnapshot.is_null())
-                .add(table_stats::Column::EndSnapshot.gt(snapshot_id)),
+                .add(table_stats::Column::EndSnapshot.gt(read_snapshot)),
         )
         .filter(table_stats::Column::TableId.eq(info.table_id))
         .one(db)
@@ -82,7 +80,10 @@ where
         .unwrap_or(info.stats.row_count as i64);
 
     TableStats::update_many()
-        .col_expr(table_stats::Column::EndSnapshot, Expr::value(snapshot_id))
+        .col_expr(
+            table_stats::Column::EndSnapshot,
+            Expr::value(write_snapshot),
+        )
         .filter(table_stats::Column::EndSnapshot.is_null())
         .filter(table_stats::Column::TableId.eq(info.table_id))
         .exec(db)
@@ -91,7 +92,7 @@ where
     TableColumnStats::update_many()
         .col_expr(
             table_column_stats::Column::EndSnapshot,
-            Expr::value(snapshot_id),
+            Expr::value(write_snapshot),
         )
         .filter(table_column_stats::Column::EndSnapshot.is_null())
         .filter(table_column_stats::Column::TableId.eq(info.table_id))
@@ -100,7 +101,7 @@ where
 
     let table_stats_model = table_stats::ActiveModel {
         table_id: Set(info.table_id),
-        begin_snapshot: Set(snapshot_id),
+        begin_snapshot: Set(write_snapshot),
         end_snapshot: Set(None),
         record_count: Set(info.stats.row_count as i64),
         next_row_id: Set(next_row_id),
@@ -117,7 +118,7 @@ where
             |(column_id, column_stats)| table_column_stats::ActiveModel {
                 table_id: Set(info.table_id),
                 column_id: Set(column_id as i64),
-                begin_snapshot: Set(snapshot_id),
+                begin_snapshot: Set(write_snapshot),
                 end_snapshot: Set(None),
                 contains_null: Set(column_stats.null_count.map(|n| n > 0).unwrap_or(true)),
                 contains_nan: Set(true),

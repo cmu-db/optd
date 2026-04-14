@@ -11,7 +11,7 @@ use crate::{
 
 pub async fn get_all_schema_infos<C>(
     db: &C,
-    current_snapshot: &mut SnapshotInfo,
+    current_snapshot: &SnapshotInfo,
 ) -> Result<Vec<SchemaInfo>, DbErr>
 where
     C: ConnectionTrait,

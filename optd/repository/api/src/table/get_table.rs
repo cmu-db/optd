@@ -11,7 +11,7 @@ use crate::{
 pub async fn get_table<C>(
     info: GetTableInfo,
     db: &C,
-    current_snapshot: &mut SnapshotInfo,
+    current_snapshot: &SnapshotInfo,
 ) -> Result<Option<TableInfo>, DbErr>
 where
     C: ConnectionTrait,
