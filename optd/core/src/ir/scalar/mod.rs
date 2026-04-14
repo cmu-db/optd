@@ -45,6 +45,7 @@ use crate::ir::{
 
 /// The scalar type and its associated metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ScalarKind {
     Literal(LiteralMetadata),
     ColumnRef(ColumnRefMetadata),
@@ -61,6 +62,7 @@ pub enum ScalarKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Scalar {
     pub kind: ScalarKind,
     pub common: IRCommon<ScalarProperties>,

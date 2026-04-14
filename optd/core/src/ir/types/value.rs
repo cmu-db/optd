@@ -27,6 +27,8 @@ use arrow::{
     datatypes::{IntervalDayTime, IntervalMonthDayNano, IntervalUnit, TimeUnit, i256},
     util::display::{DurationFormat, FormatOptions, array_value_to_string},
 };
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
     error::{Result, whatever},
@@ -131,6 +133,53 @@ pub enum ScalarValue {
     Decimal128(Option<i128>, u8, i8),
     /// 256-bit decimal, using the i256 to represent the decimal, precision, scale.
     Decimal256(Option<i256>, u8, i8),
+}
+
+#[cfg(feature = "serde")]
+#[derive(Serialize, Deserialize)]
+struct SerializedScalarValue {
+    data_type: String,
+    value: Option<String>,
+}
+
+#[cfg(feature = "serde")]
+impl Serialize for ScalarValue {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        SerializedScalarValue {
+            data_type: self.data_type().to_string(),
+            value: self
+                .try_into_nullable_string()
+                .map_err(serde::ser::Error::custom)?,
+        }
+        .serialize(serializer)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for ScalarValue {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let SerializedScalarValue { data_type, value } =
+            SerializedScalarValue::deserialize(deserializer)?;
+        let data_type = data_type
+            .parse::<DataType>()
+            .map_err(serde::de::Error::custom)?;
+
+        match value {
+            Some(value) => {
+                ScalarValue::try_from_string(value, &data_type).map_err(serde::de::Error::custom)
+            }
+            None if data_type == DataType::Null => Ok(ScalarValue::Null),
+            None => ScalarValue::Utf8(None)
+                .cast_to(&data_type)
+                .map_err(serde::de::Error::custom),
+        }
+    }
 }
 
 impl ScalarValue {
@@ -1197,6 +1246,13 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "serde")]
+    fn assert_serde_round_trip(value: ScalarValue) {
+        let serialized = serde_json::to_string(&value).unwrap();
+        let round_trip = serde_json::from_str::<ScalarValue>(&serialized).unwrap();
+        assert_eq!(round_trip, value);
+    }
+
     #[test]
     fn scalar_values_round_trip_through_utf8_casts() {
         for value in [
@@ -1242,6 +1298,56 @@ mod tests {
             ScalarValue::Decimal256(None, 12, 2),
         ] {
             assert_string_round_trip(value);
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn scalar_values_serde_round_trip_through_utf8_casts() {
+        for value in [
+            ScalarValue::Null,
+            ScalarValue::Boolean(Some(true)),
+            ScalarValue::Boolean(None),
+            ScalarValue::Float32(Some(1.5)),
+            ScalarValue::Float32(None),
+            ScalarValue::Float64(Some(-2.25)),
+            ScalarValue::Float64(None),
+            ScalarValue::Int8(Some(-8)),
+            ScalarValue::Int8(None),
+            ScalarValue::Int16(Some(-16)),
+            ScalarValue::Int16(None),
+            ScalarValue::Int32(Some(-32)),
+            ScalarValue::Int32(None),
+            ScalarValue::Int64(Some(-64)),
+            ScalarValue::Int64(None),
+            ScalarValue::UInt8(Some(8)),
+            ScalarValue::UInt8(None),
+            ScalarValue::UInt16(Some(16)),
+            ScalarValue::UInt16(None),
+            ScalarValue::UInt32(Some(32)),
+            ScalarValue::UInt32(None),
+            ScalarValue::UInt64(Some(64)),
+            ScalarValue::UInt64(None),
+            ScalarValue::Utf8(Some("hello".to_string())),
+            ScalarValue::Utf8(None),
+            ScalarValue::Utf8View(Some("view".to_string())),
+            ScalarValue::Utf8View(None),
+            ScalarValue::LargeUtf8(Some("large".to_string())),
+            ScalarValue::LargeUtf8(None),
+            ScalarValue::Date32(Some(1)),
+            ScalarValue::Date32(None),
+            ScalarValue::Date64(Some(86_400_000)),
+            ScalarValue::Date64(None),
+            ScalarValue::Decimal32(Some(1234), 6, 2),
+            ScalarValue::Decimal32(None, 6, 2),
+            ScalarValue::Decimal64(Some(5678), 8, 2),
+            ScalarValue::Decimal64(None, 8, 2),
+            ScalarValue::Decimal128(Some(9012), 10, 2),
+            ScalarValue::Decimal128(None, 10, 2),
+            ScalarValue::Decimal256(Some(i256::from_i128(3456)), 12, 2),
+            ScalarValue::Decimal256(None, 12, 2),
+        ] {
+            assert_serde_round_trip(value);
         }
     }
 

@@ -33,6 +33,7 @@ define_node!(
 impl_operator_conversion!(Join, JoinBorrowed);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum JoinType {
     /// Returns rows that satisfy the join condition, with columns from both inputs.
     Inner,
@@ -51,6 +52,7 @@ pub enum JoinType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum JoinImplementation {
     #[default]
     NestedLoop,
@@ -61,6 +63,7 @@ pub enum JoinImplementation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum JoinSide {
     Outer,
     Inner,

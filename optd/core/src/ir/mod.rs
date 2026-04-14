@@ -45,11 +45,13 @@ use crate::ir::{
 
 /// The portion of the IR shared by all nodes.
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct IRCommon<P> {
     /// The input operators.
     input_operators: Arc<[Arc<Operator>]>,
     /// The input scalars.
     input_scalars: Arc<[Arc<Scalar>]>,
+    #[cfg_attr(feature = "serde", serde(skip))]
     properties: Arc<P>,
 }
 

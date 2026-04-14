@@ -29,6 +29,7 @@ define_node!(
 impl_scalar_conversion!(BinaryOp, BinaryOpBorrowed);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BinaryOpKind {
     Plus,
     Minus,

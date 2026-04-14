@@ -18,6 +18,7 @@ use crate::ir::{
 /// This id remains the canonical handle for a table even when name-based
 /// lookups are resolved separately.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DataSourceId(pub i64);
 
 /// Errors related to the catalog functionalities.

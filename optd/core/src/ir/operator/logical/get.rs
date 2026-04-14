@@ -35,6 +35,7 @@ define_node!(
 impl_operator_conversion!(Get, GetBorrowed);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum GetImplementation {
     #[default]
     TableScan,

@@ -41,6 +41,7 @@ use crate::ir::{Column, Group, GroupId, GroupMetadata, IRCommon, Scalar};
 
 /// The operator type and its associated metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum OperatorKind {
     Group(GroupMetadata),
     Get(GetMetadata),
@@ -115,6 +116,7 @@ impl OperatorKind {
 
 /// The operator struct that is able to represent any operator type.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Operator {
     /// The group ID if this operator is a placeholder for a group.
     pub group_id: Option<GroupId>,
@@ -237,5 +239,42 @@ impl Explain for Operator {
                 Subquery::borrow_raw_parts(meta, &self.common).explain(ctx, option)
             }
         }
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "serde")]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::ir::{
+        Column, ScalarValue,
+        catalog::DataSourceId,
+        convert::{IntoOperator, IntoScalar},
+        properties::{TupleOrdering, TupleOrderingDirection},
+        scalar::{BinaryOp, BinaryOpKind, ColumnRef, Literal},
+    };
+
+    use super::{EnforcerSort, Get, Operator, Select};
+
+    #[test]
+    fn query_plan_round_trips_through_serde() {
+        let input = Get::logical(DataSourceId(1), 1, Arc::from([0_usize, 1])).into_operator();
+        let predicate = BinaryOp::new(
+            BinaryOpKind::Eq,
+            ColumnRef::new(Column(1, 0)).into_scalar(),
+            Literal::new(ScalarValue::Int32(Some(42))).into_scalar(),
+        )
+        .into_scalar();
+        let select = Select::new(input, predicate).into_operator();
+        let ordering = TupleOrdering::from_iter([(Column(1, 0), TupleOrderingDirection::Asc)]);
+        let plan = EnforcerSort::new(ordering, select).into_operator();
+
+        let serialized = serde_json::to_string(&plan).unwrap();
+        let round_trip = serde_json::from_str::<Operator>(&serialized).unwrap();
+
+        println!("serialized: {}", serialized);
+
+        assert_eq!(round_trip, *plan);
     }
 }
