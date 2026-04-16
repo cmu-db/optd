@@ -25,6 +25,9 @@ pub struct Model {
 
     #[sea_orm(belongs_to, from = "query_id", to = "query_id")]
     pub query: HasOne<super::query::Entity>,
+
+    #[sea_orm(has_many)]
+    pub query_plans: HasMany<super::query_plan::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

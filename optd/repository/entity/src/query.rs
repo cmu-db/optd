@@ -12,6 +12,9 @@ pub struct Model {
 
     /// The SQL text for this query.
     pub sql: String,
+
+    #[sea_orm(has_many)]
+    pub query_instances: HasMany<super::query_instance::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

@@ -1,11 +1,11 @@
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QueryOrder};
 
-use crate::entity::{prelude::QueryInstance, query_instance};
-
-use super::{
-    QueryInstanceInfo, QueryInstanceSelector, get_query_by_sql, get_query_plans,
-    query_instance_info_from_parts,
+use crate::entity::{
+    prelude::{QueryInstance, QueryPlan as QueryPlanEntity},
+    query_instance, query_plan,
 };
+
+use super::{QueryInstanceInfo, QueryInstanceSelector, QueryPlanInfo, get_query_by_sql};
 
 /// Returns query instances matching `selector`.
 pub async fn get_query_instances<C>(
@@ -25,17 +25,23 @@ where
         }
     };
 
-    let query_instances = QueryInstance::find()
+    QueryInstance::find()
         .filter(query_instance::Column::QueryId.eq(query_id))
         .order_by_asc(query_instance::Column::Id)
+        .find_with_related(QueryPlanEntity)
+        .order_by_asc(query_plan::Column::Id)
         .all(db)
-        .await?;
-
-    let mut infos = Vec::with_capacity(query_instances.len());
-    for query_instance in query_instances {
-        let query_plans = get_query_plans(db, query_instance.id).await?;
-        infos.push(query_instance_info_from_parts(query_instance, query_plans));
-    }
-
-    Ok(infos)
+        .await
+        .map(|query_instances| {
+            query_instances
+                .into_iter()
+                .map(|(query_instance, query_plans)| QueryInstanceInfo {
+                    id: query_instance.id,
+                    query_id: query_instance.query_id,
+                    snapshot_id: query_instance.snapshot_id,
+                    query_time: query_instance.query_time,
+                    query_plans: query_plans.into_iter().map(QueryPlanInfo::from).collect(),
+                })
+                .collect()
+        })
 }
