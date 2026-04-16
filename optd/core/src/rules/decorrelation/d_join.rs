@@ -29,10 +29,8 @@ use crate::error::Result;
 use crate::ir::IRContext;
 use crate::ir::convert::{IntoOperator, IntoScalar};
 use crate::ir::operator::join::JoinType;
-use crate::ir::operator::{
-    Aggregate, Join, LogicalDependentJoinBorrowed, LogicalRemap, Operator, Project,
-};
-use crate::ir::scalar::{BinaryOp, BinaryOpKind, ColumnAssign, ColumnRef, List};
+use crate::ir::operator::{Aggregate, DependentJoinBorrowed, Join, Operator};
+use crate::ir::scalar::{BinaryOp, BinaryOpKind, ColumnRef};
 use crate::ir::{Column, Scalar};
 
 use super::UnnestingRule;
@@ -47,53 +45,31 @@ impl UnnestingRule {
         outer_refs: Vec<Column>,
         outer: Arc<Operator>,
         ctx: &IRContext,
-    ) -> (HashMap<Column, Column>, Arc<Operator>) {
-        // Compute the domain representation
-        let mut domain_repr: HashMap<Column, Column> = HashMap::new();
-        for c in &outer_refs {
-            let fresh = ctx.define_column(ctx.get_column_meta(c).data_type.clone(), None);
-            domain_repr.insert(*c, fresh);
-        }
-
-        // Compute the domain operator
-        let project_scalars: Vec<Arc<Scalar>> = outer_refs
+    ) -> Result<(HashMap<Column, Column>, Arc<Operator>)> {
+        let domain = outer
+            .with_ctx(ctx)
+            .logical_aggregate(
+                std::iter::empty::<Arc<Scalar>>(),
+                outer_refs
+                    .iter()
+                    .map(|c| ColumnRef::new(*c).into_scalar())
+                    .collect::<Vec<_>>(),
+            )?
+            .build();
+        let key_table_index = *domain.borrow::<Aggregate>().key_table_index();
+        let domain_repr = outer_refs
             .iter()
-            .map(|c| ColumnRef::new(*c).into_scalar())
+            .enumerate()
+            .map(|(idx, col)| (*col, Column(key_table_index, idx)))
             .collect();
-        let project_list = List::new(project_scalars.into()).into_scalar();
-        // TODO(yuchen): fix this
-        let table_index: i64 = 0;
-        let domain_project = Project::new(table_index, outer.clone(), project_list).into_operator();
-        let group_keys: Vec<Arc<Scalar>> = outer_refs
-            .iter()
-            .map(|c| ColumnAssign::new(*c, ColumnRef::new(*c).into_scalar()).into_scalar())
-            .collect();
-        let group_keys_list = List::new(group_keys.into()).into_scalar();
-        let empty_exprs_list = List::new(vec![].into()).into_scalar();
-        let domain_distinct =
-            Aggregate::logical(0, domain_project, empty_exprs_list, group_keys_list)
-                .into_operator();
-        let remap_keys: Vec<Arc<Scalar>> = outer_refs
-            .iter()
-            .map(|c| {
-                let target = *domain_repr.get(c).unwrap();
-                let col_ref = ColumnRef::new(*c).into_scalar();
-                ColumnAssign::new(target, col_ref).into_scalar()
-            })
-            .collect();
-        let remap_list = List::new(remap_keys.into()).into_scalar();
-        // TODO(yuchen): fix this
-        let table_index = 0;
-        let domain_d = LogicalRemap::new(table_index, domain_distinct).into_operator();
-
-        (domain_repr, domain_d)
+        Ok((domain_repr, domain))
     }
 
     // This is the main dependent decorrelation join algorithm, following
     // the algorithm from page 11 of the referenced paper
     pub(super) fn d_join_elimination(
         &self,
-        dep_join: LogicalDependentJoinBorrowed<'_>,
+        dep_join: DependentJoinBorrowed<'_>,
         mut parent_unnesting: Option<&mut Unnesting<'_>>,
         parent_accessing: Option<&HashSet<*const Operator>>,
         ctx: &IRContext,
@@ -133,9 +109,9 @@ impl UnnestingRule {
             }
         }
         let mut outer_refs_vec: Vec<Column> = outer_refs.iter().copied().collect();
-        outer_refs_vec.sort_by_key(|c| c.0);
+        outer_refs_vec.sort();
         let (domain_repr, domain_op) =
-            self.create_domain(outer_refs_vec.clone(), new_outer.clone(), ctx);
+            self.create_domain(outer_refs_vec.clone(), new_outer.clone(), ctx)?;
         let mut unnesting = Unnesting::new(Arc::new(UnnestingInfo::new(
             outer_refs,
             (domain_repr, domain_op),

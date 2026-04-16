@@ -1,12 +1,15 @@
-use super::helpers::{assert_unnesting, create_domain_with_aliases, make_cols, null_safe_eq};
-use crate::ir::builder::{boolean, column_assign, column_ref, mock_scan_with_columns};
+use super::helpers::{
+    TestOperatorExt, aggregate_with_outputs, assert_unnesting, create_domain_with_aliases,
+    make_cols, mock_scan_with_columns, null_safe_eq, project_with_outputs,
+};
+use crate::error::Result;
+use crate::ir::IRContext;
+use crate::ir::builder::{boolean, column_ref};
 use crate::ir::convert::IntoOperator;
 use crate::ir::explain::quick_explain;
-use crate::ir::operator::{Join, LogicalOrderBy, Operator, OperatorKind, join::JoinType};
+use crate::ir::operator::{Join, OperatorKind, OrderBy, join::JoinType};
 use crate::ir::properties::TupleOrderingDirection;
-use crate::ir::{Column, DataType, IRContext};
 use crate::rules::decorrelation::UnnestingRule;
-use std::sync::Arc;
 
 /// Test Simple Unnesting: A very simple select pull-up
 ///
@@ -22,26 +25,29 @@ use std::sync::Arc;
 /// |--- Select [T2.v2 = T2.v2]
 ///      |--- Scan(T2)
 #[test]
-fn test_simple_unnesting() {
-    let ctx = IRContext::with_empty_magic();
-    let t1_cols = make_cols(&ctx, 1);
-    let t2_cols = make_cols(&ctx, 1);
-    let t1 = t1_cols[0];
-    let t2 = t2_cols[0];
+fn test_simple_unnesting() -> Result<()> {
+    let input_ctx = IRContext::with_empty_magic();
+    let expected_ctx = IRContext::with_empty_magic();
 
     let input_plan = {
-        let left_branch = mock_scan_with_columns(1, t1_cols.to_vec(), 100.0);
-        let right_branch = mock_scan_with_columns(2, t2_cols.to_vec(), 100.0)
-            .logical_select(column_ref(t2).eq(column_ref(t1)));
-
+        let t1_cols = make_cols(&input_ctx, 1);
+        let t2_cols = make_cols(&input_ctx, 1);
+        let t1 = t1_cols[0];
+        let t2 = t2_cols[0];
+        let left_branch = mock_scan_with_columns(1, t1_cols);
+        let right_branch =
+            mock_scan_with_columns(2, t2_cols).logical_select(column_ref(t2).eq(column_ref(t1)));
         left_branch.logical_dependent_join(right_branch, boolean(true), JoinType::Inner)
     };
 
     let expected_plan = {
-        let left_branch = mock_scan_with_columns(1, t1_cols.to_vec(), 100.0);
-        let right_branch = mock_scan_with_columns(2, t2_cols.to_vec(), 100.0)
-            .logical_select(column_ref(t2).eq(column_ref(t2)));
-
+        let t1_cols = make_cols(&expected_ctx, 1);
+        let t2_cols = make_cols(&expected_ctx, 1);
+        let t1 = t1_cols[0];
+        let t2 = t2_cols[0];
+        let left_branch = mock_scan_with_columns(1, t1_cols);
+        let right_branch =
+            mock_scan_with_columns(2, t2_cols).logical_select(column_ref(t2).eq(column_ref(t2)));
         left_branch.logical_join(
             right_branch,
             null_safe_eq(column_ref(t1), column_ref(t2)),
@@ -49,7 +55,7 @@ fn test_simple_unnesting() {
         )
     };
 
-    assert_unnesting(&ctx, input_plan, expected_plan).unwrap();
+    assert_unnesting(&input_ctx, input_plan, &expected_ctx, expected_plan)
 }
 
 /// Test Nesting & Scope: 2 nested dependent joins
@@ -73,25 +79,26 @@ fn test_simple_unnesting() {
 ///           |    |--- Domain(T1.v0) -> d1
 ///           |--- Scan(T3) [v2]
 #[test]
-fn test_deep_nesting_and_scope() {
-    let ctx = IRContext::with_empty_magic();
-    let t1_cols = make_cols(&ctx, 1);
-    let t2_cols = make_cols(&ctx, 1);
-    let t3_cols = make_cols(&ctx, 1);
-    let t1 = t1_cols[0];
-    let t2 = t2_cols[0];
-    let t3 = t3_cols[0];
+fn test_deep_nesting_and_scope() -> Result<()> {
+    let input_ctx = IRContext::with_empty_magic();
+    let expected_ctx = IRContext::with_empty_magic();
 
     let input_plan = {
-        let left_branch = mock_scan_with_columns(1, t1_cols.to_vec(), 100.0);
+        let t1_cols = make_cols(&input_ctx, 1);
+        let t2_cols = make_cols(&input_ctx, 1);
+        let t3_cols = make_cols(&input_ctx, 1);
+        let t1 = t1_cols[0];
+        let t2 = t2_cols[0];
+        let t3 = t3_cols[0];
+
+        let left_branch = mock_scan_with_columns(1, t1_cols);
         let right_branch = {
-            let left_branch = mock_scan_with_columns(2, t2_cols.to_vec(), 100.0);
-            let right_branch = mock_scan_with_columns(3, t3_cols.to_vec(), 100.0).logical_select(
+            let left_branch = mock_scan_with_columns(2, t2_cols);
+            let right_branch = mock_scan_with_columns(3, t3_cols).logical_select(
                 column_ref(t3)
                     .eq(column_ref(t2))
                     .and(column_ref(t3).gt(column_ref(t1))),
             );
-
             left_branch.logical_dependent_join(right_branch, boolean(true), JoinType::Inner)
         };
 
@@ -99,30 +106,30 @@ fn test_deep_nesting_and_scope() {
     };
 
     let expected_plan = {
-        let mut next_id = ctx.column_meta.lock().unwrap().len();
-        let mut fresh = || {
-            let id = next_id;
-            next_id += 1;
-            Column(id)
-        };
-        let d1 = fresh();
-        let d2 = fresh();
+        let t1_cols = make_cols(&expected_ctx, 1);
+        let t2_cols = make_cols(&expected_ctx, 1);
+        let t3_cols = make_cols(&expected_ctx, 1);
+        let t1 = t1_cols[0];
+        let t2 = t2_cols[0];
+        let t3 = t3_cols[0];
 
-        let left_branch = mock_scan_with_columns(1, t1_cols.to_vec(), 100.0);
+        let left_branch = mock_scan_with_columns(1, t1_cols.clone());
         let right_branch = {
-            let left_branch = mock_scan_with_columns(2, t2_cols.to_vec(), 100.0);
+            let left_branch = mock_scan_with_columns(2, t2_cols.clone());
             let right_branch = {
-                let local_domain = create_domain_with_aliases(
-                    mock_scan_with_columns(2, t2_cols.to_vec(), 100.0),
+                let (local_domain, local_outputs) = create_domain_with_aliases(
+                    &expected_ctx,
+                    mock_scan_with_columns(2, t2_cols),
                     vec![t2],
-                    vec![d2],
-                );
-                let parent_domain = create_domain_with_aliases(
-                    mock_scan_with_columns(1, t1_cols.to_vec(), 100.0),
+                )?;
+                let d2 = local_outputs[0];
+                let (parent_domain, parent_outputs) = create_domain_with_aliases(
+                    &expected_ctx,
+                    mock_scan_with_columns(1, t1_cols),
                     vec![t1],
-                    vec![d1],
-                );
-                let t3_scan = mock_scan_with_columns(3, t3_cols.to_vec(), 100.0);
+                )?;
+                let d1 = parent_outputs[0];
+                let t3_scan = mock_scan_with_columns(3, t3_cols);
                 local_domain
                     .logical_join(parent_domain, boolean(true), JoinType::Inner)
                     .logical_join(
@@ -133,7 +140,7 @@ fn test_deep_nesting_and_scope() {
                         JoinType::Inner,
                     )
             };
-
+            let d2 = right_branch.output_columns_in_order(&expected_ctx)?[0];
             left_branch.logical_join(
                 right_branch,
                 null_safe_eq(column_ref(t2), column_ref(d2)),
@@ -141,6 +148,7 @@ fn test_deep_nesting_and_scope() {
             )
         };
 
+        let d1 = right_branch.output_columns_in_order(&expected_ctx)?[2];
         left_branch.logical_join(
             right_branch,
             null_safe_eq(column_ref(t1), column_ref(d1)),
@@ -148,7 +156,7 @@ fn test_deep_nesting_and_scope() {
         )
     };
 
-    assert_unnesting(&ctx, input_plan, expected_plan).unwrap();
+    assert_unnesting(&input_ctx, input_plan, &expected_ctx, expected_plan)
 }
 
 /// Test Nested Dependent Joins with Intermediate Outer Ref Access:
@@ -172,21 +180,23 @@ fn test_deep_nesting_and_scope() {
 ///           |--- Select [T3.v2 = T3.v2]
 ///                |--- Scan(T3) [v2]
 #[test]
-fn test_nested_dep_join_intermediate_select_preserves_outer_ref() {
-    let ctx = IRContext::with_empty_magic();
-    let t1_cols = make_cols(&ctx, 1);
-    let t2_cols = make_cols(&ctx, 1);
-    let t3_cols = make_cols(&ctx, 1);
-    let t1 = t1_cols[0];
-    let t2 = t2_cols[0];
-    let t3 = t3_cols[0];
+fn test_nested_dep_join_intermediate_select_preserves_outer_ref() -> Result<()> {
+    let input_ctx = IRContext::with_empty_magic();
+    let expected_ctx = IRContext::with_empty_magic();
 
     let input_plan = {
-        let left_branch = mock_scan_with_columns(1, t1_cols.to_vec(), 100.0);
+        let t1_cols = make_cols(&input_ctx, 1);
+        let t2_cols = make_cols(&input_ctx, 1);
+        let t3_cols = make_cols(&input_ctx, 1);
+        let t1 = t1_cols[0];
+        let t2 = t2_cols[0];
+        let t3 = t3_cols[0];
+
+        let left_branch = mock_scan_with_columns(1, t1_cols);
         let right_branch = {
             let nested_dep = {
-                let left_branch = mock_scan_with_columns(2, t2_cols.to_vec(), 100.0);
-                let right_branch = mock_scan_with_columns(3, t3_cols.to_vec(), 100.0)
+                let left_branch = mock_scan_with_columns(2, t2_cols.clone());
+                let right_branch = mock_scan_with_columns(3, t3_cols)
                     .logical_select(column_ref(t3).eq(column_ref(t2)));
                 left_branch.logical_dependent_join(right_branch, boolean(true), JoinType::Inner)
             };
@@ -197,24 +207,24 @@ fn test_nested_dep_join_intermediate_select_preserves_outer_ref() {
     };
 
     let expected_plan = {
-        let mut next_id = ctx.column_meta.lock().unwrap().len();
-        let mut fresh = || {
-            let id = next_id;
-            next_id += 1;
-            Column(id)
-        };
-        let d1 = fresh();
+        let t1_cols = make_cols(&expected_ctx, 1);
+        let t2_cols = make_cols(&expected_ctx, 1);
+        let t3_cols = make_cols(&expected_ctx, 1);
+        let t1 = t1_cols[0];
+        let t2 = t2_cols[0];
+        let t3 = t3_cols[0];
 
-        let left_branch = mock_scan_with_columns(1, t1_cols.to_vec(), 100.0);
+        let left_branch = mock_scan_with_columns(1, t1_cols.clone());
         let right_branch = {
-            let domain = create_domain_with_aliases(
-                mock_scan_with_columns(1, t1_cols.to_vec(), 100.0),
+            let (domain, domain_outputs) = create_domain_with_aliases(
+                &expected_ctx,
+                mock_scan_with_columns(1, t1_cols),
                 vec![t1],
-                vec![d1],
-            );
+            )?;
+            let d1 = domain_outputs[0];
             let nested_join = {
-                let left_branch = mock_scan_with_columns(2, t2_cols.to_vec(), 100.0);
-                let right_branch = mock_scan_with_columns(3, t3_cols.to_vec(), 100.0)
+                let left_branch = mock_scan_with_columns(2, t2_cols);
+                let right_branch = mock_scan_with_columns(3, t3_cols)
                     .logical_select(column_ref(t3).eq(column_ref(t3)));
                 left_branch.logical_join(
                     right_branch,
@@ -229,6 +239,7 @@ fn test_nested_dep_join_intermediate_select_preserves_outer_ref() {
             )
         };
 
+        let d1 = right_branch.output_columns_in_order(&expected_ctx)?[0];
         left_branch.logical_join(
             right_branch,
             null_safe_eq(column_ref(t1), column_ref(d1)),
@@ -236,7 +247,7 @@ fn test_nested_dep_join_intermediate_select_preserves_outer_ref() {
         )
     };
 
-    assert_unnesting(&ctx, input_plan, expected_plan).unwrap();
+    assert_unnesting(&input_ctx, input_plan, &expected_ctx, expected_plan)
 }
 
 /// Test Complex Operators: Aggregates + Domain
@@ -251,57 +262,68 @@ fn test_nested_dep_join_intermediate_select_preserves_outer_ref() {
 /// OUTPUT:
 /// Join [T1.v1 IS NOT DISTINCT FROM d1]
 /// |--- Scan(T1)
-/// |--- Join [d1 IS NOT DISTINCT FROM T2.v2]
-///      |--- Domain(T1, T1.v1) -> d1
+/// |--- LeftOuter Join [d1 IS NOT DISTINCT FROM T2.v2]
+///      |--- Domain(T1.v1) -> d1
 ///      |--- Aggregate [keys: T2.v2 := T2.v2]
 ///           |--- Select [T2.v2 = T2.v2]
 ///                |--- Scan(T2)
 #[test]
-fn test_complex_operators() {
-    let ctx = IRContext::with_empty_magic();
-    let t1_cols = make_cols(&ctx, 1);
-    let t2_cols = make_cols(&ctx, 1);
-    let t1 = t1_cols[0];
-    let t2 = t2_cols[0];
+fn test_complex_operators() -> Result<()> {
+    let input_ctx = IRContext::with_empty_magic();
+    let expected_ctx = IRContext::with_empty_magic();
 
     let input_plan = {
-        let left_branch = mock_scan_with_columns(1, t1_cols.to_vec(), 100.0);
+        let t1_cols = make_cols(&input_ctx, 1);
+        let t2_cols = make_cols(&input_ctx, 1);
+        let t1 = t1_cols[0];
+        let t2 = t2_cols[0];
+
+        let left_branch = mock_scan_with_columns(1, t1_cols);
         let right_branch = {
-            let agg_input = mock_scan_with_columns(2, t2_cols.to_vec(), 100.0)
+            let agg_input = mock_scan_with_columns(2, t2_cols)
                 .logical_select(column_ref(t2).eq(column_ref(t1)));
-            agg_input.logical_aggregate(std::iter::empty(), std::iter::empty())
+            aggregate_with_outputs(
+                &input_ctx,
+                agg_input,
+                std::iter::empty(),
+                std::iter::empty(),
+            )?
+            .0
         };
 
         left_branch.logical_dependent_join(right_branch, boolean(true), JoinType::Inner)
     };
 
     let expected_plan = {
-        let mut next_id = ctx.column_meta.lock().unwrap().len();
-        let mut fresh = || {
-            let id = next_id;
-            next_id += 1;
-            Column(id)
-        };
-        let d1 = fresh();
+        let t1_cols = make_cols(&expected_ctx, 1);
+        let t2_cols = make_cols(&expected_ctx, 1);
+        let t1 = t1_cols[0];
+        let t2 = t2_cols[0];
 
-        let left_branch = mock_scan_with_columns(1, t1_cols.to_vec(), 100.0);
+        let left_branch = mock_scan_with_columns(1, t1_cols.clone());
         let right_branch = {
-            let domain = create_domain_with_aliases(
-                mock_scan_with_columns(1, t1_cols.to_vec(), 100.0),
+            let (domain, domain_outputs) = create_domain_with_aliases(
+                &expected_ctx,
+                mock_scan_with_columns(1, t1_cols),
                 vec![t1],
-                vec![d1],
-            );
-            let agg_input = mock_scan_with_columns(2, t2_cols.to_vec(), 100.0)
+            )?;
+            let d1 = domain_outputs[0];
+            let agg_input = mock_scan_with_columns(2, t2_cols)
                 .logical_select(column_ref(t2).eq(column_ref(t2)));
-            let keys = vec![column_assign(t2, column_ref(t2))];
-            let agg = agg_input.logical_aggregate(std::iter::empty(), keys);
+            let (agg, agg_keys, _) = aggregate_with_outputs(
+                &expected_ctx,
+                agg_input,
+                std::iter::empty(),
+                [column_ref(t2)],
+            )?;
             domain.logical_join(
                 agg,
-                null_safe_eq(column_ref(d1), column_ref(t2)),
-                JoinType::Left,
+                null_safe_eq(column_ref(d1), column_ref(agg_keys[0])),
+                JoinType::LeftOuter,
             )
         };
 
+        let d1 = right_branch.output_columns_in_order(&expected_ctx)?[0];
         left_branch.logical_join(
             right_branch,
             null_safe_eq(column_ref(t1), column_ref(d1)),
@@ -309,7 +331,7 @@ fn test_complex_operators() {
         )
     };
 
-    assert_unnesting(&ctx, input_plan, expected_plan).unwrap();
+    assert_unnesting(&input_ctx, input_plan, &expected_ctx, expected_plan)
 }
 
 /// Test Join Equivalence Merging: Decorrelate without domain joins
@@ -332,23 +354,24 @@ fn test_complex_operators() {
 ///      |--- Select [T3.v2 = T3.v2]
 ///           |--- Scan(T3)
 #[test]
-fn test_join_equivalence_merging() {
-    let ctx = IRContext::with_empty_magic();
-    let t1_cols = make_cols(&ctx, 1);
-    let t2_cols = make_cols(&ctx, 1);
-    let t3_cols = make_cols(&ctx, 1);
-    let t1 = t1_cols[0];
-    let t2 = t2_cols[0];
-    let t3 = t3_cols[0];
+fn test_join_equivalence_merging() -> Result<()> {
+    let input_ctx = IRContext::with_empty_magic();
+    let expected_ctx = IRContext::with_empty_magic();
 
     let input_plan = {
-        let left_branch = mock_scan_with_columns(1, t1_cols.clone(), 100.0);
-        let right_branch = {
-            let left_sel = mock_scan_with_columns(2, t2_cols.clone(), 100.0)
-                .logical_select(column_ref(t2).eq(column_ref(t1)));
-            let right_sel = mock_scan_with_columns(3, t3_cols.clone(), 100.0)
-                .logical_select(column_ref(t3).eq(column_ref(t1)));
+        let t1_cols = make_cols(&input_ctx, 1);
+        let t2_cols = make_cols(&input_ctx, 1);
+        let t3_cols = make_cols(&input_ctx, 1);
+        let t1 = t1_cols[0];
+        let t2 = t2_cols[0];
+        let t3 = t3_cols[0];
 
+        let left_branch = mock_scan_with_columns(1, t1_cols);
+        let right_branch = {
+            let left_sel = mock_scan_with_columns(2, t2_cols)
+                .logical_select(column_ref(t2).eq(column_ref(t1)));
+            let right_sel = mock_scan_with_columns(3, t3_cols)
+                .logical_select(column_ref(t3).eq(column_ref(t1)));
             left_sel.logical_join(right_sel, boolean(true), JoinType::Inner)
         };
 
@@ -356,14 +379,19 @@ fn test_join_equivalence_merging() {
     };
 
     let expected_plan = {
-        let left_branch = mock_scan_with_columns(1, t1_cols.clone(), 100.0);
+        let t1_cols = make_cols(&expected_ctx, 1);
+        let t2_cols = make_cols(&expected_ctx, 1);
+        let t3_cols = make_cols(&expected_ctx, 1);
+        let t1 = t1_cols[0];
+        let t2 = t2_cols[0];
+        let t3 = t3_cols[0];
+
+        let left_branch = mock_scan_with_columns(1, t1_cols);
         let right_branch = {
-            let left_sel = mock_scan_with_columns(2, t2_cols.clone(), 100.0)
+            let left_sel = mock_scan_with_columns(2, t2_cols)
                 .logical_select(column_ref(t2).eq(column_ref(t2)));
-
-            let right_sel = mock_scan_with_columns(3, t3_cols.clone(), 100.0)
+            let right_sel = mock_scan_with_columns(3, t3_cols)
                 .logical_select(column_ref(t3).eq(column_ref(t3)));
-
             left_sel.logical_join(
                 right_sel,
                 null_safe_eq(column_ref(t2), column_ref(t3)),
@@ -378,7 +406,7 @@ fn test_join_equivalence_merging() {
         )
     };
 
-    assert_unnesting(&ctx, input_plan, expected_plan).unwrap();
+    assert_unnesting(&input_ctx, input_plan, &expected_ctx, expected_plan)
 }
 
 /// Test Multi-Outer Refs with Non-Equi Predicate (Domain Retained):
@@ -398,89 +426,81 @@ fn test_join_equivalence_merging() {
 ///           |--- Domain(T1.v0, T1.v1) -> d1, d2
 ///           |--- Scan(T2) [v2, v3]
 #[test]
-fn test_multi_outer_refs_domain_retained() {
-    fn build_input_plan(
-        ctx: &IRContext,
-    ) -> (
-        Arc<Operator>,
-        Vec<Column>,
-        Vec<Column>,
-        Column,
-        Column,
-        Column,
-        Column,
-    ) {
-        let t1_cols = make_cols(ctx, 2);
-        let t2_cols = make_cols(ctx, 2);
+fn test_multi_outer_refs_domain_retained() -> Result<()> {
+    let input_ctx = IRContext::with_empty_magic();
+    let expected_ctx = IRContext::with_empty_magic();
+
+    let input_plan = {
+        let t1_cols = make_cols(&input_ctx, 2);
+        let t2_cols = make_cols(&input_ctx, 2);
         let t1c0 = t1_cols[0];
         let t1c1 = t1_cols[1];
         let t2c0 = t2_cols[0];
         let t2c1 = t2_cols[1];
 
-        let left_branch = mock_scan_with_columns(1, t1_cols.clone(), 100.0);
+        let left_branch = mock_scan_with_columns(1, t1_cols);
         let right_branch = {
-            let select_input = mock_scan_with_columns(2, t2_cols.clone(), 100.0).logical_select(
+            let select_input = mock_scan_with_columns(2, t2_cols).logical_select(
                 column_ref(t2c0)
                     .gt(column_ref(t1c0))
                     .and(column_ref(t2c1).gt(column_ref(t1c1))),
             );
-            let keys = vec![column_assign(t2c0, column_ref(t2c0))];
-            select_input.logical_aggregate(std::iter::empty(), keys)
+            aggregate_with_outputs(
+                &input_ctx,
+                select_input,
+                std::iter::empty(),
+                [column_ref(t2c0)],
+            )?
+            .0
         };
-        (
-            left_branch.logical_dependent_join(right_branch, boolean(true), JoinType::Inner),
-            t1_cols,
-            t2_cols,
-            t1c0,
-            t1c1,
-            t2c0,
-            t2c1,
-        )
-    }
 
-    let ctx = IRContext::with_empty_magic();
-    let (input_plan, t1_cols, t2_cols, t1c0, t1c1, t2c0, t2c1) = build_input_plan(&ctx);
+        left_branch.logical_dependent_join(right_branch, boolean(true), JoinType::Inner)
+    };
+
     let expected_plan = {
-        let mut next_id = ctx.column_meta.lock().unwrap().len();
-        let mut fresh = || {
-            let id = next_id;
-            next_id += 1;
-            Column(id)
-        };
-        let d1 = fresh();
-        let d2 = fresh();
+        let t1_cols = make_cols(&expected_ctx, 2);
+        let t2_cols = make_cols(&expected_ctx, 2);
+        let t1c0 = t1_cols[0];
+        let t1c1 = t1_cols[1];
+        let t2c0 = t2_cols[0];
+        let t2c1 = t2_cols[1];
 
-        let left_branch = mock_scan_with_columns(1, t1_cols.clone(), 100.0);
+        let left_branch = mock_scan_with_columns(1, t1_cols.clone());
         let right_branch = {
-            let domain = create_domain_with_aliases(
-                mock_scan_with_columns(1, t1_cols.clone(), 100.0),
+            let (domain, domain_outputs) = create_domain_with_aliases(
+                &expected_ctx,
+                mock_scan_with_columns(1, t1_cols),
                 vec![t1c0, t1c1],
-                vec![d1, d2],
-            );
+            )?;
+            let d1 = domain_outputs[0];
+            let d2 = domain_outputs[1];
             let join_input = domain.logical_join(
-                mock_scan_with_columns(2, t2_cols.clone(), 100.0),
+                mock_scan_with_columns(2, t2_cols),
                 column_ref(t2c0)
                     .gt(column_ref(d1))
                     .and(column_ref(t2c1).gt(column_ref(d2))),
                 JoinType::Inner,
             );
-            let keys = vec![
-                column_assign(t2c0, column_ref(t2c0)),
-                column_assign(d1, column_ref(d1)),
-                column_assign(d2, column_ref(d2)),
-            ];
-            join_input.logical_aggregate(std::iter::empty(), keys)
+            let (agg, agg_keys, _) = aggregate_with_outputs(
+                &expected_ctx,
+                join_input,
+                std::iter::empty(),
+                [column_ref(t2c0), column_ref(d1), column_ref(d2)],
+            )?;
+            let _ = agg_keys;
+            agg
         };
 
+        let agg_keys = right_branch.output_columns_in_order(&expected_ctx)?[..3].to_vec();
         left_branch.logical_join(
             right_branch,
-            null_safe_eq(column_ref(t1c0), column_ref(d1))
-                .and(null_safe_eq(column_ref(t1c1), column_ref(d2))),
+            null_safe_eq(column_ref(t1c0), column_ref(agg_keys[1]))
+                .and(null_safe_eq(column_ref(t1c1), column_ref(agg_keys[2]))),
             JoinType::Inner,
         )
     };
 
-    assert_unnesting(&ctx, input_plan, expected_plan).unwrap();
+    assert_unnesting(&input_ctx, input_plan, &expected_ctx, expected_plan)
 }
 
 /// Test Deep Nesting with Multiple Dependencies:
@@ -505,27 +525,15 @@ fn test_multi_outer_refs_domain_retained() {
 ///           |--- Select [T4.v4 = T4.v4 && T4.v4 = T4.v4 && T4.v4 = T4.v4 && T4.v5 = T4.v5]
 ///                |--- Scan(T4) [v4, v5]
 #[test]
-fn test_deep_nesting_multiple_dependencies() {
-    #[allow(clippy::type_complexity)]
-    fn build_input_plan(
-        ctx: &IRContext,
-    ) -> (
-        Arc<Operator>,
-        Vec<Column>,
-        Vec<Column>,
-        Vec<Column>,
-        Vec<Column>,
-        Column,
-        Column,
-        Column,
-        Column,
-        Column,
-        Column,
-    ) {
-        let t1_cols = make_cols(ctx, 2);
-        let t2_cols = make_cols(ctx, 1);
-        let t3_cols = make_cols(ctx, 1);
-        let t4_cols = make_cols(ctx, 2);
+fn test_deep_nesting_multiple_dependencies() -> Result<()> {
+    let input_ctx = IRContext::with_empty_magic();
+    let expected_ctx = IRContext::with_empty_magic();
+
+    let input_plan = {
+        let t1_cols = make_cols(&input_ctx, 2);
+        let t2_cols = make_cols(&input_ctx, 1);
+        let t3_cols = make_cols(&input_ctx, 1);
+        let t4_cols = make_cols(&input_ctx, 2);
         let t1c0 = t1_cols[0];
         let t1c1 = t1_cols[1];
         let t2c0 = t2_cols[0];
@@ -533,51 +541,44 @@ fn test_deep_nesting_multiple_dependencies() {
         let t4c0 = t4_cols[0];
         let t4c1 = t4_cols[1];
 
-        let left_branch = mock_scan_with_columns(1, t1_cols.clone(), 100.0);
+        let left_branch = mock_scan_with_columns(1, t1_cols);
         let right_branch = {
-            let mid_left = mock_scan_with_columns(2, t2_cols.clone(), 100.0);
+            let mid_left = mock_scan_with_columns(2, t2_cols);
             let mid_right = {
-                let inner_left = mock_scan_with_columns(3, t3_cols.clone(), 100.0);
-                let inner_right = {
-                    let select_input = mock_scan_with_columns(4, t4_cols.clone(), 100.0);
-                    select_input.logical_select(
-                        column_ref(t4c0)
-                            .eq(column_ref(t3c0))
-                            .and(column_ref(t4c0).eq(column_ref(t2c0)))
-                            .and(column_ref(t4c0).eq(column_ref(t1c0)))
-                            .and(column_ref(t4c1).eq(column_ref(t1c1))),
-                    )
-                };
+                let inner_left = mock_scan_with_columns(3, t3_cols);
+                let inner_right = mock_scan_with_columns(4, t4_cols).logical_select(
+                    column_ref(t4c0)
+                        .eq(column_ref(t3c0))
+                        .and(column_ref(t4c0).eq(column_ref(t2c0)))
+                        .and(column_ref(t4c0).eq(column_ref(t1c0)))
+                        .and(column_ref(t4c1).eq(column_ref(t1c1))),
+                );
                 inner_left.logical_dependent_join(inner_right, boolean(true), JoinType::Inner)
             };
             mid_left.logical_dependent_join(mid_right, boolean(true), JoinType::Inner)
         };
 
-        (
-            left_branch.logical_dependent_join(right_branch, boolean(true), JoinType::Inner),
-            t1_cols,
-            t2_cols,
-            t3_cols,
-            t4_cols,
-            t1c0,
-            t1c1,
-            t2c0,
-            t3c0,
-            t4c0,
-            t4c1,
-        )
-    }
+        left_branch.logical_dependent_join(right_branch, boolean(true), JoinType::Inner)
+    };
 
-    let ctx = IRContext::with_empty_magic();
-    let (input_plan, t1_cols, t2_cols, t3_cols, t4_cols, t1c0, t1c1, t2c0, t3c0, t4c0, t4c1) =
-        build_input_plan(&ctx);
     let expected_plan = {
-        let left_branch = mock_scan_with_columns(1, t1_cols.clone(), 100.0);
+        let t1_cols = make_cols(&expected_ctx, 2);
+        let t2_cols = make_cols(&expected_ctx, 1);
+        let t3_cols = make_cols(&expected_ctx, 1);
+        let t4_cols = make_cols(&expected_ctx, 2);
+        let t1c0 = t1_cols[0];
+        let t1c1 = t1_cols[1];
+        let t2c0 = t2_cols[0];
+        let t3c0 = t3_cols[0];
+        let t4c0 = t4_cols[0];
+        let t4c1 = t4_cols[1];
+
+        let left_branch = mock_scan_with_columns(1, t1_cols);
         let right_branch = {
-            let mid_left = mock_scan_with_columns(2, t2_cols.clone(), 100.0);
+            let mid_left = mock_scan_with_columns(2, t2_cols);
             let mid_right = {
-                let inner_left = mock_scan_with_columns(3, t3_cols.clone(), 100.0);
-                let inner_right = mock_scan_with_columns(4, t4_cols.clone(), 100.0).logical_select(
+                let inner_left = mock_scan_with_columns(3, t3_cols);
+                let inner_right = mock_scan_with_columns(4, t4_cols).logical_select(
                     column_ref(t4c0)
                         .eq(column_ref(t4c0))
                         .and(column_ref(t4c0).eq(column_ref(t4c0)))
@@ -605,7 +606,7 @@ fn test_deep_nesting_multiple_dependencies() {
         )
     };
 
-    assert_unnesting(&ctx, input_plan, expected_plan).unwrap();
+    assert_unnesting(&input_ctx, input_plan, &expected_ctx, expected_plan)
 }
 
 /// Test Nested Dependent Joins + Regular Join + OrderBy + Map:
@@ -620,14 +621,14 @@ fn test_deep_nesting_multiple_dependencies() {
 ///           |    |--- Project [T3.v2, T3.v3]
 ///           |         |--- Select [T3.v2 > T2.v1 && T3.v3 > T1.v0]
 ///           |              |--- Scan(T3) [v2, v3]
-///           |--- Project [r0 := T4.v4, T4.v5]
+///           |--- Project [T4.v4, T4.v5]
 ///                |--- Select [T4.v4 = T2.v1]
 ///                     |--- Scan(T4) [v4, v5]
 ///
 /// OUTPUT:
 /// Join [T1.v0 IS NOT DISTINCT FROM d1]
 /// |--- Scan(T1) [v0]
-/// |--- Join [T2.v1 IS NOT DISTINCT FROM T4.v4]
+/// |--- Join [T2.v1 IS NOT DISTINCT FROM d2]
 ///      |--- Scan(T2) [v1]
 ///      |--- Join [T3.v3 = T4.v5 && d2 IS NOT DISTINCT FROM T4.v4]
 ///           |--- OrderBy [T3.v2 ASC]
@@ -637,34 +638,19 @@ fn test_deep_nesting_multiple_dependencies() {
 ///           |              |    |--- Domain(T2.v1) -> d2
 ///           |              |    |--- Domain(T1.v0) -> d1
 ///           |              |--- Scan(T3) [v2, v3]
-///           |--- Project [r0 := T4.v4, T4.v5, T4.v4]
+///           |--- Project [T4.v4, T4.v5]
 ///                |--- Select [T4.v4 = T4.v4]
 ///                     |--- Scan(T4) [v4, v5]
 #[test]
-fn test_nested_dep_join_regular_join_orderby_project_domain_vs_repr() {
-    #[allow(clippy::type_complexity)]
-    fn build_input_plan(
-        ctx: &IRContext,
-    ) -> (
-        Arc<Operator>,
-        Vec<Column>,
-        Vec<Column>,
-        Vec<Column>,
-        Vec<Column>,
-        Column,
-        Column,
-        Column,
-        Column,
-        Column,
-        Column,
-        Column,
-    ) {
-        let t1_cols = make_cols(ctx, 1);
-        let t2_cols = make_cols(ctx, 1);
-        let t3_cols = make_cols(ctx, 2);
-        let t4_cols = make_cols(ctx, 2);
-        let map_col = ctx.define_column(DataType::Int32, None);
+fn test_nested_dep_join_regular_join_orderby_project_domain_vs_repr() -> Result<()> {
+    let input_ctx = IRContext::with_empty_magic();
+    let expected_ctx = IRContext::with_empty_magic();
 
+    let input_plan = {
+        let t1_cols = make_cols(&input_ctx, 1);
+        let t2_cols = make_cols(&input_ctx, 1);
+        let t3_cols = make_cols(&input_ctx, 2);
+        let t4_cols = make_cols(&input_ctx, 2);
         let t1c0 = t1_cols[0];
         let t2c0 = t2_cols[0];
         let t3c0 = t3_cols[0];
@@ -672,136 +658,155 @@ fn test_nested_dep_join_regular_join_orderby_project_domain_vs_repr() {
         let t4c0 = t4_cols[0];
         let t4c1 = t4_cols[1];
 
-        let left_branch = mock_scan_with_columns(1, t1_cols.clone(), 100.0);
+        let left_branch = mock_scan_with_columns(1, t1_cols);
         let right_branch = {
-            let mid_left = mock_scan_with_columns(2, t2_cols.clone(), 100.0);
+            let mid_left = mock_scan_with_columns(2, t2_cols);
             let mid_right = {
                 let left_regular = {
-                    let select_input = mock_scan_with_columns(3, t3_cols.clone(), 100.0)
-                        .logical_select(
-                            column_ref(t3c0)
-                                .gt(column_ref(t2c0))
-                                .and(column_ref(t3c1).gt(column_ref(t1c0))),
-                        )
-                        .logical_project(vec![column_ref(t3c0), column_ref(t3c1)]);
-                    LogicalOrderBy::new(
+                    let select_input = mock_scan_with_columns(3, t3_cols).logical_select(
+                        column_ref(t3c0)
+                            .gt(column_ref(t2c0))
+                            .and(column_ref(t3c1).gt(column_ref(t1c0))),
+                    );
+                    let (projected, projected_cols) = project_with_outputs(
+                        &input_ctx,
                         select_input,
-                        vec![(column_ref(t3c0), TupleOrderingDirection::Asc)],
+                        [column_ref(t3c0), column_ref(t3c1)],
+                    )?;
+                    OrderBy::new(
+                        projected,
+                        vec![(column_ref(projected_cols[0]), TupleOrderingDirection::Asc)],
                     )
                     .into_operator()
                 };
-                let right_regular = mock_scan_with_columns(4, t4_cols.clone(), 100.0)
-                    .logical_select(column_ref(t4c0).eq(column_ref(t2c0)))
-                    .logical_project(vec![
-                        column_assign(map_col, column_ref(t4c0)),
-                        column_ref(t4c1),
-                    ]);
+                let left_outputs = left_regular.output_columns_in_order(&input_ctx)?;
+                let p3b = left_outputs[1];
+                let right_regular = {
+                    let select_input = mock_scan_with_columns(4, t4_cols)
+                        .logical_select(column_ref(t4c0).eq(column_ref(t2c0)));
+                    let (projected, projected_cols) = project_with_outputs(
+                        &input_ctx,
+                        select_input,
+                        [column_ref(t4c0), column_ref(t4c1)],
+                    )?;
+                    let p4b = projected_cols[1];
+                    (projected, p4b)
+                };
                 left_regular.logical_join(
-                    right_regular,
-                    column_ref(t3c1).eq(column_ref(t4c1)),
+                    right_regular.0,
+                    column_ref(p3b).eq(column_ref(right_regular.1)),
                     JoinType::Inner,
                 )
             };
             mid_left.logical_dependent_join(mid_right, boolean(true), JoinType::Inner)
         };
 
-        (
-            left_branch.logical_dependent_join(right_branch, boolean(true), JoinType::Inner),
-            t1_cols,
-            t2_cols,
-            t3_cols,
-            t4_cols,
-            map_col,
-            t1c0,
-            t2c0,
-            t3c0,
-            t3c1,
-            t4c0,
-            t4c1,
-        )
-    }
+        left_branch.logical_dependent_join(right_branch, boolean(true), JoinType::Inner)
+    };
 
-    let ctx = IRContext::with_empty_magic();
-    let (
-        input_plan,
-        t1_cols,
-        t2_cols,
-        t3_cols,
-        t4_cols,
-        map_col,
-        t1c0,
-        t2c0,
-        t3c0,
-        t3c1,
-        t4c0,
-        t4c1,
-    ) = build_input_plan(&ctx);
     let expected_plan = {
-        let mut next_id = ctx.column_meta.lock().unwrap().len();
-        let mut fresh = || {
-            let id = next_id;
-            next_id += 1;
-            Column(id)
-        };
-        let d1 = fresh();
-        let d2 = fresh();
+        let t1_cols = make_cols(&expected_ctx, 1);
+        let t2_cols = make_cols(&expected_ctx, 1);
+        let t3_cols = make_cols(&expected_ctx, 2);
+        let t4_cols = make_cols(&expected_ctx, 2);
+        let t1c0 = t1_cols[0];
+        let t2c0 = t2_cols[0];
+        let t3c0 = t3_cols[0];
+        let t3c1 = t3_cols[1];
+        let t4c0 = t4_cols[0];
+        let t4c1 = t4_cols[1];
 
-        let left_branch = mock_scan_with_columns(1, t1_cols.clone(), 100.0);
-        let right_branch = {
-            let mid_left = mock_scan_with_columns(2, t2_cols.clone(), 100.0);
-            let mid_right = {
+        let left_branch = mock_scan_with_columns(1, t1_cols.clone());
+        let (_input_left_project, input_left_outputs) = project_with_outputs(
+            &expected_ctx,
+            mock_scan_with_columns(3, t3_cols.clone()).logical_select(
+                column_ref(t3c0)
+                    .gt(column_ref(t2c0))
+                    .and(column_ref(t3c1).gt(column_ref(t1c0))),
+            ),
+            [column_ref(t3c0), column_ref(t3c1)],
+        )?;
+        let p3a = input_left_outputs[0];
+        let p3b = input_left_outputs[1];
+        let (_input_right_project, input_right_outputs) = project_with_outputs(
+            &expected_ctx,
+            mock_scan_with_columns(4, t4_cols.clone())
+                .logical_select(column_ref(t4c0).eq(column_ref(t2c0))),
+            [column_ref(t4c0), column_ref(t4c1)],
+        )?;
+        let p4b = input_right_outputs[1];
+        let (right_branch, d1) = {
+            let mid_left = mock_scan_with_columns(2, t2_cols.clone());
+            let (mid_right, d1) = {
                 let left_regular = {
-                    let current_domain = create_domain_with_aliases(
-                        mock_scan_with_columns(2, t2_cols.clone(), 100.0),
+                    let (current_domain, current_outputs) = create_domain_with_aliases(
+                        &expected_ctx,
+                        mock_scan_with_columns(2, t2_cols),
                         vec![t2c0],
-                        vec![d2],
-                    );
-                    let parent_domain = create_domain_with_aliases(
-                        mock_scan_with_columns(1, t1_cols.clone(), 100.0),
+                    )?;
+                    let d2 = current_outputs[0];
+                    let (parent_domain, parent_outputs) = create_domain_with_aliases(
+                        &expected_ctx,
+                        mock_scan_with_columns(1, t1_cols),
                         vec![t1c0],
-                        vec![d1],
-                    );
+                    )?;
+                    let d1 = parent_outputs[0];
                     let select_input = current_domain
                         .logical_join(parent_domain, boolean(true), JoinType::Inner)
                         .logical_join(
-                            mock_scan_with_columns(3, t3_cols.clone(), 100.0),
+                            mock_scan_with_columns(3, t3_cols),
                             column_ref(t3c0)
                                 .gt(column_ref(d2))
                                 .and(column_ref(t3c1).gt(column_ref(d1))),
                             JoinType::Inner,
-                        )
-                        .logical_project(vec![
+                        );
+                    let (projected, projected_cols) = project_with_outputs(
+                        &expected_ctx,
+                        select_input,
+                        [
                             column_ref(t3c0),
                             column_ref(t3c1),
                             column_ref(d1),
                             column_ref(d2),
-                        ]);
-                    LogicalOrderBy::new(
-                        select_input,
-                        vec![(column_ref(t3c0), TupleOrderingDirection::Asc)],
+                        ],
+                    )?;
+                    let ordered = OrderBy::new(
+                        projected,
+                        vec![(column_ref(p3a), TupleOrderingDirection::Asc)],
                     )
-                    .into_operator()
+                    .into_operator();
+                    (ordered, projected_cols, d1)
                 };
-                let right_regular = mock_scan_with_columns(4, t4_cols.clone(), 100.0)
-                    .logical_select(column_ref(t4c0).eq(column_ref(t4c0)))
-                    .logical_project(vec![
-                        column_assign(map_col, column_ref(t4c0)),
-                        column_ref(t4c1),
-                        column_ref(t4c0),
-                    ]);
-                left_regular.logical_join(
+                let (left_regular, left_outputs, d1) = left_regular;
+                let d2 = left_outputs[3];
+                let (right_regular, right_outputs) = {
+                    let select_input = mock_scan_with_columns(4, t4_cols)
+                        .logical_select(column_ref(t4c0).eq(column_ref(t4c0)));
+                    let (projected, projected_cols) = project_with_outputs(
+                        &expected_ctx,
+                        select_input,
+                        [column_ref(t4c0), column_ref(t4c1)],
+                    )?;
+                    (projected, projected_cols)
+                };
+                let p4a = right_outputs[0];
+                let inner_join = left_regular.logical_join(
                     right_regular,
-                    column_ref(t3c1)
-                        .eq(column_ref(t4c1))
-                        .and(null_safe_eq(column_ref(d2), column_ref(t4c0))),
+                    column_ref(p3b)
+                        .eq(column_ref(p4b))
+                        .and(null_safe_eq(column_ref(d2), column_ref(p4a))),
                     JoinType::Inner,
+                );
+                (
+                    mid_left.logical_join(
+                        inner_join,
+                        null_safe_eq(column_ref(t2c0), column_ref(d2)),
+                        JoinType::Inner,
+                    ),
+                    d1,
                 )
             };
-            mid_left.logical_join(
-                mid_right,
-                null_safe_eq(column_ref(t2c0), column_ref(t4c0)),
-                JoinType::Inner,
-            )
+            (mid_right, d1)
         };
 
         left_branch.logical_join(
@@ -811,7 +816,7 @@ fn test_nested_dep_join_regular_join_orderby_project_domain_vs_repr() {
         )
     };
 
-    assert_unnesting(&ctx, input_plan, expected_plan).unwrap();
+    assert_unnesting(&input_ctx, input_plan, &expected_ctx, expected_plan)
 }
 
 /// Test Left Join Right-Side Equivalence Is Not Used As Outer Representative:
@@ -819,7 +824,7 @@ fn test_nested_dep_join_regular_join_orderby_project_domain_vs_repr() {
 /// INPUT:
 /// DependentJoin
 /// |--- Scan(T1) [v0]
-/// |--- Join [true] (Left)
+/// |--- Join [true] (LeftOuter)
 ///      |--- Scan(T2) [v1]
 ///      |--- Select [T3.v2 = T1.v0]
 ///           |--- Scan(T3) [v2]
@@ -829,7 +834,7 @@ fn test_nested_dep_join_regular_join_orderby_project_domain_vs_repr() {
 /// representative for T1.v0, because T3.v2 is on the non-preserved side of
 /// a left join and can be NULL-extended.
 #[test]
-fn test_left_join_right_cclass_not_propagated() {
+fn test_left_join_right_cclass_not_propagated() -> Result<()> {
     let ctx = IRContext::with_empty_magic();
     let t1_cols = make_cols(&ctx, 1);
     let t2_cols = make_cols(&ctx, 1);
@@ -839,17 +844,18 @@ fn test_left_join_right_cclass_not_propagated() {
     let t3 = t3_cols[0];
 
     let input_plan = {
-        let left_branch = mock_scan_with_columns(1, t1_cols.clone(), 100.0);
+        let left_branch = mock_scan_with_columns(1, t1_cols);
         let right_branch = {
-            let left_regular = mock_scan_with_columns(2, t2_cols.clone(), 100.0);
-            let right_regular = mock_scan_with_columns(3, t3_cols.clone(), 100.0)
+            let left_regular = mock_scan_with_columns(2, t2_cols);
+            let right_regular = mock_scan_with_columns(3, t3_cols)
                 .logical_select(column_ref(t3).eq(column_ref(t1)));
-            left_regular.logical_join(right_regular, boolean(true), JoinType::Left)
+            left_regular.logical_join(right_regular, boolean(true), JoinType::LeftOuter)
         };
         left_branch.logical_dependent_join(right_branch, boolean(true), JoinType::Inner)
     };
 
-    let res = UnnestingRule::new().apply(input_plan, &ctx).unwrap();
+    let res = UnnestingRule::new().apply(input_plan, &ctx)?;
+
     let root_join = match &res.kind {
         OperatorKind::Join(meta) => Join::borrow_raw_parts(meta, &res.common),
         _ => panic!(
@@ -873,6 +879,7 @@ fn test_left_join_right_cclass_not_propagated() {
         "expected a domain representative column in top join condition; plan:\n{}",
         quick_explain(&res, &ctx)
     );
+    Ok(())
 }
 
 /// Test Partial Representative Resolution Is All-Or-Nothing:
@@ -890,18 +897,20 @@ fn test_left_join_right_cclass_not_propagated() {
 ///      |--- Domain(T1.v0, T1.v1) -> d1, d2
 ///      |--- Scan(T2) [v2, v3]
 #[test]
-fn test_partial_repr_resolution_all_or_nothing() {
-    let ctx = IRContext::with_empty_magic();
-    let t1_cols = make_cols(&ctx, 2);
-    let t2_cols = make_cols(&ctx, 2);
-    let t1c0 = t1_cols[0];
-    let t1c1 = t1_cols[1];
-    let t2c0 = t2_cols[0];
-    let t2c1 = t2_cols[1];
+fn test_partial_repr_resolution_all_or_nothing() -> Result<()> {
+    let input_ctx = IRContext::with_empty_magic();
+    let expected_ctx = IRContext::with_empty_magic();
 
     let input_plan = {
-        let left_branch = mock_scan_with_columns(1, t1_cols.clone(), 100.0);
-        let right_branch = mock_scan_with_columns(2, t2_cols.clone(), 100.0).logical_select(
+        let t1_cols = make_cols(&input_ctx, 2);
+        let t2_cols = make_cols(&input_ctx, 2);
+        let t1c0 = t1_cols[0];
+        let t1c1 = t1_cols[1];
+        let t2c0 = t2_cols[0];
+        let t2c1 = t2_cols[1];
+
+        let left_branch = mock_scan_with_columns(1, t1_cols);
+        let right_branch = mock_scan_with_columns(2, t2_cols).logical_select(
             column_ref(t2c0)
                 .eq(column_ref(t1c0))
                 .and(column_ref(t2c1).gt(column_ref(t1c1))),
@@ -910,24 +919,24 @@ fn test_partial_repr_resolution_all_or_nothing() {
     };
 
     let expected_plan = {
-        let mut next_id = ctx.column_meta.lock().unwrap().len();
-        let mut fresh = || {
-            let id = next_id;
-            next_id += 1;
-            Column(id)
-        };
-        let d1 = fresh();
-        let d2 = fresh();
+        let t1_cols = make_cols(&expected_ctx, 2);
+        let t2_cols = make_cols(&expected_ctx, 2);
+        let t1c0 = t1_cols[0];
+        let t1c1 = t1_cols[1];
+        let t2c0 = t2_cols[0];
+        let t2c1 = t2_cols[1];
 
-        let left_branch = mock_scan_with_columns(1, t1_cols.clone(), 100.0);
+        let left_branch = mock_scan_with_columns(1, t1_cols.clone());
         let right_branch = {
-            let domain = create_domain_with_aliases(
-                mock_scan_with_columns(1, t1_cols.clone(), 100.0),
+            let (domain, domain_outputs) = create_domain_with_aliases(
+                &expected_ctx,
+                mock_scan_with_columns(1, t1_cols),
                 vec![t1c0, t1c1],
-                vec![d1, d2],
-            );
+            )?;
+            let d1 = domain_outputs[0];
+            let d2 = domain_outputs[1];
             domain.logical_join(
-                mock_scan_with_columns(2, t2_cols.clone(), 100.0),
+                mock_scan_with_columns(2, t2_cols),
                 column_ref(t2c0)
                     .eq(column_ref(d1))
                     .and(column_ref(t2c1).gt(column_ref(d2))),
@@ -935,13 +944,16 @@ fn test_partial_repr_resolution_all_or_nothing() {
             )
         };
 
+        let domain_outputs = right_branch.output_columns_in_order(&expected_ctx)?[..2].to_vec();
         left_branch.logical_join(
             right_branch,
-            null_safe_eq(column_ref(t1c0), column_ref(d1))
-                .and(null_safe_eq(column_ref(t1c1), column_ref(d2))),
+            null_safe_eq(column_ref(t1c0), column_ref(domain_outputs[0])).and(null_safe_eq(
+                column_ref(t1c1),
+                column_ref(domain_outputs[1]),
+            )),
             JoinType::Inner,
         )
     };
 
-    assert_unnesting(&ctx, input_plan, expected_plan).unwrap();
+    assert_unnesting(&input_ctx, input_plan, &expected_ctx, expected_plan)
 }

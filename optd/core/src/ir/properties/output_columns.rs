@@ -7,7 +7,10 @@ use crate::{
     error::Result,
     ir::{
         Column, ColumnSet, OperatorKind,
-        operator::{Aggregate, DependentJoin, Get, Join, Project, Remap, join::JoinType},
+        operator::{
+            Aggregate, DependentJoin, EnforcerSort, Get, Join, Limit, OrderBy, Project, Remap,
+            Select, Subquery, join::JoinType,
+        },
         properties::{Derive, GetProperty, PropertyMarker},
         scalar::List,
     },
@@ -114,6 +117,18 @@ impl crate::ir::Operator {
     pub fn output_columns(&self, ctx: &crate::ir::context::IRContext) -> Result<Arc<ColumnSet>> {
         self.get_property::<OutputColumns>(ctx)
     }
+
+    /// Returns output columns in schema order rather than set order.
+    ///
+    /// This is useful when rebuilding operators that allocate a fresh
+    /// `table_index`, because callers need to know which old column lands at
+    /// which ordinal position in the new binding.
+    pub fn output_columns_in_order(
+        &self,
+        ctx: &crate::ir::context::IRContext,
+    ) -> Result<Vec<Column>> {
+        derive_output_columns_in_order(self, ctx)
+    }
 }
 
 fn derive_join_output_columns(
@@ -136,6 +151,96 @@ fn derive_join_output_columns(
         JoinType::Inner | JoinType::LeftOuter | JoinType::Single => {
             let inner_columns = inner.output_columns(ctx)?;
             Ok(Arc::new(outer_columns.as_ref() | inner_columns.as_ref()))
+        }
+    }
+}
+
+fn derive_join_output_columns_in_order(
+    outer: &crate::ir::Operator,
+    inner: &crate::ir::Operator,
+    join_type: &JoinType,
+    ctx: &crate::ir::IRContext,
+) -> Result<Vec<Column>> {
+    let mut cols = outer.output_columns_in_order(ctx)?;
+    match join_type {
+        JoinType::LeftSemi | JoinType::LeftAnti => {}
+        JoinType::Mark(mark_column) => cols.push(*mark_column),
+        JoinType::Inner | JoinType::LeftOuter | JoinType::Single => {
+            cols.extend(inner.output_columns_in_order(ctx)?);
+        }
+    }
+    Ok(cols)
+}
+
+fn derive_output_columns_in_order(
+    op: &crate::ir::Operator,
+    ctx: &crate::ir::IRContext,
+) -> Result<Vec<Column>> {
+    match &op.kind {
+        OperatorKind::Get(meta) => {
+            let get = Get::borrow_raw_parts(meta, &op.common);
+            Ok(get
+                .projections()
+                .iter()
+                .copied()
+                .map(|idx| Column(*get.table_index(), idx))
+                .collect())
+        }
+        OperatorKind::Project(meta) => {
+            let project = Project::borrow_raw_parts(meta, &op.common);
+            let len = project.projections().borrow::<List>().members().len();
+            Ok((0..len)
+                .map(|idx| Column(*project.table_index(), idx))
+                .collect())
+        }
+        OperatorKind::Aggregate(meta) => {
+            let aggregate = Aggregate::borrow_raw_parts(meta, &op.common);
+            let key_len = aggregate.keys().borrow::<List>().members().len();
+            let expr_len = aggregate.exprs().borrow::<List>().members().len();
+            Ok((0..key_len)
+                .map(|idx| Column(*aggregate.key_table_index(), idx))
+                .chain((0..expr_len).map(|idx| Column(*aggregate.aggregate_table_index(), idx)))
+                .collect())
+        }
+        OperatorKind::Remap(meta) => {
+            let remap = Remap::borrow_raw_parts(meta, &op.common);
+            let len = remap.input().output_columns_in_order(ctx)?.len();
+            Ok((0..len)
+                .map(|idx| Column(*remap.table_index(), idx))
+                .collect())
+        }
+        OperatorKind::Select(meta) => {
+            let select = Select::borrow_raw_parts(meta, &op.common);
+            select.input().output_columns_in_order(ctx)
+        }
+        OperatorKind::Limit(meta) => {
+            let limit = Limit::borrow_raw_parts(meta, &op.common);
+            limit.input().output_columns_in_order(ctx)
+        }
+        OperatorKind::OrderBy(meta) => {
+            let order_by = OrderBy::borrow_raw_parts(meta, &op.common);
+            order_by.input().output_columns_in_order(ctx)
+        }
+        OperatorKind::Subquery(meta) => {
+            let subquery = Subquery::borrow_raw_parts(meta, &op.common);
+            subquery.input().output_columns_in_order(ctx)
+        }
+        OperatorKind::EnforcerSort(meta) => {
+            let sort = EnforcerSort::borrow_raw_parts(meta, &op.common);
+            sort.input().output_columns_in_order(ctx)
+        }
+        OperatorKind::Join(meta) => {
+            let join = Join::borrow_raw_parts(meta, &op.common);
+            derive_join_output_columns_in_order(join.outer(), join.inner(), join.join_type(), ctx)
+        }
+        OperatorKind::DependentJoin(meta) => {
+            let join = DependentJoin::borrow_raw_parts(meta, &op.common);
+            derive_join_output_columns_in_order(join.outer(), join.inner(), join.join_type(), ctx)
+        }
+        OperatorKind::Group(_) => {
+            let mut cols: Vec<_> = op.output_columns(ctx)?.iter().copied().collect();
+            cols.sort();
+            Ok(cols)
         }
     }
 }

@@ -2,14 +2,16 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use snafu::whatever;
+
 use crate::error::Result;
 use crate::ir::convert::{IntoOperator, IntoScalar};
 use crate::ir::operator::{
-    Aggregate, Join, LogicalDependentJoin, LogicalOrderBy, LogicalRemap, Operator, OperatorKind,
-    Project, Select, join::JoinType,
+    Aggregate, DependentJoin, Join, Operator, OperatorKind, OrderBy, Project, Remap, Select,
+    join::JoinType,
 };
 use crate::ir::rule::Rule;
-use crate::ir::scalar::{BinaryOp, BinaryOpKind, ColumnAssign, ColumnRef, List};
+use crate::ir::scalar::{BinaryOp, BinaryOpKind, ColumnRef, List};
 use crate::ir::{Column, ColumnSet, IRContext, Scalar, ScalarKind};
 use crate::rules::decorrelation::helpers::UnnestingInfo;
 use crate::rules::logical_select_simplify::LogicalSelectSimplifyRule;
@@ -101,8 +103,8 @@ impl UnnestingRule {
                 reps.push(resolved);
             }
         }
-        reps.sort_by_key(|c| c.0);
-        reps.dedup_by_key(|c| c.0);
+        reps.sort();
+        reps.dedup();
         reps
     }
 
@@ -194,9 +196,9 @@ impl UnnestingRule {
         if accessing.is_empty() {
             let available = op.output_columns(ctx)?;
             let mut available_cols: Vec<Column> = available.iter().copied().collect();
-            available_cols.sort_by_key(|col| col.0);
+            available_cols.sort();
             let mut seen_outer_refs_vec: Vec<Column> = seen_outer_refs.iter().copied().collect();
-            seen_outer_refs_vec.sort_by_key(|col| col.0);
+            seen_outer_refs_vec.sort();
             let mut chosen_reprs: Vec<(Column, Column)> = Vec::new();
             let mut can_resolve_all = true;
             for c in &seen_outer_refs_vec {
@@ -251,8 +253,8 @@ impl UnnestingRule {
         child_accessing.remove(&Arc::as_ptr(&op));
 
         // Then unnest this operator
-        match op.kind {
-            OperatorKind::Select(ref meta) => {
+        match &op.kind {
+            OperatorKind::Select(meta) => {
                 let node = Select::borrow_raw_parts(meta, &op.common);
                 info.update_cclasses_equivalences(node.predicate());
                 let new_input = self.unnest_inner(
@@ -277,7 +279,7 @@ impl UnnestingRule {
                     Ok(rewritten_op)
                 }
             }
-            OperatorKind::Project(ref meta) => {
+            OperatorKind::Project(meta) => {
                 let node = Project::borrow_raw_parts(meta, &op.common);
                 let new_input = self.unnest_inner(
                     node.input().clone(),
@@ -288,30 +290,32 @@ impl UnnestingRule {
                 )?;
                 let new_exprs = info.rewrite_columns(node.projections().clone());
                 let mut members = new_exprs.try_borrow::<List>().unwrap().members().to_vec();
-                let mut output_cols: HashSet<Column> = members
+                let mut passthrough_cols: HashSet<Column> = members
                     .iter()
-                    .filter_map(|expr| {
-                        if let Ok(assign) = expr.try_borrow::<ColumnAssign>() {
-                            Some(*assign.column())
-                        } else if let Ok(col_ref) = expr.try_borrow::<ColumnRef>() {
-                            Some(*col_ref.column())
-                        } else {
-                            None
-                        }
-                    })
+                    .filter_map(|expr| expr.try_borrow::<ColumnRef>().ok().map(|col| *col.column()))
                     .collect();
                 let new_input_output_cols = new_input.output_columns(ctx)?;
                 for rep in Self::collect_preserved_reprs(info) {
-                    if new_input_output_cols.contains(&rep) && output_cols.insert(rep) {
+                    if new_input_output_cols.contains(&rep) && passthrough_cols.insert(rep) {
                         members.push(ColumnRef::new(rep).into_scalar());
                     }
                 }
-                let final_exprs = List::new(members.into()).into_scalar();
-                let _ = (node, new_input, final_exprs);
-                todo!()
+                let projected = ctx.project(new_input, members.clone())?.build();
+                let project_table_index = *projected.borrow::<Project>().table_index();
+                let passthrough_mapping = members
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, expr)| {
+                        expr.try_borrow::<ColumnRef>()
+                            .ok()
+                            .map(|col_ref| (*col_ref.column(), Column(project_table_index, idx)))
+                    })
+                    .collect::<HashMap<_, _>>();
+                info.propagate_passthrough_mapping(&passthrough_mapping);
+                Ok(projected)
             }
-            OperatorKind::LogicalRemap(ref meta) => {
-                let node = LogicalRemap::borrow_raw_parts(meta, &op.common);
+            OperatorKind::Remap(meta) => {
+                let node = Remap::borrow_raw_parts(meta, &op.common);
                 let new_input = self.unnest_inner(
                     node.input().clone(),
                     info,
@@ -319,32 +323,20 @@ impl UnnestingRule {
                     seen_outer_refs,
                     ctx,
                 )?;
-                let _ = (node, new_input);
-                todo!("node.mappings need to be changed");
-                // let new_exprs = info.rewrite_columns(node.mappings().clone());
-                // let mut members = new_exprs.try_borrow::<List>().unwrap().members().to_vec();
-                // let mut output_cols: HashSet<Column> = members
-                //     .iter()
-                //     .filter_map(|expr| {
-                //         expr.try_borrow::<ColumnAssign>()
-                //             .ok()
-                //             .map(|assign| *assign.column())
-                //     })
-                //     .collect();
-                // for rep in Self::collect_preserved_reprs(info) {
-                //     if new_input.output_columns(ctx).contains(&rep) && output_cols.insert(rep) {
-                //         members.push(
-                //             ColumnAssign::new(rep, ColumnRef::new(rep).into_scalar()).into_scalar(),
-                //         );
-                //     }
-                // }
-                // let final_exprs = List::new(members.into()).into_scalar();
-                // // TODO(yuchen): Fix this
-                // let table_index = 0;
-                // LogicalRemap::new(table_index, new_input).into_operator()
+                let ordered_input_cols = new_input.output_columns_in_order(ctx)?;
+                let table_index =
+                    ctx.add_binding(None, new_input.output_schema(ctx)?.inner().clone())?;
+                let remapped = Remap::new(table_index, new_input).into_operator();
+                let passthrough_mapping = ordered_input_cols
+                    .into_iter()
+                    .enumerate()
+                    .map(|(idx, col)| (col, Column(table_index, idx)))
+                    .collect::<HashMap<_, _>>();
+                info.propagate_passthrough_mapping(&passthrough_mapping);
+                Ok(remapped)
             }
-            OperatorKind::LogicalOrderBy(ref meta) => {
-                let node = LogicalOrderBy::borrow_raw_parts(meta, &op.common);
+            OperatorKind::OrderBy(meta) => {
+                let node = OrderBy::borrow_raw_parts(meta, &op.common);
                 let new_input = self.unnest_inner(
                     node.input().clone(),
                     info,
@@ -362,7 +354,7 @@ impl UnnestingRule {
                     Some(Arc::from(new_exprs)),
                 )))
             }
-            OperatorKind::Aggregate(ref meta) => {
+            OperatorKind::Aggregate(meta) => {
                 let node = Aggregate::borrow_raw_parts(meta, &op.common);
                 let new_input = self.unnest_inner(
                     node.input().clone(),
@@ -373,27 +365,41 @@ impl UnnestingRule {
                 )?;
 
                 let new_exprs = info.rewrite_columns(node.exprs().clone());
+                let new_exprs_vec = new_exprs.borrow::<List>().members().to_vec();
                 let new_keys_scalar = info.rewrite_columns(node.keys().clone());
-                let mut new_keys_vec = new_keys_scalar.input_scalars().to_vec();
+                let mut new_keys_vec = new_keys_scalar.borrow::<List>().members().to_vec();
                 let mut key_cols: HashSet<Column> = new_keys_vec
                     .iter()
-                    .filter_map(|s| s.try_borrow::<ColumnAssign>().ok().map(|a| *a.column()))
+                    .filter_map(|s| s.try_borrow::<ColumnRef>().ok().map(|a| *a.column()))
                     .collect();
                 let input_cols = new_input.output_columns(ctx)?;
                 let mut outer_refs_vec = info.collect_outer_refs_recursive();
                 outer_refs_vec.retain(|c| {
-                    let rep = info.resolve_col(*c).unwrap_or(*c);
-                    input_cols.contains(&rep)
+                    info.resolve_col(*c)
+                        .map(|rep| input_cols.contains(&rep))
+                        .unwrap_or(false)
                 });
                 for c in &outer_refs_vec {
-                    let rep = info.resolve_col(*c).unwrap_or(*c);
+                    let rep = info.resolve_col(*c).unwrap();
                     if key_cols.insert(rep) {
-                        let key_expr = ColumnRef::new(rep).into_scalar();
-                        new_keys_vec.push(ColumnAssign::new(rep, key_expr).into_scalar());
+                        new_keys_vec.push(ColumnRef::new(rep).into_scalar());
                     }
                 }
-                let final_keys = List::new(new_keys_vec.into()).into_scalar();
-                let agg = Aggregate::logical(0, new_input, new_exprs, final_keys).into_operator();
+                let agg = new_input
+                    .with_ctx(ctx)
+                    .logical_aggregate(new_exprs_vec.clone(), new_keys_vec.clone())?
+                    .build();
+                let key_table_index = *agg.borrow::<Aggregate>().key_table_index();
+                let passthrough_mapping = new_keys_vec
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, expr)| {
+                        expr.try_borrow::<ColumnRef>()
+                            .ok()
+                            .map(|col_ref| (*col_ref.column(), Column(key_table_index, idx)))
+                    })
+                    .collect::<HashMap<_, _>>();
+                info.propagate_passthrough_mapping(&passthrough_mapping);
 
                 if node
                     .keys()
@@ -412,16 +418,13 @@ impl UnnestingRule {
                     )
                     .unwrap_or_else(|| info.get_info().get_domain_op());
                     let domain_output_cols = domain_input.output_columns(ctx)?;
-                    let (agg, agg_remap) =
+                    let (agg, _agg_remap) =
                         remap_right_output_collisions(domain_output_cols.as_ref(), agg, info, ctx)?;
 
                     let mut conds = Vec::new();
                     for c in &outer_refs_vec {
                         let left_col = info.resolve_domain_repr_recursive(*c).unwrap_or(*c);
-                        let right_col = info
-                            .resolve_col(*c)
-                            .map(|col| agg_remap.get(&col).copied().unwrap_or(col))
-                            .unwrap_or(*c);
+                        let right_col = info.resolve_col(*c).unwrap_or(*c);
                         let left_ref = ColumnRef::new(left_col).into_scalar();
                         let right_ref = ColumnRef::new(right_col).into_scalar();
                         if left_ref == right_ref {
@@ -438,13 +441,16 @@ impl UnnestingRule {
                             info.clear_scoped_repr_of(c);
                         }
                     }
-                    Ok(Join::new(JoinType::Left, domain_input, agg, join_cond, None).into_operator())
+                    Ok(
+                        Join::new(JoinType::LeftOuter, domain_input, agg, join_cond, None)
+                            .into_operator(),
+                    )
                 } else {
                     Ok(agg)
                 }
             }
-            OperatorKind::LogicalDependentJoin(ref meta) => {
-                let dep = LogicalDependentJoin::borrow_raw_parts(meta, &op.common);
+            OperatorKind::DependentJoin(meta) => {
+                let dep = DependentJoin::borrow_raw_parts(meta, &op.common);
                 let unnested =
                     self.d_join_elimination(dep, Some(info), Some(&child_accessing), ctx)?;
                 let dep_output_cols = unnested.output_columns(ctx)?;
@@ -481,7 +487,7 @@ impl UnnestingRule {
                     Ok(unnested)
                 }
             }
-            OperatorKind::Join(ref meta) => {
+            OperatorKind::Join(meta) => {
                 let node = Join::borrow_raw_parts(meta, &op.common);
                 let left = node.outer();
                 let right = node.inner();
@@ -501,7 +507,7 @@ impl UnnestingRule {
                 let join_type = *node.join_type();
                 let outputs_unmatched_left = matches!(
                     join_type,
-                    JoinType::Left | JoinType::Single | JoinType::Mark(_)
+                    JoinType::LeftOuter | JoinType::Single | JoinType::Mark(_)
                 );
 
                 if right_accessing.is_empty() {
@@ -515,8 +521,10 @@ impl UnnestingRule {
                         ctx,
                     )?;
                     let new_cond = info.rewrite_columns(node.join_cond().clone());
-                    return Ok(Join::new(join_type, new_left, right.clone(), new_cond, None)
-                        .into_operator());
+                    return Ok(
+                        Join::new(join_type, new_left, right.clone(), new_cond, None)
+                            .into_operator(),
+                    );
                 }
 
                 if left_accessing.is_empty() && !outputs_unmatched_left {
@@ -528,8 +536,10 @@ impl UnnestingRule {
                         ctx,
                     )?;
                     let new_cond = info.rewrite_columns(node.join_cond().clone());
-                    return Ok(Join::new(join_type, left.clone(), new_right, new_cond, None)
-                        .into_operator());
+                    return Ok(
+                        Join::new(join_type, left.clone(), new_right, new_cond, None)
+                            .into_operator(),
+                    );
                 }
 
                 // Unnest both sides
@@ -593,8 +603,8 @@ impl UnnestingRule {
                     join_conds.push(new_cond);
                 }
                 let mut propagated_refs = info.collect_outer_refs_recursive().clone();
-                propagated_refs.sort_by_key(|c| c.0);
-                propagated_refs.dedup_by_key(|c| c.0);
+                propagated_refs.sort();
+                propagated_refs.dedup();
                 propagated_refs.retain(|c| {
                     let left_repr = left_info
                         .resolve_col(*c)
@@ -648,8 +658,11 @@ impl UnnestingRule {
                 )
                 .into_operator())
             }
-            _ => {
-                panic!("UnnestingRule: Unsupported operator kind encountered");
+            k => {
+                whatever!(
+                    "UnnestingRule: Unsupported operator kind {:?} encountered",
+                    k
+                );
             }
         }
     }
