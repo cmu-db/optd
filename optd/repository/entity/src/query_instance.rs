@@ -4,7 +4,7 @@ use sea_orm::{
 };
 
 /// The query instance table stores information about each query instance,
-/// including the query itself, the snapshot it is running against, and the initial/final plans.
+/// including the query itself and the snapshot it is running against.
 /// This table is not in the DuckLake schema.
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
@@ -22,12 +22,6 @@ pub struct Model {
     /// The timestamp at which this query instance was created.
     #[sea_orm(default_expr = "Expr::current_timestamp()")]
     pub query_time: chrono::DateTime<Utc>,
-
-    /// The initial plan for the query instance, encoded as JSON.
-    pub initial_plan: Option<Json>,
-
-    /// The final plan for the query instance, encoded as JSON.
-    pub final_plan: Option<Json>,
 
     #[sea_orm(belongs_to, from = "query_id", to = "query_id")]
     pub query: HasOne<super::query::Entity>,

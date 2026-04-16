@@ -2,7 +2,10 @@ use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, Que
 
 use crate::entity::{prelude::QueryInstance, query_instance};
 
-use super::{QueryInstanceInfo, QueryInstanceSelector, get_query_by_sql};
+use super::{
+    QueryInstanceInfo, QueryInstanceSelector, get_query_by_sql, get_query_plans,
+    query_instance_info_from_parts,
+};
 
 /// Returns query instances matching `selector`.
 pub async fn get_query_instances<C>(
@@ -22,15 +25,17 @@ where
         }
     };
 
-    QueryInstance::find()
+    let query_instances = QueryInstance::find()
         .filter(query_instance::Column::QueryId.eq(query_id))
         .order_by_asc(query_instance::Column::Id)
         .all(db)
-        .await
-        .map(|query_instances| {
-            query_instances
-                .into_iter()
-                .map(QueryInstanceInfo::from)
-                .collect()
-        })
+        .await?;
+
+    let mut infos = Vec::with_capacity(query_instances.len());
+    for query_instance in query_instances {
+        let query_plans = get_query_plans(db, query_instance.id).await?;
+        infos.push(query_instance_info_from_parts(query_instance, query_plans));
+    }
+
+    Ok(infos)
 }
