@@ -2,6 +2,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use snafu::whatever;
+
 use crate::error::Result;
 use crate::ir::convert::{IntoOperator, IntoScalar};
 use crate::ir::operator::{
@@ -251,8 +253,8 @@ impl UnnestingRule {
         child_accessing.remove(&Arc::as_ptr(&op));
 
         // Then unnest this operator
-        match op.kind {
-            OperatorKind::Select(ref meta) => {
+        match &op.kind {
+            OperatorKind::Select(meta) => {
                 let node = Select::borrow_raw_parts(meta, &op.common);
                 info.update_cclasses_equivalences(node.predicate());
                 let new_input = self.unnest_inner(
@@ -277,7 +279,7 @@ impl UnnestingRule {
                     Ok(rewritten_op)
                 }
             }
-            OperatorKind::Project(ref meta) => {
+            OperatorKind::Project(meta) => {
                 let node = Project::borrow_raw_parts(meta, &op.common);
                 let new_input = self.unnest_inner(
                     node.input().clone(),
@@ -312,7 +314,7 @@ impl UnnestingRule {
                 info.propagate_passthrough_mapping(&passthrough_mapping);
                 Ok(projected)
             }
-            OperatorKind::Remap(ref meta) => {
+            OperatorKind::Remap(meta) => {
                 let node = Remap::borrow_raw_parts(meta, &op.common);
                 let new_input = self.unnest_inner(
                     node.input().clone(),
@@ -333,7 +335,7 @@ impl UnnestingRule {
                 info.propagate_passthrough_mapping(&passthrough_mapping);
                 Ok(remapped)
             }
-            OperatorKind::OrderBy(ref meta) => {
+            OperatorKind::OrderBy(meta) => {
                 let node = OrderBy::borrow_raw_parts(meta, &op.common);
                 let new_input = self.unnest_inner(
                     node.input().clone(),
@@ -352,7 +354,7 @@ impl UnnestingRule {
                     Some(Arc::from(new_exprs)),
                 )))
             }
-            OperatorKind::Aggregate(ref meta) => {
+            OperatorKind::Aggregate(meta) => {
                 let node = Aggregate::borrow_raw_parts(meta, &op.common);
                 let new_input = self.unnest_inner(
                     node.input().clone(),
@@ -447,7 +449,7 @@ impl UnnestingRule {
                     Ok(agg)
                 }
             }
-            OperatorKind::DependentJoin(ref meta) => {
+            OperatorKind::DependentJoin(meta) => {
                 let dep = DependentJoin::borrow_raw_parts(meta, &op.common);
                 let unnested =
                     self.d_join_elimination(dep, Some(info), Some(&child_accessing), ctx)?;
@@ -485,7 +487,7 @@ impl UnnestingRule {
                     Ok(unnested)
                 }
             }
-            OperatorKind::Join(ref meta) => {
+            OperatorKind::Join(meta) => {
                 let node = Join::borrow_raw_parts(meta, &op.common);
                 let left = node.outer();
                 let right = node.inner();
@@ -656,8 +658,11 @@ impl UnnestingRule {
                 )
                 .into_operator())
             }
-            _ => {
-                panic!("UnnestingRule: Unsupported operator kind encountered");
+            k => {
+                whatever!(
+                    "UnnestingRule: Unsupported operator kind {:?} encountered",
+                    k
+                );
             }
         }
     }
