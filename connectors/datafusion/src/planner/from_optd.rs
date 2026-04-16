@@ -22,8 +22,8 @@ use optd_core::ir::{
     scalar::{
         BinaryOp, BinaryOpBorrowed, BinaryOpKind, Case, CaseBorrowed, Cast, CastBorrowed,
         ColumnRef, ColumnRefBorrowed, Function, FunctionBorrowed, FunctionKind, InList,
-        InListBorrowed, Like, LikeBorrowed, List, Literal, LiteralBorrowed, NaryOp, NaryOpBorrowed,
-        NaryOpKind,
+        InListBorrowed, IsNotNull, IsNotNullBorrowed, IsNull, IsNullBorrowed, Like, LikeBorrowed,
+        List, Literal, LiteralBorrowed, NaryOp, NaryOpBorrowed, NaryOpKind,
     },
     schema::OptdSchema,
     table_ref::TableRef,
@@ -86,7 +86,7 @@ impl OptdQueryPlannerContext<'_> {
     }
 
     fn alias_if_changed(expr: DFExpr, table_ref: &TableRef, field: &Field) -> Result<DFExpr> {
-        if table_ref.table().contains("__internal_#") {
+        if table_ref.table().contains("__#") {
             expr.alias_if_changed(field.name().clone())
                 .context(DataFusionSnafu)
         } else {
@@ -339,12 +339,15 @@ mod tests {
         scalar::ScalarValue,
     };
     use optd_core::ir::{
+        catalog::Catalog,
         scalar::{Case, Function, FunctionKind},
         schema::OptdSchema,
         table_ref::TableRef,
     };
 
-    use crate::create_optd_session_context;
+    use crate::{
+        create_optd_session_context, create_optd_session_context_with_catalog, memory_catalog,
+    };
 
     use super::super::{OptdQueryPlanner, OptdQueryPlannerContext};
 
@@ -354,6 +357,18 @@ mod tests {
         let session_state = Box::leak(Box::new(session_ctx.state()));
         let inner = OptdQueryPlanner::create_context(session_state).unwrap();
         OptdQueryPlannerContext::new(inner, session_state)
+    }
+
+    fn new_test_ctx_with_catalog() -> (OptdQueryPlannerContext<'static>, Arc<dyn Catalog>) {
+        let catalog = memory_catalog();
+        let session_ctx = create_optd_session_context_with_catalog(
+            SessionConfig::new(),
+            Arc::new(RuntimeEnv::default()),
+            catalog.clone(),
+        );
+        let session_state = Box::leak(Box::new(session_ctx.state()));
+        let inner = OptdQueryPlanner::create_context(session_state).unwrap();
+        (OptdQueryPlannerContext::new(inner, session_state), catalog)
     }
 
     #[test]
@@ -416,7 +431,7 @@ mod tests {
             Field::new("l_quantity", DataType::Int64, false),
         ]));
         let input_schema =
-            DFSchema::try_from_qualified_schema("__internal_#2", input_schema.as_ref()).unwrap();
+            DFSchema::try_from_qualified_schema("__#2", input_schema.as_ref()).unwrap();
         let input = DFLogicalPlan::EmptyRelation(logical_expr::EmptyRelation {
             produce_one_row: false,
             schema: Arc::new(input_schema),
@@ -437,11 +452,11 @@ mod tests {
         let output_schema = OptdSchema::new_with_metadata(
             vec![
                 (
-                    TableRef::bare("__internal_#3"),
+                    TableRef::bare("__#3"),
                     Arc::new(Field::new("l_returnflag", DataType::Utf8, false)),
                 ),
                 (
-                    TableRef::bare("__internal_#4"),
+                    TableRef::bare("__#4"),
                     Arc::new(Field::new(
                         "sum(lineitem.l_quantity)",
                         DataType::Int64,
@@ -458,10 +473,10 @@ mod tests {
                 &output_schema,
                 Arc::new(input),
                 vec![DFExpr::Column(Column::from_qualified_name(
-                    "__internal_#2.l_returnflag",
+                    "__#2.l_returnflag",
                 ))],
                 vec![sum(DFExpr::Column(Column::from_qualified_name(
-                    "__internal_#2.l_quantity",
+                    "__#2.l_quantity",
                 )))],
             )
             .unwrap();
@@ -512,7 +527,7 @@ mod tests {
                     Arc::new(Field::new("p_brand", DataType::Utf8, false)),
                 ),
                 (
-                    TableRef::bare("__internal_#4"),
+                    TableRef::bare("__#4"),
                     Arc::new(Field::new("sum(part.p_partkey)", DataType::Int64, false)),
                 ),
             ],
@@ -646,6 +661,98 @@ mod tests {
         let restored = ctx.try_from_optd_scalar_expr(optd_expr.as_ref()).unwrap();
         assert_eq!(restored, expr);
     }
+
+    #[test]
+    fn null_test_exprs_round_trip() {
+        let mut ctx = new_test_ctx();
+        let exprs = [
+            DFExpr::IsNull(Box::new(DFExpr::Literal(ScalarValue::Utf8(None), None))),
+            DFExpr::IsNotNull(Box::new(DFExpr::Literal(
+                ScalarValue::Utf8(Some("x".into())),
+                None,
+            ))),
+        ];
+
+        for expr in exprs {
+            let optd_expr = ctx
+                .try_into_optd_scalar_expr(&expr, &DFSchema::empty())
+                .unwrap();
+            let restored = ctx.try_from_optd_scalar_expr(optd_expr.as_ref()).unwrap();
+            assert_eq!(restored, expr);
+        }
+    }
+
+    #[test]
+    fn binary_operator_expr_round_trips_for_extended_operator_set() {
+        let mut ctx = new_test_ctx();
+        let lhs = DFExpr::Literal(ScalarValue::Utf8(Some("lhs".into())), None);
+        let rhs = DFExpr::Literal(ScalarValue::Utf8(Some("rhs".into())), None);
+        let operators = [
+            logical_expr::Operator::IsDistinctFrom,
+            logical_expr::Operator::RegexMatch,
+            logical_expr::Operator::RegexNotIMatch,
+            logical_expr::Operator::LikeMatch,
+            logical_expr::Operator::NotILikeMatch,
+            logical_expr::Operator::BitwiseAnd,
+            logical_expr::Operator::BitwiseShiftLeft,
+            logical_expr::Operator::StringConcat,
+            logical_expr::Operator::AtArrow,
+            logical_expr::Operator::Arrow,
+            logical_expr::Operator::HashLongArrow,
+            logical_expr::Operator::AtAt,
+            logical_expr::Operator::IntegerDivide,
+            logical_expr::Operator::HashMinus,
+            logical_expr::Operator::AtQuestion,
+            logical_expr::Operator::Question,
+            logical_expr::Operator::QuestionAnd,
+            logical_expr::Operator::QuestionPipe,
+        ];
+
+        for op in operators {
+            let expr = logical_expr::binary_expr(lhs.clone(), op, rhs.clone());
+            let optd_expr = ctx
+                .try_into_optd_scalar_expr(&expr, &DFSchema::empty())
+                .unwrap();
+            let restored = ctx.try_from_optd_scalar_expr(optd_expr.as_ref()).unwrap();
+            assert_eq!(restored, expr, "failed round trip for operator {op}");
+        }
+    }
+
+    #[test]
+    fn filter_plan_round_trips_with_extended_selection_operators() {
+        let (mut ctx, catalog) = new_test_ctx_with_catalog();
+        let schema = Schema::new(vec![Field::new("value", DataType::Utf8, true)]);
+        catalog
+            .create_table(TableRef::bare("t"), Arc::new(schema.clone()), None)
+            .unwrap();
+
+        let predicate = logical_expr::and(
+            logical_expr::binary_expr(
+                DFExpr::Literal(ScalarValue::Utf8(Some("abc".into())), None),
+                logical_expr::Operator::RegexMatch,
+                DFExpr::Literal(ScalarValue::Utf8(Some("^a".into())), None),
+            ),
+            logical_expr::binary_expr(
+                DFExpr::Literal(ScalarValue::Int64(Some(1)), None),
+                logical_expr::Operator::IsDistinctFrom,
+                DFExpr::Literal(ScalarValue::Int64(Some(2)), None),
+            ),
+        );
+        let plan = logical_expr::logical_plan::builder::table_scan(Some("t"), &schema, None)
+            .unwrap()
+            .filter(predicate.clone())
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let optd_plan = ctx.try_into_optd_plan(&plan).unwrap();
+        let restored = ctx.try_from_optd_plan(optd_plan.as_ref()).unwrap();
+
+        let DFLogicalPlan::Filter(restored_filter) = restored else {
+            panic!("expected filter plan after round trip");
+        };
+        assert_eq!(restored_filter.predicate, predicate);
+    }
 }
 
 impl OptdQueryPlannerContext<'_> {
@@ -677,6 +784,14 @@ impl OptdQueryPlannerContext<'_> {
             optd_core::ir::ScalarKind::Cast(meta) => {
                 let node = Cast::borrow_raw_parts(meta, &expr.common);
                 self.try_from_optd_cast(node)
+            }
+            optd_core::ir::ScalarKind::IsNull(meta) => {
+                let node = IsNull::borrow_raw_parts(meta, &expr.common);
+                self.try_from_optd_is_null(node)
+            }
+            optd_core::ir::ScalarKind::IsNotNull(meta) => {
+                let node = IsNotNull::borrow_raw_parts(meta, &expr.common);
+                self.try_from_optd_is_not_null(node)
             }
             optd_core::ir::ScalarKind::Like(meta) => {
                 let node = Like::borrow_raw_parts(meta, &expr.common);
@@ -714,11 +829,39 @@ impl OptdQueryPlannerContext<'_> {
             BinaryOpKind::Modulo => logical_expr::Operator::Modulo,
             BinaryOpKind::Eq => logical_expr::Operator::Eq,
             BinaryOpKind::Ne => logical_expr::Operator::NotEq,
+            BinaryOpKind::IsDistinctFrom => logical_expr::Operator::IsDistinctFrom,
             BinaryOpKind::IsNotDistinctFrom => logical_expr::Operator::IsNotDistinctFrom,
             BinaryOpKind::Lt => logical_expr::Operator::Lt,
             BinaryOpKind::Le => logical_expr::Operator::LtEq,
             BinaryOpKind::Gt => logical_expr::Operator::Gt,
             BinaryOpKind::Ge => logical_expr::Operator::GtEq,
+            BinaryOpKind::RegexMatch => logical_expr::Operator::RegexMatch,
+            BinaryOpKind::RegexIMatch => logical_expr::Operator::RegexIMatch,
+            BinaryOpKind::RegexNotMatch => logical_expr::Operator::RegexNotMatch,
+            BinaryOpKind::RegexNotIMatch => logical_expr::Operator::RegexNotIMatch,
+            BinaryOpKind::LikeMatch => logical_expr::Operator::LikeMatch,
+            BinaryOpKind::ILikeMatch => logical_expr::Operator::ILikeMatch,
+            BinaryOpKind::NotLikeMatch => logical_expr::Operator::NotLikeMatch,
+            BinaryOpKind::NotILikeMatch => logical_expr::Operator::NotILikeMatch,
+            BinaryOpKind::BitwiseAnd => logical_expr::Operator::BitwiseAnd,
+            BinaryOpKind::BitwiseOr => logical_expr::Operator::BitwiseOr,
+            BinaryOpKind::BitwiseXor => logical_expr::Operator::BitwiseXor,
+            BinaryOpKind::BitwiseShiftRight => logical_expr::Operator::BitwiseShiftRight,
+            BinaryOpKind::BitwiseShiftLeft => logical_expr::Operator::BitwiseShiftLeft,
+            BinaryOpKind::StringConcat => logical_expr::Operator::StringConcat,
+            BinaryOpKind::AtArrow => logical_expr::Operator::AtArrow,
+            BinaryOpKind::ArrowAt => logical_expr::Operator::ArrowAt,
+            BinaryOpKind::Arrow => logical_expr::Operator::Arrow,
+            BinaryOpKind::LongArrow => logical_expr::Operator::LongArrow,
+            BinaryOpKind::HashArrow => logical_expr::Operator::HashArrow,
+            BinaryOpKind::HashLongArrow => logical_expr::Operator::HashLongArrow,
+            BinaryOpKind::AtAt => logical_expr::Operator::AtAt,
+            BinaryOpKind::IntegerDivide => logical_expr::Operator::IntegerDivide,
+            BinaryOpKind::HashMinus => logical_expr::Operator::HashMinus,
+            BinaryOpKind::AtQuestion => logical_expr::Operator::AtQuestion,
+            BinaryOpKind::Question => logical_expr::Operator::Question,
+            BinaryOpKind::QuestionAnd => logical_expr::Operator::QuestionAnd,
+            BinaryOpKind::QuestionPipe => logical_expr::Operator::QuestionPipe,
         };
 
         Ok(logical_expr::binary_expr(left, op, right))
@@ -748,6 +891,16 @@ impl OptdQueryPlannerContext<'_> {
         let input = self.try_from_optd_scalar_expr(node.expr())?;
         let cast = logical_expr::cast(input, node.data_type().clone());
         Ok(cast)
+    }
+
+    pub fn try_from_optd_is_null(&mut self, node: IsNullBorrowed<'_>) -> Result<DFExpr> {
+        let expr = self.try_from_optd_scalar_expr(node.expr())?;
+        Ok(DFExpr::IsNull(Box::new(expr)))
+    }
+
+    pub fn try_from_optd_is_not_null(&mut self, node: IsNotNullBorrowed<'_>) -> Result<DFExpr> {
+        let expr = self.try_from_optd_scalar_expr(node.expr())?;
+        Ok(DFExpr::IsNotNull(Box::new(expr)))
     }
 
     pub fn try_from_optd_like(&mut self, node: LikeBorrowed<'_>) -> Result<DFExpr> {

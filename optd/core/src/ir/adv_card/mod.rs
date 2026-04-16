@@ -142,7 +142,7 @@ fn estimate_aggregate(keys: &[Arc<Scalar>], input: &Operator, ctx: &IRContext) -
             .ok()
             .and_then(|col_ref| column_stats(ctx, *col_ref.column()))
             .and_then(|(table_stats, offset)| {
-                let col_stats = table_stats.column_statistics.get(offset)?;
+                let col_stats = table_stats.column_statistics.get(&offset)?;
                 ndv(col_stats)
             })
             .map(|n| n as f64)

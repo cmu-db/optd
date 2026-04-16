@@ -4,6 +4,10 @@ members = [
     "cli",
     "connectors/datafusion",
     "optd/core",
+    "optd/repository",
+    "optd/repository/api",
+    "optd/repository/entity",
+    "optd/repository/migration",
     "synopses",
     "tests/sqllogictest",
     "tests/sqlplannertest",
@@ -11,6 +15,10 @@ members = [
 
 default-members = [
     "optd/core",
+    "optd/repository",
+    "optd/repository/api",
+    "optd/repository/entity",
+    "optd/repository/migration",
     "connectors/datafusion",
     "synopses",
     "tests/sqllogictest",
@@ -37,6 +45,23 @@ snafu = "0.8.6"
 async-trait = "0.1"
 anyhow = "1.0"
 itertools = "0.14.0"
+
+sea-orm = { version = "2.0.0-rc", features = [
+    "sqlx-postgres",
+    "sqlx-sqlite",
+    "runtime-tokio-native-tls",
+    "macros",
+    "mock",
+    "entity-registry",
+    "schema-sync",
+] }
+sea-orm-migration = { version = "2.0.0-rc", features = [
+    "runtime-tokio-native-tls",
+    "sqlx-postgres",
+    "sqlx-sqlite",
+] }
+dotenvy = "0.15.7"
+uuid = { version = "1", features = ["v4"] }
 
 [workspace.package]
 version = "0.1.0"

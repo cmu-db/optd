@@ -1,10 +1,12 @@
 use std::{collections::HashMap, sync::Arc};
 
 use itertools::Itertools;
+use snafu::OptionExt;
 use tokio::sync::watch;
 use tracing::{info, instrument, trace};
 
 use crate::{
+    error::Result,
     ir::{
         Group, GroupId, IRCommon, IRContext, Operator,
         convert::IntoOperator,
@@ -37,11 +39,9 @@ impl Cascades {
         self: &Arc<Self>,
         plan: &Arc<Operator>,
         required: Arc<Required>,
-    ) -> Option<Arc<Operator>> {
-        let decorrelated = UnnestingRule::new().apply(plan.clone(), &self.ctx).ok()?;
-        let simplified = SimplificationPass::new()
-            .apply(decorrelated, &self.ctx)
-            .ok()?;
+    ) -> Result<Arc<Operator>> {
+        let decorrelated = UnnestingRule::new().apply(plan.clone(), &self.ctx)?;
+        let simplified = SimplificationPass::new().apply(decorrelated, &self.ctx)?;
         let group_id = self.insert_new_operator(&simplified).await;
         let fut = self.find_best_costed_expr_for(group_id, required);
         let rx = fut.await;
@@ -51,7 +51,10 @@ impl Cascades {
                 .iter()
                 .min_by(|x, y| x.total_cost.as_f64().total_cmp(&y.total_cost.as_f64()))
                 .cloned()
-        }?;
+        }
+        .whatever_context(format!(
+            "no optimized expressions found for group {group_id}"
+        ))?;
 
         let properties = {
             let reader = self.memo.read().await;
@@ -66,7 +69,7 @@ impl Cascades {
         let best_plan = self
             .extract_best_group_expr(&best_root, group_id, properties)
             .await?;
-        Some(best_plan)
+        Ok(best_plan)
     }
 
     /// Recursively extracts the best query plan from a costed expression.
@@ -75,33 +78,40 @@ impl Cascades {
         best_root: &CostedExpr,
         group_id: GroupId,
         properties: Arc<OperatorProperties>,
-    ) -> impl Future<Output = Option<Arc<Operator>>> + Send {
+    ) -> impl Future<Output = Result<Arc<Operator>>> + Send {
         Box::pin(async move {
             let expr = best_root.group_expr.key();
 
             let input_groups = expr.input_operators();
             let mut input_operators = Vec::with_capacity(input_groups.len());
-            for (group_id, (required, index)) in
+            for (input_group_id, (input_required, index)) in
                 input_groups.iter().zip(best_root.input_requirements.iter())
             {
                 let rx = self
-                    .find_best_costed_expr_for(*group_id, required.clone())
+                    .find_best_costed_expr_for(*input_group_id, input_required.clone())
                     .await;
 
                 let properties = {
                     let reader = self.memo.read().await;
                     reader
-                        .get_memo_group(group_id)
+                        .get_memo_group(input_group_id)
                         .exploration
                         .borrow()
                         .properties
                         .clone()
                 };
 
-                let best_costed = rx.borrow().costed_exprs.get(*index).cloned()?;
+                let best_costed = rx
+                    .borrow()
+                    .costed_exprs
+                    .get(*index)
+                    .cloned()
+                    .whatever_context(format!(
+                        "missing optimized input expression {index} for group {input_group_id}"
+                    ))?;
 
                 let input_op = self
-                    .extract_best_group_expr(&best_costed, *group_id, properties)
+                    .extract_best_group_expr(&best_costed, *input_group_id, properties)
                     .await?;
                 input_operators.push(input_op);
             }
@@ -109,13 +119,20 @@ impl Cascades {
                 let reader = self.memo.read().await;
                 expr.input_scalars()
                     .iter()
-                    .map(|id| reader.get_scalar(id).unwrap())
-                    .collect()
+                    .map(|id| {
+                        reader.get_scalar(id).whatever_context(format!(
+                            "missing scalar group {id} while extracting plan for group {group_id}"
+                        ))
+                    })
+                    .collect::<Result<Vec<_>>>()?
             };
 
-            let common =
-                IRCommon::new_with_properties(input_operators.into(), input_scalars, properties);
-            Some(Arc::new(Operator::from_raw_parts(
+            let common = IRCommon::new_with_properties(
+                input_operators.into(),
+                input_scalars.into(),
+                properties,
+            );
+            Ok(Arc::new(Operator::from_raw_parts(
                 Some(group_id),
                 expr.kind().clone(),
                 common,

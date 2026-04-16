@@ -1,6 +1,3 @@
-pub mod auto_stats;
-pub mod udtf;
-
 use datafusion::{
     common::{DataFusionError, Result},
     execution::runtime_env::RuntimeEnv,
@@ -9,6 +6,7 @@ use datafusion::{
     prelude::{DataFrame, SessionConfig, SessionContext},
 };
 use datafusion_cli::cli_context::CliSessionContext;
+use optd_core::ir::catalog::Catalog;
 use optd_datafusion::OptdSessionContext;
 use std::sync::Arc;
 
@@ -24,6 +22,16 @@ impl OptdCliSessionContext {
     pub fn new_with_config_rt(config: SessionConfig, runtime: Arc<RuntimeEnv>) -> Self {
         Self {
             inner: OptdSessionContext::new_with_config_rt(config, runtime),
+        }
+    }
+
+    pub fn new_with_config_rt_catalog(
+        config: SessionConfig,
+        runtime: Arc<RuntimeEnv>,
+        catalog: Arc<dyn Catalog>,
+    ) -> Self {
+        Self {
+            inner: OptdSessionContext::new_with_config_rt_catalog(config, runtime, catalog),
         }
     }
 

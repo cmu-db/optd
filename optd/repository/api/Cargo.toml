@@ -1,0 +1,19 @@
+[package]
+name = "optd-repository-api"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+
+[dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+sea-orm = { workspace = true }
+dotenvy = { workspace = true }
+uuid = { workspace = true }
+arrow-schema = { workspace = true }
+itertools = { workspace = true }
+chrono = { workspace = true }
+optd-core = { path = "../../core" }
+optd-repository-entity = { path = "../entity" }
+
+[dev-dependencies]
+optd-repository-migration = { path = "../migration" }

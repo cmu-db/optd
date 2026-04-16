@@ -43,8 +43,12 @@ use clap::Parser;
 use datafusion::common::config_err;
 use datafusion::config::ConfigOptions;
 use datafusion::execution::disk_manager::{DiskManagerBuilder, DiskManagerMode};
+use datafusion::prelude::SessionContext;
 
 use optd_cli::OptdCliSessionContext;
+use optd_datafusion::{memory_catalog, repository_catalog_from_url};
+use optd_repository_api::Repository;
+use sea_orm::Database;
 
 #[derive(Debug, Parser, PartialEq)]
 #[clap(author, version, about, long_about= None)]
@@ -162,8 +166,18 @@ async fn main_inner() -> Result<()> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
 
+    let repository_url = env::var("OPTD_REPOSITORY_URL").ok();
+    let catalog = if let Some(database_url) = repository_url.as_deref() {
+        repository_catalog_from_url(database_url).await?
+    } else {
+        memory_catalog()
+    };
+
     if !args.quiet {
-        println!("DataFusion CLI v{DATAFUSION_CLI_VERSION} (optd's edition v{OPTD_CLI_VERSION})");
+        println!(
+            "DataFusion CLI v{DATAFUSION_CLI_VERSION} (optd's edition v{OPTD_CLI_VERSION}, with {} catalog)",
+            catalog.kind()
+        );
     }
 
     if let Some(ref path) = args.data_path {
@@ -209,7 +223,8 @@ async fn main_inner() -> Result<()> {
 
     // enable dynamic file query
 
-    let cli_ctx = OptdCliSessionContext::new_with_config_rt(session_config, runtime_env);
+    let cli_ctx =
+        OptdCliSessionContext::new_with_config_rt_catalog(session_config, runtime_env, catalog);
     cli_ctx.refresh_catalogs().await?;
     let cli_ctx = cli_ctx.enable_url_table();
     let ctx = cli_ctx.inner();
@@ -221,6 +236,10 @@ async fn main_inner() -> Result<()> {
         ctx.state_weak_ref(),
     ));
     ctx.register_catalog_list(dynamic_catalog);
+
+    if let Some(database_url) = repository_url.as_deref() {
+        restore_tables_from_repository(ctx, database_url).await?;
+    }
 
     ctx.register_udtf("parquet_metadata", Arc::new(ParquetMetadataFunc {}));
 
@@ -265,6 +284,27 @@ async fn main_inner() -> Result<()> {
 
     if !commands.is_empty() {
         exec::exec_from_commands(&cli_ctx, commands, &print_options).await?;
+    }
+
+    Ok(())
+}
+
+async fn restore_tables_from_repository(ctx: &SessionContext, database_url: &str) -> Result<()> {
+    let db = Database::connect(database_url)
+        .await
+        .map_err(|err| DataFusionError::External(Box::new(err)))?;
+    let repo = Repository::new(db);
+    let tables = repo
+        .get_all_tables()
+        .await
+        .map_err(|err| DataFusionError::External(Box::new(err)))?;
+
+    for table in tables {
+        let Some(definition) = table.definition else {
+            continue;
+        };
+        println!("restoring {}", table.table_name);
+        ctx.sql(&definition).await?.collect().await?;
     }
 
     Ok(())

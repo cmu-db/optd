@@ -111,11 +111,13 @@ macro_rules! generate_metadata_getters {
 macro_rules! generate_common_node {
     ($node_name:ident, $ref_name:ident, $(#[$($m:meta)*])*, $props_type:ty, $metadata_type:ident, $($field_name:ident: $field_type:ty),*) => {
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
         pub struct $metadata_type {
             $(pub $field_name: $field_type),*
         }
 
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
         $(#[$($m)*])*
         pub struct $node_name {
             meta: $metadata_type,
