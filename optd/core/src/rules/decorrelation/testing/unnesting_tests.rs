@@ -1089,7 +1089,7 @@ fn test_simple_mark_unnesting() -> Result<()> {
 }
 
 /// Test Two Conjunctive Mark Joins Feed One Boolean Filter:
-/// 
+///
 /// This models a shape produced from SQL like:
 ///
 /// SELECT * FROM T1
@@ -1138,7 +1138,8 @@ fn test_two_mark_joins_under_or_filter() -> Result<()> {
         let t3c0 = t3_cols[0];
 
         let first_mark = mock_scan_with_columns(1, t1_cols).logical_dependent_join(
-            mock_scan_with_columns(2, t2_cols).logical_select(column_ref(t2c0).eq(column_ref(t1c0))),
+            mock_scan_with_columns(2, t2_cols)
+                .logical_select(column_ref(t2c0).eq(column_ref(t1c0))),
             boolean(true),
             JoinType::Mark(mark1),
         );
@@ -1165,12 +1166,14 @@ fn test_two_mark_joins_under_or_filter() -> Result<()> {
 
         mock_scan_with_columns(1, t1_cols)
             .logical_join(
-                mock_scan_with_columns(2, t2_cols).logical_select(column_ref(t2c0).eq(column_ref(t2c0))),
+                mock_scan_with_columns(2, t2_cols)
+                    .logical_select(column_ref(t2c0).eq(column_ref(t2c0))),
                 null_safe_eq(column_ref(t1c0), column_ref(t2c0)),
                 JoinType::Mark(mark1),
             )
             .logical_join(
-                mock_scan_with_columns(3, t3_cols).logical_select(column_ref(t3c0).eq(column_ref(t3c0))),
+                mock_scan_with_columns(3, t3_cols)
+                    .logical_select(column_ref(t3c0).eq(column_ref(t3c0))),
                 null_safe_eq(column_ref(t1c1), column_ref(t3c0)),
                 JoinType::Mark(mark2),
             )
