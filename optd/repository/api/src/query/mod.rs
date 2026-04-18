@@ -3,22 +3,36 @@ mod get_query;
 mod get_query_by_sql;
 mod get_query_instance;
 mod get_query_instances;
+mod get_query_plans;
 mod log_query_instance;
 
 use chrono::{DateTime, Utc};
 use sea_orm::prelude::Json;
 
-use crate::entity::{query, query_instance};
+use crate::entity::{query, query_instance, query_plan};
 
 pub use get_or_create_query_id::*;
 pub use get_query::*;
 pub use get_query_by_sql::*;
 pub use get_query_instance::*;
 pub use get_query_instances::*;
+pub use get_query_plans::*;
 pub use log_query_instance::*;
 
 /// JSON-encoded query plan payload.
 pub type QueryPlan = Json;
+
+pub const INITIAL_PLAN_DESCRIPTION: &str = "initial-plan";
+pub const FINAL_PLAN_DESCRIPTION: &str = "final-plan";
+
+/// Information needed to log a query plan.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogQueryPlanInfo {
+    /// JSON-encoded plan payload.
+    pub plan: QueryPlan,
+    /// Description of this plan.
+    pub description: String,
+}
 
 /// Information needed to log a query instance.
 #[derive(Debug, Clone, PartialEq)]
@@ -27,10 +41,8 @@ pub struct LogQueryInstanceInfo {
     pub sql: String,
     /// Snapshot id the query instance runs against.
     pub snapshot_id: i64,
-    /// Initial query plan, if recorded.
-    pub initial_plan: Option<QueryPlan>,
-    /// Final query plan, if recorded.
-    pub final_plan: Option<QueryPlan>,
+    /// Query plans recorded for this instance.
+    pub query_plans: Vec<LogQueryPlanInfo>,
 }
 
 /// Query instance lookup selector.
@@ -62,10 +74,21 @@ pub struct QueryInstanceInfo {
     pub snapshot_id: i64,
     /// Time at which the query instance was created.
     pub query_time: DateTime<Utc>,
-    /// Initial query plan, if recorded.
-    pub initial_plan: Option<QueryPlan>,
-    /// Final query plan, if recorded.
-    pub final_plan: Option<QueryPlan>,
+    /// Query plans recorded for this instance.
+    pub query_plans: Vec<QueryPlanInfo>,
+}
+
+/// Stored query plan metadata.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueryPlanInfo {
+    /// Numeric query plan id.
+    pub id: i64,
+    /// Query instance this plan belongs to.
+    pub query_instance_id: i64,
+    /// JSON-encoded plan payload.
+    pub plan: QueryPlan,
+    /// Description of this plan.
+    pub description: String,
 }
 
 impl From<query::Model> for QueryInfo {
@@ -77,15 +100,26 @@ impl From<query::Model> for QueryInfo {
     }
 }
 
-impl From<query_instance::Model> for QueryInstanceInfo {
-    fn from(query_instance: query_instance::Model) -> Self {
+impl From<query_plan::Model> for QueryPlanInfo {
+    fn from(query_plan: query_plan::Model) -> Self {
         Self {
-            id: query_instance.id,
-            query_id: query_instance.query_id,
-            snapshot_id: query_instance.snapshot_id,
-            query_time: query_instance.query_time,
-            initial_plan: query_instance.initial_plan,
-            final_plan: query_instance.final_plan,
+            id: query_plan.id,
+            query_instance_id: query_plan.query_instance_id,
+            plan: query_plan.plan,
+            description: query_plan.description,
         }
+    }
+}
+
+fn query_instance_info_from_parts(
+    query_instance: query_instance::Model,
+    query_plans: Vec<QueryPlanInfo>,
+) -> QueryInstanceInfo {
+    QueryInstanceInfo {
+        id: query_instance.id,
+        query_id: query_instance.query_id,
+        snapshot_id: query_instance.snapshot_id,
+        query_time: query_instance.query_time,
+        query_plans,
     }
 }

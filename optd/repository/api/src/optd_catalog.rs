@@ -11,7 +11,10 @@ use sea_orm::DatabaseConnection;
 use crate::{
     Repository,
     entity::column::ColumnType,
-    query::{LogQueryInstanceInfo, QueryPlan},
+    query::{
+        FINAL_PLAN_DESCRIPTION, INITIAL_PLAN_DESCRIPTION, LogQueryInstanceInfo, LogQueryPlanInfo,
+        QueryPlan,
+    },
     schema::{CreateSchemaInfo, SchemaInfo},
     stats::UpdateTableStatsInfo,
     table::{CreateColumnInfo, CreateTableInfo, GetTableInfo, TableInfo},
@@ -180,11 +183,24 @@ impl RepositoryCatalog {
     ) -> Result<i64, sea_orm::DbErr> {
         let repo = Repository::new(self.db.clone());
         let snapshot_id = repo.reader().await?.snapshot().snapshot_id;
+        let mut query_plans = Vec::new();
+        if let Some(initial_plan) = initial_plan {
+            query_plans.push(LogQueryPlanInfo {
+                plan: initial_plan,
+                description: INITIAL_PLAN_DESCRIPTION.to_owned(),
+            });
+        }
+        if let Some(final_plan) = final_plan {
+            query_plans.push(LogQueryPlanInfo {
+                plan: final_plan,
+                description: FINAL_PLAN_DESCRIPTION.to_owned(),
+            });
+        }
+
         repo.log_query_instance(LogQueryInstanceInfo {
             sql,
             snapshot_id,
-            initial_plan,
-            final_plan,
+            query_plans,
         })
         .await
     }
@@ -410,10 +426,30 @@ mod tests {
         let query = runtime.block_on(repo.get_query(instance.query_id))?;
         assert_eq!(query.sql, "SELECT 1");
         assert_eq!(
-            instance.initial_plan,
-            Some(Json::String("initial".to_owned()))
+            instance
+                .query_plans
+                .into_iter()
+                .map(|query_plan| {
+                    (
+                        query_plan.query_instance_id,
+                        query_plan.description,
+                        query_plan.plan,
+                    )
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    instance_id,
+                    crate::query::INITIAL_PLAN_DESCRIPTION.to_owned(),
+                    Json::String("initial".to_owned())
+                ),
+                (
+                    instance_id,
+                    crate::query::FINAL_PLAN_DESCRIPTION.to_owned(),
+                    Json::String("final".to_owned())
+                ),
+            ]
         );
-        assert_eq!(instance.final_plan, Some(Json::String("final".to_owned())));
 
         Ok(())
     }

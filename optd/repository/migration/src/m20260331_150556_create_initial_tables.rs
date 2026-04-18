@@ -94,6 +94,14 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
+        manager
+            .create_table(
+                schema
+                    .create_table_from_entity(optd_repository_entity::query_plan::Entity)
+                    .if_not_exists()
+                    .to_owned(),
+            )
+            .await?;
 
         optd_repository_entity::prelude::Snapshot::insert(
             optd_repository_entity::snapshot::ActiveModel {
@@ -110,6 +118,14 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(
+                Table::drop()
+                    .table(optd_repository_entity::query_plan::Entity)
+                    .if_exists()
+                    .to_owned(),
+            )
+            .await?;
         manager
             .drop_table(
                 Table::drop()
