@@ -1,6 +1,9 @@
 use sea_orm::{ActiveValue::Set, ConnectionTrait, DbErr, EntityTrait};
 
-use crate::entity::{prelude::QueryInstance, query_instance};
+use crate::entity::{
+    prelude::{QueryInstance, QueryPlan as QueryPlanEntity},
+    query_instance, query_plan,
+};
 
 use super::{LogQueryInstanceInfo, get_or_create_query_id};
 
@@ -13,12 +16,24 @@ where
     let result = QueryInstance::insert(query_instance::ActiveModel {
         query_id: Set(query_id),
         snapshot_id: Set(info.snapshot_id),
-        initial_plan: Set(info.initial_plan),
-        final_plan: Set(info.final_plan),
         ..Default::default()
     })
     .exec(db)
     .await?;
 
-    Ok(result.last_insert_id)
+    let query_instance_id = result.last_insert_id;
+    if !info.query_plans.is_empty() {
+        QueryPlanEntity::insert_many(info.query_plans.into_iter().map(|query_plan| {
+            query_plan::ActiveModel {
+                query_instance_id: Set(query_instance_id),
+                plan: Set(query_plan.plan),
+                description: Set(query_plan.description),
+                ..Default::default()
+            }
+        }))
+        .exec(db)
+        .await?;
+    }
+
+    Ok(query_instance_id)
 }

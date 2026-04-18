@@ -26,6 +26,7 @@ pub enum RepositoryRequest {
     GetQueryBySql(String),
     GetQueryInstance(i64),
     GetQueryInstances(query::QueryInstanceSelector),
+    GetQueryPlans(i64),
 }
 
 /// Repository API entry point backed by database connection.
@@ -249,6 +250,14 @@ impl<T: ConnectionTrait> Repository<T> {
         selector: query::QueryInstanceSelector,
     ) -> Result<Vec<query::QueryInstanceInfo>, DbErr> {
         query::get_query_instances(&self.db, selector).await
+    }
+
+    /// Returns query plans for a query instance.
+    pub async fn get_query_plans(
+        &self,
+        query_instance_id: i64,
+    ) -> Result<Vec<query::QueryPlanInfo>, DbErr> {
+        query::get_query_plans(&self.db, query_instance_id).await
     }
 }
 
@@ -742,14 +751,49 @@ mod tests {
             .log_query_instance(query::LogQueryInstanceInfo {
                 sql: sql.clone(),
                 snapshot_id: snapshot.snapshot_id,
-                initial_plan: Some(initial_plan.clone()),
-                final_plan: Some(final_plan.clone()),
+                query_plans: vec![
+                    query::LogQueryPlanInfo {
+                        plan: initial_plan.clone(),
+                        description: query::INITIAL_PLAN_DESCRIPTION.to_owned(),
+                    },
+                    query::LogQueryPlanInfo {
+                        plan: final_plan.clone(),
+                        description: query::FINAL_PLAN_DESCRIPTION.to_owned(),
+                    },
+                ],
             })
             .await?;
         let first_instance = repo.get_query_instance(first_instance_id).await?;
         assert_eq!(first_instance.snapshot_id, snapshot.snapshot_id);
-        assert_eq!(first_instance.initial_plan, Some(initial_plan));
-        assert_eq!(first_instance.final_plan, Some(final_plan));
+        assert_eq!(
+            first_instance
+                .query_plans
+                .iter()
+                .map(|query_plan| {
+                    (
+                        query_plan.query_instance_id,
+                        query_plan.description.as_str(),
+                        &query_plan.plan,
+                    )
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    first_instance_id,
+                    query::INITIAL_PLAN_DESCRIPTION,
+                    &initial_plan
+                ),
+                (
+                    first_instance_id,
+                    query::FINAL_PLAN_DESCRIPTION,
+                    &final_plan
+                ),
+            ]
+        );
+        assert_eq!(
+            first_instance.query_plans,
+            repo.get_query_plans(first_instance_id).await?
+        );
 
         let query = repo.get_query(first_instance.query_id).await?;
         assert_eq!(query.sql, sql);
@@ -759,13 +803,14 @@ mod tests {
             .log_query_instance(query::LogQueryInstanceInfo {
                 sql: sql.clone(),
                 snapshot_id: snapshot.snapshot_id,
-                initial_plan: None,
-                final_plan: None,
+                query_plans: Vec::new(),
             })
             .await?;
         let second_instance = repo.get_query_instance(second_instance_id).await?;
         assert_eq!(second_instance.query_id, first_instance.query_id);
         assert_ne!(second_instance.id, first_instance.id);
+        assert!(second_instance.query_plans.is_empty());
+        assert!(repo.get_query_plans(second_instance_id).await?.is_empty());
         assert_eq!(
             repo.get_query_instances(query::QueryInstanceSelector::QueryId(query.query_id))
                 .await?
@@ -787,8 +832,7 @@ mod tests {
             .log_query_instance(query::LogQueryInstanceInfo {
                 sql: "SELECT * FROM t WHERE id = 1".to_owned(),
                 snapshot_id: snapshot.snapshot_id,
-                initial_plan: None,
-                final_plan: None,
+                query_plans: Vec::new(),
             })
             .await?;
         let different_sql_instance = repo.get_query_instance(different_sql_instance_id).await?;
