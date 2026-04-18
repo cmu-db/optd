@@ -40,67 +40,150 @@ order by n.id;
 
 /*
 logical_plan after optd-initial:
-OrderBy { ordering_exprs: [ `__internal_#5`.`id`(#5.0) ASC ], (.output_columns): `__internal_#5`.`category`(#5.1), `__internal_#5`.`id`(#5.0), (.cardinality): 1.00 }
+OrderBy
+├── ordering_exprs: "__#5.id"(#5.0) ASC
+├── (.output_columns):
+│   ┌── "__#5.category"(#5.1)
+│   └── "__#5.id"(#5.0)
+├── (.cardinality): 1.00
 └── Project
     ├── .table_index: 5
-    ├── .projections: [ `n`.`id`(#2.0), `d`.`category`(#4.1) ]
-    ├── (.output_columns): `__internal_#5`.`category`(#5.1), `__internal_#5`.`id`(#5.0)
+    ├── .projections:
+    │   ┌── "n.id"(#2.0)
+    │   └── "d.category"(#4.1)
+    ├── (.output_columns):
+    │   ┌── "__#5.category"(#5.1)
+    │   └── "__#5.id"(#5.0)
     ├── (.cardinality): 1.00
-    └── Join
-        ├── .join_type: Inner
-        ├── .implementation: None
-        ├── .join_cond: (`n`.`id`(#2.0) = `d`.`id`(#4.0))
-        ├── (.output_columns): `d`.`category`(#4.1), `d`.`enabled`(#4.2), `d`.`id`(#4.0), `n`.`bonus`(#2.3), `n`.`grp`(#2.1), `n`.`id`(#2.0), `n`.`note`(#2.4), `n`.`val`(#2.2)
+    └── Select
+        ├── .predicate: "d.enabled"(#4.2) = 1::integer
+        ├── (.output_columns):
+        │   ┌── "d.category"(#4.1)
+        │   ├── "d.enabled"(#4.2)
+        │   ├── "d.id"(#4.0)
+        │   ├── "n.bonus"(#2.3)
+        │   ├── "n.grp"(#2.1)
+        │   ├── "n.id"(#2.0)
+        │   ├── "n.note"(#2.4)
+        │   └── "n.val"(#2.2)
         ├── (.cardinality): 1.00
-        ├── Remap { .table_index: 2, (.output_columns): `n`.`bonus`(#2.3), `n`.`grp`(#2.1), `n`.`id`(#2.0), `n`.`note`(#2.4), `n`.`val`(#2.2), (.cardinality): 5.00 }
-        │   └── Get
-        │       ├── .data_source_id: 1
-        │       ├── .table_index: 1
-        │       ├── .implementation: None
-        │       ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`grp`(#1.1), `numbers`.`id`(#1.0), `numbers`.`note`(#1.4), `numbers`.`val`(#1.2)
-        │       └── (.cardinality): 5.00
-        └── Remap { .table_index: 4, (.output_columns): `d`.`category`(#4.1), `d`.`enabled`(#4.2), `d`.`id`(#4.0), (.cardinality): 0.50 }
-            └── Select
-                ├── .predicate: `dim`.`enabled`(#3.2) = 1::integer
-                ├── (.output_columns): `dim`.`category`(#3.1), `dim`.`enabled`(#3.2), `dim`.`id`(#3.0)
-                ├── (.cardinality): 0.50
+        └── Join
+            ├── .join_type: Inner
+            ├── .implementation: None
+            ├── .join_cond: ("n.id"(#2.0) = "d.id"(#4.0))
+            ├── (.output_columns):
+            │   ┌── "d.category"(#4.1)
+            │   ├── "d.enabled"(#4.2)
+            │   ├── "d.id"(#4.0)
+            │   ├── "n.bonus"(#2.3)
+            │   ├── "n.grp"(#2.1)
+            │   ├── "n.id"(#2.0)
+            │   ├── "n.note"(#2.4)
+            │   └── "n.val"(#2.2)
+            ├── (.cardinality): 10.00
+            ├── Remap
+            │   ├── .table_index: 2
+            │   ├── (.output_columns):
+            │   │   ┌── "n.bonus"(#2.3)
+            │   │   ├── "n.grp"(#2.1)
+            │   │   ├── "n.id"(#2.0)
+            │   │   ├── "n.note"(#2.4)
+            │   │   └── "n.val"(#2.2)
+            │   ├── (.cardinality): 5.00
+            │   └── Get
+            │       ├── .data_source_id: 1
+            │       ├── .table_index: 1
+            │       ├── .implementation: None
+            │       ├── (.output_columns):
+            │       │   ┌── "numbers.bonus"(#1.3)
+            │       │   ├── "numbers.grp"(#1.1)
+            │       │   ├── "numbers.id"(#1.0)
+            │       │   ├── "numbers.note"(#1.4)
+            │       │   └── "numbers.val"(#1.2)
+            │       └── (.cardinality): 5.00
+            └── Remap
+                ├── .table_index: 4
+                ├── (.output_columns):
+                │   ┌── "d.category"(#4.1)
+                │   ├── "d.enabled"(#4.2)
+                │   └── "d.id"(#4.0)
+                ├── (.cardinality): 5.00
                 └── Get
                     ├── .data_source_id: 2
                     ├── .table_index: 3
                     ├── .implementation: None
-                    ├── (.output_columns): `dim`.`category`(#3.1), `dim`.`enabled`(#3.2), `dim`.`id`(#3.0)
+                    ├── (.output_columns):
+                    │   ┌── "dim.category"(#3.1)
+                    │   ├── "dim.enabled"(#3.2)
+                    │   └── "dim.id"(#3.0)
                     └── (.cardinality): 5.00
 
 physical_plan after optd-finalized:
-EnforcerSort { tuple_ordering: [(#5.0, Asc)], (.output_columns): `__internal_#5`.`category`(#5.1), `__internal_#5`.`id`(#5.0), (.cardinality): 1.00 }
+EnforcerSort
+├── tuple_ordering: [(#5.0, Asc)]
+├── (.output_columns): [ "__#5.category"(#5.1), "__#5.id"(#5.0) ]
+├── (.cardinality): 1.00
 └── Project
     ├── .table_index: 5
-    ├── .projections: [ `n`.`id`(#2.0), `d`.`category`(#4.1) ]
-    ├── (.output_columns): `__internal_#5`.`category`(#5.1), `__internal_#5`.`id`(#5.0)
+    ├── .projections: [ "n.id"(#2.0), "d.category"(#4.1) ]
+    ├── (.output_columns): [ "__#5.category"(#5.1), "__#5.id"(#5.0) ]
     ├── (.cardinality): 1.00
     └── Join
         ├── .join_type: Inner
         ├── .implementation: Some(Hash { build_side: Outer, keys: [(#4.0, #2.0)] })
-        ├── .join_cond: `n`.`id`(#2.0) = `d`.`id`(#4.0)
-        ├── (.output_columns): `d`.`category`(#4.1), `d`.`enabled`(#4.2), `d`.`id`(#4.0), `n`.`bonus`(#2.3), `n`.`grp`(#2.1), `n`.`id`(#2.0), `n`.`note`(#2.4), `n`.`val`(#2.2)
+        ├── .join_cond: "n.id"(#2.0) = "d.id"(#4.0)
+        ├── (.output_columns):
+        │   ┌── "d.category"(#4.1)
+        │   ├── "d.enabled"(#4.2)
+        │   ├── "d.id"(#4.0)
+        │   ├── "n.bonus"(#2.3)
+        │   ├── "n.grp"(#2.1)
+        │   ├── "n.id"(#2.0)
+        │   ├── "n.note"(#2.4)
+        │   └── "n.val"(#2.2)
         ├── (.cardinality): 1.00
-        ├── Remap { .table_index: 4, (.output_columns): `d`.`category`(#4.1), `d`.`enabled`(#4.2), `d`.`id`(#4.0), (.cardinality): 0.50 }
-        │   └── Select
-        │       ├── .predicate: `dim`.`enabled`(#3.2) = 1::integer
-        │       ├── (.output_columns): `dim`.`category`(#3.1), `dim`.`enabled`(#3.2), `dim`.`id`(#3.0)
-        │       ├── (.cardinality): 0.50
+        ├── Select
+        │   ├── .predicate: "d.enabled"(#4.2) = 1::integer
+        │   ├── (.output_columns):
+        │   │   ┌── "d.category"(#4.1)
+        │   │   ├── "d.enabled"(#4.2)
+        │   │   └── "d.id"(#4.0)
+        │   ├── (.cardinality): 0.50
+        │   └── Remap
+        │       ├── .table_index: 4
+        │       ├── (.output_columns):
+        │       │   ┌── "d.category"(#4.1)
+        │       │   ├── "d.enabled"(#4.2)
+        │       │   └── "d.id"(#4.0)
+        │       ├── (.cardinality): 5.00
         │       └── Get
         │           ├── .data_source_id: 2
         │           ├── .table_index: 3
         │           ├── .implementation: None
-        │           ├── (.output_columns): `dim`.`category`(#3.1), `dim`.`enabled`(#3.2), `dim`.`id`(#3.0)
+        │           ├── (.output_columns):
+        │           │   ┌── "dim.category"(#3.1)
+        │           │   ├── "dim.enabled"(#3.2)
+        │           │   └── "dim.id"(#3.0)
         │           └── (.cardinality): 5.00
-        └── Remap { .table_index: 2, (.output_columns): `n`.`bonus`(#2.3), `n`.`grp`(#2.1), `n`.`id`(#2.0), `n`.`note`(#2.4), `n`.`val`(#2.2), (.cardinality): 5.00 }
+        └── Remap
+            ├── .table_index: 2
+            ├── (.output_columns):
+            │   ┌── "n.bonus"(#2.3)
+            │   ├── "n.grp"(#2.1)
+            │   ├── "n.id"(#2.0)
+            │   ├── "n.note"(#2.4)
+            │   └── "n.val"(#2.2)
+            ├── (.cardinality): 5.00
             └── Get
                 ├── .data_source_id: 1
                 ├── .table_index: 1
                 ├── .implementation: None
-                ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`grp`(#1.1), `numbers`.`id`(#1.0), `numbers`.`note`(#1.4), `numbers`.`val`(#1.2)
+                ├── (.output_columns):
+                │   ┌── "numbers.bonus"(#1.3)
+                │   ├── "numbers.grp"(#1.1)
+                │   ├── "numbers.id"(#1.0)
+                │   ├── "numbers.note"(#1.4)
+                │   └── "numbers.val"(#1.2)
                 └── (.cardinality): 5.00
 
 1 odd
@@ -116,59 +199,119 @@ order by n.id;
 
 /*
 logical_plan after optd-initial:
-OrderBy { ordering_exprs: [ `__internal_#5`.`id`(#5.0) ASC ], (.output_columns): `__internal_#5`.`id`(#5.0), `__internal_#5`.`label`(#5.1), (.cardinality): 6.00 }
+OrderBy
+├── ordering_exprs: "__#5.id"(#5.0) ASC
+├── (.output_columns): [ "__#5.id"(#5.0), "__#5.label"(#5.1) ]
+├── (.cardinality): 6.00
 └── Project
     ├── .table_index: 5
-    ├── .projections: [ `n`.`id`(#2.0), `g`.`label`(#4.2) ]
-    ├── (.output_columns): `__internal_#5`.`id`(#5.0), `__internal_#5`.`label`(#5.1)
+    ├── .projections: [ "n.id"(#2.0), "g.label"(#4.2) ]
+    ├── (.output_columns): [ "__#5.id"(#5.0), "__#5.label"(#5.1) ]
     ├── (.cardinality): 6.00
     └── Join
         ├── .join_type: LeftOuter
         ├── .implementation: None
-        ├── .join_cond: (`n`.`grp`(#2.1) = `g`.`grp`(#4.0)) AND (`n`.`val`(#2.2) < `g`.`shift`(#4.1))
-        ├── (.output_columns): `g`.`grp`(#4.0), `g`.`label`(#4.2), `g`.`shift`(#4.1), `n`.`bonus`(#2.3), `n`.`grp`(#2.1), `n`.`id`(#2.0), `n`.`note`(#2.4), `n`.`val`(#2.2)
+        ├── .join_cond: ("n.grp"(#2.1) = "g.grp"(#4.0)) AND ("n.val"(#2.2) < "g.shift"(#4.1))
+        ├── (.output_columns):
+        │   ┌── "g.grp"(#4.0)
+        │   ├── "g.label"(#4.2)
+        │   ├── "g.shift"(#4.1)
+        │   ├── "n.bonus"(#2.3)
+        │   ├── "n.grp"(#2.1)
+        │   ├── "n.id"(#2.0)
+        │   ├── "n.note"(#2.4)
+        │   └── "n.val"(#2.2)
         ├── (.cardinality): 6.00
-        ├── Remap { .table_index: 2, (.output_columns): `n`.`bonus`(#2.3), `n`.`grp`(#2.1), `n`.`id`(#2.0), `n`.`note`(#2.4), `n`.`val`(#2.2), (.cardinality): 5.00 }
+        ├── Remap
+        │   ├── .table_index: 2
+        │   ├── (.output_columns):
+        │   │   ┌── "n.bonus"(#2.3)
+        │   │   ├── "n.grp"(#2.1)
+        │   │   ├── "n.id"(#2.0)
+        │   │   ├── "n.note"(#2.4)
+        │   │   └── "n.val"(#2.2)
+        │   ├── (.cardinality): 5.00
         │   └── Get
         │       ├── .data_source_id: 1
         │       ├── .table_index: 1
         │       ├── .implementation: None
-        │       ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`grp`(#1.1), `numbers`.`id`(#1.0), `numbers`.`note`(#1.4), `numbers`.`val`(#1.2)
+        │       ├── (.output_columns):
+        │       │   ┌── "numbers.bonus"(#1.3)
+        │       │   ├── "numbers.grp"(#1.1)
+        │       │   ├── "numbers.id"(#1.0)
+        │       │   ├── "numbers.note"(#1.4)
+        │       │   └── "numbers.val"(#1.2)
         │       └── (.cardinality): 5.00
-        └── Remap { .table_index: 4, (.output_columns): `g`.`grp`(#4.0), `g`.`label`(#4.2), `g`.`shift`(#4.1), (.cardinality): 3.00 }
+        └── Remap
+            ├── .table_index: 4
+            ├── (.output_columns): [ "g.grp"(#4.0), "g.label"(#4.2), "g.shift"(#4.1) ]
+            ├── (.cardinality): 3.00
             └── Get
                 ├── .data_source_id: 3
                 ├── .table_index: 3
                 ├── .implementation: None
-                ├── (.output_columns): `grp_offsets`.`grp`(#3.0), `grp_offsets`.`label`(#3.2), `grp_offsets`.`shift`(#3.1)
+                ├── (.output_columns):
+                │   ┌── "grp_offsets.grp"(#3.0)
+                │   ├── "grp_offsets.label"(#3.2)
+                │   └── "grp_offsets.shift"(#3.1)
                 └── (.cardinality): 3.00
 
 physical_plan after optd-finalized:
-EnforcerSort { tuple_ordering: [(#5.0, Asc)], (.output_columns): `__internal_#5`.`id`(#5.0), `__internal_#5`.`label`(#5.1), (.cardinality): 6.00 }
+EnforcerSort
+├── tuple_ordering: [(#5.0, Asc)]
+├── (.output_columns): [ "__#5.id"(#5.0), "__#5.label"(#5.1) ]
+├── (.cardinality): 6.00
 └── Project
     ├── .table_index: 5
-    ├── .projections: [ `n`.`id`(#2.0), `g`.`label`(#4.2) ]
-    ├── (.output_columns): `__internal_#5`.`id`(#5.0), `__internal_#5`.`label`(#5.1)
+    ├── .projections: [ "n.id"(#2.0), "g.label"(#4.2) ]
+    ├── (.output_columns): [ "__#5.id"(#5.0), "__#5.label"(#5.1) ]
     ├── (.cardinality): 6.00
     └── Join
         ├── .join_type: LeftOuter
         ├── .implementation: Some(Hash { build_side: Outer, keys: [(#2.1, #4.0)] })
-        ├── .join_cond: (`n`.`grp`(#2.1) = `g`.`grp`(#4.0)) AND (`n`.`val`(#2.2) < `g`.`shift`(#4.1))
-        ├── (.output_columns): `g`.`grp`(#4.0), `g`.`label`(#4.2), `g`.`shift`(#4.1), `n`.`bonus`(#2.3), `n`.`grp`(#2.1), `n`.`id`(#2.0), `n`.`note`(#2.4), `n`.`val`(#2.2)
+        ├── .join_cond: ("n.grp"(#2.1) = "g.grp"(#4.0)) AND ("n.val"(#2.2) < "g.shift"(#4.1))
+        ├── (.output_columns):
+        │   ┌── "g.grp"(#4.0)
+        │   ├── "g.label"(#4.2)
+        │   ├── "g.shift"(#4.1)
+        │   ├── "n.bonus"(#2.3)
+        │   ├── "n.grp"(#2.1)
+        │   ├── "n.id"(#2.0)
+        │   ├── "n.note"(#2.4)
+        │   └── "n.val"(#2.2)
         ├── (.cardinality): 6.00
-        ├── Remap { .table_index: 2, (.output_columns): `n`.`bonus`(#2.3), `n`.`grp`(#2.1), `n`.`id`(#2.0), `n`.`note`(#2.4), `n`.`val`(#2.2), (.cardinality): 5.00 }
+        ├── Remap
+        │   ├── .table_index: 2
+        │   ├── (.output_columns):
+        │   │   ┌── "n.bonus"(#2.3)
+        │   │   ├── "n.grp"(#2.1)
+        │   │   ├── "n.id"(#2.0)
+        │   │   ├── "n.note"(#2.4)
+        │   │   └── "n.val"(#2.2)
+        │   ├── (.cardinality): 5.00
         │   └── Get
         │       ├── .data_source_id: 1
         │       ├── .table_index: 1
         │       ├── .implementation: None
-        │       ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`grp`(#1.1), `numbers`.`id`(#1.0), `numbers`.`note`(#1.4), `numbers`.`val`(#1.2)
+        │       ├── (.output_columns):
+        │       │   ┌── "numbers.bonus"(#1.3)
+        │       │   ├── "numbers.grp"(#1.1)
+        │       │   ├── "numbers.id"(#1.0)
+        │       │   ├── "numbers.note"(#1.4)
+        │       │   └── "numbers.val"(#1.2)
         │       └── (.cardinality): 5.00
-        └── Remap { .table_index: 4, (.output_columns): `g`.`grp`(#4.0), `g`.`label`(#4.2), `g`.`shift`(#4.1), (.cardinality): 3.00 }
+        └── Remap
+            ├── .table_index: 4
+            ├── (.output_columns): [ "g.grp"(#4.0), "g.label"(#4.2), "g.shift"(#4.1) ]
+            ├── (.cardinality): 3.00
             └── Get
                 ├── .data_source_id: 3
                 ├── .table_index: 3
                 ├── .implementation: None
-                ├── (.output_columns): `grp_offsets`.`grp`(#3.0), `grp_offsets`.`label`(#3.2), `grp_offsets`.`shift`(#3.1)
+                ├── (.output_columns):
+                │   ┌── "grp_offsets.grp"(#3.0)
+                │   ├── "grp_offsets.label"(#3.2)
+                │   └── "grp_offsets.shift"(#3.1)
                 └── (.cardinality): 3.00
 
 1 g1
@@ -188,74 +331,213 @@ order by n.id;
 
 /*
 logical_plan after optd-initial:
-OrderBy { ordering_exprs: [ `__internal_#7`.`id`(#7.0) ASC ], (.output_columns): `__internal_#7`.`category`(#7.1), `__internal_#7`.`id`(#7.0), `__internal_#7`.`tag`(#7.2), (.cardinality): 1.20 }
+OrderBy
+├── ordering_exprs: "__#7.id"(#7.0) ASC
+├── (.output_columns):
+│   ┌── "__#7.category"(#7.1)
+│   ├── "__#7.id"(#7.0)
+│   └── "__#7.tag"(#7.2)
+├── (.cardinality): 1.20
 └── Project
     ├── .table_index: 7
-    ├── .projections: [ `n`.`id`(#2.0), `d`.`category`(#4.1), `t`.`tag`(#6.1) ]
-    ├── (.output_columns): `__internal_#7`.`category`(#7.1), `__internal_#7`.`id`(#7.0), `__internal_#7`.`tag`(#7.2)
+    ├── .projections:
+    │   ┌── "n.id"(#2.0)
+    │   ├── "d.category"(#4.1)
+    │   └── "t.tag"(#6.1)
+    ├── (.output_columns):
+    │   ┌── "__#7.category"(#7.1)
+    │   ├── "__#7.id"(#7.0)
+    │   └── "__#7.tag"(#7.2)
     ├── (.cardinality): 1.20
-    └── Join
-        ├── .join_type: Inner
-        ├── .implementation: None
-        ├── .join_cond: (`n`.`id`(#2.0) = `t`.`id`(#6.0))
-        ├── (.output_columns): `d`.`category`(#4.1), `d`.`enabled`(#4.2), `d`.`id`(#4.0), `n`.`bonus`(#2.3), `n`.`grp`(#2.1), `n`.`id`(#2.0), `n`.`note`(#2.4), `n`.`val`(#2.2), `t`.`id`(#6.0), `t`.`tag`(#6.1)
+    └── Select
+        ├── .predicate: "n.val"(#2.2) >= 10::integer
+        ├── (.output_columns):
+        │   ┌── "d.category"(#4.1)
+        │   ├── "d.enabled"(#4.2)
+        │   ├── "d.id"(#4.0)
+        │   ├── "n.bonus"(#2.3)
+        │   ├── "n.grp"(#2.1)
+        │   ├── "n.id"(#2.0)
+        │   ├── "n.note"(#2.4)
+        │   ├── "n.val"(#2.2)
+        │   ├── "t.id"(#6.0)
+        │   └── "t.tag"(#6.1)
         ├── (.cardinality): 1.20
-        ├── Join
-        │   ├── .join_type: Inner
-        │   ├── .implementation: None
-        │   ├── .join_cond: (`n`.`id`(#2.0) = `d`.`id`(#4.0))
-        │   ├── (.output_columns): `d`.`category`(#4.1), `d`.`enabled`(#4.2), `d`.`id`(#4.0), `n`.`bonus`(#2.3), `n`.`grp`(#2.1), `n`.`id`(#2.0), `n`.`note`(#2.4), `n`.`val`(#2.2)
-        │   ├── (.cardinality): 1.00
-        │   ├── Remap { .table_index: 2, (.output_columns): `n`.`bonus`(#2.3), `n`.`grp`(#2.1), `n`.`id`(#2.0), `n`.`note`(#2.4), `n`.`val`(#2.2), (.cardinality): 0.50 }
-        │   │   └── Select
-        │   │       ├── .predicate: `numbers`.`val`(#1.2) >= 10::integer
-        │   │       ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`grp`(#1.1), `numbers`.`id`(#1.0), `numbers`.`note`(#1.4), `numbers`.`val`(#1.2)
-        │   │       ├── (.cardinality): 0.50
-        │   │       └── Get
-        │   │           ├── .data_source_id: 1
-        │   │           ├── .table_index: 1
-        │   │           ├── .implementation: None
-        │   │           ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`grp`(#1.1), `numbers`.`id`(#1.0), `numbers`.`note`(#1.4), `numbers`.`val`(#1.2)
-        │   │           └── (.cardinality): 5.00
-        │   └── Remap { .table_index: 4, (.output_columns): `d`.`category`(#4.1), `d`.`enabled`(#4.2), `d`.`id`(#4.0), (.cardinality): 5.00 }
-        │       └── Get { .data_source_id: 2, .table_index: 3, .implementation: None, (.output_columns): `dim`.`category`(#3.1), `dim`.`enabled`(#3.2), `dim`.`id`(#3.0), (.cardinality): 5.00 }
-        └── Remap { .table_index: 6, (.output_columns): `t`.`id`(#6.0), `t`.`tag`(#6.1), (.cardinality): 3.00 }
-            └── Get { .data_source_id: 4, .table_index: 5, .implementation: None, (.output_columns): `tags`.`id`(#5.0), `tags`.`tag`(#5.1), (.cardinality): 3.00 }
+        └── Join
+            ├── .join_type: Inner
+            ├── .implementation: None
+            ├── .join_cond: ("n.id"(#2.0) = "t.id"(#6.0))
+            ├── (.output_columns):
+            │   ┌── "d.category"(#4.1)
+            │   ├── "d.enabled"(#4.2)
+            │   ├── "d.id"(#4.0)
+            │   ├── "n.bonus"(#2.3)
+            │   ├── "n.grp"(#2.1)
+            │   ├── "n.id"(#2.0)
+            │   ├── "n.note"(#2.4)
+            │   ├── "n.val"(#2.2)
+            │   ├── "t.id"(#6.0)
+            │   └── "t.tag"(#6.1)
+            ├── (.cardinality): 12.00
+            ├── Join
+            │   ├── .join_type: Inner
+            │   ├── .implementation: None
+            │   ├── .join_cond: ("n.id"(#2.0) = "d.id"(#4.0))
+            │   ├── (.output_columns):
+            │   │   ┌── "d.category"(#4.1)
+            │   │   ├── "d.enabled"(#4.2)
+            │   │   ├── "d.id"(#4.0)
+            │   │   ├── "n.bonus"(#2.3)
+            │   │   ├── "n.grp"(#2.1)
+            │   │   ├── "n.id"(#2.0)
+            │   │   ├── "n.note"(#2.4)
+            │   │   └── "n.val"(#2.2)
+            │   ├── (.cardinality): 10.00
+            │   ├── Remap
+            │   │   ├── .table_index: 2
+            │   │   ├── (.output_columns):
+            │   │   │   ┌── "n.bonus"(#2.3)
+            │   │   │   ├── "n.grp"(#2.1)
+            │   │   │   ├── "n.id"(#2.0)
+            │   │   │   ├── "n.note"(#2.4)
+            │   │   │   └── "n.val"(#2.2)
+            │   │   ├── (.cardinality): 5.00
+            │   │   └── Get
+            │   │       ├── .data_source_id: 1
+            │   │       ├── .table_index: 1
+            │   │       ├── .implementation: None
+            │   │       ├── (.output_columns):
+            │   │       │   ┌── "numbers.bonus"(#1.3)
+            │   │       │   ├── "numbers.grp"(#1.1)
+            │   │       │   ├── "numbers.id"(#1.0)
+            │   │       │   ├── "numbers.note"(#1.4)
+            │   │       │   └── "numbers.val"(#1.2)
+            │   │       └── (.cardinality): 5.00
+            │   └── Remap
+            │       ├── .table_index: 4
+            │       ├── (.output_columns):
+            │       │   ┌── "d.category"(#4.1)
+            │       │   ├── "d.enabled"(#4.2)
+            │       │   └── "d.id"(#4.0)
+            │       ├── (.cardinality): 5.00
+            │       └── Get
+            │           ├── .data_source_id: 2
+            │           ├── .table_index: 3
+            │           ├── .implementation: None
+            │           ├── (.output_columns):
+            │           │   ┌── "dim.category"(#3.1)
+            │           │   ├── "dim.enabled"(#3.2)
+            │           │   └── "dim.id"(#3.0)
+            │           └── (.cardinality): 5.00
+            └── Remap
+                ├── .table_index: 6
+                ├── (.output_columns):
+                │   ┌── "t.id"(#6.0)
+                │   └── "t.tag"(#6.1)
+                ├── (.cardinality): 3.00
+                └── Get
+                    ├── .data_source_id: 4
+                    ├── .table_index: 5
+                    ├── .implementation: None
+                    ├── (.output_columns):
+                    │   ┌── "tags.id"(#5.0)
+                    │   └── "tags.tag"(#5.1)
+                    └── (.cardinality): 3.00
 
 physical_plan after optd-finalized:
-EnforcerSort { tuple_ordering: [(#7.0, Asc)], (.output_columns): `__internal_#7`.`category`(#7.1), `__internal_#7`.`id`(#7.0), `__internal_#7`.`tag`(#7.2), (.cardinality): 1.20 }
+EnforcerSort
+├── tuple_ordering: [(#7.0, Asc)]
+├── (.output_columns): [ "__#7.category"(#7.1), "__#7.id"(#7.0), "__#7.tag"(#7.2) ]
+├── (.cardinality): 1.20
 └── Project
     ├── .table_index: 7
-    ├── .projections: [ `n`.`id`(#2.0), `d`.`category`(#4.1), `t`.`tag`(#6.1) ]
-    ├── (.output_columns): `__internal_#7`.`category`(#7.1), `__internal_#7`.`id`(#7.0), `__internal_#7`.`tag`(#7.2)
+    ├── .projections: [ "n.id"(#2.0), "d.category"(#4.1), "t.tag"(#6.1) ]
+    ├── (.output_columns): [ "__#7.category"(#7.1), "__#7.id"(#7.0), "__#7.tag"(#7.2) ]
     ├── (.cardinality): 1.20
     └── Join
         ├── .join_type: Inner
         ├── .implementation: Some(Hash { build_side: Outer, keys: [(#2.0, #4.0)] })
-        ├── .join_cond: `n`.`id`(#2.0) = `d`.`id`(#4.0)
-        ├── (.output_columns): `d`.`category`(#4.1), `d`.`enabled`(#4.2), `d`.`id`(#4.0), `n`.`bonus`(#2.3), `n`.`grp`(#2.1), `n`.`id`(#2.0), `n`.`note`(#2.4), `n`.`val`(#2.2), `t`.`id`(#6.0), `t`.`tag`(#6.1)
+        ├── .join_cond: "n.id"(#2.0) = "d.id"(#4.0)
+        ├── (.output_columns):
+        │   ┌── "d.category"(#4.1)
+        │   ├── "d.enabled"(#4.2)
+        │   ├── "d.id"(#4.0)
+        │   ├── "n.bonus"(#2.3)
+        │   ├── "n.grp"(#2.1)
+        │   ├── "n.id"(#2.0)
+        │   ├── "n.note"(#2.4)
+        │   ├── "n.val"(#2.2)
+        │   ├── "t.id"(#6.0)
+        │   └── "t.tag"(#6.1)
         ├── (.cardinality): 1.20
         ├── Join
         │   ├── .join_type: Inner
         │   ├── .implementation: Some(Hash { build_side: Outer, keys: [(#2.0, #6.0)] })
-        │   ├── .join_cond: `n`.`id`(#2.0) = `t`.`id`(#6.0)
-        │   ├── (.output_columns): `n`.`bonus`(#2.3), `n`.`grp`(#2.1), `n`.`id`(#2.0), `n`.`note`(#2.4), `n`.`val`(#2.2), `t`.`id`(#6.0), `t`.`tag`(#6.1)
+        │   ├── .join_cond: "n.id"(#2.0) = "t.id"(#6.0)
+        │   ├── (.output_columns):
+        │   │   ┌── "n.bonus"(#2.3)
+        │   │   ├── "n.grp"(#2.1)
+        │   │   ├── "n.id"(#2.0)
+        │   │   ├── "n.note"(#2.4)
+        │   │   ├── "n.val"(#2.2)
+        │   │   ├── "t.id"(#6.0)
+        │   │   └── "t.tag"(#6.1)
         │   ├── (.cardinality): 0.60
-        │   ├── Remap { .table_index: 2, (.output_columns): `n`.`bonus`(#2.3), `n`.`grp`(#2.1), `n`.`id`(#2.0), `n`.`note`(#2.4), `n`.`val`(#2.2), (.cardinality): 0.50 }
-        │   │   └── Select
-        │   │       ├── .predicate: `numbers`.`val`(#1.2) >= 10::integer
-        │   │       ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`grp`(#1.1), `numbers`.`id`(#1.0), `numbers`.`note`(#1.4), `numbers`.`val`(#1.2)
-        │   │       ├── (.cardinality): 0.50
+        │   ├── Select
+        │   │   ├── .predicate: "n.val"(#2.2) >= 10::integer
+        │   │   ├── (.output_columns):
+        │   │   │   ┌── "n.bonus"(#2.3)
+        │   │   │   ├── "n.grp"(#2.1)
+        │   │   │   ├── "n.id"(#2.0)
+        │   │   │   ├── "n.note"(#2.4)
+        │   │   │   └── "n.val"(#2.2)
+        │   │   ├── (.cardinality): 0.50
+        │   │   └── Remap
+        │   │       ├── .table_index: 2
+        │   │       ├── (.output_columns):
+        │   │       │   ┌── "n.bonus"(#2.3)
+        │   │       │   ├── "n.grp"(#2.1)
+        │   │       │   ├── "n.id"(#2.0)
+        │   │       │   ├── "n.note"(#2.4)
+        │   │       │   └── "n.val"(#2.2)
+        │   │       ├── (.cardinality): 5.00
         │   │       └── Get
         │   │           ├── .data_source_id: 1
         │   │           ├── .table_index: 1
         │   │           ├── .implementation: None
-        │   │           ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`grp`(#1.1), `numbers`.`id`(#1.0), `numbers`.`note`(#1.4), `numbers`.`val`(#1.2)
+        │   │           ├── (.output_columns):
+        │   │           │   ┌── "numbers.bonus"(#1.3)
+        │   │           │   ├── "numbers.grp"(#1.1)
+        │   │           │   ├── "numbers.id"(#1.0)
+        │   │           │   ├── "numbers.note"(#1.4)
+        │   │           │   └── "numbers.val"(#1.2)
         │   │           └── (.cardinality): 5.00
-        │   └── Remap { .table_index: 6, (.output_columns): `t`.`id`(#6.0), `t`.`tag`(#6.1), (.cardinality): 3.00 }
-        │       └── Get { .data_source_id: 4, .table_index: 5, .implementation: None, (.output_columns): `tags`.`id`(#5.0), `tags`.`tag`(#5.1), (.cardinality): 3.00 }
-        └── Remap { .table_index: 4, (.output_columns): `d`.`category`(#4.1), `d`.`enabled`(#4.2), `d`.`id`(#4.0), (.cardinality): 5.00 }
-            └── Get { .data_source_id: 2, .table_index: 3, .implementation: None, (.output_columns): `dim`.`category`(#3.1), `dim`.`enabled`(#3.2), `dim`.`id`(#3.0), (.cardinality): 5.00 }
+        │   └── Remap
+        │       ├── .table_index: 6
+        │       ├── (.output_columns): [ "t.id"(#6.0), "t.tag"(#6.1) ]
+        │       ├── (.cardinality): 3.00
+        │       └── Get
+        │           ├── .data_source_id: 4
+        │           ├── .table_index: 5
+        │           ├── .implementation: None
+        │           ├── (.output_columns): [ "tags.id"(#5.0), "tags.tag"(#5.1) ]
+        │           └── (.cardinality): 3.00
+        └── Remap
+            ├── .table_index: 4
+            ├── (.output_columns):
+            │   ┌── "d.category"(#4.1)
+            │   ├── "d.enabled"(#4.2)
+            │   └── "d.id"(#4.0)
+            ├── (.cardinality): 5.00
+            └── Get
+                ├── .data_source_id: 2
+                ├── .table_index: 3
+                ├── .implementation: None
+                ├── (.output_columns):
+                │   ┌── "dim.category"(#3.1)
+                │   ├── "dim.enabled"(#3.2)
+                │   └── "dim.id"(#3.0)
+                └── (.cardinality): 5.00
 
 1 odd x
 2 even y
@@ -271,53 +553,156 @@ order by left_id, right_id;
 /*
 logical_plan after optd-initial:
 OrderBy
-├── ordering_exprs: [ `__internal_#5`.`left_id`(#5.0) ASC, `__internal_#5`.`right_id`(#5.1) ASC ]
-├── (.output_columns): `__internal_#5`.`left_id`(#5.0), `__internal_#5`.`right_id`(#5.1)
-├── (.cardinality): 10.00
-└── Project { .table_index: 5, .projections: [ `a`.`id`(#2.0), `b`.`id`(#4.0) ], (.output_columns): `__internal_#5`.`left_id`(#5.0), `__internal_#5`.`right_id`(#5.1), (.cardinality): 10.00 }
-    └── Join
-        ├── .join_type: Inner
-        ├── .implementation: None
-        ├── .join_cond: (`a`.`grp`(#2.1) = `b`.`grp`(#4.1)) AND (`a`.`id`(#2.0) < `b`.`id`(#4.0))
-        ├── (.output_columns): `a`.`bonus`(#2.3), `a`.`grp`(#2.1), `a`.`id`(#2.0), `a`.`note`(#2.4), `a`.`val`(#2.2), `b`.`bonus`(#4.3), `b`.`grp`(#4.1), `b`.`id`(#4.0), `b`.`note`(#4.4), `b`.`val`(#4.2)
-        ├── (.cardinality): 10.00
-        ├── Remap { .table_index: 2, (.output_columns): `a`.`bonus`(#2.3), `a`.`grp`(#2.1), `a`.`id`(#2.0), `a`.`note`(#2.4), `a`.`val`(#2.2), (.cardinality): 5.00 }
-        │   └── Get
-        │       ├── .data_source_id: 1
-        │       ├── .table_index: 1
-        │       ├── .implementation: None
-        │       ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`grp`(#1.1), `numbers`.`id`(#1.0), `numbers`.`note`(#1.4), `numbers`.`val`(#1.2)
-        │       └── (.cardinality): 5.00
-        └── Remap { .table_index: 4, (.output_columns): `b`.`bonus`(#4.3), `b`.`grp`(#4.1), `b`.`id`(#4.0), `b`.`note`(#4.4), `b`.`val`(#4.2), (.cardinality): 5.00 }
-            └── Get
-                ├── .data_source_id: 1
-                ├── .table_index: 3
-                ├── .implementation: None
-                ├── (.output_columns): `numbers`.`bonus`(#3.3), `numbers`.`grp`(#3.1), `numbers`.`id`(#3.0), `numbers`.`note`(#3.4), `numbers`.`val`(#3.2)
-                └── (.cardinality): 5.00
+├── ordering_exprs:
+│   ┌── "__#5.left_id"(#5.0) ASC
+│   └── "__#5.right_id"(#5.1) ASC
+├── (.output_columns):
+│   ┌── "__#5.left_id"(#5.0)
+│   └── "__#5.right_id"(#5.1)
+├── (.cardinality): 1.00
+└── Project
+    ├── .table_index: 5
+    ├── .projections: [ "a.id"(#2.0), "b.id"(#4.0) ]
+    ├── (.output_columns):
+    │   ┌── "__#5.left_id"(#5.0)
+    │   └── "__#5.right_id"(#5.1)
+    ├── (.cardinality): 1.00
+    └── Select
+        ├── .predicate: "b.id"(#4.0) > "a.id"(#2.0)
+        ├── (.output_columns):
+        │   ┌── "a.bonus"(#2.3)
+        │   ├── "a.grp"(#2.1)
+        │   ├── "a.id"(#2.0)
+        │   ├── "a.note"(#2.4)
+        │   ├── "a.val"(#2.2)
+        │   ├── "b.bonus"(#4.3)
+        │   ├── "b.grp"(#4.1)
+        │   ├── "b.id"(#4.0)
+        │   ├── "b.note"(#4.4)
+        │   └── "b.val"(#4.2)
+        ├── (.cardinality): 1.00
+        └── Join
+            ├── .join_type: Inner
+            ├── .implementation: None
+            ├── .join_cond: ("a.grp"(#2.1) = "b.grp"(#4.1))
+            ├── (.output_columns):
+            │   ┌── "a.bonus"(#2.3)
+            │   ├── "a.grp"(#2.1)
+            │   ├── "a.id"(#2.0)
+            │   ├── "a.note"(#2.4)
+            │   ├── "a.val"(#2.2)
+            │   ├── "b.bonus"(#4.3)
+            │   ├── "b.grp"(#4.1)
+            │   ├── "b.id"(#4.0)
+            │   ├── "b.note"(#4.4)
+            │   └── "b.val"(#4.2)
+            ├── (.cardinality): 10.00
+            ├── Remap
+            │   ├── .table_index: 2
+            │   ├── (.output_columns):
+            │   │   ┌── "a.bonus"(#2.3)
+            │   │   ├── "a.grp"(#2.1)
+            │   │   ├── "a.id"(#2.0)
+            │   │   ├── "a.note"(#2.4)
+            │   │   └── "a.val"(#2.2)
+            │   ├── (.cardinality): 5.00
+            │   └── Get
+            │       ├── .data_source_id: 1
+            │       ├── .table_index: 1
+            │       ├── .implementation: None
+            │       ├── (.output_columns):
+            │       │   ┌── "numbers.bonus"(#1.3)
+            │       │   ├── "numbers.grp"(#1.1)
+            │       │   ├── "numbers.id"(#1.0)
+            │       │   ├── "numbers.note"(#1.4)
+            │       │   └── "numbers.val"(#1.2)
+            │       └── (.cardinality): 5.00
+            └── Remap
+                ├── .table_index: 4
+                ├── (.output_columns):
+                │   ┌── "b.bonus"(#4.3)
+                │   ├── "b.grp"(#4.1)
+                │   ├── "b.id"(#4.0)
+                │   ├── "b.note"(#4.4)
+                │   └── "b.val"(#4.2)
+                ├── (.cardinality): 5.00
+                └── Get
+                    ├── .data_source_id: 1
+                    ├── .table_index: 3
+                    ├── .implementation: None
+                    ├── (.output_columns):
+                    │   ┌── "numbers.bonus"(#3.3)
+                    │   ├── "numbers.grp"(#3.1)
+                    │   ├── "numbers.id"(#3.0)
+                    │   ├── "numbers.note"(#3.4)
+                    │   └── "numbers.val"(#3.2)
+                    └── (.cardinality): 5.00
 
 physical_plan after optd-finalized:
-EnforcerSort { tuple_ordering: [(#5.0, Asc), (#5.1, Asc)], (.output_columns): `__internal_#5`.`left_id`(#5.0), `__internal_#5`.`right_id`(#5.1), (.cardinality): 10.00 }
-└── Project { .table_index: 5, .projections: [ `a`.`id`(#2.0), `b`.`id`(#4.0) ], (.output_columns): `__internal_#5`.`left_id`(#5.0), `__internal_#5`.`right_id`(#5.1), (.cardinality): 10.00 }
+EnforcerSort
+├── tuple_ordering: [(#5.0, Asc), (#5.1, Asc)]
+├── (.output_columns): [ "__#5.left_id"(#5.0), "__#5.right_id"(#5.1) ]
+├── (.cardinality): 10.00
+└── Project
+    ├── .table_index: 5
+    ├── .projections: [ "a.id"(#2.0), "b.id"(#4.0) ]
+    ├── (.output_columns): [ "__#5.left_id"(#5.0), "__#5.right_id"(#5.1) ]
+    ├── (.cardinality): 10.00
     └── Join
         ├── .join_type: Inner
         ├── .implementation: Some(Hash { build_side: Outer, keys: [(#2.1, #4.1)] })
-        ├── .join_cond: (`a`.`grp`(#2.1) = `b`.`grp`(#4.1)) AND (`a`.`id`(#2.0) < `b`.`id`(#4.0))
-        ├── (.output_columns): `a`.`bonus`(#2.3), `a`.`grp`(#2.1), `a`.`id`(#2.0), `a`.`note`(#2.4), `a`.`val`(#2.2), `b`.`bonus`(#4.3), `b`.`grp`(#4.1), `b`.`id`(#4.0), `b`.`note`(#4.4), `b`.`val`(#4.2)
+        ├── .join_cond: ("a.grp"(#2.1) = "b.grp"(#4.1)) AND ("b.id"(#4.0) > "a.id"(#2.0))
+        ├── (.output_columns):
+        │   ┌── "a.bonus"(#2.3)
+        │   ├── "a.grp"(#2.1)
+        │   ├── "a.id"(#2.0)
+        │   ├── "a.note"(#2.4)
+        │   ├── "a.val"(#2.2)
+        │   ├── "b.bonus"(#4.3)
+        │   ├── "b.grp"(#4.1)
+        │   ├── "b.id"(#4.0)
+        │   ├── "b.note"(#4.4)
+        │   └── "b.val"(#4.2)
         ├── (.cardinality): 10.00
-        ├── Remap { .table_index: 2, (.output_columns): `a`.`bonus`(#2.3), `a`.`grp`(#2.1), `a`.`id`(#2.0), `a`.`note`(#2.4), `a`.`val`(#2.2), (.cardinality): 5.00 }
+        ├── Remap
+        │   ├── .table_index: 2
+        │   ├── (.output_columns):
+        │   │   ┌── "a.bonus"(#2.3)
+        │   │   ├── "a.grp"(#2.1)
+        │   │   ├── "a.id"(#2.0)
+        │   │   ├── "a.note"(#2.4)
+        │   │   └── "a.val"(#2.2)
+        │   ├── (.cardinality): 5.00
         │   └── Get
         │       ├── .data_source_id: 1
         │       ├── .table_index: 1
         │       ├── .implementation: None
-        │       ├── (.output_columns): `numbers`.`bonus`(#1.3), `numbers`.`grp`(#1.1), `numbers`.`id`(#1.0), `numbers`.`note`(#1.4), `numbers`.`val`(#1.2)
+        │       ├── (.output_columns):
+        │       │   ┌── "numbers.bonus"(#1.3)
+        │       │   ├── "numbers.grp"(#1.1)
+        │       │   ├── "numbers.id"(#1.0)
+        │       │   ├── "numbers.note"(#1.4)
+        │       │   └── "numbers.val"(#1.2)
         │       └── (.cardinality): 5.00
-        └── Remap { .table_index: 4, (.output_columns): `b`.`bonus`(#4.3), `b`.`grp`(#4.1), `b`.`id`(#4.0), `b`.`note`(#4.4), `b`.`val`(#4.2), (.cardinality): 5.00 }
+        └── Remap
+            ├── .table_index: 4
+            ├── (.output_columns):
+            │   ┌── "b.bonus"(#4.3)
+            │   ├── "b.grp"(#4.1)
+            │   ├── "b.id"(#4.0)
+            │   ├── "b.note"(#4.4)
+            │   └── "b.val"(#4.2)
+            ├── (.cardinality): 5.00
             └── Get
                 ├── .data_source_id: 1
                 ├── .table_index: 3
                 ├── .implementation: None
-                ├── (.output_columns): `numbers`.`bonus`(#3.3), `numbers`.`grp`(#3.1), `numbers`.`id`(#3.0), `numbers`.`note`(#3.4), `numbers`.`val`(#3.2)
+                ├── (.output_columns):
+                │   ┌── "numbers.bonus"(#3.3)
+                │   ├── "numbers.grp"(#3.1)
+                │   ├── "numbers.id"(#3.0)
+                │   ├── "numbers.note"(#3.4)
+                │   └── "numbers.val"(#3.2)
                 └── (.cardinality): 5.00
 
 1 2
