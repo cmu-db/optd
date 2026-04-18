@@ -70,6 +70,8 @@ pub struct OptdQueryPlannerContext<'a> {
     pub inner: Arc<IRContext>,
     pub session_state: &'a SessionState,
     pub table_reference_to_source: HashMap<TableReference, Arc<dyn TableSource + 'static>>,
+    pub df_mark_columns: HashMap<datafusion::common::Column, optd_core::ir::Column>,
+    pub optd_mark_columns: HashMap<optd_core::ir::Column, datafusion::common::Column>,
 }
 
 impl<'a> OptdQueryPlannerContext<'a> {
@@ -78,6 +80,8 @@ impl<'a> OptdQueryPlannerContext<'a> {
             inner,
             session_state,
             table_reference_to_source: HashMap::new(),
+            df_mark_columns: HashMap::new(),
+            optd_mark_columns: HashMap::new(),
         }
     }
 

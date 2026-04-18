@@ -246,6 +246,17 @@ impl OptdQueryPlannerContext<'_> {
             datafusion::common::NullEquality::NullEqualsNothing,
         )
         .context(DataFusionSnafu)?;
+        if let optd_core::ir::operator::join::JoinType::Mark(mark_column) = node.join_type() {
+            let (qualifier, field) = join
+                .schema
+                .iter()
+                .last()
+                .with_whatever_context(|| "LeftMark join should expose a marker column")?;
+            self.register_optd_mark_column(
+                *mark_column,
+                Column::new(qualifier.cloned(), field.name()),
+            );
+        }
         Ok(DFLogicalPlan::Join(join))
     }
 
@@ -330,20 +341,23 @@ mod tests {
 
     use datafusion::{
         arrow::datatypes::{DataType, Field, Schema},
-        common::{Column, DFSchema},
+        common::{Column, DFSchema, JoinType, NullEquality},
         execution::FunctionRegistry,
         execution::runtime_env::RuntimeEnv,
         functions_aggregate::expr_fn::sum,
-        logical_expr::{self, Expr as DFExpr, LogicalPlan as DFLogicalPlan},
+        logical_expr::{self, Expr as DFExpr, LogicalPlan as DFLogicalPlan, expr_fn},
         prelude::SessionConfig,
         scalar::ScalarValue,
     };
     use optd_core::ir::{
         catalog::Catalog,
+        explain::quick_explain,
+        operator::OperatorKind,
         scalar::{Case, Function, FunctionKind},
         schema::OptdSchema,
         table_ref::TableRef,
     };
+    use optd_core::rules::UnnestingRule;
 
     use crate::{
         create_optd_session_context, create_optd_session_context_with_catalog, memory_catalog,
@@ -752,6 +766,151 @@ mod tests {
             panic!("expected filter plan after round trip");
         };
         assert_eq!(restored_filter.predicate, predicate);
+    }
+
+    #[test]
+    fn left_mark_join_plan_round_trips() {
+        let (mut ctx, catalog) = new_test_ctx_with_catalog();
+        let schema = Arc::new(Schema::new(vec![Field::new("a", DataType::Int64, false)]));
+        catalog
+            .create_table(TableRef::bare("t1"), schema.clone(), None)
+            .unwrap();
+        catalog
+            .create_table(TableRef::bare("t2"), schema.clone(), None)
+            .unwrap();
+
+        let left = logical_expr::logical_plan::builder::table_scan(Some("t1"), &schema, None)
+            .unwrap()
+            .build()
+            .unwrap();
+        let right = logical_expr::logical_plan::builder::table_scan(Some("t2"), &schema, None)
+            .unwrap()
+            .build()
+            .unwrap();
+        let join = logical_expr::logical_plan::Join::try_new(
+            Arc::new(left),
+            Arc::new(right),
+            vec![(
+                DFExpr::Column(Column::from_qualified_name("t1.a")),
+                DFExpr::Column(Column::from_qualified_name("t2.a")),
+            )],
+            None,
+            JoinType::LeftMark,
+            logical_expr::JoinConstraint::On,
+            NullEquality::NullEqualsNothing,
+        )
+        .unwrap();
+        let predicate = logical_expr::or(
+            DFExpr::Column(Column::from_qualified_name("t2.mark")),
+            logical_expr::binary_expr(
+                DFExpr::Column(Column::from_qualified_name("t1.a")),
+                logical_expr::Operator::Eq,
+                DFExpr::Literal(ScalarValue::Int64(Some(1)), None),
+            ),
+        );
+        let plan = logical_expr::LogicalPlanBuilder::from(DFLogicalPlan::Join(join))
+            .filter(predicate.clone())
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let optd_plan = ctx.try_into_optd_plan(&plan).unwrap();
+        let restored = ctx.try_from_optd_plan(optd_plan.as_ref()).unwrap();
+
+        let DFLogicalPlan::Filter(filter) = restored else {
+            panic!("expected filter after round trip");
+        };
+        let DFLogicalPlan::Join(join) = filter.input.as_ref() else {
+            panic!("expected join under filter after round trip");
+        };
+        assert_eq!(join.join_type, JoinType::LeftMark);
+        assert_eq!(filter.predicate, predicate);
+    }
+
+    #[test]
+    fn exists_or_condition_lowers_through_mark_join_and_decorrelates() {
+        let (mut ctx, catalog) = new_test_ctx_with_catalog();
+        let schema = Arc::new(Schema::new(vec![Field::new("a", DataType::Int64, false)]));
+        catalog
+            .create_table(TableRef::bare("t1"), schema.clone(), None)
+            .unwrap();
+        catalog
+            .create_table(TableRef::bare("t2"), schema.clone(), None)
+            .unwrap();
+
+        let outer = logical_expr::logical_plan::builder::table_scan(Some("t1"), &schema, None)
+            .unwrap()
+            .build()
+            .unwrap();
+        let subquery = logical_expr::logical_plan::builder::table_scan(Some("t2"), &schema, None)
+            .unwrap()
+            .filter(logical_expr::binary_expr(
+                DFExpr::Column(Column::from_qualified_name("t2.a")),
+                logical_expr::Operator::Eq,
+                DFExpr::OuterReferenceColumn(
+                    Arc::new(Field::new("a", DataType::Int64, false)),
+                    Column::from_qualified_name("t1.a"),
+                ),
+            ))
+            .unwrap()
+            .build()
+            .unwrap();
+        let predicate = logical_expr::or(
+            expr_fn::exists(Arc::new(subquery)),
+            logical_expr::binary_expr(
+                DFExpr::Column(Column::from_qualified_name("t1.a")),
+                logical_expr::Operator::Eq,
+                DFExpr::Literal(ScalarValue::Int64(Some(1)), None),
+            ),
+        );
+        let plan = logical_expr::LogicalPlanBuilder::from(outer)
+            .filter(predicate)
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let optd_plan = ctx.try_into_optd_plan(&plan).unwrap();
+        let select = match &optd_plan.kind {
+            OperatorKind::Select(meta) => {
+                optd_core::ir::operator::Select::borrow_raw_parts(meta, &optd_plan.common)
+            }
+            _ => panic!(
+                "expected filter lowering to produce a select, got:\n{}",
+                quick_explain(&optd_plan, &ctx.inner)
+            ),
+        };
+        match &select.input().kind {
+            OperatorKind::DependentJoin(meta) => {
+                let join = optd_core::ir::operator::DependentJoin::borrow_raw_parts(
+                    meta,
+                    &select.input().common,
+                );
+                assert!(matches!(
+                    join.join_type(),
+                    optd_core::ir::operator::join::JoinType::Mark(_)
+                ));
+            }
+            _ => panic!(
+                "expected embedded EXISTS to lower to a dependent mark join, got:\n{}",
+                quick_explain(select.input(), &ctx.inner)
+            ),
+        }
+
+        let decorrelated = UnnestingRule::new().apply(optd_plan, &ctx.inner).unwrap();
+        let restored = ctx.try_from_optd_plan(decorrelated.as_ref()).unwrap();
+        let rendered = restored.display_indent().to_string();
+        assert!(
+            rendered.contains("LeftMark Join"),
+            "expected decorrelated plan to keep a LeftMark join, got:\n{rendered}"
+        );
+
+        let DFLogicalPlan::Filter(filter) = restored else {
+            panic!("expected filter after restoring decorrelated plan");
+        };
+        let DFLogicalPlan::Join(join) = filter.input.as_ref() else {
+            panic!("expected join under restored filter");
+        };
+        assert_eq!(join.join_type, JoinType::LeftMark);
     }
 }
 

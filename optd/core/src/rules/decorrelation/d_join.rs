@@ -78,7 +78,7 @@ impl UnnestingRule {
         assert!(
             matches!(
                 join_type,
-                JoinType::Inner | JoinType::LeftSemi | JoinType::LeftAnti
+                JoinType::Inner | JoinType::LeftSemi | JoinType::LeftAnti | JoinType::Mark(_)
             ),
             "unsupported dependent join type: {join_type:?}"
         );

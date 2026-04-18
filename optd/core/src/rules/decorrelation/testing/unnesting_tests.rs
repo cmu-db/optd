@@ -1,6 +1,6 @@
 use super::helpers::{
     TestOperatorExt, aggregate_with_outputs, assert_unnesting, create_domain_with_aliases,
-    make_cols, mock_scan_with_columns, null_safe_eq, project_with_outputs,
+    make_cols, make_mark_col, mock_scan_with_columns, null_safe_eq, project_with_outputs,
 };
 use crate::error::Result;
 use crate::ir::IRContext;
@@ -1034,6 +1034,147 @@ fn test_partial_repr_resolution_all_or_nothing() -> Result<()> {
             )),
             JoinType::Inner,
         )
+    };
+
+    assert_unnesting(&input_ctx, input_plan, &expected_ctx, expected_plan)
+}
+
+/// Test Simple Mark Unnesting:
+///
+/// INPUT:
+/// DependentJoin(Mark)
+/// |--- Scan(T1)
+/// |--- Select [T2.v2 = T1.v1]
+///      |--- Scan(T2)
+///
+/// OUTPUT:
+/// Join(Mark) [T1.v1 IS NOT DISTINCT FROM T2.v2]
+/// |--- Scan(T1)
+/// |--- Select [T2.v2 = T2.v2]
+///      |--- Scan(T2)
+#[test]
+fn test_simple_mark_unnesting() -> Result<()> {
+    let input_ctx = IRContext::with_empty_magic();
+    let expected_ctx = IRContext::with_empty_magic();
+
+    let input_plan = {
+        let t1_cols = make_cols(&input_ctx, 1);
+        let t2_cols = make_cols(&input_ctx, 1);
+        let mark = make_mark_col(&input_ctx);
+        let t1 = t1_cols[0];
+        let t2 = t2_cols[0];
+        let left_branch = mock_scan_with_columns(1, t1_cols);
+        let right_branch =
+            mock_scan_with_columns(2, t2_cols).logical_select(column_ref(t2).eq(column_ref(t1)));
+        left_branch.logical_dependent_join(right_branch, boolean(true), JoinType::Mark(mark))
+    };
+
+    let expected_plan = {
+        let t1_cols = make_cols(&expected_ctx, 1);
+        let t2_cols = make_cols(&expected_ctx, 1);
+        let mark = make_mark_col(&expected_ctx);
+        let t1 = t1_cols[0];
+        let t2 = t2_cols[0];
+        let left_branch = mock_scan_with_columns(1, t1_cols);
+        let right_branch =
+            mock_scan_with_columns(2, t2_cols).logical_select(column_ref(t2).eq(column_ref(t2)));
+        left_branch.logical_join(
+            right_branch,
+            null_safe_eq(column_ref(t1), column_ref(t2)),
+            JoinType::Mark(mark),
+        )
+    };
+
+    assert_unnesting(&input_ctx, input_plan, &expected_ctx, expected_plan)
+}
+
+/// Test Two Conjunctive Mark Joins Feed One Boolean Filter:
+/// 
+/// This models a shape produced from SQL like:
+///
+/// SELECT * FROM T1
+/// WHERE T1.v0 IN (SELECT T2.v2 FROM T2)
+///    OR T1.v1 IN (SELECT T3.v3 FROM T3);
+///
+/// Or like:
+///
+/// SELECT * FROM T1
+/// WHERE EXISTS (SELECT 1 FROM T2 WHERE T2.v2 = T1.v0)
+///    OR EXISTS (SELECT 1 FROM T3 WHERE T3.v3 = T1.v1);
+///
+/// INPUT:
+/// Select [m1 OR m2]
+/// |--- DependentJoin(Mark(m2))
+///      |--- DependentJoin(Mark(m1))
+///      |    |--- Scan(T1) [v0, v1]
+///      |    |--- Select [T2.v2 = T1.v0]
+///      |         |--- Scan(T2) [v2]
+///      |--- Select [T3.v3 = T1.v1]
+///           |--- Scan(T3) [v3]
+///
+/// OUTPUT:
+/// Select [m1 OR m2]
+/// |--- Join(Mark(m2)) [T1.v1 IS NOT DISTINCT FROM T3.v3]
+///      |--- Join(Mark(m1)) [T1.v0 IS NOT DISTINCT FROM T2.v2]
+///      |    |--- Scan(T1) [v0, v1]
+///      |    |--- Select [T2.v2 = T2.v2]
+///      |    |    |--- Scan(T2) [v2]
+///      |--- Select [T3.v3 = T3.v3]
+///           |--- Scan(T3) [v3]
+#[test]
+fn test_two_mark_joins_under_or_filter() -> Result<()> {
+    let input_ctx = IRContext::with_empty_magic();
+    let expected_ctx = IRContext::with_empty_magic();
+
+    let input_plan = {
+        let t1_cols = make_cols(&input_ctx, 2);
+        let t2_cols = make_cols(&input_ctx, 1);
+        let t3_cols = make_cols(&input_ctx, 1);
+        let mark1 = make_mark_col(&input_ctx);
+        let mark2 = make_mark_col(&input_ctx);
+        let t1c0 = t1_cols[0];
+        let t1c1 = t1_cols[1];
+        let t2c0 = t2_cols[0];
+        let t3c0 = t3_cols[0];
+
+        let first_mark = mock_scan_with_columns(1, t1_cols).logical_dependent_join(
+            mock_scan_with_columns(2, t2_cols).logical_select(column_ref(t2c0).eq(column_ref(t1c0))),
+            boolean(true),
+            JoinType::Mark(mark1),
+        );
+        first_mark
+            .logical_dependent_join(
+                mock_scan_with_columns(3, t3_cols)
+                    .logical_select(column_ref(t3c0).eq(column_ref(t1c1))),
+                boolean(true),
+                JoinType::Mark(mark2),
+            )
+            .logical_select(column_ref(mark1).or(column_ref(mark2)))
+    };
+
+    let expected_plan = {
+        let t1_cols = make_cols(&expected_ctx, 2);
+        let t2_cols = make_cols(&expected_ctx, 1);
+        let t3_cols = make_cols(&expected_ctx, 1);
+        let mark1 = make_mark_col(&expected_ctx);
+        let mark2 = make_mark_col(&expected_ctx);
+        let t1c0 = t1_cols[0];
+        let t1c1 = t1_cols[1];
+        let t2c0 = t2_cols[0];
+        let t3c0 = t3_cols[0];
+
+        mock_scan_with_columns(1, t1_cols)
+            .logical_join(
+                mock_scan_with_columns(2, t2_cols).logical_select(column_ref(t2c0).eq(column_ref(t2c0))),
+                null_safe_eq(column_ref(t1c0), column_ref(t2c0)),
+                JoinType::Mark(mark1),
+            )
+            .logical_join(
+                mock_scan_with_columns(3, t3_cols).logical_select(column_ref(t3c0).eq(column_ref(t3c0))),
+                null_safe_eq(column_ref(t1c1), column_ref(t3c0)),
+                JoinType::Mark(mark2),
+            )
+            .logical_select(column_ref(mark1).or(column_ref(mark2)))
     };
 
     assert_unnesting(&input_ctx, input_plan, &expected_ctx, expected_plan)

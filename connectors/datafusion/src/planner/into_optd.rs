@@ -1,18 +1,19 @@
 use std::sync::Arc;
 
 use datafusion::{
-    common::{Column as DFColumn, DFSchema},
+    common::{Column as DFColumn, DFSchema, JoinType as DFJoinType},
     logical_expr::{
         self, Cast as DFCast, Expr as DFExpr, ExprSchemable, Like as DFLike,
         LogicalPlan as DFLogicalPlan, expr::AggregateFunction, expr::ScalarFunction, logical_plan,
     },
     scalar::ScalarValue as DFScalarValue,
+    sql::TableReference,
 };
 use itertools::{Either, Itertools};
 use optd_core::{
     error::CatalogSnafu,
     ir::{
-        Scalar,
+        Column, DataType, Scalar,
         builder::{self as optd_builder, literal},
         catalog::{Field, Schema},
         convert::{IntoOperator, IntoScalar},
@@ -24,7 +25,7 @@ use optd_core::{
         scalar::{Case, Cast, ColumnRef, Function, InList, Like, List, NaryOp, NaryOpKind},
     },
 };
-use snafu::{ResultExt, whatever};
+use snafu::{OptionExt, ResultExt, whatever};
 
 use crate::planner::{DataFusionSnafu, OptdQueryPlannerContext, OptdSnafu, Result};
 
@@ -81,13 +82,275 @@ impl OptdQueryPlannerContext<'_> {
             return Ok(input);
         }
 
-        let predicate = predicates
-            .drain(..)
-            .map(|expr| self.try_into_optd_scalar_expr(&expr, input_schema))
-            .collect::<Result<Vec<_>>>()?;
-        let predicate = Scalar::combine_conjuncts(predicate);
+        let mut current = input;
+        let mut rewritten = Vec::with_capacity(predicates.len());
+        for expr in predicates.drain(..) {
+            let (new_current, new_expr) =
+                self.rewrite_predicate_subqueries_to_mark_expr(current, &expr, input_schema)?;
+            current = new_current;
+            rewritten.push(self.try_into_optd_scalar_expr(&new_expr, input_schema)?);
+        }
+        let predicate = Scalar::combine_conjuncts(rewritten);
 
-        Ok(Select::new(input, predicate).into_operator())
+        Ok(Select::new(current, predicate).into_operator())
+    }
+
+    fn next_internal_mark_df_column(&self) -> DFColumn {
+        DFColumn::new(
+            Some(TableReference::bare(format!(
+                "__optd_mark_{}",
+                self.df_mark_columns.len() + 1
+            ))),
+            "mark",
+        )
+    }
+
+    fn allocate_mark_column(&mut self) -> Result<Column> {
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "mark",
+            DataType::Boolean,
+            false,
+        )]));
+        let table_index = self.inner.add_binding(None, schema).context(OptdSnafu)?;
+        Ok(Column(table_index, 0))
+    }
+
+    fn mark_scalar_expr(mark_column: DFColumn, negated: bool) -> DFExpr {
+        let expr = DFExpr::Column(mark_column);
+        if negated {
+            logical_expr::binary_expr(
+                expr,
+                logical_expr::Operator::Eq,
+                DFExpr::Literal(DFScalarValue::Boolean(Some(false)), None),
+            )
+        } else {
+            expr
+        }
+    }
+
+    fn rewrite_predicate_subqueries_to_mark_expr(
+        &mut self,
+        input: Arc<optd_core::ir::Operator>,
+        expr: &DFExpr,
+        input_schema: &DFSchema,
+    ) -> Result<(Arc<optd_core::ir::Operator>, DFExpr)> {
+        match expr {
+            DFExpr::Exists(exists) => {
+                let inner = self.try_into_optd_plan(&exists.subquery.subquery)?;
+                let mark_column = self.allocate_mark_column()?;
+                let df_mark_column = self.next_internal_mark_df_column();
+                self.register_df_mark_column(df_mark_column.clone(), mark_column);
+                let join =
+                    DependentJoin::new(JoinType::Mark(mark_column), input, inner, literal(true))
+                        .into_operator();
+                Ok((join, Self::mark_scalar_expr(df_mark_column, exists.negated)))
+            }
+            DFExpr::InSubquery(in_subquery) => {
+                let inner = self.try_into_optd_plan(&in_subquery.subquery.subquery)?;
+                let inner_cols = inner
+                    .output_columns_in_order(&self.inner)
+                    .context(OptdSnafu)?;
+                if inner_cols.len() != 1 {
+                    whatever!(
+                        "InSubquery should return exactly one column, found {}",
+                        inner_cols.len()
+                    );
+                }
+
+                let expr = self.try_into_optd_scalar_expr(&in_subquery.expr, input_schema)?;
+                let subquery_value = ColumnRef::new(inner_cols[0]).into_scalar();
+                let join_cond = expr.eq(subquery_value);
+                let mark_column = self.allocate_mark_column()?;
+                let df_mark_column = self.next_internal_mark_df_column();
+                self.register_df_mark_column(df_mark_column.clone(), mark_column);
+                let join = DependentJoin::new(JoinType::Mark(mark_column), input, inner, join_cond)
+                    .into_operator();
+                Ok((
+                    join,
+                    Self::mark_scalar_expr(df_mark_column, in_subquery.negated),
+                ))
+            }
+            DFExpr::Alias(alias) => {
+                self.rewrite_predicate_subqueries_to_mark_expr(input, &alias.expr, input_schema)
+            }
+            DFExpr::Cast(cast) => {
+                let (input, expr) = self.rewrite_predicate_subqueries_to_mark_expr(
+                    input,
+                    &cast.expr,
+                    input_schema,
+                )?;
+                Ok((
+                    input,
+                    DFExpr::Cast(DFCast::new(Box::new(expr), cast.data_type.clone())),
+                ))
+            }
+            DFExpr::BinaryExpr(binary_expr)
+                if Self::scalar_subquery_in_expr(&binary_expr.left).is_some()
+                    || Self::scalar_subquery_in_expr(&binary_expr.right).is_some() =>
+            {
+                whatever!("embedded scalar subquery comparisons are not supported")
+            }
+            DFExpr::BinaryExpr(binary_expr) => {
+                let (input, left) = self.rewrite_predicate_subqueries_to_mark_expr(
+                    input,
+                    &binary_expr.left,
+                    input_schema,
+                )?;
+                let (input, right) = self.rewrite_predicate_subqueries_to_mark_expr(
+                    input,
+                    &binary_expr.right,
+                    input_schema,
+                )?;
+                Ok((
+                    input,
+                    logical_expr::binary_expr(left, binary_expr.op, right),
+                ))
+            }
+            DFExpr::Case(case) => {
+                let (input, base_expr) = match &case.expr {
+                    Some(expr) => {
+                        let (input, expr) = self.rewrite_predicate_subqueries_to_mark_expr(
+                            input,
+                            expr,
+                            input_schema,
+                        )?;
+                        (input, Some(Box::new(expr)))
+                    }
+                    None => (input, None),
+                };
+                let mut current = input;
+                let mut when_then_expr = Vec::with_capacity(case.when_then_expr.len());
+                for (when, then) in &case.when_then_expr {
+                    let (next, when) = self.rewrite_predicate_subqueries_to_mark_expr(
+                        current,
+                        when,
+                        input_schema,
+                    )?;
+                    let (next, then) =
+                        self.rewrite_predicate_subqueries_to_mark_expr(next, then, input_schema)?;
+                    current = next;
+                    when_then_expr.push((Box::new(when), Box::new(then)));
+                }
+                let else_expr = match &case.else_expr {
+                    Some(expr) => {
+                        let (current_input, expr) = self
+                            .rewrite_predicate_subqueries_to_mark_expr(
+                                current,
+                                expr,
+                                input_schema,
+                            )?;
+                        current = current_input;
+                        Some(Box::new(expr))
+                    }
+                    None => None,
+                };
+                Ok((
+                    current,
+                    DFExpr::Case(logical_expr::expr::Case::new(
+                        base_expr,
+                        when_then_expr,
+                        else_expr,
+                    )),
+                ))
+            }
+            DFExpr::Not(expr) => {
+                let (input, expr) =
+                    self.rewrite_predicate_subqueries_to_mark_expr(input, expr, input_schema)?;
+                Ok((
+                    input,
+                    logical_expr::binary_expr(
+                        expr,
+                        logical_expr::Operator::Eq,
+                        DFExpr::Literal(DFScalarValue::Boolean(Some(false)), None),
+                    ),
+                ))
+            }
+            DFExpr::IsNull(expr) => {
+                let (input, expr) =
+                    self.rewrite_predicate_subqueries_to_mark_expr(input, expr, input_schema)?;
+                Ok((input, DFExpr::IsNull(Box::new(expr))))
+            }
+            DFExpr::IsNotNull(expr) => {
+                let (input, expr) =
+                    self.rewrite_predicate_subqueries_to_mark_expr(input, expr, input_schema)?;
+                Ok((input, DFExpr::IsNotNull(Box::new(expr))))
+            }
+            DFExpr::Like(like) => {
+                let (input, expr) = self.rewrite_predicate_subqueries_to_mark_expr(
+                    input,
+                    &like.expr,
+                    input_schema,
+                )?;
+                let (input, pattern) = self.rewrite_predicate_subqueries_to_mark_expr(
+                    input,
+                    &like.pattern,
+                    input_schema,
+                )?;
+                Ok((
+                    input,
+                    DFExpr::Like(DFLike::new(
+                        like.negated,
+                        Box::new(expr),
+                        Box::new(pattern),
+                        like.escape_char,
+                        like.case_insensitive,
+                    )),
+                ))
+            }
+            DFExpr::InList(in_list) => {
+                let (input, expr) = self.rewrite_predicate_subqueries_to_mark_expr(
+                    input,
+                    &in_list.expr,
+                    input_schema,
+                )?;
+                let mut current = input;
+                let mut list = Vec::with_capacity(in_list.list.len());
+                for value in &in_list.list {
+                    let (next, value) = self.rewrite_predicate_subqueries_to_mark_expr(
+                        current,
+                        value,
+                        input_schema,
+                    )?;
+                    current = next;
+                    list.push(value);
+                }
+                Ok((
+                    current,
+                    DFExpr::InList(logical_expr::expr::InList::new(
+                        Box::new(expr),
+                        list,
+                        in_list.negated,
+                    )),
+                ))
+            }
+            DFExpr::Between(between) => {
+                let (input, expr) = self.rewrite_predicate_subqueries_to_mark_expr(
+                    input,
+                    &between.expr,
+                    input_schema,
+                )?;
+                let (input, low) = self.rewrite_predicate_subqueries_to_mark_expr(
+                    input,
+                    &between.low,
+                    input_schema,
+                )?;
+                let (input, high) = self.rewrite_predicate_subqueries_to_mark_expr(
+                    input,
+                    &between.high,
+                    input_schema,
+                )?;
+                Ok((
+                    input,
+                    DFExpr::Between(logical_expr::expr::Between::new(
+                        Box::new(expr),
+                        between.negated,
+                        Box::new(low),
+                        Box::new(high),
+                    )),
+                ))
+            }
+            _ => Ok((input, expr.clone())),
+        }
     }
 
     fn scalar_subquery_in_expr<'a>(
@@ -532,7 +795,20 @@ impl OptdQueryPlannerContext<'_> {
     ) -> Result<Arc<optd_core::ir::Operator>> {
         let left = self.try_into_optd_plan(&node.left)?;
         let right = self.try_into_optd_plan(&node.right)?;
-        let join_type = Self::try_into_optd_join_type(node.join_type)?;
+        let join_type = match node.join_type {
+            DFJoinType::LeftMark => {
+                let (qualifier, field) = node
+                    .schema
+                    .iter()
+                    .last()
+                    .with_whatever_context(|| "LeftMark join should expose a marker column")?;
+                let df_mark_column = DFColumn::new(qualifier.cloned(), field.name());
+                let mark_column = self.allocate_df_mark_column(df_mark_column)?;
+                JoinType::Mark(mark_column)
+            }
+            DFJoinType::RightMark => whatever!("Unsupported join type: {}", node.join_type),
+            _ => Self::try_into_optd_join_type(node.join_type)?,
+        };
 
         let mut terms = Vec::with_capacity(node.on.len());
         for (left_key, right_key) in node.on.iter() {
@@ -657,6 +933,10 @@ impl OptdQueryPlannerContext<'_> {
             DFExpr::Cast(cast) => self.try_into_optd_cast(cast, input_schema),
             DFExpr::Like(like) => self.try_into_optd_like(like, input_schema),
             DFExpr::Case(case) => self.try_into_optd_case(case, input_schema),
+            DFExpr::Not(expr) => {
+                let expr = self.try_into_optd_scalar_expr(expr, input_schema)?;
+                Ok(expr.eq(literal(false)))
+            }
             DFExpr::InList(in_list) => self.try_into_optd_in_list(in_list, input_schema),
             DFExpr::Between(between) => self.try_into_optd_between(between, input_schema),
             DFExpr::IsNull(expr) => self.try_into_optd_is_null(expr, input_schema),
