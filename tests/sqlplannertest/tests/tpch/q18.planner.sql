@@ -380,8 +380,10 @@ Limit
             │   ├── "__#9.o_orderkey"(#9.2)
             │   └── "__#9.o_totalprice"(#9.4)
             ├── (.cardinality): 0.00
-            └── Select
-                ├── .predicate: ("orders.o_custkey"(#2.1) = "customer.c_custkey"(#1.0)) AND ("orders.o_orderkey"(#2.0) = "lineitem.l_orderkey"(#3.0))
+            └── Join
+                ├── .join_type: LeftSemi
+                ├── .implementation: None
+                ├── .join_cond: "orders.o_orderkey"(#2.0) = "__correlated_sq_1.l_orderkey"(#8.0)
                 ├── (.output_columns):
                 │   ┌── "customer.c_custkey"(#1.0)
                 │   ├── "customer.c_name"(#1.1)
@@ -392,91 +394,86 @@ Limit
                 │   ├── "orders.o_orderkey"(#2.0)
                 │   └── "orders.o_totalprice"(#2.3)
                 ├── (.cardinality): 0.00
-                └── Join
-                    ├── .join_type: LeftSemi
-                    ├── .implementation: None
-                    ├── .join_cond: "orders.o_orderkey"(#2.0) = "__correlated_sq_1.l_orderkey"(#8.0)
-                    ├── (.output_columns):
-                    │   ┌── "customer.c_custkey"(#1.0)
-                    │   ├── "customer.c_name"(#1.1)
-                    │   ├── "lineitem.l_orderkey"(#3.0)
-                    │   ├── "lineitem.l_quantity"(#3.4)
-                    │   ├── "orders.o_custkey"(#2.1)
-                    │   ├── "orders.o_orderdate"(#2.4)
-                    │   ├── "orders.o_orderkey"(#2.0)
-                    │   └── "orders.o_totalprice"(#2.3)
+                ├── Join
+                │   ├── .join_type: Inner
+                │   ├── .implementation: None
+                │   ├── .join_cond: "orders.o_orderkey"(#2.0) = "lineitem.l_orderkey"(#3.0)
+                │   ├── (.output_columns):
+                │   │   ┌── "customer.c_custkey"(#1.0)
+                │   │   ├── "customer.c_name"(#1.1)
+                │   │   ├── "lineitem.l_orderkey"(#3.0)
+                │   │   ├── "lineitem.l_quantity"(#3.4)
+                │   │   ├── "orders.o_custkey"(#2.1)
+                │   │   ├── "orders.o_orderdate"(#2.4)
+                │   │   ├── "orders.o_orderkey"(#2.0)
+                │   │   └── "orders.o_totalprice"(#2.3)
+                │   ├── (.cardinality): 0.00
+                │   ├── Join
+                │   │   ├── .join_type: Inner
+                │   │   ├── .implementation: None
+                │   │   ├── .join_cond: "orders.o_custkey"(#2.1) = "customer.c_custkey"(#1.0)
+                │   │   ├── (.output_columns):
+                │   │   │   ┌── "customer.c_custkey"(#1.0)
+                │   │   │   ├── "customer.c_name"(#1.1)
+                │   │   │   ├── "orders.o_custkey"(#2.1)
+                │   │   │   ├── "orders.o_orderdate"(#2.4)
+                │   │   │   ├── "orders.o_orderkey"(#2.0)
+                │   │   │   └── "orders.o_totalprice"(#2.3)
+                │   │   ├── (.cardinality): 0.00
+                │   │   ├── Get
+                │   │   │   ├── .data_source_id: 6
+                │   │   │   ├── .table_index: 1
+                │   │   │   ├── .implementation: None
+                │   │   │   ├── (.output_columns): [ "customer.c_custkey"(#1.0), "customer.c_name"(#1.1) ]
+                │   │   │   └── (.cardinality): 0.00
+                │   │   └── Get
+                │   │       ├── .data_source_id: 7
+                │   │       ├── .table_index: 2
+                │   │       ├── .implementation: None
+                │   │       ├── (.output_columns):
+                │   │       │   ┌── "orders.o_custkey"(#2.1)
+                │   │       │   ├── "orders.o_orderdate"(#2.4)
+                │   │       │   ├── "orders.o_orderkey"(#2.0)
+                │   │       │   └── "orders.o_totalprice"(#2.3)
+                │   │       └── (.cardinality): 0.00
+                │   └── Get
+                │       ├── .data_source_id: 8
+                │       ├── .table_index: 3
+                │       ├── .implementation: None
+                │       ├── (.output_columns): [ "lineitem.l_orderkey"(#3.0), "lineitem.l_quantity"(#3.4) ]
+                │       └── (.cardinality): 0.00
+                └── Remap
+                    ├── .table_index: 8
+                    ├── (.output_columns): "__correlated_sq_1.l_orderkey"(#8.0)
                     ├── (.cardinality): 0.00
-                    ├── Join
-                    │   ├── .join_type: Inner
-                    │   ├── .implementation: None
-                    │   ├── .join_cond: true::boolean
-                    │   ├── (.output_columns):
-                    │   │   ┌── "customer.c_custkey"(#1.0)
-                    │   │   ├── "customer.c_name"(#1.1)
-                    │   │   ├── "lineitem.l_orderkey"(#3.0)
-                    │   │   ├── "lineitem.l_quantity"(#3.4)
-                    │   │   ├── "orders.o_custkey"(#2.1)
-                    │   │   ├── "orders.o_orderdate"(#2.4)
-                    │   │   ├── "orders.o_orderkey"(#2.0)
-                    │   │   └── "orders.o_totalprice"(#2.3)
-                    │   ├── (.cardinality): 0.00
-                    │   ├── Join
-                    │   │   ├── .join_type: Inner
-                    │   │   ├── .implementation: None
-                    │   │   ├── .join_cond: true::boolean
-                    │   │   ├── (.output_columns):
-                    │   │   │   ┌── "customer.c_custkey"(#1.0)
-                    │   │   │   ├── "customer.c_name"(#1.1)
-                    │   │   │   ├── "orders.o_custkey"(#2.1)
-                    │   │   │   ├── "orders.o_orderdate"(#2.4)
-                    │   │   │   ├── "orders.o_orderkey"(#2.0)
-                    │   │   │   └── "orders.o_totalprice"(#2.3)
-                    │   │   ├── (.cardinality): 0.00
-                    │   │   ├── Get
-                    │   │   │   ├── .data_source_id: 6
-                    │   │   │   ├── .table_index: 1
-                    │   │   │   ├── .implementation: None
-                    │   │   │   ├── (.output_columns): [ "customer.c_custkey"(#1.0), "customer.c_name"(#1.1) ]
-                    │   │   │   └── (.cardinality): 0.00
-                    │   │   └── Get
-                    │   │       ├── .data_source_id: 7
-                    │   │       ├── .table_index: 2
-                    │   │       ├── .implementation: None
-                    │   │       ├── (.output_columns):
-                    │   │       │   ┌── "orders.o_custkey"(#2.1)
-                    │   │       │   ├── "orders.o_orderdate"(#2.4)
-                    │   │       │   ├── "orders.o_orderkey"(#2.0)
-                    │   │       │   └── "orders.o_totalprice"(#2.3)
-                    │   │       └── (.cardinality): 0.00
-                    │   └── Get
-                    │       ├── .data_source_id: 8
-                    │       ├── .table_index: 3
-                    │       ├── .implementation: None
-                    │       ├── (.output_columns): [ "lineitem.l_orderkey"(#3.0), "lineitem.l_quantity"(#3.4) ]
-                    │       └── (.cardinality): 0.00
-                    └── Remap { .table_index: 8, (.output_columns): "__correlated_sq_1.l_orderkey"(#8.0), (.cardinality): 0.00 }
-                        └── Project
-                            ├── .table_index: 7
-                            ├── .projections: "lineitem.l_orderkey"(#4.0)
-                            ├── (.output_columns): "__#7.l_orderkey"(#7.0)
+                    └── Project
+                        ├── .table_index: 7
+                        ├── .projections: "lineitem.l_orderkey"(#4.0)
+                        ├── (.output_columns): "__#7.l_orderkey"(#7.0)
+                        ├── (.cardinality): 0.00
+                        └── Select
+                            ├── .predicate: "__#6.sum(lineitem.l_quantity)"(#6.0) > 25000::decimal128(25, 2)
+                            ├── (.output_columns):
+                            │   ┌── "__#5.l_orderkey"(#5.0)
+                            │   └── "__#6.sum(lineitem.l_quantity)"(#6.0)
                             ├── (.cardinality): 0.00
-                            └── Select
-                                ├── .predicate: "__#6.sum(lineitem.l_quantity)"(#6.0) > 25000::decimal128(25, 2)
-                                ├── (.output_columns): [ "__#5.l_orderkey"(#5.0), "__#6.sum(lineitem.l_quantity)"(#6.0) ]
+                            └── Aggregate
+                                ├── .key_table_index: 5
+                                ├── .aggregate_table_index: 6
+                                ├── .implementation: None
+                                ├── .exprs: sum("lineitem.l_quantity"(#4.4))
+                                ├── .keys: "lineitem.l_orderkey"(#4.0)
+                                ├── (.output_columns):
+                                │   ┌── "__#5.l_orderkey"(#5.0)
+                                │   └── "__#6.sum(lineitem.l_quantity)"(#6.0)
                                 ├── (.cardinality): 0.00
-                                └── Aggregate
-                                    ├── .key_table_index: 5
-                                    ├── .aggregate_table_index: 6
+                                └── Get
+                                    ├── .data_source_id: 8
+                                    ├── .table_index: 4
                                     ├── .implementation: None
-                                    ├── .exprs: sum("lineitem.l_quantity"(#4.4))
-                                    ├── .keys: "lineitem.l_orderkey"(#4.0)
-                                    ├── (.output_columns): [ "__#5.l_orderkey"(#5.0), "__#6.sum(lineitem.l_quantity)"(#6.0) ]
-                                    ├── (.cardinality): 0.00
-                                    └── Get
-                                        ├── .data_source_id: 8
-                                        ├── .table_index: 4
-                                        ├── .implementation: None
-                                        ├── (.output_columns): [ "lineitem.l_orderkey"(#4.0), "lineitem.l_quantity"(#4.4) ]
-                                        └── (.cardinality): 0.00
+                                    ├── (.output_columns):
+                                    │   ┌── "lineitem.l_orderkey"(#4.0)
+                                    │   └── "lineitem.l_quantity"(#4.4)
+                                    └── (.cardinality): 0.00
 */
 
