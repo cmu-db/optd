@@ -353,9 +353,7 @@ impl OptdQueryPlannerContext<'_> {
         }
     }
 
-    fn scalar_subquery_in_expr<'a>(
-        expr: &'a DFExpr,
-    ) -> Option<&'a logical_expr::logical_plan::Subquery> {
+    fn scalar_subquery_in_expr(expr: &DFExpr) -> Option<&logical_expr::logical_plan::Subquery> {
         match expr {
             DFExpr::ScalarSubquery(subquery) => Some(subquery),
             DFExpr::Alias(alias) => Self::scalar_subquery_in_expr(&alias.expr),
@@ -578,7 +576,7 @@ impl OptdQueryPlannerContext<'_> {
                     false,
                     agg_func.params.filter.clone(),
                     agg_func.params.order_by.clone(),
-                    agg_func.params.null_treatment.clone(),
+                    agg_func.params.null_treatment,
                 ))
                 .alias(name)
             })
