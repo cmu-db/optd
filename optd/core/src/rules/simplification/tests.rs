@@ -1,4 +1,7 @@
-use super::{SimplificationPass, scalar::simplify_scalar_recursively};
+use super::{
+    SimplificationPass,
+    scalar::{simplify_scalar_recursively, simplify_scalar_recursively_with_ctx},
+};
 use crate::ir::{
     Column, DataType, ScalarValue,
     builder::*,
@@ -217,6 +220,19 @@ fn folds_date32_plus_interval_month_day_nano_literals() {
         literal(ScalarValue::try_from_string("1993-10-01".to_string(), &DataType::Date32).unwrap());
 
     assert_eq!(simplify_scalar_recursively(scalar), expected);
+}
+
+#[test]
+fn unwraps_lossless_integer_widening_casts_in_comparisons() {
+    let ctx = test_ctx_with_tables(&[("t1", 1)]).unwrap();
+    let get = ctx.logical_get(TableRef::bare("t1"), None).unwrap().build();
+    let column = Column(*get.borrow::<Get>().table_index(), 0);
+    let scalar = cast(column_ref(column), DataType::Int64).lt(int64(Some(2)));
+
+    assert_eq!(
+        simplify_scalar_recursively_with_ctx(scalar, &ctx),
+        column_ref(column).lt(int32(2))
+    );
 }
 
 #[test]

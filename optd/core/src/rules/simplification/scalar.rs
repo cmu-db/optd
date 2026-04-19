@@ -1,7 +1,7 @@
 use crate::ir::{
-    Column, Scalar, ScalarValue,
+    Column, DataType, IRContext, Scalar, ScalarKind, ScalarValue,
     convert::IntoScalar,
-    scalar::{BinaryOp, BinaryOpKind, Cast, ColumnRef, Literal, NaryOp},
+    scalar::{BinaryOp, BinaryOpKind, Case, Cast, ColumnRef, Function, Literal, NaryOp},
 };
 use arrow::datatypes::IntervalMonthDayNano;
 use chrono::{Duration, Months, NaiveDate};
@@ -72,10 +72,22 @@ pub fn substitute_columns(
 
 /// Simplifies a scalar expression bottom-up.
 pub fn simplify_scalar_recursively(scalar: Arc<Scalar>) -> Arc<Scalar> {
+    simplify_scalar_recursively_internal(scalar, None)
+}
+
+/// Simplifies a scalar expression bottom-up using `ctx` for type-aware rewrites.
+pub fn simplify_scalar_recursively_with_ctx(scalar: Arc<Scalar>, ctx: &IRContext) -> Arc<Scalar> {
+    simplify_scalar_recursively_internal(scalar, Some(ctx))
+}
+
+fn simplify_scalar_recursively_internal(
+    scalar: Arc<Scalar>,
+    ctx: Option<&IRContext>,
+) -> Arc<Scalar> {
     let rewritten_inputs = scalar
         .input_scalars()
         .iter()
-        .map(|input| simplify_scalar_recursively(input.clone()))
+        .map(|input| simplify_scalar_recursively_internal(input.clone(), ctx))
         .collect::<Vec<_>>();
     let mut rewritten = if rewritten_inputs.as_slice() == scalar.input_scalars() {
         scalar
@@ -102,7 +114,8 @@ pub fn simplify_scalar_recursively(scalar: Arc<Scalar>) -> Arc<Scalar> {
         }
     }
 
-    if let Some(simplified) = factor_common_conjuncts_from_or(&rewritten)
+    if let Some(simplified) = factor_common_conjuncts_from_or(&rewritten, ctx)
+        .or_else(|| simplify_cast_in_comparison(&rewritten, ctx))
         .or_else(|| simplify_cast(&rewritten))
         .or_else(|| simplify_literal_binary_op(&rewritten))
     {
@@ -112,7 +125,10 @@ pub fn simplify_scalar_recursively(scalar: Arc<Scalar>) -> Arc<Scalar> {
     rewritten.simplify_nary_scalar()
 }
 
-fn factor_common_conjuncts_from_or(scalar: &Arc<Scalar>) -> Option<Arc<Scalar>> {
+fn factor_common_conjuncts_from_or(
+    scalar: &Arc<Scalar>,
+    ctx: Option<&IRContext>,
+) -> Option<Arc<Scalar>> {
     let disjuncts = split_disjuncts(scalar.clone());
     if disjuncts.len() < 2 {
         return None;
@@ -152,8 +168,18 @@ fn factor_common_conjuncts_from_or(scalar: &Arc<Scalar>) -> Option<Arc<Scalar>> 
         .collect::<Vec<_>>();
 
     let mut conjuncts = common;
-    conjuncts.push(combine_disjuncts_simplified(reduced_disjuncts));
-    Some(combine_conjuncts_simplified(conjuncts))
+    conjuncts.push(match ctx {
+        Some(ctx) => {
+            simplify_scalar_recursively_with_ctx(Scalar::combine_disjuncts(reduced_disjuncts), ctx)
+        }
+        None => combine_disjuncts_simplified(reduced_disjuncts),
+    });
+    Some(match ctx {
+        Some(ctx) => {
+            simplify_scalar_recursively_with_ctx(Scalar::combine_conjuncts(conjuncts), ctx)
+        }
+        None => combine_conjuncts_simplified(conjuncts),
+    })
 }
 
 fn simplify_cast(scalar: &Arc<Scalar>) -> Option<Arc<Scalar>> {
@@ -172,6 +198,174 @@ fn simplify_cast(scalar: &Arc<Scalar>) -> Option<Arc<Scalar>> {
         .cast_to(cast.data_type())
         .ok()
         .map(|value| Literal::new(value).into_scalar())
+}
+
+fn simplify_cast_in_comparison(
+    scalar: &Arc<Scalar>,
+    ctx: Option<&IRContext>,
+) -> Option<Arc<Scalar>> {
+    let ctx = ctx?;
+    let binary = scalar.try_borrow::<BinaryOp>().ok()?;
+    if !supports_cast_unwrap_in_comparison(*binary.op_kind()) {
+        return None;
+    }
+
+    rewrite_cast_comparison(binary.lhs(), binary.rhs(), *binary.op_kind(), ctx)
+        .map(|(new_lhs, new_rhs)| BinaryOp::new(*binary.op_kind(), new_lhs, new_rhs).into_scalar())
+        .or_else(|| {
+            rewrite_cast_comparison(binary.rhs(), binary.lhs(), *binary.op_kind(), ctx).map(
+                |(new_rhs, new_lhs)| {
+                    BinaryOp::new(*binary.op_kind(), new_lhs, new_rhs).into_scalar()
+                },
+            )
+        })
+}
+
+fn supports_cast_unwrap_in_comparison(op_kind: BinaryOpKind) -> bool {
+    matches!(
+        op_kind,
+        BinaryOpKind::Eq
+            | BinaryOpKind::Ne
+            | BinaryOpKind::Lt
+            | BinaryOpKind::Le
+            | BinaryOpKind::Gt
+            | BinaryOpKind::Ge
+    )
+}
+
+fn rewrite_cast_comparison(
+    expr_side: &Arc<Scalar>,
+    literal_side: &Arc<Scalar>,
+    op_kind: BinaryOpKind,
+    ctx: &IRContext,
+) -> Option<(Arc<Scalar>, Arc<Scalar>)> {
+    let cast = expr_side.try_borrow::<Cast>().ok()?;
+    let literal = literal_side.try_borrow::<Literal>().ok()?;
+    let expr_type = infer_scalar_data_type(ctx, cast.expr().as_ref())?;
+    if !is_safe_unwrap_cast(&expr_type, cast.data_type()) {
+        return None;
+    }
+
+    let casted_literal = cast_literal_losslessly(literal.value(), &expr_type)?;
+    let new_expr_side = cast.expr().clone();
+    let new_literal_side = Literal::new(casted_literal).into_scalar();
+    Some(match op_kind {
+        BinaryOpKind::Eq
+        | BinaryOpKind::Ne
+        | BinaryOpKind::Lt
+        | BinaryOpKind::Le
+        | BinaryOpKind::Gt
+        | BinaryOpKind::Ge => (new_expr_side, new_literal_side),
+        _ => unreachable!("checked by supports_cast_unwrap_in_comparison"),
+    })
+}
+
+fn infer_scalar_data_type(ctx: &IRContext, scalar: &Scalar) -> Option<DataType> {
+    match &scalar.kind {
+        ScalarKind::ColumnRef(meta) => {
+            let column = ColumnRef::borrow_raw_parts(meta, &scalar.common);
+            Some(ctx.get_column_meta(column.column()).data_type)
+        }
+        ScalarKind::Literal(meta) => {
+            let literal = Literal::borrow_raw_parts(meta, &scalar.common);
+            Some(literal.value().data_type())
+        }
+        ScalarKind::BinaryOp(meta) => {
+            let binary = BinaryOp::borrow_raw_parts(meta, &scalar.common);
+            let lhs_type = infer_scalar_data_type(ctx, binary.lhs().as_ref())?;
+            Some(match binary.op_kind() {
+                BinaryOpKind::Eq
+                | BinaryOpKind::Ne
+                | BinaryOpKind::IsDistinctFrom
+                | BinaryOpKind::IsNotDistinctFrom
+                | BinaryOpKind::Lt
+                | BinaryOpKind::Le
+                | BinaryOpKind::Gt
+                | BinaryOpKind::Ge
+                | BinaryOpKind::RegexMatch
+                | BinaryOpKind::RegexIMatch
+                | BinaryOpKind::RegexNotMatch
+                | BinaryOpKind::RegexNotIMatch
+                | BinaryOpKind::LikeMatch
+                | BinaryOpKind::ILikeMatch
+                | BinaryOpKind::NotLikeMatch
+                | BinaryOpKind::NotILikeMatch
+                | BinaryOpKind::AtArrow
+                | BinaryOpKind::ArrowAt
+                | BinaryOpKind::AtAt
+                | BinaryOpKind::AtQuestion
+                | BinaryOpKind::Question
+                | BinaryOpKind::QuestionAnd
+                | BinaryOpKind::QuestionPipe => DataType::Boolean,
+                _ => lhs_type,
+            })
+        }
+        ScalarKind::NaryOp(_) => Some(DataType::Boolean),
+        ScalarKind::Function(meta) => {
+            let function = Function::borrow_raw_parts(meta, &scalar.common);
+            Some(function.return_type().clone())
+        }
+        ScalarKind::Cast(meta) => {
+            let cast = Cast::borrow_raw_parts(meta, &scalar.common);
+            Some(cast.data_type().clone())
+        }
+        ScalarKind::InList(_)
+        | ScalarKind::IsNull(_)
+        | ScalarKind::IsNotNull(_)
+        | ScalarKind::Like(_) => Some(DataType::Boolean),
+        ScalarKind::Case(meta) => {
+            let case = Case::borrow_raw_parts(meta, &scalar.common);
+            case.when_then_expr()
+                .next()
+                .map(|(_, then)| infer_scalar_data_type(ctx, then.as_ref()))
+                .or_else(|| {
+                    case.else_expr()
+                        .map(|expr| infer_scalar_data_type(ctx, expr.as_ref()))
+                })
+                .flatten()
+        }
+        ScalarKind::List(_) => None,
+    }
+}
+
+fn is_safe_unwrap_cast(expr_type: &DataType, cast_type: &DataType) -> bool {
+    expr_type == cast_type
+        || signed_integer_rank(expr_type)
+            .zip(signed_integer_rank(cast_type))
+            .is_some_and(|(expr_rank, cast_rank)| expr_rank < cast_rank)
+        || unsigned_integer_rank(expr_type)
+            .zip(unsigned_integer_rank(cast_type))
+            .is_some_and(|(expr_rank, cast_rank)| expr_rank < cast_rank)
+}
+
+fn signed_integer_rank(data_type: &DataType) -> Option<u8> {
+    match data_type {
+        DataType::Int8 => Some(0),
+        DataType::Int16 => Some(1),
+        DataType::Int32 => Some(2),
+        DataType::Int64 => Some(3),
+        _ => None,
+    }
+}
+
+fn unsigned_integer_rank(data_type: &DataType) -> Option<u8> {
+    match data_type {
+        DataType::UInt8 => Some(0),
+        DataType::UInt16 => Some(1),
+        DataType::UInt32 => Some(2),
+        DataType::UInt64 => Some(3),
+        _ => None,
+    }
+}
+
+fn cast_literal_losslessly(literal: &ScalarValue, target_type: &DataType) -> Option<ScalarValue> {
+    if literal.is_null() {
+        return None;
+    }
+
+    let casted = literal.cast_to(target_type).ok()?;
+    let round_tripped = casted.cast_to(&literal.data_type()).ok()?;
+    (round_tripped == *literal).then_some(casted)
 }
 
 fn simplify_literal_binary_op(scalar: &Arc<Scalar>) -> Option<Arc<Scalar>> {

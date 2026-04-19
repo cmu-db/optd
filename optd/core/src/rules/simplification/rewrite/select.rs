@@ -36,7 +36,7 @@ fn classify_join_conjunct(
     inner_cols: &ColumnSet,
 ) -> PushTarget {
     match join_type {
-        JoinType::Inner | JoinType::LeftSemi => { 
+        JoinType::Inner | JoinType::LeftSemi => {
             if used.is_subset(outer_cols) {
                 PushTarget::Outer
             } else if used.is_subset(inner_cols) {
@@ -63,7 +63,7 @@ fn classify_select_conjunct(
     inner_cols: &ColumnSet,
 ) -> PushTarget {
     match join_type {
-        JoinType::Inner => { 
+        JoinType::Inner => {
             if used.is_subset(outer_cols) {
                 PushTarget::Outer
             } else if used.is_subset(inner_cols) {
