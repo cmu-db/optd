@@ -48,31 +48,32 @@ impl OptdQueryPlannerContext<'_> {
         table_ref: Option<&TableReference>,
         column_name: &str,
     ) -> Result<Column> {
-        // Check for mark columns first
         let df_col = DFColumn::new(table_ref.cloned(), column_name);
         if let Some(column) = self.df_mark_columns.get(&df_col) {
             return Ok(*column);
         }
-        if table_ref.is_none() {
-            let mut matches = self
-                .df_mark_columns
-                .iter()
-                .filter_map(|(candidate, column)| {
-                    (candidate.name == column_name).then_some(*column)
-                });
-            if let Some(column) = matches.next()
-                && matches.next().is_none()
-            {
-                return Ok(column);
-            }
-        }
 
         let table_ref = table_ref.map(Self::into_optd_table_ref);
-        let column = self
-            .inner
-            .col(table_ref.as_ref(), column_name)
-            .context(OptdSnafu)?;
-        Ok(column)
+        match self.inner.col(table_ref.as_ref(), column_name) {
+            Ok(column) => Ok(column),
+            Err(err) => {
+                if table_ref.is_none() {
+                    let mut matches =
+                        self.df_mark_columns
+                            .iter()
+                            .filter_map(|(candidate, column)| {
+                                (candidate.name == column_name).then_some(*column)
+                            });
+                    if let Some(column) = matches.next()
+                        && matches.next().is_none()
+                    {
+                        return Ok(column);
+                    }
+                }
+
+                Err(err).context(OptdSnafu)
+            }
+        }
     }
 
     pub fn try_from_optd_column(&self, column: &Column) -> Result<DFColumn> {

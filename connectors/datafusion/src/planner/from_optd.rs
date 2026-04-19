@@ -348,6 +348,7 @@ mod tests {
         logical_expr::{self, Expr as DFExpr, LogicalPlan as DFLogicalPlan, expr_fn},
         prelude::SessionConfig,
         scalar::ScalarValue,
+        sql::TableReference,
     };
     use optd_core::ir::{
         catalog::Catalog,
@@ -825,6 +826,38 @@ mod tests {
         };
         assert_eq!(join.join_type, JoinType::LeftMark);
         assert_eq!(filter.predicate, predicate);
+    }
+
+    #[test]
+    fn unqualified_mark_lookup_prefers_real_column_over_synthetic_fallback() {
+        let mut ctx = new_test_ctx();
+        let real_schema = Arc::new(Schema::new(vec![Field::new(
+            "mark",
+            DataType::Boolean,
+            false,
+        )]));
+        let real_table_index = ctx
+            .inner
+            .add_binding(Some(TableRef::bare("t")), real_schema)
+            .unwrap();
+        let real_column = optd_core::ir::Column(real_table_index, 0);
+
+        let synthetic_schema = Arc::new(Schema::new(vec![Field::new(
+            "mark",
+            DataType::Boolean,
+            false,
+        )]));
+        let synthetic_table_index = ctx.inner.add_binding(None, synthetic_schema).unwrap();
+        let synthetic_column = optd_core::ir::Column(synthetic_table_index, 0);
+        let df_mark_column = Column::new(Some(TableReference::bare("__optd_mark_1")), "mark");
+        ctx.register_df_mark_column(df_mark_column.clone(), synthetic_column);
+
+        assert_eq!(ctx.try_get_optd_column(None, "mark").unwrap(), real_column);
+        assert_eq!(
+            ctx.try_get_optd_column(df_mark_column.relation.as_ref(), &df_mark_column.name)
+                .unwrap(),
+            synthetic_column
+        );
     }
 
     #[test]
