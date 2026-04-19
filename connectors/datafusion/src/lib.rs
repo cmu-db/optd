@@ -1,4 +1,5 @@
 mod extension;
+mod optimizer;
 mod planner;
 
 use core::fmt;
@@ -17,6 +18,7 @@ use datafusion::sql::TableReference;
 use datafusion::sql::parser::DFParser;
 use datafusion::sql::sqlparser::dialect::dialect_from_str;
 pub use extension::{OptdExtension, OptdExtensionConfig};
+use optimizer::wrap_logical_optimizer_rules;
 pub use planner::OptdQueryPlanner;
 
 pub use optd_core::error::Error as OptdError;
@@ -39,7 +41,7 @@ impl SessionStateBuilderOptdExt for datafusion::execution::SessionStateBuilder {
 }
 
 pub fn default_datafusion_rules() -> Vec<Arc<dyn df_optimizer::OptimizerRule + Sync + Send>> {
-    vec![
+    wrap_logical_optimizer_rules(vec![
         Arc::new(df_optimizer::optimize_unions::OptimizeUnions::new()),
         Arc::new(df_optimizer::simplify_expressions::SimplifyExpressions::new()),
         Arc::new(df_optimizer::replace_distinct_aggregate::ReplaceDistinctWithAggregate::new()),
@@ -64,7 +66,7 @@ pub fn default_datafusion_rules() -> Vec<Arc<dyn df_optimizer::OptimizerRule + S
         Arc::new(df_optimizer::eliminate_group_by_constant::EliminateGroupByConstant::new()),
         Arc::new(df_optimizer::common_subexpr_eliminate::CommonSubexprEliminate::new()),
         // Arc::new(df_optimizer::optimize_projections::OptimizeProjections::new()),
-    ]
+    ])
 }
 
 pub fn create_optd_session_context(
