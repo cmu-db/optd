@@ -200,13 +200,13 @@ impl OptdQueryPlannerContext<'_> {
     }
 
     pub fn try_from_optd_project(&mut self, node: ProjectBorrowed<'_>) -> Result<DFLogicalPlan> {
+        let input = self.try_from_optd_plan(node.input())?;
         let projection_list = node.projections().borrow::<List>();
         let exprs = projection_list
             .members()
             .iter()
             .map(|e| self.try_from_optd_scalar_expr(e))
             .try_collect()?;
-        let input = self.try_from_optd_plan(node.input())?;
 
         let projection = self.try_new_df_projection(node.table_index(), exprs, Arc::new(input))?;
 
@@ -348,6 +348,7 @@ mod tests {
         logical_expr::{self, Expr as DFExpr, LogicalPlan as DFLogicalPlan, expr_fn},
         prelude::SessionConfig,
         scalar::ScalarValue,
+        sql::TableReference,
     };
     use optd_core::ir::{
         catalog::Catalog,
@@ -825,6 +826,97 @@ mod tests {
         };
         assert_eq!(join.join_type, JoinType::LeftMark);
         assert_eq!(filter.predicate, predicate);
+    }
+
+    #[test]
+    fn unqualified_mark_lookup_prefers_real_column_over_synthetic_fallback() {
+        let mut ctx = new_test_ctx();
+        let real_schema = Arc::new(Schema::new(vec![Field::new(
+            "mark",
+            DataType::Boolean,
+            false,
+        )]));
+        let real_table_index = ctx
+            .inner
+            .add_binding(Some(TableRef::bare("t")), real_schema)
+            .unwrap();
+        let real_column = optd_core::ir::Column(real_table_index, 0);
+
+        let synthetic_schema = Arc::new(Schema::new(vec![Field::new(
+            "mark",
+            DataType::Boolean,
+            false,
+        )]));
+        let synthetic_table_index = ctx.inner.add_binding(None, synthetic_schema).unwrap();
+        let synthetic_column = optd_core::ir::Column(synthetic_table_index, 0);
+        let df_mark_column = Column::new(Some(TableReference::bare("__optd_mark_1")), "mark");
+        ctx.register_df_mark_column(df_mark_column.clone(), synthetic_column);
+
+        assert_eq!(ctx.try_get_optd_column(None, "mark").unwrap(), real_column);
+        assert_eq!(
+            ctx.try_get_optd_column(df_mark_column.relation.as_ref(), &df_mark_column.name)
+                .unwrap(),
+            synthetic_column
+        );
+    }
+
+    #[test]
+    fn project_above_left_mark_join_can_restore_mark_column() {
+        let (mut ctx, catalog) = new_test_ctx_with_catalog();
+        let schema = Arc::new(Schema::new(vec![Field::new("a", DataType::Int64, false)]));
+        catalog
+            .create_table(TableRef::bare("t1"), schema.clone(), None)
+            .unwrap();
+        catalog
+            .create_table(TableRef::bare("t2"), schema.clone(), None)
+            .unwrap();
+
+        let left = logical_expr::logical_plan::builder::table_scan(Some("t1"), &schema, None)
+            .unwrap()
+            .build()
+            .unwrap();
+        let right = logical_expr::logical_plan::builder::table_scan(Some("t2"), &schema, None)
+            .unwrap()
+            .build()
+            .unwrap();
+        let join = logical_expr::logical_plan::Join::try_new(
+            Arc::new(left),
+            Arc::new(right),
+            vec![(
+                DFExpr::Column(Column::from_qualified_name("t1.a")),
+                DFExpr::Column(Column::from_qualified_name("t2.a")),
+            )],
+            None,
+            JoinType::LeftMark,
+            logical_expr::JoinConstraint::On,
+            NullEquality::NullEqualsNothing,
+        )
+        .unwrap();
+        let projection = DFExpr::Column(Column::from_qualified_name("t2.mark"));
+        let plan = logical_expr::LogicalPlanBuilder::from(DFLogicalPlan::Join(join))
+            .project(vec![projection.clone()])
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let optd_plan = ctx.try_into_optd_plan(&plan).unwrap();
+        let restored = ctx.try_from_optd_plan(optd_plan.as_ref());
+
+        assert!(
+            restored.is_ok(),
+            "projecting a mark column above a mark join should round trip, got: {restored:?}"
+        );
+
+        let DFLogicalPlan::Projection(project) = restored.unwrap() else {
+            panic!("expected projection after round trip");
+        };
+        println!("restored projection exprs: {:#?}", project.expr);
+        println!("expected projection exprs: {:#?}", vec![projection.clone()]);
+        let restored_expr = match &project.expr[0] {
+            DFExpr::Alias(alias) => alias.expr.as_ref(),
+            expr => expr,
+        };
+        assert_eq!(restored_expr, &projection);
     }
 
     #[test]
