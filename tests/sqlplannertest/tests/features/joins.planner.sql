@@ -207,7 +207,7 @@ OrderBy
     └── Join
         ├── .join_type: LeftOuter
         ├── .implementation: None
-        ├── .join_cond: ("n.grp"(#2.1) = "g.grp"(#4.0)) AND ("n.val"(#2.2) < "g.shift"(#4.1))
+        ├── .join_cond: (("n.grp"(#2.1) = "g.grp"(#4.0)) AND ("n.val"(#2.2) < "g.shift"(#4.1)))
         ├── (.output_columns):
         │   ┌── "g.grp"(#4.0)
         │   ├── "g.label"(#4.2)
