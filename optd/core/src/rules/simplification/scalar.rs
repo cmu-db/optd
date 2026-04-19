@@ -1,7 +1,9 @@
 use crate::ir::{
     Column, DataType, IRContext, Scalar, ScalarKind, ScalarValue,
     convert::IntoScalar,
-    scalar::{BinaryOp, BinaryOpKind, Case, Cast, ColumnRef, Function, Literal, NaryOp},
+    scalar::{
+        BinaryOp, BinaryOpKind, Case, Cast, ColumnRef, Function, InList, List, Literal, NaryOp,
+    },
 };
 use arrow::datatypes::IntervalMonthDayNano;
 use chrono::{Duration, Months, NaiveDate};
@@ -116,6 +118,7 @@ fn simplify_scalar_recursively_internal(
 
     if let Some(simplified) = factor_common_conjuncts_from_or(&rewritten, ctx)
         .or_else(|| simplify_cast_in_comparison(&rewritten, ctx))
+        .or_else(|| simplify_cast_in_list(&rewritten, ctx))
         .or_else(|| simplify_cast(&rewritten))
         .or_else(|| simplify_literal_binary_op(&rewritten))
     {
@@ -219,6 +222,41 @@ fn simplify_cast_in_comparison(
                 },
             )
         })
+}
+
+fn simplify_cast_in_list(scalar: &Arc<Scalar>, ctx: Option<&IRContext>) -> Option<Arc<Scalar>> {
+    let ctx = ctx?;
+    let in_list = scalar.try_borrow::<InList>().ok()?;
+    let cast = in_list.expr().try_borrow::<Cast>().ok()?;
+    let list = in_list.list().try_borrow::<List>().ok()?;
+    let expr_type = infer_scalar_data_type(ctx, cast.expr().as_ref())?;
+    if !is_safe_unwrap_cast(&expr_type, cast.data_type()) {
+        return None;
+    }
+
+    let rewritten_members = list
+        .members()
+        .iter()
+        .map(|member| {
+            let literal = member.try_borrow::<Literal>().ok()?;
+            cast_literal_losslessly(literal.value(), &expr_type).map(Literal::new)
+        })
+        .collect::<Option<Vec<_>>>()?;
+
+    Some(
+        InList::new(
+            cast.expr().clone(),
+            List::new(Arc::from(
+                rewritten_members
+                    .into_iter()
+                    .map(IntoScalar::into_scalar)
+                    .collect::<Vec<_>>(),
+            ))
+            .into_scalar(),
+            *in_list.negated(),
+        )
+        .into_scalar(),
+    )
 }
 
 fn supports_cast_unwrap_in_comparison(op_kind: BinaryOpKind) -> bool {
@@ -336,6 +374,7 @@ fn is_safe_unwrap_cast(expr_type: &DataType, cast_type: &DataType) -> bool {
         || unsigned_integer_rank(expr_type)
             .zip(unsigned_integer_rank(cast_type))
             .is_some_and(|(expr_rank, cast_rank)| expr_rank < cast_rank)
+        || decimal_widening(expr_type, cast_type)
 }
 
 fn signed_integer_rank(data_type: &DataType) -> Option<u8> {
@@ -366,6 +405,20 @@ fn cast_literal_losslessly(literal: &ScalarValue, target_type: &DataType) -> Opt
     let casted = literal.cast_to(target_type).ok()?;
     let round_tripped = casted.cast_to(&literal.data_type()).ok()?;
     (round_tripped == *literal).then_some(casted)
+}
+
+fn decimal_widening(expr_type: &DataType, cast_type: &DataType) -> bool {
+    match (expr_type, cast_type) {
+        (
+            DataType::Decimal128(expr_precision, expr_scale),
+            DataType::Decimal128(cast_precision, cast_scale),
+        ) => cast_precision >= expr_precision && cast_scale >= expr_scale,
+        (
+            DataType::Decimal256(expr_precision, expr_scale),
+            DataType::Decimal256(cast_precision, cast_scale),
+        ) => cast_precision >= expr_precision && cast_scale >= expr_scale,
+        _ => false,
+    }
 }
 
 fn simplify_literal_binary_op(scalar: &Arc<Scalar>) -> Option<Arc<Scalar>> {
