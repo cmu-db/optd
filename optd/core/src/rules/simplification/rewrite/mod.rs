@@ -5,10 +5,11 @@ mod select;
 use crate::ir::{Column, Scalar, scalar::List};
 use std::{collections::HashMap, sync::Arc};
 
-pub use project::MergeProjectRulePass;
+pub use project::{MergeProjectRulePass, PushLimitThroughProjectRulePass};
 pub use scalar::ScalarSimplificationRulePass;
 pub use select::{
-    MergeSelectRulePass, PushSelectThroughJoinRulePass, PushSelectThroughProjectRulePass,
+    MergeSelectRulePass, PushJoinConditionIntoInputsRulePass, PushSelectThroughJoinRulePass,
+    PushSelectThroughProjectRulePass,
 };
 
 /// Builds column substitutions for the outputs of a `Project`.

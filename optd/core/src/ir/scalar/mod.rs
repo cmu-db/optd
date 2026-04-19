@@ -129,6 +129,17 @@ impl Scalar {
         }
     }
 
+    /// Conjoin predicates with `OR`, returning `false` for an empty list.
+    pub fn combine_disjuncts(mut conds: Vec<Arc<Scalar>>) -> Arc<Scalar> {
+        if conds.is_empty() {
+            Literal::boolean(false).into_scalar()
+        } else if conds.len() == 1 {
+            conds.pop().unwrap()
+        } else {
+            NaryOp::new(NaryOpKind::Or, conds.into()).into_scalar()
+        }
+    }
+
     // Simplifies an n-ary scalar by dropping redundant terms
     pub fn simplify_nary_scalar(self: Arc<Self>) -> Arc<Scalar> {
         match &self.kind {
@@ -173,6 +184,32 @@ impl Scalar {
 
                 if terms.is_empty() {
                     return Literal::boolean(true).into_scalar();
+                }
+                if terms.len() == 1 {
+                    return terms.pop().unwrap();
+                }
+                if terms.as_slice() == self.input_scalars() {
+                    return self;
+                }
+
+                Arc::new(self.clone_with_inputs(Some(Arc::from(terms)), None))
+            }
+            ScalarKind::NaryOp(nary) if nary.op_kind == NaryOpKind::Or => {
+                let mut terms = Vec::new();
+                for term in self.input_scalars() {
+                    if matches!(&term.kind, ScalarKind::Literal(meta) if matches!(meta.value, ScalarValue::Boolean(Some(false))))
+                    {
+                        continue;
+                    }
+                    if matches!(&term.kind, ScalarKind::Literal(meta) if matches!(meta.value, ScalarValue::Boolean(Some(true))))
+                    {
+                        return Literal::boolean(true).into_scalar();
+                    }
+                    terms.push(term.clone());
+                }
+
+                if terms.is_empty() {
+                    return Literal::boolean(false).into_scalar();
                 }
                 if terms.len() == 1 {
                     return terms.pop().unwrap();
