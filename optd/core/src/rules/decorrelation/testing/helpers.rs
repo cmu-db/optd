@@ -71,6 +71,18 @@ pub(super) fn make_cols(ctx: &IRContext, n: usize) -> Vec<Column> {
     (0..n).map(|idx| Column(table_index, idx)).collect()
 }
 
+pub(super) fn make_mark_col(ctx: &IRContext) -> Column {
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "mark",
+        DataType::Boolean,
+        false,
+    )]));
+    let next_table = ctx.binder.read().unwrap().bindings.len() + 1;
+    let table_ref = TableRef::bare(format!("__mark_{next_table}"));
+    let table_index = ctx.add_binding(Some(table_ref), schema).unwrap();
+    Column(table_index, 0)
+}
+
 // Build a `Get` over an existing mock binding, preserving the supplied
 // projection order.
 pub(super) fn mock_scan_with_columns(table_id: i64, cols: Vec<Column>) -> Arc<Operator> {

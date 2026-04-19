@@ -4,10 +4,13 @@ use datafusion::{
     sql::TableReference,
 };
 use optd_core::ir::{
-    Column, ScalarValue as OptdScalarValue, operator::join::JoinType as OptdJoinType,
+    Column, DataType, ScalarValue as OptdScalarValue,
+    catalog::{Field, Schema},
+    operator::join::JoinType as OptdJoinType,
     table_ref::TableRef,
 };
 use snafu::{ResultExt, whatever};
+use std::sync::Arc;
 
 use crate::planner::{OptdQueryPlannerContext, OptdSnafu, Result};
 
@@ -45,18 +48,69 @@ impl OptdQueryPlannerContext<'_> {
         table_ref: Option<&TableReference>,
         column_name: &str,
     ) -> Result<Column> {
+        let df_col = DFColumn::new(table_ref.cloned(), column_name);
+        if let Some(column) = self.df_mark_columns.get(&df_col) {
+            return Ok(*column);
+        }
+
         let table_ref = table_ref.map(Self::into_optd_table_ref);
-        let column = self
-            .inner
-            .col(table_ref.as_ref(), column_name)
-            .context(OptdSnafu)?;
-        Ok(column)
+        match self.inner.col(table_ref.as_ref(), column_name) {
+            Ok(column) => Ok(column),
+            Err(err) => {
+                if table_ref.is_none() {
+                    let mut matches =
+                        self.df_mark_columns
+                            .iter()
+                            .filter_map(|(candidate, column)| {
+                                (candidate.name == column_name).then_some(*column)
+                            });
+                    if let Some(column) = matches.next()
+                        && matches.next().is_none()
+                    {
+                        return Ok(column);
+                    }
+                }
+
+                Err(err).context(OptdSnafu)
+            }
+        }
     }
 
     pub fn try_from_optd_column(&self, column: &Column) -> Result<DFColumn> {
+        // Check for mark columns first
+        if let Some(df_column) = self.optd_mark_columns.get(column) {
+            return Ok(df_column.clone());
+        }
         let (table_ref, field) = self.inner.get_column_name(column).context(OptdSnafu)?;
         let table_reference = Self::from_optd_table_ref(&table_ref);
         let column = DFColumn::new(Some(table_reference), field.name());
+        Ok(column)
+    }
+
+    /// Registers the optd column allocated for a DataFusion mark column.
+    pub fn register_df_mark_column(&mut self, df_column: DFColumn, column: Column) {
+        self.df_mark_columns.insert(df_column, column);
+    }
+
+    /// Registers the DataFusion mark column associated with an optd column.
+    pub fn register_optd_mark_column(&mut self, column: Column, df_column: DFColumn) {
+        self.optd_mark_columns.insert(column, df_column);
+    }
+
+    /// Returns the existing optd column for a DataFusion mark column, or allocates one.
+    pub fn allocate_df_mark_column(&mut self, df_column: DFColumn) -> Result<Column> {
+        if let Some(column) = self.df_mark_columns.get(&df_column) {
+            return Ok(*column);
+        }
+
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            df_column.name.clone(),
+            DataType::Boolean,
+            false,
+        )]));
+        let table_index = self.inner.add_binding(None, schema).context(OptdSnafu)?;
+        let column = Column(table_index, 0);
+        self.register_df_mark_column(df_column, column);
         Ok(column)
     }
 
@@ -193,7 +247,8 @@ impl OptdQueryPlannerContext<'_> {
             OptdJoinType::LeftOuter => Ok(DFJoinType::Left),
             OptdJoinType::LeftSemi => Ok(DFJoinType::LeftSemi),
             OptdJoinType::LeftAnti => Ok(DFJoinType::LeftAnti),
-            // TODO: add single and mark join.
+            OptdJoinType::Mark(_) => Ok(DFJoinType::LeftMark),
+            // TODO: add single join.
             v => whatever!("Unsupported join type: {:?}", v),
         }
     }
