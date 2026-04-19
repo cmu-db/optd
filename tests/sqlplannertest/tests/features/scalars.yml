@@ -12,6 +12,8 @@
       (2, 1),
       (NULL, NULL),
       (3, NULL);
+    set optd.optd_strict_mode = true;
+    set optd.optd_only = true;
   desc: Setup scalar feature tables.
   tasks:
     - execute

@@ -34,12 +34,12 @@ OrderBy { ordering_exprs: "__#5.l_shipmode"(#5.0) ASC, (.output_columns): [ "__#
         ├── .key_table_index: 3
         ├── .aggregate_table_index: 4
         ├── .implementation: None
-        ├── .exprs: [ sum(CASE WHEN ("orders.o_orderpriority"(#1.5) = '1-URGENT'::utf8_view) OR ("orders.o_orderpriority"(#1.5) = '2-HIGH'::utf8_view) THEN 1::bigint ELSE 0::bigint END), sum(CASE WHEN ("orders.o_orderpriority"(#1.5) != '1-URGENT'::utf8_view) AND ("orders.o_orderpriority"(#1.5) != '2-HIGH'::utf8_view) THEN 1::bigint ELSE 0::bigint END) ]
+        ├── .exprs: [ sum(CASE WHEN ("orders.o_orderpriority"(#1.5) = CAST ('1-URGENT'::utf8 AS Utf8View)) OR ("orders.o_orderpriority"(#1.5) = CAST ('2-HIGH'::utf8 AS Utf8View)) THEN 1::bigint ELSE 0::bigint END), sum(CASE WHEN ("orders.o_orderpriority"(#1.5) != CAST ('1-URGENT'::utf8 AS Utf8View)) AND ("orders.o_orderpriority"(#1.5) != CAST ('2-HIGH'::utf8 AS Utf8View)) THEN 1::bigint ELSE 0::bigint END) ]
         ├── .keys: "lineitem.l_shipmode"(#2.14)
         ├── (.output_columns): [ "__#3.l_shipmode"(#3.0), "__#4.sum(CASE WHEN orders.o_orderpriority != Utf8("1-URGENT") AND orders.o_orderpriority != Utf8("2-HIGH") THEN Int64(1) ELSE Int64(0) END)"(#4.1), "__#4.sum(CASE WHEN orders.o_orderpriority = Utf8("1-URGENT") OR orders.o_orderpriority = Utf8("2-HIGH") THEN Int64(1) ELSE Int64(0) END)"(#4.0) ]
         ├── (.cardinality): 0.00
         └── Select
-            ├── .predicate: (("lineitem.l_shipmode"(#2.14) = 'MAIL'::utf8_view) OR ("lineitem.l_shipmode"(#2.14) = 'SHIP'::utf8_view)) AND ("lineitem.l_receiptdate"(#2.12) > "lineitem.l_commitdate"(#2.11)) AND ("lineitem.l_shipdate"(#2.10) < "lineitem.l_commitdate"(#2.11)) AND ("lineitem.l_receiptdate"(#2.12) >= 1994-01-01::date32) AND ("lineitem.l_receiptdate"(#2.12) < 1995-01-01::date32)
+            ├── .predicate: ("orders.o_orderkey"(#1.0) = "lineitem.l_orderkey"(#2.0)) AND ("lineitem.l_shipmode"(#2.14) IN [CAST ('MAIL'::utf8 AS Utf8View), CAST ('SHIP'::utf8 AS Utf8View)]) AND ("lineitem.l_commitdate"(#2.11) < "lineitem.l_receiptdate"(#2.12)) AND ("lineitem.l_shipdate"(#2.10) < "lineitem.l_commitdate"(#2.11)) AND ("lineitem.l_receiptdate"(#2.12) >= CAST ('1994-01-01'::utf8 AS Date32)) AND ("lineitem.l_receiptdate"(#2.12) < CAST ('1995-01-01'::utf8 AS Date32))
             ├── (.output_columns):
             │   ┌── "lineitem.l_comment"(#2.15)
             │   ├── "lineitem.l_commitdate"(#2.11)
@@ -70,7 +70,7 @@ OrderBy { ordering_exprs: "__#5.l_shipmode"(#5.0) ASC, (.output_columns): [ "__#
             └── Join
                 ├── .join_type: Inner
                 ├── .implementation: None
-                ├── .join_cond: ("orders.o_orderkey"(#1.0) = "lineitem.l_orderkey"(#2.0))
+                ├── .join_cond: 
                 ├── (.output_columns):
                 │   ┌── "lineitem.l_comment"(#2.15)
                 │   ├── "lineitem.l_commitdate"(#2.11)
@@ -137,10 +137,15 @@ EnforcerSort { tuple_ordering: [(#5.0, Asc)], (.output_columns): [ "__#5.high_pr
         ├── .keys: "lineitem.l_shipmode"(#2.14)
         ├── (.output_columns): [ "__#3.l_shipmode"(#3.0), "__#4.sum(CASE WHEN orders.o_orderpriority != Utf8("1-URGENT") AND orders.o_orderpriority != Utf8("2-HIGH") THEN Int64(1) ELSE Int64(0) END)"(#4.1), "__#4.sum(CASE WHEN orders.o_orderpriority = Utf8("1-URGENT") OR orders.o_orderpriority = Utf8("2-HIGH") THEN Int64(1) ELSE Int64(0) END)"(#4.0) ]
         ├── (.cardinality): 0.00
-        └── Join { .join_type: Inner, .implementation: None, .join_cond: "orders.o_orderkey"(#1.0) = "lineitem.l_orderkey"(#2.0), (.output_columns): [ "lineitem.l_commitdate"(#2.11), "lineitem.l_orderkey"(#2.0), "lineitem.l_receiptdate"(#2.12), "lineitem.l_shipdate"(#2.10), "lineitem.l_shipmode"(#2.14), "orders.o_orderkey"(#1.0), "orders.o_orderpriority"(#1.5) ], (.cardinality): 0.00 }
+        └── Join
+            ├── .join_type: Inner
+            ├── .implementation: None
+            ├── .join_cond: "orders.o_orderkey"(#1.0) = "lineitem.l_orderkey"(#2.0)
+            ├── (.output_columns): [ "lineitem.l_commitdate"(#2.11), "lineitem.l_orderkey"(#2.0), "lineitem.l_receiptdate"(#2.12), "lineitem.l_shipdate"(#2.10), "lineitem.l_shipmode"(#2.14), "orders.o_orderkey"(#1.0), "orders.o_orderpriority"(#1.5) ]
+            ├── (.cardinality): 0.00
             ├── Get { .data_source_id: 7, .table_index: 1, .implementation: None, (.output_columns): [ "orders.o_orderkey"(#1.0), "orders.o_orderpriority"(#1.5) ], (.cardinality): 0.00 }
             └── Select
-                ├── .predicate: (("lineitem.l_shipmode"(#2.14) = 'MAIL'::utf8_view) OR ("lineitem.l_shipmode"(#2.14) = 'SHIP'::utf8_view)) AND ("lineitem.l_receiptdate"(#2.12) > "lineitem.l_commitdate"(#2.11)) AND ("lineitem.l_shipdate"(#2.10) < "lineitem.l_commitdate"(#2.11)) AND ("lineitem.l_receiptdate"(#2.12) >= 1994-01-01::date32) AND ("lineitem.l_receiptdate"(#2.12) < 1995-01-01::date32)
+                ├── .predicate: ("lineitem.l_shipmode"(#2.14) IN ['MAIL'::utf8_view, 'SHIP'::utf8_view]) AND ("lineitem.l_commitdate"(#2.11) < "lineitem.l_receiptdate"(#2.12)) AND ("lineitem.l_shipdate"(#2.10) < "lineitem.l_commitdate"(#2.11)) AND ("lineitem.l_receiptdate"(#2.12) >= 1994-01-01::date32) AND ("lineitem.l_receiptdate"(#2.12) < 1995-01-01::date32)
                 ├── (.output_columns): [ "lineitem.l_commitdate"(#2.11), "lineitem.l_orderkey"(#2.0), "lineitem.l_receiptdate"(#2.12), "lineitem.l_shipdate"(#2.10), "lineitem.l_shipmode"(#2.14) ]
                 ├── (.cardinality): 0.00
                 └── Get { .data_source_id: 8, .table_index: 2, .implementation: None, (.output_columns): [ "lineitem.l_commitdate"(#2.11), "lineitem.l_orderkey"(#2.0), "lineitem.l_receiptdate"(#2.12), "lineitem.l_shipdate"(#2.10), "lineitem.l_shipmode"(#2.14) ], (.cardinality): 0.00 }

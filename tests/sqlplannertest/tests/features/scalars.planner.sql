@@ -12,6 +12,8 @@ insert into pairs values
   (2, 1),
   (NULL, NULL),
   (3, NULL);
+set optd.optd_strict_mode = true;
+set optd.optd_only = true;
 
 /*
 5
@@ -105,13 +107,11 @@ OrderBy
 ├── (.cardinality): 0.50
 └── Project
     ├── .table_index: 2
-    ├── .projections:
-    │   ┌── "numbers.id"(#1.0)
-    │   └── CAST ("numbers.val"(#1.2) AS Int64) + CAST ("numbers.bonus"(#1.3) AS Int64)
+    ├── .projections: [ "numbers.id"(#1.0), CAST ("numbers.val"(#1.2) AS Int64) + CAST ("numbers.bonus"(#1.3) AS Int64) ]
     ├── (.output_columns): [ "__#2.id"(#2.0), "__#2.widened_total"(#2.1) ]
     ├── (.cardinality): 0.50
     └── Select
-        ├── .predicate: ("numbers.val"(#1.2) >= 20::integer) OR ("numbers.bonus"(#1.3) = 5::integer)
+        ├── .predicate: (CAST ("numbers.val"(#1.2) AS Int64) >= 20::bigint) OR (CAST ("numbers.bonus"(#1.3) AS Int64) = 5::bigint)
         ├── (.output_columns):
         │   ┌── "numbers.bonus"(#1.3)
         │   ├── "numbers.grp"(#1.1)
@@ -170,34 +170,21 @@ order by id;
 
 /*
 logical_plan after optd-initial:
-OrderBy
-├── ordering_exprs: "__#2.id"(#2.0) ASC
-├── (.output_columns): [ "__#2.id"(#2.0), "__#2.note"(#2.1) ]
-├── (.cardinality): 0.50
+OrderBy { ordering_exprs: "__#2.id"(#2.0) ASC, (.output_columns): [ "__#2.id"(#2.0), "__#2.note"(#2.1) ], (.cardinality): 0.50 }
 └── Project
     ├── .table_index: 2
     ├── .projections: [ "numbers.id"(#1.0), "numbers.note"(#1.4) ]
     ├── (.output_columns): [ "__#2.id"(#2.0), "__#2.note"(#2.1) ]
     ├── (.cardinality): 0.50
     └── Select
-        ├── .predicate: ("numbers.note"(#1.4) LIKE 'Al%'::utf8_view) OR ("numbers.note"(#1.4) NOT LIKE '%ta'::utf8_view)
-        ├── (.output_columns):
-        │   ┌── "numbers.bonus"(#1.3)
-        │   ├── "numbers.grp"(#1.1)
-        │   ├── "numbers.id"(#1.0)
-        │   ├── "numbers.note"(#1.4)
-        │   └── "numbers.val"(#1.2)
+        ├── .predicate: ("numbers.note"(#1.4) LIKE CAST ('Al%'::utf8 AS Utf8View)) OR ("numbers.note"(#1.4) NOT LIKE CAST ('%ta'::utf8 AS Utf8View))
+        ├── (.output_columns): [ "numbers.bonus"(#1.3), "numbers.grp"(#1.1), "numbers.id"(#1.0), "numbers.note"(#1.4), "numbers.val"(#1.2) ]
         ├── (.cardinality): 0.50
         └── Get
             ├── .data_source_id: 1
             ├── .table_index: 1
             ├── .implementation: None
-            ├── (.output_columns):
-            │   ┌── "numbers.bonus"(#1.3)
-            │   ├── "numbers.grp"(#1.1)
-            │   ├── "numbers.id"(#1.0)
-            │   ├── "numbers.note"(#1.4)
-            │   └── "numbers.val"(#1.2)
+            ├── (.output_columns): [ "numbers.bonus"(#1.3), "numbers.grp"(#1.1), "numbers.id"(#1.0), "numbers.note"(#1.4), "numbers.val"(#1.2) ]
             └── (.cardinality): 5.00
 
 physical_plan after optd-finalized:
@@ -244,7 +231,7 @@ OrderBy
     ├── (.output_columns): "__#2.id"(#2.0)
     ├── (.cardinality): 0.50
     └── Select
-        ├── .predicate: "numbers.note"(#1.4) ILIKE 'al%'::utf8_view
+        ├── .predicate: "numbers.note"(#1.4) ILIKE CAST ('al%'::utf8 AS Utf8View)
         ├── (.output_columns):
         │   ┌── "numbers.bonus"(#1.3)
         │   ├── "numbers.grp"(#1.1)
@@ -354,51 +341,42 @@ limit 2 offset 1;
 
 /*
 logical_plan after optd-initial:
-Project
-├── .table_index: 3
-├── .projections: "__#2.id"(#2.0)
+Limit
+├── .skip: 1::bigint
+├── .fetch: 2::bigint
 ├── (.output_columns): "__#3.id"(#3.0)
 ├── (.cardinality): 2.00
-└── Limit
-    ├── .skip: 1::bigint
-    ├── .fetch: 2::bigint
-    ├── (.output_columns):
-    │   ┌── "__#2.id"(#2.0)
-    │   └── "__#2.val"(#2.1)
-    ├── (.cardinality): 2.00
-    └── Limit
-        ├── .skip: 0::bigint
-        ├── .fetch: 3::bigint
+└── Project
+    ├── .table_index: 3
+    ├── .projections: "__#2.id"(#2.0)
+    ├── (.output_columns): "__#3.id"(#3.0)
+    ├── (.cardinality): 5.00
+    └── OrderBy
+        ├── ordering_exprs: "__#2.val"(#2.1) DESC
         ├── (.output_columns):
         │   ┌── "__#2.id"(#2.0)
         │   └── "__#2.val"(#2.1)
-        ├── (.cardinality): 3.00
-        └── OrderBy
-            ├── ordering_exprs: "__#2.val"(#2.1) DESC
+        ├── (.cardinality): 5.00
+        └── Project
+            ├── .table_index: 2
+            ├── .projections:
+            │   ┌── "numbers.id"(#1.0)
+            │   └── "numbers.val"(#1.2)
             ├── (.output_columns):
             │   ┌── "__#2.id"(#2.0)
             │   └── "__#2.val"(#2.1)
             ├── (.cardinality): 5.00
-            └── Project
-                ├── .table_index: 2
-                ├── .projections:
-                │   ┌── "numbers.id"(#1.0)
-                │   └── "numbers.val"(#1.2)
+            └── Get
+                ├── .data_source_id: 1
+                ├── .table_index: 1
+                ├── .implementation: None
                 ├── (.output_columns):
-                │   ┌── "__#2.id"(#2.0)
-                │   └── "__#2.val"(#2.1)
-                ├── (.cardinality): 5.00
-                └── Get
-                    ├── .data_source_id: 1
-                    ├── .table_index: 1
-                    ├── .implementation: None
-                    ├── (.output_columns):
-                    │   ┌── "numbers.bonus"(#1.3)
-                    │   ├── "numbers.grp"(#1.1)
-                    │   ├── "numbers.id"(#1.0)
-                    │   ├── "numbers.note"(#1.4)
-                    │   └── "numbers.val"(#1.2)
-                    └── (.cardinality): 5.00
+                │   ┌── "numbers.bonus"(#1.3)
+                │   ├── "numbers.grp"(#1.1)
+                │   ├── "numbers.id"(#1.0)
+                │   ├── "numbers.note"(#1.4)
+                │   └── "numbers.val"(#1.2)
+                └── (.cardinality): 5.00
 
 physical_plan after optd-finalized:
 Project
@@ -413,36 +391,29 @@ Project
     │   ┌── "__#2.id"(#2.0)
     │   └── "__#2.val"(#2.1)
     ├── (.cardinality): 2.00
-    └── Limit
-        ├── .skip: 0::bigint
-        ├── .fetch: 3::bigint
+    └── EnforcerSort
+        ├── tuple_ordering: [(#2.1, Desc)]
         ├── (.output_columns):
         │   ┌── "__#2.id"(#2.0)
         │   └── "__#2.val"(#2.1)
-        ├── (.cardinality): 3.00
-        └── EnforcerSort
-            ├── tuple_ordering: [(#2.1, Desc)]
+        ├── (.cardinality): 5.00
+        └── Project
+            ├── .table_index: 2
+            ├── .projections:
+            │   ┌── "numbers.id"(#1.0)
+            │   └── "numbers.val"(#1.2)
             ├── (.output_columns):
             │   ┌── "__#2.id"(#2.0)
             │   └── "__#2.val"(#2.1)
             ├── (.cardinality): 5.00
-            └── Project
-                ├── .table_index: 2
-                ├── .projections:
+            └── Get
+                ├── .data_source_id: 1
+                ├── .table_index: 1
+                ├── .implementation: None
+                ├── (.output_columns):
                 │   ┌── "numbers.id"(#1.0)
                 │   └── "numbers.val"(#1.2)
-                ├── (.output_columns):
-                │   ┌── "__#2.id"(#2.0)
-                │   └── "__#2.val"(#2.1)
-                ├── (.cardinality): 5.00
-                └── Get
-                    ├── .data_source_id: 1
-                    ├── .table_index: 1
-                    ├── .implementation: None
-                    ├── (.output_columns):
-                    │   ┌── "numbers.id"(#1.0)
-                    │   └── "numbers.val"(#1.2)
-                    └── (.cardinality): 5.00
+                └── (.cardinality): 5.00
 
 2
 3
