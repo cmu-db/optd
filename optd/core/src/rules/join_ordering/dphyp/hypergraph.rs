@@ -1,43 +1,6 @@
 use bitvec::prelude::*;
 
-pub type VertexIndex = usize;
-
-pub type EdgeIndex = usize;
-
-pub type VertexSet = BitVec;
-
-pub type EdgeSet = BitVec;
-
-pub(crate) trait BitVecSetOpsExt {
-    /// Checks if self is a subset of other.
-    ///
-    /// # Safety
-    /// The function assumes that self and other have the same length.
-    /// The caller must ensure this precondition is met.
-    fn is_subset_of(&self, other: Self) -> bool;
-
-    fn intersects(&self, other: Self) -> bool;
-}
-
-impl BitVecSetOpsExt for BitVec {
-    fn is_subset_of(&self, other: Self) -> bool {
-        assert_eq!(
-            self.len(),
-            other.len(),
-            "BitVecs must have the same length for subset check."
-        );
-        (other & self) == *self
-    }
-
-    fn intersects(&self, other: Self) -> bool {
-        assert_eq!(
-            self.len(),
-            other.len(),
-            "BitVecs must have the same length for intersection check."
-        );
-        (other & self).any()
-    }
-}
+use super::super::{BitVecSetOpsExt, EdgeIndex, EdgeSet, VertexIndex, VertexSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct QueryHypergraph<V, E> {
@@ -72,10 +35,10 @@ impl<E> Edge<E> {
         if !(self.u.any() && self.v.any()) {
             return false;
         }
-        if self.u.is_subset_of(s1.clone()) && self.v.is_subset_of(s2.clone()) {
+        if self.u.is_subset_of(&s1) && self.v.is_subset_of(&s2) {
             return true;
         }
-        if self.v.is_subset_of(s1.clone()) && self.u.is_subset_of(s2.clone()) {
+        if self.v.is_subset_of(&s1) && self.u.is_subset_of(&s2) {
             return true;
         }
         false
@@ -84,15 +47,15 @@ impl<E> Edge<E> {
     /// If the edge connects s to some vertex outside of x, return the index of one such vertex. Otherwise, return None.
     /// The returned index is the representative, or more concretely, the minimum index of the vertices in the hypernode.
     pub fn get_neighbor(&self, s: VertexSet, x: VertexSet) -> Option<usize> {
-        if self.u.is_subset_of(s.clone()) && !self.v.intersects(s.clone()) {
+        if self.u.is_subset_of(&s) && !self.v.intersects(&s) {
             let other = &self.v;
-            if !other.intersects(x) {
+            if !other.intersects(&x) {
                 // Note: If other is empty, first_one() will return None, which is the desired behavior.
                 return other.first_one();
             }
-        } else if self.v.is_subset_of(s.clone()) && !self.u.intersects(s) {
+        } else if self.v.is_subset_of(&s) && !self.u.intersects(&s) {
             let other = &self.u;
-            if !other.intersects(x) {
+            if !other.intersects(&x) {
                 // Note: if other is empty, first_one() will return None, which is the desired behavior.
                 return other.first_one();
             }
@@ -224,7 +187,7 @@ impl<V, E> QueryHypergraph<V, E> {
     pub fn get_induced_edges(&self, s: VertexSet) -> EdgeSet {
         let mut edge_mask = self.empty_edge_set();
         for (i, edge) in self.edges.iter().enumerate() {
-            if edge.vertex_set().is_subset_of(s.clone()) {
+            if edge.vertex_set().is_subset_of(&s) {
                 edge_mask.set(i, true);
             }
         }
@@ -235,13 +198,13 @@ impl<V, E> QueryHypergraph<V, E> {
 #[cfg(test)]
 mod tests {
 
-    use crate::rules::join_ordering::dphyp::make_example_hypergraph;
+    use crate::rules::join_ordering::fixtures::make_dphyp_example_hypergraph;
 
     use super::*;
 
     #[test]
     fn test_query_hypergraph_connectedness() {
-        let h = make_example_hypergraph();
+        let h = make_dphyp_example_hypergraph();
         assert!(
             !h.is_connected(&bitvec![1, 1, 1, 0, 0, 0], &bitvec![0, 0, 0, 1, 0, 0]),
             "R1, R2, R3 should not be connected to R4 alone"
@@ -260,7 +223,7 @@ mod tests {
 
     #[test]
     fn test_query_hypergraph_neighborhood() {
-        let h = make_example_hypergraph();
+        let h = make_dphyp_example_hypergraph();
 
         let n = h.neighborhood(bitvec![1, 1, 1, 0, 0, 0], bitvec![1, 1, 1, 0, 0, 0]);
         assert_eq!(

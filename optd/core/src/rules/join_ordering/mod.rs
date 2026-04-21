@@ -1,9 +1,13 @@
 pub mod dpccp;
 pub mod dphyp;
-mod subset;
+mod bitset;
+#[cfg(test)]
+mod fixtures;
+mod format;
+#[cfg(test)]
+mod tests;
+mod types;
 
-use bitvec::prelude::*;
-
-pub fn extract_bitset(s: &BitVec) -> Vec<usize> {
-    s.iter_ones().collect()
-}
+pub(crate) use bitset::{BitVecSetOpsExt, extract_bitset, subsets};
+pub(crate) use format::{debug_vertex_set, write_csg_cmp_pairs};
+pub(crate) use types::{EdgeIndex, EdgeSet, VertexIndex, VertexSet};

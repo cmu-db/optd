@@ -5,7 +5,7 @@ pub use graph::*;
 use bitvec::prelude::*;
 use tracing::{info, info_span, instrument};
 
-use super::{extract_bitset, subset::subsets};
+use super::{debug_vertex_set, extract_bitset, subsets, write_csg_cmp_pairs};
 
 pub fn enumerate_csg_cmp<V, E>(query_graph: &QueryGraph<V, E>) -> Vec<(BitVec, BitVec)> {
     let n = query_graph.vertices.len();
@@ -147,30 +147,19 @@ pub fn show_csg_cmp_pairs<V, E>(
     V: std::fmt::Debug,
     E: std::fmt::Debug,
 {
-    f.write_fmt(format_args!("All csg-cmp pairs:\n"))
-        .expect("write failed");
-    let n = pairs.len();
-    for (csg, cmp) in pairs {
-        let csg = extract_bitset(&csg)
-            .iter()
-            .map(|v| query_graph.get_vertex_info(*v).unwrap())
-            .collect::<Vec<_>>();
-
-        let cmp = extract_bitset(&cmp)
-            .iter()
-            .map(|v| query_graph.get_vertex_info(*v).unwrap())
-            .collect::<Vec<_>>();
+    write_csg_cmp_pairs(&mut f, pairs, |f, (csg, cmp)| {
+        let csg = debug_vertex_set(&csg, |v| query_graph.get_vertex_info(v));
+        let cmp = debug_vertex_set(&cmp, |v| query_graph.get_vertex_info(v));
         f.write_fmt(format_args!("{:?},{:?}\n", csg, cmp))
-            .expect("write failed");
-    }
-
-    f.write_fmt(format_args!("Total {} pairs.\n", n))
-        .expect("write failed");
+    })
+    .expect("write failed");
 }
 #[cfg(test)]
 mod tests {
 
     use tracing_test::traced_test;
+
+    use crate::rules::join_ordering::fixtures::make_example_simple_graph;
 
     use super::*;
 
@@ -193,28 +182,7 @@ mod tests {
     #[test]
     #[traced_test]
     fn test_enumerate_csg_cmp_example() {
-        let mut graph = QueryGraph::new();
-        graph.add_vertex("R0");
-        graph.add_vertex("R1");
-        graph.add_vertex("R2");
-        graph.add_vertex("R3");
-        graph.add_vertex("R4");
-
-        // 0, 1
-        graph.add_edge("R0-R1", bitvec![1, 1, 0, 0, 0]);
-        // 0, 2
-        graph.add_edge("R0-R2", bitvec![1, 0, 1, 0, 0]);
-        // 0, 3
-        graph.add_edge("R0-R3", bitvec![1, 0, 0, 1, 0]);
-        // 1, 4
-        graph.add_edge("R1-R4", bitvec![0, 1, 0, 0, 1]);
-        // 2. 3
-        graph.add_edge("R2-R3", bitvec![0, 0, 1, 1, 0]);
-        // 2, 4
-        graph.add_edge("R2-R4", bitvec![0, 0, 1, 0, 1]);
-        // 3, 4
-        graph.add_edge("R3-R4", bitvec![0, 0, 0, 1, 1]);
-
+        let graph = make_example_simple_graph();
         let pairs = enumerate_csg_cmp(&graph);
         verify_no_duplicate_pairs(&pairs);
         verify_csg_cmp_definition(&graph, &pairs);

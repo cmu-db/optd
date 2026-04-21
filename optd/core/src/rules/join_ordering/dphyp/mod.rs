@@ -1,4 +1,4 @@
-use super::{extract_bitset, subset::subsets};
+use super::{debug_vertex_set, subsets, write_csg_cmp_pairs, EdgeSet, VertexSet};
 use bitvec::prelude::*;
 use std::{collections::HashMap, sync::Arc};
 
@@ -170,48 +170,6 @@ impl DPHyp {
     }
 }
 
-pub fn make_example_hypergraph() -> QueryHypergraph<&'static str, &'static str> {
-    let mut h = QueryHypergraph::new();
-    h.add_vertex("R1");
-    h.add_vertex("R2");
-    h.add_vertex("R3");
-    h.add_vertex("R4");
-    h.add_vertex("R5");
-    h.add_vertex("R6");
-
-    let e = h.add_edge(
-        "(R1.#1=R2.#1)",
-        bitvec![1, 0, 0, 0, 0, 0],
-        bitvec![0, 1, 0, 0, 0, 0],
-    );
-    assert!(h.edges[e].is_simple());
-    let e = h.add_edge(
-        "(R2.#2=R3.#2)",
-        bitvec![0, 1, 0, 0, 0, 0],
-        bitvec![0, 0, 1, 0, 0, 0],
-    );
-    assert!(h.edges[e].is_simple());
-    let e = h.add_edge(
-        "(R4.#3=R5.#3)",
-        bitvec![0, 0, 0, 1, 0, 0],
-        bitvec![0, 0, 0, 0, 1, 0],
-    );
-    assert!(h.edges[e].is_simple());
-    let e = h.add_edge(
-        "(R5.#4=R6.#4)",
-        bitvec![0, 0, 0, 0, 1, 0],
-        bitvec![0, 0, 0, 0, 0, 1],
-    );
-    assert!(h.edges[e].is_simple());
-    let e = h.add_edge(
-        "(R1.a + R2.b + R3.c = R4.d + R5.e + R6.f)",
-        bitvec![1, 1, 1, 0, 0, 0],
-        bitvec![0, 0, 0, 1, 1, 1],
-    );
-    assert!(!h.edges[e].is_simple());
-    h
-}
-
 pub fn show_csg_cmp_pairs<V, E>(
     query_graph: &QueryHypergraph<V, E>,
     pairs: Vec<(VertexSet, VertexSet, EdgeSet)>,
@@ -220,38 +178,26 @@ pub fn show_csg_cmp_pairs<V, E>(
     V: std::fmt::Debug,
     E: std::fmt::Debug,
 {
-    f.write_fmt(format_args!("All csg-cmp pairs:\n"))
-        .expect("write failed");
-    let n = pairs.len();
-    for (csg, cmp, edge_mask) in pairs {
-        let csg = extract_bitset(&csg)
-            .iter()
-            .map(|v| query_graph.get_vertex_info(*v).unwrap())
-            .collect::<Vec<_>>();
-
-        let cmp = extract_bitset(&cmp)
-            .iter()
-            .map(|v| query_graph.get_vertex_info(*v).unwrap())
-            .collect::<Vec<_>>();
-        f.write_fmt(format_args!("{:?},{:?}\n", csg, cmp))
-            .expect("write failed");
+    write_csg_cmp_pairs(&mut f, pairs, |f, (csg, cmp, edge_mask)| {
+        let csg = debug_vertex_set(&csg, |v| query_graph.get_vertex_info(v));
+        let cmp = debug_vertex_set(&cmp, |v| query_graph.get_vertex_info(v));
+        f.write_fmt(format_args!("{:?},{:?}\n", csg, cmp))?;
 
         let edges = query_graph.get_edges(edge_mask);
         f.write_fmt(format_args!("  edges: {:?}\n", edges))
-            .expect("write failed");
-    }
-
-    f.write_fmt(format_args!("Total {} pairs.\n", n))
+    })
         .expect("write failed");
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::rules::join_ordering::fixtures::make_dphyp_example_hypergraph;
+
     use super::*;
 
     #[test]
     fn test_dp_hyp() {
-        let h = make_example_hypergraph();
+        let h = make_dphyp_example_hypergraph();
         let mut algo = DPHyp::new();
         let plan = algo.solve(&h);
         assert!(plan.is_some(), "DPHyp should find a plan");

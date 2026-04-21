@@ -1,12 +1,6 @@
 use bitvec::prelude::*;
 
-pub type VertexIndex = usize;
-
-pub type EdgeIndex = usize;
-
-pub type VertexSet = BitVec;
-
-pub type EdgeSet = BitVec;
+use super::super::{EdgeIndex, VertexIndex, VertexSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct QueryGraph<V, E> {
