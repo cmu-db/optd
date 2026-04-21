@@ -24,19 +24,12 @@
 //!
 //! # Column-to-statistics lookup
 //!
-//! Each IR `Column` carries a `ColumnMeta.source: Option<DataSourceId>` that
-//! records which base table the column originated from (set in
-//! `add_base_table_columns`; `None` for derived columns). The [`column_stats`]
-//! helper uses this provenance chain:
-//!
-//! ```text
-//! Column → ColumnMeta.source → Catalog.describe_table → TableStatistics
-//!        → (column.id - first_column_id) → ColumnStatistics
-//! ```
-//!
-//! **Assumption:** column provenance is only valid for non-nested queries.
-//! Derived columns (expressions, subqueries) have `source = None` and will
-//! always miss the stats lookup, causing a fallback.
+//! Base-table stats are still looked up via the current binding/cached catalog
+//! path in [`IRContext::column_stats`], but higher operators now recover
+//! base-column lineage through the cached [`PredicateSummary`] property. This
+//! lets aliases and simple derived keys such as `date_part('YEAR', date_col)`
+//! keep using base-table statistics above `Project`, `Remap`, and `Aggregate`
+//! boundaries.
 
 mod selectivity;
 
@@ -114,7 +107,8 @@ fn estimate_scan(ctx: &IRContext, source: DataSourceId) -> Cardinality {
 /// Estimate filter cardinality: `sel(predicate) · |input|`.
 fn estimate_filter(input: &Operator, predicate: &Scalar, ctx: &IRContext) -> Cardinality {
     let input_card = input.cardinality(ctx);
-    let sel = selectivity::filter_selectivity(predicate, ctx);
+    let input_summary = input.predicate_summary(ctx);
+    let sel = selectivity::filter_selectivity_with_summary(predicate, input_summary.as_ref(), ctx);
     sel * input_card
 }
 
@@ -134,17 +128,11 @@ fn estimate_aggregate(keys: &[Arc<Scalar>], input: &Operator, ctx: &IRContext) -
     }
 
     let input_card = input.cardinality(ctx);
+    let input_summary = input.predicate_summary(ctx);
 
     let mut ndv_product: f64 = 1.0;
     for key in keys {
-        let key_ndv = key
-            .try_borrow::<ColumnRef>()
-            .ok()
-            .and_then(|col_ref| column_stats(ctx, *col_ref.column()))
-            .and_then(|(table_stats, offset)| {
-                let col_stats = table_stats.column_statistics.get(offset)?;
-                ndv(col_stats)
-            })
+        let key_ndv = selectivity::key_ndv_from_summary(key, input_summary.as_ref(), ctx)
             .map(|n| n as f64)
             .unwrap_or_else(|| {
                 input_card.as_f64() * AdvancedCardinalityEstimator::FALLBACK_GROUP_BY_NDV_FACTOR
@@ -269,6 +257,54 @@ fn extract_equi_and_non_equi(
 
     // Case 3: Anything else (non-equi condition, literal, etc.) — no keys.
     (vec![], Some(join_cond.clone()))
+}
+
+fn extract_hash_impl_non_equi(
+    join_cond: &Arc<Scalar>,
+    hash_keys: &[(Column, Column)],
+) -> Option<Arc<Scalar>> {
+    let normalized_keys = hash_keys
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+    let is_hash_key_term = |term: &Arc<Scalar>| {
+        let Ok(binop) = term.try_borrow::<BinaryOp>() else {
+            return false;
+        };
+        if !binop.is_eq() {
+            return false;
+        }
+        let Ok(lhs) = binop.lhs().try_borrow::<ColumnRef>() else {
+            return false;
+        };
+        let Ok(rhs) = binop.rhs().try_borrow::<ColumnRef>() else {
+            return false;
+        };
+        normalized_keys.contains(&(*lhs.column(), *rhs.column()))
+            || normalized_keys.contains(&(*rhs.column(), *lhs.column()))
+    };
+
+    if is_hash_key_term(join_cond) {
+        return None;
+    }
+
+    if let Ok(nary) = join_cond.try_borrow::<NaryOp>()
+        && nary.is_and()
+    {
+        let residual = nary
+            .terms()
+            .iter()
+            .filter(|term| !is_hash_key_term(term))
+            .cloned()
+            .collect::<Vec<_>>();
+        return match &residual[..] {
+            [] => None,
+            [singleton] => Some(singleton.clone()),
+            _ => Some(NaryOp::new(NaryOpKind::And, residual.into()).into_scalar()),
+        };
+    }
+
+    Some(join_cond.clone())
 }
 
 // ---------------------------------------------------------------------------
@@ -402,8 +438,21 @@ impl CardinalityEstimator for AdvancedCardinalityEstimator {
                 let outer_cols = outer.output_columns(ctx).unwrap();
                 let inner_cols = inner.output_columns(ctx).unwrap();
 
-                let (keys, non_equi) =
-                    extract_equi_and_non_equi(join_cond, &outer_cols, &inner_cols);
+                let (keys, non_equi) = if let Some(implementation) = join.implementation() {
+                    if let Some(hash_keys) = implementation.hash_keys() {
+                        (
+                            hash_keys.iter().copied().collect(),
+                            extract_hash_impl_non_equi(join_cond, hash_keys.as_ref()),
+                        )
+                    } else {
+                        extract_equi_and_non_equi(join_cond, &outer_cols, &inner_cols)
+                    }
+                } else {
+                    extract_equi_and_non_equi(join_cond, &outer_cols, &inner_cols)
+                };
+                let outer_summary = outer.predicate_summary(ctx);
+                let inner_summary = inner.predicate_summary(ctx);
+                let join_summary = op.predicate_summary(ctx);
 
                 if keys.is_empty() {
                     estimate_fallback_join(ctx, join_type, outer, inner, join_cond)
@@ -414,6 +463,9 @@ impl CardinalityEstimator for AdvancedCardinalityEstimator {
                         join_type,
                         outer.cardinality(ctx),
                         inner.cardinality(ctx),
+                        outer_summary.as_ref(),
+                        inner_summary.as_ref(),
+                        join_summary.as_ref(),
                         ctx,
                     )
                 }

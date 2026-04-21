@@ -19,6 +19,7 @@
 mod cardinality;
 mod output_columns;
 mod output_schema;
+mod predicate_summary;
 mod required;
 mod tuple_ordering;
 
@@ -26,16 +27,30 @@ use std::sync::{Arc, OnceLock};
 
 pub use cardinality::*;
 pub use output_columns::OutputColumns;
+pub use predicate_summary::{
+    GroupPredicate, PredicateSummary, RangeConstraint, ValueRef, date_days_to_year,
+    date_millis_to_year, derive_value_ref,
+};
 pub use required::Required;
 pub use tuple_ordering::*;
 
 use crate::ir::{ColumnSet, context::IRContext};
 
 /// Common properties structure for IR operators.
+///
+/// Every field is a `OnceLock` so the property is computed at most once per
+/// operator instance. The `predicate_summary` slot is also what carries
+/// lineage + predicate state across memo `Group` placeholders — see
+/// `docs/predicate-summary-lineage.md.memo`.
 #[derive(Debug, Default)]
 pub struct OperatorProperties {
     pub output_columns: OnceLock<Arc<ColumnSet>>,
     pub cardinality: OnceLock<Cardinality>,
+    /// Cached lineage + aggregated predicate state (see
+    /// [`predicate_summary::PredicateSummary`]). Populated lazily on first
+    /// derive; also warmed eagerly at memo-insert time so `Group`
+    /// placeholders have a usable summary.
+    pub predicate_summary: OnceLock<Arc<PredicateSummary>>,
 }
 
 /// Common properties structure for IR scalars.

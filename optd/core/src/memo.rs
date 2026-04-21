@@ -148,6 +148,29 @@ impl MemoTable {
             ctx,
         }
     }
+
+    /// Eagerly materialize the cacheable operator properties before the
+    /// operator is interred as a memo `Group` placeholder.
+    ///
+    /// Group placeholders in `OperatorKind::Group(_)` have no structural
+    /// information on their own: their `derive_by_compute` implementations
+    /// rely entirely on the `OnceLock`s in `OperatorProperties` being
+    /// populated. We therefore force computation here — while we still hold
+    /// the concrete operator tree — so later traversals through the group
+    /// see the cached value instead of a default.
+    ///
+    /// Called from `insert_new_operator` (for the root) and from
+    /// `insert_operator` (for every new input group). This is still
+    /// best-effort: re-entrant code paths that create groups without going
+    /// through these entry points will miss the warm-up. See
+    /// `docs/predicate-summary-lineage.md.memo` for the memo-integration
+    /// limitations.
+    fn warm_group_properties(&self, operator: &Arc<Operator>) {
+        let _ = operator.output_columns(&self.ctx);
+        let _ = operator.predicate_summary(&self.ctx);
+        let _ = operator.cardinality(&self.ctx);
+    }
+
     /// Adds an operator to the memo table.
     ///
     /// Returns the group id where the operator belongs:
@@ -157,6 +180,7 @@ impl MemoTable {
     /// **Note:** This would not trigger group merges.
     #[instrument(parent = None, skip_all)]
     pub fn insert_new_operator(&mut self, operator: Arc<Operator>) -> Result<GroupId, GroupId> {
+        self.warm_group_properties(&operator);
         self.insert_operator(operator.clone()).map(|first_expr| {
             trace!(id = %first_expr.id(), "obtain new expr");
             let id = first_expr.id();
@@ -235,6 +259,7 @@ impl MemoTable {
                     .map(|first_expr| {
                         let group_id = GroupId::from(first_expr.id());
                         info!(id = %first_expr.id(), "extra group created");
+                        self.warm_group_properties(op);
                         let memo_group = MemoGroup::new(first_expr, op.properties().clone());
                         let res = self.groups.insert(group_id, memo_group);
                         assert!(res.is_none());

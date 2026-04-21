@@ -92,7 +92,11 @@ use std::collections::HashMap;
 
 use crate::ir::{
     Column, DataType, IRContext, Scalar, ScalarValue, operator::join::JoinType,
-    properties::Cardinality, scalar::*, statistics::ColumnStatistics,
+    properties::{
+        Cardinality, GroupPredicate, PredicateSummary, RangeConstraint, ValueRef,
+        date_days_to_year, date_millis_to_year, derive_value_ref,
+    },
+    scalar::*, statistics::ColumnStatistics,
 };
 use crate::utility::union_find::UnionFind;
 
@@ -468,6 +472,267 @@ pub fn filter_selectivity(predicate: &Scalar, ctx: &IRContext) -> f64 {
     }
 }
 
+/// Incremental filter selectivity given the input's predicate summary.
+///
+/// Rather than multiplying the base-table selectivity of `predicate` (which
+/// double-counts predicates already reflected in the input summary), this
+/// folds the filter into a cloned summary and returns the ratio of
+/// post-filter to pre-filter summary selectivity. A contradictory merged
+/// summary short-circuits to `0.0`.
+///
+/// See the "Ratio-based `summary_selectivity`" design note in
+/// `docs/predicate-summary-lineage.md.memo` for why this is the preferred
+/// entry point over `filter_selectivity`.
+pub fn filter_selectivity_with_summary(
+    predicate: &Scalar,
+    summary: &PredicateSummary,
+    ctx: &IRContext,
+) -> f64 {
+    let mut merged = summary.clone();
+    merged.apply_predicate(&std::sync::Arc::new(predicate.clone()), ctx);
+    if merged.is_contradictory {
+        return 0.0;
+    }
+
+    let before = summary_selectivity(summary, ctx);
+    let after = summary_selectivity(&merged, ctx);
+    if before <= 0.0 {
+        return after.clamp(0.0, 1.0);
+    }
+    (after / before).clamp(0.0, 1.0)
+}
+
+/// NDV for a GROUP BY / aggregate key, resolved through lineage.
+///
+/// Resolves `key` to a `ValueRef`, canonicalizes it (so an aliased key
+/// shares NDV with its source column), then returns the NDV of the
+/// representative. Returns `None` when the key resolves to a `Derived`
+/// value or no stats are available; callers then fall back to a magic
+/// constant.
+pub fn key_ndv_from_summary(
+    key: &Scalar,
+    summary: &PredicateSummary,
+    ctx: &IRContext,
+) -> Option<usize> {
+    let value = derive_value_ref(key, summary, ctx)?;
+    value_ndv(&summary.canonical_value(&value), ctx)
+}
+
+/// Overall selectivity implied by a summary.
+///
+/// Factored into two pieces:
+///   - per-`table_index` group selectivity via [`group_selectivity`],
+///   - cross-table residual predicates, each charged the fallback
+///     `0.1` softened by `0.5^idx` so later residuals contribute less.
+///
+/// The `0.5^idx` decay is the "soft independence" compromise described in
+/// the README: raw multiplication would underestimate correlated
+/// predicates, and no compounding would overestimate truly independent
+/// ones.
+fn summary_selectivity(summary: &PredicateSummary, ctx: &IRContext) -> f64 {
+    if summary.is_contradictory {
+        return 0.0;
+    }
+
+    let group_product: f64 = summary
+        .selectivity_groups
+        .keys()
+        .copied()
+        .map(|group| group_selectivity(summary, group, ctx))
+        .product();
+
+    let residual_product: f64 = summary
+        .residual_predicates
+        .iter()
+        .enumerate()
+        .map(|(idx, _)| {
+            AdvancedCardinalityEstimator::FALLBACK_PREDICATE_SELECTIVITY.powf(0.5_f64.powi(idx as i32))
+        })
+        .product();
+
+    (group_product * residual_product).clamp(0.0, 1.0)
+}
+
+/// Selectivity contribution of a single `table_index` group.
+///
+/// Gathers one factor per constrained canonical value (literal equality or
+/// range), plus one fallback factor per distinct `ColumnEquality` and
+/// `Residual` in the group. Factors are sorted ascending (most selective
+/// first) and combined with an exponential decay so the primary predicate
+/// dominates and additional same-table predicates have diminishing effect.
+/// This reflects the common case that predicates on the same table
+/// correlate more strongly than predicates on unrelated tables.
+fn group_selectivity(summary: &PredicateSummary, group: i64, ctx: &IRContext) -> f64 {
+    let mut factors = Vec::new();
+    let mut seen_classes = std::collections::HashSet::new();
+    for value in summary.values_in_group(group) {
+        let canonical = summary.canonical_value(&value);
+        if !seen_classes.insert(canonical.clone()) {
+            continue;
+        }
+        if let Some(literal) = summary.literal_equalities.get(&canonical) {
+            factors.push(
+                value_equality_selectivity(&canonical, *literal, ctx)
+                    .unwrap_or(AdvancedCardinalityEstimator::FALLBACK_PREDICATE_SELECTIVITY),
+            );
+        } else if let Some(range) = summary.range_constraints.get(&canonical) {
+            factors.push(
+                value_range_selectivity(&canonical, range, ctx)
+                    .unwrap_or(AdvancedCardinalityEstimator::FALLBACK_PREDICATE_SELECTIVITY),
+            );
+        }
+    }
+
+    let mut seen_equalities = std::collections::HashSet::new();
+    let mut residual_count = 0usize;
+    for predicate in summary.selectivity_groups.get(&group).into_iter().flatten() {
+        match predicate {
+            GroupPredicate::ColumnEquality(lhs, rhs) => {
+                let lhs = summary.canonical_value(lhs);
+                let rhs = summary.canonical_value(rhs);
+                if lhs == rhs {
+                    continue;
+                }
+                let pair = if format!("{lhs:?}") <= format!("{rhs:?}") {
+                    (lhs, rhs)
+                } else {
+                    (rhs, lhs)
+                };
+                if seen_equalities.insert(pair) {
+                    factors.push(AdvancedCardinalityEstimator::FALLBACK_PREDICATE_SELECTIVITY);
+                }
+            }
+            GroupPredicate::Residual(_) => residual_count += 1,
+            GroupPredicate::EqLiteral(_, _) | GroupPredicate::Range(_, _, _) => {}
+        }
+    }
+    for _ in 0..residual_count {
+        factors.push(AdvancedCardinalityEstimator::FALLBACK_PREDICATE_SELECTIVITY);
+    }
+
+    factors.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mut exponent = 1.0;
+    let mut combined = 1.0;
+    for factor in factors {
+        combined *= factor.powf(exponent);
+        exponent *= 0.5;
+    }
+    combined
+}
+
+/// Equality-against-literal selectivity for a `ValueRef`.
+///
+/// `(1 - null_fraction) / NDV`. `ExtractYear` gets a year-domain NDV
+/// derived from the base column's min/max. `Derived` has no recoverable
+/// NDV and returns `None`.
+fn value_equality_selectivity(value: &ValueRef, _literal: f64, ctx: &IRContext) -> Option<f64> {
+    let (distinct, null_fraction) = match value {
+        ValueRef::Base(column) => {
+            let (stats, offset) = column_stats(ctx, *column)?;
+            let col_stats = stats.column_statistics.get(offset)?;
+            let distinct = ndv(col_stats).unwrap_or(stats.row_count);
+            (distinct, null_fraction(col_stats, stats.row_count))
+        }
+        ValueRef::ExtractYear(column) => {
+            let (stats, offset) = column_stats(ctx, *column)?;
+            let col_stats = stats.column_statistics.get(offset)?;
+            let distinct = year_ndv(col_stats, &ctx.get_column_meta(column).data_type)? as usize;
+            (distinct, null_fraction(col_stats, stats.row_count))
+        }
+        ValueRef::Derived(_) => return None,
+    };
+    Some((1.0 - null_fraction) / distinct as f64)
+}
+
+/// Uniform-distribution range selectivity:
+/// `clamp((upper - lower) / (max - min), 0, 1) * (1 - null_fraction)`.
+///
+/// Missing bounds default to the corresponding end of the value's domain.
+/// Returns `None` for `Derived` values or when the domain is degenerate.
+fn value_range_selectivity(
+    value: &ValueRef,
+    constraint: &RangeConstraint,
+    ctx: &IRContext,
+) -> Option<f64> {
+    let (min, max, null_fraction) = value_domain(value, ctx)?;
+    let domain = max - min;
+    if domain <= 0.0 {
+        return None;
+    }
+    let lower = constraint.lower.map(|(value, _)| value).unwrap_or(min);
+    let upper = constraint.upper.map(|(value, _)| value).unwrap_or(max);
+    if lower > upper {
+        return Some(0.0);
+    }
+    Some(((upper - lower) / domain).clamp(0.0, 1.0) * (1.0 - null_fraction))
+}
+
+/// Return `(min, max, null_fraction)` for a `ValueRef`, reinterpreting the
+/// underlying base-column statistics when the value is `ExtractYear`.
+/// Returns `None` for `Derived` values.
+fn value_domain(value: &ValueRef, ctx: &IRContext) -> Option<(f64, f64, f64)> {
+    match value {
+        ValueRef::Base(column) => {
+            let (stats, offset) = column_stats(ctx, *column)?;
+            let col_stats = stats.column_statistics.get(offset)?;
+            let column_type = &ctx.get_column_meta(column).data_type;
+            let min = parse_stat_value(col_stats.min_value.as_ref()?, column_type)?;
+            let max = parse_stat_value(col_stats.max_value.as_ref()?, column_type)?;
+            Some((min, max, null_fraction(col_stats, stats.row_count)))
+        }
+        ValueRef::ExtractYear(column) => {
+            let (stats, offset) = column_stats(ctx, *column)?;
+            let col_stats = stats.column_statistics.get(offset)?;
+            // Reinterpret the base column's min/max as year bounds via
+            // `parse_year_value`, which handles Date32 (days since epoch)
+            // and Date64 (millis since epoch).
+            let min = parse_year_value(col_stats.min_value.as_ref()?, &ctx.get_column_meta(column).data_type)? as f64;
+            let max = parse_year_value(col_stats.max_value.as_ref()?, &ctx.get_column_meta(column).data_type)? as f64;
+            Some((min, max, null_fraction(col_stats, stats.row_count)))
+        }
+        ValueRef::Derived(_) => None,
+    }
+}
+
+/// NDV of a `ValueRef`. For `ExtractYear` we use the integer year range
+/// (`max_year - min_year + 1`) because the catalog has no direct NDV for a
+/// year projection; for `Base` we read the column's stored NDV / HLL.
+fn value_ndv(value: &ValueRef, ctx: &IRContext) -> Option<usize> {
+    match value {
+        ValueRef::Base(column) => {
+            let (stats, offset) = column_stats(ctx, *column)?;
+            let col_stats = stats.column_statistics.get(offset)?;
+            ndv(col_stats)
+        }
+        ValueRef::ExtractYear(column) => {
+            let (stats, offset) = column_stats(ctx, *column)?;
+            let col_stats = stats.column_statistics.get(offset)?;
+            year_ndv(col_stats, &ctx.get_column_meta(column).data_type).map(|value| value as usize)
+        }
+        ValueRef::Derived(_) => None,
+    }
+}
+
+/// Approximate NDV for the year projection of a date column: number of
+/// distinct calendar years covered by `[min_value, max_value]`. Always
+/// at least 1.
+fn year_ndv(col_stats: &ColumnStatistics, data_type: &DataType) -> Option<i32> {
+    let min = parse_year_value(col_stats.min_value.as_ref()?, data_type)?;
+    let max = parse_year_value(col_stats.max_value.as_ref()?, data_type)?;
+    Some((max - min + 1).max(1))
+}
+
+/// Parse a catalog min/max string and convert to a calendar year.
+/// `Date32` values are days since the UNIX epoch; `Date64` values are
+/// milliseconds since the UNIX epoch. Non-date types return `None`.
+fn parse_year_value(value: &str, data_type: &DataType) -> Option<i32> {
+    match data_type {
+        DataType::Date32 => value.parse::<i32>().ok().and_then(date_days_to_year),
+        DataType::Date64 => value.parse::<i64>().ok().and_then(date_millis_to_year),
+        _ => None,
+    }
+}
+
 /// Compute selectivity for an equality predicate `col = literal`.
 ///
 /// # Formula
@@ -608,6 +873,9 @@ pub fn equijoin_cardinality(
     join_type: &JoinType,
     outer_card: Cardinality,
     inner_card: Cardinality,
+    outer_summary: &PredicateSummary,
+    inner_summary: &PredicateSummary,
+    join_summary: &PredicateSummary,
     ctx: &IRContext,
 ) -> Cardinality {
     // -----------------------------------------------------------------------
@@ -619,12 +887,14 @@ pub fn equijoin_cardinality(
     let mut edges: Vec<JoinEdge> = Vec::with_capacity(keys.len());
 
     for (outer_col, inner_col) in keys {
+        let outer_value = resolve_join_value(*outer_col, outer_summary);
+        let inner_value = resolve_join_value(*inner_col, inner_summary);
         match (
-            &column_stats(ctx, *outer_col),
-            &column_stats(ctx, *inner_col),
+            value_column_stats(&outer_value, ctx),
+            value_column_stats(&inner_value, ctx),
         ) {
             (Some((outer_ts, outer_off)), Some((inner_ts, inner_off))) => {
-                let Some(build_cs) = outer_ts.column_statistics.get(*outer_off) else {
+                let Some(build_cs) = outer_ts.column_statistics.get(outer_off) else {
                     edges.push(JoinEdge {
                         build_col: *outer_col,
                         probe_col: *inner_col,
@@ -633,7 +903,7 @@ pub fn equijoin_cardinality(
                     });
                     continue;
                 };
-                let Some(probe_cs) = inner_ts.column_statistics.get(*inner_off) else {
+                let Some(probe_cs) = inner_ts.column_statistics.get(inner_off) else {
                     edges.push(JoinEdge {
                         build_col: *outer_col,
                         probe_col: *inner_col,
@@ -647,19 +917,31 @@ pub fn equijoin_cardinality(
                 // no rows can match on this key → entire join produces 0 rows.
                 // Check ALL key pairs, including those that will become
                 // non-spanning-tree edges in Phase B.
-                let build_type = &ctx.get_column_meta(outer_col).data_type;
-                let probe_type = &ctx.get_column_meta(inner_col).data_type;
-                if !domains_overlap(build_cs, build_type, probe_cs, probe_type) {
-                    return Cardinality::new(0.0);
+                if let (Some((build_min, build_max, _)), Some((probe_min, probe_max, _))) = (
+                    constrained_value_domain(&outer_value, join_summary, ctx),
+                    constrained_value_domain(&inner_value, join_summary, ctx),
+                ) {
+                    if build_max < probe_min || probe_max < build_min {
+                        return Cardinality::new(0.0);
+                    }
                 }
 
                 // Compute per-edge selectivity: prefer HLL, fall back to
                 // containment assumption, then row-count upper bound.
-                let (sel, had_stats) = if let Some(s) = hll_join_selectivity(build_cs, probe_cs) {
+                let join_constrained = has_join_constraints(&outer_value, join_summary)
+                    || has_join_constraints(&inner_value, join_summary);
+                let (sel, had_stats) = if !join_constrained
+                    && let Some(s) = hll_join_selectivity(build_cs, probe_cs)
+                {
                     (s, true)
                 } else {
-                    match (ndv(build_cs), ndv(probe_cs)) {
-                        (Some(build_ndv), Some(probe_ndv)) => {
+                    match (
+                        constrained_value_ndv(&outer_value, join_summary, ctx),
+                        constrained_value_ndv(&inner_value, join_summary, ctx),
+                    ) {
+                        (Some(build_ndv), Some(probe_ndv))
+                            if build_ndv > 0 && probe_ndv > 0 =>
+                        {
                             let max_ndv = build_ndv.max(probe_ndv) as f64;
                             (1.0 / max_ndv, true)
                         }
@@ -749,7 +1031,8 @@ pub fn equijoin_cardinality(
     // These are treated as a post-join filter on the equi-join result.
     // When non_equi_conds is None or literal TRUE, filter_selectivity returns 1.0 (no effect).
     let inner_card = outer_card.as_f64() * inner_card.as_f64() * selectivity;
-    let non_equi_sel = non_equi_conds.map_or(1.0, |cond| filter_selectivity(cond, ctx));
+    let non_equi_sel = non_equi_conds
+        .map_or(1.0, |cond| filter_selectivity_with_summary(cond, join_summary, ctx));
     let inner_result = inner_card * non_equi_sel;
 
     // Adjust for join type.
@@ -764,6 +1047,111 @@ pub fn equijoin_cardinality(
     };
 
     Cardinality::new(adjusted)
+}
+
+/// Route a join-side column through its local summary's lineage and
+/// canonicalize. The returned `ValueRef` is what we use to look up stats
+/// and constraints for that side — so an alias or equi-joined pair reads
+/// from the same source column on both sides.
+fn resolve_join_value(column: Column, summary: &PredicateSummary) -> ValueRef {
+    let value = summary
+        .lineage
+        .get(&column)
+        .cloned()
+        .unwrap_or(ValueRef::Base(column));
+    summary.canonical_value(&value)
+}
+
+/// Fetch `(TableStatistics, column_offset)` for any `ValueRef` that is
+/// backed by a base column. `Derived` values return `None`, forcing
+/// callers to fall back to magic-constant selectivity.
+fn value_column_stats(value: &ValueRef, ctx: &IRContext) -> Option<(crate::ir::statistics::TableStatistics, usize)> {
+    match value {
+        ValueRef::Base(column) | ValueRef::ExtractYear(column) => column_stats(ctx, *column),
+        ValueRef::Derived(_) => None,
+    }
+}
+
+/// True iff the join summary has learned a literal or range constraint on
+/// this value's class. Used to disable HLL-intersection selectivity when
+/// constraints are present — HLL sketches describe the full column domain,
+/// not the constrained sub-domain, so mixing them with a tightened NDV
+/// double-counts the filter.
+fn has_join_constraints(value: &ValueRef, summary: &PredicateSummary) -> bool {
+    let canonical = summary.canonical_value(value);
+    summary.literal_equalities.contains_key(&canonical)
+        || summary.range_constraints.contains_key(&canonical)
+}
+
+/// Domain of `value`, tightened by any literal/range constraint recorded
+/// in `summary`. A literal equality collapses the domain to a single
+/// point; a range constraint clamps `min`/`max` to the tightened window.
+fn constrained_value_domain(
+    value: &ValueRef,
+    summary: &PredicateSummary,
+    ctx: &IRContext,
+) -> Option<(f64, f64, f64)> {
+    let (mut min, mut max, null_fraction) = value_domain(value, ctx)?;
+    let canonical = summary.canonical_value(value);
+    if let Some(literal) = summary.literal_equalities.get(&canonical) {
+        return Some((*literal, *literal, null_fraction));
+    }
+    if let Some(range) = summary.range_constraints.get(&canonical) {
+        if let Some((lower, _)) = range.lower {
+            min = min.max(lower);
+        }
+        if let Some((upper, _)) = range.upper {
+            max = max.min(upper);
+        }
+    }
+    Some((min, max, null_fraction))
+}
+
+/// NDV scaled to a constrained domain.
+///
+/// A literal equality collapses to `1`. A range shrinks NDV proportionally
+/// to `constrained_width / base_width`, under the usual uniform-
+/// distribution assumption. If the constrained window is a single inclusive
+/// point (`[v, v]`), we also collapse to `1` — this makes
+/// `col = v` (expressed as a range) behave the same as a literal
+/// equality. Returns at least `1` to avoid sub-row NDV estimates.
+fn constrained_value_ndv(
+    value: &ValueRef,
+    summary: &PredicateSummary,
+    ctx: &IRContext,
+) -> Option<usize> {
+    let canonical = summary.canonical_value(value);
+    if summary.literal_equalities.contains_key(&canonical) {
+        return Some(1);
+    }
+
+    let base_ndv = value_ndv(value, ctx)? as f64;
+    let Some(range) = summary.range_constraints.get(&canonical) else {
+        return Some(base_ndv as usize);
+    };
+    let (base_min, base_max, _) = value_domain(value, ctx)?;
+    let domain_width = (base_max - base_min).abs();
+    if domain_width <= 0.0 {
+        return Some(base_ndv.max(1.0) as usize);
+    }
+
+    let (constrained_min, constrained_max, _) = constrained_value_domain(value, summary, ctx)?;
+    let constrained_width = (constrained_max - constrained_min).max(0.0);
+    let lower_inclusive = range.lower.map(|(_, inclusive)| inclusive).unwrap_or(true);
+    let upper_inclusive = range.upper.map(|(_, inclusive)| inclusive).unwrap_or(true);
+    let exact_point = constrained_width <= f64::EPSILON
+        && lower_inclusive
+        && upper_inclusive
+        && range.lower.is_some()
+        && range.upper.is_some();
+    if exact_point {
+        return Some(1);
+    }
+
+    let scaled = (base_ndv * (constrained_width / domain_width))
+        .ceil()
+        .clamp(1.0, base_ndv);
+    Some(scaled as usize)
 }
 
 /// Compute equi-join selectivity using HLL set intersection.
@@ -1239,4 +1627,433 @@ fn domains_overlap(
 
     // Ranges overlap if NOT (a_hi < b_lo OR b_hi < a_lo)
     !(a_max < b_min || b_max < a_min)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use arrow_schema::SchemaRef;
+
+    use crate::ir::{
+        Column, DataType, IRContext, ScalarValue,
+        builder::{column_ref, int32},
+        catalog::{Catalog, Field, Schema},
+        convert::IntoScalar,
+        operator::{Remap, join::JoinType},
+        statistics::TableStatistics,
+        scalar::{Cast, Function, Literal},
+        statistics::ColumnStatistics,
+        table_ref::TableRef,
+    };
+    use crate::magic::{MagicCostModel, MemoryCatalog};
+
+    use super::super::AdvancedCardinalityEstimator;
+
+    fn adv_ctx_with_catalog(cat: MemoryCatalog) -> IRContext {
+        IRContext::new(
+            Arc::new(cat),
+            Arc::new(AdvancedCardinalityEstimator),
+            Arc::new(MagicCostModel),
+        )
+    }
+
+    fn col_stats(
+        distinct_count: usize,
+        min_value: Option<&str>,
+        max_value: Option<&str>,
+    ) -> ColumnStatistics {
+        ColumnStatistics {
+            advanced_stats: vec![],
+            min_value: min_value.map(str::to_string),
+            max_value: max_value.map(str::to_string),
+            null_count: Some(0),
+            distinct_count: Some(distinct_count),
+        }
+    }
+
+    fn int_schema(columns: usize) -> SchemaRef {
+        Arc::new(Schema::new(
+            (0..columns)
+                .map(|idx| Field::new(format!("c{idx}"), DataType::Int32, false))
+                .collect::<Vec<_>>(),
+        ))
+    }
+
+    #[test]
+    fn stacked_filters_backoff_through_project_and_remap() -> crate::error::Result<()> {
+        let catalog = MemoryCatalog::new("optd", "public");
+        let table_ref = TableRef::bare("t1");
+        let schema = int_schema(2);
+        catalog.create_table(table_ref.clone(), schema.clone()).unwrap();
+        catalog.set_table_statistics(
+            table_ref.clone(),
+            TableStatistics {
+                row_count: 1000,
+                column_statistics: vec![
+                    col_stats(10, Some("0"), Some("9")),
+                    col_stats(5, Some("0"), Some("4")),
+                ],
+                size_bytes: None,
+            },
+        )
+        .unwrap();
+
+        let ctx = adv_ctx_with_catalog(catalog);
+        let get = ctx.logical_get(table_ref.clone(), None)?.build();
+        let c0 = ctx.col(Some(&table_ref), "c0")?;
+        let c1 = ctx.col(Some(&table_ref), "c1")?;
+
+        let filtered = get
+            .with_ctx(&ctx)
+            .select(column_ref(c0).eq(int32(1)))
+            .build();
+        let projected = ctx
+            .project(filtered, [column_ref(c0), column_ref(c1)])?
+            .build();
+        let aliased = ctx.remap(projected, TableRef::bare("t2"))?.build();
+        let t2_c1 = ctx.col(Some(&TableRef::bare("t2")), "c1")?;
+        let result = aliased
+            .with_ctx(&ctx)
+            .select(column_ref(t2_c1).eq(int32(2)))
+            .build();
+
+        let card = result.cardinality(&ctx).as_f64();
+        assert!((card - 44.72135955).abs() < 0.01, "cardinality = {card}");
+        Ok(())
+    }
+
+    #[test]
+    fn transitive_contradiction_across_nested_filters_returns_zero() -> crate::error::Result<()> {
+        let catalog = MemoryCatalog::new("optd", "public");
+        let table_ref = TableRef::bare("t1");
+        let schema = int_schema(2);
+        catalog.create_table(table_ref.clone(), schema.clone()).unwrap();
+        catalog.set_table_statistics(
+            table_ref.clone(),
+            TableStatistics {
+                row_count: 1000,
+                column_statistics: vec![
+                    col_stats(10, Some("0"), Some("9")),
+                    col_stats(10, Some("0"), Some("9")),
+                ],
+                size_bytes: None,
+            },
+        )
+        .unwrap();
+
+        let ctx = adv_ctx_with_catalog(catalog);
+        let get = ctx.logical_get(table_ref.clone(), None)?.build();
+        let c0 = ctx.col(Some(&table_ref), "c0")?;
+        let c1 = ctx.col(Some(&table_ref), "c1")?;
+        let inner = get
+            .with_ctx(&ctx)
+            .select(column_ref(c0).eq(column_ref(c1)).and(column_ref(c1).eq(int32(3))))
+            .build();
+        let outer = inner.with_ctx(&ctx).select(column_ref(c0).lt(int32(2))).build();
+
+        assert_eq!(outer.cardinality(&ctx).as_f64(), 0.0);
+        Ok(())
+    }
+
+    #[test]
+    fn tautology_over_alias_preserves_input_cardinality() -> crate::error::Result<()> {
+        let catalog = MemoryCatalog::new("optd", "public");
+        let table_ref = TableRef::bare("t1");
+        let schema = int_schema(1);
+        catalog.create_table(table_ref.clone(), schema.clone()).unwrap();
+        catalog.set_table_statistics(
+            table_ref.clone(),
+            TableStatistics {
+                row_count: 1000,
+                column_statistics: vec![col_stats(101, Some("0"), Some("100"))],
+                size_bytes: None,
+            },
+        )
+        .unwrap();
+
+        let ctx = adv_ctx_with_catalog(catalog);
+        let get = ctx.logical_get(table_ref.clone(), None)?.build();
+        let projected = ctx.project(get, [column_ref(ctx.col(Some(&table_ref), "c0")?)])?.build();
+        let aliased = ctx.remap(projected, TableRef::bare("t2"))?.build();
+        let t2_c0 = ctx.col(Some(&TableRef::bare("t2")), "c0")?;
+        let predicate = column_ref(t2_c0).lt(int32(0)).or(column_ref(t2_c0).ge(int32(0)));
+        let result = aliased.clone().with_ctx(&ctx).select(predicate).build();
+
+        assert_eq!(result.cardinality(&ctx).as_f64(), aliased.cardinality(&ctx).as_f64());
+        Ok(())
+    }
+
+    #[test]
+    fn aggregate_uses_year_lineage_for_grouping_ndv() -> crate::error::Result<()> {
+        let catalog = MemoryCatalog::new("optd", "public");
+        let table_ref = TableRef::bare("orders");
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "order_date",
+            DataType::Date32,
+            false,
+        )]));
+        catalog.create_table(table_ref.clone(), schema.clone()).unwrap();
+        catalog.set_table_statistics(
+            table_ref.clone(),
+            TableStatistics {
+                row_count: 1000,
+                column_statistics: vec![ColumnStatistics {
+                    advanced_stats: vec![],
+                    min_value: Some("9131".to_string()),
+                    max_value: Some("9861".to_string()),
+                    null_count: Some(0),
+                    distinct_count: Some(731),
+                }],
+                size_bytes: None,
+            },
+        )
+        .unwrap();
+
+        let ctx = adv_ctx_with_catalog(catalog);
+        let get = ctx.logical_get(table_ref.clone(), None)?.build();
+        let order_date = ctx.col(Some(&table_ref), "order_date")?;
+        let projected = ctx
+            .project(
+                get,
+                [Function::new_scalar(
+                    "date_part",
+                    Arc::new([
+                        Literal::new(ScalarValue::Utf8(Some("YEAR".to_string()))).into_scalar(),
+                        column_ref(order_date),
+                    ]),
+                    DataType::Int32,
+                )
+                .into_scalar()],
+            )?
+            .build();
+        let year_col = crate::ir::Column(*projected.borrow::<crate::ir::operator::Project>().table_index(), 0);
+        let aggregate = projected
+            .with_ctx(&ctx)
+            .logical_aggregate(std::iter::empty(), [column_ref(year_col)])?
+            .build();
+
+        assert_eq!(aggregate.cardinality(&ctx).as_f64(), 2.0);
+        Ok(())
+    }
+
+    #[test]
+    fn aggregate_uses_year_lineage_for_casted_date_part_argument() -> crate::error::Result<()> {
+        let catalog = MemoryCatalog::new("optd", "public");
+        let table_ref = TableRef::bare("orders");
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "order_date",
+            DataType::Date32,
+            false,
+        )]));
+        catalog.create_table(table_ref.clone(), schema.clone()).unwrap();
+        catalog
+            .set_table_statistics(
+                table_ref.clone(),
+                TableStatistics {
+                    row_count: 1000,
+                    column_statistics: vec![ColumnStatistics {
+                        advanced_stats: vec![],
+                        min_value: Some("9131".to_string()),
+                        max_value: Some("9861".to_string()),
+                        null_count: Some(0),
+                        distinct_count: Some(731),
+                    }],
+                    size_bytes: None,
+                },
+            )
+            .unwrap();
+
+        let ctx = adv_ctx_with_catalog(catalog);
+        let get = ctx.logical_get(table_ref.clone(), None)?.build();
+        let order_date = ctx.col(Some(&table_ref), "order_date")?;
+        let projected = ctx
+            .project(
+                get,
+                [Function::new_scalar(
+                    "date_part",
+                    Arc::new([
+                        Cast::new(
+                            DataType::Utf8,
+                            Literal::new(ScalarValue::Utf8(Some("YEAR".to_string())))
+                                .into_scalar(),
+                        )
+                        .into_scalar(),
+                        column_ref(order_date),
+                    ]),
+                    DataType::Int32,
+                )
+                .into_scalar()],
+            )?
+            .build();
+        let year_col = Column(*projected.borrow::<crate::ir::operator::Project>().table_index(), 0);
+        let aggregate = projected
+            .with_ctx(&ctx)
+            .logical_aggregate(std::iter::empty(), [column_ref(year_col)])?
+            .build();
+
+        assert_eq!(aggregate.cardinality(&ctx).as_f64(), 2.0);
+        Ok(())
+    }
+
+    #[test]
+    fn join_uses_lineage_through_alias_for_key_stats() -> crate::error::Result<()> {
+        let catalog = MemoryCatalog::new("optd", "public");
+        let left_ref = TableRef::bare("t1");
+        let right_ref = TableRef::bare("t2");
+        let schema = int_schema(1);
+        catalog.create_table(left_ref.clone(), schema.clone()).unwrap();
+        catalog.create_table(right_ref.clone(), schema.clone()).unwrap();
+        catalog
+            .set_table_statistics(
+                left_ref.clone(),
+                TableStatistics {
+                    row_count: 1000,
+                    column_statistics: vec![col_stats(1000, Some("0"), Some("999"))],
+                    size_bytes: None,
+                },
+            )
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                right_ref.clone(),
+                TableStatistics {
+                    row_count: 1000,
+                    column_statistics: vec![col_stats(1000, Some("0"), Some("999"))],
+                    size_bytes: None,
+                },
+            )
+            .unwrap();
+
+        let ctx = adv_ctx_with_catalog(catalog);
+        let left = ctx
+            .remap(
+                ctx.project(
+                    ctx.logical_get(left_ref.clone(), None)?.build(),
+                    [column_ref(ctx.col(Some(&left_ref), "c0")?)],
+                )?
+                .build(),
+                TableRef::bare("t1_alias"),
+            )?
+            .build();
+        let right = ctx.logical_get(right_ref.clone(), None)?.build();
+        let left_col = ctx.col(Some(&TableRef::bare("t1_alias")), "c0")?;
+        let right_col = ctx.col(Some(&right_ref), "c0")?;
+        let joined = left
+            .with_ctx(&ctx)
+            .logical_join(
+                right,
+                column_ref(left_col).eq(column_ref(right_col)),
+                JoinType::Inner,
+            )
+            .build();
+
+        assert_eq!(joined.cardinality(&ctx).as_f64(), 1000.0);
+        Ok(())
+    }
+
+    #[test]
+    fn aggregate_preserves_lineage_through_join_project_and_remap() -> crate::error::Result<()> {
+        let catalog = MemoryCatalog::new("optd", "public");
+        let orders_ref = TableRef::bare("orders");
+        let nation_ref = TableRef::bare("nation");
+        let orders_schema = Arc::new(Schema::new(vec![
+            Field::new("custkey", DataType::Int32, false),
+            Field::new("order_date", DataType::Date32, false),
+        ]));
+        let nation_schema = Arc::new(Schema::new(vec![
+            Field::new("custkey", DataType::Int32, false),
+            Field::new("nation", DataType::Utf8View, false),
+        ]));
+        catalog
+            .create_table(orders_ref.clone(), orders_schema.clone())
+            .unwrap();
+        catalog
+            .create_table(nation_ref.clone(), nation_schema.clone())
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                orders_ref.clone(),
+                TableStatistics {
+                    row_count: 1000,
+                    column_statistics: vec![
+                        col_stats(10, Some("0"), Some("9")),
+                        ColumnStatistics {
+                            advanced_stats: vec![],
+                            min_value: Some("9131".to_string()),
+                            max_value: Some("9861".to_string()),
+                            null_count: Some(0),
+                            distinct_count: Some(731),
+                        },
+                    ],
+                    size_bytes: None,
+                },
+            )
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                nation_ref.clone(),
+                TableStatistics {
+                    row_count: 10,
+                    column_statistics: vec![
+                        col_stats(10, Some("0"), Some("9")),
+                        ColumnStatistics {
+                            advanced_stats: vec![],
+                            min_value: None,
+                            max_value: None,
+                            null_count: Some(0),
+                            distinct_count: Some(5),
+                        },
+                    ],
+                    size_bytes: None,
+                },
+            )
+            .unwrap();
+
+        let ctx = adv_ctx_with_catalog(catalog);
+        let orders = ctx.logical_get(orders_ref.clone(), None)?.build();
+        let nations = ctx.logical_get(nation_ref.clone(), None)?.build();
+        let order_custkey = ctx.col(Some(&orders_ref), "custkey")?;
+        let order_date = ctx.col(Some(&orders_ref), "order_date")?;
+        let nation_custkey = ctx.col(Some(&nation_ref), "custkey")?;
+        let nation_name = ctx.col(Some(&nation_ref), "nation")?;
+        let joined = orders
+            .with_ctx(&ctx)
+            .logical_join(
+                nations,
+                column_ref(order_custkey).eq(column_ref(nation_custkey)),
+                JoinType::Inner,
+            )
+            .build();
+        let projected = ctx
+            .project(
+                joined,
+                [
+                    column_ref(nation_name),
+                    Function::new_scalar(
+                        "date_part",
+                        Arc::new([
+                            Literal::new(ScalarValue::Utf8(Some("YEAR".to_string())))
+                                .into_scalar(),
+                            column_ref(order_date),
+                        ]),
+                        DataType::Int32,
+                    )
+                    .into_scalar(),
+                ],
+            )?
+            .build();
+        let remapped = ctx.remap(projected, TableRef::bare("profit"))?.build();
+        let remap_table = *remapped.borrow::<Remap>().table_index();
+        let aggregate = remapped
+            .with_ctx(&ctx)
+            .logical_aggregate(
+                std::iter::empty::<Arc<crate::ir::Scalar>>(),
+                [column_ref(Column(remap_table, 0)), column_ref(Column(remap_table, 1))],
+            )?
+            .build();
+
+        assert_eq!(aggregate.cardinality(&ctx).as_f64(), 10.0);
+        Ok(())
+    }
 }

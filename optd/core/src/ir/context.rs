@@ -93,7 +93,20 @@ impl IRContext {
         let Column(table_index, column_index) = column;
         let guard = self.binder.read().unwrap();
         let binding = guard.get_binding(table_index).unwrap();
-        let field = binding.field(*column_index).unwrap();
+        // Bindings only carry the columns that were in-scope when the
+        // binding was created. Lineage tracking (see
+        // `predicate_summary::PredicateSummary`) can legitimately refer to
+        // a column that has been projected away from the current binding
+        // but is still present in the underlying table schema. Fall back
+        // to the catalog's table schema in that case; column order is
+        // maintained by `add_binding`, so positional lookup stays valid.
+        let field = binding.field(*column_index).cloned().or_else(|| {
+            self.catalog
+                .table_by_ref(binding.table_ref())
+                .ok()
+                .and_then(|table| table.schema.fields().get(*column_index).cloned())
+        })
+        .unwrap();
         ColumnMeta {
             table_ref: binding.table_ref().clone(),
             data_type: field.data_type().clone(),
@@ -109,6 +122,13 @@ impl IRContext {
             .whatever_context("binding not found")?;
         let field = binding
             .field(*column_index)
+            .cloned()
+            .or_else(|| {
+                self.catalog
+                    .table_by_ref(binding.table_ref())
+                    .ok()
+                    .and_then(|table| table.schema.fields().get(*column_index).cloned())
+            })
             .whatever_context("column not found")?;
         Ok((binding.table_ref().clone(), field.clone()))
     }
