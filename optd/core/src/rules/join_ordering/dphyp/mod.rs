@@ -1,20 +1,35 @@
-use super::{debug_vertex_set, subsets, write_csg_cmp_pairs, EdgeSet, VertexSet};
+//! DPHyp pair enumeration over query hypergraphs.
+//!
+//! This module deliberately stops at enumeration. It records which connected
+//! subsets exist and emits the `(left, right, join_edges)` combinations that a
+//! higher layer can cost.
+
+use super::{EdgeSet, VertexSet, debug_vertex_set, subsets, write_csg_cmp_pairs};
 use bitvec::prelude::*;
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashSet;
 
 mod hypergraph;
 
 pub use hypergraph::*;
 
-#[derive(Debug, Clone)]
-pub enum JoinTree {
-    Scan(usize),
-    Join(Arc<JoinTree>, Arc<JoinTree>, EdgeSet),
+/// One emitted DPHyp combine opportunity.
+///
+/// `join_edges` contains only the edges that directly connect `left` and
+/// `right`, not all edges induced by `left ∪ right`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumeratedPair {
+    pub left: VertexSet,
+    pub right: VertexSet,
+    pub join_edges: EdgeSet,
 }
 
+/// DPHyp enumerator state.
+///
+/// `seen_subgraphs` tracks which connected subsets have been discovered so far;
+/// it is not a costed DP memo.
 pub struct DPHyp {
-    dp_table: HashMap<VertexSet, Arc<JoinTree>>,
-    pairs: Vec<(VertexSet, VertexSet, EdgeSet)>,
+    seen_subgraphs: HashSet<VertexSet>,
+    pairs: Vec<EnumeratedPair>,
 }
 
 impl Default for DPHyp {
@@ -24,62 +39,50 @@ impl Default for DPHyp {
 }
 
 impl DPHyp {
+    /// Creates a fresh enumerator.
     pub fn new() -> Self {
         DPHyp {
-            dp_table: HashMap::new(),
+            seen_subgraphs: HashSet::new(),
             pairs: Vec::new(),
         }
     }
 
-    pub fn get_pairs(&self) -> &Vec<(VertexSet, VertexSet, EdgeSet)> {
+    /// Returns the emitted pairs in enumeration order.
+    pub fn get_pairs(&self) -> &[EnumeratedPair] {
         &self.pairs
     }
 
-    pub fn solve<V, E>(&mut self, h: &QueryHypergraph<V, E>) -> Option<Arc<JoinTree>> {
-        // Initialize the dp table with plans for single relations.
+    /// Runs DPHyp on `h` and returns whether the full vertex set became
+    /// connected under the discovered subgraphs.
+    pub fn solve<V, E>(&mut self, h: &QueryHypergraph<V, E>) -> bool {
+        self.seen_subgraphs.clear();
+        self.pairs.clear();
+
         for v in 0..h.vertices.len() {
             let mut bitvec = BitVec::repeat(false, h.vertices.len());
             bitvec.set(v, true);
-
-            let touching_edges = &h.vertices[v].edges.clone();
-            let mut satisfying_edges = h.empty_edge_set();
-
-            // For leaves, check if any edge is fully satisfied by the single vertex
-            for edge_idx in touching_edges.iter_ones() {
-                let edge = &h.edges[edge_idx];
-                // For simple edges, this is true. For hyperedges, it might be false.
-                // We check if the requirement 'u' or 'v' is exactly this vertex {v}.
-                if edge.u[v] && edge.u.count_ones() == 1 || edge.v[v] && edge.v.count_ones() == 1 {
-                    satisfying_edges.set(edge_idx, true);
-                }
-            }
-
-            self.dp_table.insert(bitvec, Arc::new(JoinTree::Scan(v)));
+            self.seen_subgraphs.insert(bitvec);
         }
 
         for v in (0..h.vertices.len()).rev() {
-            // Generate all csg-cmp-pairs ({v}, S2) by calling
-            let mut singelton = BitVec::repeat(false, h.vertices.len());
-            singelton.set(v, true);
-            self.emit_csg(singelton.clone(), h);
+            let mut singleton = BitVec::repeat(false, h.vertices.len());
+            singleton.set(v, true);
+            self.emit_csg(singleton.clone(), h);
 
-            // Extend the initial set {v} to larger sets S1,
-            // then find connected subsets of its complement S2 such that
-            // each distinct (S1, S2) results in a csg-cmp-pair.
-            // Similar to DPccp, prohibit B_v = {w | w < v} U {v}
             let b_v = h.b_i_set(v);
-            self.enumerate_csg_rec(singelton, b_v, h);
+            self.enumerate_csg_rec(singleton, b_v, h);
         }
 
         let root = bitvec![1; h.vertices.len()];
-        self.dp_table.get(&root).cloned()
+        self.seen_subgraphs.contains(&root)
     }
 
+    /// Recursively expands a connected subgraph candidate.
     fn enumerate_csg_rec<V, E>(&mut self, s1: VertexSet, x: VertexSet, h: &QueryHypergraph<V, E>) {
         let neighborhood = h.neighborhood(s1.clone(), x.clone());
         for n in subsets(&neighborhood) {
             let s1_new = n | &s1;
-            if self.dp_table.contains_key(&s1_new) {
+            if self.seen_subgraphs.contains(&s1_new) {
                 self.emit_csg(s1_new, h);
             }
         }
@@ -92,6 +95,7 @@ impl DPHyp {
         }
     }
 
+    /// Emits all complements reachable from one connected subgraph `s1`.
     fn emit_csg<V, E>(&mut self, s1: VertexSet, h: &QueryHypergraph<V, E>) {
         let min_s1 = s1.first_one().expect("s1 should not be empty");
         let x = h.b_i_set(min_s1) | &s1;
@@ -112,6 +116,7 @@ impl DPHyp {
         }
     }
 
+    /// Recursively expands complement candidates for a fixed left side `s1`.
     fn enumerate_cmp_rec<V, E>(
         &mut self,
         s1: VertexSet,
@@ -122,7 +127,7 @@ impl DPHyp {
         let neighborhood = h.neighborhood(s2.clone(), x.clone());
         for n in subsets(&neighborhood) {
             let s2_new = n | &s2;
-            if self.dp_table.contains_key(&s2_new) && h.is_connected(&s1, &s2_new) {
+            if self.seen_subgraphs.contains(&s2_new) && h.is_connected(&s1, &s2_new) {
                 self.emit_csg_cmp(s1.clone(), s2_new.clone(), h);
             }
         }
@@ -133,20 +138,8 @@ impl DPHyp {
         }
     }
 
-    /// This is currently mocked. Need to get the predicates and compute cost.
+    /// Records one legal combine and marks the union as discovered.
     fn emit_csg_cmp<V, E>(&mut self, s1: VertexSet, s2: VertexSet, h: &QueryHypergraph<V, E>) {
-        let plan_1 = self
-            .dp_table
-            .get(&s1)
-            .expect("s1 should have a plan")
-            .clone();
-
-        let plan_2 = self
-            .dp_table
-            .get(&s2)
-            .expect("s2 should have a plan")
-            .clone();
-
         let mut join_edges = h.empty_edge_set();
         for (edge_index, edge) in h.edges.iter().enumerate() {
             if edge.connects(s1.clone(), s2.clone()) {
@@ -160,33 +153,33 @@ impl DPHyp {
         );
 
         let s = s1.clone() | &s2;
-        let induced_edges = h.get_induced_edges(s.clone());
-
-        self.pairs.push((s1, s2, induced_edges));
-
-        // TODO: compute cost.
-        let new_plan = JoinTree::Join(plan_1, plan_2, join_edges);
-        self.dp_table.insert(s, Arc::new(new_plan));
+        self.pairs.push(EnumeratedPair {
+            left: s1,
+            right: s2,
+            join_edges,
+        });
+        self.seen_subgraphs.insert(s);
     }
 }
 
+/// Pretty-printer for the emitted DPHyp pairs.
 pub fn show_csg_cmp_pairs<V, E>(
     query_graph: &QueryHypergraph<V, E>,
-    pairs: Vec<(VertexSet, VertexSet, EdgeSet)>,
+    pairs: Vec<EnumeratedPair>,
     mut f: impl std::io::Write,
 ) where
     V: std::fmt::Debug,
     E: std::fmt::Debug,
 {
-    write_csg_cmp_pairs(&mut f, pairs, |f, (csg, cmp, edge_mask)| {
-        let csg = debug_vertex_set(&csg, |v| query_graph.get_vertex_info(v));
-        let cmp = debug_vertex_set(&cmp, |v| query_graph.get_vertex_info(v));
+    write_csg_cmp_pairs(&mut f, pairs, |f, pair| {
+        let csg = debug_vertex_set(&pair.left, |v| query_graph.get_vertex_info(v));
+        let cmp = debug_vertex_set(&pair.right, |v| query_graph.get_vertex_info(v));
         f.write_fmt(format_args!("{:?},{:?}\n", csg, cmp))?;
 
-        let edges = query_graph.get_edges(edge_mask);
+        let edges = query_graph.get_edges(pair.join_edges.clone());
         f.write_fmt(format_args!("  edges: {:?}\n", edges))
     })
-        .expect("write failed");
+    .expect("write failed");
 }
 
 #[cfg(test)]
@@ -199,8 +192,7 @@ mod tests {
     fn test_dp_hyp() {
         let h = make_dphyp_example_hypergraph();
         let mut algo = DPHyp::new();
-        let plan = algo.solve(&h);
-        assert!(plan.is_some(), "DPHyp should find a plan");
+        assert!(algo.solve(&h), "DPHyp should find a plan");
 
         let file = std::io::stdout();
         show_csg_cmp_pairs(&h, algo.pairs.clone(), file);

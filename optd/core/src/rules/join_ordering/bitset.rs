@@ -1,15 +1,21 @@
+//! Small helpers for treating `BitVec` values as finite sets.
+
 use bitvec::prelude::*;
 use itertools::Itertools;
 
 use super::types::VertexSet;
 
+/// Returns the set members as sorted indices.
 pub(crate) fn extract_bitset(s: &BitVec) -> Vec<usize> {
     s.iter_ones().collect()
 }
 
+/// Extra set-style operations used by the graph and hypergraph code.
 pub(crate) trait BitVecSetOpsExt {
+    /// Returns whether `self` is a subset of `other`.
     fn is_subset_of(&self, other: &Self) -> bool;
 
+    /// Returns whether the two sets overlap.
     fn intersects(&self, other: &Self) -> bool;
 }
 

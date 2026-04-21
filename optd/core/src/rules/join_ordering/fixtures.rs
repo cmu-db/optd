@@ -7,6 +7,7 @@ use super::dpccp::QueryGraph;
 use super::dphyp::QueryHypergraph;
 
 #[cfg(test)]
+/// Dense five-vertex simple graph used by DPccp tests.
 pub(crate) fn make_example_simple_graph() -> QueryGraph<&'static str, &'static str> {
     let mut graph = QueryGraph::new();
     graph.add_vertex("R0");
@@ -27,6 +28,7 @@ pub(crate) fn make_example_simple_graph() -> QueryGraph<&'static str, &'static s
 }
 
 #[cfg(test)]
+/// Hypergraph version of `make_example_simple_graph` with only simple edges.
 pub(crate) fn make_example_simple_hypergraph() -> QueryHypergraph<&'static str, &'static str> {
     let mut h = QueryHypergraph::new();
     h.add_vertex("R0");
@@ -47,6 +49,8 @@ pub(crate) fn make_example_simple_hypergraph() -> QueryHypergraph<&'static str, 
 }
 
 #[cfg(test)]
+/// Canonical DPHyp example containing one true hyperedge between two
+/// three-relation groups.
 pub(crate) fn make_dphyp_example_hypergraph() -> QueryHypergraph<&'static str, &'static str> {
     let mut h = QueryHypergraph::new();
     h.add_vertex("R1");
@@ -117,6 +121,8 @@ pub(crate) fn make_dphyp_example_hypergraph() -> QueryHypergraph<&'static str, &
 // AND mi.movie_id = mc.movie_id
 // AND miidx.movie_id = mc.movie_id;
 #[cfg(test)]
+/// JOB Query 13d encoded as a hypergraph, preserving each predicate's two-sided
+/// split for DPHyp.
 pub(crate) fn make_job_q13_hypergraph() -> QueryHypergraph<&'static str, &'static str> {
     let mut graph = QueryHypergraph::new();
     ["cn", "ct", "it", "it2", "t", "kt", "mc", "mi", "miidx"]
@@ -205,6 +211,7 @@ pub(crate) fn make_job_q13_hypergraph() -> QueryHypergraph<&'static str, &'stati
 }
 
 #[cfg(test)]
+/// Binary-edge graph version of JOB Query 13d used for DPccp parity checks.
 pub(crate) fn make_job_q13_graph() -> QueryGraph<&'static str, &'static str> {
     let mut graph = QueryGraph::new();
     ["cn", "ct", "it", "it2", "t", "kt", "mc", "mi", "miidx"]

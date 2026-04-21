@@ -1,8 +1,11 @@
+//! Small formatting helpers shared by the test/debug-oriented graph printers.
+
 use std::fmt::Debug;
 use std::io::{Result, Write};
 
 use super::types::VertexSet;
 
+/// Resolves a vertex bitset into the corresponding vertex payloads.
 pub(crate) fn debug_vertex_set<'a, V: Debug>(
     set: &VertexSet,
     mut get_vertex_info: impl FnMut(usize) -> Option<&'a V>,
@@ -12,6 +15,7 @@ pub(crate) fn debug_vertex_set<'a, V: Debug>(
         .collect()
 }
 
+/// Writes a standard header/footer around a stream of emitted CSG-CMP pairs.
 pub(crate) fn write_csg_cmp_pairs<W, P>(
     mut f: W,
     pairs: impl IntoIterator<Item = P>,

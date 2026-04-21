@@ -1,3 +1,9 @@
+//! Bottom-up join-ordering pass.
+//!
+//! The pass currently optimizes maximal inner-join regions. Non-inner logical
+//! joins remain as boundaries for reordering, but their children are still
+//! visited recursively so inner regions underneath them can be optimized.
+
 use std::{
     collections::HashMap,
     sync::Arc,
@@ -19,11 +25,13 @@ use crate::{
 };
 
 use super::{
-    BitVecSetOpsExt, VertexSet,
-    dphyp::{DPHyp, QueryHypergraph},
+    VertexSet,
+    dphyp::{DPHyp, EnumeratedPair, QueryHypergraph},
     island::is_inner_logical_join,
 };
 
+/// Reorders maximal inner-join regions by enumerating pairs with DPHyp and
+/// costing concrete join implementations.
 pub struct JoinOrderingPass;
 
 impl Default for JoinOrderingPass {
@@ -33,14 +41,17 @@ impl Default for JoinOrderingPass {
 }
 
 impl JoinOrderingPass {
+    /// Creates the pass.
     pub fn new() -> Self {
         Self
     }
 
+    /// Applies join ordering to `root` and returns the rebuilt best plan.
     pub fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Result<Arc<Operator>> {
         self.optimize_subtree(root, ctx, false)
     }
 
+    /// Rewrites the tree bottom-up and only optimizes maximal inner-join roots.
     fn optimize_subtree(
         &self,
         op: Arc<Operator>,
@@ -69,9 +80,10 @@ impl JoinOrderingPass {
         }
     }
 
+    /// Extracts, enumerates, costs, and rebuilds one inner-join region.
     fn optimize_inner_region(&self, root: Arc<Operator>, ctx: &IRContext) -> Result<Arc<Operator>> {
         let region = InnerJoinRegion::extract(root.clone(), ctx)?;
-        if region.leaves.len() <= 1 || region.join_predicates.is_empty() {
+        if region.leaves.len() <= 1 || region.predicates.is_empty() {
             self.write_debug_dump(
                 DebugDump::for_skipped_region(root.clone(), region, "region is too small to reorder"),
                 ctx,
@@ -80,7 +92,7 @@ impl JoinOrderingPass {
         }
 
         let mut dphyp = DPHyp::new();
-        if dphyp.solve(&region.build_hypergraph()).is_none() {
+        if !dphyp.solve(&region.hypergraph) {
             self.write_debug_dump(
                 DebugDump::for_skipped_region(root.clone(), region, "DPHyp could not find a connected plan"),
                 ctx,
@@ -89,8 +101,8 @@ impl JoinOrderingPass {
         }
 
         let mut best_plans = region.initialize_leaf_plans(ctx)?;
-        for (left, right, _) in dphyp.get_pairs() {
-            region.consider_pair(&mut best_plans, left, right, ctx)?;
+        for pair in dphyp.get_pairs() {
+            region.consider_pair(&mut best_plans, pair, ctx)?;
         }
 
         let root_set = bitvec![1; region.leaves.len()];
@@ -103,57 +115,69 @@ impl JoinOrderingPass {
         Ok(chosen.map(|entry| entry.plan).unwrap_or(root))
     }
 
+    /// Emits the always-on debug dump for one region.
     fn write_debug_dump(&self, dump: DebugDump, ctx: &IRContext) {
         println!("{}", dump.render(ctx));
     }
 }
 
+/// Cheapest plan found so far for one vertex subset.
 #[derive(Debug, Clone)]
 struct BestPlan {
     plan: Arc<Operator>,
     cost: Cost,
 }
 
+/// Opaque leaf subtree in an extracted inner-join region.
 #[derive(Debug, Clone)]
 struct RegionLeaf {
     op: Arc<Operator>,
     output_columns: Arc<ColumnSet>,
 }
 
+/// Predicate that mentions only one extracted leaf.
 #[derive(Debug, Clone)]
 struct UnaryPredicate {
     scalar: Arc<Scalar>,
     leaf_index: usize,
 }
 
+/// Join predicate stored in region-level form.
+///
+/// `refs` tracks every referenced leaf, which is useful for debugging and for
+/// future legality checks. The hypergraph edge retains the two-sided split used
+/// by DPHyp.
 #[derive(Debug, Clone)]
-struct JoinPredicate {
+struct RegionPredicate {
     scalar: Arc<Scalar>,
     refs: VertexSet,
-    left_refs: VertexSet,
-    right_refs: VertexSet,
 }
 
+/// Flattened inner-join region used by the production join-ordering pass.
 #[derive(Debug)]
 struct InnerJoinRegion {
     leaves: Vec<RegionLeaf>,
     unary_predicates: Vec<UnaryPredicate>,
-    join_predicates: Vec<JoinPredicate>,
+    predicates: Vec<RegionPredicate>,
+    hypergraph: QueryHypergraph<usize, usize>,
 }
 
+/// Rendered debug snapshot for one region, either skipped or optimized.
 #[derive(Debug)]
 struct DebugDump {
     root_before: Arc<Operator>,
     leaves: Vec<RegionLeaf>,
     unary_predicates: Vec<UnaryPredicate>,
-    join_predicates: Vec<JoinPredicate>,
-    dphyp_pairs: Vec<(VertexSet, VertexSet)>,
+    predicates: Vec<RegionPredicate>,
+    edge_predicates: Vec<usize>,
+    dphyp_pairs: Vec<EnumeratedPair>,
     best_plans: Vec<(VertexSet, BestPlan)>,
     chosen: Option<BestPlan>,
     skipped_reason: Option<&'static str>,
 }
 
 impl DebugDump {
+    /// Builds a dump for a region that was not optimized.
     fn for_skipped_region(
         root_before: Arc<Operator>,
         region: InnerJoinRegion,
@@ -163,7 +187,13 @@ impl DebugDump {
             root_before,
             leaves: region.leaves,
             unary_predicates: region.unary_predicates,
-            join_predicates: region.join_predicates,
+            predicates: region.predicates,
+            edge_predicates: region
+                .hypergraph
+                .edges
+                .iter()
+                .map(|edge| edge.info)
+                .collect(),
             dphyp_pairs: Vec::new(),
             best_plans: Vec::new(),
             chosen: None,
@@ -171,6 +201,7 @@ impl DebugDump {
         }
     }
 
+    /// Builds a dump for a completed optimization.
     fn for_completed_region(
         root_before: Arc<Operator>,
         region: &InnerJoinRegion,
@@ -193,18 +224,21 @@ impl DebugDump {
             root_before,
             leaves: region.leaves.clone(),
             unary_predicates: region.unary_predicates.clone(),
-            join_predicates: region.join_predicates.clone(),
-            dphyp_pairs: dphyp
-                .get_pairs()
+            predicates: region.predicates.clone(),
+            edge_predicates: region
+                .hypergraph
+                .edges
                 .iter()
-                .map(|(left, right, _)| (left.clone(), right.clone()))
+                .map(|edge| edge.info)
                 .collect(),
+            dphyp_pairs: dphyp.get_pairs().to_vec(),
             best_plans: entries,
             chosen,
             skipped_reason: None,
         }
     }
 
+    /// Renders a compact, human-readable debugging view.
     fn render(&self, ctx: &IRContext) -> String {
         let mut out = String::new();
         out.push_str("===== JOIN ORDERING DEBUG DUMP BEGIN =====\n");
@@ -237,15 +271,13 @@ impl DebugDump {
         }
 
         out.push_str("\n== Join Predicates ==\n");
-        if self.join_predicates.is_empty() {
+        if self.predicates.is_empty() {
             out.push_str("<none>\n");
         } else {
-            for predicate in &self.join_predicates {
+            for predicate in &self.predicates {
                 out.push_str(&format!(
-                    "refs={} left={} right={} predicate={}\n",
+                    "refs={} predicate={}\n",
                     format_vertex_set(&predicate.refs),
-                    format_vertex_set(&predicate.left_refs),
-                    format_vertex_set(&predicate.right_refs),
                     format_scalar_compact(predicate.scalar.as_ref(), ctx)
                 ));
             }
@@ -255,11 +287,23 @@ impl DebugDump {
         if self.dphyp_pairs.is_empty() {
             out.push_str("<none>\n");
         } else {
-            for (left, right) in &self.dphyp_pairs {
+            for pair in &self.dphyp_pairs {
+                let predicates = pair
+                    .join_edges
+                    .iter_ones()
+                    .filter_map(|edge_index| {
+                        self.edge_predicates
+                            .get(edge_index)
+                            .and_then(|predicate_index| self.predicates.get(*predicate_index))
+                    })
+                    .map(|predicate| format_scalar_compact(predicate.scalar.as_ref(), ctx))
+                    .collect::<Vec<_>>()
+                    .join(" AND ");
                 out.push_str(&format!(
-                    "{} x {}\n",
-                    format_vertex_set(left),
-                    format_vertex_set(right)
+                    "{} x {} on {}\n",
+                    format_vertex_set(&pair.left),
+                    format_vertex_set(&pair.right),
+                    predicates
                 ));
             }
         }
@@ -293,6 +337,7 @@ impl DebugDump {
 }
 
 impl InnerJoinRegion {
+    /// Extracts a maximal inner-join region rooted at `root`.
     fn extract(root: Arc<Operator>, ctx: &IRContext) -> Result<Self> {
         let mut leaves = Vec::new();
         let tree = InnerRegionTree::build(root, ctx, &mut leaves)?;
@@ -301,38 +346,44 @@ impl InnerJoinRegion {
 
         tree.collect_predicates(&leaves, &mut raw_join_predicates, &mut unary_predicates);
 
-        let join_predicates = raw_join_predicates
+        let hypergraph = Self::build_hypergraph(leaves.len(), &raw_join_predicates);
+        let predicates = raw_join_predicates
             .into_iter()
-            .map(|predicate| JoinPredicate {
+            .map(|predicate| RegionPredicate {
                 scalar: predicate.scalar,
                 refs: to_vertex_set(&predicate.refs, leaves.len()),
-                left_refs: to_vertex_set(&predicate.left_refs, leaves.len()),
-                right_refs: to_vertex_set(&predicate.right_refs, leaves.len()),
             })
             .collect();
 
         Ok(Self {
             leaves,
             unary_predicates,
-            join_predicates,
+            predicates,
+            hypergraph,
         })
     }
 
-    fn build_hypergraph(&self) -> QueryHypergraph<usize, usize> {
+    /// Builds the hypergraph consumed by DPHyp.
+    ///
+    /// The edge payload is the predicate index, so later stages can recover the
+    /// exact scalar without rescanning every predicate.
+    fn build_hypergraph(leaf_count: usize, predicates: &[RawJoinPredicate]) -> QueryHypergraph<usize, usize> {
         let mut graph = QueryHypergraph::new();
-        for vertex_index in 0..self.leaves.len() {
+        for vertex_index in 0..leaf_count {
             graph.add_vertex(vertex_index);
         }
-        for (predicate_index, predicate) in self.join_predicates.iter().enumerate() {
+        for (predicate_index, predicate) in predicates.iter().enumerate() {
             graph.add_edge(
                 predicate_index,
-                predicate.left_refs.clone(),
-                predicate.right_refs.clone(),
+                to_vertex_set(&predicate.left_refs, leaf_count),
+                to_vertex_set(&predicate.right_refs, leaf_count),
             );
         }
         graph
     }
 
+    /// Seeds the DP memo with singleton leaf plans, pushing unary predicates
+    /// into a local `Select` when needed.
     fn initialize_leaf_plans(&self, ctx: &IRContext) -> Result<HashMap<VertexSet, BestPlan>> {
         let mut best = HashMap::new();
         for (leaf_index, leaf) in self.leaves.iter().enumerate() {
@@ -360,13 +411,18 @@ impl InnerJoinRegion {
         Ok(best)
     }
 
+    /// Costs one emitted DPHyp pair against the current DP memo.
+    ///
+    /// The pair already tells us which join predicates are relevant, so this
+    /// step avoids rescanning the whole predicate list.
     fn consider_pair(
         &self,
         best: &mut HashMap<VertexSet, BestPlan>,
-        left: &VertexSet,
-        right: &VertexSet,
+        pair: &EnumeratedPair,
         ctx: &IRContext,
     ) -> Result<()> {
+        let left = &pair.left;
+        let right = &pair.right;
         let Some(left_entry) = best.get(left).cloned() else {
             return Ok(());
         };
@@ -375,15 +431,16 @@ impl InnerJoinRegion {
         };
 
         let union = left.clone() | right;
-        let predicates = self
-            .join_predicates
-            .iter()
-            .filter(|predicate| {
-                predicate.refs.is_subset_of(&union)
-                    && predicate.refs.intersects(left)
-                    && predicate.refs.intersects(right)
+        let predicates = pair
+            .join_edges
+            .iter_ones()
+            .map(|edge_index| {
+                let predicate_index = *self
+                    .hypergraph
+                    .get_edge_info(edge_index)
+                    .expect("edge index should reference a predicate");
+                self.predicates[predicate_index].scalar.clone()
             })
-            .map(|predicate| predicate.scalar.clone())
             .collect::<Vec<_>>();
 
         if predicates.is_empty() {
@@ -443,6 +500,7 @@ impl InnerJoinRegion {
         Ok(())
     }
 
+    /// Produces physical join candidates for one logical combine.
     fn make_join_candidates(
         &self,
         outer: Arc<Operator>,
@@ -499,6 +557,8 @@ impl InnerJoinRegion {
     }
 }
 
+/// Candidate physical plan for one combine, along with already-computed child
+/// costs needed by the cost model.
 #[derive(Debug)]
 struct CandidatePlan {
     plan: Arc<Operator>,
@@ -506,6 +566,10 @@ struct CandidatePlan {
     inner_cost: Cost,
 }
 
+/// Temporary tree form used while extracting an inner-join region.
+///
+/// Non-inner operators become leaves immediately; only logical inner joins are
+/// expanded.
 #[derive(Debug)]
 enum InnerRegionTree {
     Leaf {
@@ -520,6 +584,7 @@ enum InnerRegionTree {
 }
 
 impl InnerRegionTree {
+    /// Builds an extraction tree while collecting opaque leaves.
     fn build(op: Arc<Operator>, ctx: &IRContext, leaves: &mut Vec<RegionLeaf>) -> Result<Self> {
         if let OperatorKind::Join(meta) = &op.kind
             && meta.implementation.is_none()
@@ -546,6 +611,7 @@ impl InnerRegionTree {
         Ok(Self::Leaf { leaf_index })
     }
 
+    /// Returns the leaf ids that appear under this subtree.
     fn leaf_ids(&self) -> &[usize] {
         match self {
             Self::Leaf { leaf_index } => std::slice::from_ref(leaf_index),
@@ -553,6 +619,8 @@ impl InnerRegionTree {
         }
     }
 
+    /// Splits join conditions into unary predicates and cross-subtree join
+    /// predicates.
     fn collect_predicates(
         &self,
         leaves: &[RegionLeaf],
@@ -586,6 +654,10 @@ impl InnerRegionTree {
     }
 }
 
+/// Join predicate in extraction-time form.
+///
+/// This keeps the exact left/right split only long enough to build the
+/// hypergraph, after which the long-lived region stores a de-duplicated form.
 #[derive(Debug)]
 struct RawJoinPredicate {
     scalar: Arc<Scalar>,
@@ -594,6 +666,7 @@ struct RawJoinPredicate {
     right_refs: Vec<usize>,
 }
 
+/// Classifies one conjunct relative to the current inner join node.
 fn assign_predicate(
     scalar: Arc<Scalar>,
     refs: Vec<usize>,
@@ -624,6 +697,7 @@ fn assign_predicate(
     }
 }
 
+/// Pushes a predicate deeper until it either becomes unary or crosses a join.
 fn push_into_subtree(
     scalar: Arc<Scalar>,
     refs: Vec<usize>,
@@ -651,6 +725,7 @@ fn push_into_subtree(
     }
 }
 
+/// Returns the extracted leaves referenced by a scalar.
 fn predicate_leaf_refs(leaves: &[RegionLeaf], scalar: &Scalar) -> Vec<usize> {
     let used = scalar.used_columns();
     leaves
@@ -663,6 +738,7 @@ fn predicate_leaf_refs(leaves: &[RegionLeaf], scalar: &Scalar) -> Vec<usize> {
         .collect()
 }
 
+/// Intersects a reference list with one candidate leaf set.
 fn intersect_refs(refs: &[usize], candidates: &[usize]) -> Vec<usize> {
     refs.iter()
         .copied()
@@ -670,6 +746,7 @@ fn intersect_refs(refs: &[usize], candidates: &[usize]) -> Vec<usize> {
         .collect()
 }
 
+/// Flattens a conjunction into individual conjuncts.
 fn split_conjuncts(predicate: Arc<Scalar>) -> Vec<Arc<Scalar>> {
     if let Ok(and) = predicate.try_borrow::<crate::ir::scalar::NaryOp>()
         && and.is_and()
@@ -683,6 +760,7 @@ fn split_conjuncts(predicate: Arc<Scalar>) -> Vec<Arc<Scalar>> {
     }
 }
 
+/// Converts a list of indices into a fixed-width bitset.
 fn to_vertex_set(indices: &[usize], len: usize) -> VertexSet {
     let mut set = bitvec![0; len];
     for index in indices {
@@ -691,11 +769,13 @@ fn to_vertex_set(indices: &[usize], len: usize) -> VertexSet {
     set
 }
 
+/// Formats a vertex set as `[i, j, ...]` for debugging.
 fn format_vertex_set(set: &VertexSet) -> String {
     let entries = set.iter_ones().map(|index| index.to_string()).collect::<Vec<_>>();
     format!("[{}]", entries.join(", "))
 }
 
+/// Produces a one-line scalar rendering for debug output.
 fn format_scalar_compact(scalar: &Scalar, ctx: &IRContext) -> String {
     quick_explain(Arc::new(scalar.clone()), ctx)
         .lines()
@@ -705,6 +785,7 @@ fn format_scalar_compact(scalar: &Scalar, ctx: &IRContext) -> String {
         .join(" ")
 }
 
+/// Formats only the current operator, not its children.
 fn format_plan_atom(op: &Operator, ctx: &IRContext) -> String {
     if let Ok(join) = op.try_borrow::<Join>() {
         let implementation = format_join_implementation(join.implementation());
@@ -737,6 +818,7 @@ fn format_plan_atom(op: &Operator, ctx: &IRContext) -> String {
     format!("{:?}", op.kind)
 }
 
+/// Formats a subtree using one compact line per operator.
 fn format_plan_tree(op: &Operator, ctx: &IRContext, indent: usize) -> String {
     let prefix = "  ".repeat(indent);
     let mut out = format!("{prefix}{}\n", format_plan_atom(op, ctx));
@@ -746,6 +828,7 @@ fn format_plan_tree(op: &Operator, ctx: &IRContext, indent: usize) -> String {
     out
 }
 
+/// Formats the join implementation summary shown in debug dumps.
 fn format_join_implementation(implementation: &Option<JoinImplementation>) -> String {
     match implementation {
         None => "logical".to_string(),

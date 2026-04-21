@@ -1,3 +1,8 @@
+//! DPccp pair enumeration over simple query graphs.
+//!
+//! This module is currently used as a reference implementation and parity check
+//! for `dphyp` on purely binary join predicates.
+
 mod graph;
 
 pub use graph::*;
@@ -7,6 +12,7 @@ use tracing::{info, info_span, instrument};
 
 use super::{debug_vertex_set, extract_bitset, subsets, write_csg_cmp_pairs};
 
+/// Enumerates all valid `(CSG, CMP)` pairs for a simple query graph.
 pub fn enumerate_csg_cmp<V, E>(query_graph: &QueryGraph<V, E>) -> Vec<(BitVec, BitVec)> {
     let n = query_graph.vertices.len();
     let s = bitvec![1; n];
@@ -27,6 +33,7 @@ pub fn enumerate_csg_cmp<V, E>(query_graph: &QueryGraph<V, E>) -> Vec<(BitVec, B
     pairs
 }
 
+/// Asserts that no emitted pair appears twice, including with sides reversed.
 pub fn verify_no_duplicate_pairs(pairs: &[(BitVec, BitVec)]) {
     let mut seen = std::collections::HashSet::new();
     for (csg, cmp) in pairs {
@@ -47,6 +54,7 @@ pub fn verify_no_duplicate_pairs(pairs: &[(BitVec, BitVec)]) {
     }
 }
 
+/// Checks the defining properties of a valid `(CSG, CMP)` pair.
 pub fn verify_csg_cmp_definition<V, E>(query_graph: &QueryGraph<V, E>, pairs: &[(BitVec, BitVec)]) {
     for (csg, cmp) in pairs {
         assert!(
@@ -77,6 +85,7 @@ pub fn verify_csg_cmp_definition<V, E>(query_graph: &QueryGraph<V, E>, pairs: &[
     }
 }
 
+/// Enumerates all connected subgraphs reachable under DPccp's ordering rules.
 pub fn enumerate_csg<V, E>(
     query_graph: &QueryGraph<V, E>,
     s: BitVec,
@@ -99,6 +108,7 @@ pub fn enumerate_csg<V, E>(
     }
 }
 
+/// Recursive worker for `enumerate_csg`.
 pub fn enumerate_csg_rec<V, E>(
     query_graph: &QueryGraph<V, E>,
     s: BitVec,
@@ -119,6 +129,7 @@ pub fn enumerate_csg_rec<V, E>(
 }
 
 #[instrument(name = "enum_cmp", skip(query_graph, on_emit), fields(csg = ?extract_bitset(csg)))]
+/// Enumerates complements that can legally pair with a fixed connected subgraph.
 pub fn enumerate_cmp<V, E>(
     query_graph: &QueryGraph<V, E>,
     csg: &BitVec,
@@ -139,6 +150,7 @@ pub fn enumerate_cmp<V, E>(
     enumerate_csg(query_graph, n, x, on_emit);
 }
 
+/// Pretty-printer for `(CSG, CMP)` pairs using vertex payloads.
 pub fn show_csg_cmp_pairs<V, E>(
     query_graph: &QueryGraph<V, E>,
     pairs: Vec<(BitVec, BitVec)>,

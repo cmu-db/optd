@@ -1,13 +1,18 @@
+//! Simple graph representation used by the DPccp reference implementation.
+
 use bitvec::prelude::*;
 
 use super::super::{EdgeIndex, VertexIndex, VertexSet};
 
+/// Undirected query graph where each edge connects an arbitrary set of
+/// vertices, though DPccp only uses simple binary edges.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct QueryGraph<V, E> {
     pub(crate) vertices: Vec<Vertex<V>>,
     pub(crate) edges: Vec<Edge<E>>,
 }
 
+/// Vertex payload plus its incident-edge bitset.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Vertex<V> {
     pub info: V,
@@ -15,6 +20,7 @@ pub struct Vertex<V> {
     pub(crate) edges: BitVec,
 }
 
+/// Edge payload plus the set of participating vertices.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Edge<E> {
     pub info: E,
@@ -36,6 +42,7 @@ impl<V, E> Default for QueryGraph<V, E> {
 }
 
 impl<V, E> QueryGraph<V, E> {
+    /// Creates an empty query graph.
     pub fn new() -> Self {
         Self {
             vertices: Vec::new(),
@@ -43,24 +50,29 @@ impl<V, E> QueryGraph<V, E> {
         }
     }
 
+    /// Returns the payload stored for a vertex.
     pub fn get_vertex_info(&self, vertex_index: VertexIndex) -> Option<&V> {
         self.vertices.get(vertex_index).map(|v| &v.info)
     }
 
+    /// Returns the payload stored for an edge.
     pub fn get_edge_info(&self, edge_index: EdgeIndex) -> Option<&E> {
         self.edges.get(edge_index).map(|e| &e.info)
     }
 
+    /// Allocates an empty vertex bitset of the correct length for this graph.
     pub fn empty_vertex_set(&self) -> VertexSet {
         bitvec![0; self.vertices.len()]
     }
 
+    /// Returns `B_i = {0, ..., i}` used by DPccp's duplicate-avoidance rules.
     pub fn b_i_set(&self, i: usize) -> VertexSet {
         let mut b_i = bitvec![0; self.vertices.len()];
         b_i[0..=i].fill(true);
         b_i
     }
 
+    /// Adds a vertex and returns its index.
     pub fn add_vertex(&mut self, info: V) -> VertexIndex {
         let vertex_index = self.vertices.len();
         self.vertices.push(Vertex {
@@ -70,6 +82,7 @@ impl<V, E> QueryGraph<V, E> {
         vertex_index
     }
 
+    /// Adds an edge spanning all vertices set in `vertex_set`.
     pub fn add_edge(&mut self, info: E, vertex_set: VertexSet) -> EdgeIndex {
         assert!(
             vertex_set.count_ones() >= 2,
@@ -100,6 +113,7 @@ impl<V, E> QueryGraph<V, E> {
         edge_index
     }
 
+    /// Returns the vertex frontier of `vertex_set`.
     pub fn neighborhood(&self, vertex_set: VertexSet) -> VertexSet {
         let mut result = bitvec![0; self.vertices.len()];
         for vertex_index in vertex_set.iter_ones() {
@@ -114,6 +128,7 @@ impl<V, E> QueryGraph<V, E> {
         result
     }
 
+    /// Returns one edge crossing the cut `(a, b)` if any exists.
     pub fn get_any_edge_between(&self, a: VertexSet, b: VertexSet) -> Option<EdgeIndex> {
         for edge_index in a
             .iter_ones()
@@ -127,10 +142,12 @@ impl<V, E> QueryGraph<V, E> {
         None
     }
 
+    /// Returns whether two vertex sets are disjoint.
     pub fn is_disjoint(&self, a: VertexSet, b: VertexSet) -> bool {
         (a & b).not_any()
     }
 
+    /// Checks graph connectivity restricted to the vertices in `vertex_set`.
     pub fn is_connected(&self, vertex_set: &VertexSet) -> bool {
         if vertex_set.count_ones() <= 1 {
             return true;

@@ -1,3 +1,7 @@
+//! Join-ordering algorithms and the pass that applies them to IR join trees.
+//!
+//! `dpccp` and `dphyp` are kept as enumeration engines. `pass` owns plan
+//! extraction, costing, and reconstruction.
 pub mod dpccp;
 pub mod dphyp;
 mod bitset;

@@ -33,13 +33,12 @@ fn test_dpccp_and_dphyp_emit_same_pairs_on_simple_graph() {
         .collect::<BTreeSet<_>>();
 
     let mut dphyp = DPHyp::new();
-    let plan = dphyp.solve(&hypergraph);
-    assert!(plan.is_some(), "DPHyp should find a plan on a simple graph");
+    assert!(dphyp.solve(&hypergraph), "DPHyp should find a plan on a simple graph");
 
     let dphyp_pairs = dphyp
         .get_pairs()
         .iter()
-        .map(|(left, right, _)| normalize_pair(left, right))
+        .map(|pair| normalize_pair(&pair.left, &pair.right))
         .collect::<BTreeSet<_>>();
 
     assert_eq!(dpccp_pairs, dphyp_pairs);
@@ -234,13 +233,12 @@ fn test_dpccp_and_dphyp_emit_same_pairs_on_job_q13() {
         .collect::<BTreeSet<_>>();
 
     let mut dphyp = DPHyp::new();
-    let plan = dphyp.solve(&hypergraph);
-    assert!(plan.is_some(), "DPHyp should find a plan on JOB Query 13d");
+    assert!(dphyp.solve(&hypergraph), "DPHyp should find a plan on JOB Query 13d");
 
     let dphyp_pairs = dphyp
         .get_pairs()
         .iter()
-        .map(|(left, right, _)| normalize_pair(left, right))
+        .map(|pair| normalize_pair(&pair.left, &pair.right))
         .collect::<BTreeSet<_>>();
 
     assert_eq!(dpccp_pairs, dphyp_pairs);
