@@ -81,6 +81,12 @@ impl OptdQueryPlannerContext<'_> {
         if let Some(df_column) = self.optd_mark_columns.get(column) {
             return Ok(df_column.clone());
         }
+        for scope in self.from_optd_column_scopes.iter().rev() {
+            if let Some(df_column) = scope.get(column) {
+                return Ok(df_column.clone());
+            }
+        }
+
         let (table_ref, field) = self.inner.get_column_name(column).context(OptdSnafu)?;
         let table_reference = Self::from_optd_table_ref(&table_ref);
         let column = DFColumn::new(Some(table_reference), field.name());

@@ -1,4 +1,4 @@
-use std::{sync::Arc, vec};
+use std::{collections::HashMap, sync::Arc, vec};
 
 use datafusion::{
     common::{Column, DFSchema},
@@ -81,8 +81,38 @@ impl OptdQueryPlannerContext<'_> {
         let optd_schema = binding.optd_schema();
         let exprs = Self::alias_exprs_for_schema(exprs, &optd_schema)?;
         let schema = Self::df_schema_from_optd_schema(&optd_schema)?;
-        logical_expr::Projection::try_new_with_schema(exprs, input, Arc::new(schema))
-            .context(DataFusionSnafu)
+        Ok(logical_expr::Projection::try_new_with_schema(exprs, input, Arc::new(schema)).unwrap())
+    }
+
+    fn visible_column_scope(
+        &self,
+        input: &Operator,
+    ) -> Result<HashMap<optd_core::ir::Column, Column>> {
+        let columns = input
+            .output_columns_in_order(&self.inner)
+            .context(OptdSnafu)?;
+        let schema = input.output_schema(&self.inner).context(OptdSnafu)?;
+        Ok(columns
+            .into_iter()
+            .zip(schema.iter())
+            .map(|(column, (table_ref, field))| {
+                (
+                    column,
+                    Column::new(Some(Self::from_optd_table_ref(table_ref)), field.name()),
+                )
+            })
+            .collect())
+    }
+
+    fn with_visible_column_scope<T>(
+        &mut self,
+        scope: HashMap<optd_core::ir::Column, Column>,
+        f: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        self.from_optd_column_scopes.push(scope);
+        let result = f(self);
+        self.from_optd_column_scopes.pop();
+        result
     }
 
     fn alias_if_changed(expr: DFExpr, table_ref: &TableRef, field: &Field) -> Result<DFExpr> {
@@ -168,16 +198,20 @@ impl OptdQueryPlannerContext<'_> {
 
         let keys = node.keys().borrow::<List>();
         let exprs = node.exprs().borrow::<List>();
-        let group_expr = keys
-            .members()
-            .iter()
-            .map(|e| self.try_from_optd_scalar_expr(e))
-            .try_collect()?;
-        let aggr_expr = exprs
-            .members()
-            .iter()
-            .map(|e| self.try_from_optd_scalar_expr(e))
-            .try_collect()?;
+        let scope = self.visible_column_scope(node.input())?;
+        let (group_expr, aggr_expr) = self.with_visible_column_scope(scope, |this| {
+            let group_expr = keys
+                .members()
+                .iter()
+                .map(|e| this.try_from_optd_scalar_expr(e))
+                .try_collect()?;
+            let aggr_expr = exprs
+                .members()
+                .iter()
+                .map(|e| this.try_from_optd_scalar_expr(e))
+                .try_collect()?;
+            Ok((group_expr, aggr_expr))
+        })?;
 
         let aggregate =
             self.try_new_df_aggregate(&output_schema, Arc::new(input), group_expr, aggr_expr)?;
@@ -202,11 +236,14 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_from_optd_project(&mut self, node: ProjectBorrowed<'_>) -> Result<DFLogicalPlan> {
         let input = self.try_from_optd_plan(node.input())?;
         let projection_list = node.projections().borrow::<List>();
-        let exprs = projection_list
-            .members()
-            .iter()
-            .map(|e| self.try_from_optd_scalar_expr(e))
-            .try_collect()?;
+        let scope = self.visible_column_scope(node.input())?;
+        let exprs = self.with_visible_column_scope(scope, |this| {
+            projection_list
+                .members()
+                .iter()
+                .map(|e| this.try_from_optd_scalar_expr(e))
+                .try_collect()
+        })?;
 
         let projection = self.try_new_df_projection(node.table_index(), exprs, Arc::new(input))?;
 
@@ -219,19 +256,24 @@ impl OptdQueryPlannerContext<'_> {
         let (equi_conds, non_equi_conds) =
             split_equi_and_non_equi_conditions(&node, &self.inner).context(OptdSnafu)?;
 
-        let on = equi_conds
-            .iter()
-            .map(|(l, r)| {
-                Ok((
-                    DFExpr::Column(self.try_from_optd_column(l)?),
-                    DFExpr::Column(self.try_from_optd_column(r)?),
-                ))
-            })
-            .try_collect()?;
-        let filter: Vec<_> = non_equi_conds
-            .iter()
-            .map(|e| self.try_from_optd_scalar_expr(e))
-            .try_collect()?;
+        let mut scope = self.visible_column_scope(node.outer())?;
+        scope.extend(self.visible_column_scope(node.inner())?);
+        let (on, filter): (_, Vec<_>) = self.with_visible_column_scope(scope, |this| {
+            let on = equi_conds
+                .iter()
+                .map(|(l, r)| {
+                    Ok((
+                        DFExpr::Column(this.try_from_optd_column(l)?),
+                        DFExpr::Column(this.try_from_optd_column(r)?),
+                    ))
+                })
+                .try_collect()?;
+            let filter = non_equi_conds
+                .iter()
+                .map(|e| this.try_from_optd_scalar_expr(e))
+                .try_collect()?;
+            Ok((on, filter))
+        })?;
 
         let filter = filter.into_iter().reduce(logical_expr::and);
 
@@ -262,7 +304,10 @@ impl OptdQueryPlannerContext<'_> {
 
     pub fn try_from_optd_select(&mut self, node: SelectBorrowed<'_>) -> Result<DFLogicalPlan> {
         let input = self.try_from_optd_plan(node.input())?;
-        let predicate = self.try_from_optd_scalar_expr(node.predicate())?;
+        let scope = self.visible_column_scope(node.input())?;
+        let predicate = self.with_visible_column_scope(scope, |this| {
+            this.try_from_optd_scalar_expr(node.predicate())
+        })?;
         let filter =
             logical_plan::Filter::try_new(predicate, Arc::new(input)).context(DataFusionSnafu)?;
         Ok(DFLogicalPlan::Filter(filter))
@@ -296,15 +341,17 @@ impl OptdQueryPlannerContext<'_> {
         node: EnforcerSortBorrowed<'_>,
     ) -> Result<DFLogicalPlan> {
         let input = self.try_from_optd_plan(node.input())?;
-        let expr = node
-            .tuple_ordering()
-            .iter()
-            .map(|(column, direction)| {
-                let expr = DFExpr::Column(self.try_from_optd_column(column)?);
-                let asc = matches!(direction, TupleOrderingDirection::Asc);
-                Ok(logical_expr::expr::Sort::new(expr, asc, !asc))
-            })
-            .try_collect()?;
+        let scope = self.visible_column_scope(node.input())?;
+        let expr = self.with_visible_column_scope(scope, |this| {
+            node.tuple_ordering()
+                .iter()
+                .map(|(column, direction)| {
+                    let expr = DFExpr::Column(this.try_from_optd_column(column)?);
+                    let asc = matches!(direction, TupleOrderingDirection::Asc);
+                    Ok(logical_expr::expr::Sort::new(expr, asc, !asc))
+                })
+                .try_collect()
+        })?;
 
         Ok(DFLogicalPlan::Sort(logical_plan::Sort {
             expr,
