@@ -1275,14 +1275,14 @@
         "row_count": 600572,
         "columns": [
           {
-            "null_count": 400208,
+            "null_count": 500186,
             "distinct_count": 1000,
             "min_value": "1",
             "max_value": "1000"
           },
           {
-            "null_count": 346512,
-            "distinct_count": 108172,
+            "null_count": 118747,
+            "distinct_count": 126851,
             "min_value": "Some(90100),15,2",
             "max_value": "Some(9594950),15,2"
           },
@@ -1293,7 +1293,7 @@
             "max_value": "Some(10),15,2"
           },
           {
-            "null_count": 243414,
+            "null_count": 375632,
             "distinct_count": 2525,
             "min_value": "1992-01-03",
             "max_value": "1998-12-01"
@@ -1311,7 +1311,7 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.5769699553092719,
+            "null_fraction_abs_error": 0.1977231705773829,
             "min_value_match": true,
             "max_value_match": true
           },
@@ -1323,7 +1323,7 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.4053036105579348,
+            "null_fraction_abs_error": 0.6254570642654003,
             "min_value_match": true,
             "max_value_match": true
           }
@@ -1740,14 +1740,14 @@
         "row_count": 600572,
         "columns": [
           {
-            "null_count": 400208,
+            "null_count": 500186,
             "distinct_count": 1000,
             "min_value": "1",
             "max_value": "1000"
           },
           {
-            "null_count": 346512,
-            "distinct_count": 108172,
+            "null_count": 118747,
+            "distinct_count": 126851,
             "min_value": "Some(90100),15,2",
             "max_value": "Some(9594950),15,2"
           },
@@ -1758,7 +1758,7 @@
             "max_value": "Some(10),15,2"
           },
           {
-            "null_count": 243414,
+            "null_count": 375632,
             "distinct_count": 2525,
             "min_value": "1992-01-03",
             "max_value": "1998-12-01"
@@ -1776,7 +1776,7 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.5769699553092719,
+            "null_fraction_abs_error": 0.1977231705773829,
             "min_value_match": true,
             "max_value_match": true
           },
@@ -1788,7 +1788,7 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.4053036105579348,
+            "null_fraction_abs_error": 0.6254570642654003,
             "min_value_match": true,
             "max_value_match": true
           }

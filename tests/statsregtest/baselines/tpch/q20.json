@@ -1596,13 +1596,13 @@
         "row_count": 600572,
         "columns": [
           {
-            "null_count": 300758,
+            "null_count": 100281,
             "distinct_count": 20000,
             "min_value": "1",
             "max_value": "20000"
           },
           {
-            "null_count": 400208,
+            "null_count": 300758,
             "distinct_count": 1000,
             "min_value": "1",
             "max_value": "1000"
@@ -1614,8 +1614,8 @@
             "max_value": "Some(5000),15,2"
           },
           {
-            "null_count": 383824,
-            "distinct_count": 2525,
+            "null_count": 465872,
+            "distinct_count": 2523,
             "min_value": "1992-01-03",
             "max_value": "1998-12-01"
           }
@@ -1644,7 +1644,7 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.6390973938178937,
+            "null_fraction_abs_error": 0.7757138194920842,
             "min_value_match": true,
             "max_value_match": true
           }

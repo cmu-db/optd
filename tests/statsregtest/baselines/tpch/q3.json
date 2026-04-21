@@ -968,8 +968,8 @@
             "max_value": "600000"
           },
           {
-            "null_count": 184273,
-            "distinct_count": 123426,
+            "null_count": 130513,
+            "distinct_count": 126274,
             "min_value": "Some(90100),15,2",
             "max_value": "Some(9594950),15,2"
           },
@@ -980,7 +980,7 @@
             "max_value": "Some(10),15,2"
           },
           {
-            "null_count": 330236,
+            "null_count": 383824,
             "distinct_count": 2525,
             "min_value": "1992-01-03",
             "max_value": "1998-12-01"
@@ -998,7 +998,7 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.3068291562044185,
+            "null_fraction_abs_error": 0.21731449351618123,
             "min_value_match": true,
             "max_value_match": true
           },
@@ -1010,7 +1010,7 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.5498691247677214,
+            "null_fraction_abs_error": 0.6390973938178937,
             "min_value_match": true,
             "max_value_match": true
           }
@@ -1545,7 +1545,7 @@
             "max_value": "1998-08-02"
           },
           {
-            "null_count": 109040,
+            "null_count": 76272,
             "distinct_count": 1,
             "min_value": "0",
             "max_value": "0"
@@ -1575,7 +1575,7 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.7269333333333333,
+            "null_fraction_abs_error": 0.50848,
             "min_value_match": true,
             "max_value_match": true
           }

@@ -888,7 +888,7 @@
         "row_count": 600572,
         "columns": [
           {
-            "null_count": 200657,
+            "null_count": 400208,
             "distinct_count": 20000,
             "min_value": "1",
             "max_value": "20000"
@@ -900,8 +900,8 @@
             "max_value": "Some(5000),15,2"
           },
           {
-            "null_count": 230678,
-            "distinct_count": 120390,
+            "null_count": 176081,
+            "distinct_count": 123863,
             "min_value": "Some(90100),15,2",
             "max_value": "Some(9594950),15,2"
           },
@@ -912,13 +912,13 @@
             "max_value": "Some(10),15,2"
           },
           {
-            "null_count": 592380,
+            "null_count": 584188,
             "distinct_count": 4,
             "min_value": "COLLECT COD",
             "max_value": "TAKE BACK RETURN"
           },
           {
-            "null_count": 584188,
+            "null_count": 592380,
             "distinct_count": 7,
             "min_value": "AIR",
             "max_value": "TRUCK"
@@ -942,13 +942,7 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.38409716070679284,
-            "min_value_match": true,
-            "max_value_match": true
-          },
-          {
-            "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9863596704475067,
+            "null_fraction_abs_error": 0.29318882665192514,
             "min_value_match": true,
             "max_value_match": true
           },
@@ -961,6 +955,12 @@
           {
             "distinct_count_q_error": null,
             "null_fraction_abs_error": 0.9727193408950134,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.9863596704475067,
             "min_value_match": true,
             "max_value_match": true
           }

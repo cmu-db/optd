@@ -1627,20 +1627,20 @@
         "row_count": 600572,
         "columns": [
           {
-            "null_count": 0,
-            "distinct_count": 150000,
+            "null_count": 299927,
+            "distinct_count": 75000,
             "min_value": "1",
             "max_value": "600000"
           },
           {
-            "null_count": 400208,
+            "null_count": 200657,
             "distinct_count": 1000,
             "min_value": "1",
             "max_value": "1000"
           },
           {
-            "null_count": 338320,
-            "distinct_count": 109321,
+            "null_count": 176081,
+            "distinct_count": 123912,
             "min_value": "Some(90100),15,2",
             "max_value": "Some(9594950),15,2"
           },
@@ -1669,7 +1669,7 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.5633296257567786,
+            "null_fraction_abs_error": 0.29318882665192514,
             "min_value_match": true,
             "max_value_match": true
           },

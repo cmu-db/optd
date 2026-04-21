@@ -1558,8 +1558,8 @@
             "max_value": "Some(47912921),15,2"
           },
           {
-            "null_count": 76272,
-            "distinct_count": 2406,
+            "null_count": 133616,
+            "distinct_count": 2405,
             "min_value": "1992-01-01",
             "max_value": "1998-08-02"
           },
@@ -1570,7 +1570,7 @@
             "max_value": "5-LOW"
           },
           {
-            "null_count": 92656,
+            "null_count": 117232,
             "distinct_count": 1000,
             "min_value": "Clerk#000000001",
             "max_value": "Clerk#000001000"
@@ -1812,19 +1812,19 @@
             "max_value": "1998-08-02"
           },
           {
-            "null_count": 76272,
+            "null_count": 109040,
             "distinct_count": 5,
             "min_value": "1-URGENT",
             "max_value": "5-LOW"
           },
           {
-            "null_count": 100848,
+            "null_count": 76272,
             "distinct_count": 1000,
             "min_value": "Clerk#000000001",
             "max_value": "Clerk#000001000"
           },
           {
-            "null_count": 117232,
+            "null_count": 76272,
             "distinct_count": 1,
             "min_value": "0",
             "max_value": "0"
@@ -1872,19 +1872,19 @@
           },
           {
             "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.7269333333333333,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
             "null_fraction_abs_error": 0.50848,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.67232,
-            "min_value_match": true,
-            "max_value_match": true
-          },
-          {
-            "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.7815466666666666,
+            "null_fraction_abs_error": 0.50848,
             "min_value_match": true,
             "max_value_match": true
           },

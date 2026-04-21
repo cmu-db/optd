@@ -733,13 +733,13 @@
             "max_value": "600000"
           },
           {
-            "null_count": 284374,
+            "null_count": 383824,
             "distinct_count": 2525,
             "min_value": "1992-01-03",
             "max_value": "1998-12-01"
           },
           {
-            "null_count": 330236,
+            "null_count": 342864,
             "distinct_count": 2466,
             "min_value": "1992-01-31",
             "max_value": "1998-10-31"
@@ -751,7 +751,7 @@
             "max_value": "1998-12-27"
           },
           {
-            "null_count": 592380,
+            "null_count": 584188,
             "distinct_count": 7,
             "min_value": "AIR",
             "max_value": "TRUCK"
@@ -769,13 +769,13 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.4735052583204012,
+            "null_fraction_abs_error": 0.6390973938178937,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.5498691247677214,
+            "null_fraction_abs_error": 0.5708957460554271,
             "min_value_match": true,
             "max_value_match": true
           },
@@ -787,7 +787,7 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9863596704475067,
+            "null_fraction_abs_error": 0.9727193408950134,
             "min_value_match": true,
             "max_value_match": true
           }

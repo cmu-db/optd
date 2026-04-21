@@ -2203,8 +2203,8 @@
             "max_value": "14999"
           },
           {
-            "null_count": 133616,
-            "distinct_count": 2405,
+            "null_count": 76272,
+            "distinct_count": 2406,
             "min_value": "1992-01-01",
             "max_value": "1998-08-02"
           }
@@ -2227,7 +2227,7 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.8907733333333333,
+            "null_fraction_abs_error": 0.50848,
             "min_value_match": true,
             "max_value_match": true
           }
@@ -2431,8 +2431,8 @@
             "max_value": "600000"
           },
           {
-            "null_count": 338320,
-            "distinct_count": 109321,
+            "null_count": 177878,
+            "distinct_count": 123816,
             "min_value": "Some(90100),15,2",
             "max_value": "Some(9594950),15,2"
           },
@@ -2443,7 +2443,7 @@
             "max_value": "Some(10),15,2"
           },
           {
-            "null_count": 584188,
+            "null_count": 592380,
             "distinct_count": 3,
             "min_value": "A",
             "max_value": "R"
@@ -2461,7 +2461,7 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.5633296257567786,
+            "null_fraction_abs_error": 0.29618097413798844,
             "min_value_match": true,
             "max_value_match": true
           },
@@ -2473,7 +2473,7 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9727193408950134,
+            "null_fraction_abs_error": 0.9863596704475067,
             "min_value_match": true,
             "max_value_match": true
           }

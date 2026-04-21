@@ -2213,7 +2213,7 @@
             "max_value": "600000"
           },
           {
-            "null_count": 109040,
+            "null_count": 117232,
             "distinct_count": 3,
             "min_value": "F",
             "max_value": "P"
@@ -2231,7 +2231,7 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.7269333333333333,
+            "null_fraction_abs_error": 0.7815466666666666,
             "min_value_match": true,
             "max_value_match": true
           }
@@ -4266,80 +4266,80 @@
             "max_value": "1000"
           },
           {
-            "null_count": 584188,
+            "null_count": 592380,
             "distinct_count": 7,
             "min_value": "1",
             "max_value": "7"
           },
           {
-            "null_count": 575996,
+            "null_count": 592380,
             "distinct_count": 50,
             "min_value": "Some(100),15,2",
             "max_value": "Some(5000),15,2"
           },
           {
-            "null_count": 551420,
-            "distinct_count": 40210,
+            "null_count": 526844,
+            "distinct_count": 55043,
             "min_value": "Some(90100),15,2",
             "max_value": "Some(9594950),15,2"
           },
           {
-            "null_count": 567804,
+            "null_count": 592380,
             "distinct_count": 11,
             "min_value": "Some(0),15,2",
             "max_value": "Some(10),15,2"
           },
           {
-            "null_count": 584188,
+            "null_count": 592380,
             "distinct_count": 9,
             "min_value": "Some(0),15,2",
             "max_value": "Some(8),15,2"
           },
           {
-            "null_count": 551420,
+            "null_count": 575996,
             "distinct_count": 3,
             "min_value": "A",
             "max_value": "R"
           },
           {
-            "null_count": 559612,
+            "null_count": 584188,
             "distinct_count": 2,
             "min_value": "F",
             "max_value": "O"
           },
           {
-            "null_count": 518652,
+            "null_count": 485884,
             "distinct_count": 2522,
             "min_value": "1992-01-03",
             "max_value": "1998-12-01"
           },
           {
-            "null_count": 379388,
+            "null_count": 403964,
             "distinct_count": 2466,
             "min_value": "1992-01-31",
             "max_value": "1998-10-31"
           },
           {
-            "null_count": 84476,
+            "null_count": 70836,
             "distinct_count": 2547,
             "min_value": "1992-01-04",
             "max_value": "1998-12-27"
           },
           {
-            "null_count": 551420,
+            "null_count": 592380,
             "distinct_count": 4,
             "min_value": "COLLECT COD",
             "max_value": "TAKE BACK RETURN"
           },
           {
-            "null_count": 575996,
+            "null_count": 592380,
             "distinct_count": 7,
             "min_value": "AIR",
             "max_value": "TRUCK"
           },
           {
-            "null_count": 453116,
-            "distinct_count": 140458,
+            "null_count": 412156,
+            "distinct_count": 177996,
             "min_value": " Tiresias ",
             "max_value": "zzle: pending i"
           }
@@ -4368,7 +4368,31 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9727193408950134,
+            "null_fraction_abs_error": 0.9863596704475067,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.9863596704475067,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.8772370340275604,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.9863596704475067,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.9863596704475067,
             "min_value_match": true,
             "max_value_match": true
           },
@@ -4380,67 +4404,43 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9181580226850402,
-            "min_value_match": true,
-            "max_value_match": true
-          },
-          {
-            "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9454386817900269,
-            "min_value_match": true,
-            "max_value_match": true
-          },
-          {
-            "distinct_count_q_error": null,
             "null_fraction_abs_error": 0.9727193408950134,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9181580226850402,
+            "null_fraction_abs_error": 0.809035386265094,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9317983522375336,
+            "null_fraction_abs_error": 0.6726320907401611,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.8635967044750671,
+            "null_fraction_abs_error": 0.11794755666264828,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.6317111020826812,
+            "null_fraction_abs_error": 0.9863596704475067,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.14065923819292275,
+            "null_fraction_abs_error": 0.9863596704475067,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9181580226850402,
-            "min_value_match": true,
-            "max_value_match": true
-          },
-          {
-            "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9590790113425202,
-            "min_value_match": true,
-            "max_value_match": true
-          },
-          {
-            "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.7544740680551207,
+            "null_fraction_abs_error": 0.6862724202926543,
             "min_value_match": true,
             "max_value_match": true
           }
@@ -4689,80 +4689,80 @@
             "max_value": "1000"
           },
           {
-            "null_count": 584188,
+            "null_count": 592380,
             "distinct_count": 7,
             "min_value": "1",
             "max_value": "7"
           },
           {
-            "null_count": 575996,
+            "null_count": 592380,
             "distinct_count": 50,
             "min_value": "Some(100),15,2",
             "max_value": "Some(5000),15,2"
           },
           {
-            "null_count": 551420,
-            "distinct_count": 40210,
+            "null_count": 502268,
+            "distinct_count": 67175,
             "min_value": "Some(90100),15,2",
             "max_value": "Some(9594950),15,2"
           },
           {
-            "null_count": 567804,
+            "null_count": 592380,
             "distinct_count": 11,
             "min_value": "Some(0),15,2",
             "max_value": "Some(10),15,2"
           },
           {
-            "null_count": 575996,
+            "null_count": 592380,
             "distinct_count": 9,
             "min_value": "Some(0),15,2",
             "max_value": "Some(8),15,2"
           },
           {
-            "null_count": 567804,
+            "null_count": 592380,
             "distinct_count": 3,
             "min_value": "A",
             "max_value": "R"
           },
           {
-            "null_count": 551420,
+            "null_count": 584188,
             "distinct_count": 2,
             "min_value": "F",
             "max_value": "O"
           },
           {
-            "null_count": 526844,
-            "distinct_count": 2521,
+            "null_count": 559612,
+            "distinct_count": 2515,
             "min_value": "1992-01-03",
             "max_value": "1998-12-01"
           },
           {
-            "null_count": 354812,
+            "null_count": 412156,
             "distinct_count": 2466,
             "min_value": "1992-01-31",
             "max_value": "1998-10-31"
           },
           {
-            "null_count": 100860,
+            "null_count": 10264,
             "distinct_count": 2547,
             "min_value": "1992-01-04",
             "max_value": "1998-12-27"
           },
           {
-            "null_count": 559612,
+            "null_count": 592380,
             "distinct_count": 4,
             "min_value": "COLLECT COD",
             "max_value": "TAKE BACK RETURN"
           },
           {
-            "null_count": 551420,
+            "null_count": 592380,
             "distinct_count": 7,
             "min_value": "AIR",
             "max_value": "TRUCK"
           },
           {
-            "null_count": 453116,
-            "distinct_count": 140458,
+            "null_count": 436732,
+            "distinct_count": 155485,
             "min_value": " Tiresias ",
             "max_value": "zzle: pending i"
           }
@@ -5112,80 +5112,80 @@
             "max_value": "1000"
           },
           {
-            "null_count": 584188,
+            "null_count": 592380,
             "distinct_count": 7,
             "min_value": "1",
             "max_value": "7"
           },
           {
-            "null_count": 551420,
+            "null_count": 592380,
             "distinct_count": 50,
             "min_value": "Some(100),15,2",
             "max_value": "Some(5000),15,2"
           },
           {
-            "null_count": 535036,
-            "distinct_count": 50414,
+            "null_count": 526844,
+            "distinct_count": 55016,
             "min_value": "Some(90100),15,2",
             "max_value": "Some(9594950),15,2"
           },
           {
-            "null_count": 584188,
+            "null_count": 592380,
             "distinct_count": 11,
             "min_value": "Some(0),15,2",
             "max_value": "Some(10),15,2"
           },
           {
-            "null_count": 575996,
+            "null_count": 584188,
             "distinct_count": 9,
             "min_value": "Some(0),15,2",
             "max_value": "Some(8),15,2"
           },
           {
-            "null_count": 551420,
+            "null_count": 592380,
             "distinct_count": 3,
             "min_value": "A",
             "max_value": "R"
           },
           {
-            "null_count": 551420,
+            "null_count": 567804,
             "distinct_count": 2,
             "min_value": "F",
             "max_value": "O"
           },
           {
-            "null_count": 502268,
+            "null_count": 510460,
             "distinct_count": 2523,
             "min_value": "1992-01-03",
             "max_value": "1998-12-01"
           },
           {
-            "null_count": 363004,
+            "null_count": 354812,
             "distinct_count": 2466,
             "min_value": "1992-01-31",
             "max_value": "1998-10-31"
           },
           {
-            "null_count": 84476,
+            "null_count": 92668,
             "distinct_count": 2547,
             "min_value": "1992-01-04",
             "max_value": "1998-12-27"
           },
           {
-            "null_count": 551420,
+            "null_count": 592380,
             "distinct_count": 4,
             "min_value": "COLLECT COD",
             "max_value": "TAKE BACK RETURN"
           },
           {
-            "null_count": 559612,
+            "null_count": 584188,
             "distinct_count": 7,
             "min_value": "AIR",
             "max_value": "TRUCK"
           },
           {
-            "null_count": 453116,
-            "distinct_count": 140458,
+            "null_count": 477692,
+            "distinct_count": 117700,
             "min_value": " Tiresias ",
             "max_value": "zzle: pending i"
           }
@@ -5535,13 +5535,13 @@
             "max_value": "1000"
           },
           {
-            "null_count": 584188,
+            "null_count": 592380,
             "distinct_count": 7,
             "min_value": "1",
             "max_value": "7"
           },
           {
-            "null_count": 584188,
+            "null_count": 592380,
             "distinct_count": 50,
             "min_value": "Some(100),15,2",
             "max_value": "Some(5000),15,2"
@@ -5553,62 +5553,62 @@
             "max_value": "Some(9594950),15,2"
           },
           {
-            "null_count": 575996,
+            "null_count": 584188,
             "distinct_count": 11,
             "min_value": "Some(0),15,2",
             "max_value": "Some(10),15,2"
           },
           {
-            "null_count": 575996,
+            "null_count": 584188,
             "distinct_count": 9,
             "min_value": "Some(0),15,2",
             "max_value": "Some(8),15,2"
           },
           {
-            "null_count": 551420,
+            "null_count": 575996,
             "distinct_count": 3,
             "min_value": "A",
             "max_value": "R"
           },
           {
-            "null_count": 551420,
+            "null_count": 584188,
             "distinct_count": 2,
             "min_value": "F",
             "max_value": "O"
           },
           {
-            "null_count": 518652,
-            "distinct_count": 2522,
+            "null_count": 559612,
+            "distinct_count": 2516,
             "min_value": "1992-01-03",
             "max_value": "1998-12-01"
           },
           {
-            "null_count": 346620,
+            "null_count": 387580,
             "distinct_count": 2466,
             "min_value": "1992-01-31",
             "max_value": "1998-10-31"
           },
           {
-            "null_count": 50034,
+            "null_count": 10264,
             "distinct_count": 2547,
             "min_value": "1992-01-04",
             "max_value": "1998-12-27"
           },
           {
-            "null_count": 551420,
+            "null_count": 584188,
             "distinct_count": 4,
             "min_value": "COLLECT COD",
             "max_value": "TAKE BACK RETURN"
           },
           {
-            "null_count": 567804,
+            "null_count": 575996,
             "distinct_count": 7,
             "min_value": "AIR",
             "max_value": "TRUCK"
           },
           {
-            "null_count": 453116,
-            "distinct_count": 140458,
+            "null_count": 412156,
+            "distinct_count": 177968,
             "min_value": " Tiresias ",
             "max_value": "zzle: pending i"
           }
@@ -5958,80 +5958,80 @@
             "max_value": "1000"
           },
           {
-            "null_count": 584188,
+            "null_count": 592380,
             "distinct_count": 7,
             "min_value": "1",
             "max_value": "7"
           },
           {
-            "null_count": 575996,
+            "null_count": 592380,
             "distinct_count": 50,
             "min_value": "Some(100),15,2",
             "max_value": "Some(5000),15,2"
           },
           {
-            "null_count": 551420,
-            "distinct_count": 40210,
+            "null_count": 526844,
+            "distinct_count": 55043,
             "min_value": "Some(90100),15,2",
             "max_value": "Some(9594950),15,2"
           },
           {
-            "null_count": 567804,
+            "null_count": 592380,
             "distinct_count": 11,
             "min_value": "Some(0),15,2",
             "max_value": "Some(10),15,2"
           },
           {
-            "null_count": 584188,
+            "null_count": 592380,
             "distinct_count": 9,
             "min_value": "Some(0),15,2",
             "max_value": "Some(8),15,2"
           },
           {
-            "null_count": 551420,
+            "null_count": 575996,
             "distinct_count": 3,
             "min_value": "A",
             "max_value": "R"
           },
           {
-            "null_count": 559612,
+            "null_count": 584188,
             "distinct_count": 2,
             "min_value": "F",
             "max_value": "O"
           },
           {
-            "null_count": 518652,
+            "null_count": 485884,
             "distinct_count": 2522,
             "min_value": "1992-01-03",
             "max_value": "1998-12-01"
           },
           {
-            "null_count": 379388,
+            "null_count": 403964,
             "distinct_count": 2466,
             "min_value": "1992-01-31",
             "max_value": "1998-10-31"
           },
           {
-            "null_count": 84476,
+            "null_count": 70836,
             "distinct_count": 2547,
             "min_value": "1992-01-04",
             "max_value": "1998-12-27"
           },
           {
-            "null_count": 551420,
+            "null_count": 592380,
             "distinct_count": 4,
             "min_value": "COLLECT COD",
             "max_value": "TAKE BACK RETURN"
           },
           {
-            "null_count": 575996,
+            "null_count": 592380,
             "distinct_count": 7,
             "min_value": "AIR",
             "max_value": "TRUCK"
           },
           {
-            "null_count": 453116,
-            "distinct_count": 140458,
+            "null_count": 412156,
+            "distinct_count": 177996,
             "min_value": " Tiresias ",
             "max_value": "zzle: pending i"
           }
@@ -6060,7 +6060,31 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9727193408950134,
+            "null_fraction_abs_error": 0.9863596704475067,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.9863596704475067,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.8772370340275604,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.9863596704475067,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.9863596704475067,
             "min_value_match": true,
             "max_value_match": true
           },
@@ -6072,67 +6096,43 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9181580226850402,
-            "min_value_match": true,
-            "max_value_match": true
-          },
-          {
-            "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9454386817900269,
-            "min_value_match": true,
-            "max_value_match": true
-          },
-          {
-            "distinct_count_q_error": null,
             "null_fraction_abs_error": 0.9727193408950134,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9181580226850402,
+            "null_fraction_abs_error": 0.809035386265094,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9317983522375336,
+            "null_fraction_abs_error": 0.6726320907401611,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.8635967044750671,
+            "null_fraction_abs_error": 0.11794755666264828,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.6317111020826812,
+            "null_fraction_abs_error": 0.9863596704475067,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.14065923819292275,
+            "null_fraction_abs_error": 0.9863596704475067,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9181580226850402,
-            "min_value_match": true,
-            "max_value_match": true
-          },
-          {
-            "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9590790113425202,
-            "min_value_match": true,
-            "max_value_match": true
-          },
-          {
-            "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.7544740680551207,
+            "null_fraction_abs_error": 0.6862724202926543,
             "min_value_match": true,
             "max_value_match": true
           }
@@ -8073,80 +8073,80 @@
             "max_value": "1000"
           },
           {
-            "null_count": 584188,
+            "null_count": 592380,
             "distinct_count": 7,
             "min_value": "1",
             "max_value": "7"
           },
           {
-            "null_count": 575996,
+            "null_count": 592380,
             "distinct_count": 50,
             "min_value": "Some(100),15,2",
             "max_value": "Some(5000),15,2"
           },
           {
-            "null_count": 551420,
-            "distinct_count": 40210,
+            "null_count": 526844,
+            "distinct_count": 55043,
             "min_value": "Some(90100),15,2",
             "max_value": "Some(9594950),15,2"
           },
           {
-            "null_count": 567804,
+            "null_count": 592380,
             "distinct_count": 11,
             "min_value": "Some(0),15,2",
             "max_value": "Some(10),15,2"
           },
           {
-            "null_count": 584188,
+            "null_count": 592380,
             "distinct_count": 9,
             "min_value": "Some(0),15,2",
             "max_value": "Some(8),15,2"
           },
           {
-            "null_count": 551420,
+            "null_count": 575996,
             "distinct_count": 3,
             "min_value": "A",
             "max_value": "R"
           },
           {
-            "null_count": 559612,
+            "null_count": 584188,
             "distinct_count": 2,
             "min_value": "F",
             "max_value": "O"
           },
           {
-            "null_count": 518652,
+            "null_count": 485884,
             "distinct_count": 2522,
             "min_value": "1992-01-03",
             "max_value": "1998-12-01"
           },
           {
-            "null_count": 379388,
+            "null_count": 403964,
             "distinct_count": 2466,
             "min_value": "1992-01-31",
             "max_value": "1998-10-31"
           },
           {
-            "null_count": 84476,
+            "null_count": 70836,
             "distinct_count": 2547,
             "min_value": "1992-01-04",
             "max_value": "1998-12-27"
           },
           {
-            "null_count": 551420,
+            "null_count": 592380,
             "distinct_count": 4,
             "min_value": "COLLECT COD",
             "max_value": "TAKE BACK RETURN"
           },
           {
-            "null_count": 575996,
+            "null_count": 592380,
             "distinct_count": 7,
             "min_value": "AIR",
             "max_value": "TRUCK"
           },
           {
-            "null_count": 453116,
-            "distinct_count": 140458,
+            "null_count": 412156,
+            "distinct_count": 177996,
             "min_value": " Tiresias ",
             "max_value": "zzle: pending i"
           }
@@ -8175,7 +8175,31 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9727193408950134,
+            "null_fraction_abs_error": 0.9863596704475067,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.9863596704475067,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.8772370340275604,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.9863596704475067,
+            "min_value_match": true,
+            "max_value_match": true
+          },
+          {
+            "distinct_count_q_error": null,
+            "null_fraction_abs_error": 0.9863596704475067,
             "min_value_match": true,
             "max_value_match": true
           },
@@ -8187,67 +8211,43 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9181580226850402,
-            "min_value_match": true,
-            "max_value_match": true
-          },
-          {
-            "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9454386817900269,
-            "min_value_match": true,
-            "max_value_match": true
-          },
-          {
-            "distinct_count_q_error": null,
             "null_fraction_abs_error": 0.9727193408950134,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9181580226850402,
+            "null_fraction_abs_error": 0.809035386265094,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9317983522375336,
+            "null_fraction_abs_error": 0.6726320907401611,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.8635967044750671,
+            "null_fraction_abs_error": 0.11794755666264828,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.6317111020826812,
+            "null_fraction_abs_error": 0.9863596704475067,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.14065923819292275,
+            "null_fraction_abs_error": 0.9863596704475067,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9181580226850402,
-            "min_value_match": true,
-            "max_value_match": true
-          },
-          {
-            "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9590790113425202,
-            "min_value_match": true,
-            "max_value_match": true
-          },
-          {
-            "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.7544740680551207,
+            "null_fraction_abs_error": 0.6862724202926543,
             "min_value_match": true,
             "max_value_match": true
           }

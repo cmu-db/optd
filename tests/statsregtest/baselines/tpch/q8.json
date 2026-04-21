@@ -3583,7 +3583,7 @@
             "max_value": "20000"
           },
           {
-            "null_count": 0,
+            "null_count": 3616,
             "distinct_count": 150,
             "min_value": "ECONOMY ANODIZED BRASS",
             "max_value": "STANDARD POLISHED TIN"
@@ -3601,7 +3601,7 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.0,
+            "null_fraction_abs_error": 0.1808,
             "min_value_match": true,
             "max_value_match": true
           }
@@ -3707,13 +3707,13 @@
             "max_value": "1000"
           },
           {
-            "null_count": 391903,
-            "distinct_count": 100814,
+            "null_count": 244560,
+            "distinct_count": 119180,
             "min_value": "Some(90100),15,2",
             "max_value": "Some(9594950),15,2"
           },
           {
-            "null_count": 584188,
+            "null_count": 592380,
             "distinct_count": 11,
             "min_value": "Some(0),15,2",
             "max_value": "Some(10),15,2"
@@ -3743,13 +3743,13 @@
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.6525495694104954,
+            "null_fraction_abs_error": 0.4072117914255077,
             "min_value_match": true,
             "max_value_match": true
           },
           {
             "distinct_count_q_error": null,
-            "null_fraction_abs_error": 0.9727193408950134,
+            "null_fraction_abs_error": 0.9863596704475067,
             "min_value_match": true,
             "max_value_match": true
           }
