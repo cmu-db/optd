@@ -45,10 +45,6 @@ order by
 limit 100;
 
 /*
-<<<<<<< HEAD
-Error
-Schema error: No field named "__#11"."min(partsupp.ps_supplycost)". Valid fields are part.p_partkey, partsupp.ps_partkey, "__#17".min.
-=======
 logical_plan after optd-initial:
 Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): [ "__#13.n_name"(#13.2), "__#13.p_mfgr"(#13.4), "__#13.p_partkey"(#13.3), "__#13.s_acctbal"(#13.0), "__#13.s_address"(#13.5), "__#13.s_comment"(#13.7), "__#13.s_name"(#13.1), "__#13.s_phone"(#13.6) ], (.cardinality): 0.00 }
 └── OrderBy { ordering_exprs: [ "__#13.s_acctbal"(#13.0) DESC, "__#13.n_name"(#13.2) ASC, "__#13.s_name"(#13.1) ASC, "__#13.p_partkey"(#13.3) ASC ], (.output_columns): [ "__#13.n_name"(#13.2), "__#13.p_mfgr"(#13.4), "__#13.p_partkey"(#13.3), "__#13.s_acctbal"(#13.0), "__#13.s_address"(#13.5), "__#13.s_comment"(#13.7), "__#13.s_name"(#13.1), "__#13.s_phone"(#13.6) ], (.cardinality): 0.00 }
@@ -126,7 +122,7 @@ Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): [ "__#13.n_nam
             │   └── Join
             │       ├── .join_type: Inner
             │       ├── .implementation: None
-            │       ├── .join_cond: 
+            │       ├── .join_cond:
             │       ├── (.output_columns):
             │       │   ┌── "nation.n_comment"(#4.3)
             │       │   ├── "nation.n_name"(#4.1)
@@ -160,7 +156,7 @@ Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): [ "__#13.n_nam
             │       ├── Join
             │       │   ├── .join_type: Inner
             │       │   ├── .implementation: None
-            │       │   ├── .join_cond: 
+            │       │   ├── .join_cond:
             │       │   ├── (.output_columns):
             │       │   │   ┌── "nation.n_comment"(#4.3)
             │       │   │   ├── "nation.n_name"(#4.1)
@@ -191,7 +187,7 @@ Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): [ "__#13.n_nam
             │       │   ├── Join
             │       │   │   ├── .join_type: Inner
             │       │   │   ├── .implementation: None
-            │       │   │   ├── .join_cond: 
+            │       │   │   ├── .join_cond:
             │       │   │   ├── (.output_columns):
             │       │   │   │   ┌── "part.p_brand"(#1.3)
             │       │   │   │   ├── "part.p_comment"(#1.8)
@@ -218,7 +214,7 @@ Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): [ "__#13.n_nam
             │       │   │   ├── Join
             │       │   │   │   ├── .join_type: Inner
             │       │   │   │   ├── .implementation: None
-            │       │   │   │   ├── .join_cond: 
+            │       │   │   │   ├── .join_cond:
             │       │   │   │   ├── (.output_columns):
             │       │   │   │   │   ┌── "part.p_brand"(#1.3)
             │       │   │   │   │   ├── "part.p_comment"(#1.8)
@@ -270,7 +266,7 @@ Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): [ "__#13.n_nam
                         └── Join
                             ├── .join_type: Inner
                             ├── .implementation: None
-                            ├── .join_cond: 
+                            ├── .join_cond:
                             ├── (.output_columns):
                             │   ┌── "nation.n_comment"(#8.3)
                             │   ├── "nation.n_name"(#8.1)
@@ -295,7 +291,7 @@ Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): [ "__#13.n_nam
                             ├── Join
                             │   ├── .join_type: Inner
                             │   ├── .implementation: None
-                            │   ├── .join_cond: 
+                            │   ├── .join_cond:
                             │   ├── (.output_columns):
                             │   │   ┌── "nation.n_comment"(#8.3)
                             │   │   ├── "nation.n_name"(#8.1)
@@ -317,7 +313,7 @@ Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): [ "__#13.n_nam
                             │   ├── Join
                             │   │   ├── .join_type: Inner
                             │   │   ├── .implementation: None
-                            │   │   ├── .join_cond: 
+                            │   │   ├── .join_cond:
                             │   │   ├── (.output_columns): [ "partsupp.ps_availqty"(#6.2), "partsupp.ps_comment"(#6.4), "partsupp.ps_partkey"(#6.0), "partsupp.ps_suppkey"(#6.1), "partsupp.ps_supplycost"(#6.3), "supplier.s_acctbal"(#7.5), "supplier.s_address"(#7.2), "supplier.s_comment"(#7.6), "supplier.s_name"(#7.1), "supplier.s_nationkey"(#7.3), "supplier.s_phone"(#7.4), "supplier.s_suppkey"(#7.0) ]
                             │   │   ├── (.cardinality): 0.00
                             │   │   ├── Get { .data_source_id: 5, .table_index: 6, .implementation: None, (.output_columns): [ "partsupp.ps_availqty"(#6.2), "partsupp.ps_comment"(#6.4), "partsupp.ps_partkey"(#6.0), "partsupp.ps_suppkey"(#6.1), "partsupp.ps_supplycost"(#6.3) ], (.cardinality): 0.00 }
@@ -721,6 +717,4 @@ Limit
                                     ├── .implementation: None
                                     ├── (.output_columns): [ "region.r_name"(#9.1), "region.r_regionkey"(#9.0) ]
                                     └── (.cardinality): 0.00
->>>>>>> 1e4fd43 (decorrelation: rewrite dependent join conditions after remap)
 */
-
