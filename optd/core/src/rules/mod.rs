@@ -11,6 +11,7 @@ mod simplification;
 pub use decorrelation::*;
 pub use enforcers::*;
 pub use implementations::*;
+pub use join_ordering::JoinOrderingPass;
 pub use logical_join_inner_assoc::LogicalJoinInnerAssocRule;
 pub use logical_join_inner_commute::LogicalJoinInnerCommuteRule;
 pub use logical_select_join_transpose::LogicalSelectJoinTransposeRule;
