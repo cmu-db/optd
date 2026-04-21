@@ -81,6 +81,10 @@ pub(super) struct Unnesting<'a> {
 
     /// Representatives discovered for columns that belong to ancestor scopes.
     nested_repr: HashMap<Column, Column>,
+
+    /// Rebuilt operators allocate fresh output column ids. This map remembers
+    /// which old output columns are now represented by which fresh columns.
+    column_rewrites: HashMap<Column, Column>,
 }
 
 impl<'a> Unnesting<'a> {
@@ -88,6 +92,7 @@ impl<'a> Unnesting<'a> {
         Self {
             repr: HashMap::new(),
             nested_repr: HashMap::new(),
+            column_rewrites: HashMap::new(),
             cclasses: UnionFind::default(),
             info,
         }
@@ -154,6 +159,23 @@ impl<'a> Unnesting<'a> {
                 *val = *mapped;
             }
         }
+        for val in self.column_rewrites.values_mut() {
+            if let Some(mapped) = remap.get(val) {
+                *val = *mapped;
+            }
+        }
+    }
+
+    fn resolve_column_rewrite(&self, col: Column) -> Option<Column> {
+        let mut current = col;
+        let mut seen = HashSet::new();
+        while let Some(next) = self.column_rewrites.get(&current).copied() {
+            if !seen.insert(current) {
+                break;
+            }
+            current = next;
+        }
+        (current != col).then_some(current)
     }
 
     pub(super) fn resolve_domain_repr_recursive(&self, col: Column) -> Option<Column> {
@@ -165,8 +187,8 @@ impl<'a> Unnesting<'a> {
     }
 
     pub(super) fn resolve_col(&self, col: Column) -> Option<Column> {
-        self.get_resolved_repr_of(&col)
-            .copied()
+        self.resolve_column_rewrite(col)
+            .or_else(|| self.get_resolved_repr_of(&col).copied())
             .or_else(|| self.resolve_domain_repr_recursive(col))
     }
 
@@ -187,10 +209,19 @@ impl<'a> Unnesting<'a> {
     }
 
     // Project/remap/aggregate rebuilds create fresh table-index namespaces in
-    // the new IR. Preserve equivalence information by teaching the current
-    // scope which old output column now corresponds to which new one.
+    // the new IR. Remember which old output column now corresponds to which
+    // new one so later expressions do not keep referencing hidden columns.
+    pub(super) fn record_column_rewrites(&mut self, mapping: &HashMap<Column, Column>) {
+        for (source, target) in mapping {
+            self.column_rewrites.insert(*source, *target);
+        }
+    }
+
+    // Passthrough mappings are stronger than column rewrites: the source input
+    // column and target output column are equivalent for representative choice.
     pub(super) fn propagate_passthrough_mapping(&mut self, mapping: &HashMap<Column, Column>) {
         for (source, target) in mapping {
+            self.column_rewrites.insert(*source, *target);
             self.cclasses.merge(source, target);
         }
 
