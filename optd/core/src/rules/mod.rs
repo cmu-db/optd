@@ -1,6 +1,7 @@
 mod decorrelation;
 mod enforcers;
 mod implementations;
+mod join_ordering;
 mod logical_join_inner_assoc;
 mod logical_join_inner_commute;
 mod logical_select_join_transpose;
