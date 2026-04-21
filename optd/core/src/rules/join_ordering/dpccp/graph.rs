@@ -200,6 +200,7 @@ mod tests {
         assert_eq!(graph.vertices[v0].info, "A");
         assert_eq!(graph.vertices[v1].info, "B");
         assert_eq!(graph.edges[e0].info, "R1");
+        assert_eq!(graph.get_edge_info(e0), Some(&"R1"));
         assert!(graph.edges[e0].connects(v0, v1));
         assert!(graph.edges[e1].connects(v1, v2));
         let neighborhood = graph.neighborhood(bitvec![0, 1, 0]);

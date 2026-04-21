@@ -80,11 +80,13 @@ impl<E> Edge<E> {
     }
 
     /// Check if the hyperedge is simple, i.e., |u| = |v| = 1.
+    #[cfg(test)]
     pub fn is_simple(&self) -> bool {
         self.u.count_ones() == 1 && self.v.count_ones() == 1
     }
 
     /// Returns the full set of vertices mentioned by the edge.
+    #[cfg(test)]
     pub fn vertex_set(&self) -> VertexSet {
         self.u.clone() | &self.v
     }
@@ -100,6 +102,7 @@ impl<V, E> QueryHypergraph<V, E> {
     }
 
     /// Returns the payload stored for a vertex.
+    #[cfg(test)]
     pub fn get_vertex_info(&self, vertex_index: VertexIndex) -> Option<&V> {
         self.vertices.get(vertex_index).map(|v| &v.info)
     }
@@ -168,6 +171,7 @@ impl<V, E> QueryHypergraph<V, E> {
     }
 
     /// Returns whether two vertex sets are disjoint.
+    #[cfg(test)]
     pub fn is_disjoint(&self, a: VertexSet, b: VertexSet) -> bool {
         (a & b).not_any()
     }
@@ -202,6 +206,7 @@ impl<V, E> QueryHypergraph<V, E> {
     }
 
     /// Resolves an edge mask to edge payloads.
+    #[cfg(test)]
     pub fn get_edges(&self, edge_mask: EdgeSet) -> Vec<&E> {
         edge_mask
             .iter_ones()
@@ -216,6 +221,7 @@ impl<V, E> QueryHypergraph<V, E> {
     }
 
     /// Returns the edges fully contained in `s`.
+    #[cfg(test)]
     pub fn get_induced_edges(&self, s: VertexSet) -> EdgeSet {
         let mut edge_mask = self.empty_edge_set();
         for (i, edge) in self.edges.iter().enumerate() {
@@ -237,6 +243,7 @@ mod tests {
     #[test]
     fn test_query_hypergraph_connectedness() {
         let h = make_dphyp_example_hypergraph();
+        assert!(h.is_disjoint(bitvec![1, 0, 0, 0, 0, 0], bitvec![0, 1, 0, 0, 0, 0]));
         assert!(
             !h.is_connected(&bitvec![1, 1, 1, 0, 0, 0], &bitvec![0, 0, 0, 1, 0, 0]),
             "R1, R2, R3 should not be connected to R4 alone"
@@ -250,6 +257,16 @@ mod tests {
         assert!(
             h.is_connected(&bitvec![1, 1, 1, 0, 0, 0], &bitvec![0, 0, 0, 1, 1, 1]),
             "R1, R2, R3 should  be connected to R4, R5, R6 through hyperedge"
+        );
+        assert_eq!(
+            h.edges[4].vertex_set(),
+            bitvec![1, 1, 1, 1, 1, 1],
+            "The hyperedge should cover all six relations"
+        );
+        assert_eq!(
+            h.get_induced_edges(bitvec![1, 1, 1, 0, 0, 0]),
+            bitvec![1, 1, 0, 0, 0],
+            "Only the two simple edges among R1/R2/R3 are induced"
         );
     }
 

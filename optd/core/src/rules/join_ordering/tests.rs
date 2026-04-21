@@ -12,7 +12,7 @@ use crate::ir::{
     IRContext,
     builder::column_ref,
     explain::quick_explain,
-    operator::{Get, Join, JoinImplementation, JoinType},
+    operator::{Get, Join, JoinImplementation, JoinType, OperatorCategory},
     statistics::TableStatistics,
     table_ref::TableRef,
     test_utils::test_ctx_with_tables,
@@ -70,9 +70,12 @@ fn test_extract_logical_join_island_keeps_constrained_joins_inside() -> crate::e
     let island = JoinIsland::extract(root, &ctx)?.expect("expected a logical join island");
     assert_eq!(island.leaf_count(), 4);
     assert_eq!(island.join_count(), 3);
+    assert_eq!(island.root().leaf_count(), 4);
+    assert_eq!(island.root().join_count(), 3);
 
     let root_atom = island.root().atom().expect("root should be a join");
     assert_eq!(root_atom.join_type, JoinType::LeftOuter);
+    assert!(quick_explain(&root_atom.join_cond, &ctx).starts_with("true"));
     assert_eq!(
         root_atom.semantics,
         JoinSemantics {
@@ -91,6 +94,47 @@ fn test_extract_logical_join_island_keeps_constrained_joins_inside() -> crate::e
     };
     let semi_atom = inner.atom().expect("inner child should be a join");
     assert_eq!(semi_atom.join_type, JoinType::LeftSemi);
+    assert!(quick_explain(&semi_atom.join_cond, &ctx).starts_with("true"));
+
+    let JoinIslandNode::Join { outer, inner, .. } = island.root() else {
+        panic!("root should be a join");
+    };
+    let JoinIslandNode::Join {
+        outer: ab_outer,
+        inner: ab_inner,
+        ..
+    } = outer.as_ref()
+    else {
+        panic!("left child should be a join");
+    };
+    let JoinIslandNode::Join {
+        outer: semi_outer,
+        inner: semi_inner,
+        ..
+    } = inner.as_ref()
+    else {
+        panic!("right child should be a join");
+    };
+    let JoinIslandNode::Leaf(ab_outer_leaf) = ab_outer.as_ref() else {
+        panic!("A should be a leaf");
+    };
+    let JoinIslandNode::Leaf(ab_inner_leaf) = ab_inner.as_ref() else {
+        panic!("B should be a leaf");
+    };
+    let JoinIslandNode::Leaf(semi_outer_leaf) = semi_outer.as_ref() else {
+        panic!("C should be a leaf");
+    };
+    let JoinIslandNode::Leaf(semi_inner_leaf) = semi_inner.as_ref() else {
+        panic!("D should be a leaf");
+    };
+    assert_eq!(ab_outer_leaf.op.kind.category(), OperatorCategory::Logical);
+    assert_eq!(ab_inner_leaf.op.kind.category(), OperatorCategory::Logical);
+    assert_eq!(semi_outer_leaf.op.kind.category(), OperatorCategory::Logical);
+    assert_eq!(semi_inner_leaf.op.kind.category(), OperatorCategory::Logical);
+    assert!(!ab_outer_leaf.output_columns.is_empty());
+    assert!(!ab_inner_leaf.output_columns.is_empty());
+    assert!(!semi_outer_leaf.output_columns.is_empty());
+    assert!(!semi_inner_leaf.output_columns.is_empty());
 
     Ok(())
 }

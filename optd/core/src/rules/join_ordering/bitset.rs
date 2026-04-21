@@ -6,6 +6,7 @@ use itertools::Itertools;
 use super::types::VertexSet;
 
 /// Returns the set members as sorted indices.
+#[cfg(test)]
 pub(crate) fn extract_bitset(s: &BitVec) -> Vec<usize> {
     s.iter_ones().collect()
 }

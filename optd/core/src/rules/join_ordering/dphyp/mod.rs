@@ -4,9 +4,12 @@
 //! subsets exist and emits the `(left, right, join_edges)` combinations that a
 //! higher layer can cost.
 
-use super::{EdgeSet, VertexSet, debug_vertex_set, subsets, write_csg_cmp_pairs};
+use super::{EdgeSet, VertexSet, subsets};
 use bitvec::prelude::*;
 use std::collections::HashSet;
+
+#[cfg(test)]
+use super::{debug_vertex_set, write_csg_cmp_pairs};
 
 mod hypergraph;
 
@@ -163,6 +166,7 @@ impl DPHyp {
 }
 
 /// Pretty-printer for the emitted DPHyp pairs.
+#[cfg(test)]
 pub fn show_csg_cmp_pairs<V, E>(
     query_graph: &QueryHypergraph<V, E>,
     pairs: Vec<EnumeratedPair>,

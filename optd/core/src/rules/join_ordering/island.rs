@@ -5,8 +5,10 @@
 //! types are still represented here instead of being treated as opaque
 //! non-joins.
 
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use crate::{
     error::Result,
     ir::{
@@ -14,8 +16,11 @@ use crate::{
         operator::{Join, JoinType},
     },
 };
+#[cfg(not(test))]
+use crate::ir::{Operator, OperatorKind, operator::JoinType};
 
 /// Maximal connected subtree of logical joins, regardless of join type.
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub(crate) struct JoinIsland {
     root: JoinIslandNode,
@@ -23,6 +28,7 @@ pub(crate) struct JoinIsland {
     join_count: usize,
 }
 
+#[cfg(test)]
 impl JoinIsland {
     /// Extracts a join island rooted at `root`, or returns `None` if `root` is
     /// not a logical join.
@@ -58,6 +64,7 @@ impl JoinIsland {
 }
 
 /// Recursive island node: either an opaque leaf subplan or a logical join atom.
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub(crate) enum JoinIslandNode {
     Leaf(JoinIslandLeaf),
@@ -68,6 +75,7 @@ pub(crate) enum JoinIslandNode {
     },
 }
 
+#[cfg(test)]
 impl JoinIslandNode {
     /// Returns the number of leaf subplans under this node.
     pub(crate) fn leaf_count(&self) -> usize {
@@ -95,6 +103,7 @@ impl JoinIslandNode {
 }
 
 /// Leaf of a join island; the pass treats this subtree as opaque for now.
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub(crate) struct JoinIslandLeaf {
     pub(crate) op: Arc<Operator>,
@@ -102,6 +111,7 @@ pub(crate) struct JoinIslandLeaf {
 }
 
 /// Semantic summary of one logical join operator inside an island.
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub(crate) struct JoinAtom {
     pub(crate) join_type: JoinType,
@@ -113,6 +123,7 @@ pub(crate) struct JoinAtom {
 ///
 /// These flags are intentionally conservative. Today they are descriptive
 /// metadata, not the active legality oracle for reordering.
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct JoinSemantics {
     pub(crate) commutative: bool,
@@ -124,6 +135,7 @@ pub(crate) struct JoinSemantics {
     pub(crate) introduces_mark_column: bool,
 }
 
+#[cfg(test)]
 impl JoinSemantics {
     /// Derives coarse legality metadata from the join type alone.
     pub(crate) fn from_join_type(join_type: JoinType) -> Self {
@@ -169,6 +181,7 @@ impl JoinSemantics {
 }
 
 /// Returns whether `op` is a logical join, regardless of its join type.
+#[cfg(test)]
 pub(crate) fn is_logical_join(op: &Operator) -> bool {
     matches!(&op.kind, OperatorKind::Join(meta) if meta.implementation.is_none())
 }
@@ -179,6 +192,7 @@ pub(crate) fn is_inner_logical_join(op: &Operator) -> bool {
 }
 
 /// Recursive worker for island extraction.
+#[cfg(test)]
 fn extract_node(
     op: Arc<Operator>,
     ctx: &IRContext,
