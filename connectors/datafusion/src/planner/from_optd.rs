@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, vec};
+use std::{sync::Arc, vec};
 
 use datafusion::{
     common::{Column, DFSchema},
@@ -118,35 +118,10 @@ impl OptdQueryPlannerContext<'_> {
         Ok(logical_expr::Projection::try_new_with_schema(exprs, input, Arc::new(schema)).unwrap())
     }
 
-    fn visible_column_scope(
-        &self,
-        input: &Operator,
-    ) -> Result<HashMap<optd_core::ir::Column, Column>> {
-        let columns = input
-            .output_columns_in_order(&self.inner)
-            .context(OptdSnafu)?;
-        let schema = input.output_schema(&self.inner).context(OptdSnafu)?;
-        Ok(columns
-            .into_iter()
-            .zip(schema.iter())
-            .map(|(column, (table_ref, field))| {
-                (
-                    column,
-                    Column::new(Some(Self::from_optd_table_ref(table_ref)), field.name()),
-                )
-            })
-            .collect())
-    }
-
-    fn with_visible_column_scope<T>(
-        &mut self,
-        scope: HashMap<optd_core::ir::Column, Column>,
-        f: impl FnOnce(&mut Self) -> Result<T>,
-    ) -> Result<T> {
-        self.from_optd_column_scopes.push(scope);
-        let result = f(self);
-        self.from_optd_column_scopes.pop();
-        result
+    fn merge_output_envs(&self, left: &OutputEnv, right: &OutputEnv) -> OutputEnv {
+        let mut merged = left.clone();
+        merged.extend(right.iter().map(|(column, df_column)| (*column, df_column.clone())));
+        merged
     }
 
     fn alias_if_changed(expr: DFExpr, table_ref: &TableRef, field: &Field) -> Result<DFExpr> {
@@ -248,7 +223,7 @@ impl OptdQueryPlannerContext<'_> {
         Ok(DFLogicalPlan::Aggregate(aggregate))
     }
     pub fn try_from_optd_remap(&mut self, node: RemapBorrowed<'_>) -> Result<DFLogicalPlan> {
-        let input = self.try_from_optd_plan(node.input())?;
+        let input = self.try_from_optd_plan_with_outputs(node.input())?;
         let binder = self.inner.binder.read().unwrap();
         let binding = binder
             .get_binding(node.table_index())
@@ -257,7 +232,7 @@ impl OptdQueryPlannerContext<'_> {
 
         let alias = Self::from_optd_table_ref(table_ref);
 
-        let subquery_alias = logical_plan::SubqueryAlias::try_new(Arc::new(input), alias)
+        let subquery_alias = logical_plan::SubqueryAlias::try_new(Arc::new(input.plan), alias)
             .context(DataFusionSnafu)?;
 
         Ok(DFLogicalPlan::SubqueryAlias(subquery_alias))
@@ -279,36 +254,32 @@ impl OptdQueryPlannerContext<'_> {
     }
 
     pub fn try_from_optd_join(&mut self, node: JoinBorrowed<'_>) -> Result<DFLogicalPlan> {
-        let outer = self.try_from_optd_plan(node.outer())?;
-        let inner = self.try_from_optd_plan(node.inner())?;
+        let outer = self.try_from_optd_plan_with_outputs(node.outer())?;
+        let inner = self.try_from_optd_plan_with_outputs(node.inner())?;
         let (equi_conds, non_equi_conds) =
             split_equi_and_non_equi_conditions(&node, &self.inner).context(OptdSnafu)?;
 
-        let mut scope = self.visible_column_scope(node.outer())?;
-        scope.extend(self.visible_column_scope(node.inner())?);
-        let (on, filter): (_, Vec<_>) = self.with_visible_column_scope(scope, |ctx| {
-            let on = equi_conds
-                .iter()
-                .map(|(l, r)| {
-                    Ok((
-                        DFExpr::Column(ctx.try_from_optd_column(l)?),
-                        DFExpr::Column(ctx.try_from_optd_column(r)?),
-                    ))
-                })
-                .try_collect()?;
-            let filter = non_equi_conds
-                .iter()
-                .map(|e| ctx.try_from_optd_scalar_expr(e))
-                .try_collect()?;
-            Ok((on, filter))
-        })?;
+        let output_env = self.merge_output_envs(&outer.outputs, &inner.outputs);
+        let on = equi_conds
+            .iter()
+            .map(|(l, r)| {
+                Ok((
+                    DFExpr::Column(self.try_from_optd_column_in_env(l, &output_env)?),
+                    DFExpr::Column(self.try_from_optd_column_in_env(r, &output_env)?),
+                ))
+            })
+            .try_collect()?;
+        let filter: Vec<_> = non_equi_conds
+            .iter()
+            .map(|e| self.try_from_optd_scalar_expr_with_env(e, &output_env))
+            .try_collect()?;
 
         let filter = filter.into_iter().reduce(logical_expr::and);
 
         let join_type = Self::try_from_optd_join_type(node.join_type())?;
         let join = logical_plan::Join::try_new(
-            Arc::new(outer),
-            Arc::new(inner),
+            Arc::new(outer.plan),
+            Arc::new(inner.plan),
             on,
             filter,
             join_type,
@@ -316,17 +287,6 @@ impl OptdQueryPlannerContext<'_> {
             datafusion::common::NullEquality::NullEqualsNothing,
         )
         .context(DataFusionSnafu)?;
-        if let optd_core::ir::operator::join::JoinType::Mark(mark_column) = node.join_type() {
-            let (qualifier, field) = join
-                .schema
-                .iter()
-                .last()
-                .with_whatever_context(|| "LeftMark join should expose a marker column")?;
-            self.register_optd_mark_column(
-                *mark_column,
-                Column::new(qualifier.cloned(), field.name()),
-            );
-        }
         Ok(DFLogicalPlan::Join(join))
     }
 
@@ -1077,6 +1037,7 @@ mod tests {
 }
 
 impl OptdQueryPlannerContext<'_> {
+    #[cfg(test)]
     pub fn try_from_optd_scalar_expr(&mut self, expr: &Scalar) -> Result<DFExpr> {
         let output_env = OutputEnv::default();
         self.try_from_optd_scalar_expr_with_env(expr, &output_env)

@@ -78,8 +78,6 @@ pub struct OptdQueryPlannerContext<'a> {
     pub session_state: &'a SessionState,
     pub table_reference_to_source: HashMap<TableReference, Arc<dyn TableSource + 'static>>,
     pub df_mark_columns: HashMap<datafusion::common::Column, optd_core::ir::Column>,
-    pub optd_mark_columns: HashMap<optd_core::ir::Column, datafusion::common::Column>,
-    pub from_optd_column_scopes: Vec<HashMap<optd_core::ir::Column, datafusion::common::Column>>,
 }
 
 impl<'a> OptdQueryPlannerContext<'a> {
@@ -89,8 +87,6 @@ impl<'a> OptdQueryPlannerContext<'a> {
             session_state,
             table_reference_to_source: HashMap::new(),
             df_mark_columns: HashMap::new(),
-            optd_mark_columns: HashMap::new(),
-            from_optd_column_scopes: Vec::new(),
         }
     }
 

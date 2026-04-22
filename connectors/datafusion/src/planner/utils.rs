@@ -77,10 +77,6 @@ impl OptdQueryPlannerContext<'_> {
     }
 
     pub fn try_from_optd_column(&self, column: &Column) -> Result<DFColumn> {
-        // Check for mark columns first
-        if let Some(df_column) = self.optd_mark_columns.get(column) {
-            return Ok(df_column.clone());
-        }
         let (table_ref, field) = self.inner.get_column_name(column).context(OptdSnafu)?;
         let table_reference = Self::from_optd_table_ref(&table_ref);
         let column = DFColumn::new(Some(table_reference), field.name());
@@ -102,11 +98,6 @@ impl OptdQueryPlannerContext<'_> {
     /// Registers the optd column allocated for a DataFusion mark column.
     pub fn register_df_mark_column(&mut self, df_column: DFColumn, column: Column) {
         self.df_mark_columns.insert(df_column, column);
-    }
-
-    /// Registers the DataFusion mark column associated with an optd column.
-    pub fn register_optd_mark_column(&mut self, column: Column, df_column: DFColumn) {
-        self.optd_mark_columns.insert(column, df_column);
     }
 
     /// Returns the existing optd column for a DataFusion mark column, or allocates one.
