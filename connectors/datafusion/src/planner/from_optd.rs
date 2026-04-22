@@ -120,7 +120,11 @@ impl OptdQueryPlannerContext<'_> {
 
     fn merge_output_envs(&self, left: &OutputEnv, right: &OutputEnv) -> OutputEnv {
         let mut merged = left.clone();
-        merged.extend(right.iter().map(|(column, df_column)| (*column, df_column.clone())));
+        merged.extend(
+            right
+                .iter()
+                .map(|(column, df_column)| (*column, df_column.clone())),
+        );
         merged
     }
 
@@ -292,9 +296,10 @@ impl OptdQueryPlannerContext<'_> {
 
     pub fn try_from_optd_select(&mut self, node: SelectBorrowed<'_>) -> Result<DFLogicalPlan> {
         let input = self.try_from_optd_plan_with_outputs(node.input())?;
-        let predicate = self.try_from_optd_scalar_expr_with_env(node.predicate(), &input.outputs)?;
-        let filter =
-            logical_plan::Filter::try_new(predicate, Arc::new(input.plan)).context(DataFusionSnafu)?;
+        let predicate =
+            self.try_from_optd_scalar_expr_with_env(node.predicate(), &input.outputs)?;
+        let filter = logical_plan::Filter::try_new(predicate, Arc::new(input.plan))
+            .context(DataFusionSnafu)?;
         Ok(DFLogicalPlan::Filter(filter))
     }
 
@@ -330,7 +335,8 @@ impl OptdQueryPlannerContext<'_> {
             .tuple_ordering()
             .iter()
             .map(|(column, direction)| {
-                let expr = DFExpr::Column(self.try_from_optd_column_in_env(column, &input.outputs)?);
+                let expr =
+                    DFExpr::Column(self.try_from_optd_column_in_env(column, &input.outputs)?);
                 let asc = matches!(direction, TupleOrderingDirection::Asc);
                 Ok(logical_expr::expr::Sort::new(expr, asc, !asc))
             })
