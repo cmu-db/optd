@@ -199,16 +199,16 @@ impl OptdQueryPlannerContext<'_> {
         let keys = node.keys().borrow::<List>();
         let exprs = node.exprs().borrow::<List>();
         let scope = self.visible_column_scope(node.input())?;
-        let (group_expr, aggr_expr) = self.with_visible_column_scope(scope, |this| {
+        let (group_expr, aggr_expr) = self.with_visible_column_scope(scope, |ctx| {
             let group_expr = keys
                 .members()
                 .iter()
-                .map(|e| this.try_from_optd_scalar_expr(e))
+                .map(|e| ctx.try_from_optd_scalar_expr(e))
                 .try_collect()?;
             let aggr_expr = exprs
                 .members()
                 .iter()
-                .map(|e| this.try_from_optd_scalar_expr(e))
+                .map(|e| ctx.try_from_optd_scalar_expr(e))
                 .try_collect()?;
             Ok((group_expr, aggr_expr))
         })?;
@@ -237,11 +237,11 @@ impl OptdQueryPlannerContext<'_> {
         let input = self.try_from_optd_plan(node.input())?;
         let projection_list = node.projections().borrow::<List>();
         let scope = self.visible_column_scope(node.input())?;
-        let exprs = self.with_visible_column_scope(scope, |this| {
+        let exprs = self.with_visible_column_scope(scope, |ctx| {
             projection_list
                 .members()
                 .iter()
-                .map(|e| this.try_from_optd_scalar_expr(e))
+                .map(|e| ctx.try_from_optd_scalar_expr(e))
                 .try_collect()
         })?;
 
@@ -258,19 +258,19 @@ impl OptdQueryPlannerContext<'_> {
 
         let mut scope = self.visible_column_scope(node.outer())?;
         scope.extend(self.visible_column_scope(node.inner())?);
-        let (on, filter): (_, Vec<_>) = self.with_visible_column_scope(scope, |this| {
+        let (on, filter): (_, Vec<_>) = self.with_visible_column_scope(scope, |ctx| {
             let on = equi_conds
                 .iter()
                 .map(|(l, r)| {
                     Ok((
-                        DFExpr::Column(this.try_from_optd_column(l)?),
-                        DFExpr::Column(this.try_from_optd_column(r)?),
+                        DFExpr::Column(ctx.try_from_optd_column(l)?),
+                        DFExpr::Column(ctx.try_from_optd_column(r)?),
                     ))
                 })
                 .try_collect()?;
             let filter = non_equi_conds
                 .iter()
-                .map(|e| this.try_from_optd_scalar_expr(e))
+                .map(|e| ctx.try_from_optd_scalar_expr(e))
                 .try_collect()?;
             Ok((on, filter))
         })?;
@@ -305,8 +305,8 @@ impl OptdQueryPlannerContext<'_> {
     pub fn try_from_optd_select(&mut self, node: SelectBorrowed<'_>) -> Result<DFLogicalPlan> {
         let input = self.try_from_optd_plan(node.input())?;
         let scope = self.visible_column_scope(node.input())?;
-        let predicate = self.with_visible_column_scope(scope, |this| {
-            this.try_from_optd_scalar_expr(node.predicate())
+        let predicate = self.with_visible_column_scope(scope, |ctx| {
+            ctx.try_from_optd_scalar_expr(node.predicate())
         })?;
         let filter =
             logical_plan::Filter::try_new(predicate, Arc::new(input)).context(DataFusionSnafu)?;
@@ -342,11 +342,11 @@ impl OptdQueryPlannerContext<'_> {
     ) -> Result<DFLogicalPlan> {
         let input = self.try_from_optd_plan(node.input())?;
         let scope = self.visible_column_scope(node.input())?;
-        let expr = self.with_visible_column_scope(scope, |this| {
+        let expr = self.with_visible_column_scope(scope, |ctx| {
             node.tuple_ordering()
                 .iter()
                 .map(|(column, direction)| {
-                    let expr = DFExpr::Column(this.try_from_optd_column(column)?);
+                    let expr = DFExpr::Column(ctx.try_from_optd_column(column)?);
                     let asc = matches!(direction, TupleOrderingDirection::Asc);
                     Ok(logical_expr::expr::Sort::new(expr, asc, !asc))
                 })
