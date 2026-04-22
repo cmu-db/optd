@@ -122,7 +122,7 @@ Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): [ "__#13.n_nam
             │   └── Join
             │       ├── .join_type: Inner
             │       ├── .implementation: None
-            │       ├── .join_cond:
+            │       ├── .join_cond: 
             │       ├── (.output_columns):
             │       │   ┌── "nation.n_comment"(#4.3)
             │       │   ├── "nation.n_name"(#4.1)
@@ -156,7 +156,7 @@ Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): [ "__#13.n_nam
             │       ├── Join
             │       │   ├── .join_type: Inner
             │       │   ├── .implementation: None
-            │       │   ├── .join_cond:
+            │       │   ├── .join_cond: 
             │       │   ├── (.output_columns):
             │       │   │   ┌── "nation.n_comment"(#4.3)
             │       │   │   ├── "nation.n_name"(#4.1)
@@ -187,7 +187,7 @@ Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): [ "__#13.n_nam
             │       │   ├── Join
             │       │   │   ├── .join_type: Inner
             │       │   │   ├── .implementation: None
-            │       │   │   ├── .join_cond:
+            │       │   │   ├── .join_cond: 
             │       │   │   ├── (.output_columns):
             │       │   │   │   ┌── "part.p_brand"(#1.3)
             │       │   │   │   ├── "part.p_comment"(#1.8)
@@ -214,7 +214,7 @@ Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): [ "__#13.n_nam
             │       │   │   ├── Join
             │       │   │   │   ├── .join_type: Inner
             │       │   │   │   ├── .implementation: None
-            │       │   │   │   ├── .join_cond:
+            │       │   │   │   ├── .join_cond: 
             │       │   │   │   ├── (.output_columns):
             │       │   │   │   │   ┌── "part.p_brand"(#1.3)
             │       │   │   │   │   ├── "part.p_comment"(#1.8)
@@ -266,7 +266,7 @@ Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): [ "__#13.n_nam
                         └── Join
                             ├── .join_type: Inner
                             ├── .implementation: None
-                            ├── .join_cond:
+                            ├── .join_cond: 
                             ├── (.output_columns):
                             │   ┌── "nation.n_comment"(#8.3)
                             │   ├── "nation.n_name"(#8.1)
@@ -291,7 +291,7 @@ Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): [ "__#13.n_nam
                             ├── Join
                             │   ├── .join_type: Inner
                             │   ├── .implementation: None
-                            │   ├── .join_cond:
+                            │   ├── .join_cond: 
                             │   ├── (.output_columns):
                             │   │   ┌── "nation.n_comment"(#8.3)
                             │   │   ├── "nation.n_name"(#8.1)
@@ -313,7 +313,7 @@ Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): [ "__#13.n_nam
                             │   ├── Join
                             │   │   ├── .join_type: Inner
                             │   │   ├── .implementation: None
-                            │   │   ├── .join_cond:
+                            │   │   ├── .join_cond: 
                             │   │   ├── (.output_columns): [ "partsupp.ps_availqty"(#6.2), "partsupp.ps_comment"(#6.4), "partsupp.ps_partkey"(#6.0), "partsupp.ps_suppkey"(#6.1), "partsupp.ps_supplycost"(#6.3), "supplier.s_acctbal"(#7.5), "supplier.s_address"(#7.2), "supplier.s_comment"(#7.6), "supplier.s_name"(#7.1), "supplier.s_nationkey"(#7.3), "supplier.s_phone"(#7.4), "supplier.s_suppkey"(#7.0) ]
                             │   │   ├── (.cardinality): 0.00
                             │   │   ├── Get { .data_source_id: 5, .table_index: 6, .implementation: None, (.output_columns): [ "partsupp.ps_availqty"(#6.2), "partsupp.ps_comment"(#6.4), "partsupp.ps_partkey"(#6.0), "partsupp.ps_suppkey"(#6.1), "partsupp.ps_supplycost"(#6.3) ], (.cardinality): 0.00 }
@@ -718,3 +718,4 @@ Limit
                                     ├── (.output_columns): [ "region.r_name"(#9.1), "region.r_regionkey"(#9.0) ]
                                     └── (.cardinality): 0.00
 */
+
