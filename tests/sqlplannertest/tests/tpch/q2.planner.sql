@@ -46,6 +46,6 @@ limit 100;
 
 /*
 Error
-Schema error: No field named "__#14".p_partkey.
+Schema error: No field named "__#11"."min(partsupp.ps_supplycost)". Valid fields are part.p_partkey, partsupp.ps_partkey, "__#17".min.
 */
 

@@ -19,6 +19,6 @@ WHERE
 
 /*
 Error
-Schema error: No field named "__#10".p_partkey.
+Schema error: No field named "__#5"."avg(lineitem.l_quantity)". Did you mean 'lineitem.l_partkey'?.
 */
 

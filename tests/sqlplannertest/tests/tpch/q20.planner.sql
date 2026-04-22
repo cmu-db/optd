@@ -39,6 +39,6 @@ order by
 
 /*
 Error
-Schema error: No field named "__#14".ps_partkey.
+Schema error: No field named "__#8"."sum(lineitem.l_quantity)". Did you mean 'lineitem.l_partkey'?.
 */
 
