@@ -66,6 +66,13 @@ pub enum OptdDFConnectorError {
 
 pub type Result<T> = std::result::Result<T, OptdDFConnectorError>;
 
+pub type OutputEnv = HashMap<optd_core::ir::Column, datafusion::common::Column>;
+
+pub struct ConvertedPlan {
+    pub plan: LogicalPlan,
+    pub outputs: OutputEnv,
+}
+
 pub struct OptdQueryPlannerContext<'a> {
     pub inner: Arc<IRContext>,
     pub session_state: &'a SessionState,

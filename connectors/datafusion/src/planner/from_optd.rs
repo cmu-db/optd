@@ -30,11 +30,17 @@ use optd_core::ir::{
 };
 use snafu::{OptionExt, ResultExt, whatever};
 
-use crate::planner::{DataFusionSnafu, OptdQueryPlannerContext, OptdSnafu, Result};
+use crate::planner::{
+    ConvertedPlan, DataFusionSnafu, OptdQueryPlannerContext, OptdSnafu, OutputEnv, Result,
+};
 
 impl OptdQueryPlannerContext<'_> {
     pub fn try_from_optd_plan(&mut self, optd_plan: &Operator) -> Result<DFLogicalPlan> {
-        match &optd_plan.kind {
+        Ok(self.try_from_optd_plan_with_outputs(optd_plan)?.plan)
+    }
+
+    fn try_from_optd_plan_with_outputs(&mut self, optd_plan: &Operator) -> Result<ConvertedPlan> {
+        let plan = match &optd_plan.kind {
             OperatorKind::Get(meta) => {
                 let node = Get::borrow_raw_parts(meta, &optd_plan.common);
                 self.try_from_optd_get(node)
@@ -68,7 +74,35 @@ impl OptdQueryPlannerContext<'_> {
                 self.try_from_optd_enforcer_sort(node)
             }
             kind => whatever!("unsupported operator type {kind:?}"),
+        }?;
+
+        let outputs = self.build_output_env(optd_plan, &plan)?;
+        Ok(ConvertedPlan { plan, outputs })
+    }
+
+    fn build_output_env(&self, optd_plan: &Operator, plan: &DFLogicalPlan) -> Result<OutputEnv> {
+        let columns = optd_plan
+            .output_columns_in_order(&self.inner)
+            .context(OptdSnafu)?;
+        let schema = plan.schema();
+        let fields = schema.iter().collect_vec();
+
+        if columns.len() != fields.len() {
+            whatever!(
+                "optd output columns ({}) do not match DataFusion schema fields ({}) for {:?}",
+                columns.len(),
+                fields.len(),
+                optd_plan.kind
+            );
         }
+
+        Ok(columns
+            .into_iter()
+            .zip(fields)
+            .map(|(column, (qualifier, field))| {
+                (column, Column::new(qualifier.cloned(), field.name()))
+            })
+            .collect())
     }
 
     fn try_new_df_projection(
