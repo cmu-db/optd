@@ -2,7 +2,10 @@ mod from_optd;
 mod into_optd;
 mod utils;
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use datafusion::{
     catalog::memory::DataSourceExec,
@@ -28,7 +31,7 @@ use optd_core::{
         statistics::{ColumnStatistics, TableStatistics},
     },
     magic::{MagicCardinalityEstimator, MagicCostModel},
-    rules,
+    rules::{self, PassExtension, PassManager},
 };
 use optd_repository_api::optd_catalog::RepositoryCatalog;
 use snafu::{OptionExt, ResultExt, Snafu};
@@ -192,7 +195,89 @@ fn warm_explain_properties(op: &Arc<optd_core::ir::Operator>, ctx: &IRContext) {
     let _ = op.cardinality(ctx);
 }
 
+/// One rendered optd logical-plan snapshot captured after a named pass.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PassExplainSnapshot {
+    /// Stable pass name used to label the `EXPLAIN` section.
+    pass_name: &'static str,
+    /// Fully rendered optd plan after the pass completed.
+    rendered_plan: String,
+}
+
+/// Pass extension that records post-pass plans for `EXPLAIN` output.
+#[derive(Default)]
+struct ExplainPassExtension {
+    /// Captured snapshots in pass-execution order.
+    snapshots: Mutex<Vec<PassExplainSnapshot>>,
+}
+
+impl ExplainPassExtension {
+    /// Returns a copy of the collected pass snapshots.
+    fn snapshots(&self) -> Vec<PassExplainSnapshot> {
+        self.snapshots.lock().unwrap().clone()
+    }
+}
+
+impl PassExtension for ExplainPassExtension {
+    fn after_pass(
+        &self,
+        pass_name: &'static str,
+        _before: &Arc<optd_core::ir::Operator>,
+        after: &Arc<optd_core::ir::Operator>,
+        ctx: &IRContext,
+    ) -> optd_core::error::Result<()> {
+        warm_explain_properties(after, ctx);
+        self.snapshots.lock().unwrap().push(PassExplainSnapshot {
+            pass_name,
+            rendered_plan: quick_explain(after, ctx),
+        });
+        Ok(())
+    }
+}
+
+/// Converts captured pass snapshots into `EXPLAIN` rows.
+///
+/// If a pass leaves the rendered plan unchanged, its section is collapsed to
+/// `same as above` instead of repeating the full tree.
+fn pass_explain_plans(
+    initial_plan: &str,
+    snapshots: &[PassExplainSnapshot],
+) -> Vec<StringifiedPlan> {
+    let mut previous_rendered = initial_plan.to_owned();
+    let mut plans = Vec::with_capacity(snapshots.len());
+    for snapshot in snapshots {
+        let display_plan = if snapshot.rendered_plan == previous_rendered {
+            "same as above".to_string()
+        } else {
+            previous_rendered = snapshot.rendered_plan.clone();
+            snapshot.rendered_plan.clone()
+        };
+        plans.push(StringifiedPlan::new(
+            PlanType::OptimizedLogicalPlan {
+                optimizer_name: format!("optd-{}", snapshot.pass_name),
+            },
+            display_plan,
+        ));
+    }
+    plans
+}
+
 impl OptdQueryPlanner {
+    /// Builds the pass manager for the current planning request.
+    ///
+    /// `EXPLAIN` requests may register a snapshot collector for per-pass
+    /// logical-plan display.
+    fn create_pass_manager(
+        _session_state: &SessionState,
+        explain_pass_extension: Option<Arc<ExplainPassExtension>>,
+    ) -> PassManager {
+        let mut builder = PassManager::builder();
+        if let Some(extension) = explain_pass_extension {
+            builder = builder.add_extension_arc(extension);
+        }
+        builder.build()
+    }
+
     fn optd_extension(session_state: &SessionState) -> Result<Arc<OptdExtension>> {
         session_state
             .config()
@@ -285,7 +370,15 @@ impl OptdQueryPlanner {
 
         warm_explain_properties(&optd_logical, &ctx.inner);
 
-        let opt = Arc::new(Cascades::new(ctx.inner.clone(), rule_set));
+        let explain_pass_extension = explain
+            .as_ref()
+            .map(|_| Arc::new(ExplainPassExtension::default()));
+        let pass_manager = Self::create_pass_manager(session_state, explain_pass_extension.clone());
+        let opt = Arc::new(Cascades::with_pass_manager(
+            ctx.inner.clone(),
+            rule_set,
+            pass_manager,
+        ));
 
         let optd_physical = match opt.optimize(&optd_logical, Arc::default()).await {
             Ok(plan) => plan,
@@ -329,6 +422,10 @@ impl OptdQueryPlanner {
                 },
                 s.clone(),
             ));
+            if let Some(extension) = explain_pass_extension.as_ref() {
+                x.stringified_plans
+                    .extend(pass_explain_plans(&s, &extension.snapshots()));
+            }
             x.stringified_plans.push(StringifiedPlan::new(
                 PlanType::FinalLogicalPlan,
                 logical_plan.display_indent().to_string(),
@@ -758,4 +855,35 @@ fn get_join_order_from_df_exec(rel_node: &Arc<dyn ExecutionPlan>) -> Option<Join
         return Some(JoinOrder::Other(Box::new(child)));
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PassExplainSnapshot, pass_explain_plans};
+
+    #[test]
+    fn pass_explain_plans_collapses_unchanged_plans() {
+        let plans = pass_explain_plans(
+            "initial",
+            &[
+                PassExplainSnapshot {
+                    pass_name: "decorrelation",
+                    rendered_plan: "initial".to_string(),
+                },
+                PassExplainSnapshot {
+                    pass_name: "simplification",
+                    rendered_plan: "simplified".to_string(),
+                },
+                PassExplainSnapshot {
+                    pass_name: "pruning",
+                    rendered_plan: "simplified".to_string(),
+                },
+            ],
+        );
+
+        assert_eq!(plans.len(), 3);
+        assert_eq!(plans[0].plan.as_ref().as_str(), "same as above");
+        assert_eq!(plans[1].plan.as_ref().as_str(), "simplified");
+        assert_eq!(plans[2].plan.as_ref().as_str(), "same as above");
+    }
 }
