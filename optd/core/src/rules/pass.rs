@@ -1,4 +1,8 @@
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 use crate::{
     error::Result,
@@ -75,6 +79,14 @@ impl PassManager {
 
         Ok(after)
     }
+
+    #[doc(hidden)]
+    /// Returns the number of registered extensions.
+    ///
+    /// This is primarily used by tests to verify pass-manager configuration.
+    pub fn extension_count(&self) -> usize {
+        self.extensions.len()
+    }
 }
 
 impl Default for PassManager {
@@ -115,6 +127,82 @@ impl PassManagerBuilder {
         PassManager {
             extensions: self.extensions.into(),
         }
+    }
+}
+
+/// Pass extension that emits wall-clock timing metrics for each pass run.
+#[derive(Default)]
+pub struct PassProfilingExtension {
+    /// Mutable timing state shared across pass invocations.
+    state: Mutex<ProfilingPassState>,
+}
+
+/// Internal state accumulated by [`PassProfilingExtension`].
+#[derive(Default)]
+struct ProfilingPassState {
+    /// Passes that have started but not yet finished.
+    active_passes: Vec<ActivePass>,
+    /// Aggregated per-pass timing totals keyed by pass name.
+    totals: HashMap<&'static str, PassProfileMetric>,
+}
+
+/// Timing information for a pass that is currently executing.
+struct ActivePass {
+    /// Stable name of the in-flight pass.
+    name: &'static str,
+    /// Timestamp captured immediately before the pass started.
+    started_at: Instant,
+}
+
+/// Aggregated metrics for one pass name.
+#[derive(Default)]
+struct PassProfileMetric {
+    /// Number of times the pass has been executed.
+    invocations: usize,
+    /// Total wall-clock time spent running the pass.
+    total_duration: Duration,
+}
+
+impl PassExtension for PassProfilingExtension {
+    fn before_pass(
+        &self,
+        pass_name: &'static str,
+        _root: &Arc<Operator>,
+        _ctx: &IRContext,
+    ) -> Result<()> {
+        self.state.lock().unwrap().active_passes.push(ActivePass {
+            name: pass_name,
+            started_at: Instant::now(),
+        });
+        Ok(())
+    }
+
+    fn after_pass(
+        &self,
+        pass_name: &'static str,
+        before: &Arc<Operator>,
+        after: &Arc<Operator>,
+        _ctx: &IRContext,
+    ) -> Result<()> {
+        let mut state = self.state.lock().unwrap();
+        let active = state
+            .active_passes
+            .pop()
+            .filter(|active| active.name == pass_name);
+        let elapsed = active
+            .map(|active| active.started_at.elapsed())
+            .unwrap_or_default();
+        let metric = state.totals.entry(pass_name).or_default();
+        metric.invocations += 1;
+        metric.total_duration += elapsed;
+        eprintln!(
+            "[optd pass profile] pass={pass_name} changed={} elapsed_ms={:.3} total_ms={:.3} invocations={}",
+            before != after,
+            elapsed.as_secs_f64() * 1_000.0,
+            metric.total_duration.as_secs_f64() * 1_000.0,
+            metric.invocations,
+        );
+        Ok(())
     }
 }
 

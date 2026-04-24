@@ -31,7 +31,7 @@ use optd_core::{
         statistics::{ColumnStatistics, TableStatistics},
     },
     magic::{MagicCardinalityEstimator, MagicCostModel},
-    rules::{self, PassExtension, PassManager},
+    rules::{self, PassExtension, PassManager, PassProfilingExtension},
 };
 use optd_repository_api::optd_catalog::RepositoryCatalog;
 use snafu::{OptionExt, ResultExt, Snafu};
@@ -265,13 +265,24 @@ fn pass_explain_plans(
 impl OptdQueryPlanner {
     /// Builds the pass manager for the current planning request.
     ///
+    /// Runtime pass profiling is enabled by `optd.profile_passes`, and
     /// `EXPLAIN` requests may register a snapshot collector for per-pass
     /// logical-plan display.
     fn create_pass_manager(
-        _session_state: &SessionState,
+        session_state: &SessionState,
         explain_pass_extension: Option<Arc<ExplainPassExtension>>,
     ) -> PassManager {
+        let profile_passes = session_state
+            .config_options()
+            .extensions
+            .get::<OptdExtensionConfig>()
+            .map(|conf| conf.profile_passes)
+            .unwrap_or(false);
+
         let mut builder = PassManager::builder();
+        if profile_passes {
+            builder = builder.add_extension(PassProfilingExtension::default());
+        }
         if let Some(extension) = explain_pass_extension {
             builder = builder.add_extension_arc(extension);
         }
@@ -859,7 +870,13 @@ fn get_join_order_from_df_exec(rel_node: &Arc<dyn ExecutionPlan>) -> Option<Join
 
 #[cfg(test)]
 mod tests {
-    use super::{PassExplainSnapshot, pass_explain_plans};
+    use std::sync::Arc;
+
+    use datafusion::{execution::runtime_env::RuntimeEnv, prelude::SessionConfig};
+    use tokio::runtime::Runtime;
+
+    use super::{OptdQueryPlanner, PassExplainSnapshot, pass_explain_plans};
+    use crate::create_optd_session_context;
 
     #[test]
     fn pass_explain_plans_collapses_unchanged_plans() {
@@ -885,5 +902,29 @@ mod tests {
         assert_eq!(plans[0].plan.as_ref().as_str(), "same as above");
         assert_eq!(plans[1].plan.as_ref().as_str(), "simplified");
         assert_eq!(plans[2].plan.as_ref().as_str(), "same as above");
+    }
+
+    #[test]
+    fn create_pass_manager_respects_profile_passes_config() {
+        let disabled =
+            create_optd_session_context(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
+        let disabled_state = disabled.state();
+        let disabled_manager = OptdQueryPlanner::create_pass_manager(&disabled_state, None);
+        assert_eq!(disabled_manager.extension_count(), 0);
+
+        let enabled =
+            create_optd_session_context(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
+        Runtime::new().unwrap().block_on(async {
+            enabled
+                .sql("set optd.profile_passes = true")
+                .await
+                .unwrap()
+                .collect()
+                .await
+                .unwrap();
+        });
+        let enabled_state = enabled.state();
+        let enabled_manager = OptdQueryPlanner::create_pass_manager(&enabled_state, None);
+        assert_eq!(enabled_manager.extension_count(), 1);
     }
 }
