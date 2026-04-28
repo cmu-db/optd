@@ -4035,6 +4035,7 @@ dependencies = [
  "snafu",
  "sqlplannertest",
  "tokio",
+ "tracing-subscriber",
 ]
 
 [[package]]

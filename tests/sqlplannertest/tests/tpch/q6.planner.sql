@@ -56,7 +56,10 @@ Project { .table_index: 4, .projections: "__#3.sum(lineitem.l_extendedprice * li
             │   └── "lineitem.l_tax"(#1.7)
             └── (.cardinality): 0.00
 
-physical_plan after optd-finalized:
+logical_plan after optd-decorrelation:
+SAME TEXT AS ABOVE
+
+logical_plan after optd-simplification:
 Project { .table_index: 4, .projections: "__#3.sum(lineitem.l_extendedprice * lineitem.l_discount)"(#3.0), (.output_columns): "__#4.revenue_loss"(#4.0), (.cardinality): 1.00 }
 └── Aggregate { .key_table_index: 2, .aggregate_table_index: 3, .implementation: None, .exprs: sum("lineitem.l_extendedprice"(#1.5) * "lineitem.l_discount"(#1.6)), .keys: [], (.output_columns): "__#3.sum(lineitem.l_extendedprice * lineitem.l_discount)"(#3.0), (.cardinality): 1.00 }
     └── Select
@@ -64,6 +67,9 @@ Project { .table_index: 4, .projections: "__#3.sum(lineitem.l_extendedprice * li
         ├── (.output_columns): [ "lineitem.l_discount"(#1.6), "lineitem.l_extendedprice"(#1.5), "lineitem.l_quantity"(#1.4), "lineitem.l_shipdate"(#1.10) ]
         ├── (.cardinality): 0.00
         └── Get { .data_source_id: 8, .table_index: 1, .implementation: None, (.output_columns): [ "lineitem.l_discount"(#1.6), "lineitem.l_extendedprice"(#1.5), "lineitem.l_quantity"(#1.4), "lineitem.l_shipdate"(#1.10) ], (.cardinality): 0.00 }
+
+physical_plan after optd-cascades:
+SAME TEXT AS ABOVE
 
 NULL
 */

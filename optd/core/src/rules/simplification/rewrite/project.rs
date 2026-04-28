@@ -8,7 +8,7 @@ use crate::{
     ir::{
         IRContext, Operator,
         convert::{IntoOperator, IntoScalar},
-        operator::Project,
+        operator::{Limit, Project},
         scalar::List,
     },
 };
@@ -16,6 +16,8 @@ use std::sync::Arc;
 
 /// Merges adjacent `Project` operators into one projection list.
 pub struct MergeProjectRulePass;
+/// Pushes a `Limit` below a `Project`.
+pub struct PushLimitThroughProjectRulePass;
 
 impl RulePass for MergeProjectRulePass {
     fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Result<Arc<Operator>> {
@@ -46,6 +48,33 @@ impl RulePass for MergeProjectRulePass {
                 *project.table_index(),
                 inner_project.input().clone(),
                 List::new(Arc::from(merged_members)).into_scalar(),
+            )
+            .into_operator())
+        })
+    }
+}
+
+impl RulePass for PushLimitThroughProjectRulePass {
+    fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Result<Arc<Operator>> {
+        rewrite_bottom_up(root, ctx, &|op, _ctx| {
+            let Ok(limit) = op.try_borrow::<Limit>() else {
+                return Ok(op);
+            };
+            let Ok(project) = limit.input().try_borrow::<Project>() else {
+                return Ok(op);
+            };
+
+            let pushed_limit = Limit::new(
+                project.input().clone(),
+                limit.skip().clone(),
+                limit.fetch().clone(),
+            )
+            .into_operator();
+
+            Ok(Project::new(
+                *project.table_index(),
+                pushed_limit,
+                project.projections().clone(),
             )
             .into_operator())
         })

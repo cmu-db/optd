@@ -1,7 +1,8 @@
 use super::{
     prune::ColumnPruningRulePass,
     rewrite::{
-        MergeProjectRulePass, MergeSelectRulePass, PushSelectThroughJoinRulePass,
+        MergeProjectRulePass, MergeSelectRulePass, PushJoinConditionIntoInputsRulePass,
+        PushLimitThroughProjectRulePass, PushSelectThroughJoinRulePass,
         PushSelectThroughProjectRulePass, ScalarSimplificationRulePass,
     },
     rule::RulePass,
@@ -9,6 +10,7 @@ use super::{
 use crate::{
     error::Result,
     ir::{IRContext, Operator},
+    rules::PlanPass,
 };
 use std::sync::Arc;
 
@@ -43,11 +45,13 @@ impl SimplificationPass {
 
     /// Applies simplification rules until the plan reaches a fixed point.
     pub fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Result<Arc<Operator>> {
-        let rules: [&dyn RulePass; 6] = [
+        let rules: [&dyn RulePass; 8] = [
             &ScalarSimplificationRulePass,
             &MergeSelectRulePass,
             &PushSelectThroughProjectRulePass,
             &PushSelectThroughJoinRulePass,
+            &PushJoinConditionIntoInputsRulePass,
+            &PushLimitThroughProjectRulePass,
             &MergeProjectRulePass,
             &ColumnPruningRulePass,
         ];
@@ -66,5 +70,15 @@ impl SimplificationPass {
         }
 
         Ok(current)
+    }
+}
+
+impl PlanPass for SimplificationPass {
+    fn name(&self) -> &'static str {
+        "simplification"
+    }
+
+    fn run(&self, root: Arc<Operator>, ctx: &IRContext) -> Result<Arc<Operator>> {
+        self.apply(root, ctx)
     }
 }

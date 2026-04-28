@@ -1,4 +1,4 @@
-use super::{rule::RulePass, scalar::simplify_scalar_recursively};
+use super::{rule::RulePass, scalar::simplify_scalar_recursively_with_ctx};
 use crate::{
     error::Result,
     ir::{
@@ -31,7 +31,7 @@ fn prune_operator(
     Ok(match &op.kind {
         OperatorKind::Select(meta) => {
             let select = Select::borrow_raw_parts(meta, &op.common);
-            let predicate = simplify_scalar_recursively(select.predicate().clone());
+            let predicate = simplify_scalar_recursively_with_ctx(select.predicate().clone(), ctx);
 
             let mut input_required = required.clone();
             input_required |= &predicate.used_columns();

@@ -111,8 +111,14 @@ OrderBy
                                 │   └── "orders.o_totalprice"(#2.3)
                                 └── (.cardinality): 0.00
 
-physical_plan after optd-finalized:
-EnforcerSort { tuple_ordering: [(#10.1, Desc), (#10.0, Desc)], (.output_columns): [ "__#10.c_count"(#10.0), "__#10.custdist"(#10.1) ], (.cardinality): 0.00 }
+logical_plan after optd-decorrelation:
+SAME TEXT AS ABOVE
+
+logical_plan after optd-simplification:
+OrderBy
+├── ordering_exprs: [ "__#10.custdist"(#10.1) DESC, "__#10.c_count"(#10.0) DESC ]
+├── (.output_columns): [ "__#10.c_count"(#10.0), "__#10.custdist"(#10.1) ]
+├── (.cardinality): 0.00
 └── Project
     ├── .table_index: 10
     ├── .projections: [ "c_orders.c_count"(#7.1), "__#9.count(Int64(1))"(#9.0) ]
@@ -126,7 +132,10 @@ EnforcerSort { tuple_ordering: [(#10.1, Desc), (#10.0, Desc)], (.output_columns)
         ├── .keys: "c_orders.c_count"(#7.1)
         ├── (.output_columns): [ "__#8.c_count"(#8.0), "__#9.count(Int64(1))"(#9.0) ]
         ├── (.cardinality): 0.00
-        └── Remap { .table_index: 7, (.output_columns): [ "c_orders.c_count"(#7.1), "c_orders.c_custkey"(#7.0) ], (.cardinality): 0.00 }
+        └── Remap
+            ├── .table_index: 7
+            ├── (.output_columns): [ "c_orders.c_count"(#7.1), "c_orders.c_custkey"(#7.0) ]
+            ├── (.cardinality): 0.00
             └── Project
                 ├── .table_index: 6
                 ├── .projections: [ "customer.c_custkey"(#1.0), "__#4.count(orders.o_orderkey)"(#4.0) ]
@@ -143,15 +152,102 @@ EnforcerSort { tuple_ordering: [(#10.1, Desc), (#10.0, Desc)], (.output_columns)
                     └── Join
                         ├── .join_type: LeftOuter
                         ├── .implementation: None
-                        ├── .join_cond: ("customer.c_custkey"(#1.0) = "orders.o_custkey"(#2.1)) AND ("orders.o_comment"(#2.8) NOT LIKE '%special%requests%'::utf8_view)
-                        ├── (.output_columns): [ "customer.c_custkey"(#1.0), "orders.o_comment"(#2.8), "orders.o_custkey"(#2.1), "orders.o_orderkey"(#2.0) ]
+                        ├── .join_cond: "customer.c_custkey"(#1.0) = "orders.o_custkey"(#2.1)
+                        ├── (.output_columns):
+                        │   ┌── "customer.c_custkey"(#1.0)
+                        │   ├── "orders.o_comment"(#2.8)
+                        │   ├── "orders.o_custkey"(#2.1)
+                        │   └── "orders.o_orderkey"(#2.0)
                         ├── (.cardinality): 0.00
-                        ├── Get { .data_source_id: 6, .table_index: 1, .implementation: None, (.output_columns): "customer.c_custkey"(#1.0), (.cardinality): 0.00 }
-                        └── Get
-                            ├── .data_source_id: 7
-                            ├── .table_index: 2
-                            ├── .implementation: None
-                            ├── (.output_columns): [ "orders.o_comment"(#2.8), "orders.o_custkey"(#2.1), "orders.o_orderkey"(#2.0) ]
-                            └── (.cardinality): 0.00
+                        ├── Get
+                        │   ├── .data_source_id: 6
+                        │   ├── .table_index: 1
+                        │   ├── .implementation: None
+                        │   ├── (.output_columns): "customer.c_custkey"(#1.0)
+                        │   └── (.cardinality): 0.00
+                        └── Select
+                            ├── .predicate: "orders.o_comment"(#2.8) NOT LIKE '%special%requests%'::utf8_view
+                            ├── (.output_columns):
+                            │   ┌── "orders.o_comment"(#2.8)
+                            │   ├── "orders.o_custkey"(#2.1)
+                            │   └── "orders.o_orderkey"(#2.0)
+                            ├── (.cardinality): 0.00
+                            └── Get
+                                ├── .data_source_id: 7
+                                ├── .table_index: 2
+                                ├── .implementation: None
+                                ├── (.output_columns):
+                                │   ┌── "orders.o_comment"(#2.8)
+                                │   ├── "orders.o_custkey"(#2.1)
+                                │   └── "orders.o_orderkey"(#2.0)
+                                └── (.cardinality): 0.00
+
+physical_plan after optd-cascades:
+EnforcerSort
+├── tuple_ordering: [(#10.1, Desc), (#10.0, Desc)]
+├── (.output_columns): [ "__#10.c_count"(#10.0), "__#10.custdist"(#10.1) ]
+├── (.cardinality): 0.00
+└── Project
+    ├── .table_index: 10
+    ├── .projections: [ "c_orders.c_count"(#7.1), "__#9.count(Int64(1))"(#9.0) ]
+    ├── (.output_columns): [ "__#10.c_count"(#10.0), "__#10.custdist"(#10.1) ]
+    ├── (.cardinality): 0.00
+    └── Aggregate
+        ├── .key_table_index: 8
+        ├── .aggregate_table_index: 9
+        ├── .implementation: None
+        ├── .exprs: count(1::bigint)
+        ├── .keys: "c_orders.c_count"(#7.1)
+        ├── (.output_columns): [ "__#8.c_count"(#8.0), "__#9.count(Int64(1))"(#9.0) ]
+        ├── (.cardinality): 0.00
+        └── Remap
+            ├── .table_index: 7
+            ├── (.output_columns): [ "c_orders.c_count"(#7.1), "c_orders.c_custkey"(#7.0) ]
+            ├── (.cardinality): 0.00
+            └── Project
+                ├── .table_index: 6
+                ├── .projections: [ "customer.c_custkey"(#1.0), "__#4.count(orders.o_orderkey)"(#4.0) ]
+                ├── (.output_columns): [ "__#6.c_count"(#6.1), "__#6.c_custkey"(#6.0) ]
+                ├── (.cardinality): 0.00
+                └── Aggregate
+                    ├── .key_table_index: 3
+                    ├── .aggregate_table_index: 4
+                    ├── .implementation: None
+                    ├── .exprs: count("orders.o_orderkey"(#2.0))
+                    ├── .keys: "customer.c_custkey"(#1.0)
+                    ├── (.output_columns): [ "__#3.c_custkey"(#3.0), "__#4.count(orders.o_orderkey)"(#4.0) ]
+                    ├── (.cardinality): 0.00
+                    └── Join
+                        ├── .join_type: LeftOuter
+                        ├── .implementation: None
+                        ├── .join_cond: "customer.c_custkey"(#1.0) = "orders.o_custkey"(#2.1)
+                        ├── (.output_columns):
+                        │   ┌── "customer.c_custkey"(#1.0)
+                        │   ├── "orders.o_comment"(#2.8)
+                        │   ├── "orders.o_custkey"(#2.1)
+                        │   └── "orders.o_orderkey"(#2.0)
+                        ├── (.cardinality): 0.00
+                        ├── Get
+                        │   ├── .data_source_id: 6
+                        │   ├── .table_index: 1
+                        │   ├── .implementation: None
+                        │   ├── (.output_columns): "customer.c_custkey"(#1.0)
+                        │   └── (.cardinality): 0.00
+                        └── Select
+                            ├── .predicate: "orders.o_comment"(#2.8) NOT LIKE '%special%requests%'::utf8_view
+                            ├── (.output_columns):
+                            │   ┌── "orders.o_comment"(#2.8)
+                            │   ├── "orders.o_custkey"(#2.1)
+                            │   └── "orders.o_orderkey"(#2.0)
+                            ├── (.cardinality): 0.00
+                            └── Get
+                                ├── .data_source_id: 7
+                                ├── .table_index: 2
+                                ├── .implementation: None
+                                ├── (.output_columns):
+                                │   ┌── "orders.o_comment"(#2.8)
+                                │   ├── "orders.o_custkey"(#2.1)
+                                │   └── "orders.o_orderkey"(#2.0)
+                                └── (.cardinality): 0.00
 */
 

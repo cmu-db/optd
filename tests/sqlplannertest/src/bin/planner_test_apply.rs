@@ -24,6 +24,7 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
     let cli = Cli::parse();
     let opts = PlannerTestApplyOptions {
         serial: cli.serial,

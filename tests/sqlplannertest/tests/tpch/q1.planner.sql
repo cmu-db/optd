@@ -184,7 +184,13 @@ Limit
                         │   └── "lineitem.l_tax"(#1.7)
                         └── (.cardinality): 0.00
 
-physical_plan after optd-finalized:
+logical_plan after optd-decorrelation:
+SAME TEXT AS ABOVE
+
+logical_plan after optd-simplification:
+SAME TEXT AS ABOVE
+
+physical_plan after optd-cascades:
 Limit
 ├── .skip: 0::bigint
 ├── .fetch: 3::bigint
