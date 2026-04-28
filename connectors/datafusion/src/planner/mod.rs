@@ -66,12 +66,18 @@ pub enum OptdDFConnectorError {
 
 pub type Result<T> = std::result::Result<T, OptdDFConnectorError>;
 
+pub type OutputEnv = HashMap<optd_core::ir::Column, datafusion::common::Column>;
+
+pub struct ConvertedPlan {
+    pub plan: LogicalPlan,
+    pub outputs: OutputEnv,
+}
+
 pub struct OptdQueryPlannerContext<'a> {
     pub inner: Arc<IRContext>,
     pub session_state: &'a SessionState,
     pub table_reference_to_source: HashMap<TableReference, Arc<dyn TableSource + 'static>>,
     pub df_mark_columns: HashMap<datafusion::common::Column, optd_core::ir::Column>,
-    pub optd_mark_columns: HashMap<optd_core::ir::Column, datafusion::common::Column>,
 }
 
 impl<'a> OptdQueryPlannerContext<'a> {
@@ -81,7 +87,6 @@ impl<'a> OptdQueryPlannerContext<'a> {
             session_state,
             table_reference_to_source: HashMap::new(),
             df_mark_columns: HashMap::new(),
-            optd_mark_columns: HashMap::new(),
         }
     }
 
@@ -296,6 +301,15 @@ impl OptdQueryPlanner {
                 return Err(DataFusionError::External(e.into()));
             }
         };
+
+        println!(
+            "optd_logical:\n{}",
+            quick_explain(&optd_logical, &ctx.inner)
+        );
+        println!(
+            "optd_physical:\n{}",
+            quick_explain(&optd_physical, &ctx.inner)
+        );
 
         let logical_plan = ctx
             .try_from_optd_plan(&optd_physical)

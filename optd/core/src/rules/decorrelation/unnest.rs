@@ -290,6 +290,7 @@ impl UnnestingRule {
                 )?;
                 let new_exprs = info.rewrite_columns(node.projections().clone());
                 let mut members = new_exprs.try_borrow::<List>().unwrap().members().to_vec();
+                let original_projection_len = members.len();
                 let mut passthrough_cols: HashSet<Column> = members
                     .iter()
                     .filter_map(|expr| expr.try_borrow::<ColumnRef>().ok().map(|col| *col.column()))
@@ -302,6 +303,15 @@ impl UnnestingRule {
                 }
                 let projected = ctx.project(new_input, members.clone())?.build();
                 let project_table_index = *projected.borrow::<Project>().table_index();
+                let output_rewrites = (0..original_projection_len)
+                    .map(|idx| {
+                        (
+                            Column(*node.table_index(), idx),
+                            Column(project_table_index, idx),
+                        )
+                    })
+                    .collect::<HashMap<_, _>>();
+                info.record_column_rewrites(&output_rewrites);
                 let passthrough_mapping = members
                     .iter()
                     .enumerate()
@@ -389,7 +399,19 @@ impl UnnestingRule {
                     .with_ctx(ctx)
                     .logical_aggregate(new_exprs_vec.clone(), new_keys_vec.clone())?
                     .build();
-                let key_table_index = *agg.borrow::<Aggregate>().key_table_index();
+                let (key_table_index, aggregate_table_index) = {
+                    let new_agg = agg.borrow::<Aggregate>();
+                    (*new_agg.key_table_index(), *new_agg.aggregate_table_index())
+                };
+                let output_rewrites = (0..new_exprs_vec.len())
+                    .map(|idx| {
+                        (
+                            Column(*node.aggregate_table_index(), idx),
+                            Column(aggregate_table_index, idx),
+                        )
+                    })
+                    .collect::<HashMap<_, _>>();
+                info.record_column_rewrites(&output_rewrites);
                 let passthrough_mapping = new_keys_vec
                     .iter()
                     .enumerate()

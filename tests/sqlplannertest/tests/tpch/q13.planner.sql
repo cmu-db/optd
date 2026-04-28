@@ -22,10 +22,7 @@ order by
 
 /*
 logical_plan after optd-initial:
-OrderBy
-├── ordering_exprs: [ "__#10.custdist"(#10.1) DESC, "__#10.c_count"(#10.0) DESC ]
-├── (.output_columns): [ "__#10.c_count"(#10.0), "__#10.custdist"(#10.1) ]
-├── (.cardinality): 0.00
+OrderBy { ordering_exprs: [ "__#10.custdist"(#10.1) DESC, "__#10.c_count"(#10.0) DESC ], (.output_columns): [ "__#10.c_count"(#10.0), "__#10.custdist"(#10.1) ], (.cardinality): 0.00 }
 └── Project
     ├── .table_index: 10
     ├── .projections: [ "c_orders.c_count"(#7.1), "__#9.count(Int64(1))"(#9.0) ]
@@ -61,7 +58,7 @@ OrderBy
                         └── Join
                             ├── .join_type: LeftOuter
                             ├── .implementation: None
-                            ├── .join_cond: ("customer.c_custkey"(#1.0) = "orders.o_custkey"(#2.1)) AND ("orders.o_comment"(#2.8) NOT LIKE '%special%requests%'::utf8_view)
+                            ├── .join_cond: (("customer.c_custkey"(#1.0) = "orders.o_custkey"(#2.1)) AND ("orders.o_comment"(#2.8) NOT LIKE CAST ('%special%requests%'::utf8 AS Utf8View)))
                             ├── (.output_columns):
                             │   ┌── "customer.c_acctbal"(#1.5)
                             │   ├── "customer.c_address"(#1.2)

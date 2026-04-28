@@ -1,4 +1,10 @@
 statement ok
+SET optd.optd_strict_mode = true;
+
+statement ok
+SET optd.optd_only = true;
+
+statement ok
 CREATE TABLE numbers(id int, grp int, val int, bonus int, note varchar);
 
 statement ok

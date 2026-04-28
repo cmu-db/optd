@@ -6,6 +6,7 @@
     insert into t2 values (0, 200), (1, 201), (2, 202);
     insert into t3 values (201, 300), (202, 301), (203, 302);
     set optd.optd_strict_mode = true;
+    set optd.optd_only = true;
   tasks:
     - execute
 - sql: |

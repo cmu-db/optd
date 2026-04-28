@@ -34,77 +34,23 @@ LIMIT 20;
 
 /*
 logical_plan after optd-initial:
-Limit
-├── .skip: 0::bigint
-├── .fetch: 20::bigint
-├── (.output_columns):
-│   ┌── "__#7.c_acctbal"(#7.3)
-│   ├── "__#7.c_address"(#7.5)
-│   ├── "__#7.c_comment"(#7.7)
-│   ├── "__#7.c_custkey"(#7.0)
-│   ├── "__#7.c_name"(#7.1)
-│   ├── "__#7.c_phone"(#7.6)
-│   ├── "__#7.n_name"(#7.4)
-│   └── "__#7.revenue"(#7.2)
-├── (.cardinality): 0.00
-└── OrderBy
-    ├── ordering_exprs: "__#7.revenue"(#7.2) DESC
-    ├── (.output_columns):
-    │   ┌── "__#7.c_acctbal"(#7.3)
-    │   ├── "__#7.c_address"(#7.5)
-    │   ├── "__#7.c_comment"(#7.7)
-    │   ├── "__#7.c_custkey"(#7.0)
-    │   ├── "__#7.c_name"(#7.1)
-    │   ├── "__#7.c_phone"(#7.6)
-    │   ├── "__#7.n_name"(#7.4)
-    │   └── "__#7.revenue"(#7.2)
-    ├── (.cardinality): 0.00
+Limit { .skip: 0::bigint, .fetch: 20::bigint, (.output_columns): [ "__#7.c_acctbal"(#7.3), "__#7.c_address"(#7.5), "__#7.c_comment"(#7.7), "__#7.c_custkey"(#7.0), "__#7.c_name"(#7.1), "__#7.c_phone"(#7.6), "__#7.n_name"(#7.4), "__#7.revenue"(#7.2) ], (.cardinality): 0.00 }
+└── OrderBy { ordering_exprs: "__#7.revenue"(#7.2) DESC, (.output_columns): [ "__#7.c_acctbal"(#7.3), "__#7.c_address"(#7.5), "__#7.c_comment"(#7.7), "__#7.c_custkey"(#7.0), "__#7.c_name"(#7.1), "__#7.c_phone"(#7.6), "__#7.n_name"(#7.4), "__#7.revenue"(#7.2) ], (.cardinality): 0.00 }
     └── Project
         ├── .table_index: 7
-        ├── .projections:
-        │   ┌── "customer.c_custkey"(#1.0)
-        │   ├── "customer.c_name"(#1.1)
-        │   ├── "__#6.sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)"(#6.0)
-        │   ├── "customer.c_acctbal"(#1.5)
-        │   ├── "nation.n_name"(#4.1)
-        │   ├── "customer.c_address"(#1.2)
-        │   ├── "customer.c_phone"(#1.4)
-        │   └── "customer.c_comment"(#1.7)
-        ├── (.output_columns):
-        │   ┌── "__#7.c_acctbal"(#7.3)
-        │   ├── "__#7.c_address"(#7.5)
-        │   ├── "__#7.c_comment"(#7.7)
-        │   ├── "__#7.c_custkey"(#7.0)
-        │   ├── "__#7.c_name"(#7.1)
-        │   ├── "__#7.c_phone"(#7.6)
-        │   ├── "__#7.n_name"(#7.4)
-        │   └── "__#7.revenue"(#7.2)
+        ├── .projections: [ "customer.c_custkey"(#1.0), "customer.c_name"(#1.1), "__#6.sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)"(#6.0), "customer.c_acctbal"(#1.5), "nation.n_name"(#4.1), "customer.c_address"(#1.2), "customer.c_phone"(#1.4), "customer.c_comment"(#1.7) ]
+        ├── (.output_columns): [ "__#7.c_acctbal"(#7.3), "__#7.c_address"(#7.5), "__#7.c_comment"(#7.7), "__#7.c_custkey"(#7.0), "__#7.c_name"(#7.1), "__#7.c_phone"(#7.6), "__#7.n_name"(#7.4), "__#7.revenue"(#7.2) ]
         ├── (.cardinality): 0.00
         └── Aggregate
             ├── .key_table_index: 5
             ├── .aggregate_table_index: 6
             ├── .implementation: None
-            ├── .exprs: sum("lineitem.l_extendedprice"(#3.5) * 1::decimal128(20, 0) - "lineitem.l_discount"(#3.6))
-            ├── .keys:
-            │   ┌── "customer.c_custkey"(#1.0)
-            │   ├── "customer.c_name"(#1.1)
-            │   ├── "customer.c_acctbal"(#1.5)
-            │   ├── "customer.c_phone"(#1.4)
-            │   ├── "nation.n_name"(#4.1)
-            │   ├── "customer.c_address"(#1.2)
-            │   └── "customer.c_comment"(#1.7)
-            ├── (.output_columns):
-            │   ┌── "__#5.c_acctbal"(#5.2)
-            │   ├── "__#5.c_address"(#5.5)
-            │   ├── "__#5.c_comment"(#5.6)
-            │   ├── "__#5.c_custkey"(#5.0)
-            │   ├── "__#5.c_name"(#5.1)
-            │   ├── "__#5.c_phone"(#5.3)
-            │   ├── "__#5.n_name"(#5.4)
-            │   └── "__#6.sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)"(#6.0)
+            ├── .exprs: sum("lineitem.l_extendedprice"(#3.5) * CAST (1::bigint AS Decimal128(20, 0)) - "lineitem.l_discount"(#3.6))
+            ├── .keys: [ "customer.c_custkey"(#1.0), "customer.c_name"(#1.1), "customer.c_acctbal"(#1.5), "customer.c_phone"(#1.4), "nation.n_name"(#4.1), "customer.c_address"(#1.2), "customer.c_comment"(#1.7) ]
+            ├── (.output_columns): [ "__#5.c_acctbal"(#5.2), "__#5.c_address"(#5.5), "__#5.c_comment"(#5.6), "__#5.c_custkey"(#5.0), "__#5.c_name"(#5.1), "__#5.c_phone"(#5.3), "__#5.n_name"(#5.4), "__#6.sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)"(#6.0) ]
             ├── (.cardinality): 0.00
             └── Select
-                ├── .predicate: ("orders.o_orderdate"(#2.4) >= 1993-07-01::date32) AND ("orders.o_orderdate"(#2.4) < 1993-10-01::date32) AND ("lineitem.l_returnflag"(#3.8) = 'R'::utf8_view)
+                ├── .predicate: ("customer.c_custkey"(#1.0) = "orders.o_custkey"(#2.1)) AND ("lineitem.l_orderkey"(#3.0) = "orders.o_orderkey"(#2.0)) AND ("orders.o_orderdate"(#2.4) >= CAST ('1993-07-01'::utf8 AS Date32)) AND ("orders.o_orderdate"(#2.4) < CAST ('1993-07-01'::utf8 AS Date32) + IntervalMonthDayNano { months: 3, days: 0, nanoseconds: 0 }::interval_month_day_nano) AND ("lineitem.l_returnflag"(#3.8) = CAST ('R'::utf8 AS Utf8View)) AND ("customer.c_nationkey"(#1.3) = "nation.n_nationkey"(#4.0))
                 ├── (.output_columns):
                 │   ┌── "customer.c_acctbal"(#1.5)
                 │   ├── "customer.c_address"(#1.2)
@@ -147,7 +93,7 @@ Limit
                 └── Join
                     ├── .join_type: Inner
                     ├── .implementation: None
-                    ├── .join_cond: ("customer.c_nationkey"(#1.3) = "nation.n_nationkey"(#4.0))
+                    ├── .join_cond: 
                     ├── (.output_columns):
                     │   ┌── "customer.c_acctbal"(#1.5)
                     │   ├── "customer.c_address"(#1.2)
@@ -190,7 +136,7 @@ Limit
                     ├── Join
                     │   ├── .join_type: Inner
                     │   ├── .implementation: None
-                    │   ├── .join_cond: ("orders.o_orderkey"(#2.0) = "lineitem.l_orderkey"(#3.0))
+                    │   ├── .join_cond: 
                     │   ├── (.output_columns):
                     │   │   ┌── "customer.c_acctbal"(#1.5)
                     │   │   ├── "customer.c_address"(#1.2)
@@ -229,7 +175,7 @@ Limit
                     │   ├── Join
                     │   │   ├── .join_type: Inner
                     │   │   ├── .implementation: None
-                    │   │   ├── .join_cond: ("customer.c_custkey"(#1.0) = "orders.o_custkey"(#2.1))
+                    │   │   ├── .join_cond: 
                     │   │   ├── (.output_columns):
                     │   │   │   ┌── "customer.c_acctbal"(#1.5)
                     │   │   │   ├── "customer.c_address"(#1.2)
@@ -249,35 +195,8 @@ Limit
                     │   │   │   ├── "orders.o_shippriority"(#2.7)
                     │   │   │   └── "orders.o_totalprice"(#2.3)
                     │   │   ├── (.cardinality): 0.00
-                    │   │   ├── Get
-                    │   │   │   ├── .data_source_id: 6
-                    │   │   │   ├── .table_index: 1
-                    │   │   │   ├── .implementation: None
-                    │   │   │   ├── (.output_columns):
-                    │   │   │   │   ┌── "customer.c_acctbal"(#1.5)
-                    │   │   │   │   ├── "customer.c_address"(#1.2)
-                    │   │   │   │   ├── "customer.c_comment"(#1.7)
-                    │   │   │   │   ├── "customer.c_custkey"(#1.0)
-                    │   │   │   │   ├── "customer.c_mktsegment"(#1.6)
-                    │   │   │   │   ├── "customer.c_name"(#1.1)
-                    │   │   │   │   ├── "customer.c_nationkey"(#1.3)
-                    │   │   │   │   └── "customer.c_phone"(#1.4)
-                    │   │   │   └── (.cardinality): 0.00
-                    │   │   └── Get
-                    │   │       ├── .data_source_id: 7
-                    │   │       ├── .table_index: 2
-                    │   │       ├── .implementation: None
-                    │   │       ├── (.output_columns):
-                    │   │       │   ┌── "orders.o_clerk"(#2.6)
-                    │   │       │   ├── "orders.o_comment"(#2.8)
-                    │   │       │   ├── "orders.o_custkey"(#2.1)
-                    │   │       │   ├── "orders.o_orderdate"(#2.4)
-                    │   │       │   ├── "orders.o_orderkey"(#2.0)
-                    │   │       │   ├── "orders.o_orderpriority"(#2.5)
-                    │   │       │   ├── "orders.o_orderstatus"(#2.2)
-                    │   │       │   ├── "orders.o_shippriority"(#2.7)
-                    │   │       │   └── "orders.o_totalprice"(#2.3)
-                    │   │       └── (.cardinality): 0.00
+                    │   │   ├── Get { .data_source_id: 6, .table_index: 1, .implementation: None, (.output_columns): [ "customer.c_acctbal"(#1.5), "customer.c_address"(#1.2), "customer.c_comment"(#1.7), "customer.c_custkey"(#1.0), "customer.c_mktsegment"(#1.6), "customer.c_name"(#1.1), "customer.c_nationkey"(#1.3), "customer.c_phone"(#1.4) ], (.cardinality): 0.00 }
+                    │   │   └── Get { .data_source_id: 7, .table_index: 2, .implementation: None, (.output_columns): [ "orders.o_clerk"(#2.6), "orders.o_comment"(#2.8), "orders.o_custkey"(#2.1), "orders.o_orderdate"(#2.4), "orders.o_orderkey"(#2.0), "orders.o_orderpriority"(#2.5), "orders.o_orderstatus"(#2.2), "orders.o_shippriority"(#2.7), "orders.o_totalprice"(#2.3) ], (.cardinality): 0.00 }
                     │   └── Get
                     │       ├── .data_source_id: 8
                     │       ├── .table_index: 3
@@ -300,12 +219,7 @@ Limit
                     │       │   ├── "lineitem.l_suppkey"(#3.2)
                     │       │   └── "lineitem.l_tax"(#3.7)
                     │       └── (.cardinality): 0.00
-                    └── Get
-                        ├── .data_source_id: 1
-                        ├── .table_index: 4
-                        ├── .implementation: None
-                        ├── (.output_columns): [ "nation.n_comment"(#4.3), "nation.n_name"(#4.1), "nation.n_nationkey"(#4.0), "nation.n_regionkey"(#4.2) ]
-                        └── (.cardinality): 0.00
+                    └── Get { .data_source_id: 1, .table_index: 4, .implementation: None, (.output_columns): [ "nation.n_comment"(#4.3), "nation.n_name"(#4.1), "nation.n_nationkey"(#4.0), "nation.n_regionkey"(#4.2) ], (.cardinality): 0.00 }
 
 physical_plan after optd-finalized:
 Limit
@@ -402,7 +316,7 @@ Limit
                 ├── Join
                 │   ├── .join_type: Inner
                 │   ├── .implementation: None
-                │   ├── .join_cond: "orders.o_orderkey"(#2.0) = "lineitem.l_orderkey"(#3.0)
+                │   ├── .join_cond: "lineitem.l_orderkey"(#3.0) = "orders.o_orderkey"(#2.0)
                 │   ├── (.output_columns):
                 │   │   ┌── "customer.c_acctbal"(#1.5)
                 │   │   ├── "customer.c_address"(#1.2)

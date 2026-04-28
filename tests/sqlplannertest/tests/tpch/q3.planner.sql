@@ -25,25 +25,18 @@ ORDER BY
 /*
 logical_plan after optd-initial:
 Limit { .skip: 0::bigint, .fetch: 10::bigint, (.output_columns): [ "__#6.l_orderkey"(#6.0), "__#6.o_orderdate"(#6.2), "__#6.o_shippriority"(#6.3), "__#6.revenue"(#6.1) ], (.cardinality): 0.00 }
-└── OrderBy
-    ├── ordering_exprs: [ "__#6.revenue"(#6.1) DESC, "__#6.o_orderdate"(#6.2) ASC ]
-    ├── (.output_columns): [ "__#6.l_orderkey"(#6.0), "__#6.o_orderdate"(#6.2), "__#6.o_shippriority"(#6.3), "__#6.revenue"(#6.1) ]
-    ├── (.cardinality): 0.00
-    └── Project
-        ├── .table_index: 6
-        ├── .projections: [ "lineitem.l_orderkey"(#3.0), "__#5.sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)"(#5.0), "orders.o_orderdate"(#2.4), "orders.o_shippriority"(#2.7) ]
-        ├── (.output_columns): [ "__#6.l_orderkey"(#6.0), "__#6.o_orderdate"(#6.2), "__#6.o_shippriority"(#6.3), "__#6.revenue"(#6.1) ]
-        ├── (.cardinality): 0.00
+└── OrderBy { ordering_exprs: [ "__#6.revenue"(#6.1) DESC, "__#6.o_orderdate"(#6.2) ASC ], (.output_columns): [ "__#6.l_orderkey"(#6.0), "__#6.o_orderdate"(#6.2), "__#6.o_shippriority"(#6.3), "__#6.revenue"(#6.1) ], (.cardinality): 0.00 }
+    └── Project { .table_index: 6, .projections: [ "lineitem.l_orderkey"(#3.0), "__#5.sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)"(#5.0), "orders.o_orderdate"(#2.4), "orders.o_shippriority"(#2.7) ], (.output_columns): [ "__#6.l_orderkey"(#6.0), "__#6.o_orderdate"(#6.2), "__#6.o_shippriority"(#6.3), "__#6.revenue"(#6.1) ], (.cardinality): 0.00 }
         └── Aggregate
             ├── .key_table_index: 4
             ├── .aggregate_table_index: 5
             ├── .implementation: None
-            ├── .exprs: sum("lineitem.l_extendedprice"(#3.5) * 1::decimal128(20, 0) - "lineitem.l_discount"(#3.6))
+            ├── .exprs: sum("lineitem.l_extendedprice"(#3.5) * CAST (1::bigint AS Decimal128(20, 0)) - "lineitem.l_discount"(#3.6))
             ├── .keys: [ "lineitem.l_orderkey"(#3.0), "orders.o_orderdate"(#2.4), "orders.o_shippriority"(#2.7) ]
             ├── (.output_columns): [ "__#4.l_orderkey"(#4.0), "__#4.o_orderdate"(#4.1), "__#4.o_shippriority"(#4.2), "__#5.sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)"(#5.0) ]
             ├── (.cardinality): 0.00
             └── Select
-                ├── .predicate: ("customer.c_mktsegment"(#1.6) = 'FURNITURE'::utf8_view) AND ("orders.o_orderdate"(#2.4) < 1995-03-29::date32) AND ("lineitem.l_shipdate"(#3.10) > 1995-03-29::date32)
+                ├── .predicate: ("customer.c_mktsegment"(#1.6) = CAST ('FURNITURE'::utf8 AS Utf8View)) AND ("customer.c_custkey"(#1.0) = "orders.o_custkey"(#2.1)) AND ("lineitem.l_orderkey"(#3.0) = "orders.o_orderkey"(#2.0)) AND ("orders.o_orderdate"(#2.4) < CAST ('1995-03-29'::utf8 AS Date32)) AND ("lineitem.l_shipdate"(#3.10) > CAST ('1995-03-29'::utf8 AS Date32))
                 ├── (.output_columns):
                 │   ┌── "customer.c_acctbal"(#1.5)
                 │   ├── "customer.c_address"(#1.2)
@@ -82,7 +75,7 @@ Limit { .skip: 0::bigint, .fetch: 10::bigint, (.output_columns): [ "__#6.l_order
                 └── Join
                     ├── .join_type: Inner
                     ├── .implementation: None
-                    ├── .join_cond: ("orders.o_orderkey"(#2.0) = "lineitem.l_orderkey"(#3.0))
+                    ├── .join_cond: 
                     ├── (.output_columns):
                     │   ┌── "customer.c_acctbal"(#1.5)
                     │   ├── "customer.c_address"(#1.2)
@@ -121,7 +114,7 @@ Limit { .skip: 0::bigint, .fetch: 10::bigint, (.output_columns): [ "__#6.l_order
                     ├── Join
                     │   ├── .join_type: Inner
                     │   ├── .implementation: None
-                    │   ├── .join_cond: ("customer.c_custkey"(#1.0) = "orders.o_custkey"(#2.1))
+                    │   ├── .join_cond: 
                     │   ├── (.output_columns):
                     │   │   ┌── "customer.c_acctbal"(#1.5)
                     │   │   ├── "customer.c_address"(#1.2)
@@ -141,34 +134,12 @@ Limit { .skip: 0::bigint, .fetch: 10::bigint, (.output_columns): [ "__#6.l_order
                     │   │   ├── "orders.o_shippriority"(#2.7)
                     │   │   └── "orders.o_totalprice"(#2.3)
                     │   ├── (.cardinality): 0.00
-                    │   ├── Get
-                    │   │   ├── .data_source_id: 6
-                    │   │   ├── .table_index: 1
-                    │   │   ├── .implementation: None
-                    │   │   ├── (.output_columns):
-                    │   │   │   ┌── "customer.c_acctbal"(#1.5)
-                    │   │   │   ├── "customer.c_address"(#1.2)
-                    │   │   │   ├── "customer.c_comment"(#1.7)
-                    │   │   │   ├── "customer.c_custkey"(#1.0)
-                    │   │   │   ├── "customer.c_mktsegment"(#1.6)
-                    │   │   │   ├── "customer.c_name"(#1.1)
-                    │   │   │   ├── "customer.c_nationkey"(#1.3)
-                    │   │   │   └── "customer.c_phone"(#1.4)
-                    │   │   └── (.cardinality): 0.00
+                    │   ├── Get { .data_source_id: 6, .table_index: 1, .implementation: None, (.output_columns): [ "customer.c_acctbal"(#1.5), "customer.c_address"(#1.2), "customer.c_comment"(#1.7), "customer.c_custkey"(#1.0), "customer.c_mktsegment"(#1.6), "customer.c_name"(#1.1), "customer.c_nationkey"(#1.3), "customer.c_phone"(#1.4) ], (.cardinality): 0.00 }
                     │   └── Get
                     │       ├── .data_source_id: 7
                     │       ├── .table_index: 2
                     │       ├── .implementation: None
-                    │       ├── (.output_columns):
-                    │       │   ┌── "orders.o_clerk"(#2.6)
-                    │       │   ├── "orders.o_comment"(#2.8)
-                    │       │   ├── "orders.o_custkey"(#2.1)
-                    │       │   ├── "orders.o_orderdate"(#2.4)
-                    │       │   ├── "orders.o_orderkey"(#2.0)
-                    │       │   ├── "orders.o_orderpriority"(#2.5)
-                    │       │   ├── "orders.o_orderstatus"(#2.2)
-                    │       │   ├── "orders.o_shippriority"(#2.7)
-                    │       │   └── "orders.o_totalprice"(#2.3)
+                    │       ├── (.output_columns): [ "orders.o_clerk"(#2.6), "orders.o_comment"(#2.8), "orders.o_custkey"(#2.1), "orders.o_orderdate"(#2.4), "orders.o_orderkey"(#2.0), "orders.o_orderpriority"(#2.5), "orders.o_orderstatus"(#2.2), "orders.o_shippriority"(#2.7), "orders.o_totalprice"(#2.3) ]
                     │       └── (.cardinality): 0.00
                     └── Get
                         ├── .data_source_id: 8
@@ -239,7 +210,7 @@ Limit
             └── Join
                 ├── .join_type: Inner
                 ├── .implementation: None
-                ├── .join_cond: "orders.o_orderkey"(#2.0) = "lineitem.l_orderkey"(#3.0)
+                ├── .join_cond: "lineitem.l_orderkey"(#3.0) = "orders.o_orderkey"(#2.0)
                 ├── (.output_columns):
                 │   ┌── "customer.c_custkey"(#1.0)
                 │   ├── "customer.c_mktsegment"(#1.6)
