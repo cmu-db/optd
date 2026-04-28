@@ -602,6 +602,295 @@ Limit
                                                     ├── (.output_columns): [ "region.r_comment"(#9.2), "region.r_name"(#9.1), "region.r_regionkey"(#9.0) ]
                                                     └── (.cardinality): 0.00
 
+logical_plan after optd-decorrelation:
+SAME TEXT AS ABOVE
+
+logical_plan after optd-simplification:
+Limit
+├── .skip: 0::bigint
+├── .fetch: 100::bigint
+├── (.output_columns):
+│   ┌── "__#17.n_name"(#17.2)
+│   ├── "__#17.p_mfgr"(#17.4)
+│   ├── "__#17.p_partkey"(#17.3)
+│   ├── "__#17.s_acctbal"(#17.0)
+│   ├── "__#17.s_address"(#17.5)
+│   ├── "__#17.s_comment"(#17.7)
+│   ├── "__#17.s_name"(#17.1)
+│   └── "__#17.s_phone"(#17.6)
+├── (.cardinality): 0.00
+└── OrderBy
+    ├── ordering_exprs: [ "__#17.s_acctbal"(#17.0) DESC, "__#17.n_name"(#17.2) ASC, "__#17.s_name"(#17.1) ASC, "__#17.p_partkey"(#17.3) ASC ]
+    ├── (.output_columns):
+    │   ┌── "__#17.n_name"(#17.2)
+    │   ├── "__#17.p_mfgr"(#17.4)
+    │   ├── "__#17.p_partkey"(#17.3)
+    │   ├── "__#17.s_acctbal"(#17.0)
+    │   ├── "__#17.s_address"(#17.5)
+    │   ├── "__#17.s_comment"(#17.7)
+    │   ├── "__#17.s_name"(#17.1)
+    │   └── "__#17.s_phone"(#17.6)
+    ├── (.cardinality): 0.00
+    └── Project
+        ├── .table_index: 17
+        ├── .projections:
+        │   ┌── "supplier.s_acctbal"(#3.5)
+        │   ├── "supplier.s_name"(#3.1)
+        │   ├── "nation.n_name"(#4.1)
+        │   ├── "part.p_partkey"(#1.0)
+        │   ├── "part.p_mfgr"(#1.2)
+        │   ├── "supplier.s_address"(#3.2)
+        │   ├── "supplier.s_phone"(#3.4)
+        │   └── "supplier.s_comment"(#3.6)
+        ├── (.output_columns):
+        │   ┌── "__#17.n_name"(#17.2)
+        │   ├── "__#17.p_mfgr"(#17.4)
+        │   ├── "__#17.p_partkey"(#17.3)
+        │   ├── "__#17.s_acctbal"(#17.0)
+        │   ├── "__#17.s_address"(#17.5)
+        │   ├── "__#17.s_comment"(#17.7)
+        │   ├── "__#17.s_name"(#17.1)
+        │   └── "__#17.s_phone"(#17.6)
+        ├── (.cardinality): 0.00
+        └── Join
+            ├── .join_type: Inner
+            ├── .implementation: None
+            ├── .join_cond: ("part.p_partkey"(#1.0) = "__scalar_sq_1.ps_partkey"(#14.1)) AND ("partsupp.ps_supplycost"(#2.3) = "__scalar_sq_1.min(partsupp.ps_supplycost)"(#14.0))
+            ├── (.output_columns):
+            │   ┌── "__scalar_sq_1.__always_true"(#14.2)
+            │   ├── "__scalar_sq_1.min(partsupp.ps_supplycost)"(#14.0)
+            │   ├── "__scalar_sq_1.ps_partkey"(#14.1)
+            │   ├── "nation.n_name"(#4.1)
+            │   ├── "nation.n_nationkey"(#4.0)
+            │   ├── "nation.n_regionkey"(#4.2)
+            │   ├── "part.p_mfgr"(#1.2)
+            │   ├── "part.p_partkey"(#1.0)
+            │   ├── "part.p_size"(#1.5)
+            │   ├── "part.p_type"(#1.4)
+            │   ├── "partsupp.ps_partkey"(#2.0)
+            │   ├── "partsupp.ps_suppkey"(#2.1)
+            │   ├── "partsupp.ps_supplycost"(#2.3)
+            │   ├── "region.r_name"(#5.1)
+            │   ├── "region.r_regionkey"(#5.0)
+            │   ├── "supplier.s_acctbal"(#3.5)
+            │   ├── "supplier.s_address"(#3.2)
+            │   ├── "supplier.s_comment"(#3.6)
+            │   ├── "supplier.s_name"(#3.1)
+            │   ├── "supplier.s_nationkey"(#3.3)
+            │   ├── "supplier.s_phone"(#3.4)
+            │   └── "supplier.s_suppkey"(#3.0)
+            ├── (.cardinality): 0.00
+            ├── Join
+            │   ├── .join_type: Inner
+            │   ├── .implementation: None
+            │   ├── .join_cond: "nation.n_regionkey"(#4.2) = "region.r_regionkey"(#5.0)
+            │   ├── (.output_columns):
+            │   │   ┌── "nation.n_name"(#4.1)
+            │   │   ├── "nation.n_nationkey"(#4.0)
+            │   │   ├── "nation.n_regionkey"(#4.2)
+            │   │   ├── "part.p_mfgr"(#1.2)
+            │   │   ├── "part.p_partkey"(#1.0)
+            │   │   ├── "part.p_size"(#1.5)
+            │   │   ├── "part.p_type"(#1.4)
+            │   │   ├── "partsupp.ps_partkey"(#2.0)
+            │   │   ├── "partsupp.ps_suppkey"(#2.1)
+            │   │   ├── "partsupp.ps_supplycost"(#2.3)
+            │   │   ├── "region.r_name"(#5.1)
+            │   │   ├── "region.r_regionkey"(#5.0)
+            │   │   ├── "supplier.s_acctbal"(#3.5)
+            │   │   ├── "supplier.s_address"(#3.2)
+            │   │   ├── "supplier.s_comment"(#3.6)
+            │   │   ├── "supplier.s_name"(#3.1)
+            │   │   ├── "supplier.s_nationkey"(#3.3)
+            │   │   ├── "supplier.s_phone"(#3.4)
+            │   │   └── "supplier.s_suppkey"(#3.0)
+            │   ├── (.cardinality): 0.00
+            │   ├── Join
+            │   │   ├── .join_type: Inner
+            │   │   ├── .implementation: None
+            │   │   ├── .join_cond: "supplier.s_nationkey"(#3.3) = "nation.n_nationkey"(#4.0)
+            │   │   ├── (.output_columns):
+            │   │   │   ┌── "nation.n_name"(#4.1)
+            │   │   │   ├── "nation.n_nationkey"(#4.0)
+            │   │   │   ├── "nation.n_regionkey"(#4.2)
+            │   │   │   ├── "part.p_mfgr"(#1.2)
+            │   │   │   ├── "part.p_partkey"(#1.0)
+            │   │   │   ├── "part.p_size"(#1.5)
+            │   │   │   ├── "part.p_type"(#1.4)
+            │   │   │   ├── "partsupp.ps_partkey"(#2.0)
+            │   │   │   ├── "partsupp.ps_suppkey"(#2.1)
+            │   │   │   ├── "partsupp.ps_supplycost"(#2.3)
+            │   │   │   ├── "supplier.s_acctbal"(#3.5)
+            │   │   │   ├── "supplier.s_address"(#3.2)
+            │   │   │   ├── "supplier.s_comment"(#3.6)
+            │   │   │   ├── "supplier.s_name"(#3.1)
+            │   │   │   ├── "supplier.s_nationkey"(#3.3)
+            │   │   │   ├── "supplier.s_phone"(#3.4)
+            │   │   │   └── "supplier.s_suppkey"(#3.0)
+            │   │   ├── (.cardinality): 0.00
+            │   │   ├── Join
+            │   │   │   ├── .join_type: Inner
+            │   │   │   ├── .implementation: None
+            │   │   │   ├── .join_cond: "partsupp.ps_suppkey"(#2.1) = "supplier.s_suppkey"(#3.0)
+            │   │   │   ├── (.output_columns):
+            │   │   │   │   ┌── "part.p_mfgr"(#1.2)
+            │   │   │   │   ├── "part.p_partkey"(#1.0)
+            │   │   │   │   ├── "part.p_size"(#1.5)
+            │   │   │   │   ├── "part.p_type"(#1.4)
+            │   │   │   │   ├── "partsupp.ps_partkey"(#2.0)
+            │   │   │   │   ├── "partsupp.ps_suppkey"(#2.1)
+            │   │   │   │   ├── "partsupp.ps_supplycost"(#2.3)
+            │   │   │   │   ├── "supplier.s_acctbal"(#3.5)
+            │   │   │   │   ├── "supplier.s_address"(#3.2)
+            │   │   │   │   ├── "supplier.s_comment"(#3.6)
+            │   │   │   │   ├── "supplier.s_name"(#3.1)
+            │   │   │   │   ├── "supplier.s_nationkey"(#3.3)
+            │   │   │   │   ├── "supplier.s_phone"(#3.4)
+            │   │   │   │   └── "supplier.s_suppkey"(#3.0)
+            │   │   │   ├── (.cardinality): 0.00
+            │   │   │   ├── Join
+            │   │   │   │   ├── .join_type: Inner
+            │   │   │   │   ├── .implementation: None
+            │   │   │   │   ├── .join_cond: "part.p_partkey"(#1.0) = "partsupp.ps_partkey"(#2.0)
+            │   │   │   │   ├── (.output_columns):
+            │   │   │   │   │   ┌── "part.p_mfgr"(#1.2)
+            │   │   │   │   │   ├── "part.p_partkey"(#1.0)
+            │   │   │   │   │   ├── "part.p_size"(#1.5)
+            │   │   │   │   │   ├── "part.p_type"(#1.4)
+            │   │   │   │   │   ├── "partsupp.ps_partkey"(#2.0)
+            │   │   │   │   │   ├── "partsupp.ps_suppkey"(#2.1)
+            │   │   │   │   │   └── "partsupp.ps_supplycost"(#2.3)
+            │   │   │   │   ├── (.cardinality): 0.00
+            │   │   │   │   ├── Select
+            │   │   │   │   │   ├── .predicate: ("part.p_size"(#1.5) = 4::integer) AND ("part.p_type"(#1.4) LIKE '%TIN'::utf8_view)
+            │   │   │   │   │   ├── (.output_columns): [ "part.p_mfgr"(#1.2), "part.p_partkey"(#1.0), "part.p_size"(#1.5), "part.p_type"(#1.4) ]
+            │   │   │   │   │   ├── (.cardinality): 0.00
+            │   │   │   │   │   └── Get
+            │   │   │   │   │       ├── .data_source_id: 3
+            │   │   │   │   │       ├── .table_index: 1
+            │   │   │   │   │       ├── .implementation: None
+            │   │   │   │   │       ├── (.output_columns): [ "part.p_mfgr"(#1.2), "part.p_partkey"(#1.0), "part.p_size"(#1.5), "part.p_type"(#1.4) ]
+            │   │   │   │   │       └── (.cardinality): 0.00
+            │   │   │   │   └── Get
+            │   │   │   │       ├── .data_source_id: 5
+            │   │   │   │       ├── .table_index: 2
+            │   │   │   │       ├── .implementation: None
+            │   │   │   │       ├── (.output_columns): [ "partsupp.ps_partkey"(#2.0), "partsupp.ps_suppkey"(#2.1), "partsupp.ps_supplycost"(#2.3) ]
+            │   │   │   │       └── (.cardinality): 0.00
+            │   │   │   └── Get
+            │   │   │       ├── .data_source_id: 4
+            │   │   │       ├── .table_index: 3
+            │   │   │       ├── .implementation: None
+            │   │   │       ├── (.output_columns):
+            │   │   │       │   ┌── "supplier.s_acctbal"(#3.5)
+            │   │   │       │   ├── "supplier.s_address"(#3.2)
+            │   │   │       │   ├── "supplier.s_comment"(#3.6)
+            │   │   │       │   ├── "supplier.s_name"(#3.1)
+            │   │   │       │   ├── "supplier.s_nationkey"(#3.3)
+            │   │   │       │   ├── "supplier.s_phone"(#3.4)
+            │   │   │       │   └── "supplier.s_suppkey"(#3.0)
+            │   │   │       └── (.cardinality): 0.00
+            │   │   └── Get
+            │   │       ├── .data_source_id: 1
+            │   │       ├── .table_index: 4
+            │   │       ├── .implementation: None
+            │   │       ├── (.output_columns): [ "nation.n_name"(#4.1), "nation.n_nationkey"(#4.0), "nation.n_regionkey"(#4.2) ]
+            │   │       └── (.cardinality): 0.00
+            │   └── Select
+            │       ├── .predicate: "region.r_name"(#5.1) = 'AFRICA'::utf8_view
+            │       ├── (.output_columns): [ "region.r_name"(#5.1), "region.r_regionkey"(#5.0) ]
+            │       ├── (.cardinality): 0.00
+            │       └── Get
+            │           ├── .data_source_id: 2
+            │           ├── .table_index: 5
+            │           ├── .implementation: None
+            │           ├── (.output_columns): [ "region.r_name"(#5.1), "region.r_regionkey"(#5.0) ]
+            │           └── (.cardinality): 0.00
+            └── Remap
+                ├── .table_index: 14
+                ├── (.output_columns): [ "__scalar_sq_1.__always_true"(#14.2), "__scalar_sq_1.min(partsupp.ps_supplycost)"(#14.0), "__scalar_sq_1.ps_partkey"(#14.1) ]
+                ├── (.cardinality): 0.00
+                └── Project
+                    ├── .table_index: 13
+                    ├── .projections: [ "__#11.min(partsupp.ps_supplycost)"(#11.0), "partsupp.ps_partkey"(#2.0), true::boolean ]
+                    ├── (.output_columns): [ "__#13.__always_true"(#13.2), "__#13.min(partsupp.ps_supplycost)"(#13.0), "__#13.ps_partkey"(#13.1) ]
+                    ├── (.cardinality): 0.00
+                    └── Aggregate
+                        ├── .key_table_index: 10
+                        ├── .aggregate_table_index: 11
+                        ├── .implementation: None
+                        ├── .exprs: min("partsupp.ps_supplycost"(#6.3))
+                        ├── .keys: "partsupp.ps_partkey"(#6.0)
+                        ├── (.output_columns): [ "__#10.ps_partkey"(#10.0), "__#11.min(partsupp.ps_supplycost)"(#11.0) ]
+                        ├── (.cardinality): 0.00
+                        └── Join
+                            ├── .join_type: Inner
+                            ├── .implementation: None
+                            ├── .join_cond: "nation.n_regionkey"(#8.2) = "region.r_regionkey"(#9.0)
+                            ├── (.output_columns):
+                            │   ┌── "nation.n_nationkey"(#8.0)
+                            │   ├── "nation.n_regionkey"(#8.2)
+                            │   ├── "partsupp.ps_partkey"(#6.0)
+                            │   ├── "partsupp.ps_suppkey"(#6.1)
+                            │   ├── "partsupp.ps_supplycost"(#6.3)
+                            │   ├── "region.r_name"(#9.1)
+                            │   ├── "region.r_regionkey"(#9.0)
+                            │   ├── "supplier.s_nationkey"(#7.3)
+                            │   └── "supplier.s_suppkey"(#7.0)
+                            ├── (.cardinality): 0.00
+                            ├── Join
+                            │   ├── .join_type: Inner
+                            │   ├── .implementation: None
+                            │   ├── .join_cond: "supplier.s_nationkey"(#7.3) = "nation.n_nationkey"(#8.0)
+                            │   ├── (.output_columns):
+                            │   │   ┌── "nation.n_nationkey"(#8.0)
+                            │   │   ├── "nation.n_regionkey"(#8.2)
+                            │   │   ├── "partsupp.ps_partkey"(#6.0)
+                            │   │   ├── "partsupp.ps_suppkey"(#6.1)
+                            │   │   ├── "partsupp.ps_supplycost"(#6.3)
+                            │   │   ├── "supplier.s_nationkey"(#7.3)
+                            │   │   └── "supplier.s_suppkey"(#7.0)
+                            │   ├── (.cardinality): 0.00
+                            │   ├── Join
+                            │   │   ├── .join_type: Inner
+                            │   │   ├── .implementation: None
+                            │   │   ├── .join_cond: "partsupp.ps_suppkey"(#6.1) = "supplier.s_suppkey"(#7.0)
+                            │   │   ├── (.output_columns):
+                            │   │   │   ┌── "partsupp.ps_partkey"(#6.0)
+                            │   │   │   ├── "partsupp.ps_suppkey"(#6.1)
+                            │   │   │   ├── "partsupp.ps_supplycost"(#6.3)
+                            │   │   │   ├── "supplier.s_nationkey"(#7.3)
+                            │   │   │   └── "supplier.s_suppkey"(#7.0)
+                            │   │   ├── (.cardinality): 0.00
+                            │   │   ├── Get
+                            │   │   │   ├── .data_source_id: 5
+                            │   │   │   ├── .table_index: 6
+                            │   │   │   ├── .implementation: None
+                            │   │   │   ├── (.output_columns): [ "partsupp.ps_partkey"(#6.0), "partsupp.ps_suppkey"(#6.1), "partsupp.ps_supplycost"(#6.3) ]
+                            │   │   │   └── (.cardinality): 0.00
+                            │   │   └── Get
+                            │   │       ├── .data_source_id: 4
+                            │   │       ├── .table_index: 7
+                            │   │       ├── .implementation: None
+                            │   │       ├── (.output_columns): [ "supplier.s_nationkey"(#7.3), "supplier.s_suppkey"(#7.0) ]
+                            │   │       └── (.cardinality): 0.00
+                            │   └── Get
+                            │       ├── .data_source_id: 1
+                            │       ├── .table_index: 8
+                            │       ├── .implementation: None
+                            │       ├── (.output_columns): [ "nation.n_nationkey"(#8.0), "nation.n_regionkey"(#8.2) ]
+                            │       └── (.cardinality): 0.00
+                            └── Select
+                                ├── .predicate: "region.r_name"(#9.1) = 'AFRICA'::utf8_view
+                                ├── (.output_columns): [ "region.r_name"(#9.1), "region.r_regionkey"(#9.0) ]
+                                ├── (.cardinality): 0.00
+                                └── Get
+                                    ├── .data_source_id: 2
+                                    ├── .table_index: 9
+                                    ├── .implementation: None
+                                    ├── (.output_columns): [ "region.r_name"(#9.1), "region.r_regionkey"(#9.0) ]
+                                    └── (.cardinality): 0.00
+
 physical_plan after optd-finalized:
 Limit
 ├── .skip: 0::bigint

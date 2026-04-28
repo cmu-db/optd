@@ -212,9 +212,21 @@ struct ExplainPassExtension {
 }
 
 impl ExplainPassExtension {
-    /// Returns a copy of the collected pass snapshots.
-    fn snapshots(&self) -> Vec<PassExplainSnapshot> {
-        self.snapshots.lock().unwrap().clone()
+    /// Stores the initial optd logical plan.
+    fn record_initial_logical_plan(&self, rendered_plan: String) {
+        self.snapshots.lock().unwrap().insert(
+            0,
+            PassExplainSnapshot {
+                pass_name: "optd-initial",
+                rendered_plan,
+            },
+        );
+    }
+
+    /// Builds the optd logical-plan explain rows accumulated during planning.
+    fn logical_stringified_plans(&self) -> Vec<StringifiedPlan> {
+        let snapshots = self.snapshots.lock().unwrap().clone();
+        pass_explain_plans(&snapshots)
     }
 }
 
@@ -236,27 +248,18 @@ impl PassExtension for ExplainPassExtension {
 }
 
 /// Converts captured pass snapshots into `EXPLAIN` rows.
-///
-/// If a pass leaves the rendered plan unchanged, its section is collapsed to
-/// `same as above` instead of repeating the full tree.
-fn pass_explain_plans(
-    initial_plan: &str,
-    snapshots: &[PassExplainSnapshot],
-) -> Vec<StringifiedPlan> {
-    let mut previous_rendered = initial_plan.to_owned();
+fn pass_explain_plans(snapshots: &[PassExplainSnapshot]) -> Vec<StringifiedPlan> {
     let mut plans = Vec::with_capacity(snapshots.len());
     for snapshot in snapshots {
-        let display_plan = if snapshot.rendered_plan == previous_rendered {
-            "same as above".to_string()
-        } else {
-            previous_rendered = snapshot.rendered_plan.clone();
-            snapshot.rendered_plan.clone()
-        };
         plans.push(StringifiedPlan::new(
             PlanType::OptimizedLogicalPlan {
-                optimizer_name: format!("optd-{}", snapshot.pass_name),
+                optimizer_name: if snapshot.pass_name.starts_with("optd-") {
+                    snapshot.pass_name.to_string()
+                } else {
+                    format!("optd-{}", snapshot.pass_name)
+                },
             },
-            display_plan,
+            snapshot.rendered_plan.clone(),
         ));
     }
     plans
@@ -427,33 +430,15 @@ impl OptdQueryPlanner {
             // for `(.output_columns)` and `(.cardinality)` in explain output.
             warm_explain_properties(&optd_logical, &ctx.inner);
             let s = quick_explain(&optd_logical, &ctx.inner);
-            x.stringified_plans.push(StringifiedPlan::new(
-                PlanType::OptimizedLogicalPlan {
-                    optimizer_name: "optd-initial".to_string(),
-                },
-                s.clone(),
-            ));
             if let Some(extension) = explain_pass_extension.as_ref() {
+                extension.record_initial_logical_plan(s);
                 x.stringified_plans
-                    .extend(pass_explain_plans(&s, &extension.snapshots()));
+                    .extend(extension.logical_stringified_plans());
             }
             x.stringified_plans.push(StringifiedPlan::new(
                 PlanType::FinalLogicalPlan,
                 logical_plan.display_indent().to_string(),
             ));
-        }
-
-        if let Some(x) = explain.as_mut() {
-            let s = quick_explain(&optd_logical, &opt.ctx);
-
-            x.stringified_plans.push(StringifiedPlan::new(
-                PlanType::OptimizedPhysicalPlan {
-                    optimizer_name: "optd-initial".to_string(),
-                },
-                s.clone(),
-            ));
-            x.stringified_plans
-                .push(StringifiedPlan::new(PlanType::FinalLogicalPlan, s));
         }
 
         if let Some(x) = explain.as_mut() {
@@ -880,28 +865,30 @@ mod tests {
 
     #[test]
     fn pass_explain_plans_collapses_unchanged_plans() {
-        let plans = pass_explain_plans(
-            "initial",
-            &[
-                PassExplainSnapshot {
-                    pass_name: "decorrelation",
-                    rendered_plan: "initial".to_string(),
-                },
-                PassExplainSnapshot {
-                    pass_name: "simplification",
-                    rendered_plan: "simplified".to_string(),
-                },
-                PassExplainSnapshot {
-                    pass_name: "pruning",
-                    rendered_plan: "simplified".to_string(),
-                },
-            ],
-        );
+        let plans = pass_explain_plans(&[
+            PassExplainSnapshot {
+                pass_name: "optd-initial",
+                rendered_plan: "initial".to_string(),
+            },
+            PassExplainSnapshot {
+                pass_name: "decorrelation",
+                rendered_plan: "initial".to_string(),
+            },
+            PassExplainSnapshot {
+                pass_name: "simplification",
+                rendered_plan: "simplified".to_string(),
+            },
+            PassExplainSnapshot {
+                pass_name: "pruning",
+                rendered_plan: "simplified".to_string(),
+            },
+        ]);
 
-        assert_eq!(plans.len(), 3);
-        assert_eq!(plans[0].plan.as_ref().as_str(), "same as above");
-        assert_eq!(plans[1].plan.as_ref().as_str(), "simplified");
-        assert_eq!(plans[2].plan.as_ref().as_str(), "same as above");
+        assert_eq!(plans.len(), 4);
+        assert_eq!(plans[0].plan.as_ref().as_str(), "initial");
+        assert_eq!(plans[1].plan.as_ref().as_str(), "initial");
+        assert_eq!(plans[2].plan.as_ref().as_str(), "simplified");
+        assert_eq!(plans[3].plan.as_ref().as_str(), "simplified");
     }
 
     #[test]

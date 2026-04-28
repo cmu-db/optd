@@ -71,10 +71,11 @@ impl sqlplannertest::PlannerTestRunner for PlannerTestDB {
                     let result = self.execute(&explained_sql).await?;
                     let explained_output = result
                         .into_iter()
-                        .filter_map(|row| match row[0].as_str() {
-                            "logical_plan after optd-initial"
-                            | "physical_plan after optd-finalized" => Some(row[0..2].join(":\n")),
-                            _ => None,
+                        .filter_map(|row| {
+                            let label = row[0].as_str();
+                            (label.starts_with("logical_plan after optd-")
+                                || label.starts_with("physical_plan after optd-"))
+                                .then(|| row[0..2].join(":\n"))
                         })
                         .join("\n\n");
                     writeln!(r, "{}\n", explained_output)?;

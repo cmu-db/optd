@@ -522,6 +522,176 @@ OrderBy
                                 ├── (.output_columns): [ "nation.n_comment"(#6.3), "nation.n_name"(#6.1), "nation.n_nationkey"(#6.0), "nation.n_regionkey"(#6.2) ]
                                 └── (.cardinality): 0.00
 
+logical_plan after optd-decorrelation:
+SAME TEXT AS ABOVE
+
+logical_plan after optd-simplification:
+OrderBy
+├── ordering_exprs: [ "__#12.nation"(#12.0) ASC, "__#12.o_year"(#12.1) DESC ]
+├── (.output_columns): [ "__#12.nation"(#12.0), "__#12.o_year"(#12.1), "__#12.sum_profit"(#12.2) ]
+├── (.cardinality): 0.00
+└── Project
+    ├── .table_index: 12
+    ├── .projections: [ "profit.nation"(#9.0), "profit.o_year"(#9.1), "__#11.sum(profit.amount)"(#11.0) ]
+    ├── (.output_columns): [ "__#12.nation"(#12.0), "__#12.o_year"(#12.1), "__#12.sum_profit"(#12.2) ]
+    ├── (.cardinality): 0.00
+    └── Aggregate
+        ├── .key_table_index: 10
+        ├── .aggregate_table_index: 11
+        ├── .implementation: None
+        ├── .exprs: sum("profit.amount"(#9.2))
+        ├── .keys: [ "profit.nation"(#9.0), "profit.o_year"(#9.1) ]
+        ├── (.output_columns): [ "__#10.nation"(#10.0), "__#10.o_year"(#10.1), "__#11.sum(profit.amount)"(#11.0) ]
+        ├── (.cardinality): 0.00
+        └── Remap { .table_index: 9, (.output_columns): [ "profit.amount"(#9.2), "profit.nation"(#9.0), "profit.o_year"(#9.1) ], (.cardinality): 0.00 }
+            └── Project
+                ├── .table_index: 8
+                ├── .projections:
+                │   ┌── "nation.n_name"(#6.1)
+                │   ├── date_part('YEAR'::utf8, "orders.o_orderdate"(#5.4))
+                │   └── "lineitem.l_extendedprice"(#2.5) * 1::decimal128(20, 0) - "lineitem.l_discount"(#2.6) - "partsupp.ps_supplycost"(#4.3) * "lineitem.l_quantity"(#2.4)
+                ├── (.output_columns): [ "__#8.amount"(#8.2), "__#8.nation"(#8.0), "__#8.o_year"(#8.1) ]
+                ├── (.cardinality): 0.00
+                └── Join
+                    ├── .join_type: Inner
+                    ├── .implementation: None
+                    ├── .join_cond: "supplier.s_nationkey"(#3.3) = "nation.n_nationkey"(#6.0)
+                    ├── (.output_columns):
+                    │   ┌── "lineitem.l_discount"(#2.6)
+                    │   ├── "lineitem.l_extendedprice"(#2.5)
+                    │   ├── "lineitem.l_orderkey"(#2.0)
+                    │   ├── "lineitem.l_partkey"(#2.1)
+                    │   ├── "lineitem.l_quantity"(#2.4)
+                    │   ├── "lineitem.l_suppkey"(#2.2)
+                    │   ├── "nation.n_name"(#6.1)
+                    │   ├── "nation.n_nationkey"(#6.0)
+                    │   ├── "orders.o_orderdate"(#5.4)
+                    │   ├── "orders.o_orderkey"(#5.0)
+                    │   ├── "part.p_name"(#1.1)
+                    │   ├── "part.p_partkey"(#1.0)
+                    │   ├── "partsupp.ps_partkey"(#4.0)
+                    │   ├── "partsupp.ps_suppkey"(#4.1)
+                    │   ├── "partsupp.ps_supplycost"(#4.3)
+                    │   ├── "supplier.s_nationkey"(#3.3)
+                    │   └── "supplier.s_suppkey"(#3.0)
+                    ├── (.cardinality): 0.00
+                    ├── Join
+                    │   ├── .join_type: Inner
+                    │   ├── .implementation: None
+                    │   ├── .join_cond: "lineitem.l_orderkey"(#2.0) = "orders.o_orderkey"(#5.0)
+                    │   ├── (.output_columns):
+                    │   │   ┌── "lineitem.l_discount"(#2.6)
+                    │   │   ├── "lineitem.l_extendedprice"(#2.5)
+                    │   │   ├── "lineitem.l_orderkey"(#2.0)
+                    │   │   ├── "lineitem.l_partkey"(#2.1)
+                    │   │   ├── "lineitem.l_quantity"(#2.4)
+                    │   │   ├── "lineitem.l_suppkey"(#2.2)
+                    │   │   ├── "orders.o_orderdate"(#5.4)
+                    │   │   ├── "orders.o_orderkey"(#5.0)
+                    │   │   ├── "part.p_name"(#1.1)
+                    │   │   ├── "part.p_partkey"(#1.0)
+                    │   │   ├── "partsupp.ps_partkey"(#4.0)
+                    │   │   ├── "partsupp.ps_suppkey"(#4.1)
+                    │   │   ├── "partsupp.ps_supplycost"(#4.3)
+                    │   │   ├── "supplier.s_nationkey"(#3.3)
+                    │   │   └── "supplier.s_suppkey"(#3.0)
+                    │   ├── (.cardinality): 0.00
+                    │   ├── Join
+                    │   │   ├── .join_type: Inner
+                    │   │   ├── .implementation: None
+                    │   │   ├── .join_cond: ("lineitem.l_suppkey"(#2.2) = "partsupp.ps_suppkey"(#4.1)) AND ("lineitem.l_partkey"(#2.1) = "partsupp.ps_partkey"(#4.0))
+                    │   │   ├── (.output_columns):
+                    │   │   │   ┌── "lineitem.l_discount"(#2.6)
+                    │   │   │   ├── "lineitem.l_extendedprice"(#2.5)
+                    │   │   │   ├── "lineitem.l_orderkey"(#2.0)
+                    │   │   │   ├── "lineitem.l_partkey"(#2.1)
+                    │   │   │   ├── "lineitem.l_quantity"(#2.4)
+                    │   │   │   ├── "lineitem.l_suppkey"(#2.2)
+                    │   │   │   ├── "part.p_name"(#1.1)
+                    │   │   │   ├── "part.p_partkey"(#1.0)
+                    │   │   │   ├── "partsupp.ps_partkey"(#4.0)
+                    │   │   │   ├── "partsupp.ps_suppkey"(#4.1)
+                    │   │   │   ├── "partsupp.ps_supplycost"(#4.3)
+                    │   │   │   ├── "supplier.s_nationkey"(#3.3)
+                    │   │   │   └── "supplier.s_suppkey"(#3.0)
+                    │   │   ├── (.cardinality): 0.00
+                    │   │   ├── Join
+                    │   │   │   ├── .join_type: Inner
+                    │   │   │   ├── .implementation: None
+                    │   │   │   ├── .join_cond: "lineitem.l_suppkey"(#2.2) = "supplier.s_suppkey"(#3.0)
+                    │   │   │   ├── (.output_columns):
+                    │   │   │   │   ┌── "lineitem.l_discount"(#2.6)
+                    │   │   │   │   ├── "lineitem.l_extendedprice"(#2.5)
+                    │   │   │   │   ├── "lineitem.l_orderkey"(#2.0)
+                    │   │   │   │   ├── "lineitem.l_partkey"(#2.1)
+                    │   │   │   │   ├── "lineitem.l_quantity"(#2.4)
+                    │   │   │   │   ├── "lineitem.l_suppkey"(#2.2)
+                    │   │   │   │   ├── "part.p_name"(#1.1)
+                    │   │   │   │   ├── "part.p_partkey"(#1.0)
+                    │   │   │   │   ├── "supplier.s_nationkey"(#3.3)
+                    │   │   │   │   └── "supplier.s_suppkey"(#3.0)
+                    │   │   │   ├── (.cardinality): 0.00
+                    │   │   │   ├── Join
+                    │   │   │   │   ├── .join_type: Inner
+                    │   │   │   │   ├── .implementation: None
+                    │   │   │   │   ├── .join_cond: "part.p_partkey"(#1.0) = "lineitem.l_partkey"(#2.1)
+                    │   │   │   │   ├── (.output_columns):
+                    │   │   │   │   │   ┌── "lineitem.l_discount"(#2.6)
+                    │   │   │   │   │   ├── "lineitem.l_extendedprice"(#2.5)
+                    │   │   │   │   │   ├── "lineitem.l_orderkey"(#2.0)
+                    │   │   │   │   │   ├── "lineitem.l_partkey"(#2.1)
+                    │   │   │   │   │   ├── "lineitem.l_quantity"(#2.4)
+                    │   │   │   │   │   ├── "lineitem.l_suppkey"(#2.2)
+                    │   │   │   │   │   ├── "part.p_name"(#1.1)
+                    │   │   │   │   │   └── "part.p_partkey"(#1.0)
+                    │   │   │   │   ├── (.cardinality): 0.00
+                    │   │   │   │   ├── Select
+                    │   │   │   │   │   ├── .predicate: "part.p_name"(#1.1) LIKE '%green%'::utf8_view
+                    │   │   │   │   │   ├── (.output_columns): [ "part.p_name"(#1.1), "part.p_partkey"(#1.0) ]
+                    │   │   │   │   │   ├── (.cardinality): 0.00
+                    │   │   │   │   │   └── Get
+                    │   │   │   │   │       ├── .data_source_id: 3
+                    │   │   │   │   │       ├── .table_index: 1
+                    │   │   │   │   │       ├── .implementation: None
+                    │   │   │   │   │       ├── (.output_columns): [ "part.p_name"(#1.1), "part.p_partkey"(#1.0) ]
+                    │   │   │   │   │       └── (.cardinality): 0.00
+                    │   │   │   │   └── Get
+                    │   │   │   │       ├── .data_source_id: 8
+                    │   │   │   │       ├── .table_index: 2
+                    │   │   │   │       ├── .implementation: None
+                    │   │   │   │       ├── (.output_columns):
+                    │   │   │   │       │   ┌── "lineitem.l_discount"(#2.6)
+                    │   │   │   │       │   ├── "lineitem.l_extendedprice"(#2.5)
+                    │   │   │   │       │   ├── "lineitem.l_orderkey"(#2.0)
+                    │   │   │   │       │   ├── "lineitem.l_partkey"(#2.1)
+                    │   │   │   │       │   ├── "lineitem.l_quantity"(#2.4)
+                    │   │   │   │       │   └── "lineitem.l_suppkey"(#2.2)
+                    │   │   │   │       └── (.cardinality): 0.00
+                    │   │   │   └── Get
+                    │   │   │       ├── .data_source_id: 4
+                    │   │   │       ├── .table_index: 3
+                    │   │   │       ├── .implementation: None
+                    │   │   │       ├── (.output_columns): [ "supplier.s_nationkey"(#3.3), "supplier.s_suppkey"(#3.0) ]
+                    │   │   │       └── (.cardinality): 0.00
+                    │   │   └── Get
+                    │   │       ├── .data_source_id: 5
+                    │   │       ├── .table_index: 4
+                    │   │       ├── .implementation: None
+                    │   │       ├── (.output_columns): [ "partsupp.ps_partkey"(#4.0), "partsupp.ps_suppkey"(#4.1), "partsupp.ps_supplycost"(#4.3) ]
+                    │   │       └── (.cardinality): 0.00
+                    │   └── Get
+                    │       ├── .data_source_id: 7
+                    │       ├── .table_index: 5
+                    │       ├── .implementation: None
+                    │       ├── (.output_columns): [ "orders.o_orderdate"(#5.4), "orders.o_orderkey"(#5.0) ]
+                    │       └── (.cardinality): 0.00
+                    └── Get
+                        ├── .data_source_id: 1
+                        ├── .table_index: 6
+                        ├── .implementation: None
+                        ├── (.output_columns): [ "nation.n_name"(#6.1), "nation.n_nationkey"(#6.0) ]
+                        └── (.cardinality): 0.00
+
 physical_plan after optd-finalized:
 EnforcerSort
 ├── tuple_ordering: [(#12.0, Asc), (#12.1, Desc)]

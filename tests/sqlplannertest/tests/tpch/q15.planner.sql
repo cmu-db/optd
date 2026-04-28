@@ -248,6 +248,134 @@ OrderBy
                                                 │   └── "lineitem.l_tax"(#8.7)
                                                 └── (.cardinality): 0.00
 
+logical_plan after optd-decorrelation:
+SAME TEXT AS ABOVE
+
+logical_plan after optd-simplification:
+OrderBy
+├── ordering_exprs: "__#19.s_suppkey"(#19.0) ASC
+├── (.output_columns): [ "__#19.s_address"(#19.2), "__#19.s_name"(#19.1), "__#19.s_phone"(#19.3), "__#19.s_suppkey"(#19.0), "__#19.total_revenue"(#19.4) ]
+├── (.cardinality): 0.00
+└── Project
+    ├── .table_index: 19
+    ├── .projections:
+    │   ┌── "supplier.s_suppkey"(#1.0)
+    │   ├── "supplier.s_name"(#1.1)
+    │   ├── "supplier.s_address"(#1.2)
+    │   ├── "supplier.s_phone"(#1.4)
+    │   └── "revenue0.total_revenue"(#7.1)
+    ├── (.output_columns): [ "__#19.s_address"(#19.2), "__#19.s_name"(#19.1), "__#19.s_phone"(#19.3), "__#19.s_suppkey"(#19.0), "__#19.total_revenue"(#19.4) ]
+    ├── (.cardinality): 0.00
+    └── Join
+        ├── .join_type: Inner
+        ├── .implementation: None
+        ├── .join_cond: "revenue0.total_revenue"(#7.1) = "__scalar_sq_1.max(revenue0.total_revenue)"(#17.0)
+        ├── (.output_columns):
+        │   ┌── "__scalar_sq_1.max(revenue0.total_revenue)"(#17.0)
+        │   ├── "revenue0.supplier_no"(#7.0)
+        │   ├── "revenue0.total_revenue"(#7.1)
+        │   ├── "supplier.s_address"(#1.2)
+        │   ├── "supplier.s_name"(#1.1)
+        │   ├── "supplier.s_phone"(#1.4)
+        │   └── "supplier.s_suppkey"(#1.0)
+        ├── (.cardinality): 0.00
+        ├── Join
+        │   ├── .join_type: Inner
+        │   ├── .implementation: None
+        │   ├── .join_cond: "supplier.s_suppkey"(#1.0) = "revenue0.supplier_no"(#7.0)
+        │   ├── (.output_columns):
+        │   │   ┌── "revenue0.supplier_no"(#7.0)
+        │   │   ├── "revenue0.total_revenue"(#7.1)
+        │   │   ├── "supplier.s_address"(#1.2)
+        │   │   ├── "supplier.s_name"(#1.1)
+        │   │   ├── "supplier.s_phone"(#1.4)
+        │   │   └── "supplier.s_suppkey"(#1.0)
+        │   ├── (.cardinality): 0.00
+        │   ├── Get
+        │   │   ├── .data_source_id: 4
+        │   │   ├── .table_index: 1
+        │   │   ├── .implementation: None
+        │   │   ├── (.output_columns): [ "supplier.s_address"(#1.2), "supplier.s_name"(#1.1), "supplier.s_phone"(#1.4), "supplier.s_suppkey"(#1.0) ]
+        │   │   └── (.cardinality): 0.00
+        │   └── Remap { .table_index: 7, (.output_columns): [ "revenue0.supplier_no"(#7.0), "revenue0.total_revenue"(#7.1) ], (.cardinality): 0.00 }
+        │       └── Project
+        │           ├── .table_index: 6
+        │           ├── .projections: [ "lineitem.l_suppkey"(#2.2), "__#4.sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)"(#4.0) ]
+        │           ├── (.output_columns): [ "__#6.supplier_no"(#6.0), "__#6.total_revenue"(#6.1) ]
+        │           ├── (.cardinality): 0.00
+        │           └── Aggregate
+        │               ├── .key_table_index: 3
+        │               ├── .aggregate_table_index: 4
+        │               ├── .implementation: None
+        │               ├── .exprs: sum("lineitem.l_extendedprice"(#2.5) * 1::decimal128(20, 0) - "lineitem.l_discount"(#2.6))
+        │               ├── .keys: "lineitem.l_suppkey"(#2.2)
+        │               ├── (.output_columns): [ "__#3.l_suppkey"(#3.0), "__#4.sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)"(#4.0) ]
+        │               ├── (.cardinality): 0.00
+        │               └── Select
+        │                   ├── .predicate: ("lineitem.l_shipdate"(#2.10) >= 1993-01-01::date32) AND ("lineitem.l_shipdate"(#2.10) < 1993-04-01::date32)
+        │                   ├── (.output_columns):
+        │                   │   ┌── "lineitem.l_discount"(#2.6)
+        │                   │   ├── "lineitem.l_extendedprice"(#2.5)
+        │                   │   ├── "lineitem.l_shipdate"(#2.10)
+        │                   │   └── "lineitem.l_suppkey"(#2.2)
+        │                   ├── (.cardinality): 0.00
+        │                   └── Get
+        │                       ├── .data_source_id: 8
+        │                       ├── .table_index: 2
+        │                       ├── .implementation: None
+        │                       ├── (.output_columns):
+        │                       │   ┌── "lineitem.l_discount"(#2.6)
+        │                       │   ├── "lineitem.l_extendedprice"(#2.5)
+        │                       │   ├── "lineitem.l_shipdate"(#2.10)
+        │                       │   └── "lineitem.l_suppkey"(#2.2)
+        │                       └── (.cardinality): 0.00
+        └── Remap { .table_index: 17, (.output_columns): "__scalar_sq_1.max(revenue0.total_revenue)"(#17.0), (.cardinality): 1.00 }
+            └── Project
+                ├── .table_index: 16
+                ├── .projections: "__#15.max(revenue0.total_revenue)"(#15.0)
+                ├── (.output_columns): "__#16.max(revenue0.total_revenue)"(#16.0)
+                ├── (.cardinality): 1.00
+                └── Aggregate
+                    ├── .key_table_index: 14
+                    ├── .aggregate_table_index: 15
+                    ├── .implementation: None
+                    ├── .exprs: max("revenue0.total_revenue"(#13.1))
+                    ├── .keys: []
+                    ├── (.output_columns): "__#15.max(revenue0.total_revenue)"(#15.0)
+                    ├── (.cardinality): 1.00
+                    └── Remap { .table_index: 13, (.output_columns): [ "revenue0.supplier_no"(#13.0), "revenue0.total_revenue"(#13.1) ], (.cardinality): 0.00 }
+                        └── Project
+                            ├── .table_index: 12
+                            ├── .projections: [ "lineitem.l_suppkey"(#8.2), "__#10.sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)"(#10.0) ]
+                            ├── (.output_columns): [ "__#12.supplier_no"(#12.0), "__#12.total_revenue"(#12.1) ]
+                            ├── (.cardinality): 0.00
+                            └── Aggregate
+                                ├── .key_table_index: 9
+                                ├── .aggregate_table_index: 10
+                                ├── .implementation: None
+                                ├── .exprs: sum("lineitem.l_extendedprice"(#8.5) * 1::decimal128(20, 0) - "lineitem.l_discount"(#8.6))
+                                ├── .keys: "lineitem.l_suppkey"(#8.2)
+                                ├── (.output_columns): [ "__#10.sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)"(#10.0), "__#9.l_suppkey"(#9.0) ]
+                                ├── (.cardinality): 0.00
+                                └── Select
+                                    ├── .predicate: ("lineitem.l_shipdate"(#8.10) >= 1993-01-01::date32) AND ("lineitem.l_shipdate"(#8.10) < 1993-04-01::date32)
+                                    ├── (.output_columns):
+                                    │   ┌── "lineitem.l_discount"(#8.6)
+                                    │   ├── "lineitem.l_extendedprice"(#8.5)
+                                    │   ├── "lineitem.l_shipdate"(#8.10)
+                                    │   └── "lineitem.l_suppkey"(#8.2)
+                                    ├── (.cardinality): 0.00
+                                    └── Get
+                                        ├── .data_source_id: 8
+                                        ├── .table_index: 8
+                                        ├── .implementation: None
+                                        ├── (.output_columns):
+                                        │   ┌── "lineitem.l_discount"(#8.6)
+                                        │   ├── "lineitem.l_extendedprice"(#8.5)
+                                        │   ├── "lineitem.l_shipdate"(#8.10)
+                                        │   └── "lineitem.l_suppkey"(#8.2)
+                                        └── (.cardinality): 0.00
+
 physical_plan after optd-finalized:
 EnforcerSort
 ├── tuple_ordering: [(#19.0, Asc)]
