@@ -1,6 +1,6 @@
 use super::super::{
     rule::{RulePass, rewrite_bottom_up},
-    scalar::simplify_scalar_recursively,
+    scalar::simplify_scalar_recursively_with_ctx,
 };
 use crate::{
     error::Result,
@@ -17,7 +17,7 @@ impl RulePass for ScalarSimplificationRulePass {
             let rewritten_scalars = op
                 .input_scalars()
                 .iter()
-                .map(|scalar| simplify_scalar_recursively(scalar.clone()))
+                .map(|scalar| simplify_scalar_recursively_with_ctx(scalar.clone(), ctx))
                 .collect::<Vec<_>>();
             if rewritten_scalars.as_slice() == op.input_scalars() {
                 Ok(op)

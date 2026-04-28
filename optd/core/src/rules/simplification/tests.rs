@@ -1,11 +1,16 @@
-use super::SimplificationPass;
+use super::{
+    SimplificationPass,
+    scalar::{simplify_scalar_recursively, simplify_scalar_recursively_with_ctx},
+};
 use crate::ir::{
-    Column,
+    Column, DataType, ScalarValue,
     builder::*,
-    operator::{Get, Join, Project, Select, join::JoinType},
+    convert::IntoOperator,
+    operator::{Get, Join, Limit, Project, Select, join::JoinType},
     table_ref::TableRef,
     test_utils::test_ctx_with_tables,
 };
+use arrow::datatypes::IntervalMonthDayNano;
 
 // Input plan tree:
 // LogicalSelect [c3 = 20 AND true]
@@ -188,4 +193,136 @@ fn prunes_get_projections_from_required_columns() {
     let project = simplified.try_borrow::<Project>().unwrap();
     let get = project.input().try_borrow::<Get>().unwrap();
     assert_eq!(get.projections().as_ref(), &[0]);
+}
+
+#[test]
+fn folds_literal_casts() {
+    let expected =
+        literal(ScalarValue::try_from_string("1993-07-01".to_string(), &DataType::Date32).unwrap());
+    let scalar = cast(utf8(Some("1993-07-01")), DataType::Date32);
+
+    assert_eq!(simplify_scalar_recursively(scalar), expected);
+}
+
+#[test]
+fn collapses_nested_casts_with_same_target_type() {
+    let scalar = cast(cast(int64(Some(7)), DataType::Int64), DataType::Int64);
+
+    assert_eq!(simplify_scalar_recursively(scalar), int64(Some(7)));
+}
+
+#[test]
+fn folds_date32_plus_interval_month_day_nano_literals() {
+    let scalar = cast(utf8(Some("1993-07-01")), DataType::Date32).plus(literal(
+        ScalarValue::IntervalMonthDayNano(Some(IntervalMonthDayNano::new(3, 0, 0))),
+    ));
+    let expected =
+        literal(ScalarValue::try_from_string("1993-10-01".to_string(), &DataType::Date32).unwrap());
+
+    assert_eq!(simplify_scalar_recursively(scalar), expected);
+}
+
+#[test]
+fn unwraps_lossless_integer_widening_casts_in_comparisons() {
+    let ctx = test_ctx_with_tables(&[("t1", 1)]).unwrap();
+    let get = ctx.logical_get(TableRef::bare("t1"), None).unwrap().build();
+    let column = Column(*get.borrow::<Get>().table_index(), 0);
+    let scalar = cast(column_ref(column), DataType::Int64).lt(int64(Some(2)));
+
+    assert_eq!(
+        simplify_scalar_recursively_with_ctx(scalar, &ctx),
+        column_ref(column).lt(int32(2))
+    );
+}
+
+#[test]
+fn pushes_limit_through_project() {
+    let ctx = test_ctx_with_tables(&[("t1", 2)]).unwrap();
+    let get = ctx.logical_get(TableRef::bare("t1"), None).unwrap().build();
+    let get_table_index = *get.borrow::<Get>().table_index();
+
+    let project = ctx
+        .project(get, [column_ref(Column(get_table_index, 0))])
+        .unwrap()
+        .build();
+    let project_table_index = *project.borrow::<Project>().table_index();
+
+    let plan = Limit::new(project, int64(1), int64(2)).into_operator();
+    let simplified = SimplificationPass::new().apply(plan, &ctx).unwrap();
+
+    let project = simplified.try_borrow::<Project>().unwrap();
+    assert_eq!(project.table_index(), &project_table_index);
+    let limit = project.input().try_borrow::<Limit>().unwrap();
+    assert_eq!(limit.skip(), &int64(1));
+    assert_eq!(limit.fetch(), &int64(2));
+    assert!(limit.input().try_borrow::<Get>().is_ok());
+}
+
+#[test]
+fn pushes_inner_join_condition_conjuncts_to_inputs() {
+    let ctx = test_ctx_with_tables(&[("t1", 2), ("t2", 2)]).unwrap();
+    let left = ctx.logical_get(TableRef::bare("t1"), None).unwrap().build();
+    let right = ctx.logical_get(TableRef::bare("t2"), None).unwrap().build();
+    let t1_c0 = ctx.col(Some(&TableRef::bare("t1")), "c0").unwrap();
+    let t1_c1 = ctx.col(Some(&TableRef::bare("t1")), "c1").unwrap();
+    let t2_c0 = ctx.col(Some(&TableRef::bare("t2")), "c0").unwrap();
+    let t2_c1 = ctx.col(Some(&TableRef::bare("t2")), "c1").unwrap();
+
+    let join_cond = column_ref(t1_c0)
+        .eq(column_ref(t2_c0))
+        .and(column_ref(t1_c1).gt(int32(5)))
+        .and(column_ref(t2_c1).gt(int32(10)));
+
+    let plan = left
+        .with_ctx(&ctx)
+        .logical_join(right, join_cond, JoinType::Inner)
+        .build();
+
+    let simplified = SimplificationPass::new().apply(plan, &ctx).unwrap();
+    let join = simplified.try_borrow::<Join>().unwrap();
+    let outer_filter = join.outer().try_borrow::<Select>().unwrap();
+    let inner_filter = join.inner().try_borrow::<Select>().unwrap();
+
+    assert!(outer_filter.predicate().used_columns().contains(&t1_c1));
+    assert!(inner_filter.predicate().used_columns().contains(&t2_c1));
+    assert!(join.join_cond().used_columns().contains(&t1_c0));
+    assert!(join.join_cond().used_columns().contains(&t2_c0));
+    assert!(!join.join_cond().used_columns().contains(&t1_c1));
+    assert!(!join.join_cond().used_columns().contains(&t2_c1));
+}
+
+#[test]
+fn factors_or_join_condition_to_enable_pushdown() {
+    let ctx = test_ctx_with_tables(&[("t1", 2), ("t2", 2)]).unwrap();
+    let left = ctx.logical_get(TableRef::bare("t1"), None).unwrap().build();
+    let right = ctx.logical_get(TableRef::bare("t2"), None).unwrap().build();
+    let t1_c0 = ctx.col(Some(&TableRef::bare("t1")), "c0").unwrap();
+    let t1_c1 = ctx.col(Some(&TableRef::bare("t1")), "c1").unwrap();
+    let t2_c0 = ctx.col(Some(&TableRef::bare("t2")), "c0").unwrap();
+    let t2_c1 = ctx.col(Some(&TableRef::bare("t2")), "c1").unwrap();
+
+    let common = column_ref(t1_c0)
+        .eq(column_ref(t2_c0))
+        .and(column_ref(t1_c1).gt(int32(5)))
+        .and(column_ref(t2_c1).lt(int32(30)));
+    let join_cond = common
+        .clone()
+        .and(column_ref(t2_c1).gt(int32(10)))
+        .or(common.and(column_ref(t2_c1).gt(int32(20))));
+
+    let plan = left
+        .with_ctx(&ctx)
+        .logical_join(right, join_cond, JoinType::Inner)
+        .build();
+
+    let simplified = SimplificationPass::new().apply(plan, &ctx).unwrap();
+    let join = simplified.try_borrow::<Join>().unwrap();
+    let outer_filter = join.outer().try_borrow::<Select>().unwrap();
+    let inner_filter = join.inner().try_borrow::<Select>().unwrap();
+
+    assert!(outer_filter.predicate().used_columns().contains(&t1_c1));
+    assert!(inner_filter.predicate().used_columns().contains(&t2_c1));
+    assert!(join.join_cond().used_columns().contains(&t1_c0));
+    assert!(join.join_cond().used_columns().contains(&t2_c0));
+    assert!(!join.join_cond().used_columns().contains(&t1_c1));
 }
