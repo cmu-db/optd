@@ -92,17 +92,10 @@ impl Default for PassManager {
 }
 
 /// Builder for a [`PassManager`].
+#[derive(Default)]
 pub struct PassManagerBuilder {
     /// Extensions that will be registered in insertion order.
     extensions: Vec<Arc<dyn PassExtension>>,
-}
-
-impl Default for PassManagerBuilder {
-    fn default() -> Self {
-        Self {
-            extensions: Vec::new(),
-        }
-    }
 }
 
 impl PassManagerBuilder {
