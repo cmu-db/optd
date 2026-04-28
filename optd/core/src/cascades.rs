@@ -15,7 +15,7 @@ use crate::{
         rule::{OperatorPattern, Rule, RuleSet},
     },
     memo::{CostedExpr, Exploration, MemoGroupExpr, MemoTable, Optimization, Status, WithId},
-    rules::{EnforceTupleOrderingRule, PassManager, SimplificationPass, UnnestingRule},
+    rules::{EnforceTupleOrderingRule, JoinOrderingPass, PassManager, SimplificationPass, UnnestingRule},
 };
 
 pub struct Cascades {
@@ -175,6 +175,115 @@ impl Cascades {
         writer
             .insert_new_operator(plan.clone())
             .unwrap_or_else(|group_id| group_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        ir::{
+            builder::column_ref,
+            operator::{Get, Join, JoinImplementation, JoinType, Select},
+            properties::Required,
+            statistics::TableStatistics,
+            table_ref::TableRef,
+        },
+        rules::JoinOrderingPass,
+    };
+
+    fn numbered_ctx(rows: &[usize]) -> IRContext {
+        IRContext::with_numbered_tables(
+            rows.iter()
+                .copied()
+                .map(|row_count| TableStatistics {
+                    row_count,
+                    column_statistics: Default::default(),
+                    size_bytes: None,
+                })
+                .collect(),
+            1,
+        )
+    }
+
+    fn leaf_table_name(op: &crate::ir::Operator, ctx: &IRContext) -> crate::error::Result<String> {
+        if let Ok(get) = op.try_borrow::<Get>() {
+            return Ok(ctx.get_binding(get.table_index())?.table_ref().table().to_string());
+        }
+        if let Ok(join) = op.try_borrow::<Join>() {
+            let outer = leaf_table_name(join.outer().as_ref(), ctx)?;
+            let inner = leaf_table_name(join.inner().as_ref(), ctx)?;
+            return Ok(format!("({outer},{inner})"));
+        }
+        if let Ok(select) = op.try_borrow::<Select>() {
+            return leaf_table_name(select.input().as_ref(), ctx);
+        }
+        panic!("unexpected operator in leaf_table_name: {:?}", op.kind);
+    }
+
+    fn has_direct_join_pair(op: &crate::ir::Operator, ctx: &IRContext, a: &str, b: &str) -> bool {
+        let Ok(join) = op.try_borrow::<Join>() else {
+            return false;
+        };
+
+        let outer_leaf = leaf_table_name(join.outer().as_ref(), ctx);
+        let inner_leaf = leaf_table_name(join.inner().as_ref(), ctx);
+        if let (Ok(outer_leaf), Ok(inner_leaf)) = (outer_leaf, inner_leaf)
+            && ((outer_leaf == a && inner_leaf == b) || (outer_leaf == b && inner_leaf == a))
+        {
+            return true;
+        }
+
+        has_direct_join_pair(join.outer().as_ref(), ctx, a, b)
+            || has_direct_join_pair(join.inner().as_ref(), ctx, a, b)
+    }
+
+    #[tokio::test]
+    async fn optimize_pipeline_applies_join_ordering_pass() -> crate::error::Result<()> {
+        let ctx = Arc::new(numbered_ctx(&[10_000, 10, 10]));
+        let t0 = ctx.logical_get(TableRef::bare("t0"), None)?.build();
+        let t1 = ctx.logical_get(TableRef::bare("t1"), None)?.build();
+        let t2 = ctx.logical_get(TableRef::bare("t2"), None)?.build();
+
+        let t0_v1 = ctx.col(Some(&TableRef::bare("t0")), "t0.v1")?;
+        let t1_v1 = ctx.col(Some(&TableRef::bare("t1")), "t1.v1")?;
+        let t2_v1 = ctx.col(Some(&TableRef::bare("t2")), "t2.v1")?;
+
+        let plan = t0
+            .clone()
+            .with_ctx(&ctx)
+            .logical_join(t1.clone(), column_ref(t0_v1).eq(column_ref(t1_v1)), JoinType::Inner)
+            .build()
+            .with_ctx(&ctx)
+            .logical_join(t2, column_ref(t1_v1).eq(column_ref(t2_v1)), JoinType::Inner)
+            .build();
+
+        let rule_set = RuleSet::builder().build();
+        let cascades = Arc::new(Cascades::new(ctx.clone(), rule_set));
+        let optimized = cascades
+            .optimize(&plan, Arc::new(Required::default()))
+            .await?;
+
+        let pass_result = JoinOrderingPass::new().apply(plan.clone(), &ctx)?;
+
+        assert_eq!(
+            ctx.cm.compute_total_cost(optimized.as_ref(), &ctx)?,
+            ctx.cm.compute_total_cost(pass_result.as_ref(), &ctx)?
+        );
+        assert!(
+            ctx.cm.compute_total_cost(optimized.as_ref(), &ctx)?
+                < ctx.cm.compute_total_cost(plan.as_ref(), &ctx)?
+        );
+        assert!(has_direct_join_pair(optimized.as_ref(), &ctx, "t1", "t2"));
+
+        let root_join = optimized.try_borrow::<Join>().unwrap();
+        assert_eq!(root_join.join_type(), &JoinType::Inner);
+        assert!(matches!(
+            root_join.implementation(),
+            Some(JoinImplementation::NestedLoop) | Some(JoinImplementation::Hash { .. })
+        ));
+
+        Ok(())
     }
 }
 

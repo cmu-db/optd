@@ -356,8 +356,8 @@ impl OptdQueryPlanner {
             .add_rule(rules::LogicalJoinAsPhysicalHashJoinRule::new())
             .add_rule(rules::LogicalJoinAsPhysicalNestedLoopRule::new())
             .add_rule(rules::LogicalSelectSimplifyRule::new())
-            .add_rule(rules::LogicalJoinInnerCommuteRule::new())
-            .add_rule(rules::LogicalJoinInnerAssocRule::new())
+            // .add_rule(rules::LogicalJoinInnerCommuteRule::new())
+            // .add_rule(rules::LogicalJoinInnerAssocRule::new())
             .build();
 
         warm_explain_properties(&optd_logical, &ctx.inner);
