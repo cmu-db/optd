@@ -118,9 +118,21 @@ mod tests {
     #[test]
     fn format_duration_ms_uses_three_significant_digits() {
         assert_eq!(super::format_duration_ms(Duration::from_nanos(0)), "0");
-        assert_eq!(super::format_duration_ms(Duration::from_micros(456)), "0.456");
-        assert_eq!(super::format_duration_ms(Duration::from_micros(12_340)), "12.3");
-        assert_eq!(super::format_duration_ms(Duration::from_micros(123_400)), "123");
-        assert_eq!(super::format_duration_ms(Duration::from_micros(1_234_000)), "1230");
+        assert_eq!(
+            super::format_duration_ms(Duration::from_micros(456)),
+            "0.456"
+        );
+        assert_eq!(
+            super::format_duration_ms(Duration::from_micros(12_340)),
+            "12.3"
+        );
+        assert_eq!(
+            super::format_duration_ms(Duration::from_micros(123_400)),
+            "123"
+        );
+        assert_eq!(
+            super::format_duration_ms(Duration::from_micros(1_234_000)),
+            "1230"
+        );
     }
 }

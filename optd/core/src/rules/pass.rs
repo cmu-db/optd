@@ -69,7 +69,7 @@ impl PassManager {
         let before = root.clone();
         let after = pass.run(root, ctx)?;
 
-        for extension in self.extensions.iter() {
+        for extension in self.extensions.iter().rev() {
             extension.after_pass(pass.name(), &before, &after, ctx)?;
         }
 
@@ -200,6 +200,72 @@ mod tests {
 
         assert_eq!(rewritten, plan);
         assert_eq!(extension.recorded(), vec!["before:noop", "after:noop"]);
+        Ok(())
+    }
+
+    #[test]
+    fn pass_manager_unwinds_after_hooks_in_reverse_registration_order() -> Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 1)])?;
+        let plan = ctx.logical_get(TableRef::bare("t1"), None)?.build();
+        let events = Arc::new(Mutex::new(Vec::new()));
+
+        struct SharedRecordingExtension {
+            name: &'static str,
+            events: Arc<Mutex<Vec<String>>>,
+        }
+
+        impl PassExtension for SharedRecordingExtension {
+            fn before_pass(
+                &self,
+                pass_name: &'static str,
+                _root: &Arc<Operator>,
+                _ctx: &IRContext,
+            ) -> Result<()> {
+                self.events
+                    .lock()
+                    .unwrap()
+                    .push(format!("before:{}:{pass_name}", self.name));
+                Ok(())
+            }
+
+            fn after_pass(
+                &self,
+                pass_name: &'static str,
+                _before: &Arc<Operator>,
+                _after: &Arc<Operator>,
+                _ctx: &IRContext,
+            ) -> Result<()> {
+                self.events
+                    .lock()
+                    .unwrap()
+                    .push(format!("after:{}:{pass_name}", self.name));
+                Ok(())
+            }
+        }
+
+        let manager = PassManager::builder()
+            .add_extension_arc(Arc::new(SharedRecordingExtension {
+                name: "first",
+                events: events.clone(),
+            }))
+            .add_extension_arc(Arc::new(SharedRecordingExtension {
+                name: "second",
+                events: events.clone(),
+            }))
+            .build();
+
+        let rewritten = manager.run(&NoopPass, plan.clone(), &ctx)?;
+
+        assert_eq!(rewritten, plan);
+        assert_eq!(
+            events.lock().unwrap().as_slice(),
+            [
+                "before:first:noop",
+                "before:second:noop",
+                "after:second:noop",
+                "after:first:noop",
+            ]
+        );
         Ok(())
     }
 }

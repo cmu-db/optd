@@ -75,7 +75,7 @@ impl sqlplannertest::PlannerTestRunner for PlannerTestDB {
                             let label = row[0].as_str();
                             (label.starts_with("logical_plan after optd-")
                                 || label.starts_with("physical_plan after optd-"))
-                                .then(|| row[0..2].join(":\n"))
+                            .then(|| row[0..2].join(":\n"))
                         })
                         .join("\n\n");
                     writeln!(r, "{}\n", explained_output)?;
