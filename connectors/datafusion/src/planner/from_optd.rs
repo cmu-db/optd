@@ -30,11 +30,17 @@ use optd_core::ir::{
 };
 use snafu::{OptionExt, ResultExt, whatever};
 
-use crate::planner::{DataFusionSnafu, OptdQueryPlannerContext, OptdSnafu, Result};
+use crate::planner::{
+    ConvertedPlan, DataFusionSnafu, OptdQueryPlannerContext, OptdSnafu, OutputEnv, Result,
+};
 
 impl OptdQueryPlannerContext<'_> {
     pub fn try_from_optd_plan(&mut self, optd_plan: &Operator) -> Result<DFLogicalPlan> {
-        match &optd_plan.kind {
+        Ok(self.try_from_optd_plan_with_outputs(optd_plan)?.plan)
+    }
+
+    fn try_from_optd_plan_with_outputs(&mut self, optd_plan: &Operator) -> Result<ConvertedPlan> {
+        let plan = match &optd_plan.kind {
             OperatorKind::Get(meta) => {
                 let node = Get::borrow_raw_parts(meta, &optd_plan.common);
                 self.try_from_optd_get(node)
@@ -68,7 +74,35 @@ impl OptdQueryPlannerContext<'_> {
                 self.try_from_optd_enforcer_sort(node)
             }
             kind => whatever!("unsupported operator type {kind:?}"),
+        }?;
+
+        let outputs = self.build_output_env(optd_plan, &plan)?;
+        Ok(ConvertedPlan { plan, outputs })
+    }
+
+    fn build_output_env(&self, optd_plan: &Operator, plan: &DFLogicalPlan) -> Result<OutputEnv> {
+        let columns = optd_plan
+            .output_columns_in_order(&self.inner)
+            .context(OptdSnafu)?;
+        let schema = plan.schema();
+        let fields = schema.iter().collect_vec();
+
+        if columns.len() != fields.len() {
+            whatever!(
+                "optd output columns ({}) do not match DataFusion schema fields ({}) for {:?}",
+                columns.len(),
+                fields.len(),
+                optd_plan.kind
+            );
         }
+
+        Ok(columns
+            .into_iter()
+            .zip(fields)
+            .map(|(column, (qualifier, field))| {
+                (column, Column::new(qualifier.cloned(), field.name()))
+            })
+            .collect())
     }
 
     fn try_new_df_projection(
@@ -81,8 +115,17 @@ impl OptdQueryPlannerContext<'_> {
         let optd_schema = binding.optd_schema();
         let exprs = Self::alias_exprs_for_schema(exprs, &optd_schema)?;
         let schema = Self::df_schema_from_optd_schema(&optd_schema)?;
-        logical_expr::Projection::try_new_with_schema(exprs, input, Arc::new(schema))
-            .context(DataFusionSnafu)
+        Ok(logical_expr::Projection::try_new_with_schema(exprs, input, Arc::new(schema)).unwrap())
+    }
+
+    fn merge_output_envs(&self, left: &OutputEnv, right: &OutputEnv) -> OutputEnv {
+        let mut merged = left.clone();
+        merged.extend(
+            right
+                .iter()
+                .map(|(column, df_column)| (*column, df_column.clone())),
+        );
+        merged
     }
 
     fn alias_if_changed(expr: DFExpr, table_ref: &TableRef, field: &Field) -> Result<DFExpr> {
@@ -164,27 +207,27 @@ impl OptdQueryPlannerContext<'_> {
         .output_schema(&self.inner)
         .context(OptdSnafu)?;
 
-        let input = self.try_from_optd_plan(node.input())?;
+        let input = self.try_from_optd_plan_with_outputs(node.input())?;
 
         let keys = node.keys().borrow::<List>();
         let exprs = node.exprs().borrow::<List>();
         let group_expr = keys
             .members()
             .iter()
-            .map(|e| self.try_from_optd_scalar_expr(e))
+            .map(|e| self.try_from_optd_scalar_expr_with_env(e, &input.outputs))
             .try_collect()?;
         let aggr_expr = exprs
             .members()
             .iter()
-            .map(|e| self.try_from_optd_scalar_expr(e))
+            .map(|e| self.try_from_optd_scalar_expr_with_env(e, &input.outputs))
             .try_collect()?;
 
         let aggregate =
-            self.try_new_df_aggregate(&output_schema, Arc::new(input), group_expr, aggr_expr)?;
+            self.try_new_df_aggregate(&output_schema, Arc::new(input.plan), group_expr, aggr_expr)?;
         Ok(DFLogicalPlan::Aggregate(aggregate))
     }
     pub fn try_from_optd_remap(&mut self, node: RemapBorrowed<'_>) -> Result<DFLogicalPlan> {
-        let input = self.try_from_optd_plan(node.input())?;
+        let input = self.try_from_optd_plan_with_outputs(node.input())?;
         let binder = self.inner.binder.read().unwrap();
         let binding = binder
             .get_binding(node.table_index())
@@ -193,52 +236,54 @@ impl OptdQueryPlannerContext<'_> {
 
         let alias = Self::from_optd_table_ref(table_ref);
 
-        let subquery_alias = logical_plan::SubqueryAlias::try_new(Arc::new(input), alias)
+        let subquery_alias = logical_plan::SubqueryAlias::try_new(Arc::new(input.plan), alias)
             .context(DataFusionSnafu)?;
 
         Ok(DFLogicalPlan::SubqueryAlias(subquery_alias))
     }
 
     pub fn try_from_optd_project(&mut self, node: ProjectBorrowed<'_>) -> Result<DFLogicalPlan> {
-        let input = self.try_from_optd_plan(node.input())?;
+        let input = self.try_from_optd_plan_with_outputs(node.input())?;
         let projection_list = node.projections().borrow::<List>();
         let exprs = projection_list
             .members()
             .iter()
-            .map(|e| self.try_from_optd_scalar_expr(e))
+            .map(|e| self.try_from_optd_scalar_expr_with_env(e, &input.outputs))
             .try_collect()?;
 
-        let projection = self.try_new_df_projection(node.table_index(), exprs, Arc::new(input))?;
+        let projection =
+            self.try_new_df_projection(node.table_index(), exprs, Arc::new(input.plan))?;
 
         Ok(DFLogicalPlan::Projection(projection))
     }
 
     pub fn try_from_optd_join(&mut self, node: JoinBorrowed<'_>) -> Result<DFLogicalPlan> {
-        let outer = self.try_from_optd_plan(node.outer())?;
-        let inner = self.try_from_optd_plan(node.inner())?;
+        let outer = self.try_from_optd_plan_with_outputs(node.outer())?;
+        let inner = self.try_from_optd_plan_with_outputs(node.inner())?;
         let (equi_conds, non_equi_conds) =
             split_equi_and_non_equi_conditions(&node, &self.inner).context(OptdSnafu)?;
 
+        let output_env = self.merge_output_envs(&outer.outputs, &inner.outputs);
         let on = equi_conds
             .iter()
             .map(|(l, r)| {
                 Ok((
-                    DFExpr::Column(self.try_from_optd_column(l)?),
-                    DFExpr::Column(self.try_from_optd_column(r)?),
+                    DFExpr::Column(self.try_from_optd_column_in_env(l, &output_env)?),
+                    DFExpr::Column(self.try_from_optd_column_in_env(r, &output_env)?),
                 ))
             })
             .try_collect()?;
         let filter: Vec<_> = non_equi_conds
             .iter()
-            .map(|e| self.try_from_optd_scalar_expr(e))
+            .map(|e| self.try_from_optd_scalar_expr_with_env(e, &output_env))
             .try_collect()?;
 
         let filter = filter.into_iter().reduce(logical_expr::and);
 
         let join_type = Self::try_from_optd_join_type(node.join_type())?;
         let join = logical_plan::Join::try_new(
-            Arc::new(outer),
-            Arc::new(inner),
+            Arc::new(outer.plan),
+            Arc::new(inner.plan),
             on,
             filter,
             join_type,
@@ -246,32 +291,22 @@ impl OptdQueryPlannerContext<'_> {
             datafusion::common::NullEquality::NullEqualsNothing,
         )
         .context(DataFusionSnafu)?;
-        if let optd_core::ir::operator::join::JoinType::Mark(mark_column) = node.join_type() {
-            let (qualifier, field) = join
-                .schema
-                .iter()
-                .last()
-                .with_whatever_context(|| "LeftMark join should expose a marker column")?;
-            self.register_optd_mark_column(
-                *mark_column,
-                Column::new(qualifier.cloned(), field.name()),
-            );
-        }
         Ok(DFLogicalPlan::Join(join))
     }
 
     pub fn try_from_optd_select(&mut self, node: SelectBorrowed<'_>) -> Result<DFLogicalPlan> {
-        let input = self.try_from_optd_plan(node.input())?;
-        let predicate = self.try_from_optd_scalar_expr(node.predicate())?;
-        let filter =
-            logical_plan::Filter::try_new(predicate, Arc::new(input)).context(DataFusionSnafu)?;
+        let input = self.try_from_optd_plan_with_outputs(node.input())?;
+        let predicate =
+            self.try_from_optd_scalar_expr_with_env(node.predicate(), &input.outputs)?;
+        let filter = logical_plan::Filter::try_new(predicate, Arc::new(input.plan))
+            .context(DataFusionSnafu)?;
         Ok(DFLogicalPlan::Filter(filter))
     }
 
     pub fn try_from_optd_limit(&mut self, node: LimitBorrowed<'_>) -> Result<DFLogicalPlan> {
-        let input = self.try_from_optd_plan(node.input())?;
-        let skip_expr = self.try_from_optd_scalar_expr(node.skip())?;
-        let fetch_expr = self.try_from_optd_scalar_expr(node.fetch())?;
+        let input = self.try_from_optd_plan_with_outputs(node.input())?;
+        let skip_expr = self.try_from_optd_scalar_expr_with_env(node.skip(), &input.outputs)?;
+        let fetch_expr = self.try_from_optd_scalar_expr_with_env(node.fetch(), &input.outputs)?;
 
         let skip = match skip_expr {
             DFExpr::Literal(datafusion::scalar::ScalarValue::Int64(Some(0)), _) => None,
@@ -287,7 +322,7 @@ impl OptdQueryPlannerContext<'_> {
         Ok(DFLogicalPlan::Limit(logical_plan::Limit {
             skip,
             fetch,
-            input: Arc::new(input),
+            input: Arc::new(input.plan),
         }))
     }
 
@@ -295,12 +330,13 @@ impl OptdQueryPlannerContext<'_> {
         &mut self,
         node: EnforcerSortBorrowed<'_>,
     ) -> Result<DFLogicalPlan> {
-        let input = self.try_from_optd_plan(node.input())?;
+        let input = self.try_from_optd_plan_with_outputs(node.input())?;
         let expr = node
             .tuple_ordering()
             .iter()
             .map(|(column, direction)| {
-                let expr = DFExpr::Column(self.try_from_optd_column(column)?);
+                let expr =
+                    DFExpr::Column(self.try_from_optd_column_in_env(column, &input.outputs)?);
                 let asc = matches!(direction, TupleOrderingDirection::Asc);
                 Ok(logical_expr::expr::Sort::new(expr, asc, !asc))
             })
@@ -308,7 +344,7 @@ impl OptdQueryPlannerContext<'_> {
 
         Ok(DFLogicalPlan::Sort(logical_plan::Sort {
             expr,
-            input: Arc::new(input),
+            input: Arc::new(input.plan),
             fetch: None,
         }))
     }
@@ -1007,7 +1043,17 @@ mod tests {
 }
 
 impl OptdQueryPlannerContext<'_> {
+    #[cfg(test)]
     pub fn try_from_optd_scalar_expr(&mut self, expr: &Scalar) -> Result<DFExpr> {
+        let output_env = OutputEnv::default();
+        self.try_from_optd_scalar_expr_with_env(expr, &output_env)
+    }
+
+    fn try_from_optd_scalar_expr_with_env(
+        &mut self,
+        expr: &Scalar,
+        output_env: &OutputEnv,
+    ) -> Result<DFExpr> {
         match &expr.kind {
             optd_core::ir::ScalarKind::Literal(meta) => {
                 let node = Literal::borrow_raw_parts(meta, &expr.common);
@@ -1015,46 +1061,46 @@ impl OptdQueryPlannerContext<'_> {
             }
             optd_core::ir::ScalarKind::ColumnRef(meta) => {
                 let node = ColumnRef::borrow_raw_parts(meta, &expr.common);
-                self.try_from_optd_column_ref(node)
+                self.try_from_optd_column_ref(node, output_env)
             }
             optd_core::ir::ScalarKind::BinaryOp(meta) => {
                 let node = BinaryOp::borrow_raw_parts(meta, &expr.common);
-                self.try_from_optd_binary_op(node)
+                self.try_from_optd_binary_op(node, output_env)
             }
             optd_core::ir::ScalarKind::NaryOp(meta) => {
                 let node = NaryOp::borrow_raw_parts(meta, &expr.common);
-                self.try_from_optd_nary_op(node)
+                self.try_from_optd_nary_op(node, output_env)
             }
             optd_core::ir::ScalarKind::List(_) => {
                 whatever!("expr list should not be extracted from this path")
             }
             optd_core::ir::ScalarKind::Function(meta) => {
                 let node = Function::borrow_raw_parts(meta, &expr.common);
-                self.try_from_optd_function(node)
+                self.try_from_optd_function(node, output_env)
             }
             optd_core::ir::ScalarKind::Cast(meta) => {
                 let node = Cast::borrow_raw_parts(meta, &expr.common);
-                self.try_from_optd_cast(node)
+                self.try_from_optd_cast(node, output_env)
             }
             optd_core::ir::ScalarKind::IsNull(meta) => {
                 let node = IsNull::borrow_raw_parts(meta, &expr.common);
-                self.try_from_optd_is_null(node)
+                self.try_from_optd_is_null(node, output_env)
             }
             optd_core::ir::ScalarKind::IsNotNull(meta) => {
                 let node = IsNotNull::borrow_raw_parts(meta, &expr.common);
-                self.try_from_optd_is_not_null(node)
+                self.try_from_optd_is_not_null(node, output_env)
             }
             optd_core::ir::ScalarKind::Like(meta) => {
                 let node = Like::borrow_raw_parts(meta, &expr.common);
-                self.try_from_optd_like(node)
+                self.try_from_optd_like(node, output_env)
             }
             optd_core::ir::ScalarKind::Case(meta) => {
                 let node = Case::borrow_raw_parts(meta, &expr.common);
-                self.try_from_optd_case(node)
+                self.try_from_optd_case(node, output_env)
             }
             optd_core::ir::ScalarKind::InList(meta) => {
                 let node = InList::borrow_raw_parts(meta, &expr.common);
-                self.try_from_optd_in_list(node)
+                self.try_from_optd_in_list(node, output_env)
             }
         }
     }
@@ -1064,14 +1110,22 @@ impl OptdQueryPlannerContext<'_> {
         Ok(DFExpr::Literal(value, None))
     }
 
-    pub fn try_from_optd_column_ref(&self, node: ColumnRefBorrowed<'_>) -> Result<DFExpr> {
-        let column = self.try_from_optd_column(node.column())?;
+    pub fn try_from_optd_column_ref(
+        &self,
+        node: ColumnRefBorrowed<'_>,
+        output_env: &OutputEnv,
+    ) -> Result<DFExpr> {
+        let column = self.try_from_optd_column_in_env(node.column(), output_env)?;
         Ok(DFExpr::Column(column))
     }
 
-    pub fn try_from_optd_binary_op(&mut self, node: BinaryOpBorrowed<'_>) -> Result<DFExpr> {
-        let left = self.try_from_optd_scalar_expr(node.lhs())?;
-        let right = self.try_from_optd_scalar_expr(node.rhs())?;
+    pub fn try_from_optd_binary_op(
+        &mut self,
+        node: BinaryOpBorrowed<'_>,
+        output_env: &OutputEnv,
+    ) -> Result<DFExpr> {
+        let left = self.try_from_optd_scalar_expr_with_env(node.lhs(), output_env)?;
+        let right = self.try_from_optd_scalar_expr_with_env(node.rhs(), output_env)?;
         let op = match node.op_kind() {
             BinaryOpKind::Plus => logical_expr::Operator::Plus,
             BinaryOpKind::Minus => logical_expr::Operator::Minus,
@@ -1118,7 +1172,11 @@ impl OptdQueryPlannerContext<'_> {
         Ok(logical_expr::binary_expr(left, op, right))
     }
 
-    pub fn try_from_optd_nary_op(&mut self, node: NaryOpBorrowed<'_>) -> Result<DFExpr> {
+    pub fn try_from_optd_nary_op(
+        &mut self,
+        node: NaryOpBorrowed<'_>,
+        output_env: &OutputEnv,
+    ) -> Result<DFExpr> {
         let op = match node.op_kind() {
             NaryOpKind::And => logical_expr::Operator::And,
             NaryOpKind::Or => logical_expr::Operator::Or,
@@ -1127,7 +1185,7 @@ impl OptdQueryPlannerContext<'_> {
         let exprs: Vec<_> = node
             .terms()
             .iter()
-            .map(|term| self.try_from_optd_scalar_expr(term))
+            .map(|term| self.try_from_optd_scalar_expr_with_env(term, output_env))
             .try_collect()?;
 
         let nary_expr = exprs
@@ -1138,25 +1196,41 @@ impl OptdQueryPlannerContext<'_> {
         Ok(nary_expr)
     }
 
-    pub fn try_from_optd_cast(&mut self, node: CastBorrowed<'_>) -> Result<DFExpr> {
-        let input = self.try_from_optd_scalar_expr(node.expr())?;
+    pub fn try_from_optd_cast(
+        &mut self,
+        node: CastBorrowed<'_>,
+        output_env: &OutputEnv,
+    ) -> Result<DFExpr> {
+        let input = self.try_from_optd_scalar_expr_with_env(node.expr(), output_env)?;
         let cast = logical_expr::cast(input, node.data_type().clone());
         Ok(cast)
     }
 
-    pub fn try_from_optd_is_null(&mut self, node: IsNullBorrowed<'_>) -> Result<DFExpr> {
-        let expr = self.try_from_optd_scalar_expr(node.expr())?;
+    pub fn try_from_optd_is_null(
+        &mut self,
+        node: IsNullBorrowed<'_>,
+        output_env: &OutputEnv,
+    ) -> Result<DFExpr> {
+        let expr = self.try_from_optd_scalar_expr_with_env(node.expr(), output_env)?;
         Ok(DFExpr::IsNull(Box::new(expr)))
     }
 
-    pub fn try_from_optd_is_not_null(&mut self, node: IsNotNullBorrowed<'_>) -> Result<DFExpr> {
-        let expr = self.try_from_optd_scalar_expr(node.expr())?;
+    pub fn try_from_optd_is_not_null(
+        &mut self,
+        node: IsNotNullBorrowed<'_>,
+        output_env: &OutputEnv,
+    ) -> Result<DFExpr> {
+        let expr = self.try_from_optd_scalar_expr_with_env(node.expr(), output_env)?;
         Ok(DFExpr::IsNotNull(Box::new(expr)))
     }
 
-    pub fn try_from_optd_like(&mut self, node: LikeBorrowed<'_>) -> Result<DFExpr> {
-        let input = self.try_from_optd_scalar_expr(node.expr())?;
-        let pattern = self.try_from_optd_scalar_expr(node.pattern())?;
+    pub fn try_from_optd_like(
+        &mut self,
+        node: LikeBorrowed<'_>,
+        output_env: &OutputEnv,
+    ) -> Result<DFExpr> {
+        let input = self.try_from_optd_scalar_expr_with_env(node.expr(), output_env)?;
+        let pattern = self.try_from_optd_scalar_expr_with_env(node.pattern(), output_env)?;
         let like = logical_expr::Like::new(
             *node.negated(),
             Box::new(input),
@@ -1167,11 +1241,15 @@ impl OptdQueryPlannerContext<'_> {
         Ok(DFExpr::Like(like))
     }
 
-    pub fn try_from_optd_function(&mut self, node: FunctionBorrowed<'_>) -> Result<DFExpr> {
+    pub fn try_from_optd_function(
+        &mut self,
+        node: FunctionBorrowed<'_>,
+        output_env: &OutputEnv,
+    ) -> Result<DFExpr> {
         let args = node
             .params()
             .iter()
-            .map(|e| self.try_from_optd_scalar_expr(e))
+            .map(|e| self.try_from_optd_scalar_expr_with_env(e, output_env))
             .try_collect()?;
 
         match node.kind() {
@@ -1206,24 +1284,28 @@ impl OptdQueryPlannerContext<'_> {
         }
     }
 
-    pub fn try_from_optd_case(&mut self, node: CaseBorrowed<'_>) -> Result<DFExpr> {
+    pub fn try_from_optd_case(
+        &mut self,
+        node: CaseBorrowed<'_>,
+        output_env: &OutputEnv,
+    ) -> Result<DFExpr> {
         let expr = node
             .expr()
-            .map(|expr| self.try_from_optd_scalar_expr(expr))
+            .map(|expr| self.try_from_optd_scalar_expr_with_env(expr, output_env))
             .transpose()?
             .map(Box::new);
         let when_then_expr = node
             .when_then_expr()
             .map(|(when, then)| {
                 Ok((
-                    Box::new(self.try_from_optd_scalar_expr(when)?),
-                    Box::new(self.try_from_optd_scalar_expr(then)?),
+                    Box::new(self.try_from_optd_scalar_expr_with_env(when, output_env)?),
+                    Box::new(self.try_from_optd_scalar_expr_with_env(then, output_env)?),
                 ))
             })
             .try_collect()?;
         let else_expr = node
             .else_expr()
-            .map(|expr| self.try_from_optd_scalar_expr(expr))
+            .map(|expr| self.try_from_optd_scalar_expr_with_env(expr, output_env))
             .transpose()?
             .map(Box::new);
 
@@ -1234,13 +1316,17 @@ impl OptdQueryPlannerContext<'_> {
         )))
     }
 
-    pub fn try_from_optd_in_list(&mut self, node: InListBorrowed<'_>) -> Result<DFExpr> {
-        let expr = self.try_from_optd_scalar_expr(node.expr())?;
+    pub fn try_from_optd_in_list(
+        &mut self,
+        node: InListBorrowed<'_>,
+        output_env: &OutputEnv,
+    ) -> Result<DFExpr> {
+        let expr = self.try_from_optd_scalar_expr_with_env(node.expr(), output_env)?;
         let list = node.list().borrow::<List>();
         let list = list
             .members()
             .iter()
-            .map(|e| self.try_from_optd_scalar_expr(e))
+            .map(|e| self.try_from_optd_scalar_expr_with_env(e, output_env))
             .try_collect()?;
 
         Ok(DFExpr::InList(logical_expr::expr::InList::new(

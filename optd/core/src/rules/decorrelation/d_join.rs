@@ -31,7 +31,7 @@ use crate::ir::convert::{IntoOperator, IntoScalar};
 use crate::ir::operator::join::JoinType;
 use crate::ir::operator::{Aggregate, DependentJoinBorrowed, Join, Operator};
 use crate::ir::scalar::{BinaryOp, BinaryOpKind, ColumnRef};
-use crate::ir::{Column, Scalar};
+use crate::ir::{Column, Scalar, ScalarKind};
 
 use super::UnnestingRule;
 use super::helpers::{
@@ -39,6 +39,28 @@ use super::helpers::{
 };
 
 impl UnnestingRule {
+    fn remap_scalar_columns(scalar: Arc<Scalar>, remap: &HashMap<Column, Column>) -> Arc<Scalar> {
+        let rewritten = match &scalar.kind {
+            ScalarKind::ColumnRef(cr) => {
+                ColumnRef::new(remap.get(&cr.column).copied().unwrap_or(cr.column)).into_scalar()
+            }
+            _ => {
+                let new_inputs = scalar
+                    .input_scalars()
+                    .iter()
+                    .map(|s| Self::remap_scalar_columns(s.clone(), remap))
+                    .collect::<Vec<_>>();
+
+                if new_inputs != scalar.input_scalars() {
+                    Arc::new(scalar.clone_with_inputs(Some(Arc::from(new_inputs)), None))
+                } else {
+                    scalar
+                }
+            }
+        };
+        rewritten.simplify_nary_scalar()
+    }
+
     // Creates the domain for the new unnesting struct
     fn create_domain(
         &self,
@@ -133,6 +155,7 @@ impl UnnestingRule {
         let new_outer_cols = new_outer.output_columns(ctx)?;
         let (new_inner, remap) =
             remap_right_output_collisions(new_outer_cols.as_ref(), new_inner, &mut unnesting, ctx)?;
+        let condition = Self::remap_scalar_columns(unnesting.rewrite_columns(condition), &remap);
 
         // Add equality to join condition
         let mut new_conds = Vec::new();

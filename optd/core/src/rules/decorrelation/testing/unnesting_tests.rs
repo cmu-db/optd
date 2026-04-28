@@ -717,40 +717,22 @@ fn test_nested_dep_join_regular_join_orderby_project_domain_vs_repr() -> Result<
         let t4c1 = t4_cols[1];
 
         let left_branch = mock_scan_with_columns(1, t1_cols.clone());
-        let (_input_left_project, input_left_outputs) = project_with_outputs(
-            &expected_ctx,
-            mock_scan_with_columns(3, t3_cols.clone()).logical_select(
-                column_ref(t3c0)
-                    .gt(column_ref(t2c0))
-                    .and(column_ref(t3c1).gt(column_ref(t1c0))),
-            ),
-            [column_ref(t3c0), column_ref(t3c1)],
-        )?;
-        let p3a = input_left_outputs[0];
-        let p3b = input_left_outputs[1];
-        let (_input_right_project, input_right_outputs) = project_with_outputs(
-            &expected_ctx,
-            mock_scan_with_columns(4, t4_cols.clone())
-                .logical_select(column_ref(t4c0).eq(column_ref(t2c0))),
-            [column_ref(t4c0), column_ref(t4c1)],
-        )?;
-        let p4b = input_right_outputs[1];
         let (right_branch, d1) = {
             let mid_left = mock_scan_with_columns(2, t2_cols.clone());
             let (mid_right, d1) = {
                 let left_regular = {
-                    let (current_domain, current_outputs) = create_domain_with_aliases(
-                        &expected_ctx,
-                        mock_scan_with_columns(2, t2_cols),
-                        vec![t2c0],
-                    )?;
-                    let d2 = current_outputs[0];
                     let (parent_domain, parent_outputs) = create_domain_with_aliases(
                         &expected_ctx,
                         mock_scan_with_columns(1, t1_cols),
                         vec![t1c0],
                     )?;
                     let d1 = parent_outputs[0];
+                    let (current_domain, current_outputs) = create_domain_with_aliases(
+                        &expected_ctx,
+                        mock_scan_with_columns(2, t2_cols),
+                        vec![t2c0],
+                    )?;
+                    let d2 = current_outputs[0];
                     let select_input = current_domain
                         .logical_join(parent_domain, boolean(true), JoinType::Inner)
                         .logical_join(
@@ -772,12 +754,13 @@ fn test_nested_dep_join_regular_join_orderby_project_domain_vs_repr() -> Result<
                     )?;
                     let ordered = OrderBy::new(
                         projected,
-                        vec![(column_ref(p3a), TupleOrderingDirection::Asc)],
+                        vec![(column_ref(projected_cols[0]), TupleOrderingDirection::Asc)],
                     )
                     .into_operator();
                     (ordered, projected_cols, d1)
                 };
                 let (left_regular, left_outputs, d1) = left_regular;
+                let p3b = left_outputs[1];
                 let d2 = left_outputs[3];
                 let (right_regular, right_outputs) = {
                     let select_input = mock_scan_with_columns(4, t4_cols)
@@ -790,6 +773,7 @@ fn test_nested_dep_join_regular_join_orderby_project_domain_vs_repr() -> Result<
                     (projected, projected_cols)
                 };
                 let p4a = right_outputs[0];
+                let p4b = right_outputs[1];
                 let inner_join = left_regular.logical_join(
                     right_regular,
                     column_ref(p3b)
