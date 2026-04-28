@@ -15,22 +15,33 @@ use crate::{
         rule::{OperatorPattern, Rule, RuleSet},
     },
     memo::{CostedExpr, Exploration, MemoGroupExpr, MemoTable, Optimization, Status, WithId},
-    rules::{EnforceTupleOrderingRule, SimplificationPass, UnnestingRule},
+    rules::{EnforceTupleOrderingRule, PassManager, SimplificationPass, UnnestingRule},
 };
 
 pub struct Cascades {
     pub memo: tokio::sync::RwLock<MemoTable>,
     pub ctx: Arc<IRContext>,
     pub rule_set: RuleSet,
+    pub pass_manager: PassManager,
 }
 
 impl Cascades {
     /// Creates a new Cascades optimizer instance.
     pub fn new(ctx: Arc<IRContext>, rule_set: RuleSet) -> Self {
+        Self::with_pass_manager(ctx, rule_set, PassManager::default())
+    }
+
+    /// Creates a new Cascades optimizer instance with a custom pass manager.
+    pub fn with_pass_manager(
+        ctx: Arc<IRContext>,
+        rule_set: RuleSet,
+        pass_manager: PassManager,
+    ) -> Self {
         Self {
             memo: tokio::sync::RwLock::new(MemoTable::new(ctx.clone())),
             ctx,
             rule_set,
+            pass_manager,
         }
     }
 
@@ -40,8 +51,27 @@ impl Cascades {
         plan: &Arc<Operator>,
         required: Arc<Required>,
     ) -> Result<Arc<Operator>> {
-        let decorrelated = UnnestingRule::new().apply(plan.clone(), &self.ctx)?;
-        let simplified = SimplificationPass::new().apply(decorrelated, &self.ctx)?;
+        let decorrelated = self
+            .pass_manager
+            .run(&UnnestingRule::new(), plan.clone(), &self.ctx)?;
+        let simplified =
+            self.pass_manager
+                .run(&SimplificationPass::new(), decorrelated, &self.ctx)?;
+        let cascades = self.clone();
+        self.pass_manager
+            .run_async("cascades", simplified, &self.ctx, move |simplified| {
+                let cascades = cascades.clone();
+                async move { cascades.optimize_cascades_phase(simplified, required).await }
+            })
+            .await
+    }
+
+    /// Runs the memo-based cascades search after pre-cascades passes finish.
+    async fn optimize_cascades_phase(
+        self: &Arc<Self>,
+        simplified: Arc<Operator>,
+        required: Arc<Required>,
+    ) -> Result<Arc<Operator>> {
         let group_id = self.insert_new_operator(&simplified).await;
         let fut = self.find_best_costed_expr_for(group_id, required);
         let rx = fut.await;

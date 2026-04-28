@@ -313,7 +313,10 @@ Project { .table_index: 13, .projections: round(CAST ("__#12.sum(lineitem.l_exte
                                         │   └── "lineitem.l_tax"(#3.7)
                                         └── (.cardinality): 0.00
 
-physical_plan after optd-finalized:
+logical_plan after optd-decorrelation:
+SAME TEXT AS ABOVE
+
+logical_plan after optd-simplification:
 Project { .table_index: 13, .projections: round(CAST ("__#12.sum(lineitem.l_extendedprice)"(#12.0) AS Float64) / 7::float64, 16::integer), (.output_columns): "__#13.avg_yearly"(#13.0), (.cardinality): 1.00 }
 └── Aggregate
     ├── .key_table_index: 11
@@ -511,6 +514,9 @@ Project { .table_index: 13, .projections: round(CAST ("__#12.sum(lineitem.l_exte
                         ├── (.output_columns): [ "__#4.l_partkey"(#4.0), "__#5.avg(lineitem.l_quantity)"(#5.0) ]
                         ├── (.cardinality): 0.00
                         └── Get { .data_source_id: 8, .table_index: 3, .implementation: None, (.output_columns): [ "lineitem.l_partkey"(#3.1), "lineitem.l_quantity"(#3.4) ], (.cardinality): 0.00 }
+
+physical_plan after optd-cascades:
+SAME TEXT AS ABOVE
 
 NULL
 */

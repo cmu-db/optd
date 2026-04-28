@@ -172,7 +172,10 @@ Project
                     ├── (.output_columns): [ "part.p_brand"(#2.3), "part.p_comment"(#2.8), "part.p_container"(#2.6), "part.p_mfgr"(#2.2), "part.p_name"(#2.1), "part.p_partkey"(#2.0), "part.p_retailprice"(#2.7), "part.p_size"(#2.5), "part.p_type"(#2.4) ]
                     └── (.cardinality): 0.00
 
-physical_plan after optd-finalized:
+logical_plan after optd-decorrelation:
+SAME TEXT AS ABOVE
+
+logical_plan after optd-simplification:
 Project
 ├── .table_index: 6
 ├── .projections: 100::float64 * CAST ("__#5.sum(CASE WHEN part.p_type LIKE Utf8("PROMO%") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)"(#5.0) AS Float64) / CAST ("__#5.sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)"(#5.1) AS Float64)
@@ -322,6 +325,9 @@ Project
                 ├── .implementation: None
                 ├── (.output_columns): [ "part.p_brand"(#2.3), "part.p_comment"(#2.8), "part.p_container"(#2.6), "part.p_mfgr"(#2.2), "part.p_name"(#2.1), "part.p_partkey"(#2.0), "part.p_retailprice"(#2.7), "part.p_size"(#2.5), "part.p_type"(#2.4) ]
                 └── (.cardinality): 0.00
+
+physical_plan after optd-cascades:
+SAME TEXT AS ABOVE
 
 NULL
 */

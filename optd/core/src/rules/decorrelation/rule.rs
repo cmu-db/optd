@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::error::Result;
 use crate::ir::IRContext;
 use crate::ir::operator::{DependentJoin, Operator, OperatorKind};
+use crate::rules::PlanPass;
 
 pub struct UnnestingRule {}
 
@@ -51,5 +52,15 @@ impl UnnestingRule {
         } else {
             Ok(op)
         }
+    }
+}
+
+impl PlanPass for UnnestingRule {
+    fn name(&self) -> &'static str {
+        "decorrelation"
+    }
+
+    fn run(&self, root: Arc<Operator>, ctx: &IRContext) -> Result<Arc<Operator>> {
+        self.apply(root, ctx)
     }
 }

@@ -12,6 +12,8 @@ extensions_options! {
        pub optd_strict_mode: bool, default = false
        /// Disable DataFusion optimizers and run optd optimization only.
        pub optd_only: bool, default = false
+       /// Print per-pass timing metrics while optd is running.
+       pub profile_passes: bool, default = false
    }
 }
 

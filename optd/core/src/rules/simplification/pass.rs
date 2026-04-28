@@ -10,6 +10,7 @@ use super::{
 use crate::{
     error::Result,
     ir::{IRContext, Operator},
+    rules::PlanPass,
 };
 use std::sync::Arc;
 
@@ -69,5 +70,15 @@ impl SimplificationPass {
         }
 
         Ok(current)
+    }
+}
+
+impl PlanPass for SimplificationPass {
+    fn name(&self) -> &'static str {
+        "simplification"
+    }
+
+    fn run(&self, root: Arc<Operator>, ctx: &IRContext) -> Result<Arc<Operator>> {
+        self.apply(root, ctx)
     }
 }
