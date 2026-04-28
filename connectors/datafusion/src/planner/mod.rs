@@ -251,14 +251,18 @@ impl PassExtension for ExplainPassExtension {
 fn pass_explain_plans(snapshots: &[PassExplainSnapshot]) -> Vec<StringifiedPlan> {
     let mut plans = Vec::with_capacity(snapshots.len());
     for snapshot in snapshots {
+        let optimizer_name = if snapshot.pass_name.starts_with("optd-") {
+            snapshot.pass_name.to_string()
+        } else {
+            format!("optd-{}", snapshot.pass_name)
+        };
+        let plan_type = if snapshot.pass_name == "cascades" {
+            PlanType::OptimizedPhysicalPlan { optimizer_name }
+        } else {
+            PlanType::OptimizedLogicalPlan { optimizer_name }
+        };
         plans.push(StringifiedPlan::new(
-            PlanType::OptimizedLogicalPlan {
-                optimizer_name: if snapshot.pass_name.starts_with("optd-") {
-                    snapshot.pass_name.to_string()
-                } else {
-                    format!("optd-{}", snapshot.pass_name)
-                },
-            },
+            plan_type,
             snapshot.rendered_plan.clone(),
         ));
     }
@@ -430,18 +434,6 @@ impl OptdQueryPlanner {
         }
 
         if let Some(x) = explain.as_mut() {
-            let s = quick_explain(&optd_physical, &opt.ctx);
-            x.stringified_plans.push(StringifiedPlan::new(
-                PlanType::OptimizedPhysicalPlan {
-                    optimizer_name: "optd-finalized".to_string(),
-                },
-                s.clone(),
-            ));
-            x.stringified_plans
-                .push(StringifiedPlan::new(PlanType::FinalPhysicalPlan, s));
-        }
-
-        if let Some(x) = explain.as_mut() {
             let config = &session_state.config_options().explain;
             x.stringified_plans.push(StringifiedPlan::new(
                 PlanType::FinalPhysicalPlan,
@@ -564,18 +556,6 @@ impl OptdQueryPlanner {
     //         ));
     //         x.stringified_plans
     //             .push(StringifiedPlan::new(PlanType::FinalLogicalPlan, s));
-    //     }
-
-    //     if let Some(x) = explain.as_mut() {
-    //         let s = quick_explain(&optd_physical, &opt.ctx);
-    //         x.stringified_plans.push(StringifiedPlan::new(
-    //             PlanType::OptimizedPhysicalPlan {
-    //                 optimizer_name: "optd-finalized".to_string(),
-    //             },
-    //             s.clone(),
-    //         ));
-    //         x.stringified_plans
-    //             .push(StringifiedPlan::new(PlanType::FinalPhysicalPlan, s));
     //     }
 
     //     if let Some(x) = explain.as_mut() {
@@ -848,11 +828,11 @@ mod tests {
     use datafusion::{execution::runtime_env::RuntimeEnv, prelude::SessionConfig};
     use tokio::runtime::Runtime;
 
-    use super::{PassExplainSnapshot, pass_explain_plans};
+    use super::{PassExplainSnapshot, PlanType, pass_explain_plans};
     use crate::{OptdExtensionConfig, create_optd_session_context};
 
     #[test]
-    fn pass_explain_plans_collapses_unchanged_plans() {
+    fn pass_explain_plans_labels_cascades_as_physical() {
         let plans = pass_explain_plans(&[
             PassExplainSnapshot {
                 pass_name: "optd-initial",
@@ -870,13 +850,24 @@ mod tests {
                 pass_name: "pruning",
                 rendered_plan: "simplified".to_string(),
             },
+            PassExplainSnapshot {
+                pass_name: "cascades",
+                rendered_plan: "physical".to_string(),
+            },
         ]);
 
-        assert_eq!(plans.len(), 4);
+        assert_eq!(plans.len(), 5);
         assert_eq!(plans[0].plan.as_ref().as_str(), "initial");
         assert_eq!(plans[1].plan.as_ref().as_str(), "initial");
         assert_eq!(plans[2].plan.as_ref().as_str(), "simplified");
         assert_eq!(plans[3].plan.as_ref().as_str(), "simplified");
+        assert_eq!(plans[4].plan.as_ref().as_str(), "physical");
+        assert_eq!(
+            plans[4].plan_type,
+            PlanType::OptimizedPhysicalPlan {
+                optimizer_name: "optd-cascades".to_string()
+            }
+        );
     }
 
     #[test]

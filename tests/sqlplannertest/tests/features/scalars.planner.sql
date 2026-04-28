@@ -87,7 +87,7 @@ OrderBy
         │   └── "numbers.val"(#1.2)
         └── (.cardinality): 5.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort
 ├── tuple_ordering: [(#2.0, Asc)]
 ├── (.output_columns):
@@ -192,7 +192,7 @@ OrderBy
             │   └── "numbers.val"(#1.2)
             └── (.cardinality): 5.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort
 ├── tuple_ordering: [(#2.0, Asc)]
 ├── (.output_columns): [ "__#2.id"(#2.0), "__#2.widened_total"(#2.1) ]
@@ -285,7 +285,7 @@ OrderBy
             ├── (.output_columns): [ "numbers.id"(#1.0), "numbers.note"(#1.4) ]
             └── (.cardinality): 5.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort
 ├── tuple_ordering: [(#2.0, Asc)]
 ├── (.output_columns): [ "__#2.id"(#2.0), "__#2.note"(#2.1) ]
@@ -377,7 +377,7 @@ OrderBy
             │   └── "numbers.note"(#1.4)
             └── (.cardinality): 5.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort
 ├── tuple_ordering: [(#2.0, Asc)]
 ├── (.output_columns): "__#2.id"(#2.0)
@@ -440,7 +440,7 @@ SAME TEXT AS ABOVE
 logical_plan after optd-simplification:
 SAME TEXT AS ABOVE
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort
 ├── tuple_ordering: [(#2.0, Asc)]
 ├── (.output_columns): [ "__#2.lhs"(#2.0), "__#2.rhs"(#2.1) ]
@@ -566,7 +566,7 @@ Project
                     │   └── "numbers.val"(#1.2)
                     └── (.cardinality): 5.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 Project
 ├── .table_index: 3
 ├── .projections: "__#2.id"(#2.0)

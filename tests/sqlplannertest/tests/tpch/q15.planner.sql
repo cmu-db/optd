@@ -376,7 +376,7 @@ OrderBy
                                         │   └── "lineitem.l_suppkey"(#8.2)
                                         └── (.cardinality): 0.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort
 ├── tuple_ordering: [(#19.0, Asc)]
 ├── (.output_columns): [ "__#19.s_address"(#19.2), "__#19.s_name"(#19.1), "__#19.s_phone"(#19.3), "__#19.s_suppkey"(#19.0), "__#19.total_revenue"(#19.4) ]

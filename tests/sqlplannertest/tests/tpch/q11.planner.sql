@@ -359,7 +359,7 @@ OrderBy { ordering_exprs: "__#14.value"(#14.1) DESC, (.output_columns): [ "__#14
                         └── Select { .predicate: "nation.n_name"(#8.1) = 'CHINA'::utf8_view, (.output_columns): [ "nation.n_name"(#8.1), "nation.n_nationkey"(#8.0) ], (.cardinality): 0.00 }
                             └── Get { .data_source_id: 1, .table_index: 8, .implementation: None, (.output_columns): [ "nation.n_name"(#8.1), "nation.n_nationkey"(#8.0) ], (.cardinality): 0.00 }
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort { tuple_ordering: [(#14.1, Desc)], (.output_columns): [ "__#14.ps_partkey"(#14.0), "__#14.value"(#14.1) ], (.cardinality): 0.00 }
 └── Project
     ├── .table_index: 14

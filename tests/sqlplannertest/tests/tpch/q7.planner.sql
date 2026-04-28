@@ -497,7 +497,7 @@ OrderBy { ordering_exprs: [ "__#13.supp_nation"(#13.0) ASC, "__#13.cust_nation"(
                     └── Remap { .table_index: 8, (.output_columns): [ "n2.n_comment"(#8.3), "n2.n_name"(#8.1), "n2.n_nationkey"(#8.0), "n2.n_regionkey"(#8.2) ], (.cardinality): 0.00 }
                         └── Get { .data_source_id: 1, .table_index: 7, .implementation: None, (.output_columns): [ "nation.n_comment"(#7.3), "nation.n_name"(#7.1), "nation.n_nationkey"(#7.0), "nation.n_regionkey"(#7.2) ], (.cardinality): 0.00 }
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort { tuple_ordering: [(#13.0, Asc), (#13.1, Asc), (#13.2, Asc)], (.output_columns): [ "__#13.cust_nation"(#13.1), "__#13.l_year"(#13.2), "__#13.revenue"(#13.3), "__#13.supp_nation"(#13.0) ], (.cardinality): 0.00 }
 └── Project
     ├── .table_index: 13

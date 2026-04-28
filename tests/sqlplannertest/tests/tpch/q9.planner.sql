@@ -692,7 +692,7 @@ OrderBy
                         ├── (.output_columns): [ "nation.n_name"(#6.1), "nation.n_nationkey"(#6.0) ]
                         └── (.cardinality): 0.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort
 ├── tuple_ordering: [(#12.0, Asc), (#12.1, Desc)]
 ├── (.output_columns): [ "__#12.nation"(#12.0), "__#12.o_year"(#12.1), "__#12.sum_profit"(#12.2) ]

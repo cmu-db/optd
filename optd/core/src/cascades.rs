@@ -57,6 +57,21 @@ impl Cascades {
         let simplified =
             self.pass_manager
                 .run(&SimplificationPass::new(), decorrelated, &self.ctx)?;
+        let cascades = self.clone();
+        self.pass_manager
+            .run_async("cascades", simplified, &self.ctx, move |simplified| {
+                let cascades = cascades.clone();
+                async move { cascades.optimize_cascades_phase(simplified, required).await }
+            })
+            .await
+    }
+
+    /// Runs the memo-based cascades search after pre-cascades passes finish.
+    async fn optimize_cascades_phase(
+        self: &Arc<Self>,
+        simplified: Arc<Operator>,
+        required: Arc<Required>,
+    ) -> Result<Arc<Operator>> {
         let group_id = self.insert_new_operator(&simplified).await;
         let fut = self.find_best_costed_expr_for(group_id, required);
         let rx = fut.await;

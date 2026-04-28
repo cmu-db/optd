@@ -479,7 +479,7 @@ Limit
                                     │   └── "lineitem.l_quantity"(#4.4)
                                     └── (.cardinality): 0.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 Limit
 ├── .skip: 0::bigint
 ├── .fetch: 100::bigint

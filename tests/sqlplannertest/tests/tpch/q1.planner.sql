@@ -190,7 +190,7 @@ SAME TEXT AS ABOVE
 logical_plan after optd-simplification:
 SAME TEXT AS ABOVE
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 Limit
 ├── .skip: 0::bigint
 ├── .fetch: 3::bigint

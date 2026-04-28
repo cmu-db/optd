@@ -181,7 +181,7 @@ OrderBy
                         └── Select { .predicate: "supplier.s_comment"(#3.6) LIKE '%Customer%Complaints%'::utf8_view, (.output_columns): [ "supplier.s_comment"(#3.6), "supplier.s_suppkey"(#3.0) ], (.cardinality): 0.00 }
                             └── Get { .data_source_id: 4, .table_index: 3, .implementation: None, (.output_columns): [ "supplier.s_comment"(#3.6), "supplier.s_suppkey"(#3.0) ], (.cardinality): 0.00 }
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort { tuple_ordering: [(#11.3, Desc), (#11.0, Asc), (#11.1, Asc), (#11.2, Asc)], (.output_columns): [ "__#11.p_brand"(#11.0), "__#11.p_size"(#11.2), "__#11.p_type"(#11.1), "__#11.supplier_cnt"(#11.3) ], (.cardinality): 0.00 }
 └── Project
     ├── .table_index: 11

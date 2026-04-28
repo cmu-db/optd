@@ -204,7 +204,7 @@ OrderBy { ordering_exprs: "__#15.cntrycode"(#15.0) ASC, (.output_columns): [ "__
                                     ├── (.cardinality): 0.00
                                     └── Get { .data_source_id: 6, .table_index: 5, .implementation: None, (.output_columns): [ "customer.c_acctbal"(#5.5), "customer.c_phone"(#5.4) ], (.cardinality): 0.00 }
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort { tuple_ordering: [(#15.0, Asc)], (.output_columns): [ "__#15.cntrycode"(#15.0), "__#15.numcust"(#15.1), "__#15.totacctbal"(#15.2) ], (.cardinality): 0.00 }
 └── Project { .table_index: 15, .projections: [ "custsale.cntrycode"(#12.0), "__#14.count(Int64(1))"(#14.0), "__#14.sum(custsale.c_acctbal)"(#14.1) ], (.output_columns): [ "__#15.cntrycode"(#15.0), "__#15.numcust"(#15.1), "__#15.totacctbal"(#15.2) ], (.cardinality): 0.00 }
     └── Aggregate

@@ -193,7 +193,7 @@ OrderBy
                     │   └── "dim.id"(#3.0)
                     └── (.cardinality): 5.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort
 ├── tuple_ordering: [(#5.0, Asc)]
 ├── (.output_columns): [ "__#5.category"(#5.1), "__#5.id"(#5.0) ]
@@ -337,7 +337,7 @@ SAME TEXT AS ABOVE
 logical_plan after optd-simplification:
 SAME TEXT AS ABOVE
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort
 ├── tuple_ordering: [(#5.0, Asc)]
 ├── (.output_columns): [ "__#5.id"(#5.0), "__#5.label"(#5.1) ]
@@ -637,7 +637,7 @@ OrderBy
                 │   └── "tags.tag"(#5.1)
                 └── (.cardinality): 3.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort
 ├── tuple_ordering: [(#7.0, Asc)]
 ├── (.output_columns): [ "__#7.category"(#7.1), "__#7.id"(#7.0), "__#7.tag"(#7.2) ]
@@ -901,7 +901,7 @@ OrderBy
                 │   └── "numbers.val"(#3.2)
                 └── (.cardinality): 5.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort
 ├── tuple_ordering: [(#5.0, Asc), (#5.1, Asc)]
 ├── (.output_columns): [ "__#5.left_id"(#5.0), "__#5.right_id"(#5.1) ]

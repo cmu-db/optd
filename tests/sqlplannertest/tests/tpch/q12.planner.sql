@@ -148,7 +148,7 @@ OrderBy { ordering_exprs: "__#5.l_shipmode"(#5.0) ASC, (.output_columns): [ "__#
                 ├── (.cardinality): 0.00
                 └── Get { .data_source_id: 8, .table_index: 2, .implementation: None, (.output_columns): [ "lineitem.l_commitdate"(#2.11), "lineitem.l_orderkey"(#2.0), "lineitem.l_receiptdate"(#2.12), "lineitem.l_shipdate"(#2.10), "lineitem.l_shipmode"(#2.14) ], (.cardinality): 0.00 }
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort { tuple_ordering: [(#5.0, Asc)], (.output_columns): [ "__#5.high_priority_orders"(#5.1), "__#5.l_shipmode"(#5.0), "__#5.low_priority_orders"(#5.2) ], (.cardinality): 0.00 }
 └── Project
     ├── .table_index: 5

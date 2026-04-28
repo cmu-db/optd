@@ -531,7 +531,7 @@ OrderBy { ordering_exprs: "__#9.revenue"(#9.1) DESC, (.output_columns): [ "__#9.
                     ├── (.output_columns): [ "region.r_name"(#6.1), "region.r_regionkey"(#6.0) ]
                     └── (.cardinality): 0.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort { tuple_ordering: [(#9.1, Desc)], (.output_columns): [ "__#9.nation"(#9.0), "__#9.revenue"(#9.1) ], (.cardinality): 0.00 }
 └── Project
     ├── .table_index: 9

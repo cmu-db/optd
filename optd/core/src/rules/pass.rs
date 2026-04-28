@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{future::Future, sync::Arc};
 
 use crate::{
     error::Result,
@@ -71,6 +71,32 @@ impl PassManager {
 
         for extension in self.extensions.iter().rev() {
             extension.after_pass(pass.name(), &before, &after, ctx)?;
+        }
+
+        Ok(after)
+    }
+
+    /// Runs an async optimizer phase and invokes registered extensions around it.
+    pub async fn run_async<F, Fut>(
+        &self,
+        pass_name: &'static str,
+        root: Arc<Operator>,
+        ctx: &IRContext,
+        run: F,
+    ) -> Result<Arc<Operator>>
+    where
+        F: FnOnce(Arc<Operator>) -> Fut,
+        Fut: Future<Output = Result<Arc<Operator>>>,
+    {
+        for extension in self.extensions.iter() {
+            extension.before_pass(pass_name, &root, ctx)?;
+        }
+
+        let before = root.clone();
+        let after = run(root).await?;
+
+        for extension in self.extensions.iter().rev() {
+            extension.after_pass(pass_name, &before, &after, ctx)?;
         }
 
         Ok(after)
@@ -258,6 +284,32 @@ mod tests {
                 "after:second:noop",
                 "after:first:noop",
             ]
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn pass_manager_runs_extensions_around_async_phase() -> Result<()> {
+        let ctx = test_ctx_with_tables(&[("t1", 1)])?;
+        let plan = ctx.logical_get(TableRef::bare("t1"), None)?.build();
+        let extension = Arc::new(RecordingExtension::default());
+        let manager = PassManager::builder()
+            .add_extension_arc(extension.clone())
+            .build();
+
+        let rewritten = manager
+            .run_async(
+                "async-noop",
+                plan.clone(),
+                &ctx,
+                |root| async move { Ok(root) },
+            )
+            .await?;
+
+        assert_eq!(rewritten, plan);
+        assert_eq!(
+            extension.recorded(),
+            vec!["before:async-noop", "after:async-noop"]
         );
         Ok(())
     }

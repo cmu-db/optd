@@ -891,7 +891,7 @@ Limit
                                     ├── (.output_columns): [ "region.r_name"(#9.1), "region.r_regionkey"(#9.0) ]
                                     └── (.cardinality): 0.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 Limit
 ├── .skip: 0::bigint
 ├── .fetch: 100::bigint

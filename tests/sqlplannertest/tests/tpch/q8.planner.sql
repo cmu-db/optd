@@ -959,7 +959,7 @@ OrderBy { ordering_exprs: "__#16.o_year"(#16.0) ASC, (.output_columns): [ "__#16
                             ├── (.output_columns): [ "region.r_name"(#10.1), "region.r_regionkey"(#10.0) ]
                             └── (.cardinality): 0.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort { tuple_ordering: [(#16.0, Asc)], (.output_columns): [ "__#16.mkt_share"(#16.1), "__#16.o_year"(#16.0) ], (.cardinality): 0.00 }
 └── Project
     ├── .table_index: 16

@@ -320,7 +320,7 @@ OrderBy
                             │   └── "lineitem.l_tax"(#2.7)
                             └── (.cardinality): 0.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort
 ├── tuple_ordering: [(#7.0, Asc)]
 ├── (.output_columns): [ "__#7.o_orderpriority"(#7.0), "__#7.order_count"(#7.1) ]

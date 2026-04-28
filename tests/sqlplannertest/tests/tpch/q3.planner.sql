@@ -314,7 +314,7 @@ Limit
                         │   └── "lineitem.l_shipdate"(#3.10)
                         └── (.cardinality): 0.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 Limit
 ├── .skip: 0::bigint
 ├── .fetch: 10::bigint

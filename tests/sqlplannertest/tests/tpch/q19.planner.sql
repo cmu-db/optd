@@ -60,19 +60,8 @@ Project { .table_index: 5, .projections: "__#4.sum(lineitem.l_extendedprice * In
         └── Select { .predicate: "part.p_size"(#2.5) >= 1::integer, (.output_columns): [ "part.p_brand"(#2.3), "part.p_container"(#2.6), "part.p_partkey"(#2.0), "part.p_size"(#2.5) ], (.cardinality): 0.00 }
             └── Get { .data_source_id: 3, .table_index: 2, .implementation: None, (.output_columns): [ "part.p_brand"(#2.3), "part.p_container"(#2.6), "part.p_partkey"(#2.0), "part.p_size"(#2.5) ], (.cardinality): 0.00 }
 
-physical_plan after optd-finalized:
-Project { .table_index: 5, .projections: "__#4.sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)"(#4.0), (.output_columns): "__#5.revenue"(#5.0), (.cardinality): 1.00 }
-└── Aggregate { .key_table_index: 3, .aggregate_table_index: 4, .implementation: None, .exprs: sum("lineitem.l_extendedprice"(#1.5) * 1::decimal128(20, 0) - "lineitem.l_discount"(#1.6)), .keys: [], (.output_columns): "__#4.sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)"(#4.0), (.cardinality): 1.00 }
-    └── Join
-        ├── .join_type: Inner
-        ├── .implementation: None
-        ├── .join_cond: ("lineitem.l_partkey"(#1.1) = "part.p_partkey"(#2.0)) AND ((("part.p_brand"(#2.3) = 'Brand#12'::utf8_view) AND ("part.p_container"(#2.6) IN ['SM CASE'::utf8_view, 'SM BOX'::utf8_view, 'SM PACK'::utf8_view, 'SM PKG'::utf8_view]) AND ("lineitem.l_quantity"(#1.4) >= 100::decimal128(15, 2)) AND ("lineitem.l_quantity"(#1.4) <= 1100::decimal128(15, 2)) AND ("part.p_size"(#2.5) <= 5::integer)) OR (("part.p_brand"(#2.3) = 'Brand#23'::utf8_view) AND ("part.p_container"(#2.6) IN ['MED BAG'::utf8_view, 'MED BOX'::utf8_view, 'MED PKG'::utf8_view, 'MED PACK'::utf8_view]) AND ("lineitem.l_quantity"(#1.4) >= 1000::decimal128(15, 2)) AND ("lineitem.l_quantity"(#1.4) <= 2000::decimal128(15, 2)) AND ("part.p_size"(#2.5) <= 10::integer)) OR (("part.p_brand"(#2.3) = 'Brand#34'::utf8_view) AND ("part.p_container"(#2.6) IN ['LG CASE'::utf8_view, 'LG BOX'::utf8_view, 'LG PACK'::utf8_view, 'LG PKG'::utf8_view]) AND ("lineitem.l_quantity"(#1.4) >= 2000::decimal128(15, 2)) AND ("lineitem.l_quantity"(#1.4) <= 3000::decimal128(15, 2)) AND ("part.p_size"(#2.5) <= 15::integer)))
-        ├── (.output_columns): [ "lineitem.l_discount"(#1.6), "lineitem.l_extendedprice"(#1.5), "lineitem.l_partkey"(#1.1), "lineitem.l_quantity"(#1.4), "lineitem.l_shipinstruct"(#1.13), "lineitem.l_shipmode"(#1.14), "part.p_brand"(#2.3), "part.p_container"(#2.6), "part.p_partkey"(#2.0), "part.p_size"(#2.5) ]
-        ├── (.cardinality): 0.00
-        ├── Select { .predicate: (("lineitem.l_shipmode"(#1.14) = 'AIR'::utf8_view) OR ("lineitem.l_shipmode"(#1.14) = 'AIR REG'::utf8_view)) AND ("lineitem.l_shipinstruct"(#1.13) = 'DELIVER IN PERSON'::utf8_view), (.output_columns): [ "lineitem.l_discount"(#1.6), "lineitem.l_extendedprice"(#1.5), "lineitem.l_partkey"(#1.1), "lineitem.l_quantity"(#1.4), "lineitem.l_shipinstruct"(#1.13), "lineitem.l_shipmode"(#1.14) ], (.cardinality): 0.00 }
-        │   └── Get { .data_source_id: 8, .table_index: 1, .implementation: None, (.output_columns): [ "lineitem.l_discount"(#1.6), "lineitem.l_extendedprice"(#1.5), "lineitem.l_partkey"(#1.1), "lineitem.l_quantity"(#1.4), "lineitem.l_shipinstruct"(#1.13), "lineitem.l_shipmode"(#1.14) ], (.cardinality): 0.00 }
-        └── Select { .predicate: "part.p_size"(#2.5) >= 1::integer, (.output_columns): [ "part.p_brand"(#2.3), "part.p_container"(#2.6), "part.p_partkey"(#2.0), "part.p_size"(#2.5) ], (.cardinality): 0.00 }
-            └── Get { .data_source_id: 3, .table_index: 2, .implementation: None, (.output_columns): [ "part.p_brand"(#2.3), "part.p_container"(#2.6), "part.p_partkey"(#2.0), "part.p_size"(#2.5) ], (.cardinality): 0.00 }
+physical_plan after optd-cascades:
+SAME TEXT AS ABOVE
 
 NULL
 */

@@ -108,44 +108,8 @@ Project
         │   └── "numbers.val"(#1.2)
         └── (.cardinality): 5.00
 
-physical_plan after optd-finalized:
-Project
-├── .table_index: 4
-├── .projections:
-│   ┌── "__#3.count(numbers.id)"(#3.0)
-│   ├── "__#3.sum(numbers.val)"(#3.1)
-│   ├── "__#3.min(numbers.val)"(#3.2)
-│   └── "__#3.max(numbers.val)"(#3.3)
-├── (.output_columns):
-│   ┌── "__#4.count(numbers.id)"(#4.0)
-│   ├── "__#4.max(numbers.val)"(#4.3)
-│   ├── "__#4.min(numbers.val)"(#4.2)
-│   └── "__#4.sum(numbers.val)"(#4.1)
-├── (.cardinality): 1.00
-└── Aggregate
-    ├── .key_table_index: 2
-    ├── .aggregate_table_index: 3
-    ├── .implementation: None
-    ├── .exprs:
-    │   ┌── count("numbers.id"(#1.0))
-    │   ├── sum(CAST ("numbers.val"(#1.2) AS Int64))
-    │   ├── min("numbers.val"(#1.2))
-    │   └── max("numbers.val"(#1.2))
-    ├── .keys: []
-    ├── (.output_columns):
-    │   ┌── "__#3.count(numbers.id)"(#3.0)
-    │   ├── "__#3.max(numbers.val)"(#3.3)
-    │   ├── "__#3.min(numbers.val)"(#3.2)
-    │   └── "__#3.sum(numbers.val)"(#3.1)
-    ├── (.cardinality): 1.00
-    └── Get
-        ├── .data_source_id: 1
-        ├── .table_index: 1
-        ├── .implementation: None
-        ├── (.output_columns):
-        │   ┌── "numbers.id"(#1.0)
-        │   └── "numbers.val"(#1.2)
-        └── (.cardinality): 5.00
+physical_plan after optd-cascades:
+SAME TEXT AS ABOVE
 
 5 83 8 30
 */
@@ -247,7 +211,7 @@ OrderBy
             │   └── "numbers.val"(#1.2)
             └── (.cardinality): 5.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort
 ├── tuple_ordering: [(#4.0, Asc)]
 ├── (.output_columns):
@@ -395,7 +359,7 @@ OrderBy
             │   └── "numbers.id"(#1.0)
             └── (.cardinality): 5.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort
 ├── tuple_ordering: [(#4.0, Asc), (#4.1, Asc)]
 ├── (.output_columns):
@@ -621,7 +585,7 @@ OrderBy
                     │   └── "dim.id"(#3.0)
                     └── (.cardinality): 5.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort
 ├── tuple_ordering: [(#7.0, Asc)]
 ├── (.output_columns):
@@ -798,7 +762,7 @@ OrderBy
                 │   └── "numbers.val"(#1.2)
                 └── (.cardinality): 5.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort
 ├── tuple_ordering: [(#4.0, Asc)]
 ├── (.output_columns): [ "__#4.grp"(#4.0), "__#4.total"(#4.1) ]
@@ -935,7 +899,7 @@ Limit
                 │   └── "numbers.val"(#1.2)
                 └── (.cardinality): 5.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 Limit
 ├── .skip: 0::bigint
 ├── .fetch: 2::bigint

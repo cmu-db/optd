@@ -166,7 +166,7 @@ Project
         │   └── "t3.t3v2"(#3.1)
         └── (.cardinality): 3.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 Project
 ├── .table_index: 4
 ├── .projections:

@@ -376,7 +376,7 @@ OrderBy { ordering_exprs: "__#17.s_name"(#17.0) ASC, (.output_columns): [ "__#17
                                     ├── (.cardinality): 0.00
                                     └── Get { .data_source_id: 8, .table_index: 7, .implementation: None, (.output_columns): [ "lineitem.l_partkey"(#7.1), "lineitem.l_quantity"(#7.4), "lineitem.l_shipdate"(#7.10), "lineitem.l_suppkey"(#7.2) ], (.cardinality): 0.00 }
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort { tuple_ordering: [(#17.0, Asc)], (.output_columns): [ "__#17.s_address"(#17.1), "__#17.s_name"(#17.0) ], (.cardinality): 0.00 }
 └── Project { .table_index: 17, .projections: [ "supplier.s_name"(#1.1), "supplier.s_address"(#1.2) ], (.output_columns): [ "__#17.s_address"(#17.1), "__#17.s_name"(#17.0) ], (.cardinality): 0.00 }
     └── Join

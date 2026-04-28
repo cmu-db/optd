@@ -486,7 +486,7 @@ Limit
                     ├── (.output_columns): [ "nation.n_name"(#4.1), "nation.n_nationkey"(#4.0) ]
                     └── (.cardinality): 0.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 Limit
 ├── .skip: 0::bigint
 ├── .fetch: 20::bigint

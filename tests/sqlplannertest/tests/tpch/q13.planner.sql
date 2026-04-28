@@ -160,7 +160,7 @@ OrderBy
                             ├── (.output_columns): [ "orders.o_comment"(#2.8), "orders.o_custkey"(#2.1), "orders.o_orderkey"(#2.0) ]
                             └── (.cardinality): 0.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 EnforcerSort { tuple_ordering: [(#10.1, Desc), (#10.0, Desc)], (.output_columns): [ "__#10.c_count"(#10.0), "__#10.custdist"(#10.1) ], (.cardinality): 0.00 }
 └── Project
     ├── .table_index: 10

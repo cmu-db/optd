@@ -1016,7 +1016,7 @@ Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): [ "__#16.numwa
                                     │   └── "lineitem.l_tax"(#10.7)
                                     └── (.cardinality): 0.00
 
-physical_plan after optd-finalized:
+physical_plan after optd-cascades:
 Limit { .skip: 0::bigint, .fetch: 100::bigint, (.output_columns): [ "__#16.numwait"(#16.1), "__#16.s_name"(#16.0) ], (.cardinality): 0.00 }
 └── EnforcerSort { tuple_ordering: [(#16.1, Desc), (#16.0, Asc)], (.output_columns): [ "__#16.numwait"(#16.1), "__#16.s_name"(#16.0) ], (.cardinality): 0.00 }
     └── Project
