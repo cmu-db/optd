@@ -15,6 +15,7 @@ async-trait = { workspace = true }
 anyhow = { workspace = true }
 clap = { version = "4.5.56", features = ["derive"] }
 itertools = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [[test]]
 name = "planner_test"
