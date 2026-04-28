@@ -266,32 +266,6 @@ fn pass_explain_plans(snapshots: &[PassExplainSnapshot]) -> Vec<StringifiedPlan>
 }
 
 impl OptdQueryPlanner {
-    /// Builds the pass manager for the current planning request.
-    ///
-    /// Runtime pass profiling is enabled by `optd.profile_passes`, and
-    /// `EXPLAIN` requests may register a snapshot collector for per-pass
-    /// logical-plan display.
-    fn create_pass_manager(
-        session_state: &SessionState,
-        explain_pass_extension: Option<Arc<ExplainPassExtension>>,
-    ) -> PassManager {
-        let profile_passes = session_state
-            .config_options()
-            .extensions
-            .get::<OptdExtensionConfig>()
-            .map(|conf| conf.profile_passes)
-            .unwrap_or(false);
-
-        let mut builder = PassManager::builder();
-        if profile_passes {
-            builder = builder.add_extension(PassProfilingExtension::default());
-        }
-        if let Some(extension) = explain_pass_extension {
-            builder = builder.add_extension_arc(extension);
-        }
-        builder.build()
-    }
-
     fn optd_extension(session_state: &SessionState) -> Result<Arc<OptdExtension>> {
         session_state
             .config()
@@ -387,7 +361,21 @@ impl OptdQueryPlanner {
         let explain_pass_extension = explain
             .as_ref()
             .map(|_| Arc::new(ExplainPassExtension::default()));
-        let pass_manager = Self::create_pass_manager(session_state, explain_pass_extension.clone());
+        let profile_passes = session_state
+            .config_options()
+            .extensions
+            .get::<OptdExtensionConfig>()
+            .map(|conf| conf.profile_passes)
+            .unwrap_or(false);
+        let mut pass_manager_builder = PassManager::builder();
+        if let Some(extension) = explain_pass_extension.as_ref() {
+            pass_manager_builder = pass_manager_builder.add_extension_arc(extension.clone());
+        }
+        if profile_passes {
+            pass_manager_builder =
+                pass_manager_builder.add_extension(PassProfilingExtension::default());
+        }
+        let pass_manager = pass_manager_builder.build();
         let opt = Arc::new(Cascades::with_pass_manager(
             ctx.inner.clone(),
             rule_set,
@@ -860,8 +848,8 @@ mod tests {
     use datafusion::{execution::runtime_env::RuntimeEnv, prelude::SessionConfig};
     use tokio::runtime::Runtime;
 
-    use super::{OptdQueryPlanner, PassExplainSnapshot, pass_explain_plans};
-    use crate::create_optd_session_context;
+    use super::{PassExplainSnapshot, pass_explain_plans};
+    use crate::{OptdExtensionConfig, create_optd_session_context};
 
     #[test]
     fn pass_explain_plans_collapses_unchanged_plans() {
@@ -892,12 +880,17 @@ mod tests {
     }
 
     #[test]
-    fn create_pass_manager_respects_profile_passes_config() {
+    fn profile_passes_config_is_toggled_by_set_statement() {
         let disabled =
             create_optd_session_context(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
         let disabled_state = disabled.state();
-        let disabled_manager = OptdQueryPlanner::create_pass_manager(&disabled_state, None);
-        assert_eq!(disabled_manager.extension_count(), 0);
+        let disabled_config = &disabled_state.config_options().extensions;
+        assert_eq!(
+            disabled_config
+                .get::<OptdExtensionConfig>()
+                .map(|conf| conf.profile_passes),
+            Some(false)
+        );
 
         let enabled =
             create_optd_session_context(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
@@ -911,7 +904,12 @@ mod tests {
                 .unwrap();
         });
         let enabled_state = enabled.state();
-        let enabled_manager = OptdQueryPlanner::create_pass_manager(&enabled_state, None);
-        assert_eq!(enabled_manager.extension_count(), 1);
+        let enabled_config = &enabled_state.config_options().extensions;
+        assert_eq!(
+            enabled_config
+                .get::<OptdExtensionConfig>()
+                .map(|conf| conf.profile_passes),
+            Some(true)
+        );
     }
 }
