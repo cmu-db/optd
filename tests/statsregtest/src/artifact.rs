@@ -96,11 +96,38 @@ pub struct ColumnErrorMetrics {
     pub max_value_match: Option<bool>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CardinalityEstimator {
+    Advanced,
+    Magic,
+}
+
+impl CardinalityEstimator {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Advanced => "advanced",
+            Self::Magic => "magic",
+        }
+    }
+}
+
 pub async fn collect_query_artifact(
     query: &BenchmarkQuery,
     workspace_root: &Path,
 ) -> Result<QueryArtifact> {
-    let db = DataFusionDB::new_with_advanced_cardinality().await?;
+    collect_query_artifact_with_estimator(query, workspace_root, CardinalityEstimator::Advanced)
+        .await
+}
+
+pub async fn collect_query_artifact_with_estimator(
+    query: &BenchmarkQuery,
+    workspace_root: &Path,
+    estimator: CardinalityEstimator,
+) -> Result<QueryArtifact> {
+    let db = match estimator {
+        CardinalityEstimator::Advanced => DataFusionDB::new().await?,
+        CardinalityEstimator::Magic => DataFusionDB::new_with_magic_cardinality().await?,
+    };
     for setup in query.harness_setup_sql(workspace_root)? {
         for statement in split_sql_statements(&setup.sql) {
             db.execute_one(&statement)

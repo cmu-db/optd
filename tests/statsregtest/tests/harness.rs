@@ -12,9 +12,12 @@ use datafusion::{
 use optd_core::ir::{Operator, OperatorKind};
 use optd_datafusion::DataFusionDB;
 use optd_statsregtest::{
-    QueryArtifact, RunConfig, apply_baselines,
-    artifact::{collect_query_artifact, read_artifact, write_artifact},
-    load_tpch_queries, run_against_baselines, split_sql_statements,
+    CardinalityEstimator, QueryArtifact, RunConfig, apply_baselines,
+    artifact::{
+        collect_query_artifact, collect_query_artifact_with_estimator, read_artifact,
+        write_artifact,
+    },
+    compare_estimators, load_tpch_queries, run_against_baselines, split_sql_statements,
 };
 use tempfile::tempdir;
 
@@ -36,7 +39,7 @@ async fn setup_benchmark_db(
 ) -> Result<(optd_statsregtest::BenchmarkQuery, DataFusionDB)> {
     let workspace_root = workspace_root();
     let query = load_query(query_id).await?;
-    let db = DataFusionDB::new_with_advanced_cardinality().await?;
+    let db = DataFusionDB::new().await?;
     for setup in query.harness_setup_sql(&workspace_root)? {
         for statement in split_sql_statements(&setup.sql) {
             db.execute_one(&statement).await?;
@@ -131,8 +134,8 @@ async fn filter_node_exact_row_count_matches_manual_count() -> Result<()> {
             SELECT COUNT(*)
             FROM lineitem
             WHERE
-                l_shipdate >= DATE '2023-01-01'
-                AND l_shipdate < DATE '2024-01-01'
+                l_shipdate >= DATE '1994-01-01'
+                AND l_shipdate < DATE '1995-01-01'
                 AND l_discount BETWEEN 0.05 AND 0.07
                 AND l_quantity < 24
             "#,
@@ -335,5 +338,52 @@ async fn baseline_perturbation_is_reported() -> Result<()> {
     let report = run_against_baselines(&config).await?;
     assert_eq!(report.comparisons.len(), 1);
     assert!(report.comparisons[0].root.delta.unwrap_or(0.0) < 0.0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn q6_advanced_estimate_differs_from_magic() -> Result<()> {
+    let workspace_root = workspace_root();
+    let query = load_query("q6").await?;
+    let advanced = collect_query_artifact_with_estimator(
+        &query,
+        &workspace_root,
+        CardinalityEstimator::Advanced,
+    )
+    .await?;
+    let magic =
+        collect_query_artifact_with_estimator(&query, &workspace_root, CardinalityEstimator::Magic)
+            .await?;
+
+    let advanced_select = advanced
+        .nodes
+        .iter()
+        .find(|node| node.operator_kind == "Select")
+        .context("missing Advanced Select node")?;
+    let magic_select = magic
+        .nodes
+        .iter()
+        .find(|node| node.operator_kind == "Select")
+        .context("missing Magic Select node")?;
+
+    assert_ne!(
+        advanced_select.estimated.row_count,
+        magic_select.estimated.row_count
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "expensive estimator comparison workflow"]
+async fn tpch_magic_vs_advanced_report() -> Result<()> {
+    let config = RunConfig::new(workspace_root(), "tpch", vec![]);
+    let report = compare_estimators(
+        &config,
+        CardinalityEstimator::Magic,
+        CardinalityEstimator::Advanced,
+    )
+    .await?;
+    println!("{}", report.markdown);
+    assert!(!report.comparisons.is_empty());
     Ok(())
 }

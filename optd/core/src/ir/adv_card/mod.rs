@@ -13,10 +13,20 @@
 //! # High-level approach
 //!
 //! * **Scan**: `|R| = table_stats.row_count`. Falls back to 1 000 when no stats.
-//! * **Filter**: `|σ_p(R)| = sel(p) · |R|`. See [`selectivity::filter_selectivity`].
-//! * **Hash Join**: `|R ⋈ S| = |R| · |S| · Π sel(k_i) · sel(non_equi_conds)`
-//!   over equi-key pairs, refined by non-equi condition selectivity.
-//!   See [`selectivity::equijoin_cardinality`].
+//! * **Filter**: `|σ_p(R)| = sel(p) · |R|`, where the new predicate is folded
+//!   into the input's [`crate::ir::properties::PredicateSummary`] and the
+//!   incremental selectivity is `summary_selectivity(after) /
+//!   summary_selectivity(before)`. See
+//!   [`selectivity::filter_selectivity_with_summary`].
+//! * **Hash Join (Inner / Left / Single / Mark)**:
+//!   `|R ⋈ S| = |R| · |S| · Π sel(k_i) · sel(non_equi_conds)` over equi-key
+//!   pairs, refined by non-equi condition selectivity.
+//! * **Hash Join (LeftSemi / LeftAnti)**: containment-based, *not* the
+//!   inner-join formula — `|outer| · match_prob` (semi) or
+//!   `|outer| · (1 − match_prob)` (anti), where `match_prob` is the
+//!   per-MST-edge product of `min(1, NDV_inner / NDV_outer)`. Avoids the
+//!   PK→FK saturation pathology where inner-join tuple counts dwarf the outer
+//!   row count. See [`selectivity::equijoin_cardinality`].
 //! * **Aggregate**: `min(|input|, Π NDV(k_i))` over grouping keys; falls back
 //!   to `|input| × 0.2^k` per key when column stats are unavailable. Scalar
 //!   aggregates (0 keys) always return 1.
@@ -163,9 +173,11 @@ fn join_cond_selectivity(join_cond: &Scalar) -> f64 {
 /// Fallback join estimator for join types without stats-driven estimation.
 ///
 /// Formula by join type:
-///   Mark(col)  → |outer|           (adds a boolean column, no row change)
-///   Single     → min(sel · |L| · |R|, |L|)  (at-most-one match per left row)
-///   Otherwise  → sel · |L| · |R|            (standard cross-product model)
+///   Mark(col)  → |outer|                       (adds a boolean column, no row change)
+///   Single     → min(sel · |L| · |R|, |L|)     (at-most-one match per left row)
+///   LeftSemi   → min(sel · |L| · |R|, |L|)     (left rows with ≥1 match)
+///   LeftAnti   → max(|L| - sel · |L| · |R|, 0) (complement of LeftSemi)
+///   Otherwise  → sel · |L| · |R|               (standard cross-product model)
 fn estimate_fallback_join(
     ctx: &IRContext,
     join_type: &JoinType,
@@ -177,9 +189,14 @@ fn estimate_fallback_join(
     let right_card = inner.cardinality(ctx);
     match *join_type {
         JoinType::Mark(_) => left_card,
-        JoinType::Single => {
+        JoinType::Single | JoinType::LeftSemi => {
             let sel = join_cond_selectivity(join_cond);
             (sel * left_card * right_card).map(|value| value.min(left_card.as_f64()))
+        }
+        JoinType::LeftAnti => {
+            let sel = join_cond_selectivity(join_cond);
+            let inner_result = sel * left_card.as_f64() * right_card.as_f64();
+            Cardinality::new((left_card.as_f64() - inner_result).max(0.0))
         }
         _ => {
             let sel = join_cond_selectivity(join_cond);

@@ -7,6 +7,7 @@ use std::{collections::HashMap, future::Future, sync::Arc};
 use datafusion::{
     arrow::array::RecordBatch,
     catalog::{TableProvider, memory::DataSourceExec},
+    common::stats::Precision,
     datasource::physical_plan::ParquetSource,
     error::DataFusionError,
     execution::{SessionState, context::QueryPlanner},
@@ -18,6 +19,7 @@ use datafusion::{
     },
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
     prelude::SessionContext,
+    scalar::ScalarValue,
     sql::TableReference,
 };
 use optd_core::{
@@ -228,13 +230,80 @@ fn precision_to_option<T: Copy + PartialOrd + Eq + std::fmt::Debug>(
 
 /// Extract value from Precision as Option<String>.
 /// TODO(Aditya): this should not be required after we move from `String` to `Value`.
-fn precision_to_string<T: ToString + PartialOrd + Eq + Clone + std::fmt::Debug>(
-    precision: &datafusion::common::stats::Precision<T>,
-) -> Option<String> {
+fn precision_to_string(precision: &Precision<ScalarValue>) -> Option<String> {
     match precision {
-        datafusion::common::stats::Precision::Exact(v) => Some(v.to_string()),
-        datafusion::common::stats::Precision::Inexact(v) => Some(v.to_string()),
-        datafusion::common::stats::Precision::Absent => None,
+        Precision::Exact(value) | Precision::Inexact(value) => scalar_value_to_stat_string(value),
+        Precision::Absent => None,
+    }
+}
+
+fn scalar_value_to_stat_string(value: &ScalarValue) -> Option<String> {
+    if value.is_null() {
+        return None;
+    }
+
+    match value {
+        ScalarValue::Decimal32(Some(raw), _, scale) => {
+            Some(format_decimal_string(&raw.to_string(), *scale))
+        }
+        ScalarValue::Decimal64(Some(raw), _, scale) => {
+            Some(format_decimal_string(&raw.to_string(), *scale))
+        }
+        ScalarValue::Decimal128(Some(raw), _, scale) => {
+            Some(format_decimal_string(&raw.to_string(), *scale))
+        }
+        ScalarValue::Decimal256(Some(raw), _, scale) => {
+            Some(format_decimal_string(&raw.to_string(), *scale))
+        }
+        _ => Some(value.to_string()),
+    }
+}
+
+fn format_decimal_string(raw: &str, scale: i8) -> String {
+    let (sign, digits) = if let Some(rest) = raw.strip_prefix('-') {
+        ("-", rest)
+    } else {
+        ("", raw)
+    };
+
+    if scale <= 0 {
+        return format!("{sign}{digits}{}", "0".repeat((-scale) as usize));
+    }
+
+    let scale = scale as usize;
+    if digits.len() <= scale {
+        return format!("{sign}0.{digits:0>width$}", width = scale);
+    }
+
+    let split = digits.len() - scale;
+    format!("{sign}{}.{}", &digits[..split], &digits[split..])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{format_decimal_string, precision_to_string};
+    use datafusion::{common::stats::Precision, scalar::ScalarValue};
+
+    #[test]
+    fn formats_decimal_statistics_as_scaled_decimal_text() {
+        let value = Precision::Exact(ScalarValue::Decimal128(Some(100), 15, 2));
+        assert_eq!(precision_to_string(&value).as_deref(), Some("1.00"));
+        assert_eq!(format_decimal_string("-5", 2), "-0.05");
+    }
+
+    #[test]
+    fn formats_date_statistics_as_iso_dates() {
+        let value = Precision::Exact(ScalarValue::Date32(Some(8037)));
+        assert_eq!(precision_to_string(&value).as_deref(), Some("1992-01-03"));
+    }
+
+    #[test]
+    fn omits_absent_or_null_statistics() {
+        assert_eq!(precision_to_string(&Precision::Absent), None);
+        assert_eq!(
+            precision_to_string(&Precision::Exact(ScalarValue::Null)),
+            None
+        );
     }
 }
 

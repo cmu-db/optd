@@ -13,7 +13,7 @@ extensions_options! {
        /// Disable DataFusion optimizers and run optd optimization only.
        pub optd_only: bool, default = false
        /// Use the advanced cardinality estimator instead of the magic estimator.
-       pub optd_use_advanced_cardinality: bool, default = false
+       pub optd_use_advanced_cardinality: bool, default = true
    }
 }
 

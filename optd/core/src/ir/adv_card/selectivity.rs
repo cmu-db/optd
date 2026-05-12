@@ -91,12 +91,15 @@
 use std::collections::HashMap;
 
 use crate::ir::{
-    Column, DataType, IRContext, Scalar, ScalarValue, operator::join::JoinType,
+    Column, DataType, IRContext, Scalar, ScalarValue,
+    operator::join::JoinType,
     properties::{
         Cardinality, GroupPredicate, PredicateSummary, RangeConstraint, ValueRef,
-        date_days_to_year, date_millis_to_year, derive_value_ref,
+        date_days_to_year, date_millis_to_year, date_string_to_days, date_string_to_millis,
+        derive_value_ref,
     },
-    scalar::*, statistics::ColumnStatistics,
+    scalar::*,
+    statistics::ColumnStatistics,
 };
 use crate::utility::union_find::UnionFind;
 
@@ -520,15 +523,17 @@ pub fn key_ndv_from_summary(
 
 /// Overall selectivity implied by a summary.
 ///
-/// Factored into two pieces:
-///   - per-`table_index` group selectivity via [`group_selectivity`],
-///   - cross-table residual predicates, each charged the fallback
-///     `0.1` softened by `0.5^idx` so later residuals contribute less.
+/// Selinger-style: predicates that plausibly correlate (same `table_index`)
+/// are combined inside [`group_selectivity`] with the SQL-Server-style
+/// exponential-backoff variant of Selinger independence. Predicates on
+/// **different** tables are then composed by pure independence — the textbook
+/// `Π sel_i` from Selinger 1979 — because cross-table correlation is exactly
+/// the case where the independence assumption is most defensible.
 ///
-/// The `0.5^idx` decay is the "soft independence" compromise described in
-/// the README: raw multiplication would underestimate correlated
-/// predicates, and no compounding would overestimate truly independent
-/// ones.
+/// Concretely:
+///   - per-`table_index` group selectivity → [`group_selectivity`] (decayed),
+///   - cross-table residual predicates → pure independence (`Π 0.1`),
+///   - groups multiplied together → pure independence.
 fn summary_selectivity(summary: &PredicateSummary, ctx: &IRContext) -> f64 {
     if summary.is_contradictory {
         return 0.0;
@@ -541,14 +546,8 @@ fn summary_selectivity(summary: &PredicateSummary, ctx: &IRContext) -> f64 {
         .map(|group| group_selectivity(summary, group, ctx))
         .product();
 
-    let residual_product: f64 = summary
-        .residual_predicates
-        .iter()
-        .enumerate()
-        .map(|(idx, _)| {
-            AdvancedCardinalityEstimator::FALLBACK_PREDICATE_SELECTIVITY.powf(0.5_f64.powi(idx as i32))
-        })
-        .product();
+    let residual_product: f64 = AdvancedCardinalityEstimator::FALLBACK_PREDICATE_SELECTIVITY
+        .powi(summary.residual_predicates.len() as i32);
 
     (group_product * residual_product).clamp(0.0, 1.0)
 }
@@ -625,12 +624,18 @@ fn group_selectivity(summary: &PredicateSummary, group: i64, ctx: &IRContext) ->
 /// `(1 - null_fraction) / NDV`. `ExtractYear` gets a year-domain NDV
 /// derived from the base column's min/max. `Derived` has no recoverable
 /// NDV and returns `None`.
+///
+/// Returns `None` when NDV is missing rather than substituting `row_count`
+/// (which would model the column as a primary key — wildly wrong for the
+/// columns we typically lack NDV stats on, e.g. low-cardinality strings).
+/// `None` lets the caller fall back to the magic fallback selectivity
+/// `0.1` (aka "I have no idea.")
 fn value_equality_selectivity(value: &ValueRef, _literal: f64, ctx: &IRContext) -> Option<f64> {
     let (distinct, null_fraction) = match value {
         ValueRef::Base(column) => {
             let (stats, offset) = column_stats(ctx, *column)?;
             let col_stats = stats.column_statistics.get(offset)?;
-            let distinct = ndv(col_stats).unwrap_or(stats.row_count);
+            let distinct = ndv(col_stats)?;
             (distinct, null_fraction(col_stats, stats.row_count))
         }
         ValueRef::ExtractYear(column) => {
@@ -686,8 +691,14 @@ fn value_domain(value: &ValueRef, ctx: &IRContext) -> Option<(f64, f64, f64)> {
             // Reinterpret the base column's min/max as year bounds via
             // `parse_year_value`, which handles Date32 (days since epoch)
             // and Date64 (millis since epoch).
-            let min = parse_year_value(col_stats.min_value.as_ref()?, &ctx.get_column_meta(column).data_type)? as f64;
-            let max = parse_year_value(col_stats.max_value.as_ref()?, &ctx.get_column_meta(column).data_type)? as f64;
+            let min = parse_year_value(
+                col_stats.min_value.as_ref()?,
+                &ctx.get_column_meta(column).data_type,
+            )? as f64;
+            let max = parse_year_value(
+                col_stats.max_value.as_ref()?,
+                &ctx.get_column_meta(column).data_type,
+            )? as f64;
             Some((min, max, null_fraction(col_stats, stats.row_count)))
         }
         ValueRef::Derived(_) => None,
@@ -723,12 +734,11 @@ fn year_ndv(col_stats: &ColumnStatistics, data_type: &DataType) -> Option<i32> {
 }
 
 /// Parse a catalog min/max string and convert to a calendar year.
-/// `Date32` values are days since the UNIX epoch; `Date64` values are
-/// milliseconds since the UNIX epoch. Non-date types return `None`.
+/// Values are stored as ISO-8601 date strings. Non-date types return `None`.
 fn parse_year_value(value: &str, data_type: &DataType) -> Option<i32> {
     match data_type {
-        DataType::Date32 => value.parse::<i32>().ok().and_then(date_days_to_year),
-        DataType::Date64 => value.parse::<i64>().ok().and_then(date_millis_to_year),
+        DataType::Date32 => date_string_to_days(value).and_then(date_days_to_year),
+        DataType::Date64 => date_string_to_millis(value).and_then(date_millis_to_year),
         _ => None,
     }
 }
@@ -782,8 +792,16 @@ fn equality_selectivity_col_lit(
 struct JoinEdge {
     build_col: Column,
     probe_col: Column,
-    /// Estimated selectivity for this key pair.
+    /// Estimated selectivity for this key pair (used for the inner-join formula).
     selectivity: f64,
+    /// Per-edge probability that an outer row finds at least one match on the
+    /// inner side, i.e. `min(1, NDV_inner / NDV_outer)` under the containment
+    /// assumption. Distinct from `selectivity`: `selectivity` produces matching
+    /// *tuples*, `match_prob` produces matching *outer rows*. Used by
+    /// LeftSemi / LeftAnti — see the join-type adjustment block below.
+    /// Falls back to [`AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY`]
+    /// when NDVs are not available, mirroring the magic-constant path.
+    match_prob: f64,
     /// Whether column statistics were available for this pair (vs. pure fallback).
     had_stats: bool,
 }
@@ -856,6 +874,16 @@ struct JoinEdge {
 /// - **Left**: `max(result, |left|)` — every left row appears at least once.
 /// - **Mark(col)**: `|left|` — adds a boolean column, no row change.
 /// - **Single**: `min(result, |left|)` — at-most-one match per left row.
+/// - **LeftSemi**: `|left| · match_prob` — fraction of distinct outer keys
+///   that find at least one inner match (containment ratio
+///   `min(1, NDV_inner / NDV_outer)`), rather than the inner-join tuple
+///   count. The previous `min(inner_result, |left|)` formula saturated to
+///   `|left|` whenever the inner side had duplicates per key (e.g. PK→FK),
+///   wrongly claiming every outer row matched.
+/// - **LeftAnti**: `|left| · (1 - match_prob)` — symmetric. The previous
+///   `max(|left| - inner_result, 0)` formula collapsed to `0` (or float
+///   noise) whenever `inner_result ≥ |left|`, which is the common PK→FK
+///   shape; it confused matching *tuples* with matching *outer rows*.
 ///
 /// # Assumptions
 ///
@@ -899,6 +927,7 @@ pub fn equijoin_cardinality(
                         build_col: *outer_col,
                         probe_col: *inner_col,
                         selectivity: AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
+                        match_prob: AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
                         had_stats: false,
                     });
                     continue;
@@ -908,6 +937,7 @@ pub fn equijoin_cardinality(
                         build_col: *outer_col,
                         probe_col: *inner_col,
                         selectivity: AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
+                        match_prob: AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
                         had_stats: false,
                     });
                     continue;
@@ -927,21 +957,27 @@ pub fn equijoin_cardinality(
                 }
 
                 // Compute per-edge selectivity: prefer HLL, fall back to
-                // containment assumption, then row-count upper bound.
+                // containment assumption, then row-count upper bound. We
+                // also compute `match_prob` from the per-side NDVs in
+                // parallel — it powers LeftSemi/LeftAnti and is intentionally
+                // independent of the (post-summary, possibly literal-collapsed)
+                // selectivity used for the inner-join formula.
                 let join_constrained = has_join_constraints(&outer_value, join_summary)
                     || has_join_constraints(&inner_value, join_summary);
+                let probe_for_match = constrained_value_ndv(&inner_value, join_summary, ctx);
+                let build_for_match = constrained_value_ndv(&outer_value, join_summary, ctx);
+                let match_prob = match (build_for_match, probe_for_match) {
+                    (Some(b), Some(p)) if b > 0 => ((p as f64) / (b as f64)).clamp(0.0, 1.0),
+                    _ => AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
+                };
+
                 let (sel, had_stats) = if !join_constrained
                     && let Some(s) = hll_join_selectivity(build_cs, probe_cs)
                 {
                     (s, true)
                 } else {
-                    match (
-                        constrained_value_ndv(&outer_value, join_summary, ctx),
-                        constrained_value_ndv(&inner_value, join_summary, ctx),
-                    ) {
-                        (Some(build_ndv), Some(probe_ndv))
-                            if build_ndv > 0 && probe_ndv > 0 =>
-                        {
+                    match (build_for_match, probe_for_match) {
+                        (Some(build_ndv), Some(probe_ndv)) if build_ndv > 0 && probe_ndv > 0 => {
                             let max_ndv = build_ndv.max(probe_ndv) as f64;
                             (1.0 / max_ndv, true)
                         }
@@ -972,6 +1008,7 @@ pub fn equijoin_cardinality(
                     build_col: *outer_col,
                     probe_col: *inner_col,
                     selectivity: sel,
+                    match_prob,
                     had_stats,
                 });
             }
@@ -988,6 +1025,7 @@ pub fn equijoin_cardinality(
                     build_col: *outer_col,
                     probe_col: *inner_col,
                     selectivity: AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
+                    match_prob: AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
                     had_stats: false,
                 });
             }
@@ -1012,12 +1050,14 @@ pub fn equijoin_cardinality(
 
     let mut graph = ColumnConstraintGraph::new();
     let mut selectivity: f64 = 1.0;
+    let mut match_prob: f64 = 1.0;
     let mut any_key_had_stats = false;
 
     for edge in &edges {
         // add_equality returns true iff this edge is a spanning-tree edge.
         if graph.add_equality(edge.build_col, edge.probe_col) {
             selectivity *= edge.selectivity;
+            match_prob *= edge.match_prob;
             any_key_had_stats |= edge.had_stats;
         }
         // else: cycle-forming edge — transitively implied, skip.
@@ -1025,25 +1065,31 @@ pub fn equijoin_cardinality(
 
     if keys.is_empty() && !any_key_had_stats {
         selectivity = AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY;
+        match_prob = AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY;
     }
 
     // Apply selectivity of non-equi conditions (e.g. range predicates like x.b < y.b).
     // These are treated as a post-join filter on the equi-join result.
     // When non_equi_conds is None or literal TRUE, filter_selectivity returns 1.0 (no effect).
     let inner_card = outer_card.as_f64() * inner_card.as_f64() * selectivity;
-    let non_equi_sel = non_equi_conds
-        .map_or(1.0, |cond| filter_selectivity_with_summary(cond, join_summary, ctx));
+    let non_equi_sel = non_equi_conds.map_or(1.0, |cond| {
+        filter_selectivity_with_summary(cond, join_summary, ctx)
+    });
     let inner_result = inner_card * non_equi_sel;
 
     // Adjust for join type.
     let left = outer_card.as_f64();
+    // For LeftSemi/LeftAnti we count *outer rows* with ≥1 match, not matching
+    // tuples. Apply non-equi selectivity to `match_prob` too — a non-equi
+    // condition on top of the equi-join can only reduce the match probability.
+    let semi_match_prob = (match_prob * non_equi_sel).clamp(0.0, 1.0);
     let adjusted = match *join_type {
         JoinType::Inner => inner_result,
         JoinType::LeftOuter => inner_result.max(left),
         JoinType::Mark(_) => left,
         JoinType::Single => inner_result.min(left),
-        JoinType::LeftSemi => todo!(),
-        JoinType::LeftAnti => todo!(),
+        JoinType::LeftSemi => left * semi_match_prob,
+        JoinType::LeftAnti => left * (1.0 - semi_match_prob),
     };
 
     Cardinality::new(adjusted)
@@ -1065,7 +1111,10 @@ fn resolve_join_value(column: Column, summary: &PredicateSummary) -> ValueRef {
 /// Fetch `(TableStatistics, column_offset)` for any `ValueRef` that is
 /// backed by a base column. `Derived` values return `None`, forcing
 /// callers to fall back to magic-constant selectivity.
-fn value_column_stats(value: &ValueRef, ctx: &IRContext) -> Option<(crate::ir::statistics::TableStatistics, usize)> {
+fn value_column_stats(
+    value: &ValueRef,
+    ctx: &IRContext,
+) -> Option<(crate::ir::statistics::TableStatistics, usize)> {
     match value {
         ValueRef::Base(column) | ValueRef::ExtractYear(column) => column_stats(ctx, *column),
         ValueRef::Derived(_) => None,
@@ -1194,8 +1243,8 @@ fn hll_join_selectivity(build_cs: &ColumnStatistics, probe_cs: &ColumnStatistics
 /// - Integer types (Int8..Int64, UInt8..UInt64): parsed as integer, cast to f64.
 /// - Float16/Float32/Float64: parsed as f64 directly.
 /// - Decimal128/Decimal256: parsed as f64 (string is already in decimal form).
-/// - Date32: parsed as i32 (days since epoch), cast to f64.
-/// - Date64: parsed as i64 (milliseconds since epoch), cast to f64.
+/// - Date32: parsed from ISO date text to day count, cast to f64.
+/// - Date64: parsed from ISO date text to millisecond count, cast to f64.
 ///
 /// TODO(AC/Yuchen): What to do?
 /// # Unsupported types (returns `None`)
@@ -1221,14 +1270,8 @@ fn parse_stat_value(value: &str, data_type: &DataType) -> Option<f64> {
             // String representation is already in decimal form (e.g. "123.45").
             value.parse::<f64>().ok()
         }
-        DataType::Date32 => {
-            // Days since epoch, stored as integer string.
-            value.parse::<i32>().ok().map(|v| v as f64)
-        }
-        DataType::Date64 => {
-            // Milliseconds since epoch, stored as integer string.
-            value.parse::<i64>().ok().map(|v| v as f64)
-        }
+        DataType::Date32 => date_string_to_days(value).map(|v| v as f64),
+        DataType::Date64 => date_string_to_millis(value).map(|v| v as f64),
         _ => None,
     }
 }
@@ -1241,7 +1284,7 @@ fn parse_stat_value(value: &str, data_type: &DataType) -> Option<f64> {
 ///
 /// # Unsupported types (returns `None`)
 ///
-/// Boolean, Utf8, Utf8View, Date32, Date64, and any null variant.
+/// Boolean, Utf8, Utf8View, and any null variant.
 ///
 /// # Precision
 ///
@@ -1249,8 +1292,6 @@ fn parse_stat_value(value: &str, data_type: &DataType) -> Option<f64> {
 /// For selectivity estimation (inherently approximate), this is negligible.
 /// Decimal types are converted via `value as f64 / 10^scale`.
 ///
-/// TODO: Support Date32/Date64 by converting to days-since-epoch f64,
-/// enabling range queries on date columns.
 fn scalar_value_to_f64(value: &ScalarValue) -> Option<f64> {
     match value {
         ScalarValue::Int8(Some(v)) => Some(*v as f64),
@@ -1264,7 +1305,9 @@ fn scalar_value_to_f64(value: &ScalarValue) -> Option<f64> {
         ScalarValue::Decimal32(Some(v), _, scale) => Some(*v as f64 / 10f64.powi(*scale as i32)),
         ScalarValue::Decimal64(Some(v), _, scale) => Some(*v as f64 / 10f64.powi(*scale as i32)),
         ScalarValue::Decimal128(Some(v), _, scale) => Some(*v as f64 / 10f64.powi(*scale as i32)),
-        _ => None, // Null variants, Boolean, Utf8, Date types
+        ScalarValue::Date32(Some(v)) => Some(*v as f64),
+        ScalarValue::Date64(Some(v)) => Some(*v as f64),
+        _ => None, // Null variants, Boolean, Utf8
     }
 }
 
@@ -1641,9 +1684,9 @@ mod tests {
         catalog::{Catalog, Field, Schema},
         convert::IntoScalar,
         operator::{Remap, join::JoinType},
-        statistics::TableStatistics,
         scalar::{Cast, Function, Literal},
         statistics::ColumnStatistics,
+        statistics::TableStatistics,
         table_ref::TableRef,
     };
     use crate::magic::{MagicCostModel, MemoryCatalog};
@@ -1681,23 +1724,46 @@ mod tests {
     }
 
     #[test]
+    fn parses_canonical_decimal_stat_values() {
+        assert_eq!(
+            super::parse_stat_value("1.00", &DataType::Decimal128(15, 2)),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn parses_iso_date_stat_values_and_years() {
+        assert_eq!(
+            super::parse_stat_value("1992-01-03", &DataType::Date32),
+            Some(8037.0)
+        );
+        assert_eq!(
+            super::parse_year_value("1992-01-03", &DataType::Date32),
+            Some(1992)
+        );
+    }
+
+    #[test]
     fn stacked_filters_backoff_through_project_and_remap() -> crate::error::Result<()> {
         let catalog = MemoryCatalog::new("optd", "public");
         let table_ref = TableRef::bare("t1");
         let schema = int_schema(2);
-        catalog.create_table(table_ref.clone(), schema.clone()).unwrap();
-        catalog.set_table_statistics(
-            table_ref.clone(),
-            TableStatistics {
-                row_count: 1000,
-                column_statistics: vec![
-                    col_stats(10, Some("0"), Some("9")),
-                    col_stats(5, Some("0"), Some("4")),
-                ],
-                size_bytes: None,
-            },
-        )
-        .unwrap();
+        catalog
+            .create_table(table_ref.clone(), schema.clone())
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                table_ref.clone(),
+                TableStatistics {
+                    row_count: 1000,
+                    column_statistics: vec![
+                        col_stats(10, Some("0"), Some("9")),
+                        col_stats(5, Some("0"), Some("4")),
+                    ],
+                    size_bytes: None,
+                },
+            )
+            .unwrap();
 
         let ctx = adv_ctx_with_catalog(catalog);
         let get = ctx.logical_get(table_ref.clone(), None)?.build();
@@ -1728,19 +1794,22 @@ mod tests {
         let catalog = MemoryCatalog::new("optd", "public");
         let table_ref = TableRef::bare("t1");
         let schema = int_schema(2);
-        catalog.create_table(table_ref.clone(), schema.clone()).unwrap();
-        catalog.set_table_statistics(
-            table_ref.clone(),
-            TableStatistics {
-                row_count: 1000,
-                column_statistics: vec![
-                    col_stats(10, Some("0"), Some("9")),
-                    col_stats(10, Some("0"), Some("9")),
-                ],
-                size_bytes: None,
-            },
-        )
-        .unwrap();
+        catalog
+            .create_table(table_ref.clone(), schema.clone())
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                table_ref.clone(),
+                TableStatistics {
+                    row_count: 1000,
+                    column_statistics: vec![
+                        col_stats(10, Some("0"), Some("9")),
+                        col_stats(10, Some("0"), Some("9")),
+                    ],
+                    size_bytes: None,
+                },
+            )
+            .unwrap();
 
         let ctx = adv_ctx_with_catalog(catalog);
         let get = ctx.logical_get(table_ref.clone(), None)?.build();
@@ -1748,9 +1817,16 @@ mod tests {
         let c1 = ctx.col(Some(&table_ref), "c1")?;
         let inner = get
             .with_ctx(&ctx)
-            .select(column_ref(c0).eq(column_ref(c1)).and(column_ref(c1).eq(int32(3))))
+            .select(
+                column_ref(c0)
+                    .eq(column_ref(c1))
+                    .and(column_ref(c1).eq(int32(3))),
+            )
             .build();
-        let outer = inner.with_ctx(&ctx).select(column_ref(c0).lt(int32(2))).build();
+        let outer = inner
+            .with_ctx(&ctx)
+            .select(column_ref(c0).lt(int32(2)))
+            .build();
 
         assert_eq!(outer.cardinality(&ctx).as_f64(), 0.0);
         Ok(())
@@ -1761,26 +1837,36 @@ mod tests {
         let catalog = MemoryCatalog::new("optd", "public");
         let table_ref = TableRef::bare("t1");
         let schema = int_schema(1);
-        catalog.create_table(table_ref.clone(), schema.clone()).unwrap();
-        catalog.set_table_statistics(
-            table_ref.clone(),
-            TableStatistics {
-                row_count: 1000,
-                column_statistics: vec![col_stats(101, Some("0"), Some("100"))],
-                size_bytes: None,
-            },
-        )
-        .unwrap();
+        catalog
+            .create_table(table_ref.clone(), schema.clone())
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                table_ref.clone(),
+                TableStatistics {
+                    row_count: 1000,
+                    column_statistics: vec![col_stats(101, Some("0"), Some("100"))],
+                    size_bytes: None,
+                },
+            )
+            .unwrap();
 
         let ctx = adv_ctx_with_catalog(catalog);
         let get = ctx.logical_get(table_ref.clone(), None)?.build();
-        let projected = ctx.project(get, [column_ref(ctx.col(Some(&table_ref), "c0")?)])?.build();
+        let projected = ctx
+            .project(get, [column_ref(ctx.col(Some(&table_ref), "c0")?)])?
+            .build();
         let aliased = ctx.remap(projected, TableRef::bare("t2"))?.build();
         let t2_c0 = ctx.col(Some(&TableRef::bare("t2")), "c0")?;
-        let predicate = column_ref(t2_c0).lt(int32(0)).or(column_ref(t2_c0).ge(int32(0)));
+        let predicate = column_ref(t2_c0)
+            .lt(int32(0))
+            .or(column_ref(t2_c0).ge(int32(0)));
         let result = aliased.clone().with_ctx(&ctx).select(predicate).build();
 
-        assert_eq!(result.cardinality(&ctx).as_f64(), aliased.cardinality(&ctx).as_f64());
+        assert_eq!(
+            result.cardinality(&ctx).as_f64(),
+            aliased.cardinality(&ctx).as_f64()
+        );
         Ok(())
     }
 
@@ -1793,22 +1879,25 @@ mod tests {
             DataType::Date32,
             false,
         )]));
-        catalog.create_table(table_ref.clone(), schema.clone()).unwrap();
-        catalog.set_table_statistics(
-            table_ref.clone(),
-            TableStatistics {
-                row_count: 1000,
-                column_statistics: vec![ColumnStatistics {
-                    advanced_stats: vec![],
-                    min_value: Some("9131".to_string()),
-                    max_value: Some("9861".to_string()),
-                    null_count: Some(0),
-                    distinct_count: Some(731),
-                }],
-                size_bytes: None,
-            },
-        )
-        .unwrap();
+        catalog
+            .create_table(table_ref.clone(), schema.clone())
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                table_ref.clone(),
+                TableStatistics {
+                    row_count: 1000,
+                    column_statistics: vec![ColumnStatistics {
+                        advanced_stats: vec![],
+                        min_value: Some("1995-01-01".to_string()),
+                        max_value: Some("1997-01-01".to_string()),
+                        null_count: Some(0),
+                        distinct_count: Some(731),
+                    }],
+                    size_bytes: None,
+                },
+            )
+            .unwrap();
 
         let ctx = adv_ctx_with_catalog(catalog);
         let get = ctx.logical_get(table_ref.clone(), None)?.build();
@@ -1827,7 +1916,12 @@ mod tests {
                 .into_scalar()],
             )?
             .build();
-        let year_col = crate::ir::Column(*projected.borrow::<crate::ir::operator::Project>().table_index(), 0);
+        let year_col = crate::ir::Column(
+            *projected
+                .borrow::<crate::ir::operator::Project>()
+                .table_index(),
+            0,
+        );
         let aggregate = projected
             .with_ctx(&ctx)
             .logical_aggregate(std::iter::empty(), [column_ref(year_col)])?
@@ -1846,7 +1940,9 @@ mod tests {
             DataType::Date32,
             false,
         )]));
-        catalog.create_table(table_ref.clone(), schema.clone()).unwrap();
+        catalog
+            .create_table(table_ref.clone(), schema.clone())
+            .unwrap();
         catalog
             .set_table_statistics(
                 table_ref.clone(),
@@ -1854,8 +1950,8 @@ mod tests {
                     row_count: 1000,
                     column_statistics: vec![ColumnStatistics {
                         advanced_stats: vec![],
-                        min_value: Some("9131".to_string()),
-                        max_value: Some("9861".to_string()),
+                        min_value: Some("1995-01-01".to_string()),
+                        max_value: Some("1997-01-01".to_string()),
                         null_count: Some(0),
                         distinct_count: Some(731),
                     }],
@@ -1875,8 +1971,7 @@ mod tests {
                     Arc::new([
                         Cast::new(
                             DataType::Utf8,
-                            Literal::new(ScalarValue::Utf8(Some("YEAR".to_string())))
-                                .into_scalar(),
+                            Literal::new(ScalarValue::Utf8(Some("YEAR".to_string()))).into_scalar(),
                         )
                         .into_scalar(),
                         column_ref(order_date),
@@ -1886,7 +1981,12 @@ mod tests {
                 .into_scalar()],
             )?
             .build();
-        let year_col = Column(*projected.borrow::<crate::ir::operator::Project>().table_index(), 0);
+        let year_col = Column(
+            *projected
+                .borrow::<crate::ir::operator::Project>()
+                .table_index(),
+            0,
+        );
         let aggregate = projected
             .with_ctx(&ctx)
             .logical_aggregate(std::iter::empty(), [column_ref(year_col)])?
@@ -1902,8 +2002,12 @@ mod tests {
         let left_ref = TableRef::bare("t1");
         let right_ref = TableRef::bare("t2");
         let schema = int_schema(1);
-        catalog.create_table(left_ref.clone(), schema.clone()).unwrap();
-        catalog.create_table(right_ref.clone(), schema.clone()).unwrap();
+        catalog
+            .create_table(left_ref.clone(), schema.clone())
+            .unwrap();
+        catalog
+            .create_table(right_ref.clone(), schema.clone())
+            .unwrap();
         catalog
             .set_table_statistics(
                 left_ref.clone(),
@@ -1980,8 +2084,8 @@ mod tests {
                         col_stats(10, Some("0"), Some("9")),
                         ColumnStatistics {
                             advanced_stats: vec![],
-                            min_value: Some("9131".to_string()),
-                            max_value: Some("9861".to_string()),
+                            min_value: Some("1995-01-01".to_string()),
+                            max_value: Some("1997-01-01".to_string()),
                             null_count: Some(0),
                             distinct_count: Some(731),
                         },
@@ -2033,8 +2137,7 @@ mod tests {
                     Function::new_scalar(
                         "date_part",
                         Arc::new([
-                            Literal::new(ScalarValue::Utf8(Some("YEAR".to_string())))
-                                .into_scalar(),
+                            Literal::new(ScalarValue::Utf8(Some("YEAR".to_string()))).into_scalar(),
                             column_ref(order_date),
                         ]),
                         DataType::Int32,
@@ -2049,7 +2152,10 @@ mod tests {
             .with_ctx(&ctx)
             .logical_aggregate(
                 std::iter::empty::<Arc<crate::ir::Scalar>>(),
-                [column_ref(Column(remap_table, 0)), column_ref(Column(remap_table, 1))],
+                [
+                    column_ref(Column(remap_table, 0)),
+                    column_ref(Column(remap_table, 1)),
+                ],
             )?
             .build();
 

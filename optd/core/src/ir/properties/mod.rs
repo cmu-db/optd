@@ -29,7 +29,7 @@ pub use cardinality::*;
 pub use output_columns::OutputColumns;
 pub use predicate_summary::{
     GroupPredicate, PredicateSummary, RangeConstraint, ValueRef, date_days_to_year,
-    date_millis_to_year, derive_value_ref,
+    date_millis_to_year, date_string_to_days, date_string_to_millis, derive_value_ref,
 };
 pub use required::Required;
 pub use tuple_ordering::*;

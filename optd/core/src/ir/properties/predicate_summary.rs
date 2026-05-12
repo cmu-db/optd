@@ -27,9 +27,14 @@ use crate::error::{Result, whatever};
 use crate::ir::{
     Column, DataType, IRContext, Operator, OperatorKind, Scalar, ScalarKind, ScalarValue,
     convert::IntoScalar,
-    operator::{Aggregate, DependentJoin, EnforcerSort, Get, Join, Limit, OrderBy, Project, Remap, Select, Subquery, join::JoinType},
+    operator::{
+        Aggregate, DependentJoin, EnforcerSort, Get, Join, Limit, OrderBy, Project, Remap, Select,
+        Subquery, join::JoinType,
+    },
     properties::{Derive, GetProperty, PropertyMarker},
-    scalar::{BinaryOp, BinaryOpKind, Cast, ColumnRef, Function, List, Literal, NaryOp, NaryOpKind},
+    scalar::{
+        BinaryOp, BinaryOpKind, Cast, ColumnRef, Function, List, Literal, NaryOp, NaryOpKind,
+    },
 };
 use crate::utility::union_find::UnionFind;
 
@@ -462,7 +467,10 @@ impl PropertyMarker for PredicateSummaryProperty {
 }
 
 impl Derive<PredicateSummaryProperty> for Operator {
-    fn derive_by_compute(&self, ctx: &IRContext) -> <PredicateSummaryProperty as PropertyMarker>::Output {
+    fn derive_by_compute(
+        &self,
+        ctx: &IRContext,
+    ) -> <PredicateSummaryProperty as PropertyMarker>::Output {
         match &self.kind {
             // Group placeholders materialize via the memo's cached property.
             // If the cache is empty, we return a default summary — no lineage,
@@ -665,7 +673,9 @@ pub fn ordered_output_columns(op: &Operator, ctx: &IRContext) -> Result<Vec<Colu
             let exprs = agg.exprs().borrow::<List>();
             Ok((0..keys.members().len())
                 .map(|idx| Column(*agg.key_table_index(), idx))
-                .chain((0..exprs.members().len()).map(|idx| Column(*agg.aggregate_table_index(), idx)))
+                .chain(
+                    (0..exprs.members().len()).map(|idx| Column(*agg.aggregate_table_index(), idx)),
+                )
                 .collect())
         }
         OperatorKind::Join(meta) => {
@@ -765,6 +775,20 @@ pub fn date_millis_to_year(millis: i64) -> Option<i32> {
     Some(DateTime::<Utc>::from_timestamp(secs, nanos)?.year())
 }
 
+/// Convert an ISO-8601 date string to a `Date32` day count.
+pub fn date_string_to_days(value: &str) -> Option<i32> {
+    let epoch = NaiveDate::from_ymd_opt(1970, 1, 1)?;
+    let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()?;
+    date.signed_duration_since(epoch).num_days().try_into().ok()
+}
+
+/// Convert an ISO-8601 date string to a `Date64` millisecond count.
+pub fn date_string_to_millis(value: &str) -> Option<i64> {
+    let epoch = NaiveDate::from_ymd_opt(1970, 1, 1)?;
+    let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()?;
+    Some(date.signed_duration_since(epoch).num_milliseconds())
+}
+
 /// Combine the summaries from both join sides and harvest equi-conditions.
 ///
 /// The inner side is folded into a copy of the outer summary, then every
@@ -806,10 +830,7 @@ fn ordered_join_output_columns(
             .collect()),
         JoinType::Inner | JoinType::LeftOuter | JoinType::Single => {
             let inner_columns = ordered_output_columns(inner, ctx)?;
-            Ok(outer_columns
-                .into_iter()
-                .chain(inner_columns)
-                .collect())
+            Ok(outer_columns.into_iter().chain(inner_columns).collect())
         }
     }
 }
@@ -821,7 +842,11 @@ fn split_conjuncts(predicate: Arc<Scalar>) -> Vec<Arc<Scalar>> {
     if let Ok(nary) = predicate.try_borrow::<NaryOp>()
         && nary.op_kind() == &NaryOpKind::And
     {
-        return nary.terms().iter().flat_map(|term| split_conjuncts(term.clone())).collect();
+        return nary
+            .terms()
+            .iter()
+            .flat_map(|term| split_conjuncts(term.clone()))
+            .collect();
     }
     vec![predicate]
 }
@@ -894,7 +919,10 @@ fn extract_range_constraint(
 ) -> Option<(ValueRef, BinaryOpKind, f64)> {
     let binary = term.try_borrow::<BinaryOp>().ok()?;
     let op = *binary.op_kind();
-    if !matches!(op, BinaryOpKind::Lt | BinaryOpKind::Le | BinaryOpKind::Gt | BinaryOpKind::Ge) {
+    if !matches!(
+        op,
+        BinaryOpKind::Lt | BinaryOpKind::Le | BinaryOpKind::Gt | BinaryOpKind::Ge
+    ) {
         return None;
     }
     if let Some(value) = derive_value_ref(binary.lhs(), summary, ctx)
@@ -921,9 +949,31 @@ fn scalar_value_to_f64(scalar: &Scalar) -> Option<f64> {
         ScalarValue::UInt16(Some(value)) => Some(*value as f64),
         ScalarValue::UInt32(Some(value)) => Some(*value as f64),
         ScalarValue::UInt64(Some(value)) => Some(*value as f64),
-        ScalarValue::Decimal32(Some(value), _, scale) => Some(*value as f64 / 10f64.powi(*scale as i32)),
-        ScalarValue::Decimal64(Some(value), _, scale) => Some(*value as f64 / 10f64.powi(*scale as i32)),
-        ScalarValue::Decimal128(Some(value), _, scale) => Some(*value as f64 / 10f64.powi(*scale as i32)),
+        ScalarValue::Decimal32(Some(value), _, scale) => {
+            Some(*value as f64 / 10f64.powi(*scale as i32))
+        }
+        ScalarValue::Decimal64(Some(value), _, scale) => {
+            Some(*value as f64 / 10f64.powi(*scale as i32))
+        }
+        ScalarValue::Decimal128(Some(value), _, scale) => {
+            Some(*value as f64 / 10f64.powi(*scale as i32))
+        }
+        ScalarValue::Date32(Some(value)) => Some(*value as f64),
+        ScalarValue::Date64(Some(value)) => Some(*value as f64),
+        ScalarValue::Boolean(Some(value)) => Some(if *value { 1.0 } else { 0.0 }),
+        // Non-numeric literals (strings, bytes) get a deterministic hash. The
+        // numeric value is **only** used as a key in `literal_equalities` to
+        // detect contradictions (`col = 'A' AND col = 'B'`); the actual
+        // selectivity computation in `value_equality_selectivity` ignores it
+        // and uses `(1 - null_fraction) / NDV` instead. Hashing therefore
+        // gives us correct contradiction detection for two distinct strings
+        // without needing a separate non-numeric storage path.
+        ScalarValue::Utf8(Some(value)) | ScalarValue::Utf8View(Some(value)) => {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            value.hash(&mut hasher);
+            Some(hasher.finish() as f64)
+        }
         _ => None,
     }
 }
@@ -960,18 +1010,20 @@ fn literal_satisfies_range(literal: f64, range: &RangeConstraint) -> bool {
 /// charged a flat fallback selectivity; same-table predicates are routed
 /// into `selectivity_groups` so the group's overall selectivity can apply
 /// the correlation-aware decay (see `summary_selectivity`).
-fn single_group(predicate: &Arc<Scalar>, summary: &PredicateSummary, ctx: &IRContext) -> Option<i64> {
+fn single_group(
+    predicate: &Arc<Scalar>,
+    summary: &PredicateSummary,
+    ctx: &IRContext,
+) -> Option<i64> {
     let used_columns = predicate.used_columns();
-    let mut groups = used_columns
-        .iter()
-        .filter_map(|column| {
-            summary
-                .lineage
-                .get(column)
-                .cloned()
-                .or(Some(ValueRef::Base(*column)))
-                .and_then(|value| derive_value_group(&value, summary, ctx))
-        });
+    let mut groups = used_columns.iter().filter_map(|column| {
+        summary
+            .lineage
+            .get(column)
+            .cloned()
+            .or(Some(ValueRef::Base(*column)))
+            .and_then(|value| derive_value_group(&value, summary, ctx))
+    });
     let group = groups.next()?;
     if groups.all(|candidate| candidate == group) {
         Some(group)
@@ -980,7 +1032,11 @@ fn single_group(predicate: &Arc<Scalar>, summary: &PredicateSummary, ctx: &IRCon
     }
 }
 
-fn derive_value_group(value: &ValueRef, summary: &PredicateSummary, _ctx: &IRContext) -> Option<i64> {
+fn derive_value_group(
+    value: &ValueRef,
+    summary: &PredicateSummary,
+    _ctx: &IRContext,
+) -> Option<i64> {
     summary.canonical_value(value).group_key()
 }
 
@@ -1013,7 +1069,9 @@ fn rewrite_scalar_through_lineage(
                 .iter()
                 .map(|child| rewrite_scalar_through_lineage(child.clone(), summary, ctx))
                 .collect::<Option<Vec<_>>>()?;
-            Some(Arc::new(scalar.clone_with_inputs(Some(Arc::from(rewritten)), None)))
+            Some(Arc::new(
+                scalar.clone_with_inputs(Some(Arc::from(rewritten)), None),
+            ))
         }
     }
 }
@@ -1147,16 +1205,16 @@ fn parse_base_stat_value(value: &str, data_type: &DataType) -> Option<f64> {
         DataType::UInt64 => value.parse::<u64>().ok().map(|value| value as f64),
         DataType::Float16 | DataType::Float32 | DataType::Float64 => value.parse::<f64>().ok(),
         DataType::Decimal128(_, _) | DataType::Decimal256(_, _) => value.parse::<f64>().ok(),
-        DataType::Date32 => value.parse::<i32>().ok().map(|value| value as f64),
-        DataType::Date64 => value.parse::<i64>().ok().map(|value| value as f64),
+        DataType::Date32 => date_string_to_days(value).map(|value| value as f64),
+        DataType::Date64 => date_string_to_millis(value).map(|value| value as f64),
         _ => None,
     }
 }
 
 fn parse_year_stat_value(value: &str, data_type: &DataType) -> Option<i32> {
     match data_type {
-        DataType::Date32 => value.parse::<i32>().ok().and_then(date_days_to_year),
-        DataType::Date64 => value.parse::<i64>().ok().and_then(date_millis_to_year),
+        DataType::Date32 => date_string_to_days(value).and_then(date_days_to_year),
+        DataType::Date64 => date_string_to_millis(value).and_then(date_millis_to_year),
         _ => None,
     }
 }

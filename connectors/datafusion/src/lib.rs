@@ -69,9 +69,15 @@ pub fn create_optd_session_context(
     runtime: Arc<RuntimeEnv>,
 ) -> SessionContext {
     let optd_extension = Arc::new(OptdExtension::default());
+    let optd_config = config
+        .options()
+        .extensions
+        .get::<OptdExtensionConfig>()
+        .cloned()
+        .unwrap_or_default();
 
     let config = config
-        .with_option_extension(OptdExtensionConfig::default())
+        .with_option_extension(optd_config)
         .with_extension(optd_extension)
         .set_bool("optd.optd_enabled", true)
         .set_bool("optd.optd_strict_mode", false);
@@ -223,12 +229,12 @@ impl DataFusionDB {
         Ok(Self { ctx })
     }
 
-    pub async fn new_with_advanced_cardinality() -> Result<Self, DataFusionError> {
+    pub async fn new_with_magic_cardinality() -> Result<Self, DataFusionError> {
         let config_options = ConfigOptions::from_env()?;
         let config = SessionConfig::from(config_options)
             .with_information_schema(true)
             .with_option_extension(OptdExtensionConfig::default())
-            .set_bool("optd.optd_use_advanced_cardinality", true);
+            .set_bool("optd.optd_use_advanced_cardinality", false);
         Self::new_with_session_config(config).await
     }
 
