@@ -1594,7 +1594,7 @@ impl OperatorDisplayFormat for Limit {
             .unwrap_or_else(|| "all".to_string());
         OperatorDisplay {
             kind: "limit".to_string(),
-            title: "Limit".to_string(),
+            title: "τ Limit".to_string(),
             fields: vec![
                 display_scalar_field("fetch", fetch),
                 display_scalar_field("offset", self.offset.to_string()),
@@ -2112,7 +2112,7 @@ mod tests {
 
         let pretty = ctx.pretty();
 
-        assert!(pretty.contains("│ Limit"));
+        assert!(pretty.contains("│ τ Limit"));
         assert!(pretty.contains("│ fetch: 10"));
         assert!(pretty.contains("│ offset: 5"));
         assert!(pretty.contains("│ ⇞ Sort"));
