@@ -3153,7 +3153,9 @@ dependencies = [
  "datafusion-sqllogictest",
  "simple-graph",
  "sqllogictest",
+ "tempfile",
  "tokio",
+ "tpchgen",
 ]
 
 [[package]]
@@ -3465,6 +3467,12 @@ dependencies = [
  "pin-project-lite",
  "tokio",
 ]
+
+[[package]]
+name = "tpchgen"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d651db770ccf53b89dd769ed47899c0c089452e3b725c3c48fbc6a2be579638"
 
 [[package]]
 name = "tracing"

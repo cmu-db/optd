@@ -511,6 +511,10 @@ fn convert_expr(
             expr: convert_expr(&cast.expr, ctx, bindings)?,
             ty: cast.data_type.clone(),
         },
+        DFExpr::Alias(alias) => {
+            // Strip the alias — simple-graph doesn't have named expressions.
+            return convert_expr(&alias.expr, ctx, bindings);
+        }
         DFExpr::Case(Case {
             when_then_expr,
             else_expr,
@@ -557,6 +561,11 @@ fn convert_agg_expr(
     let distinct = params.distinct;
 
     if name == "count" && args.is_empty() {
+        return Ok(AggregateExpr::CountStar);
+    }
+
+    // count(literal) is semantically COUNT(*) — counting rows, not column values.
+    if name == "count" && matches!(args.as_slice(), [DFExpr::Literal(_, _)]) {
         return Ok(AggregateExpr::CountStar);
     }
 

@@ -2,6 +2,7 @@
 
 use datafusion::common::{Column as DFColumn, TableReference};
 use datafusion::datasource::provider_as_source;
+use datafusion::functions_aggregate::count::count_all;
 use datafusion::functions_aggregate::expr_fn::{avg, count, max, min, sum};
 use datafusion::logical_expr::{
     Expr as DFExpr, JoinType as DFJoinType, LogicalPlan, LogicalPlanBuilder, SortExpr,
@@ -76,18 +77,7 @@ async fn convert_operator_inner(
                 .await
                 .map_err(|_| ToDFError::TableNotFound(table_name.clone()))?;
             let schema = provider.schema();
-            let projection: Option<Vec<usize>> = {
-                let indices: Vec<usize> = scan
-                    .columns
-                    .iter()
-                    .filter_map(|col| schema.index_of(&ctx.column(*col).name).ok())
-                    .collect();
-                if indices.len() == schema.fields().len() {
-                    None
-                } else {
-                    Some(indices)
-                }
-            };
+            let projection: Option<Vec<usize>> = None; // let DataFusion prune columns
             Ok(LogicalPlanBuilder::scan(
                 TableReference::bare(table_name),
                 provider_as_source(provider),
@@ -270,10 +260,7 @@ fn convert_expr(expr: simple_graph::Expr, ctx: &QueryContext) -> ToDFResult<DFEx
 
 fn convert_agg_expr(agg: &AggregateExpr, ctx: &QueryContext) -> ToDFResult<DFExpr> {
     match agg {
-        AggregateExpr::CountStar => Ok(count(DFExpr::Literal(
-            datafusion::common::ScalarValue::Int64(Some(1)),
-            None,
-        ))),
+        AggregateExpr::CountStar => Ok(count_all()),
         AggregateExpr::Func { func, arg, .. } => {
             let arg_expr = convert_expr(*arg, ctx)?;
             Ok(match func {
