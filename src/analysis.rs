@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::{
     AggregateExpr, AggregateFunction, Catalog, Column, Expr, ExprData, JoinType, Operator,
-    OperatorData, QueryContext, Scan,
+    OperatorData, QueryContext, Relation, Scan,
 };
 
 /// Result type used by query analyses.
@@ -1115,18 +1115,7 @@ impl Analyzable for ParentOf {
 }
 
 fn relational_inputs(op: Operator, ctx: &QueryContext) -> Vec<Operator> {
-    match op.get(ctx) {
-        OperatorData::Scan(_) | OperatorData::TableFunction(_) => vec![],
-        OperatorData::Selection(d) => vec![d.input],
-        OperatorData::Map(d) => vec![d.input],
-        OperatorData::Sort(d) => vec![d.input],
-        OperatorData::Limit(d) => vec![d.input],
-        OperatorData::Aggregation(d) => vec![d.input],
-        OperatorData::Projection(d) => vec![d.input],
-        OperatorData::Output(d) => vec![d.input],
-        OperatorData::Join(d) => vec![d.outer, d.inner],
-        OperatorData::CrossProduct(d) => vec![d.outer, d.inner],
-    }
+    op.get(ctx).inputs()
 }
 
 #[cfg(test)]

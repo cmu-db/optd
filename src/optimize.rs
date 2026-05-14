@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use crate::{Operator, OptimizerContext};
+use crate::{Operator, OptimizerContext, QueryContext, Relation};
 
 /// Tracks append-only operator replacements for one pass invocation.
 ///
@@ -71,6 +71,134 @@ pub enum PassResult {
 /// A pass that rewrites a full query.
 pub trait QueryPass: Pass {
     fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<PassResult>;
+}
+
+/// Traversal direction for [`OperatorRewrite`] rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    /// Visit children before parents (post-order). Default for most rules.
+    BottomUp,
+    /// Visit parents before children (pre-order).
+    TopDown,
+}
+
+/// Result returned by an [`OperatorRewrite`] rule.
+#[derive(Debug)]
+pub enum Rewrite {
+    /// Leave this operator unchanged.
+    Keep,
+    /// Replace this operator with a new one.
+    Replace(Operator),
+}
+
+/// A local rewrite rule over one operator.
+///
+/// The adaptor owns traversal, input resolution, and rewrite-map updates.
+/// Rules only need to pattern-match and return [`Rewrite::Keep`] or [`Rewrite::Replace`].
+pub trait OperatorRewrite: Pass {
+    /// Traversal order. Defaults to bottom-up.
+    const DIRECTION: Direction = Direction::BottomUp;
+
+    fn rewrite(&mut self, op: Operator, ctx: &mut OptimizerContext) -> OptimizeResult<Rewrite>;
+}
+
+/// Adapts an [`OperatorRewrite`] rule into a [`QueryPass`].
+///
+/// Owns traversal (bottom-up or top-down), resolves operators through the
+/// rewrite map before passing them to the rule, and records replacements.
+pub struct OperatorRewriteAdaptor<R> {
+    rule: R,
+}
+
+impl<R: OperatorRewrite> OperatorRewriteAdaptor<R> {
+    pub fn new(rule: R) -> Self {
+        Self { rule }
+    }
+}
+
+impl<R: OperatorRewrite> Pass for OperatorRewriteAdaptor<R> {
+    fn name(&self) -> &'static str {
+        self.rule.name()
+    }
+}
+
+impl<R: OperatorRewrite> QueryPass for OperatorRewriteAdaptor<R> {
+    fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<PassResult> {
+        let Some(root) = ctx.query.root() else {
+            return Ok(PassResult::Unchanged);
+        };
+
+        let ops = match R::DIRECTION {
+            Direction::BottomUp => collect_post_order(root, &ctx.query, &ctx.rewrites),
+            Direction::TopDown => collect_pre_order(root, &ctx.query, &ctx.rewrites),
+        };
+
+        let mut changed = false;
+        for op in ops {
+            let resolved = ctx.rewrites.resolve(op);
+            match self.rule.rewrite(resolved, ctx)? {
+                Rewrite::Keep => {}
+                Rewrite::Replace(replacement) => {
+                    ctx.rewrites.replace(resolved, replacement);
+                    changed = true;
+                }
+            }
+        }
+
+        Ok(if changed {
+            PassResult::Changed
+        } else {
+            PassResult::Unchanged
+        })
+    }
+}
+
+fn collect_post_order(root: Operator, ctx: &QueryContext, rewrites: &RewriteMap) -> Vec<Operator> {
+    let mut visited = HashSet::new();
+    let mut result = Vec::new();
+    post_order(root, ctx, rewrites, &mut visited, &mut result);
+    result
+}
+
+fn post_order(
+    op: Operator,
+    ctx: &QueryContext,
+    rewrites: &RewriteMap,
+    visited: &mut HashSet<Operator>,
+    result: &mut Vec<Operator>,
+) {
+    let op = rewrites.resolve(op);
+    if !visited.insert(op) {
+        return;
+    }
+    for child in op.get(ctx).inputs() {
+        post_order(child, ctx, rewrites, visited, result);
+    }
+    result.push(op);
+}
+
+fn collect_pre_order(root: Operator, ctx: &QueryContext, rewrites: &RewriteMap) -> Vec<Operator> {
+    let mut visited = HashSet::new();
+    let mut result = Vec::new();
+    pre_order(root, ctx, rewrites, &mut visited, &mut result);
+    result
+}
+
+fn pre_order(
+    op: Operator,
+    ctx: &QueryContext,
+    rewrites: &RewriteMap,
+    visited: &mut HashSet<Operator>,
+    result: &mut Vec<Operator>,
+) {
+    let op = rewrites.resolve(op);
+    if !visited.insert(op) {
+        return;
+    }
+    result.push(op);
+    for child in op.get(ctx).inputs() {
+        pre_order(child, ctx, rewrites, visited, result);
+    }
 }
 
 /// Runs query passes in registration order until no pass reports changes.

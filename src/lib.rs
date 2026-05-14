@@ -23,7 +23,8 @@ pub use display::{
     DisplayNode, DisplayNodeRecord, DisplayPlan, DisplayProperties, DisplayValue,
 };
 pub use optimize::{
-    OptimizeError, OptimizeResult, Pass, PassManager, PassResult, QueryPass, RewriteMap,
+    Direction, OperatorRewrite, OperatorRewriteAdaptor, OptimizeError, OptimizeResult, Pass,
+    PassManager, PassResult, QueryPass, Rewrite, RewriteMap,
 };
 
 /// An opaque reference to a relational operator in a [`QueryContext`].
@@ -1421,7 +1422,7 @@ trait OperatorDisplayFormat {
     fn format(&self, formatter: &QueryFormatter<'_>) -> OperatorDisplay;
 }
 
-trait Relation {
+pub trait Relation {
     fn inputs(&self) -> Vec<Operator> {
         Vec::new()
     }
