@@ -62,5 +62,5 @@ Integration tests currently validate DataFusion consumer interoperability for th
 - [x] Decimal/date/timestamp type coverage complete
 - [x] Cast/conditional expression coverage complete
 - [x] Semi/anti/subquery-lowered semantics covered
-- [ ] TPC-H integration harness added
+- [x] TPC-H integration harness added
 - [ ] Q1–Q22 export+consume matrix green
