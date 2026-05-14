@@ -20,7 +20,7 @@ fn main() {
 
     let Some(query) = tpch_query(args.query) else {
         eprintln!(
-            "unsupported TPC-H query q{}; currently available: q2",
+            "unsupported TPC-H query q{}; currently available: q1-q22",
             args.query
         );
         std::process::exit(2);
