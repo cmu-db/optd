@@ -62,10 +62,54 @@ dependencies = [
 ]
 
 [[package]]
+name = "anstream"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "824a212faf96e9acacdbd09febd34438f8f711fb84e09a8916013cd7815ca28d"
+dependencies = [
+ "anstyle",
+ "anstyle-parse",
+ "anstyle-query",
+ "anstyle-wincon",
+ "colorchoice",
+ "is_terminal_polyfill",
+ "utf8parse",
+]
+
+[[package]]
 name = "anstyle"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
+
+[[package]]
+name = "anstyle-parse"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52ce7f38b242319f7cabaa6813055467063ecdc9d355bbb4ce0c68908cd8130e"
+dependencies = [
+ "utf8parse",
+]
+
+[[package]]
+name = "anstyle-query"
+version = "1.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
+dependencies = [
+ "windows-sys",
+]
+
+[[package]]
+name = "anstyle-wincon"
+version = "3.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
+dependencies = [
+ "anstyle",
+ "once_cell_polyfill",
+ "windows-sys",
+]
 
 [[package]]
 name = "anyhow"
@@ -521,13 +565,59 @@ dependencies = [
 ]
 
 [[package]]
+name = "clap"
+version = "4.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ddb117e43bbf7dacf0a4190fef4d345b9bad68dfc649cb349e7d17d28428e51"
+dependencies = [
+ "clap_builder",
+ "clap_derive",
+]
+
+[[package]]
+name = "clap_builder"
+version = "4.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "714a53001bf66416adb0e2ef5ac857140e7dc3a0c48fb28b2f10762fc4b5069f"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "clap_lex",
+ "strsim",
+]
+
+[[package]]
+name = "clap_derive"
+version = "4.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2ce8604710f6733aa641a2b3731eaa1e8b3d9973d5e3565da11800813f997a9"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "clap_lex"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
+
+[[package]]
+name = "colorchoice"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
+
+[[package]]
 name = "comfy-table"
 version = "7.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "958c5d6ecf1f214b4c2bbbbf6ab9523a864bd136dcf71a7e8904799acfe1ad47"
 dependencies = [
  "unicode-segmentation",
- "unicode-width",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]
@@ -706,13 +796,13 @@ dependencies = [
  "datafusion-sql",
  "flate2",
  "futures",
- "itertools",
+ "itertools 0.14.0",
  "liblzma",
  "log",
  "object_store",
  "parking_lot",
  "parquet",
- "rand",
+ "rand 0.9.4",
  "regex",
  "sqlparser",
  "tempfile",
@@ -740,7 +830,7 @@ dependencies = [
  "datafusion-physical-plan",
  "datafusion-session",
  "futures",
- "itertools",
+ "itertools 0.14.0",
  "log",
  "object_store",
  "parking_lot",
@@ -765,7 +855,7 @@ dependencies = [
  "datafusion-physical-expr-common",
  "datafusion-physical-plan",
  "futures",
- "itertools",
+ "itertools 0.14.0",
  "log",
  "object_store",
 ]
@@ -829,11 +919,11 @@ dependencies = [
  "flate2",
  "futures",
  "glob",
- "itertools",
+ "itertools 0.14.0",
  "liblzma",
  "log",
  "object_store",
- "rand",
+ "rand 0.9.4",
  "tokio",
  "tokio-util",
  "url",
@@ -859,7 +949,7 @@ dependencies = [
  "datafusion-physical-plan",
  "datafusion-session",
  "futures",
- "itertools",
+ "itertools 0.14.0",
  "object_store",
  "tokio",
 ]
@@ -931,7 +1021,7 @@ dependencies = [
  "datafusion-pruning",
  "datafusion-session",
  "futures",
- "itertools",
+ "itertools 0.14.0",
  "log",
  "object_store",
  "parking_lot",
@@ -961,7 +1051,7 @@ dependencies = [
  "log",
  "object_store",
  "parking_lot",
- "rand",
+ "rand 0.9.4",
  "tempfile",
  "url",
 ]
@@ -982,7 +1072,7 @@ dependencies = [
  "datafusion-functions-window-common",
  "datafusion-physical-expr-common",
  "indexmap",
- "itertools",
+ "itertools 0.14.0",
  "paste",
  "recursive",
  "serde_json",
@@ -998,7 +1088,7 @@ dependencies = [
  "arrow",
  "datafusion-common",
  "indexmap",
- "itertools",
+ "itertools 0.14.0",
  "paste",
 ]
 
@@ -1022,11 +1112,11 @@ dependencies = [
  "datafusion-expr-common",
  "datafusion-macros",
  "hex",
- "itertools",
+ "itertools 0.14.0",
  "log",
  "md-5",
  "num-traits",
- "rand",
+ "rand 0.9.4",
  "regex",
  "sha2",
  "unicode-segmentation",
@@ -1085,7 +1175,7 @@ dependencies = [
  "datafusion-functions-aggregate-common",
  "datafusion-macros",
  "datafusion-physical-expr-common",
- "itertools",
+ "itertools 0.14.0",
  "log",
  "paste",
 ]
@@ -1158,7 +1248,7 @@ dependencies = [
  "datafusion-expr-common",
  "datafusion-physical-expr",
  "indexmap",
- "itertools",
+ "itertools 0.14.0",
  "log",
  "recursive",
  "regex",
@@ -1181,7 +1271,7 @@ dependencies = [
  "half",
  "hashbrown 0.16.1",
  "indexmap",
- "itertools",
+ "itertools 0.14.0",
  "parking_lot",
  "paste",
  "petgraph",
@@ -1201,7 +1291,7 @@ dependencies = [
  "datafusion-functions",
  "datafusion-physical-expr",
  "datafusion-physical-expr-common",
- "itertools",
+ "itertools 0.14.0",
 ]
 
 [[package]]
@@ -1217,7 +1307,7 @@ dependencies = [
  "datafusion-expr-common",
  "hashbrown 0.16.1",
  "indexmap",
- "itertools",
+ "itertools 0.14.0",
  "parking_lot",
 ]
 
@@ -1236,7 +1326,7 @@ dependencies = [
  "datafusion-physical-expr-common",
  "datafusion-physical-plan",
  "datafusion-pruning",
- "itertools",
+ "itertools 0.14.0",
  "recursive",
 ]
 
@@ -1264,7 +1354,7 @@ dependencies = [
  "half",
  "hashbrown 0.16.1",
  "indexmap",
- "itertools",
+ "itertools 0.14.0",
  "log",
  "parking_lot",
  "pin-project-lite",
@@ -1284,7 +1374,7 @@ dependencies = [
  "datafusion-physical-expr",
  "datafusion-physical-expr-common",
  "datafusion-physical-plan",
- "itertools",
+ "itertools 0.14.0",
  "log",
 ]
 
@@ -1331,7 +1421,7 @@ dependencies = [
  "chrono",
  "datafusion",
  "half",
- "itertools",
+ "itertools 0.14.0",
  "object_store",
  "pbjson-types",
  "prost",
@@ -1369,10 +1459,42 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
+name = "educe"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d7bc049e1bd8cdeb31b68bbd586a9464ecf9f3944af3958a7a9d0f8b9799417"
+dependencies = [
+ "enum-ordinalize",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
+
+[[package]]
+name = "enum-ordinalize"
+version = "4.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a1091a7bb1f8f2c4b28f1fe2cef4980ca2d410a3d727d67ecc3178c9b0800f0"
+dependencies = [
+ "enum-ordinalize-derive",
+]
+
+[[package]]
+name = "enum-ordinalize-derive"
+version = "4.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ca9601fb2d62598ee17836250842873a413586e5d7ed88b356e38ddbb0ec631"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "equivalent"
@@ -1389,6 +1511,12 @@ dependencies = [
  "libc",
  "windows-sys",
 ]
+
+[[package]]
+name = "escape8259"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5692dd7b5a1978a5aeb0ce83b7655c58ca8efdcb79d21036ea249da95afec2c6"
 
 [[package]]
 name = "fastrand"
@@ -1448,6 +1576,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "fs-err"
+version = "3.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73fde052dbfc920003cfd2c8e2c6e6d4cc7c1091538c3a24226cec0665ab08c0"
+dependencies = [
+ "autocfg",
 ]
 
 [[package]]
@@ -1814,6 +1951,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8bb03732005da905c88227371639bf1ad885cc712789c011c31c5fb3ab3ccf02"
 
 [[package]]
+name = "is_terminal_polyfill"
+version = "1.70.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
+
+[[package]]
+name = "itertools"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itertools"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1952,6 +2104,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
+name = "libtest-mimic"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14e6ba06f0ade6e504aff834d7c34298e5155c6baca353cc6a4aaff2f9fd7f33"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "clap",
+ "escape8259",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2078,7 +2242,7 @@ dependencies = [
  "futures",
  "http",
  "humantime",
- "itertools",
+ "itertools 0.14.0",
  "parking_lot",
  "percent-encoding",
  "thiserror",
@@ -2097,6 +2261,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
+name = "once_cell_polyfill"
+version = "1.70.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
+
+[[package]]
 name = "ordered-float"
 version = "2.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2104,6 +2274,12 @@ checksum = "68f19d67e5a2795c94e73e0bb1cc1a7edeb2e28efd39e2e1c9b7a40c1108b11c"
 dependencies = [
  "num-traits",
 ]
+
+[[package]]
+name = "owo-colors"
+version = "4.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d211803b9b6b570f68772237e415a029d5a50c65d382910b879fb19d3271f94d"
 
 [[package]]
 name = "parking_lot"
@@ -2188,7 +2364,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "af22d08a625a2213a78dbb0ffa253318c5c79ce3133d32d296655a7bdfb02095"
 dependencies = [
  "heck",
- "itertools",
+ "itertools 0.14.0",
  "prost",
  "prost-types",
 ]
@@ -2310,7 +2486,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "343d3bd7056eda839b03204e68deff7d1b13aba7af2b2fd16890697274262ee7"
 dependencies = [
  "heck",
- "itertools",
+ "itertools 0.14.0",
  "log",
  "multimap",
  "petgraph",
@@ -2329,7 +2505,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
 dependencies = [
  "anyhow",
- "itertools",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn",
@@ -2377,12 +2553,33 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rand"
+version = "0.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
+dependencies = [
+ "libc",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.4",
+]
+
+[[package]]
+name = "rand"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "44c5af06bb1b7d3216d91932aed5265164bf384dc89cd6ba05cf59a35f5f76ea"
 dependencies = [
- "rand_chacha",
- "rand_core",
+ "rand_chacha 0.9.0",
+ "rand_core 0.9.5",
+]
+
+[[package]]
+name = "rand_chacha"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
+dependencies = [
+ "ppv-lite86",
+ "rand_core 0.6.4",
 ]
 
 [[package]]
@@ -2392,7 +2589,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
 dependencies = [
  "ppv-lite86",
- "rand_core",
+ "rand_core 0.9.5",
+]
+
+[[package]]
+name = "rand_core"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
+dependencies = [
+ "getrandom 0.2.17",
 ]
 
 [[package]]
@@ -2671,16 +2877,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
+name = "similar"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
+
+[[package]]
 name = "simple-graph"
 version = "0.1.0"
 dependencies = [
  "anstyle",
  "arrow-schema 58.3.0",
+ "async-trait",
  "datafusion",
  "datafusion-substrait",
  "prost",
  "serde",
  "serde_json",
+ "sqllogictest",
  "substrait 0.63.0",
  "tokio",
 ]
@@ -2708,6 +2922,31 @@ name = "snap"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b6b67fb9a61334225b5b790716f609cd58395f895b3fe8b328786812a40bc3b"
+
+[[package]]
+name = "sqllogictest"
+version = "0.29.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d03b2262a244037b0b510edbd25a8e6c9fb8d73ee0237fc6cc95a54c16f94a82"
+dependencies = [
+ "async-trait",
+ "educe",
+ "fs-err",
+ "futures",
+ "glob",
+ "humantime",
+ "itertools 0.13.0",
+ "libtest-mimic",
+ "md-5",
+ "owo-colors",
+ "rand 0.8.6",
+ "regex",
+ "similar",
+ "subst",
+ "tempfile",
+ "thiserror",
+ "tracing",
+]
 
 [[package]]
 name = "sqlparser"
@@ -2748,6 +2987,22 @@ dependencies = [
  "libc",
  "psm",
  "windows-sys",
+]
+
+[[package]]
+name = "strsim"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
+
+[[package]]
+name = "subst"
+version = "0.3.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a9a86e5144f63c2d18334698269a8bfae6eece345c70b64821ea5b35054ec99"
+dependencies = [
+ "memchr",
+ "unicode-width 0.1.14",
 ]
 
 [[package]]
@@ -3028,6 +3283,12 @@ checksum = "9629274872b2bfaf8d66f5f15725007f635594914870f65218920345aa11aa8c"
 
 [[package]]
 name = "unicode-width"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af"
+
+[[package]]
+name = "unicode-width"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
@@ -3061,6 +3322,12 @@ name = "utf8_iter"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
+
+[[package]]
+name = "utf8parse"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"

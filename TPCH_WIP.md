@@ -13,7 +13,7 @@ Implemented exporter coverage:
 - `TableFunction` for representable local-file reads
 - scalar expressions (`Literal`, `ColumnRef`, `Unary`, `Binary`, `Nary`, `Cast`, `CaseWhen`, `ScalarFunction`) with conservative output typing
 
-Integration tests currently validate DataFusion consumer interoperability for these operators.
+Integration tests currently validate DataFusion consumer interoperability for these operators. A narrow sqllogictest harness also validates DataFusion SQL plans after a Substrait export/import round trip with logical optimizer rules disabled.
 
 ## Gaps Most Likely to Block TPC-H
 
