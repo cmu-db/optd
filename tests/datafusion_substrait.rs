@@ -88,6 +88,36 @@ async fn datafusion_consumes_join_substrait_plan_produced_by_simple_graph() {
 }
 
 #[tokio::test]
+async fn datafusion_consumes_semi_and_anti_join_plans_produced_by_simple_graph() {
+    let df_ctx = users_orders_session_context();
+
+    for join_type in [
+        simple_graph::JoinType::LeftSemi,
+        simple_graph::JoinType::LeftAnti,
+    ] {
+        let query = semi_or_anti_joined_users_orders_query(join_type);
+        let plan = substrait::to_plan(&query).unwrap();
+
+        let mut bytes = Vec::new();
+        plan.encode(&mut bytes).unwrap();
+
+        let df_substrait_plan = datafusion_substrait::serializer::deserialize_bytes(bytes)
+            .await
+            .unwrap();
+        let logical_plan = datafusion_substrait::logical_plan::consumer::from_substrait_plan(
+            &df_ctx.state(),
+            &df_substrait_plan,
+        )
+        .await
+        .unwrap();
+
+        let fields = logical_plan.schema().fields();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].name(), "id");
+    }
+}
+
+#[tokio::test]
 async fn datafusion_consumes_cross_substrait_plan_produced_by_simple_graph() {
     let df_ctx = users_orders_session_context();
     let query = crossed_users_orders_query();
@@ -295,6 +325,44 @@ fn joined_users_orders_query() -> QueryContext {
     }));
     let projection = ctx.add_operator(OperatorData::Projection(Projection {
         columns: vec![user_id, order_id],
+        input: join,
+    }));
+    let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+    ctx.set_root(output);
+
+    ctx
+}
+
+fn semi_or_anti_joined_users_orders_query(join_type: simple_graph::JoinType) -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let user_id = ctx.add_column(ColumnData::new("id", arrow_schema::DataType::Int64));
+    let user_age = ctx.add_column(ColumnData::new("age", arrow_schema::DataType::Int64));
+    let order_id = ctx.add_column(ColumnData::new("order_id", arrow_schema::DataType::Int64));
+    let order_user_id = ctx.add_column(ColumnData::new("user_id", arrow_schema::DataType::Int64));
+
+    let users = ctx.add_operator(OperatorData::Scan(Scan {
+        table: TableRef::bare("users"),
+        columns: vec![user_id, user_age],
+    }));
+    let orders = ctx.add_operator(OperatorData::Scan(Scan {
+        table: TableRef::bare("orders"),
+        columns: vec![order_id, order_user_id],
+    }));
+    let left = ctx.add_expr(ExprData::ColumnRef(user_id));
+    let right = ctx.add_expr(ExprData::ColumnRef(order_user_id));
+    let predicate = ctx.add_expr(ExprData::Binary {
+        op: simple_graph::BinaryOp::Eq,
+        left,
+        right,
+    });
+    let join = ctx.add_operator(OperatorData::Join(simple_graph::Join {
+        join_type,
+        on: predicate,
+        outer: users,
+        inner: orders,
+    }));
+    let projection = ctx.add_operator(OperatorData::Projection(Projection {
+        columns: vec![user_id],
         input: join,
     }));
     let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));

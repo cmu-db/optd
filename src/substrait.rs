@@ -355,6 +355,10 @@ impl<'a> Exporter<'a> {
         scope.extend(right.columns.iter().copied());
         let condition = self.export_expr(join.on, &scope)?;
         let join_type = join_type_to_substrait(join.join_type.clone())? as i32;
+        let columns = match join.join_type {
+            JoinType::LeftSemi | JoinType::LeftAnti => left.columns.clone(),
+            _ => scope.clone(),
+        };
         let rel = Rel {
             rel_type: Some(rel::RelType::Join(Box::new(JoinRel {
                 common: Some(direct_common()),
@@ -366,10 +370,7 @@ impl<'a> Exporter<'a> {
                 advanced_extension: None,
             }))),
         };
-        Ok(ExportedRelation {
-            rel,
-            columns: scope,
-        })
+        Ok(ExportedRelation { rel, columns })
     }
 
     fn export_cross(&mut self, cross: &CrossProduct) -> Result<ExportedRelation, SubstraitError> {
@@ -906,6 +907,8 @@ fn sort_direction_to_substrait(
 fn join_type_to_substrait(join_type: JoinType) -> Result<join_rel::JoinType, SubstraitError> {
     match join_type {
         JoinType::Inner => Ok(join_rel::JoinType::Inner),
+        JoinType::LeftSemi => Ok(join_rel::JoinType::LeftSemi),
+        JoinType::LeftAnti => Ok(join_rel::JoinType::LeftAnti),
         JoinType::LeftOuter => Ok(join_rel::JoinType::Left),
         JoinType::RightOuter => Ok(join_rel::JoinType::Right),
         JoinType::FullOuter => Ok(join_rel::JoinType::Outer),
@@ -1364,21 +1367,16 @@ impl Converter {
         };
 
         let join_type = convert_join_type(join.r#type)?;
+        let columns = join_output_columns(&join_type, &left.columns, &scope);
         let operator = self.ctx.add_operator(OperatorData::Join(Join {
-            join_type,
+            join_type: join_type.clone(),
             on,
             outer: left.operator,
             inner: right.operator,
         }));
         let operator =
             self.apply_post_join_filter(operator, &scope, join.post_join_filter.as_deref())?;
-        self.apply_common(
-            project_common_join(join),
-            Relation {
-                operator,
-                columns: scope,
-            },
-        )
+        self.apply_common(project_common_join(join), Relation { operator, columns })
     }
 
     fn convert_hash_join(&mut self, join: &HashJoinRel) -> Result<Relation, SubstraitError> {
@@ -1402,21 +1400,16 @@ impl Converter {
             &right.columns,
         )?;
         let join_type = convert_hash_join_type(join.r#type)?;
+        let columns = join_output_columns(&join_type, &left.columns, &scope);
         let operator = self.ctx.add_operator(OperatorData::Join(Join {
-            join_type,
+            join_type: join_type.clone(),
             on,
             outer: left.operator,
             inner: right.operator,
         }));
         let operator =
             self.apply_post_join_filter(operator, &scope, join.post_join_filter.as_deref())?;
-        self.apply_common(
-            join.common.as_ref(),
-            Relation {
-                operator,
-                columns: scope,
-            },
-        )
+        self.apply_common(join.common.as_ref(), Relation { operator, columns })
     }
 
     fn convert_merge_join(&mut self, join: &MergeJoinRel) -> Result<Relation, SubstraitError> {
@@ -1440,21 +1433,16 @@ impl Converter {
             &right.columns,
         )?;
         let join_type = convert_merge_join_type(join.r#type)?;
+        let columns = join_output_columns(&join_type, &left.columns, &scope);
         let operator = self.ctx.add_operator(OperatorData::Join(Join {
-            join_type,
+            join_type: join_type.clone(),
             on,
             outer: left.operator,
             inner: right.operator,
         }));
         let operator =
             self.apply_post_join_filter(operator, &scope, join.post_join_filter.as_deref())?;
-        self.apply_common(
-            join.common.as_ref(),
-            Relation {
-                operator,
-                columns: scope,
-            },
-        )
+        self.apply_common(join.common.as_ref(), Relation { operator, columns })
     }
 
     fn convert_nested_loop_join(
@@ -1480,19 +1468,14 @@ impl Converter {
                 .add_expr(ExprData::Literal(ScalarValue::Boolean(true)))
         };
         let join_type = convert_nested_loop_join_type(join.r#type)?;
+        let columns = join_output_columns(&join_type, &left.columns, &scope);
         let operator = self.ctx.add_operator(OperatorData::Join(Join {
-            join_type,
+            join_type: join_type.clone(),
             on,
             outer: left.operator,
             inner: right.operator,
         }));
-        self.apply_common(
-            join.common.as_ref(),
-            Relation {
-                operator,
-                columns: scope,
-            },
-        )
+        self.apply_common(join.common.as_ref(), Relation { operator, columns })
     }
 
     fn convert_cross(&mut self, cross: &CrossRel) -> Result<Relation, SubstraitError> {
@@ -2100,6 +2083,17 @@ fn project_common_join(join: &JoinRel) -> Option<&RelCommon> {
     join.common.as_ref()
 }
 
+fn join_output_columns(
+    join_type: &JoinType,
+    left: &[Column],
+    full_scope: &[Column],
+) -> Vec<Column> {
+    match join_type {
+        JoinType::LeftSemi | JoinType::LeftAnti => left.to_vec(),
+        _ => full_scope.to_vec(),
+    }
+}
+
 fn convert_join_type(join_type: i32) -> Result<JoinType, SubstraitError> {
     match join_rel::JoinType::try_from(join_type).ok() {
         Some(join_rel::JoinType::Inner) => Ok(JoinType::Inner),
@@ -2109,15 +2103,11 @@ fn convert_join_type(join_type: i32) -> Result<JoinType, SubstraitError> {
         Some(join_rel::JoinType::LeftSingle) | Some(join_rel::JoinType::RightSingle) => {
             Ok(JoinType::Single)
         }
-        Some(join_rel::JoinType::LeftSemi) => {
-            Err(SubstraitError::UnsupportedJoin("left semi join"))
-        }
+        Some(join_rel::JoinType::LeftSemi) => Ok(JoinType::LeftSemi),
         Some(join_rel::JoinType::RightSemi) => {
             Err(SubstraitError::UnsupportedJoin("right semi join"))
         }
-        Some(join_rel::JoinType::LeftAnti) => {
-            Err(SubstraitError::UnsupportedJoin("left anti join"))
-        }
+        Some(join_rel::JoinType::LeftAnti) => Ok(JoinType::LeftAnti),
         Some(join_rel::JoinType::RightAnti) => {
             Err(SubstraitError::UnsupportedJoin("right anti join"))
         }
@@ -2139,15 +2129,11 @@ fn convert_hash_join_type(join_type: i32) -> Result<JoinType, SubstraitError> {
         Some(hash_join_rel::JoinType::LeftSingle) | Some(hash_join_rel::JoinType::RightSingle) => {
             Ok(JoinType::Single)
         }
-        Some(hash_join_rel::JoinType::LeftSemi) => {
-            Err(SubstraitError::UnsupportedJoin("left semi join"))
-        }
+        Some(hash_join_rel::JoinType::LeftSemi) => Ok(JoinType::LeftSemi),
         Some(hash_join_rel::JoinType::RightSemi) => {
             Err(SubstraitError::UnsupportedJoin("right semi join"))
         }
-        Some(hash_join_rel::JoinType::LeftAnti) => {
-            Err(SubstraitError::UnsupportedJoin("left anti join"))
-        }
+        Some(hash_join_rel::JoinType::LeftAnti) => Ok(JoinType::LeftAnti),
         Some(hash_join_rel::JoinType::RightAnti) => {
             Err(SubstraitError::UnsupportedJoin("right anti join"))
         }
@@ -2168,15 +2154,11 @@ fn convert_merge_join_type(join_type: i32) -> Result<JoinType, SubstraitError> {
         Some(merge_join_rel::JoinType::Outer) => Ok(JoinType::FullOuter),
         Some(merge_join_rel::JoinType::LeftSingle)
         | Some(merge_join_rel::JoinType::RightSingle) => Ok(JoinType::Single),
-        Some(merge_join_rel::JoinType::LeftSemi) => {
-            Err(SubstraitError::UnsupportedJoin("left semi join"))
-        }
+        Some(merge_join_rel::JoinType::LeftSemi) => Ok(JoinType::LeftSemi),
         Some(merge_join_rel::JoinType::RightSemi) => {
             Err(SubstraitError::UnsupportedJoin("right semi join"))
         }
-        Some(merge_join_rel::JoinType::LeftAnti) => {
-            Err(SubstraitError::UnsupportedJoin("left anti join"))
-        }
+        Some(merge_join_rel::JoinType::LeftAnti) => Ok(JoinType::LeftAnti),
         Some(merge_join_rel::JoinType::RightAnti) => {
             Err(SubstraitError::UnsupportedJoin("right anti join"))
         }
@@ -2197,15 +2179,11 @@ fn convert_nested_loop_join_type(join_type: i32) -> Result<JoinType, SubstraitEr
         Some(nested_loop_join_rel::JoinType::Outer) => Ok(JoinType::FullOuter),
         Some(nested_loop_join_rel::JoinType::LeftSingle)
         | Some(nested_loop_join_rel::JoinType::RightSingle) => Ok(JoinType::Single),
-        Some(nested_loop_join_rel::JoinType::LeftSemi) => {
-            Err(SubstraitError::UnsupportedJoin("left semi join"))
-        }
+        Some(nested_loop_join_rel::JoinType::LeftSemi) => Ok(JoinType::LeftSemi),
         Some(nested_loop_join_rel::JoinType::RightSemi) => {
             Err(SubstraitError::UnsupportedJoin("right semi join"))
         }
-        Some(nested_loop_join_rel::JoinType::LeftAnti) => {
-            Err(SubstraitError::UnsupportedJoin("left anti join"))
-        }
+        Some(nested_loop_join_rel::JoinType::LeftAnti) => Ok(JoinType::LeftAnti),
         Some(nested_loop_join_rel::JoinType::RightAnti) => {
             Err(SubstraitError::UnsupportedJoin("right anti join"))
         }
@@ -2964,6 +2942,54 @@ mod tests {
     }
 
     #[test]
+    fn exports_left_semi_and_anti_joins_as_join_rel() {
+        for (join_type, expected) in [
+            (JoinType::LeftSemi, join_rel::JoinType::LeftSemi),
+            (JoinType::LeftAnti, join_rel::JoinType::LeftAnti),
+        ] {
+            let mut ctx = QueryContext::new();
+            let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
+            let order_user_id = ctx.add_column(ColumnData::new("order_user_id", DataType::Int64));
+            let users = ctx.add_operator(OperatorData::Scan(Scan {
+                table: TableRef::bare("users"),
+                columns: vec![user_id],
+            }));
+            let orders = ctx.add_operator(OperatorData::Scan(Scan {
+                table: TableRef::bare("orders"),
+                columns: vec![order_user_id],
+            }));
+            let left_ref = ctx.add_expr(ExprData::ColumnRef(user_id));
+            let right_ref = ctx.add_expr(ExprData::ColumnRef(order_user_id));
+            let on = ctx.add_expr(ExprData::Binary {
+                op: BinaryOp::Eq,
+                left: left_ref,
+                right: right_ref,
+            });
+            let join = ctx.add_operator(OperatorData::Join(Join {
+                join_type,
+                on,
+                outer: users,
+                inner: orders,
+            }));
+            let output = ctx.add_operator(OperatorData::Output(Output { input: join }));
+            ctx.set_root(output);
+
+            let plan = to_plan(&ctx).expect("query should export");
+            let Some(plan_rel::RelType::Root(root)) = plan.relations[0].rel_type.as_ref() else {
+                panic!("plan should export a root")
+            };
+            let Some(Rel {
+                rel_type: Some(rel::RelType::Join(join)),
+            }) = root.input.as_ref()
+            else {
+                panic!("root should read from join")
+            };
+            assert_eq!(join.r#type, expected as i32);
+            assert_eq!(root.names, vec!["user_id".to_string()]);
+        }
+    }
+
+    #[test]
     fn exports_cross_product_as_cross_rel() {
         let mut ctx = QueryContext::new();
         let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
@@ -3590,6 +3616,39 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn imports_hash_left_semi_and_anti_joins_as_logical_join() {
+        for (substrait_join_type, expected_join_type) in [
+            (hash_join_rel::JoinType::LeftSemi, JoinType::LeftSemi),
+            (hash_join_rel::JoinType::LeftAnti, JoinType::LeftAnti),
+        ] {
+            let hash_join = Rel {
+                rel_type: Some(rel::RelType::HashJoin(Box::new(HashJoinRel {
+                    common: None,
+                    left: Some(Box::new(named_read("users", &["user_id"]))),
+                    right: Some(Box::new(named_read("orders", &["order_user_id"]))),
+                    left_keys: Vec::new(),
+                    right_keys: Vec::new(),
+                    keys: vec![comparison_key(0, 0)],
+                    post_join_filter: None,
+                    r#type: substrait_join_type as i32,
+                    build_input: hash_join_rel::BuildInput::Right as i32,
+                    advanced_extension: None,
+                }))),
+            };
+
+            let ctx = from_rel(&hash_join).expect("relation should import");
+            let OperatorData::Output(output) = ctx.operator(ctx.root().unwrap()) else {
+                panic!("root should be output");
+            };
+            let OperatorData::Join(join) = ctx.operator(output.input) else {
+                panic!("hash join should lower to logical join");
+            };
+
+            assert_eq!(join.join_type, expected_join_type);
+        }
     }
 
     #[test]

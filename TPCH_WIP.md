@@ -11,7 +11,7 @@ Implemented exporter coverage:
 - `Sort`, `Limit`
 - `Aggregation`
 - `TableFunction` for representable local-file reads
-- scalar expressions (`Literal`, `ColumnRef`, `Unary`, `Binary`, `Nary`, `ScalarFunction`) with conservative output typing
+- scalar expressions (`Literal`, `ColumnRef`, `Unary`, `Binary`, `Nary`, `Cast`, `CaseWhen`, `ScalarFunction`) with conservative output typing
 
 Integration tests currently validate DataFusion consumer interoperability for these operators.
 
@@ -61,6 +61,6 @@ Integration tests currently validate DataFusion consumer interoperability for th
 
 - [x] Decimal/date/timestamp type coverage complete
 - [x] Cast/conditional expression coverage complete
-- [ ] Semi/anti/subquery-lowered semantics covered
+- [x] Semi/anti/subquery-lowered semantics covered
 - [ ] TPC-H integration harness added
 - [ ] Q1–Q22 export+consume matrix green

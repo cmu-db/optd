@@ -205,6 +205,8 @@ pub struct Output {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum JoinType {
     Inner,
+    LeftSemi,
+    LeftAnti,
     LeftOuter,
     RightOuter,
     FullOuter,
@@ -216,6 +218,8 @@ impl std::fmt::Display for JoinType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             JoinType::Inner => f.write_str("Inner"),
+            JoinType::LeftSemi => f.write_str("LeftSemi"),
+            JoinType::LeftAnti => f.write_str("LeftAnti"),
             JoinType::LeftOuter => f.write_str("LeftOuter"),
             JoinType::RightOuter => f.write_str("RightOuter"),
             JoinType::FullOuter => f.write_str("FullOuter"),
@@ -1093,6 +1097,8 @@ impl<'a> QueryFormatter<'a> {
     fn format_join_op(&self, join_type: &JoinType) -> &'static str {
         match join_type {
             JoinType::Inner => "⋈",
+            JoinType::LeftSemi => "⋉",
+            JoinType::LeftAnti => "▷",
             JoinType::LeftOuter => "⟕",
             JoinType::RightOuter => "⟖",
             JoinType::FullOuter => "⟗",

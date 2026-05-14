@@ -640,7 +640,9 @@ fn output_column_nullability(
                     JoinType::LeftOuter | JoinType::FullOuter | JoinType::Single => true,
                     _ => nullable,
                 };
-                push_unique_nullability(&mut columns, column, nullable);
+                if !matches!(data.join_type, JoinType::LeftSemi | JoinType::LeftAnti) {
+                    push_unique_nullability(&mut columns, column, nullable);
+                }
             }
 
             if let JoinType::Mark(column) = data.join_type {
@@ -899,7 +901,9 @@ impl OperatorAnalysis for AvailableColumns {
             }
             OperatorData::Join(data) => {
                 let mut columns = analyses.get::<AvailableColumns>(ctx, data.outer)?;
-                columns.extend(analyses.get::<AvailableColumns>(ctx, data.inner)?);
+                if !matches!(data.join_type, JoinType::LeftSemi | JoinType::LeftAnti) {
+                    columns.extend(analyses.get::<AvailableColumns>(ctx, data.inner)?);
+                }
                 columns.extend(analyses.get::<CreatedColumns>(ctx, operator)?);
                 Ok(columns)
             }
