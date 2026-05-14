@@ -11,7 +11,7 @@ use substrait::proto::{
     NamedStruct, NestedLoopJoinRel, Plan, PlanRel, ProjectRel, ReadRel, Rel, RelCommon, SortField,
     SortRel, Type, aggregate_function, aggregate_rel, comparison_join_key, expression, fetch_rel,
     function_argument, hash_join_rel, join_rel, merge_join_rel, nested_loop_join_rel, plan_rel,
-    read_rel, rel, sort_field, r#type,
+    read_rel, rel, rel_common, sort_field, r#type,
 };
 
 use crate::{
@@ -50,6 +50,14 @@ pub fn from_rel_with_catalog(
 ) -> Result<QueryContext, SubstraitError> {
     let empty = Plan::default();
     Converter::with_catalog(&empty, catalog).convert_standalone_rel(rel)
+}
+
+/// Converts this crate's relational IR into a Substrait protobuf plan.
+///
+/// The exporter starts with the same conservative subset used by the interop
+/// tests: output roots, projections, and named table scans.
+pub fn to_plan(ctx: &QueryContext) -> Result<Plan, SubstraitError> {
+    Exporter::new(ctx).export_plan()
 }
 
 /// Error produced while importing a Substrait plan.
@@ -131,6 +139,192 @@ struct Converter {
     functions: HashMap<u32, String>,
     next_computed_column: usize,
     catalog: Option<Arc<dyn Catalog>>,
+}
+
+#[derive(Debug, Clone)]
+struct ExportedRelation {
+    rel: Rel,
+    columns: Vec<Column>,
+}
+
+struct Exporter<'a> {
+    ctx: &'a QueryContext,
+}
+
+impl<'a> Exporter<'a> {
+    fn new(ctx: &'a QueryContext) -> Self {
+        Self { ctx }
+    }
+
+    fn export_plan(self) -> Result<Plan, SubstraitError> {
+        let root = self.ctx.root().ok_or(SubstraitError::EmptyPlan)?;
+        let exported = self.export_operator(root)?;
+        let names = exported
+            .columns
+            .iter()
+            .map(|column| self.ctx.column(*column).name.clone())
+            .collect();
+
+        Ok(Plan {
+            relations: vec![PlanRel {
+                rel_type: Some(plan_rel::RelType::Root(proto::RelRoot {
+                    input: Some(exported.rel),
+                    names,
+                })),
+            }],
+            ..Plan::default()
+        })
+    }
+
+    fn export_operator(&self, operator: Operator) -> Result<ExportedRelation, SubstraitError> {
+        match self.ctx.operator(operator) {
+            OperatorData::Output(output) => self.export_operator(output.input),
+            OperatorData::Scan(scan) => self.export_scan(scan),
+            OperatorData::Projection(projection) => self.export_projection(projection),
+            OperatorData::Selection(_) => Err(SubstraitError::UnsupportedRel("Selection export")),
+            OperatorData::Map(_) => Err(SubstraitError::UnsupportedRel("Map export")),
+            OperatorData::TableFunction(_) => {
+                Err(SubstraitError::UnsupportedRel("TableFunction export"))
+            }
+            OperatorData::Join(_) => Err(SubstraitError::UnsupportedRel("Join export")),
+            OperatorData::CrossProduct(_) => {
+                Err(SubstraitError::UnsupportedRel("CrossProduct export"))
+            }
+            OperatorData::Sort(_) => Err(SubstraitError::UnsupportedRel("Sort export")),
+            OperatorData::Limit(_) => Err(SubstraitError::UnsupportedRel("Limit export")),
+            OperatorData::Aggregation(_) => {
+                Err(SubstraitError::UnsupportedRel("Aggregation export"))
+            }
+        }
+    }
+
+    fn export_scan(&self, scan: &Scan) -> Result<ExportedRelation, SubstraitError> {
+        let columns = scan.columns.clone();
+        let rel = Rel {
+            rel_type: Some(rel::RelType::Read(Box::new(ReadRel {
+                common: Some(direct_common()),
+                base_schema: Some(self.export_named_struct(&columns)?),
+                filter: None,
+                best_effort_filter: None,
+                projection: None,
+                advanced_extension: None,
+                read_type: Some(read_rel::ReadType::NamedTable(read_rel::NamedTable {
+                    names: table_ref_names(&scan.table),
+                    advanced_extension: None,
+                })),
+            }))),
+        };
+        Ok(ExportedRelation { rel, columns })
+    }
+
+    fn export_projection(
+        &self,
+        projection: &Projection,
+    ) -> Result<ExportedRelation, SubstraitError> {
+        let input = self.export_operator(projection.input)?;
+        let output_mapping = projection
+            .columns
+            .iter()
+            .map(|column| {
+                input
+                    .columns
+                    .iter()
+                    .position(|input_column| input_column == column)
+                    .map(|index| index as i32)
+                    .ok_or(SubstraitError::InvalidFieldReference {
+                        index: column.0,
+                        input_len: input.columns.len(),
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let rel = Rel {
+            rel_type: Some(rel::RelType::Project(Box::new(ProjectRel {
+                common: Some(emit_common(output_mapping)),
+                input: Some(Box::new(input.rel)),
+                expressions: Vec::new(),
+                advanced_extension: None,
+            }))),
+        };
+        Ok(ExportedRelation {
+            rel,
+            columns: projection.columns.clone(),
+        })
+    }
+
+    fn export_named_struct(&self, columns: &[Column]) -> Result<NamedStruct, SubstraitError> {
+        Ok(NamedStruct {
+            names: columns
+                .iter()
+                .map(|column| self.ctx.column(*column).name.clone())
+                .collect(),
+            r#struct: Some(r#type::Struct {
+                types: columns
+                    .iter()
+                    .map(|column| arrow_to_substrait_type(&self.ctx.column(*column).ty))
+                    .collect::<Result<Vec<_>, _>>()?,
+                type_variation_reference: 0,
+                nullability: r#type::Nullability::Required as i32,
+            }),
+        })
+    }
+}
+
+fn direct_common() -> RelCommon {
+    RelCommon {
+        hint: None,
+        advanced_extension: None,
+        emit_kind: Some(rel_common::EmitKind::Direct(rel_common::Direct {})),
+    }
+}
+
+fn emit_common(output_mapping: Vec<i32>) -> RelCommon {
+    RelCommon {
+        hint: None,
+        advanced_extension: None,
+        emit_kind: Some(rel_common::EmitKind::Emit(rel_common::Emit {
+            output_mapping,
+        })),
+    }
+}
+
+fn table_ref_names(table: &TableRef) -> Vec<String> {
+    match table {
+        TableRef::Bare { table } => vec![table.to_string()],
+        TableRef::Partial { schema, table } => vec![schema.to_string(), table.to_string()],
+        TableRef::Full {
+            catalog,
+            schema,
+            table,
+        } => vec![catalog.to_string(), schema.to_string(), table.to_string()],
+    }
+}
+
+fn arrow_to_substrait_type(data_type: &DataType) -> Result<Type, SubstraitError> {
+    let nullability = r#type::Nullability::Required as i32;
+    let kind = match data_type {
+        DataType::Boolean => r#type::Kind::Bool(r#type::Boolean {
+            type_variation_reference: 0,
+            nullability,
+        }),
+        DataType::Int32 => r#type::Kind::I32(r#type::I32 {
+            type_variation_reference: 0,
+            nullability,
+        }),
+        DataType::Int64 => r#type::Kind::I64(r#type::I64 {
+            type_variation_reference: 0,
+            nullability,
+        }),
+        DataType::Float64 => r#type::Kind::Fp64(r#type::Fp64 {
+            type_variation_reference: 0,
+            nullability,
+        }),
+        DataType::Utf8 => r#type::Kind::String(r#type::String {
+            type_variation_reference: 0,
+            nullability,
+        }),
+        _ => return Err(SubstraitError::UnsupportedType("exported Arrow type")),
+    };
+    Ok(Type { kind: Some(kind) })
 }
 
 impl Converter {
@@ -1767,6 +1961,43 @@ mod tests {
                 })),
             }))),
         }
+    }
+
+    #[test]
+    fn exports_projection_over_named_table_read() {
+        let mut ctx = QueryContext::new();
+        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
+        let age = ctx.add_column(ColumnData::new("age", DataType::Int32));
+        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![id, age],
+        }));
+        let projection = ctx.add_operator(OperatorData::Projection(Projection {
+            columns: vec![id],
+            input: scan,
+        }));
+        let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+        ctx.set_root(output);
+
+        let plan = to_plan(&ctx).expect("query should export");
+        let Some(plan_rel::RelType::Root(root)) = plan.relations[0].rel_type.as_ref() else {
+            panic!("plan should export a root")
+        };
+        assert_eq!(root.names, vec!["id"]);
+        let Some(Rel {
+            rel_type: Some(rel::RelType::Project(project)),
+        }) = root.input.as_ref()
+        else {
+            panic!("root should read from project")
+        };
+        let Some(RelCommon {
+            emit_kind: Some(rel_common::EmitKind::Emit(emit)),
+            ..
+        }) = project.common.as_ref()
+        else {
+            panic!("project should emit selected columns")
+        };
+        assert_eq!(emit.output_mapping, vec![0]);
     }
 
     #[test]
