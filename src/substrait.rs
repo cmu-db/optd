@@ -263,10 +263,6 @@ impl Converter {
     }
 
     fn convert_read(&mut self, read: &ReadRel) -> Result<Relation, SubstraitError> {
-        if read.projection.is_some() {
-            return Err(SubstraitError::UnsupportedRead("ReadRel.projection"));
-        }
-
         let mut relation = match read
             .read_type
             .as_ref()
@@ -308,6 +304,8 @@ impl Converter {
             relation.operator = operator;
         }
 
+        relation = self.apply_read_projection(read.projection.as_ref(), relation)?;
+
         if read.best_effort_filter.is_some() {
             return Err(SubstraitError::UnsupportedRead(
                 "ReadRel.best_effort_filter",
@@ -315,6 +313,44 @@ impl Converter {
         }
 
         self.apply_common(read.common.as_ref(), relation)
+    }
+
+    fn apply_read_projection(
+        &mut self,
+        projection: Option<&expression::MaskExpression>,
+        relation: Relation,
+    ) -> Result<Relation, SubstraitError> {
+        let Some(projection) = projection else {
+            return Ok(relation);
+        };
+        let Some(select) = projection.select.as_ref() else {
+            return Ok(relation);
+        };
+
+        let columns = select
+            .struct_items
+            .iter()
+            .map(|item| {
+                if item.child.is_some() {
+                    return Err(SubstraitError::UnsupportedRead(
+                        "ReadRel.projection nested field",
+                    ));
+                }
+                if item.field < 0 || item.field as usize >= relation.columns.len() {
+                    return Err(SubstraitError::InvalidEmit {
+                        index: item.field,
+                        input_len: relation.columns.len(),
+                    });
+                }
+                Ok(relation.columns[item.field as usize])
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let operator = self.ctx.add_operator(OperatorData::Projection(Projection {
+            columns: columns.clone(),
+            input: relation.operator,
+        }));
+        Ok(Relation { operator, columns })
     }
 
     fn convert_named_table_read(
@@ -1409,8 +1445,8 @@ fn convert_sort_direction(
 fn convert_fetch_offset(fetch: &proto::FetchRel) -> Result<usize, SubstraitError> {
     let offset = match &fetch.offset_mode {
         Some(fetch_rel::OffsetMode::Offset(offset)) => *offset,
-        Some(fetch_rel::OffsetMode::OffsetExpr(_)) => {
-            return Err(SubstraitError::UnsupportedFetch("offset expression"));
+        Some(fetch_rel::OffsetMode::OffsetExpr(expr)) => {
+            return Ok(convert_fetch_literal_expr("offset", expr)?.unwrap_or(0));
         }
         None => 0,
     };
@@ -1421,11 +1457,36 @@ fn convert_fetch_count(fetch: &proto::FetchRel) -> Result<Option<usize>, Substra
     let count = match &fetch.count_mode {
         None | Some(fetch_rel::CountMode::Count(-1)) => return Ok(None),
         Some(fetch_rel::CountMode::Count(count)) => *count,
-        Some(fetch_rel::CountMode::CountExpr(_)) => {
-            return Err(SubstraitError::UnsupportedFetch("count expression"));
+        Some(fetch_rel::CountMode::CountExpr(expr)) => {
+            return convert_fetch_literal_expr("count", expr);
         }
     };
     usize_from_fetch_value("count", count).map(Some)
+}
+
+fn convert_fetch_literal_expr(
+    field: &'static str,
+    expr: &Expression,
+) -> Result<Option<usize>, SubstraitError> {
+    let literal = match expr.rex_type.as_ref() {
+        Some(expression::RexType::Literal(literal)) => literal,
+        _ => {
+            return Err(SubstraitError::UnsupportedFetch(
+                "non-literal fetch expression",
+            ));
+        }
+    };
+    let value = match convert_literal(literal)? {
+        ScalarValue::Null(_) => return Ok(None),
+        ScalarValue::Int32(value) => i64::from(value),
+        ScalarValue::Int64(value) => value,
+        _ => {
+            return Err(SubstraitError::UnsupportedFetch(
+                "non-integer fetch expression",
+            ));
+        }
+    };
+    usize_from_fetch_value(field, value).map(Some)
 }
 
 fn usize_from_fetch_value(field: &'static str, value: i64) -> Result<usize, SubstraitError> {
