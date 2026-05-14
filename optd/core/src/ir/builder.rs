@@ -1,7 +1,7 @@
 //! Context-aware builders for constructing IR nodes while hiding binding
 //! registration details from callers.
 
-use std::sync::Arc;
+use std::{collections::{HashMap, HashSet}, sync::Arc};
 
 use arrow_schema::{Field, Schema, SchemaRef};
 use snafu::{OptionExt, ResultExt};
@@ -406,9 +406,57 @@ fn derive_projection_schema(
         .map(|(idx, scalar)| derive_scalar_field(ctx, scalar.as_ref(), idx))
         .collect::<Result<Vec<_>>>()?;
     Ok(Arc::new(Schema::new_with_metadata(
-        fields,
+        make_field_names_unique(fields),
         input_schema.inner().metadata().clone(),
     )))
+}
+
+pub fn unique_field_name(base: &str, used_names: &mut HashSet<String>) -> String {
+    if used_names.insert(base.to_string()) {
+        return base.to_string();
+    }
+    for suffix in 1.. {
+        let candidate = format!("{base}__optd_{suffix}");
+        if used_names.insert(candidate.clone()) {
+            return candidate;
+        }
+    }
+    unreachable!("unbounded suffix search should always find a unique field name")
+}
+
+pub fn make_field_names_unique(fields: Vec<Field>) -> Vec<Field> {
+    let mut used_names = HashSet::new();
+    fields
+        .into_iter()
+        .map(|field| {
+            let name = unique_field_name(field.name(), &mut used_names);
+            if name == field.name().as_str() {
+                field
+            } else {
+                field.with_name(name)
+            }
+        })
+        .collect()
+}
+
+pub fn make_schema_field_names_unique(
+    fields: impl IntoIterator<Item = Arc<Field>>,
+    metadata: HashMap<String, String>,
+) -> Arc<Schema> {
+    let mut used_names = HashSet::new();
+    let fields = fields
+        .into_iter()
+        .map(|field| {
+            let name = unique_field_name(field.name(), &mut used_names);
+            if name == field.name().as_str() {
+                field
+            } else {
+                Arc::new(field.as_ref().clone().with_name(name))
+            }
+        })
+        .collect::<Vec<_>>();
+
+    Arc::new(Schema::new_with_metadata(fields, metadata))
 }
 
 fn derive_aggregate_schema(
