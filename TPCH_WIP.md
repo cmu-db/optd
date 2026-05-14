@@ -58,6 +58,37 @@ Integration tests currently validate DataFusion consumer interoperability for th
      - DataFusion consumes exported plan
      - output schema compatibility
 
+## Current TPC-H sqllogictest Status
+
+Command: `INCLUDE_TPCH=true cargo test --test sqllogictest_harness`
+
+Last checked: May 14, 2026.
+
+| Query | File | Status | Current failure |
+| --- | --- | --- | --- |
+| Q01 | `tests/slt/tpch/q01.slt` | Pass | None |
+| Q02 | `tests/slt/tpch/q02.slt` | Fail | DataFusion Substrait producer: `Cannot convert <subquery> to Substrait` |
+| Q03 | `tests/slt/tpch/q03.slt` | Pass | None |
+| Q04 | `tests/slt/tpch/q04.slt` | Fail | DataFusion Substrait producer: `Cannot convert Exists { subquery: <subquery>, negated: false } to Substrait` |
+| Q05 | `tests/slt/tpch/q05.slt` | Pass | None |
+| Q06 | `tests/slt/tpch/q06.slt` | Pass | None |
+| Q07 | `tests/slt/tpch/q07.slt` | Pass | None |
+| Q08 | `tests/slt/tpch/q08.slt` | Pass | None |
+| Q09 | `tests/slt/tpch/q09.slt` | Pass | None |
+| Q10 | `tests/slt/tpch/q10.slt` | Pass | None |
+| Q11 | `tests/slt/tpch/q11.slt` | Fail | DataFusion Substrait producer: `Cannot convert <subquery> to Substrait` |
+| Q12 | `tests/slt/tpch/q12.slt` | Pass | None |
+| Q13 | `tests/slt/tpch/q13.slt` | Pass | None |
+| Q14 | `tests/slt/tpch/q14.slt` | Pass | None |
+| Q15 | `tests/slt/tpch/q15.slt` | Fail | DataFusion Substrait producer: `Cannot convert <subquery> to Substrait` |
+| Q16 | `tests/slt/tpch/q16.slt` | Fail | Physical planner: `Physical plan does not support logical expression InSubquery(...)` |
+| Q17 | `tests/slt/tpch/q17.slt` | Fail | DataFusion Substrait producer: `Cannot convert <subquery> to Substrait` |
+| Q18 | `tests/slt/tpch/q18.slt` | Fail | Physical planner: `Physical plan does not support logical expression InSubquery(...)` |
+| Q19 | `tests/slt/tpch/q19.slt` | Pass | None |
+| Q20 | `tests/slt/tpch/q20.slt` | Fail | DataFusion Substrait producer: `Cannot convert <subquery> to Substrait` |
+| Q21 | `tests/slt/tpch/q21.slt` | Fail | DataFusion Substrait producer: `Cannot convert Exists { subquery: <subquery>, negated: false } to Substrait` |
+| Q22 | `tests/slt/tpch/q22.slt` | Fail | DataFusion Substrait producer: `Cannot convert <subquery> to Substrait` |
+
 ## Tracking Template
 
 - [x] Decimal/date/timestamp type coverage complete
