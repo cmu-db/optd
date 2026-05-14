@@ -13,7 +13,7 @@ Implemented exporter coverage:
 - `TableFunction` for representable local-file reads
 - scalar expressions (`Literal`, `ColumnRef`, `Unary`, `Binary`, `Nary`, `Cast`, `CaseWhen`, `ScalarFunction`) with conservative output typing
 
-Integration tests currently validate DataFusion consumer interoperability for these operators. A narrow sqllogictest harness also validates DataFusion SQL plans after a Substrait export/import round trip with logical optimizer rules disabled.
+Integration tests currently validate DataFusion consumer interoperability for these operators. A narrow sqllogictest harness also validates DataFusion SQL plans after a Substrait export/import round trip with logical optimizer rules disabled. A plan-only sqllogictest script now carries all TPC-H Q1-Q22 SQL shapes over empty benchmark schemas; the full runner is gated behind `INCLUDE_TPCH=true` until remaining Substrait gaps are closed.
 
 ## Gaps Most Likely to Block TPC-H
 
@@ -49,6 +49,7 @@ Integration tests currently validate DataFusion consumer interoperability for th
 3. **Join semantics**
    - add/validate semi/anti-compatible lowering or direct mapping strategy
    - add query-shape tests for subquery-like plans
+   - current TPC-H sqllogictest blocker: DataFusion Substrait producer rejects scalar subquery expressions (`Cannot convert <subquery> to Substrait`) starting at Q2
 
 4. **TPC-H query coverage harness**
    - add an integration matrix for TPC-H queries (Q1..Q22)

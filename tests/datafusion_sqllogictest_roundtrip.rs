@@ -14,6 +14,8 @@ use datafusion::physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner};
 use datafusion::prelude::SessionContext;
 use sqllogictest::{AsyncDB, DBOutput, DefaultColumnType, Runner};
 
+const PLAN_ONLY_MARKER: &str = "-- simple_graph: plan-only";
+
 #[derive(Debug)]
 struct SubstraitRoundTripQueryPlanner;
 
@@ -54,6 +56,7 @@ impl DataFusionSubstraitDb {
         let ctx = SessionContext::new_with_state(state);
 
         register_numbers_table(&ctx)?;
+        register_tpch_tables(&ctx)?;
         Ok(Self { ctx })
     }
 }
@@ -64,6 +67,13 @@ impl AsyncDB for DataFusionSubstraitDb {
     type ColumnType = DefaultColumnType;
 
     async fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, Self::Error> {
+        if let Some(plan_only_sql) = strip_plan_only_marker(sql) {
+            let dataframe = self.ctx.sql(plan_only_sql).await?;
+            let (state, logical_plan) = dataframe.into_parts();
+            state.create_physical_plan(&logical_plan).await?;
+            return Ok(DBOutput::StatementComplete(0));
+        }
+
         let dataframe = self.ctx.sql(sql).await?;
         let schema = dataframe.schema().clone();
         let batches = dataframe.collect().await?;
@@ -107,6 +117,32 @@ async fn sqllogictest_runs_datafusion_substrait_roundtrip() {
         .unwrap();
 }
 
+#[test]
+fn tpch_sqllogictest_contains_all_queries() {
+    let script = include_str!("slt/tpch_roundtrip_plan_only.slt");
+
+    for query in 1..=22 {
+        assert!(
+            script.contains(&format!("# TPC-H Q{query}")),
+            "missing TPC-H Q{query} sqllogictest entry"
+        );
+    }
+}
+
+#[tokio::test]
+async fn sqllogictest_runs_tpch_substrait_roundtrip_plan_only() {
+    if std::env::var("INCLUDE_TPCH").as_deref() != Ok("true") {
+        return;
+    }
+
+    let mut runner = Runner::new(|| async { DataFusionSubstraitDb::new() });
+
+    runner
+        .run_file_async("tests/slt/tpch_roundtrip_plan_only.slt")
+        .await
+        .unwrap();
+}
+
 fn register_numbers_table(ctx: &SessionContext) -> DataFusionResult<()> {
     let schema = Arc::new(Schema::new(vec![
         Field::new("n", DataType::Int64, false),
@@ -123,6 +159,156 @@ fn register_numbers_table(ctx: &SessionContext) -> DataFusionResult<()> {
 
     ctx.register_table("numbers", Arc::new(table))?;
     Ok(())
+}
+
+fn register_tpch_tables(ctx: &SessionContext) -> DataFusionResult<()> {
+    register_empty_table(
+        ctx,
+        "customer",
+        vec![
+            i64_field("c_custkey"),
+            string_field("c_name"),
+            string_field("c_address"),
+            i64_field("c_nationkey"),
+            string_field("c_phone"),
+            decimal_field("c_acctbal"),
+            string_field("c_mktsegment"),
+            string_field("c_comment"),
+        ],
+    )?;
+    register_empty_table(
+        ctx,
+        "lineitem",
+        vec![
+            i64_field("l_orderkey"),
+            i64_field("l_partkey"),
+            i64_field("l_suppkey"),
+            i64_field("l_linenumber"),
+            decimal_field("l_quantity"),
+            decimal_field("l_extendedprice"),
+            decimal_field("l_discount"),
+            decimal_field("l_tax"),
+            string_field("l_returnflag"),
+            string_field("l_linestatus"),
+            date_field("l_shipdate"),
+            date_field("l_commitdate"),
+            date_field("l_receiptdate"),
+            string_field("l_shipinstruct"),
+            string_field("l_shipmode"),
+            string_field("l_comment"),
+        ],
+    )?;
+    register_empty_table(
+        ctx,
+        "nation",
+        vec![
+            i64_field("n_nationkey"),
+            string_field("n_name"),
+            i64_field("n_regionkey"),
+            string_field("n_comment"),
+        ],
+    )?;
+    register_empty_table(
+        ctx,
+        "orders",
+        vec![
+            i64_field("o_orderkey"),
+            i64_field("o_custkey"),
+            string_field("o_orderstatus"),
+            decimal_field("o_totalprice"),
+            date_field("o_orderdate"),
+            string_field("o_orderpriority"),
+            string_field("o_clerk"),
+            i64_field("o_shippriority"),
+            string_field("o_comment"),
+        ],
+    )?;
+    register_empty_table(
+        ctx,
+        "part",
+        vec![
+            i64_field("p_partkey"),
+            string_field("p_name"),
+            string_field("p_mfgr"),
+            string_field("p_brand"),
+            string_field("p_type"),
+            i64_field("p_size"),
+            string_field("p_container"),
+            decimal_field("p_retailprice"),
+            string_field("p_comment"),
+        ],
+    )?;
+    register_empty_table(
+        ctx,
+        "partsupp",
+        vec![
+            i64_field("ps_partkey"),
+            i64_field("ps_suppkey"),
+            i64_field("ps_availqty"),
+            decimal_field("ps_supplycost"),
+            string_field("ps_comment"),
+        ],
+    )?;
+    register_empty_table(
+        ctx,
+        "region",
+        vec![
+            i64_field("r_regionkey"),
+            string_field("r_name"),
+            string_field("r_comment"),
+        ],
+    )?;
+    register_empty_table(
+        ctx,
+        "supplier",
+        vec![
+            i64_field("s_suppkey"),
+            string_field("s_name"),
+            string_field("s_address"),
+            i64_field("s_nationkey"),
+            string_field("s_phone"),
+            decimal_field("s_acctbal"),
+            string_field("s_comment"),
+        ],
+    )?;
+
+    Ok(())
+}
+
+fn register_empty_table(
+    ctx: &SessionContext,
+    name: &str,
+    fields: Vec<Field>,
+) -> DataFusionResult<()> {
+    let schema = Arc::new(Schema::new(fields));
+    let table = MemTable::try_new(
+        Arc::clone(&schema),
+        vec![vec![RecordBatch::new_empty(schema)]],
+    )?;
+
+    ctx.register_table(name, Arc::new(table))?;
+    Ok(())
+}
+
+fn i64_field(name: &str) -> Field {
+    Field::new(name, DataType::Int64, false)
+}
+
+fn decimal_field(name: &str) -> Field {
+    Field::new(name, DataType::Decimal128(15, 2), false)
+}
+
+fn date_field(name: &str) -> Field {
+    Field::new(name, DataType::Date32, false)
+}
+
+fn string_field(name: &str) -> Field {
+    Field::new(name, DataType::Utf8, false)
+}
+
+fn strip_plan_only_marker(sql: &str) -> Option<&str> {
+    let sql = sql.trim_start();
+    sql.strip_prefix(PLAN_ONLY_MARKER).map(str::trim_start)
 }
 
 fn column_type(data_type: &DataType) -> DefaultColumnType {
