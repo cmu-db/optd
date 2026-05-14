@@ -1,10 +1,17 @@
 use std::sync::Arc;
 
 use datafusion::arrow::array::new_empty_array;
-use datafusion::arrow::datatypes::{DataType, Field, Schema};
+use datafusion::arrow::datatypes::{DataType as DataFusionDataType, Field, Fields, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::datasource::MemTable;
 use datafusion::prelude::SessionContext;
+use prost::Message;
+use simple_graph::{
+    AggregateExpr, AggregateFunction, Aggregation, BinaryOp, ColumnData, ExprData, NaryOp,
+    OperatorData, Output, QueryContext, ScalarValue, Scan, Selection, TableRef, substrait,
+};
+
+type QueryBuilder = fn() -> QueryContext;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct TpchQueryStatus {
@@ -25,6 +32,7 @@ impl TpchQueryStatus {
 struct TpchQueryMatrixRow {
     query: u8,
     status: TpchQueryStatus,
+    build: Option<QueryBuilder>,
 }
 
 #[test]
@@ -49,6 +57,39 @@ fn tpch_query_matrix_covers_q1_through_q22() {
     }
 }
 
+#[tokio::test]
+async fn tpch_implemented_matrix_rows_export_and_datafusion_consumes() {
+    let df_ctx = tpch_session_context();
+
+    for row in tpch_query_matrix()
+        .into_iter()
+        .filter(|row| row.status.exports)
+    {
+        let query = row
+            .build
+            .unwrap_or_else(|| panic!("Q{} is marked exportable without a builder", row.query))(
+        );
+        let plan = substrait::to_plan(&query).unwrap();
+
+        let mut bytes = Vec::new();
+        plan.encode(&mut bytes).unwrap();
+
+        let df_substrait_plan = datafusion_substrait::serializer::deserialize_bytes(bytes)
+            .await
+            .unwrap();
+        let logical_plan = datafusion_substrait::logical_plan::consumer::from_substrait_plan(
+            &df_ctx.state(),
+            &df_substrait_plan,
+        )
+        .await
+        .unwrap();
+
+        if row.status.schema_compatible {
+            assert_expected_schema(row.query, logical_plan.schema().fields());
+        }
+    }
+}
+
 #[test]
 fn tpch_empty_datafusion_context_registers_all_benchmark_tables() {
     let ctx = tpch_session_context();
@@ -67,9 +108,145 @@ fn tpch_query_matrix() -> Vec<TpchQueryMatrixRow> {
     (1..=22)
         .map(|query| TpchQueryMatrixRow {
             query,
-            status: TpchQueryStatus::PENDING,
+            status: if query == 6 {
+                TpchQueryStatus {
+                    exports: true,
+                    datafusion_consumes: true,
+                    schema_compatible: true,
+                }
+            } else {
+                TpchQueryStatus::PENDING
+            },
+            build: if query == 6 { Some(tpch_q6) } else { None },
         })
         .collect()
+}
+
+fn assert_expected_schema(query: u8, fields: &Fields) {
+    match query {
+        6 => {
+            assert_eq!(fields.len(), 1);
+            assert_eq!(fields[0].name(), "revenue");
+            assert_eq!(
+                fields[0].data_type(),
+                &DataFusionDataType::Decimal128(38, 4)
+            );
+        }
+        _ => panic!("no expected schema registered for Q{query}"),
+    }
+}
+
+fn tpch_q6() -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let shipdate = ctx.add_column(ColumnData::new(
+        "l_shipdate",
+        arrow_schema::DataType::Date32,
+    ));
+    let discount = ctx.add_column(ColumnData::new(
+        "l_discount",
+        arrow_schema::DataType::Decimal128(15, 2),
+    ));
+    let quantity = ctx.add_column(ColumnData::new(
+        "l_quantity",
+        arrow_schema::DataType::Decimal128(15, 2),
+    ));
+    let extendedprice = ctx.add_column(ColumnData::new(
+        "l_extendedprice",
+        arrow_schema::DataType::Decimal128(15, 2),
+    ));
+    let revenue = ctx.add_column(ColumnData::new(
+        "revenue",
+        arrow_schema::DataType::Decimal128(15, 2),
+    ));
+
+    let lineitem = ctx.add_operator(OperatorData::Scan(Scan {
+        table: TableRef::bare("lineitem"),
+        columns: vec![shipdate, discount, quantity, extendedprice],
+    }));
+    let shipdate_ref = ctx.add_expr(ExprData::ColumnRef(shipdate));
+    let start_date = ctx.add_expr(ExprData::Literal(ScalarValue::Date32(8766)));
+    let shipdate_after_start = ctx.add_expr(ExprData::Binary {
+        op: BinaryOp::GtEq,
+        left: shipdate_ref,
+        right: start_date,
+    });
+    let shipdate_ref = ctx.add_expr(ExprData::ColumnRef(shipdate));
+    let end_date = ctx.add_expr(ExprData::Literal(ScalarValue::Date32(9131)));
+    let shipdate_before_end = ctx.add_expr(ExprData::Binary {
+        op: BinaryOp::Lt,
+        left: shipdate_ref,
+        right: end_date,
+    });
+    let discount_ref = ctx.add_expr(ExprData::ColumnRef(discount));
+    let min_discount = ctx.add_expr(ExprData::Literal(ScalarValue::Decimal128 {
+        value: 5,
+        precision: 15,
+        scale: 2,
+    }));
+    let discount_above_min = ctx.add_expr(ExprData::Binary {
+        op: BinaryOp::GtEq,
+        left: discount_ref,
+        right: min_discount,
+    });
+    let discount_ref = ctx.add_expr(ExprData::ColumnRef(discount));
+    let max_discount = ctx.add_expr(ExprData::Literal(ScalarValue::Decimal128 {
+        value: 7,
+        precision: 15,
+        scale: 2,
+    }));
+    let discount_below_max = ctx.add_expr(ExprData::Binary {
+        op: BinaryOp::LtEq,
+        left: discount_ref,
+        right: max_discount,
+    });
+    let quantity_ref = ctx.add_expr(ExprData::ColumnRef(quantity));
+    let max_quantity = ctx.add_expr(ExprData::Literal(ScalarValue::Decimal128 {
+        value: 2400,
+        precision: 15,
+        scale: 2,
+    }));
+    let quantity_below_max = ctx.add_expr(ExprData::Binary {
+        op: BinaryOp::Lt,
+        left: quantity_ref,
+        right: max_quantity,
+    });
+    let predicate = ctx.add_expr(ExprData::Nary {
+        op: NaryOp::And,
+        exprs: vec![
+            shipdate_after_start,
+            shipdate_before_end,
+            discount_above_min,
+            discount_below_max,
+            quantity_below_max,
+        ],
+    });
+    let selection = ctx.add_operator(OperatorData::Selection(Selection {
+        predicate,
+        input: lineitem,
+    }));
+    let extendedprice_ref = ctx.add_expr(ExprData::ColumnRef(extendedprice));
+    let discount_ref = ctx.add_expr(ExprData::ColumnRef(discount));
+    let revenue_expr = ctx.add_expr(ExprData::Binary {
+        op: BinaryOp::Multiply,
+        left: extendedprice_ref,
+        right: discount_ref,
+    });
+    let aggregation = ctx.add_operator(OperatorData::Aggregation(Aggregation {
+        keys: Vec::new(),
+        aggregates: vec![(
+            revenue,
+            AggregateExpr::Func {
+                func: AggregateFunction::Sum,
+                arg: revenue_expr,
+                distinct: false,
+            },
+        )],
+        input: selection,
+    }));
+    let output = ctx.add_operator(OperatorData::Output(Output { input: aggregation }));
+    ctx.set_root(output);
+
+    ctx
 }
 
 fn tpch_session_context() -> SessionContext {
@@ -199,21 +376,21 @@ fn tpch_schemas() -> Vec<(&'static str, Schema)> {
 }
 
 fn int32(name: &'static str) -> Field {
-    Field::new(name, DataType::Int32, false)
+    Field::new(name, DataFusionDataType::Int32, false)
 }
 
 fn int64(name: &'static str) -> Field {
-    Field::new(name, DataType::Int64, false)
+    Field::new(name, DataFusionDataType::Int64, false)
 }
 
 fn utf8(name: &'static str) -> Field {
-    Field::new(name, DataType::Utf8, true)
+    Field::new(name, DataFusionDataType::Utf8, true)
 }
 
 fn decimal(name: &'static str) -> Field {
-    Field::new(name, DataType::Decimal128(15, 2), false)
+    Field::new(name, DataFusionDataType::Decimal128(15, 2), false)
 }
 
 fn date(name: &'static str) -> Field {
-    Field::new(name, DataType::Date32, false)
+    Field::new(name, DataFusionDataType::Date32, false)
 }
