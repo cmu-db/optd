@@ -682,6 +682,15 @@ impl<'a> Exporter<'a> {
                     )
                 }
             }
+            ExprData::Exists { .. } => {
+                return Err(SubstraitError::UnsupportedExpression("Exists"));
+            }
+            ExprData::InSubquery { .. } => {
+                return Err(SubstraitError::UnsupportedExpression("InSubquery"));
+            }
+            ExprData::ScalarSubquery { .. } => {
+                return Err(SubstraitError::UnsupportedExpression("ScalarSubquery"));
+            }
         };
         Ok(Expression {
             rex_type: Some(rex_type),
@@ -868,6 +877,8 @@ fn infer_expr_data_type(ctx: &QueryContext, expr: Expr) -> Option<DataType> {
             ScalarFunction::Abs => args.first().and_then(|arg| infer_expr_data_type(ctx, *arg)),
             ScalarFunction::Extension(_) => None,
         },
+        ExprData::Exists { .. } | ExprData::InSubquery { .. } => Some(DataType::Boolean),
+        ExprData::ScalarSubquery { .. } => None,
     }
 }
 

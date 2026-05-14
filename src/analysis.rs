@@ -236,6 +236,76 @@ fn collect_expr_used_columns(
                 collect_expr_used_columns(ctx, *arg, columns)?;
             }
         }
+        ExprData::Exists { subquery, .. } | ExprData::ScalarSubquery { subquery } => {
+            collect_operator_used_columns(ctx, *subquery, columns)?;
+        }
+        ExprData::InSubquery { expr, subquery, .. } => {
+            collect_expr_used_columns(ctx, *expr, columns)?;
+            collect_operator_used_columns(ctx, *subquery, columns)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn collect_operator_used_columns(
+    ctx: &QueryContext,
+    operator: Operator,
+    columns: &mut Vec<Column>,
+) -> AnalysisResult<()> {
+    match operator.get(ctx) {
+        OperatorData::Scan(data) => {
+            for column in &data.columns {
+                push_unique_column(columns, *column);
+            }
+        }
+        OperatorData::Selection(data) => {
+            collect_operator_used_columns(ctx, data.input, columns)?;
+            collect_expr_used_columns(ctx, data.predicate, columns)?;
+        }
+        OperatorData::Map(data) => {
+            collect_operator_used_columns(ctx, data.input, columns)?;
+            for (_, expr) in &data.computations {
+                collect_expr_used_columns(ctx, *expr, columns)?;
+            }
+        }
+        OperatorData::TableFunction(data) => {
+            for arg in &data.args {
+                collect_expr_used_columns(ctx, *arg, columns)?;
+            }
+        }
+        OperatorData::Join(data) => {
+            collect_operator_used_columns(ctx, data.outer, columns)?;
+            collect_operator_used_columns(ctx, data.inner, columns)?;
+            collect_expr_used_columns(ctx, data.on, columns)?;
+        }
+        OperatorData::CrossProduct(data) => {
+            collect_operator_used_columns(ctx, data.outer, columns)?;
+            collect_operator_used_columns(ctx, data.inner, columns)?;
+        }
+        OperatorData::Sort(data) => {
+            collect_operator_used_columns(ctx, data.input, columns)?;
+            for key in &data.keys {
+                collect_expr_used_columns(ctx, key.expr, columns)?;
+            }
+        }
+        OperatorData::Limit(data) => collect_operator_used_columns(ctx, data.input, columns)?,
+        OperatorData::Aggregation(data) => {
+            collect_operator_used_columns(ctx, data.input, columns)?;
+            for key in &data.keys {
+                collect_expr_used_columns(ctx, *key, columns)?;
+            }
+            for (_, aggregate) in &data.aggregates {
+                collect_aggregate_expr_used_columns(ctx, aggregate, columns)?;
+            }
+        }
+        OperatorData::Projection(data) => {
+            collect_operator_used_columns(ctx, data.input, columns)?;
+            for column in &data.columns {
+                push_unique_column(columns, *column);
+            }
+        }
+        OperatorData::Output(data) => collect_operator_used_columns(ctx, data.input, columns)?,
     }
 
     Ok(())
@@ -502,7 +572,8 @@ fn expr_nullability(
                 Ok(true)
             }
         }
-        ExprData::ScalarFunction { .. } => Ok(true),
+        ExprData::ScalarFunction { .. } | ExprData::ScalarSubquery { .. } => Ok(true),
+        ExprData::Exists { .. } | ExprData::InSubquery { .. } => Ok(false),
     }
 }
 
@@ -516,7 +587,10 @@ fn collect_non_null_columns_from_predicate(
         | ExprData::ColumnRef(_)
         | ExprData::Cast { .. }
         | ExprData::CaseWhen { .. }
-        | ExprData::ScalarFunction { .. } => {}
+        | ExprData::ScalarFunction { .. }
+        | ExprData::Exists { .. }
+        | ExprData::InSubquery { .. }
+        | ExprData::ScalarSubquery { .. } => {}
         ExprData::Unary { op, expr } => match op {
             crate::UnaryOp::IsNotNull => collect_expr_used_columns(ctx, *expr, columns)?,
             crate::UnaryOp::Not => {

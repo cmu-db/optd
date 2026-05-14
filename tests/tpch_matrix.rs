@@ -358,9 +358,9 @@ fn tpch_q2() -> QueryContext {
             min_expr(supplycost),
         )],
     );
-    let joined = cross_join_on_cols(&mut ctx, joined, min_cost, "p_partkey", "p_partkey");
     let supplycost = col(&mut ctx, joined.col("ps_supplycost"));
-    let min_supplycost = col(&mut ctx, joined.col("min_supplycost"));
+    let min_cost = project_rel(&mut ctx, min_cost, &["min_supplycost"]);
+    let min_supplycost = scalar_subquery(&mut ctx, min_cost.input);
     let predicate = eq(&mut ctx, supplycost, min_supplycost);
     let joined = select_rel(&mut ctx, joined, predicate);
     let sorted = sort_rel(
@@ -472,11 +472,13 @@ fn tpch_q4() -> QueryContext {
     let commit = col(&mut ctx, lineitem.col("l_commitdate"));
     let receipt = col(&mut ctx, lineitem.col("l_receiptdate"));
     let late_lineitem = bin(&mut ctx, BinaryOp::Lt, commit, receipt);
-    let lineitem = select_rel(&mut ctx, lineitem, late_lineitem);
-    let orderkey = col(&mut ctx, orders.col("o_orderkey"));
     let line_orderkey = col(&mut ctx, lineitem.col("l_orderkey"));
-    let on = eq(&mut ctx, orderkey, line_orderkey);
-    let orders = join_rel(&mut ctx, JoinType::LeftSemi, orders, lineitem, on);
+    let orderkey = col(&mut ctx, orders.col("o_orderkey"));
+    let correlated = eq(&mut ctx, line_orderkey, orderkey);
+    let subquery_predicate = and(&mut ctx, vec![late_lineitem, correlated]);
+    let lineitem = select_rel(&mut ctx, lineitem, subquery_predicate);
+    let predicate = exists(&mut ctx, lineitem.input);
+    let orders = select_rel(&mut ctx, orders, predicate);
     let orders = filter_date_range(&mut ctx, orders, "o_orderdate", 9221, 9312);
     let priority = col(&mut ctx, orders.col("o_orderpriority"));
     let grouped = aggregate_rel(
@@ -1048,9 +1050,8 @@ fn tpch_q11() -> QueryContext {
             sum_expr(value_arg),
         )],
     );
-    let grouped = cross_rel(&mut ctx, grouped, total);
     let value = col(&mut ctx, grouped.col("value"));
-    let threshold = col(&mut ctx, grouped.col("total_value_threshold"));
+    let threshold = scalar_subquery(&mut ctx, total.input);
     let predicate = bin(&mut ctx, BinaryOp::Gt, value, threshold);
     let grouped = select_rel(&mut ctx, grouped, predicate);
     let sorted = sort_rel(&mut ctx, grouped, vec![("value", SortDirection::Desc)]);
@@ -1295,9 +1296,8 @@ fn tpch_q15() -> QueryContext {
         &["s_suppkey", "s_name", "s_address", "s_phone"],
     );
     let joined = cross_join_on_cols(&mut ctx, supplier, revenue, "s_suppkey", "l_suppkey");
-    let joined = cross_rel(&mut ctx, joined, max_revenue);
     let total = col(&mut ctx, joined.col("total_revenue"));
-    let max_total = col(&mut ctx, joined.col("max_total_revenue"));
+    let max_total = scalar_subquery(&mut ctx, max_revenue.input);
     let predicate = eq(&mut ctx, total, max_total);
     let joined = select_rel(&mut ctx, joined, predicate);
     let sorted = sort_rel(&mut ctx, joined, vec![("s_suppkey", SortDirection::Asc)]);
@@ -1353,9 +1353,9 @@ fn tpch_q16() -> QueryContext {
     let complaints = like(&mut ctx, comment, "%Customer%Complaints%");
     let supplier = select_rel(&mut ctx, supplier, complaints);
     let ps_suppkey = col(&mut ctx, joined.col("ps_suppkey"));
-    let s_suppkey = col(&mut ctx, supplier.col("s_suppkey"));
-    let on = eq(&mut ctx, ps_suppkey, s_suppkey);
-    let joined = join_rel(&mut ctx, JoinType::LeftAnti, joined, supplier, on);
+    let supplier_keys = project_rel(&mut ctx, supplier, &["s_suppkey"]);
+    let predicate = not_in_subquery(&mut ctx, ps_suppkey, supplier_keys.input);
+    let joined = select_rel(&mut ctx, joined, predicate);
     let suppkey = col(&mut ctx, joined.col("ps_suppkey"));
     let grouped = aggregate_rel(
         &mut ctx,
@@ -1395,21 +1395,31 @@ fn tpch_q17() -> QueryContext {
         "lineitem",
         &["l_partkey", "l_quantity", "l_extendedprice"],
     );
-    let avg_quantity_arg = col(&mut ctx, lineitem.col("l_quantity"));
+    let joined = cross_join_on_cols(&mut ctx, part, lineitem, "p_partkey", "l_partkey");
+    let sub_lineitem = scan_rel_as(
+        &mut ctx,
+        "lineitem",
+        Some("l2"),
+        &["l_partkey", "l_quantity"],
+    );
+    let sub_partkey = col(&mut ctx, sub_lineitem.col("l2.l_partkey"));
+    let outer_partkey = col(&mut ctx, joined.col("p_partkey"));
+    let correlated = eq(&mut ctx, sub_partkey, outer_partkey);
+    let sub_lineitem = select_rel(&mut ctx, sub_lineitem, correlated);
+    let avg_quantity_arg = col(&mut ctx, sub_lineitem.col("l2.l_quantity"));
     let avg_by_part = aggregate_rel(
         &mut ctx,
-        lineitem.clone(),
-        &["l_partkey"],
+        sub_lineitem,
+        &[],
         vec![(
             "avg_quantity",
             arrow_schema::DataType::Decimal128(15, 2),
             avg_expr(avg_quantity_arg),
         )],
     );
-    let joined = cross_join_on_cols(&mut ctx, part, lineitem, "p_partkey", "l_partkey");
-    let joined = cross_join_on_cols(&mut ctx, joined, avg_by_part, "p_partkey", "l_partkey");
     let quantity = col(&mut ctx, joined.col("l_quantity"));
-    let avg_quantity = col(&mut ctx, joined.col("avg_quantity"));
+    let avg_by_part = project_rel(&mut ctx, avg_by_part, &["avg_quantity"]);
+    let avg_quantity = scalar_subquery(&mut ctx, avg_by_part.input);
     let predicate = bin(&mut ctx, BinaryOp::Lt, quantity, avg_quantity);
     let joined = select_rel(&mut ctx, joined, predicate);
     let extendedprice = col(&mut ctx, joined.col("l_extendedprice"));
@@ -1454,9 +1464,9 @@ fn tpch_q18() -> QueryContext {
     );
     let lineitem = scan_rel(&mut ctx, "lineitem", &["l_orderkey", "l_quantity"]);
     let orderkey = col(&mut ctx, orders.col("o_orderkey"));
-    let large_orderkey = col(&mut ctx, large_orders.col("l_orderkey"));
-    let on = eq(&mut ctx, orderkey, large_orderkey);
-    let orders = join_rel(&mut ctx, JoinType::LeftSemi, orders, large_orders, on);
+    let large_order_keys = project_rel(&mut ctx, large_orders, &["l_orderkey"]);
+    let predicate = in_subquery(&mut ctx, orderkey, large_order_keys.input);
+    let orders = select_rel(&mut ctx, orders, predicate);
     let joined = cross_join_on_cols(&mut ctx, customer, orders, "c_custkey", "o_custkey");
     let joined = cross_join_on_cols(&mut ctx, joined, lineitem, "o_orderkey", "l_orderkey");
     let quantity = col(&mut ctx, joined.col("l_quantity"));
@@ -1597,9 +1607,9 @@ fn tpch_q20() -> QueryContext {
         &["ps_partkey", "ps_suppkey", "ps_availqty"],
     );
     let partkey = col(&mut ctx, partsupp.col("ps_partkey"));
-    let p_partkey = col(&mut ctx, part.col("p_partkey"));
-    let on = eq(&mut ctx, partkey, p_partkey);
-    let candidate_partsupp = join_rel(&mut ctx, JoinType::LeftSemi, partsupp, part, on);
+    let part_keys = project_rel(&mut ctx, part, &["p_partkey"]);
+    let partkey_in = in_subquery(&mut ctx, partkey, part_keys.input);
+    let candidate_partsupp = select_rel(&mut ctx, partsupp, partkey_in);
     let supplier = scan_rel(
         &mut ctx,
         "supplier",
@@ -1607,15 +1617,9 @@ fn tpch_q20() -> QueryContext {
     );
     let nation = scan_rel(&mut ctx, "nation", &["n_nationkey", "n_name"]);
     let suppkey = col(&mut ctx, supplier.col("s_suppkey"));
-    let ps_suppkey = col(&mut ctx, candidate_partsupp.col("ps_suppkey"));
-    let on = eq(&mut ctx, suppkey, ps_suppkey);
-    let supplier = join_rel(
-        &mut ctx,
-        JoinType::LeftSemi,
-        supplier,
-        candidate_partsupp,
-        on,
-    );
+    let partsupp_keys = project_rel(&mut ctx, candidate_partsupp, &["ps_suppkey"]);
+    let suppkey_in = in_subquery(&mut ctx, suppkey, partsupp_keys.input);
+    let supplier = select_rel(&mut ctx, supplier, suppkey_in);
     let joined = cross_join_on_cols(&mut ctx, supplier, nation, "s_nationkey", "n_nationkey");
     let joined = filter_eq_str(&mut ctx, joined, "n_name", "KENYA");
     let sorted = sort_rel(&mut ctx, joined, vec![("s_name", SortDirection::Asc)]);
@@ -1660,8 +1664,10 @@ fn tpch_q21() -> QueryContext {
     let suppkey = col(&mut ctx, joined.col("l1.l_suppkey"));
     let l2_suppkey = col(&mut ctx, l2.col("l2.l_suppkey"));
     let different_supplier = bin(&mut ctx, BinaryOp::NotEq, suppkey, l2_suppkey);
-    let on = and(&mut ctx, vec![same_order, different_supplier]);
-    let joined = join_rel(&mut ctx, JoinType::LeftSemi, joined, l2, on);
+    let predicate = and(&mut ctx, vec![same_order, different_supplier]);
+    let l2 = select_rel(&mut ctx, l2, predicate);
+    let predicate = exists(&mut ctx, l2.input);
+    let joined = select_rel(&mut ctx, joined, predicate);
 
     let l3 = scan_rel_as(
         &mut ctx,
@@ -1679,8 +1685,10 @@ fn tpch_q21() -> QueryContext {
     let suppkey = col(&mut ctx, joined.col("l1.l_suppkey"));
     let l3_suppkey = col(&mut ctx, l3.col("l3.l_suppkey"));
     let different_supplier = bin(&mut ctx, BinaryOp::NotEq, suppkey, l3_suppkey);
-    let on = and(&mut ctx, vec![same_order, different_supplier]);
-    let joined = join_rel(&mut ctx, JoinType::LeftAnti, joined, l3, on);
+    let predicate = and(&mut ctx, vec![same_order, different_supplier]);
+    let l3 = select_rel(&mut ctx, l3, predicate);
+    let predicate = not_exists(&mut ctx, l3.input);
+    let joined = select_rel(&mut ctx, joined, predicate);
     let name = col(&mut ctx, joined.col("s_name"));
     let grouped = aggregate_rel(
         &mut ctx,
@@ -1731,16 +1739,17 @@ fn tpch_q22() -> QueryContext {
             avg_expr(acctbal),
         )],
     );
-    let customer = cross_rel(&mut ctx, customer, avg_bal);
     let acctbal = col(&mut ctx, customer.col("c_acctbal"));
-    let avg = col(&mut ctx, customer.col("avg_acctbal"));
+    let avg = scalar_subquery(&mut ctx, avg_bal.input);
     let above_avg = bin(&mut ctx, BinaryOp::Gt, acctbal, avg);
     let customer = select_rel(&mut ctx, customer, above_avg);
     let orders = scan_rel(&mut ctx, "orders", &["o_custkey"]);
     let custkey = col(&mut ctx, customer.col("c_custkey"));
     let order_custkey = col(&mut ctx, orders.col("o_custkey"));
-    let on = eq(&mut ctx, custkey, order_custkey);
-    let customer = join_rel(&mut ctx, JoinType::LeftAnti, customer, orders, on);
+    let predicate = eq(&mut ctx, custkey, order_custkey);
+    let orders = select_rel(&mut ctx, orders, predicate);
+    let predicate = not_exists(&mut ctx, orders.input);
+    let customer = select_rel(&mut ctx, customer, predicate);
     let custkey = col(&mut ctx, customer.col("c_custkey"));
     let acctbal = col(&mut ctx, customer.col("c_acctbal"));
     let grouped = aggregate_rel(
@@ -1975,6 +1984,23 @@ fn limit_rel(ctx: &mut QueryContext, rel: Rel, fetch: usize) -> Rel {
     }
 }
 
+fn project_rel(ctx: &mut QueryContext, rel: Rel, output_columns: &[&str]) -> Rel {
+    let columns = output_columns
+        .iter()
+        .map(|name| rel.col(name))
+        .collect::<Vec<_>>();
+    let input = ctx.add_operator(OperatorData::Projection(Projection {
+        columns: columns.clone(),
+        input: rel.input,
+    }));
+    let cols = output_columns
+        .iter()
+        .zip(columns)
+        .map(|(name, column)| ((*name).to_string(), column))
+        .collect();
+    Rel { input, cols }
+}
+
 fn finish(ctx: &mut QueryContext, rel: Rel, output_columns: &[&str]) {
     let columns = output_columns.iter().map(|name| rel.col(name)).collect();
     let projection = ctx.add_operator(OperatorData::Projection(Projection {
@@ -2050,6 +2076,40 @@ fn scalar_fn(ctx: &mut QueryContext, name: &'static str, args: Vec<Expr>) -> Exp
         function: ScalarFunction::extension(name),
         args,
     })
+}
+
+fn exists(ctx: &mut QueryContext, subquery: Operator) -> Expr {
+    ctx.add_expr(ExprData::Exists {
+        subquery,
+        negated: false,
+    })
+}
+
+fn not_exists(ctx: &mut QueryContext, subquery: Operator) -> Expr {
+    ctx.add_expr(ExprData::Exists {
+        subquery,
+        negated: true,
+    })
+}
+
+fn in_subquery(ctx: &mut QueryContext, expr: Expr, subquery: Operator) -> Expr {
+    ctx.add_expr(ExprData::InSubquery {
+        expr,
+        subquery,
+        negated: false,
+    })
+}
+
+fn not_in_subquery(ctx: &mut QueryContext, expr: Expr, subquery: Operator) -> Expr {
+    ctx.add_expr(ExprData::InSubquery {
+        expr,
+        subquery,
+        negated: true,
+    })
+}
+
+fn scalar_subquery(ctx: &mut QueryContext, subquery: Operator) -> Expr {
+    ctx.add_expr(ExprData::ScalarSubquery { subquery })
 }
 
 fn like(ctx: &mut QueryContext, value: Expr, pattern: &'static str) -> Expr {

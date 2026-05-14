@@ -316,6 +316,16 @@ pub enum ExprData {
         function: ScalarFunction,
         args: Vec<Expr>,
     },
+    /// SQL `EXISTS (subquery)` predicate. `negated` represents `NOT EXISTS`.
+    Exists { subquery: Operator, negated: bool },
+    /// SQL `[NOT] IN (subquery)` predicate.
+    InSubquery {
+        expr: Expr,
+        subquery: Operator,
+        negated: bool,
+    },
+    /// SQL scalar subquery expression.
+    ScalarSubquery { subquery: Operator },
 }
 
 /// Unary expression operator.
@@ -1043,6 +1053,19 @@ impl<'a> QueryFormatter<'a> {
                 }
                 format!("CASE {} END", parts.join(" "))
             }
+            ExprData::Exists { subquery, negated } => {
+                let prefix = if *negated { "NOT EXISTS" } else { "EXISTS" };
+                format!("{prefix}({subquery:?})")
+            }
+            ExprData::InSubquery {
+                expr,
+                subquery,
+                negated,
+            } => {
+                let op = if *negated { "NOT IN" } else { "IN" };
+                format!("({} {op} {subquery:?})", self.format_expr(*expr))
+            }
+            ExprData::ScalarSubquery { subquery } => format!("SCALAR_SUBQUERY({subquery:?})"),
         }
     }
 

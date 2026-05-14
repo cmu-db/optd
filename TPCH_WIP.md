@@ -11,11 +11,11 @@ Implemented exporter coverage:
 - `Sort`, `Limit`
 - `Aggregation`
 - `TableFunction` for representable local-file reads
-- scalar expressions (`Literal`, `ColumnRef`, `Unary`, `Binary`, `Nary`, `Cast`, `CaseWhen`, `ScalarFunction`) with conservative output typing
+- scalar expressions (`Literal`, `ColumnRef`, `Unary`, `Binary`, `Nary`, `Cast`, `CaseWhen`, `ScalarFunction`, `Exists`, `InSubquery`, `ScalarSubquery`) with conservative output typing
 
 Integration tests currently validate DataFusion consumer interoperability for these operators. A sqllogictest harness validates DataFusion SQL plans after a Substrait export/import round trip with logical optimizer rules disabled. Plan-only sqllogictests carry all TPC-H Q1-Q22 SQL shapes over empty benchmark schemas as separate files under `tests/slt/tpch/`; the full TPC-H run is gated behind `INCLUDE_TPCH=true cargo test --test sqllogictest_harness` until remaining Substrait gaps are closed.
 
-The Rust TPC-H matrix now has one direct IR builder function per query (`tpch_q1` through `tpch_q22`). Each builder manually constructs a lowered `QueryContext` using simple-graph IR operators. Q6 remains the first export+consume green query while the other lowered builders track the relational and expression shapes that still need Substrait/DataFusion compatibility work.
+The Rust TPC-H matrix now has one direct IR builder function per query (`tpch_q1` through `tpch_q22`). Each builder manually constructs a `QueryContext` using simple-graph IR operators. The IR can now represent SQL subquery expressions directly with `Exists`, `InSubquery`, and `ScalarSubquery`; later passes should lower those forms to semi/anti/single/mark joins before Substrait export. Q6 remains the first export+consume green query while the other builders track the relational and expression shapes that still need lowering plus Substrait/DataFusion compatibility work.
 
 ## Gaps Most Likely to Block TPC-H
 
@@ -31,6 +31,7 @@ The Rust TPC-H matrix now has one direct IR builder function per query (`tpch_q1
    - consistent function extension naming/anchors compatible with DataFusion consumer behavior
 
 3. **Join/subquery semantics**
+   - represent SQL `EXISTS`, `[NOT] IN`, and scalar subqueries in `ExprData`
    - support for semi/anti join semantics where plans use `EXISTS`/`IN` forms
    - ensure mark/single join behavior is either supported or intentionally lowered pre-export
 
@@ -51,6 +52,7 @@ The Rust TPC-H matrix now has one direct IR builder function per query (`tpch_q1
 3. **Join semantics**
    - add/validate semi/anti-compatible lowering or direct mapping strategy
    - add query-shape tests for subquery-like plans
+   - add a lowering/decorrelation pass from subquery expressions to joins before export
    - current TPC-H sqllogictest blocker: DataFusion Substrait producer rejects scalar subquery expressions (`Cannot convert <subquery> to Substrait`) starting at Q2
 
 4. **TPC-H query coverage harness**
@@ -95,6 +97,7 @@ Last checked: May 14, 2026.
 
 - [x] Decimal/date/timestamp type coverage complete
 - [x] Cast/conditional expression coverage complete
-- [x] Semi/anti/subquery-lowered semantics covered
+- [x] Semi/anti/subquery expression semantics represented
+- [ ] Subquery-to-join lowering pass added
 - [x] TPC-H integration harness added
 - [ ] Q1–Q22 export+consume matrix green
