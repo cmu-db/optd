@@ -962,6 +962,10 @@ impl<'a> QueryFormatter<'a> {
             node = node.with_input(input.name, self.format_operator(input.target));
         }
 
+        for input in self.operator_subquery_inputs(operator) {
+            node = node.with_input(input.name, self.format_operator(input.target));
+        }
+
         for (key, value) in self.format_analysis_properties(operator) {
             node.metadata.insert(key, value);
         }
@@ -1176,7 +1180,13 @@ impl<'a> QueryFormatter<'a> {
     }
 
     fn operator_inputs(&self, operator: Operator) -> Vec<Operator> {
-        self.ctx.operator(operator).inputs()
+        let mut inputs = self.ctx.operator(operator).inputs();
+        inputs.extend(
+            self.operator_subquery_inputs(operator)
+                .into_iter()
+                .map(|input| input.target),
+        );
+        inputs
     }
 
     fn format_operator_display(&self, operator: Operator) -> OperatorDisplay {
@@ -1202,6 +1212,15 @@ impl<'a> QueryFormatter<'a> {
             insert_input(&mut record, order, input.name, input.target);
         }
 
+        let offset = record.inputs.len();
+        for (order, input) in self
+            .operator_subquery_inputs(operator)
+            .into_iter()
+            .enumerate()
+        {
+            insert_input(&mut record, offset + order, input.name, input.target);
+        }
+
         for (order, (key, value)) in self
             .format_analysis_properties(operator)
             .into_iter()
@@ -1211,6 +1230,120 @@ impl<'a> QueryFormatter<'a> {
         }
 
         record
+    }
+
+    fn operator_subquery_inputs(&self, operator: Operator) -> Vec<OperatorDisplayInput> {
+        let mut inputs = Vec::new();
+        match self.ctx.operator(operator) {
+            OperatorData::Scan(_) => {}
+            OperatorData::Selection(data) => {
+                self.collect_expr_subquery_inputs(data.predicate, &mut inputs);
+            }
+            OperatorData::Map(data) => {
+                for (_, expr) in &data.computations {
+                    self.collect_expr_subquery_inputs(*expr, &mut inputs);
+                }
+            }
+            OperatorData::TableFunction(data) => {
+                for expr in &data.args {
+                    self.collect_expr_subquery_inputs(*expr, &mut inputs);
+                }
+            }
+            OperatorData::Join(data) => {
+                self.collect_expr_subquery_inputs(data.on, &mut inputs);
+            }
+            OperatorData::CrossProduct(_) => {}
+            OperatorData::Sort(data) => {
+                for key in &data.keys {
+                    self.collect_expr_subquery_inputs(key.expr, &mut inputs);
+                }
+            }
+            OperatorData::Limit(_) => {}
+            OperatorData::Aggregation(data) => {
+                for key in &data.keys {
+                    self.collect_expr_subquery_inputs(*key, &mut inputs);
+                }
+                for (_, aggregate) in &data.aggregates {
+                    self.collect_aggregate_subquery_inputs(aggregate, &mut inputs);
+                }
+            }
+            OperatorData::Projection(_) | OperatorData::Output(_) => {}
+        }
+        inputs
+    }
+
+    fn collect_expr_subquery_inputs(&self, expr: Expr, inputs: &mut Vec<OperatorDisplayInput>) {
+        match self.ctx.expr(expr) {
+            ExprData::Literal(_) | ExprData::ColumnRef(_) => {}
+            ExprData::Unary { expr, .. } | ExprData::Cast { expr, .. } => {
+                self.collect_expr_subquery_inputs(*expr, inputs);
+            }
+            ExprData::Binary { left, right, .. } => {
+                self.collect_expr_subquery_inputs(*left, inputs);
+                self.collect_expr_subquery_inputs(*right, inputs);
+            }
+            ExprData::Nary { exprs, .. } | ExprData::ScalarFunction { args: exprs, .. } => {
+                for expr in exprs {
+                    self.collect_expr_subquery_inputs(*expr, inputs);
+                }
+            }
+            ExprData::CaseWhen {
+                when_then,
+                else_expr,
+            } => {
+                for (when, then) in when_then {
+                    self.collect_expr_subquery_inputs(*when, inputs);
+                    self.collect_expr_subquery_inputs(*then, inputs);
+                }
+                if let Some(else_expr) = else_expr {
+                    self.collect_expr_subquery_inputs(*else_expr, inputs);
+                }
+            }
+            ExprData::Exists { subquery, negated } => {
+                let name = if *negated {
+                    "not exists subquery"
+                } else {
+                    "exists subquery"
+                };
+                inputs.push(OperatorDisplayInput {
+                    name: name.to_string(),
+                    target: *subquery,
+                });
+            }
+            ExprData::InSubquery {
+                expr,
+                subquery,
+                negated,
+            } => {
+                self.collect_expr_subquery_inputs(*expr, inputs);
+                let name = if *negated {
+                    "not in subquery"
+                } else {
+                    "in subquery"
+                };
+                inputs.push(OperatorDisplayInput {
+                    name: name.to_string(),
+                    target: *subquery,
+                });
+            }
+            ExprData::ScalarSubquery { subquery } => {
+                inputs.push(OperatorDisplayInput {
+                    name: "scalar subquery".to_string(),
+                    target: *subquery,
+                });
+            }
+        }
+    }
+
+    fn collect_aggregate_subquery_inputs(
+        &self,
+        aggregate: &AggregateExpr,
+        inputs: &mut Vec<OperatorDisplayInput>,
+    ) {
+        match aggregate {
+            AggregateExpr::CountStar => {}
+            AggregateExpr::Func { arg, .. } => self.collect_expr_subquery_inputs(*arg, inputs),
+        }
     }
 
     fn format_analysis_properties(&self, operator: Operator) -> Vec<(String, DisplayValue)> {
@@ -1820,6 +1953,40 @@ mod tests {
         assert!(pretty.contains("│ outer"));
         assert!(pretty.contains("│ inner"));
         assert!(pretty.lines().any(|line| line.matches('┌').count() == 2));
+    }
+
+    #[test]
+    fn pretty_prints_subquery_expression_inputs() {
+        let mut ctx = QueryContext::new();
+        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
+        let order_id = ctx.add_column(ColumnData::new("order_id", DataType::Int64));
+
+        let users = ctx.add_operator(OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![user_id],
+        }));
+        let orders = ctx.add_operator(OperatorData::Scan(Scan {
+            table: TableRef::bare("orders"),
+            columns: vec![order_id],
+        }));
+        let left = ctx.add_expr(ExprData::ColumnRef(user_id));
+        let right = ctx.add_expr(ExprData::ScalarSubquery { subquery: orders });
+        let predicate = ctx.add_expr(ExprData::Binary {
+            op: BinaryOp::Eq,
+            left,
+            right,
+        });
+        let selection = ctx.add_operator(OperatorData::Selection(Selection {
+            predicate,
+            input: users,
+        }));
+        ctx.set_root(selection);
+
+        let pretty = ctx.pretty();
+
+        assert!(pretty.contains("SCALAR_SUBQUERY(Operator(1))"));
+        assert!(pretty.contains("│ scalar subquery"));
+        assert!(pretty.contains("│ ⊞ orders"));
     }
 
     #[test]
