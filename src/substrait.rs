@@ -915,11 +915,23 @@ fn arrow_to_substrait_type(data_type: &DataType) -> Result<Type, SubstraitError>
             type_variation_reference: 0,
             nullability,
         }),
+        DataType::Int8 => r#type::Kind::I8(r#type::I8 {
+            type_variation_reference: 0,
+            nullability,
+        }),
+        DataType::Int16 => r#type::Kind::I16(r#type::I16 {
+            type_variation_reference: 0,
+            nullability,
+        }),
         DataType::Int32 => r#type::Kind::I32(r#type::I32 {
             type_variation_reference: 0,
             nullability,
         }),
         DataType::Int64 => r#type::Kind::I64(r#type::I64 {
+            type_variation_reference: 0,
+            nullability,
+        }),
+        DataType::Float32 => r#type::Kind::Fp32(r#type::Fp32 {
             type_variation_reference: 0,
             nullability,
         }),
@@ -930,6 +942,52 @@ fn arrow_to_substrait_type(data_type: &DataType) -> Result<Type, SubstraitError>
         DataType::Utf8 => r#type::Kind::String(r#type::String {
             type_variation_reference: 0,
             nullability,
+        }),
+        DataType::Date32 => r#type::Kind::Date(r#type::Date {
+            type_variation_reference: 0,
+            nullability,
+        }),
+        DataType::Timestamp(TimeUnit::Microsecond, None) => {
+            r#type::Kind::Timestamp(r#type::Timestamp {
+                type_variation_reference: 0,
+                nullability,
+            })
+        }
+        DataType::Timestamp(unit, None) => {
+            r#type::Kind::PrecisionTimestamp(r#type::PrecisionTimestamp {
+                type_variation_reference: 0,
+                nullability,
+                precision: match unit {
+                    TimeUnit::Second => 0,
+                    TimeUnit::Millisecond => 3,
+                    TimeUnit::Microsecond => 6,
+                    TimeUnit::Nanosecond => 9,
+                },
+            })
+        }
+        DataType::Timestamp(TimeUnit::Microsecond, Some(_)) => {
+            r#type::Kind::TimestampTz(r#type::TimestampTz {
+                type_variation_reference: 0,
+                nullability,
+            })
+        }
+        DataType::Timestamp(unit, Some(_)) => {
+            r#type::Kind::PrecisionTimestampTz(r#type::PrecisionTimestampTz {
+                type_variation_reference: 0,
+                nullability,
+                precision: match unit {
+                    TimeUnit::Second => 0,
+                    TimeUnit::Millisecond => 3,
+                    TimeUnit::Microsecond => 6,
+                    TimeUnit::Nanosecond => 9,
+                },
+            })
+        }
+        DataType::Decimal128(precision, scale) => r#type::Kind::Decimal(r#type::Decimal {
+            type_variation_reference: 0,
+            nullability,
+            precision: i32::from(*precision),
+            scale: i32::from(*scale),
         }),
         _ => return Err(SubstraitError::UnsupportedType("exported Arrow type")),
     };
@@ -2591,6 +2649,52 @@ mod tests {
             panic!("project should emit selected columns")
         };
         assert_eq!(emit.output_mapping, vec![0]);
+    }
+
+    #[test]
+    fn exports_tpch_relevant_types_in_scan_schema() {
+        let mut ctx = QueryContext::new();
+        let dec = ctx.add_column(ColumnData::new(
+            "extendedprice",
+            DataType::Decimal128(15, 2),
+        ));
+        let order_date = ctx.add_column(ColumnData::new("orderdate", DataType::Date32));
+        let commit_ts = ctx.add_column(ColumnData::new(
+            "commit_ts",
+            DataType::Timestamp(TimeUnit::Microsecond, None),
+        ));
+        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+            table: TableRef::bare("lineitem"),
+            columns: vec![dec, order_date, commit_ts],
+        }));
+        let output = ctx.add_operator(OperatorData::Output(Output { input: scan }));
+        ctx.set_root(output);
+
+        let plan = to_plan(&ctx).expect("query should export");
+        let Some(plan_rel::RelType::Root(root)) = plan.relations[0].rel_type.as_ref() else {
+            panic!("plan should export a root")
+        };
+        let Some(Rel {
+            rel_type: Some(rel::RelType::Read(read)),
+        }) = root.input.as_ref()
+        else {
+            panic!("root should read from read")
+        };
+        let schema = read
+            .base_schema
+            .as_ref()
+            .expect("read should include schema");
+        let ty = &schema
+            .r#struct
+            .as_ref()
+            .expect("schema should include struct")
+            .types;
+        assert!(matches!(ty[0].kind, Some(r#type::Kind::Decimal(_))));
+        assert!(matches!(ty[1].kind, Some(r#type::Kind::Date(_))));
+        assert!(matches!(
+            ty[2].kind,
+            Some(r#type::Kind::Timestamp(_)) | Some(r#type::Kind::PrecisionTimestamp(_))
+        ));
     }
 
     #[test]
