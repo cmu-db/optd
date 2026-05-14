@@ -542,6 +542,7 @@ pub fn tpch_q6() -> QueryContext {
     }));
     let output = ctx.add_operator(OperatorData::Output(Output { input: aggregation }));
     ctx.set_root(output);
+    coalesce_where_selections(&mut ctx);
 
     ctx
 }
@@ -1918,6 +1919,228 @@ pub fn finish(ctx: &mut QueryContext, rel: Rel, output_columns: &[&str]) {
     }));
     let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
     ctx.set_root(output);
+    coalesce_where_selections(ctx);
+}
+
+fn coalesce_where_selections(ctx: &mut QueryContext) {
+    let Some(root) = ctx.root() else {
+        return;
+    };
+    let (root, predicates) = coalesce_operator(ctx, root);
+    let root = wrap_with_selection(ctx, root, predicates);
+    ctx.set_root(root);
+}
+
+fn coalesce_operator(ctx: &mut QueryContext, operator: Operator) -> (Operator, Vec<Expr>) {
+    match ctx.operator(operator).clone() {
+        OperatorData::Scan(_) => (operator, Vec::new()),
+        OperatorData::TableFunction(mut table_function) => {
+            table_function.args = table_function
+                .args
+                .into_iter()
+                .map(|arg| coalesce_expr(ctx, arg))
+                .collect();
+            let input = ctx.add_operator(OperatorData::TableFunction(table_function));
+            (input, Vec::new())
+        }
+        OperatorData::Selection(selection) => {
+            let (input, mut predicates) = coalesce_operator(ctx, selection.input);
+            let predicate = coalesce_expr(ctx, selection.predicate);
+            push_conjuncts(ctx, predicate, &mut predicates);
+            (input, predicates)
+        }
+        OperatorData::CrossProduct(cross) => {
+            let (outer, mut predicates) = coalesce_operator(ctx, cross.outer);
+            let (inner, inner_predicates) = coalesce_operator(ctx, cross.inner);
+            predicates.extend(inner_predicates);
+            let input = ctx.add_operator(OperatorData::CrossProduct(CrossProduct { outer, inner }));
+            (input, predicates)
+        }
+        OperatorData::Map(mut map) => {
+            let (input, predicates) = coalesce_operator(ctx, map.input);
+            map.input = wrap_with_selection(ctx, input, predicates);
+            map.computations = map
+                .computations
+                .into_iter()
+                .map(|(column, expr)| (column, coalesce_expr(ctx, expr)))
+                .collect();
+            let input = ctx.add_operator(OperatorData::Map(map));
+            (input, Vec::new())
+        }
+        OperatorData::Join(mut join) => {
+            let (outer, outer_predicates) = coalesce_operator(ctx, join.outer);
+            let (inner, inner_predicates) = coalesce_operator(ctx, join.inner);
+            join.outer = wrap_with_selection(ctx, outer, outer_predicates);
+            join.inner = wrap_with_selection(ctx, inner, inner_predicates);
+            join.on = coalesce_expr(ctx, join.on);
+            let input = ctx.add_operator(OperatorData::Join(join));
+            (input, Vec::new())
+        }
+        OperatorData::Sort(mut sort) => {
+            let (input, predicates) = coalesce_operator(ctx, sort.input);
+            sort.input = wrap_with_selection(ctx, input, predicates);
+            sort.keys = sort
+                .keys
+                .into_iter()
+                .map(|mut key| {
+                    key.expr = coalesce_expr(ctx, key.expr);
+                    key
+                })
+                .collect();
+            let input = ctx.add_operator(OperatorData::Sort(sort));
+            (input, Vec::new())
+        }
+        OperatorData::Limit(mut limit) => {
+            let (input, predicates) = coalesce_operator(ctx, limit.input);
+            limit.input = wrap_with_selection(ctx, input, predicates);
+            let input = ctx.add_operator(OperatorData::Limit(limit));
+            (input, Vec::new())
+        }
+        OperatorData::Aggregation(mut aggregation) => {
+            let (input, predicates) = coalesce_operator(ctx, aggregation.input);
+            aggregation.input = wrap_with_selection(ctx, input, predicates);
+            aggregation.keys = aggregation
+                .keys
+                .into_iter()
+                .map(|key| coalesce_expr(ctx, key))
+                .collect();
+            aggregation.aggregates = aggregation
+                .aggregates
+                .into_iter()
+                .map(|(column, aggregate)| (column, coalesce_aggregate_expr(ctx, aggregate)))
+                .collect();
+            let input = ctx.add_operator(OperatorData::Aggregation(aggregation));
+            (input, Vec::new())
+        }
+        OperatorData::Projection(mut projection) => {
+            let (input, predicates) = coalesce_operator(ctx, projection.input);
+            projection.input = wrap_with_selection(ctx, input, predicates);
+            let input = ctx.add_operator(OperatorData::Projection(projection));
+            (input, Vec::new())
+        }
+        OperatorData::Output(mut output) => {
+            let (input, predicates) = coalesce_operator(ctx, output.input);
+            output.input = wrap_with_selection(ctx, input, predicates);
+            let input = ctx.add_operator(OperatorData::Output(output));
+            (input, Vec::new())
+        }
+    }
+}
+
+fn coalesce_aggregate_expr(ctx: &mut QueryContext, aggregate: AggregateExpr) -> AggregateExpr {
+    match aggregate {
+        AggregateExpr::CountStar => AggregateExpr::CountStar,
+        AggregateExpr::Func {
+            func,
+            arg,
+            distinct,
+        } => AggregateExpr::Func {
+            func,
+            arg: coalesce_expr(ctx, arg),
+            distinct,
+        },
+    }
+}
+
+fn coalesce_expr(ctx: &mut QueryContext, expr: Expr) -> Expr {
+    match ctx.expr(expr).clone() {
+        ExprData::Literal(_) | ExprData::ColumnRef(_) => expr,
+        ExprData::Unary { op, expr } => {
+            let expr = coalesce_expr(ctx, expr);
+            ctx.add_expr(ExprData::Unary { op, expr })
+        }
+        ExprData::Binary { op, left, right } => {
+            let left = coalesce_expr(ctx, left);
+            let right = coalesce_expr(ctx, right);
+            ctx.add_expr(ExprData::Binary { op, left, right })
+        }
+        ExprData::Nary { op, exprs } => {
+            let exprs = exprs
+                .into_iter()
+                .map(|expr| coalesce_expr(ctx, expr))
+                .collect();
+            ctx.add_expr(ExprData::Nary { op, exprs })
+        }
+        ExprData::Cast { expr, ty } => {
+            let expr = coalesce_expr(ctx, expr);
+            ctx.add_expr(ExprData::Cast { expr, ty })
+        }
+        ExprData::CaseWhen {
+            when_then,
+            else_expr,
+        } => {
+            let when_then = when_then
+                .into_iter()
+                .map(|(when, then)| (coalesce_expr(ctx, when), coalesce_expr(ctx, then)))
+                .collect();
+            let else_expr = else_expr.map(|expr| coalesce_expr(ctx, expr));
+            ctx.add_expr(ExprData::CaseWhen {
+                when_then,
+                else_expr,
+            })
+        }
+        ExprData::ScalarFunction { function, args } => {
+            let args = args
+                .into_iter()
+                .map(|arg| coalesce_expr(ctx, arg))
+                .collect();
+            ctx.add_expr(ExprData::ScalarFunction { function, args })
+        }
+        ExprData::Exists { subquery, negated } => {
+            let subquery = coalesce_subquery(ctx, subquery);
+            ctx.add_expr(ExprData::Exists { subquery, negated })
+        }
+        ExprData::InSubquery {
+            expr,
+            subquery,
+            negated,
+        } => {
+            let expr = coalesce_expr(ctx, expr);
+            let subquery = coalesce_subquery(ctx, subquery);
+            ctx.add_expr(ExprData::InSubquery {
+                expr,
+                subquery,
+                negated,
+            })
+        }
+        ExprData::ScalarSubquery { subquery } => {
+            let subquery = coalesce_subquery(ctx, subquery);
+            ctx.add_expr(ExprData::ScalarSubquery { subquery })
+        }
+    }
+}
+
+fn coalesce_subquery(ctx: &mut QueryContext, subquery: Operator) -> Operator {
+    let (subquery, predicates) = coalesce_operator(ctx, subquery);
+    wrap_with_selection(ctx, subquery, predicates)
+}
+
+fn wrap_with_selection(ctx: &mut QueryContext, input: Operator, predicates: Vec<Expr>) -> Operator {
+    match predicates.len() {
+        0 => input,
+        1 => ctx.add_operator(OperatorData::Selection(Selection {
+            predicate: predicates[0],
+            input,
+        })),
+        _ => {
+            let predicate = and(ctx, predicates);
+            ctx.add_operator(OperatorData::Selection(Selection { predicate, input }))
+        }
+    }
+}
+
+fn push_conjuncts(ctx: &QueryContext, expr: Expr, output: &mut Vec<Expr>) {
+    match ctx.expr(expr) {
+        ExprData::Nary {
+            op: NaryOp::And,
+            exprs,
+        } => {
+            for expr in exprs {
+                push_conjuncts(ctx, *expr, output);
+            }
+        }
+        _ => output.push(expr),
+    }
 }
 
 pub fn col(ctx: &mut QueryContext, column: Column) -> Expr {

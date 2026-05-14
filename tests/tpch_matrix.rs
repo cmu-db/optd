@@ -7,7 +7,7 @@ use datafusion::datasource::MemTable;
 use datafusion::prelude::SessionContext;
 use prost::Message;
 use simple_graph::tpch::*;
-use simple_graph::{OperatorData, QueryContext, substrait};
+use simple_graph::{ExprData, NaryOp, Operator, OperatorData, QueryContext, substrait};
 
 type QueryBuilder = fn() -> QueryContext;
 
@@ -155,6 +155,69 @@ fn tpch_query_matrix_has_direct_ir_builder_for_every_query() {
             "Q{} builder should render an output node: {rendered}",
             row.query
         );
+    }
+}
+
+#[test]
+fn tpch_q3_models_where_clause_as_one_selection() {
+    let query = tpch_q3();
+    let mut predicates = Vec::new();
+    collect_selection_predicates(
+        &query,
+        query.root().expect("Q3 builder should set a root"),
+        &mut predicates,
+    );
+
+    assert_eq!(
+        predicates.len(),
+        1,
+        "Q3 should keep its WHERE clause in one Selection"
+    );
+    let ExprData::Nary {
+        op: NaryOp::And,
+        exprs,
+    } = query.expr(predicates[0])
+    else {
+        panic!("Q3 WHERE predicate should be a conjunction");
+    };
+    assert_eq!(
+        exprs.len(),
+        5,
+        "Q3 WHERE clause should include the two joins and three filters"
+    );
+}
+
+fn collect_selection_predicates(
+    query: &QueryContext,
+    operator: Operator,
+    predicates: &mut Vec<simple_graph::Expr>,
+) {
+    match query.operator(operator) {
+        OperatorData::Scan(_) | OperatorData::TableFunction(_) => {}
+        OperatorData::Selection(selection) => {
+            predicates.push(selection.predicate);
+            collect_selection_predicates(query, selection.input, predicates);
+        }
+        OperatorData::Map(map) => collect_selection_predicates(query, map.input, predicates),
+        OperatorData::Sort(sort) => collect_selection_predicates(query, sort.input, predicates),
+        OperatorData::Limit(limit) => collect_selection_predicates(query, limit.input, predicates),
+        OperatorData::Aggregation(aggregation) => {
+            collect_selection_predicates(query, aggregation.input, predicates);
+        }
+        OperatorData::Projection(projection) => {
+            collect_selection_predicates(query, projection.input, predicates);
+        }
+        OperatorData::Output(output) => {
+            collect_selection_predicates(query, output.input, predicates)
+        }
+        OperatorData::CrossProduct(cross) => {
+            collect_selection_predicates(query, cross.outer, predicates);
+            collect_selection_predicates(query, cross.inner, predicates);
+        }
+        OperatorData::Join(join) => {
+            collect_selection_predicates(query, join.outer, predicates);
+            collect_selection_predicates(query, join.inner, predicates);
+        }
     }
 }
 
