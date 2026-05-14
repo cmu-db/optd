@@ -815,6 +815,16 @@ fn export_literal(value: &ScalarValue) -> Result<expression::Literal, SubstraitE
         ScalarValue::Int32(value) => expression::literal::LiteralType::I32(*value),
         ScalarValue::Int64(value) => expression::literal::LiteralType::I64(*value),
         ScalarValue::Float64(value) => expression::literal::LiteralType::Fp64(*value),
+        ScalarValue::Decimal128 {
+            value,
+            precision,
+            scale,
+        } => expression::literal::LiteralType::Decimal(expression::literal::Decimal {
+            value: value.to_le_bytes().to_vec(),
+            precision: i32::from(*precision),
+            scale: i32::from(*scale),
+        }),
+        ScalarValue::Date32(value) => expression::literal::LiteralType::Date(*value),
         ScalarValue::Utf8(value) => expression::literal::LiteralType::String(value.clone()),
     };
     Ok(expression::Literal {
@@ -2523,6 +2533,17 @@ fn convert_literal(literal: &expression::Literal) -> Result<ScalarValue, Substra
         expression::literal::LiteralType::I32(value) => Ok(ScalarValue::Int32(*value)),
         expression::literal::LiteralType::I64(value) => Ok(ScalarValue::Int64(*value)),
         expression::literal::LiteralType::Fp64(value) => Ok(ScalarValue::Float64(*value)),
+        expression::literal::LiteralType::Decimal(decimal) => {
+            let value = decimal_bytes_to_i128(&decimal.value)?;
+            Ok(ScalarValue::Decimal128 {
+                value,
+                precision: u8::try_from(decimal.precision)
+                    .map_err(|_| SubstraitError::UnsupportedExpression("decimal precision"))?,
+                scale: i8::try_from(decimal.scale)
+                    .map_err(|_| SubstraitError::UnsupportedExpression("decimal scale"))?,
+            })
+        }
+        expression::literal::LiteralType::Date(value) => Ok(ScalarValue::Date32(*value)),
         expression::literal::LiteralType::String(value) => Ok(ScalarValue::Utf8(value.clone())),
         expression::literal::LiteralType::VarChar(value) => {
             Ok(ScalarValue::Utf8(value.value.clone()))
@@ -2533,6 +2554,13 @@ fn convert_literal(literal: &expression::Literal) -> Result<ScalarValue, Substra
         }
         _ => Err(SubstraitError::UnsupportedExpression("literal type")),
     }
+}
+
+fn decimal_bytes_to_i128(bytes: &[u8]) -> Result<i128, SubstraitError> {
+    let bytes: [u8; 16] = bytes
+        .try_into()
+        .map_err(|_| SubstraitError::UnsupportedExpression("decimal literal width"))?;
+    Ok(i128::from_le_bytes(bytes))
 }
 
 fn substrait_type_to_column_type(ty: &Type) -> Result<(DataType, bool), SubstraitError> {
@@ -2789,6 +2817,36 @@ mod tests {
             ty[2].kind,
             Some(r#type::Kind::Timestamp(_)) | Some(r#type::Kind::PrecisionTimestamp(_))
         ));
+    }
+
+    #[test]
+    fn round_trips_tpch_relevant_literals() {
+        let decimal = ScalarValue::Decimal128 {
+            value: 12345,
+            precision: 15,
+            scale: 2,
+        };
+        let date = ScalarValue::Date32(10_592);
+
+        let exported_decimal = export_literal(&decimal).expect("decimal should export");
+        let exported_date = export_literal(&date).expect("date should export");
+
+        assert!(matches!(
+            exported_decimal.literal_type.as_ref(),
+            Some(expression::literal::LiteralType::Decimal(_))
+        ));
+        assert!(matches!(
+            exported_date.literal_type.as_ref(),
+            Some(expression::literal::LiteralType::Date(10_592))
+        ));
+        assert_eq!(
+            convert_literal(&exported_decimal).expect("decimal should import"),
+            decimal
+        );
+        assert_eq!(
+            convert_literal(&exported_date).expect("date should import"),
+            date
+        );
     }
 
     #[test]

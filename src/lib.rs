@@ -520,6 +520,14 @@ pub enum ScalarValue {
     Int64(i64),
     /// 64-bit floating-point scalar.
     Float64(f64),
+    /// Decimal scalar with unscaled 128-bit value, precision, and scale.
+    Decimal128 {
+        value: i128,
+        precision: u8,
+        scale: i8,
+    },
+    /// Date scalar as days since the UNIX epoch.
+    Date32(i32),
     /// UTF-8 string scalar.
     Utf8(String),
 }
@@ -533,6 +541,10 @@ impl ScalarValue {
             ScalarValue::Int32(_) => DataType::Int32,
             ScalarValue::Int64(_) => DataType::Int64,
             ScalarValue::Float64(_) => DataType::Float64,
+            ScalarValue::Decimal128 {
+                precision, scale, ..
+            } => DataType::Decimal128(*precision, *scale),
+            ScalarValue::Date32(_) => DataType::Date32,
             ScalarValue::Utf8(_) => DataType::Utf8,
         }
     }
@@ -1055,6 +1067,12 @@ impl<'a> QueryFormatter<'a> {
             ScalarValue::Int32(value) => value.to_string(),
             ScalarValue::Int64(value) => value.to_string(),
             ScalarValue::Float64(value) => value.to_string(),
+            ScalarValue::Decimal128 {
+                value,
+                precision,
+                scale,
+            } => format!("{value}::Decimal128({precision}, {scale})"),
+            ScalarValue::Date32(value) => format!("{value}::Date32"),
             ScalarValue::Utf8(value) => format!("{value:?}"),
         }
     }
