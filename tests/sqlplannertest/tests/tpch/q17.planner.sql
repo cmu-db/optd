@@ -233,7 +233,7 @@ Project
     └── Join
         ├── .join_type: Inner
         ├── .implementation: None
-        ├── .join_cond: ("part.p_partkey"(#2.0) IS NOT DISTINCT FROM "__#14.p_partkey"(#14.1)) AND (CAST ("lineitem.l_quantity"(#1.4) AS Decimal128(30, 15)) < "__#14.expr0"(#14.0))
+        ├── .join_cond: ("part.p_partkey"(#2.0) = "__#14.p_partkey"(#14.1)) AND (CAST ("lineitem.l_quantity"(#1.4) AS Decimal128(30, 15)) < "__#14.expr0"(#14.0))
         ├── (.output_columns):
         │   ┌── "__#14.expr0"(#14.0)
         │   ├── "__#14.p_partkey"(#14.1)
@@ -274,58 +274,23 @@ Project
         │           └── (.cardinality): 0.00
         └── Project
             ├── .table_index: 14
-            ├── .projections: [ CAST (0.2::float64 * CAST ("__#13.avg"(#13.0) AS Float64) AS Decimal128(30, 15)), "__#10.p_partkey"(#10.0) ]
+            ├── .projections: [ CAST (0.2::float64 * CAST ("__#13.avg"(#13.0) AS Float64) AS Decimal128(30, 15)), "__#12.l_partkey"(#12.0) ]
             ├── (.output_columns): [ "__#14.expr0"(#14.0), "__#14.p_partkey"(#14.1) ]
             ├── (.cardinality): 0.00
-            └── Join
-                ├── .join_type: LeftOuter
+            └── Aggregate
+                ├── .key_table_index: 12
+                ├── .aggregate_table_index: 13
                 ├── .implementation: None
-                ├── .join_cond: "__#10.p_partkey"(#10.0) IS NOT DISTINCT FROM "__#12.l_partkey"(#12.0)
-                ├── (.output_columns): [ "__#10.p_partkey"(#10.0), "__#12.l_partkey"(#12.0), "__#13.avg"(#13.0) ]
+                ├── .exprs: avg("lineitem.l_quantity"(#3.4))
+                ├── .keys: "lineitem.l_partkey"(#3.1)
+                ├── (.output_columns): [ "__#12.l_partkey"(#12.0), "__#13.avg"(#13.0) ]
                 ├── (.cardinality): 0.00
-                ├── Aggregate
-                │   ├── .key_table_index: 10
-                │   ├── .aggregate_table_index: 11
-                │   ├── .implementation: None
-                │   ├── .exprs: []
-                │   ├── .keys: "part.p_partkey"(#2.0)
-                │   ├── (.output_columns): "__#10.p_partkey"(#10.0)
-                │   ├── (.cardinality): 0.00
-                │   └── Join
-                │       ├── .join_type: Inner
-                │       ├── .implementation: None
-                │       ├── .join_cond: "part.p_partkey"(#2.0) = "lineitem.l_partkey"(#1.1)
-                │       ├── (.output_columns): [ "lineitem.l_partkey"(#1.1), "part.p_brand"(#2.3), "part.p_container"(#2.6), "part.p_partkey"(#2.0) ]
-                │       ├── (.cardinality): 0.00
-                │       ├── Get { .data_source_id: 8, .table_index: 1, .implementation: None, (.output_columns): "lineitem.l_partkey"(#1.1), (.cardinality): 0.00 }
-                │       └── Select
-                │           ├── .predicate: ("part.p_brand"(#2.3) = 'Brand#13'::utf8_view) AND ("part.p_container"(#2.6) = 'JUMBO PKG'::utf8_view)
-                │           ├── (.output_columns): [ "part.p_brand"(#2.3), "part.p_container"(#2.6), "part.p_partkey"(#2.0) ]
-                │           ├── (.cardinality): 0.00
-                │           └── Get
-                │               ├── .data_source_id: 3
-                │               ├── .table_index: 2
-                │               ├── .implementation: None
-                │               ├── (.output_columns): [ "part.p_brand"(#2.3), "part.p_container"(#2.6), "part.p_partkey"(#2.0) ]
-                │               └── (.cardinality): 0.00
-                └── Aggregate
-                    ├── .key_table_index: 12
-                    ├── .aggregate_table_index: 13
+                └── Get
+                    ├── .data_source_id: 8
+                    ├── .table_index: 3
                     ├── .implementation: None
-                    ├── .exprs: avg("lineitem.l_quantity"(#3.4))
-                    ├── .keys: "lineitem.l_partkey"(#3.1)
-                    ├── (.output_columns): [ "__#12.l_partkey"(#12.0), "__#13.avg"(#13.0) ]
-                    ├── (.cardinality): 0.00
-                    └── Select
-                        ├── .predicate: "lineitem.l_partkey"(#3.1) = "lineitem.l_partkey"(#3.1)
-                        ├── (.output_columns): [ "lineitem.l_partkey"(#3.1), "lineitem.l_quantity"(#3.4) ]
-                        ├── (.cardinality): 0.00
-                        └── Get
-                            ├── .data_source_id: 8
-                            ├── .table_index: 3
-                            ├── .implementation: None
-                            ├── (.output_columns): [ "lineitem.l_partkey"(#3.1), "lineitem.l_quantity"(#3.4) ]
-                            └── (.cardinality): 0.00
+                    ├── (.output_columns): [ "lineitem.l_partkey"(#3.1), "lineitem.l_quantity"(#3.4) ]
+                    └── (.cardinality): 0.00
 
 NULL
 */

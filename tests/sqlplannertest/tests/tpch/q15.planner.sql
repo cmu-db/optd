@@ -35,6 +35,6 @@ ORDER BY
 
 /*
 Error
-Error during planning: Aggregate requires at least one grouping or aggregate expression. Aggregate without grouping expressions nor aggregate expressions is logically equivalent to, but less efficient than, VALUES producing single row. Please use VALUES instead.
+Schema error: No field named revenue0.total_revenue. Valid fields are "__#22".l_suppkey, "__#22"."sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)".
 */
 

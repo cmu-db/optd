@@ -1,16 +1,34 @@
 use super::{
     SimplificationPass,
-    scalar::{simplify_scalar_recursively, simplify_scalar_recursively_with_ctx},
+    scalar::{simplify_scalar_recursively, simplify_scalar_recursively_with_ctx, split_conjuncts},
 };
 use crate::ir::{
-    Column, DataType, ScalarValue,
+    Column, DataType, IRContext, ScalarValue,
     builder::*,
-    convert::IntoOperator,
-    operator::{Get, Join, Limit, Project, Select, join::JoinType},
+    catalog::{Catalog, Field, Schema},
+    convert::{IntoOperator, IntoScalar},
+    operator::{Aggregate, Get, Join, Limit, Project, Select, join::JoinType},
+    scalar::{BinaryOp, BinaryOpKind, Function},
     table_ref::TableRef,
     test_utils::test_ctx_with_tables,
 };
 use arrow::datatypes::IntervalMonthDayNano;
+use std::sync::Arc;
+
+fn nullable_test_ctx() -> IRContext {
+    let catalog = crate::magic::MemoryCatalog::new("optd", "public");
+    catalog
+        .create_table(
+            TableRef::bare("t"),
+            Arc::new(Schema::new(vec![
+                Field::new("nullable", DataType::Int32, true),
+                Field::new("not_null", DataType::Int32, false),
+            ])),
+            None,
+        )
+        .unwrap();
+    IRContext::with_memory_catalog(catalog)
+}
 
 // Input plan tree:
 // LogicalSelect [c3 = 20 AND true]
@@ -289,6 +307,149 @@ fn pushes_inner_join_condition_conjuncts_to_inputs() {
     assert!(join.join_cond().used_columns().contains(&t2_c0));
     assert!(!join.join_cond().used_columns().contains(&t1_c1));
     assert!(!join.join_cond().used_columns().contains(&t2_c1));
+}
+
+#[test]
+fn null_rejected_select_converts_left_outer_join_to_inner_join() {
+    let ctx = test_ctx_with_tables(&[("t1", 2), ("t2", 2)]).unwrap();
+    let left = ctx.logical_get(TableRef::bare("t1"), None).unwrap().build();
+    let right = ctx.logical_get(TableRef::bare("t2"), None).unwrap().build();
+    let t2_c0 = ctx.col(Some(&TableRef::bare("t2")), "c0").unwrap();
+
+    let plan = left
+        .with_ctx(&ctx)
+        .logical_join(right, boolean(true), JoinType::LeftOuter)
+        .select(column_ref(t2_c0).eq(int32(10)))
+        .build();
+
+    let simplified = SimplificationPass::new().apply(plan, &ctx).unwrap();
+    let join = simplified.try_borrow::<Join>().unwrap();
+    assert_eq!(join.join_type(), &JoinType::Inner);
+}
+
+#[test]
+fn removes_non_null_self_equality_from_select_predicate() {
+    let ctx = test_ctx_with_tables(&[("t1", 2)]).unwrap();
+    let input = ctx.logical_get(TableRef::bare("t1"), None).unwrap().build();
+    let t1_c0 = ctx.col(Some(&TableRef::bare("t1")), "c0").unwrap();
+    let t1_c1 = ctx.col(Some(&TableRef::bare("t1")), "c1").unwrap();
+
+    let plan = input
+        .with_ctx(&ctx)
+        .select(
+            column_ref(t1_c0)
+                .eq(column_ref(t1_c0))
+                .and(column_ref(t1_c1).gt(int32(5))),
+        )
+        .build();
+
+    let simplified = SimplificationPass::new().apply(plan, &ctx).unwrap();
+    let select = simplified.try_borrow::<Select>().unwrap();
+    assert!(!select.predicate().used_columns().contains(&t1_c0));
+    assert!(select.predicate().used_columns().contains(&t1_c1));
+}
+
+#[test]
+fn keeps_nullable_self_equality_in_select_predicate() {
+    let ctx = nullable_test_ctx();
+    let input = ctx.logical_get(TableRef::bare("t"), None).unwrap().build();
+    let nullable = ctx.col(Some(&TableRef::bare("t")), "nullable").unwrap();
+    let not_null = ctx.col(Some(&TableRef::bare("t")), "not_null").unwrap();
+
+    let plan = input
+        .with_ctx(&ctx)
+        .select(
+            column_ref(nullable)
+                .eq(column_ref(nullable))
+                .and(column_ref(not_null).gt(int32(5))),
+        )
+        .build();
+
+    let simplified = SimplificationPass::new().apply(plan, &ctx).unwrap();
+    let select = simplified.try_borrow::<Select>().unwrap();
+    assert!(select.predicate().used_columns().contains(&nullable));
+    assert!(select.predicate().used_columns().contains(&not_null));
+}
+
+#[test]
+fn removes_redundant_decorrelation_domain_join_after_null_rejection() {
+    let ctx = test_ctx_with_tables(&[("t1", 2), ("t2", 2)]).unwrap();
+    let left = ctx.logical_get(TableRef::bare("t1"), None).unwrap().build();
+    let right = ctx.logical_get(TableRef::bare("t2"), None).unwrap().build();
+    let t1_c0 = ctx.col(Some(&TableRef::bare("t1")), "c0").unwrap();
+    let t1_c1 = ctx.col(Some(&TableRef::bare("t1")), "c1").unwrap();
+    let t2_c0 = ctx.col(Some(&TableRef::bare("t2")), "c0").unwrap();
+    let t2_c1 = ctx.col(Some(&TableRef::bare("t2")), "c1").unwrap();
+
+    let domain = left
+        .clone()
+        .with_ctx(&ctx)
+        .logical_aggregate([], [column_ref(t1_c0)])
+        .unwrap()
+        .build();
+    let domain_key = Column(*domain.borrow::<Aggregate>().key_table_index(), 0);
+
+    let aggregate_expr =
+        Function::new_aggregate("sum", Arc::from([column_ref(t2_c1)]), DataType::Int32)
+            .into_scalar();
+    let value = right
+        .with_ctx(&ctx)
+        .logical_aggregate([aggregate_expr], [column_ref(t2_c0)])
+        .unwrap()
+        .build();
+    let value_agg = value.borrow::<Aggregate>();
+    let value_key = Column(*value_agg.key_table_index(), 0);
+    let value_sum = Column(*value_agg.aggregate_table_index(), 0);
+    drop(value_agg);
+
+    let domain_join_cond =
+        column_ref(domain_key).binary_op(column_ref(value_key), BinaryOpKind::IsNotDistinctFrom);
+    let domain_join = domain
+        .with_ctx(&ctx)
+        .logical_join(value, domain_join_cond, JoinType::LeftOuter)
+        .build();
+
+    let project = ctx
+        .project(domain_join, [column_ref(value_sum), column_ref(domain_key)])
+        .unwrap()
+        .build();
+    let project_table_index = *project.borrow::<Project>().table_index();
+    let project_sum = Column(project_table_index, 0);
+    let project_key = Column(project_table_index, 1);
+
+    let parent_cond = column_ref(t1_c0)
+        .binary_op(column_ref(project_key), BinaryOpKind::IsNotDistinctFrom)
+        .and(column_ref(t1_c1).lt(column_ref(project_sum)));
+    let plan = left
+        .with_ctx(&ctx)
+        .logical_join(project, parent_cond, JoinType::Inner)
+        .build();
+
+    let simplified = SimplificationPass::new().apply(plan, &ctx).unwrap();
+    let join = simplified.try_borrow::<Join>().unwrap();
+    let project = join.inner().try_borrow::<Project>().unwrap();
+
+    assert!(project.input().try_borrow::<Aggregate>().is_ok());
+    assert!(
+        split_conjuncts(join.join_cond().clone())
+            .into_iter()
+            .any(|conjunct| matches!(
+                conjunct
+                    .try_borrow::<BinaryOp>()
+                    .map(|binary| *binary.op_kind()),
+                Ok(BinaryOpKind::Eq)
+            ))
+    );
+    assert!(!contains_left_outer_join(&simplified));
+}
+
+fn contains_left_outer_join(op: &Arc<crate::ir::Operator>) -> bool {
+    if let Ok(join) = op.try_borrow::<Join>()
+        && join.join_type() == &JoinType::LeftOuter
+    {
+        return true;
+    }
+    op.input_operators().iter().any(contains_left_outer_join)
 }
 
 #[test]

@@ -1,9 +1,10 @@
 use super::{
     prune::ColumnPruningRulePass,
     rewrite::{
-        MergeProjectRulePass, MergeSelectRulePass, PushJoinConditionIntoInputsRulePass,
-        PushLimitThroughProjectRulePass, PushSelectThroughJoinRulePass,
-        PushSelectThroughProjectRulePass, ScalarSimplificationRulePass,
+        EliminateNullRejectedLeftOuterJoinRulePass, MergeProjectRulePass, MergeSelectRulePass,
+        PushJoinConditionIntoInputsRulePass, PushLimitThroughProjectRulePass,
+        PushSelectThroughJoinRulePass, PushSelectThroughProjectRulePass,
+        RemoveRedundantDomainJoinRulePass, ScalarSimplificationRulePass,
     },
     rule::RulePass,
 };
@@ -21,6 +22,7 @@ const MAX_ITERATIONS: usize = 10;
 ///
 /// This pass focuses on common rewrites:
 /// - scalar simplification
+/// - decorrelation cleanup
 /// - filter/predicate pushdown
 /// - select/project merging
 /// - top-down column pruning (including `LogicalGet` projection pruning)
@@ -44,8 +46,10 @@ impl SimplificationPass {
 
     /// Applies simplification rules until the plan reaches a fixed point.
     pub fn apply(&self, root: Arc<Operator>, ctx: &IRContext) -> Result<Arc<Operator>> {
-        let rules: [&dyn RulePass; 8] = [
+        let rules: [&dyn RulePass; 10] = [
             &ScalarSimplificationRulePass,
+            &EliminateNullRejectedLeftOuterJoinRulePass,
+            &RemoveRedundantDomainJoinRulePass,
             &MergeSelectRulePass,
             &PushSelectThroughProjectRulePass,
             &PushSelectThroughJoinRulePass,

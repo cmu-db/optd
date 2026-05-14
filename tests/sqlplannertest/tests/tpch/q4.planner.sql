@@ -156,7 +156,10 @@ OrderBy { ordering_exprs: "__#6.o_orderpriority"(#6.0) ASC, (.output_columns): [
                         └── (.cardinality): 0.00
 
 physical_plan after optd-finalized:
-EnforcerSort { tuple_ordering: [(#6.0, Asc)], (.output_columns): [ "__#6.o_orderpriority"(#6.0), "__#6.order_count"(#6.1) ], (.cardinality): 0.00 }
+EnforcerSort
+├── tuple_ordering: [(#6.0, Asc)]
+├── (.output_columns): [ "__#6.o_orderpriority"(#6.0), "__#6.order_count"(#6.1) ]
+├── (.cardinality): 0.00
 └── Project
     ├── .table_index: 6
     ├── .projections: [ "orders.o_orderpriority"(#1.5), "__#5.count(Int64(1))"(#5.0) ]
@@ -224,7 +227,7 @@ EnforcerSort { tuple_ordering: [(#6.0, Asc)], (.output_columns): [ "__#6.o_order
                 │   └── "__#9.l_tax"(#9.7)
                 ├── (.cardinality): 0.00
                 └── Select
-                    ├── .predicate: ("lineitem.l_orderkey"(#2.0) = "lineitem.l_orderkey"(#2.0)) AND ("lineitem.l_commitdate"(#2.11) < "lineitem.l_receiptdate"(#2.12))
+                    ├── .predicate: "lineitem.l_commitdate"(#2.11) < "lineitem.l_receiptdate"(#2.12)
                     ├── (.output_columns):
                     │   ┌── "lineitem.l_comment"(#2.15)
                     │   ├── "lineitem.l_commitdate"(#2.11)
