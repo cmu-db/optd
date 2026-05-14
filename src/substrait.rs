@@ -290,7 +290,13 @@ impl<'a> Exporter<'a> {
         let expressions = map
             .computations
             .iter()
-            .map(|(_, expr)| self.export_expr(*expr, &input.columns))
+            .map(|(column, expr)| {
+                self.export_expr_with_type_hint(
+                    *expr,
+                    &input.columns,
+                    Some(&self.ctx.column(*column).ty),
+                )
+            })
             .collect::<Result<Vec<_>, _>>()?;
         let mut output_columns = input.columns.clone();
         output_columns.extend(map.computations.iter().map(|(column, _)| *column));
@@ -549,9 +555,20 @@ impl<'a> Exporter<'a> {
     }
 
     fn export_expr(&mut self, expr: Expr, scope: &[Column]) -> Result<Expression, SubstraitError> {
+        self.export_expr_with_type_hint(expr, scope, None)
+    }
+
+    fn export_expr_with_type_hint(
+        &mut self,
+        expr: Expr,
+        scope: &[Column],
+        output_type_hint: Option<&DataType>,
+    ) -> Result<Expression, SubstraitError> {
         let inferred_output_type = infer_expr_data_type(self.ctx, expr)
             .as_ref()
             .and_then(|data_type| arrow_to_substrait_type(data_type).ok());
+        let hinted_output_type =
+            output_type_hint.and_then(|data_type| arrow_to_substrait_type(data_type).ok());
         let rex_type = match self.ctx.expr(expr) {
             ExprData::Literal(value) => expression::RexType::Literal(export_literal(value)?),
             ExprData::ColumnRef(column) => {
@@ -570,7 +587,9 @@ impl<'a> Exporter<'a> {
                     UnaryOp::Not | UnaryOp::IsNull | UnaryOp::IsNotNull => {
                         Some(arrow_to_substrait_type(&DataType::Boolean)?)
                     }
-                    UnaryOp::Negate => inferred_output_type.clone(),
+                    UnaryOp::Negate => hinted_output_type
+                        .clone()
+                        .or_else(|| inferred_output_type.clone()),
                 };
                 expression::RexType::ScalarFunction(self.export_scalar_function(
                     unary_op_function_name(*op),
@@ -589,7 +608,9 @@ impl<'a> Exporter<'a> {
                     | BinaryOp::Gt
                     | BinaryOp::GtEq => Some(arrow_to_substrait_type(&DataType::Boolean)?),
                     BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
-                        inferred_output_type.clone()
+                        hinted_output_type
+                            .clone()
+                            .or_else(|| inferred_output_type.clone())
                     }
                 };
                 expression::RexType::ScalarFunction(self.export_scalar_function(
@@ -615,11 +636,41 @@ impl<'a> Exporter<'a> {
                     .map(|expr| self.export_expr(*expr, scope))
                     .collect::<Result<Vec<_>, _>>()?;
                 let function_name = function.to_string();
-                expression::RexType::ScalarFunction(self.export_scalar_function(
-                    &function_name,
-                    arguments,
-                    inferred_output_type.clone(),
-                ))
+                let normalized = normalize_function_name(&function_name);
+                if normalized == "cast" && arguments.len() == 1 {
+                    expression::RexType::Cast(Box::new(expression::Cast {
+                        r#type: hinted_output_type
+                            .clone()
+                            .or_else(|| inferred_output_type.clone()),
+                        input: Some(Box::new(arguments[0].clone())),
+                        failure_behavior: expression::cast::FailureBehavior::ThrowException as i32,
+                    }))
+                } else if (normalized == "if_then" || normalized == "case_when")
+                    && arguments.len() >= 3
+                    && arguments.len() % 2 == 1
+                {
+                    let mut ifs = Vec::new();
+                    for pair in arguments[..arguments.len() - 1].chunks(2) {
+                        ifs.push(expression::if_then::IfClause {
+                            r#if: Some(pair[0].clone()),
+                            then: Some(pair[1].clone()),
+                        });
+                    }
+                    expression::RexType::IfThen(Box::new(expression::IfThen {
+                        ifs,
+                        r#else: Some(Box::new(arguments.last().cloned().expect("else exists"))),
+                    }))
+                } else {
+                    expression::RexType::ScalarFunction(
+                        self.export_scalar_function(
+                            &function_name,
+                            arguments,
+                            hinted_output_type
+                                .clone()
+                                .or_else(|| inferred_output_type.clone()),
+                        ),
+                    )
+                }
             }
         };
         Ok(Expression {
@@ -1776,8 +1827,27 @@ impl Converter {
                     args: vec![arg],
                 }
             }
-            expression::RexType::IfThen(_) => {
-                return Err(SubstraitError::UnsupportedExpression("IfThen"));
+            expression::RexType::IfThen(if_then) => {
+                let mut args = Vec::new();
+                for clause in &if_then.ifs {
+                    let condition = clause.r#if.as_ref().ok_or(SubstraitError::MissingField(
+                        "Expression.IfThen.IfClause.if",
+                    ))?;
+                    let then = clause.then.as_ref().ok_or(SubstraitError::MissingField(
+                        "Expression.IfThen.IfClause.then",
+                    ))?;
+                    args.push(self.convert_expr(condition, scope)?);
+                    args.push(self.convert_expr(then, scope)?);
+                }
+                let r#else = if_then
+                    .r#else
+                    .as_ref()
+                    .ok_or(SubstraitError::MissingField("Expression.IfThen.else"))?;
+                args.push(self.convert_expr(r#else, scope)?);
+                ExprData::ScalarFunction {
+                    function: ScalarFunction::Extension("if_then".to_string()),
+                    args,
+                }
             }
             expression::RexType::SwitchExpression(_) => {
                 return Err(SubstraitError::UnsupportedExpression("SwitchExpression"));
@@ -1959,6 +2029,18 @@ impl Converter {
                 .as_ref()
                 .map(substrait_type_to_arrow)
                 .transpose(),
+            expression::RexType::IfThen(if_then) => {
+                if let Some(expr) = if_then
+                    .ifs
+                    .iter()
+                    .find_map(|clause| clause.then.as_ref())
+                    .or_else(|| if_then.r#else.as_deref())
+                {
+                    self.expr_output_type(expr)
+                } else {
+                    Ok(None)
+                }
+            }
             _ => Ok(None),
         }
     }
@@ -3061,6 +3143,151 @@ mod tests {
             panic!("scalar function should include output type");
         };
         assert!(matches!(output_type.kind, Some(r#type::Kind::String(_))));
+    }
+
+    #[test]
+    fn exports_cast_extension_as_cast_expression() {
+        let mut ctx = QueryContext::new();
+        let amount = ctx.add_column(ColumnData::new("amount", DataType::Int64));
+        let amount_i32 = ctx.add_column(ColumnData::new("amount_i32", DataType::Int32));
+        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+            table: TableRef::bare("orders"),
+            columns: vec![amount],
+        }));
+        let amount_ref = ctx.add_expr(ExprData::ColumnRef(amount));
+        let cast_expr = ctx.add_expr(ExprData::ScalarFunction {
+            function: ScalarFunction::Extension("cast".to_string()),
+            args: vec![amount_ref],
+        });
+        let map = ctx.add_operator(OperatorData::Map(Map {
+            computations: vec![(amount_i32, cast_expr)],
+            input: scan,
+        }));
+        let output = ctx.add_operator(OperatorData::Output(Output { input: map }));
+        ctx.set_root(output);
+
+        let plan = to_plan(&ctx).expect("query should export");
+        let Some(plan_rel::RelType::Root(root)) = plan.relations[0].rel_type.as_ref() else {
+            panic!("plan should export a root")
+        };
+        let Some(Rel {
+            rel_type: Some(rel::RelType::Project(project)),
+        }) = root.input.as_ref()
+        else {
+            panic!("root should read from project");
+        };
+        let Some(expression::RexType::Cast(cast)) = project.expressions[0].rex_type.as_ref() else {
+            panic!("expression should export as cast");
+        };
+        assert!(cast.input.is_some());
+        assert!(matches!(
+            cast.r#type.as_ref().and_then(|ty| ty.kind.as_ref()),
+            Some(r#type::Kind::I32(_))
+        ));
+    }
+
+    #[test]
+    fn exports_if_then_extension_as_if_then_expression() {
+        let mut ctx = QueryContext::new();
+        let amount = ctx.add_column(ColumnData::new("amount", DataType::Int64));
+        let bucket = ctx.add_column(ColumnData::new("bucket", DataType::Utf8));
+        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+            table: TableRef::bare("orders"),
+            columns: vec![amount],
+        }));
+        let amount_ref = ctx.add_expr(ExprData::ColumnRef(amount));
+        let limit = ctx.add_expr(ExprData::Literal(ScalarValue::Int64(100)));
+        let condition = ctx.add_expr(ExprData::Binary {
+            op: BinaryOp::Gt,
+            left: amount_ref,
+            right: limit,
+        });
+        let high = ctx.add_expr(ExprData::Literal(ScalarValue::Utf8("high".to_string())));
+        let low = ctx.add_expr(ExprData::Literal(ScalarValue::Utf8("low".to_string())));
+        let if_then = ctx.add_expr(ExprData::ScalarFunction {
+            function: ScalarFunction::Extension("if_then".to_string()),
+            args: vec![condition, high, low],
+        });
+        let map = ctx.add_operator(OperatorData::Map(Map {
+            computations: vec![(bucket, if_then)],
+            input: scan,
+        }));
+        let output = ctx.add_operator(OperatorData::Output(Output { input: map }));
+        ctx.set_root(output);
+
+        let plan = to_plan(&ctx).expect("query should export");
+        let Some(plan_rel::RelType::Root(root)) = plan.relations[0].rel_type.as_ref() else {
+            panic!("plan should export a root")
+        };
+        let Some(Rel {
+            rel_type: Some(rel::RelType::Project(project)),
+        }) = root.input.as_ref()
+        else {
+            panic!("root should read from project");
+        };
+        let Some(expression::RexType::IfThen(if_then)) = project.expressions[0].rex_type.as_ref()
+        else {
+            panic!("expression should export as if_then");
+        };
+        assert_eq!(if_then.ifs.len(), 1);
+        assert!(if_then.r#else.is_some());
+    }
+
+    #[test]
+    fn imports_if_then_as_extension_scalar_function() {
+        let relation = Rel {
+            rel_type: Some(rel::RelType::Project(Box::new(ProjectRel {
+                common: None,
+                input: Some(Box::new(named_read("orders", &["amount"]))),
+                expressions: vec![Expression {
+                    rex_type: Some(expression::RexType::IfThen(Box::new(expression::IfThen {
+                        ifs: vec![expression::if_then::IfClause {
+                            r#if: Some(Expression {
+                                rex_type: Some(expression::RexType::Literal(expression::Literal {
+                                    nullable: false,
+                                    type_variation_reference: 0,
+                                    literal_type: Some(expression::literal::LiteralType::Boolean(
+                                        true,
+                                    )),
+                                })),
+                            }),
+                            then: Some(Expression {
+                                rex_type: Some(expression::RexType::Literal(expression::Literal {
+                                    nullable: false,
+                                    type_variation_reference: 0,
+                                    literal_type: Some(expression::literal::LiteralType::String(
+                                        "x".to_string(),
+                                    )),
+                                })),
+                            }),
+                        }],
+                        r#else: Some(Box::new(Expression {
+                            rex_type: Some(expression::RexType::Literal(expression::Literal {
+                                nullable: false,
+                                type_variation_reference: 0,
+                                literal_type: Some(expression::literal::LiteralType::String(
+                                    "y".to_string(),
+                                )),
+                            })),
+                        })),
+                    }))),
+                }],
+                advanced_extension: None,
+            }))),
+        };
+
+        let ctx = from_rel(&relation).expect("relation should import");
+        let OperatorData::Output(output) = ctx.operator(ctx.root().expect("root")) else {
+            panic!("root should be output");
+        };
+        let OperatorData::Map(map) = ctx.operator(output.input) else {
+            panic!("project expression should become map");
+        };
+        let ExprData::ScalarFunction { function, args } = ctx.expr(map.computations[0].1) else {
+            panic!("if_then should import as scalar function");
+        };
+        assert_eq!(function, &ScalarFunction::Extension("if_then".to_string()));
+        assert_eq!(args.len(), 3);
     }
 
     #[test]
