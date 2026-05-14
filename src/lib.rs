@@ -1,11 +1,23 @@
 use arrow_schema::DataType;
+use std::any::{TypeId, type_name};
+use std::cell::RefCell;
 
+pub mod analysis;
+pub mod catalog;
 mod display;
 pub mod substrait;
 
+pub use analysis::{
+    Analysis, AnalysisContext, AnalysisError, AnalysisResult, AvailableColumns, ColumnNullability,
+    CreatedColumns, FreeColumns, OperatorAnalysis, UsedColumns, expr_used_columns,
+};
+pub use catalog::{
+    Catalog, CatalogError, CatalogResult, MemoryCatalog, ResolvedTableRef, TableId, TableMetadata,
+    TableRef, TableStatistics,
+};
 pub use display::{
-    BoxDrawingRenderer, BoxRendererConfig, DisplayField, DisplayInput, DisplayNode,
-    DisplayNodeRecord, DisplayPlan, DisplayProperties, DisplayValue,
+    BoxDrawingRenderer, BoxRendererConfig, BoxRendererTheme, ColorMode, DisplayField, DisplayInput,
+    DisplayNode, DisplayNodeRecord, DisplayPlan, DisplayProperties, DisplayValue,
 };
 
 /// An opaque reference to a relational operator in a [`QueryContext`].
@@ -14,6 +26,18 @@ pub use display::{
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Operator(usize);
+
+impl Operator {
+    /// Returns the operator payload from `ctx`.
+    pub fn get(self, ctx: &QueryContext) -> &OperatorData {
+        &ctx.operators[self.0]
+    }
+
+    /// Returns the mutable operator payload from `ctx`.
+    pub fn get_mut(self, ctx: &mut QueryContext) -> &mut OperatorData {
+        &mut ctx.operators[self.0]
+    }
+}
 
 /// A relational operator referenced by an [`Operator`] handle.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -41,7 +65,7 @@ pub enum OperatorData {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Scan {
-    pub table: String,
+    pub table: TableRef,
     pub columns: Vec<Column>,
 }
 
@@ -143,6 +167,13 @@ impl std::fmt::Display for JoinType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Column(usize);
 
+impl Column {
+    /// Returns the column payload from `ctx`.
+    pub fn get(self, ctx: &QueryContext) -> &ColumnData {
+        &ctx.columns[self.0]
+    }
+}
+
 impl std::fmt::Display for Column {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "#{}", self.0)
@@ -155,16 +186,14 @@ impl std::fmt::Display for Column {
 pub struct ColumnData {
     pub name: String,
     pub ty: DataType,
-    pub nullable: bool,
 }
 
 impl ColumnData {
     /// Creates column metadata.
-    pub fn new(name: impl Into<String>, ty: DataType, nullable: bool) -> Self {
+    pub fn new(name: impl Into<String>, ty: DataType) -> Self {
         Self {
             name: name.into(),
             ty,
-            nullable,
         }
     }
 }
@@ -175,6 +204,18 @@ impl ColumnData {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Expr(usize);
+
+impl Expr {
+    /// Returns the expression payload from `ctx`.
+    pub fn get(self, ctx: &QueryContext) -> &ExprData {
+        &ctx.exprs[self.0]
+    }
+
+    /// Returns the mutable expression payload from `ctx`.
+    pub fn get_mut(self, ctx: &mut QueryContext) -> &mut ExprData {
+        &mut ctx.exprs[self.0]
+    }
+}
 
 /// A scalar expression referenced by an [`Expr`] handle.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -441,6 +482,27 @@ impl std::fmt::Debug for QueryContext {
     }
 }
 
+/// Owns a query and the analysis state used while optimizing it.
+pub struct OptimizerContext {
+    pub query: QueryContext,
+    pub analyses: AnalysisContext,
+}
+
+impl OptimizerContext {
+    /// Creates an optimizer context for `query`.
+    pub fn new(query: QueryContext) -> Self {
+        Self {
+            query,
+            analyses: AnalysisContext::new(),
+        }
+    }
+
+    /// Consumes this optimizer context and returns the optimized query.
+    pub fn into_query(self) -> QueryContext {
+        self.query
+    }
+}
+
 impl QueryContext {
     /// Creates an empty query context.
     pub fn new() -> Self {
@@ -483,6 +545,11 @@ impl QueryContext {
         self.root
     }
 
+    /// Creates an empty analysis context for demand-driven query analysis.
+    pub fn analyze(&self) -> AnalysisContext {
+        AnalysisContext::new()
+    }
+
     /// Returns the number of operators in the operator arena.
     pub fn operator_count(&self) -> usize {
         self.operators.len()
@@ -500,59 +567,219 @@ impl QueryContext {
 
     /// Returns immutable operator data for a handle.
     pub fn operator(&self, operator: Operator) -> &OperatorData {
-        &self.operators[operator.0]
+        operator.get(self)
     }
 
     /// Returns mutable operator data for a handle.
     pub fn operator_mut(&mut self, operator: Operator) -> &mut OperatorData {
-        &mut self.operators[operator.0]
+        operator.get_mut(self)
     }
 
     /// Returns immutable expression data for a handle.
     pub fn expr(&self, expr: Expr) -> &ExprData {
-        &self.exprs[expr.0]
+        expr.get(self)
     }
 
     /// Returns mutable expression data for a handle.
     pub fn expr_mut(&mut self, expr: Expr) -> &mut ExprData {
-        &mut self.exprs[expr.0]
+        expr.get_mut(self)
     }
 
     /// Returns metadata for a column handle.
     pub fn column(&self, column: Column) -> &ColumnData {
-        &self.columns[column.0]
+        column.get(self)
     }
 
     /// Formats the reachable query plan using the default query formatter.
     pub fn pretty(&self) -> String {
-        let node = QueryFormatter::new(self).format();
+        self.pretty_with_config(QueryFormatConfig::default())
+    }
+
+    /// Formats the reachable query plan using the provided query formatter config.
+    pub fn pretty_with_config(&self, config: QueryFormatConfig) -> String {
+        let node = QueryFormatter::with_config(self, config).format();
         BoxDrawingRenderer::default().render(&node)
     }
 
     /// Formats the reachable query plan as recursive JSON for inspecting the tree shape.
     #[cfg(feature = "serde")]
     pub fn pretty_json(&self) -> String {
-        let node = QueryFormatter::new(self).format();
+        self.pretty_json_with_config(QueryFormatConfig::default())
+    }
+
+    /// Formats the reachable query plan as recursive JSON with the provided config.
+    #[cfg(feature = "serde")]
+    pub fn pretty_json_with_config(&self, config: QueryFormatConfig) -> String {
+        let node = QueryFormatter::with_config(self, config).format();
         serde_json::to_string_pretty(&node).expect("display tree serialization should not fail")
     }
 
     /// Formats the reachable query plan as flat DFS post-order JSON for file diffs.
     #[cfg(feature = "serde")]
     pub fn pretty_flat(&self) -> String {
-        let plan = QueryFormatter::new(self).format_plan();
+        self.pretty_flat_with_config(QueryFormatConfig::default())
+    }
+
+    /// Formats the reachable query plan as flat DFS post-order JSON with the provided config.
+    #[cfg(feature = "serde")]
+    pub fn pretty_flat_with_config(&self, config: QueryFormatConfig) -> String {
+        let plan = QueryFormatter::with_config(self, config).format_plan();
         serde_json::to_string_pretty(&plan).expect("display plan serialization should not fail")
+    }
+}
+
+/// Configuration for query-specific formatting.
+#[derive(Debug, Clone, Default)]
+pub struct QueryFormatConfig {
+    analysis_properties: Vec<AnalysisDisplayProperty>,
+}
+
+impl QueryFormatConfig {
+    /// Creates a config that includes no optional analysis properties.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds an analysis property to the formatted output.
+    pub fn with_analysis<A>(mut self) -> Self
+    where
+        A: DisplayableOperatorAnalysis,
+    {
+        let property = AnalysisDisplayProperty::new::<A>();
+        if !self
+            .analysis_properties
+            .iter()
+            .any(|existing| existing.type_id == property.type_id)
+        {
+            self.analysis_properties.push(property);
+        }
+        self
+    }
+
+    /// Adds all currently supported analysis properties to the formatted output.
+    pub fn with_all_analysis(self) -> Self {
+        self.with_analysis::<CreatedColumns>()
+            .with_analysis::<AvailableColumns>()
+            .with_analysis::<UsedColumns>()
+            .with_analysis::<FreeColumns>()
+            .with_analysis::<ColumnNullability>()
+    }
+
+    /// Returns the display keys for analysis properties shown by this config.
+    pub fn analysis_property_keys(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.analysis_properties.iter().map(|property| property.key)
+    }
+}
+
+/// Operator analysis whose output can be shown as a display property.
+pub trait DisplayableOperatorAnalysis: OperatorAnalysis + Default + 'static {
+    /// Stable key used by pretty and JSON display output.
+    const DISPLAY_KEY: &'static str;
+
+    /// Formats this analysis' output as a display value.
+    fn format_output(formatter: &QueryFormatter<'_>, output: Self::Output) -> DisplayValue;
+}
+
+impl DisplayableOperatorAnalysis for CreatedColumns {
+    const DISPLAY_KEY: &'static str = "analysis::created_columns";
+
+    fn format_output(formatter: &QueryFormatter<'_>, output: Self::Output) -> DisplayValue {
+        formatter.format_columns(output)
+    }
+}
+
+impl DisplayableOperatorAnalysis for AvailableColumns {
+    const DISPLAY_KEY: &'static str = "analysis::available_columns";
+
+    fn format_output(formatter: &QueryFormatter<'_>, output: Self::Output) -> DisplayValue {
+        formatter.format_columns(output)
+    }
+}
+
+impl DisplayableOperatorAnalysis for UsedColumns {
+    const DISPLAY_KEY: &'static str = "analysis::used_columns";
+
+    fn format_output(formatter: &QueryFormatter<'_>, output: Self::Output) -> DisplayValue {
+        formatter.format_columns(output)
+    }
+}
+
+impl DisplayableOperatorAnalysis for FreeColumns {
+    const DISPLAY_KEY: &'static str = "analysis::free_columns";
+
+    fn format_output(formatter: &QueryFormatter<'_>, output: Self::Output) -> DisplayValue {
+        formatter.format_columns(output)
+    }
+}
+
+impl DisplayableOperatorAnalysis for ColumnNullability {
+    const DISPLAY_KEY: &'static str = "analysis::column_nullability";
+
+    fn format_output(formatter: &QueryFormatter<'_>, output: Self::Output) -> DisplayValue {
+        DisplayValue::List(
+            output
+                .into_iter()
+                .map(|(column, nullable)| {
+                    let state = if nullable { "nullable" } else { "not null" };
+                    format!("{}: {state}", formatter.format_column_name(column))
+                })
+                .collect(),
+        )
+    }
+}
+
+#[derive(Clone)]
+struct AnalysisDisplayProperty {
+    type_id: TypeId,
+    type_name: &'static str,
+    key: &'static str,
+    format: fn(&QueryFormatter<'_>, Operator) -> DisplayValue,
+}
+
+impl AnalysisDisplayProperty {
+    fn new<A>() -> Self
+    where
+        A: DisplayableOperatorAnalysis,
+    {
+        Self {
+            type_id: TypeId::of::<A>(),
+            type_name: type_name::<A>(),
+            key: A::DISPLAY_KEY,
+            format: format_displayable_analysis::<A>,
+        }
+    }
+}
+
+impl std::fmt::Debug for AnalysisDisplayProperty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AnalysisDisplayProperty")
+            .field("type_id", &self.type_id)
+            .field("type_name", &self.type_name)
+            .field("key", &self.key)
+            .finish_non_exhaustive()
     }
 }
 
 /// Formats a [`QueryContext`] into a generic [`DisplayNode`] tree.
 pub struct QueryFormatter<'a> {
     ctx: &'a QueryContext,
+    config: QueryFormatConfig,
+    analyses: RefCell<AnalysisContext>,
 }
 
 impl<'a> QueryFormatter<'a> {
     /// Creates a query formatter.
     pub fn new(ctx: &'a QueryContext) -> Self {
-        Self { ctx }
+        Self::with_config(ctx, QueryFormatConfig::default())
+    }
+
+    /// Creates a query formatter with the provided config.
+    pub fn with_config(ctx: &'a QueryContext, config: QueryFormatConfig) -> Self {
+        Self {
+            ctx,
+            config,
+            analyses: RefCell::new(AnalysisContext::new()),
+        }
     }
 
     /// Formats the reachable query plan from the root operator into a display tree.
@@ -579,6 +806,7 @@ impl<'a> QueryFormatter<'a> {
                 title: "EMPTY QUERY".to_string(),
                 fields: DisplayProperties::new(),
                 inputs: DisplayProperties::new(),
+                metadata: DisplayProperties::new(),
             });
         }
 
@@ -586,15 +814,19 @@ impl<'a> QueryFormatter<'a> {
     }
 
     fn format_operator(&self, operator: Operator) -> DisplayNode {
-        let operator = self.format_operator_display(operator);
-        let mut node = DisplayNode::with_kind(operator.kind, operator.title);
+        let operator_display = self.format_operator_display(operator);
+        let mut node = DisplayNode::with_kind(operator_display.kind, operator_display.title);
 
-        for field in operator.fields {
+        for field in operator_display.fields {
             node.fields.push(field);
         }
 
-        for input in operator.inputs {
+        for input in operator_display.inputs {
             node = node.with_input(input.name, self.format_operator(input.target));
+        }
+
+        for (key, value) in self.format_analysis_properties(operator) {
+            node.metadata.insert(key, value);
         }
 
         node
@@ -602,6 +834,15 @@ impl<'a> QueryFormatter<'a> {
 
     fn format_column_name(&self, column: Column) -> String {
         format!("{}({column})", self.ctx.column(column).name)
+    }
+
+    fn format_columns(&self, columns: Vec<Column>) -> DisplayValue {
+        DisplayValue::List(
+            columns
+                .into_iter()
+                .map(|column| self.format_column_name(column))
+                .collect(),
+        )
     }
 
     fn format_definition(&self, column: Column, value: impl Into<String>) -> String {
@@ -761,6 +1002,7 @@ impl<'a> QueryFormatter<'a> {
             title: operator_display.title,
             fields: DisplayProperties::new(),
             inputs: DisplayProperties::new(),
+            metadata: DisplayProperties::new(),
         };
 
         for (order, field) in operator_display.fields.into_iter().enumerate() {
@@ -771,7 +1013,40 @@ impl<'a> QueryFormatter<'a> {
             insert_input(&mut record, order, input.name, input.target);
         }
 
+        for (order, (key, value)) in self
+            .format_analysis_properties(operator)
+            .into_iter()
+            .enumerate()
+        {
+            record.metadata.insert(order, key, value);
+        }
+
         record
+    }
+
+    fn format_analysis_properties(&self, operator: Operator) -> Vec<(String, DisplayValue)> {
+        self.config
+            .analysis_properties
+            .iter()
+            .map(|property| (property.key.to_string(), (property.format)(self, operator)))
+            .collect()
+    }
+}
+
+fn format_displayable_analysis<A>(
+    formatter: &QueryFormatter<'_>,
+    operator: Operator,
+) -> DisplayValue
+where
+    A: DisplayableOperatorAnalysis,
+{
+    match formatter
+        .analyses
+        .borrow_mut()
+        .get::<A>(formatter.ctx, operator)
+    {
+        Ok(output) => A::format_output(formatter, output),
+        Err(error) => DisplayValue::Atom(format!("error: {error}")),
     }
 }
 
@@ -1052,7 +1327,7 @@ impl OperatorDisplayFormat for Output {
 fn display_scalar_field(key: impl Into<String>, value: impl Into<String>) -> DisplayField {
     DisplayField {
         key: key.into(),
-        value: DisplayValue::Scalar(value.into()),
+        value: DisplayValue::Atom(value.into()),
     }
 }
 
@@ -1089,10 +1364,10 @@ mod tests {
     #[test]
     fn pretty_prints_query_plan() {
         let mut ctx = QueryContext::new();
-        let id = ctx.add_column(ColumnData::new("id", DataType::Int64, false));
-        let age = ctx.add_column(ColumnData::new("age", DataType::Int32, true));
+        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
+        let age = ctx.add_column(ColumnData::new("age", DataType::Int32));
         let scan = ctx.add_operator(OperatorData::Scan(Scan {
-            table: "users".to_string(),
+            table: TableRef::bare("users"),
             columns: vec![id, age],
         }));
         let age_ref = ctx.add_expr(ExprData::ColumnRef(age));
@@ -1149,9 +1424,9 @@ mod tests {
     #[cfg(feature = "serde")]
     fn pretty_json_serializes_recursive_display_tree() {
         let mut ctx = QueryContext::new();
-        let id = ctx.add_column(ColumnData::new("id", DataType::Int64, false));
+        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
         let scan = ctx.add_operator(OperatorData::Scan(Scan {
-            table: "users".to_string(),
+            table: TableRef::bare("users"),
             columns: vec![id],
         }));
         let output = ctx.add_operator(OperatorData::Output(Output { input: scan }));
@@ -1173,11 +1448,55 @@ mod tests {
     }
 
     #[test]
+    fn pretty_can_include_analysis_properties() {
+        let mut ctx = QueryContext::new();
+        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
+        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![id],
+        }));
+        ctx.set_root(scan);
+
+        assert!(!ctx.pretty().contains("analysis::available_columns"));
+
+        let pretty =
+            ctx.pretty_with_config(QueryFormatConfig::new().with_analysis::<AvailableColumns>());
+
+        assert!(pretty.contains("│ analysis::available_columns:"));
+        assert!(pretty.contains("│   id(#0)"));
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn json_formats_can_include_analysis_properties() {
+        let mut ctx = QueryContext::new();
+        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
+        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![id],
+        }));
+        let output = ctx.add_operator(OperatorData::Output(Output { input: scan }));
+        ctx.set_root(output);
+        let config = QueryFormatConfig::new().with_analysis::<AvailableColumns>();
+
+        let tree: serde_json::Value =
+            serde_json::from_str(&ctx.pretty_json_with_config(config.clone())).unwrap();
+        assert_eq!(tree["analysis::available_columns"][0], "id(#0)");
+        assert_eq!(tree["input"]["analysis::available_columns"][0], "id(#0)");
+
+        let plan: serde_json::Value =
+            serde_json::from_str(&ctx.pretty_flat_with_config(config)).unwrap();
+        let nodes = plan["nodes"].as_array().unwrap();
+        assert_eq!(nodes[0]["analysis::available_columns"][0], "id(#0)");
+        assert_eq!(nodes[1]["analysis::available_columns"][0], "id(#0)");
+    }
+
+    #[test]
     fn set_root_does_not_append_operator() {
         let mut ctx = QueryContext::new();
-        let id = ctx.add_column(ColumnData::new("id", DataType::Int64, false));
+        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
         let scan = ctx.add_operator(OperatorData::Scan(Scan {
-            table: "users".to_string(),
+            table: TableRef::bare("users"),
             columns: vec![id],
         }));
 
@@ -1192,16 +1511,15 @@ mod tests {
     #[test]
     fn pretty_prints_join_children_side_by_side() {
         let mut ctx = QueryContext::new();
-        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64, false));
-        let order_user_id =
-            ctx.add_column(ColumnData::new("order_user_id", DataType::Int64, false));
+        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
+        let order_user_id = ctx.add_column(ColumnData::new("order_user_id", DataType::Int64));
 
         let users = ctx.add_operator(OperatorData::Scan(Scan {
-            table: "users".to_string(),
+            table: TableRef::bare("users"),
             columns: vec![user_id],
         }));
         let orders = ctx.add_operator(OperatorData::Scan(Scan {
-            table: "orders".to_string(),
+            table: TableRef::bare("orders"),
             columns: vec![order_user_id],
         }));
         let left = ctx.add_expr(ExprData::ColumnRef(user_id));
@@ -1232,16 +1550,15 @@ mod tests {
     #[cfg(feature = "serde")]
     fn flat_prints_operators_in_dfs_post_order() {
         let mut ctx = QueryContext::new();
-        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64, false));
-        let order_user_id =
-            ctx.add_column(ColumnData::new("order_user_id", DataType::Int64, false));
+        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
+        let order_user_id = ctx.add_column(ColumnData::new("order_user_id", DataType::Int64));
 
         let users = ctx.add_operator(OperatorData::Scan(Scan {
-            table: "users".to_string(),
+            table: TableRef::bare("users"),
             columns: vec![user_id],
         }));
         let orders = ctx.add_operator(OperatorData::Scan(Scan {
-            table: "orders".to_string(),
+            table: TableRef::bare("orders"),
             columns: vec![order_user_id],
         }));
         let left = ctx.add_expr(ExprData::ColumnRef(user_id));
@@ -1277,12 +1594,12 @@ mod tests {
     #[test]
     fn pretty_prints_aggregation() {
         let mut ctx = QueryContext::new();
-        let region = ctx.add_column(ColumnData::new("region", DataType::Utf8, false));
-        let amount = ctx.add_column(ColumnData::new("amount", DataType::Float64, false));
-        let total_amount = ctx.add_column(ColumnData::new("total_amount", DataType::Float64, true));
-        let order_count = ctx.add_column(ColumnData::new("order_count", DataType::Int64, false));
+        let region = ctx.add_column(ColumnData::new("region", DataType::Utf8));
+        let amount = ctx.add_column(ColumnData::new("amount", DataType::Float64));
+        let total_amount = ctx.add_column(ColumnData::new("total_amount", DataType::Float64));
+        let order_count = ctx.add_column(ColumnData::new("order_count", DataType::Int64));
         let scan = ctx.add_operator(OperatorData::Scan(Scan {
-            table: "orders".to_string(),
+            table: TableRef::bare("orders"),
             columns: vec![region, amount],
         }));
         let region_ref = ctx.add_expr(ExprData::ColumnRef(region));
@@ -1320,11 +1637,11 @@ mod tests {
         let path = ctx.add_expr(ExprData::Literal(ScalarValue::Utf8(
             "orders.csv".to_string(),
         )));
-        let order_id = ctx.add_column(ColumnData::new("order_id", DataType::Int64, false));
-        let region = ctx.add_column(ColumnData::new("region", DataType::Utf8, false));
+        let order_id = ctx.add_column(ColumnData::new("order_id", DataType::Int64));
+        let region = ctx.add_column(ColumnData::new("region", DataType::Utf8));
         let normalized_region =
-            ctx.add_column(ColumnData::new("normalized_region", DataType::Utf8, true));
-        let score = ctx.add_column(ColumnData::new("score", DataType::Float64, true));
+            ctx.add_column(ColumnData::new("normalized_region", DataType::Utf8));
+        let score = ctx.add_column(ColumnData::new("score", DataType::Float64));
         let table = ctx.add_operator(OperatorData::TableFunction(TableFunction {
             function: TableFunctionDef::extension("read_orders"),
             args: vec![path],
@@ -1373,15 +1690,13 @@ mod tests {
         let first = ctx.add_column(ColumnData::new(
             "first_really_long_column_name",
             DataType::Int64,
-            false,
         ));
         let second = ctx.add_column(ColumnData::new(
             "second_really_long_column_name",
             DataType::Int64,
-            false,
         ));
         let scan = ctx.add_operator(OperatorData::Scan(Scan {
-            table: "wide_table".to_string(),
+            table: TableRef::bare("wide_table"),
             columns: vec![first, second],
         }));
         ctx.set_root(scan);
@@ -1391,6 +1706,7 @@ mod tests {
             min_box_width: 8,
             max_box_width: 32,
             child_gap: 2,
+            ..BoxRendererConfig::default()
         })
         .render(&node);
 
@@ -1411,6 +1727,7 @@ mod tests {
             min_box_width: 1,
             max_box_width: 5,
             child_gap: 1,
+            ..BoxRendererConfig::default()
         })
         .render(&node);
 
@@ -1438,14 +1755,27 @@ mod tests {
         assert!(rendered.contains("│ Right"));
     }
 
+    #[test]
+    fn box_renderer_can_color_metadata() {
+        let node = DisplayNode::new("Root").with_metadata("analysis::free_columns", "id(#0)");
+        let rendered = BoxDrawingRenderer::with_config(
+            BoxRendererConfig::default().with_color_mode(ColorMode::Always),
+        )
+        .render(&node);
+
+        assert!(rendered.contains("\u{1b}["));
+        assert!(rendered.contains("analysis::free_columns"));
+        assert!(rendered.contains("id(#0)"));
+    }
+
     #[cfg(feature = "serde")]
     #[test]
     fn query_context_round_trips_through_serde() {
         let mut ctx = QueryContext::new();
-        let id = ctx.add_column(ColumnData::new("id", DataType::Int64, false));
-        let age = ctx.add_column(ColumnData::new("age", DataType::Int32, true));
+        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
+        let age = ctx.add_column(ColumnData::new("age", DataType::Int32));
         let scan = ctx.add_operator(OperatorData::Scan(Scan {
-            table: "users".to_string(),
+            table: TableRef::bare("users"),
             columns: vec![id, age],
         }));
         let age_ref = ctx.add_expr(ExprData::ColumnRef(age));

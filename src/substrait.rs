@@ -15,7 +15,7 @@ use crate::{
     AggregateExpr, AggregateFunction, Aggregation, BinaryOp, Column, ColumnData, CrossProduct,
     Expr, ExprData, Join, JoinType, Map, NaryOp, Operator, OperatorData, Output, Projection,
     QueryContext, ScalarFunction, ScalarValue, Scan, Selection, TableFunction, TableFunctionDef,
-    UnaryOp,
+    TableRef, UnaryOp,
 };
 
 /// Converts Substrait protobuf plans into this crate's relational IR.
@@ -234,11 +234,7 @@ impl Converter {
             .ok_or(SubstraitError::MissingField("ReadRel.read_type"))?
         {
             read_rel::ReadType::NamedTable(table) => {
-                let table = if table.names.is_empty() {
-                    "<unnamed>".to_string()
-                } else {
-                    table.names.join(".")
-                };
+                let table = Self::convert_named_table_ref(&table.names);
                 let operator = self.ctx.add_operator(OperatorData::Scan(Scan {
                     table,
                     columns: columns.clone(),
@@ -601,15 +597,13 @@ impl Converter {
             .iter()
             .enumerate()
             .map(|(index, ty)| {
-                let (data_type, nullable) = substrait_type_to_column_type(ty)?;
+                let (data_type, _nullable) = substrait_type_to_column_type(ty)?;
                 let name = schema
                     .names
                     .get(index)
                     .cloned()
                     .unwrap_or_else(|| format!("field_{index}"));
-                Ok(self
-                    .ctx
-                    .add_column(ColumnData::new(name, data_type, nullable)))
+                Ok(self.ctx.add_column(ColumnData::new(name, data_type)))
             })
             .collect()
     }
@@ -656,6 +650,22 @@ impl Converter {
             .ctx
             .add_expr(ExprData::Literal(ScalarValue::Utf8(path)));
         Ok((function, vec![path]))
+    }
+
+    fn convert_named_table_ref(names: &[String]) -> TableRef {
+        match names {
+            [] => TableRef::bare("<unnamed>"),
+            [table] => TableRef::bare(table.clone()),
+            [schema, table] => TableRef::partial(schema.clone(), table.clone()),
+            [catalog, schema, table] => {
+                TableRef::full(catalog.clone(), schema.clone(), table.clone())
+            }
+            _ => TableRef::full(
+                names[..names.len() - 2].join("."),
+                names[names.len() - 2].clone(),
+                names[names.len() - 1].clone(),
+            ),
+        }
     }
 
     fn apply_common(
@@ -724,7 +734,7 @@ impl Converter {
     fn add_computed_column(&mut self, name: String, ty: Option<DataType>) -> Column {
         self.next_computed_column += 1;
         self.ctx
-            .add_column(ColumnData::new(name, ty.unwrap_or(DataType::Null), true))
+            .add_column(ColumnData::new(name, ty.unwrap_or(DataType::Null)))
     }
 
     fn function_name(&self, reference: u32) -> String {
@@ -1171,9 +1181,8 @@ mod tests {
             panic!("output should read from scan")
         };
 
-        assert_eq!(scan.table, "users");
+        assert_eq!(scan.table, TableRef::bare("users"));
         assert_eq!(ctx.column(scan.columns[0]).name, "user_id");
         assert_eq!(ctx.column(scan.columns[0]).ty, DataType::Int64);
-        assert!(!ctx.column(scan.columns[0]).nullable);
     }
 }

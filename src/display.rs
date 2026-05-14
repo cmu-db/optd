@@ -3,6 +3,7 @@ use serde::Serialize;
 #[cfg(feature = "serde")]
 use serde::ser::{SerializeMap, Serializer};
 use std::collections::BTreeMap;
+use std::io::IsTerminal;
 
 /// Generic display tree node that can be rendered independently of query plans.
 #[derive(Debug, Clone)]
@@ -56,7 +57,7 @@ impl DisplayNode {
     pub fn with_field(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.fields.push(DisplayField {
             key: key.into(),
-            value: DisplayValue::Scalar(value.into()),
+            value: DisplayValue::Atom(value.into()),
         });
         self
     }
@@ -83,7 +84,7 @@ impl DisplayNode {
 
     pub fn with_metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata
-            .insert(key.into(), DisplayValue::Scalar(value.into()));
+            .insert(key.into(), DisplayValue::Atom(value.into()));
         self
     }
 }
@@ -101,7 +102,7 @@ pub struct DisplayField {
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(untagged))]
 pub enum DisplayValue {
-    Scalar(String),
+    Atom(String),
     List(Vec<String>),
 }
 
@@ -120,6 +121,7 @@ pub struct DisplayNodeRecord {
     pub title: String,
     pub fields: DisplayProperties<DisplayValue>,
     pub inputs: DisplayProperties<usize>,
+    pub metadata: DisplayProperties<DisplayValue>,
 }
 
 #[cfg(feature = "serde")]
@@ -128,11 +130,14 @@ impl Serialize for DisplayNodeRecord {
     where
         S: Serializer,
     {
-        let mut map = serializer.serialize_map(Some(3 + self.fields.len() + self.inputs.len()))?;
+        let mut map = serializer.serialize_map(Some(
+            3 + self.fields.len() + self.inputs.len() + self.metadata.len(),
+        ))?;
         map.serialize_entry("id", &self.id)?;
         serialize_display_header(&mut map, &self.kind, &self.title)?;
         serialize_display_properties(&mut map, &self.fields)?;
         serialize_display_properties(&mut map, &self.inputs)?;
+        serialize_display_properties(&mut map, &self.metadata)?;
         map.end()
     }
 }
@@ -267,6 +272,8 @@ pub struct BoxRendererConfig {
     pub min_box_width: usize,
     pub max_box_width: usize,
     pub child_gap: usize,
+    pub color_mode: ColorMode,
+    pub theme: BoxRendererTheme,
 }
 
 impl Default for BoxRendererConfig {
@@ -275,6 +282,41 @@ impl Default for BoxRendererConfig {
             min_box_width: 12,
             max_box_width: 80,
             child_gap: 4,
+            color_mode: ColorMode::Never,
+            theme: BoxRendererTheme::default(),
+        }
+    }
+}
+
+impl BoxRendererConfig {
+    pub fn with_color_mode(mut self, color_mode: ColorMode) -> Self {
+        self.color_mode = color_mode;
+        self
+    }
+}
+
+/// Controls ANSI color output for [`BoxDrawingRenderer`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorMode {
+    Auto,
+    Always,
+    Never,
+}
+
+/// ANSI styles used by [`BoxDrawingRenderer`].
+#[derive(Debug, Clone)]
+pub struct BoxRendererTheme {
+    pub metadata_key: anstyle::Style,
+    pub metadata_value: anstyle::Style,
+}
+
+impl Default for BoxRendererTheme {
+    fn default() -> Self {
+        Self {
+            metadata_key: anstyle::Style::new()
+                .fg_color(Some(anstyle::AnsiColor::Yellow.into()))
+                .effects(anstyle::Effects::BOLD),
+            metadata_value: anstyle::Style::new().fg_color(Some(anstyle::AnsiColor::Cyan.into())),
         }
     }
 }
@@ -316,7 +358,7 @@ impl BoxDrawingRenderer {
         }
     }
 
-    fn render_details(&self, node: &DisplayNode) -> Vec<String> {
+    fn render_details(&self, node: &DisplayNode) -> Vec<RenderDetail> {
         let fields = node
             .fields
             .iter()
@@ -324,22 +366,44 @@ impl BoxDrawingRenderer {
         let metadata = node
             .metadata
             .iter()
-            .flat_map(|(key, value)| self.render_entry(key, value));
+            .flat_map(|(key, value)| self.render_metadata_entry(key, value));
 
         fields.chain(metadata).collect()
     }
 
-    fn render_field(&self, field: &DisplayField) -> Vec<String> {
+    fn render_field(&self, field: &DisplayField) -> Vec<RenderDetail> {
         self.render_entry(&field.key, &field.value)
     }
 
-    fn render_entry(&self, key: &str, value: &DisplayValue) -> Vec<String> {
+    fn render_entry(&self, key: &str, value: &DisplayValue) -> Vec<RenderDetail> {
         match value {
-            DisplayValue::Scalar(value) => vec![format!("{key}: {value}")],
+            DisplayValue::Atom(value) => vec![RenderDetail::plain(format!("{key}: {value}"))],
             DisplayValue::List(values) => {
                 let mut details = Vec::with_capacity(values.len() + 1);
-                details.push(format!("{key}:"));
-                details.extend(values.iter().map(|value| format!("  {value}")));
+                details.push(RenderDetail::plain(format!("{key}:")));
+                details.extend(
+                    values
+                        .iter()
+                        .map(|value| RenderDetail::plain(format!("  {value}"))),
+                );
+                details
+            }
+        }
+    }
+
+    fn render_metadata_entry(&self, key: &str, value: &DisplayValue) -> Vec<RenderDetail> {
+        match value {
+            DisplayValue::Atom(value) => {
+                vec![RenderDetail::metadata_scalar(key, value)]
+            }
+            DisplayValue::List(values) => {
+                let mut details = Vec::with_capacity(values.len() + 1);
+                details.push(RenderDetail::metadata_key(format!("{key}:")));
+                details.extend(
+                    values
+                        .iter()
+                        .map(|value| RenderDetail::metadata_value(format!("  {value}"))),
+                );
                 details
             }
         }
@@ -381,11 +445,10 @@ impl BoxDrawingRenderer {
         }
 
         lines.push(format!(
-            "{:<left_width$}{}{}",
-            format!("│ {}", outer.name),
+            "{}{}│ {}",
+            pad_visible(&format!("│ {}", outer.name), left_width),
             " ".repeat(gap),
-            format!("│ {}", inner.name),
-            left_width = left_width
+            inner.name
         ));
 
         let height = outer_block.lines.len().max(inner_block.lines.len());
@@ -402,9 +465,9 @@ impl BoxDrawingRenderer {
                 .unwrap_or("");
 
             lines.push(format!(
-                "{outer_line:<left_width$}{}{inner_line}",
-                " ".repeat(gap),
-                left_width = left_width
+                "{}{}{inner_line}",
+                pad_visible(outer_line, left_width),
+                " ".repeat(gap)
             ));
         }
 
@@ -425,13 +488,13 @@ impl BoxDrawingRenderer {
         RenderedBlock { lines, width }
     }
 
-    fn render_box(&self, title: &str, details: &[String]) -> RenderedBlock {
+    fn render_box(&self, title: &str, details: &[RenderDetail]) -> RenderedBlock {
         let max_box_width = self.config.max_box_width.max(4);
         let max_content_width = max_box_width.saturating_sub(4).max(1);
         let wrapped_details = self.wrap_details(details, max_content_width);
         let content_width = wrapped_details
             .iter()
-            .map(|detail| detail.chars().count())
+            .map(|detail| detail.text.chars().count())
             .chain(std::iter::once(title.chars().count()))
             .max()
             .unwrap_or(0)
@@ -444,7 +507,12 @@ impl BoxDrawingRenderer {
         lines.push(format!("├{}┤", "─".repeat(content_width + 2)));
 
         for detail in wrapped_details {
-            lines.push(format!("│ {detail:content_width$} │"));
+            let padding = content_width.saturating_sub(detail.text.chars().count());
+            lines.push(format!(
+                "│ {}{} │",
+                self.style_detail(&detail),
+                " ".repeat(padding)
+            ));
         }
 
         lines.push(format!("└{}┘", "─".repeat(content_width + 2)));
@@ -455,22 +523,34 @@ impl BoxDrawingRenderer {
         }
     }
 
-    fn wrap_details(&self, details: &[String], max_width: usize) -> Vec<String> {
+    fn wrap_details(&self, details: &[RenderDetail], max_width: usize) -> Vec<RenderDetail> {
         details
             .iter()
             .flat_map(|detail| self.wrap_detail(detail, max_width))
             .collect()
     }
 
-    fn wrap_detail(&self, detail: &str, max_width: usize) -> Vec<String> {
-        if detail.chars().count() <= max_width {
-            return vec![detail.to_string()];
+    fn wrap_detail(&self, detail: &RenderDetail, max_width: usize) -> Vec<RenderDetail> {
+        if detail.text.chars().count() <= max_width {
+            return vec![detail.clone()];
         }
 
-        let requested_indent_width = detail.chars().take_while(|ch| ch.is_whitespace()).count();
+        if let RenderDetailStyle::MetadataScalar { key, value } = &detail.style {
+            let expanded = [
+                RenderDetail::metadata_key(format!("{key}:")),
+                RenderDetail::metadata_value(format!("  {value}")),
+            ];
+            return self.wrap_details(&expanded, max_width);
+        }
+
+        let requested_indent_width = detail
+            .text
+            .chars()
+            .take_while(|ch| ch.is_whitespace())
+            .count();
         let indent_width = requested_indent_width.min(max_width.saturating_sub(1));
         let indent = " ".repeat(indent_width);
-        let body = detail.trim_start();
+        let body = detail.text.trim_start();
         let max_body_width = max_width - indent_width;
         let mut lines = Vec::new();
         let mut current = String::new();
@@ -480,20 +560,20 @@ impl BoxDrawingRenderer {
             let next_width = current.chars().count() + separator_width + word.chars().count();
 
             if !current.is_empty() && next_width > max_body_width {
-                lines.push(format!("{indent}{current}"));
+                lines.push(detail.with_text(format!("{indent}{current}")));
                 current = String::new();
             }
 
             if word.chars().count() > max_body_width {
                 if !current.is_empty() {
-                    lines.push(format!("{indent}{current}"));
+                    lines.push(detail.with_text(format!("{indent}{current}")));
                     current = String::new();
                 }
 
                 lines.extend(
                     self.wrap_long_word(word, max_body_width)
                         .into_iter()
-                        .map(|line| format!("{indent}{line}")),
+                        .map(|line| detail.with_text(format!("{indent}{line}"))),
                 );
                 continue;
             }
@@ -506,7 +586,7 @@ impl BoxDrawingRenderer {
         }
 
         if !current.is_empty() {
-            lines.push(format!("{indent}{current}"));
+            lines.push(detail.with_text(format!("{indent}{current}")));
         }
 
         lines
@@ -531,6 +611,123 @@ impl BoxDrawingRenderer {
 
         lines
     }
+
+    fn style_detail(&self, detail: &RenderDetail) -> String {
+        if !self.use_color() {
+            return detail.text.clone();
+        }
+
+        match &detail.style {
+            RenderDetailStyle::Plain => detail.text.clone(),
+            RenderDetailStyle::MetadataKey => {
+                self.apply_style(self.config.theme.metadata_key, &detail.text)
+            }
+            RenderDetailStyle::MetadataValue => {
+                self.apply_style(self.config.theme.metadata_value, &detail.text)
+            }
+            RenderDetailStyle::MetadataScalar { key, value } => format!(
+                "{}: {}",
+                self.apply_style(self.config.theme.metadata_key, key),
+                self.apply_style(self.config.theme.metadata_value, value)
+            ),
+        }
+    }
+
+    fn apply_style(&self, style: anstyle::Style, text: &str) -> String {
+        format!("{}{text}{}", style.render(), style.render_reset())
+    }
+
+    fn use_color(&self) -> bool {
+        match self.config.color_mode {
+            ColorMode::Always => true,
+            ColorMode::Never => false,
+            ColorMode::Auto => std::io::stdout().is_terminal(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RenderDetail {
+    text: String,
+    style: RenderDetailStyle,
+}
+
+#[derive(Debug, Clone)]
+enum RenderDetailStyle {
+    Plain,
+    MetadataKey,
+    MetadataValue,
+    MetadataScalar { key: String, value: String },
+}
+
+impl RenderDetail {
+    fn plain(text: String) -> Self {
+        Self {
+            text,
+            style: RenderDetailStyle::Plain,
+        }
+    }
+
+    fn metadata_key(text: String) -> Self {
+        Self {
+            text,
+            style: RenderDetailStyle::MetadataKey,
+        }
+    }
+
+    fn metadata_value(text: String) -> Self {
+        Self {
+            text,
+            style: RenderDetailStyle::MetadataValue,
+        }
+    }
+
+    fn metadata_scalar(key: &str, value: &str) -> Self {
+        Self {
+            text: format!("{key}: {value}"),
+            style: RenderDetailStyle::MetadataScalar {
+                key: key.to_string(),
+                value: value.to_string(),
+            },
+        }
+    }
+
+    fn with_text(&self, text: String) -> Self {
+        Self {
+            text,
+            style: self.style.clone(),
+        }
+    }
+}
+
+fn pad_visible(text: &str, target_width: usize) -> String {
+    let width = visible_width(text);
+    if width >= target_width {
+        return text.to_string();
+    }
+
+    format!("{text}{}", " ".repeat(target_width - width))
+}
+
+fn visible_width(text: &str) -> usize {
+    let mut width = 0;
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next();
+            for ch in chars.by_ref() {
+                if ch.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+            continue;
+        }
+
+        width += 1;
+    }
+
+    width
 }
 
 struct RenderedBlock {
