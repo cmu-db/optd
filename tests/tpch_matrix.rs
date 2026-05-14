@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use datafusion::arrow::array::new_empty_array;
@@ -7,7 +8,9 @@ use datafusion::datasource::MemTable;
 use datafusion::prelude::SessionContext;
 use prost::Message;
 use simple_graph::tpch::*;
-use simple_graph::{ExprData, NaryOp, Operator, OperatorData, QueryContext, substrait};
+use simple_graph::{
+    AggregateExpr, Expr, ExprData, NaryOp, Operator, OperatorData, QueryContext, substrait,
+};
 
 type QueryBuilder = fn() -> QueryContext;
 
@@ -187,6 +190,52 @@ fn tpch_q3_models_where_clause_as_one_selection() {
     );
 }
 
+#[test]
+fn tpch_builders_keep_one_selection_per_query_block_filter() {
+    let expected_selection_counts = [
+        (1, 1),
+        (2, 2),
+        (3, 1),
+        (4, 2),
+        (5, 1),
+        (6, 1),
+        (7, 1),
+        (8, 1),
+        (9, 1),
+        (10, 1),
+        (11, 2),
+        (12, 1),
+        (13, 0),
+        (14, 1),
+        (15, 2),
+        (16, 2),
+        (17, 2),
+        (18, 2),
+        (19, 1),
+        (20, 4),
+        (21, 3),
+        (22, 3),
+    ];
+
+    for (query_number, expected) in expected_selection_counts {
+        let query = tpch_query(query_number).expect("TPC-H builder should exist");
+        let mut selections = Vec::new();
+        let mut visited = HashSet::new();
+        collect_unique_selection_predicates(
+            &query,
+            query.root().expect("TPC-H builder should set a root"),
+            &mut visited,
+            &mut selections,
+        );
+
+        assert_eq!(
+            selections.len(),
+            expected,
+            "Q{query_number} should model each query-block filter with one Selection"
+        );
+    }
+}
+
 fn collect_selection_predicates(
     query: &QueryContext,
     operator: Operator,
@@ -217,6 +266,121 @@ fn collect_selection_predicates(
         OperatorData::Join(join) => {
             collect_selection_predicates(query, join.outer, predicates);
             collect_selection_predicates(query, join.inner, predicates);
+        }
+    }
+}
+
+fn collect_unique_selection_predicates(
+    query: &QueryContext,
+    operator: Operator,
+    visited: &mut HashSet<Operator>,
+    predicates: &mut Vec<simple_graph::Expr>,
+) {
+    if !visited.insert(operator) {
+        return;
+    }
+
+    match query.operator(operator) {
+        OperatorData::Scan(_) | OperatorData::TableFunction(_) => {}
+        OperatorData::Selection(selection) => {
+            predicates.push(selection.predicate);
+            collect_expr_subquery_selections(query, selection.predicate, visited, predicates);
+            collect_unique_selection_predicates(query, selection.input, visited, predicates);
+        }
+        OperatorData::Map(map) => {
+            for (_, expr) in &map.computations {
+                collect_expr_subquery_selections(query, *expr, visited, predicates);
+            }
+            collect_unique_selection_predicates(query, map.input, visited, predicates);
+        }
+        OperatorData::Sort(sort) => {
+            for key in &sort.keys {
+                collect_expr_subquery_selections(query, key.expr, visited, predicates);
+            }
+            collect_unique_selection_predicates(query, sort.input, visited, predicates);
+        }
+        OperatorData::Limit(limit) => {
+            collect_unique_selection_predicates(query, limit.input, visited, predicates);
+        }
+        OperatorData::Aggregation(aggregation) => {
+            for key in &aggregation.keys {
+                collect_expr_subquery_selections(query, *key, visited, predicates);
+            }
+            for (_, aggregate) in &aggregation.aggregates {
+                collect_aggregate_subquery_selections(query, aggregate, visited, predicates);
+            }
+            collect_unique_selection_predicates(query, aggregation.input, visited, predicates);
+        }
+        OperatorData::Projection(projection) => {
+            collect_unique_selection_predicates(query, projection.input, visited, predicates);
+        }
+        OperatorData::Output(output) => {
+            collect_unique_selection_predicates(query, output.input, visited, predicates)
+        }
+        OperatorData::CrossProduct(cross) => {
+            collect_unique_selection_predicates(query, cross.outer, visited, predicates);
+            collect_unique_selection_predicates(query, cross.inner, visited, predicates);
+        }
+        OperatorData::Join(join) => {
+            collect_expr_subquery_selections(query, join.on, visited, predicates);
+            collect_unique_selection_predicates(query, join.outer, visited, predicates);
+            collect_unique_selection_predicates(query, join.inner, visited, predicates);
+        }
+    }
+}
+
+fn collect_aggregate_subquery_selections(
+    query: &QueryContext,
+    aggregate: &AggregateExpr,
+    visited: &mut HashSet<Operator>,
+    predicates: &mut Vec<simple_graph::Expr>,
+) {
+    match aggregate {
+        AggregateExpr::CountStar => {}
+        AggregateExpr::Func { arg, .. } => {
+            collect_expr_subquery_selections(query, *arg, visited, predicates);
+        }
+    }
+}
+
+fn collect_expr_subquery_selections(
+    query: &QueryContext,
+    expr: Expr,
+    visited: &mut HashSet<Operator>,
+    predicates: &mut Vec<simple_graph::Expr>,
+) {
+    match query.expr(expr) {
+        ExprData::Literal(_) | ExprData::ColumnRef(_) => {}
+        ExprData::Unary { expr, .. } | ExprData::Cast { expr, .. } => {
+            collect_expr_subquery_selections(query, *expr, visited, predicates);
+        }
+        ExprData::Binary { left, right, .. } => {
+            collect_expr_subquery_selections(query, *left, visited, predicates);
+            collect_expr_subquery_selections(query, *right, visited, predicates);
+        }
+        ExprData::Nary { exprs, .. } | ExprData::ScalarFunction { args: exprs, .. } => {
+            for expr in exprs {
+                collect_expr_subquery_selections(query, *expr, visited, predicates);
+            }
+        }
+        ExprData::CaseWhen {
+            when_then,
+            else_expr,
+        } => {
+            for (when, then) in when_then {
+                collect_expr_subquery_selections(query, *when, visited, predicates);
+                collect_expr_subquery_selections(query, *then, visited, predicates);
+            }
+            if let Some(else_expr) = else_expr {
+                collect_expr_subquery_selections(query, *else_expr, visited, predicates);
+            }
+        }
+        ExprData::Exists { subquery, .. } | ExprData::ScalarSubquery { subquery } => {
+            collect_unique_selection_predicates(query, *subquery, visited, predicates);
+        }
+        ExprData::InSubquery { expr, subquery, .. } => {
+            collect_expr_subquery_selections(query, *expr, visited, predicates);
+            collect_unique_selection_predicates(query, *subquery, visited, predicates);
         }
     }
 }

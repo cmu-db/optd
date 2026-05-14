@@ -280,16 +280,33 @@ pub fn tpch_q3() -> QueryContext {
         "lineitem",
         &["l_orderkey", "l_extendedprice", "l_discount", "l_shipdate"],
     );
-    let joined = cross_join_on_cols(&mut ctx, customer, orders, "c_custkey", "o_custkey");
-    let joined = cross_join_on_cols(&mut ctx, joined, lineitem, "o_orderkey", "l_orderkey");
-    let joined = filter_eq_str(&mut ctx, joined, "c_mktsegment", "BUILDING");
+    let joined = cross_rel(&mut ctx, customer, orders);
+    let joined = cross_rel(&mut ctx, joined, lineitem);
+    let c_custkey = col(&mut ctx, joined.col("c_custkey"));
+    let o_custkey = col(&mut ctx, joined.col("o_custkey"));
+    let customer_order = eq(&mut ctx, c_custkey, o_custkey);
+    let o_orderkey = col(&mut ctx, joined.col("o_orderkey"));
+    let l_orderkey = col(&mut ctx, joined.col("l_orderkey"));
+    let order_lineitem = eq(&mut ctx, o_orderkey, l_orderkey);
+    let c_mktsegment = col(&mut ctx, joined.col("c_mktsegment"));
+    let building = str_lit(&mut ctx, "BUILDING");
+    let segment_filter = eq(&mut ctx, c_mktsegment, building);
     let orderdate = col(&mut ctx, joined.col("o_orderdate"));
     let cutoff = date_lit(&mut ctx, 9204);
     let order_before = bin(&mut ctx, BinaryOp::Lt, orderdate, cutoff);
     let shipdate = col(&mut ctx, joined.col("l_shipdate"));
     let cutoff = date_lit(&mut ctx, 9204);
     let ship_after = bin(&mut ctx, BinaryOp::Gt, shipdate, cutoff);
-    let predicate = and(&mut ctx, vec![order_before, ship_after]);
+    let predicate = and(
+        &mut ctx,
+        vec![
+            customer_order,
+            order_lineitem,
+            segment_filter,
+            order_before,
+            ship_after,
+        ],
+    );
     let joined = select_rel(&mut ctx, joined, predicate);
     let revenue = disc_price(
         &mut ctx,
@@ -542,7 +559,6 @@ pub fn tpch_q6() -> QueryContext {
     }));
     let output = ctx.add_operator(OperatorData::Output(Output { input: aggregation }));
     ctx.set_root(output);
-    coalesce_where_selections(&mut ctx);
 
     ctx
 }
@@ -743,7 +759,7 @@ pub fn tpch_q9() -> QueryContext {
     let ps_suppkey = col(&mut ctx, joined.col("ps_suppkey"));
     let l_suppkey = col(&mut ctx, joined.col("l_suppkey"));
     let same_supp = eq(&mut ctx, ps_suppkey, l_suppkey);
-    let joined = select_rel(&mut ctx, joined, same_supp);
+    let joined = with_predicate(joined, same_supp);
     let joined = cross_join_on_cols(&mut ctx, joined, orders, "l_orderkey", "o_orderkey");
     let joined = cross_join_on_cols(&mut ctx, joined, nation, "s_nationkey", "n_nationkey");
     let part_name = col(&mut ctx, joined.col("p_name"));
@@ -1031,13 +1047,13 @@ pub fn tpch_q13() -> QueryContext {
         "orders",
         &["o_custkey", "o_orderkey", "o_comment"],
     );
+    let custkey = col(&mut ctx, customer.col("c_custkey"));
+    let order_custkey = col(&mut ctx, orders.col("o_custkey"));
+    let customer_order = eq(&mut ctx, custkey, order_custkey);
     let comment = col(&mut ctx, orders.col("o_comment"));
     let bad_comment = like(&mut ctx, comment, "%express%requests%");
     let good_comment = not(&mut ctx, bad_comment);
-    let orders = select_rel(&mut ctx, orders, good_comment);
-    let custkey = col(&mut ctx, customer.col("c_custkey"));
-    let order_custkey = col(&mut ctx, orders.col("o_custkey"));
-    let on = eq(&mut ctx, custkey, order_custkey);
+    let on = and(&mut ctx, vec![customer_order, good_comment]);
     let joined = join_rel(&mut ctx, JoinType::LeftOuter, customer, orders, on);
     let orderkey = col(&mut ctx, joined.col("o_orderkey"));
     let counts = aggregate_rel(
@@ -1340,12 +1356,19 @@ pub fn tpch_q18() -> QueryContext {
         &["o_orderkey", "o_custkey", "o_orderdate", "o_totalprice"],
     );
     let lineitem = scan_rel(&mut ctx, "lineitem", &["l_orderkey", "l_quantity"]);
-    let orderkey = col(&mut ctx, orders.col("o_orderkey"));
     let large_order_keys = project_rel(&mut ctx, large_orders, &["l_orderkey"]);
-    let predicate = in_subquery(&mut ctx, orderkey, large_order_keys.input);
-    let orders = select_rel(&mut ctx, orders, predicate);
-    let joined = cross_join_on_cols(&mut ctx, customer, orders, "c_custkey", "o_custkey");
-    let joined = cross_join_on_cols(&mut ctx, joined, lineitem, "o_orderkey", "l_orderkey");
+    let joined = cross_rel(&mut ctx, customer, orders);
+    let joined = cross_rel(&mut ctx, joined, lineitem);
+    let orderkey = col(&mut ctx, joined.col("o_orderkey"));
+    let large_order = in_subquery(&mut ctx, orderkey, large_order_keys.input);
+    let custkey = col(&mut ctx, joined.col("c_custkey"));
+    let order_custkey = col(&mut ctx, joined.col("o_custkey"));
+    let customer_order = eq(&mut ctx, custkey, order_custkey);
+    let orderkey = col(&mut ctx, joined.col("o_orderkey"));
+    let line_orderkey = col(&mut ctx, joined.col("l_orderkey"));
+    let order_lineitem = eq(&mut ctx, orderkey, line_orderkey);
+    let predicate = and(&mut ctx, vec![large_order, customer_order, order_lineitem]);
+    let joined = select_rel(&mut ctx, joined, predicate);
     let quantity = col(&mut ctx, joined.col("l_quantity"));
     let grouped = aggregate_rel(
         &mut ctx,
@@ -1682,6 +1705,7 @@ pub fn tpch_query(query: u8) -> Option<QueryContext> {
 pub struct Rel {
     pub input: Operator,
     cols: HashMap<String, Column>,
+    predicates: Vec<Expr>,
 }
 
 impl Rel {
@@ -1694,6 +1718,7 @@ impl Rel {
 
     fn merge(mut self, other: Rel) -> Rel {
         self.cols.extend(other.cols);
+        self.predicates.extend(other.predicates);
         self
     }
 }
@@ -1727,7 +1752,11 @@ pub fn scan_rel_as(
         table: TableRef::bare(table),
         columns: scan_columns,
     }));
-    Rel { input, cols }
+    Rel {
+        input,
+        cols,
+        predicates: Vec::new(),
+    }
 }
 
 pub fn cross_rel(ctx: &mut QueryContext, left: Rel, right: Rel) -> Rel {
@@ -1735,10 +1764,8 @@ pub fn cross_rel(ctx: &mut QueryContext, left: Rel, right: Rel) -> Rel {
         outer: left.input,
         inner: right.input,
     }));
-    Rel {
-        input,
-        cols: left.merge(right).cols,
-    }
+    let merged = left.merge(right);
+    Rel { input, ..merged }
 }
 
 pub fn join_rel(
@@ -1748,6 +1775,8 @@ pub fn join_rel(
     right: Rel,
     on: Expr,
 ) -> Rel {
+    let left = materialize_rel(ctx, left);
+    let right = materialize_rel(ctx, right);
     let input = ctx.add_operator(OperatorData::Join(Join {
         join_type: join_type.clone(),
         on,
@@ -1758,7 +1787,11 @@ pub fn join_rel(
         JoinType::LeftSemi | JoinType::LeftAnti => left.cols,
         _ => left.merge(right).cols,
     };
-    Rel { input, cols }
+    Rel {
+        input,
+        cols,
+        predicates: Vec::new(),
+    }
 }
 
 pub fn cross_join_on_cols(
@@ -1772,14 +1805,14 @@ pub fn cross_join_on_cols(
     let left = col(ctx, joined.col(left_col));
     let right = col(ctx, joined.col(right_col));
     let predicate = eq(ctx, left, right);
-    select_rel(ctx, joined, predicate)
+    with_predicate(joined, predicate)
 }
 
 pub fn filter_eq_str(ctx: &mut QueryContext, rel: Rel, column: &str, value: &'static str) -> Rel {
     let left = col(ctx, rel.col(column));
     let right = str_lit(ctx, value);
     let predicate = eq(ctx, left, right);
-    select_rel(ctx, rel, predicate)
+    with_predicate(rel, predicate)
 }
 
 pub fn filter_date_range(
@@ -1796,17 +1829,69 @@ pub fn filter_date_range(
     let end = date_lit(ctx, end_days);
     let before_end = bin(ctx, BinaryOp::Lt, value, end);
     let predicate = and(ctx, vec![after_start, before_end]);
-    select_rel(ctx, rel, predicate)
+    with_predicate(rel, predicate)
 }
 
 pub fn select_rel(ctx: &mut QueryContext, rel: Rel, predicate: Expr) -> Rel {
-    let input = ctx.add_operator(OperatorData::Selection(Selection {
-        predicate,
-        input: rel.input,
-    }));
+    let mut predicates = rel.predicates;
+    push_conjuncts(ctx, predicate, &mut predicates);
+    let predicate = and(ctx, predicates);
+    let input = match ctx.operator(rel.input).clone() {
+        OperatorData::Selection(existing) => {
+            let mut predicates = Vec::new();
+            push_conjuncts(ctx, existing.predicate, &mut predicates);
+            push_conjuncts(ctx, predicate, &mut predicates);
+            let predicate = and(ctx, predicates);
+            ctx.add_operator(OperatorData::Selection(Selection {
+                predicate,
+                input: existing.input,
+            }))
+        }
+        _ => ctx.add_operator(OperatorData::Selection(Selection {
+            predicate,
+            input: rel.input,
+        })),
+    };
     Rel {
         input,
         cols: rel.cols,
+        predicates: Vec::new(),
+    }
+}
+
+fn with_predicate(mut rel: Rel, predicate: Expr) -> Rel {
+    rel.predicates.push(predicate);
+    rel
+}
+
+fn materialize_rel(ctx: &mut QueryContext, rel: Rel) -> Rel {
+    if rel.predicates.is_empty() {
+        return rel;
+    }
+
+    let predicate = and(ctx, rel.predicates);
+    select_rel(
+        ctx,
+        Rel {
+            input: rel.input,
+            cols: rel.cols,
+            predicates: Vec::new(),
+        },
+        predicate,
+    )
+}
+
+fn push_conjuncts(ctx: &QueryContext, expr: Expr, output: &mut Vec<Expr>) {
+    match ctx.expr(expr) {
+        ExprData::Nary {
+            op: NaryOp::And,
+            exprs,
+        } => {
+            for expr in exprs {
+                push_conjuncts(ctx, *expr, output);
+            }
+        }
+        _ => output.push(expr),
     }
 }
 
@@ -1815,6 +1900,7 @@ pub fn map_rel(
     rel: Rel,
     computations: Vec<(&'static str, DataType, Expr)>,
 ) -> Rel {
+    let rel = materialize_rel(ctx, rel);
     let mut cols = rel.cols;
     let mut map_computations = Vec::new();
 
@@ -1828,7 +1914,11 @@ pub fn map_rel(
         computations: map_computations,
         input: rel.input,
     }));
-    Rel { input, cols }
+    Rel {
+        input,
+        cols,
+        predicates: Vec::new(),
+    }
 }
 
 pub fn aggregate_rel(
@@ -1837,6 +1927,7 @@ pub fn aggregate_rel(
     key_columns: &[&str],
     aggregates: Vec<(&'static str, DataType, AggregateExpr)>,
 ) -> Rel {
+    let rel = materialize_rel(ctx, rel);
     let mut cols = HashMap::new();
     let keys = key_columns
         .iter()
@@ -1860,10 +1951,15 @@ pub fn aggregate_rel(
         aggregates,
         input: rel.input,
     }));
-    Rel { input, cols }
+    Rel {
+        input,
+        cols,
+        predicates: Vec::new(),
+    }
 }
 
 pub fn sort_rel(ctx: &mut QueryContext, rel: Rel, keys: Vec<(&str, SortDirection)>) -> Rel {
+    let rel = materialize_rel(ctx, rel);
     let sort_keys = keys
         .into_iter()
         .map(|(name, direction)| SortKey {
@@ -1879,10 +1975,12 @@ pub fn sort_rel(ctx: &mut QueryContext, rel: Rel, keys: Vec<(&str, SortDirection
     Rel {
         input,
         cols: rel.cols,
+        predicates: Vec::new(),
     }
 }
 
 pub fn limit_rel(ctx: &mut QueryContext, rel: Rel, fetch: usize) -> Rel {
+    let rel = materialize_rel(ctx, rel);
     let input = ctx.add_operator(OperatorData::Limit(Limit {
         fetch: Some(fetch),
         offset: 0,
@@ -1891,10 +1989,12 @@ pub fn limit_rel(ctx: &mut QueryContext, rel: Rel, fetch: usize) -> Rel {
     Rel {
         input,
         cols: rel.cols,
+        predicates: Vec::new(),
     }
 }
 
 pub fn project_rel(ctx: &mut QueryContext, rel: Rel, output_columns: &[&str]) -> Rel {
+    let rel = materialize_rel(ctx, rel);
     let columns = output_columns
         .iter()
         .map(|name| rel.col(name))
@@ -1908,10 +2008,15 @@ pub fn project_rel(ctx: &mut QueryContext, rel: Rel, output_columns: &[&str]) ->
         .zip(columns)
         .map(|(name, column)| ((*name).to_string(), column))
         .collect();
-    Rel { input, cols }
+    Rel {
+        input,
+        cols,
+        predicates: Vec::new(),
+    }
 }
 
 pub fn finish(ctx: &mut QueryContext, rel: Rel, output_columns: &[&str]) {
+    let rel = materialize_rel(ctx, rel);
     let columns = output_columns.iter().map(|name| rel.col(name)).collect();
     let projection = ctx.add_operator(OperatorData::Projection(Projection {
         columns,
@@ -1919,228 +2024,6 @@ pub fn finish(ctx: &mut QueryContext, rel: Rel, output_columns: &[&str]) {
     }));
     let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
     ctx.set_root(output);
-    coalesce_where_selections(ctx);
-}
-
-fn coalesce_where_selections(ctx: &mut QueryContext) {
-    let Some(root) = ctx.root() else {
-        return;
-    };
-    let (root, predicates) = coalesce_operator(ctx, root);
-    let root = wrap_with_selection(ctx, root, predicates);
-    ctx.set_root(root);
-}
-
-fn coalesce_operator(ctx: &mut QueryContext, operator: Operator) -> (Operator, Vec<Expr>) {
-    match ctx.operator(operator).clone() {
-        OperatorData::Scan(_) => (operator, Vec::new()),
-        OperatorData::TableFunction(mut table_function) => {
-            table_function.args = table_function
-                .args
-                .into_iter()
-                .map(|arg| coalesce_expr(ctx, arg))
-                .collect();
-            let input = ctx.add_operator(OperatorData::TableFunction(table_function));
-            (input, Vec::new())
-        }
-        OperatorData::Selection(selection) => {
-            let (input, mut predicates) = coalesce_operator(ctx, selection.input);
-            let predicate = coalesce_expr(ctx, selection.predicate);
-            push_conjuncts(ctx, predicate, &mut predicates);
-            (input, predicates)
-        }
-        OperatorData::CrossProduct(cross) => {
-            let (outer, mut predicates) = coalesce_operator(ctx, cross.outer);
-            let (inner, inner_predicates) = coalesce_operator(ctx, cross.inner);
-            predicates.extend(inner_predicates);
-            let input = ctx.add_operator(OperatorData::CrossProduct(CrossProduct { outer, inner }));
-            (input, predicates)
-        }
-        OperatorData::Map(mut map) => {
-            let (input, predicates) = coalesce_operator(ctx, map.input);
-            map.input = wrap_with_selection(ctx, input, predicates);
-            map.computations = map
-                .computations
-                .into_iter()
-                .map(|(column, expr)| (column, coalesce_expr(ctx, expr)))
-                .collect();
-            let input = ctx.add_operator(OperatorData::Map(map));
-            (input, Vec::new())
-        }
-        OperatorData::Join(mut join) => {
-            let (outer, outer_predicates) = coalesce_operator(ctx, join.outer);
-            let (inner, inner_predicates) = coalesce_operator(ctx, join.inner);
-            join.outer = wrap_with_selection(ctx, outer, outer_predicates);
-            join.inner = wrap_with_selection(ctx, inner, inner_predicates);
-            join.on = coalesce_expr(ctx, join.on);
-            let input = ctx.add_operator(OperatorData::Join(join));
-            (input, Vec::new())
-        }
-        OperatorData::Sort(mut sort) => {
-            let (input, predicates) = coalesce_operator(ctx, sort.input);
-            sort.input = wrap_with_selection(ctx, input, predicates);
-            sort.keys = sort
-                .keys
-                .into_iter()
-                .map(|mut key| {
-                    key.expr = coalesce_expr(ctx, key.expr);
-                    key
-                })
-                .collect();
-            let input = ctx.add_operator(OperatorData::Sort(sort));
-            (input, Vec::new())
-        }
-        OperatorData::Limit(mut limit) => {
-            let (input, predicates) = coalesce_operator(ctx, limit.input);
-            limit.input = wrap_with_selection(ctx, input, predicates);
-            let input = ctx.add_operator(OperatorData::Limit(limit));
-            (input, Vec::new())
-        }
-        OperatorData::Aggregation(mut aggregation) => {
-            let (input, predicates) = coalesce_operator(ctx, aggregation.input);
-            aggregation.input = wrap_with_selection(ctx, input, predicates);
-            aggregation.keys = aggregation
-                .keys
-                .into_iter()
-                .map(|key| coalesce_expr(ctx, key))
-                .collect();
-            aggregation.aggregates = aggregation
-                .aggregates
-                .into_iter()
-                .map(|(column, aggregate)| (column, coalesce_aggregate_expr(ctx, aggregate)))
-                .collect();
-            let input = ctx.add_operator(OperatorData::Aggregation(aggregation));
-            (input, Vec::new())
-        }
-        OperatorData::Projection(mut projection) => {
-            let (input, predicates) = coalesce_operator(ctx, projection.input);
-            projection.input = wrap_with_selection(ctx, input, predicates);
-            let input = ctx.add_operator(OperatorData::Projection(projection));
-            (input, Vec::new())
-        }
-        OperatorData::Output(mut output) => {
-            let (input, predicates) = coalesce_operator(ctx, output.input);
-            output.input = wrap_with_selection(ctx, input, predicates);
-            let input = ctx.add_operator(OperatorData::Output(output));
-            (input, Vec::new())
-        }
-    }
-}
-
-fn coalesce_aggregate_expr(ctx: &mut QueryContext, aggregate: AggregateExpr) -> AggregateExpr {
-    match aggregate {
-        AggregateExpr::CountStar => AggregateExpr::CountStar,
-        AggregateExpr::Func {
-            func,
-            arg,
-            distinct,
-        } => AggregateExpr::Func {
-            func,
-            arg: coalesce_expr(ctx, arg),
-            distinct,
-        },
-    }
-}
-
-fn coalesce_expr(ctx: &mut QueryContext, expr: Expr) -> Expr {
-    match ctx.expr(expr).clone() {
-        ExprData::Literal(_) | ExprData::ColumnRef(_) => expr,
-        ExprData::Unary { op, expr } => {
-            let expr = coalesce_expr(ctx, expr);
-            ctx.add_expr(ExprData::Unary { op, expr })
-        }
-        ExprData::Binary { op, left, right } => {
-            let left = coalesce_expr(ctx, left);
-            let right = coalesce_expr(ctx, right);
-            ctx.add_expr(ExprData::Binary { op, left, right })
-        }
-        ExprData::Nary { op, exprs } => {
-            let exprs = exprs
-                .into_iter()
-                .map(|expr| coalesce_expr(ctx, expr))
-                .collect();
-            ctx.add_expr(ExprData::Nary { op, exprs })
-        }
-        ExprData::Cast { expr, ty } => {
-            let expr = coalesce_expr(ctx, expr);
-            ctx.add_expr(ExprData::Cast { expr, ty })
-        }
-        ExprData::CaseWhen {
-            when_then,
-            else_expr,
-        } => {
-            let when_then = when_then
-                .into_iter()
-                .map(|(when, then)| (coalesce_expr(ctx, when), coalesce_expr(ctx, then)))
-                .collect();
-            let else_expr = else_expr.map(|expr| coalesce_expr(ctx, expr));
-            ctx.add_expr(ExprData::CaseWhen {
-                when_then,
-                else_expr,
-            })
-        }
-        ExprData::ScalarFunction { function, args } => {
-            let args = args
-                .into_iter()
-                .map(|arg| coalesce_expr(ctx, arg))
-                .collect();
-            ctx.add_expr(ExprData::ScalarFunction { function, args })
-        }
-        ExprData::Exists { subquery, negated } => {
-            let subquery = coalesce_subquery(ctx, subquery);
-            ctx.add_expr(ExprData::Exists { subquery, negated })
-        }
-        ExprData::InSubquery {
-            expr,
-            subquery,
-            negated,
-        } => {
-            let expr = coalesce_expr(ctx, expr);
-            let subquery = coalesce_subquery(ctx, subquery);
-            ctx.add_expr(ExprData::InSubquery {
-                expr,
-                subquery,
-                negated,
-            })
-        }
-        ExprData::ScalarSubquery { subquery } => {
-            let subquery = coalesce_subquery(ctx, subquery);
-            ctx.add_expr(ExprData::ScalarSubquery { subquery })
-        }
-    }
-}
-
-fn coalesce_subquery(ctx: &mut QueryContext, subquery: Operator) -> Operator {
-    let (subquery, predicates) = coalesce_operator(ctx, subquery);
-    wrap_with_selection(ctx, subquery, predicates)
-}
-
-fn wrap_with_selection(ctx: &mut QueryContext, input: Operator, predicates: Vec<Expr>) -> Operator {
-    match predicates.len() {
-        0 => input,
-        1 => ctx.add_operator(OperatorData::Selection(Selection {
-            predicate: predicates[0],
-            input,
-        })),
-        _ => {
-            let predicate = and(ctx, predicates);
-            ctx.add_operator(OperatorData::Selection(Selection { predicate, input }))
-        }
-    }
-}
-
-fn push_conjuncts(ctx: &QueryContext, expr: Expr, output: &mut Vec<Expr>) {
-    match ctx.expr(expr) {
-        ExprData::Nary {
-            op: NaryOp::And,
-            exprs,
-        } => {
-            for expr in exprs {
-                push_conjuncts(ctx, *expr, output);
-            }
-        }
-        _ => output.push(expr),
-    }
 }
 
 pub fn col(ctx: &mut QueryContext, column: Column) -> Expr {
