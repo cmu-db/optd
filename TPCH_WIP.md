@@ -15,7 +15,7 @@ Implemented exporter coverage:
 
 Integration tests currently validate DataFusion consumer interoperability for these operators. A sqllogictest harness validates DataFusion SQL plans after a Substrait export/import round trip with logical optimizer rules disabled. Plan-only sqllogictests carry all TPC-H Q1-Q22 SQL shapes over empty benchmark schemas as separate files under `tests/slt/tpch/`; the full TPC-H run is gated behind `INCLUDE_TPCH=true cargo test --test sqllogictest_harness` until remaining Substrait gaps are closed.
 
-The Rust TPC-H matrix now has one direct IR builder function per query (`tpch_q1` through `tpch_q22`). Q6 is the first semantically modeled query and remains export+consume green; the other builders currently establish per-query `QueryContext` entry points and output schemas for iterative lowering work.
+The Rust TPC-H matrix now has one direct IR builder function per query (`tpch_q1` through `tpch_q22`). Each builder manually constructs a lowered `QueryContext` using simple-graph IR operators. Q6 remains the first export+consume green query while the other lowered builders track the relational and expression shapes that still need Substrait/DataFusion compatibility work.
 
 ## Gaps Most Likely to Block TPC-H
 

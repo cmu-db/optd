@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use datafusion::arrow::array::new_empty_array;
@@ -7,9 +8,10 @@ use datafusion::datasource::MemTable;
 use datafusion::prelude::SessionContext;
 use prost::Message;
 use simple_graph::{
-    AggregateExpr, AggregateFunction, Aggregation, BinaryOp, ColumnData, ExprData, Map, NaryOp,
-    OperatorData, Output, Projection, QueryContext, ScalarValue, Scan, Selection, TableRef,
-    substrait,
+    AggregateExpr, AggregateFunction, Aggregation, BinaryOp, Column, ColumnData, CrossProduct,
+    Expr, ExprData, Join, JoinType, Limit, Map, NaryOp, NullOrdering, Operator, OperatorData,
+    Output, Projection, QueryContext, ScalarFunction, ScalarValue, Scan, Selection, Sort,
+    SortDirection, SortKey, TableRef, substrait,
 };
 
 type QueryBuilder = fn() -> QueryContext;
@@ -176,60 +178,381 @@ fn assert_expected_schema(query: u8, fields: &Fields) {
 }
 
 fn tpch_q1() -> QueryContext {
-    tpch_schema_only_query(
+    let mut ctx = QueryContext::new();
+    let lineitem = scan_rel(
+        &mut ctx,
         "lineitem",
-        vec![
-            utf8_ty("l_returnflag"),
-            utf8_ty("l_linestatus"),
-            decimal_ty("sum_qty"),
-            decimal_ty("sum_base_price"),
-            decimal_ty("sum_disc_price"),
-            decimal_ty("sum_charge"),
-            decimal_ty("avg_qty"),
-            decimal_ty("avg_price"),
-            decimal_ty("avg_disc"),
-            int64_ty("count_order"),
+        &[
+            "l_returnflag",
+            "l_linestatus",
+            "l_quantity",
+            "l_extendedprice",
+            "l_discount",
+            "l_tax",
+            "l_shipdate",
         ],
-    )
+    );
+
+    let shipdate = col(&mut ctx, lineitem.col("l_shipdate"));
+    let cutoff = date_lit(&mut ctx, 10524);
+    let predicate = bin(&mut ctx, BinaryOp::LtEq, shipdate, cutoff);
+    let lineitem = select_rel(&mut ctx, lineitem, predicate);
+
+    let discounted = disc_price(
+        &mut ctx,
+        lineitem.col("l_extendedprice"),
+        lineitem.col("l_discount"),
+    );
+    let one = dec_lit(&mut ctx, 100);
+    let tax = col(&mut ctx, lineitem.col("l_tax"));
+    let charge_factor = bin(&mut ctx, BinaryOp::Add, one, tax);
+    let charge = bin(&mut ctx, BinaryOp::Multiply, discounted, charge_factor);
+    let lineitem = map_rel(
+        &mut ctx,
+        lineitem,
+        vec![
+            (
+                "disc_price",
+                arrow_schema::DataType::Decimal128(15, 2),
+                discounted,
+            ),
+            ("charge", arrow_schema::DataType::Decimal128(15, 2), charge),
+        ],
+    );
+
+    let quantity = col(&mut ctx, lineitem.col("l_quantity"));
+    let extendedprice = col(&mut ctx, lineitem.col("l_extendedprice"));
+    let disc_price = col(&mut ctx, lineitem.col("disc_price"));
+    let charge = col(&mut ctx, lineitem.col("charge"));
+    let quantity_for_avg = col(&mut ctx, lineitem.col("l_quantity"));
+    let extendedprice_for_avg = col(&mut ctx, lineitem.col("l_extendedprice"));
+    let discount_for_avg = col(&mut ctx, lineitem.col("l_discount"));
+    let count_arg = col(&mut ctx, lineitem.col("l_returnflag"));
+    let grouped = aggregate_rel(
+        &mut ctx,
+        lineitem,
+        &["l_returnflag", "l_linestatus"],
+        vec![
+            (
+                "sum_qty",
+                arrow_schema::DataType::Decimal128(15, 2),
+                sum_expr(quantity),
+            ),
+            (
+                "sum_base_price",
+                arrow_schema::DataType::Decimal128(15, 2),
+                sum_expr(extendedprice),
+            ),
+            (
+                "sum_disc_price",
+                arrow_schema::DataType::Decimal128(15, 2),
+                sum_expr(disc_price),
+            ),
+            (
+                "sum_charge",
+                arrow_schema::DataType::Decimal128(15, 2),
+                sum_expr(charge),
+            ),
+            (
+                "avg_qty",
+                arrow_schema::DataType::Decimal128(15, 2),
+                avg_expr(quantity_for_avg),
+            ),
+            (
+                "avg_price",
+                arrow_schema::DataType::Decimal128(15, 2),
+                avg_expr(extendedprice_for_avg),
+            ),
+            (
+                "avg_disc",
+                arrow_schema::DataType::Decimal128(15, 2),
+                avg_expr(discount_for_avg),
+            ),
+            (
+                "count_order",
+                arrow_schema::DataType::Int64,
+                count_expr(count_arg),
+            ),
+        ],
+    );
+    let grouped = sort_rel(
+        &mut ctx,
+        grouped,
+        vec![
+            ("l_returnflag", SortDirection::Asc),
+            ("l_linestatus", SortDirection::Asc),
+        ],
+    );
+    finish(
+        &mut ctx,
+        grouped,
+        &[
+            "l_returnflag",
+            "l_linestatus",
+            "sum_qty",
+            "sum_base_price",
+            "sum_disc_price",
+            "sum_charge",
+            "avg_qty",
+            "avg_price",
+            "avg_disc",
+            "count_order",
+        ],
+    );
+
+    ctx
 }
 
 fn tpch_q2() -> QueryContext {
-    tpch_schema_only_query(
+    let mut ctx = QueryContext::new();
+    let part = scan_rel(
+        &mut ctx,
         "part",
-        vec![
-            decimal_ty("s_acctbal"),
-            utf8_ty("s_name"),
-            utf8_ty("n_name"),
-            int64_ty("p_partkey"),
-            utf8_ty("p_mfgr"),
-            utf8_ty("s_address"),
-            utf8_ty("s_phone"),
-            utf8_ty("s_comment"),
+        &["p_partkey", "p_mfgr", "p_size", "p_type"],
+    );
+    let supplier = scan_rel(
+        &mut ctx,
+        "supplier",
+        &[
+            "s_suppkey",
+            "s_name",
+            "s_address",
+            "s_phone",
+            "s_comment",
+            "s_acctbal",
+            "s_nationkey",
         ],
-    )
+    );
+    let partsupp = scan_rel(
+        &mut ctx,
+        "partsupp",
+        &["ps_partkey", "ps_suppkey", "ps_supplycost"],
+    );
+    let nation = scan_rel(
+        &mut ctx,
+        "nation",
+        &["n_nationkey", "n_regionkey", "n_name"],
+    );
+    let region = scan_rel(&mut ctx, "region", &["r_regionkey", "r_name"]);
+    let joined = cross_join_on_cols(&mut ctx, part, partsupp, "p_partkey", "ps_partkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, supplier, "ps_suppkey", "s_suppkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, nation, "s_nationkey", "n_nationkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, region, "n_regionkey", "r_regionkey");
+    let region_filtered = filter_eq_str(&mut ctx, joined, "r_name", "ASIA");
+    let size = col(&mut ctx, region_filtered.col("p_size"));
+    let wanted_size = int_lit(&mut ctx, 48);
+    let size_predicate = eq(&mut ctx, size, wanted_size);
+    let part_type = col(&mut ctx, region_filtered.col("p_type"));
+    let type_predicate = like(&mut ctx, part_type, "%TIN");
+    let predicate = and(&mut ctx, vec![size_predicate, type_predicate]);
+    let joined = select_rel(&mut ctx, region_filtered.clone(), predicate);
+
+    let supplycost = col(&mut ctx, region_filtered.col("ps_supplycost"));
+    let min_cost = aggregate_rel(
+        &mut ctx,
+        region_filtered,
+        &["p_partkey"],
+        vec![(
+            "min_supplycost",
+            arrow_schema::DataType::Decimal128(15, 2),
+            min_expr(supplycost),
+        )],
+    );
+    let joined = cross_join_on_cols(&mut ctx, joined, min_cost, "p_partkey", "p_partkey");
+    let supplycost = col(&mut ctx, joined.col("ps_supplycost"));
+    let min_supplycost = col(&mut ctx, joined.col("min_supplycost"));
+    let predicate = eq(&mut ctx, supplycost, min_supplycost);
+    let joined = select_rel(&mut ctx, joined, predicate);
+    let sorted = sort_rel(
+        &mut ctx,
+        joined,
+        vec![
+            ("s_acctbal", SortDirection::Desc),
+            ("n_name", SortDirection::Asc),
+            ("s_name", SortDirection::Asc),
+            ("p_partkey", SortDirection::Asc),
+        ],
+    );
+    let limited = limit_rel(&mut ctx, sorted, 100);
+    finish(
+        &mut ctx,
+        limited,
+        &[
+            "s_acctbal",
+            "s_name",
+            "n_name",
+            "p_partkey",
+            "p_mfgr",
+            "s_address",
+            "s_phone",
+            "s_comment",
+        ],
+    );
+    ctx
 }
 
 fn tpch_q3() -> QueryContext {
-    tpch_schema_only_query(
+    let mut ctx = QueryContext::new();
+    let customer = scan_rel(&mut ctx, "customer", &["c_custkey", "c_mktsegment"]);
+    let orders = scan_rel(
+        &mut ctx,
+        "orders",
+        &["o_orderkey", "o_custkey", "o_orderdate", "o_shippriority"],
+    );
+    let lineitem = scan_rel(
+        &mut ctx,
         "lineitem",
+        &["l_orderkey", "l_extendedprice", "l_discount", "l_shipdate"],
+    );
+    let joined = cross_join_on_cols(&mut ctx, customer, orders, "c_custkey", "o_custkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, lineitem, "o_orderkey", "l_orderkey");
+    let joined = filter_eq_str(&mut ctx, joined, "c_mktsegment", "BUILDING");
+    let orderdate = col(&mut ctx, joined.col("o_orderdate"));
+    let cutoff = date_lit(&mut ctx, 9204);
+    let order_before = bin(&mut ctx, BinaryOp::Lt, orderdate, cutoff);
+    let shipdate = col(&mut ctx, joined.col("l_shipdate"));
+    let cutoff = date_lit(&mut ctx, 9204);
+    let ship_after = bin(&mut ctx, BinaryOp::Gt, shipdate, cutoff);
+    let predicate = and(&mut ctx, vec![order_before, ship_after]);
+    let joined = select_rel(&mut ctx, joined, predicate);
+    let revenue = disc_price(
+        &mut ctx,
+        joined.col("l_extendedprice"),
+        joined.col("l_discount"),
+    );
+    let joined = map_rel(
+        &mut ctx,
+        joined,
+        vec![(
+            "revenue_expr",
+            arrow_schema::DataType::Decimal128(15, 2),
+            revenue,
+        )],
+    );
+    let revenue_arg = col(&mut ctx, joined.col("revenue_expr"));
+    let grouped = aggregate_rel(
+        &mut ctx,
+        joined,
+        &["l_orderkey", "o_orderdate", "o_shippriority"],
+        vec![(
+            "revenue",
+            arrow_schema::DataType::Decimal128(15, 2),
+            sum_expr(revenue_arg),
+        )],
+    );
+    let sorted = sort_rel(
+        &mut ctx,
+        grouped,
         vec![
-            int64_ty("l_orderkey"),
-            decimal_ty("revenue"),
-            date_ty("o_orderdate"),
-            int32_ty("o_shippriority"),
+            ("revenue", SortDirection::Desc),
+            ("o_orderdate", SortDirection::Asc),
         ],
-    )
+    );
+    let limited = limit_rel(&mut ctx, sorted, 10);
+    finish(
+        &mut ctx,
+        limited,
+        &["l_orderkey", "revenue", "o_orderdate", "o_shippriority"],
+    );
+    ctx
 }
 
 fn tpch_q4() -> QueryContext {
-    tpch_schema_only_query(
+    let mut ctx = QueryContext::new();
+    let orders = scan_rel(
+        &mut ctx,
         "orders",
-        vec![utf8_ty("o_orderpriority"), int64_ty("order_count")],
-    )
+        &["o_orderkey", "o_orderdate", "o_orderpriority"],
+    );
+    let lineitem = scan_rel(
+        &mut ctx,
+        "lineitem",
+        &["l_orderkey", "l_commitdate", "l_receiptdate"],
+    );
+    let commit = col(&mut ctx, lineitem.col("l_commitdate"));
+    let receipt = col(&mut ctx, lineitem.col("l_receiptdate"));
+    let late_lineitem = bin(&mut ctx, BinaryOp::Lt, commit, receipt);
+    let lineitem = select_rel(&mut ctx, lineitem, late_lineitem);
+    let orderkey = col(&mut ctx, orders.col("o_orderkey"));
+    let line_orderkey = col(&mut ctx, lineitem.col("l_orderkey"));
+    let on = eq(&mut ctx, orderkey, line_orderkey);
+    let orders = join_rel(&mut ctx, JoinType::LeftSemi, orders, lineitem, on);
+    let orders = filter_date_range(&mut ctx, orders, "o_orderdate", 9221, 9312);
+    let priority = col(&mut ctx, orders.col("o_orderpriority"));
+    let grouped = aggregate_rel(
+        &mut ctx,
+        orders,
+        &["o_orderpriority"],
+        vec![(
+            "order_count",
+            arrow_schema::DataType::Int64,
+            count_expr(priority),
+        )],
+    );
+    let sorted = sort_rel(
+        &mut ctx,
+        grouped,
+        vec![("o_orderpriority", SortDirection::Asc)],
+    );
+    finish(&mut ctx, sorted, &["o_orderpriority", "order_count"]);
+    ctx
 }
 
 fn tpch_q5() -> QueryContext {
-    tpch_schema_only_query("nation", vec![utf8_ty("n_name"), decimal_ty("revenue")])
+    let mut ctx = QueryContext::new();
+    let customer = scan_rel(&mut ctx, "customer", &["c_custkey", "c_nationkey"]);
+    let orders = scan_rel(
+        &mut ctx,
+        "orders",
+        &["o_orderkey", "o_custkey", "o_orderdate"],
+    );
+    let lineitem = scan_rel(
+        &mut ctx,
+        "lineitem",
+        &["l_orderkey", "l_suppkey", "l_extendedprice", "l_discount"],
+    );
+    let supplier = scan_rel(&mut ctx, "supplier", &["s_suppkey", "s_nationkey"]);
+    let nation = scan_rel(
+        &mut ctx,
+        "nation",
+        &["n_nationkey", "n_regionkey", "n_name"],
+    );
+    let region = scan_rel(&mut ctx, "region", &["r_regionkey", "r_name"]);
+    let joined = cross_join_on_cols(&mut ctx, customer, orders, "c_custkey", "o_custkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, lineitem, "o_orderkey", "l_orderkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, supplier, "l_suppkey", "s_suppkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, nation, "s_nationkey", "n_nationkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, region, "n_regionkey", "r_regionkey");
+    let joined = filter_eq_str(&mut ctx, joined, "r_name", "AFRICA");
+    let joined = filter_date_range(&mut ctx, joined, "o_orderdate", 8766, 9131);
+    let revenue = disc_price(
+        &mut ctx,
+        joined.col("l_extendedprice"),
+        joined.col("l_discount"),
+    );
+    let joined = map_rel(
+        &mut ctx,
+        joined,
+        vec![(
+            "revenue_expr",
+            arrow_schema::DataType::Decimal128(15, 2),
+            revenue,
+        )],
+    );
+    let revenue = col(&mut ctx, joined.col("revenue_expr"));
+    let grouped = aggregate_rel(
+        &mut ctx,
+        joined,
+        &["n_name"],
+        vec![(
+            "revenue",
+            arrow_schema::DataType::Decimal128(15, 2),
+            sum_expr(revenue),
+        )],
+    );
+    let sorted = sort_rel(&mut ctx, grouped, vec![("revenue", SortDirection::Desc)]);
+    finish(&mut ctx, sorted, &["n_name", "revenue"]);
+    ctx
 }
 
 fn tpch_q6() -> QueryContext {
@@ -346,206 +669,1494 @@ fn tpch_q6() -> QueryContext {
 }
 
 fn tpch_q7() -> QueryContext {
-    tpch_schema_only_query(
-        "lineitem",
-        vec![
-            utf8_ty("supp_nation"),
-            utf8_ty("cust_nation"),
-            int64_ty("l_year"),
-            decimal_ty("revenue"),
-        ],
-    )
-}
-
-fn tpch_q8() -> QueryContext {
-    tpch_schema_only_query("orders", vec![int64_ty("o_year"), decimal_ty("mkt_share")])
-}
-
-fn tpch_q9() -> QueryContext {
-    tpch_schema_only_query(
-        "lineitem",
-        vec![
-            utf8_ty("nation"),
-            int64_ty("o_year"),
-            decimal_ty("sum_profit"),
-        ],
-    )
-}
-
-fn tpch_q10() -> QueryContext {
-    tpch_schema_only_query(
-        "customer",
-        vec![
-            int64_ty("c_custkey"),
-            utf8_ty("c_name"),
-            decimal_ty("revenue"),
-            decimal_ty("c_acctbal"),
-            utf8_ty("n_name"),
-            utf8_ty("c_address"),
-            utf8_ty("c_phone"),
-            utf8_ty("c_comment"),
-        ],
-    )
-}
-
-fn tpch_q11() -> QueryContext {
-    tpch_schema_only_query(
-        "partsupp",
-        vec![int64_ty("ps_partkey"), decimal_ty("value")],
-    )
-}
-
-fn tpch_q12() -> QueryContext {
-    tpch_schema_only_query(
-        "lineitem",
-        vec![
-            utf8_ty("l_shipmode"),
-            int64_ty("high_line_count"),
-            int64_ty("low_line_count"),
-        ],
-    )
-}
-
-fn tpch_q13() -> QueryContext {
-    tpch_schema_only_query("customer", vec![int64_ty("c_count"), int64_ty("custdist")])
-}
-
-fn tpch_q14() -> QueryContext {
-    tpch_schema_only_query("lineitem", vec![decimal_ty("promo_revenue")])
-}
-
-fn tpch_q15() -> QueryContext {
-    tpch_schema_only_query(
-        "supplier",
-        vec![
-            int64_ty("s_suppkey"),
-            utf8_ty("s_name"),
-            utf8_ty("s_address"),
-            utf8_ty("s_phone"),
-            decimal_ty("total_revenue"),
-        ],
-    )
-}
-
-fn tpch_q16() -> QueryContext {
-    tpch_schema_only_query(
-        "partsupp",
-        vec![
-            utf8_ty("p_brand"),
-            utf8_ty("p_type"),
-            int32_ty("p_size"),
-            int64_ty("supplier_cnt"),
-        ],
-    )
-}
-
-fn tpch_q17() -> QueryContext {
-    tpch_schema_only_query("lineitem", vec![decimal_ty("avg_yearly")])
-}
-
-fn tpch_q18() -> QueryContext {
-    tpch_schema_only_query(
-        "orders",
-        vec![
-            utf8_ty("c_name"),
-            int64_ty("c_custkey"),
-            int64_ty("o_orderkey"),
-            date_ty("o_orderdate"),
-            decimal_ty("o_totalprice"),
-            decimal_ty("sum_l_quantity"),
-        ],
-    )
-}
-
-fn tpch_q19() -> QueryContext {
-    tpch_schema_only_query("lineitem", vec![decimal_ty("revenue")])
-}
-
-fn tpch_q20() -> QueryContext {
-    tpch_schema_only_query("supplier", vec![utf8_ty("s_name"), utf8_ty("s_address")])
-}
-
-fn tpch_q21() -> QueryContext {
-    tpch_schema_only_query("supplier", vec![utf8_ty("s_name"), int64_ty("numwait")])
-}
-
-fn tpch_q22() -> QueryContext {
-    tpch_schema_only_query(
-        "customer",
-        vec![
-            utf8_ty("cntrycode"),
-            int64_ty("numcust"),
-            decimal_ty("totacctbal"),
-        ],
-    )
-}
-
-fn tpch_schema_only_query(
-    source_table: &'static str,
-    outputs: Vec<(&'static str, arrow_schema::DataType)>,
-) -> QueryContext {
     let mut ctx = QueryContext::new();
-    let scan = ctx.add_operator(OperatorData::Scan(Scan {
-        table: TableRef::bare(source_table),
-        columns: Vec::new(),
-    }));
-    let mut output_columns = Vec::new();
-    let mut computations = Vec::new();
-
-    for (name, ty) in outputs {
-        let column = ctx.add_column(ColumnData::new(name, ty.clone()));
-        let expr = ctx.add_expr(ExprData::Literal(default_scalar(&ty)));
-        output_columns.push(column);
-        computations.push((column, expr));
-    }
-
-    let map = ctx.add_operator(OperatorData::Map(Map {
-        computations,
-        input: scan,
-    }));
-    let projection = ctx.add_operator(OperatorData::Projection(Projection {
-        columns: output_columns,
-        input: map,
-    }));
-    let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
-    ctx.set_root(output);
-
+    let supplier = scan_rel(&mut ctx, "supplier", &["s_suppkey", "s_nationkey"]);
+    let lineitem = scan_rel(
+        &mut ctx,
+        "lineitem",
+        &[
+            "l_suppkey",
+            "l_orderkey",
+            "l_shipdate",
+            "l_extendedprice",
+            "l_discount",
+        ],
+    );
+    let orders = scan_rel(&mut ctx, "orders", &["o_orderkey", "o_custkey"]);
+    let customer = scan_rel(&mut ctx, "customer", &["c_custkey", "c_nationkey"]);
+    let n1 = scan_rel_as(&mut ctx, "nation", Some("n1"), &["n_nationkey", "n_name"]);
+    let n2 = scan_rel_as(&mut ctx, "nation", Some("n2"), &["n_nationkey", "n_name"]);
+    let joined = cross_join_on_cols(&mut ctx, supplier, lineitem, "s_suppkey", "l_suppkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, orders, "l_orderkey", "o_orderkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, customer, "o_custkey", "c_custkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, n1, "s_nationkey", "n1.n_nationkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, n2, "c_nationkey", "n2.n_nationkey");
+    let n1_name = col(&mut ctx, joined.col("n1.n_name"));
+    let germany = str_lit(&mut ctx, "GERMANY");
+    let n1_germany = eq(&mut ctx, n1_name, germany);
+    let n2_name = col(&mut ctx, joined.col("n2.n_name"));
+    let iraq = str_lit(&mut ctx, "IRAQ");
+    let n2_iraq = eq(&mut ctx, n2_name, iraq);
+    let germany_to_iraq = and(&mut ctx, vec![n1_germany, n2_iraq]);
+    let n1_name = col(&mut ctx, joined.col("n1.n_name"));
+    let iraq = str_lit(&mut ctx, "IRAQ");
+    let n1_iraq = eq(&mut ctx, n1_name, iraq);
+    let n2_name = col(&mut ctx, joined.col("n2.n_name"));
+    let germany = str_lit(&mut ctx, "GERMANY");
+    let n2_germany = eq(&mut ctx, n2_name, germany);
+    let iraq_to_germany = and(&mut ctx, vec![n1_iraq, n2_germany]);
+    let nation_pair = or(&mut ctx, vec![germany_to_iraq, iraq_to_germany]);
+    let joined = select_rel(&mut ctx, joined, nation_pair);
+    let joined = filter_date_range(&mut ctx, joined, "l_shipdate", 9131, 9862);
+    let supp_nation = col(&mut ctx, joined.col("n1.n_name"));
+    let cust_nation = col(&mut ctx, joined.col("n2.n_name"));
+    let shipdate = col(&mut ctx, joined.col("l_shipdate"));
+    let l_year = scalar_fn(&mut ctx, "extract_year", vec![shipdate]);
+    let volume = disc_price(
+        &mut ctx,
+        joined.col("l_extendedprice"),
+        joined.col("l_discount"),
+    );
+    let joined = map_rel(
+        &mut ctx,
+        joined,
+        vec![
+            ("supp_nation", arrow_schema::DataType::Utf8, supp_nation),
+            ("cust_nation", arrow_schema::DataType::Utf8, cust_nation),
+            ("l_year", arrow_schema::DataType::Int64, l_year),
+            ("volume", arrow_schema::DataType::Decimal128(15, 2), volume),
+        ],
+    );
+    let volume = col(&mut ctx, joined.col("volume"));
+    let grouped = aggregate_rel(
+        &mut ctx,
+        joined,
+        &["supp_nation", "cust_nation", "l_year"],
+        vec![(
+            "revenue",
+            arrow_schema::DataType::Decimal128(15, 2),
+            sum_expr(volume),
+        )],
+    );
+    let sorted = sort_rel(
+        &mut ctx,
+        grouped,
+        vec![
+            ("supp_nation", SortDirection::Asc),
+            ("cust_nation", SortDirection::Asc),
+            ("l_year", SortDirection::Asc),
+        ],
+    );
+    finish(
+        &mut ctx,
+        sorted,
+        &["supp_nation", "cust_nation", "l_year", "revenue"],
+    );
     ctx
 }
 
-fn default_scalar(ty: &arrow_schema::DataType) -> ScalarValue {
-    match ty {
-        arrow_schema::DataType::Int32 => ScalarValue::Int32(0),
-        arrow_schema::DataType::Int64 => ScalarValue::Int64(0),
-        arrow_schema::DataType::Decimal128(precision, scale) => ScalarValue::Decimal128 {
-            value: 0,
-            precision: *precision,
-            scale: *scale,
-        },
-        arrow_schema::DataType::Date32 => ScalarValue::Date32(0),
-        arrow_schema::DataType::Utf8 => ScalarValue::Utf8(String::new()),
-        _ => ScalarValue::Null(ty.clone()),
+fn tpch_q8() -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let part = scan_rel(&mut ctx, "part", &["p_partkey", "p_type"]);
+    let supplier = scan_rel(&mut ctx, "supplier", &["s_suppkey", "s_nationkey"]);
+    let lineitem = scan_rel(
+        &mut ctx,
+        "lineitem",
+        &[
+            "l_partkey",
+            "l_suppkey",
+            "l_orderkey",
+            "l_extendedprice",
+            "l_discount",
+        ],
+    );
+    let orders = scan_rel(
+        &mut ctx,
+        "orders",
+        &["o_orderkey", "o_custkey", "o_orderdate"],
+    );
+    let customer = scan_rel(&mut ctx, "customer", &["c_custkey", "c_nationkey"]);
+    let n1 = scan_rel_as(
+        &mut ctx,
+        "nation",
+        Some("n1"),
+        &["n_nationkey", "n_regionkey"],
+    );
+    let n2 = scan_rel_as(&mut ctx, "nation", Some("n2"), &["n_nationkey", "n_name"]);
+    let region = scan_rel(&mut ctx, "region", &["r_regionkey", "r_name"]);
+    let joined = cross_join_on_cols(&mut ctx, part, lineitem, "p_partkey", "l_partkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, supplier, "l_suppkey", "s_suppkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, orders, "l_orderkey", "o_orderkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, customer, "o_custkey", "c_custkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, n1, "c_nationkey", "n1.n_nationkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, region, "n1.n_regionkey", "r_regionkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, n2, "s_nationkey", "n2.n_nationkey");
+    let joined = filter_eq_str(&mut ctx, joined, "r_name", "MIDDLE EAST");
+    let joined = filter_eq_str(&mut ctx, joined, "p_type", "LARGE PLATED STEEL");
+    let joined = filter_date_range(&mut ctx, joined, "o_orderdate", 9131, 9862);
+    let orderdate = col(&mut ctx, joined.col("o_orderdate"));
+    let o_year = scalar_fn(&mut ctx, "extract_year", vec![orderdate]);
+    let volume = disc_price(
+        &mut ctx,
+        joined.col("l_extendedprice"),
+        joined.col("l_discount"),
+    );
+    let nation = col(&mut ctx, joined.col("n2.n_name"));
+    let iraq = str_lit(&mut ctx, "IRAQ");
+    let is_iraq = eq(&mut ctx, nation, iraq);
+    let zero = dec_lit(&mut ctx, 0);
+    let iraq_volume = case_when(&mut ctx, vec![(is_iraq, volume)], Some(zero));
+    let joined = map_rel(
+        &mut ctx,
+        joined,
+        vec![
+            ("o_year", arrow_schema::DataType::Int64, o_year),
+            ("volume", arrow_schema::DataType::Decimal128(15, 2), volume),
+            (
+                "iraq_volume",
+                arrow_schema::DataType::Decimal128(15, 2),
+                iraq_volume,
+            ),
+        ],
+    );
+    let iraq_volume = col(&mut ctx, joined.col("iraq_volume"));
+    let grouped = aggregate_rel(
+        &mut ctx,
+        joined,
+        &["o_year"],
+        vec![(
+            "mkt_share",
+            arrow_schema::DataType::Decimal128(15, 2),
+            sum_expr(iraq_volume),
+        )],
+    );
+    let sorted = sort_rel(&mut ctx, grouped, vec![("o_year", SortDirection::Asc)]);
+    finish(&mut ctx, sorted, &["o_year", "mkt_share"]);
+    ctx
+}
+
+fn tpch_q9() -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let part = scan_rel(&mut ctx, "part", &["p_partkey", "p_name"]);
+    let supplier = scan_rel(&mut ctx, "supplier", &["s_suppkey", "s_nationkey"]);
+    let lineitem = scan_rel(
+        &mut ctx,
+        "lineitem",
+        &[
+            "l_partkey",
+            "l_suppkey",
+            "l_orderkey",
+            "l_extendedprice",
+            "l_discount",
+            "l_quantity",
+        ],
+    );
+    let partsupp = scan_rel(
+        &mut ctx,
+        "partsupp",
+        &["ps_partkey", "ps_suppkey", "ps_supplycost"],
+    );
+    let orders = scan_rel(&mut ctx, "orders", &["o_orderkey", "o_orderdate"]);
+    let nation = scan_rel(&mut ctx, "nation", &["n_nationkey", "n_name"]);
+    let joined = cross_join_on_cols(&mut ctx, part, lineitem, "p_partkey", "l_partkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, supplier, "l_suppkey", "s_suppkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, partsupp, "l_partkey", "ps_partkey");
+    let ps_suppkey = col(&mut ctx, joined.col("ps_suppkey"));
+    let l_suppkey = col(&mut ctx, joined.col("l_suppkey"));
+    let same_supp = eq(&mut ctx, ps_suppkey, l_suppkey);
+    let joined = select_rel(&mut ctx, joined, same_supp);
+    let joined = cross_join_on_cols(&mut ctx, joined, orders, "l_orderkey", "o_orderkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, nation, "s_nationkey", "n_nationkey");
+    let part_name = col(&mut ctx, joined.col("p_name"));
+    let moccasin = like(&mut ctx, part_name, "%moccasin%");
+    let joined = select_rel(&mut ctx, joined, moccasin);
+    let orderdate = col(&mut ctx, joined.col("o_orderdate"));
+    let o_year = scalar_fn(&mut ctx, "extract_year", vec![orderdate]);
+    let revenue = disc_price(
+        &mut ctx,
+        joined.col("l_extendedprice"),
+        joined.col("l_discount"),
+    );
+    let supplycost = col(&mut ctx, joined.col("ps_supplycost"));
+    let quantity = col(&mut ctx, joined.col("l_quantity"));
+    let cost = bin(&mut ctx, BinaryOp::Multiply, supplycost, quantity);
+    let amount = bin(&mut ctx, BinaryOp::Subtract, revenue, cost);
+    let nation_name = col(&mut ctx, joined.col("n_name"));
+    let joined = map_rel(
+        &mut ctx,
+        joined,
+        vec![
+            ("nation", arrow_schema::DataType::Utf8, nation_name),
+            ("o_year", arrow_schema::DataType::Int64, o_year),
+            ("amount", arrow_schema::DataType::Decimal128(15, 2), amount),
+        ],
+    );
+    let amount = col(&mut ctx, joined.col("amount"));
+    let grouped = aggregate_rel(
+        &mut ctx,
+        joined,
+        &["nation", "o_year"],
+        vec![(
+            "sum_profit",
+            arrow_schema::DataType::Decimal128(15, 2),
+            sum_expr(amount),
+        )],
+    );
+    let sorted = sort_rel(
+        &mut ctx,
+        grouped,
+        vec![
+            ("nation", SortDirection::Asc),
+            ("o_year", SortDirection::Desc),
+        ],
+    );
+    finish(&mut ctx, sorted, &["nation", "o_year", "sum_profit"]);
+    ctx
+}
+
+fn tpch_q10() -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let customer = scan_rel(
+        &mut ctx,
+        "customer",
+        &[
+            "c_custkey",
+            "c_name",
+            "c_acctbal",
+            "c_address",
+            "c_phone",
+            "c_comment",
+            "c_nationkey",
+        ],
+    );
+    let orders = scan_rel(
+        &mut ctx,
+        "orders",
+        &["o_orderkey", "o_custkey", "o_orderdate"],
+    );
+    let lineitem = scan_rel(
+        &mut ctx,
+        "lineitem",
+        &[
+            "l_orderkey",
+            "l_extendedprice",
+            "l_discount",
+            "l_returnflag",
+        ],
+    );
+    let nation = scan_rel(&mut ctx, "nation", &["n_nationkey", "n_name"]);
+    let joined = cross_join_on_cols(&mut ctx, customer, orders, "c_custkey", "o_custkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, lineitem, "o_orderkey", "l_orderkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, nation, "c_nationkey", "n_nationkey");
+    let joined = filter_date_range(&mut ctx, joined, "o_orderdate", 8582, 8674);
+    let joined = filter_eq_str(&mut ctx, joined, "l_returnflag", "R");
+    let revenue = disc_price(
+        &mut ctx,
+        joined.col("l_extendedprice"),
+        joined.col("l_discount"),
+    );
+    let joined = map_rel(
+        &mut ctx,
+        joined,
+        vec![(
+            "revenue_expr",
+            arrow_schema::DataType::Decimal128(15, 2),
+            revenue,
+        )],
+    );
+    let revenue = col(&mut ctx, joined.col("revenue_expr"));
+    let grouped = aggregate_rel(
+        &mut ctx,
+        joined,
+        &[
+            "c_custkey",
+            "c_name",
+            "c_acctbal",
+            "c_phone",
+            "n_name",
+            "c_address",
+            "c_comment",
+        ],
+        vec![(
+            "revenue",
+            arrow_schema::DataType::Decimal128(15, 2),
+            sum_expr(revenue),
+        )],
+    );
+    let sorted = sort_rel(&mut ctx, grouped, vec![("revenue", SortDirection::Desc)]);
+    let limited = limit_rel(&mut ctx, sorted, 20);
+    finish(
+        &mut ctx,
+        limited,
+        &[
+            "c_custkey",
+            "c_name",
+            "revenue",
+            "c_acctbal",
+            "n_name",
+            "c_address",
+            "c_phone",
+            "c_comment",
+        ],
+    );
+    ctx
+}
+
+fn tpch_q11() -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let partsupp = scan_rel(
+        &mut ctx,
+        "partsupp",
+        &["ps_partkey", "ps_suppkey", "ps_supplycost", "ps_availqty"],
+    );
+    let supplier = scan_rel(&mut ctx, "supplier", &["s_suppkey", "s_nationkey"]);
+    let nation = scan_rel(&mut ctx, "nation", &["n_nationkey", "n_name"]);
+    let joined = cross_join_on_cols(&mut ctx, partsupp, supplier, "ps_suppkey", "s_suppkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, nation, "s_nationkey", "n_nationkey");
+    let joined = filter_eq_str(&mut ctx, joined, "n_name", "ALGERIA");
+    let supplycost = col(&mut ctx, joined.col("ps_supplycost"));
+    let availqty = col(&mut ctx, joined.col("ps_availqty"));
+    let value_expr = bin(&mut ctx, BinaryOp::Multiply, supplycost, availqty);
+    let joined = map_rel(
+        &mut ctx,
+        joined,
+        vec![(
+            "value_expr",
+            arrow_schema::DataType::Decimal128(15, 2),
+            value_expr,
+        )],
+    );
+    let value_arg = col(&mut ctx, joined.col("value_expr"));
+    let grouped = aggregate_rel(
+        &mut ctx,
+        joined.clone(),
+        &["ps_partkey"],
+        vec![(
+            "value",
+            arrow_schema::DataType::Decimal128(15, 2),
+            sum_expr(value_arg),
+        )],
+    );
+    let value_arg = col(&mut ctx, joined.col("value_expr"));
+    let total = aggregate_rel(
+        &mut ctx,
+        joined,
+        &[],
+        vec![(
+            "total_value_threshold",
+            arrow_schema::DataType::Decimal128(15, 2),
+            sum_expr(value_arg),
+        )],
+    );
+    let grouped = cross_rel(&mut ctx, grouped, total);
+    let value = col(&mut ctx, grouped.col("value"));
+    let threshold = col(&mut ctx, grouped.col("total_value_threshold"));
+    let predicate = bin(&mut ctx, BinaryOp::Gt, value, threshold);
+    let grouped = select_rel(&mut ctx, grouped, predicate);
+    let sorted = sort_rel(&mut ctx, grouped, vec![("value", SortDirection::Desc)]);
+    finish(&mut ctx, sorted, &["ps_partkey", "value"]);
+    ctx
+}
+
+fn tpch_q12() -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let orders = scan_rel(&mut ctx, "orders", &["o_orderkey", "o_orderpriority"]);
+    let lineitem = scan_rel(
+        &mut ctx,
+        "lineitem",
+        &[
+            "l_orderkey",
+            "l_shipmode",
+            "l_commitdate",
+            "l_receiptdate",
+            "l_shipdate",
+        ],
+    );
+    let joined = cross_join_on_cols(&mut ctx, orders, lineitem, "o_orderkey", "l_orderkey");
+    let shipmode = col(&mut ctx, joined.col("l_shipmode"));
+    let mode_predicate = in_list(&mut ctx, shipmode, &["FOB", "SHIP"]);
+    let commit = col(&mut ctx, joined.col("l_commitdate"));
+    let receipt = col(&mut ctx, joined.col("l_receiptdate"));
+    let commit_before_receipt = bin(&mut ctx, BinaryOp::Lt, commit, receipt);
+    let ship = col(&mut ctx, joined.col("l_shipdate"));
+    let commit = col(&mut ctx, joined.col("l_commitdate"));
+    let ship_before_commit = bin(&mut ctx, BinaryOp::Lt, ship, commit);
+    let receipt = col(&mut ctx, joined.col("l_receiptdate"));
+    let start = date_lit(&mut ctx, 9131);
+    let receipt_after = bin(&mut ctx, BinaryOp::GtEq, receipt, start);
+    let receipt = col(&mut ctx, joined.col("l_receiptdate"));
+    let end = date_lit(&mut ctx, 9496);
+    let receipt_before = bin(&mut ctx, BinaryOp::Lt, receipt, end);
+    let predicate = and(
+        &mut ctx,
+        vec![
+            mode_predicate,
+            commit_before_receipt,
+            ship_before_commit,
+            receipt_after,
+            receipt_before,
+        ],
+    );
+    let joined = select_rel(&mut ctx, joined, predicate);
+    let priority = col(&mut ctx, joined.col("o_orderpriority"));
+    let urgent = str_lit(&mut ctx, "1-URGENT");
+    let high_urgent = eq(&mut ctx, priority, urgent);
+    let priority = col(&mut ctx, joined.col("o_orderpriority"));
+    let high_literal = str_lit(&mut ctx, "2-HIGH");
+    let high = eq(&mut ctx, priority, high_literal);
+    let high_predicate = or(&mut ctx, vec![high_urgent, high]);
+    let one = int_lit(&mut ctx, 1);
+    let zero = int_lit(&mut ctx, 0);
+    let high_case = case_when(&mut ctx, vec![(high_predicate, one)], Some(zero));
+    let low_case = case_when(&mut ctx, vec![(high_predicate, zero)], Some(one));
+    let joined = map_rel(
+        &mut ctx,
+        joined,
+        vec![
+            ("high_priority", arrow_schema::DataType::Int64, high_case),
+            ("low_priority", arrow_schema::DataType::Int64, low_case),
+        ],
+    );
+    let high = col(&mut ctx, joined.col("high_priority"));
+    let low = col(&mut ctx, joined.col("low_priority"));
+    let grouped = aggregate_rel(
+        &mut ctx,
+        joined,
+        &["l_shipmode"],
+        vec![
+            (
+                "high_line_count",
+                arrow_schema::DataType::Int64,
+                sum_expr(high),
+            ),
+            (
+                "low_line_count",
+                arrow_schema::DataType::Int64,
+                sum_expr(low),
+            ),
+        ],
+    );
+    let sorted = sort_rel(&mut ctx, grouped, vec![("l_shipmode", SortDirection::Asc)]);
+    finish(
+        &mut ctx,
+        sorted,
+        &["l_shipmode", "high_line_count", "low_line_count"],
+    );
+    ctx
+}
+
+fn tpch_q13() -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let customer = scan_rel(&mut ctx, "customer", &["c_custkey"]);
+    let orders = scan_rel(
+        &mut ctx,
+        "orders",
+        &["o_custkey", "o_orderkey", "o_comment"],
+    );
+    let comment = col(&mut ctx, orders.col("o_comment"));
+    let bad_comment = like(&mut ctx, comment, "%express%requests%");
+    let good_comment = not(&mut ctx, bad_comment);
+    let orders = select_rel(&mut ctx, orders, good_comment);
+    let custkey = col(&mut ctx, customer.col("c_custkey"));
+    let order_custkey = col(&mut ctx, orders.col("o_custkey"));
+    let on = eq(&mut ctx, custkey, order_custkey);
+    let joined = join_rel(&mut ctx, JoinType::LeftOuter, customer, orders, on);
+    let orderkey = col(&mut ctx, joined.col("o_orderkey"));
+    let counts = aggregate_rel(
+        &mut ctx,
+        joined,
+        &["c_custkey"],
+        vec![(
+            "c_count",
+            arrow_schema::DataType::Int64,
+            count_expr(orderkey),
+        )],
+    );
+    let c_count = col(&mut ctx, counts.col("c_count"));
+    let grouped = aggregate_rel(
+        &mut ctx,
+        counts,
+        &["c_count"],
+        vec![(
+            "custdist",
+            arrow_schema::DataType::Int64,
+            count_expr(c_count),
+        )],
+    );
+    let sorted = sort_rel(
+        &mut ctx,
+        grouped,
+        vec![
+            ("custdist", SortDirection::Desc),
+            ("c_count", SortDirection::Desc),
+        ],
+    );
+    finish(&mut ctx, sorted, &["c_count", "custdist"]);
+    ctx
+}
+
+fn tpch_q14() -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let lineitem = scan_rel(
+        &mut ctx,
+        "lineitem",
+        &["l_partkey", "l_shipdate", "l_extendedprice", "l_discount"],
+    );
+    let part = scan_rel(&mut ctx, "part", &["p_partkey", "p_type"]);
+    let joined = cross_join_on_cols(&mut ctx, lineitem, part, "l_partkey", "p_partkey");
+    let joined = filter_date_range(&mut ctx, joined, "l_shipdate", 9162, 9190);
+    let disc_price = disc_price(
+        &mut ctx,
+        joined.col("l_extendedprice"),
+        joined.col("l_discount"),
+    );
+    let part_type = col(&mut ctx, joined.col("p_type"));
+    let promo = like(&mut ctx, part_type, "PROMO%");
+    let zero = dec_lit(&mut ctx, 0);
+    let promo_disc_price = case_when(&mut ctx, vec![(promo, disc_price)], Some(zero));
+    let joined = map_rel(
+        &mut ctx,
+        joined,
+        vec![
+            (
+                "disc_price",
+                arrow_schema::DataType::Decimal128(15, 2),
+                disc_price,
+            ),
+            (
+                "promo_disc_price",
+                arrow_schema::DataType::Decimal128(15, 2),
+                promo_disc_price,
+            ),
+        ],
+    );
+    let promo_disc_price = col(&mut ctx, joined.col("promo_disc_price"));
+    let grouped = aggregate_rel(
+        &mut ctx,
+        joined,
+        &[],
+        vec![(
+            "promo_revenue",
+            arrow_schema::DataType::Decimal128(15, 2),
+            sum_expr(promo_disc_price),
+        )],
+    );
+    finish(&mut ctx, grouped, &["promo_revenue"]);
+    ctx
+}
+
+fn tpch_q15() -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let lineitem = scan_rel(
+        &mut ctx,
+        "lineitem",
+        &["l_suppkey", "l_extendedprice", "l_discount", "l_shipdate"],
+    );
+    let lineitem = filter_date_range(&mut ctx, lineitem, "l_shipdate", 9709, 9801);
+    let revenue_expr = disc_price(
+        &mut ctx,
+        lineitem.col("l_extendedprice"),
+        lineitem.col("l_discount"),
+    );
+    let lineitem = map_rel(
+        &mut ctx,
+        lineitem,
+        vec![(
+            "revenue_expr",
+            arrow_schema::DataType::Decimal128(15, 2),
+            revenue_expr,
+        )],
+    );
+    let revenue_arg = col(&mut ctx, lineitem.col("revenue_expr"));
+    let revenue = aggregate_rel(
+        &mut ctx,
+        lineitem,
+        &["l_suppkey"],
+        vec![(
+            "total_revenue",
+            arrow_schema::DataType::Decimal128(15, 2),
+            sum_expr(revenue_arg),
+        )],
+    );
+    let max_arg = col(&mut ctx, revenue.col("total_revenue"));
+    let max_revenue = aggregate_rel(
+        &mut ctx,
+        revenue.clone(),
+        &[],
+        vec![(
+            "max_total_revenue",
+            arrow_schema::DataType::Decimal128(15, 2),
+            max_expr(max_arg),
+        )],
+    );
+    let supplier = scan_rel(
+        &mut ctx,
+        "supplier",
+        &["s_suppkey", "s_name", "s_address", "s_phone"],
+    );
+    let joined = cross_join_on_cols(&mut ctx, supplier, revenue, "s_suppkey", "l_suppkey");
+    let joined = cross_rel(&mut ctx, joined, max_revenue);
+    let total = col(&mut ctx, joined.col("total_revenue"));
+    let max_total = col(&mut ctx, joined.col("max_total_revenue"));
+    let predicate = eq(&mut ctx, total, max_total);
+    let joined = select_rel(&mut ctx, joined, predicate);
+    let sorted = sort_rel(&mut ctx, joined, vec![("s_suppkey", SortDirection::Asc)]);
+    finish(
+        &mut ctx,
+        sorted,
+        &[
+            "s_suppkey",
+            "s_name",
+            "s_address",
+            "s_phone",
+            "total_revenue",
+        ],
+    );
+    ctx
+}
+
+fn tpch_q16() -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let partsupp = scan_rel(&mut ctx, "partsupp", &["ps_partkey", "ps_suppkey"]);
+    let part = scan_rel(
+        &mut ctx,
+        "part",
+        &["p_partkey", "p_brand", "p_type", "p_size"],
+    );
+    let supplier = scan_rel(&mut ctx, "supplier", &["s_suppkey", "s_comment"]);
+    let joined = cross_join_on_cols(&mut ctx, partsupp, part, "ps_partkey", "p_partkey");
+    let brand = col(&mut ctx, joined.col("p_brand"));
+    let brand_literal = str_lit(&mut ctx, "Brand#14");
+    let not_brand = bin(&mut ctx, BinaryOp::NotEq, brand, brand_literal);
+    let part_type = col(&mut ctx, joined.col("p_type"));
+    let plated = like(&mut ctx, part_type, "SMALL PLATED%");
+    let not_plated = not(&mut ctx, plated);
+    let size = col(&mut ctx, joined.col("p_size"));
+    let size_14 = int_lit(&mut ctx, 14);
+    let size_6 = int_lit(&mut ctx, 6);
+    let size_5 = int_lit(&mut ctx, 5);
+    let size_31 = int_lit(&mut ctx, 31);
+    let size_49 = int_lit(&mut ctx, 49);
+    let size_15 = int_lit(&mut ctx, 15);
+    let size_41 = int_lit(&mut ctx, 41);
+    let size_47 = int_lit(&mut ctx, 47);
+    let size_ok = scalar_fn(
+        &mut ctx,
+        "in",
+        vec![
+            size, size_14, size_6, size_5, size_31, size_49, size_15, size_41, size_47,
+        ],
+    );
+    let predicate = and(&mut ctx, vec![not_brand, not_plated, size_ok]);
+    let joined = select_rel(&mut ctx, joined, predicate);
+    let comment = col(&mut ctx, supplier.col("s_comment"));
+    let complaints = like(&mut ctx, comment, "%Customer%Complaints%");
+    let supplier = select_rel(&mut ctx, supplier, complaints);
+    let ps_suppkey = col(&mut ctx, joined.col("ps_suppkey"));
+    let s_suppkey = col(&mut ctx, supplier.col("s_suppkey"));
+    let on = eq(&mut ctx, ps_suppkey, s_suppkey);
+    let joined = join_rel(&mut ctx, JoinType::LeftAnti, joined, supplier, on);
+    let suppkey = col(&mut ctx, joined.col("ps_suppkey"));
+    let grouped = aggregate_rel(
+        &mut ctx,
+        joined,
+        &["p_brand", "p_type", "p_size"],
+        vec![(
+            "supplier_cnt",
+            arrow_schema::DataType::Int64,
+            count_distinct_expr(suppkey),
+        )],
+    );
+    let sorted = sort_rel(
+        &mut ctx,
+        grouped,
+        vec![
+            ("supplier_cnt", SortDirection::Desc),
+            ("p_brand", SortDirection::Asc),
+            ("p_type", SortDirection::Asc),
+            ("p_size", SortDirection::Asc),
+        ],
+    );
+    finish(
+        &mut ctx,
+        sorted,
+        &["p_brand", "p_type", "p_size", "supplier_cnt"],
+    );
+    ctx
+}
+
+fn tpch_q17() -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let part = scan_rel(&mut ctx, "part", &["p_partkey", "p_brand", "p_container"]);
+    let part = filter_eq_str(&mut ctx, part, "p_brand", "Brand#42");
+    let part = filter_eq_str(&mut ctx, part, "p_container", "LG BAG");
+    let lineitem = scan_rel(
+        &mut ctx,
+        "lineitem",
+        &["l_partkey", "l_quantity", "l_extendedprice"],
+    );
+    let avg_quantity_arg = col(&mut ctx, lineitem.col("l_quantity"));
+    let avg_by_part = aggregate_rel(
+        &mut ctx,
+        lineitem.clone(),
+        &["l_partkey"],
+        vec![(
+            "avg_quantity",
+            arrow_schema::DataType::Decimal128(15, 2),
+            avg_expr(avg_quantity_arg),
+        )],
+    );
+    let joined = cross_join_on_cols(&mut ctx, part, lineitem, "p_partkey", "l_partkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, avg_by_part, "p_partkey", "l_partkey");
+    let quantity = col(&mut ctx, joined.col("l_quantity"));
+    let avg_quantity = col(&mut ctx, joined.col("avg_quantity"));
+    let predicate = bin(&mut ctx, BinaryOp::Lt, quantity, avg_quantity);
+    let joined = select_rel(&mut ctx, joined, predicate);
+    let extendedprice = col(&mut ctx, joined.col("l_extendedprice"));
+    let grouped = aggregate_rel(
+        &mut ctx,
+        joined,
+        &[],
+        vec![(
+            "avg_yearly",
+            arrow_schema::DataType::Decimal128(15, 2),
+            sum_expr(extendedprice),
+        )],
+    );
+    finish(&mut ctx, grouped, &["avg_yearly"]);
+    ctx
+}
+
+fn tpch_q18() -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let lineitem_sub = scan_rel(&mut ctx, "lineitem", &["l_orderkey", "l_quantity"]);
+    let quantity = col(&mut ctx, lineitem_sub.col("l_quantity"));
+    let large_orders = aggregate_rel(
+        &mut ctx,
+        lineitem_sub,
+        &["l_orderkey"],
+        vec![(
+            "sum_l_quantity_filter",
+            arrow_schema::DataType::Decimal128(15, 2),
+            sum_expr(quantity),
+        )],
+    );
+    let sum_qty = col(&mut ctx, large_orders.col("sum_l_quantity_filter"));
+    let threshold = dec_lit(&mut ctx, 31300);
+    let predicate = bin(&mut ctx, BinaryOp::Gt, sum_qty, threshold);
+    let large_orders = select_rel(&mut ctx, large_orders, predicate);
+
+    let customer = scan_rel(&mut ctx, "customer", &["c_name", "c_custkey"]);
+    let orders = scan_rel(
+        &mut ctx,
+        "orders",
+        &["o_orderkey", "o_custkey", "o_orderdate", "o_totalprice"],
+    );
+    let lineitem = scan_rel(&mut ctx, "lineitem", &["l_orderkey", "l_quantity"]);
+    let orderkey = col(&mut ctx, orders.col("o_orderkey"));
+    let large_orderkey = col(&mut ctx, large_orders.col("l_orderkey"));
+    let on = eq(&mut ctx, orderkey, large_orderkey);
+    let orders = join_rel(&mut ctx, JoinType::LeftSemi, orders, large_orders, on);
+    let joined = cross_join_on_cols(&mut ctx, customer, orders, "c_custkey", "o_custkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, lineitem, "o_orderkey", "l_orderkey");
+    let quantity = col(&mut ctx, joined.col("l_quantity"));
+    let grouped = aggregate_rel(
+        &mut ctx,
+        joined,
+        &[
+            "c_name",
+            "c_custkey",
+            "o_orderkey",
+            "o_orderdate",
+            "o_totalprice",
+        ],
+        vec![(
+            "sum_l_quantity",
+            arrow_schema::DataType::Decimal128(15, 2),
+            sum_expr(quantity),
+        )],
+    );
+    let sorted = sort_rel(
+        &mut ctx,
+        grouped,
+        vec![
+            ("o_totalprice", SortDirection::Desc),
+            ("o_orderdate", SortDirection::Asc),
+        ],
+    );
+    let limited = limit_rel(&mut ctx, sorted, 100);
+    finish(
+        &mut ctx,
+        limited,
+        &[
+            "c_name",
+            "c_custkey",
+            "o_orderkey",
+            "o_orderdate",
+            "o_totalprice",
+            "sum_l_quantity",
+        ],
+    );
+    ctx
+}
+
+fn tpch_q19() -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let lineitem = scan_rel(
+        &mut ctx,
+        "lineitem",
+        &[
+            "l_partkey",
+            "l_quantity",
+            "l_extendedprice",
+            "l_discount",
+            "l_shipmode",
+            "l_shipinstruct",
+        ],
+    );
+    let part = scan_rel(
+        &mut ctx,
+        "part",
+        &["p_partkey", "p_brand", "p_container", "p_size"],
+    );
+    let joined = cross_join_on_cols(&mut ctx, lineitem, part, "l_partkey", "p_partkey");
+    let shipmode = col(&mut ctx, joined.col("l_shipmode"));
+    let air = in_list(&mut ctx, shipmode, &["AIR", "AIR REG"]);
+    let instruct = col(&mut ctx, joined.col("l_shipinstruct"));
+    let deliver_literal = str_lit(&mut ctx, "DELIVER IN PERSON");
+    let deliver = eq(&mut ctx, instruct, deliver_literal);
+    let base = and(&mut ctx, vec![air, deliver]);
+
+    let brand = col(&mut ctx, joined.col("p_brand"));
+    let brand_literal = str_lit(&mut ctx, "Brand#21");
+    let brand_21 = eq(&mut ctx, brand, brand_literal);
+    let qty = col(&mut ctx, joined.col("l_quantity"));
+    let low = dec_lit(&mut ctx, 800);
+    let high = dec_lit(&mut ctx, 1800);
+    let qty_1 = between(&mut ctx, qty, low, high);
+    let case_1 = and(&mut ctx, vec![brand_21, qty_1]);
+
+    let brand = col(&mut ctx, joined.col("p_brand"));
+    let brand_literal = str_lit(&mut ctx, "Brand#13");
+    let brand_13 = eq(&mut ctx, brand, brand_literal);
+    let qty = col(&mut ctx, joined.col("l_quantity"));
+    let low = dec_lit(&mut ctx, 2000);
+    let high = dec_lit(&mut ctx, 3000);
+    let qty_2 = between(&mut ctx, qty, low, high);
+    let case_2 = and(&mut ctx, vec![brand_13, qty_2]);
+
+    let brand = col(&mut ctx, joined.col("p_brand"));
+    let brand_literal = str_lit(&mut ctx, "Brand#52");
+    let brand_52 = eq(&mut ctx, brand, brand_literal);
+    let qty = col(&mut ctx, joined.col("l_quantity"));
+    let low = dec_lit(&mut ctx, 3000);
+    let high = dec_lit(&mut ctx, 4000);
+    let qty_3 = between(&mut ctx, qty, low, high);
+    let case_3 = and(&mut ctx, vec![brand_52, qty_3]);
+    let brand_cases = or(&mut ctx, vec![case_1, case_2, case_3]);
+    let predicate = and(&mut ctx, vec![base, brand_cases]);
+    let joined = select_rel(&mut ctx, joined, predicate);
+    let revenue = disc_price(
+        &mut ctx,
+        joined.col("l_extendedprice"),
+        joined.col("l_discount"),
+    );
+    let joined = map_rel(
+        &mut ctx,
+        joined,
+        vec![(
+            "revenue_expr",
+            arrow_schema::DataType::Decimal128(15, 2),
+            revenue,
+        )],
+    );
+    let revenue = col(&mut ctx, joined.col("revenue_expr"));
+    let grouped = aggregate_rel(
+        &mut ctx,
+        joined,
+        &[],
+        vec![(
+            "revenue",
+            arrow_schema::DataType::Decimal128(15, 2),
+            sum_expr(revenue),
+        )],
+    );
+    finish(&mut ctx, grouped, &["revenue"]);
+    ctx
+}
+
+fn tpch_q20() -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let part = scan_rel(&mut ctx, "part", &["p_partkey", "p_name"]);
+    let part_name = col(&mut ctx, part.col("p_name"));
+    let blanched = like(&mut ctx, part_name, "blanched%");
+    let part = select_rel(&mut ctx, part, blanched);
+    let partsupp = scan_rel(
+        &mut ctx,
+        "partsupp",
+        &["ps_partkey", "ps_suppkey", "ps_availqty"],
+    );
+    let partkey = col(&mut ctx, partsupp.col("ps_partkey"));
+    let p_partkey = col(&mut ctx, part.col("p_partkey"));
+    let on = eq(&mut ctx, partkey, p_partkey);
+    let candidate_partsupp = join_rel(&mut ctx, JoinType::LeftSemi, partsupp, part, on);
+    let supplier = scan_rel(
+        &mut ctx,
+        "supplier",
+        &["s_suppkey", "s_name", "s_address", "s_nationkey"],
+    );
+    let nation = scan_rel(&mut ctx, "nation", &["n_nationkey", "n_name"]);
+    let suppkey = col(&mut ctx, supplier.col("s_suppkey"));
+    let ps_suppkey = col(&mut ctx, candidate_partsupp.col("ps_suppkey"));
+    let on = eq(&mut ctx, suppkey, ps_suppkey);
+    let supplier = join_rel(
+        &mut ctx,
+        JoinType::LeftSemi,
+        supplier,
+        candidate_partsupp,
+        on,
+    );
+    let joined = cross_join_on_cols(&mut ctx, supplier, nation, "s_nationkey", "n_nationkey");
+    let joined = filter_eq_str(&mut ctx, joined, "n_name", "KENYA");
+    let sorted = sort_rel(&mut ctx, joined, vec![("s_name", SortDirection::Asc)]);
+    finish(&mut ctx, sorted, &["s_name", "s_address"]);
+    ctx
+}
+
+fn tpch_q21() -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let supplier = scan_rel(
+        &mut ctx,
+        "supplier",
+        &["s_suppkey", "s_name", "s_nationkey"],
+    );
+    let lineitem = scan_rel_as(
+        &mut ctx,
+        "lineitem",
+        Some("l1"),
+        &["l_orderkey", "l_suppkey", "l_receiptdate", "l_commitdate"],
+    );
+    let orders = scan_rel(&mut ctx, "orders", &["o_orderkey", "o_orderstatus"]);
+    let nation = scan_rel(&mut ctx, "nation", &["n_nationkey", "n_name"]);
+    let joined = cross_join_on_cols(&mut ctx, supplier, lineitem, "s_suppkey", "l1.l_suppkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, orders, "l1.l_orderkey", "o_orderkey");
+    let joined = cross_join_on_cols(&mut ctx, joined, nation, "s_nationkey", "n_nationkey");
+    let joined = filter_eq_str(&mut ctx, joined, "o_orderstatus", "F");
+    let joined = filter_eq_str(&mut ctx, joined, "n_name", "ARGENTINA");
+    let receipt = col(&mut ctx, joined.col("l1.l_receiptdate"));
+    let commit = col(&mut ctx, joined.col("l1.l_commitdate"));
+    let late = bin(&mut ctx, BinaryOp::Gt, receipt, commit);
+    let joined = select_rel(&mut ctx, joined, late);
+
+    let l2 = scan_rel_as(
+        &mut ctx,
+        "lineitem",
+        Some("l2"),
+        &["l_orderkey", "l_suppkey"],
+    );
+    let orderkey = col(&mut ctx, joined.col("l1.l_orderkey"));
+    let l2_orderkey = col(&mut ctx, l2.col("l2.l_orderkey"));
+    let same_order = eq(&mut ctx, orderkey, l2_orderkey);
+    let suppkey = col(&mut ctx, joined.col("l1.l_suppkey"));
+    let l2_suppkey = col(&mut ctx, l2.col("l2.l_suppkey"));
+    let different_supplier = bin(&mut ctx, BinaryOp::NotEq, suppkey, l2_suppkey);
+    let on = and(&mut ctx, vec![same_order, different_supplier]);
+    let joined = join_rel(&mut ctx, JoinType::LeftSemi, joined, l2, on);
+
+    let l3 = scan_rel_as(
+        &mut ctx,
+        "lineitem",
+        Some("l3"),
+        &["l_orderkey", "l_suppkey", "l_receiptdate", "l_commitdate"],
+    );
+    let receipt = col(&mut ctx, l3.col("l3.l_receiptdate"));
+    let commit = col(&mut ctx, l3.col("l3.l_commitdate"));
+    let late = bin(&mut ctx, BinaryOp::Gt, receipt, commit);
+    let l3 = select_rel(&mut ctx, l3, late);
+    let orderkey = col(&mut ctx, joined.col("l1.l_orderkey"));
+    let l3_orderkey = col(&mut ctx, l3.col("l3.l_orderkey"));
+    let same_order = eq(&mut ctx, orderkey, l3_orderkey);
+    let suppkey = col(&mut ctx, joined.col("l1.l_suppkey"));
+    let l3_suppkey = col(&mut ctx, l3.col("l3.l_suppkey"));
+    let different_supplier = bin(&mut ctx, BinaryOp::NotEq, suppkey, l3_suppkey);
+    let on = and(&mut ctx, vec![same_order, different_supplier]);
+    let joined = join_rel(&mut ctx, JoinType::LeftAnti, joined, l3, on);
+    let name = col(&mut ctx, joined.col("s_name"));
+    let grouped = aggregate_rel(
+        &mut ctx,
+        joined,
+        &["s_name"],
+        vec![("numwait", arrow_schema::DataType::Int64, count_expr(name))],
+    );
+    let sorted = sort_rel(
+        &mut ctx,
+        grouped,
+        vec![
+            ("numwait", SortDirection::Desc),
+            ("s_name", SortDirection::Asc),
+        ],
+    );
+    let limited = limit_rel(&mut ctx, sorted, 100);
+    finish(&mut ctx, limited, &["s_name", "numwait"]);
+    ctx
+}
+
+fn tpch_q22() -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let customer = scan_rel(&mut ctx, "customer", &["c_custkey", "c_phone", "c_acctbal"]);
+    let phone = col(&mut ctx, customer.col("c_phone"));
+    let start = int_lit(&mut ctx, 1);
+    let length = int_lit(&mut ctx, 2);
+    let cntrycode = scalar_fn(&mut ctx, "substring", vec![phone, start, length]);
+    let customer = map_rel(
+        &mut ctx,
+        customer,
+        vec![("cntrycode", arrow_schema::DataType::Utf8, cntrycode)],
+    );
+    let code = col(&mut ctx, customer.col("cntrycode"));
+    let code_ok = in_list(&mut ctx, code, &["24", "34", "16", "30", "33", "14", "13"]);
+    let acctbal = col(&mut ctx, customer.col("c_acctbal"));
+    let zero = dec_lit(&mut ctx, 0);
+    let positive = bin(&mut ctx, BinaryOp::Gt, acctbal, zero);
+    let predicate = and(&mut ctx, vec![code_ok, positive]);
+    let customer = select_rel(&mut ctx, customer, predicate);
+    let acctbal = col(&mut ctx, customer.col("c_acctbal"));
+    let avg_bal = aggregate_rel(
+        &mut ctx,
+        customer.clone(),
+        &[],
+        vec![(
+            "avg_acctbal",
+            arrow_schema::DataType::Decimal128(15, 2),
+            avg_expr(acctbal),
+        )],
+    );
+    let customer = cross_rel(&mut ctx, customer, avg_bal);
+    let acctbal = col(&mut ctx, customer.col("c_acctbal"));
+    let avg = col(&mut ctx, customer.col("avg_acctbal"));
+    let above_avg = bin(&mut ctx, BinaryOp::Gt, acctbal, avg);
+    let customer = select_rel(&mut ctx, customer, above_avg);
+    let orders = scan_rel(&mut ctx, "orders", &["o_custkey"]);
+    let custkey = col(&mut ctx, customer.col("c_custkey"));
+    let order_custkey = col(&mut ctx, orders.col("o_custkey"));
+    let on = eq(&mut ctx, custkey, order_custkey);
+    let customer = join_rel(&mut ctx, JoinType::LeftAnti, customer, orders, on);
+    let custkey = col(&mut ctx, customer.col("c_custkey"));
+    let acctbal = col(&mut ctx, customer.col("c_acctbal"));
+    let grouped = aggregate_rel(
+        &mut ctx,
+        customer,
+        &["cntrycode"],
+        vec![
+            (
+                "numcust",
+                arrow_schema::DataType::Int64,
+                count_expr(custkey),
+            ),
+            (
+                "totacctbal",
+                arrow_schema::DataType::Decimal128(15, 2),
+                sum_expr(acctbal),
+            ),
+        ],
+    );
+    let sorted = sort_rel(&mut ctx, grouped, vec![("cntrycode", SortDirection::Asc)]);
+    finish(&mut ctx, sorted, &["cntrycode", "numcust", "totacctbal"]);
+    ctx
+}
+
+#[derive(Clone)]
+struct Rel {
+    input: Operator,
+    cols: HashMap<String, Column>,
+}
+
+impl Rel {
+    fn col(&self, name: &str) -> Column {
+        *self
+            .cols
+            .get(name)
+            .unwrap_or_else(|| panic!("missing column in test TPC-H builder: {name}"))
+    }
+
+    fn merge(mut self, other: Rel) -> Rel {
+        self.cols.extend(other.cols);
+        self
     }
 }
 
-fn int32_ty(name: &'static str) -> (&'static str, arrow_schema::DataType) {
-    (name, arrow_schema::DataType::Int32)
+fn scan_rel(ctx: &mut QueryContext, table: &'static str, columns: &[&'static str]) -> Rel {
+    scan_rel_as(ctx, table, None, columns)
 }
 
-fn int64_ty(name: &'static str) -> (&'static str, arrow_schema::DataType) {
-    (name, arrow_schema::DataType::Int64)
+fn scan_rel_as(
+    ctx: &mut QueryContext,
+    table: &'static str,
+    alias: Option<&'static str>,
+    columns: &[&'static str],
+) -> Rel {
+    let mut cols = HashMap::new();
+    let mut scan_columns = Vec::new();
+
+    for name in columns {
+        let display_name = alias
+            .map(|alias| format!("{alias}.{name}"))
+            .unwrap_or_else(|| (*name).to_string());
+        let column = ctx.add_column(ColumnData::new(display_name, tpch_column_type(name)));
+        cols.insert((*name).to_string(), column);
+        if let Some(alias) = alias {
+            cols.insert(format!("{alias}.{name}"), column);
+        }
+        scan_columns.push(column);
+    }
+
+    let input = ctx.add_operator(OperatorData::Scan(Scan {
+        table: TableRef::bare(table),
+        columns: scan_columns,
+    }));
+    Rel { input, cols }
 }
 
-fn utf8_ty(name: &'static str) -> (&'static str, arrow_schema::DataType) {
-    (name, arrow_schema::DataType::Utf8)
+fn cross_rel(ctx: &mut QueryContext, left: Rel, right: Rel) -> Rel {
+    let input = ctx.add_operator(OperatorData::CrossProduct(CrossProduct {
+        outer: left.input,
+        inner: right.input,
+    }));
+    Rel {
+        input,
+        cols: left.merge(right).cols,
+    }
 }
 
-fn decimal_ty(name: &'static str) -> (&'static str, arrow_schema::DataType) {
-    (name, arrow_schema::DataType::Decimal128(15, 2))
+fn join_rel(ctx: &mut QueryContext, join_type: JoinType, left: Rel, right: Rel, on: Expr) -> Rel {
+    let input = ctx.add_operator(OperatorData::Join(Join {
+        join_type: join_type.clone(),
+        on,
+        outer: left.input,
+        inner: right.input,
+    }));
+    let cols = match join_type {
+        JoinType::LeftSemi | JoinType::LeftAnti => left.cols,
+        _ => left.merge(right).cols,
+    };
+    Rel { input, cols }
 }
 
-fn date_ty(name: &'static str) -> (&'static str, arrow_schema::DataType) {
-    (name, arrow_schema::DataType::Date32)
+fn cross_join_on_cols(
+    ctx: &mut QueryContext,
+    left: Rel,
+    right: Rel,
+    left_col: &str,
+    right_col: &str,
+) -> Rel {
+    let joined = cross_rel(ctx, left, right);
+    let left = col(ctx, joined.col(left_col));
+    let right = col(ctx, joined.col(right_col));
+    let predicate = eq(ctx, left, right);
+    select_rel(ctx, joined, predicate)
+}
+
+fn filter_eq_str(ctx: &mut QueryContext, rel: Rel, column: &str, value: &'static str) -> Rel {
+    let left = col(ctx, rel.col(column));
+    let right = str_lit(ctx, value);
+    let predicate = eq(ctx, left, right);
+    select_rel(ctx, rel, predicate)
+}
+
+fn filter_date_range(
+    ctx: &mut QueryContext,
+    rel: Rel,
+    column: &str,
+    start_days: i32,
+    end_days: i32,
+) -> Rel {
+    let value = col(ctx, rel.col(column));
+    let start = date_lit(ctx, start_days);
+    let after_start = bin(ctx, BinaryOp::GtEq, value, start);
+    let value = col(ctx, rel.col(column));
+    let end = date_lit(ctx, end_days);
+    let before_end = bin(ctx, BinaryOp::Lt, value, end);
+    let predicate = and(ctx, vec![after_start, before_end]);
+    select_rel(ctx, rel, predicate)
+}
+
+fn select_rel(ctx: &mut QueryContext, rel: Rel, predicate: Expr) -> Rel {
+    let input = ctx.add_operator(OperatorData::Selection(Selection {
+        predicate,
+        input: rel.input,
+    }));
+    Rel {
+        input,
+        cols: rel.cols,
+    }
+}
+
+fn map_rel(
+    ctx: &mut QueryContext,
+    rel: Rel,
+    computations: Vec<(&'static str, arrow_schema::DataType, Expr)>,
+) -> Rel {
+    let mut cols = rel.cols;
+    let mut map_computations = Vec::new();
+
+    for (name, ty, expr) in computations {
+        let column = ctx.add_column(ColumnData::new(name, ty));
+        cols.insert(name.to_string(), column);
+        map_computations.push((column, expr));
+    }
+
+    let input = ctx.add_operator(OperatorData::Map(Map {
+        computations: map_computations,
+        input: rel.input,
+    }));
+    Rel { input, cols }
+}
+
+fn aggregate_rel(
+    ctx: &mut QueryContext,
+    rel: Rel,
+    key_columns: &[&str],
+    aggregates: Vec<(&'static str, arrow_schema::DataType, AggregateExpr)>,
+) -> Rel {
+    let mut cols = HashMap::new();
+    let keys = key_columns
+        .iter()
+        .map(|name| {
+            let column = rel.col(name);
+            cols.insert((*name).to_string(), column);
+            col(ctx, column)
+        })
+        .collect();
+    let aggregates = aggregates
+        .into_iter()
+        .map(|(name, ty, expr)| {
+            let column = ctx.add_column(ColumnData::new(name, ty));
+            cols.insert(name.to_string(), column);
+            (column, expr)
+        })
+        .collect();
+
+    let input = ctx.add_operator(OperatorData::Aggregation(Aggregation {
+        keys,
+        aggregates,
+        input: rel.input,
+    }));
+    Rel { input, cols }
+}
+
+fn sort_rel(ctx: &mut QueryContext, rel: Rel, keys: Vec<(&str, SortDirection)>) -> Rel {
+    let sort_keys = keys
+        .into_iter()
+        .map(|(name, direction)| SortKey {
+            expr: col(ctx, rel.col(name)),
+            direction,
+            nulls: NullOrdering::Last,
+        })
+        .collect();
+    let input = ctx.add_operator(OperatorData::Sort(Sort {
+        keys: sort_keys,
+        input: rel.input,
+    }));
+    Rel {
+        input,
+        cols: rel.cols,
+    }
+}
+
+fn limit_rel(ctx: &mut QueryContext, rel: Rel, fetch: usize) -> Rel {
+    let input = ctx.add_operator(OperatorData::Limit(Limit {
+        fetch: Some(fetch),
+        offset: 0,
+        input: rel.input,
+    }));
+    Rel {
+        input,
+        cols: rel.cols,
+    }
+}
+
+fn finish(ctx: &mut QueryContext, rel: Rel, output_columns: &[&str]) {
+    let columns = output_columns.iter().map(|name| rel.col(name)).collect();
+    let projection = ctx.add_operator(OperatorData::Projection(Projection {
+        columns,
+        input: rel.input,
+    }));
+    let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+    ctx.set_root(output);
+}
+
+fn col(ctx: &mut QueryContext, column: Column) -> Expr {
+    ctx.add_expr(ExprData::ColumnRef(column))
+}
+
+fn lit(ctx: &mut QueryContext, value: ScalarValue) -> Expr {
+    ctx.add_expr(ExprData::Literal(value))
+}
+
+fn int_lit(ctx: &mut QueryContext, value: i64) -> Expr {
+    lit(ctx, ScalarValue::Int64(value))
+}
+
+fn dec_lit(ctx: &mut QueryContext, value: i128) -> Expr {
+    lit(
+        ctx,
+        ScalarValue::Decimal128 {
+            value,
+            precision: 15,
+            scale: 2,
+        },
+    )
+}
+
+fn str_lit(ctx: &mut QueryContext, value: &'static str) -> Expr {
+    lit(ctx, ScalarValue::Utf8(value.to_string()))
+}
+
+fn date_lit(ctx: &mut QueryContext, days_since_epoch: i32) -> Expr {
+    lit(ctx, ScalarValue::Date32(days_since_epoch))
+}
+
+fn bin(ctx: &mut QueryContext, op: BinaryOp, left: Expr, right: Expr) -> Expr {
+    ctx.add_expr(ExprData::Binary { op, left, right })
+}
+
+fn eq(ctx: &mut QueryContext, left: Expr, right: Expr) -> Expr {
+    bin(ctx, BinaryOp::Eq, left, right)
+}
+
+fn and(ctx: &mut QueryContext, exprs: Vec<Expr>) -> Expr {
+    ctx.add_expr(ExprData::Nary {
+        op: NaryOp::And,
+        exprs,
+    })
+}
+
+fn or(ctx: &mut QueryContext, exprs: Vec<Expr>) -> Expr {
+    ctx.add_expr(ExprData::Nary {
+        op: NaryOp::Or,
+        exprs,
+    })
+}
+
+fn not(ctx: &mut QueryContext, expr: Expr) -> Expr {
+    ctx.add_expr(ExprData::Unary {
+        op: simple_graph::UnaryOp::Not,
+        expr,
+    })
+}
+
+fn scalar_fn(ctx: &mut QueryContext, name: &'static str, args: Vec<Expr>) -> Expr {
+    ctx.add_expr(ExprData::ScalarFunction {
+        function: ScalarFunction::extension(name),
+        args,
+    })
+}
+
+fn like(ctx: &mut QueryContext, value: Expr, pattern: &'static str) -> Expr {
+    let pattern = str_lit(ctx, pattern);
+    scalar_fn(ctx, "like", vec![value, pattern])
+}
+
+fn in_list(ctx: &mut QueryContext, value: Expr, values: &[&'static str]) -> Expr {
+    let mut args = vec![value];
+    for value in values {
+        args.push(str_lit(ctx, value));
+    }
+    scalar_fn(ctx, "in", args)
+}
+
+fn between(ctx: &mut QueryContext, value: Expr, low: Expr, high: Expr) -> Expr {
+    let above = bin(ctx, BinaryOp::GtEq, value, low);
+    let below = bin(ctx, BinaryOp::LtEq, value, high);
+    and(ctx, vec![above, below])
+}
+
+fn disc_price(ctx: &mut QueryContext, extendedprice: Column, discount: Column) -> Expr {
+    let one = dec_lit(ctx, 100);
+    let discount = col(ctx, discount);
+    let keep = bin(ctx, BinaryOp::Subtract, one, discount);
+    let extendedprice = col(ctx, extendedprice);
+    bin(ctx, BinaryOp::Multiply, extendedprice, keep)
+}
+
+fn case_when(
+    ctx: &mut QueryContext,
+    when_then: Vec<(Expr, Expr)>,
+    else_expr: Option<Expr>,
+) -> Expr {
+    ctx.add_expr(ExprData::CaseWhen {
+        when_then,
+        else_expr,
+    })
+}
+
+fn sum_expr(arg: Expr) -> AggregateExpr {
+    AggregateExpr::Func {
+        func: AggregateFunction::Sum,
+        arg,
+        distinct: false,
+    }
+}
+
+fn count_expr(arg: Expr) -> AggregateExpr {
+    AggregateExpr::Func {
+        func: AggregateFunction::Count,
+        arg,
+        distinct: false,
+    }
+}
+
+fn count_distinct_expr(arg: Expr) -> AggregateExpr {
+    AggregateExpr::Func {
+        func: AggregateFunction::Count,
+        arg,
+        distinct: true,
+    }
+}
+
+fn avg_expr(arg: Expr) -> AggregateExpr {
+    AggregateExpr::Func {
+        func: AggregateFunction::Avg,
+        arg,
+        distinct: false,
+    }
+}
+
+fn min_expr(arg: Expr) -> AggregateExpr {
+    AggregateExpr::Func {
+        func: AggregateFunction::Min,
+        arg,
+        distinct: false,
+    }
+}
+
+fn max_expr(arg: Expr) -> AggregateExpr {
+    AggregateExpr::Func {
+        func: AggregateFunction::Max,
+        arg,
+        distinct: false,
+    }
+}
+
+fn tpch_column_type(name: &str) -> arrow_schema::DataType {
+    match name {
+        "l_linenumber" | "p_size" | "ps_availqty" | "o_shippriority" => {
+            arrow_schema::DataType::Int32
+        }
+        "c_custkey" | "c_nationkey" | "l_orderkey" | "l_partkey" | "l_suppkey" | "n_nationkey"
+        | "n_regionkey" | "o_orderkey" | "o_custkey" | "p_partkey" | "ps_partkey"
+        | "ps_suppkey" | "r_regionkey" | "s_suppkey" | "s_nationkey" => {
+            arrow_schema::DataType::Int64
+        }
+        "c_acctbal" | "l_quantity" | "l_extendedprice" | "l_discount" | "l_tax"
+        | "o_totalprice" | "p_retailprice" | "ps_supplycost" | "s_acctbal" => {
+            arrow_schema::DataType::Decimal128(15, 2)
+        }
+        "l_shipdate" | "l_commitdate" | "l_receiptdate" | "o_orderdate" => {
+            arrow_schema::DataType::Date32
+        }
+        _ => arrow_schema::DataType::Utf8,
+    }
 }
 
 fn tpch_session_context() -> SessionContext {
