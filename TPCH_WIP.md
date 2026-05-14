@@ -60,7 +60,7 @@ Integration tests currently validate DataFusion consumer interoperability for th
 ## Tracking Template
 
 - [x] Decimal/date/timestamp type coverage complete
-- [ ] Cast/conditional expression coverage complete
+- [x] Cast/conditional expression coverage complete
 - [ ] Semi/anti/subquery-lowered semantics covered
 - [ ] TPC-H integration harness added
 - [ ] Q1–Q22 export+consume matrix green

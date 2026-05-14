@@ -8,8 +8,8 @@ use datafusion::prelude::SessionContext;
 use prost::Message;
 use simple_graph::{
     AggregateExpr, Aggregation, ColumnData, CrossProduct, ExprData, Limit, Map, NullOrdering,
-    OperatorData, Output, Projection, QueryContext, ScalarValue, Scan, Selection, Sort,
-    SortDirection, SortKey, TableRef, substrait,
+    OperatorData, Output, Projection, QueryContext, ScalarFunction, ScalarValue, Scan, Selection,
+    Sort, SortDirection, SortKey, TableRef, substrait,
 };
 
 #[tokio::test]
@@ -160,6 +160,33 @@ async fn datafusion_consumes_map_substrait_plan_produced_by_simple_graph() {
     assert_eq!(fields.len(), 2);
     assert_eq!(fields[0].name(), "id");
     assert_eq!(fields[1].name(), "id_plus_one");
+}
+
+#[tokio::test]
+async fn datafusion_consumes_cast_and_case_when_plan_produced_by_simple_graph() {
+    let df_ctx = users_session_context();
+    let query = cast_and_case_when_users_query();
+    let plan = substrait::to_plan(&query).unwrap();
+
+    let mut bytes = Vec::new();
+    plan.encode(&mut bytes).unwrap();
+
+    let df_substrait_plan = datafusion_substrait::serializer::deserialize_bytes(bytes)
+        .await
+        .unwrap();
+    let logical_plan = datafusion_substrait::logical_plan::consumer::from_substrait_plan(
+        &df_ctx.state(),
+        &df_substrait_plan,
+    )
+    .await
+    .unwrap();
+
+    let fields = logical_plan.schema().fields();
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].name(), "age_i32");
+    assert_eq!(fields[0].data_type(), &DataType::Int32);
+    assert_eq!(fields[1].name(), "age_bucket");
+    assert_eq!(fields[1].data_type(), &DataType::Utf8);
 }
 
 fn users_session_context() -> SessionContext {
@@ -353,6 +380,51 @@ fn mapped_users_query() -> QueryContext {
     }));
     let projection = ctx.add_operator(OperatorData::Projection(Projection {
         columns: vec![user_id, id_plus_one],
+        input: map,
+    }));
+    let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+    ctx.set_root(output);
+
+    ctx
+}
+
+fn cast_and_case_when_users_query() -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let user_id = ctx.add_column(ColumnData::new("id", arrow_schema::DataType::Int64));
+    let user_age = ctx.add_column(ColumnData::new("age", arrow_schema::DataType::Int64));
+    let age_i32 = ctx.add_column(ColumnData::new("age_i32", arrow_schema::DataType::Int32));
+    let age_bucket = ctx.add_column(ColumnData::new("age_bucket", arrow_schema::DataType::Utf8));
+
+    let users = ctx.add_operator(OperatorData::Scan(Scan {
+        table: TableRef::bare("users"),
+        columns: vec![user_id, user_age],
+    }));
+    let age_ref_for_cast = ctx.add_expr(ExprData::ColumnRef(user_age));
+    let cast = ctx.add_expr(ExprData::ScalarFunction {
+        function: ScalarFunction::Extension("cast".to_string()),
+        args: vec![age_ref_for_cast],
+    });
+
+    let age_ref_for_condition = ctx.add_expr(ExprData::ColumnRef(user_age));
+    let adult_age = ctx.add_expr(ExprData::Literal(ScalarValue::Int64(18)));
+    let is_adult = ctx.add_expr(ExprData::Binary {
+        op: simple_graph::BinaryOp::GtEq,
+        left: age_ref_for_condition,
+        right: adult_age,
+    });
+    let adult = ctx.add_expr(ExprData::Literal(ScalarValue::Utf8("adult".to_string())));
+    let minor = ctx.add_expr(ExprData::Literal(ScalarValue::Utf8("minor".to_string())));
+    let bucket = ctx.add_expr(ExprData::CaseWhen {
+        when_then: vec![(is_adult, adult)],
+        else_expr: Some(minor),
+    });
+
+    let map = ctx.add_operator(OperatorData::Map(Map {
+        computations: vec![(age_i32, cast), (age_bucket, bucket)],
+        input: users,
+    }));
+    let projection = ctx.add_operator(OperatorData::Projection(Projection {
+        columns: vec![age_i32, age_bucket],
         input: map,
     }));
     let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));

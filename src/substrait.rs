@@ -630,6 +630,25 @@ impl<'a> Exporter<'a> {
                     Some(arrow_to_substrait_type(&DataType::Boolean)?),
                 ))
             }
+            ExprData::CaseWhen {
+                when_then,
+                else_expr,
+            } => {
+                let ifs = when_then
+                    .iter()
+                    .map(|(when, then)| {
+                        Ok(expression::if_then::IfClause {
+                            r#if: Some(self.export_expr(*when, scope)?),
+                            then: Some(self.export_expr(*then, scope)?),
+                        })
+                    })
+                    .collect::<Result<Vec<_>, SubstraitError>>()?;
+                let r#else = else_expr
+                    .map(|expr| self.export_expr(expr, scope))
+                    .transpose()?
+                    .map(Box::new);
+                expression::RexType::IfThen(Box::new(expression::IfThen { ifs, r#else }))
+            }
             ExprData::ScalarFunction { function, args } => {
                 let arguments = args
                     .iter()
@@ -644,21 +663,6 @@ impl<'a> Exporter<'a> {
                             .or_else(|| inferred_output_type.clone()),
                         input: Some(Box::new(arguments[0].clone())),
                         failure_behavior: expression::cast::FailureBehavior::ThrowException as i32,
-                    }))
-                } else if (normalized == "if_then" || normalized == "case_when")
-                    && arguments.len() >= 3
-                    && arguments.len() % 2 == 1
-                {
-                    let mut ifs = Vec::new();
-                    for pair in arguments[..arguments.len() - 1].chunks(2) {
-                        ifs.push(expression::if_then::IfClause {
-                            r#if: Some(pair[0].clone()),
-                            then: Some(pair[1].clone()),
-                        });
-                    }
-                    expression::RexType::IfThen(Box::new(expression::IfThen {
-                        ifs,
-                        r#else: Some(Box::new(arguments.last().cloned().expect("else exists"))),
                     }))
                 } else {
                     expression::RexType::ScalarFunction(
@@ -834,6 +838,13 @@ fn infer_expr_data_type(ctx: &QueryContext, expr: Expr) -> Option<DataType> {
             }
         },
         ExprData::Nary { op: _, exprs: _ } => Some(DataType::Boolean),
+        ExprData::CaseWhen {
+            when_then,
+            else_expr,
+        } => when_then
+            .iter()
+            .find_map(|(_, then)| infer_expr_data_type(ctx, *then))
+            .or_else(|| else_expr.and_then(|expr| infer_expr_data_type(ctx, expr))),
         ExprData::ScalarFunction { function, args } => match function {
             ScalarFunction::Lower | ScalarFunction::Upper => Some(DataType::Utf8),
             ScalarFunction::Coalesce => args.iter().find_map(|arg| infer_expr_data_type(ctx, *arg)),
@@ -1828,7 +1839,7 @@ impl Converter {
                 }
             }
             expression::RexType::IfThen(if_then) => {
-                let mut args = Vec::new();
+                let mut when_then = Vec::new();
                 for clause in &if_then.ifs {
                     let condition = clause.r#if.as_ref().ok_or(SubstraitError::MissingField(
                         "Expression.IfThen.IfClause.if",
@@ -1836,17 +1847,19 @@ impl Converter {
                     let then = clause.then.as_ref().ok_or(SubstraitError::MissingField(
                         "Expression.IfThen.IfClause.then",
                     ))?;
-                    args.push(self.convert_expr(condition, scope)?);
-                    args.push(self.convert_expr(then, scope)?);
+                    when_then.push((
+                        self.convert_expr(condition, scope)?,
+                        self.convert_expr(then, scope)?,
+                    ));
                 }
-                let r#else = if_then
+                let else_expr = if_then
                     .r#else
                     .as_ref()
-                    .ok_or(SubstraitError::MissingField("Expression.IfThen.else"))?;
-                args.push(self.convert_expr(r#else, scope)?);
-                ExprData::ScalarFunction {
-                    function: ScalarFunction::Extension("if_then".to_string()),
-                    args,
+                    .map(|expr| self.convert_expr(expr, scope))
+                    .transpose()?;
+                ExprData::CaseWhen {
+                    when_then,
+                    else_expr,
                 }
             }
             expression::RexType::SwitchExpression(_) => {
@@ -2327,6 +2340,18 @@ fn build_function_expr(name: &str, args: Vec<Expr>) -> ExprData {
             function: ScalarFunction::Coalesce,
             args,
         },
+        ("if_then" | "case_when", _) if args.len() >= 2 => {
+            let mut chunks = args.chunks_exact(2);
+            let when_then = chunks
+                .by_ref()
+                .map(|pair| (pair[0], pair[1]))
+                .collect::<Vec<_>>();
+            let else_expr = chunks.remainder().first().copied();
+            ExprData::CaseWhen {
+                when_then,
+                else_expr,
+            }
+        }
         _ => ExprData::ScalarFunction {
             function: ScalarFunction::Extension(name.to_string()),
             args,
@@ -3187,7 +3212,7 @@ mod tests {
     }
 
     #[test]
-    fn exports_if_then_extension_as_if_then_expression() {
+    fn exports_case_when_as_if_then_expression() {
         let mut ctx = QueryContext::new();
         let amount = ctx.add_column(ColumnData::new("amount", DataType::Int64));
         let bucket = ctx.add_column(ColumnData::new("bucket", DataType::Utf8));
@@ -3204,12 +3229,12 @@ mod tests {
         });
         let high = ctx.add_expr(ExprData::Literal(ScalarValue::Utf8("high".to_string())));
         let low = ctx.add_expr(ExprData::Literal(ScalarValue::Utf8("low".to_string())));
-        let if_then = ctx.add_expr(ExprData::ScalarFunction {
-            function: ScalarFunction::Extension("if_then".to_string()),
-            args: vec![condition, high, low],
+        let case_when = ctx.add_expr(ExprData::CaseWhen {
+            when_then: vec![(condition, high)],
+            else_expr: Some(low),
         });
         let map = ctx.add_operator(OperatorData::Map(Map {
-            computations: vec![(bucket, if_then)],
+            computations: vec![(bucket, case_when)],
             input: scan,
         }));
         let output = ctx.add_operator(OperatorData::Output(Output { input: map }));
@@ -3234,7 +3259,7 @@ mod tests {
     }
 
     #[test]
-    fn imports_if_then_as_extension_scalar_function() {
+    fn imports_if_then_as_case_when() {
         let relation = Rel {
             rel_type: Some(rel::RelType::Project(Box::new(ProjectRel {
                 common: None,
@@ -3283,11 +3308,15 @@ mod tests {
         let OperatorData::Map(map) = ctx.operator(output.input) else {
             panic!("project expression should become map");
         };
-        let ExprData::ScalarFunction { function, args } = ctx.expr(map.computations[0].1) else {
-            panic!("if_then should import as scalar function");
+        let ExprData::CaseWhen {
+            when_then,
+            else_expr,
+        } = ctx.expr(map.computations[0].1)
+        else {
+            panic!("if_then should import as case_when");
         };
-        assert_eq!(function, &ScalarFunction::Extension("if_then".to_string()));
-        assert_eq!(args.len(), 3);
+        assert_eq!(when_then.len(), 1);
+        assert!(else_expr.is_some());
     }
 
     #[test]

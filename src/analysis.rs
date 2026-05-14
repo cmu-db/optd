@@ -218,6 +218,18 @@ fn collect_expr_used_columns(
                 collect_expr_used_columns(ctx, *expr, columns)?;
             }
         }
+        ExprData::CaseWhen {
+            when_then,
+            else_expr,
+        } => {
+            for (when, then) in when_then {
+                collect_expr_used_columns(ctx, *when, columns)?;
+                collect_expr_used_columns(ctx, *then, columns)?;
+            }
+            if let Some(else_expr) = else_expr {
+                collect_expr_used_columns(ctx, *else_expr, columns)?;
+            }
+        }
         ExprData::ScalarFunction { args, .. } => {
             for arg in args {
                 collect_expr_used_columns(ctx, *arg, columns)?;
@@ -473,6 +485,21 @@ fn expr_nullability(
             }
             Ok(false)
         }
+        ExprData::CaseWhen {
+            when_then,
+            else_expr,
+        } => {
+            for (_, then) in when_then {
+                if expr_nullability(ctx, input_nullability, *then)? {
+                    return Ok(true);
+                }
+            }
+            if let Some(else_expr) = else_expr {
+                expr_nullability(ctx, input_nullability, *else_expr)
+            } else {
+                Ok(true)
+            }
+        }
         ExprData::ScalarFunction { .. } => Ok(true),
     }
 }
@@ -483,7 +510,10 @@ fn collect_non_null_columns_from_predicate(
     columns: &mut Vec<Column>,
 ) -> AnalysisResult<()> {
     match expr.get(ctx) {
-        ExprData::Literal(_) | ExprData::ColumnRef(_) | ExprData::ScalarFunction { .. } => {}
+        ExprData::Literal(_)
+        | ExprData::ColumnRef(_)
+        | ExprData::CaseWhen { .. }
+        | ExprData::ScalarFunction { .. } => {}
         ExprData::Unary { op, expr } => match op {
             crate::UnaryOp::IsNotNull => collect_expr_used_columns(ctx, *expr, columns)?,
             crate::UnaryOp::Not => {

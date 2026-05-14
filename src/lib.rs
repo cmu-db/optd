@@ -300,6 +300,11 @@ pub enum ExprData {
     },
     /// N-ary operation over a variable number of expressions.
     Nary { op: NaryOp, exprs: Vec<Expr> },
+    /// SQL-style conditional expression.
+    CaseWhen {
+        when_then: Vec<(Expr, Expr)>,
+        else_expr: Option<Expr>,
+    },
     /// Scalar function call over zero or more argument expressions.
     ScalarFunction {
         function: ScalarFunction,
@@ -997,6 +1002,25 @@ impl<'a> QueryFormatter<'a> {
             }
             ExprData::ScalarFunction { function, args } => {
                 format!("{}({})", function, self.format_exprs(args))
+            }
+            ExprData::CaseWhen {
+                when_then,
+                else_expr,
+            } => {
+                let mut parts = when_then
+                    .iter()
+                    .map(|(when, then)| {
+                        format!(
+                            "WHEN {} THEN {}",
+                            self.format_expr(*when),
+                            self.format_expr(*then)
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                if let Some(else_expr) = else_expr {
+                    parts.push(format!("ELSE {}", self.format_expr(*else_expr)));
+                }
+                format!("CASE {} END", parts.join(" "))
             }
         }
     }
