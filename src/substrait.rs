@@ -1116,9 +1116,10 @@ impl Converter {
             0 => Err(SubstraitError::EmptyPlan),
             1 => {
                 let relation = self.convert_plan_rel(roots[0])?;
-                let output = self.ctx.add_operator(OperatorData::Output(Output {
+                let output = OperatorData::Output(Output {
                     input: relation.operator,
-                }));
+                })
+                .add(&mut self.ctx);
                 self.ctx.set_root(output);
                 Ok(self.ctx)
             }
@@ -1128,9 +1129,10 @@ impl Converter {
 
     fn convert_standalone_rel(mut self, rel: &Rel) -> Result<QueryContext, SubstraitError> {
         let relation = self.convert_rel(rel)?;
-        let output = self.ctx.add_operator(OperatorData::Output(Output {
+        let output = OperatorData::Output(Output {
             input: relation.operator,
-        }));
+        })
+        .add(&mut self.ctx);
         self.ctx.set_root(output);
         Ok(self.ctx)
     }
@@ -1172,10 +1174,11 @@ impl Converter {
                     .as_ref()
                     .ok_or(SubstraitError::MissingField("FilterRel.condition"))?;
                 let predicate = self.convert_expr(condition, &relation.columns)?;
-                let operator = self.ctx.add_operator(OperatorData::Selection(Selection {
+                let operator = OperatorData::Selection(Selection {
                     predicate,
                     input: relation.operator,
-                }));
+                })
+                .add(&mut self.ctx);
                 self.apply_common(
                     filter.common.as_ref(),
                     Relation {
@@ -1228,13 +1231,12 @@ impl Converter {
             read_rel::ReadType::LocalFiles(files) => {
                 let columns = self.convert_named_struct(read.base_schema.as_ref())?;
                 let (function, args) = self.convert_local_files(files)?;
-                let operator = self
-                    .ctx
-                    .add_operator(OperatorData::TableFunction(TableFunction {
-                        function,
-                        args,
-                        columns: columns.clone(),
-                    }));
+                let operator = OperatorData::TableFunction(TableFunction {
+                    function,
+                    args,
+                    columns: columns.clone(),
+                })
+                .add(&mut self.ctx);
                 Relation { operator, columns }
             }
             read_rel::ReadType::VirtualTable(_) => {
@@ -1250,10 +1252,11 @@ impl Converter {
 
         if let Some(filter) = &read.filter {
             let predicate = self.convert_expr(filter, &relation.columns)?;
-            let operator = self.ctx.add_operator(OperatorData::Selection(Selection {
+            let operator = OperatorData::Selection(Selection {
                 predicate,
                 input: relation.operator,
-            }));
+            })
+            .add(&mut self.ctx);
             relation.operator = operator;
         }
 
@@ -1299,10 +1302,11 @@ impl Converter {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let operator = self.ctx.add_operator(OperatorData::Projection(Projection {
+        let operator = OperatorData::Projection(Projection {
             columns: columns.clone(),
             input: relation.operator,
-        }));
+        })
+        .add(&mut self.ctx);
         Ok(Relation { operator, columns })
     }
 
@@ -1327,10 +1331,11 @@ impl Converter {
         }
 
         let columns = self.convert_named_struct(base_schema)?;
-        let operator = self.ctx.add_operator(OperatorData::Scan(Scan {
+        let operator = OperatorData::Scan(Scan {
             table,
             columns: columns.clone(),
-        }));
+        })
+        .add(&mut self.ctx);
         Ok(Relation { operator, columns })
     }
 
@@ -1359,10 +1364,11 @@ impl Converter {
 
         let mut columns = relation.columns.clone();
         columns.extend(computations.iter().map(|(column, _)| *column));
-        let operator = self.ctx.add_operator(OperatorData::Map(Map {
+        let operator = OperatorData::Map(Map {
             computations,
             input: relation.operator,
-        }));
+        })
+        .add(&mut self.ctx);
         self.apply_common(project.common.as_ref(), Relation { operator, columns })
     }
 
@@ -1383,18 +1389,18 @@ impl Converter {
         let on = if let Some(expression) = &join.expression {
             self.convert_expr(expression, &scope)?
         } else {
-            self.ctx
-                .add_expr(ExprData::Literal(ScalarValue::Boolean(true)))
+            ExprData::Literal(ScalarValue::Boolean(true)).add(&mut self.ctx)
         };
 
         let join_type = convert_join_type(join.r#type)?;
         let columns = join_output_columns(&join_type, &left.columns, &scope);
-        let operator = self.ctx.add_operator(OperatorData::Join(Join {
+        let operator = OperatorData::Join(Join {
             join_type: join_type.clone(),
             on,
             outer: left.operator,
             inner: right.operator,
-        }));
+        })
+        .add(&mut self.ctx);
         let operator =
             self.apply_post_join_filter(operator, &scope, join.post_join_filter.as_deref())?;
         self.apply_common(project_common_join(join), Relation { operator, columns })
@@ -1422,12 +1428,13 @@ impl Converter {
         )?;
         let join_type = convert_hash_join_type(join.r#type)?;
         let columns = join_output_columns(&join_type, &left.columns, &scope);
-        let operator = self.ctx.add_operator(OperatorData::Join(Join {
+        let operator = OperatorData::Join(Join {
             join_type: join_type.clone(),
             on,
             outer: left.operator,
             inner: right.operator,
-        }));
+        })
+        .add(&mut self.ctx);
         let operator =
             self.apply_post_join_filter(operator, &scope, join.post_join_filter.as_deref())?;
         self.apply_common(join.common.as_ref(), Relation { operator, columns })
@@ -1455,12 +1462,13 @@ impl Converter {
         )?;
         let join_type = convert_merge_join_type(join.r#type)?;
         let columns = join_output_columns(&join_type, &left.columns, &scope);
-        let operator = self.ctx.add_operator(OperatorData::Join(Join {
+        let operator = OperatorData::Join(Join {
             join_type: join_type.clone(),
             on,
             outer: left.operator,
             inner: right.operator,
-        }));
+        })
+        .add(&mut self.ctx);
         let operator =
             self.apply_post_join_filter(operator, &scope, join.post_join_filter.as_deref())?;
         self.apply_common(join.common.as_ref(), Relation { operator, columns })
@@ -1485,17 +1493,17 @@ impl Converter {
         let on = if let Some(expression) = &join.expression {
             self.convert_expr(expression, &scope)?
         } else {
-            self.ctx
-                .add_expr(ExprData::Literal(ScalarValue::Boolean(true)))
+            ExprData::Literal(ScalarValue::Boolean(true)).add(&mut self.ctx)
         };
         let join_type = convert_nested_loop_join_type(join.r#type)?;
         let columns = join_output_columns(&join_type, &left.columns, &scope);
-        let operator = self.ctx.add_operator(OperatorData::Join(Join {
+        let operator = OperatorData::Join(Join {
             join_type: join_type.clone(),
             on,
             outer: left.operator,
             inner: right.operator,
-        }));
+        })
+        .add(&mut self.ctx);
         self.apply_common(join.common.as_ref(), Relation { operator, columns })
     }
 
@@ -1514,12 +1522,11 @@ impl Converter {
         )?;
         let mut columns = left.columns.clone();
         columns.extend(right.columns.iter().copied());
-        let operator = self
-            .ctx
-            .add_operator(OperatorData::CrossProduct(CrossProduct {
-                outer: left.operator,
-                inner: right.operator,
-            }));
+        let operator = OperatorData::CrossProduct(CrossProduct {
+            outer: left.operator,
+            inner: right.operator,
+        })
+        .add(&mut self.ctx);
         self.apply_common(cross.common.as_ref(), Relation { operator, columns })
     }
 
@@ -1534,10 +1541,11 @@ impl Converter {
             .iter()
             .map(|field| self.convert_sort_field(field, &relation.columns))
             .collect::<Result<Vec<_>, _>>()?;
-        let operator = self.ctx.add_operator(OperatorData::Sort(Sort {
+        let operator = OperatorData::Sort(Sort {
             keys,
             input: relation.operator,
-        }));
+        })
+        .add(&mut self.ctx);
         self.apply_common(
             sort.common.as_ref(),
             Relation {
@@ -1555,11 +1563,12 @@ impl Converter {
         let relation = self.convert_rel(input)?;
         let offset = convert_fetch_offset(fetch)?;
         let fetch_count = convert_fetch_count(fetch)?;
-        let operator = self.ctx.add_operator(OperatorData::Limit(Limit {
+        let operator = OperatorData::Limit(Limit {
             fetch: fetch_count,
             offset,
             input: relation.operator,
-        }));
+        })
+        .add(&mut self.ctx);
         self.apply_common(
             fetch.common.as_ref(),
             Relation {
@@ -1611,13 +1620,12 @@ impl Converter {
             .collect::<Vec<_>>();
         columns.extend(aggregates.iter().map(|(column, _)| *column));
 
-        let operator = self
-            .ctx
-            .add_operator(OperatorData::Aggregation(Aggregation {
-                keys,
-                aggregates,
-                input: relation.operator,
-            }));
+        let operator = OperatorData::Aggregation(Aggregation {
+            keys,
+            aggregates,
+            input: relation.operator,
+        })
+        .add(&mut self.ctx);
         self.apply_common(aggregate.common.as_ref(), Relation { operator, columns })
     }
 
@@ -1750,10 +1758,11 @@ impl Converter {
         match predicates.as_slice() {
             [] => Err(SubstraitError::UnsupportedJoin("join without keys")),
             [predicate] => Ok(*predicate),
-            _ => Ok(self.ctx.add_expr(ExprData::Nary {
+            _ => Ok(ExprData::Nary {
                 op: NaryOp::And,
                 exprs: predicates,
-            })),
+            }
+            .add(&mut self.ctx)),
         }
     }
 
@@ -1782,22 +1791,16 @@ impl Converter {
         left_scope: &[Column],
         right_scope: &[Column],
     ) -> Result<Expr, SubstraitError> {
-        let left = self
-            .ctx
-            .add_expr(ExprData::ColumnRef(resolve_field_reference(
-                left, left_scope,
-            )?));
-        let right = self
-            .ctx
-            .add_expr(ExprData::ColumnRef(resolve_field_reference(
-                right,
-                right_scope,
-            )?));
-        Ok(self.ctx.add_expr(ExprData::Binary {
+        let left =
+            ExprData::ColumnRef(resolve_field_reference(left, left_scope)?).add(&mut self.ctx);
+        let right =
+            ExprData::ColumnRef(resolve_field_reference(right, right_scope)?).add(&mut self.ctx);
+        Ok(ExprData::Binary {
             op: BinaryOp::Eq,
             left,
             right,
-        }))
+        }
+        .add(&mut self.ctx))
     }
 
     fn apply_post_join_filter(
@@ -1810,9 +1813,7 @@ impl Converter {
             return Ok(input);
         };
         let predicate = self.convert_expr(filter, scope)?;
-        Ok(self
-            .ctx
-            .add_operator(OperatorData::Selection(Selection { predicate, input })))
+        Ok(OperatorData::Selection(Selection { predicate, input }).add(&mut self.ctx))
     }
 
     fn convert_expr(
@@ -1907,7 +1908,7 @@ impl Converter {
             }
         };
 
-        Ok(self.ctx.add_expr(expr))
+        Ok(expr.add(&mut self.ctx))
     }
 
     fn convert_named_struct(
@@ -1931,7 +1932,7 @@ impl Converter {
                     .get(index)
                     .cloned()
                     .unwrap_or_else(|| format!("field_{index}"));
-                Ok(self.ctx.add_column(ColumnData::new(name, data_type)))
+                Ok(ColumnData::new(name, data_type).add(&mut self.ctx))
             })
             .collect()
     }
@@ -1974,9 +1975,7 @@ impl Converter {
             None => TableFunctionDef::Extension("read_files".to_string()),
         };
 
-        let path = self
-            .ctx
-            .add_expr(ExprData::Literal(ScalarValue::Utf8(path)));
+        let path = ExprData::Literal(ScalarValue::Utf8(path)).add(&mut self.ctx);
         Ok((function, vec![path]))
     }
 
@@ -2021,10 +2020,11 @@ impl Converter {
                         Ok(relation.columns[*index as usize])
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                let operator = self.ctx.add_operator(OperatorData::Projection(Projection {
+                let operator = OperatorData::Projection(Projection {
                     columns: columns.clone(),
                     input: relation.operator,
-                }));
+                })
+                .add(&mut self.ctx);
                 Ok(Relation { operator, columns })
             }
         }
@@ -2073,8 +2073,7 @@ impl Converter {
 
     fn add_computed_column(&mut self, name: String, ty: Option<DataType>) -> Column {
         self.next_computed_column += 1;
-        self.ctx
-            .add_column(ColumnData::new(name, ty.unwrap_or(DataType::Null)))
+        ColumnData::new(name, ty.unwrap_or(DataType::Null)).add(&mut self.ctx)
     }
 
     fn function_name(&self, reference: u32) -> String {
@@ -2750,17 +2749,19 @@ mod tests {
     #[test]
     fn exports_projection_over_named_table_read() {
         let mut ctx = QueryContext::new();
-        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
-        let age = ctx.add_column(ColumnData::new("age", DataType::Int32));
-        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let age = ColumnData::new("age", DataType::Int32).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![id, age],
-        }));
-        let projection = ctx.add_operator(OperatorData::Projection(Projection {
+        })
+        .add(&mut ctx);
+        let projection = OperatorData::Projection(Projection {
             columns: vec![id],
             input: scan,
-        }));
-        let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: projection }).add(&mut ctx);
         ctx.set_root(output);
 
         let plan = to_plan(&ctx).expect("query should export");
@@ -2787,20 +2788,19 @@ mod tests {
     #[test]
     fn exports_tpch_relevant_types_in_scan_schema() {
         let mut ctx = QueryContext::new();
-        let dec = ctx.add_column(ColumnData::new(
-            "extendedprice",
-            DataType::Decimal128(15, 2),
-        ));
-        let order_date = ctx.add_column(ColumnData::new("orderdate", DataType::Date32));
-        let commit_ts = ctx.add_column(ColumnData::new(
+        let dec = ColumnData::new("extendedprice", DataType::Decimal128(15, 2)).add(&mut ctx);
+        let order_date = ColumnData::new("orderdate", DataType::Date32).add(&mut ctx);
+        let commit_ts = ColumnData::new(
             "commit_ts",
             DataType::Timestamp(TimeUnit::Microsecond, None),
-        ));
-        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+        )
+        .add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
             table: TableRef::bare("lineitem"),
             columns: vec![dec, order_date, commit_ts],
-        }));
-        let output = ctx.add_operator(OperatorData::Output(Output { input: scan }));
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: scan }).add(&mut ctx);
         ctx.set_root(output);
 
         let plan = to_plan(&ctx).expect("query should export");
@@ -2863,38 +2863,43 @@ mod tests {
     #[test]
     fn exports_selection_sort_and_limit() {
         let mut ctx = QueryContext::new();
-        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
-        let age = ctx.add_column(ColumnData::new("age", DataType::Int64));
-        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let age = ColumnData::new("age", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![id, age],
-        }));
-        let age_ref = ctx.add_expr(ExprData::ColumnRef(age));
-        let eighteen = ctx.add_expr(ExprData::Literal(ScalarValue::Int64(18)));
-        let predicate = ctx.add_expr(ExprData::Binary {
+        })
+        .add(&mut ctx);
+        let age_ref = ExprData::ColumnRef(age).add(&mut ctx);
+        let eighteen = ExprData::Literal(ScalarValue::Int64(18)).add(&mut ctx);
+        let predicate = ExprData::Binary {
             op: BinaryOp::GtEq,
             left: age_ref,
             right: eighteen,
-        });
-        let selection = ctx.add_operator(OperatorData::Selection(Selection {
+        }
+        .add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
             predicate,
             input: scan,
-        }));
-        let id_ref = ctx.add_expr(ExprData::ColumnRef(id));
-        let sort = ctx.add_operator(OperatorData::Sort(Sort {
+        })
+        .add(&mut ctx);
+        let id_ref = ExprData::ColumnRef(id).add(&mut ctx);
+        let sort = OperatorData::Sort(Sort {
             keys: vec![SortKey {
                 expr: id_ref,
                 direction: SortDirection::Desc,
                 nulls: NullOrdering::Last,
             }],
             input: selection,
-        }));
-        let limit = ctx.add_operator(OperatorData::Limit(Limit {
+        })
+        .add(&mut ctx);
+        let limit = OperatorData::Limit(Limit {
             fetch: Some(5),
             offset: 2,
             input: sort,
-        }));
-        let output = ctx.add_operator(OperatorData::Output(Output { input: limit }));
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: limit }).add(&mut ctx);
         ctx.set_root(output);
 
         let plan = to_plan(&ctx).expect("query should export");
@@ -2957,30 +2962,34 @@ mod tests {
     #[test]
     fn exports_logical_join_as_join_rel() {
         let mut ctx = QueryContext::new();
-        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
-        let order_user_id = ctx.add_column(ColumnData::new("order_user_id", DataType::Int64));
-        let users = ctx.add_operator(OperatorData::Scan(Scan {
+        let user_id = ColumnData::new("user_id", DataType::Int64).add(&mut ctx);
+        let order_user_id = ColumnData::new("order_user_id", DataType::Int64).add(&mut ctx);
+        let users = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![user_id],
-        }));
-        let orders = ctx.add_operator(OperatorData::Scan(Scan {
+        })
+        .add(&mut ctx);
+        let orders = OperatorData::Scan(Scan {
             table: TableRef::bare("orders"),
             columns: vec![order_user_id],
-        }));
-        let left_ref = ctx.add_expr(ExprData::ColumnRef(user_id));
-        let right_ref = ctx.add_expr(ExprData::ColumnRef(order_user_id));
-        let on = ctx.add_expr(ExprData::Binary {
+        })
+        .add(&mut ctx);
+        let left_ref = ExprData::ColumnRef(user_id).add(&mut ctx);
+        let right_ref = ExprData::ColumnRef(order_user_id).add(&mut ctx);
+        let on = ExprData::Binary {
             op: BinaryOp::Eq,
             left: left_ref,
             right: right_ref,
-        });
-        let join = ctx.add_operator(OperatorData::Join(Join {
+        }
+        .add(&mut ctx);
+        let join = OperatorData::Join(Join {
             join_type: JoinType::Inner,
             on,
             outer: users,
             inner: orders,
-        }));
-        let output = ctx.add_operator(OperatorData::Output(Output { input: join }));
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: join }).add(&mut ctx);
         ctx.set_root(output);
 
         let plan = to_plan(&ctx).expect("query should export");
@@ -3017,30 +3026,34 @@ mod tests {
             (JoinType::LeftAnti, join_rel::JoinType::LeftAnti),
         ] {
             let mut ctx = QueryContext::new();
-            let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
-            let order_user_id = ctx.add_column(ColumnData::new("order_user_id", DataType::Int64));
-            let users = ctx.add_operator(OperatorData::Scan(Scan {
+            let user_id = ColumnData::new("user_id", DataType::Int64).add(&mut ctx);
+            let order_user_id = ColumnData::new("order_user_id", DataType::Int64).add(&mut ctx);
+            let users = OperatorData::Scan(Scan {
                 table: TableRef::bare("users"),
                 columns: vec![user_id],
-            }));
-            let orders = ctx.add_operator(OperatorData::Scan(Scan {
+            })
+            .add(&mut ctx);
+            let orders = OperatorData::Scan(Scan {
                 table: TableRef::bare("orders"),
                 columns: vec![order_user_id],
-            }));
-            let left_ref = ctx.add_expr(ExprData::ColumnRef(user_id));
-            let right_ref = ctx.add_expr(ExprData::ColumnRef(order_user_id));
-            let on = ctx.add_expr(ExprData::Binary {
+            })
+            .add(&mut ctx);
+            let left_ref = ExprData::ColumnRef(user_id).add(&mut ctx);
+            let right_ref = ExprData::ColumnRef(order_user_id).add(&mut ctx);
+            let on = ExprData::Binary {
                 op: BinaryOp::Eq,
                 left: left_ref,
                 right: right_ref,
-            });
-            let join = ctx.add_operator(OperatorData::Join(Join {
+            }
+            .add(&mut ctx);
+            let join = OperatorData::Join(Join {
                 join_type,
                 on,
                 outer: users,
                 inner: orders,
-            }));
-            let output = ctx.add_operator(OperatorData::Output(Output { input: join }));
+            })
+            .add(&mut ctx);
+            let output = OperatorData::Output(Output { input: join }).add(&mut ctx);
             ctx.set_root(output);
 
             let plan = to_plan(&ctx).expect("query should export");
@@ -3061,21 +3074,24 @@ mod tests {
     #[test]
     fn exports_cross_product_as_cross_rel() {
         let mut ctx = QueryContext::new();
-        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
-        let order_id = ctx.add_column(ColumnData::new("order_id", DataType::Int64));
-        let users = ctx.add_operator(OperatorData::Scan(Scan {
+        let user_id = ColumnData::new("user_id", DataType::Int64).add(&mut ctx);
+        let order_id = ColumnData::new("order_id", DataType::Int64).add(&mut ctx);
+        let users = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![user_id],
-        }));
-        let orders = ctx.add_operator(OperatorData::Scan(Scan {
+        })
+        .add(&mut ctx);
+        let orders = OperatorData::Scan(Scan {
             table: TableRef::bare("orders"),
             columns: vec![order_id],
-        }));
-        let cross = ctx.add_operator(OperatorData::CrossProduct(CrossProduct {
+        })
+        .add(&mut ctx);
+        let cross = OperatorData::CrossProduct(CrossProduct {
             outer: users,
             inner: orders,
-        }));
-        let output = ctx.add_operator(OperatorData::Output(Output { input: cross }));
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: cross }).add(&mut ctx);
         ctx.set_root(output);
 
         let plan = to_plan(&ctx).expect("query should export");
@@ -3095,24 +3111,27 @@ mod tests {
     #[test]
     fn exports_map_as_project_with_expressions() {
         let mut ctx = QueryContext::new();
-        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
-        let id_plus_one = ctx.add_column(ColumnData::new("id_plus_one", DataType::Int64));
-        let users = ctx.add_operator(OperatorData::Scan(Scan {
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let id_plus_one = ColumnData::new("id_plus_one", DataType::Int64).add(&mut ctx);
+        let users = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![id],
-        }));
-        let id_ref = ctx.add_expr(ExprData::ColumnRef(id));
-        let one = ctx.add_expr(ExprData::Literal(ScalarValue::Int64(1)));
-        let computation = ctx.add_expr(ExprData::Binary {
+        })
+        .add(&mut ctx);
+        let id_ref = ExprData::ColumnRef(id).add(&mut ctx);
+        let one = ExprData::Literal(ScalarValue::Int64(1)).add(&mut ctx);
+        let computation = ExprData::Binary {
             op: BinaryOp::Add,
             left: id_ref,
             right: one,
-        });
-        let map = ctx.add_operator(OperatorData::Map(Map {
+        }
+        .add(&mut ctx);
+        let map = OperatorData::Map(Map {
             computations: vec![(id_plus_one, computation)],
             input: users,
-        }));
-        let output = ctx.add_operator(OperatorData::Output(Output { input: map }));
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: map }).add(&mut ctx);
         ctx.set_root(output);
 
         let plan = to_plan(&ctx).expect("query should export");
@@ -3139,20 +3158,22 @@ mod tests {
     #[test]
     fn exports_aggregation_with_emit_mapping() {
         let mut ctx = QueryContext::new();
-        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
-        let order_id = ctx.add_column(ColumnData::new("order_id", DataType::Int64));
-        let order_count = ctx.add_column(ColumnData::new("order_count", DataType::Int64));
-        let orders = ctx.add_operator(OperatorData::Scan(Scan {
+        let user_id = ColumnData::new("user_id", DataType::Int64).add(&mut ctx);
+        let order_id = ColumnData::new("order_id", DataType::Int64).add(&mut ctx);
+        let order_count = ColumnData::new("order_count", DataType::Int64).add(&mut ctx);
+        let orders = OperatorData::Scan(Scan {
             table: TableRef::bare("orders"),
             columns: vec![order_id, user_id],
-        }));
-        let key = ctx.add_expr(ExprData::ColumnRef(user_id));
-        let aggregation = ctx.add_operator(OperatorData::Aggregation(Aggregation {
+        })
+        .add(&mut ctx);
+        let key = ExprData::ColumnRef(user_id).add(&mut ctx);
+        let aggregation = OperatorData::Aggregation(Aggregation {
             keys: vec![key],
             aggregates: vec![(order_count, AggregateExpr::CountStar)],
             input: orders,
-        }));
-        let output = ctx.add_operator(OperatorData::Output(Output { input: aggregation }));
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: aggregation }).add(&mut ctx);
         ctx.set_root(output);
 
         let plan = to_plan(&ctx).expect("query should export");
@@ -3198,18 +3219,19 @@ mod tests {
     #[test]
     fn exports_table_function_as_local_files_read() {
         let mut ctx = QueryContext::new();
-        let col = ctx.add_column(ColumnData::new("id", DataType::Int64));
-        let path = ctx.add_expr(ExprData::Literal(ScalarValue::Utf8(
-            "file:///tmp/users.parquet".to_string(),
-        )));
-        let table_function = ctx.add_operator(OperatorData::TableFunction(TableFunction {
+        let col = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let path = ExprData::Literal(ScalarValue::Utf8("file:///tmp/users.parquet".to_string()))
+            .add(&mut ctx);
+        let table_function = OperatorData::TableFunction(TableFunction {
             function: TableFunctionDef::ReadParquet,
             args: vec![path],
             columns: vec![col],
-        }));
-        let output = ctx.add_operator(OperatorData::Output(Output {
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output {
             input: table_function,
-        }));
+        })
+        .add(&mut ctx);
         ctx.set_root(output);
 
         let plan = to_plan(&ctx).expect("query should export");
@@ -3235,22 +3257,25 @@ mod tests {
     #[test]
     fn exports_scalar_function_with_inferred_output_type() {
         let mut ctx = QueryContext::new();
-        let name = ctx.add_column(ColumnData::new("name", DataType::Utf8));
-        let users = ctx.add_operator(OperatorData::Scan(Scan {
+        let name = ColumnData::new("name", DataType::Utf8).add(&mut ctx);
+        let users = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![name],
-        }));
-        let name_ref = ctx.add_expr(ExprData::ColumnRef(name));
-        let lower = ctx.add_expr(ExprData::ScalarFunction {
+        })
+        .add(&mut ctx);
+        let name_ref = ExprData::ColumnRef(name).add(&mut ctx);
+        let lower = ExprData::ScalarFunction {
             function: ScalarFunction::Lower,
             args: vec![name_ref],
-        });
-        let lowered = ctx.add_column(ColumnData::new("lowered", DataType::Utf8));
-        let map = ctx.add_operator(OperatorData::Map(Map {
+        }
+        .add(&mut ctx);
+        let lowered = ColumnData::new("lowered", DataType::Utf8).add(&mut ctx);
+        let map = OperatorData::Map(Map {
             computations: vec![(lowered, lower)],
             input: users,
-        }));
-        let output = ctx.add_operator(OperatorData::Output(Output { input: map }));
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: map }).add(&mut ctx);
         ctx.set_root(output);
 
         let plan = to_plan(&ctx).expect("query should export");
@@ -3277,22 +3302,25 @@ mod tests {
     #[test]
     fn exports_cast_as_cast_expression() {
         let mut ctx = QueryContext::new();
-        let amount = ctx.add_column(ColumnData::new("amount", DataType::Int64));
-        let amount_i32 = ctx.add_column(ColumnData::new("amount_i32", DataType::Int32));
-        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+        let amount = ColumnData::new("amount", DataType::Int64).add(&mut ctx);
+        let amount_i32 = ColumnData::new("amount_i32", DataType::Int32).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
             table: TableRef::bare("orders"),
             columns: vec![amount],
-        }));
-        let amount_ref = ctx.add_expr(ExprData::ColumnRef(amount));
-        let cast_expr = ctx.add_expr(ExprData::Cast {
+        })
+        .add(&mut ctx);
+        let amount_ref = ExprData::ColumnRef(amount).add(&mut ctx);
+        let cast_expr = ExprData::Cast {
             expr: amount_ref,
             ty: DataType::Int32,
-        });
-        let map = ctx.add_operator(OperatorData::Map(Map {
+        }
+        .add(&mut ctx);
+        let map = OperatorData::Map(Map {
             computations: vec![(amount_i32, cast_expr)],
             input: scan,
-        }));
-        let output = ctx.add_operator(OperatorData::Output(Output { input: map }));
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: map }).add(&mut ctx);
         ctx.set_root(output);
 
         let plan = to_plan(&ctx).expect("query should export");
@@ -3352,30 +3380,34 @@ mod tests {
     #[test]
     fn exports_case_when_as_if_then_expression() {
         let mut ctx = QueryContext::new();
-        let amount = ctx.add_column(ColumnData::new("amount", DataType::Int64));
-        let bucket = ctx.add_column(ColumnData::new("bucket", DataType::Utf8));
-        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+        let amount = ColumnData::new("amount", DataType::Int64).add(&mut ctx);
+        let bucket = ColumnData::new("bucket", DataType::Utf8).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
             table: TableRef::bare("orders"),
             columns: vec![amount],
-        }));
-        let amount_ref = ctx.add_expr(ExprData::ColumnRef(amount));
-        let limit = ctx.add_expr(ExprData::Literal(ScalarValue::Int64(100)));
-        let condition = ctx.add_expr(ExprData::Binary {
+        })
+        .add(&mut ctx);
+        let amount_ref = ExprData::ColumnRef(amount).add(&mut ctx);
+        let limit = ExprData::Literal(ScalarValue::Int64(100)).add(&mut ctx);
+        let condition = ExprData::Binary {
             op: BinaryOp::Gt,
             left: amount_ref,
             right: limit,
-        });
-        let high = ctx.add_expr(ExprData::Literal(ScalarValue::Utf8("high".to_string())));
-        let low = ctx.add_expr(ExprData::Literal(ScalarValue::Utf8("low".to_string())));
-        let case_when = ctx.add_expr(ExprData::CaseWhen {
+        }
+        .add(&mut ctx);
+        let high = ExprData::Literal(ScalarValue::Utf8("high".to_string())).add(&mut ctx);
+        let low = ExprData::Literal(ScalarValue::Utf8("low".to_string())).add(&mut ctx);
+        let case_when = ExprData::CaseWhen {
             when_then: vec![(condition, high)],
             else_expr: Some(low),
-        });
-        let map = ctx.add_operator(OperatorData::Map(Map {
+        }
+        .add(&mut ctx);
+        let map = OperatorData::Map(Map {
             computations: vec![(bucket, case_when)],
             input: scan,
-        }));
-        let output = ctx.add_operator(OperatorData::Output(Output { input: map }));
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: map }).add(&mut ctx);
         ctx.set_root(output);
 
         let plan = to_plan(&ctx).expect("query should export");

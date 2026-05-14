@@ -985,31 +985,35 @@ mod tests {
     #[test]
     fn created_columns_tracks_columns_introduced_by_operators() {
         let mut ctx = QueryContext::new();
-        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
-        let age = ctx.add_column(ColumnData::new("age", DataType::Int32));
-        let is_adult = ctx.add_column(ColumnData::new("is_adult", DataType::Boolean));
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let age = ColumnData::new("age", DataType::Int32).add(&mut ctx);
+        let is_adult = ColumnData::new("is_adult", DataType::Boolean).add(&mut ctx);
 
-        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+        let scan = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![id, age],
-        }));
+        })
+        .add(&mut ctx);
 
-        let age_ref = ctx.add_expr(ExprData::ColumnRef(age));
-        let adult_age = ctx.add_expr(ExprData::Literal(ScalarValue::Int32(18)));
-        let adult_expr = ctx.add_expr(ExprData::Binary {
+        let age_ref = ExprData::ColumnRef(age).add(&mut ctx);
+        let adult_age = ExprData::Literal(ScalarValue::Int32(18)).add(&mut ctx);
+        let adult_expr = ExprData::Binary {
             op: BinaryOp::GtEq,
             left: age_ref,
             right: adult_age,
-        });
-        let map = ctx.add_operator(OperatorData::Map(Map {
+        }
+        .add(&mut ctx);
+        let map = OperatorData::Map(Map {
             computations: vec![(is_adult, adult_expr)],
             input: scan,
-        }));
-        let projection = ctx.add_operator(OperatorData::Projection(Projection {
+        })
+        .add(&mut ctx);
+        let projection = OperatorData::Projection(Projection {
             columns: vec![id, is_adult],
             input: map,
-        }));
-        let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: projection }).add(&mut ctx);
 
         let mut analyses = ctx.analyze();
 
@@ -1034,51 +1038,58 @@ mod tests {
     #[test]
     fn available_columns_tracks_columns_visible_at_each_operator() {
         let mut ctx = QueryContext::new();
-        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
-        let age = ctx.add_column(ColumnData::new("age", DataType::Int32));
-        let order_user_id = ctx.add_column(ColumnData::new("order_user_id", DataType::Int64));
-        let order_total = ctx.add_column(ColumnData::new("order_total", DataType::Float64));
-        let is_adult = ctx.add_column(ColumnData::new("is_adult", DataType::Boolean));
+        let user_id = ColumnData::new("user_id", DataType::Int64).add(&mut ctx);
+        let age = ColumnData::new("age", DataType::Int32).add(&mut ctx);
+        let order_user_id = ColumnData::new("order_user_id", DataType::Int64).add(&mut ctx);
+        let order_total = ColumnData::new("order_total", DataType::Float64).add(&mut ctx);
+        let is_adult = ColumnData::new("is_adult", DataType::Boolean).add(&mut ctx);
 
-        let users = ctx.add_operator(OperatorData::Scan(Scan {
+        let users = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![user_id, age],
-        }));
-        let orders = ctx.add_operator(OperatorData::Scan(Scan {
+        })
+        .add(&mut ctx);
+        let orders = OperatorData::Scan(Scan {
             table: TableRef::bare("orders"),
             columns: vec![order_user_id, order_total],
-        }));
+        })
+        .add(&mut ctx);
 
-        let left = ctx.add_expr(ExprData::ColumnRef(user_id));
-        let right = ctx.add_expr(ExprData::ColumnRef(order_user_id));
-        let on = ctx.add_expr(ExprData::Binary {
+        let left = ExprData::ColumnRef(user_id).add(&mut ctx);
+        let right = ExprData::ColumnRef(order_user_id).add(&mut ctx);
+        let on = ExprData::Binary {
             op: BinaryOp::Eq,
             left,
             right,
-        });
-        let join = ctx.add_operator(OperatorData::Join(Join {
+        }
+        .add(&mut ctx);
+        let join = OperatorData::Join(Join {
             join_type: JoinType::Inner,
             on,
             outer: users,
             inner: orders,
-        }));
+        })
+        .add(&mut ctx);
 
-        let age_ref = ctx.add_expr(ExprData::ColumnRef(age));
-        let adult_age = ctx.add_expr(ExprData::Literal(ScalarValue::Int32(18)));
-        let adult_expr = ctx.add_expr(ExprData::Binary {
+        let age_ref = ExprData::ColumnRef(age).add(&mut ctx);
+        let adult_age = ExprData::Literal(ScalarValue::Int32(18)).add(&mut ctx);
+        let adult_expr = ExprData::Binary {
             op: BinaryOp::GtEq,
             left: age_ref,
             right: adult_age,
-        });
-        let map = ctx.add_operator(OperatorData::Map(Map {
+        }
+        .add(&mut ctx);
+        let map = OperatorData::Map(Map {
             computations: vec![(is_adult, adult_expr)],
             input: join,
-        }));
-        let projection = ctx.add_operator(OperatorData::Projection(Projection {
+        })
+        .add(&mut ctx);
+        let projection = OperatorData::Projection(Projection {
             columns: vec![user_id, order_total, is_adult],
             input: map,
-        }));
-        let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: projection }).add(&mut ctx);
 
         let mut analyses = ctx.analyze();
 
@@ -1107,51 +1118,58 @@ mod tests {
     #[test]
     fn used_columns_tracks_columns_referenced_by_each_operator() {
         let mut ctx = QueryContext::new();
-        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
-        let age = ctx.add_column(ColumnData::new("age", DataType::Int32));
-        let order_user_id = ctx.add_column(ColumnData::new("order_user_id", DataType::Int64));
-        let order_total = ctx.add_column(ColumnData::new("order_total", DataType::Float64));
-        let is_adult = ctx.add_column(ColumnData::new("is_adult", DataType::Boolean));
+        let user_id = ColumnData::new("user_id", DataType::Int64).add(&mut ctx);
+        let age = ColumnData::new("age", DataType::Int32).add(&mut ctx);
+        let order_user_id = ColumnData::new("order_user_id", DataType::Int64).add(&mut ctx);
+        let order_total = ColumnData::new("order_total", DataType::Float64).add(&mut ctx);
+        let is_adult = ColumnData::new("is_adult", DataType::Boolean).add(&mut ctx);
 
-        let users = ctx.add_operator(OperatorData::Scan(Scan {
+        let users = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![user_id, age],
-        }));
-        let orders = ctx.add_operator(OperatorData::Scan(Scan {
+        })
+        .add(&mut ctx);
+        let orders = OperatorData::Scan(Scan {
             table: TableRef::bare("orders"),
             columns: vec![order_user_id, order_total],
-        }));
+        })
+        .add(&mut ctx);
 
-        let left = ctx.add_expr(ExprData::ColumnRef(user_id));
-        let right = ctx.add_expr(ExprData::ColumnRef(order_user_id));
-        let on = ctx.add_expr(ExprData::Binary {
+        let left = ExprData::ColumnRef(user_id).add(&mut ctx);
+        let right = ExprData::ColumnRef(order_user_id).add(&mut ctx);
+        let on = ExprData::Binary {
             op: BinaryOp::Eq,
             left,
             right,
-        });
-        let join = ctx.add_operator(OperatorData::Join(Join {
+        }
+        .add(&mut ctx);
+        let join = OperatorData::Join(Join {
             join_type: JoinType::Inner,
             on,
             outer: users,
             inner: orders,
-        }));
+        })
+        .add(&mut ctx);
 
-        let age_ref = ctx.add_expr(ExprData::ColumnRef(age));
-        let adult_age = ctx.add_expr(ExprData::Literal(ScalarValue::Int32(18)));
-        let adult_expr = ctx.add_expr(ExprData::Binary {
+        let age_ref = ExprData::ColumnRef(age).add(&mut ctx);
+        let adult_age = ExprData::Literal(ScalarValue::Int32(18)).add(&mut ctx);
+        let adult_expr = ExprData::Binary {
             op: BinaryOp::GtEq,
             left: age_ref,
             right: adult_age,
-        });
-        let map = ctx.add_operator(OperatorData::Map(Map {
+        }
+        .add(&mut ctx);
+        let map = OperatorData::Map(Map {
             computations: vec![(is_adult, adult_expr)],
             input: join,
-        }));
-        let projection = ctx.add_operator(OperatorData::Projection(Projection {
+        })
+        .add(&mut ctx);
+        let projection = OperatorData::Projection(Projection {
             columns: vec![user_id, order_total, is_adult],
             input: map,
-        }));
-        let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: projection }).add(&mut ctx);
 
         let mut analyses = ctx.analyze();
 
@@ -1174,33 +1192,38 @@ mod tests {
     #[test]
     fn free_columns_tracks_used_columns_missing_from_inputs() {
         let mut ctx = QueryContext::new();
-        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
-        let missing = ctx.add_column(ColumnData::new("missing", DataType::Int64));
-        let computed = ctx.add_column(ColumnData::new("computed", DataType::Int64));
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let missing = ColumnData::new("missing", DataType::Int64).add(&mut ctx);
+        let computed = ColumnData::new("computed", DataType::Int64).add(&mut ctx);
 
-        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+        let scan = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![id],
-        }));
+        })
+        .add(&mut ctx);
 
-        let missing_ref = ctx.add_expr(ExprData::ColumnRef(missing));
-        let selection = ctx.add_operator(OperatorData::Selection(Selection {
+        let missing_ref = ExprData::ColumnRef(missing).add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
             predicate: missing_ref,
             input: scan,
-        }));
-        let projection = ctx.add_operator(OperatorData::Projection(Projection {
+        })
+        .add(&mut ctx);
+        let projection = OperatorData::Projection(Projection {
             columns: vec![id, missing],
             input: scan,
-        }));
-        let map = ctx.add_operator(OperatorData::Map(Map {
+        })
+        .add(&mut ctx);
+        let map = OperatorData::Map(Map {
             computations: vec![(computed, missing_ref)],
             input: scan,
-        }));
-        let table_function = ctx.add_operator(OperatorData::TableFunction(TableFunction {
+        })
+        .add(&mut ctx);
+        let table_function = OperatorData::TableFunction(TableFunction {
             function: TableFunctionDef::extension("read_from_column_path"),
             args: vec![missing_ref],
             columns: vec![id],
-        }));
+        })
+        .add(&mut ctx);
 
         let mut analyses = ctx.analyze();
 
@@ -1226,42 +1249,48 @@ mod tests {
     #[test]
     fn free_columns_for_subquery_expressions_only_bubble_correlations() {
         let mut ctx = QueryContext::new();
-        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
-        let order_user_id = ctx.add_column(ColumnData::new("order_user_id", DataType::Int64));
-        let order_total = ctx.add_column(ColumnData::new("order_total", DataType::Float64));
+        let user_id = ColumnData::new("user_id", DataType::Int64).add(&mut ctx);
+        let order_user_id = ColumnData::new("order_user_id", DataType::Int64).add(&mut ctx);
+        let order_total = ColumnData::new("order_total", DataType::Float64).add(&mut ctx);
 
-        let users = ctx.add_operator(OperatorData::Scan(Scan {
+        let users = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![user_id],
-        }));
-        let orders = ctx.add_operator(OperatorData::Scan(Scan {
+        })
+        .add(&mut ctx);
+        let orders = OperatorData::Scan(Scan {
             table: TableRef::bare("orders"),
             columns: vec![order_user_id, order_total],
-        }));
+        })
+        .add(&mut ctx);
 
-        let order_user_ref = ctx.add_expr(ExprData::ColumnRef(order_user_id));
-        let user_ref = ctx.add_expr(ExprData::ColumnRef(user_id));
-        let correlated = ctx.add_expr(ExprData::Binary {
+        let order_user_ref = ExprData::ColumnRef(order_user_id).add(&mut ctx);
+        let user_ref = ExprData::ColumnRef(user_id).add(&mut ctx);
+        let correlated = ExprData::Binary {
             op: BinaryOp::Eq,
             left: order_user_ref,
             right: user_ref,
-        });
-        let subquery = ctx.add_operator(OperatorData::Selection(Selection {
+        }
+        .add(&mut ctx);
+        let subquery = OperatorData::Selection(Selection {
             predicate: correlated,
             input: orders,
-        }));
+        })
+        .add(&mut ctx);
 
-        let user_ref = ctx.add_expr(ExprData::ColumnRef(user_id));
-        let subquery_expr = ctx.add_expr(ExprData::ScalarSubquery { subquery });
-        let predicate = ctx.add_expr(ExprData::Binary {
+        let user_ref = ExprData::ColumnRef(user_id).add(&mut ctx);
+        let subquery_expr = ExprData::ScalarSubquery { subquery }.add(&mut ctx);
+        let predicate = ExprData::Binary {
             op: BinaryOp::Eq,
             left: user_ref,
             right: subquery_expr,
-        });
-        let parent = ctx.add_operator(OperatorData::Selection(Selection {
+        }
+        .add(&mut ctx);
+        let parent = OperatorData::Selection(Selection {
             predicate,
             input: users,
-        }));
+        })
+        .add(&mut ctx);
 
         let mut analyses = ctx.analyze();
 
@@ -1279,34 +1308,39 @@ mod tests {
     #[test]
     fn column_nullability_tracks_output_columns() {
         let mut ctx = QueryContext::new();
-        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
-        let age = ctx.add_column(ColumnData::new("age", DataType::Int32));
-        let is_age_null = ctx.add_column(ColumnData::new("is_age_null", DataType::Boolean));
-        let age_plus_one = ctx.add_column(ColumnData::new("age_plus_one", DataType::Int32));
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let age = ColumnData::new("age", DataType::Int32).add(&mut ctx);
+        let is_age_null = ColumnData::new("is_age_null", DataType::Boolean).add(&mut ctx);
+        let age_plus_one = ColumnData::new("age_plus_one", DataType::Int32).add(&mut ctx);
 
-        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+        let scan = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![id, age],
-        }));
-        let age_ref = ctx.add_expr(ExprData::ColumnRef(age));
-        let is_null = ctx.add_expr(ExprData::Unary {
+        })
+        .add(&mut ctx);
+        let age_ref = ExprData::ColumnRef(age).add(&mut ctx);
+        let is_null = ExprData::Unary {
             op: crate::UnaryOp::IsNull,
             expr: age_ref,
-        });
-        let one = ctx.add_expr(ExprData::Literal(ScalarValue::Int32(1)));
-        let age_plus_one_expr = ctx.add_expr(ExprData::Binary {
+        }
+        .add(&mut ctx);
+        let one = ExprData::Literal(ScalarValue::Int32(1)).add(&mut ctx);
+        let age_plus_one_expr = ExprData::Binary {
             op: BinaryOp::Add,
             left: age_ref,
             right: one,
-        });
-        let map = ctx.add_operator(OperatorData::Map(Map {
+        }
+        .add(&mut ctx);
+        let map = OperatorData::Map(Map {
             computations: vec![(is_age_null, is_null), (age_plus_one, age_plus_one_expr)],
             input: scan,
-        }));
-        let projection = ctx.add_operator(OperatorData::Projection(Projection {
+        })
+        .add(&mut ctx);
+        let projection = OperatorData::Projection(Projection {
             columns: vec![id, is_age_null, age_plus_one],
             input: map,
-        }));
+        })
+        .add(&mut ctx);
 
         let mut analyses = ctx.analyze();
 
@@ -1362,22 +1396,25 @@ mod tests {
     #[test]
     fn column_nullability_uses_selection_null_rejection() {
         let mut ctx = QueryContext::new();
-        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
-        let age = ctx.add_column(ColumnData::new("age", DataType::Int32));
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let age = ColumnData::new("age", DataType::Int32).add(&mut ctx);
 
-        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+        let scan = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![id, age],
-        }));
-        let age_ref = ctx.add_expr(ExprData::ColumnRef(age));
-        let predicate = ctx.add_expr(ExprData::Unary {
+        })
+        .add(&mut ctx);
+        let age_ref = ExprData::ColumnRef(age).add(&mut ctx);
+        let predicate = ExprData::Unary {
             op: crate::UnaryOp::IsNotNull,
             expr: age_ref,
-        });
-        let selection = ctx.add_operator(OperatorData::Selection(Selection {
+        }
+        .add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
             predicate,
             input: scan,
-        }));
+        })
+        .add(&mut ctx);
 
         let mut analyses = ctx.analyze();
 
@@ -1390,30 +1427,34 @@ mod tests {
     #[test]
     fn column_nullability_uses_inner_join_null_rejection() {
         let mut ctx = QueryContext::new();
-        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
-        let order_user_id = ctx.add_column(ColumnData::new("order_user_id", DataType::Int64));
+        let user_id = ColumnData::new("user_id", DataType::Int64).add(&mut ctx);
+        let order_user_id = ColumnData::new("order_user_id", DataType::Int64).add(&mut ctx);
 
-        let users = ctx.add_operator(OperatorData::Scan(Scan {
+        let users = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![user_id],
-        }));
-        let orders = ctx.add_operator(OperatorData::Scan(Scan {
+        })
+        .add(&mut ctx);
+        let orders = OperatorData::Scan(Scan {
             table: TableRef::bare("orders"),
             columns: vec![order_user_id],
-        }));
-        let left = ctx.add_expr(ExprData::ColumnRef(user_id));
-        let right = ctx.add_expr(ExprData::ColumnRef(order_user_id));
-        let on = ctx.add_expr(ExprData::Binary {
+        })
+        .add(&mut ctx);
+        let left = ExprData::ColumnRef(user_id).add(&mut ctx);
+        let right = ExprData::ColumnRef(order_user_id).add(&mut ctx);
+        let on = ExprData::Binary {
             op: BinaryOp::Eq,
             left,
             right,
-        });
-        let join = ctx.add_operator(OperatorData::Join(Join {
+        }
+        .add(&mut ctx);
+        let join = OperatorData::Join(Join {
             join_type: JoinType::Inner,
             on,
             outer: users,
             inner: orders,
-        }));
+        })
+        .add(&mut ctx);
 
         let mut analyses = ctx.analyze();
 
@@ -1426,30 +1467,34 @@ mod tests {
     #[test]
     fn column_nullability_tracks_outer_join_null_extension() {
         let mut ctx = QueryContext::new();
-        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
-        let order_user_id = ctx.add_column(ColumnData::new("order_user_id", DataType::Int64));
+        let user_id = ColumnData::new("user_id", DataType::Int64).add(&mut ctx);
+        let order_user_id = ColumnData::new("order_user_id", DataType::Int64).add(&mut ctx);
 
-        let users = ctx.add_operator(OperatorData::Scan(Scan {
+        let users = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![user_id],
-        }));
-        let orders = ctx.add_operator(OperatorData::Scan(Scan {
+        })
+        .add(&mut ctx);
+        let orders = OperatorData::Scan(Scan {
             table: TableRef::bare("orders"),
             columns: vec![order_user_id],
-        }));
-        let left = ctx.add_expr(ExprData::ColumnRef(user_id));
-        let right = ctx.add_expr(ExprData::ColumnRef(order_user_id));
-        let on = ctx.add_expr(ExprData::Binary {
+        })
+        .add(&mut ctx);
+        let left = ExprData::ColumnRef(user_id).add(&mut ctx);
+        let right = ExprData::ColumnRef(order_user_id).add(&mut ctx);
+        let on = ExprData::Binary {
             op: BinaryOp::Eq,
             left,
             right,
-        });
-        let join = ctx.add_operator(OperatorData::Join(Join {
+        }
+        .add(&mut ctx);
+        let join = OperatorData::Join(Join {
             join_type: JoinType::LeftOuter,
             on,
             outer: users,
             inner: orders,
-        }));
+        })
+        .add(&mut ctx);
 
         let mut analyses = ctx.analyze();
 
@@ -1462,16 +1507,17 @@ mod tests {
     #[test]
     fn expr_used_columns_deduplicates_by_first_use() {
         let mut ctx = QueryContext::new();
-        let a = ctx.add_column(ColumnData::new("a", DataType::Int64));
-        let b = ctx.add_column(ColumnData::new("b", DataType::Int64));
+        let a = ColumnData::new("a", DataType::Int64).add(&mut ctx);
+        let b = ColumnData::new("b", DataType::Int64).add(&mut ctx);
 
-        let a_left = ctx.add_expr(ExprData::ColumnRef(a));
-        let b_ref = ctx.add_expr(ExprData::ColumnRef(b));
-        let a_right = ctx.add_expr(ExprData::ColumnRef(a));
-        let expr = ctx.add_expr(ExprData::Nary {
+        let a_left = ExprData::ColumnRef(a).add(&mut ctx);
+        let b_ref = ExprData::ColumnRef(b).add(&mut ctx);
+        let a_right = ExprData::ColumnRef(a).add(&mut ctx);
+        let expr = ExprData::Nary {
             op: crate::NaryOp::And,
             exprs: vec![a_left, b_ref, a_right],
-        });
+        }
+        .add(&mut ctx);
 
         assert_eq!(expr_used_columns(&ctx, expr).unwrap(), vec![a, b]);
     }
@@ -1479,21 +1525,23 @@ mod tests {
     #[test]
     fn available_columns_rejects_expression_aggregation_keys() {
         let mut ctx = QueryContext::new();
-        let age = ctx.add_column(ColumnData::new("age", DataType::Int32));
-        let count = ctx.add_column(ColumnData::new("count", DataType::Int64));
+        let age = ColumnData::new("age", DataType::Int32).add(&mut ctx);
+        let count = ColumnData::new("count", DataType::Int64).add(&mut ctx);
 
-        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+        let scan = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![age],
-        }));
-        let age_ref = ctx.add_expr(ExprData::ColumnRef(age));
-        let one = ctx.add_expr(ExprData::Literal(ScalarValue::Int32(1)));
-        let key = ctx.add_expr(ExprData::Binary {
+        })
+        .add(&mut ctx);
+        let age_ref = ExprData::ColumnRef(age).add(&mut ctx);
+        let one = ExprData::Literal(ScalarValue::Int32(1)).add(&mut ctx);
+        let key = ExprData::Binary {
             op: BinaryOp::Add,
             left: age_ref,
             right: one,
-        });
-        let aggregation = ctx.add_operator(OperatorData::Aggregation(Aggregation {
+        }
+        .add(&mut ctx);
+        let aggregation = OperatorData::Aggregation(Aggregation {
             keys: vec![key],
             aggregates: vec![(
                 count,
@@ -1504,7 +1552,8 @@ mod tests {
                 },
             )],
             input: scan,
-        }));
+        })
+        .add(&mut ctx);
 
         let mut analyses = ctx.analyze();
 
@@ -1520,11 +1569,12 @@ mod tests {
     #[test]
     fn analysis_context_clear_invalidates_analysis_caches() {
         let mut ctx = QueryContext::new();
-        let first = ctx.add_column(ColumnData::new("first", DataType::Int64));
-        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+        let first = ColumnData::new("first", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![first],
-        }));
+        })
+        .add(&mut ctx);
         let mut analyses = ctx.analyze();
 
         assert_eq!(
@@ -1532,7 +1582,7 @@ mod tests {
             vec![first]
         );
 
-        let second = ctx.add_column(ColumnData::new("second", DataType::Int64));
+        let second = ColumnData::new("second", DataType::Int64).add(&mut ctx);
         *ctx.operator_mut(scan) = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![first, second],

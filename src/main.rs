@@ -222,42 +222,43 @@ fn pretty_with_free_column(query: &QueryContext) -> String {
 fn sales_rollup_query() -> QueryContext {
     let mut ctx = QueryContext::new();
 
-    let user_id = ctx.add_column(ColumnData::new("u_userkey", DataType::Int64));
-    let user_age = ctx.add_column(ColumnData::new("u_age", DataType::Int32));
-    let user_region = ctx.add_column(ColumnData::new("u_region", DataType::Utf8));
+    let user_id = ColumnData::new("u_userkey", DataType::Int64).add(&mut ctx);
+    let user_age = ColumnData::new("u_age", DataType::Int32).add(&mut ctx);
+    let user_region = ColumnData::new("u_region", DataType::Utf8).add(&mut ctx);
 
-    let order_id = ctx.add_column(ColumnData::new("o_orderkey", DataType::Int64));
-    let order_user_id = ctx.add_column(ColumnData::new("o_userkey", DataType::Int64));
+    let order_id = ColumnData::new("o_orderkey", DataType::Int64).add(&mut ctx);
+    let order_user_id = ColumnData::new("o_userkey", DataType::Int64).add(&mut ctx);
 
-    let line_item_order_id = ctx.add_column(ColumnData::new("l_orderkey", DataType::Int64));
-    let line_item_product_id = ctx.add_column(ColumnData::new("l_partkey", DataType::Int64));
-    let quantity = ctx.add_column(ColumnData::new("l_quantity", DataType::Int32));
-    let unit_price = ctx.add_column(ColumnData::new("l_unit_price", DataType::Float64));
+    let line_item_order_id = ColumnData::new("l_orderkey", DataType::Int64).add(&mut ctx);
+    let line_item_product_id = ColumnData::new("l_partkey", DataType::Int64).add(&mut ctx);
+    let quantity = ColumnData::new("l_quantity", DataType::Int32).add(&mut ctx);
+    let unit_price = ColumnData::new("l_unit_price", DataType::Float64).add(&mut ctx);
 
-    let product_id = ctx.add_column(ColumnData::new("p_partkey", DataType::Int64));
-    let product_name = ctx.add_column(ColumnData::new("p_name", DataType::Utf8));
+    let product_id = ColumnData::new("p_partkey", DataType::Int64).add(&mut ctx);
+    let product_name = ColumnData::new("p_name", DataType::Utf8).add(&mut ctx);
 
-    let normalized_region = ctx.add_column(ColumnData::new("region_key", DataType::Utf8));
-    let gross_amount = ctx.add_column(ColumnData::new("gross_amount", DataType::Float64));
-    let total_gross_amount = ctx.add_column(ColumnData::new("total_gross", DataType::Float64));
-    let order_count = ctx.add_column(ColumnData::new("order_count", DataType::Int64));
-    let buyer_count = ctx.add_column(ColumnData::new("buyer_count", DataType::Int64));
+    let normalized_region = ColumnData::new("region_key", DataType::Utf8).add(&mut ctx);
+    let gross_amount = ColumnData::new("gross_amount", DataType::Float64).add(&mut ctx);
+    let total_gross_amount = ColumnData::new("total_gross", DataType::Float64).add(&mut ctx);
+    let order_count = ColumnData::new("order_count", DataType::Int64).add(&mut ctx);
+    let buyer_count = ColumnData::new("buyer_count", DataType::Int64).add(&mut ctx);
 
-    let users = ctx.add_operator(OperatorData::Scan(Scan {
+    let users = OperatorData::Scan(Scan {
         table: TableRef::bare("users"),
         columns: vec![user_id, user_age, user_region],
-    }));
+    })
+    .add(&mut ctx);
 
-    let orders_path = ctx.add_expr(ExprData::Literal(ScalarValue::Utf8(
-        "orders.parquet".to_string(),
-    )));
-    let orders = ctx.add_operator(OperatorData::TableFunction(TableFunction {
+    let orders_path =
+        ExprData::Literal(ScalarValue::Utf8("orders.parquet".to_string())).add(&mut ctx);
+    let orders = OperatorData::TableFunction(TableFunction {
         function: TableFunctionDef::ReadParquet,
         args: vec![orders_path],
         columns: vec![order_id, order_user_id],
-    }));
+    })
+    .add(&mut ctx);
 
-    let line_items = ctx.add_operator(OperatorData::Scan(Scan {
+    let line_items = OperatorData::Scan(Scan {
         table: TableRef::bare("line_items"),
         columns: vec![
             line_item_order_id,
@@ -265,100 +266,115 @@ fn sales_rollup_query() -> QueryContext {
             quantity,
             unit_price,
         ],
-    }));
-    let products = ctx.add_operator(OperatorData::Scan(Scan {
+    })
+    .add(&mut ctx);
+    let products = OperatorData::Scan(Scan {
         table: TableRef::bare("products"),
         columns: vec![product_id, product_name],
-    }));
+    })
+    .add(&mut ctx);
 
-    let users_id_ref = ctx.add_expr(ExprData::ColumnRef(user_id));
-    let orders_user_id_ref = ctx.add_expr(ExprData::ColumnRef(order_user_id));
-    let users_orders_on = ctx.add_expr(ExprData::Binary {
+    let users_id_ref = ExprData::ColumnRef(user_id).add(&mut ctx);
+    let orders_user_id_ref = ExprData::ColumnRef(order_user_id).add(&mut ctx);
+    let users_orders_on = ExprData::Binary {
         op: BinaryOp::Eq,
         left: users_id_ref,
         right: orders_user_id_ref,
-    });
-    let users_orders = ctx.add_operator(OperatorData::Join(Join {
+    }
+    .add(&mut ctx);
+    let users_orders = OperatorData::Join(Join {
         join_type: JoinType::Inner,
         on: users_orders_on,
         outer: users,
         inner: orders,
-    }));
+    })
+    .add(&mut ctx);
 
-    let line_item_product_id_ref = ctx.add_expr(ExprData::ColumnRef(line_item_product_id));
-    let product_id_ref = ctx.add_expr(ExprData::ColumnRef(product_id));
-    let line_items_products_on = ctx.add_expr(ExprData::Binary {
+    let line_item_product_id_ref = ExprData::ColumnRef(line_item_product_id).add(&mut ctx);
+    let product_id_ref = ExprData::ColumnRef(product_id).add(&mut ctx);
+    let line_items_products_on = ExprData::Binary {
         op: BinaryOp::Eq,
         left: line_item_product_id_ref,
         right: product_id_ref,
-    });
-    let line_items_products = ctx.add_operator(OperatorData::Join(Join {
+    }
+    .add(&mut ctx);
+    let line_items_products = OperatorData::Join(Join {
         join_type: JoinType::Inner,
         on: line_items_products_on,
         outer: line_items,
         inner: products,
-    }));
+    })
+    .add(&mut ctx);
 
-    let orders_id_ref = ctx.add_expr(ExprData::ColumnRef(order_id));
-    let line_item_order_id_ref = ctx.add_expr(ExprData::ColumnRef(line_item_order_id));
-    let top_join_on = ctx.add_expr(ExprData::Binary {
+    let orders_id_ref = ExprData::ColumnRef(order_id).add(&mut ctx);
+    let line_item_order_id_ref = ExprData::ColumnRef(line_item_order_id).add(&mut ctx);
+    let top_join_on = ExprData::Binary {
         op: BinaryOp::Eq,
         left: orders_id_ref,
         right: line_item_order_id_ref,
-    });
-    let joined = ctx.add_operator(OperatorData::Join(Join {
+    }
+    .add(&mut ctx);
+    let joined = OperatorData::Join(Join {
         join_type: JoinType::Inner,
         on: top_join_on,
         outer: users_orders,
         inner: line_items_products,
-    }));
+    })
+    .add(&mut ctx);
 
-    let user_region_ref = ctx.add_expr(ExprData::ColumnRef(user_region));
-    let normalize_region = ctx.add_expr(ExprData::ScalarFunction {
+    let user_region_ref = ExprData::ColumnRef(user_region).add(&mut ctx);
+    let normalize_region = ExprData::ScalarFunction {
         function: ScalarFunction::extension("normalize_region"),
         args: vec![user_region_ref],
-    });
-    let quantity_ref = ctx.add_expr(ExprData::ColumnRef(quantity));
-    let unit_price_ref = ctx.add_expr(ExprData::ColumnRef(unit_price));
-    let gross_amount_expr = ctx.add_expr(ExprData::Binary {
+    }
+    .add(&mut ctx);
+    let quantity_ref = ExprData::ColumnRef(quantity).add(&mut ctx);
+    let unit_price_ref = ExprData::ColumnRef(unit_price).add(&mut ctx);
+    let gross_amount_expr = ExprData::Binary {
         op: BinaryOp::Multiply,
         left: quantity_ref,
         right: unit_price_ref,
-    });
-    let map = ctx.add_operator(OperatorData::Map(Map {
+    }
+    .add(&mut ctx);
+    let map = OperatorData::Map(Map {
         computations: vec![
             (normalized_region, normalize_region),
             (gross_amount, gross_amount_expr),
         ],
         input: joined,
-    }));
+    })
+    .add(&mut ctx);
 
-    let user_age_ref = ctx.add_expr(ExprData::ColumnRef(user_age));
-    let adult_age = ctx.add_expr(ExprData::Literal(ScalarValue::Int32(18)));
-    let adult_predicate = ctx.add_expr(ExprData::Binary {
+    let user_age_ref = ExprData::ColumnRef(user_age).add(&mut ctx);
+    let adult_age = ExprData::Literal(ScalarValue::Int32(18)).add(&mut ctx);
+    let adult_predicate = ExprData::Binary {
         op: BinaryOp::GtEq,
         left: user_age_ref,
         right: adult_age,
-    });
-    let normalized_region_ref = ctx.add_expr(ExprData::ColumnRef(normalized_region));
-    let region_present = ctx.add_expr(ExprData::Unary {
+    }
+    .add(&mut ctx);
+    let normalized_region_ref = ExprData::ColumnRef(normalized_region).add(&mut ctx);
+    let region_present = ExprData::Unary {
         op: UnaryOp::IsNotNull,
         expr: normalized_region_ref,
-    });
-    let predicate = ctx.add_expr(ExprData::Nary {
+    }
+    .add(&mut ctx);
+    let predicate = ExprData::Nary {
         op: NaryOp::And,
         exprs: vec![adult_predicate, region_present],
-    });
-    let selection = ctx.add_operator(OperatorData::Selection(Selection {
+    }
+    .add(&mut ctx);
+    let selection = OperatorData::Selection(Selection {
         predicate,
         input: map,
-    }));
+    })
+    .add(&mut ctx);
 
-    let group_region = ctx.add_expr(ExprData::ColumnRef(normalized_region));
-    let group_product_name = ctx.add_expr(ExprData::ColumnRef(product_name));
-    let gross_amount_ref = ctx.add_expr(ExprData::ColumnRef(gross_amount));
-    let buyer_ref = ctx.add_expr(ExprData::ColumnRef(user_id));
-    let aggregation = ctx.add_operator(OperatorData::Aggregation(Aggregation {
+    let group_region = ExprData::ColumnRef(normalized_region).add(&mut ctx);
+    let group_product_name = ExprData::ColumnRef(product_name).add(&mut ctx);
+    let gross_amount_ref = ExprData::ColumnRef(gross_amount).add(&mut ctx);
+    let buyer_ref = ExprData::ColumnRef(user_id).add(&mut ctx);
+    let aggregation = OperatorData::Aggregation(Aggregation {
         keys: vec![group_region, group_product_name],
         aggregates: vec![
             (
@@ -380,9 +396,10 @@ fn sales_rollup_query() -> QueryContext {
             ),
         ],
         input: selection,
-    }));
+    })
+    .add(&mut ctx);
 
-    let projection = ctx.add_operator(OperatorData::Projection(Projection {
+    let projection = OperatorData::Projection(Projection {
         columns: vec![
             normalized_region,
             product_name,
@@ -391,8 +408,9 @@ fn sales_rollup_query() -> QueryContext {
             buyer_count,
         ],
         input: aggregation,
-    }));
-    let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+    })
+    .add(&mut ctx);
+    let output = OperatorData::Output(Output { input: projection }).add(&mut ctx);
     ctx.set_root(output);
 
     ctx
@@ -401,43 +419,49 @@ fn sales_rollup_query() -> QueryContext {
 fn join_with_free_column_query() -> QueryContext {
     let mut ctx = QueryContext::new();
 
-    let user_id = ctx.add_column(ColumnData::new("u_userkey", DataType::Int64));
-    let order_id = ctx.add_column(ColumnData::new("o_orderkey", DataType::Int64));
-    let order_user_id = ctx.add_column(ColumnData::new("o_userkey", DataType::Int64));
+    let user_id = ColumnData::new("u_userkey", DataType::Int64).add(&mut ctx);
+    let order_id = ColumnData::new("o_orderkey", DataType::Int64).add(&mut ctx);
+    let order_user_id = ColumnData::new("o_userkey", DataType::Int64).add(&mut ctx);
 
-    let users = ctx.add_operator(OperatorData::Scan(Scan {
+    let users = OperatorData::Scan(Scan {
         table: TableRef::bare("users"),
         columns: vec![user_id],
-    }));
-    let orders = ctx.add_operator(OperatorData::Scan(Scan {
+    })
+    .add(&mut ctx);
+    let orders = OperatorData::Scan(Scan {
         table: TableRef::bare("orders"),
         columns: vec![order_id, order_user_id],
-    }));
+    })
+    .add(&mut ctx);
 
-    let order_user_id_ref = ctx.add_expr(ExprData::ColumnRef(order_user_id));
-    let user_id_ref = ctx.add_expr(ExprData::ColumnRef(user_id));
-    let correlated_predicate = ctx.add_expr(ExprData::Binary {
+    let order_user_id_ref = ExprData::ColumnRef(order_user_id).add(&mut ctx);
+    let user_id_ref = ExprData::ColumnRef(user_id).add(&mut ctx);
+    let correlated_predicate = ExprData::Binary {
         op: BinaryOp::Eq,
         left: order_user_id_ref,
         right: user_id_ref,
-    });
-    let scalar_subquery = ctx.add_operator(OperatorData::Selection(Selection {
+    }
+    .add(&mut ctx);
+    let scalar_subquery = OperatorData::Selection(Selection {
         predicate: correlated_predicate,
         input: orders,
-    }));
+    })
+    .add(&mut ctx);
 
-    let on = ctx.add_expr(ExprData::Literal(ScalarValue::Boolean(true)));
-    let join = ctx.add_operator(OperatorData::Join(Join {
+    let on = ExprData::Literal(ScalarValue::Boolean(true)).add(&mut ctx);
+    let join = OperatorData::Join(Join {
         join_type: JoinType::Single,
         on,
         outer: users,
         inner: scalar_subquery,
-    }));
-    let projection = ctx.add_operator(OperatorData::Projection(Projection {
+    })
+    .add(&mut ctx);
+    let projection = OperatorData::Projection(Projection {
         columns: vec![user_id, order_id],
         input: join,
-    }));
-    let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+    })
+    .add(&mut ctx);
+    let output = OperatorData::Output(Output { input: projection }).add(&mut ctx);
     ctx.set_root(output);
 
     ctx

@@ -259,37 +259,42 @@ fn users_orders_session_context() -> SessionContext {
 
 fn projected_users_query() -> QueryContext {
     let mut ctx = QueryContext::new();
-    let id = ctx.add_column(ColumnData::new("id", arrow_schema::DataType::Int64));
-    let age = ctx.add_column(ColumnData::new("age", arrow_schema::DataType::Int64));
+    let id = ColumnData::new("id", arrow_schema::DataType::Int64).add(&mut ctx);
+    let age = ColumnData::new("age", arrow_schema::DataType::Int64).add(&mut ctx);
 
-    let scan = ctx.add_operator(OperatorData::Scan(Scan {
+    let scan = OperatorData::Scan(Scan {
         table: TableRef::bare("users"),
         columns: vec![id, age],
-    }));
-    let predicate = ctx.add_expr(ExprData::Literal(ScalarValue::Boolean(true)));
-    let selection = ctx.add_operator(OperatorData::Selection(Selection {
+    })
+    .add(&mut ctx);
+    let predicate = ExprData::Literal(ScalarValue::Boolean(true)).add(&mut ctx);
+    let selection = OperatorData::Selection(Selection {
         predicate,
         input: scan,
-    }));
-    let id_ref = ctx.add_expr(ExprData::ColumnRef(id));
-    let sort = ctx.add_operator(OperatorData::Sort(Sort {
+    })
+    .add(&mut ctx);
+    let id_ref = ExprData::ColumnRef(id).add(&mut ctx);
+    let sort = OperatorData::Sort(Sort {
         keys: vec![SortKey {
             expr: id_ref,
             direction: SortDirection::Desc,
             nulls: NullOrdering::Last,
         }],
         input: selection,
-    }));
-    let limit = ctx.add_operator(OperatorData::Limit(Limit {
+    })
+    .add(&mut ctx);
+    let limit = OperatorData::Limit(Limit {
         fetch: Some(5),
         offset: 0,
         input: sort,
-    }));
-    let projection = ctx.add_operator(OperatorData::Projection(Projection {
+    })
+    .add(&mut ctx);
+    let projection = OperatorData::Projection(Projection {
         columns: vec![id],
         input: limit,
-    }));
-    let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+    })
+    .add(&mut ctx);
+    let output = OperatorData::Output(Output { input: projection }).add(&mut ctx);
     ctx.set_root(output);
 
     ctx
@@ -297,37 +302,42 @@ fn projected_users_query() -> QueryContext {
 
 fn joined_users_orders_query() -> QueryContext {
     let mut ctx = QueryContext::new();
-    let user_id = ctx.add_column(ColumnData::new("id", arrow_schema::DataType::Int64));
-    let user_age = ctx.add_column(ColumnData::new("age", arrow_schema::DataType::Int64));
-    let order_id = ctx.add_column(ColumnData::new("order_id", arrow_schema::DataType::Int64));
-    let order_user_id = ctx.add_column(ColumnData::new("user_id", arrow_schema::DataType::Int64));
+    let user_id = ColumnData::new("id", arrow_schema::DataType::Int64).add(&mut ctx);
+    let user_age = ColumnData::new("age", arrow_schema::DataType::Int64).add(&mut ctx);
+    let order_id = ColumnData::new("order_id", arrow_schema::DataType::Int64).add(&mut ctx);
+    let order_user_id = ColumnData::new("user_id", arrow_schema::DataType::Int64).add(&mut ctx);
 
-    let users = ctx.add_operator(OperatorData::Scan(Scan {
+    let users = OperatorData::Scan(Scan {
         table: TableRef::bare("users"),
         columns: vec![user_id, user_age],
-    }));
-    let orders = ctx.add_operator(OperatorData::Scan(Scan {
+    })
+    .add(&mut ctx);
+    let orders = OperatorData::Scan(Scan {
         table: TableRef::bare("orders"),
         columns: vec![order_id, order_user_id],
-    }));
-    let left = ctx.add_expr(ExprData::ColumnRef(user_id));
-    let right = ctx.add_expr(ExprData::ColumnRef(order_user_id));
-    let predicate = ctx.add_expr(ExprData::Binary {
+    })
+    .add(&mut ctx);
+    let left = ExprData::ColumnRef(user_id).add(&mut ctx);
+    let right = ExprData::ColumnRef(order_user_id).add(&mut ctx);
+    let predicate = ExprData::Binary {
         op: simple_graph::BinaryOp::Eq,
         left,
         right,
-    });
-    let join = ctx.add_operator(OperatorData::Join(simple_graph::Join {
+    }
+    .add(&mut ctx);
+    let join = OperatorData::Join(simple_graph::Join {
         join_type: simple_graph::JoinType::Inner,
         on: predicate,
         outer: users,
         inner: orders,
-    }));
-    let projection = ctx.add_operator(OperatorData::Projection(Projection {
+    })
+    .add(&mut ctx);
+    let projection = OperatorData::Projection(Projection {
         columns: vec![user_id, order_id],
         input: join,
-    }));
-    let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+    })
+    .add(&mut ctx);
+    let output = OperatorData::Output(Output { input: projection }).add(&mut ctx);
     ctx.set_root(output);
 
     ctx
@@ -335,37 +345,42 @@ fn joined_users_orders_query() -> QueryContext {
 
 fn semi_or_anti_joined_users_orders_query(join_type: simple_graph::JoinType) -> QueryContext {
     let mut ctx = QueryContext::new();
-    let user_id = ctx.add_column(ColumnData::new("id", arrow_schema::DataType::Int64));
-    let user_age = ctx.add_column(ColumnData::new("age", arrow_schema::DataType::Int64));
-    let order_id = ctx.add_column(ColumnData::new("order_id", arrow_schema::DataType::Int64));
-    let order_user_id = ctx.add_column(ColumnData::new("user_id", arrow_schema::DataType::Int64));
+    let user_id = ColumnData::new("id", arrow_schema::DataType::Int64).add(&mut ctx);
+    let user_age = ColumnData::new("age", arrow_schema::DataType::Int64).add(&mut ctx);
+    let order_id = ColumnData::new("order_id", arrow_schema::DataType::Int64).add(&mut ctx);
+    let order_user_id = ColumnData::new("user_id", arrow_schema::DataType::Int64).add(&mut ctx);
 
-    let users = ctx.add_operator(OperatorData::Scan(Scan {
+    let users = OperatorData::Scan(Scan {
         table: TableRef::bare("users"),
         columns: vec![user_id, user_age],
-    }));
-    let orders = ctx.add_operator(OperatorData::Scan(Scan {
+    })
+    .add(&mut ctx);
+    let orders = OperatorData::Scan(Scan {
         table: TableRef::bare("orders"),
         columns: vec![order_id, order_user_id],
-    }));
-    let left = ctx.add_expr(ExprData::ColumnRef(user_id));
-    let right = ctx.add_expr(ExprData::ColumnRef(order_user_id));
-    let predicate = ctx.add_expr(ExprData::Binary {
+    })
+    .add(&mut ctx);
+    let left = ExprData::ColumnRef(user_id).add(&mut ctx);
+    let right = ExprData::ColumnRef(order_user_id).add(&mut ctx);
+    let predicate = ExprData::Binary {
         op: simple_graph::BinaryOp::Eq,
         left,
         right,
-    });
-    let join = ctx.add_operator(OperatorData::Join(simple_graph::Join {
+    }
+    .add(&mut ctx);
+    let join = OperatorData::Join(simple_graph::Join {
         join_type,
         on: predicate,
         outer: users,
         inner: orders,
-    }));
-    let projection = ctx.add_operator(OperatorData::Projection(Projection {
+    })
+    .add(&mut ctx);
+    let projection = OperatorData::Projection(Projection {
         columns: vec![user_id],
         input: join,
-    }));
-    let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+    })
+    .add(&mut ctx);
+    let output = OperatorData::Output(Output { input: projection }).add(&mut ctx);
     ctx.set_root(output);
 
     ctx
@@ -373,28 +388,32 @@ fn semi_or_anti_joined_users_orders_query(join_type: simple_graph::JoinType) -> 
 
 fn crossed_users_orders_query() -> QueryContext {
     let mut ctx = QueryContext::new();
-    let user_id = ctx.add_column(ColumnData::new("id", arrow_schema::DataType::Int64));
-    let user_age = ctx.add_column(ColumnData::new("age", arrow_schema::DataType::Int64));
-    let order_id = ctx.add_column(ColumnData::new("order_id", arrow_schema::DataType::Int64));
-    let order_user_id = ctx.add_column(ColumnData::new("user_id", arrow_schema::DataType::Int64));
+    let user_id = ColumnData::new("id", arrow_schema::DataType::Int64).add(&mut ctx);
+    let user_age = ColumnData::new("age", arrow_schema::DataType::Int64).add(&mut ctx);
+    let order_id = ColumnData::new("order_id", arrow_schema::DataType::Int64).add(&mut ctx);
+    let order_user_id = ColumnData::new("user_id", arrow_schema::DataType::Int64).add(&mut ctx);
 
-    let users = ctx.add_operator(OperatorData::Scan(Scan {
+    let users = OperatorData::Scan(Scan {
         table: TableRef::bare("users"),
         columns: vec![user_id, user_age],
-    }));
-    let orders = ctx.add_operator(OperatorData::Scan(Scan {
+    })
+    .add(&mut ctx);
+    let orders = OperatorData::Scan(Scan {
         table: TableRef::bare("orders"),
         columns: vec![order_id, order_user_id],
-    }));
-    let cross = ctx.add_operator(OperatorData::CrossProduct(CrossProduct {
+    })
+    .add(&mut ctx);
+    let cross = OperatorData::CrossProduct(CrossProduct {
         outer: users,
         inner: orders,
-    }));
-    let projection = ctx.add_operator(OperatorData::Projection(Projection {
+    })
+    .add(&mut ctx);
+    let projection = OperatorData::Projection(Projection {
         columns: vec![user_id, order_id],
         input: cross,
-    }));
-    let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+    })
+    .add(&mut ctx);
+    let output = OperatorData::Output(Output { input: projection }).add(&mut ctx);
     ctx.set_root(output);
 
     ctx
@@ -402,21 +421,23 @@ fn crossed_users_orders_query() -> QueryContext {
 
 fn aggregated_users_query() -> QueryContext {
     let mut ctx = QueryContext::new();
-    let user_id = ctx.add_column(ColumnData::new("id", arrow_schema::DataType::Int64));
-    let user_age = ctx.add_column(ColumnData::new("age", arrow_schema::DataType::Int64));
-    let user_count = ctx.add_column(ColumnData::new("user_count", arrow_schema::DataType::Int64));
+    let user_id = ColumnData::new("id", arrow_schema::DataType::Int64).add(&mut ctx);
+    let user_age = ColumnData::new("age", arrow_schema::DataType::Int64).add(&mut ctx);
+    let user_count = ColumnData::new("user_count", arrow_schema::DataType::Int64).add(&mut ctx);
 
-    let users = ctx.add_operator(OperatorData::Scan(Scan {
+    let users = OperatorData::Scan(Scan {
         table: TableRef::bare("users"),
         columns: vec![user_id, user_age],
-    }));
-    let key = ctx.add_expr(ExprData::ColumnRef(user_id));
-    let aggregation = ctx.add_operator(OperatorData::Aggregation(Aggregation {
+    })
+    .add(&mut ctx);
+    let key = ExprData::ColumnRef(user_id).add(&mut ctx);
+    let aggregation = OperatorData::Aggregation(Aggregation {
         keys: vec![key],
         aggregates: vec![(user_count, AggregateExpr::CountStar)],
         input: users,
-    }));
-    let output = ctx.add_operator(OperatorData::Output(Output { input: aggregation }));
+    })
+    .add(&mut ctx);
+    let output = OperatorData::Output(Output { input: aggregation }).add(&mut ctx);
     ctx.set_root(output);
 
     ctx
@@ -424,33 +445,34 @@ fn aggregated_users_query() -> QueryContext {
 
 fn mapped_users_query() -> QueryContext {
     let mut ctx = QueryContext::new();
-    let user_id = ctx.add_column(ColumnData::new("id", arrow_schema::DataType::Int64));
-    let user_age = ctx.add_column(ColumnData::new("age", arrow_schema::DataType::Int64));
-    let id_plus_one = ctx.add_column(ColumnData::new(
-        "id_plus_one",
-        arrow_schema::DataType::Int64,
-    ));
+    let user_id = ColumnData::new("id", arrow_schema::DataType::Int64).add(&mut ctx);
+    let user_age = ColumnData::new("age", arrow_schema::DataType::Int64).add(&mut ctx);
+    let id_plus_one = ColumnData::new("id_plus_one", arrow_schema::DataType::Int64).add(&mut ctx);
 
-    let users = ctx.add_operator(OperatorData::Scan(Scan {
+    let users = OperatorData::Scan(Scan {
         table: TableRef::bare("users"),
         columns: vec![user_id, user_age],
-    }));
-    let id_ref = ctx.add_expr(ExprData::ColumnRef(user_id));
-    let one = ctx.add_expr(ExprData::Literal(ScalarValue::Int64(1)));
-    let add = ctx.add_expr(ExprData::Binary {
+    })
+    .add(&mut ctx);
+    let id_ref = ExprData::ColumnRef(user_id).add(&mut ctx);
+    let one = ExprData::Literal(ScalarValue::Int64(1)).add(&mut ctx);
+    let add = ExprData::Binary {
         op: simple_graph::BinaryOp::Add,
         left: id_ref,
         right: one,
-    });
-    let map = ctx.add_operator(OperatorData::Map(Map {
+    }
+    .add(&mut ctx);
+    let map = OperatorData::Map(Map {
         computations: vec![(id_plus_one, add)],
         input: users,
-    }));
-    let projection = ctx.add_operator(OperatorData::Projection(Projection {
+    })
+    .add(&mut ctx);
+    let projection = OperatorData::Projection(Projection {
         columns: vec![user_id, id_plus_one],
         input: map,
-    }));
-    let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+    })
+    .add(&mut ctx);
+    let output = OperatorData::Output(Output { input: projection }).add(&mut ctx);
     ctx.set_root(output);
 
     ctx
@@ -458,44 +480,50 @@ fn mapped_users_query() -> QueryContext {
 
 fn cast_and_case_when_users_query() -> QueryContext {
     let mut ctx = QueryContext::new();
-    let user_id = ctx.add_column(ColumnData::new("id", arrow_schema::DataType::Int64));
-    let user_age = ctx.add_column(ColumnData::new("age", arrow_schema::DataType::Int64));
-    let age_i32 = ctx.add_column(ColumnData::new("age_i32", arrow_schema::DataType::Int32));
-    let age_bucket = ctx.add_column(ColumnData::new("age_bucket", arrow_schema::DataType::Utf8));
+    let user_id = ColumnData::new("id", arrow_schema::DataType::Int64).add(&mut ctx);
+    let user_age = ColumnData::new("age", arrow_schema::DataType::Int64).add(&mut ctx);
+    let age_i32 = ColumnData::new("age_i32", arrow_schema::DataType::Int32).add(&mut ctx);
+    let age_bucket = ColumnData::new("age_bucket", arrow_schema::DataType::Utf8).add(&mut ctx);
 
-    let users = ctx.add_operator(OperatorData::Scan(Scan {
+    let users = OperatorData::Scan(Scan {
         table: TableRef::bare("users"),
         columns: vec![user_id, user_age],
-    }));
-    let age_ref_for_cast = ctx.add_expr(ExprData::ColumnRef(user_age));
-    let cast = ctx.add_expr(ExprData::Cast {
+    })
+    .add(&mut ctx);
+    let age_ref_for_cast = ExprData::ColumnRef(user_age).add(&mut ctx);
+    let cast = ExprData::Cast {
         expr: age_ref_for_cast,
         ty: arrow_schema::DataType::Int32,
-    });
+    }
+    .add(&mut ctx);
 
-    let age_ref_for_condition = ctx.add_expr(ExprData::ColumnRef(user_age));
-    let adult_age = ctx.add_expr(ExprData::Literal(ScalarValue::Int64(18)));
-    let is_adult = ctx.add_expr(ExprData::Binary {
+    let age_ref_for_condition = ExprData::ColumnRef(user_age).add(&mut ctx);
+    let adult_age = ExprData::Literal(ScalarValue::Int64(18)).add(&mut ctx);
+    let is_adult = ExprData::Binary {
         op: simple_graph::BinaryOp::GtEq,
         left: age_ref_for_condition,
         right: adult_age,
-    });
-    let adult = ctx.add_expr(ExprData::Literal(ScalarValue::Utf8("adult".to_string())));
-    let minor = ctx.add_expr(ExprData::Literal(ScalarValue::Utf8("minor".to_string())));
-    let bucket = ctx.add_expr(ExprData::CaseWhen {
+    }
+    .add(&mut ctx);
+    let adult = ExprData::Literal(ScalarValue::Utf8("adult".to_string())).add(&mut ctx);
+    let minor = ExprData::Literal(ScalarValue::Utf8("minor".to_string())).add(&mut ctx);
+    let bucket = ExprData::CaseWhen {
         when_then: vec![(is_adult, adult)],
         else_expr: Some(minor),
-    });
+    }
+    .add(&mut ctx);
 
-    let map = ctx.add_operator(OperatorData::Map(Map {
+    let map = OperatorData::Map(Map {
         computations: vec![(age_i32, cast), (age_bucket, bucket)],
         input: users,
-    }));
-    let projection = ctx.add_operator(OperatorData::Projection(Projection {
+    })
+    .add(&mut ctx);
+    let projection = OperatorData::Projection(Projection {
         columns: vec![age_i32, age_bucket],
         input: map,
-    }));
-    let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+    })
+    .add(&mut ctx);
+    let output = OperatorData::Output(Output { input: projection }).add(&mut ctx);
     ctx.set_root(output);
 
     ctx

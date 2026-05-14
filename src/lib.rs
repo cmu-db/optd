@@ -73,6 +73,13 @@ pub enum OperatorData {
     Output(Output),
 }
 
+impl OperatorData {
+    /// Appends this operator to `ctx` and returns its handle.
+    pub fn add(self, ctx: &mut QueryContext) -> Operator {
+        QueryContext::add_operator(ctx, self)
+    }
+}
+
 /// Reads a base table and exposes its columns.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -272,6 +279,11 @@ impl ColumnData {
             ty,
         }
     }
+
+    /// Appends this column metadata to `ctx` and returns its handle.
+    pub fn add(self, ctx: &mut QueryContext) -> Column {
+        QueryContext::add_column(ctx, self)
+    }
 }
 
 /// An opaque reference to a scalar expression in a [`QueryContext`].
@@ -333,6 +345,13 @@ pub enum ExprData {
     },
     /// SQL scalar subquery expression.
     ScalarSubquery { subquery: Operator },
+}
+
+impl ExprData {
+    /// Appends this expression to `ctx` and returns its handle.
+    pub fn add(self, ctx: &mut QueryContext) -> Expr {
+        QueryContext::add_expr(ctx, self)
+    }
 }
 
 /// Unary expression operator.
@@ -1747,30 +1766,54 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn arena_payload_add_helpers_append_to_context() {
+        let mut ctx = QueryContext::new();
+
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let id_ref = ExprData::ColumnRef(id).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![id],
+        })
+        .add(&mut ctx);
+
+        assert_eq!(ctx.column(id).name, "id");
+        assert_eq!(ctx.expr(id_ref), &ExprData::ColumnRef(id));
+        let OperatorData::Scan(scan_data) = ctx.operator(scan) else {
+            panic!("expected scan operator");
+        };
+        assert_eq!(scan_data.columns, vec![id]);
+    }
+
+    #[test]
     fn pretty_prints_query_plan() {
         let mut ctx = QueryContext::new();
-        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
-        let age = ctx.add_column(ColumnData::new("age", DataType::Int32));
-        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let age = ColumnData::new("age", DataType::Int32).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![id, age],
-        }));
-        let age_ref = ctx.add_expr(ExprData::ColumnRef(age));
-        let adult_age = ctx.add_expr(ExprData::Literal(ScalarValue::Int32(18)));
-        let predicate = ctx.add_expr(ExprData::Binary {
+        })
+        .add(&mut ctx);
+        let age_ref = ExprData::ColumnRef(age).add(&mut ctx);
+        let adult_age = ExprData::Literal(ScalarValue::Int32(18)).add(&mut ctx);
+        let predicate = ExprData::Binary {
             op: BinaryOp::GtEq,
             left: age_ref,
             right: adult_age,
-        });
-        let selection = ctx.add_operator(OperatorData::Selection(Selection {
+        }
+        .add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
             predicate,
             input: scan,
-        }));
-        let projection = ctx.add_operator(OperatorData::Projection(Projection {
+        })
+        .add(&mut ctx);
+        let projection = OperatorData::Projection(Projection {
             columns: vec![id],
             input: selection,
-        }));
-        let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: projection }).add(&mut ctx);
         ctx.set_root(output);
 
         assert_eq!(
@@ -1809,12 +1852,13 @@ mod tests {
     #[cfg(feature = "serde")]
     fn pretty_json_serializes_recursive_display_tree() {
         let mut ctx = QueryContext::new();
-        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
-        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![id],
-        }));
-        let output = ctx.add_operator(OperatorData::Output(Output { input: scan }));
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: scan }).add(&mut ctx);
         ctx.set_root(output);
 
         let json = ctx.pretty_json();
@@ -1866,11 +1910,12 @@ mod tests {
     #[test]
     fn pretty_can_include_analysis_properties() {
         let mut ctx = QueryContext::new();
-        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
-        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![id],
-        }));
+        })
+        .add(&mut ctx);
         ctx.set_root(scan);
 
         assert!(!ctx.pretty().contains("analysis::available_columns"));
@@ -1886,12 +1931,13 @@ mod tests {
     #[cfg(feature = "serde")]
     fn json_formats_can_include_analysis_properties() {
         let mut ctx = QueryContext::new();
-        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
-        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![id],
-        }));
-        let output = ctx.add_operator(OperatorData::Output(Output { input: scan }));
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: scan }).add(&mut ctx);
         ctx.set_root(output);
         let config = QueryFormatConfig::new().with_analysis::<AvailableColumns>();
 
@@ -1910,11 +1956,12 @@ mod tests {
     #[test]
     fn set_root_does_not_append_operator() {
         let mut ctx = QueryContext::new();
-        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
-        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![id],
-        }));
+        })
+        .add(&mut ctx);
 
         ctx.set_root(scan);
         ctx.set_root(scan);
@@ -1927,31 +1974,35 @@ mod tests {
     #[test]
     fn pretty_prints_join_children_side_by_side() {
         let mut ctx = QueryContext::new();
-        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
-        let order_user_id = ctx.add_column(ColumnData::new("order_user_id", DataType::Int64));
+        let user_id = ColumnData::new("user_id", DataType::Int64).add(&mut ctx);
+        let order_user_id = ColumnData::new("order_user_id", DataType::Int64).add(&mut ctx);
 
-        let users = ctx.add_operator(OperatorData::Scan(Scan {
+        let users = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![user_id],
-        }));
-        let orders = ctx.add_operator(OperatorData::Scan(Scan {
+        })
+        .add(&mut ctx);
+        let orders = OperatorData::Scan(Scan {
             table: TableRef::bare("orders"),
             columns: vec![order_user_id],
-        }));
-        let left = ctx.add_expr(ExprData::ColumnRef(user_id));
-        let right = ctx.add_expr(ExprData::ColumnRef(order_user_id));
-        let on = ctx.add_expr(ExprData::Binary {
+        })
+        .add(&mut ctx);
+        let left = ExprData::ColumnRef(user_id).add(&mut ctx);
+        let right = ExprData::ColumnRef(order_user_id).add(&mut ctx);
+        let on = ExprData::Binary {
             op: BinaryOp::Eq,
             left,
             right,
-        });
-        let join = ctx.add_operator(OperatorData::Join(Join {
+        }
+        .add(&mut ctx);
+        let join = OperatorData::Join(Join {
             join_type: JoinType::Inner,
             on,
             outer: orders,
             inner: users,
-        }));
-        let output = ctx.add_operator(OperatorData::Output(Output { input: join }));
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: join }).add(&mut ctx);
         ctx.set_root(output);
 
         let pretty = ctx.pretty();
@@ -1965,28 +2016,32 @@ mod tests {
     #[test]
     fn pretty_prints_subquery_expression_inputs() {
         let mut ctx = QueryContext::new();
-        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
-        let order_id = ctx.add_column(ColumnData::new("order_id", DataType::Int64));
+        let user_id = ColumnData::new("user_id", DataType::Int64).add(&mut ctx);
+        let order_id = ColumnData::new("order_id", DataType::Int64).add(&mut ctx);
 
-        let users = ctx.add_operator(OperatorData::Scan(Scan {
+        let users = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![user_id],
-        }));
-        let orders = ctx.add_operator(OperatorData::Scan(Scan {
+        })
+        .add(&mut ctx);
+        let orders = OperatorData::Scan(Scan {
             table: TableRef::bare("orders"),
             columns: vec![order_id],
-        }));
-        let left = ctx.add_expr(ExprData::ColumnRef(user_id));
-        let right = ctx.add_expr(ExprData::ScalarSubquery { subquery: orders });
-        let predicate = ctx.add_expr(ExprData::Binary {
+        })
+        .add(&mut ctx);
+        let left = ExprData::ColumnRef(user_id).add(&mut ctx);
+        let right = ExprData::ScalarSubquery { subquery: orders }.add(&mut ctx);
+        let predicate = ExprData::Binary {
             op: BinaryOp::Eq,
             left,
             right,
-        });
-        let selection = ctx.add_operator(OperatorData::Selection(Selection {
+        }
+        .add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
             predicate,
             input: users,
-        }));
+        })
+        .add(&mut ctx);
         ctx.set_root(selection);
 
         let pretty = ctx.pretty();
@@ -2004,31 +2059,35 @@ mod tests {
     #[cfg(feature = "serde")]
     fn flat_prints_operators_in_dfs_post_order() {
         let mut ctx = QueryContext::new();
-        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
-        let order_user_id = ctx.add_column(ColumnData::new("order_user_id", DataType::Int64));
+        let user_id = ColumnData::new("user_id", DataType::Int64).add(&mut ctx);
+        let order_user_id = ColumnData::new("order_user_id", DataType::Int64).add(&mut ctx);
 
-        let users = ctx.add_operator(OperatorData::Scan(Scan {
+        let users = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![user_id],
-        }));
-        let orders = ctx.add_operator(OperatorData::Scan(Scan {
+        })
+        .add(&mut ctx);
+        let orders = OperatorData::Scan(Scan {
             table: TableRef::bare("orders"),
             columns: vec![order_user_id],
-        }));
-        let left = ctx.add_expr(ExprData::ColumnRef(user_id));
-        let right = ctx.add_expr(ExprData::ColumnRef(order_user_id));
-        let on = ctx.add_expr(ExprData::Binary {
+        })
+        .add(&mut ctx);
+        let left = ExprData::ColumnRef(user_id).add(&mut ctx);
+        let right = ExprData::ColumnRef(order_user_id).add(&mut ctx);
+        let on = ExprData::Binary {
             op: BinaryOp::Eq,
             left,
             right,
-        });
-        let join = ctx.add_operator(OperatorData::Join(Join {
+        }
+        .add(&mut ctx);
+        let join = OperatorData::Join(Join {
             join_type: JoinType::Inner,
             on,
             outer: orders,
             inner: users,
-        }));
-        let output = ctx.add_operator(OperatorData::Output(Output { input: join }));
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: join }).add(&mut ctx);
         ctx.set_root(output);
 
         let flat = ctx.pretty_flat();
@@ -2048,17 +2107,18 @@ mod tests {
     #[test]
     fn pretty_prints_aggregation() {
         let mut ctx = QueryContext::new();
-        let region = ctx.add_column(ColumnData::new("region", DataType::Utf8));
-        let amount = ctx.add_column(ColumnData::new("amount", DataType::Float64));
-        let total_amount = ctx.add_column(ColumnData::new("total_amount", DataType::Float64));
-        let order_count = ctx.add_column(ColumnData::new("order_count", DataType::Int64));
-        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+        let region = ColumnData::new("region", DataType::Utf8).add(&mut ctx);
+        let amount = ColumnData::new("amount", DataType::Float64).add(&mut ctx);
+        let total_amount = ColumnData::new("total_amount", DataType::Float64).add(&mut ctx);
+        let order_count = ColumnData::new("order_count", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
             table: TableRef::bare("orders"),
             columns: vec![region, amount],
-        }));
-        let region_ref = ctx.add_expr(ExprData::ColumnRef(region));
-        let amount_ref = ctx.add_expr(ExprData::ColumnRef(amount));
-        let aggregation = ctx.add_operator(OperatorData::Aggregation(Aggregation {
+        })
+        .add(&mut ctx);
+        let region_ref = ExprData::ColumnRef(region).add(&mut ctx);
+        let amount_ref = ExprData::ColumnRef(amount).add(&mut ctx);
+        let aggregation = OperatorData::Aggregation(Aggregation {
             keys: vec![region_ref],
             aggregates: vec![
                 (
@@ -2072,7 +2132,8 @@ mod tests {
                 (order_count, AggregateExpr::CountStar),
             ],
             input: scan,
-        }));
+        })
+        .add(&mut ctx);
         ctx.set_root(aggregation);
 
         let pretty = ctx.pretty();
@@ -2088,26 +2149,29 @@ mod tests {
     #[test]
     fn pretty_prints_sort_and_limit() {
         let mut ctx = QueryContext::new();
-        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
-        let age = ctx.add_column(ColumnData::new("age", DataType::Int32));
-        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let age = ColumnData::new("age", DataType::Int32).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![id, age],
-        }));
-        let age_ref = ctx.add_expr(ExprData::ColumnRef(age));
-        let sort = ctx.add_operator(OperatorData::Sort(Sort {
+        })
+        .add(&mut ctx);
+        let age_ref = ExprData::ColumnRef(age).add(&mut ctx);
+        let sort = OperatorData::Sort(Sort {
             keys: vec![SortKey {
                 expr: age_ref,
                 direction: SortDirection::Desc,
                 nulls: NullOrdering::Last,
             }],
             input: scan,
-        }));
-        let limit = ctx.add_operator(OperatorData::Limit(Limit {
+        })
+        .add(&mut ctx);
+        let limit = OperatorData::Limit(Limit {
             fetch: Some(10),
             offset: 5,
             input: sort,
-        }));
+        })
+        .add(&mut ctx);
         ctx.set_root(limit);
 
         let pretty = ctx.pretty();
@@ -2129,31 +2193,31 @@ mod tests {
     #[test]
     fn pretty_prints_extension_functions() {
         let mut ctx = QueryContext::new();
-        let path = ctx.add_expr(ExprData::Literal(ScalarValue::Utf8(
-            "orders.csv".to_string(),
-        )));
-        let order_id = ctx.add_column(ColumnData::new("order_id", DataType::Int64));
-        let region = ctx.add_column(ColumnData::new("region", DataType::Utf8));
-        let normalized_region =
-            ctx.add_column(ColumnData::new("normalized_region", DataType::Utf8));
-        let score = ctx.add_column(ColumnData::new("score", DataType::Float64));
-        let table = ctx.add_operator(OperatorData::TableFunction(TableFunction {
+        let path = ExprData::Literal(ScalarValue::Utf8("orders.csv".to_string())).add(&mut ctx);
+        let order_id = ColumnData::new("order_id", DataType::Int64).add(&mut ctx);
+        let region = ColumnData::new("region", DataType::Utf8).add(&mut ctx);
+        let normalized_region = ColumnData::new("normalized_region", DataType::Utf8).add(&mut ctx);
+        let score = ColumnData::new("score", DataType::Float64).add(&mut ctx);
+        let table = OperatorData::TableFunction(TableFunction {
             function: TableFunctionDef::extension("read_orders"),
             args: vec![path],
             columns: vec![order_id, region],
-        }));
-        let region_ref = ctx.add_expr(ExprData::ColumnRef(region));
-        let normalize_region = ctx.add_expr(ExprData::ScalarFunction {
+        })
+        .add(&mut ctx);
+        let region_ref = ExprData::ColumnRef(region).add(&mut ctx);
+        let normalize_region = ExprData::ScalarFunction {
             function: ScalarFunction::extension("normalize_region"),
             args: vec![region_ref],
-        });
-        let map = ctx.add_operator(OperatorData::Map(Map {
+        }
+        .add(&mut ctx);
+        let map = OperatorData::Map(Map {
             computations: vec![(normalized_region, normalize_region)],
             input: table,
-        }));
-        let key = ctx.add_expr(ExprData::ColumnRef(normalized_region));
-        let order_id_ref = ctx.add_expr(ExprData::ColumnRef(order_id));
-        let aggregation = ctx.add_operator(OperatorData::Aggregation(Aggregation {
+        })
+        .add(&mut ctx);
+        let key = ExprData::ColumnRef(normalized_region).add(&mut ctx);
+        let order_id_ref = ExprData::ColumnRef(order_id).add(&mut ctx);
+        let aggregation = OperatorData::Aggregation(Aggregation {
             keys: vec![key],
             aggregates: vec![(
                 score,
@@ -2164,7 +2228,8 @@ mod tests {
                 },
             )],
             input: map,
-        }));
+        })
+        .add(&mut ctx);
         ctx.set_root(aggregation);
 
         let pretty = ctx.pretty();
@@ -2182,18 +2247,14 @@ mod tests {
     #[test]
     fn formatter_wraps_box_details_at_configured_width() {
         let mut ctx = QueryContext::new();
-        let first = ctx.add_column(ColumnData::new(
-            "first_really_long_column_name",
-            DataType::Int64,
-        ));
-        let second = ctx.add_column(ColumnData::new(
-            "second_really_long_column_name",
-            DataType::Int64,
-        ));
-        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+        let first = ColumnData::new("first_really_long_column_name", DataType::Int64).add(&mut ctx);
+        let second =
+            ColumnData::new("second_really_long_column_name", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
             table: TableRef::bare("wide_table"),
             columns: vec![first, second],
-        }));
+        })
+        .add(&mut ctx);
         ctx.set_root(scan);
 
         let node = QueryFormatter::new(&ctx).format();
@@ -2284,24 +2345,27 @@ mod tests {
     #[test]
     fn query_context_round_trips_through_serde() {
         let mut ctx = QueryContext::new();
-        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
-        let age = ctx.add_column(ColumnData::new("age", DataType::Int32));
-        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let age = ColumnData::new("age", DataType::Int32).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
             table: TableRef::bare("users"),
             columns: vec![id, age],
-        }));
-        let age_ref = ctx.add_expr(ExprData::ColumnRef(age));
-        let adult_age = ctx.add_expr(ExprData::Literal(ScalarValue::Int32(18)));
-        let predicate = ctx.add_expr(ExprData::Binary {
+        })
+        .add(&mut ctx);
+        let age_ref = ExprData::ColumnRef(age).add(&mut ctx);
+        let adult_age = ExprData::Literal(ScalarValue::Int32(18)).add(&mut ctx);
+        let predicate = ExprData::Binary {
             op: BinaryOp::GtEq,
             left: age_ref,
             right: adult_age,
-        });
-        let selection = ctx.add_operator(OperatorData::Selection(Selection {
+        }
+        .add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
             predicate,
             input: scan,
-        }));
-        let output = ctx.add_operator(OperatorData::Output(Output { input: selection }));
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: selection }).add(&mut ctx);
         ctx.set_root(output);
 
         let serialized = serde_json::to_string(&ctx).unwrap();

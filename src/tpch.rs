@@ -452,79 +452,77 @@ pub fn tpch_q5() -> QueryContext {
 
 pub fn tpch_q6() -> QueryContext {
     let mut ctx = QueryContext::new();
-    let shipdate = ctx.add_column(ColumnData::new(
-        "l_shipdate",
-        arrow_schema::DataType::Date32,
-    ));
-    let discount = ctx.add_column(ColumnData::new(
-        "l_discount",
-        arrow_schema::DataType::Decimal128(15, 2),
-    ));
-    let quantity = ctx.add_column(ColumnData::new(
-        "l_quantity",
-        arrow_schema::DataType::Decimal128(15, 2),
-    ));
-    let extendedprice = ctx.add_column(ColumnData::new(
-        "l_extendedprice",
-        arrow_schema::DataType::Decimal128(15, 2),
-    ));
-    let revenue = ctx.add_column(ColumnData::new(
-        "revenue",
-        arrow_schema::DataType::Decimal128(15, 2),
-    ));
+    let shipdate = ColumnData::new("l_shipdate", arrow_schema::DataType::Date32).add(&mut ctx);
+    let discount =
+        ColumnData::new("l_discount", arrow_schema::DataType::Decimal128(15, 2)).add(&mut ctx);
+    let quantity =
+        ColumnData::new("l_quantity", arrow_schema::DataType::Decimal128(15, 2)).add(&mut ctx);
+    let extendedprice =
+        ColumnData::new("l_extendedprice", arrow_schema::DataType::Decimal128(15, 2)).add(&mut ctx);
+    let revenue =
+        ColumnData::new("revenue", arrow_schema::DataType::Decimal128(15, 2)).add(&mut ctx);
 
-    let lineitem = ctx.add_operator(OperatorData::Scan(Scan {
+    let lineitem = OperatorData::Scan(Scan {
         table: TableRef::bare("lineitem"),
         columns: vec![shipdate, discount, quantity, extendedprice],
-    }));
-    let shipdate_ref = ctx.add_expr(ExprData::ColumnRef(shipdate));
-    let start_date = ctx.add_expr(ExprData::Literal(ScalarValue::Date32(8766)));
-    let shipdate_after_start = ctx.add_expr(ExprData::Binary {
+    })
+    .add(&mut ctx);
+    let shipdate_ref = ExprData::ColumnRef(shipdate).add(&mut ctx);
+    let start_date = ExprData::Literal(ScalarValue::Date32(8766)).add(&mut ctx);
+    let shipdate_after_start = ExprData::Binary {
         op: BinaryOp::GtEq,
         left: shipdate_ref,
         right: start_date,
-    });
-    let shipdate_ref = ctx.add_expr(ExprData::ColumnRef(shipdate));
-    let end_date = ctx.add_expr(ExprData::Literal(ScalarValue::Date32(9131)));
-    let shipdate_before_end = ctx.add_expr(ExprData::Binary {
+    }
+    .add(&mut ctx);
+    let shipdate_ref = ExprData::ColumnRef(shipdate).add(&mut ctx);
+    let end_date = ExprData::Literal(ScalarValue::Date32(9131)).add(&mut ctx);
+    let shipdate_before_end = ExprData::Binary {
         op: BinaryOp::Lt,
         left: shipdate_ref,
         right: end_date,
-    });
-    let discount_ref = ctx.add_expr(ExprData::ColumnRef(discount));
-    let min_discount = ctx.add_expr(ExprData::Literal(ScalarValue::Decimal128 {
+    }
+    .add(&mut ctx);
+    let discount_ref = ExprData::ColumnRef(discount).add(&mut ctx);
+    let min_discount = ExprData::Literal(ScalarValue::Decimal128 {
         value: 5,
         precision: 15,
         scale: 2,
-    }));
-    let discount_above_min = ctx.add_expr(ExprData::Binary {
+    })
+    .add(&mut ctx);
+    let discount_above_min = ExprData::Binary {
         op: BinaryOp::GtEq,
         left: discount_ref,
         right: min_discount,
-    });
-    let discount_ref = ctx.add_expr(ExprData::ColumnRef(discount));
-    let max_discount = ctx.add_expr(ExprData::Literal(ScalarValue::Decimal128 {
+    }
+    .add(&mut ctx);
+    let discount_ref = ExprData::ColumnRef(discount).add(&mut ctx);
+    let max_discount = ExprData::Literal(ScalarValue::Decimal128 {
         value: 7,
         precision: 15,
         scale: 2,
-    }));
-    let discount_below_max = ctx.add_expr(ExprData::Binary {
+    })
+    .add(&mut ctx);
+    let discount_below_max = ExprData::Binary {
         op: BinaryOp::LtEq,
         left: discount_ref,
         right: max_discount,
-    });
-    let quantity_ref = ctx.add_expr(ExprData::ColumnRef(quantity));
-    let max_quantity = ctx.add_expr(ExprData::Literal(ScalarValue::Decimal128 {
+    }
+    .add(&mut ctx);
+    let quantity_ref = ExprData::ColumnRef(quantity).add(&mut ctx);
+    let max_quantity = ExprData::Literal(ScalarValue::Decimal128 {
         value: 2400,
         precision: 15,
         scale: 2,
-    }));
-    let quantity_below_max = ctx.add_expr(ExprData::Binary {
+    })
+    .add(&mut ctx);
+    let quantity_below_max = ExprData::Binary {
         op: BinaryOp::Lt,
         left: quantity_ref,
         right: max_quantity,
-    });
-    let predicate = ctx.add_expr(ExprData::Nary {
+    }
+    .add(&mut ctx);
+    let predicate = ExprData::Nary {
         op: NaryOp::And,
         exprs: vec![
             shipdate_after_start,
@@ -533,19 +531,22 @@ pub fn tpch_q6() -> QueryContext {
             discount_below_max,
             quantity_below_max,
         ],
-    });
-    let selection = ctx.add_operator(OperatorData::Selection(Selection {
+    }
+    .add(&mut ctx);
+    let selection = OperatorData::Selection(Selection {
         predicate,
         input: lineitem,
-    }));
-    let extendedprice_ref = ctx.add_expr(ExprData::ColumnRef(extendedprice));
-    let discount_ref = ctx.add_expr(ExprData::ColumnRef(discount));
-    let revenue_expr = ctx.add_expr(ExprData::Binary {
+    })
+    .add(&mut ctx);
+    let extendedprice_ref = ExprData::ColumnRef(extendedprice).add(&mut ctx);
+    let discount_ref = ExprData::ColumnRef(discount).add(&mut ctx);
+    let revenue_expr = ExprData::Binary {
         op: BinaryOp::Multiply,
         left: extendedprice_ref,
         right: discount_ref,
-    });
-    let aggregation = ctx.add_operator(OperatorData::Aggregation(Aggregation {
+    }
+    .add(&mut ctx);
+    let aggregation = OperatorData::Aggregation(Aggregation {
         keys: Vec::new(),
         aggregates: vec![(
             revenue,
@@ -556,8 +557,9 @@ pub fn tpch_q6() -> QueryContext {
             },
         )],
         input: selection,
-    }));
-    let output = ctx.add_operator(OperatorData::Output(Output { input: aggregation }));
+    })
+    .add(&mut ctx);
+    let output = OperatorData::Output(Output { input: aggregation }).add(&mut ctx);
     ctx.set_root(output);
 
     ctx
@@ -1740,7 +1742,7 @@ pub fn scan_rel_as(
         let display_name = alias
             .map(|alias| format!("{alias}.{name}"))
             .unwrap_or_else(|| (*name).to_string());
-        let column = ctx.add_column(ColumnData::new(display_name, tpch_column_type(name)));
+        let column = ColumnData::new(display_name, tpch_column_type(name)).add(ctx);
         cols.insert((*name).to_string(), column);
         if let Some(alias) = alias {
             cols.insert(format!("{alias}.{name}"), column);
@@ -1748,10 +1750,11 @@ pub fn scan_rel_as(
         scan_columns.push(column);
     }
 
-    let input = ctx.add_operator(OperatorData::Scan(Scan {
+    let input = OperatorData::Scan(Scan {
         table: TableRef::bare(table),
         columns: scan_columns,
-    }));
+    })
+    .add(ctx);
     Rel {
         input,
         cols,
@@ -1760,10 +1763,11 @@ pub fn scan_rel_as(
 }
 
 pub fn cross_rel(ctx: &mut QueryContext, left: Rel, right: Rel) -> Rel {
-    let input = ctx.add_operator(OperatorData::CrossProduct(CrossProduct {
+    let input = OperatorData::CrossProduct(CrossProduct {
         outer: left.input,
         inner: right.input,
-    }));
+    })
+    .add(ctx);
     let merged = left.merge(right);
     Rel { input, ..merged }
 }
@@ -1777,12 +1781,13 @@ pub fn join_rel(
 ) -> Rel {
     let left = materialize_rel(ctx, left);
     let right = materialize_rel(ctx, right);
-    let input = ctx.add_operator(OperatorData::Join(Join {
+    let input = OperatorData::Join(Join {
         join_type: join_type.clone(),
         on,
         outer: left.input,
         inner: right.input,
-    }));
+    })
+    .add(ctx);
     let cols = match join_type {
         JoinType::LeftSemi | JoinType::LeftAnti => left.cols,
         _ => left.merge(right).cols,
@@ -1842,15 +1847,17 @@ pub fn select_rel(ctx: &mut QueryContext, rel: Rel, predicate: Expr) -> Rel {
             push_conjuncts(ctx, existing.predicate, &mut predicates);
             push_conjuncts(ctx, predicate, &mut predicates);
             let predicate = and(ctx, predicates);
-            ctx.add_operator(OperatorData::Selection(Selection {
+            OperatorData::Selection(Selection {
                 predicate,
                 input: existing.input,
-            }))
+            })
+            .add(ctx)
         }
-        _ => ctx.add_operator(OperatorData::Selection(Selection {
+        _ => OperatorData::Selection(Selection {
             predicate,
             input: rel.input,
-        })),
+        })
+        .add(ctx),
     };
     Rel {
         input,
@@ -1905,15 +1912,16 @@ pub fn map_rel(
     let mut map_computations = Vec::new();
 
     for (name, ty, expr) in computations {
-        let column = ctx.add_column(ColumnData::new(name, ty));
+        let column = ColumnData::new(name, ty).add(ctx);
         cols.insert(name.to_string(), column);
         map_computations.push((column, expr));
     }
 
-    let input = ctx.add_operator(OperatorData::Map(Map {
+    let input = OperatorData::Map(Map {
         computations: map_computations,
         input: rel.input,
-    }));
+    })
+    .add(ctx);
     Rel {
         input,
         cols,
@@ -1940,17 +1948,18 @@ pub fn aggregate_rel(
     let aggregates = aggregates
         .into_iter()
         .map(|(name, ty, expr)| {
-            let column = ctx.add_column(ColumnData::new(name, ty));
+            let column = ColumnData::new(name, ty).add(ctx);
             cols.insert(name.to_string(), column);
             (column, expr)
         })
         .collect();
 
-    let input = ctx.add_operator(OperatorData::Aggregation(Aggregation {
+    let input = OperatorData::Aggregation(Aggregation {
         keys,
         aggregates,
         input: rel.input,
-    }));
+    })
+    .add(ctx);
     Rel {
         input,
         cols,
@@ -1968,10 +1977,11 @@ pub fn sort_rel(ctx: &mut QueryContext, rel: Rel, keys: Vec<(&str, SortDirection
             nulls: NullOrdering::Last,
         })
         .collect();
-    let input = ctx.add_operator(OperatorData::Sort(Sort {
+    let input = OperatorData::Sort(Sort {
         keys: sort_keys,
         input: rel.input,
-    }));
+    })
+    .add(ctx);
     Rel {
         input,
         cols: rel.cols,
@@ -1981,11 +1991,12 @@ pub fn sort_rel(ctx: &mut QueryContext, rel: Rel, keys: Vec<(&str, SortDirection
 
 pub fn limit_rel(ctx: &mut QueryContext, rel: Rel, fetch: usize) -> Rel {
     let rel = materialize_rel(ctx, rel);
-    let input = ctx.add_operator(OperatorData::Limit(Limit {
+    let input = OperatorData::Limit(Limit {
         fetch: Some(fetch),
         offset: 0,
         input: rel.input,
-    }));
+    })
+    .add(ctx);
     Rel {
         input,
         cols: rel.cols,
@@ -1999,10 +2010,11 @@ pub fn project_rel(ctx: &mut QueryContext, rel: Rel, output_columns: &[&str]) ->
         .iter()
         .map(|name| rel.col(name))
         .collect::<Vec<_>>();
-    let input = ctx.add_operator(OperatorData::Projection(Projection {
+    let input = OperatorData::Projection(Projection {
         columns: columns.clone(),
         input: rel.input,
-    }));
+    })
+    .add(ctx);
     let cols = output_columns
         .iter()
         .zip(columns)
@@ -2018,20 +2030,21 @@ pub fn project_rel(ctx: &mut QueryContext, rel: Rel, output_columns: &[&str]) ->
 pub fn finish(ctx: &mut QueryContext, rel: Rel, output_columns: &[&str]) {
     let rel = materialize_rel(ctx, rel);
     let columns = output_columns.iter().map(|name| rel.col(name)).collect();
-    let projection = ctx.add_operator(OperatorData::Projection(Projection {
+    let projection = OperatorData::Projection(Projection {
         columns,
         input: rel.input,
-    }));
-    let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+    })
+    .add(ctx);
+    let output = OperatorData::Output(Output { input: projection }).add(ctx);
     ctx.set_root(output);
 }
 
 pub fn col(ctx: &mut QueryContext, column: Column) -> Expr {
-    ctx.add_expr(ExprData::ColumnRef(column))
+    ExprData::ColumnRef(column).add(ctx)
 }
 
 pub fn lit(ctx: &mut QueryContext, value: ScalarValue) -> Expr {
-    ctx.add_expr(ExprData::Literal(value))
+    ExprData::Literal(value).add(ctx)
 }
 
 pub fn int_lit(ctx: &mut QueryContext, value: i64) -> Expr {
@@ -2058,7 +2071,7 @@ pub fn date_lit(ctx: &mut QueryContext, days_since_epoch: i32) -> Expr {
 }
 
 pub fn bin(ctx: &mut QueryContext, op: BinaryOp, left: Expr, right: Expr) -> Expr {
-    ctx.add_expr(ExprData::Binary { op, left, right })
+    ExprData::Binary { op, left, right }.add(ctx)
 }
 
 pub fn eq(ctx: &mut QueryContext, left: Expr, right: Expr) -> Expr {
@@ -2066,65 +2079,73 @@ pub fn eq(ctx: &mut QueryContext, left: Expr, right: Expr) -> Expr {
 }
 
 pub fn and(ctx: &mut QueryContext, exprs: Vec<Expr>) -> Expr {
-    ctx.add_expr(ExprData::Nary {
+    ExprData::Nary {
         op: NaryOp::And,
         exprs,
-    })
+    }
+    .add(ctx)
 }
 
 pub fn or(ctx: &mut QueryContext, exprs: Vec<Expr>) -> Expr {
-    ctx.add_expr(ExprData::Nary {
+    ExprData::Nary {
         op: NaryOp::Or,
         exprs,
-    })
+    }
+    .add(ctx)
 }
 
 pub fn not(ctx: &mut QueryContext, expr: Expr) -> Expr {
-    ctx.add_expr(ExprData::Unary {
+    ExprData::Unary {
         op: UnaryOp::Not,
         expr,
-    })
+    }
+    .add(ctx)
 }
 
 pub fn scalar_fn(ctx: &mut QueryContext, name: &'static str, args: Vec<Expr>) -> Expr {
-    ctx.add_expr(ExprData::ScalarFunction {
+    ExprData::ScalarFunction {
         function: ScalarFunction::extension(name),
         args,
-    })
+    }
+    .add(ctx)
 }
 
 pub fn exists(ctx: &mut QueryContext, subquery: Operator) -> Expr {
-    ctx.add_expr(ExprData::Exists {
+    ExprData::Exists {
         subquery,
         negated: false,
-    })
+    }
+    .add(ctx)
 }
 
 pub fn not_exists(ctx: &mut QueryContext, subquery: Operator) -> Expr {
-    ctx.add_expr(ExprData::Exists {
+    ExprData::Exists {
         subquery,
         negated: true,
-    })
+    }
+    .add(ctx)
 }
 
 pub fn in_subquery(ctx: &mut QueryContext, expr: Expr, subquery: Operator) -> Expr {
-    ctx.add_expr(ExprData::InSubquery {
+    ExprData::InSubquery {
         expr,
         subquery,
         negated: false,
-    })
+    }
+    .add(ctx)
 }
 
 pub fn not_in_subquery(ctx: &mut QueryContext, expr: Expr, subquery: Operator) -> Expr {
-    ctx.add_expr(ExprData::InSubquery {
+    ExprData::InSubquery {
         expr,
         subquery,
         negated: true,
-    })
+    }
+    .add(ctx)
 }
 
 pub fn scalar_subquery(ctx: &mut QueryContext, subquery: Operator) -> Expr {
-    ctx.add_expr(ExprData::ScalarSubquery { subquery })
+    ExprData::ScalarSubquery { subquery }.add(ctx)
 }
 
 pub fn like(ctx: &mut QueryContext, value: Expr, pattern: &'static str) -> Expr {
@@ -2159,10 +2180,11 @@ pub fn case_when(
     when_then: Vec<(Expr, Expr)>,
     else_expr: Option<Expr>,
 ) -> Expr {
-    ctx.add_expr(ExprData::CaseWhen {
+    ExprData::CaseWhen {
         when_then,
         else_expr,
-    })
+    }
+    .add(ctx)
 }
 
 pub fn sum_expr(arg: Expr) -> AggregateExpr {
