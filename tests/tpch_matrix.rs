@@ -347,11 +347,56 @@ fn tpch_q2() -> QueryContext {
     let predicate = and(&mut ctx, vec![size_predicate, type_predicate]);
     let joined = select_rel(&mut ctx, region_filtered.clone(), predicate);
 
-    let supplycost = col(&mut ctx, region_filtered.col("ps_supplycost"));
+    let sub_partsupp = scan_rel_as(
+        &mut ctx,
+        "partsupp",
+        Some("ps2"),
+        &["ps_partkey", "ps_suppkey", "ps_supplycost"],
+    );
+    let sub_supplier = scan_rel_as(
+        &mut ctx,
+        "supplier",
+        Some("s2"),
+        &["s_suppkey", "s_nationkey"],
+    );
+    let sub_nation = scan_rel_as(
+        &mut ctx,
+        "nation",
+        Some("n2"),
+        &["n_nationkey", "n_regionkey"],
+    );
+    let sub_region = scan_rel_as(&mut ctx, "region", Some("r2"), &["r_regionkey", "r_name"]);
+    let subquery = cross_join_on_cols(
+        &mut ctx,
+        sub_partsupp,
+        sub_supplier,
+        "ps2.ps_suppkey",
+        "s2.s_suppkey",
+    );
+    let subquery = cross_join_on_cols(
+        &mut ctx,
+        subquery,
+        sub_nation,
+        "s2.s_nationkey",
+        "n2.n_nationkey",
+    );
+    let subquery = cross_join_on_cols(
+        &mut ctx,
+        subquery,
+        sub_region,
+        "n2.n_regionkey",
+        "r2.r_regionkey",
+    );
+    let subquery = filter_eq_str(&mut ctx, subquery, "r2.r_name", "ASIA");
+    let outer_partkey = col(&mut ctx, joined.col("p_partkey"));
+    let inner_partkey = col(&mut ctx, subquery.col("ps2.ps_partkey"));
+    let correlated = eq(&mut ctx, outer_partkey, inner_partkey);
+    let subquery = select_rel(&mut ctx, subquery, correlated);
+    let supplycost = col(&mut ctx, subquery.col("ps2.ps_supplycost"));
     let min_cost = aggregate_rel(
         &mut ctx,
-        region_filtered,
-        &["p_partkey"],
+        subquery,
+        &[],
         vec![(
             "min_supplycost",
             arrow_schema::DataType::Decimal128(15, 2),
