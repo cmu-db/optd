@@ -13,7 +13,7 @@ Implemented exporter coverage:
 - `TableFunction` for representable local-file reads
 - scalar expressions (`Literal`, `ColumnRef`, `Unary`, `Binary`, `Nary`, `Cast`, `CaseWhen`, `ScalarFunction`) with conservative output typing
 
-Integration tests currently validate DataFusion consumer interoperability for these operators. A narrow sqllogictest harness also validates DataFusion SQL plans after a Substrait export/import round trip with logical optimizer rules disabled. A plan-only sqllogictest script now carries all TPC-H Q1-Q22 SQL shapes over empty benchmark schemas; the full runner is gated behind `INCLUDE_TPCH=true` until remaining Substrait gaps are closed.
+Integration tests currently validate DataFusion consumer interoperability for these operators. A sqllogictest harness validates DataFusion SQL plans after a Substrait export/import round trip with logical optimizer rules disabled. Plan-only sqllogictests carry all TPC-H Q1-Q22 SQL shapes over empty benchmark schemas as separate files under `tests/slt/tpch/`; the full TPC-H run is gated behind `INCLUDE_TPCH=true cargo test --test sqllogictest_harness` until remaining Substrait gaps are closed.
 
 ## Gaps Most Likely to Block TPC-H
 
