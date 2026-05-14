@@ -5,6 +5,7 @@ use std::sync::Arc;
 use snafu::whatever;
 
 use crate::error::Result;
+use crate::ir::builder::make_schema_field_names_unique;
 use crate::ir::convert::{IntoOperator, IntoScalar};
 use crate::ir::operator::{
     Aggregate, DependentJoin, Join, Operator, OperatorKind, OrderBy, Project, Remap, Select,
@@ -334,14 +335,41 @@ impl UnnestingRule {
                     ctx,
                 )?;
                 let ordered_input_cols = new_input.output_columns_in_order(ctx)?;
+                let old_binding = ctx.get_binding(node.table_index())?;
+                let old_field_count = old_binding.schema().fields().len();
+                if ordered_input_cols.len() < old_field_count {
+                    whatever!(
+                        "rebuilt remap input has fewer columns ({}) than original remap binding ({})",
+                        ordered_input_cols.len(),
+                        old_field_count
+                    );
+                }
+
+                let new_input_schema = new_input.output_schema(ctx)?;
+                let mut metadata = new_input_schema.inner().metadata().clone();
+                metadata.extend(old_binding.schema().metadata().clone());
+                let remap_fields = (0..ordered_input_cols.len())
+                    .map(|idx| {
+                        if idx < old_field_count {
+                            old_binding.schema().fields()[idx].clone()
+                        } else {
+                            new_input_schema.inner().fields()[idx].clone()
+                        }
+                    })
+                    .collect::<Vec<_>>();
                 let table_index =
-                    ctx.add_binding(None, new_input.output_schema(ctx)?.inner().clone())?;
+                    ctx.add_binding(None, make_schema_field_names_unique(remap_fields, metadata))?;
                 let remapped = Remap::new(table_index, new_input).into_operator();
-                let passthrough_mapping = ordered_input_cols
+                let mut passthrough_mapping = (0..old_field_count)
+                    .map(|idx| (Column(*node.table_index(), idx), Column(table_index, idx)))
+                    .collect::<HashMap<_, _>>();
+                passthrough_mapping.extend(
+                    ordered_input_cols
                     .into_iter()
                     .enumerate()
                     .map(|(idx, col)| (col, Column(table_index, idx)))
-                    .collect::<HashMap<_, _>>();
+                        .collect::<HashMap<_, _>>(),
+                );
                 info.propagate_passthrough_mapping(&passthrough_mapping);
                 Ok(remapped)
             }

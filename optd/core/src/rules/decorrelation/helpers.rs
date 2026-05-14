@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::error::Result;
+use crate::ir::builder::make_schema_field_names_unique;
 use crate::ir::convert::IntoOperator;
 use crate::ir::convert::IntoScalar;
 use crate::ir::operator::{Operator, Remap};
@@ -342,7 +343,12 @@ pub(super) fn remap_right_output_collisions(
 
     // `Remap` is the cheapest way in the current IR to assign a fresh
     // table_index to the entire right subtree while preserving column order.
-    let table_index = ctx.add_binding(None, right.output_schema(ctx)?.inner().clone())?;
+    let output_schema = right.output_schema(ctx)?;
+    let remap_schema = make_schema_field_names_unique(
+        output_schema.inner().fields().iter().cloned(),
+        output_schema.inner().metadata().clone(),
+    );
+    let table_index = ctx.add_binding(None, remap_schema)?;
     let right_remap = right_cols
         .into_iter()
         .enumerate()
