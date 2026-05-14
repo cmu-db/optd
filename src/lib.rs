@@ -10,10 +10,12 @@ pub use display::{
 /// An opaque reference to a relational operator in a [`QueryContext`].
 ///
 /// The corresponding payload is [`OperatorData`].
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Operator(usize);
 
 /// A relational operator referenced by an [`Operator`] handle.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OperatorData {
     /// Reads a table and exposes the listed columns.
@@ -35,6 +37,7 @@ pub enum OperatorData {
 }
 
 /// Reads a base table and exposes its columns.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Scan {
     pub table: String,
@@ -42,6 +45,7 @@ pub struct Scan {
 }
 
 /// Filters rows from its input.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Selection {
     pub predicate: Expr,
@@ -49,6 +53,7 @@ pub struct Selection {
 }
 
 /// Computes new columns from input rows.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Map {
     pub computations: Vec<(Column, Expr)>,
@@ -56,6 +61,7 @@ pub struct Map {
 }
 
 /// Reads rows produced by a table-valued function.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TableFunction {
     pub function: TableFunctionDef,
@@ -64,6 +70,7 @@ pub struct TableFunction {
 }
 
 /// Joins two inputs using a join condition.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Join {
     pub join_type: JoinType,
@@ -73,6 +80,7 @@ pub struct Join {
 }
 
 /// Produces the Cartesian product of two inputs.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CrossProduct {
     pub outer: Operator,
@@ -80,6 +88,7 @@ pub struct CrossProduct {
 }
 
 /// Groups rows and computes aggregate columns.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Aggregation {
     pub keys: Vec<Expr>,
@@ -88,6 +97,7 @@ pub struct Aggregation {
 }
 
 /// Keeps or reorders columns from its input.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Projection {
     pub columns: Vec<Column>,
@@ -95,11 +105,13 @@ pub struct Projection {
 }
 
 /// Marks the final query output.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Output {
     pub input: Operator,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum JoinType {
     Inner,
@@ -126,6 +138,7 @@ impl std::fmt::Display for JoinType {
 /// An opaque reference to a column in a [`QueryContext`].
 ///
 /// The corresponding payload is [`ColumnData`].
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Column(usize);
 
@@ -136,6 +149,7 @@ impl std::fmt::Display for Column {
 }
 
 /// Metadata for the column.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone)]
 pub struct ColumnData {
     pub name: String,
@@ -157,10 +171,12 @@ impl ColumnData {
 /// An opaque reference to a scalar expression in a [`QueryContext`].
 ///
 /// The corresponding payload is [`ExprData`].
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Expr(usize);
 
 /// A scalar expression referenced by an [`Expr`] handle.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprData {
     /// Constant scalar literal.
@@ -185,6 +201,7 @@ pub enum ExprData {
 }
 
 /// Unary expression operator.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UnaryOp {
     /// Boolean negation.
@@ -198,6 +215,7 @@ pub enum UnaryOp {
 }
 
 /// Binary expression operator.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BinaryOp {
     /// Equality comparison.
@@ -223,6 +241,7 @@ pub enum BinaryOp {
 }
 
 /// N-ary logical expression operator.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NaryOp {
     /// Logical conjunction.
@@ -234,6 +253,7 @@ pub enum NaryOp {
 /// Group-level expression used by [`OperatorData::Aggregation`].
 ///
 /// Aggregate expressions consume the input rows for one group and produce one scalar value.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AggregateExpr {
     /// Counts all rows in the group.
@@ -247,6 +267,7 @@ pub enum AggregateExpr {
 }
 
 /// Aggregate function applied by [`AggregateExpr::Func`].
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AggregateFunction {
     Count,
@@ -278,6 +299,7 @@ impl std::fmt::Display for AggregateFunction {
 }
 
 /// Scalar function used by [`ExprData::ScalarFunction`].
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ScalarFunction {
     Abs,
@@ -307,6 +329,7 @@ impl std::fmt::Display for ScalarFunction {
 }
 
 /// Window function identifier for future window expressions/operators.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum WindowFunction {
     RowNumber,
@@ -338,6 +361,7 @@ impl std::fmt::Display for WindowFunction {
 }
 
 /// Table-valued function used by [`OperatorData::TableFunction`].
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TableFunctionDef {
     Values,
@@ -365,6 +389,7 @@ impl std::fmt::Display for TableFunctionDef {
 }
 
 /// Scalar value used by literal expressions.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ScalarValue {
     /// Null value with an explicit Arrow data type.
@@ -396,6 +421,7 @@ impl ScalarValue {
 }
 
 /// Owns the query IR graph and all node arenas.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone)]
 pub struct QueryContext {
     root: Option<Operator>,
@@ -503,12 +529,14 @@ impl QueryContext {
     }
 
     /// Formats the reachable query plan as recursive JSON for inspecting the tree shape.
+    #[cfg(feature = "serde")]
     pub fn pretty_json(&self) -> String {
         let node = QueryFormatter::new(self).format();
         serde_json::to_string_pretty(&node).expect("display tree serialization should not fail")
     }
 
     /// Formats the reachable query plan as flat DFS post-order JSON for file diffs.
+    #[cfg(feature = "serde")]
     pub fn pretty_flat(&self) -> String {
         let plan = QueryFormatter::new(self).format_plan();
         serde_json::to_string_pretty(&plan).expect("display plan serialization should not fail")
@@ -1117,6 +1145,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "serde")]
     fn pretty_json_serializes_recursive_display_tree() {
         let mut ctx = QueryContext::new();
         let id = ctx.add_column(ColumnData::new("id", DataType::Int64, false));
@@ -1199,6 +1228,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "serde")]
     fn flat_prints_operators_in_dfs_post_order() {
         let mut ctx = QueryContext::new();
         let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64, false));
@@ -1405,5 +1435,39 @@ mod tests {
         assert!(rendered.contains("│ right"));
         assert!(rendered.contains("│ Left"));
         assert!(rendered.contains("│ Right"));
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn query_context_round_trips_through_serde() {
+        let mut ctx = QueryContext::new();
+        let id = ctx.add_column(ColumnData::new("id", DataType::Int64, false));
+        let age = ctx.add_column(ColumnData::new("age", DataType::Int32, true));
+        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+            table: "users".to_string(),
+            columns: vec![id, age],
+        }));
+        let age_ref = ctx.add_expr(ExprData::ColumnRef(age));
+        let adult_age = ctx.add_expr(ExprData::Literal(ScalarValue::Int32(18)));
+        let predicate = ctx.add_expr(ExprData::Binary {
+            op: BinaryOp::GtEq,
+            left: age_ref,
+            right: adult_age,
+        });
+        let selection = ctx.add_operator(OperatorData::Selection(Selection {
+            predicate,
+            input: scan,
+        }));
+        let output = ctx.add_operator(OperatorData::Output(Output { input: selection }));
+        ctx.set_root(output);
+
+        let serialized = serde_json::to_string(&ctx).unwrap();
+        let deserialized: QueryContext = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.root(), ctx.root());
+        assert_eq!(deserialized.operator_count(), ctx.operator_count());
+        assert_eq!(deserialized.expr_count(), ctx.expr_count());
+        assert_eq!(deserialized.column_count(), ctx.column_count());
+        assert_eq!(deserialized.pretty(), ctx.pretty());
     }
 }

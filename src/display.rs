@@ -1,4 +1,6 @@
+#[cfg(feature = "serde")]
 use serde::Serialize;
+#[cfg(feature = "serde")]
 use serde::ser::{SerializeMap, Serializer};
 use std::collections::BTreeMap;
 
@@ -12,6 +14,7 @@ pub struct DisplayNode {
     pub metadata: BTreeMap<String, DisplayValue>,
 }
 
+#[cfg(feature = "serde")]
 impl Serialize for DisplayNode {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -86,22 +89,25 @@ impl DisplayNode {
 }
 
 /// Ordered key-value field for a [`DisplayNode`].
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct DisplayField {
     pub key: String,
     pub value: DisplayValue,
 }
 
 /// Value for a [`DisplayField`].
-#[derive(Debug, Clone, Serialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(untagged))]
 pub enum DisplayValue {
     Scalar(String),
     List(Vec<String>),
 }
 
 /// Flat display plan for stable serde output.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct DisplayPlan {
     pub nodes: Vec<DisplayNodeRecord>,
 }
@@ -116,6 +122,7 @@ pub struct DisplayNodeRecord {
     pub inputs: DisplayProperties<usize>,
 }
 
+#[cfg(feature = "serde")]
 impl Serialize for DisplayNodeRecord {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -157,6 +164,7 @@ impl<V> DisplayProperties<V> {
         self.entries.insert((order, key.into()), value);
     }
 
+    #[cfg(feature = "serde")]
     fn iter(&self) -> impl Iterator<Item = (&str, &V)> {
         self.entries
             .iter()
@@ -164,6 +172,7 @@ impl<V> DisplayProperties<V> {
     }
 }
 
+#[cfg(feature = "serde")]
 impl<V> Serialize for DisplayProperties<V>
 where
     V: Serialize,
@@ -179,12 +188,14 @@ where
 }
 
 /// Named child input for a [`DisplayNode`].
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct DisplayInput {
     pub name: String,
     pub node: Box<DisplayNode>,
 }
 
+#[cfg(feature = "serde")]
 fn serialize_display_header<M>(map: &mut M, kind: &str, title: &str) -> Result<(), M::Error>
 where
     M: SerializeMap,
@@ -193,6 +204,7 @@ where
     map.serialize_entry("title", title)
 }
 
+#[cfg(feature = "serde")]
 fn serialize_display_fields<'a, M, I>(map: &mut M, fields: I) -> Result<(), M::Error>
 where
     M: SerializeMap,
@@ -205,6 +217,7 @@ where
     Ok(())
 }
 
+#[cfg(feature = "serde")]
 fn serialize_display_inputs<'a, M, I>(map: &mut M, inputs: I) -> Result<(), M::Error>
 where
     M: SerializeMap,
@@ -217,6 +230,7 @@ where
     Ok(())
 }
 
+#[cfg(feature = "serde")]
 fn serialize_display_metadata<M>(
     map: &mut M,
     metadata: &BTreeMap<String, DisplayValue>,
@@ -231,6 +245,7 @@ where
     Ok(())
 }
 
+#[cfg(feature = "serde")]
 fn serialize_display_properties<M, V>(
     map: &mut M,
     properties: &DisplayProperties<V>,

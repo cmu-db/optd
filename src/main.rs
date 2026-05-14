@@ -32,11 +32,17 @@ fn main() {
     //     (line_items JOIN products)
     let query = sales_rollup_query();
 
-    println!("-- sales_rollup_query_flat");
-    println!("{}", query.pretty_flat());
+    #[cfg(feature = "serde")]
+    {
+        println!("-- sales_rollup_query_flat");
+        println!("{}", query.pretty_flat());
 
-    println!("-- sales_rollup_query_json");
-    println!("{}", query.pretty_json());
+        println!("-- sales_rollup_query_json");
+        println!("{}", query.pretty_json());
+
+        println!("-- sales_rollup_query_context");
+        println!("{}", serde_json::to_string_pretty(&query).unwrap());
+    }
 
     println!("-- sales_rollup_query");
     println!("{query}");
