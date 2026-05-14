@@ -691,6 +691,9 @@ impl<'a> Exporter<'a> {
             ExprData::ScalarSubquery { .. } => {
                 return Err(SubstraitError::UnsupportedExpression("ScalarSubquery"));
             }
+            ExprData::Like { .. } => {
+                return Err(SubstraitError::UnsupportedExpression("Like"));
+            }
         };
         Ok(Expression {
             rex_type: Some(rex_type),
@@ -835,6 +838,9 @@ fn export_literal(value: &ScalarValue) -> Result<expression::Literal, SubstraitE
         }),
         ScalarValue::Date32(value) => expression::literal::LiteralType::Date(*value),
         ScalarValue::Utf8(value) => expression::literal::LiteralType::String(value.clone()),
+        ScalarValue::IntervalMonthDayNano { .. } | ScalarValue::IntervalDayTime { .. } => {
+            return Err(SubstraitError::UnsupportedExpression("interval literal"));
+        }
     };
     Ok(expression::Literal {
         nullable: matches!(value, ScalarValue::Null(_)),
@@ -879,6 +885,7 @@ fn infer_expr_data_type(ctx: &QueryContext, expr: Expr) -> Option<DataType> {
         },
         ExprData::Exists { .. } | ExprData::InSubquery { .. } => Some(DataType::Boolean),
         ExprData::ScalarSubquery { .. } => None,
+        ExprData::Like { .. } => Some(DataType::Boolean),
     }
 }
 

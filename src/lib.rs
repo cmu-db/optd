@@ -350,6 +350,13 @@ pub enum ExprData {
     },
     /// SQL scalar subquery expression.
     ScalarSubquery { subquery: Operator },
+    /// SQL `[NOT] [I]LIKE pattern` predicate. `case_insensitive` = true for ILIKE.
+    Like {
+        negated: bool,
+        expr: Expr,
+        pattern: Expr,
+        case_insensitive: bool,
+    },
 }
 
 impl ExprData {
@@ -571,6 +578,14 @@ pub enum ScalarValue {
     Date32(i32),
     /// UTF-8 string scalar.
     Utf8(String),
+    /// Month-day-nanosecond interval scalar.
+    IntervalMonthDayNano {
+        months: i32,
+        days: i32,
+        nanoseconds: i64,
+    },
+    /// Day-time interval scalar.
+    IntervalDayTime { days: i32, milliseconds: i32 },
 }
 
 impl ScalarValue {
@@ -587,6 +602,12 @@ impl ScalarValue {
             } => DataType::Decimal128(*precision, *scale),
             ScalarValue::Date32(_) => DataType::Date32,
             ScalarValue::Utf8(_) => DataType::Utf8,
+            ScalarValue::IntervalMonthDayNano { .. } => {
+                DataType::Interval(arrow_schema::IntervalUnit::MonthDayNano)
+            }
+            ScalarValue::IntervalDayTime { .. } => {
+                DataType::Interval(arrow_schema::IntervalUnit::DayTime)
+            }
         }
     }
 }
@@ -1105,6 +1126,24 @@ impl<'a> QueryFormatter<'a> {
                 format!("({} {op} {subquery})", self.format_expr(*expr))
             }
             ExprData::ScalarSubquery { subquery } => format!("SCALAR_SUBQUERY({subquery})"),
+            ExprData::Like {
+                negated,
+                expr,
+                pattern,
+                case_insensitive,
+            } => {
+                let op = match (negated, case_insensitive) {
+                    (false, false) => "LIKE",
+                    (true, false) => "NOT LIKE",
+                    (false, true) => "ILIKE",
+                    (true, true) => "NOT ILIKE",
+                };
+                format!(
+                    "({} {op} {})",
+                    self.format_expr(*expr),
+                    self.format_expr(*pattern)
+                )
+            }
         }
     }
 
@@ -1136,6 +1175,14 @@ impl<'a> QueryFormatter<'a> {
             } => format!("{value}::Decimal128({precision}, {scale})"),
             ScalarValue::Date32(value) => format!("{value}::Date32"),
             ScalarValue::Utf8(value) => format!("{value:?}"),
+            ScalarValue::IntervalMonthDayNano {
+                months,
+                days,
+                nanoseconds,
+            } => format!("INTERVAL({months}mo {days}d {nanoseconds}ns)"),
+            ScalarValue::IntervalDayTime { days, milliseconds } => {
+                format!("INTERVAL({days}d {milliseconds}ms)")
+            }
         }
     }
 
@@ -1365,6 +1412,10 @@ impl<'a> QueryFormatter<'a> {
                     name: "scalar subquery".to_string(),
                     target: *subquery,
                 });
+            }
+            ExprData::Like { expr, pattern, .. } => {
+                self.collect_expr_subquery_inputs(*expr, inputs);
+                self.collect_expr_subquery_inputs(*pattern, inputs);
             }
         }
     }

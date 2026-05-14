@@ -382,6 +382,10 @@ fn collect_expr_subquery_selections(
             collect_expr_subquery_selections(query, *expr, visited, predicates);
             collect_unique_selection_predicates(query, *subquery, visited, predicates);
         }
+        ExprData::Like { expr, pattern, .. } => {
+            collect_expr_subquery_selections(query, *expr, visited, predicates);
+            collect_expr_subquery_selections(query, *pattern, visited, predicates);
+        }
     }
 }
 

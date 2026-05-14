@@ -2,6 +2,7 @@
 
 use datafusion::common::{Column as DFColumn, TableReference};
 use datafusion::datasource::provider_as_source;
+use datafusion::execution::FunctionRegistry;
 use datafusion::functions_aggregate::count::count_all;
 use datafusion::functions_aggregate::expr_fn::{avg, count, max, min, sum};
 use datafusion::logical_expr::{
@@ -88,7 +89,7 @@ async fn convert_operator_inner(
 
         OperatorData::Selection(sel) => {
             let input = convert_operator(sel.input, ctx, session).await?;
-            let predicate = convert_expr(sel.predicate, ctx)?;
+            let predicate = convert_expr(sel.predicate, ctx, session)?;
             Ok(LogicalPlanBuilder::from(input).filter(predicate)?.build()?)
         }
 
@@ -115,7 +116,7 @@ async fn convert_operator_inner(
                 .collect();
             for (col, expr) in &map.computations {
                 let name = ctx.column(*col).name.clone();
-                exprs.push(convert_expr(*expr, ctx)?.alias(name));
+                exprs.push(convert_expr(*expr, ctx, session)?.alias(name));
             }
             Ok(LogicalPlanBuilder::from(input).project(exprs)?.build()?)
         }
@@ -125,14 +126,14 @@ async fn convert_operator_inner(
             let group_exprs: Vec<DFExpr> = agg
                 .keys
                 .iter()
-                .map(|e| convert_expr(*e, ctx))
+                .map(|e| convert_expr(*e, ctx, session))
                 .collect::<ToDFResult<_>>()?;
             let aggr_exprs: Vec<DFExpr> = agg
                 .aggregates
                 .iter()
                 .map(|(col, agg_expr)| {
                     let name = ctx.column(*col).name.clone();
-                    Ok(convert_agg_expr(agg_expr, ctx)?.alias(name))
+                    Ok(convert_agg_expr(agg_expr, ctx, session)?.alias(name))
                 })
                 .collect::<ToDFResult<_>>()?;
             Ok(LogicalPlanBuilder::from(input)
@@ -147,7 +148,7 @@ async fn convert_operator_inner(
                 .iter()
                 .map(|key| {
                     Ok(SortExpr {
-                        expr: convert_expr(key.expr, ctx)?,
+                        expr: convert_expr(key.expr, ctx, session)?,
                         asc: matches!(key.direction, simple_graph::SortDirection::Asc),
                         nulls_first: matches!(key.nulls, simple_graph::NullOrdering::First),
                     })
@@ -167,7 +168,7 @@ async fn convert_operator_inner(
             let outer = convert_operator(join.outer, ctx, session).await?;
             let inner = convert_operator(join.inner, ctx, session).await?;
             let join_type = convert_join_type(&join.join_type)?;
-            let condition = convert_expr(join.on, ctx)?;
+            let condition = convert_expr(join.on, ctx, session)?;
             Ok(LogicalPlanBuilder::from(outer)
                 .join_on(inner, join_type, Some(condition))?
                 .build()?)
@@ -185,7 +186,11 @@ async fn convert_operator_inner(
     }
 }
 
-fn convert_expr(expr: simple_graph::Expr, ctx: &QueryContext) -> ToDFResult<DFExpr> {
+fn convert_expr(
+    expr: simple_graph::Expr,
+    ctx: &QueryContext,
+    session: &SessionContext,
+) -> ToDFResult<DFExpr> {
     match expr.get(ctx) {
         ExprData::ColumnRef(col) => {
             let name = &ctx.column(*col).name;
@@ -193,7 +198,7 @@ fn convert_expr(expr: simple_graph::Expr, ctx: &QueryContext) -> ToDFResult<DFEx
         }
         ExprData::Literal(scalar) => Ok(DFExpr::Literal(convert_scalar(scalar)?, None)),
         ExprData::Unary { op, expr } => {
-            let inner = convert_expr(*expr, ctx)?;
+            let inner = convert_expr(*expr, ctx, session)?;
             Ok(match op {
                 UnaryOp::Not => datafusion::logical_expr::not(inner),
                 UnaryOp::IsNull => inner.is_null(),
@@ -202,8 +207,8 @@ fn convert_expr(expr: simple_graph::Expr, ctx: &QueryContext) -> ToDFResult<DFEx
             })
         }
         ExprData::Binary { op, left, right } => {
-            let l = convert_expr(*left, ctx)?;
-            let r = convert_expr(*right, ctx)?;
+            let l = convert_expr(*left, ctx, session)?;
+            let r = convert_expr(*right, ctx, session)?;
             Ok(match op {
                 BinaryOp::Eq => l.eq(r),
                 BinaryOp::NotEq => l.not_eq(r),
@@ -218,7 +223,7 @@ fn convert_expr(expr: simple_graph::Expr, ctx: &QueryContext) -> ToDFResult<DFEx
             })
         }
         ExprData::Nary { op, exprs } => {
-            let mut iter = exprs.iter().map(|e| convert_expr(*e, ctx));
+            let mut iter = exprs.iter().map(|e| convert_expr(*e, ctx, session));
             let first = iter
                 .next()
                 .ok_or_else(|| ToDFError::Unsupported("empty nary expr".into()))??;
@@ -231,25 +236,61 @@ fn convert_expr(expr: simple_graph::Expr, ctx: &QueryContext) -> ToDFResult<DFEx
             })
         }
         ExprData::Cast { expr, ty } => {
-            let inner = convert_expr(*expr, ctx)?;
+            let inner = convert_expr(*expr, ctx, session)?;
             Ok(DFExpr::Cast(datafusion::logical_expr::Cast {
                 expr: Box::new(inner),
                 data_type: ty.clone(),
             }))
         }
+        ExprData::ScalarFunction { function, args } => {
+            use simple_graph::ScalarFunction;
+            let df_args: Vec<DFExpr> = args
+                .iter()
+                .map(|a| convert_expr(*a, ctx, session))
+                .collect::<ToDFResult<_>>()?;
+            match function {
+                ScalarFunction::Extension(name) => match session.udf(name) {
+                    Ok(udf) => Ok(DFExpr::ScalarFunction(
+                        datafusion::logical_expr::expr::ScalarFunction {
+                            func: udf,
+                            args: df_args,
+                        },
+                    )),
+                    Err(_) => Err(ToDFError::Unsupported(format!("scalar function {name}"))),
+                },
+                _ => Err(ToDFError::Unsupported(format!(
+                    "scalar function {function}"
+                ))),
+            }
+        }
+        ExprData::Like {
+            negated,
+            expr,
+            pattern,
+            case_insensitive,
+        } => Ok(DFExpr::Like(datafusion::logical_expr::Like {
+            negated: *negated,
+            expr: Box::new(convert_expr(*expr, ctx, session)?),
+            pattern: Box::new(convert_expr(*pattern, ctx, session)?),
+            escape_char: None,
+            case_insensitive: *case_insensitive,
+        })),
         ExprData::CaseWhen {
             when_then,
             else_expr,
         } => {
             let mut builder = datafusion::logical_expr::when(
-                convert_expr(when_then[0].0, ctx)?,
-                convert_expr(when_then[0].1, ctx)?,
+                convert_expr(when_then[0].0, ctx, session)?,
+                convert_expr(when_then[0].1, ctx, session)?,
             );
             for (w, t) in &when_then[1..] {
-                builder = builder.when(convert_expr(*w, ctx)?, convert_expr(*t, ctx)?);
+                builder = builder.when(
+                    convert_expr(*w, ctx, session)?,
+                    convert_expr(*t, ctx, session)?,
+                );
             }
             Ok(if let Some(else_e) = else_expr {
-                builder.otherwise(convert_expr(*else_e, ctx)?)?
+                builder.otherwise(convert_expr(*else_e, ctx, session)?)?
             } else {
                 builder.end()?
             })
@@ -258,11 +299,15 @@ fn convert_expr(expr: simple_graph::Expr, ctx: &QueryContext) -> ToDFResult<DFEx
     }
 }
 
-fn convert_agg_expr(agg: &AggregateExpr, ctx: &QueryContext) -> ToDFResult<DFExpr> {
+fn convert_agg_expr(
+    agg: &AggregateExpr,
+    ctx: &QueryContext,
+    session: &SessionContext,
+) -> ToDFResult<DFExpr> {
     match agg {
         AggregateExpr::CountStar => Ok(count_all()),
         AggregateExpr::Func { func, arg, .. } => {
-            let arg_expr = convert_expr(*arg, ctx)?;
+            let arg_expr = convert_expr(*arg, ctx, session)?;
             Ok(match func {
                 AggregateFunction::Count => count(arg_expr),
                 AggregateFunction::Sum => sum(arg_expr),
@@ -294,6 +339,21 @@ fn convert_scalar(scalar: &ScalarValue) -> ToDFResult<datafusion::common::Scalar
             precision,
             scale,
         } => DFSv::Decimal128(Some(*value), *precision, *scale),
+        ScalarValue::IntervalMonthDayNano {
+            months,
+            days,
+            nanoseconds,
+        } => DFSv::IntervalMonthDayNano(Some(datafusion::arrow::datatypes::IntervalMonthDayNano {
+            months: *months,
+            days: *days,
+            nanoseconds: *nanoseconds,
+        })),
+        ScalarValue::IntervalDayTime { days, milliseconds } => {
+            DFSv::IntervalDayTime(Some(datafusion::arrow::datatypes::IntervalDayTime {
+                days: *days,
+                milliseconds: *milliseconds,
+            }))
+        }
     })
 }
 

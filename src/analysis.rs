@@ -255,6 +255,10 @@ fn collect_expr_used_columns(
             collect_expr_used_columns(ctx, *expr, columns)?;
             collect_subquery_free_columns(ctx, *subquery, columns)?;
         }
+        ExprData::Like { expr, pattern, .. } => {
+            collect_expr_used_columns(ctx, *expr, columns)?;
+            collect_expr_used_columns(ctx, *pattern, columns)?;
+        }
     }
 
     Ok(())
@@ -533,6 +537,7 @@ fn expr_nullability(
         }
         ExprData::ScalarFunction { .. } | ExprData::ScalarSubquery { .. } => Ok(true),
         ExprData::Exists { .. } | ExprData::InSubquery { .. } => Ok(false),
+        ExprData::Like { .. } => Ok(false), // LIKE returns boolean, never null
     }
 }
 
@@ -547,6 +552,7 @@ fn collect_non_null_columns_from_predicate(
         | ExprData::Cast { .. }
         | ExprData::CaseWhen { .. }
         | ExprData::ScalarFunction { .. }
+        | ExprData::Like { .. }
         | ExprData::Exists { .. }
         | ExprData::InSubquery { .. }
         | ExprData::ScalarSubquery { .. } => {}

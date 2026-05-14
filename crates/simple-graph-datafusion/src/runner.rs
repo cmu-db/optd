@@ -31,10 +31,10 @@ impl AsyncDB for SimpleGraphRunner {
     type ColumnType = DFColumnType;
 
     async fn run(&mut self, sql: &str) -> Result<DBOutput<DFColumnType>, DFSqlLogicTestError> {
-        // Try IR round-trip; fall back to direct execution on any failure.
         let (schema, results) = match self.try_via_ir(sql).await {
             Ok(pair) => pair,
-            Err(_) => {
+            Err(e) if e == "non-query plan" => {
+                // DDL and other non-query statements — execute directly.
                 let plan = self
                     .session
                     .state()
@@ -54,6 +54,11 @@ impl AsyncDB for SimpleGraphRunner {
                     std::sync::Arc::new(datafusion::arrow::datatypes::Schema::empty())
                 });
                 (schema, batches)
+            }
+            Err(e) => {
+                return Err(DFSqlLogicTestError::DataFusion(
+                    datafusion::error::DataFusionError::Plan(e),
+                ));
             }
         };
 

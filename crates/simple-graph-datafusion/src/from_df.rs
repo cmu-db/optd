@@ -515,6 +515,89 @@ fn convert_expr(
             // Strip the alias — simple-graph doesn't have named expressions.
             return convert_expr(&alias.expr, ctx, bindings);
         }
+        DFExpr::Between(between) => {
+            // expr BETWEEN low AND high → (expr >= low) AND (expr <= high)
+            let expr = convert_expr(&between.expr, ctx, bindings)?;
+            let low = convert_expr(&between.low, ctx, bindings)?;
+            let high = convert_expr(&between.high, ctx, bindings)?;
+            let ge = ExprData::Binary {
+                op: BinaryOp::GtEq,
+                left: expr,
+                right: low,
+            }
+            .add(ctx);
+            let le = ExprData::Binary {
+                op: BinaryOp::LtEq,
+                left: expr,
+                right: high,
+            }
+            .add(ctx);
+            let and = ExprData::Nary {
+                op: NaryOp::And,
+                exprs: vec![ge, le],
+            };
+            if between.negated {
+                // NOT (expr BETWEEN low AND high)
+                let inner = and.add(ctx);
+                ExprData::Unary {
+                    op: simple_graph::UnaryOp::Not,
+                    expr: inner,
+                }
+            } else {
+                and
+            }
+        }
+        DFExpr::InList(inlist) => {
+            // expr IN (a, b, c) → (expr = a) OR (expr = b) OR (expr = c)
+            let expr = convert_expr(&inlist.expr, ctx, bindings)?;
+            let exprs: Vec<simple_graph::Expr> = inlist
+                .list
+                .iter()
+                .map(|item| {
+                    let item_expr = convert_expr(item, ctx, bindings)?;
+                    Ok(ExprData::Binary {
+                        op: BinaryOp::Eq,
+                        left: expr,
+                        right: item_expr,
+                    }
+                    .add(ctx))
+                })
+                .collect::<FromDFResult<_>>()?;
+            let or_expr = ExprData::Nary {
+                op: NaryOp::Or,
+                exprs,
+            };
+            if inlist.negated {
+                let inner = or_expr.add(ctx);
+                ExprData::Unary {
+                    op: simple_graph::UnaryOp::Not,
+                    expr: inner,
+                }
+            } else {
+                or_expr
+            }
+        }
+        DFExpr::Like(like) => {
+            let expr = convert_expr(&like.expr, ctx, bindings)?;
+            let pattern = convert_expr(&like.pattern, ctx, bindings)?;
+            ExprData::Like {
+                negated: like.negated,
+                expr,
+                pattern,
+                case_insensitive: like.case_insensitive,
+            }
+        }
+        DFExpr::ScalarFunction(sf) => {
+            let args: Vec<simple_graph::Expr> = sf
+                .args
+                .iter()
+                .map(|a| convert_expr(a, ctx, bindings))
+                .collect::<FromDFResult<_>>()?;
+            ExprData::ScalarFunction {
+                function: simple_graph::ScalarFunction::extension(sf.func.name()),
+                args,
+            }
+        }
         DFExpr::Case(Case {
             when_then_expr,
             else_expr,
@@ -606,6 +689,15 @@ fn convert_scalar(scalar: &DFScalarValue) -> FromDFResult<ScalarValue> {
             value: *v,
             precision: *p,
             scale: *s,
+        }),
+        DFScalarValue::IntervalMonthDayNano(Some(v)) => Ok(ScalarValue::IntervalMonthDayNano {
+            months: v.months,
+            days: v.days,
+            nanoseconds: v.nanoseconds,
+        }),
+        DFScalarValue::IntervalDayTime(Some(v)) => Ok(ScalarValue::IntervalDayTime {
+            days: v.days,
+            milliseconds: v.milliseconds,
         }),
         other => Err(FromDFError::Unsupported(format!("scalar {other:?}"))),
     }
