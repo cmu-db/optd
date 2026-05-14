@@ -1,17 +1,150 @@
 use arrow_schema::DataType;
 use simple_graph::{
     AggregateExpr, AggregateFunction, Aggregation, BinaryOp, BoxDrawingRenderer, BoxRendererConfig,
-    ColorMode, ColumnData, ColumnNullability, ExprData, FreeColumns, Join, JoinType, Map, NaryOp,
-    OperatorData, Output, Projection, QueryContext, QueryFormatConfig, QueryFormatter,
-    ScalarFunction, ScalarValue, Scan, Selection, TableFunction, TableFunctionDef, TableRef,
-    UnaryOp, tpch::tpch_q2,
+    ColorMode, ColumnData, ExprData, FreeColumns, Join, JoinType, Map, NaryOp, OperatorData,
+    Output, Projection, QueryContext, QueryFormatConfig, QueryFormatter, ScalarFunction,
+    ScalarValue, Scan, Selection, TableFunction, TableFunctionDef, TableRef, UnaryOp,
+    tpch::tpch_query,
 };
 
 fn main() {
-    let query = tpch_q2();
+    let args = match CliArgs::parse(std::env::args().skip(1)) {
+        Ok(args) => args,
+        Err(error) => {
+            eprintln!("{error}");
+            eprintln!();
+            print_usage();
+            std::process::exit(2);
+        }
+    };
 
-    println!("-- tpch_q2");
-    println!("{}", pretty_with_free_columns_and_nullability(&query));
+    let Some(query) = tpch_query(args.query) else {
+        eprintln!(
+            "unsupported TPC-H query q{}; currently available: q2",
+            args.query
+        );
+        std::process::exit(2);
+    };
+
+    match format_query(&query, args.format) {
+        Ok(output) => println!("{output}"),
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(2);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputFormat {
+    Box,
+    Flat,
+    Json,
+    Context,
+}
+
+impl OutputFormat {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "box" => Some(Self::Box),
+            "flat" => Some(Self::Flat),
+            "json" => Some(Self::Json),
+            "context" => Some(Self::Context),
+            _ => None,
+        }
+    }
+}
+
+struct CliArgs {
+    query: u8,
+    format: OutputFormat,
+}
+
+impl CliArgs {
+    fn parse(args: impl IntoIterator<Item = String>) -> Result<Self, String> {
+        let mut query = None;
+        let mut format = OutputFormat::Box;
+        let mut args = args.into_iter();
+
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "--help" | "-h" => {
+                    print_usage();
+                    std::process::exit(0);
+                }
+                "--format" => {
+                    let value = args
+                        .next()
+                        .ok_or_else(|| "--format requires a value".to_string())?;
+                    format = OutputFormat::parse(&value).ok_or_else(|| {
+                        format!("unknown format {value:?}; expected box, flat, json, or context")
+                    })?;
+                }
+                _ if arg.starts_with("--format=") => {
+                    let value = arg.trim_start_matches("--format=");
+                    format = OutputFormat::parse(value).ok_or_else(|| {
+                        format!("unknown format {value:?}; expected box, flat, json, or context")
+                    })?;
+                }
+                _ if arg.starts_with('-') => return Err(format!("unknown option {arg:?}")),
+                _ => {
+                    if query.is_some() {
+                        return Err("expected exactly one query number".to_string());
+                    }
+                    query = Some(
+                        arg.parse::<u8>()
+                            .map_err(|_| format!("invalid query number {arg:?}"))?,
+                    );
+                }
+            }
+        }
+
+        let query = query.ok_or_else(|| "missing query number".to_string())?;
+        Ok(Self { query, format })
+    }
+}
+
+fn print_usage() {
+    eprintln!("usage: simple-graph [--format box|flat|json|context] <tpch-query-number>");
+}
+
+fn format_query(query: &QueryContext, format: OutputFormat) -> Result<String, String> {
+    match format {
+        OutputFormat::Box => Ok(pretty_with_free_column(query)),
+        OutputFormat::Flat => format_flat(query),
+        OutputFormat::Json => format_json(query),
+        OutputFormat::Context => format_context(query),
+    }
+}
+
+#[cfg(feature = "serde")]
+fn format_flat(query: &QueryContext) -> Result<String, String> {
+    Ok(query.pretty_flat())
+}
+
+#[cfg(not(feature = "serde"))]
+fn format_flat(_query: &QueryContext) -> Result<String, String> {
+    Err("--format flat requires the serde feature".to_string())
+}
+
+#[cfg(feature = "serde")]
+fn format_json(query: &QueryContext) -> Result<String, String> {
+    Ok(query.pretty_json())
+}
+
+#[cfg(not(feature = "serde"))]
+fn format_json(_query: &QueryContext) -> Result<String, String> {
+    Err("--format json requires the serde feature".to_string())
+}
+
+#[cfg(feature = "serde")]
+fn format_context(query: &QueryContext) -> Result<String, String> {
+    serde_json::to_string_pretty(query).map_err(|error| error.to_string())
+}
+
+#[cfg(not(feature = "serde"))]
+fn format_context(_query: &QueryContext) -> Result<String, String> {
+    Err("--format context requires the serde feature".to_string())
 }
 
 #[allow(dead_code)]
@@ -55,7 +188,7 @@ fn example_queries() {
     }
 
     println!("-- sales_rollup_query");
-    println!("{}", pretty_with_free_columns_and_nullability(&query));
+    println!("{}", pretty_with_free_column(&query));
 
     // SQL-ish correlated scalar subquery shape:
     //
@@ -72,19 +205,17 @@ fn example_queries() {
     // u_userkey from the outer users input, so that inner side has a free column.
     let query = join_with_free_column_query();
     println!("-- join_with_free_column_query");
-    println!("{}", pretty_with_free_columns_and_nullability(&query));
+    println!("{}", pretty_with_free_column(&query));
 }
 
-fn pretty_with_free_columns_and_nullability(query: &QueryContext) -> String {
+fn pretty_with_free_column(query: &QueryContext) -> String {
     let display = QueryFormatter::with_config(
         query,
-        QueryFormatConfig::new()
-            .with_analysis::<FreeColumns>()
-            .with_analysis::<ColumnNullability>(),
+        QueryFormatConfig::new().with_analysis::<FreeColumns>(),
     )
     .format();
 
-    BoxDrawingRenderer::with_config(BoxRendererConfig::default().with_color_mode(ColorMode::Always))
+    BoxDrawingRenderer::with_config(BoxRendererConfig::default().with_color_mode(ColorMode::Never))
         .render(&display)
 }
 

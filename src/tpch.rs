@@ -120,6 +120,14 @@ pub fn tpch_q2() -> QueryContext {
     ctx
 }
 
+/// Builds a direct simple-graph IR shape for a supported TPC-H query number.
+pub fn tpch_query(query: u8) -> Option<QueryContext> {
+    match query {
+        2 => Some(tpch_q2()),
+        _ => None,
+    }
+}
+
 #[derive(Clone)]
 pub struct Rel {
     pub input: Operator,
