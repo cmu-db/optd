@@ -1,3 +1,10 @@
+[workspace]
+members = [
+    ".",
+    "crates/simple-graph-datafusion",
+]
+resolver = "2"
+
 [package]
 name = "simple-graph"
 version = "0.1.0"
@@ -16,8 +23,8 @@ substrait = "0.63.0"
 
 [dev-dependencies]
 async-trait = "0.1"
-datafusion = "=52.5.0"
-datafusion-substrait = "=52.5.0"
+datafusion = "=53.1.0"
+datafusion-substrait = "=53.1.0"
 prost = "0.14.1"
 sqllogictest = "0.29.1"
 tokio = { version = "1.48.0", features = ["macros", "rt"] }
