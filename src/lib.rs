@@ -1,6 +1,7 @@
 use arrow_schema::DataType;
 use std::any::{TypeId, type_name};
 use std::cell::RefCell;
+use std::sync::Arc;
 
 pub mod analysis;
 pub mod catalog;
@@ -497,6 +498,14 @@ impl OptimizerContext {
         }
     }
 
+    /// Creates an optimizer context whose analyses can consult `catalog`.
+    pub fn with_catalog(query: QueryContext, catalog: Arc<dyn Catalog>) -> Self {
+        Self {
+            query,
+            analyses: AnalysisContext::with_catalog(catalog),
+        }
+    }
+
     /// Consumes this optimizer context and returns the optimized query.
     pub fn into_query(self) -> QueryContext {
         self.query
@@ -533,6 +542,36 @@ impl QueryContext {
         let id = Column(self.columns.len());
         self.columns.push(column);
         id
+    }
+
+    /// Appends a scan over already-created columns and returns its operator handle.
+    pub fn add_scan(&mut self, table: TableRef, columns: Vec<Column>) -> Operator {
+        self.add_operator(OperatorData::Scan(Scan { table, columns }))
+    }
+
+    /// Resolves `table` through `catalog`, creates query columns from its schema, and appends a scan.
+    pub fn add_scan_from_catalog<C>(
+        &mut self,
+        catalog: &C,
+        table: TableRef,
+    ) -> CatalogResult<Operator>
+    where
+        C: Catalog + ?Sized,
+    {
+        let metadata = catalog.table_by_ref(&table)?;
+        let columns = metadata
+            .schema
+            .fields()
+            .iter()
+            .map(|field| {
+                self.add_column(ColumnData::new(
+                    field.name().clone(),
+                    field.data_type().clone(),
+                ))
+            })
+            .collect();
+
+        Ok(self.add_scan(TableRef::from(metadata.table), columns))
     }
 
     /// Updates the root operator of the query graph.
@@ -1360,6 +1399,8 @@ impl std::fmt::Display for QueryContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arrow_schema::{Field, Schema};
+    use std::sync::Arc;
 
     #[test]
     fn pretty_prints_query_plan() {
@@ -1445,6 +1486,37 @@ mod tests {
         let node_json = serde_json::to_value(&node).unwrap();
         assert_eq!(node_json["rows"], "10");
         assert!(node_json.get("metadata").is_none());
+    }
+
+    #[test]
+    fn add_scan_from_catalog_creates_columns_from_table_schema() {
+        let catalog = MemoryCatalog::new("memory", "public");
+        catalog
+            .create_table(
+                TableRef::bare("users"),
+                Arc::new(Schema::new(vec![
+                    Field::new("id", DataType::Int64, false),
+                    Field::new("name", DataType::Utf8, true),
+                ])),
+                None,
+            )
+            .unwrap();
+
+        let mut ctx = QueryContext::new();
+        let scan = ctx
+            .add_scan_from_catalog(&catalog, TableRef::bare("users"))
+            .unwrap();
+
+        let OperatorData::Scan(scan_data) = scan.get(&ctx) else {
+            panic!("catalog scan should create a scan operator");
+        };
+
+        assert_eq!(scan_data.table, TableRef::full("memory", "public", "users"));
+        assert_eq!(scan_data.columns.len(), 2);
+        assert_eq!(ctx.column(scan_data.columns[0]).name, "id");
+        assert_eq!(ctx.column(scan_data.columns[0]).ty, DataType::Int64);
+        assert_eq!(ctx.column(scan_data.columns[1]).name, "name");
+        assert_eq!(ctx.column(scan_data.columns[1]).ty, DataType::Utf8);
     }
 
     #[test]

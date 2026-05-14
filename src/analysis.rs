@@ -3,10 +3,11 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::{
-    AggregateExpr, AggregateFunction, Column, Expr, ExprData, JoinType, Operator, OperatorData,
-    QueryContext,
+    AggregateExpr, AggregateFunction, Catalog, Column, Expr, ExprData, JoinType, Operator,
+    OperatorData, QueryContext, Scan,
 };
 
 /// Result type used by query analyses.
@@ -130,12 +131,27 @@ impl<T> OperatorAnalysisState<T> {
 #[derive(Default)]
 pub struct AnalysisContext {
     pub analyses: AnalysisRegistry,
+    pub catalog: Option<Arc<dyn Catalog>>,
 }
 
 impl AnalysisContext {
     /// Creates an empty analysis context.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates an analysis context that can consult `catalog` during analysis.
+    pub fn with_catalog(catalog: Arc<dyn Catalog>) -> Self {
+        Self {
+            analyses: AnalysisRegistry::new(),
+            catalog: Some(catalog),
+        }
+    }
+
+    /// Replaces the catalog used by catalog-aware analyses.
+    pub fn set_catalog(&mut self, catalog: Option<Arc<dyn Catalog>>) {
+        self.catalog = catalog;
+        self.clear();
     }
 
     /// Clears every registered analysis cache while preserving analysis instances.
@@ -533,7 +549,8 @@ fn output_column_nullability(
     operator: Operator,
 ) -> AnalysisResult<Vec<(Column, bool)>> {
     match operator.get(ctx) {
-        OperatorData::Scan(_) | OperatorData::TableFunction(_) => Ok(analyses
+        OperatorData::Scan(data) => Ok(scan_column_nullability(data, analyses)),
+        OperatorData::TableFunction(_) => Ok(analyses
             .get::<CreatedColumns>(ctx, operator)?
             .into_iter()
             .map(|column| (column, true))
@@ -638,6 +655,30 @@ fn output_column_nullability(
         }
         OperatorData::Output(data) => analyses.get::<ColumnNullability>(ctx, data.input),
     }
+}
+
+fn scan_column_nullability(scan: &Scan, analyses: &AnalysisContext) -> Vec<(Column, bool)> {
+    let Some(catalog) = &analyses.catalog else {
+        return scan.columns.iter().map(|column| (*column, true)).collect();
+    };
+
+    let Ok(metadata) = catalog.table_by_ref(&scan.table) else {
+        return scan.columns.iter().map(|column| (*column, true)).collect();
+    };
+
+    scan.columns
+        .iter()
+        .enumerate()
+        .map(|(index, column)| {
+            let nullable = metadata
+                .schema
+                .fields()
+                .get(index)
+                .map(|field| field.is_nullable())
+                .unwrap_or(true);
+            (*column, nullable)
+        })
+        .collect()
 }
 
 /// Analysis that records columns introduced directly by an operator.
@@ -853,11 +894,12 @@ impl Analysis for AvailableColumns {
 mod tests {
     use super::*;
     use crate::{
-        AggregateExpr, AggregateFunction, Aggregation, BinaryOp, ColumnData, ExprData, Join,
-        JoinType, Map, OperatorData, Output, Projection, ScalarValue, Scan, Selection,
-        TableFunction, TableFunctionDef, TableRef,
+        AggregateExpr, AggregateFunction, Aggregation, BinaryOp, Catalog, ColumnData, ExprData,
+        Join, JoinType, Map, MemoryCatalog, OperatorData, Output, Projection, ScalarValue, Scan,
+        Selection, TableFunction, TableFunctionDef, TableRef,
     };
-    use arrow_schema::DataType;
+    use arrow_schema::{DataType, Field, Schema};
+    use std::sync::Arc;
 
     #[test]
     fn created_columns_tracks_columns_introduced_by_operators() {
@@ -1150,6 +1192,36 @@ mod tests {
         assert_eq!(
             analyses.get::<ColumnNullability>(&ctx, projection).unwrap(),
             vec![(id, true), (is_age_null, false), (age_plus_one, true)]
+        );
+    }
+
+    #[test]
+    fn column_nullability_uses_catalog_scan_schema_when_available() {
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(
+                TableRef::bare("users"),
+                Arc::new(Schema::new(vec![
+                    Field::new("id", DataType::Int64, false),
+                    Field::new("age", DataType::Int32, true),
+                ])),
+                None,
+            )
+            .unwrap();
+
+        let mut ctx = QueryContext::new();
+        let scan = ctx
+            .add_scan_from_catalog(catalog.as_ref(), TableRef::bare("users"))
+            .unwrap();
+
+        let mut analyses = AnalysisContext::with_catalog(catalog);
+
+        let OperatorData::Scan(scan_data) = scan.get(&ctx) else {
+            panic!("catalog scan should create a scan operator");
+        };
+        assert_eq!(
+            analyses.get::<ColumnNullability>(&ctx, scan).unwrap(),
+            vec![(scan_data.columns[0], false), (scan_data.columns[1], true)]
         );
     }
 
