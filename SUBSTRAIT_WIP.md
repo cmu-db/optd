@@ -25,6 +25,7 @@ The exporter now handles:
 - `Selection`
 - `Sort`
 - `Limit`
+- `Join`
 - named-table `Scan`
 - root output names
 - basic scalar expression export (`ColumnRef`, `Literal`, `BinaryOp`, `UnaryOp`, `NaryOp`)
@@ -69,7 +70,7 @@ Expression import supports literals, column references, scalar functions, casts,
 Exporter gaps remain:
 
 - no export for `Map`
-- no export for `Join` / `CrossProduct`
+- no export for `CrossProduct`
 - no export for `Aggregation`
 - no export for `TableFunction`
 - no export for complex scalar expressions beyond the basic set
@@ -83,8 +84,8 @@ Importer limitations to watch:
 
 ## Recommended Next Steps
 
-1. Export joins.
-   For inner joins with equality predicates, consider emitting `HashJoinRel` or `JoinRel` first. Preserve current IR naming: `outer` maps to Substrait left, `inner` maps to Substrait right.
+1. Export cross product.
+   Emit `CrossRel` from `CrossProduct` preserving `outer` -> left and `inner` -> right mapping.
 
 2. Export aggregation after expression and function export are stable.
    Need a decision on how to map `Aggregation.keys: Vec<Expr>` and `(Column, AggregateExpr)` into Substrait grouping expressions, measures, output names, and emit mappings.

@@ -204,7 +204,7 @@ impl<'a> Exporter<'a> {
             OperatorData::TableFunction(_) => {
                 Err(SubstraitError::UnsupportedRel("TableFunction export"))
             }
-            OperatorData::Join(_) => Err(SubstraitError::UnsupportedRel("Join export")),
+            OperatorData::Join(join) => self.export_join(join),
             OperatorData::CrossProduct(_) => {
                 Err(SubstraitError::UnsupportedRel("CrossProduct export"))
             }
@@ -286,6 +286,30 @@ impl<'a> Exporter<'a> {
         Ok(ExportedRelation {
             rel,
             columns: input.columns,
+        })
+    }
+
+    fn export_join(&mut self, join: &Join) -> Result<ExportedRelation, SubstraitError> {
+        let left = self.export_operator(join.outer)?;
+        let right = self.export_operator(join.inner)?;
+        let mut scope = left.columns.clone();
+        scope.extend(right.columns.iter().copied());
+        let condition = self.export_expr(join.on, &scope)?;
+        let join_type = join_type_to_substrait(join.join_type.clone())? as i32;
+        let rel = Rel {
+            rel_type: Some(rel::RelType::Join(Box::new(JoinRel {
+                common: Some(direct_common()),
+                left: Some(Box::new(left.rel)),
+                right: Some(Box::new(right.rel)),
+                expression: Some(Box::new(condition)),
+                post_join_filter: None,
+                r#type: join_type,
+                advanced_extension: None,
+            }))),
+        };
+        Ok(ExportedRelation {
+            rel,
+            columns: scope,
         })
     }
 
@@ -432,9 +456,16 @@ impl<'a> Exporter<'a> {
         output_type: Option<Type>,
     ) -> expression::ScalarFunction {
         let anchor = self.register_function(name);
+        let arguments = args
+            .iter()
+            .cloned()
+            .map(|arg| FunctionArgument {
+                arg_type: Some(function_argument::ArgType::Value(arg)),
+            })
+            .collect();
         expression::ScalarFunction {
             function_reference: anchor,
-            arguments: Vec::new(),
+            arguments,
             options: Vec::new(),
             output_type,
             args,
@@ -590,6 +621,17 @@ fn sort_direction_to_substrait(
         (SortDirection::Asc, NullOrdering::First) => sort_field::SortDirection::AscNullsFirst,
         (SortDirection::Desc, NullOrdering::Last) => sort_field::SortDirection::DescNullsLast,
         (SortDirection::Desc, NullOrdering::First) => sort_field::SortDirection::DescNullsFirst,
+    }
+}
+
+fn join_type_to_substrait(join_type: JoinType) -> Result<join_rel::JoinType, SubstraitError> {
+    match join_type {
+        JoinType::Inner => Ok(join_rel::JoinType::Inner),
+        JoinType::LeftOuter => Ok(join_rel::JoinType::Left),
+        JoinType::RightOuter => Ok(join_rel::JoinType::Right),
+        JoinType::FullOuter => Ok(join_rel::JoinType::Outer),
+        JoinType::Single => Ok(join_rel::JoinType::LeftSingle),
+        JoinType::Mark(_) => Err(SubstraitError::UnsupportedJoin("mark join marker column")),
     }
 }
 fn table_ref_names(table: &TableRef) -> Vec<String> {
@@ -2380,6 +2422,62 @@ mod tests {
             Some(proto::extensions::simple_extension_declaration::MappingType::ExtensionFunction(
                 proto::extensions::simple_extension_declaration::ExtensionFunction { name, .. }
             )) if name == "gte"
+        )));
+    }
+
+    #[test]
+    fn exports_logical_join_as_join_rel() {
+        let mut ctx = QueryContext::new();
+        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
+        let order_user_id = ctx.add_column(ColumnData::new("order_user_id", DataType::Int64));
+        let users = ctx.add_operator(OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![user_id],
+        }));
+        let orders = ctx.add_operator(OperatorData::Scan(Scan {
+            table: TableRef::bare("orders"),
+            columns: vec![order_user_id],
+        }));
+        let left_ref = ctx.add_expr(ExprData::ColumnRef(user_id));
+        let right_ref = ctx.add_expr(ExprData::ColumnRef(order_user_id));
+        let on = ctx.add_expr(ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: left_ref,
+            right: right_ref,
+        });
+        let join = ctx.add_operator(OperatorData::Join(Join {
+            join_type: JoinType::Inner,
+            on,
+            outer: users,
+            inner: orders,
+        }));
+        let output = ctx.add_operator(OperatorData::Output(Output { input: join }));
+        ctx.set_root(output);
+
+        let plan = to_plan(&ctx).expect("query should export");
+        let Some(plan_rel::RelType::Root(root)) = plan.relations[0].rel_type.as_ref() else {
+            panic!("plan should export a root")
+        };
+        let Some(Rel {
+            rel_type: Some(rel::RelType::Join(join)),
+        }) = root.input.as_ref()
+        else {
+            panic!("root should read from join")
+        };
+        assert_eq!(join.r#type, join_rel::JoinType::Inner as i32);
+        assert!(join.left.is_some(), "join should have left input");
+        assert!(join.right.is_some(), "join should have right input");
+        assert!(matches!(
+            join.expression
+                .as_ref()
+                .and_then(|expr| expr.rex_type.as_ref()),
+            Some(expression::RexType::ScalarFunction(_))
+        ));
+        assert!(plan.extensions.iter().any(|extension| matches!(
+            extension.mapping_type.as_ref(),
+            Some(proto::extensions::simple_extension_declaration::MappingType::ExtensionFunction(
+                proto::extensions::simple_extension_declaration::ExtensionFunction { name, .. }
+            )) if name == "equal"
         )));
     }
 
