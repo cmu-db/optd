@@ -15,6 +15,30 @@ use datafusion::prelude::SessionContext;
 use sqllogictest::{AsyncDB, DBOutput, DefaultColumnType, Runner};
 
 const PLAN_ONLY_MARKER: &str = "-- simple_graph: plan-only";
+const TPCH_SQLLOGICTEST_FILES: [&str; 22] = [
+    "tests/slt/tpch/q01.slt",
+    "tests/slt/tpch/q02.slt",
+    "tests/slt/tpch/q03.slt",
+    "tests/slt/tpch/q04.slt",
+    "tests/slt/tpch/q05.slt",
+    "tests/slt/tpch/q06.slt",
+    "tests/slt/tpch/q07.slt",
+    "tests/slt/tpch/q08.slt",
+    "tests/slt/tpch/q09.slt",
+    "tests/slt/tpch/q10.slt",
+    "tests/slt/tpch/q11.slt",
+    "tests/slt/tpch/q12.slt",
+    "tests/slt/tpch/q13.slt",
+    "tests/slt/tpch/q14.slt",
+    "tests/slt/tpch/q15.slt",
+    "tests/slt/tpch/q16.slt",
+    "tests/slt/tpch/q17.slt",
+    "tests/slt/tpch/q18.slt",
+    "tests/slt/tpch/q19.slt",
+    "tests/slt/tpch/q20.slt",
+    "tests/slt/tpch/q21.slt",
+    "tests/slt/tpch/q22.slt",
+];
 
 #[derive(Debug)]
 struct SubstraitRoundTripQueryPlanner;
@@ -119,12 +143,12 @@ async fn sqllogictest_runs_datafusion_substrait_roundtrip() {
 
 #[test]
 fn tpch_sqllogictest_contains_all_queries() {
-    let script = include_str!("slt/tpch_roundtrip_plan_only.slt");
-
-    for query in 1..=22 {
+    for (index, path) in TPCH_SQLLOGICTEST_FILES.iter().enumerate() {
+        let query = index + 1;
+        let script = std::fs::read_to_string(path).unwrap();
         assert!(
             script.contains(&format!("# TPC-H Q{query}")),
-            "missing TPC-H Q{query} sqllogictest entry"
+            "{path} should contain only TPC-H Q{query}"
         );
     }
 }
@@ -137,10 +161,9 @@ async fn sqllogictest_runs_tpch_substrait_roundtrip_plan_only() {
 
     let mut runner = Runner::new(|| async { DataFusionSubstraitDb::new() });
 
-    runner
-        .run_file_async("tests/slt/tpch_roundtrip_plan_only.slt")
-        .await
-        .unwrap();
+    for file in TPCH_SQLLOGICTEST_FILES {
+        runner.run_file_async(file).await.unwrap();
+    }
 }
 
 fn register_numbers_table(ctx: &SessionContext) -> DataFusionResult<()> {
