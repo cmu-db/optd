@@ -11,8 +11,8 @@ pub mod substrait;
 pub mod tpch;
 
 pub use analysis::{
-    Analysis, AnalysisContext, AnalysisError, AnalysisResult, AvailableColumns, ColumnNullability,
-    CreatedColumns, FreeColumns, OperatorAnalysis, UsedColumns, expr_used_columns,
+    Analysis, AnalysisContext, AnalysisError, AnalysisResult, Analyzable, AvailableColumns,
+    ColumnNullability, CreatedColumns, FreeColumns, ParentOf, UsedColumns, expr_used_columns,
 };
 pub use catalog::{
     Catalog, CatalogError, CatalogResult, MemoryCatalog, ResolvedTableRef, TableId, TableMetadata,
@@ -841,18 +841,18 @@ impl QueryFormatConfig {
 }
 
 /// Operator analysis whose output can be shown as a display property.
-pub trait DisplayableOperatorAnalysis: OperatorAnalysis + Default + 'static {
+pub trait DisplayableOperatorAnalysis: Analyzable + Default + 'static {
     /// Stable key used by pretty and JSON display output.
     const DISPLAY_KEY: &'static str;
 
     /// Formats this analysis' output as a display value.
-    fn format_output(formatter: &QueryFormatter<'_>, output: Self::Output) -> DisplayValue;
+    fn format_output(formatter: &QueryFormatter<'_>, output: Self::Value) -> DisplayValue;
 }
 
 impl DisplayableOperatorAnalysis for CreatedColumns {
     const DISPLAY_KEY: &'static str = "analysis::created_columns";
 
-    fn format_output(formatter: &QueryFormatter<'_>, output: Self::Output) -> DisplayValue {
+    fn format_output(formatter: &QueryFormatter<'_>, output: Self::Value) -> DisplayValue {
         formatter.format_columns(output)
     }
 }
@@ -860,7 +860,7 @@ impl DisplayableOperatorAnalysis for CreatedColumns {
 impl DisplayableOperatorAnalysis for AvailableColumns {
     const DISPLAY_KEY: &'static str = "analysis::available_columns";
 
-    fn format_output(formatter: &QueryFormatter<'_>, output: Self::Output) -> DisplayValue {
+    fn format_output(formatter: &QueryFormatter<'_>, output: Self::Value) -> DisplayValue {
         formatter.format_columns(output)
     }
 }
@@ -868,7 +868,7 @@ impl DisplayableOperatorAnalysis for AvailableColumns {
 impl DisplayableOperatorAnalysis for UsedColumns {
     const DISPLAY_KEY: &'static str = "analysis::used_columns";
 
-    fn format_output(formatter: &QueryFormatter<'_>, output: Self::Output) -> DisplayValue {
+    fn format_output(formatter: &QueryFormatter<'_>, output: Self::Value) -> DisplayValue {
         formatter.format_columns(output)
     }
 }
@@ -876,7 +876,7 @@ impl DisplayableOperatorAnalysis for UsedColumns {
 impl DisplayableOperatorAnalysis for FreeColumns {
     const DISPLAY_KEY: &'static str = "analysis::free_columns";
 
-    fn format_output(formatter: &QueryFormatter<'_>, output: Self::Output) -> DisplayValue {
+    fn format_output(formatter: &QueryFormatter<'_>, output: Self::Value) -> DisplayValue {
         formatter.format_columns(output)
     }
 }
@@ -884,7 +884,7 @@ impl DisplayableOperatorAnalysis for FreeColumns {
 impl DisplayableOperatorAnalysis for ColumnNullability {
     const DISPLAY_KEY: &'static str = "analysis::column_nullability";
 
-    fn format_output(formatter: &QueryFormatter<'_>, output: Self::Output) -> DisplayValue {
+    fn format_output(formatter: &QueryFormatter<'_>, output: Self::Value) -> DisplayValue {
         DisplayValue::List(
             output
                 .into_iter()
