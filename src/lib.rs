@@ -2244,6 +2244,23 @@ mod tests {
         assert!(rendered.contains("│ Root"));
         assert!(rendered.contains("│ field: value"));
         assert!(rendered.contains("│ metadata: present"));
+        let lines = rendered.lines().collect::<Vec<_>>();
+        let field_index = lines
+            .iter()
+            .position(|line| line.contains("field: value"))
+            .expect("field should render");
+        let metadata_index = lines
+            .iter()
+            .position(|line| line.contains("metadata: present"))
+            .expect("metadata should render");
+        assert_eq!(metadata_index, field_index + 2);
+        assert!(
+            lines[field_index + 1]
+                .chars()
+                .all(|ch| matches!(ch, '│' | ' ' | '┄')),
+            "{}",
+            lines[field_index + 1]
+        );
         assert!(rendered.contains("│ left"));
         assert!(rendered.contains("│ right"));
         assert!(rendered.contains("│ Left"));

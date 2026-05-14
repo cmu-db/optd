@@ -373,16 +373,23 @@ impl BoxDrawingRenderer {
     }
 
     fn render_details(&self, node: &DisplayNode) -> Vec<RenderDetail> {
-        let fields = node
+        let mut details = node
             .fields
             .iter()
-            .flat_map(|field| self.render_field(field));
-        let metadata = node
-            .metadata
-            .iter()
-            .flat_map(|(key, value)| self.render_metadata_entry(key, value));
+            .flat_map(|field| self.render_field(field))
+            .collect::<Vec<_>>();
 
-        fields.chain(metadata).collect()
+        if !details.is_empty() && !node.metadata.is_empty() {
+            details.push(RenderDetail::separator());
+        }
+
+        details.extend(
+            node.metadata
+                .iter()
+                .flat_map(|(key, value)| self.render_metadata_entry(key, value)),
+        );
+
+        details
     }
 
     fn render_field(&self, field: &DisplayField) -> Vec<RenderDetail> {
@@ -525,6 +532,11 @@ impl BoxDrawingRenderer {
         lines.push(format!("├{}┤", "─".repeat(content_width + 2)));
 
         for detail in wrapped_details {
+            if detail.is_separator() {
+                lines.push(format!("│ {} │", "┄".repeat(content_width)));
+                continue;
+            }
+
             let padding = content_width.saturating_sub(detail.text.chars().count());
             lines.push(format!(
                 "│ {}{} │",
@@ -637,6 +649,7 @@ impl BoxDrawingRenderer {
 
         match &detail.style {
             RenderDetailStyle::Plain => detail.text.clone(),
+            RenderDetailStyle::Separator => detail.text.clone(),
             RenderDetailStyle::MetadataKey => {
                 self.apply_style(self.config.theme.metadata_key, &detail.text)
             }
@@ -673,6 +686,7 @@ struct RenderDetail {
 #[derive(Debug, Clone)]
 enum RenderDetailStyle {
     Plain,
+    Separator,
     MetadataKey,
     MetadataValue,
     MetadataScalar { key: String, value: String },
@@ -684,6 +698,17 @@ impl RenderDetail {
             text,
             style: RenderDetailStyle::Plain,
         }
+    }
+
+    fn separator() -> Self {
+        Self {
+            text: String::new(),
+            style: RenderDetailStyle::Separator,
+        }
+    }
+
+    fn is_separator(&self) -> bool {
+        matches!(self.style, RenderDetailStyle::Separator)
     }
 
     fn metadata_key(text: String) -> Self {
