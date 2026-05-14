@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 
 use arrow_schema::{DataType, TimeUnit};
 use substrait::proto;
@@ -12,10 +13,10 @@ use substrait::proto::{
 };
 
 use crate::{
-    AggregateExpr, AggregateFunction, Aggregation, BinaryOp, Column, ColumnData, CrossProduct,
-    Expr, ExprData, Join, JoinType, Map, NaryOp, Operator, OperatorData, Output, Projection,
-    QueryContext, ScalarFunction, ScalarValue, Scan, Selection, TableFunction, TableFunctionDef,
-    TableRef, UnaryOp,
+    AggregateExpr, AggregateFunction, Aggregation, BinaryOp, Catalog, Column, ColumnData,
+    CrossProduct, Expr, ExprData, Join, JoinType, Map, NaryOp, Operator, OperatorData, Output,
+    Projection, QueryContext, ScalarFunction, ScalarValue, Scan, Selection, TableFunction,
+    TableFunctionDef, TableRef, UnaryOp,
 };
 
 /// Converts Substrait protobuf plans into this crate's relational IR.
@@ -26,10 +27,27 @@ pub fn from_plan(plan: &Plan) -> Result<QueryContext, SubstraitError> {
     Converter::new(plan).convert_plan(plan)
 }
 
+/// Converts a Substrait plan using `catalog` to resolve named table reads when possible.
+pub fn from_plan_with_catalog(
+    plan: &Plan,
+    catalog: Arc<dyn Catalog>,
+) -> Result<QueryContext, SubstraitError> {
+    Converter::with_catalog(plan, catalog).convert_plan(plan)
+}
+
 /// Converts a single Substrait relation tree into this crate's relational IR.
 pub fn from_rel(rel: &Rel) -> Result<QueryContext, SubstraitError> {
     let empty = Plan::default();
     Converter::new(&empty).convert_standalone_rel(rel)
+}
+
+/// Converts a single Substrait relation tree using `catalog` to resolve named table reads.
+pub fn from_rel_with_catalog(
+    rel: &Rel,
+    catalog: Arc<dyn Catalog>,
+) -> Result<QueryContext, SubstraitError> {
+    let empty = Plan::default();
+    Converter::with_catalog(&empty, catalog).convert_standalone_rel(rel)
 }
 
 /// Error produced while importing a Substrait plan.
@@ -99,6 +117,7 @@ struct Converter {
     ctx: QueryContext,
     functions: HashMap<u32, String>,
     next_computed_column: usize,
+    catalog: Option<Arc<dyn Catalog>>,
 }
 
 impl Converter {
@@ -107,6 +126,16 @@ impl Converter {
             ctx: QueryContext::new(),
             functions: collect_function_anchors(plan),
             next_computed_column: 0,
+            catalog: None,
+        }
+    }
+
+    fn with_catalog(plan: &Plan, catalog: Arc<dyn Catalog>) -> Self {
+        Self {
+            ctx: QueryContext::new(),
+            functions: collect_function_anchors(plan),
+            next_computed_column: 0,
+            catalog: Some(catalog),
         }
     }
 
@@ -227,7 +256,6 @@ impl Converter {
             return Err(SubstraitError::UnsupportedRead("ReadRel.projection"));
         }
 
-        let columns = self.convert_named_struct(read.base_schema.as_ref())?;
         let mut relation = match read
             .read_type
             .as_ref()
@@ -235,13 +263,10 @@ impl Converter {
         {
             read_rel::ReadType::NamedTable(table) => {
                 let table = Self::convert_named_table_ref(&table.names);
-                let operator = self.ctx.add_operator(OperatorData::Scan(Scan {
-                    table,
-                    columns: columns.clone(),
-                }));
-                Relation { operator, columns }
+                self.convert_named_table_read(table, read.base_schema.as_ref())?
             }
             read_rel::ReadType::LocalFiles(files) => {
+                let columns = self.convert_named_struct(read.base_schema.as_ref())?;
                 let (function, args) = self.convert_local_files(files)?;
                 let operator = self
                     .ctx
@@ -279,6 +304,34 @@ impl Converter {
         }
 
         self.apply_common(read.common.as_ref(), relation)
+    }
+
+    fn convert_named_table_read(
+        &mut self,
+        table: TableRef,
+        base_schema: Option<&NamedStruct>,
+    ) -> Result<Relation, SubstraitError> {
+        if let Some(catalog) = self.catalog.clone() {
+            if let Ok(operator) = self
+                .ctx
+                .add_scan_from_catalog(catalog.as_ref(), table.clone())
+            {
+                let OperatorData::Scan(scan) = operator.get(&self.ctx) else {
+                    unreachable!("add_scan_from_catalog always creates a scan")
+                };
+                return Ok(Relation {
+                    operator,
+                    columns: scan.columns.clone(),
+                });
+            }
+        }
+
+        let columns = self.convert_named_struct(base_schema)?;
+        let operator = self.ctx.add_operator(OperatorData::Scan(Scan {
+            table,
+            columns: columns.clone(),
+        }));
+        Ok(Relation { operator, columns })
     }
 
     fn convert_project(&mut self, project: &ProjectRel) -> Result<Relation, SubstraitError> {
@@ -1130,6 +1183,9 @@ fn precision_to_time_unit(precision: i32) -> Result<TimeUnit, SubstraitError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Catalog, MemoryCatalog};
+    use arrow_schema::{Field, Schema};
+    use std::sync::Arc;
 
     fn required_i64_type() -> Type {
         Type {
@@ -1184,5 +1240,58 @@ mod tests {
         assert_eq!(scan.table, TableRef::bare("users"));
         assert_eq!(ctx.column(scan.columns[0]).name, "user_id");
         assert_eq!(ctx.column(scan.columns[0]).ty, DataType::Int64);
+    }
+
+    #[test]
+    fn imports_named_table_read_from_catalog_without_base_schema() {
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(
+                TableRef::bare("users"),
+                Arc::new(Schema::new(vec![
+                    Field::new("id", DataType::Int64, false),
+                    Field::new("age", DataType::Int32, true),
+                ])),
+                None,
+            )
+            .unwrap();
+        let plan = Plan {
+            relations: vec![PlanRel {
+                rel_type: Some(plan_rel::RelType::Root(proto::RelRoot {
+                    input: Some(Rel {
+                        rel_type: Some(rel::RelType::Read(Box::new(ReadRel {
+                            common: None,
+                            base_schema: None,
+                            filter: None,
+                            best_effort_filter: None,
+                            projection: None,
+                            advanced_extension: None,
+                            read_type: Some(read_rel::ReadType::NamedTable(read_rel::NamedTable {
+                                names: vec!["users".to_string()],
+                                advanced_extension: None,
+                            })),
+                        }))),
+                    }),
+                    names: Vec::new(),
+                })),
+            }],
+            ..Plan::default()
+        };
+
+        let ctx = from_plan_with_catalog(&plan, catalog).expect("plan should import");
+        let root = ctx.root().expect("root should be set");
+        let OperatorData::Output(output) = ctx.operator(root) else {
+            panic!("root should be output")
+        };
+        let OperatorData::Scan(scan) = ctx.operator(output.input) else {
+            panic!("output should read from scan")
+        };
+
+        assert_eq!(scan.table, TableRef::full("memory", "public", "users"));
+        assert_eq!(scan.columns.len(), 2);
+        assert_eq!(ctx.column(scan.columns[0]).name, "id");
+        assert_eq!(ctx.column(scan.columns[0]).ty, DataType::Int64);
+        assert_eq!(ctx.column(scan.columns[1]).name, "age");
+        assert_eq!(ctx.column(scan.columns[1]).ty, DataType::Int32);
     }
 }
