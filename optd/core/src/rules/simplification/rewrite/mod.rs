@@ -1,3 +1,4 @@
+mod decorrelation;
 mod project;
 mod scalar;
 mod select;
@@ -5,6 +6,9 @@ mod select;
 use crate::ir::{Column, Scalar, scalar::List};
 use std::{collections::HashMap, sync::Arc};
 
+pub use decorrelation::{
+    EliminateNullRejectedLeftOuterJoinRulePass, RemoveRedundantDomainJoinRulePass,
+};
 pub use project::{MergeProjectRulePass, PushLimitThroughProjectRulePass};
 pub use scalar::ScalarSimplificationRulePass;
 pub use select::{

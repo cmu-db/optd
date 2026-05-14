@@ -130,8 +130,10 @@ EnforcerSort { tuple_ordering: [(#12.0, Asc)], (.output_columns): [ "__#12.cntry
                         │   ├── "__#15.o_shippriority"(#15.7)
                         │   └── "__#15.o_totalprice"(#15.3)
                         ├── (.cardinality): 0.00
-                        └── Select
-                            ├── .predicate: "orders.o_custkey"(#6.1) = "orders.o_custkey"(#6.1)
+                        └── Get
+                            ├── .data_source_id: 7
+                            ├── .table_index: 6
+                            ├── .implementation: None
                             ├── (.output_columns):
                             │   ┌── "orders.o_clerk"(#6.6)
                             │   ├── "orders.o_comment"(#6.8)
@@ -142,21 +144,6 @@ EnforcerSort { tuple_ordering: [(#12.0, Asc)], (.output_columns): [ "__#12.cntry
                             │   ├── "orders.o_orderstatus"(#6.2)
                             │   ├── "orders.o_shippriority"(#6.7)
                             │   └── "orders.o_totalprice"(#6.3)
-                            ├── (.cardinality): 0.00
-                            └── Get
-                                ├── .data_source_id: 7
-                                ├── .table_index: 6
-                                ├── .implementation: None
-                                ├── (.output_columns):
-                                │   ┌── "orders.o_clerk"(#6.6)
-                                │   ├── "orders.o_comment"(#6.8)
-                                │   ├── "orders.o_custkey"(#6.1)
-                                │   ├── "orders.o_orderdate"(#6.4)
-                                │   ├── "orders.o_orderkey"(#6.0)
-                                │   ├── "orders.o_orderpriority"(#6.5)
-                                │   ├── "orders.o_orderstatus"(#6.2)
-                                │   ├── "orders.o_shippriority"(#6.7)
-                                │   └── "orders.o_totalprice"(#6.3)
-                                └── (.cardinality): 0.00
+                            └── (.cardinality): 0.00
 */
 

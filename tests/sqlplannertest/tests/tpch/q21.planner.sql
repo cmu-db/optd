@@ -42,6 +42,6 @@ limit 100;
 
 /*
 Error
-Schema error: Schema contains duplicate qualified field name "__#20".l_orderkey
+External error: Schema error: Schema contains duplicate fields: __#20.l_orderkey
 */
 

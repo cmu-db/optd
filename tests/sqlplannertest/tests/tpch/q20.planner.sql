@@ -129,57 +129,53 @@ EnforcerSort { tuple_ordering: [(#11.0, Asc)], (.output_columns): [ "__#11.s_add
         │   ├── .join_cond: "supplier.s_nationkey"(#1.3) = "nation.n_nationkey"(#2.0)
         │   ├── (.output_columns): [ "nation.n_name"(#2.1), "nation.n_nationkey"(#2.0), "supplier.s_address"(#1.2), "supplier.s_name"(#1.1), "supplier.s_nationkey"(#1.3), "supplier.s_suppkey"(#1.0) ]
         │   ├── (.cardinality): 0.00
-        │   ├── Get { .data_source_id: 4, .table_index: 1, .implementation: None, (.output_columns): [ "supplier.s_address"(#1.2), "supplier.s_name"(#1.1), "supplier.s_nationkey"(#1.3), "supplier.s_suppkey"(#1.0) ], (.cardinality): 0.00 }
+        │   ├── Get
+        │   │   ├── .data_source_id: 4
+        │   │   ├── .table_index: 1
+        │   │   ├── .implementation: None
+        │   │   ├── (.output_columns): [ "supplier.s_address"(#1.2), "supplier.s_name"(#1.1), "supplier.s_nationkey"(#1.3), "supplier.s_suppkey"(#1.0) ]
+        │   │   └── (.cardinality): 0.00
         │   └── Select { .predicate: "nation.n_name"(#2.1) = 'IRAQ'::utf8_view, (.output_columns): [ "nation.n_name"(#2.1), "nation.n_nationkey"(#2.0) ], (.cardinality): 0.00 }
         │       └── Get { .data_source_id: 1, .table_index: 2, .implementation: None, (.output_columns): [ "nation.n_name"(#2.1), "nation.n_nationkey"(#2.0) ], (.cardinality): 0.00 }
         └── Project { .table_index: 19, .projections: "partsupp.ps_suppkey"(#3.1), (.output_columns): "__#19.ps_suppkey"(#19.0), (.cardinality): 0.00 }
             └── Join
                 ├── .join_type: Inner
                 ├── .implementation: None
-                ├── .join_cond: ("partsupp.ps_partkey"(#3.0) IS NOT DISTINCT FROM "__#18.ps_partkey"(#18.1)) AND ("partsupp.ps_suppkey"(#3.1) IS NOT DISTINCT FROM "__#18.ps_suppkey"(#18.2)) AND (CAST ("partsupp.ps_availqty"(#3.2) AS Float64) > "__#18.expr0"(#18.0))
+                ├── .join_cond: ("partsupp.ps_partkey"(#3.0) = "__#18.ps_partkey"(#18.1)) AND ("partsupp.ps_suppkey"(#3.1) = "__#18.ps_suppkey"(#18.2)) AND (CAST ("partsupp.ps_availqty"(#3.2) AS Float64) > "__#18.expr0"(#18.0))
                 ├── (.output_columns): [ "__#18.expr0"(#18.0), "__#18.ps_partkey"(#18.1), "__#18.ps_suppkey"(#18.2), "partsupp.ps_availqty"(#3.2), "partsupp.ps_partkey"(#3.0), "partsupp.ps_suppkey"(#3.1) ]
                 ├── (.cardinality): 0.00
-                ├── Join { .join_type: LeftSemi, .implementation: None, .join_cond: "partsupp.ps_partkey"(#3.0) = "__#5.p_partkey"(#5.0), (.output_columns): [ "partsupp.ps_availqty"(#3.2), "partsupp.ps_partkey"(#3.0), "partsupp.ps_suppkey"(#3.1) ], (.cardinality): 0.00 }
+                ├── Join
+                │   ├── .join_type: LeftSemi
+                │   ├── .implementation: None
+                │   ├── .join_cond: "partsupp.ps_partkey"(#3.0) = "__#5.p_partkey"(#5.0)
+                │   ├── (.output_columns): [ "partsupp.ps_availqty"(#3.2), "partsupp.ps_partkey"(#3.0), "partsupp.ps_suppkey"(#3.1) ]
+                │   ├── (.cardinality): 0.00
                 │   ├── Get { .data_source_id: 5, .table_index: 3, .implementation: None, (.output_columns): [ "partsupp.ps_availqty"(#3.2), "partsupp.ps_partkey"(#3.0), "partsupp.ps_suppkey"(#3.1) ], (.cardinality): 0.00 }
                 │   └── Project { .table_index: 5, .projections: "part.p_partkey"(#4.0), (.output_columns): "__#5.p_partkey"(#5.0), (.cardinality): 0.00 }
                 │       └── Select { .predicate: "part.p_name"(#4.1) LIKE 'indian%'::utf8_view, (.output_columns): [ "part.p_name"(#4.1), "part.p_partkey"(#4.0) ], (.cardinality): 0.00 }
                 │           └── Get { .data_source_id: 3, .table_index: 4, .implementation: None, (.output_columns): [ "part.p_name"(#4.1), "part.p_partkey"(#4.0) ], (.cardinality): 0.00 }
                 └── Project
                     ├── .table_index: 18
-                    ├── .projections: [ 0.5::float64 * CAST ("__#17.sum"(#17.0) AS Float64), "__#14.ps_partkey"(#14.0), "__#14.ps_suppkey"(#14.1) ]
+                    ├── .projections: [ 0.5::float64 * CAST ("__#17.sum"(#17.0) AS Float64), "__#16.l_partkey"(#16.0), "__#16.l_suppkey"(#16.1) ]
                     ├── (.output_columns): [ "__#18.expr0"(#18.0), "__#18.ps_partkey"(#18.1), "__#18.ps_suppkey"(#18.2) ]
                     ├── (.cardinality): 0.00
-                    └── Join
-                        ├── .join_type: LeftOuter
+                    └── Aggregate
+                        ├── .key_table_index: 16
+                        ├── .aggregate_table_index: 17
                         ├── .implementation: None
-                        ├── .join_cond: ("__#14.ps_partkey"(#14.0) IS NOT DISTINCT FROM "__#16.l_partkey"(#16.0)) AND ("__#14.ps_suppkey"(#14.1) IS NOT DISTINCT FROM "__#16.l_suppkey"(#16.1))
-                        ├── (.output_columns): [ "__#14.ps_partkey"(#14.0), "__#14.ps_suppkey"(#14.1), "__#16.l_partkey"(#16.0), "__#16.l_suppkey"(#16.1), "__#17.sum"(#17.0) ]
+                        ├── .exprs: sum("lineitem.l_quantity"(#6.4))
+                        ├── .keys: [ "lineitem.l_partkey"(#6.1), "lineitem.l_suppkey"(#6.2) ]
+                        ├── (.output_columns): [ "__#16.l_partkey"(#16.0), "__#16.l_suppkey"(#16.1), "__#17.sum"(#17.0) ]
                         ├── (.cardinality): 0.00
-                        ├── Aggregate
-                        │   ├── .key_table_index: 14
-                        │   ├── .aggregate_table_index: 15
-                        │   ├── .implementation: None
-                        │   ├── .exprs: []
-                        │   ├── .keys: [ "partsupp.ps_partkey"(#3.0), "partsupp.ps_suppkey"(#3.1) ]
-                        │   ├── (.output_columns): [ "__#14.ps_partkey"(#14.0), "__#14.ps_suppkey"(#14.1) ]
-                        │   ├── (.cardinality): 0.00
-                        │   └── Join { .join_type: LeftSemi, .implementation: None, .join_cond: "partsupp.ps_partkey"(#3.0) = "__#5.p_partkey"(#5.0), (.output_columns): [ "partsupp.ps_partkey"(#3.0), "partsupp.ps_suppkey"(#3.1) ], (.cardinality): 0.00 }
-                        │       ├── Get { .data_source_id: 5, .table_index: 3, .implementation: None, (.output_columns): [ "partsupp.ps_partkey"(#3.0), "partsupp.ps_suppkey"(#3.1) ], (.cardinality): 0.00 }
-                        │       └── Project { .table_index: 5, .projections: "part.p_partkey"(#4.0), (.output_columns): "__#5.p_partkey"(#5.0), (.cardinality): 0.00 }
-                        │           └── Select { .predicate: "part.p_name"(#4.1) LIKE 'indian%'::utf8_view, (.output_columns): [ "part.p_name"(#4.1), "part.p_partkey"(#4.0) ], (.cardinality): 0.00 }
-                        │               └── Get { .data_source_id: 3, .table_index: 4, .implementation: None, (.output_columns): [ "part.p_name"(#4.1), "part.p_partkey"(#4.0) ], (.cardinality): 0.00 }
-                        └── Aggregate
-                            ├── .key_table_index: 16
-                            ├── .aggregate_table_index: 17
-                            ├── .implementation: None
-                            ├── .exprs: sum("lineitem.l_quantity"(#6.4))
-                            ├── .keys: [ "lineitem.l_partkey"(#6.1), "lineitem.l_suppkey"(#6.2) ]
-                            ├── (.output_columns): [ "__#16.l_partkey"(#16.0), "__#16.l_suppkey"(#16.1), "__#17.sum"(#17.0) ]
+                        └── Select
+                            ├── .predicate: ("lineitem.l_shipdate"(#6.10) >= 1996-01-01::date32) AND ("lineitem.l_shipdate"(#6.10) < 1997-01-01::date32)
+                            ├── (.output_columns): [ "lineitem.l_partkey"(#6.1), "lineitem.l_quantity"(#6.4), "lineitem.l_shipdate"(#6.10), "lineitem.l_suppkey"(#6.2) ]
                             ├── (.cardinality): 0.00
-                            └── Select
-                                ├── .predicate: ("lineitem.l_partkey"(#6.1) = "lineitem.l_partkey"(#6.1)) AND ("lineitem.l_suppkey"(#6.2) = "lineitem.l_suppkey"(#6.2)) AND ("lineitem.l_shipdate"(#6.10) >= 1996-01-01::date32) AND ("lineitem.l_shipdate"(#6.10) < 1997-01-01::date32)
+                            └── Get
+                                ├── .data_source_id: 8
+                                ├── .table_index: 6
+                                ├── .implementation: None
                                 ├── (.output_columns): [ "lineitem.l_partkey"(#6.1), "lineitem.l_quantity"(#6.4), "lineitem.l_shipdate"(#6.10), "lineitem.l_suppkey"(#6.2) ]
-                                ├── (.cardinality): 0.00
-                                └── Get { .data_source_id: 8, .table_index: 6, .implementation: None, (.output_columns): [ "lineitem.l_partkey"(#6.1), "lineitem.l_quantity"(#6.4), "lineitem.l_shipdate"(#6.10), "lineitem.l_suppkey"(#6.2) ], (.cardinality): 0.00 }
+                                └── (.cardinality): 0.00
 */
 

@@ -371,7 +371,7 @@ Limit
         └── Join
             ├── .join_type: Inner
             ├── .implementation: None
-            ├── .join_cond: ("part.p_partkey"(#1.0) IS NOT DISTINCT FROM "__#18.p_partkey"(#18.1)) AND ("partsupp.ps_supplycost"(#3.3) = "__#18.min"(#18.0))
+            ├── .join_cond: ("part.p_partkey"(#1.0) = "__#18.p_partkey"(#18.1)) AND ("partsupp.ps_supplycost"(#3.3) = "__#18.min"(#18.0))
             ├── (.output_columns):
             │   ┌── "__#18.min"(#18.0)
             │   ├── "__#18.p_partkey"(#18.1)
@@ -527,195 +527,83 @@ Limit
             │           └── (.cardinality): 0.00
             └── Project
                 ├── .table_index: 18
-                ├── .projections: [ "__#17.min"(#17.0), "__#14.p_partkey"(#14.0) ]
+                ├── .projections: [ "__#17.min"(#17.0), "__#16.ps_partkey"(#16.0) ]
                 ├── (.output_columns): [ "__#18.min"(#18.0), "__#18.p_partkey"(#18.1) ]
                 ├── (.cardinality): 0.00
-                └── Join
-                    ├── .join_type: LeftOuter
+                └── Aggregate
+                    ├── .key_table_index: 16
+                    ├── .aggregate_table_index: 17
                     ├── .implementation: None
-                    ├── .join_cond: "__#14.p_partkey"(#14.0) IS NOT DISTINCT FROM "__#16.ps_partkey"(#16.0)
-                    ├── (.output_columns): [ "__#14.p_partkey"(#14.0), "__#16.ps_partkey"(#16.0), "__#17.min"(#17.0) ]
+                    ├── .exprs: min("partsupp.ps_supplycost"(#6.3))
+                    ├── .keys: "partsupp.ps_partkey"(#6.0)
+                    ├── (.output_columns): [ "__#16.ps_partkey"(#16.0), "__#17.min"(#17.0) ]
                     ├── (.cardinality): 0.00
-                    ├── Aggregate
-                    │   ├── .key_table_index: 14
-                    │   ├── .aggregate_table_index: 15
-                    │   ├── .implementation: None
-                    │   ├── .exprs: []
-                    │   ├── .keys: "part.p_partkey"(#1.0)
-                    │   ├── (.output_columns): "__#14.p_partkey"(#14.0)
-                    │   ├── (.cardinality): 0.00
-                    │   └── Join
-                    │       ├── .join_type: Inner
-                    │       ├── .implementation: None
-                    │       ├── .join_cond: "nation.n_regionkey"(#4.2) = "region.r_regionkey"(#5.0)
-                    │       ├── (.output_columns):
-                    │       │   ┌── "nation.n_nationkey"(#4.0)
-                    │       │   ├── "nation.n_regionkey"(#4.2)
-                    │       │   ├── "part.p_partkey"(#1.0)
-                    │       │   ├── "part.p_size"(#1.5)
-                    │       │   ├── "part.p_type"(#1.4)
-                    │       │   ├── "partsupp.ps_partkey"(#3.0)
-                    │       │   ├── "partsupp.ps_suppkey"(#3.1)
-                    │       │   ├── "region.r_name"(#5.1)
-                    │       │   ├── "region.r_regionkey"(#5.0)
-                    │       │   ├── "supplier.s_nationkey"(#2.3)
-                    │       │   └── "supplier.s_suppkey"(#2.0)
-                    │       ├── (.cardinality): 0.00
-                    │       ├── Join
-                    │       │   ├── .join_type: Inner
-                    │       │   ├── .implementation: None
-                    │       │   ├── .join_cond: "supplier.s_nationkey"(#2.3) = "nation.n_nationkey"(#4.0)
-                    │       │   ├── (.output_columns):
-                    │       │   │   ┌── "nation.n_nationkey"(#4.0)
-                    │       │   │   ├── "nation.n_regionkey"(#4.2)
-                    │       │   │   ├── "part.p_partkey"(#1.0)
-                    │       │   │   ├── "part.p_size"(#1.5)
-                    │       │   │   ├── "part.p_type"(#1.4)
-                    │       │   │   ├── "partsupp.ps_partkey"(#3.0)
-                    │       │   │   ├── "partsupp.ps_suppkey"(#3.1)
-                    │       │   │   ├── "supplier.s_nationkey"(#2.3)
-                    │       │   │   └── "supplier.s_suppkey"(#2.0)
-                    │       │   ├── (.cardinality): 0.00
-                    │       │   ├── Join
-                    │       │   │   ├── .join_type: Inner
-                    │       │   │   ├── .implementation: None
-                    │       │   │   ├── .join_cond: ("part.p_partkey"(#1.0) = "partsupp.ps_partkey"(#3.0)) AND ("supplier.s_suppkey"(#2.0) = "partsupp.ps_suppkey"(#3.1))
-                    │       │   │   ├── (.output_columns):
-                    │       │   │   │   ┌── "part.p_partkey"(#1.0)
-                    │       │   │   │   ├── "part.p_size"(#1.5)
-                    │       │   │   │   ├── "part.p_type"(#1.4)
-                    │       │   │   │   ├── "partsupp.ps_partkey"(#3.0)
-                    │       │   │   │   ├── "partsupp.ps_suppkey"(#3.1)
-                    │       │   │   │   ├── "supplier.s_nationkey"(#2.3)
-                    │       │   │   │   └── "supplier.s_suppkey"(#2.0)
-                    │       │   │   ├── (.cardinality): 0.00
-                    │       │   │   ├── Join
-                    │       │   │   │   ├── .join_type: Inner
-                    │       │   │   │   ├── .implementation: None
-                    │       │   │   │   ├── .join_cond: true::boolean
-                    │       │   │   │   ├── (.output_columns):
-                    │       │   │   │   │   ┌── "part.p_partkey"(#1.0)
-                    │       │   │   │   │   ├── "part.p_size"(#1.5)
-                    │       │   │   │   │   ├── "part.p_type"(#1.4)
-                    │       │   │   │   │   ├── "supplier.s_nationkey"(#2.3)
-                    │       │   │   │   │   └── "supplier.s_suppkey"(#2.0)
-                    │       │   │   │   ├── (.cardinality): 0.00
-                    │       │   │   │   ├── Select
-                    │       │   │   │   │   ├── .predicate: ("part.p_size"(#1.5) = 4::integer) AND ("part.p_type"(#1.4) LIKE '%TIN'::utf8_view)
-                    │       │   │   │   │   ├── (.output_columns): [ "part.p_partkey"(#1.0), "part.p_size"(#1.5), "part.p_type"(#1.4) ]
-                    │       │   │   │   │   ├── (.cardinality): 0.00
-                    │       │   │   │   │   └── Get
-                    │       │   │   │   │       ├── .data_source_id: 3
-                    │       │   │   │   │       ├── .table_index: 1
-                    │       │   │   │   │       ├── .implementation: None
-                    │       │   │   │   │       ├── (.output_columns): [ "part.p_partkey"(#1.0), "part.p_size"(#1.5), "part.p_type"(#1.4) ]
-                    │       │   │   │   │       └── (.cardinality): 0.00
-                    │       │   │   │   └── Get
-                    │       │   │   │       ├── .data_source_id: 4
-                    │       │   │   │       ├── .table_index: 2
-                    │       │   │   │       ├── .implementation: None
-                    │       │   │   │       ├── (.output_columns): [ "supplier.s_nationkey"(#2.3), "supplier.s_suppkey"(#2.0) ]
-                    │       │   │   │       └── (.cardinality): 0.00
-                    │       │   │   └── Get
-                    │       │   │       ├── .data_source_id: 5
-                    │       │   │       ├── .table_index: 3
-                    │       │   │       ├── .implementation: None
-                    │       │   │       ├── (.output_columns): [ "partsupp.ps_partkey"(#3.0), "partsupp.ps_suppkey"(#3.1) ]
-                    │       │   │       └── (.cardinality): 0.00
-                    │       │   └── Get
-                    │       │       ├── .data_source_id: 1
-                    │       │       ├── .table_index: 4
-                    │       │       ├── .implementation: None
-                    │       │       ├── (.output_columns): [ "nation.n_nationkey"(#4.0), "nation.n_regionkey"(#4.2) ]
-                    │       │       └── (.cardinality): 0.00
-                    │       └── Select
-                    │           ├── .predicate: "region.r_name"(#5.1) = 'AFRICA'::utf8_view
-                    │           ├── (.output_columns): [ "region.r_name"(#5.1), "region.r_regionkey"(#5.0) ]
-                    │           ├── (.cardinality): 0.00
-                    │           └── Get
-                    │               ├── .data_source_id: 2
-                    │               ├── .table_index: 5
-                    │               ├── .implementation: None
-                    │               ├── (.output_columns): [ "region.r_name"(#5.1), "region.r_regionkey"(#5.0) ]
-                    │               └── (.cardinality): 0.00
-                    └── Aggregate
-                        ├── .key_table_index: 16
-                        ├── .aggregate_table_index: 17
+                    └── Join
+                        ├── .join_type: Inner
                         ├── .implementation: None
-                        ├── .exprs: min("partsupp.ps_supplycost"(#6.3))
-                        ├── .keys: "partsupp.ps_partkey"(#6.0)
-                        ├── (.output_columns): [ "__#16.ps_partkey"(#16.0), "__#17.min"(#17.0) ]
+                        ├── .join_cond: "nation.n_regionkey"(#8.2) = "region.r_regionkey"(#9.0)
+                        ├── (.output_columns):
+                        │   ┌── "nation.n_nationkey"(#8.0)
+                        │   ├── "nation.n_regionkey"(#8.2)
+                        │   ├── "partsupp.ps_partkey"(#6.0)
+                        │   ├── "partsupp.ps_suppkey"(#6.1)
+                        │   ├── "partsupp.ps_supplycost"(#6.3)
+                        │   ├── "region.r_name"(#9.1)
+                        │   ├── "region.r_regionkey"(#9.0)
+                        │   ├── "supplier.s_nationkey"(#7.3)
+                        │   └── "supplier.s_suppkey"(#7.0)
                         ├── (.cardinality): 0.00
-                        └── Join
-                            ├── .join_type: Inner
-                            ├── .implementation: None
-                            ├── .join_cond: "nation.n_regionkey"(#8.2) = "region.r_regionkey"(#9.0)
-                            ├── (.output_columns):
-                            │   ┌── "nation.n_nationkey"(#8.0)
-                            │   ├── "nation.n_regionkey"(#8.2)
-                            │   ├── "partsupp.ps_partkey"(#6.0)
-                            │   ├── "partsupp.ps_suppkey"(#6.1)
-                            │   ├── "partsupp.ps_supplycost"(#6.3)
-                            │   ├── "region.r_name"(#9.1)
-                            │   ├── "region.r_regionkey"(#9.0)
-                            │   ├── "supplier.s_nationkey"(#7.3)
-                            │   └── "supplier.s_suppkey"(#7.0)
+                        ├── Join
+                        │   ├── .join_type: Inner
+                        │   ├── .implementation: None
+                        │   ├── .join_cond: "supplier.s_nationkey"(#7.3) = "nation.n_nationkey"(#8.0)
+                        │   ├── (.output_columns):
+                        │   │   ┌── "nation.n_nationkey"(#8.0)
+                        │   │   ├── "nation.n_regionkey"(#8.2)
+                        │   │   ├── "partsupp.ps_partkey"(#6.0)
+                        │   │   ├── "partsupp.ps_suppkey"(#6.1)
+                        │   │   ├── "partsupp.ps_supplycost"(#6.3)
+                        │   │   ├── "supplier.s_nationkey"(#7.3)
+                        │   │   └── "supplier.s_suppkey"(#7.0)
+                        │   ├── (.cardinality): 0.00
+                        │   ├── Join
+                        │   │   ├── .join_type: Inner
+                        │   │   ├── .implementation: None
+                        │   │   ├── .join_cond: "supplier.s_suppkey"(#7.0) = "partsupp.ps_suppkey"(#6.1)
+                        │   │   ├── (.output_columns):
+                        │   │   │   ┌── "partsupp.ps_partkey"(#6.0)
+                        │   │   │   ├── "partsupp.ps_suppkey"(#6.1)
+                        │   │   │   ├── "partsupp.ps_supplycost"(#6.3)
+                        │   │   │   ├── "supplier.s_nationkey"(#7.3)
+                        │   │   │   └── "supplier.s_suppkey"(#7.0)
+                        │   │   ├── (.cardinality): 0.00
+                        │   │   ├── Get
+                        │   │   │   ├── .data_source_id: 5
+                        │   │   │   ├── .table_index: 6
+                        │   │   │   ├── .implementation: None
+                        │   │   │   ├── (.output_columns): [ "partsupp.ps_partkey"(#6.0), "partsupp.ps_suppkey"(#6.1), "partsupp.ps_supplycost"(#6.3) ]
+                        │   │   │   └── (.cardinality): 0.00
+                        │   │   └── Get
+                        │   │       ├── .data_source_id: 4
+                        │   │       ├── .table_index: 7
+                        │   │       ├── .implementation: None
+                        │   │       ├── (.output_columns): [ "supplier.s_nationkey"(#7.3), "supplier.s_suppkey"(#7.0) ]
+                        │   │       └── (.cardinality): 0.00
+                        │   └── Get
+                        │       ├── .data_source_id: 1
+                        │       ├── .table_index: 8
+                        │       ├── .implementation: None
+                        │       ├── (.output_columns): [ "nation.n_nationkey"(#8.0), "nation.n_regionkey"(#8.2) ]
+                        │       └── (.cardinality): 0.00
+                        └── Select
+                            ├── .predicate: "region.r_name"(#9.1) = 'AFRICA'::utf8_view
+                            ├── (.output_columns): [ "region.r_name"(#9.1), "region.r_regionkey"(#9.0) ]
                             ├── (.cardinality): 0.00
-                            ├── Join
-                            │   ├── .join_type: Inner
-                            │   ├── .implementation: None
-                            │   ├── .join_cond: "supplier.s_nationkey"(#7.3) = "nation.n_nationkey"(#8.0)
-                            │   ├── (.output_columns):
-                            │   │   ┌── "nation.n_nationkey"(#8.0)
-                            │   │   ├── "nation.n_regionkey"(#8.2)
-                            │   │   ├── "partsupp.ps_partkey"(#6.0)
-                            │   │   ├── "partsupp.ps_suppkey"(#6.1)
-                            │   │   ├── "partsupp.ps_supplycost"(#6.3)
-                            │   │   ├── "supplier.s_nationkey"(#7.3)
-                            │   │   └── "supplier.s_suppkey"(#7.0)
-                            │   ├── (.cardinality): 0.00
-                            │   ├── Join
-                            │   │   ├── .join_type: Inner
-                            │   │   ├── .implementation: None
-                            │   │   ├── .join_cond: "supplier.s_suppkey"(#7.0) = "partsupp.ps_suppkey"(#6.1)
-                            │   │   ├── (.output_columns):
-                            │   │   │   ┌── "partsupp.ps_partkey"(#6.0)
-                            │   │   │   ├── "partsupp.ps_suppkey"(#6.1)
-                            │   │   │   ├── "partsupp.ps_supplycost"(#6.3)
-                            │   │   │   ├── "supplier.s_nationkey"(#7.3)
-                            │   │   │   └── "supplier.s_suppkey"(#7.0)
-                            │   │   ├── (.cardinality): 0.00
-                            │   │   ├── Select
-                            │   │   │   ├── .predicate: "partsupp.ps_partkey"(#6.0) = "partsupp.ps_partkey"(#6.0)
-                            │   │   │   ├── (.output_columns): [ "partsupp.ps_partkey"(#6.0), "partsupp.ps_suppkey"(#6.1), "partsupp.ps_supplycost"(#6.3) ]
-                            │   │   │   ├── (.cardinality): 0.00
-                            │   │   │   └── Get
-                            │   │   │       ├── .data_source_id: 5
-                            │   │   │       ├── .table_index: 6
-                            │   │   │       ├── .implementation: None
-                            │   │   │       ├── (.output_columns): [ "partsupp.ps_partkey"(#6.0), "partsupp.ps_suppkey"(#6.1), "partsupp.ps_supplycost"(#6.3) ]
-                            │   │   │       └── (.cardinality): 0.00
-                            │   │   └── Get
-                            │   │       ├── .data_source_id: 4
-                            │   │       ├── .table_index: 7
-                            │   │       ├── .implementation: None
-                            │   │       ├── (.output_columns): [ "supplier.s_nationkey"(#7.3), "supplier.s_suppkey"(#7.0) ]
-                            │   │       └── (.cardinality): 0.00
-                            │   └── Get
-                            │       ├── .data_source_id: 1
-                            │       ├── .table_index: 8
-                            │       ├── .implementation: None
-                            │       ├── (.output_columns): [ "nation.n_nationkey"(#8.0), "nation.n_regionkey"(#8.2) ]
-                            │       └── (.cardinality): 0.00
-                            └── Select
-                                ├── .predicate: "region.r_name"(#9.1) = 'AFRICA'::utf8_view
+                            └── Get
+                                ├── .data_source_id: 2
+                                ├── .table_index: 9
+                                ├── .implementation: None
                                 ├── (.output_columns): [ "region.r_name"(#9.1), "region.r_regionkey"(#9.0) ]
-                                ├── (.cardinality): 0.00
-                                └── Get
-                                    ├── .data_source_id: 2
-                                    ├── .table_index: 9
-                                    ├── .implementation: None
-                                    ├── (.output_columns): [ "region.r_name"(#9.1), "region.r_regionkey"(#9.0) ]
-                                    └── (.cardinality): 0.00
+                                └── (.cardinality): 0.00
 */
 
