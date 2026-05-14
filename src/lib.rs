@@ -6,6 +6,7 @@ use std::sync::Arc;
 pub mod analysis;
 pub mod catalog;
 mod display;
+pub mod optimize;
 pub mod substrait;
 pub mod tpch;
 
@@ -21,6 +22,7 @@ pub use display::{
     BoxDrawingRenderer, BoxRendererConfig, BoxRendererTheme, ColorMode, DisplayField, DisplayInput,
     DisplayNode, DisplayNodeRecord, DisplayPlan, DisplayProperties, DisplayValue,
 };
+pub use optimize::{OptimizeError, OptimizeResult, Pass, PassManager, PassResult, QueryPass};
 
 /// An opaque reference to a relational operator in a [`QueryContext`].
 ///
