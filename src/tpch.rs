@@ -4,9 +4,9 @@ use arrow_schema::DataType;
 
 use crate::{
     AggregateExpr, AggregateFunction, Aggregation, BinaryOp, Column, ColumnData, CrossProduct,
-    Expr, ExprData, Limit, NaryOp, NullOrdering, Operator, OperatorData, Output, Projection,
-    QueryContext, ScalarFunction, ScalarValue, Scan, Selection, Sort, SortDirection, SortKey,
-    TableRef,
+    Expr, ExprData, Join, JoinType, Limit, Map, NaryOp, NullOrdering, Operator, OperatorData,
+    Output, Projection, QueryContext, ScalarFunction, ScalarValue, Scan, Selection, Sort,
+    SortDirection, SortKey, TableRef, UnaryOp,
 };
 
 /// Builds the direct simple-graph IR shape for TPC-H Q2.
@@ -121,13 +121,13 @@ pub fn tpch_q2() -> QueryContext {
 }
 
 #[derive(Clone)]
-struct Rel {
-    input: Operator,
+pub struct Rel {
+    pub input: Operator,
     cols: HashMap<String, Column>,
 }
 
 impl Rel {
-    fn col(&self, name: &str) -> Column {
+    pub fn col(&self, name: &str) -> Column {
         *self
             .cols
             .get(name)
@@ -140,13 +140,28 @@ impl Rel {
     }
 }
 
-fn scan_rel(ctx: &mut QueryContext, table: &'static str, columns: &[&'static str]) -> Rel {
+pub fn scan_rel(ctx: &mut QueryContext, table: &'static str, columns: &[&'static str]) -> Rel {
+    scan_rel_as(ctx, table, None, columns)
+}
+
+pub fn scan_rel_as(
+    ctx: &mut QueryContext,
+    table: &'static str,
+    alias: Option<&'static str>,
+    columns: &[&'static str],
+) -> Rel {
     let mut cols = HashMap::new();
     let mut scan_columns = Vec::new();
 
     for name in columns {
-        let column = ctx.add_column(ColumnData::new(*name, tpch_column_type(name)));
+        let display_name = alias
+            .map(|alias| format!("{alias}.{name}"))
+            .unwrap_or_else(|| (*name).to_string());
+        let column = ctx.add_column(ColumnData::new(display_name, tpch_column_type(name)));
         cols.insert((*name).to_string(), column);
+        if let Some(alias) = alias {
+            cols.insert(format!("{alias}.{name}"), column);
+        }
         scan_columns.push(column);
     }
 
@@ -157,7 +172,7 @@ fn scan_rel(ctx: &mut QueryContext, table: &'static str, columns: &[&'static str
     Rel { input, cols }
 }
 
-fn cross_rel(ctx: &mut QueryContext, left: Rel, right: Rel) -> Rel {
+pub fn cross_rel(ctx: &mut QueryContext, left: Rel, right: Rel) -> Rel {
     let input = ctx.add_operator(OperatorData::CrossProduct(CrossProduct {
         outer: left.input,
         inner: right.input,
@@ -168,7 +183,27 @@ fn cross_rel(ctx: &mut QueryContext, left: Rel, right: Rel) -> Rel {
     }
 }
 
-fn cross_join_on_cols(
+pub fn join_rel(
+    ctx: &mut QueryContext,
+    join_type: JoinType,
+    left: Rel,
+    right: Rel,
+    on: Expr,
+) -> Rel {
+    let input = ctx.add_operator(OperatorData::Join(Join {
+        join_type: join_type.clone(),
+        on,
+        outer: left.input,
+        inner: right.input,
+    }));
+    let cols = match join_type {
+        JoinType::LeftSemi | JoinType::LeftAnti => left.cols,
+        _ => left.merge(right).cols,
+    };
+    Rel { input, cols }
+}
+
+pub fn cross_join_on_cols(
     ctx: &mut QueryContext,
     left: Rel,
     right: Rel,
@@ -182,14 +217,31 @@ fn cross_join_on_cols(
     select_rel(ctx, joined, predicate)
 }
 
-fn filter_eq_str(ctx: &mut QueryContext, rel: Rel, column: &str, value: &'static str) -> Rel {
+pub fn filter_eq_str(ctx: &mut QueryContext, rel: Rel, column: &str, value: &'static str) -> Rel {
     let left = col(ctx, rel.col(column));
     let right = str_lit(ctx, value);
     let predicate = eq(ctx, left, right);
     select_rel(ctx, rel, predicate)
 }
 
-fn select_rel(ctx: &mut QueryContext, rel: Rel, predicate: Expr) -> Rel {
+pub fn filter_date_range(
+    ctx: &mut QueryContext,
+    rel: Rel,
+    column: &str,
+    start_days: i32,
+    end_days: i32,
+) -> Rel {
+    let value = col(ctx, rel.col(column));
+    let start = date_lit(ctx, start_days);
+    let after_start = bin(ctx, BinaryOp::GtEq, value, start);
+    let value = col(ctx, rel.col(column));
+    let end = date_lit(ctx, end_days);
+    let before_end = bin(ctx, BinaryOp::Lt, value, end);
+    let predicate = and(ctx, vec![after_start, before_end]);
+    select_rel(ctx, rel, predicate)
+}
+
+pub fn select_rel(ctx: &mut QueryContext, rel: Rel, predicate: Expr) -> Rel {
     let input = ctx.add_operator(OperatorData::Selection(Selection {
         predicate,
         input: rel.input,
@@ -200,7 +252,28 @@ fn select_rel(ctx: &mut QueryContext, rel: Rel, predicate: Expr) -> Rel {
     }
 }
 
-fn aggregate_rel(
+pub fn map_rel(
+    ctx: &mut QueryContext,
+    rel: Rel,
+    computations: Vec<(&'static str, DataType, Expr)>,
+) -> Rel {
+    let mut cols = rel.cols;
+    let mut map_computations = Vec::new();
+
+    for (name, ty, expr) in computations {
+        let column = ctx.add_column(ColumnData::new(name, ty));
+        cols.insert(name.to_string(), column);
+        map_computations.push((column, expr));
+    }
+
+    let input = ctx.add_operator(OperatorData::Map(Map {
+        computations: map_computations,
+        input: rel.input,
+    }));
+    Rel { input, cols }
+}
+
+pub fn aggregate_rel(
     ctx: &mut QueryContext,
     rel: Rel,
     key_columns: &[&str],
@@ -232,7 +305,7 @@ fn aggregate_rel(
     Rel { input, cols }
 }
 
-fn sort_rel(ctx: &mut QueryContext, rel: Rel, keys: Vec<(&str, SortDirection)>) -> Rel {
+pub fn sort_rel(ctx: &mut QueryContext, rel: Rel, keys: Vec<(&str, SortDirection)>) -> Rel {
     let sort_keys = keys
         .into_iter()
         .map(|(name, direction)| SortKey {
@@ -251,7 +324,7 @@ fn sort_rel(ctx: &mut QueryContext, rel: Rel, keys: Vec<(&str, SortDirection)>) 
     }
 }
 
-fn limit_rel(ctx: &mut QueryContext, rel: Rel, fetch: usize) -> Rel {
+pub fn limit_rel(ctx: &mut QueryContext, rel: Rel, fetch: usize) -> Rel {
     let input = ctx.add_operator(OperatorData::Limit(Limit {
         fetch: Some(fetch),
         offset: 0,
@@ -263,7 +336,7 @@ fn limit_rel(ctx: &mut QueryContext, rel: Rel, fetch: usize) -> Rel {
     }
 }
 
-fn project_rel(ctx: &mut QueryContext, rel: Rel, output_columns: &[&str]) -> Rel {
+pub fn project_rel(ctx: &mut QueryContext, rel: Rel, output_columns: &[&str]) -> Rel {
     let columns = output_columns
         .iter()
         .map(|name| rel.col(name))
@@ -280,7 +353,7 @@ fn project_rel(ctx: &mut QueryContext, rel: Rel, output_columns: &[&str]) -> Rel
     Rel { input, cols }
 }
 
-fn finish(ctx: &mut QueryContext, rel: Rel, output_columns: &[&str]) {
+pub fn finish(ctx: &mut QueryContext, rel: Rel, output_columns: &[&str]) {
     let columns = output_columns.iter().map(|name| rel.col(name)).collect();
     let projection = ctx.add_operator(OperatorData::Projection(Projection {
         columns,
@@ -290,54 +363,178 @@ fn finish(ctx: &mut QueryContext, rel: Rel, output_columns: &[&str]) {
     ctx.set_root(output);
 }
 
-fn col(ctx: &mut QueryContext, column: Column) -> Expr {
+pub fn col(ctx: &mut QueryContext, column: Column) -> Expr {
     ctx.add_expr(ExprData::ColumnRef(column))
 }
 
-fn lit(ctx: &mut QueryContext, value: ScalarValue) -> Expr {
+pub fn lit(ctx: &mut QueryContext, value: ScalarValue) -> Expr {
     ctx.add_expr(ExprData::Literal(value))
 }
 
-fn int_lit(ctx: &mut QueryContext, value: i64) -> Expr {
+pub fn int_lit(ctx: &mut QueryContext, value: i64) -> Expr {
     lit(ctx, ScalarValue::Int64(value))
 }
 
-fn str_lit(ctx: &mut QueryContext, value: &'static str) -> Expr {
+pub fn dec_lit(ctx: &mut QueryContext, value: i128) -> Expr {
+    lit(
+        ctx,
+        ScalarValue::Decimal128 {
+            value,
+            precision: 15,
+            scale: 2,
+        },
+    )
+}
+
+pub fn str_lit(ctx: &mut QueryContext, value: &'static str) -> Expr {
     lit(ctx, ScalarValue::Utf8(value.to_string()))
 }
 
-fn bin(ctx: &mut QueryContext, op: BinaryOp, left: Expr, right: Expr) -> Expr {
+pub fn date_lit(ctx: &mut QueryContext, days_since_epoch: i32) -> Expr {
+    lit(ctx, ScalarValue::Date32(days_since_epoch))
+}
+
+pub fn bin(ctx: &mut QueryContext, op: BinaryOp, left: Expr, right: Expr) -> Expr {
     ctx.add_expr(ExprData::Binary { op, left, right })
 }
 
-fn eq(ctx: &mut QueryContext, left: Expr, right: Expr) -> Expr {
+pub fn eq(ctx: &mut QueryContext, left: Expr, right: Expr) -> Expr {
     bin(ctx, BinaryOp::Eq, left, right)
 }
 
-fn and(ctx: &mut QueryContext, exprs: Vec<Expr>) -> Expr {
+pub fn and(ctx: &mut QueryContext, exprs: Vec<Expr>) -> Expr {
     ctx.add_expr(ExprData::Nary {
         op: NaryOp::And,
         exprs,
     })
 }
 
-fn scalar_fn(ctx: &mut QueryContext, name: &'static str, args: Vec<Expr>) -> Expr {
+pub fn or(ctx: &mut QueryContext, exprs: Vec<Expr>) -> Expr {
+    ctx.add_expr(ExprData::Nary {
+        op: NaryOp::Or,
+        exprs,
+    })
+}
+
+pub fn not(ctx: &mut QueryContext, expr: Expr) -> Expr {
+    ctx.add_expr(ExprData::Unary {
+        op: UnaryOp::Not,
+        expr,
+    })
+}
+
+pub fn scalar_fn(ctx: &mut QueryContext, name: &'static str, args: Vec<Expr>) -> Expr {
     ctx.add_expr(ExprData::ScalarFunction {
         function: ScalarFunction::extension(name),
         args,
     })
 }
 
-fn scalar_subquery(ctx: &mut QueryContext, subquery: Operator) -> Expr {
+pub fn exists(ctx: &mut QueryContext, subquery: Operator) -> Expr {
+    ctx.add_expr(ExprData::Exists {
+        subquery,
+        negated: false,
+    })
+}
+
+pub fn not_exists(ctx: &mut QueryContext, subquery: Operator) -> Expr {
+    ctx.add_expr(ExprData::Exists {
+        subquery,
+        negated: true,
+    })
+}
+
+pub fn in_subquery(ctx: &mut QueryContext, expr: Expr, subquery: Operator) -> Expr {
+    ctx.add_expr(ExprData::InSubquery {
+        expr,
+        subquery,
+        negated: false,
+    })
+}
+
+pub fn not_in_subquery(ctx: &mut QueryContext, expr: Expr, subquery: Operator) -> Expr {
+    ctx.add_expr(ExprData::InSubquery {
+        expr,
+        subquery,
+        negated: true,
+    })
+}
+
+pub fn scalar_subquery(ctx: &mut QueryContext, subquery: Operator) -> Expr {
     ctx.add_expr(ExprData::ScalarSubquery { subquery })
 }
 
-fn like(ctx: &mut QueryContext, value: Expr, pattern: &'static str) -> Expr {
+pub fn like(ctx: &mut QueryContext, value: Expr, pattern: &'static str) -> Expr {
     let pattern = str_lit(ctx, pattern);
     scalar_fn(ctx, "like", vec![value, pattern])
 }
 
-fn min_expr(arg: Expr) -> AggregateExpr {
+pub fn in_list(ctx: &mut QueryContext, value: Expr, values: &[&'static str]) -> Expr {
+    let mut args = vec![value];
+    for value in values {
+        args.push(str_lit(ctx, value));
+    }
+    scalar_fn(ctx, "in", args)
+}
+
+pub fn between(ctx: &mut QueryContext, value: Expr, low: Expr, high: Expr) -> Expr {
+    let above = bin(ctx, BinaryOp::GtEq, value, low);
+    let below = bin(ctx, BinaryOp::LtEq, value, high);
+    and(ctx, vec![above, below])
+}
+
+pub fn disc_price(ctx: &mut QueryContext, extendedprice: Column, discount: Column) -> Expr {
+    let one = dec_lit(ctx, 100);
+    let discount = col(ctx, discount);
+    let keep = bin(ctx, BinaryOp::Subtract, one, discount);
+    let extendedprice = col(ctx, extendedprice);
+    bin(ctx, BinaryOp::Multiply, extendedprice, keep)
+}
+
+pub fn case_when(
+    ctx: &mut QueryContext,
+    when_then: Vec<(Expr, Expr)>,
+    else_expr: Option<Expr>,
+) -> Expr {
+    ctx.add_expr(ExprData::CaseWhen {
+        when_then,
+        else_expr,
+    })
+}
+
+pub fn sum_expr(arg: Expr) -> AggregateExpr {
+    AggregateExpr::Func {
+        func: AggregateFunction::Sum,
+        arg,
+        distinct: false,
+    }
+}
+
+pub fn count_expr(arg: Expr) -> AggregateExpr {
+    AggregateExpr::Func {
+        func: AggregateFunction::Count,
+        arg,
+        distinct: false,
+    }
+}
+
+pub fn count_distinct_expr(arg: Expr) -> AggregateExpr {
+    AggregateExpr::Func {
+        func: AggregateFunction::Count,
+        arg,
+        distinct: true,
+    }
+}
+
+pub fn avg_expr(arg: Expr) -> AggregateExpr {
+    AggregateExpr::Func {
+        func: AggregateFunction::Avg,
+        arg,
+        distinct: false,
+    }
+}
+
+pub fn min_expr(arg: Expr) -> AggregateExpr {
     AggregateExpr::Func {
         func: AggregateFunction::Min,
         arg,
@@ -345,12 +542,25 @@ fn min_expr(arg: Expr) -> AggregateExpr {
     }
 }
 
-fn tpch_column_type(name: &str) -> DataType {
+pub fn max_expr(arg: Expr) -> AggregateExpr {
+    AggregateExpr::Func {
+        func: AggregateFunction::Max,
+        arg,
+        distinct: false,
+    }
+}
+
+pub fn tpch_column_type(name: &str) -> DataType {
     match name {
-        "p_size" => DataType::Int32,
-        "n_nationkey" | "n_regionkey" | "p_partkey" | "ps_partkey" | "ps_suppkey"
-        | "r_regionkey" | "s_suppkey" | "s_nationkey" => DataType::Int64,
-        "ps_supplycost" | "s_acctbal" => DataType::Decimal128(15, 2),
+        "l_linenumber" | "p_size" | "ps_availqty" | "o_shippriority" => DataType::Int32,
+        "c_custkey" | "c_nationkey" | "l_orderkey" | "l_partkey" | "l_suppkey" | "n_nationkey"
+        | "n_regionkey" | "o_orderkey" | "o_custkey" | "p_partkey" | "ps_partkey"
+        | "ps_suppkey" | "r_regionkey" | "s_suppkey" | "s_nationkey" => DataType::Int64,
+        "c_acctbal" | "l_quantity" | "l_extendedprice" | "l_discount" | "l_tax"
+        | "o_totalprice" | "p_retailprice" | "ps_supplycost" | "s_acctbal" => {
+            DataType::Decimal128(15, 2)
+        }
+        "l_shipdate" | "l_commitdate" | "l_receiptdate" | "o_orderdate" => DataType::Date32,
         _ => DataType::Utf8,
     }
 }
