@@ -1,6 +1,7 @@
 use arrow_schema::DataType;
 
 mod display;
+pub mod substrait;
 
 pub use display::{
     BoxDrawingRenderer, BoxRendererConfig, DisplayField, DisplayInput, DisplayNode,
