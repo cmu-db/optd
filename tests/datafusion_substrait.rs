@@ -8,8 +8,8 @@ use datafusion::prelude::SessionContext;
 use prost::Message;
 use simple_graph::{
     AggregateExpr, Aggregation, ColumnData, CrossProduct, ExprData, Limit, Map, NullOrdering,
-    OperatorData, Output, Projection, QueryContext, ScalarFunction, ScalarValue, Scan, Selection,
-    Sort, SortDirection, SortKey, TableRef, substrait,
+    OperatorData, Output, Projection, QueryContext, ScalarValue, Scan, Selection, Sort,
+    SortDirection, SortKey, TableRef, substrait,
 };
 
 #[tokio::test]
@@ -400,9 +400,9 @@ fn cast_and_case_when_users_query() -> QueryContext {
         columns: vec![user_id, user_age],
     }));
     let age_ref_for_cast = ctx.add_expr(ExprData::ColumnRef(user_age));
-    let cast = ctx.add_expr(ExprData::ScalarFunction {
-        function: ScalarFunction::Extension("cast".to_string()),
-        args: vec![age_ref_for_cast],
+    let cast = ctx.add_expr(ExprData::Cast {
+        expr: age_ref_for_cast,
+        ty: arrow_schema::DataType::Int32,
     });
 
     let age_ref_for_condition = ctx.add_expr(ExprData::ColumnRef(user_age));

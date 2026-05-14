@@ -630,6 +630,11 @@ impl<'a> Exporter<'a> {
                     Some(arrow_to_substrait_type(&DataType::Boolean)?),
                 ))
             }
+            ExprData::Cast { expr, ty } => expression::RexType::Cast(Box::new(expression::Cast {
+                r#type: Some(arrow_to_substrait_type(ty)?),
+                input: Some(Box::new(self.export_expr(*expr, scope)?)),
+                failure_behavior: expression::cast::FailureBehavior::ThrowException as i32,
+            })),
             ExprData::CaseWhen {
                 when_then,
                 else_expr,
@@ -838,6 +843,7 @@ fn infer_expr_data_type(ctx: &QueryContext, expr: Expr) -> Option<DataType> {
             }
         },
         ExprData::Nary { op: _, exprs: _ } => Some(DataType::Boolean),
+        ExprData::Cast { ty, .. } => Some(ty.clone()),
         ExprData::CaseWhen {
             when_then,
             else_expr,
@@ -1833,10 +1839,13 @@ impl Converter {
                     .as_ref()
                     .ok_or(SubstraitError::MissingField("Expression.Cast.input"))?;
                 let arg = self.convert_expr(input, scope)?;
-                ExprData::ScalarFunction {
-                    function: ScalarFunction::Extension("cast".to_string()),
-                    args: vec![arg],
-                }
+                let ty = cast
+                    .r#type
+                    .as_ref()
+                    .map(substrait_type_to_arrow)
+                    .transpose()?
+                    .unwrap_or(DataType::Null);
+                ExprData::Cast { expr: arg, ty }
             }
             expression::RexType::IfThen(if_then) => {
                 let mut when_then = Vec::new();
@@ -3171,7 +3180,7 @@ mod tests {
     }
 
     #[test]
-    fn exports_cast_extension_as_cast_expression() {
+    fn exports_cast_as_cast_expression() {
         let mut ctx = QueryContext::new();
         let amount = ctx.add_column(ColumnData::new("amount", DataType::Int64));
         let amount_i32 = ctx.add_column(ColumnData::new("amount_i32", DataType::Int32));
@@ -3180,9 +3189,9 @@ mod tests {
             columns: vec![amount],
         }));
         let amount_ref = ctx.add_expr(ExprData::ColumnRef(amount));
-        let cast_expr = ctx.add_expr(ExprData::ScalarFunction {
-            function: ScalarFunction::Extension("cast".to_string()),
-            args: vec![amount_ref],
+        let cast_expr = ctx.add_expr(ExprData::Cast {
+            expr: amount_ref,
+            ty: DataType::Int32,
         });
         let map = ctx.add_operator(OperatorData::Map(Map {
             computations: vec![(amount_i32, cast_expr)],
@@ -3209,6 +3218,40 @@ mod tests {
             cast.r#type.as_ref().and_then(|ty| ty.kind.as_ref()),
             Some(r#type::Kind::I32(_))
         ));
+    }
+
+    #[test]
+    fn imports_cast_as_cast_expression() {
+        let relation = Rel {
+            rel_type: Some(rel::RelType::Project(Box::new(ProjectRel {
+                common: None,
+                input: Some(Box::new(named_read("orders", &["amount"]))),
+                expressions: vec![Expression {
+                    rex_type: Some(expression::RexType::Cast(Box::new(expression::Cast {
+                        r#type: Some(arrow_to_substrait_type(&DataType::Int32).unwrap()),
+                        input: Some(Box::new(Expression {
+                            rex_type: Some(expression::RexType::Selection(Box::new(
+                                field_reference(0),
+                            ))),
+                        })),
+                        failure_behavior: expression::cast::FailureBehavior::ThrowException as i32,
+                    }))),
+                }],
+                advanced_extension: None,
+            }))),
+        };
+
+        let ctx = from_rel(&relation).expect("relation should import");
+        let OperatorData::Output(output) = ctx.operator(ctx.root().expect("root")) else {
+            panic!("root should be output");
+        };
+        let OperatorData::Map(map) = ctx.operator(output.input) else {
+            panic!("project expression should become map");
+        };
+        let ExprData::Cast { ty, .. } = ctx.expr(map.computations[0].1) else {
+            panic!("cast should import as cast expression");
+        };
+        assert_eq!(ty, &DataType::Int32);
     }
 
     #[test]

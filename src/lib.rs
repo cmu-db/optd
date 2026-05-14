@@ -300,6 +300,8 @@ pub enum ExprData {
     },
     /// N-ary operation over a variable number of expressions.
     Nary { op: NaryOp, exprs: Vec<Expr> },
+    /// Casts an expression to a target type.
+    Cast { expr: Expr, ty: DataType },
     /// SQL-style conditional expression.
     CaseWhen {
         when_then: Vec<(Expr, Expr)>,
@@ -1002,6 +1004,9 @@ impl<'a> QueryFormatter<'a> {
             }
             ExprData::ScalarFunction { function, args } => {
                 format!("{}({})", function, self.format_exprs(args))
+            }
+            ExprData::Cast { expr, ty } => {
+                format!("CAST({} AS {ty:?})", self.format_expr(*expr))
             }
             ExprData::CaseWhen {
                 when_then,

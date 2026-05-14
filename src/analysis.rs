@@ -218,6 +218,7 @@ fn collect_expr_used_columns(
                 collect_expr_used_columns(ctx, *expr, columns)?;
             }
         }
+        ExprData::Cast { expr, .. } => collect_expr_used_columns(ctx, *expr, columns)?,
         ExprData::CaseWhen {
             when_then,
             else_expr,
@@ -485,6 +486,7 @@ fn expr_nullability(
             }
             Ok(false)
         }
+        ExprData::Cast { expr, .. } => expr_nullability(ctx, input_nullability, *expr),
         ExprData::CaseWhen {
             when_then,
             else_expr,
@@ -512,6 +514,7 @@ fn collect_non_null_columns_from_predicate(
     match expr.get(ctx) {
         ExprData::Literal(_)
         | ExprData::ColumnRef(_)
+        | ExprData::Cast { .. }
         | ExprData::CaseWhen { .. }
         | ExprData::ScalarFunction { .. } => {}
         ExprData::Unary { op, expr } => match op {
