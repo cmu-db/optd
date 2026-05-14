@@ -7,6 +7,7 @@ pub mod analysis;
 pub mod catalog;
 mod display;
 pub mod substrait;
+pub mod tpch;
 
 pub use analysis::{
     Analysis, AnalysisContext, AnalysisError, AnalysisResult, AvailableColumns, ColumnNullability,

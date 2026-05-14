@@ -4,10 +4,18 @@ use simple_graph::{
     ColorMode, ColumnData, ColumnNullability, ExprData, FreeColumns, Join, JoinType, Map, NaryOp,
     OperatorData, Output, Projection, QueryContext, QueryFormatConfig, QueryFormatter,
     ScalarFunction, ScalarValue, Scan, Selection, TableFunction, TableFunctionDef, TableRef,
-    UnaryOp,
+    UnaryOp, tpch::tpch_q2,
 };
 
 fn main() {
+    let query = tpch_q2();
+
+    println!("-- tpch_q2");
+    println!("{}", pretty_with_free_columns_and_nullability(&query));
+}
+
+#[allow(dead_code)]
+fn example_queries() {
     // SQL-ish:
     //
     // SELECT
