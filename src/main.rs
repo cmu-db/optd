@@ -1,7 +1,7 @@
 use arrow_schema::DataType;
 use simple_graph::{
     AggregateExpr, AggregateFunction, Aggregation, BinaryOp, ColumnData, ExprData, Join, JoinType,
-    Map, NaryOp, OperatorData, Projection, QueryContext, ScalarFunction, ScalarValue, Scan,
+    Map, NaryOp, OperatorData, Output, Projection, QueryContext, ScalarFunction, ScalarValue, Scan,
     Selection, TableFunction, TableFunctionDef, UnaryOp,
 };
 
@@ -216,7 +216,8 @@ fn sales_rollup_query() -> QueryContext {
         ],
         input: aggregation,
     }));
-    ctx.set_root(projection);
+    let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+    ctx.set_root(output);
 
     ctx
 }
