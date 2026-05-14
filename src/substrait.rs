@@ -200,19 +200,15 @@ impl<'a> Exporter<'a> {
             OperatorData::Scan(scan) => self.export_scan(scan),
             OperatorData::Projection(projection) => self.export_projection(projection),
             OperatorData::Selection(selection) => self.export_selection(selection),
-            OperatorData::Map(_) => Err(SubstraitError::UnsupportedRel("Map export")),
-            OperatorData::TableFunction(_) => {
-                Err(SubstraitError::UnsupportedRel("TableFunction export"))
+            OperatorData::Map(map) => self.export_map(map),
+            OperatorData::TableFunction(table_function) => {
+                self.export_table_function(table_function)
             }
             OperatorData::Join(join) => self.export_join(join),
-            OperatorData::CrossProduct(_) => {
-                Err(SubstraitError::UnsupportedRel("CrossProduct export"))
-            }
+            OperatorData::CrossProduct(cross) => self.export_cross(cross),
             OperatorData::Sort(sort) => self.export_sort(sort),
             OperatorData::Limit(limit) => self.export_limit(limit),
-            OperatorData::Aggregation(_) => {
-                Err(SubstraitError::UnsupportedRel("Aggregation export"))
-            }
+            OperatorData::Aggregation(aggregation) => self.export_aggregation(aggregation),
         }
     }
 
@@ -289,6 +285,63 @@ impl<'a> Exporter<'a> {
         })
     }
 
+    fn export_map(&mut self, map: &Map) -> Result<ExportedRelation, SubstraitError> {
+        let input = self.export_operator(map.input)?;
+        let expressions = map
+            .computations
+            .iter()
+            .map(|(_, expr)| self.export_expr(*expr, &input.columns))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut output_columns = input.columns.clone();
+        output_columns.extend(map.computations.iter().map(|(column, _)| *column));
+        let rel = Rel {
+            rel_type: Some(rel::RelType::Project(Box::new(ProjectRel {
+                common: Some(emit_common(identity_output_mapping(output_columns.len()))),
+                input: Some(Box::new(input.rel)),
+                expressions,
+                advanced_extension: None,
+            }))),
+        };
+        Ok(ExportedRelation {
+            rel,
+            columns: output_columns,
+        })
+    }
+
+    fn export_table_function(
+        &mut self,
+        table_function: &TableFunction,
+    ) -> Result<ExportedRelation, SubstraitError> {
+        let path = table_function_path_arg(self.ctx, &table_function.args)?;
+        let file_format = table_function_file_format(&table_function.function)?;
+        let read = ReadRel {
+            common: Some(direct_common()),
+            base_schema: Some(self.export_named_struct(&table_function.columns)?),
+            filter: None,
+            best_effort_filter: None,
+            projection: None,
+            advanced_extension: None,
+            read_type: Some(read_rel::ReadType::LocalFiles(read_rel::LocalFiles {
+                items: vec![read_rel::local_files::FileOrFiles {
+                    partition_index: 0,
+                    start: 0,
+                    length: 0,
+                    path_type: Some(read_rel::local_files::file_or_files::PathType::UriPath(
+                        path,
+                    )),
+                    file_format,
+                }],
+                advanced_extension: None,
+            })),
+        };
+        Ok(ExportedRelation {
+            rel: Rel {
+                rel_type: Some(rel::RelType::Read(Box::new(read))),
+            },
+            columns: table_function.columns.clone(),
+        })
+    }
+
     fn export_join(&mut self, join: &Join) -> Result<ExportedRelation, SubstraitError> {
         let left = self.export_operator(join.outer)?;
         let right = self.export_operator(join.inner)?;
@@ -311,6 +364,22 @@ impl<'a> Exporter<'a> {
             rel,
             columns: scope,
         })
+    }
+
+    fn export_cross(&mut self, cross: &CrossProduct) -> Result<ExportedRelation, SubstraitError> {
+        let left = self.export_operator(cross.outer)?;
+        let right = self.export_operator(cross.inner)?;
+        let mut columns = left.columns.clone();
+        columns.extend(right.columns.iter().copied());
+        let rel = Rel {
+            rel_type: Some(rel::RelType::Cross(Box::new(CrossRel {
+                common: Some(direct_common()),
+                left: Some(Box::new(left.rel)),
+                right: Some(Box::new(right.rel)),
+                advanced_extension: None,
+            }))),
+        };
+        Ok(ExportedRelation { rel, columns })
     }
 
     fn export_sort(&mut self, sort: &Sort) -> Result<ExportedRelation, SubstraitError> {
@@ -373,7 +442,116 @@ impl<'a> Exporter<'a> {
         })
     }
 
+    fn export_aggregation(
+        &mut self,
+        aggregation: &Aggregation,
+    ) -> Result<ExportedRelation, SubstraitError> {
+        let input = self.export_operator(aggregation.input)?;
+        let grouping_expressions = aggregation
+            .keys
+            .iter()
+            .map(|key| self.export_expr(*key, &input.columns))
+            .collect::<Result<Vec<_>, _>>()?;
+        let measures = aggregation
+            .aggregates
+            .iter()
+            .map(|(column, aggregate)| self.export_measure(*column, aggregate, &input.columns))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut output_columns = aggregation
+            .keys
+            .iter()
+            .map(|key| self.aggregation_key_column(*key))
+            .collect::<Result<Vec<_>, _>>()?;
+        output_columns.extend(aggregation.aggregates.iter().map(|(column, _)| *column));
+
+        let groupings = if !grouping_expressions.is_empty() || measures.is_empty() {
+            vec![aggregate_rel::Grouping {
+                grouping_expressions: Vec::new(),
+                expression_references: (0..grouping_expressions.len() as u32).collect(),
+            }]
+        } else {
+            Vec::new()
+        };
+        let rel = Rel {
+            rel_type: Some(rel::RelType::Aggregate(Box::new(proto::AggregateRel {
+                common: Some(emit_common(
+                    (0..output_columns.len() as i32).collect::<Vec<_>>(),
+                )),
+                input: Some(Box::new(input.rel)),
+                groupings,
+                measures,
+                grouping_expressions,
+                advanced_extension: None,
+            }))),
+        };
+        Ok(ExportedRelation {
+            rel,
+            columns: output_columns,
+        })
+    }
+
+    fn export_measure(
+        &mut self,
+        output_column: Column,
+        aggregate: &AggregateExpr,
+        scope: &[Column],
+    ) -> Result<aggregate_rel::Measure, SubstraitError> {
+        let (function_name, args, invocation) = match aggregate {
+            AggregateExpr::CountStar => (
+                "count".to_string(),
+                Vec::new(),
+                aggregate_function::AggregationInvocation::All as i32,
+            ),
+            AggregateExpr::Func {
+                func,
+                arg,
+                distinct,
+            } => (
+                func.to_string(),
+                vec![self.export_expr(*arg, scope)?],
+                if *distinct {
+                    aggregate_function::AggregationInvocation::Distinct as i32
+                } else {
+                    aggregate_function::AggregationInvocation::All as i32
+                },
+            ),
+        };
+        let arguments = args
+            .iter()
+            .cloned()
+            .map(|arg| FunctionArgument {
+                arg_type: Some(function_argument::ArgType::Value(arg)),
+            })
+            .collect();
+        let measure = proto::AggregateFunction {
+            function_reference: self.register_function(&function_name),
+            arguments,
+            options: Vec::new(),
+            output_type: Some(arrow_to_substrait_type(&self.ctx.column(output_column).ty)?),
+            phase: proto::AggregationPhase::InitialToResult as i32,
+            sorts: Vec::new(),
+            invocation,
+            args,
+        };
+        Ok(aggregate_rel::Measure {
+            measure: Some(measure),
+            filter: None,
+        })
+    }
+
+    fn aggregation_key_column(&self, key: Expr) -> Result<Column, SubstraitError> {
+        match self.ctx.expr(key) {
+            ExprData::ColumnRef(column) => Ok(*column),
+            _ => Err(SubstraitError::UnsupportedAggregation(
+                "expression aggregation key export",
+            )),
+        }
+    }
+
     fn export_expr(&mut self, expr: Expr, scope: &[Column]) -> Result<Expression, SubstraitError> {
+        let inferred_output_type = infer_expr_data_type(self.ctx, expr)
+            .as_ref()
+            .and_then(|data_type| arrow_to_substrait_type(data_type).ok());
         let rex_type = match self.ctx.expr(expr) {
             ExprData::Literal(value) => expression::RexType::Literal(export_literal(value)?),
             ExprData::ColumnRef(column) => {
@@ -392,7 +570,7 @@ impl<'a> Exporter<'a> {
                     UnaryOp::Not | UnaryOp::IsNull | UnaryOp::IsNotNull => {
                         Some(arrow_to_substrait_type(&DataType::Boolean)?)
                     }
-                    UnaryOp::Negate => None,
+                    UnaryOp::Negate => inferred_output_type.clone(),
                 };
                 expression::RexType::ScalarFunction(self.export_scalar_function(
                     unary_op_function_name(*op),
@@ -411,7 +589,7 @@ impl<'a> Exporter<'a> {
                     | BinaryOp::Gt
                     | BinaryOp::GtEq => Some(arrow_to_substrait_type(&DataType::Boolean)?),
                     BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
-                        None
+                        inferred_output_type.clone()
                     }
                 };
                 expression::RexType::ScalarFunction(self.export_scalar_function(
@@ -440,7 +618,7 @@ impl<'a> Exporter<'a> {
                 expression::RexType::ScalarFunction(self.export_scalar_function(
                     &function_name,
                     arguments,
-                    None,
+                    inferred_output_type.clone(),
                 ))
             }
         };
@@ -545,6 +723,10 @@ fn emit_common(output_mapping: Vec<i32>) -> RelCommon {
     }
 }
 
+fn identity_output_mapping(len: usize) -> Vec<i32> {
+    (0..len as i32).collect()
+}
+
 fn field_reference(index: i32) -> expression::FieldReference {
     expression::FieldReference {
         reference_type: Some(expression::field_reference::ReferenceType::DirectReference(
@@ -575,10 +757,39 @@ fn export_literal(value: &ScalarValue) -> Result<expression::Literal, SubstraitE
         ScalarValue::Utf8(value) => expression::literal::LiteralType::String(value.clone()),
     };
     Ok(expression::Literal {
-        nullable: false,
+        nullable: matches!(value, ScalarValue::Null(_)),
         type_variation_reference: 0,
         literal_type: Some(literal_type),
     })
+}
+
+fn infer_expr_data_type(ctx: &QueryContext, expr: Expr) -> Option<DataType> {
+    match ctx.expr(expr) {
+        ExprData::Literal(value) => Some(value.data_type()),
+        ExprData::ColumnRef(column) => Some(ctx.column(*column).ty.clone()),
+        ExprData::Unary { op, expr } => match op {
+            UnaryOp::Not | UnaryOp::IsNull | UnaryOp::IsNotNull => Some(DataType::Boolean),
+            UnaryOp::Negate => infer_expr_data_type(ctx, *expr),
+        },
+        ExprData::Binary { op, left, right: _ } => match op {
+            BinaryOp::Eq
+            | BinaryOp::NotEq
+            | BinaryOp::Lt
+            | BinaryOp::LtEq
+            | BinaryOp::Gt
+            | BinaryOp::GtEq => Some(DataType::Boolean),
+            BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
+                infer_expr_data_type(ctx, *left)
+            }
+        },
+        ExprData::Nary { op: _, exprs: _ } => Some(DataType::Boolean),
+        ExprData::ScalarFunction { function, args } => match function {
+            ScalarFunction::Lower | ScalarFunction::Upper => Some(DataType::Utf8),
+            ScalarFunction::Coalesce => args.iter().find_map(|arg| infer_expr_data_type(ctx, *arg)),
+            ScalarFunction::Abs => args.first().and_then(|arg| infer_expr_data_type(ctx, *arg)),
+            ScalarFunction::Extension(_) => None,
+        },
+    }
 }
 
 fn unary_op_function_name(op: UnaryOp) -> &'static str {
@@ -634,6 +845,57 @@ fn join_type_to_substrait(join_type: JoinType) -> Result<join_rel::JoinType, Sub
         JoinType::Mark(_) => Err(SubstraitError::UnsupportedJoin("mark join marker column")),
     }
 }
+
+fn table_function_path_arg(ctx: &QueryContext, args: &[Expr]) -> Result<String, SubstraitError> {
+    let first = args.first().ok_or(SubstraitError::UnsupportedRel(
+        "TableFunction path argument export",
+    ))?;
+    match ctx.expr(*first) {
+        ExprData::Literal(ScalarValue::Utf8(path)) => Ok(path.clone()),
+        _ => Err(SubstraitError::UnsupportedRel(
+            "TableFunction non-string path export",
+        )),
+    }
+}
+
+fn table_function_file_format(
+    function: &TableFunctionDef,
+) -> Result<Option<read_rel::local_files::file_or_files::FileFormat>, SubstraitError> {
+    use read_rel::local_files::file_or_files::{
+        ArrowReadOptions, DelimiterSeparatedTextReadOptions, DwrfReadOptions, FileFormat,
+        OrcReadOptions, ParquetReadOptions,
+    };
+
+    let file_format = match function {
+        TableFunctionDef::ReadParquet => Some(FileFormat::Parquet(ParquetReadOptions {})),
+        TableFunctionDef::ReadCsv => Some(FileFormat::Text(DelimiterSeparatedTextReadOptions {
+            field_delimiter: ",".to_string(),
+            max_line_size: 1 << 20,
+            quote: "\"".to_string(),
+            header_lines_to_skip: 0,
+            escape: "\\".to_string(),
+            value_treated_as_null: None,
+        })),
+        TableFunctionDef::Extension(name) if normalize_function_name(name) == "read_arrow" => {
+            Some(FileFormat::Arrow(ArrowReadOptions {}))
+        }
+        TableFunctionDef::Extension(name) if normalize_function_name(name) == "read_orc" => {
+            Some(FileFormat::Orc(OrcReadOptions {}))
+        }
+        TableFunctionDef::Extension(name) if normalize_function_name(name) == "read_dwrf" => {
+            Some(FileFormat::Dwrf(DwrfReadOptions {}))
+        }
+        TableFunctionDef::Extension(name) if normalize_function_name(name) == "read_extension" => {
+            return Err(SubstraitError::UnsupportedRel(
+                "TableFunction read_extension format export",
+            ));
+        }
+        TableFunctionDef::Extension(name) if normalize_function_name(name) == "read_files" => None,
+        _ => return Err(SubstraitError::UnsupportedRel("TableFunction export")),
+    };
+    Ok(file_format)
+}
+
 fn table_ref_names(table: &TableRef) -> Vec<String> {
     match table {
         TableRef::Bare { table } => vec![table.to_string()],
@@ -2479,6 +2741,222 @@ mod tests {
                 proto::extensions::simple_extension_declaration::ExtensionFunction { name, .. }
             )) if name == "equal"
         )));
+    }
+
+    #[test]
+    fn exports_cross_product_as_cross_rel() {
+        let mut ctx = QueryContext::new();
+        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
+        let order_id = ctx.add_column(ColumnData::new("order_id", DataType::Int64));
+        let users = ctx.add_operator(OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![user_id],
+        }));
+        let orders = ctx.add_operator(OperatorData::Scan(Scan {
+            table: TableRef::bare("orders"),
+            columns: vec![order_id],
+        }));
+        let cross = ctx.add_operator(OperatorData::CrossProduct(CrossProduct {
+            outer: users,
+            inner: orders,
+        }));
+        let output = ctx.add_operator(OperatorData::Output(Output { input: cross }));
+        ctx.set_root(output);
+
+        let plan = to_plan(&ctx).expect("query should export");
+        let Some(plan_rel::RelType::Root(root)) = plan.relations[0].rel_type.as_ref() else {
+            panic!("plan should export a root")
+        };
+        let Some(Rel {
+            rel_type: Some(rel::RelType::Cross(cross)),
+        }) = root.input.as_ref()
+        else {
+            panic!("root should read from cross")
+        };
+        assert!(cross.left.is_some(), "cross should have left input");
+        assert!(cross.right.is_some(), "cross should have right input");
+    }
+
+    #[test]
+    fn exports_map_as_project_with_expressions() {
+        let mut ctx = QueryContext::new();
+        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
+        let id_plus_one = ctx.add_column(ColumnData::new("id_plus_one", DataType::Int64));
+        let users = ctx.add_operator(OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![id],
+        }));
+        let id_ref = ctx.add_expr(ExprData::ColumnRef(id));
+        let one = ctx.add_expr(ExprData::Literal(ScalarValue::Int64(1)));
+        let computation = ctx.add_expr(ExprData::Binary {
+            op: BinaryOp::Add,
+            left: id_ref,
+            right: one,
+        });
+        let map = ctx.add_operator(OperatorData::Map(Map {
+            computations: vec![(id_plus_one, computation)],
+            input: users,
+        }));
+        let output = ctx.add_operator(OperatorData::Output(Output { input: map }));
+        ctx.set_root(output);
+
+        let plan = to_plan(&ctx).expect("query should export");
+        let Some(plan_rel::RelType::Root(root)) = plan.relations[0].rel_type.as_ref() else {
+            panic!("plan should export a root")
+        };
+        let Some(Rel {
+            rel_type: Some(rel::RelType::Project(project)),
+        }) = root.input.as_ref()
+        else {
+            panic!("root should read from project")
+        };
+        assert_eq!(project.expressions.len(), 1);
+        let Some(RelCommon {
+            emit_kind: Some(rel_common::EmitKind::Emit(emit)),
+            ..
+        }) = project.common.as_ref()
+        else {
+            panic!("project should use emit mapping");
+        };
+        assert_eq!(emit.output_mapping, vec![0, 1]);
+    }
+
+    #[test]
+    fn exports_aggregation_with_emit_mapping() {
+        let mut ctx = QueryContext::new();
+        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
+        let order_id = ctx.add_column(ColumnData::new("order_id", DataType::Int64));
+        let order_count = ctx.add_column(ColumnData::new("order_count", DataType::Int64));
+        let orders = ctx.add_operator(OperatorData::Scan(Scan {
+            table: TableRef::bare("orders"),
+            columns: vec![order_id, user_id],
+        }));
+        let key = ctx.add_expr(ExprData::ColumnRef(user_id));
+        let aggregation = ctx.add_operator(OperatorData::Aggregation(Aggregation {
+            keys: vec![key],
+            aggregates: vec![(order_count, AggregateExpr::CountStar)],
+            input: orders,
+        }));
+        let output = ctx.add_operator(OperatorData::Output(Output { input: aggregation }));
+        ctx.set_root(output);
+
+        let plan = to_plan(&ctx).expect("query should export");
+        let Some(plan_rel::RelType::Root(root)) = plan.relations[0].rel_type.as_ref() else {
+            panic!("plan should export a root")
+        };
+        let Some(Rel {
+            rel_type: Some(rel::RelType::Aggregate(aggregate)),
+        }) = root.input.as_ref()
+        else {
+            panic!("root should read from aggregate")
+        };
+
+        let Some(RelCommon {
+            emit_kind: Some(rel_common::EmitKind::Emit(emit)),
+            ..
+        }) = aggregate.common.as_ref()
+        else {
+            panic!("aggregate should emit output mapping");
+        };
+        assert_eq!(emit.output_mapping, vec![0, 1]);
+        assert_eq!(aggregate.grouping_expressions.len(), 1);
+        assert_eq!(aggregate.groupings.len(), 1);
+        assert_eq!(aggregate.groupings[0].expression_references, vec![0]);
+        assert_eq!(aggregate.measures.len(), 1);
+
+        let measure = aggregate.measures[0]
+            .measure
+            .as_ref()
+            .expect("measure should be populated");
+        assert_eq!(
+            aggregate_function::AggregationInvocation::try_from(measure.invocation).ok(),
+            Some(aggregate_function::AggregationInvocation::All)
+        );
+        assert_eq!(
+            proto::AggregationPhase::try_from(measure.phase).ok(),
+            Some(proto::AggregationPhase::InitialToResult)
+        );
+        assert!(measure.args.is_empty());
+        assert!(measure.arguments.is_empty());
+    }
+
+    #[test]
+    fn exports_table_function_as_local_files_read() {
+        let mut ctx = QueryContext::new();
+        let col = ctx.add_column(ColumnData::new("id", DataType::Int64));
+        let path = ctx.add_expr(ExprData::Literal(ScalarValue::Utf8(
+            "file:///tmp/users.parquet".to_string(),
+        )));
+        let table_function = ctx.add_operator(OperatorData::TableFunction(TableFunction {
+            function: TableFunctionDef::ReadParquet,
+            args: vec![path],
+            columns: vec![col],
+        }));
+        let output = ctx.add_operator(OperatorData::Output(Output {
+            input: table_function,
+        }));
+        ctx.set_root(output);
+
+        let plan = to_plan(&ctx).expect("query should export");
+        let Some(plan_rel::RelType::Root(root)) = plan.relations[0].rel_type.as_ref() else {
+            panic!("plan should export a root")
+        };
+        let Some(Rel {
+            rel_type: Some(rel::RelType::Read(read)),
+        }) = root.input.as_ref()
+        else {
+            panic!("root should read from local files");
+        };
+        let Some(read_rel::ReadType::LocalFiles(files)) = read.read_type.as_ref() else {
+            panic!("read should be local files");
+        };
+        assert_eq!(files.items.len(), 1);
+        assert!(matches!(
+            files.items[0].file_format,
+            Some(read_rel::local_files::file_or_files::FileFormat::Parquet(_))
+        ));
+    }
+
+    #[test]
+    fn exports_scalar_function_with_inferred_output_type() {
+        let mut ctx = QueryContext::new();
+        let name = ctx.add_column(ColumnData::new("name", DataType::Utf8));
+        let users = ctx.add_operator(OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![name],
+        }));
+        let name_ref = ctx.add_expr(ExprData::ColumnRef(name));
+        let lower = ctx.add_expr(ExprData::ScalarFunction {
+            function: ScalarFunction::Lower,
+            args: vec![name_ref],
+        });
+        let lowered = ctx.add_column(ColumnData::new("lowered", DataType::Utf8));
+        let map = ctx.add_operator(OperatorData::Map(Map {
+            computations: vec![(lowered, lower)],
+            input: users,
+        }));
+        let output = ctx.add_operator(OperatorData::Output(Output { input: map }));
+        ctx.set_root(output);
+
+        let plan = to_plan(&ctx).expect("query should export");
+        let Some(plan_rel::RelType::Root(root)) = plan.relations[0].rel_type.as_ref() else {
+            panic!("plan should export a root")
+        };
+        let Some(Rel {
+            rel_type: Some(rel::RelType::Project(project)),
+        }) = root.input.as_ref()
+        else {
+            panic!("root should read from project");
+        };
+        let Some(expression::RexType::ScalarFunction(function)) =
+            project.expressions[0].rex_type.as_ref()
+        else {
+            panic!("projection expression should be scalar function");
+        };
+        let Some(output_type) = function.output_type.as_ref() else {
+            panic!("scalar function should include output type");
+        };
+        assert!(matches!(output_type.kind, Some(r#type::Kind::String(_))));
     }
 
     #[test]

@@ -7,8 +7,9 @@ use datafusion::datasource::MemTable;
 use datafusion::prelude::SessionContext;
 use prost::Message;
 use simple_graph::{
-    ColumnData, ExprData, Limit, NullOrdering, OperatorData, Output, Projection, QueryContext,
-    ScalarValue, Scan, Selection, Sort, SortDirection, SortKey, TableRef, substrait,
+    AggregateExpr, Aggregation, ColumnData, CrossProduct, ExprData, Limit, Map, NullOrdering,
+    OperatorData, Output, Projection, QueryContext, ScalarValue, Scan, Selection, Sort,
+    SortDirection, SortKey, TableRef, substrait,
 };
 
 #[tokio::test]
@@ -84,6 +85,81 @@ async fn datafusion_consumes_join_substrait_plan_produced_by_simple_graph() {
     assert_eq!(fields.len(), 2);
     assert_eq!(fields[0].name(), "id");
     assert_eq!(fields[1].name(), "order_id");
+}
+
+#[tokio::test]
+async fn datafusion_consumes_cross_substrait_plan_produced_by_simple_graph() {
+    let df_ctx = users_orders_session_context();
+    let query = crossed_users_orders_query();
+    let plan = substrait::to_plan(&query).unwrap();
+
+    let mut bytes = Vec::new();
+    plan.encode(&mut bytes).unwrap();
+
+    let df_substrait_plan = datafusion_substrait::serializer::deserialize_bytes(bytes)
+        .await
+        .unwrap();
+    let logical_plan = datafusion_substrait::logical_plan::consumer::from_substrait_plan(
+        &df_ctx.state(),
+        &df_substrait_plan,
+    )
+    .await
+    .unwrap();
+
+    let fields = logical_plan.schema().fields();
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].name(), "id");
+    assert_eq!(fields[1].name(), "order_id");
+}
+
+#[tokio::test]
+async fn datafusion_consumes_aggregation_substrait_plan_produced_by_simple_graph() {
+    let df_ctx = users_session_context();
+    let query = aggregated_users_query();
+    let plan = substrait::to_plan(&query).unwrap();
+
+    let mut bytes = Vec::new();
+    plan.encode(&mut bytes).unwrap();
+
+    let df_substrait_plan = datafusion_substrait::serializer::deserialize_bytes(bytes)
+        .await
+        .unwrap();
+    let logical_plan = datafusion_substrait::logical_plan::consumer::from_substrait_plan(
+        &df_ctx.state(),
+        &df_substrait_plan,
+    )
+    .await
+    .unwrap();
+
+    let fields = logical_plan.schema().fields();
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].name(), "id");
+    assert_eq!(fields[1].name(), "user_count");
+}
+
+#[tokio::test]
+async fn datafusion_consumes_map_substrait_plan_produced_by_simple_graph() {
+    let df_ctx = users_session_context();
+    let query = mapped_users_query();
+    let plan = substrait::to_plan(&query).unwrap();
+
+    let mut bytes = Vec::new();
+    plan.encode(&mut bytes).unwrap();
+
+    let df_substrait_plan = datafusion_substrait::serializer::deserialize_bytes(bytes)
+        .await
+        .unwrap();
+    let logical_plan = datafusion_substrait::logical_plan::consumer::from_substrait_plan(
+        &df_ctx.state(),
+        &df_substrait_plan,
+    )
+    .await
+    .unwrap();
+
+    let fields = logical_plan.schema().fields();
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].name(), "id");
+    assert_eq!(fields[1].name(), "id_plus_one");
 }
 
 fn users_session_context() -> SessionContext {
@@ -193,6 +269,91 @@ fn joined_users_orders_query() -> QueryContext {
     let projection = ctx.add_operator(OperatorData::Projection(Projection {
         columns: vec![user_id, order_id],
         input: join,
+    }));
+    let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+    ctx.set_root(output);
+
+    ctx
+}
+
+fn crossed_users_orders_query() -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let user_id = ctx.add_column(ColumnData::new("id", arrow_schema::DataType::Int64));
+    let user_age = ctx.add_column(ColumnData::new("age", arrow_schema::DataType::Int64));
+    let order_id = ctx.add_column(ColumnData::new("order_id", arrow_schema::DataType::Int64));
+    let order_user_id = ctx.add_column(ColumnData::new("user_id", arrow_schema::DataType::Int64));
+
+    let users = ctx.add_operator(OperatorData::Scan(Scan {
+        table: TableRef::bare("users"),
+        columns: vec![user_id, user_age],
+    }));
+    let orders = ctx.add_operator(OperatorData::Scan(Scan {
+        table: TableRef::bare("orders"),
+        columns: vec![order_id, order_user_id],
+    }));
+    let cross = ctx.add_operator(OperatorData::CrossProduct(CrossProduct {
+        outer: users,
+        inner: orders,
+    }));
+    let projection = ctx.add_operator(OperatorData::Projection(Projection {
+        columns: vec![user_id, order_id],
+        input: cross,
+    }));
+    let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
+    ctx.set_root(output);
+
+    ctx
+}
+
+fn aggregated_users_query() -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let user_id = ctx.add_column(ColumnData::new("id", arrow_schema::DataType::Int64));
+    let user_age = ctx.add_column(ColumnData::new("age", arrow_schema::DataType::Int64));
+    let user_count = ctx.add_column(ColumnData::new("user_count", arrow_schema::DataType::Int64));
+
+    let users = ctx.add_operator(OperatorData::Scan(Scan {
+        table: TableRef::bare("users"),
+        columns: vec![user_id, user_age],
+    }));
+    let key = ctx.add_expr(ExprData::ColumnRef(user_id));
+    let aggregation = ctx.add_operator(OperatorData::Aggregation(Aggregation {
+        keys: vec![key],
+        aggregates: vec![(user_count, AggregateExpr::CountStar)],
+        input: users,
+    }));
+    let output = ctx.add_operator(OperatorData::Output(Output { input: aggregation }));
+    ctx.set_root(output);
+
+    ctx
+}
+
+fn mapped_users_query() -> QueryContext {
+    let mut ctx = QueryContext::new();
+    let user_id = ctx.add_column(ColumnData::new("id", arrow_schema::DataType::Int64));
+    let user_age = ctx.add_column(ColumnData::new("age", arrow_schema::DataType::Int64));
+    let id_plus_one = ctx.add_column(ColumnData::new(
+        "id_plus_one",
+        arrow_schema::DataType::Int64,
+    ));
+
+    let users = ctx.add_operator(OperatorData::Scan(Scan {
+        table: TableRef::bare("users"),
+        columns: vec![user_id, user_age],
+    }));
+    let id_ref = ctx.add_expr(ExprData::ColumnRef(user_id));
+    let one = ctx.add_expr(ExprData::Literal(ScalarValue::Int64(1)));
+    let add = ctx.add_expr(ExprData::Binary {
+        op: simple_graph::BinaryOp::Add,
+        left: id_ref,
+        right: one,
+    });
+    let map = ctx.add_operator(OperatorData::Map(Map {
+        computations: vec![(id_plus_one, add)],
+        input: users,
+    }));
+    let projection = ctx.add_operator(OperatorData::Projection(Projection {
+        columns: vec![user_id, id_plus_one],
+        input: map,
     }));
     let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
     ctx.set_root(output);

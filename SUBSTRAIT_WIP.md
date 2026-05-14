@@ -26,9 +26,13 @@ The exporter now handles:
 - `Sort`
 - `Limit`
 - `Join`
+- `CrossProduct`
+- `Aggregation`
+- `Map`
+- `TableFunction` (local-files read forms where representable)
 - named-table `Scan`
 - root output names
-- basic scalar expression export (`ColumnRef`, `Literal`, `BinaryOp`, `UnaryOp`, `NaryOp`)
+- scalar expression export (`ColumnRef`, `Literal`, `BinaryOp`, `UnaryOp`, `NaryOp`, `ScalarFunction`) with inferred output types for common cases
 - scalar function anchors via `Plan.extensions`
 - basic Arrow types: `Boolean`, `Int32`, `Int64`, `Float64`, `Utf8`
 
@@ -69,11 +73,8 @@ Expression import supports literals, column references, scalar functions, casts,
 
 Exporter gaps remain:
 
-- no export for `Map`
-- no export for `CrossProduct`
-- no export for `Aggregation`
-- no export for `TableFunction`
-- no export for complex scalar expressions beyond the basic set
+- some table-function extension/file formats are intentionally conservative
+- expression coverage is still conservative compared to full Substrait expression space
 
 Importer limitations to watch:
 
@@ -84,11 +85,11 @@ Importer limitations to watch:
 
 ## Recommended Next Steps
 
-1. Export cross product.
-   Emit `CrossRel` from `CrossProduct` preserving `outer` -> left and `inner` -> right mapping.
+1. Broaden table-function export coverage.
+   Add more extension/local-file format mappings as needed by downstream consumers.
 
-2. Export aggregation after expression and function export are stable.
-   Need a decision on how to map `Aggregation.keys: Vec<Expr>` and `(Column, AggregateExpr)` into Substrait grouping expressions, measures, output names, and emit mappings.
+2. Broaden expression coverage.
+   Add explicit export support for additional Substrait expression families when the IR grows to represent them.
 
 ## Design Notes
 
