@@ -41,6 +41,12 @@ impl Operator {
     }
 }
 
+impl std::fmt::Display for Operator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "@{}", self.0)
+    }
+}
+
 /// A relational operator referenced by an [`Operator`] handle.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -952,7 +958,8 @@ impl<'a> QueryFormatter<'a> {
 
     fn format_operator(&self, operator: Operator) -> DisplayNode {
         let operator_display = self.format_operator_display(operator);
-        let mut node = DisplayNode::with_kind(operator_display.kind, operator_display.title);
+        let mut node =
+            DisplayNode::with_kind(operator_display.kind, operator_display.title).with_id(operator);
 
         for field in operator_display.fields {
             node.fields.push(field);
@@ -1060,7 +1067,7 @@ impl<'a> QueryFormatter<'a> {
             }
             ExprData::Exists { subquery, negated } => {
                 let prefix = if *negated { "NOT EXISTS" } else { "EXISTS" };
-                format!("{prefix}({subquery:?})")
+                format!("{prefix}({subquery})")
             }
             ExprData::InSubquery {
                 expr,
@@ -1068,9 +1075,9 @@ impl<'a> QueryFormatter<'a> {
                 negated,
             } => {
                 let op = if *negated { "NOT IN" } else { "IN" };
-                format!("({} {op} {subquery:?})", self.format_expr(*expr))
+                format!("({} {op} {subquery})", self.format_expr(*expr))
             }
-            ExprData::ScalarSubquery { subquery } => format!("SCALAR_SUBQUERY({subquery:?})"),
+            ExprData::ScalarSubquery { subquery } => format!("SCALAR_SUBQUERY({subquery})"),
         }
     }
 
@@ -1770,25 +1777,25 @@ mod tests {
             ctx.pretty(),
             "\
 ┌──────────────┐
-│ = Output     │
+│ = Output  @3 │
 ├──────────────┤
 └──────────────┘
 │ input
-┌──────────────┐
-│ π Projection │
-├──────────────┤
-│ columns:     │
-│   id(#0)     │
-└──────────────┘
+┌─────────────────┐
+│ π Projection @2 │
+├─────────────────┤
+│ columns:        │
+│   id(#0)        │
+└─────────────────┘
 │ input
 ┌────────────────────────────┐
-│ σ Selection                │
+│ σ Selection             @1 │
 ├────────────────────────────┤
 │ predicate: (age(#1) >= 18) │
 └────────────────────────────┘
 │ input
 ┌──────────────┐
-│ ⊞ users      │
+│ ⊞ users   @0 │
 ├──────────────┤
 │ columns:     │
 │   id(#0)     │
@@ -1984,9 +1991,13 @@ mod tests {
 
         let pretty = ctx.pretty();
 
-        assert!(pretty.contains("SCALAR_SUBQUERY(Operator(1))"));
+        assert!(pretty.contains("SCALAR_SUBQUERY(@1)"));
         assert!(pretty.contains("│ scalar subquery"));
-        assert!(pretty.contains("│ ⊞ orders"));
+        assert!(
+            pretty
+                .lines()
+                .any(|line| line.contains("⊞ orders") && line.contains("@1"))
+        );
     }
 
     #[test]

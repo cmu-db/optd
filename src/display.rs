@@ -8,6 +8,7 @@ use std::io::IsTerminal;
 /// Generic display tree node that can be rendered independently of query plans.
 #[derive(Debug, Clone)]
 pub struct DisplayNode {
+    pub id: Option<String>,
     pub kind: String,
     pub title: String,
     pub fields: Vec<DisplayField>,
@@ -22,8 +23,14 @@ impl Serialize for DisplayNode {
         S: Serializer,
     {
         let mut map = serializer.serialize_map(Some(
-            2 + self.fields.len() + self.inputs.len() + self.metadata.len(),
+            2 + usize::from(self.id.is_some())
+                + self.fields.len()
+                + self.inputs.len()
+                + self.metadata.len(),
         ))?;
+        if let Some(id) = &self.id {
+            map.serialize_entry("id", id)?;
+        }
         serialize_display_header(&mut map, &self.kind, &self.title)?;
         serialize_display_fields(&mut map, self.fields.iter())?;
         serialize_display_inputs(&mut map, self.inputs.iter())?;
@@ -36,6 +43,7 @@ impl DisplayNode {
     pub fn new(title: impl Into<String>) -> Self {
         let title = title.into();
         Self {
+            id: None,
             kind: title.clone(),
             title,
             fields: Vec::new(),
@@ -46,12 +54,18 @@ impl DisplayNode {
 
     pub fn with_kind(kind: impl Into<String>, title: impl Into<String>) -> Self {
         Self {
+            id: None,
             kind: kind.into(),
             title: title.into(),
             fields: Vec::new(),
             inputs: Vec::new(),
             metadata: BTreeMap::new(),
         }
+    }
+
+    pub fn with_id(mut self, id: impl std::fmt::Display) -> Self {
+        self.id = Some(id.to_string());
+        self
     }
 
     pub fn with_field(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
@@ -348,7 +362,7 @@ impl BoxDrawingRenderer {
     }
 
     fn render_node(&self, node: &DisplayNode) -> RenderedBlock {
-        let parent = self.render_box(&node.title, &self.render_details(node));
+        let parent = self.render_box(&node.title, node.id.as_deref(), &self.render_details(node));
 
         match node.inputs.as_slice() {
             [] => parent,
@@ -488,14 +502,15 @@ impl BoxDrawingRenderer {
         RenderedBlock { lines, width }
     }
 
-    fn render_box(&self, title: &str, details: &[RenderDetail]) -> RenderedBlock {
+    fn render_box(&self, title: &str, id: Option<&str>, details: &[RenderDetail]) -> RenderedBlock {
         let max_box_width = self.config.max_box_width.max(4);
         let max_content_width = max_box_width.saturating_sub(4).max(1);
         let wrapped_details = self.wrap_details(details, max_content_width);
+        let title_width = title_content_width(title, id);
         let content_width = wrapped_details
             .iter()
             .map(|detail| detail.text.chars().count())
-            .chain(std::iter::once(title.chars().count()))
+            .chain(std::iter::once(title_width))
             .max()
             .unwrap_or(0)
             .max(self.config.min_box_width)
@@ -503,7 +518,10 @@ impl BoxDrawingRenderer {
 
         let mut lines = Vec::with_capacity(wrapped_details.len() + 4);
         lines.push(format!("┌{}┐", "─".repeat(content_width + 2)));
-        lines.push(format!("│ {title:content_width$} │"));
+        lines.push(format!(
+            "│ {} │",
+            render_title_line(title, id, content_width)
+        ));
         lines.push(format!("├{}┤", "─".repeat(content_width + 2)));
 
         for detail in wrapped_details {
@@ -728,6 +746,26 @@ fn visible_width(text: &str) -> usize {
     }
 
     width
+}
+
+fn title_content_width(title: &str, id: Option<&str>) -> usize {
+    let title_width = title.chars().count();
+    match id {
+        Some(id) => title_width + 1 + id.chars().count(),
+        None => title_width,
+    }
+}
+
+fn render_title_line(title: &str, id: Option<&str>, width: usize) -> String {
+    match id {
+        Some(id) => {
+            let title_width = title.chars().count();
+            let id_width = id.chars().count();
+            let padding = width.saturating_sub(title_width + id_width);
+            format!("{title}{}{id}", " ".repeat(padding))
+        }
+        None => format!("{title:width$}"),
+    }
 }
 
 struct RenderedBlock {
