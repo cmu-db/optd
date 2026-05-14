@@ -237,77 +237,24 @@ fn collect_expr_used_columns(
             }
         }
         ExprData::Exists { subquery, .. } | ExprData::ScalarSubquery { subquery } => {
-            collect_operator_used_columns(ctx, *subquery, columns)?;
+            collect_subquery_free_columns(ctx, *subquery, columns)?;
         }
         ExprData::InSubquery { expr, subquery, .. } => {
             collect_expr_used_columns(ctx, *expr, columns)?;
-            collect_operator_used_columns(ctx, *subquery, columns)?;
+            collect_subquery_free_columns(ctx, *subquery, columns)?;
         }
     }
 
     Ok(())
 }
 
-fn collect_operator_used_columns(
+fn collect_subquery_free_columns(
     ctx: &QueryContext,
     operator: Operator,
     columns: &mut Vec<Column>,
 ) -> AnalysisResult<()> {
-    match operator.get(ctx) {
-        OperatorData::Scan(data) => {
-            for column in &data.columns {
-                push_unique_column(columns, *column);
-            }
-        }
-        OperatorData::Selection(data) => {
-            collect_operator_used_columns(ctx, data.input, columns)?;
-            collect_expr_used_columns(ctx, data.predicate, columns)?;
-        }
-        OperatorData::Map(data) => {
-            collect_operator_used_columns(ctx, data.input, columns)?;
-            for (_, expr) in &data.computations {
-                collect_expr_used_columns(ctx, *expr, columns)?;
-            }
-        }
-        OperatorData::TableFunction(data) => {
-            for arg in &data.args {
-                collect_expr_used_columns(ctx, *arg, columns)?;
-            }
-        }
-        OperatorData::Join(data) => {
-            collect_operator_used_columns(ctx, data.outer, columns)?;
-            collect_operator_used_columns(ctx, data.inner, columns)?;
-            collect_expr_used_columns(ctx, data.on, columns)?;
-        }
-        OperatorData::CrossProduct(data) => {
-            collect_operator_used_columns(ctx, data.outer, columns)?;
-            collect_operator_used_columns(ctx, data.inner, columns)?;
-        }
-        OperatorData::Sort(data) => {
-            collect_operator_used_columns(ctx, data.input, columns)?;
-            for key in &data.keys {
-                collect_expr_used_columns(ctx, key.expr, columns)?;
-            }
-        }
-        OperatorData::Limit(data) => collect_operator_used_columns(ctx, data.input, columns)?,
-        OperatorData::Aggregation(data) => {
-            collect_operator_used_columns(ctx, data.input, columns)?;
-            for key in &data.keys {
-                collect_expr_used_columns(ctx, *key, columns)?;
-            }
-            for (_, aggregate) in &data.aggregates {
-                collect_aggregate_expr_used_columns(ctx, aggregate, columns)?;
-            }
-        }
-        OperatorData::Projection(data) => {
-            collect_operator_used_columns(ctx, data.input, columns)?;
-            for column in &data.columns {
-                push_unique_column(columns, *column);
-            }
-        }
-        OperatorData::Output(data) => collect_operator_used_columns(ctx, data.input, columns)?,
-    }
-
+    let mut analyses = AnalysisContext::new();
+    extend_unique_columns(columns, analyses.get::<FreeColumns>(ctx, operator)?);
     Ok(())
 }
 
@@ -1273,6 +1220,59 @@ mod tests {
         assert_eq!(
             analyses.get::<FreeColumns>(&ctx, table_function).unwrap(),
             vec![missing]
+        );
+    }
+
+    #[test]
+    fn free_columns_for_subquery_expressions_only_bubble_correlations() {
+        let mut ctx = QueryContext::new();
+        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64));
+        let order_user_id = ctx.add_column(ColumnData::new("order_user_id", DataType::Int64));
+        let order_total = ctx.add_column(ColumnData::new("order_total", DataType::Float64));
+
+        let users = ctx.add_operator(OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![user_id],
+        }));
+        let orders = ctx.add_operator(OperatorData::Scan(Scan {
+            table: TableRef::bare("orders"),
+            columns: vec![order_user_id, order_total],
+        }));
+
+        let order_user_ref = ctx.add_expr(ExprData::ColumnRef(order_user_id));
+        let user_ref = ctx.add_expr(ExprData::ColumnRef(user_id));
+        let correlated = ctx.add_expr(ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: order_user_ref,
+            right: user_ref,
+        });
+        let subquery = ctx.add_operator(OperatorData::Selection(Selection {
+            predicate: correlated,
+            input: orders,
+        }));
+
+        let user_ref = ctx.add_expr(ExprData::ColumnRef(user_id));
+        let subquery_expr = ctx.add_expr(ExprData::ScalarSubquery { subquery });
+        let predicate = ctx.add_expr(ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: user_ref,
+            right: subquery_expr,
+        });
+        let parent = ctx.add_operator(OperatorData::Selection(Selection {
+            predicate,
+            input: users,
+        }));
+
+        let mut analyses = ctx.analyze();
+
+        assert_eq!(
+            analyses.get::<UsedColumns>(&ctx, parent).unwrap(),
+            vec![user_id]
+        );
+        assert_eq!(analyses.get::<FreeColumns>(&ctx, parent).unwrap(), vec![]);
+        assert_eq!(
+            analyses.get::<FreeColumns>(&ctx, subquery).unwrap(),
+            vec![user_id]
         );
     }
 
