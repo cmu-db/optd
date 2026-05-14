@@ -7,11 +7,11 @@ use std::sync::Arc;
 use arrow_schema::{DataType, TimeUnit};
 use substrait::proto;
 use substrait::proto::{
-    ComparisonJoinKey, CrossRel, Expression, FunctionArgument, HashJoinRel, JoinRel, MergeJoinRel,
-    NamedStruct, NestedLoopJoinRel, Plan, PlanRel, ProjectRel, ReadRel, Rel, RelCommon, SortField,
-    SortRel, Type, aggregate_function, aggregate_rel, comparison_join_key, expression, fetch_rel,
-    function_argument, hash_join_rel, join_rel, merge_join_rel, nested_loop_join_rel, plan_rel,
-    read_rel, rel, rel_common, sort_field, r#type,
+    ComparisonJoinKey, CrossRel, Expression, FilterRel, FunctionArgument, HashJoinRel, JoinRel,
+    MergeJoinRel, NamedStruct, NestedLoopJoinRel, Plan, PlanRel, ProjectRel, ReadRel, Rel,
+    RelCommon, SortField, SortRel, Type, aggregate_function, aggregate_rel, comparison_join_key,
+    expression, fetch_rel, function_argument, hash_join_rel, join_rel, merge_join_rel,
+    nested_loop_join_rel, plan_rel, read_rel, rel, rel_common, sort_field, r#type,
 };
 
 use crate::{
@@ -54,8 +54,9 @@ pub fn from_rel_with_catalog(
 
 /// Converts this crate's relational IR into a Substrait protobuf plan.
 ///
-/// The exporter starts with the same conservative subset used by the interop
-/// tests: output roots, projections, and named table scans.
+/// The exporter supports a conservative subset used by interop tests:
+/// output roots, named-table scans, projections, filters, sorts, limits,
+/// and simple scalar expressions.
 pub fn to_plan(ctx: &QueryContext) -> Result<Plan, SubstraitError> {
     Exporter::new(ctx).export_plan()
 }
@@ -149,14 +150,20 @@ struct ExportedRelation {
 
 struct Exporter<'a> {
     ctx: &'a QueryContext,
+    function_anchors: HashMap<String, u32>,
+    next_function_anchor: u32,
 }
 
 impl<'a> Exporter<'a> {
     fn new(ctx: &'a QueryContext) -> Self {
-        Self { ctx }
+        Self {
+            ctx,
+            function_anchors: HashMap::new(),
+            next_function_anchor: 1,
+        }
     }
 
-    fn export_plan(self) -> Result<Plan, SubstraitError> {
+    fn export_plan(mut self) -> Result<Plan, SubstraitError> {
         let root = self.ctx.root().ok_or(SubstraitError::EmptyPlan)?;
         let exported = self.export_operator(root)?;
         let names = exported
@@ -164,6 +171,15 @@ impl<'a> Exporter<'a> {
             .iter()
             .map(|column| self.ctx.column(*column).name.clone())
             .collect();
+        let extensions = self.export_function_extensions();
+        let extension_urns = if extensions.is_empty() {
+            Vec::new()
+        } else {
+            vec![proto::extensions::SimpleExtensionUrn {
+                extension_urn_anchor: 1,
+                urn: "extension:io.substrait:functions_simple_graph".to_string(),
+            }]
+        };
 
         Ok(Plan {
             relations: vec![PlanRel {
@@ -172,16 +188,18 @@ impl<'a> Exporter<'a> {
                     names,
                 })),
             }],
+            extension_urns,
+            extensions,
             ..Plan::default()
         })
     }
 
-    fn export_operator(&self, operator: Operator) -> Result<ExportedRelation, SubstraitError> {
+    fn export_operator(&mut self, operator: Operator) -> Result<ExportedRelation, SubstraitError> {
         match self.ctx.operator(operator) {
             OperatorData::Output(output) => self.export_operator(output.input),
             OperatorData::Scan(scan) => self.export_scan(scan),
             OperatorData::Projection(projection) => self.export_projection(projection),
-            OperatorData::Selection(_) => Err(SubstraitError::UnsupportedRel("Selection export")),
+            OperatorData::Selection(selection) => self.export_selection(selection),
             OperatorData::Map(_) => Err(SubstraitError::UnsupportedRel("Map export")),
             OperatorData::TableFunction(_) => {
                 Err(SubstraitError::UnsupportedRel("TableFunction export"))
@@ -190,15 +208,15 @@ impl<'a> Exporter<'a> {
             OperatorData::CrossProduct(_) => {
                 Err(SubstraitError::UnsupportedRel("CrossProduct export"))
             }
-            OperatorData::Sort(_) => Err(SubstraitError::UnsupportedRel("Sort export")),
-            OperatorData::Limit(_) => Err(SubstraitError::UnsupportedRel("Limit export")),
+            OperatorData::Sort(sort) => self.export_sort(sort),
+            OperatorData::Limit(limit) => self.export_limit(limit),
             OperatorData::Aggregation(_) => {
                 Err(SubstraitError::UnsupportedRel("Aggregation export"))
             }
         }
     }
 
-    fn export_scan(&self, scan: &Scan) -> Result<ExportedRelation, SubstraitError> {
+    fn export_scan(&mut self, scan: &Scan) -> Result<ExportedRelation, SubstraitError> {
         let columns = scan.columns.clone();
         let rel = Rel {
             rel_type: Some(rel::RelType::Read(Box::new(ReadRel {
@@ -218,7 +236,7 @@ impl<'a> Exporter<'a> {
     }
 
     fn export_projection(
-        &self,
+        &mut self,
         projection: &Projection,
     ) -> Result<ExportedRelation, SubstraitError> {
         let input = self.export_operator(projection.input)?;
@@ -249,6 +267,215 @@ impl<'a> Exporter<'a> {
             rel,
             columns: projection.columns.clone(),
         })
+    }
+
+    fn export_selection(
+        &mut self,
+        selection: &Selection,
+    ) -> Result<ExportedRelation, SubstraitError> {
+        let input = self.export_operator(selection.input)?;
+        let condition = self.export_expr(selection.predicate, &input.columns)?;
+        let rel = Rel {
+            rel_type: Some(rel::RelType::Filter(Box::new(FilterRel {
+                common: Some(direct_common()),
+                input: Some(Box::new(input.rel)),
+                condition: Some(Box::new(condition)),
+                advanced_extension: None,
+            }))),
+        };
+        Ok(ExportedRelation {
+            rel,
+            columns: input.columns,
+        })
+    }
+
+    fn export_sort(&mut self, sort: &Sort) -> Result<ExportedRelation, SubstraitError> {
+        let input = self.export_operator(sort.input)?;
+        let sorts = sort
+            .keys
+            .iter()
+            .map(|key| {
+                Ok(SortField {
+                    expr: Some(self.export_expr(key.expr, &input.columns)?),
+                    sort_kind: Some(sort_field::SortKind::Direction(
+                        sort_direction_to_substrait(key.direction, key.nulls) as i32,
+                    )),
+                })
+            })
+            .collect::<Result<Vec<_>, SubstraitError>>()?;
+        let rel = Rel {
+            rel_type: Some(rel::RelType::Sort(Box::new(SortRel {
+                common: Some(direct_common()),
+                input: Some(Box::new(input.rel)),
+                sorts,
+                advanced_extension: None,
+            }))),
+        };
+        Ok(ExportedRelation {
+            rel,
+            columns: input.columns,
+        })
+    }
+
+    fn export_limit(&mut self, limit: &Limit) -> Result<ExportedRelation, SubstraitError> {
+        let input = self.export_operator(limit.input)?;
+        let offset_mode = if limit.offset == 0 {
+            None
+        } else {
+            Some(fetch_rel::OffsetMode::Offset(
+                i64::try_from(limit.offset)
+                    .map_err(|_| SubstraitError::UnsupportedFetch("offset is too large"))?,
+            ))
+        };
+        let count_mode = match limit.fetch {
+            Some(fetch) => Some(fetch_rel::CountMode::Count(
+                i64::try_from(fetch)
+                    .map_err(|_| SubstraitError::UnsupportedFetch("count is too large"))?,
+            )),
+            None => None,
+        };
+        let rel = Rel {
+            rel_type: Some(rel::RelType::Fetch(Box::new(proto::FetchRel {
+                common: Some(direct_common()),
+                input: Some(Box::new(input.rel)),
+                advanced_extension: None,
+                offset_mode,
+                count_mode,
+            }))),
+        };
+        Ok(ExportedRelation {
+            rel,
+            columns: input.columns,
+        })
+    }
+
+    fn export_expr(&mut self, expr: Expr, scope: &[Column]) -> Result<Expression, SubstraitError> {
+        let rex_type = match self.ctx.expr(expr) {
+            ExprData::Literal(value) => expression::RexType::Literal(export_literal(value)?),
+            ExprData::ColumnRef(column) => {
+                let index = scope
+                    .iter()
+                    .position(|input_column| input_column == column)
+                    .ok_or(SubstraitError::InvalidFieldReference {
+                        index: column.0,
+                        input_len: scope.len(),
+                    })?;
+                expression::RexType::Selection(Box::new(field_reference(index as i32)))
+            }
+            ExprData::Unary { op, expr } => {
+                let argument = self.export_expr(*expr, scope)?;
+                let output_type = match op {
+                    UnaryOp::Not | UnaryOp::IsNull | UnaryOp::IsNotNull => {
+                        Some(arrow_to_substrait_type(&DataType::Boolean)?)
+                    }
+                    UnaryOp::Negate => None,
+                };
+                expression::RexType::ScalarFunction(self.export_scalar_function(
+                    unary_op_function_name(*op),
+                    vec![argument],
+                    output_type,
+                ))
+            }
+            ExprData::Binary { op, left, right } => {
+                let left = self.export_expr(*left, scope)?;
+                let right = self.export_expr(*right, scope)?;
+                let output_type = match op {
+                    BinaryOp::Eq
+                    | BinaryOp::NotEq
+                    | BinaryOp::Lt
+                    | BinaryOp::LtEq
+                    | BinaryOp::Gt
+                    | BinaryOp::GtEq => Some(arrow_to_substrait_type(&DataType::Boolean)?),
+                    BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
+                        None
+                    }
+                };
+                expression::RexType::ScalarFunction(self.export_scalar_function(
+                    binary_op_function_name(*op),
+                    vec![left, right],
+                    output_type,
+                ))
+            }
+            ExprData::Nary { op, exprs } => {
+                let arguments = exprs
+                    .iter()
+                    .map(|expr| self.export_expr(*expr, scope))
+                    .collect::<Result<Vec<_>, _>>()?;
+                expression::RexType::ScalarFunction(self.export_scalar_function(
+                    nary_op_function_name(*op),
+                    arguments,
+                    Some(arrow_to_substrait_type(&DataType::Boolean)?),
+                ))
+            }
+            ExprData::ScalarFunction { function, args } => {
+                let arguments = args
+                    .iter()
+                    .map(|expr| self.export_expr(*expr, scope))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let function_name = function.to_string();
+                expression::RexType::ScalarFunction(self.export_scalar_function(
+                    &function_name,
+                    arguments,
+                    None,
+                ))
+            }
+        };
+        Ok(Expression {
+            rex_type: Some(rex_type),
+        })
+    }
+
+    fn export_scalar_function(
+        &mut self,
+        name: &str,
+        args: Vec<Expression>,
+        output_type: Option<Type>,
+    ) -> expression::ScalarFunction {
+        let anchor = self.register_function(name);
+        expression::ScalarFunction {
+            function_reference: anchor,
+            arguments: Vec::new(),
+            options: Vec::new(),
+            output_type,
+            args,
+        }
+    }
+
+    fn register_function(&mut self, name: &str) -> u32 {
+        if let Some(anchor) = self.function_anchors.get(name) {
+            return *anchor;
+        }
+        let anchor = self.next_function_anchor;
+        self.next_function_anchor += 1;
+        self.function_anchors.insert(name.to_string(), anchor);
+        anchor
+    }
+
+    fn export_function_extensions(&self) -> Vec<proto::extensions::SimpleExtensionDeclaration> {
+        let mut by_anchor = self
+            .function_anchors
+            .iter()
+            .map(|(name, anchor)| (*anchor, name.clone()))
+            .collect::<Vec<_>>();
+        by_anchor.sort_by_key(|(anchor, _)| *anchor);
+        by_anchor
+            .into_iter()
+            .map(
+                |(anchor, name)| {
+                    proto::extensions::SimpleExtensionDeclaration {
+                mapping_type: Some(
+                    proto::extensions::simple_extension_declaration::MappingType::ExtensionFunction(
+                        proto::extensions::simple_extension_declaration::ExtensionFunction {
+                            extension_urn_reference: 1,
+                            function_anchor: anchor,
+                            name,
+                        },
+                    ),
+                ),
+            }
+                },
+            )
+            .collect()
     }
 
     fn export_named_struct(&self, columns: &[Column]) -> Result<NamedStruct, SubstraitError> {
@@ -287,6 +514,84 @@ fn emit_common(output_mapping: Vec<i32>) -> RelCommon {
     }
 }
 
+fn field_reference(index: i32) -> expression::FieldReference {
+    expression::FieldReference {
+        reference_type: Some(expression::field_reference::ReferenceType::DirectReference(
+            expression::ReferenceSegment {
+                reference_type: Some(expression::reference_segment::ReferenceType::StructField(
+                    Box::new(expression::reference_segment::StructField {
+                        field: index,
+                        child: None,
+                    }),
+                )),
+            },
+        )),
+        root_type: Some(expression::field_reference::RootType::RootReference(
+            expression::field_reference::RootReference {},
+        )),
+    }
+}
+
+fn export_literal(value: &ScalarValue) -> Result<expression::Literal, SubstraitError> {
+    let literal_type = match value {
+        ScalarValue::Null(ty) => {
+            expression::literal::LiteralType::Null(arrow_to_substrait_type(ty)?)
+        }
+        ScalarValue::Boolean(value) => expression::literal::LiteralType::Boolean(*value),
+        ScalarValue::Int32(value) => expression::literal::LiteralType::I32(*value),
+        ScalarValue::Int64(value) => expression::literal::LiteralType::I64(*value),
+        ScalarValue::Float64(value) => expression::literal::LiteralType::Fp64(*value),
+        ScalarValue::Utf8(value) => expression::literal::LiteralType::String(value.clone()),
+    };
+    Ok(expression::Literal {
+        nullable: false,
+        type_variation_reference: 0,
+        literal_type: Some(literal_type),
+    })
+}
+
+fn unary_op_function_name(op: UnaryOp) -> &'static str {
+    match op {
+        UnaryOp::Not => "not",
+        UnaryOp::IsNull => "is_null",
+        UnaryOp::IsNotNull => "is_not_null",
+        UnaryOp::Negate => "negate",
+    }
+}
+
+fn binary_op_function_name(op: BinaryOp) -> &'static str {
+    match op {
+        BinaryOp::Eq => "equal",
+        BinaryOp::NotEq => "not_equal",
+        BinaryOp::Lt => "lt",
+        BinaryOp::LtEq => "lte",
+        BinaryOp::Gt => "gt",
+        BinaryOp::GtEq => "gte",
+        BinaryOp::Add => "add",
+        BinaryOp::Subtract => "subtract",
+        BinaryOp::Multiply => "multiply",
+        BinaryOp::Divide => "divide",
+    }
+}
+
+fn nary_op_function_name(op: NaryOp) -> &'static str {
+    match op {
+        NaryOp::And => "and",
+        NaryOp::Or => "or",
+    }
+}
+
+fn sort_direction_to_substrait(
+    direction: SortDirection,
+    nulls: NullOrdering,
+) -> sort_field::SortDirection {
+    match (direction, nulls) {
+        (SortDirection::Asc, NullOrdering::Last) => sort_field::SortDirection::AscNullsLast,
+        (SortDirection::Asc, NullOrdering::First) => sort_field::SortDirection::AscNullsFirst,
+        (SortDirection::Desc, NullOrdering::Last) => sort_field::SortDirection::DescNullsLast,
+        (SortDirection::Desc, NullOrdering::First) => sort_field::SortDirection::DescNullsFirst,
+    }
+}
 fn table_ref_names(table: &TableRef) -> Vec<String> {
     match table {
         TableRef::Bare { table } => vec![table.to_string()],
@@ -1912,23 +2217,7 @@ mod tests {
     }
 
     fn field_reference(index: i32) -> expression::FieldReference {
-        expression::FieldReference {
-            reference_type: Some(expression::field_reference::ReferenceType::DirectReference(
-                expression::ReferenceSegment {
-                    reference_type: Some(
-                        expression::reference_segment::ReferenceType::StructField(Box::new(
-                            expression::reference_segment::StructField {
-                                field: index,
-                                child: None,
-                            },
-                        )),
-                    ),
-                },
-            )),
-            root_type: Some(expression::field_reference::RootType::RootReference(
-                expression::field_reference::RootReference {},
-            )),
-        }
+        super::field_reference(index)
     }
 
     fn comparison_key(left: i32, right: i32) -> ComparisonJoinKey {
@@ -1998,6 +2287,100 @@ mod tests {
             panic!("project should emit selected columns")
         };
         assert_eq!(emit.output_mapping, vec![0]);
+    }
+
+    #[test]
+    fn exports_selection_sort_and_limit() {
+        let mut ctx = QueryContext::new();
+        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
+        let age = ctx.add_column(ColumnData::new("age", DataType::Int64));
+        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![id, age],
+        }));
+        let age_ref = ctx.add_expr(ExprData::ColumnRef(age));
+        let eighteen = ctx.add_expr(ExprData::Literal(ScalarValue::Int64(18)));
+        let predicate = ctx.add_expr(ExprData::Binary {
+            op: BinaryOp::GtEq,
+            left: age_ref,
+            right: eighteen,
+        });
+        let selection = ctx.add_operator(OperatorData::Selection(Selection {
+            predicate,
+            input: scan,
+        }));
+        let id_ref = ctx.add_expr(ExprData::ColumnRef(id));
+        let sort = ctx.add_operator(OperatorData::Sort(Sort {
+            keys: vec![SortKey {
+                expr: id_ref,
+                direction: SortDirection::Desc,
+                nulls: NullOrdering::Last,
+            }],
+            input: selection,
+        }));
+        let limit = ctx.add_operator(OperatorData::Limit(Limit {
+            fetch: Some(5),
+            offset: 2,
+            input: sort,
+        }));
+        let output = ctx.add_operator(OperatorData::Output(Output { input: limit }));
+        ctx.set_root(output);
+
+        let plan = to_plan(&ctx).expect("query should export");
+        let Some(plan_rel::RelType::Root(root)) = plan.relations[0].rel_type.as_ref() else {
+            panic!("plan should export a root")
+        };
+        let Some(Rel {
+            rel_type: Some(rel::RelType::Fetch(fetch)),
+        }) = root.input.as_ref()
+        else {
+            panic!("root should read from fetch")
+        };
+        assert!(matches!(
+            fetch.count_mode,
+            Some(fetch_rel::CountMode::Count(5))
+        ));
+        assert!(matches!(
+            fetch.offset_mode,
+            Some(fetch_rel::OffsetMode::Offset(2))
+        ));
+        let Some(sort_input) = fetch.input.as_ref() else {
+            panic!("fetch should read from sort")
+        };
+        let Rel {
+            rel_type: Some(rel::RelType::Sort(sort)),
+        } = sort_input.as_ref()
+        else {
+            panic!("fetch should read from sort")
+        };
+        assert_eq!(sort.sorts.len(), 1);
+        assert!(matches!(
+            sort.sorts[0].sort_kind,
+            Some(sort_field::SortKind::Direction(x))
+                if x == sort_field::SortDirection::DescNullsLast as i32
+        ));
+        let Some(filter_input) = sort.input.as_ref() else {
+            panic!("sort should read from filter")
+        };
+        let Rel {
+            rel_type: Some(rel::RelType::Filter(filter)),
+        } = filter_input.as_ref()
+        else {
+            panic!("sort should read from filter")
+        };
+        let Some(predicate) = filter.condition.as_ref() else {
+            panic!("filter should have condition")
+        };
+        assert!(matches!(
+            predicate.rex_type.as_ref(),
+            Some(expression::RexType::ScalarFunction(_))
+        ));
+        assert!(plan.extensions.iter().any(|extension| matches!(
+            extension.mapping_type.as_ref(),
+            Some(proto::extensions::simple_extension_declaration::MappingType::ExtensionFunction(
+                proto::extensions::simple_extension_declaration::ExtensionFunction { name, .. }
+            )) if name == "gte"
+        )));
     }
 
     #[test]

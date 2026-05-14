@@ -7,7 +7,8 @@ use datafusion::datasource::MemTable;
 use datafusion::prelude::SessionContext;
 use prost::Message;
 use simple_graph::{
-    ColumnData, OperatorData, Output, Projection, QueryContext, Scan, TableRef, substrait,
+    ColumnData, ExprData, Limit, NullOrdering, OperatorData, Output, Projection, QueryContext,
+    ScalarValue, Scan, Selection, Sort, SortDirection, SortKey, TableRef, substrait,
 };
 
 #[tokio::test]
@@ -88,9 +89,28 @@ fn projected_users_query() -> QueryContext {
         table: TableRef::bare("users"),
         columns: vec![id, age],
     }));
+    let predicate = ctx.add_expr(ExprData::Literal(ScalarValue::Boolean(true)));
+    let selection = ctx.add_operator(OperatorData::Selection(Selection {
+        predicate,
+        input: scan,
+    }));
+    let id_ref = ctx.add_expr(ExprData::ColumnRef(id));
+    let sort = ctx.add_operator(OperatorData::Sort(Sort {
+        keys: vec![SortKey {
+            expr: id_ref,
+            direction: SortDirection::Desc,
+            nulls: NullOrdering::Last,
+        }],
+        input: selection,
+    }));
+    let limit = ctx.add_operator(OperatorData::Limit(Limit {
+        fetch: Some(5),
+        offset: 0,
+        input: sort,
+    }));
     let projection = ctx.add_operator(OperatorData::Projection(Projection {
         columns: vec![id],
-        input: scan,
+        input: limit,
     }));
     let output = ctx.add_operator(OperatorData::Output(Output { input: projection }));
     ctx.set_root(output);
