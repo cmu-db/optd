@@ -22,7 +22,9 @@ pub use display::{
     BoxDrawingRenderer, BoxRendererConfig, BoxRendererTheme, ColorMode, DisplayField, DisplayInput,
     DisplayNode, DisplayNodeRecord, DisplayPlan, DisplayProperties, DisplayValue,
 };
-pub use optimize::{OptimizeError, OptimizeResult, Pass, PassManager, PassResult, QueryPass};
+pub use optimize::{
+    OptimizeError, OptimizeResult, Pass, PassManager, PassResult, QueryPass, RewriteMap,
+};
 
 /// An opaque reference to a relational operator in a [`QueryContext`].
 ///
@@ -612,6 +614,7 @@ impl std::fmt::Debug for QueryContext {
 pub struct OptimizerContext {
     pub query: QueryContext,
     pub analyses: AnalysisContext,
+    pub rewrites: optimize::RewriteMap,
 }
 
 impl OptimizerContext {
@@ -620,6 +623,7 @@ impl OptimizerContext {
         Self {
             query,
             analyses: AnalysisContext::new(),
+            rewrites: optimize::RewriteMap::new(),
         }
     }
 
@@ -628,6 +632,7 @@ impl OptimizerContext {
         Self {
             query,
             analyses: AnalysisContext::with_catalog(catalog),
+            rewrites: optimize::RewriteMap::new(),
         }
     }
 

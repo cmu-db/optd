@@ -1,6 +1,39 @@
-use crate::OptimizerContext;
+use std::collections::HashMap;
 
-/// Errors produced by optimization passes.
+use crate::{Operator, OptimizerContext};
+
+/// Tracks append-only operator replacements for one pass invocation.
+///
+/// Passes append new operators to [`OptimizerContext`] and record the mapping here.
+/// [`PassManager`] resolves the query root through the map after each pass.
+#[derive(Debug, Default)]
+pub struct RewriteMap {
+    replacements: HashMap<Operator, Operator>,
+}
+
+impl RewriteMap {
+    /// Creates an empty rewrite map.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Records that `old` should be replaced by `new`.
+    pub fn replace(&mut self, old: Operator, new: Operator) {
+        self.replacements.insert(old, new);
+    }
+
+    /// Follows the replacement chain for `operator`, returning the latest replacement.
+    ///
+    /// If `operator` has no replacement, returns `operator` unchanged.
+    pub fn resolve(&self, operator: Operator) -> Operator {
+        let mut current = operator;
+        while let Some(&next) = self.replacements.get(&current) {
+            current = next;
+        }
+        current
+    }
+}
+
 #[derive(Debug)]
 pub enum OptimizeError {
     /// A pass returned an error with a message.
@@ -67,6 +100,13 @@ impl PassManager {
             for pass in &mut self.passes {
                 if pass.run(ctx)? == PassResult::Changed {
                     any_changed = true;
+                    // Resolve the query root through the pass's rewrite map.
+                    if let Some(root) = ctx.query.root() {
+                        let resolved = ctx.rewrites.resolve(root);
+                        if resolved != root {
+                            ctx.query.set_root(resolved);
+                        }
+                    }
                 }
             }
             if !any_changed {
@@ -80,7 +120,99 @@ impl PassManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::QueryContext;
+    use crate::{ColumnData, OperatorData, Output, QueryContext, Scan, TableRef};
+    use arrow_schema::DataType;
+
+    // --- RewriteMap tests ---
+
+    #[test]
+    fn rewrite_map_resolve_returns_original_when_no_replacement() {
+        let map = RewriteMap::new();
+        let mut ctx = QueryContext::new();
+        let op = OperatorData::Output(Output {
+            input: OperatorData::Scan(Scan {
+                table: TableRef::bare("t"),
+                columns: vec![],
+            })
+            .add(&mut ctx),
+        })
+        .add(&mut ctx);
+        assert_eq!(map.resolve(op), op);
+    }
+
+    #[test]
+    fn rewrite_map_resolve_follows_chain() {
+        let mut map = RewriteMap::new();
+        let mut ctx = QueryContext::new();
+        let col = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let a = OperatorData::Scan(Scan {
+            table: TableRef::bare("a"),
+            columns: vec![col],
+        })
+        .add(&mut ctx);
+        let b = OperatorData::Scan(Scan {
+            table: TableRef::bare("b"),
+            columns: vec![col],
+        })
+        .add(&mut ctx);
+        let c = OperatorData::Scan(Scan {
+            table: TableRef::bare("c"),
+            columns: vec![col],
+        })
+        .add(&mut ctx);
+        map.replace(a, b);
+        map.replace(b, c);
+        assert_eq!(map.resolve(a), c);
+        assert_eq!(map.resolve(b), c);
+        assert_eq!(map.resolve(c), c);
+    }
+
+    #[test]
+    fn pass_manager_resolves_root_through_rewrite_map() {
+        use crate::OptimizerContext;
+
+        struct ReplaceRootPass {
+            fired: bool,
+        }
+        impl Pass for ReplaceRootPass {
+            fn name(&self) -> &'static str {
+                "replace_root"
+            }
+        }
+        impl QueryPass for ReplaceRootPass {
+            fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<PassResult> {
+                if self.fired {
+                    return Ok(PassResult::Unchanged);
+                }
+                let Some(root) = ctx.query.root() else {
+                    return Ok(PassResult::Unchanged);
+                };
+                // Append a replacement and record it.
+                let replacement = ctx.query.operator(root).clone().add(&mut ctx.query);
+                ctx.rewrites.replace(root, replacement);
+                self.fired = true;
+                Ok(PassResult::Changed)
+            }
+        }
+
+        let mut ctx = QueryContext::new();
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("t"),
+            columns: vec![],
+        })
+        .add(&mut ctx);
+        ctx.set_root(scan);
+
+        let mut opt_ctx = OptimizerContext::new(ctx);
+        let mut pm = PassManager::new(10);
+        pm.add_pass(ReplaceRootPass { fired: false });
+        pm.run(&mut opt_ctx).unwrap();
+
+        // Root should have been updated to the replacement.
+        assert_ne!(opt_ctx.query.root(), Some(scan));
+    }
+
+    // --- PassManager tests ---
 
     struct NoopPass;
     impl Pass for NoopPass {
