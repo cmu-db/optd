@@ -19,7 +19,7 @@ pub enum AnalysisError {
     /// The current IR cannot expose an expression aggregation key as an output column.
     UnsupportedAggregationKey { operator: Operator, expr: Expr },
     /// The operator graph contained a cycle for the requested analysis.
-    RecursiveOperatorAnalysis {
+    CyclicDependency {
         analysis: &'static str,
         operator: Operator,
     },
@@ -34,10 +34,9 @@ impl fmt::Display for AnalysisError {
                 f,
                 "aggregation {operator:?} has non-column key expression {expr:?}"
             ),
-            Self::RecursiveOperatorAnalysis { analysis, operator } => write!(
-                f,
-                "recursive operator dependency for {analysis} at {operator:?}"
-            ),
+            Self::CyclicDependency { analysis, operator } => {
+                write!(f, "cyclic dependency for {analysis} at {operator:?}")
+            }
             Self::AnalysisTypeMismatch(analysis) => {
                 write!(f, "registered analysis had the wrong type for {analysis}")
             }
@@ -46,6 +45,22 @@ impl fmt::Display for AnalysisError {
 }
 
 impl std::error::Error for AnalysisError {}
+
+/// Umbrella trait for all analyses. Owns the query interface.
+///
+/// Each analysis decides its own computation strategy and caching.
+/// Bottom-up analyses recurse into inputs via [`AnalysisContext::get`].
+/// Top-down analyses use [`AnalysisContext::get::<ParentOf>`] to walk from root.
+pub trait Analyzable: 'static {
+    /// The value produced for one operator.
+    type Value: Clone;
+
+    fn get(
+        ctx: &QueryContext,
+        analyses: &mut AnalysisContext,
+        op: Operator,
+    ) -> AnalysisResult<Self::Value>;
+}
 
 /// Object-safe base trait for analysis instances stored in an [`AnalysisContext`].
 pub trait Analysis: Any {
@@ -60,14 +75,13 @@ pub trait Analysis: Any {
 pub type AnalysisRegistry = HashMap<TypeId, Rc<dyn Analysis>>;
 
 /// Analysis that computes and caches one output value per operator.
-pub trait OperatorAnalysis: Analysis {
-    /// The value computed for one operator.
+/// Internal trait for analyses that cache results per operator handle.
+/// Used by the existing bottom-up analyses.
+trait CachedAnalysis: Analysis {
     type Output: Clone + 'static;
 
-    /// Returns this analysis' operator-value state.
     fn state(&self) -> &OperatorAnalysisState<Self::Output>;
 
-    /// Computes the value for `operator`.
     fn compute(
         &self,
         ctx: &QueryContext,
@@ -75,8 +89,7 @@ pub trait OperatorAnalysis: Analysis {
         operator: Operator,
     ) -> AnalysisResult<Self::Output>;
 
-    /// Returns the value for `operator`, computing and caching it if needed.
-    fn get(
+    fn get_cached(
         &self,
         ctx: &QueryContext,
         analyses: &mut AnalysisContext,
@@ -85,29 +98,29 @@ pub trait OperatorAnalysis: Analysis {
     where
         Self: Sized,
     {
-        let state = self.state();
-
-        if let Some(value) = state.values.borrow().get(&operator) {
+        if let Some(value) = self.state().values.borrow().get(&operator) {
             return Ok(value.clone());
         }
 
-        if !state.in_progress.borrow_mut().insert(operator) {
-            return Err(AnalysisError::RecursiveOperatorAnalysis {
+        if !self.state().in_progress.borrow_mut().insert(operator) {
+            return Err(AnalysisError::CyclicDependency {
                 analysis: type_name::<Self>(),
                 operator,
             });
         }
 
         let result = self.compute(ctx, analyses, operator);
-        state.in_progress.borrow_mut().remove(&operator);
+        self.state().in_progress.borrow_mut().remove(&operator);
 
         let value = result?;
-        state.values.borrow_mut().insert(operator, value.clone());
+        self.state()
+            .values
+            .borrow_mut()
+            .insert(operator, value.clone());
         Ok(value)
     }
 
-    /// Clears the operator-value cache.
-    fn clear_operator_cache(&self) {
+    fn clear_cache(&self) {
         self.state().clear();
     }
 }
@@ -162,16 +175,15 @@ impl AnalysisContext {
     }
 
     /// Returns analysis output for `operator`.
-    pub fn get<A>(&mut self, ctx: &QueryContext, operator: Operator) -> AnalysisResult<A::Output>
-    where
-        A: OperatorAnalysis + Default + 'static,
-    {
-        let analysis = self.analysis::<A>();
-        let analysis = typed_analysis::<A>(&analysis)?;
-        analysis.get(ctx, self, operator)
+    pub fn get<A: Analyzable>(
+        &mut self,
+        ctx: &QueryContext,
+        op: Operator,
+    ) -> AnalysisResult<A::Value> {
+        A::get(ctx, self, op)
     }
 
-    fn analysis<A>(&mut self) -> Rc<dyn Analysis>
+    fn registry_entry<A>(&mut self) -> Rc<dyn Analysis>
     where
         A: Analysis + Default + 'static,
     {
@@ -764,7 +776,7 @@ pub struct CreatedColumns {
     state: OperatorAnalysisState<Vec<Column>>,
 }
 
-impl OperatorAnalysis for CreatedColumns {
+impl CachedAnalysis for CreatedColumns {
     type Output = Vec<Column>;
 
     fn state(&self) -> &OperatorAnalysisState<Self::Output> {
@@ -787,7 +799,20 @@ impl Analysis for CreatedColumns {
     }
 
     fn clear(&self) {
-        self.clear_operator_cache();
+        self.clear_cache();
+    }
+}
+
+impl Analyzable for CreatedColumns {
+    type Value = Vec<Column>;
+
+    fn get(
+        ctx: &QueryContext,
+        analyses: &mut AnalysisContext,
+        op: Operator,
+    ) -> AnalysisResult<Vec<Column>> {
+        let analysis = analyses.registry_entry::<Self>();
+        typed_analysis::<Self>(&analysis)?.get_cached(ctx, analyses, op)
     }
 }
 
@@ -797,7 +822,7 @@ pub struct UsedColumns {
     state: OperatorAnalysisState<Vec<Column>>,
 }
 
-impl OperatorAnalysis for UsedColumns {
+impl CachedAnalysis for UsedColumns {
     type Output = Vec<Column>;
 
     fn state(&self) -> &OperatorAnalysisState<Self::Output> {
@@ -810,8 +835,7 @@ impl OperatorAnalysis for UsedColumns {
         analyses: &mut AnalysisContext,
         operator: Operator,
     ) -> AnalysisResult<Self::Output> {
-        let operator_data = operator.get(ctx);
-        directly_used_columns(ctx, analyses, operator_data)
+        directly_used_columns(ctx, analyses, operator.get(ctx))
     }
 }
 
@@ -821,7 +845,20 @@ impl Analysis for UsedColumns {
     }
 
     fn clear(&self) {
-        self.clear_operator_cache();
+        self.clear_cache();
+    }
+}
+
+impl Analyzable for UsedColumns {
+    type Value = Vec<Column>;
+
+    fn get(
+        ctx: &QueryContext,
+        analyses: &mut AnalysisContext,
+        op: Operator,
+    ) -> AnalysisResult<Vec<Column>> {
+        let analysis = analyses.registry_entry::<Self>();
+        typed_analysis::<Self>(&analysis)?.get_cached(ctx, analyses, op)
     }
 }
 
@@ -831,7 +868,7 @@ pub struct FreeColumns {
     state: OperatorAnalysisState<Vec<Column>>,
 }
 
-impl OperatorAnalysis for FreeColumns {
+impl CachedAnalysis for FreeColumns {
     type Output = Vec<Column>;
 
     fn state(&self) -> &OperatorAnalysisState<Self::Output> {
@@ -854,7 +891,20 @@ impl Analysis for FreeColumns {
     }
 
     fn clear(&self) {
-        self.clear_operator_cache();
+        self.clear_cache();
+    }
+}
+
+impl Analyzable for FreeColumns {
+    type Value = Vec<Column>;
+
+    fn get(
+        ctx: &QueryContext,
+        analyses: &mut AnalysisContext,
+        op: Operator,
+    ) -> AnalysisResult<Vec<Column>> {
+        let analysis = analyses.registry_entry::<Self>();
+        typed_analysis::<Self>(&analysis)?.get_cached(ctx, analyses, op)
     }
 }
 
@@ -864,7 +914,7 @@ pub struct ColumnNullability {
     state: OperatorAnalysisState<Vec<(Column, bool)>>,
 }
 
-impl OperatorAnalysis for ColumnNullability {
+impl CachedAnalysis for ColumnNullability {
     type Output = Vec<(Column, bool)>;
 
     fn state(&self) -> &OperatorAnalysisState<Self::Output> {
@@ -887,7 +937,20 @@ impl Analysis for ColumnNullability {
     }
 
     fn clear(&self) {
-        self.clear_operator_cache();
+        self.clear_cache();
+    }
+}
+
+impl Analyzable for ColumnNullability {
+    type Value = Vec<(Column, bool)>;
+
+    fn get(
+        ctx: &QueryContext,
+        analyses: &mut AnalysisContext,
+        op: Operator,
+    ) -> AnalysisResult<Vec<(Column, bool)>> {
+        let analysis = analyses.registry_entry::<Self>();
+        typed_analysis::<Self>(&analysis)?.get_cached(ctx, analyses, op)
     }
 }
 
@@ -897,7 +960,7 @@ pub struct AvailableColumns {
     state: OperatorAnalysisState<Vec<Column>>,
 }
 
-impl OperatorAnalysis for AvailableColumns {
+impl CachedAnalysis for AvailableColumns {
     type Output = Vec<Column>;
 
     fn state(&self) -> &OperatorAnalysisState<Self::Output> {
@@ -908,16 +971,16 @@ impl OperatorAnalysis for AvailableColumns {
         &self,
         ctx: &QueryContext,
         analyses: &mut AnalysisContext,
-        operator: Operator,
+        op: Operator,
     ) -> AnalysisResult<Self::Output> {
-        match operator.get(ctx) {
+        match op.get(ctx) {
             OperatorData::Scan(_) | OperatorData::TableFunction(_) => {
-                analyses.get::<CreatedColumns>(ctx, operator)
+                analyses.get::<CreatedColumns>(ctx, op)
             }
             OperatorData::Selection(data) => analyses.get::<AvailableColumns>(ctx, data.input),
             OperatorData::Map(data) => {
                 let mut columns = analyses.get::<AvailableColumns>(ctx, data.input)?;
-                columns.extend(analyses.get::<CreatedColumns>(ctx, operator)?);
+                columns.extend(analyses.get::<CreatedColumns>(ctx, op)?);
                 Ok(columns)
             }
             OperatorData::Join(data) => {
@@ -925,7 +988,7 @@ impl OperatorAnalysis for AvailableColumns {
                 if !matches!(data.join_type, JoinType::LeftSemi | JoinType::LeftAnti) {
                     columns.extend(analyses.get::<AvailableColumns>(ctx, data.inner)?);
                 }
-                columns.extend(analyses.get::<CreatedColumns>(ctx, operator)?);
+                columns.extend(analyses.get::<CreatedColumns>(ctx, op)?);
                 Ok(columns)
             }
             OperatorData::CrossProduct(data) => {
@@ -941,13 +1004,13 @@ impl OperatorAnalysis for AvailableColumns {
                         ExprData::ColumnRef(column) => columns.push(*column),
                         _ => {
                             return Err(AnalysisError::UnsupportedAggregationKey {
-                                operator,
+                                operator: op,
                                 expr: *expr,
                             });
                         }
                     }
                 }
-                columns.extend(analyses.get::<CreatedColumns>(ctx, operator)?);
+                columns.extend(analyses.get::<CreatedColumns>(ctx, op)?);
                 Ok(columns)
             }
             OperatorData::Projection(data) => {
@@ -967,7 +1030,102 @@ impl Analysis for AvailableColumns {
     }
 
     fn clear(&self) {
-        self.clear_operator_cache();
+        self.clear_cache();
+    }
+}
+
+impl Analyzable for AvailableColumns {
+    type Value = Vec<Column>;
+
+    fn get(
+        ctx: &QueryContext,
+        analyses: &mut AnalysisContext,
+        op: Operator,
+    ) -> AnalysisResult<Vec<Column>> {
+        let analysis = analyses.registry_entry::<Self>();
+        typed_analysis::<Self>(&analysis)?.get_cached(ctx, analyses, op)
+    }
+}
+
+/// Analysis that returns the immediate parent of an operator in the reachable plan.
+///
+/// Returns `None` for the root. Builds and caches a full parent map on first call.
+/// The cache is keyed on the root at time of computation; call [`AnalysisContext::clear`]
+/// if the root changes.
+#[derive(Default)]
+pub struct ParentOf {
+    /// Cached (root, parent_map) pair. Invalidated when root changes.
+    cache: RefCell<Option<(Operator, HashMap<Operator, Operator>)>>,
+}
+
+impl Analysis for ParentOf {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn clear(&self) {
+        *self.cache.borrow_mut() = None;
+    }
+}
+
+impl Analyzable for ParentOf {
+    /// `Some(parent)` if `op` has a parent in the reachable plan, `None` if `op` is the root
+    /// or unreachable.
+    type Value = Option<Operator>;
+
+    fn get(
+        ctx: &QueryContext,
+        analyses: &mut AnalysisContext,
+        op: Operator,
+    ) -> AnalysisResult<Option<Operator>> {
+        let Some(root) = ctx.root() else {
+            return Ok(None);
+        };
+
+        let entry = analyses.registry_entry::<Self>();
+        let analysis = typed_analysis::<Self>(&entry)?;
+
+        // Rebuild cache if root changed or not yet computed.
+        {
+            let cache = analysis.cache.borrow();
+            if let Some((cached_root, ref map)) = *cache {
+                if cached_root == root {
+                    return Ok(map.get(&op).copied());
+                }
+            }
+        }
+
+        // Build parent map with a DFS from root.
+        let mut map: HashMap<Operator, Operator> = HashMap::new();
+        let mut stack = vec![root];
+        let mut visited = HashSet::new();
+        while let Some(current) = stack.pop() {
+            if !visited.insert(current) {
+                continue;
+            }
+            for child in relational_inputs(current, ctx) {
+                map.entry(child).or_insert(current);
+                stack.push(child);
+            }
+        }
+
+        *analysis.cache.borrow_mut() = Some((root, map.clone()));
+        Ok(map.get(&op).copied())
+    }
+}
+
+fn relational_inputs(op: Operator, ctx: &QueryContext) -> Vec<Operator> {
+    match op.get(ctx) {
+        OperatorData::Scan(_) | OperatorData::TableFunction(_) => vec![],
+        OperatorData::Selection(d) => vec![d.input],
+        OperatorData::Map(d) => vec![d.input],
+        OperatorData::Sort(d) => vec![d.input],
+        OperatorData::Limit(d) => vec![d.input],
+        OperatorData::Aggregation(d) => vec![d.input],
+        OperatorData::Projection(d) => vec![d.input],
+        OperatorData::Output(d) => vec![d.input],
+        OperatorData::Join(d) => vec![d.outer, d.inner],
+        OperatorData::CrossProduct(d) => vec![d.outer, d.inner],
     }
 }
 
@@ -1596,6 +1754,36 @@ mod tests {
         assert_eq!(
             analyses.get::<CreatedColumns>(&ctx, scan).unwrap(),
             vec![first, second]
+        );
+    }
+
+    #[test]
+    fn parent_of_returns_immediate_parent() {
+        let mut ctx = QueryContext::new();
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("t"),
+            columns: vec![id],
+        })
+        .add(&mut ctx);
+        let id_ref = ExprData::ColumnRef(id).add(&mut ctx);
+        let selection = OperatorData::Selection(crate::Selection {
+            predicate: id_ref,
+            input: scan,
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(crate::Output { input: selection }).add(&mut ctx);
+        ctx.set_root(output);
+
+        let mut analyses = AnalysisContext::new();
+        assert_eq!(analyses.get::<ParentOf>(&ctx, output).unwrap(), None);
+        assert_eq!(
+            analyses.get::<ParentOf>(&ctx, selection).unwrap(),
+            Some(output)
+        );
+        assert_eq!(
+            analyses.get::<ParentOf>(&ctx, scan).unwrap(),
+            Some(selection)
         );
     }
 }
