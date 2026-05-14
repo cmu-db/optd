@@ -1,0 +1,38 @@
+{
+  "nodes": [
+    {
+      "id": 0,
+      "kind": "scan",
+      "title": "⊞ lineitem",
+      "columns": [
+        "l_shipdate(#0)",
+        "l_discount(#1)",
+        "l_quantity(#2)",
+        "l_extendedprice(#3)"
+      ]
+    },
+    {
+      "id": 1,
+      "kind": "selection",
+      "title": "σ Selection",
+      "predicate": "((l_shipdate(#0) >= 8766::Date32) AND (l_shipdate(#0) < 9131::Date32) AND (l_discount(#1) >= 5::Decimal128(15, 2)) AND (l_discount(#1) <= 7::Decimal128(15, 2)) AND (l_quantity(#2) < 2400::Decimal128(15, 2)))",
+      "input": 0
+    },
+    {
+      "id": 2,
+      "kind": "aggregation",
+      "title": "γ Aggregation",
+      "keys": "",
+      "aggregates": [
+        "revenue(#4) := sum((l_extendedprice(#3) * l_discount(#1)))"
+      ],
+      "input": 1
+    },
+    {
+      "id": 3,
+      "kind": "output",
+      "title": "= Output",
+      "input": 2
+    }
+  ]
+}

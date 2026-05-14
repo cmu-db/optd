@@ -1,0 +1,182 @@
+{
+  "nodes": [
+    {
+      "id": 0,
+      "kind": "scan",
+      "title": "⊞ part",
+      "columns": [
+        "p_partkey(#0)",
+        "p_type(#1)"
+      ]
+    },
+    {
+      "id": 2,
+      "kind": "scan",
+      "title": "⊞ lineitem",
+      "columns": [
+        "l_partkey(#4)",
+        "l_suppkey(#5)",
+        "l_orderkey(#6)",
+        "l_extendedprice(#7)",
+        "l_discount(#8)"
+      ]
+    },
+    {
+      "id": 8,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 0,
+      "inner": 2
+    },
+    {
+      "id": 1,
+      "kind": "scan",
+      "title": "⊞ supplier",
+      "columns": [
+        "s_suppkey(#2)",
+        "s_nationkey(#3)"
+      ]
+    },
+    {
+      "id": 9,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 8,
+      "inner": 1
+    },
+    {
+      "id": 3,
+      "kind": "scan",
+      "title": "⊞ orders",
+      "columns": [
+        "o_orderkey(#9)",
+        "o_custkey(#10)",
+        "o_orderdate(#11)"
+      ]
+    },
+    {
+      "id": 10,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 9,
+      "inner": 3
+    },
+    {
+      "id": 4,
+      "kind": "scan",
+      "title": "⊞ customer",
+      "columns": [
+        "c_custkey(#12)",
+        "c_nationkey(#13)"
+      ]
+    },
+    {
+      "id": 11,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 10,
+      "inner": 4
+    },
+    {
+      "id": 5,
+      "kind": "scan",
+      "title": "⊞ nation",
+      "columns": [
+        "n1.n_nationkey(#14)",
+        "n1.n_regionkey(#15)"
+      ]
+    },
+    {
+      "id": 12,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 11,
+      "inner": 5
+    },
+    {
+      "id": 7,
+      "kind": "scan",
+      "title": "⊞ region",
+      "columns": [
+        "r_regionkey(#18)",
+        "r_name(#19)"
+      ]
+    },
+    {
+      "id": 13,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 12,
+      "inner": 7
+    },
+    {
+      "id": 6,
+      "kind": "scan",
+      "title": "⊞ nation",
+      "columns": [
+        "n2.n_nationkey(#16)",
+        "n2.n_name(#17)"
+      ]
+    },
+    {
+      "id": 14,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 13,
+      "inner": 6
+    },
+    {
+      "id": 15,
+      "kind": "selection",
+      "title": "σ Selection",
+      "predicate": "((p_partkey(#0) = l_partkey(#4)) AND (l_suppkey(#5) = s_suppkey(#2)) AND (l_orderkey(#6) = o_orderkey(#9)) AND (o_custkey(#10) = c_custkey(#12)) AND (c_nationkey(#13) = n1.n_nationkey(#14)) AND (n1.n_regionkey(#15) = r_regionkey(#18)) AND (s_nationkey(#3) = n2.n_nationkey(#16)) AND (r_name(#19) = \"MIDDLE EAST\") AND (p_type(#1) = \"LARGE PLATED STEEL\") AND (o_orderdate(#11) >= 9131::Date32) AND (o_orderdate(#11) < 9862::Date32))",
+      "input": 14
+    },
+    {
+      "id": 16,
+      "kind": "map",
+      "title": "χ Map",
+      "computations": [
+        "o_year(#20) := extract_year(o_orderdate(#11))",
+        "volume(#21) := (l_extendedprice(#7) * (100::Decimal128(15, 2) - l_discount(#8)))",
+        "iraq_volume(#22) := CASE WHEN (n2.n_name(#17) = \"IRAQ\") THEN (l_extendedprice(#7) * (100::Decimal128(15, 2) - l_discount(#8))) ELSE 0::Decimal128(15, 2) END"
+      ],
+      "input": 15
+    },
+    {
+      "id": 17,
+      "kind": "aggregation",
+      "title": "γ Aggregation",
+      "keys": "o_year(#20)",
+      "aggregates": [
+        "mkt_share(#23) := sum(iraq_volume(#22))"
+      ],
+      "input": 16
+    },
+    {
+      "id": 18,
+      "kind": "sort",
+      "title": "⇞ Sort",
+      "keys": [
+        "o_year(#20) Asc NullsLast"
+      ],
+      "input": 17
+    },
+    {
+      "id": 19,
+      "kind": "projection",
+      "title": "π Projection",
+      "columns": [
+        "o_year(#20)",
+        "mkt_share(#23)"
+      ],
+      "input": 18
+    },
+    {
+      "id": 20,
+      "kind": "output",
+      "title": "= Output",
+      "input": 19
+    }
+  ]
+}

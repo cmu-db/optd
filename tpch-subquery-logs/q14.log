@@ -1,0 +1,73 @@
+{
+  "nodes": [
+    {
+      "id": 0,
+      "kind": "scan",
+      "title": "⊞ lineitem",
+      "columns": [
+        "l_partkey(#0)",
+        "l_shipdate(#1)",
+        "l_extendedprice(#2)",
+        "l_discount(#3)"
+      ]
+    },
+    {
+      "id": 1,
+      "kind": "scan",
+      "title": "⊞ part",
+      "columns": [
+        "p_partkey(#4)",
+        "p_type(#5)"
+      ]
+    },
+    {
+      "id": 2,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 0,
+      "inner": 1
+    },
+    {
+      "id": 3,
+      "kind": "selection",
+      "title": "σ Selection",
+      "predicate": "((l_partkey(#0) = p_partkey(#4)) AND (l_shipdate(#1) >= 9162::Date32) AND (l_shipdate(#1) < 9190::Date32))",
+      "input": 2
+    },
+    {
+      "id": 4,
+      "kind": "map",
+      "title": "χ Map",
+      "computations": [
+        "disc_price(#6) := (l_extendedprice(#2) * (100::Decimal128(15, 2) - l_discount(#3)))",
+        "promo_disc_price(#7) := CASE WHEN like(p_type(#5), \"PROMO%\") THEN (l_extendedprice(#2) * (100::Decimal128(15, 2) - l_discount(#3))) ELSE 0::Decimal128(15, 2) END"
+      ],
+      "input": 3
+    },
+    {
+      "id": 5,
+      "kind": "aggregation",
+      "title": "γ Aggregation",
+      "keys": "",
+      "aggregates": [
+        "promo_revenue(#8) := sum(promo_disc_price(#7))"
+      ],
+      "input": 4
+    },
+    {
+      "id": 6,
+      "kind": "projection",
+      "title": "π Projection",
+      "columns": [
+        "promo_revenue(#8)"
+      ],
+      "input": 5
+    },
+    {
+      "id": 7,
+      "kind": "output",
+      "title": "= Output",
+      "input": 6
+    }
+  ]
+}

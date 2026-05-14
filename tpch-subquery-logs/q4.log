@@ -1,0 +1,74 @@
+{
+  "nodes": [
+    {
+      "id": 0,
+      "kind": "scan",
+      "title": "⊞ orders",
+      "columns": [
+        "o_orderkey(#0)",
+        "o_orderdate(#1)",
+        "o_orderpriority(#2)"
+      ]
+    },
+    {
+      "id": 1,
+      "kind": "scan",
+      "title": "⊞ lineitem",
+      "columns": [
+        "l_orderkey(#3)",
+        "l_commitdate(#4)",
+        "l_receiptdate(#5)"
+      ]
+    },
+    {
+      "id": 2,
+      "kind": "selection",
+      "title": "σ Selection",
+      "predicate": "((l_commitdate(#4) < l_receiptdate(#5)) AND (l_orderkey(#3) = o_orderkey(#0)))",
+      "input": 1
+    },
+    {
+      "id": 4,
+      "kind": "selection",
+      "title": "σ Selection",
+      "predicate": "(EXISTS(@2) AND (o_orderdate(#1) >= 9221::Date32) AND (o_orderdate(#1) < 9312::Date32))",
+      "input": 0,
+      "exists subquery": 2
+    },
+    {
+      "id": 5,
+      "kind": "aggregation",
+      "title": "γ Aggregation",
+      "keys": "o_orderpriority(#2)",
+      "aggregates": [
+        "order_count(#6) := count(o_orderpriority(#2))"
+      ],
+      "input": 4
+    },
+    {
+      "id": 6,
+      "kind": "sort",
+      "title": "⇞ Sort",
+      "keys": [
+        "o_orderpriority(#2) Asc NullsLast"
+      ],
+      "input": 5
+    },
+    {
+      "id": 7,
+      "kind": "projection",
+      "title": "π Projection",
+      "columns": [
+        "o_orderpriority(#2)",
+        "order_count(#6)"
+      ],
+      "input": 6
+    },
+    {
+      "id": 8,
+      "kind": "output",
+      "title": "= Output",
+      "input": 7
+    }
+  ]
+}

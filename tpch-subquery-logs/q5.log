@@ -1,0 +1,148 @@
+{
+  "nodes": [
+    {
+      "id": 0,
+      "kind": "scan",
+      "title": "⊞ customer",
+      "columns": [
+        "c_custkey(#0)",
+        "c_nationkey(#1)"
+      ]
+    },
+    {
+      "id": 1,
+      "kind": "scan",
+      "title": "⊞ orders",
+      "columns": [
+        "o_orderkey(#2)",
+        "o_custkey(#3)",
+        "o_orderdate(#4)"
+      ]
+    },
+    {
+      "id": 6,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 0,
+      "inner": 1
+    },
+    {
+      "id": 2,
+      "kind": "scan",
+      "title": "⊞ lineitem",
+      "columns": [
+        "l_orderkey(#5)",
+        "l_suppkey(#6)",
+        "l_extendedprice(#7)",
+        "l_discount(#8)"
+      ]
+    },
+    {
+      "id": 7,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 6,
+      "inner": 2
+    },
+    {
+      "id": 3,
+      "kind": "scan",
+      "title": "⊞ supplier",
+      "columns": [
+        "s_suppkey(#9)",
+        "s_nationkey(#10)"
+      ]
+    },
+    {
+      "id": 8,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 7,
+      "inner": 3
+    },
+    {
+      "id": 4,
+      "kind": "scan",
+      "title": "⊞ nation",
+      "columns": [
+        "n_nationkey(#11)",
+        "n_regionkey(#12)",
+        "n_name(#13)"
+      ]
+    },
+    {
+      "id": 9,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 8,
+      "inner": 4
+    },
+    {
+      "id": 5,
+      "kind": "scan",
+      "title": "⊞ region",
+      "columns": [
+        "r_regionkey(#14)",
+        "r_name(#15)"
+      ]
+    },
+    {
+      "id": 10,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 9,
+      "inner": 5
+    },
+    {
+      "id": 11,
+      "kind": "selection",
+      "title": "σ Selection",
+      "predicate": "((c_custkey(#0) = o_custkey(#3)) AND (o_orderkey(#2) = l_orderkey(#5)) AND (l_suppkey(#6) = s_suppkey(#9)) AND (s_nationkey(#10) = n_nationkey(#11)) AND (n_regionkey(#12) = r_regionkey(#14)) AND (r_name(#15) = \"AFRICA\") AND (o_orderdate(#4) >= 8766::Date32) AND (o_orderdate(#4) < 9131::Date32))",
+      "input": 10
+    },
+    {
+      "id": 12,
+      "kind": "map",
+      "title": "χ Map",
+      "computations": [
+        "revenue_expr(#16) := (l_extendedprice(#7) * (100::Decimal128(15, 2) - l_discount(#8)))"
+      ],
+      "input": 11
+    },
+    {
+      "id": 13,
+      "kind": "aggregation",
+      "title": "γ Aggregation",
+      "keys": "n_name(#13)",
+      "aggregates": [
+        "revenue(#17) := sum(revenue_expr(#16))"
+      ],
+      "input": 12
+    },
+    {
+      "id": 14,
+      "kind": "sort",
+      "title": "⇞ Sort",
+      "keys": [
+        "revenue(#17) Desc NullsLast"
+      ],
+      "input": 13
+    },
+    {
+      "id": 15,
+      "kind": "projection",
+      "title": "π Projection",
+      "columns": [
+        "n_name(#13)",
+        "revenue(#17)"
+      ],
+      "input": 14
+    },
+    {
+      "id": 16,
+      "kind": "output",
+      "title": "= Output",
+      "input": 15
+    }
+  ]
+}

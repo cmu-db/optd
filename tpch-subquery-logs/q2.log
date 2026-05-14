@@ -1,0 +1,220 @@
+{
+  "nodes": [
+    {
+      "id": 0,
+      "kind": "scan",
+      "title": "⊞ part",
+      "columns": [
+        "p_partkey(#0)",
+        "p_mfgr(#1)",
+        "p_size(#2)",
+        "p_type(#3)"
+      ]
+    },
+    {
+      "id": 2,
+      "kind": "scan",
+      "title": "⊞ partsupp",
+      "columns": [
+        "ps_partkey(#11)",
+        "ps_suppkey(#12)",
+        "ps_supplycost(#13)"
+      ]
+    },
+    {
+      "id": 5,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 0,
+      "inner": 2
+    },
+    {
+      "id": 1,
+      "kind": "scan",
+      "title": "⊞ supplier",
+      "columns": [
+        "s_suppkey(#4)",
+        "s_name(#5)",
+        "s_address(#6)",
+        "s_phone(#7)",
+        "s_comment(#8)",
+        "s_acctbal(#9)",
+        "s_nationkey(#10)"
+      ]
+    },
+    {
+      "id": 6,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 5,
+      "inner": 1
+    },
+    {
+      "id": 3,
+      "kind": "scan",
+      "title": "⊞ nation",
+      "columns": [
+        "n_nationkey(#14)",
+        "n_regionkey(#15)",
+        "n_name(#16)"
+      ]
+    },
+    {
+      "id": 7,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 6,
+      "inner": 3
+    },
+    {
+      "id": 4,
+      "kind": "scan",
+      "title": "⊞ region",
+      "columns": [
+        "r_regionkey(#17)",
+        "r_name(#18)"
+      ]
+    },
+    {
+      "id": 8,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 7,
+      "inner": 4
+    },
+    {
+      "id": 10,
+      "kind": "scan",
+      "title": "⊞ partsupp",
+      "columns": [
+        "ps2.ps_partkey(#19)",
+        "ps2.ps_suppkey(#20)",
+        "ps2.ps_supplycost(#21)"
+      ]
+    },
+    {
+      "id": 11,
+      "kind": "scan",
+      "title": "⊞ supplier",
+      "columns": [
+        "s2.s_suppkey(#22)",
+        "s2.s_nationkey(#23)"
+      ]
+    },
+    {
+      "id": 14,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 10,
+      "inner": 11
+    },
+    {
+      "id": 12,
+      "kind": "scan",
+      "title": "⊞ nation",
+      "columns": [
+        "n2.n_nationkey(#24)",
+        "n2.n_regionkey(#25)"
+      ]
+    },
+    {
+      "id": 15,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 14,
+      "inner": 12
+    },
+    {
+      "id": 13,
+      "kind": "scan",
+      "title": "⊞ region",
+      "columns": [
+        "r2.r_regionkey(#26)",
+        "r2.r_name(#27)"
+      ]
+    },
+    {
+      "id": 16,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 15,
+      "inner": 13
+    },
+    {
+      "id": 17,
+      "kind": "selection",
+      "title": "σ Selection",
+      "predicate": "((ps2.ps_suppkey(#20) = s2.s_suppkey(#22)) AND (s2.s_nationkey(#23) = n2.n_nationkey(#24)) AND (n2.n_regionkey(#25) = r2.r_regionkey(#26)) AND (r2.r_name(#27) = \"ASIA\") AND (p_partkey(#0) = ps2.ps_partkey(#19)))",
+      "input": 16
+    },
+    {
+      "id": 18,
+      "kind": "aggregation",
+      "title": "γ Aggregation",
+      "keys": "",
+      "aggregates": [
+        "min_supplycost(#28) := min(ps2.ps_supplycost(#21))"
+      ],
+      "input": 17
+    },
+    {
+      "id": 19,
+      "kind": "projection",
+      "title": "π Projection",
+      "columns": [
+        "min_supplycost(#28)"
+      ],
+      "input": 18
+    },
+    {
+      "id": 20,
+      "kind": "selection",
+      "title": "σ Selection",
+      "predicate": "((p_partkey(#0) = ps_partkey(#11)) AND (ps_suppkey(#12) = s_suppkey(#4)) AND (s_nationkey(#10) = n_nationkey(#14)) AND (n_regionkey(#15) = r_regionkey(#17)) AND (r_name(#18) = \"ASIA\") AND (p_size(#2) = 48) AND like(p_type(#3), \"%TIN\") AND (ps_supplycost(#13) = SCALAR_SUBQUERY(@19)))",
+      "input": 8,
+      "scalar subquery": 19
+    },
+    {
+      "id": 21,
+      "kind": "sort",
+      "title": "⇞ Sort",
+      "keys": [
+        "s_acctbal(#9) Desc NullsLast",
+        "n_name(#16) Asc NullsLast",
+        "s_name(#5) Asc NullsLast",
+        "p_partkey(#0) Asc NullsLast"
+      ],
+      "input": 20
+    },
+    {
+      "id": 22,
+      "kind": "limit",
+      "title": "τ Limit",
+      "fetch": "100",
+      "offset": "0",
+      "input": 21
+    },
+    {
+      "id": 23,
+      "kind": "projection",
+      "title": "π Projection",
+      "columns": [
+        "s_acctbal(#9)",
+        "s_name(#5)",
+        "n_name(#16)",
+        "p_partkey(#0)",
+        "p_mfgr(#1)",
+        "s_address(#6)",
+        "s_phone(#7)",
+        "s_comment(#8)"
+      ],
+      "input": 22
+    },
+    {
+      "id": 24,
+      "kind": "output",
+      "title": "= Output",
+      "input": 23
+    }
+  ]
+}

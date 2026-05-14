@@ -1,0 +1,99 @@
+{
+  "nodes": [
+    {
+      "id": 0,
+      "kind": "scan",
+      "title": "⊞ part",
+      "columns": [
+        "p_partkey(#0)",
+        "p_brand(#1)",
+        "p_container(#2)"
+      ]
+    },
+    {
+      "id": 1,
+      "kind": "scan",
+      "title": "⊞ lineitem",
+      "columns": [
+        "l_partkey(#3)",
+        "l_quantity(#4)",
+        "l_extendedprice(#5)"
+      ]
+    },
+    {
+      "id": 2,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 0,
+      "inner": 1
+    },
+    {
+      "id": 3,
+      "kind": "scan",
+      "title": "⊞ lineitem",
+      "columns": [
+        "l2.l_partkey(#6)",
+        "l2.l_quantity(#7)"
+      ]
+    },
+    {
+      "id": 4,
+      "kind": "selection",
+      "title": "σ Selection",
+      "predicate": "((l2.l_partkey(#6) = p_partkey(#0)))",
+      "input": 3
+    },
+    {
+      "id": 5,
+      "kind": "aggregation",
+      "title": "γ Aggregation",
+      "keys": "",
+      "aggregates": [
+        "avg_quantity(#8) := avg(l2.l_quantity(#7))"
+      ],
+      "input": 4
+    },
+    {
+      "id": 6,
+      "kind": "projection",
+      "title": "π Projection",
+      "columns": [
+        "avg_quantity(#8)"
+      ],
+      "input": 5
+    },
+    {
+      "id": 7,
+      "kind": "selection",
+      "title": "σ Selection",
+      "predicate": "((p_brand(#1) = \"Brand#42\") AND (p_container(#2) = \"LG BAG\") AND (p_partkey(#0) = l_partkey(#3)) AND (l_quantity(#4) < SCALAR_SUBQUERY(@6)))",
+      "input": 2,
+      "scalar subquery": 6
+    },
+    {
+      "id": 8,
+      "kind": "aggregation",
+      "title": "γ Aggregation",
+      "keys": "",
+      "aggregates": [
+        "avg_yearly(#9) := sum(l_extendedprice(#5))"
+      ],
+      "input": 7
+    },
+    {
+      "id": 9,
+      "kind": "projection",
+      "title": "π Projection",
+      "columns": [
+        "avg_yearly(#9)"
+      ],
+      "input": 8
+    },
+    {
+      "id": 10,
+      "kind": "output",
+      "title": "= Output",
+      "input": 9
+    }
+  ]
+}
