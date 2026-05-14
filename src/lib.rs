@@ -1,4 +1,7 @@
 use arrow_schema::DataType;
+use serde::Serialize;
+use serde::ser::{SerializeMap, Serializer};
+use std::collections::BTreeMap;
 
 /// An opaque reference to a relational operator in a [`QueryContext`].
 ///
@@ -6,51 +9,91 @@ use arrow_schema::DataType;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Operator(usize);
 
-/// A relational operator.
-#[derive(Debug, Clone)]
+/// A relational operator referenced by an [`Operator`] handle.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OperatorData {
     /// Reads a table and exposes the listed columns.
-    Scan {
-        table: String,
-        columns: Vec<Column>,
-    },
+    Scan(Scan),
     /// Filters the input using a boolean predicate expression.
-    Selection {
-        predicate: Expr,
-        input: Operator,
-    },
+    Selection(Selection),
     /// Applies a function to each row of the input, producing new columns.
-    Map {
-        computations: Vec<(Column, Expr)>,
-        input: Operator,
-    },
+    Map(Map),
     /// Reads rows produced by a table-valued function.
-    TableFunction {
-        function: TableFunction,
-        args: Vec<Expr>,
-        columns: Vec<Column>,
-    },
-    Join {
-        join_type: JoinType,
-        on: Expr,
-        outer: Operator,
-        inner: Operator,
-    },
-    CrossProduct {
-        outer: Operator,
-        inner: Operator,
-    },
+    TableFunction(TableFunction),
+    Join(Join),
+    CrossProduct(CrossProduct),
     /// Groups rows by key expressions and computes one or more aggregate columns.
-    Aggregation {
-        keys: Vec<Expr>,
-        aggregates: Vec<(Column, AggregateExpr)>,
-        input: Operator,
-    },
+    Aggregation(Aggregation),
     /// Keeps or reorders the listed columns from the input.
-    Projection {
-        columns: Vec<Column>,
-        input: Operator,
-    },
+    Projection(Projection),
+    /// Marks the final query output.
+    Output(Output),
+}
+
+/// Reads a base table and exposes its columns.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Scan {
+    pub table: String,
+    pub columns: Vec<Column>,
+}
+
+/// Filters rows from its input.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Selection {
+    pub predicate: Expr,
+    pub input: Operator,
+}
+
+/// Computes new columns from input rows.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Map {
+    pub computations: Vec<(Column, Expr)>,
+    pub input: Operator,
+}
+
+/// Reads rows produced by a table-valued function.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TableFunction {
+    pub function: TableFunctionDef,
+    pub args: Vec<Expr>,
+    pub columns: Vec<Column>,
+}
+
+/// Joins two inputs using a join condition.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Join {
+    pub join_type: JoinType,
+    pub on: Expr,
+    pub outer: Operator,
+    pub inner: Operator,
+}
+
+/// Produces the Cartesian product of two inputs.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CrossProduct {
+    pub outer: Operator,
+    pub inner: Operator,
+}
+
+/// Groups rows and computes aggregate columns.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Aggregation {
+    pub keys: Vec<Expr>,
+    pub aggregates: Vec<(Column, AggregateExpr)>,
+    pub input: Operator,
+}
+
+/// Keeps or reorders columns from its input.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Projection {
+    pub columns: Vec<Column>,
+    pub input: Operator,
+}
+
+/// Marks the final query output.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Output {
+    pub input: Operator,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -82,6 +125,12 @@ impl std::fmt::Display for JoinType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Column(usize);
 
+impl std::fmt::Display for Column {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "#{}", self.0)
+    }
+}
+
 /// Metadata for the column.
 #[derive(Debug, Clone)]
 pub struct ColumnData {
@@ -108,7 +157,7 @@ impl ColumnData {
 pub struct Expr(usize);
 
 /// A scalar expression referenced by an [`Expr`] handle.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ExprData {
     /// Constant scalar literal.
     Literal(ScalarValue),
@@ -132,7 +181,7 @@ pub enum ExprData {
 }
 
 /// Unary expression operator.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UnaryOp {
     /// Boolean negation.
     Not,
@@ -145,7 +194,7 @@ pub enum UnaryOp {
 }
 
 /// Binary expression operator.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BinaryOp {
     /// Equality comparison.
     Eq,
@@ -170,7 +219,7 @@ pub enum BinaryOp {
 }
 
 /// N-ary logical expression operator.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NaryOp {
     /// Logical conjunction.
     And,
@@ -181,7 +230,7 @@ pub enum NaryOp {
 /// Group-level expression used by [`OperatorData::Aggregation`].
 ///
 /// Aggregate expressions consume the input rows for one group and produce one scalar value.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AggregateExpr {
     /// Counts all rows in the group.
     CountStar,
@@ -286,33 +335,33 @@ impl std::fmt::Display for WindowFunction {
 
 /// Table-valued function used by [`OperatorData::TableFunction`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum TableFunction {
+pub enum TableFunctionDef {
     Values,
     ReadCsv,
     ReadParquet,
     Extension(String),
 }
 
-impl TableFunction {
+impl TableFunctionDef {
     /// Creates a table function identifier for a catalog or extension function.
     pub fn extension(name: impl Into<String>) -> Self {
         Self::Extension(name.into())
     }
 }
 
-impl std::fmt::Display for TableFunction {
+impl std::fmt::Display for TableFunctionDef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TableFunction::Values => f.write_str("values"),
-            TableFunction::ReadCsv => f.write_str("read_csv"),
-            TableFunction::ReadParquet => f.write_str("read_parquet"),
-            TableFunction::Extension(name) => f.write_str(name),
+            TableFunctionDef::Values => f.write_str("values"),
+            TableFunctionDef::ReadCsv => f.write_str("read_csv"),
+            TableFunctionDef::ReadParquet => f.write_str("read_parquet"),
+            TableFunctionDef::Extension(name) => f.write_str(name),
         }
     }
 }
 
 /// Scalar value used by literal expressions.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ScalarValue {
     /// Null value with an explicit Arrow data type.
     Null(DataType),
@@ -448,31 +497,84 @@ impl QueryContext {
         let node = QueryFormatter::new(self).format();
         BoxDrawingRenderer::default().render(&node)
     }
+
+    /// Formats the reachable query plan as recursive JSON for inspecting the tree shape.
+    pub fn pretty_json(&self) -> String {
+        let node = QueryFormatter::new(self).format();
+        serde_json::to_string_pretty(&node).expect("display tree serialization should not fail")
+    }
+
+    /// Formats the reachable query plan as flat DFS post-order JSON for file diffs.
+    pub fn pretty_flat(&self) -> String {
+        let plan = QueryFormatter::new(self).format_plan();
+        serde_json::to_string_pretty(&plan).expect("display plan serialization should not fail")
+    }
 }
 
 /// Generic display tree node that can be rendered independently of query plans.
 #[derive(Debug, Clone)]
 pub struct DisplayNode {
+    pub kind: String,
     pub title: String,
     pub fields: Vec<DisplayField>,
     pub inputs: Vec<DisplayInput>,
-    pub metadata: Vec<DisplayField>,
+    pub metadata: BTreeMap<String, DisplayValue>,
+}
+
+impl Serialize for DisplayNode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(
+            2 + self.fields.len() + self.inputs.len() + self.metadata.len(),
+        ))?;
+        serialize_display_header(&mut map, &self.kind, &self.title)?;
+        serialize_display_fields(&mut map, self.fields.iter())?;
+        serialize_display_inputs(&mut map, self.inputs.iter())?;
+        serialize_display_metadata(&mut map, &self.metadata)?;
+        map.end()
+    }
 }
 
 impl DisplayNode {
     pub fn new(title: impl Into<String>) -> Self {
+        let title = title.into();
         Self {
+            kind: title.clone(),
+            title,
+            fields: Vec::new(),
+            inputs: Vec::new(),
+            metadata: BTreeMap::new(),
+        }
+    }
+
+    pub fn with_kind(kind: impl Into<String>, title: impl Into<String>) -> Self {
+        Self {
+            kind: kind.into(),
             title: title.into(),
             fields: Vec::new(),
             inputs: Vec::new(),
-            metadata: Vec::new(),
+            metadata: BTreeMap::new(),
         }
     }
 
     pub fn with_field(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.fields.push(DisplayField {
             key: key.into(),
-            value: value.into(),
+            value: DisplayValue::Scalar(value.into()),
+        });
+        self
+    }
+
+    pub fn with_list_field<I, S>(mut self, key: impl Into<String>, values: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.fields.push(DisplayField {
+            key: key.into(),
+            value: DisplayValue::List(values.into_iter().map(Into::into).collect()),
         });
         self
     }
@@ -486,26 +588,171 @@ impl DisplayNode {
     }
 
     pub fn with_metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.metadata.push(DisplayField {
-            key: key.into(),
-            value: value.into(),
-        });
+        self.metadata
+            .insert(key.into(), DisplayValue::Scalar(value.into()));
         self
     }
 }
 
 /// Ordered key-value field for a [`DisplayNode`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DisplayField {
     pub key: String,
-    pub value: String,
+    pub value: DisplayValue,
+}
+
+/// Value for a [`DisplayField`].
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum DisplayValue {
+    Scalar(String),
+    List(Vec<String>),
+}
+
+/// Flat display plan for stable serde output.
+#[derive(Debug, Clone, Serialize)]
+pub struct DisplayPlan {
+    pub nodes: Vec<DisplayNodeRecord>,
+}
+
+/// Stable flat display record for one operator-like node.
+#[derive(Debug, Clone)]
+pub struct DisplayNodeRecord {
+    pub id: usize,
+    pub kind: String,
+    pub title: String,
+    pub fields: DisplayProperties<DisplayValue>,
+    pub inputs: DisplayProperties<usize>,
+}
+
+impl Serialize for DisplayNodeRecord {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(3 + self.fields.len() + self.inputs.len()))?;
+        map.serialize_entry("id", &self.id)?;
+        serialize_display_header(&mut map, &self.kind, &self.title)?;
+        serialize_display_properties(&mut map, &self.fields)?;
+        serialize_display_properties(&mut map, &self.inputs)?;
+        map.end()
+    }
+}
+
+/// Ordered display properties that serialize using only their string keys.
+#[derive(Debug, Clone)]
+pub struct DisplayProperties<V> {
+    entries: BTreeMap<(usize, String), V>,
+}
+
+impl<V> Default for DisplayProperties<V> {
+    fn default() -> Self {
+        Self {
+            entries: BTreeMap::new(),
+        }
+    }
+}
+
+impl<V> DisplayProperties<V> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn insert(&mut self, order: usize, key: impl Into<String>, value: V) {
+        self.entries.insert((order, key.into()), value);
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (&str, &V)> {
+        self.entries
+            .iter()
+            .map(|((_order, key), value)| (key.as_str(), value))
+    }
+}
+
+impl<V> Serialize for DisplayProperties<V>
+where
+    V: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.len()))?;
+        serialize_display_properties(&mut map, self)?;
+        map.end()
+    }
 }
 
 /// Named child input for a [`DisplayNode`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DisplayInput {
     pub name: String,
     pub node: Box<DisplayNode>,
+}
+
+fn serialize_display_header<M>(map: &mut M, kind: &str, title: &str) -> Result<(), M::Error>
+where
+    M: SerializeMap,
+{
+    map.serialize_entry("kind", kind)?;
+    map.serialize_entry("title", title)
+}
+
+fn serialize_display_fields<'a, M, I>(map: &mut M, fields: I) -> Result<(), M::Error>
+where
+    M: SerializeMap,
+    I: IntoIterator<Item = &'a DisplayField>,
+{
+    for field in fields {
+        map.serialize_entry(&field.key, &field.value)?;
+    }
+
+    Ok(())
+}
+
+fn serialize_display_inputs<'a, M, I>(map: &mut M, inputs: I) -> Result<(), M::Error>
+where
+    M: SerializeMap,
+    I: IntoIterator<Item = &'a DisplayInput>,
+{
+    for input in inputs {
+        map.serialize_entry(&input.name, &input.node)?;
+    }
+
+    Ok(())
+}
+
+fn serialize_display_metadata<M>(
+    map: &mut M,
+    metadata: &BTreeMap<String, DisplayValue>,
+) -> Result<(), M::Error>
+where
+    M: SerializeMap,
+{
+    for (key, value) in metadata {
+        map.serialize_entry(key, value)?;
+    }
+
+    Ok(())
+}
+
+fn serialize_display_properties<M, V>(
+    map: &mut M,
+    properties: &DisplayProperties<V>,
+) -> Result<(), M::Error>
+where
+    M: SerializeMap,
+    V: Serialize,
+{
+    for (key, value) in properties.iter() {
+        map.serialize_entry(key, value)?;
+    }
+
+    Ok(())
 }
 
 /// Display settings for [`BoxDrawingRenderer`].
@@ -520,7 +767,7 @@ impl Default for QueryFormatConfig {
     fn default() -> Self {
         Self {
             min_box_width: 12,
-            max_box_width: 40,
+            max_box_width: 80,
             child_gap: 4,
         }
     }
@@ -540,91 +787,63 @@ impl<'a> QueryFormatter<'a> {
     /// Formats the reachable query plan from the root operator into a display tree.
     pub fn format(&self) -> DisplayNode {
         if let Some(root) = self.ctx.root {
-            self.format_operator(root)
+            if matches!(self.ctx.operator(root), OperatorData::Output(_)) {
+                self.format_operator(root)
+            } else {
+                DisplayNode::with_kind("output", "= Output")
+                    .with_input("input", self.format_operator(root))
+            }
         } else {
-            DisplayNode::new("EMPTY QUERY")
+            DisplayNode::with_kind("empty_query", "EMPTY QUERY")
         }
+    }
+
+    /// Formats the reachable query plan as flat records in deterministic DFS post-order.
+    pub fn format_plan(&self) -> DisplayPlan {
+        let mut nodes = Vec::new();
+
+        if let Some(root) = self.ctx.root {
+            for operator in self.dfs_post_order(root) {
+                nodes.push(self.format_operator_record(operator));
+            }
+
+            if !matches!(self.ctx.operator(root), OperatorData::Output(_)) {
+                nodes.push(self.format_synthetic_output_record(root));
+            }
+        } else {
+            nodes.push(DisplayNodeRecord {
+                id: 0,
+                kind: "empty_query".to_string(),
+                title: "EMPTY QUERY".to_string(),
+                fields: DisplayProperties::new(),
+                inputs: DisplayProperties::new(),
+            });
+        }
+
+        DisplayPlan { nodes }
     }
 
     fn format_operator(&self, operator: Operator) -> DisplayNode {
-        match self.ctx.operator(operator) {
-            OperatorData::Scan { table, columns } => DisplayNode::new(format!("⊞ {table}"))
-                .with_field("columns", self.format_columns(columns)),
-            OperatorData::Selection { predicate, input } => DisplayNode::new("σ Filter")
-                .with_field("predicate", self.format_expr(*predicate))
-                .with_input("input", self.format_operator(*input)),
-            OperatorData::Map {
-                computations,
-                input,
-            } => {
-                let mut node = DisplayNode::new("χ Map");
+        let operator = self.format_operator_display(operator);
+        let mut node = DisplayNode::with_kind(operator.kind, operator.title);
 
-                for (column, expr) in computations {
-                    node = node.with_field(self.format_column(*column), self.format_expr(*expr));
-                }
-
-                node.with_input("input", self.format_operator(*input))
-            }
-            OperatorData::TableFunction {
-                function,
-                args,
-                columns,
-            } => DisplayNode::new(format!("⊞ {function}"))
-                .with_field("args", self.format_exprs(args))
-                .with_field("columns", self.format_columns(columns)),
-            OperatorData::Join {
-                join_type,
-                on,
-                outer,
-                inner,
-            } => DisplayNode::new(self.format_join_title(join_type))
-                .with_field("join_type", join_type.to_string())
-                .with_field("condition", self.format_expr(*on))
-                .with_input("outer", self.format_operator(*outer))
-                .with_input("inner", self.format_operator(*inner)),
-            OperatorData::CrossProduct { outer, inner } => DisplayNode::new("× CrossProduct")
-                .with_input("outer", self.format_operator(*outer))
-                .with_input("inner", self.format_operator(*inner)),
-            OperatorData::Aggregation {
-                keys,
-                aggregates,
-                input,
-            } => {
-                let mut node =
-                    DisplayNode::new("γ Aggregation").with_field("keys", self.format_exprs(keys));
-
-                for (column, aggregate) in aggregates {
-                    node = node.with_field(
-                        self.ctx.column(*column).name.clone(),
-                        self.format_aggregate_expr(aggregate),
-                    );
-                }
-
-                node.with_input("input", self.format_operator(*input))
-            }
-            OperatorData::Projection { columns, input } => DisplayNode::new("π Projection")
-                .with_field("columns", self.format_columns(columns))
-                .with_input("input", self.format_operator(*input)),
+        for field in operator.fields {
+            node.fields.push(field);
         }
+
+        for input in operator.inputs {
+            node = node.with_input(input.name, self.format_operator(input.target));
+        }
+
+        node
     }
 
-    fn format_columns(&self, columns: &[Column]) -> String {
-        columns
-            .iter()
-            .map(|column| self.format_column(*column))
-            .collect::<Vec<_>>()
-            .join(", ")
+    fn format_column_name(&self, column: Column) -> String {
+        format!("{}({column})", self.ctx.column(column).name)
     }
 
-    fn format_column(&self, column: Column) -> String {
-        let column = self.ctx.column(column);
-        let nullability = if column.nullable {
-            " nullable"
-        } else {
-            " not null"
-        };
-
-        format!("{}: {:?}{}", column.name, column.ty, nullability)
+    fn format_definition(&self, column: Column, value: impl Into<String>) -> String {
+        format!("{} := {}", self.format_column_name(column), value.into())
     }
 
     fn format_exprs(&self, exprs: &[Expr]) -> String {
@@ -638,7 +857,7 @@ impl<'a> QueryFormatter<'a> {
     fn format_expr(&self, expr: Expr) -> String {
         match self.ctx.expr(expr) {
             ExprData::Literal(value) => self.format_scalar(value),
-            ExprData::ColumnRef(column) => self.ctx.column(*column).name.clone(),
+            ExprData::ColumnRef(column) => self.format_column_name(*column),
             ExprData::Unary { op, expr } => {
                 format!("{}({})", self.format_unary_op(*op), self.format_expr(*expr))
             }
@@ -724,7 +943,7 @@ impl<'a> QueryFormatter<'a> {
     }
 
     fn format_join_title(&self, join_type: &JoinType) -> String {
-        format!("{} {join_type}", self.format_join_op(join_type))
+        format!("{} {join_type}Join", self.format_join_op(join_type))
     }
 
     fn format_join_op(&self, join_type: &JoinType) -> &'static str {
@@ -737,6 +956,354 @@ impl<'a> QueryFormatter<'a> {
             JoinType::Mark(_) => "⋈ᵐ",
         }
     }
+
+    fn dfs_post_order(&self, root: Operator) -> Vec<Operator> {
+        let mut visited = vec![false; self.ctx.operator_count()];
+        let mut order = Vec::new();
+        self.collect_dfs_post_order(root, &mut visited, &mut order);
+        order
+    }
+
+    fn collect_dfs_post_order(
+        &self,
+        operator: Operator,
+        visited: &mut [bool],
+        order: &mut Vec<Operator>,
+    ) {
+        if visited[operator.0] {
+            return;
+        }
+
+        visited[operator.0] = true;
+
+        for input in self.operator_inputs(operator) {
+            self.collect_dfs_post_order(input, visited, order);
+        }
+
+        order.push(operator);
+    }
+
+    fn operator_inputs(&self, operator: Operator) -> Vec<Operator> {
+        self.ctx.operator(operator).inputs()
+    }
+
+    fn format_operator_display(&self, operator: Operator) -> FormattedOperator {
+        self.ctx.operator(operator).format(self)
+    }
+
+    fn format_operator_record(&self, operator: Operator) -> DisplayNodeRecord {
+        let operator_display = self.format_operator_display(operator);
+        let mut record = DisplayNodeRecord {
+            id: operator.0,
+            kind: operator_display.kind,
+            title: operator_display.title,
+            fields: DisplayProperties::new(),
+            inputs: DisplayProperties::new(),
+        };
+
+        for (order, field) in operator_display.fields.into_iter().enumerate() {
+            record.fields.insert(order, field.key, field.value);
+        }
+
+        for (order, input) in operator_display.inputs.into_iter().enumerate() {
+            insert_input(&mut record, order, input.name, input.target);
+        }
+
+        record
+    }
+
+    fn format_synthetic_output_record(&self, input: Operator) -> DisplayNodeRecord {
+        let mut record = DisplayNodeRecord {
+            id: self.ctx.operator_count(),
+            kind: "output".to_string(),
+            title: "= Output".to_string(),
+            fields: DisplayProperties::new(),
+            inputs: DisplayProperties::new(),
+        };
+
+        insert_input(&mut record, 0, "input", input);
+
+        record
+    }
+}
+
+struct FormattedOperator {
+    kind: String,
+    title: String,
+    fields: Vec<DisplayField>,
+    inputs: Vec<FormattedInput>,
+}
+
+struct FormattedInput {
+    name: String,
+    target: Operator,
+}
+
+impl OperatorData {
+    fn inputs(&self) -> Vec<Operator> {
+        match self {
+            Self::Scan(operator) => operator.inputs(),
+            Self::Selection(operator) => operator.inputs(),
+            Self::Map(operator) => operator.inputs(),
+            Self::TableFunction(operator) => operator.inputs(),
+            Self::Join(operator) => operator.inputs(),
+            Self::CrossProduct(operator) => operator.inputs(),
+            Self::Aggregation(operator) => operator.inputs(),
+            Self::Projection(operator) => operator.inputs(),
+            Self::Output(operator) => operator.inputs(),
+        }
+    }
+
+    fn format(&self, formatter: &QueryFormatter<'_>) -> FormattedOperator {
+        match self {
+            Self::Scan(operator) => operator.format(formatter),
+            Self::Selection(operator) => operator.format(formatter),
+            Self::Map(operator) => operator.format(formatter),
+            Self::TableFunction(operator) => operator.format(formatter),
+            Self::Join(operator) => operator.format(formatter),
+            Self::CrossProduct(operator) => operator.format(formatter),
+            Self::Aggregation(operator) => operator.format(formatter),
+            Self::Projection(operator) => operator.format(formatter),
+            Self::Output(operator) => operator.format(formatter),
+        }
+    }
+}
+
+impl Scan {
+    fn inputs(&self) -> Vec<Operator> {
+        Vec::new()
+    }
+
+    fn format(&self, formatter: &QueryFormatter<'_>) -> FormattedOperator {
+        FormattedOperator {
+            kind: "scan".to_string(),
+            title: format!("⊞ {}", self.table),
+            fields: vec![display_list_field(
+                "columns",
+                self.columns
+                    .iter()
+                    .map(|column| formatter.format_column_name(*column)),
+            )],
+            inputs: Vec::new(),
+        }
+    }
+}
+
+impl Selection {
+    fn inputs(&self) -> Vec<Operator> {
+        vec![self.input]
+    }
+
+    fn format(&self, formatter: &QueryFormatter<'_>) -> FormattedOperator {
+        FormattedOperator {
+            kind: "selection".to_string(),
+            title: "σ Filter".to_string(),
+            fields: vec![display_scalar_field(
+                "predicate",
+                formatter.format_expr(self.predicate),
+            )],
+            inputs: vec![FormattedInput {
+                name: "input".to_string(),
+                target: self.input,
+            }],
+        }
+    }
+}
+
+impl Map {
+    fn inputs(&self) -> Vec<Operator> {
+        vec![self.input]
+    }
+
+    fn format(&self, formatter: &QueryFormatter<'_>) -> FormattedOperator {
+        FormattedOperator {
+            kind: "map".to_string(),
+            title: "χ Map".to_string(),
+            fields: vec![display_list_field(
+                "computations",
+                self.computations.iter().map(|(column, expr)| {
+                    formatter.format_definition(*column, formatter.format_expr(*expr))
+                }),
+            )],
+            inputs: vec![FormattedInput {
+                name: "input".to_string(),
+                target: self.input,
+            }],
+        }
+    }
+}
+
+impl TableFunction {
+    fn inputs(&self) -> Vec<Operator> {
+        Vec::new()
+    }
+
+    fn format(&self, formatter: &QueryFormatter<'_>) -> FormattedOperator {
+        FormattedOperator {
+            kind: "table_function".to_string(),
+            title: "⊞ TableFunction".to_string(),
+            fields: vec![
+                display_scalar_field("function", self.function.to_string()),
+                display_list_field(
+                    "args",
+                    self.args.iter().map(|arg| formatter.format_expr(*arg)),
+                ),
+                display_list_field(
+                    "columns",
+                    self.columns
+                        .iter()
+                        .map(|column| formatter.format_column_name(*column)),
+                ),
+            ],
+            inputs: Vec::new(),
+        }
+    }
+}
+
+impl Join {
+    fn inputs(&self) -> Vec<Operator> {
+        vec![self.outer, self.inner]
+    }
+
+    fn format(&self, formatter: &QueryFormatter<'_>) -> FormattedOperator {
+        FormattedOperator {
+            kind: "join".to_string(),
+            title: formatter.format_join_title(&self.join_type),
+            fields: vec![
+                display_scalar_field("join_type", self.join_type.to_string()),
+                display_scalar_field("condition", formatter.format_expr(self.on)),
+            ],
+            inputs: vec![
+                FormattedInput {
+                    name: "outer".to_string(),
+                    target: self.outer,
+                },
+                FormattedInput {
+                    name: "inner".to_string(),
+                    target: self.inner,
+                },
+            ],
+        }
+    }
+}
+
+impl CrossProduct {
+    fn inputs(&self) -> Vec<Operator> {
+        vec![self.outer, self.inner]
+    }
+
+    fn format(&self, _formatter: &QueryFormatter<'_>) -> FormattedOperator {
+        FormattedOperator {
+            kind: "cross_product".to_string(),
+            title: "× CrossProduct".to_string(),
+            fields: Vec::new(),
+            inputs: vec![
+                FormattedInput {
+                    name: "outer".to_string(),
+                    target: self.outer,
+                },
+                FormattedInput {
+                    name: "inner".to_string(),
+                    target: self.inner,
+                },
+            ],
+        }
+    }
+}
+
+impl Aggregation {
+    fn inputs(&self) -> Vec<Operator> {
+        vec![self.input]
+    }
+
+    fn format(&self, formatter: &QueryFormatter<'_>) -> FormattedOperator {
+        FormattedOperator {
+            kind: "aggregation".to_string(),
+            title: "γ Aggregation".to_string(),
+            fields: vec![
+                display_scalar_field("keys", formatter.format_exprs(&self.keys)),
+                display_list_field(
+                    "aggregates",
+                    self.aggregates.iter().map(|(column, aggregate)| {
+                        formatter
+                            .format_definition(*column, formatter.format_aggregate_expr(aggregate))
+                    }),
+                ),
+            ],
+            inputs: vec![FormattedInput {
+                name: "input".to_string(),
+                target: self.input,
+            }],
+        }
+    }
+}
+
+impl Projection {
+    fn inputs(&self) -> Vec<Operator> {
+        vec![self.input]
+    }
+
+    fn format(&self, formatter: &QueryFormatter<'_>) -> FormattedOperator {
+        FormattedOperator {
+            kind: "projection".to_string(),
+            title: "π Projection".to_string(),
+            fields: vec![display_list_field(
+                "columns",
+                self.columns
+                    .iter()
+                    .map(|column| formatter.format_column_name(*column)),
+            )],
+            inputs: vec![FormattedInput {
+                name: "input".to_string(),
+                target: self.input,
+            }],
+        }
+    }
+}
+
+impl Output {
+    fn inputs(&self) -> Vec<Operator> {
+        vec![self.input]
+    }
+
+    fn format(&self, _formatter: &QueryFormatter<'_>) -> FormattedOperator {
+        FormattedOperator {
+            kind: "output".to_string(),
+            title: "= Output".to_string(),
+            fields: Vec::new(),
+            inputs: vec![FormattedInput {
+                name: "input".to_string(),
+                target: self.input,
+            }],
+        }
+    }
+}
+
+fn display_scalar_field(key: impl Into<String>, value: impl Into<String>) -> DisplayField {
+    DisplayField {
+        key: key.into(),
+        value: DisplayValue::Scalar(value.into()),
+    }
+}
+
+fn display_list_field<I, S>(key: impl Into<String>, values: I) -> DisplayField
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    DisplayField {
+        key: key.into(),
+        value: DisplayValue::List(values.into_iter().map(Into::into).collect()),
+    }
+}
+
+fn insert_input(
+    record: &mut DisplayNodeRecord,
+    order: usize,
+    name: impl Into<String>,
+    target: Operator,
+) {
+    record.inputs.insert(order, name, target.0);
 }
 
 /// Renders a generic [`DisplayNode`] tree using box drawing characters.
@@ -777,11 +1344,32 @@ impl BoxDrawingRenderer {
     }
 
     fn render_details(&self, node: &DisplayNode) -> Vec<String> {
-        node.fields
+        let fields = node
+            .fields
             .iter()
-            .chain(node.metadata.iter())
-            .map(|field| format!("{}: {}", field.key, field.value))
-            .collect()
+            .flat_map(|field| self.render_field(field));
+        let metadata = node
+            .metadata
+            .iter()
+            .flat_map(|(key, value)| self.render_entry(key, value));
+
+        fields.chain(metadata).collect()
+    }
+
+    fn render_field(&self, field: &DisplayField) -> Vec<String> {
+        self.render_entry(&field.key, &field.value)
+    }
+
+    fn render_entry(&self, key: &str, value: &DisplayValue) -> Vec<String> {
+        match value {
+            DisplayValue::Scalar(value) => vec![format!("{key}: {value}")],
+            DisplayValue::List(values) => {
+                let mut details = Vec::with_capacity(values.len() + 1);
+                details.push(format!("{key}:"));
+                details.extend(values.iter().map(|value| format!("  {value}")));
+                details
+            }
+        }
     }
 
     fn render_unary_node(&self, parent: RenderedBlock, input: &DisplayInput) -> RenderedBlock {
@@ -906,25 +1494,34 @@ impl BoxDrawingRenderer {
             return vec![detail.to_string()];
         }
 
+        let requested_indent_width = detail.chars().take_while(|ch| ch.is_whitespace()).count();
+        let indent_width = requested_indent_width.min(max_width.saturating_sub(1));
+        let indent = " ".repeat(indent_width);
+        let body = detail.trim_start();
+        let max_body_width = max_width - indent_width;
         let mut lines = Vec::new();
         let mut current = String::new();
 
-        for word in detail.split_whitespace() {
+        for word in body.split_whitespace() {
             let separator_width = usize::from(!current.is_empty());
             let next_width = current.chars().count() + separator_width + word.chars().count();
 
-            if !current.is_empty() && next_width > max_width {
-                lines.push(current);
+            if !current.is_empty() && next_width > max_body_width {
+                lines.push(format!("{indent}{current}"));
                 current = String::new();
             }
 
-            if word.chars().count() > max_width {
+            if word.chars().count() > max_body_width {
                 if !current.is_empty() {
-                    lines.push(current);
+                    lines.push(format!("{indent}{current}"));
                     current = String::new();
                 }
 
-                lines.extend(self.wrap_long_word(word, max_width));
+                lines.extend(
+                    self.wrap_long_word(word, max_body_width)
+                        .into_iter()
+                        .map(|line| format!("{indent}{line}")),
+                );
                 continue;
             }
 
@@ -936,7 +1533,7 @@ impl BoxDrawingRenderer {
         }
 
         if !current.is_empty() {
-            lines.push(current);
+            lines.push(format!("{indent}{current}"));
         }
 
         lines
@@ -993,10 +1590,10 @@ mod tests {
         let mut ctx = QueryContext::new();
         let id = ctx.add_column(ColumnData::new("id", DataType::Int64, false));
         let age = ctx.add_column(ColumnData::new("age", DataType::Int32, true));
-        let scan = ctx.add_operator(OperatorData::Scan {
+        let scan = ctx.add_operator(OperatorData::Scan(Scan {
             table: "users".to_string(),
             columns: vec![id, age],
-        });
+        }));
         let age_ref = ctx.add_expr(ExprData::ColumnRef(age));
         let adult_age = ctx.add_expr(ExprData::Literal(ScalarValue::Int32(18)));
         let predicate = ctx.add_expr(ExprData::Binary {
@@ -1004,39 +1601,88 @@ mod tests {
             left: age_ref,
             right: adult_age,
         });
-        let selection = ctx.add_operator(OperatorData::Selection {
+        let selection = ctx.add_operator(OperatorData::Selection(Selection {
             predicate,
             input: scan,
-        });
-        let projection = ctx.add_operator(OperatorData::Projection {
+        }));
+        let projection = ctx.add_operator(OperatorData::Projection(Projection {
             columns: vec![id],
             input: selection,
-        });
+        }));
         ctx.set_root(projection);
 
         assert_eq!(
             ctx.pretty(),
             "\
-┌─────────────────────────────┐
-│ π Projection                │
-├─────────────────────────────┤
-│ columns: id: Int64 not null │
-└─────────────────────────────┘
+┌──────────────┐
+│ = Output     │
+├──────────────┤
+└──────────────┘
 │ input
-┌────────────────────────┐
-│ σ Filter               │
-├────────────────────────┤
-│ predicate: (age >= 18) │
-└────────────────────────┘
+┌──────────────┐
+│ π Projection │
+├──────────────┤
+│ columns:     │
+│   id(#0)     │
+└──────────────┘
 │ input
-┌───────────────────────────────────┐
-│ ⊞ users                           │
-├───────────────────────────────────┤
-│ columns: id: Int64 not null, age: │
-│ Int32 nullable                    │
-└───────────────────────────────────┘
+┌────────────────────────────┐
+│ σ Filter                   │
+├────────────────────────────┤
+│ predicate: (age(#1) >= 18) │
+└────────────────────────────┘
+│ input
+┌──────────────┐
+│ ⊞ users      │
+├──────────────┤
+│ columns:     │
+│   id(#0)     │
+│   age(#1)    │
+└──────────────┘
 "
         );
+    }
+
+    #[test]
+    fn pretty_json_serializes_recursive_display_tree() {
+        let mut ctx = QueryContext::new();
+        let id = ctx.add_column(ColumnData::new("id", DataType::Int64, false));
+        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+            table: "users".to_string(),
+            columns: vec![id],
+        }));
+        ctx.set_root(scan);
+
+        let json = ctx.pretty_json();
+        let tree: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(tree["title"], "= Output");
+        assert_eq!(tree["input"]["title"], "⊞ users");
+        assert_eq!(tree["input"]["columns"][0], "id(#0)");
+        assert!(tree.get("inputs").is_none());
+        assert!(tree["input"].get("fields").is_none());
+
+        let node = DisplayNode::new("Root").with_metadata("rows", "10");
+        let node_json = serde_json::to_value(&node).unwrap();
+        assert_eq!(node_json["rows"], "10");
+        assert!(node_json.get("metadata").is_none());
+    }
+
+    #[test]
+    fn set_root_does_not_append_output_operator() {
+        let mut ctx = QueryContext::new();
+        let id = ctx.add_column(ColumnData::new("id", DataType::Int64, false));
+        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+            table: "users".to_string(),
+            columns: vec![id],
+        }));
+
+        ctx.set_root(scan);
+        ctx.set_root(scan);
+
+        assert_eq!(ctx.root(), Some(scan));
+        assert_eq!(ctx.operator_count(), 1);
+        assert_eq!(QueryFormatter::new(&ctx).format().title, "= Output");
     }
 
     #[test]
@@ -1046,14 +1692,14 @@ mod tests {
         let order_user_id =
             ctx.add_column(ColumnData::new("order_user_id", DataType::Int64, false));
 
-        let users = ctx.add_operator(OperatorData::Scan {
+        let users = ctx.add_operator(OperatorData::Scan(Scan {
             table: "users".to_string(),
             columns: vec![user_id],
-        });
-        let orders = ctx.add_operator(OperatorData::Scan {
+        }));
+        let orders = ctx.add_operator(OperatorData::Scan(Scan {
             table: "orders".to_string(),
             columns: vec![order_user_id],
-        });
+        }));
         let left = ctx.add_expr(ExprData::ColumnRef(user_id));
         let right = ctx.add_expr(ExprData::ColumnRef(order_user_id));
         let on = ctx.add_expr(ExprData::Binary {
@@ -1061,12 +1707,12 @@ mod tests {
             left,
             right,
         });
-        let join = ctx.add_operator(OperatorData::Join {
+        let join = ctx.add_operator(OperatorData::Join(Join {
             join_type: JoinType::Inner,
             on,
-            outer: users,
-            inner: orders,
-        });
+            outer: orders,
+            inner: users,
+        }));
         ctx.set_root(join);
 
         let pretty = ctx.pretty();
@@ -1078,19 +1724,63 @@ mod tests {
     }
 
     #[test]
+    fn flat_prints_operators_in_dfs_post_order() {
+        let mut ctx = QueryContext::new();
+        let user_id = ctx.add_column(ColumnData::new("user_id", DataType::Int64, false));
+        let order_user_id =
+            ctx.add_column(ColumnData::new("order_user_id", DataType::Int64, false));
+
+        let users = ctx.add_operator(OperatorData::Scan(Scan {
+            table: "users".to_string(),
+            columns: vec![user_id],
+        }));
+        let orders = ctx.add_operator(OperatorData::Scan(Scan {
+            table: "orders".to_string(),
+            columns: vec![order_user_id],
+        }));
+        let left = ctx.add_expr(ExprData::ColumnRef(user_id));
+        let right = ctx.add_expr(ExprData::ColumnRef(order_user_id));
+        let on = ctx.add_expr(ExprData::Binary {
+            op: BinaryOp::Eq,
+            left,
+            right,
+        });
+        let join = ctx.add_operator(OperatorData::Join(Join {
+            join_type: JoinType::Inner,
+            on,
+            outer: orders,
+            inner: users,
+        }));
+        ctx.set_root(join);
+
+        let flat = ctx.pretty_flat();
+        let plan: serde_json::Value = serde_json::from_str(&flat).unwrap();
+        let nodes = plan["nodes"].as_array().unwrap();
+
+        assert_eq!(nodes[0]["id"], 1);
+        assert_eq!(nodes[1]["id"], 0);
+        assert_eq!(nodes[2]["id"], 2);
+        assert_eq!(nodes[3]["id"], 3);
+        assert_eq!(nodes[2]["kind"], "join");
+        assert_eq!(nodes[2]["outer"], 1);
+        assert_eq!(nodes[2]["inner"], 0);
+        assert_eq!(nodes[3]["input"], 2);
+    }
+
+    #[test]
     fn pretty_prints_aggregation() {
         let mut ctx = QueryContext::new();
         let region = ctx.add_column(ColumnData::new("region", DataType::Utf8, false));
         let amount = ctx.add_column(ColumnData::new("amount", DataType::Float64, false));
         let total_amount = ctx.add_column(ColumnData::new("total_amount", DataType::Float64, true));
         let order_count = ctx.add_column(ColumnData::new("order_count", DataType::Int64, false));
-        let scan = ctx.add_operator(OperatorData::Scan {
+        let scan = ctx.add_operator(OperatorData::Scan(Scan {
             table: "orders".to_string(),
             columns: vec![region, amount],
-        });
+        }));
         let region_ref = ctx.add_expr(ExprData::ColumnRef(region));
         let amount_ref = ctx.add_expr(ExprData::ColumnRef(amount));
-        let aggregation = ctx.add_operator(OperatorData::Aggregation {
+        let aggregation = ctx.add_operator(OperatorData::Aggregation(Aggregation {
             keys: vec![region_ref],
             aggregates: vec![
                 (
@@ -1104,15 +1794,17 @@ mod tests {
                 (order_count, AggregateExpr::CountStar),
             ],
             input: scan,
-        });
+        }));
         ctx.set_root(aggregation);
 
         let pretty = ctx.pretty();
 
         assert!(pretty.contains("│ γ Aggregation"));
-        assert!(pretty.contains("│ keys: region"));
-        assert!(pretty.contains("│ total_amount: sum(amount)"));
-        assert!(pretty.contains("│ order_count: count(*)"));
+        assert!(pretty.contains("│ keys: region(#0)"));
+        assert!(pretty.contains("│ aggregates:"));
+        assert!(pretty.contains("total_amount(#2) :="));
+        assert!(pretty.contains("sum(amount(#1))"));
+        assert!(pretty.contains("order_count(#3) := count_star()"));
     }
 
     #[test]
@@ -1126,23 +1818,23 @@ mod tests {
         let normalized_region =
             ctx.add_column(ColumnData::new("normalized_region", DataType::Utf8, true));
         let score = ctx.add_column(ColumnData::new("score", DataType::Float64, true));
-        let table = ctx.add_operator(OperatorData::TableFunction {
-            function: TableFunction::extension("read_orders"),
+        let table = ctx.add_operator(OperatorData::TableFunction(TableFunction {
+            function: TableFunctionDef::extension("read_orders"),
             args: vec![path],
             columns: vec![order_id, region],
-        });
+        }));
         let region_ref = ctx.add_expr(ExprData::ColumnRef(region));
         let normalize_region = ctx.add_expr(ExprData::ScalarFunction {
             function: ScalarFunction::extension("normalize_region"),
             args: vec![region_ref],
         });
-        let map = ctx.add_operator(OperatorData::Map {
+        let map = ctx.add_operator(OperatorData::Map(Map {
             computations: vec![(normalized_region, normalize_region)],
             input: table,
-        });
+        }));
         let key = ctx.add_expr(ExprData::ColumnRef(normalized_region));
         let order_id_ref = ctx.add_expr(ExprData::ColumnRef(order_id));
-        let aggregation = ctx.add_operator(OperatorData::Aggregation {
+        let aggregation = ctx.add_operator(OperatorData::Aggregation(Aggregation {
             keys: vec![key],
             aggregates: vec![(
                 score,
@@ -1153,15 +1845,19 @@ mod tests {
                 },
             )],
             input: map,
-        });
+        }));
         ctx.set_root(aggregation);
 
         let pretty = ctx.pretty();
 
         assert!(pretty.contains("│ γ Aggregation"));
-        assert!(pretty.contains("│ score: approx_score(DISTINCT"));
-        assert!(pretty.contains("normalize_region(region)"));
-        assert!(pretty.contains("│ ⊞ read_orders"));
+        assert!(pretty.contains("│ aggregates:"));
+        assert!(pretty.contains("score(#3) :="));
+        assert!(pretty.contains("approx_score(DISTINCT"));
+        assert!(pretty.contains("│ computations:"));
+        assert!(pretty.contains("normalize_region(region(#1))"));
+        assert!(pretty.contains("│ ⊞ TableFunction"));
+        assert!(pretty.contains("│ function: read_orders"));
     }
 
     #[test]
@@ -1177,10 +1873,10 @@ mod tests {
             DataType::Int64,
             false,
         ));
-        let scan = ctx.add_operator(OperatorData::Scan {
+        let scan = ctx.add_operator(OperatorData::Scan(Scan {
             table: "wide_table".to_string(),
             columns: vec![first, second],
-        });
+        }));
         ctx.set_root(scan);
 
         let node = QueryFormatter::new(&ctx).format();
@@ -1194,9 +1890,25 @@ mod tests {
         assert!(formatted.contains("│ columns:"));
         assert!(formatted.contains("first_really_long_column"));
         assert!(formatted.contains("second_really_long_column"));
+        assert!(!formatted.contains("Int64"));
 
         for line in formatted.lines() {
             assert!(line.chars().count() <= 32);
+        }
+    }
+
+    #[test]
+    fn renderer_wraps_indented_lists_at_tiny_width() {
+        let node = DisplayNode::new("R").with_list_field("l", ["abcdef"]);
+        let formatted = BoxDrawingRenderer::with_config(QueryFormatConfig {
+            min_box_width: 1,
+            max_box_width: 5,
+            child_gap: 1,
+        })
+        .render(&node);
+
+        for line in formatted.lines() {
+            assert!(line.chars().count() <= 5, "{line}");
         }
     }
 
