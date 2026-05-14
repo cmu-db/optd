@@ -54,6 +54,10 @@ pub enum OperatorData {
     TableFunction(TableFunction),
     Join(Join),
     CrossProduct(CrossProduct),
+    /// Orders rows by one or more sort keys.
+    Sort(Sort),
+    /// Skips and/or takes rows from its input.
+    Limit(Limit),
     /// Groups rows by key expressions and computes one or more aggregate columns.
     Aggregation(Aggregation),
     /// Keeps or reorders the listed columns from the input.
@@ -111,6 +115,66 @@ pub struct Join {
 pub struct CrossProduct {
     pub outer: Operator,
     pub inner: Operator,
+}
+
+/// Orders rows by one or more expressions.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Sort {
+    pub keys: Vec<SortKey>,
+    pub input: Operator,
+}
+
+/// One expression and ordering policy used by [`Sort`].
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SortKey {
+    pub expr: Expr,
+    pub direction: SortDirection,
+    pub nulls: NullOrdering,
+}
+
+/// Sort direction for a [`SortKey`].
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SortDirection {
+    Asc,
+    Desc,
+}
+
+impl std::fmt::Display for SortDirection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Asc => f.write_str("Asc"),
+            Self::Desc => f.write_str("Desc"),
+        }
+    }
+}
+
+/// Null ordering policy for a [`SortKey`].
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NullOrdering {
+    First,
+    Last,
+}
+
+impl std::fmt::Display for NullOrdering {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::First => f.write_str("NullsFirst"),
+            Self::Last => f.write_str("NullsLast"),
+        }
+    }
+}
+
+/// Skips and/or takes rows from its input.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Limit {
+    pub fetch: Option<usize>,
+    pub offset: usize,
+    pub input: Operator,
 }
 
 /// Groups rows and computes aggregate columns.
@@ -888,6 +952,15 @@ impl<'a> QueryFormatter<'a> {
         format!("{} := {}", self.format_column_name(column), value.into())
     }
 
+    fn format_sort_key(&self, key: &SortKey) -> String {
+        format!(
+            "{} {} {}",
+            self.format_expr(key.expr),
+            key.direction,
+            key.nulls
+        )
+    }
+
     fn format_exprs(&self, exprs: &[Expr]) -> String {
         exprs
             .iter()
@@ -1120,6 +1193,8 @@ impl Relation for OperatorData {
             Self::TableFunction(operator) => operator.inputs(),
             Self::Join(operator) => operator.inputs(),
             Self::CrossProduct(operator) => operator.inputs(),
+            Self::Sort(operator) => operator.inputs(),
+            Self::Limit(operator) => operator.inputs(),
             Self::Aggregation(operator) => operator.inputs(),
             Self::Projection(operator) => operator.inputs(),
             Self::Output(operator) => operator.inputs(),
@@ -1136,6 +1211,8 @@ impl OperatorDisplayFormat for OperatorData {
             Self::TableFunction(operator) => operator.format(formatter),
             Self::Join(operator) => operator.format(formatter),
             Self::CrossProduct(operator) => operator.format(formatter),
+            Self::Sort(operator) => operator.format(formatter),
+            Self::Limit(operator) => operator.format(formatter),
             Self::Aggregation(operator) => operator.format(formatter),
             Self::Projection(operator) => operator.format(formatter),
             Self::Output(operator) => operator.format(formatter),
@@ -1259,6 +1336,56 @@ impl OperatorDisplayFormat for Join {
                     target: self.inner,
                 },
             ],
+        }
+    }
+}
+
+impl Relation for Sort {
+    fn inputs(&self) -> Vec<Operator> {
+        vec![self.input]
+    }
+}
+
+impl OperatorDisplayFormat for Sort {
+    fn format(&self, formatter: &QueryFormatter<'_>) -> OperatorDisplay {
+        OperatorDisplay {
+            kind: "sort".to_string(),
+            title: "⇞ Sort".to_string(),
+            fields: vec![display_list_field(
+                "keys",
+                self.keys.iter().map(|key| formatter.format_sort_key(key)),
+            )],
+            inputs: vec![OperatorDisplayInput {
+                name: "input".to_string(),
+                target: self.input,
+            }],
+        }
+    }
+}
+
+impl Relation for Limit {
+    fn inputs(&self) -> Vec<Operator> {
+        vec![self.input]
+    }
+}
+
+impl OperatorDisplayFormat for Limit {
+    fn format(&self, _formatter: &QueryFormatter<'_>) -> OperatorDisplay {
+        let fetch = self
+            .fetch
+            .map(|fetch| fetch.to_string())
+            .unwrap_or_else(|| "all".to_string());
+        OperatorDisplay {
+            kind: "limit".to_string(),
+            title: "Limit".to_string(),
+            fields: vec![
+                display_scalar_field("fetch", fetch),
+                display_scalar_field("offset", self.offset.to_string()),
+            ],
+            inputs: vec![OperatorDisplayInput {
+                name: "input".to_string(),
+                target: self.input,
+            }],
         }
     }
 }
@@ -1701,6 +1828,47 @@ mod tests {
         assert!(pretty.contains("total_amount(#2) :="));
         assert!(pretty.contains("sum(amount(#1))"));
         assert!(pretty.contains("order_count(#3) := count_star()"));
+    }
+
+    #[test]
+    fn pretty_prints_sort_and_limit() {
+        let mut ctx = QueryContext::new();
+        let id = ctx.add_column(ColumnData::new("id", DataType::Int64));
+        let age = ctx.add_column(ColumnData::new("age", DataType::Int32));
+        let scan = ctx.add_operator(OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![id, age],
+        }));
+        let age_ref = ctx.add_expr(ExprData::ColumnRef(age));
+        let sort = ctx.add_operator(OperatorData::Sort(Sort {
+            keys: vec![SortKey {
+                expr: age_ref,
+                direction: SortDirection::Desc,
+                nulls: NullOrdering::Last,
+            }],
+            input: scan,
+        }));
+        let limit = ctx.add_operator(OperatorData::Limit(Limit {
+            fetch: Some(10),
+            offset: 5,
+            input: sort,
+        }));
+        ctx.set_root(limit);
+
+        let pretty = ctx.pretty();
+
+        assert!(pretty.contains("│ Limit"));
+        assert!(pretty.contains("│ fetch: 10"));
+        assert!(pretty.contains("│ offset: 5"));
+        assert!(pretty.contains("│ ⇞ Sort"));
+        assert!(pretty.contains("│   age(#1) Desc NullsLast"));
+
+        let mut analyses = ctx.analyze();
+        assert_eq!(analyses.get::<UsedColumns>(&ctx, sort).unwrap(), vec![age]);
+        assert_eq!(
+            analyses.get::<AvailableColumns>(&ctx, limit).unwrap(),
+            vec![id, age]
+        );
     }
 
     #[test]

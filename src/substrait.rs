@@ -8,15 +8,16 @@ use arrow_schema::{DataType, TimeUnit};
 use substrait::proto;
 use substrait::proto::{
     CrossRel, Expression, FunctionArgument, JoinRel, NamedStruct, Plan, PlanRel, ProjectRel,
-    ReadRel, Rel, RelCommon, Type, aggregate_function, aggregate_rel, expression,
-    function_argument, join_rel, plan_rel, read_rel, rel, r#type,
+    ReadRel, Rel, RelCommon, SortField, SortRel, Type, aggregate_function, aggregate_rel,
+    expression, fetch_rel, function_argument, join_rel, plan_rel, read_rel, rel, sort_field,
+    r#type,
 };
 
 use crate::{
     AggregateExpr, AggregateFunction, Aggregation, BinaryOp, Catalog, Column, ColumnData,
-    CrossProduct, Expr, ExprData, Join, JoinType, Map, NaryOp, Operator, OperatorData, Output,
-    Projection, QueryContext, ScalarFunction, ScalarValue, Scan, Selection, TableFunction,
-    TableFunctionDef, TableRef, UnaryOp,
+    CrossProduct, Expr, ExprData, Join, JoinType, Limit, Map, NaryOp, NullOrdering, Operator,
+    OperatorData, Output, Projection, QueryContext, ScalarFunction, ScalarValue, Scan, Selection,
+    Sort, SortDirection, SortKey, TableFunction, TableFunctionDef, TableRef, UnaryOp,
 };
 
 /// Converts Substrait protobuf plans into this crate's relational IR.
@@ -62,6 +63,9 @@ pub enum SubstraitError {
     UnsupportedRead(&'static str),
     UnsupportedJoin(&'static str),
     UnsupportedAggregation(&'static str),
+    UnsupportedSort(&'static str),
+    UnsupportedFetch(&'static str),
+    InvalidFetch { field: &'static str, value: i64 },
     InvalidFieldReference { index: usize, input_len: usize },
     InvalidEmit { index: i32, input_len: usize },
     InvalidGroupingReference { index: usize, input_len: usize },
@@ -84,6 +88,14 @@ impl fmt::Display for SubstraitError {
             Self::UnsupportedJoin(join) => write!(f, "unsupported Substrait join {join}"),
             Self::UnsupportedAggregation(aggr) => {
                 write!(f, "unsupported Substrait aggregation {aggr}")
+            }
+            Self::UnsupportedSort(sort) => write!(f, "unsupported Substrait sort {sort}"),
+            Self::UnsupportedFetch(fetch) => write!(f, "unsupported Substrait fetch {fetch}"),
+            Self::InvalidFetch { field, value } => {
+                write!(
+                    f,
+                    "Substrait fetch {field} must be non-negative, found {value}"
+                )
             }
             Self::InvalidFieldReference { index, input_len } => {
                 write!(
@@ -222,8 +234,8 @@ impl Converter {
             rel::RelType::Join(join) => self.convert_join(join),
             rel::RelType::Cross(cross) => self.convert_cross(cross),
             rel::RelType::Aggregate(aggregate) => self.convert_aggregate(aggregate),
-            rel::RelType::Fetch(_) => Err(SubstraitError::UnsupportedRel("FetchRel")),
-            rel::RelType::Sort(_) => Err(SubstraitError::UnsupportedRel("SortRel")),
+            rel::RelType::Fetch(fetch) => self.convert_fetch(fetch),
+            rel::RelType::Sort(sort) => self.convert_sort(sort),
             rel::RelType::Set(_) => Err(SubstraitError::UnsupportedRel("SetRel")),
             rel::RelType::ExtensionSingle(_) => {
                 Err(SubstraitError::UnsupportedRel("ExtensionSingleRel"))
@@ -431,6 +443,52 @@ impl Converter {
         self.apply_common(cross.common.as_ref(), Relation { operator, columns })
     }
 
+    fn convert_sort(&mut self, sort: &SortRel) -> Result<Relation, SubstraitError> {
+        let input = sort
+            .input
+            .as_ref()
+            .ok_or(SubstraitError::MissingField("SortRel.input"))?;
+        let relation = self.convert_rel(input)?;
+        let keys = sort
+            .sorts
+            .iter()
+            .map(|field| self.convert_sort_field(field, &relation.columns))
+            .collect::<Result<Vec<_>, _>>()?;
+        let operator = self.ctx.add_operator(OperatorData::Sort(Sort {
+            keys,
+            input: relation.operator,
+        }));
+        self.apply_common(
+            sort.common.as_ref(),
+            Relation {
+                operator,
+                ..relation
+            },
+        )
+    }
+
+    fn convert_fetch(&mut self, fetch: &proto::FetchRel) -> Result<Relation, SubstraitError> {
+        let input = fetch
+            .input
+            .as_ref()
+            .ok_or(SubstraitError::MissingField("FetchRel.input"))?;
+        let relation = self.convert_rel(input)?;
+        let offset = convert_fetch_offset(fetch)?;
+        let fetch_count = convert_fetch_count(fetch)?;
+        let operator = self.ctx.add_operator(OperatorData::Limit(Limit {
+            fetch: fetch_count,
+            offset,
+            input: relation.operator,
+        }));
+        self.apply_common(
+            fetch.common.as_ref(),
+            Relation {
+                operator,
+                ..relation
+            },
+        )
+    }
+
     fn convert_aggregate(
         &mut self,
         aggregate: &proto::AggregateRel,
@@ -562,6 +620,24 @@ impl Converter {
                 .transpose()?,
         );
         Ok((column, aggregate))
+    }
+
+    fn convert_sort_field(
+        &mut self,
+        field: &SortField,
+        scope: &[Column],
+    ) -> Result<SortKey, SubstraitError> {
+        let expr = field
+            .expr
+            .as_ref()
+            .ok_or(SubstraitError::MissingField("SortField.expr"))?;
+        let expr = self.convert_expr(expr, scope)?;
+        let (direction, nulls) = convert_sort_direction(field)?;
+        Ok(SortKey {
+            expr,
+            direction,
+            nulls,
+        })
     }
 
     fn convert_expr(
@@ -983,6 +1059,67 @@ fn normalize_function_name(name: &str) -> String {
         .to_ascii_lowercase()
 }
 
+fn convert_sort_direction(
+    field: &SortField,
+) -> Result<(SortDirection, NullOrdering), SubstraitError> {
+    let direction = match field.sort_kind {
+        Some(sort_field::SortKind::Direction(direction)) => {
+            sort_field::SortDirection::try_from(direction).ok()
+        }
+        Some(sort_field::SortKind::ComparisonFunctionReference(_)) => {
+            return Err(SubstraitError::UnsupportedSort("comparison function"));
+        }
+        None => Some(sort_field::SortDirection::AscNullsLast),
+    };
+
+    match direction {
+        Some(sort_field::SortDirection::Unspecified)
+        | Some(sort_field::SortDirection::AscNullsLast)
+        | None => Ok((SortDirection::Asc, NullOrdering::Last)),
+        Some(sort_field::SortDirection::AscNullsFirst) => {
+            Ok((SortDirection::Asc, NullOrdering::First))
+        }
+        Some(sort_field::SortDirection::DescNullsFirst) => {
+            Ok((SortDirection::Desc, NullOrdering::First))
+        }
+        Some(sort_field::SortDirection::DescNullsLast) => {
+            Ok((SortDirection::Desc, NullOrdering::Last))
+        }
+        Some(sort_field::SortDirection::Clustered) => {
+            Err(SubstraitError::UnsupportedSort("clustered sort direction"))
+        }
+    }
+}
+
+fn convert_fetch_offset(fetch: &proto::FetchRel) -> Result<usize, SubstraitError> {
+    let offset = match &fetch.offset_mode {
+        Some(fetch_rel::OffsetMode::Offset(offset)) => *offset,
+        Some(fetch_rel::OffsetMode::OffsetExpr(_)) => {
+            return Err(SubstraitError::UnsupportedFetch("offset expression"));
+        }
+        None => 0,
+    };
+    usize_from_fetch_value("offset", offset)
+}
+
+fn convert_fetch_count(fetch: &proto::FetchRel) -> Result<Option<usize>, SubstraitError> {
+    let count = match &fetch.count_mode {
+        None | Some(fetch_rel::CountMode::Count(-1)) => return Ok(None),
+        Some(fetch_rel::CountMode::Count(count)) => *count,
+        Some(fetch_rel::CountMode::CountExpr(_)) => {
+            return Err(SubstraitError::UnsupportedFetch("count expression"));
+        }
+    };
+    usize_from_fetch_value("count", count).map(Some)
+}
+
+fn usize_from_fetch_value(field: &'static str, value: i64) -> Result<usize, SubstraitError> {
+    if value < 0 {
+        return Err(SubstraitError::InvalidFetch { field, value });
+    }
+    usize::try_from(value).map_err(|_| SubstraitError::InvalidFetch { field, value })
+}
+
 fn resolve_field_reference(
     field: &expression::FieldReference,
     scope: &[Column],
@@ -1196,6 +1333,32 @@ mod tests {
         }
     }
 
+    fn field_ref(index: i32) -> Expression {
+        Expression {
+            rex_type: Some(expression::RexType::Selection(Box::new(
+                expression::FieldReference {
+                    reference_type: Some(
+                        expression::field_reference::ReferenceType::DirectReference(
+                            expression::ReferenceSegment {
+                                reference_type: Some(
+                                    expression::reference_segment::ReferenceType::StructField(
+                                        Box::new(expression::reference_segment::StructField {
+                                            field: index,
+                                            child: None,
+                                        }),
+                                    ),
+                                ),
+                            },
+                        ),
+                    ),
+                    root_type: Some(expression::field_reference::RootType::RootReference(
+                        expression::field_reference::RootReference {},
+                    )),
+                },
+            ))),
+        }
+    }
+
     #[test]
     fn imports_named_table_read_with_root_output() {
         let plan = Plan {
@@ -1293,5 +1456,69 @@ mod tests {
         assert_eq!(ctx.column(scan.columns[0]).ty, DataType::Int64);
         assert_eq!(ctx.column(scan.columns[1]).name, "age");
         assert_eq!(ctx.column(scan.columns[1]).ty, DataType::Int32);
+    }
+
+    #[test]
+    fn imports_sort_and_fetch() {
+        let read = Rel {
+            rel_type: Some(rel::RelType::Read(Box::new(ReadRel {
+                common: None,
+                base_schema: Some(NamedStruct {
+                    names: vec!["id".to_string()],
+                    r#struct: Some(r#type::Struct {
+                        types: vec![required_i64_type()],
+                        type_variation_reference: 0,
+                        nullability: r#type::Nullability::Required as i32,
+                    }),
+                }),
+                filter: None,
+                best_effort_filter: None,
+                projection: None,
+                advanced_extension: None,
+                read_type: Some(read_rel::ReadType::NamedTable(read_rel::NamedTable {
+                    names: vec!["users".to_string()],
+                    advanced_extension: None,
+                })),
+            }))),
+        };
+        let sort = Rel {
+            rel_type: Some(rel::RelType::Sort(Box::new(SortRel {
+                common: None,
+                input: Some(Box::new(read)),
+                sorts: vec![SortField {
+                    expr: Some(field_ref(0)),
+                    sort_kind: Some(sort_field::SortKind::Direction(
+                        sort_field::SortDirection::DescNullsLast as i32,
+                    )),
+                }],
+                advanced_extension: None,
+            }))),
+        };
+        let fetch = Rel {
+            rel_type: Some(rel::RelType::Fetch(Box::new(proto::FetchRel {
+                common: None,
+                input: Some(Box::new(sort)),
+                advanced_extension: None,
+                offset_mode: Some(fetch_rel::OffsetMode::Offset(5)),
+                count_mode: Some(fetch_rel::CountMode::Count(10)),
+            }))),
+        };
+
+        let ctx = from_rel(&fetch).expect("relation should import");
+        let OperatorData::Output(output) = ctx.operator(ctx.root().unwrap()) else {
+            panic!("root should be output");
+        };
+        let OperatorData::Limit(limit) = ctx.operator(output.input) else {
+            panic!("output should read from limit");
+        };
+        assert_eq!(limit.fetch, Some(10));
+        assert_eq!(limit.offset, 5);
+
+        let OperatorData::Sort(sort) = ctx.operator(limit.input) else {
+            panic!("limit should read from sort");
+        };
+        assert_eq!(sort.keys.len(), 1);
+        assert_eq!(sort.keys[0].direction, SortDirection::Desc);
+        assert_eq!(sort.keys[0].nulls, NullOrdering::Last);
     }
 }

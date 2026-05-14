@@ -271,6 +271,8 @@ fn directly_created_columns(operator: &OperatorData) -> Vec<Column> {
         },
         OperatorData::Selection(_)
         | OperatorData::CrossProduct(_)
+        | OperatorData::Sort(_)
+        | OperatorData::Limit(_)
         | OperatorData::Projection(_)
         | OperatorData::Output(_) => Vec::new(),
     }
@@ -285,7 +287,12 @@ fn directly_used_columns(
     let mut columns = Vec::new();
 
     match operator_data {
-        OperatorData::Scan(_) | OperatorData::CrossProduct(_) => {}
+        OperatorData::Scan(_) | OperatorData::CrossProduct(_) | OperatorData::Limit(_) => {}
+        OperatorData::Sort(data) => {
+            for key in &data.keys {
+                collect_expr_used_columns(ctx, key.expr, &mut columns)?;
+            }
+        }
         OperatorData::Selection(data) => {
             collect_expr_used_columns(ctx, data.predicate, &mut columns)?;
         }
@@ -351,6 +358,18 @@ fn input_available_columns(
             );
         }
         OperatorData::Projection(data) => {
+            extend_unique_columns(
+                &mut columns,
+                analyses.get::<AvailableColumns>(ctx, data.input)?,
+            );
+        }
+        OperatorData::Sort(data) => {
+            extend_unique_columns(
+                &mut columns,
+                analyses.get::<AvailableColumns>(ctx, data.input)?,
+            );
+        }
+        OperatorData::Limit(data) => {
             extend_unique_columns(
                 &mut columns,
                 analyses.get::<AvailableColumns>(ctx, data.input)?,
@@ -653,6 +672,8 @@ fn output_column_nullability(
                 })
                 .collect())
         }
+        OperatorData::Sort(data) => analyses.get::<ColumnNullability>(ctx, data.input),
+        OperatorData::Limit(data) => analyses.get::<ColumnNullability>(ctx, data.input),
         OperatorData::Output(data) => analyses.get::<ColumnNullability>(ctx, data.input),
     }
 }
@@ -875,6 +896,8 @@ impl OperatorAnalysis for AvailableColumns {
                 analyses.get::<AvailableColumns>(ctx, data.input)?;
                 Ok(data.columns.clone())
             }
+            OperatorData::Sort(data) => analyses.get::<AvailableColumns>(ctx, data.input),
+            OperatorData::Limit(data) => analyses.get::<AvailableColumns>(ctx, data.input),
             OperatorData::Output(data) => analyses.get::<AvailableColumns>(ctx, data.input),
         }
     }
