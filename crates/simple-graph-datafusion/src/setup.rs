@@ -213,3 +213,20 @@ async fn to_logical_plan_round_trip_nation() {
         .value(0);
     assert_eq!(count, 25);
 }
+
+#[tokio::test]
+async fn print_q13_ir() {
+    use crate::from_df::from_logical_plan;
+    use simple_graph::QueryContext;
+
+    let (session, _dir) = setup_tpch_session().await.unwrap();
+    let sql = "select c_count, count(*) as custdist from ( select c_custkey, count(o_orderkey) from customer left outer join orders on c_custkey = o_custkey and o_comment not like '%special%requests%' group by c_custkey ) as c_orders (c_custkey, c_count) group by c_count order by custdist desc, c_count desc";
+
+    let plan = session.state().create_logical_plan(sql).await.unwrap();
+    println!("=== DataFusion plan ===\n{}", plan.display_indent());
+
+    let mut ctx = QueryContext::new();
+    let root = from_logical_plan(&plan, &mut ctx).unwrap();
+    ctx.set_root(root);
+    println!("=== simple-graph IR ===\n{}", ctx.pretty());
+}

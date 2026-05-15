@@ -6,13 +6,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use datafusion::common::{Column as DFColumn, TableReference};
+use datafusion::common::{Column as DFColumn, DFSchema, TableReference};
 use datafusion::datasource::provider_as_source;
 use datafusion::execution::FunctionRegistry;
 use datafusion::functions_aggregate::count::count_all;
 use datafusion::functions_aggregate::expr_fn::{avg, count, max, min, sum};
 use datafusion::logical_expr::{
-    Expr as DFExpr, JoinType as DFJoinType, LogicalPlan, LogicalPlanBuilder, SortExpr, TableSource,
+    Expr as DFExpr, JoinType as DFJoinType, LogicalPlan, LogicalPlanBuilder,
+    Projection as DFProjection, SortExpr, TableSource,
 };
 use datafusion::prelude::SessionContext;
 use simple_graph::{
@@ -292,9 +293,10 @@ fn convert_operator_inner(
             let inner = convert_operator_inner(join.inner, ctx, tables, session, outer_refs)?;
             let join_type = convert_join_type(&join.join_type)?;
             let condition = convert_expr(join.on, ctx, tables, session, outer_refs)?;
-            Ok(LogicalPlanBuilder::from(outer)
+            let joined = LogicalPlanBuilder::from(outer)
                 .join_on(inner, join_type, Some(condition))?
-                .build()?)
+                .build()?;
+            normalize_join_output(joined)
         }
 
         OperatorData::CrossProduct(cross) => {
@@ -316,6 +318,79 @@ fn convert_operator_inner(
 
         OperatorData::TableFunction(_) => Err(ToDFError::Unsupported("TableFunction".into())),
     }
+}
+
+fn normalize_join_output(plan: LogicalPlan) -> ToDFResult<LogicalPlan> {
+    let schema = plan.schema();
+    let mut fields_by_name: HashMap<String, Vec<usize>> = HashMap::new();
+    for i in 0..schema.fields().len() {
+        fields_by_name
+            .entry(schema.field(i).name().clone())
+            .or_default()
+            .push(i);
+    }
+
+    let mut keep = Vec::new();
+    for indices in fields_by_name.values() {
+        let qualified: Vec<_> = indices
+            .iter()
+            .copied()
+            .filter(|i| schema.qualified_field(*i).0.is_some())
+            .collect();
+        let distinct_qualifiers: std::collections::HashSet<_> = qualified
+            .iter()
+            .filter_map(|i| schema.qualified_field(*i).0.cloned())
+            .collect();
+
+        if distinct_qualifiers.len() > 1 {
+            keep.extend(qualified);
+        } else if let Some(unqualified) = indices
+            .iter()
+            .copied()
+            .find(|i| schema.qualified_field(*i).0.is_none())
+        {
+            keep.push(unqualified);
+        } else if let Some(first) = indices.first() {
+            keep.push(*first);
+        }
+    }
+    keep.sort_unstable();
+
+    let mut exprs = Vec::with_capacity(keep.len());
+    let mut qualified_fields = Vec::with_capacity(keep.len());
+    for i in keep {
+        let (qualifier, field) = schema.qualified_field(i);
+        let output_qualifier = if fields_by_name[field.name()]
+            .iter()
+            .filter_map(|i| schema.qualified_field(*i).0)
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+            > 1
+        {
+            qualifier.cloned()
+        } else {
+            None
+        };
+        let expr = if output_qualifier.is_none() {
+            DFExpr::Column(DFColumn::new(qualifier.cloned(), field.name().clone()))
+                .alias(field.name().clone())
+        } else {
+            DFExpr::Column(DFColumn::new(qualifier.cloned(), field.name().clone()))
+        };
+        exprs.push(expr);
+        qualified_fields.push((output_qualifier, Arc::new(field.as_ref().clone())));
+    }
+
+    let output_schema = Arc::new(DFSchema::new_with_metadata(
+        qualified_fields,
+        schema.metadata().clone(),
+    )?);
+
+    Ok(LogicalPlan::Projection(DFProjection::try_new_with_schema(
+        exprs,
+        Arc::new(plan),
+        output_schema,
+    )?))
 }
 
 fn convert_expr(
