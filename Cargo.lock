@@ -3136,6 +3136,7 @@ dependencies = [
  "async-trait",
  "datafusion",
  "datafusion-substrait",
+ "fixedbitset",
  "prost",
  "serde",
  "serde_json",

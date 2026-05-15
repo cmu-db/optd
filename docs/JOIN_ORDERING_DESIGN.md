@@ -366,28 +366,24 @@ trivial). For larger groups the ordering matters for cardinality estimates.
 
 ---
 
-## Open Questions / Follow-ups
+## Implementation Tasks
 
-- **CD-E for TES**: The hypergraph already uses CD-A. Upgrading to CD-E (Algorithm 3,
-  Birler & Neumann 2025) improves completeness for outer-join queries from 63.8% to 100%.
-  This is a hypergraph concern, not a pass concern.
+### Done
+1. `src/hypergraph.rs`: `NodeSet = u64` type alias + `nodeset_singleton`, `nodeset_min`, `nodeset_iter` helpers.
+2. `src/hypergraph.rs`: `Hyperedge.left`/`.right` changed from `Vec<NodeId>` to `NodeSet`.
+3. `src/hypergraph.rs`: Compatibility tables (`assoc`, `l_asscom`, `r_asscom`) corrected to match Tables 1–3 from Birler & Neumann 2025.
+4. `src/hypergraph.rs`: Builder upgraded to CD-E (Algorithm 3): uses `TES(◦_a)` instead of full subtree, gates extensions on connectivity check (Algorithm 5, union-find).
+5. `src/hypergraph.rs`: `HyperedgeJoinType::to_ir_join_type()` for plan reconstruction.
+6. `src/optimize/join_ordering.rs`: `DPhyp` — full implementation of `Solve`/`EmitCsg`/`EnumerateCsgRec`/`EmitCsg`/`EnumerateCmpRec`/`EmitCsgCmp`.
+7. `src/optimize/join_ordering.rs`: `Statistics` trait + `UniformStatistics` placeholder.
+8. `src/optimize/join_ordering.rs`: `join_tree_to_ir` — converts `JoinTree` back to simple-graph IR.
+9. `src/optimize/join_ordering.rs`: `collect_join_group_roots` — finds all join group roots bottom-up.
+10. `src/optimize/join_ordering.rs`: `JoinOrdering` pass implementing `QueryPass`.
 
-- **Null-rejecting predicate detection**: Needed to classify `'E` vs `E` join types for
-  the compatibility tables. Use `ColumnNullability` analysis.
-
-- **Linearized DP for medium queries** (Neumann & Radke §4.2): Run IKKBZ to get a
-  relation ordering, then DP over contiguous subchains in O(n³). Needed for groups
-  with 15–100 nodes.
-
-- **GOO-DP for large queries** (Neumann & Radke §4.3): Greedy Operator Ordering seeds
-  a bushy tree; DP refines subtrees of size ≤ k. Needed for groups > 100 nodes.
-
-- **NodeSet as bitmask**: The initial implementation uses `u64` (up to 64 nodes). For
-  larger groups, use `Vec<u64>` or a sparse representation.
-
-- **Statistics integration**: `UniformStatistics` is the placeholder. Real statistics
-  come from catalog metadata or sampling. The `Statistics` trait is the extension point.
-
-- **Predicate pushdown interaction**: The pass assumes predicates are already in join
-  conditions (not in a `Selection` above the join group). A predicate-pushdown pass
-  should run before `JoinOrdering`.
+### Open / Follow-ups
+- **Linearized DP** (Neumann & Radke §4.2): IKKBZ ordering + O(n³) DP for 15–100 node groups without hyperedges.
+- **GOO-DP** (Neumann & Radke §4.3): greedy seed + DP on subtrees of size k for >100 nodes.
+- **NodeSet >64 nodes**: extend to `Vec<u64>` or sparse representation for very large groups.
+- **Real statistics**: replace `UniformStatistics` with catalog-backed cardinality/selectivity.
+- **Null-rejecting predicate detection**: classify `'E`/`'K` variants using `ColumnNullability` analysis.
+- **Predicate pushdown prerequisite**: WHERE-clause predicates must be pushed into join conditions before `JoinOrdering` runs.

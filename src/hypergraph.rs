@@ -19,6 +19,36 @@ use crate::{
 /// Index into [`QueryHypergraph::nodes`].
 pub type NodeId = usize;
 
+/// A bitmask over node indices for groups of up to 64 relations.
+///
+/// Bit `i` is set iff node `i` is in the set. Used by DPhyp for O(1) set operations.
+pub type NodeSet = u64;
+
+/// Returns a `NodeSet` containing only node `id`.
+#[inline]
+pub fn nodeset_singleton(id: NodeId) -> NodeSet {
+    1u64 << id
+}
+
+/// Returns the lowest set bit index (canonical representative of a hypernode).
+#[inline]
+pub fn nodeset_min(s: NodeSet) -> NodeId {
+    s.trailing_zeros() as NodeId
+}
+
+/// Iterates over set bits in `s`, yielding each `NodeId`.
+pub fn nodeset_iter(mut s: NodeSet) -> impl Iterator<Item = NodeId> {
+    std::iter::from_fn(move || {
+        if s == 0 {
+            None
+        } else {
+            let bit = s.trailing_zeros() as NodeId;
+            s &= s - 1;
+            Some(bit)
+        }
+    })
+}
+
 /// A base-relation node in the hypergraph.
 pub struct HypergraphNode {
     /// The topmost IR operator for this node.
@@ -61,6 +91,19 @@ impl HyperedgeJoinType {
             JoinType::Single => Self::LeftSemi,
         }
     }
+
+    /// Converts back to the IR `JoinType` for plan reconstruction.
+    pub fn to_ir_join_type(self) -> JoinType {
+        match self {
+            Self::Inner => JoinType::Inner,
+            Self::LeftSemi => JoinType::LeftSemi,
+            Self::LeftOuter | Self::LeftOuterNullRejectingLeft => JoinType::LeftOuter,
+            Self::FullOuter
+            | Self::FullOuterNullRejectingLeft
+            | Self::FullOuterNullRejectingRight
+            | Self::FullOuterNullRejectingBoth => JoinType::FullOuter,
+        }
+    }
 }
 
 impl std::fmt::Display for HyperedgeJoinType {
@@ -84,10 +127,10 @@ impl std::fmt::Display for HyperedgeJoinType {
 pub struct Hyperedge {
     /// The predicate expression. `None` for cross-product dummy edges (§2.6).
     pub predicate: Option<Expr>,
-    /// Nodes that must be present in the left input of the join.
-    pub left: Vec<NodeId>,
-    /// Nodes that must be present in the right input of the join.
-    pub right: Vec<NodeId>,
+    /// Nodes that must be present in the left input of the join (bitmask).
+    pub left: NodeSet,
+    /// Nodes that must be present in the right input of the join (bitmask).
+    pub right: NodeSet,
     /// The IR operator this edge came from.
     pub source: Operator,
     /// Join type of the source operator.
@@ -104,18 +147,15 @@ pub struct QueryHypergraph {
 // Operator compatibility tables (§2.2, Tables 1–3)
 // ---------------------------------------------------------------------------
 
-/// `assoc(◦_a, ◦_b)`: can ◦_a be moved from the left subtree of ◦_b to its right?
-/// Table 1 from the paper.
-pub fn assoc(outer: HyperedgeJoinType, inner: HyperedgeJoinType) -> bool {
+/// `assoc(◦_a, ◦_b)`: Table 1 from Birler & Neumann 2025.
+/// Rows = ◦_a, cols = ◦_b. `+` means the reordering is valid.
+pub fn assoc(oa: HyperedgeJoinType, ob: HyperedgeJoinType) -> bool {
     use HyperedgeJoinType::*;
     matches!(
-        (outer, inner),
+        (oa, ob),
         (Inner, Inner)
             | (Inner, LeftOuterNullRejectingLeft)
-            | (LeftOuter, FullOuter)
-            | (LeftOuter, FullOuterNullRejectingLeft)
-            | (LeftOuter, FullOuterNullRejectingRight)
-            | (LeftOuter, FullOuterNullRejectingBoth)
+            | (LeftOuterNullRejectingLeft, LeftOuterNullRejectingLeft)
             | (LeftOuterNullRejectingLeft, FullOuter)
             | (LeftOuterNullRejectingLeft, FullOuterNullRejectingLeft)
             | (LeftOuterNullRejectingLeft, FullOuterNullRejectingRight)
@@ -139,11 +179,11 @@ pub fn assoc(outer: HyperedgeJoinType, inner: HyperedgeJoinType) -> bool {
     )
 }
 
-/// `l_asscom(◦_a, ◦_b)`: Table 2 from the paper.
-pub fn l_asscom(outer: HyperedgeJoinType, inner: HyperedgeJoinType) -> bool {
+/// `l_asscom(◦_a, ◦_b)`: Table 2 from Birler & Neumann 2025.
+pub fn l_asscom(oa: HyperedgeJoinType, ob: HyperedgeJoinType) -> bool {
     use HyperedgeJoinType::*;
     matches!(
-        (outer, inner),
+        (oa, ob),
         (Inner, Inner)
             | (Inner, LeftSemi)
             | (Inner, LeftOuter)
@@ -183,11 +223,11 @@ pub fn l_asscom(outer: HyperedgeJoinType, inner: HyperedgeJoinType) -> bool {
     )
 }
 
-/// `r_asscom(◦_a, ◦_b)`: Table 3 from the paper.
-pub fn r_asscom(outer: HyperedgeJoinType, inner: HyperedgeJoinType) -> bool {
+/// `r_asscom(◦_a, ◦_b)`: Table 3 from Birler & Neumann 2025.
+pub fn r_asscom(oa: HyperedgeJoinType, ob: HyperedgeJoinType) -> bool {
     use HyperedgeJoinType::*;
     matches!(
-        (outer, inner),
+        (oa, ob),
         (Inner, Inner)
             | (FullOuterNullRejectingRight, FullOuterNullRejectingRight)
             | (FullOuterNullRejectingRight, FullOuterNullRejectingBoth)
@@ -224,17 +264,20 @@ struct HypergraphBuilder<'a> {
     edges: Vec<Hyperedge>,
     /// Maps each operator handle to its NodeId (for leaf/unary operators).
     node_map: HashMap<Operator, NodeId>,
-    /// Records the join operators encountered in DFS order (for CD-A).
-    /// Each entry: (join_op, join_type, left_subtree_nodes, right_subtree_nodes).
+    /// Records join operators bottom-up for CD-E TES computation.
     join_stack: Vec<JoinRecord>,
 }
 
 struct JoinRecord {
     join_type: HyperedgeJoinType,
-    /// NodeIds reachable from the left input.
-    left_nodes: Vec<NodeId>,
-    /// NodeIds reachable from the right input.
-    right_nodes: Vec<NodeId>,
+    /// NodeSet of nodes reachable from the left input.
+    left_nodes: NodeSet,
+    /// NodeSet of nodes reachable from the right input.
+    right_nodes: NodeSet,
+    /// TES-left computed for this join (used by CD-E).
+    tes_left: NodeSet,
+    /// TES-right computed for this join (used by CD-E).
+    tes_right: NodeSet,
 }
 
 impl<'a> HypergraphBuilder<'a> {
@@ -249,8 +292,8 @@ impl<'a> HypergraphBuilder<'a> {
         }
     }
 
-    /// Recursively collect nodes and edges. Returns the set of NodeIds in this subtree.
-    fn collect(&mut self, op: Operator) -> Vec<NodeId> {
+    /// Recursively collect nodes and edges. Returns the NodeSet of nodes in this subtree.
+    fn collect(&mut self, op: Operator) -> NodeSet {
         match self.ctx.operator(op) {
             OperatorData::Join(j) => {
                 let jt = HyperedgeJoinType::from_join_type(&j.join_type.clone());
@@ -261,15 +304,15 @@ impl<'a> HypergraphBuilder<'a> {
                 let left_nodes = self.collect(outer);
                 let right_nodes = self.collect(inner);
 
-                // CD-A: compute TES for this join operator.
-                let (tes_left, tes_right) = self.cd_a(op, jt, &left_nodes, &right_nodes);
+                // CD-E: compute TES for this join operator (Algorithm 3, Birler & Neumann 2025).
+                let (tes_left, tes_right) = self.cd_e(op, jt, left_nodes, right_nodes);
 
                 // Split conjunctive predicates into individual edges (§4.5).
                 for predicate in conjuncts(on, self.ctx) {
                     self.edges.push(Hyperedge {
                         predicate: Some(predicate),
-                        left: tes_left.clone(),
-                        right: tes_right.clone(),
+                        left: tes_left,
+                        right: tes_right,
                         source: op,
                         join_type: jt,
                     });
@@ -277,13 +320,13 @@ impl<'a> HypergraphBuilder<'a> {
 
                 self.join_stack.push(JoinRecord {
                     join_type: jt,
-                    left_nodes: left_nodes.clone(),
-                    right_nodes: right_nodes.clone(),
+                    left_nodes,
+                    right_nodes,
+                    tes_left,
+                    tes_right,
                 });
 
-                let mut all = left_nodes;
-                all.extend_from_slice(&right_nodes);
-                all
+                left_nodes | right_nodes
             }
 
             OperatorData::CrossProduct(cp) => {
@@ -292,10 +335,9 @@ impl<'a> HypergraphBuilder<'a> {
                 let left_nodes = self.collect(outer);
                 let right_nodes = self.collect(inner);
 
-                // Cross product: add a dummy always-true edge to keep graph connected (§2.6).
-                // TES is just one representative from each side.
-                let l = left_nodes.first().copied().into_iter().collect();
-                let r = right_nodes.first().copied().into_iter().collect();
+                // Cross product: dummy always-true edge to keep graph connected (§2.6).
+                let l = nodeset_singleton(nodeset_min(left_nodes));
+                let r = nodeset_singleton(nodeset_min(right_nodes));
                 self.edges.push(Hyperedge {
                     predicate: None,
                     left: l,
@@ -306,18 +348,19 @@ impl<'a> HypergraphBuilder<'a> {
 
                 self.join_stack.push(JoinRecord {
                     join_type: HyperedgeJoinType::Inner,
-                    left_nodes: left_nodes.clone(),
-                    right_nodes: right_nodes.clone(),
+                    left_nodes,
+                    right_nodes,
+                    tes_left: l,
+                    tes_right: r,
                 });
 
-                let mut all = left_nodes;
-                all.extend_from_slice(&right_nodes);
-                all
+                left_nodes | right_nodes
             }
 
             // Leaf and transparent-unary operators become nodes (§2.7).
             _ => {
                 let node_id = self.nodes.len();
+                assert!(node_id < 64, "hypergraph supports at most 64 nodes");
                 let available = self
                     .analyses
                     .get::<AvailableColumns>(self.ctx, op)
@@ -328,50 +371,57 @@ impl<'a> HypergraphBuilder<'a> {
                     available,
                 });
                 self.node_map.insert(op, node_id);
-                vec![node_id]
+                nodeset_singleton(node_id)
             }
         }
     }
 
-    /// CD-A (Algorithm 1): compute (TES-left, TES-right) for join operator `join_op`.
+    /// CD-E (Algorithm 3, Birler & Neumann 2025): compute (TES-left, TES-right).
     ///
-    /// Iterates over all join operators in the left and right subtrees and extends
-    /// the TES based on assoc/l_asscom/r_asscom compatibility.
-    fn cd_a(
+    /// Improvements over CD-A:
+    /// 1. Extends with `TES(◦_a)` instead of the full subtree `T(◦_a)`.
+    /// 2. Gates each extension on a connectivity check — skips redundant restrictions.
+    fn cd_e(
         &self,
         join_op: Operator,
         join_type: HyperedgeJoinType,
-        left_nodes: &[NodeId],
-        right_nodes: &[NodeId],
-    ) -> (Vec<NodeId>, Vec<NodeId>) {
-        // Start with SES: split predicate columns by which side produces them.
+        left_nodes: NodeSet,
+        right_nodes: NodeSet,
+    ) -> (NodeSet, NodeSet) {
         let (mut tes_left, mut tes_right) = self.ses(join_op, left_nodes, right_nodes);
 
-        // Extend TES based on operators in the left subtree.
         for rec in &self.join_stack {
-            if rec.left_nodes.iter().all(|n| left_nodes.contains(n))
-                && rec.right_nodes.iter().all(|n| left_nodes.contains(n))
-            {
-                // rec.op is in the left subtree of join_op.
+            let in_left = (rec.left_nodes | rec.right_nodes) & !left_nodes == 0
+                && (rec.left_nodes | rec.right_nodes) & left_nodes != 0;
+            let in_right = (rec.left_nodes | rec.right_nodes) & !right_nodes == 0
+                && (rec.left_nodes | rec.right_nodes) & right_nodes != 0;
+
+            if in_left {
                 let oa = rec.join_type;
                 let ob = join_type;
-                if !assoc(oa, ob) {
-                    extend_unique(&mut tes_left, &rec.left_nodes);
+                // CD-E: only extend if connected(right(◦_a), right(◦_b), ◦_a)
+                if !assoc(oa, ob)
+                    && self.connected(rec.right_nodes, right_nodes, rec.tes_left | rec.tes_right)
+                {
+                    tes_left |= rec.tes_left;
                 }
-                if !l_asscom(oa, ob) {
-                    extend_unique(&mut tes_left, &rec.right_nodes);
+                if !l_asscom(oa, ob)
+                    && self.connected(rec.left_nodes, right_nodes, rec.tes_left | rec.tes_right)
+                {
+                    tes_left |= rec.tes_right;
                 }
-            } else if rec.left_nodes.iter().all(|n| right_nodes.contains(n))
-                && rec.right_nodes.iter().all(|n| right_nodes.contains(n))
-            {
-                // rec.op is in the right subtree of join_op.
+            } else if in_right {
                 let oa = rec.join_type;
                 let ob = join_type;
-                if !assoc(oa, ob) {
-                    extend_unique(&mut tes_right, &rec.right_nodes);
+                if !assoc(oa, ob)
+                    && self.connected(rec.left_nodes, left_nodes, rec.tes_left | rec.tes_right)
+                {
+                    tes_right |= rec.tes_right;
                 }
-                if !r_asscom(oa, ob) {
-                    extend_unique(&mut tes_right, &rec.left_nodes);
+                if !r_asscom(oa, ob)
+                    && self.connected(rec.right_nodes, left_nodes, rec.tes_left | rec.tes_right)
+                {
+                    tes_right |= rec.tes_left;
                 }
             }
         }
@@ -379,62 +429,116 @@ impl<'a> HypergraphBuilder<'a> {
         (tes_left, tes_right)
     }
 
-    /// Computes the SES split into (left, right) based on which side of `join_op`
-    /// each referenced column comes from.
+    /// Connectivity check (Algorithm 5, Birler & Neumann 2025).
+    ///
+    /// Returns true if `r1` and `r2` are connected in the hypergraph when the
+    /// edge represented by `excluded_tes` (= tes_left | tes_right of ◦_a) is removed.
+    /// Uses union-find over the remaining edges.
+    fn connected(&self, r1: NodeSet, r2: NodeSet, excluded_tes: NodeSet) -> bool {
+        if r1 == 0 || r2 == 0 {
+            return false;
+        }
+        // Union-find: parent[i] = i initially.
+        let n = self.nodes.len();
+        let mut parent: Vec<usize> = (0..n).collect();
+
+        fn find(parent: &mut Vec<usize>, x: usize) -> usize {
+            if parent[x] != x {
+                parent[x] = find(parent, parent[x]);
+            }
+            parent[x]
+        }
+        fn union(parent: &mut Vec<usize>, x: usize, y: usize) {
+            let rx = find(parent, x);
+            let ry = find(parent, y);
+            if rx != ry {
+                parent[rx] = ry;
+            }
+        }
+
+        // Merge nodes within r1 and within r2.
+        let r1_rep = nodeset_min(r1);
+        let r2_rep = nodeset_min(r2);
+        for nid in nodeset_iter(r1) {
+            union(&mut parent, r1_rep, nid);
+        }
+        for nid in nodeset_iter(r2) {
+            union(&mut parent, r2_rep, nid);
+        }
+
+        // Repeatedly apply edges (excluding the one being tested) until fixpoint.
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for edge in &self.edges {
+                // Skip the excluded edge (identified by its TES matching excluded_tes).
+                if (edge.left | edge.right) == excluded_tes {
+                    continue;
+                }
+                // Edge is applicable if both sides are internally connected.
+                let l_rep = nodeset_min(edge.left);
+                let r_rep = nodeset_min(edge.right);
+                let all_l_same = nodeset_iter(edge.left)
+                    .all(|n| find(&mut parent, n) == find(&mut parent, l_rep));
+                let all_r_same = nodeset_iter(edge.right)
+                    .all(|n| find(&mut parent, n) == find(&mut parent, r_rep));
+                if all_l_same && all_r_same {
+                    let before = find(&mut parent, l_rep);
+                    union(&mut parent, l_rep, r_rep);
+                    if find(&mut parent, l_rep) != before {
+                        changed = true;
+                    }
+                }
+            }
+            // Early exit if r1 and r2 are already connected.
+            if find(&mut parent, r1_rep) == find(&mut parent, r2_rep) {
+                return true;
+            }
+        }
+
+        find(&mut parent, r1_rep) == find(&mut parent, r2_rep)
+    }
+
+    /// Computes the SES split into (left, right) NodeSets.
     fn ses(
         &self,
         join_op: Operator,
-        left_nodes: &[NodeId],
-        right_nodes: &[NodeId],
-    ) -> (Vec<NodeId>, Vec<NodeId>) {
+        left_nodes: NodeSet,
+        right_nodes: NodeSet,
+    ) -> (NodeSet, NodeSet) {
         let predicate = match self.ctx.operator(join_op) {
             OperatorData::Join(j) => j.on,
-            _ => return (vec![], vec![]),
+            _ => return (left_nodes, right_nodes),
         };
 
         let used = expr_used_columns(self.ctx, predicate).unwrap_or_default();
-
-        let mut ses_left = Vec::new();
-        let mut ses_right = Vec::new();
+        let mut ses_left: NodeSet = 0;
+        let mut ses_right: NodeSet = 0;
 
         for col in used {
-            // Find which node produces this column.
-            for &nid in left_nodes {
+            for nid in nodeset_iter(left_nodes) {
                 if self.nodes[nid].available.contains(&col) {
-                    if !ses_left.contains(&nid) {
-                        ses_left.push(nid);
-                    }
+                    ses_left |= nodeset_singleton(nid);
                     break;
                 }
             }
-            for &nid in right_nodes {
+            for nid in nodeset_iter(right_nodes) {
                 if self.nodes[nid].available.contains(&col) {
-                    if !ses_right.contains(&nid) {
-                        ses_right.push(nid);
-                    }
+                    ses_right |= nodeset_singleton(nid);
                     break;
                 }
             }
         }
 
-        // Fallback: if SES is empty on one side, include all nodes on that side
-        // (handles cross-node predicates and degenerate cases).
-        if ses_left.is_empty() && !left_nodes.is_empty() {
-            ses_left = left_nodes.to_vec();
+        // Fallback: degenerate predicate — include all nodes on each side.
+        if ses_left == 0 {
+            ses_left = left_nodes;
         }
-        if ses_right.is_empty() && !right_nodes.is_empty() {
-            ses_right = right_nodes.to_vec();
+        if ses_right == 0 {
+            ses_right = right_nodes;
         }
 
         (ses_left, ses_right)
-    }
-}
-
-fn extend_unique(target: &mut Vec<NodeId>, src: &[NodeId]) {
-    for &n in src {
-        if !target.contains(&n) {
-            target.push(n);
-        }
     }
 }
 
@@ -498,8 +602,8 @@ impl QueryHypergraph {
 
         out.push_str("\nEdges:\n");
         for (i, edge) in self.edges.iter().enumerate() {
-            let left: Vec<String> = edge.left.iter().map(|n| n.to_string()).collect();
-            let right: Vec<String> = edge.right.iter().map(|n| n.to_string()).collect();
+            let left: Vec<String> = nodeset_iter(edge.left).map(|n| n.to_string()).collect();
+            let right: Vec<String> = nodeset_iter(edge.right).map(|n| n.to_string()).collect();
             let pred = match edge.predicate {
                 Some(p) => formatter.format_expr_pub(p),
                 None => "true".to_string(),
@@ -591,9 +695,9 @@ mod tests {
         assert_eq!(hg.nodes.len(), 2);
         assert_eq!(hg.edges.len(), 1);
         // For inner joins TES == SES: one node on each side.
-        assert_eq!(hg.edges[0].left.len(), 1);
-        assert_eq!(hg.edges[0].right.len(), 1);
-        assert_ne!(hg.edges[0].left[0], hg.edges[0].right[0]);
+        assert_eq!(hg.edges[0].left.count_ones(), 1);
+        assert_eq!(hg.edges[0].right.count_ones(), 1);
+        assert_ne!(hg.edges[0].left, hg.edges[0].right);
         assert_eq!(hg.edges[0].join_type, HyperedgeJoinType::Inner);
     }
 
@@ -913,7 +1017,7 @@ mod tests {
         assert_eq!(inner_edge.join_type, HyperedgeJoinType::Inner);
         // Multi-relation predicate: both T and S nodes must be on the left side
         // (they come from the left subtree of the inner join).
-        assert!(inner_edge.left.len() >= 2 || inner_edge.right.len() >= 1);
+        assert!(inner_edge.left.count_ones() >= 2 || inner_edge.right.count_ones() >= 1);
     }
 
     #[test]

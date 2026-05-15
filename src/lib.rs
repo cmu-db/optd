@@ -24,12 +24,12 @@ pub use display::{
     DisplayNode, DisplayNodeRecord, DisplayPlan, DisplayProperties, DisplayValue,
 };
 pub use hypergraph::{
-    Hyperedge, HyperedgeJoinType, HypergraphNode, HypergraphOf, JoinGroupOf, NodeId,
-    QueryHypergraph, build_hypergraph,
+    Hyperedge, HyperedgeJoinType, HypergraphNode, HypergraphOf, JoinGroupOf, NodeId, NodeSet,
+    QueryHypergraph, build_hypergraph, nodeset_iter, nodeset_min, nodeset_singleton,
 };
 pub use optimize::{
-    Direction, OperatorRewrite, OperatorRewriteAdaptor, OptimizeError, OptimizeResult, Pass,
-    PassManager, PassResult, QueryPass, Rewrite, RewriteMap, SubqueryToJoin,
+    Direction, JoinOrdering, OperatorRewrite, OperatorRewriteAdaptor, OptimizeError,
+    OptimizeResult, Pass, PassManager, PassResult, QueryPass, Rewrite, RewriteMap, SubqueryToJoin,
 };
 
 /// An opaque reference to a relational operator in a [`QueryContext`].

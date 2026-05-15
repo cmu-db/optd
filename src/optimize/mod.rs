@@ -1,4 +1,6 @@
+pub mod join_ordering;
 pub mod subquery_to_join;
+pub use join_ordering::JoinOrdering;
 pub use subquery_to_join::SubqueryToJoin;
 
 use std::collections::{HashMap, HashSet};
