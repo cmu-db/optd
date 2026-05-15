@@ -19,12 +19,33 @@
 use arrow_schema::DataType;
 
 use crate::{
-    AnalysisContext, AvailableColumns, BinaryOp, Column, ColumnData, ExprData, Join, JoinType,
-    Operator, OperatorData, OptimizerContext, Relation, Selection,
-    optimize::{OptimizeResult, Pass, PassResult, QueryPass},
+    AnalysisContext, AvailableColumns, BinaryOp, Column, ColumnData, Expr, ExprData, Join,
+    JoinType, Operator, OperatorData, OptimizerContext, Selection,
+    optimize::{
+        OperatorRewrite, OperatorRewriteAdaptor, OptimizeResult, Pass, PassResult, QueryPass,
+        Rewrite,
+    },
 };
 
 pub struct SubqueryToJoin;
+struct SubqueryToJoinRule;
+
+enum ExprRewrite {
+    Keep,
+    Replace(Expr),
+}
+
+impl ExprRewrite {
+    fn apply_to(self, expr: &mut Expr) -> bool {
+        match self {
+            Self::Keep => false,
+            Self::Replace(replacement) => {
+                *expr = replacement;
+                true
+            }
+        }
+    }
+}
 
 impl Pass for SubqueryToJoin {
     fn name(&self) -> &'static str {
@@ -34,45 +55,21 @@ impl Pass for SubqueryToJoin {
 
 impl QueryPass for SubqueryToJoin {
     fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<PassResult> {
-        let Some(root) = ctx.query.root() else {
-            return Ok(PassResult::Unchanged);
-        };
+        OperatorRewriteAdaptor::new(SubqueryToJoinRule).run(ctx)
+    }
+}
 
-        // Collect operators in bottom-up order so inner subqueries are processed first.
-        let ops = collect_post_order(root, ctx);
-        let mut changed = false;
+impl Pass for SubqueryToJoinRule {
+    fn name(&self) -> &'static str {
+        "subquery_to_join"
+    }
+}
 
-        for op in ops {
-            let op = ctx.rewrites.resolve(op);
-            if let Some(replacement) = rewrite_operator(op, ctx) {
-                ctx.rewrites.replace(op, replacement);
-                changed = true;
-            }
-        }
-
-        // Patch every reachable operator's child pointers through the rewrite map.
-        // Collect from the original root (to reach parents of replaced nodes) and
-        // the resolved root (to reach newly-inserted nodes).
-        if changed {
-            let resolved = ctx.rewrites.resolve(root);
-            let mut ops = collect_post_order(root, ctx);
-            if resolved != root {
-                for op in collect_post_order(resolved, ctx) {
-                    if !ops.contains(&op) {
-                        ops.push(op);
-                    }
-                }
-            }
-            for op in ops {
-                patch_inputs(op, ctx);
-            }
-        }
-
-        Ok(if changed {
-            PassResult::Changed
-        } else {
-            PassResult::Unchanged
-        })
+impl OperatorRewrite for SubqueryToJoinRule {
+    fn rewrite(&mut self, op: Operator, ctx: &mut OptimizerContext) -> OptimizeResult<Rewrite> {
+        Ok(rewrite_operator(op, ctx)
+            .map(Rewrite::Replace)
+            .unwrap_or(Rewrite::Keep))
     }
 }
 
@@ -90,9 +87,7 @@ fn rewrite_operator(op: Operator, ctx: &mut OptimizerContext) -> Option<Operator
             let mut computations = map.computations.clone();
             let mut any = false;
             for (_, expr) in &mut computations {
-                if lift_subqueries_from_expr(*expr, &mut input, ctx) {
-                    any = true;
-                }
+                any |= lift_subqueries_from_expr(*expr, &mut input, ctx).apply_to(expr);
             }
             if any {
                 let new_op = OperatorData::Map(crate::Map {
@@ -124,8 +119,8 @@ fn rewrite_selection(
 
     // --- general case: lift subqueries from predicate into mark/single joins ---
     let mut input = sel.input;
-    let predicate = sel.predicate;
-    if lift_subqueries_from_expr(predicate, &mut input, ctx) {
+    let mut predicate = sel.predicate;
+    if lift_subqueries_from_expr(predicate, &mut input, ctx).apply_to(&mut predicate) {
         let new_op = OperatorData::Selection(Selection { predicate, input }).add(&mut ctx.query);
         Some(new_op)
     } else {
@@ -208,13 +203,13 @@ fn try_direct_semijoin(sel: &crate::Selection, ctx: &mut OptimizerContext) -> Op
 // ---------------------------------------------------------------------------
 
 /// Walks `expr` and for each subquery node found, inserts a join above `input`
-/// and rewrites the expression in-place to a `ColumnRef`. Returns `true` if
-/// any subquery was lifted.
+/// and returns a replacement expression handle. Existing expression payloads
+/// are left unchanged.
 fn lift_subqueries_from_expr(
-    expr: crate::Expr,
+    expr: Expr,
     input: &mut Operator,
     ctx: &mut OptimizerContext,
-) -> bool {
+) -> ExprRewrite {
     match ctx.query.expr(expr).clone() {
         ExprData::Exists { subquery, negated } => {
             let mark_col = fresh_mark_column("exists_mark", ctx);
@@ -240,8 +235,7 @@ fn lift_subqueries_from_expr(
             } else {
                 col_ref
             };
-            *ctx.query.expr_mut(expr) = ctx.query.expr(replacement).clone();
-            true
+            ExprRewrite::Replace(replacement)
         }
         ExprData::InSubquery {
             expr: lhs,
@@ -276,8 +270,7 @@ fn lift_subqueries_from_expr(
             } else {
                 col_ref
             };
-            *ctx.query.expr_mut(expr) = ctx.query.expr(replacement).clone();
-            true
+            ExprRewrite::Replace(replacement)
         }
         ExprData::ScalarSubquery { subquery } => {
             let scalar_col = single_available_column(subquery, ctx);
@@ -291,78 +284,126 @@ fn lift_subqueries_from_expr(
             .add(&mut ctx.query);
             *input = join;
 
-            *ctx.query.expr_mut(expr) = ExprData::ColumnRef(scalar_col);
-            true
+            ExprRewrite::Replace(ExprData::ColumnRef(scalar_col).add(&mut ctx.query))
         }
         // Recurse into compound expressions.
         ExprData::Unary { op, expr: inner } => {
-            if lift_subqueries_from_expr(inner, input, ctx) {
-                // inner was rewritten in-place; just re-use the handle.
-                *ctx.query.expr_mut(expr) = ExprData::Unary { op, expr: inner };
-                true
+            let mut inner = inner;
+            if lift_subqueries_from_expr(inner, input, ctx).apply_to(&mut inner) {
+                ExprRewrite::Replace(ExprData::Unary { op, expr: inner }.add(&mut ctx.query))
             } else {
-                false
+                ExprRewrite::Keep
             }
         }
         ExprData::Binary { op, left, right } => {
-            let l = lift_subqueries_from_expr(left, input, ctx);
-            let r = lift_subqueries_from_expr(right, input, ctx);
-            if l || r {
-                *ctx.query.expr_mut(expr) = ExprData::Binary { op, left, right };
+            let mut left = left;
+            let mut right = right;
+            let left_changed = lift_subqueries_from_expr(left, input, ctx).apply_to(&mut left);
+            let right_changed = lift_subqueries_from_expr(right, input, ctx).apply_to(&mut right);
+            let changed = left_changed || right_changed;
+            if changed {
+                ExprRewrite::Replace(ExprData::Binary { op, left, right }.add(&mut ctx.query))
+            } else {
+                ExprRewrite::Keep
             }
-            l || r
         }
         ExprData::Nary { op, exprs } => {
-            let mut any = false;
-            for &e in &exprs {
-                if lift_subqueries_from_expr(e, input, ctx) {
-                    any = true;
-                }
+            let mut changed = false;
+            let exprs = exprs
+                .into_iter()
+                .map(|mut e| {
+                    changed |= lift_subqueries_from_expr(e, input, ctx).apply_to(&mut e);
+                    e
+                })
+                .collect();
+            if changed {
+                ExprRewrite::Replace(ExprData::Nary { op, exprs }.add(&mut ctx.query))
+            } else {
+                ExprRewrite::Keep
             }
-            if any {
-                *ctx.query.expr_mut(expr) = ExprData::Nary { op, exprs };
-            }
-            any
         }
         ExprData::CaseWhen {
             when_then,
             else_expr,
         } => {
-            let mut any = false;
-            for (when, then) in &when_then {
-                any |= lift_subqueries_from_expr(*when, input, ctx);
-                any |= lift_subqueries_from_expr(*then, input, ctx);
+            let mut changed = false;
+            let when_then = when_then
+                .into_iter()
+                .map(|(mut when, mut then)| {
+                    changed |= lift_subqueries_from_expr(when, input, ctx).apply_to(&mut when);
+                    changed |= lift_subqueries_from_expr(then, input, ctx).apply_to(&mut then);
+                    (when, then)
+                })
+                .collect();
+            let else_expr = else_expr.map(|mut e| {
+                changed |= lift_subqueries_from_expr(e, input, ctx).apply_to(&mut e);
+                e
+            });
+            if changed {
+                ExprRewrite::Replace(
+                    ExprData::CaseWhen {
+                        when_then,
+                        else_expr,
+                    }
+                    .add(&mut ctx.query),
+                )
+            } else {
+                ExprRewrite::Keep
             }
-            if let Some(e) = else_expr {
-                any |= lift_subqueries_from_expr(e, input, ctx);
-            }
-            if any {
-                *ctx.query.expr_mut(expr) = ExprData::CaseWhen {
-                    when_then,
-                    else_expr,
-                };
-            }
-            any
         }
         ExprData::ScalarFunction { function, args } => {
-            let mut any = false;
-            for &a in &args {
-                any |= lift_subqueries_from_expr(a, input, ctx);
+            let mut changed = false;
+            let args = args
+                .into_iter()
+                .map(|mut arg| {
+                    changed |= lift_subqueries_from_expr(arg, input, ctx).apply_to(&mut arg);
+                    arg
+                })
+                .collect();
+            if changed {
+                ExprRewrite::Replace(
+                    ExprData::ScalarFunction { function, args }.add(&mut ctx.query),
+                )
+            } else {
+                ExprRewrite::Keep
             }
-            if any {
-                *ctx.query.expr_mut(expr) = ExprData::ScalarFunction { function, args };
-            }
-            any
         }
         ExprData::Cast { expr: inner, ty } => {
-            if lift_subqueries_from_expr(inner, input, ctx) {
-                *ctx.query.expr_mut(expr) = ExprData::Cast { expr: inner, ty };
-                true
+            let mut inner = inner;
+            if lift_subqueries_from_expr(inner, input, ctx).apply_to(&mut inner) {
+                ExprRewrite::Replace(ExprData::Cast { expr: inner, ty }.add(&mut ctx.query))
             } else {
-                false
+                ExprRewrite::Keep
             }
         }
-        ExprData::Literal(_) | ExprData::ColumnRef(_) | ExprData::Like { .. } => false,
+        ExprData::Like {
+            negated,
+            expr: like_expr,
+            pattern,
+            case_insensitive,
+        } => {
+            let mut like_expr = like_expr;
+            let mut pattern = pattern;
+            let expr_changed =
+                lift_subqueries_from_expr(like_expr, input, ctx).apply_to(&mut like_expr);
+            let pattern_changed =
+                lift_subqueries_from_expr(pattern, input, ctx).apply_to(&mut pattern);
+            let changed = expr_changed || pattern_changed;
+            if changed {
+                ExprRewrite::Replace(
+                    ExprData::Like {
+                        negated,
+                        expr: like_expr,
+                        pattern,
+                        case_insensitive,
+                    }
+                    .add(&mut ctx.query),
+                )
+            } else {
+                ExprRewrite::Keep
+            }
+        }
+        ExprData::Literal(_) | ExprData::ColumnRef(_) => ExprRewrite::Keep,
     }
 }
 
@@ -388,80 +429,6 @@ fn single_available_column(subquery: Operator, ctx: &mut OptimizerContext) -> Co
 /// Allocates a fresh boolean mark column.
 fn fresh_mark_column(name: &str, ctx: &mut OptimizerContext) -> Column {
     ColumnData::new(name, DataType::Boolean).add(&mut ctx.query)
-}
-
-/// Rewrites all child operator pointers in `op` through the rewrite map.
-fn patch_inputs(op: Operator, ctx: &mut OptimizerContext) {
-    let data = ctx.query.operator(op).clone();
-    let patched = match data {
-        OperatorData::Selection(mut s) => {
-            s.input = ctx.rewrites.resolve(s.input);
-            OperatorData::Selection(s)
-        }
-        OperatorData::Map(mut m) => {
-            m.input = ctx.rewrites.resolve(m.input);
-            OperatorData::Map(m)
-        }
-        OperatorData::Join(mut j) => {
-            j.outer = ctx.rewrites.resolve(j.outer);
-            j.inner = ctx.rewrites.resolve(j.inner);
-            OperatorData::Join(j)
-        }
-        OperatorData::CrossProduct(mut cp) => {
-            cp.outer = ctx.rewrites.resolve(cp.outer);
-            cp.inner = ctx.rewrites.resolve(cp.inner);
-            OperatorData::CrossProduct(cp)
-        }
-        OperatorData::Sort(mut s) => {
-            s.input = ctx.rewrites.resolve(s.input);
-            OperatorData::Sort(s)
-        }
-        OperatorData::Limit(mut l) => {
-            l.input = ctx.rewrites.resolve(l.input);
-            OperatorData::Limit(l)
-        }
-        OperatorData::Aggregation(mut a) => {
-            a.input = ctx.rewrites.resolve(a.input);
-            OperatorData::Aggregation(a)
-        }
-        OperatorData::Projection(mut p) => {
-            p.input = ctx.rewrites.resolve(p.input);
-            OperatorData::Projection(p)
-        }
-        OperatorData::Output(mut o) => {
-            o.input = ctx.rewrites.resolve(o.input);
-            OperatorData::Output(o)
-        }
-        OperatorData::Rename(mut r) => {
-            r.input = ctx.rewrites.resolve(r.input);
-            OperatorData::Rename(r)
-        }
-        OperatorData::Scan(_) | OperatorData::TableFunction(_) | OperatorData::SingleRow => return,
-    };
-    *ctx.query.operator_mut(op) = patched;
-}
-
-fn collect_post_order(root: Operator, ctx: &OptimizerContext) -> Vec<Operator> {
-    let mut visited = std::collections::HashSet::new();
-    let mut result = Vec::new();
-    post_order(root, ctx, &mut visited, &mut result);
-    result
-}
-
-fn post_order(
-    op: Operator,
-    ctx: &OptimizerContext,
-    visited: &mut std::collections::HashSet<Operator>,
-    result: &mut Vec<Operator>,
-) {
-    let op = ctx.rewrites.resolve(op);
-    if !visited.insert(op) {
-        return;
-    }
-    for child in op.get(&ctx.query).inputs() {
-        post_order(child, ctx, visited, result);
-    }
-    result.push(op);
 }
 
 // ---------------------------------------------------------------------------
@@ -664,6 +631,7 @@ mod tests {
         // The computation expr should now be a ColumnRef to the mark column.
         let (_, expr) = m.computations[0];
         assert!(matches!(ctx.expr(expr), ExprData::ColumnRef(_)));
+        assert!(matches!(ctx.expr(exists), ExprData::Exists { .. }));
     }
 
     /// ScalarSubquery → Single join; expression replaced with ColumnRef.

@@ -3,7 +3,7 @@ pub use subquery_to_join::SubqueryToJoin;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::{Operator, OptimizerContext, QueryContext, Relation};
+use crate::{Operator, OperatorData, OptimizerContext, QueryContext, Relation};
 
 /// Tracks append-only operator replacements for one pass invocation.
 ///
@@ -138,12 +138,29 @@ impl<R: OperatorRewrite> QueryPass for OperatorRewriteAdaptor<R> {
 
         let mut changed = false;
         for op in ops {
-            let resolved = ctx.rewrites.resolve(op);
-            match self.rule.rewrite(resolved, ctx)? {
+            let mut current = ctx.rewrites.resolve(op);
+            if R::DIRECTION == Direction::BottomUp {
+                if let Some(rebuilt) = rebuild_with_resolved_inputs(current, ctx) {
+                    ctx.rewrites.replace(current, rebuilt);
+                    current = rebuilt;
+                    changed = true;
+                }
+            }
+
+            match self.rule.rewrite(current, ctx)? {
                 Rewrite::Keep => {}
                 Rewrite::Replace(replacement) => {
-                    ctx.rewrites.replace(resolved, replacement);
+                    ctx.rewrites.replace(current, replacement);
                     changed = true;
+                }
+            }
+        }
+
+        if changed && R::DIRECTION == Direction::TopDown {
+            for op in collect_post_order(root, &ctx.query, &ctx.rewrites) {
+                let current = ctx.rewrites.resolve(op);
+                if let Some(rebuilt) = rebuild_with_resolved_inputs(current, ctx) {
+                    ctx.rewrites.replace(current, rebuilt);
                 }
             }
         }
@@ -153,6 +170,84 @@ impl<R: OperatorRewrite> QueryPass for OperatorRewriteAdaptor<R> {
         } else {
             PassResult::Unchanged
         })
+    }
+}
+
+fn rebuild_with_resolved_inputs(op: Operator, ctx: &mut OptimizerContext) -> Option<Operator> {
+    let data = ctx.query.operator(op).clone();
+    let (rebuilt, changed) = resolve_operator_inputs(data, ctx);
+    changed.then(|| rebuilt.add(&mut ctx.query))
+}
+
+fn resolve_operator_inputs(data: OperatorData, ctx: &OptimizerContext) -> (OperatorData, bool) {
+    match data {
+        OperatorData::Selection(mut s) => {
+            let input = ctx.rewrites.resolve(s.input);
+            let changed = input != s.input;
+            s.input = input;
+            (OperatorData::Selection(s), changed)
+        }
+        OperatorData::Map(mut m) => {
+            let input = ctx.rewrites.resolve(m.input);
+            let changed = input != m.input;
+            m.input = input;
+            (OperatorData::Map(m), changed)
+        }
+        OperatorData::Join(mut j) => {
+            let outer = ctx.rewrites.resolve(j.outer);
+            let inner = ctx.rewrites.resolve(j.inner);
+            let changed = outer != j.outer || inner != j.inner;
+            j.outer = outer;
+            j.inner = inner;
+            (OperatorData::Join(j), changed)
+        }
+        OperatorData::CrossProduct(mut cp) => {
+            let outer = ctx.rewrites.resolve(cp.outer);
+            let inner = ctx.rewrites.resolve(cp.inner);
+            let changed = outer != cp.outer || inner != cp.inner;
+            cp.outer = outer;
+            cp.inner = inner;
+            (OperatorData::CrossProduct(cp), changed)
+        }
+        OperatorData::Sort(mut s) => {
+            let input = ctx.rewrites.resolve(s.input);
+            let changed = input != s.input;
+            s.input = input;
+            (OperatorData::Sort(s), changed)
+        }
+        OperatorData::Limit(mut l) => {
+            let input = ctx.rewrites.resolve(l.input);
+            let changed = input != l.input;
+            l.input = input;
+            (OperatorData::Limit(l), changed)
+        }
+        OperatorData::Aggregation(mut a) => {
+            let input = ctx.rewrites.resolve(a.input);
+            let changed = input != a.input;
+            a.input = input;
+            (OperatorData::Aggregation(a), changed)
+        }
+        OperatorData::Projection(mut p) => {
+            let input = ctx.rewrites.resolve(p.input);
+            let changed = input != p.input;
+            p.input = input;
+            (OperatorData::Projection(p), changed)
+        }
+        OperatorData::Output(mut o) => {
+            let input = ctx.rewrites.resolve(o.input);
+            let changed = input != o.input;
+            o.input = input;
+            (OperatorData::Output(o), changed)
+        }
+        OperatorData::Rename(mut r) => {
+            let input = ctx.rewrites.resolve(r.input);
+            let changed = input != r.input;
+            r.input = input;
+            (OperatorData::Rename(r), changed)
+        }
+        data @ (OperatorData::Scan(_)
+        | OperatorData::TableFunction(_)
+        | OperatorData::SingleRow) => (data, false),
     }
 }
 
@@ -341,6 +436,114 @@ mod tests {
 
         // Root should have been updated to the replacement.
         assert_ne!(opt_ctx.query.root(), Some(scan));
+    }
+
+    #[test]
+    fn operator_rewrite_adaptor_rebuilds_parent_with_rewritten_child() {
+        struct ReplaceScan {
+            replacement: Operator,
+        }
+
+        impl Pass for ReplaceScan {
+            fn name(&self) -> &'static str {
+                "replace_scan"
+            }
+        }
+
+        impl OperatorRewrite for ReplaceScan {
+            fn rewrite(
+                &mut self,
+                op: Operator,
+                ctx: &mut OptimizerContext,
+            ) -> OptimizeResult<Rewrite> {
+                Ok(match ctx.query.operator(op) {
+                    OperatorData::Scan(_) => Rewrite::Replace(self.replacement),
+                    _ => Rewrite::Keep,
+                })
+            }
+        }
+
+        let mut ctx = QueryContext::new();
+        let col = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("old"),
+            columns: vec![col],
+        })
+        .add(&mut ctx);
+        let replacement = OperatorData::Scan(Scan {
+            table: TableRef::bare("new"),
+            columns: vec![col],
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: scan }).add(&mut ctx);
+        ctx.set_root(output);
+
+        let mut opt_ctx = OptimizerContext::new(ctx);
+        let mut pass = OperatorRewriteAdaptor::new(ReplaceScan { replacement });
+
+        assert_eq!(pass.run(&mut opt_ctx).unwrap(), PassResult::Changed);
+
+        let root = opt_ctx.rewrites.resolve(output);
+        assert_ne!(root, output);
+        let OperatorData::Output(rebuilt) = opt_ctx.query.operator(root) else {
+            panic!("expected rebuilt output");
+        };
+        assert_eq!(rebuilt.input, replacement);
+    }
+
+    #[test]
+    fn top_down_operator_rewrite_adaptor_rebuilds_parent_after_child_rewrite() {
+        struct ReplaceScanTopDown {
+            replacement: Operator,
+        }
+
+        impl Pass for ReplaceScanTopDown {
+            fn name(&self) -> &'static str {
+                "replace_scan_top_down"
+            }
+        }
+
+        impl OperatorRewrite for ReplaceScanTopDown {
+            const DIRECTION: Direction = Direction::TopDown;
+
+            fn rewrite(
+                &mut self,
+                op: Operator,
+                ctx: &mut OptimizerContext,
+            ) -> OptimizeResult<Rewrite> {
+                Ok(match ctx.query.operator(op) {
+                    OperatorData::Scan(_) => Rewrite::Replace(self.replacement),
+                    _ => Rewrite::Keep,
+                })
+            }
+        }
+
+        let mut ctx = QueryContext::new();
+        let col = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("old"),
+            columns: vec![col],
+        })
+        .add(&mut ctx);
+        let replacement = OperatorData::Scan(Scan {
+            table: TableRef::bare("new"),
+            columns: vec![col],
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: scan }).add(&mut ctx);
+        ctx.set_root(output);
+
+        let mut opt_ctx = OptimizerContext::new(ctx);
+        let mut pass = OperatorRewriteAdaptor::new(ReplaceScanTopDown { replacement });
+
+        assert_eq!(pass.run(&mut opt_ctx).unwrap(), PassResult::Changed);
+
+        let root = opt_ctx.rewrites.resolve(output);
+        assert_ne!(root, output);
+        let OperatorData::Output(rebuilt) = opt_ctx.query.operator(root) else {
+            panic!("expected rebuilt output");
+        };
+        assert_eq!(rebuilt.input, replacement);
     }
 
     // --- PassManager tests ---
