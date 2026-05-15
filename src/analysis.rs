@@ -321,6 +321,7 @@ fn directly_created_columns(operator: &OperatorData) -> Vec<Column> {
         | OperatorData::Limit(_)
         | OperatorData::Projection(_)
         | OperatorData::Output(_) => Vec::new(),
+        OperatorData::Rename(r) => r.defs.iter().map(|(renamed, _)| *renamed).collect(),
     }
 }
 
@@ -371,6 +372,7 @@ fn directly_used_columns(
         OperatorData::Output(data) => {
             columns.extend(analyses.get::<AvailableColumns>(ctx, data.input)?);
         }
+        OperatorData::Rename(_) => {} // no expressions — column mapping only
     }
 
     Ok(columns)
@@ -445,6 +447,12 @@ fn input_available_columns(
             extend_unique_columns(
                 &mut columns,
                 analyses.get::<AvailableColumns>(ctx, data.inner)?,
+            );
+        }
+        OperatorData::Rename(r) => {
+            extend_unique_columns(
+                &mut columns,
+                analyses.get::<AvailableColumns>(ctx, r.input)?,
             );
         }
     }
@@ -749,6 +757,18 @@ fn output_column_nullability(
         OperatorData::Sort(data) => analyses.get::<ColumnNullability>(ctx, data.input),
         OperatorData::Limit(data) => analyses.get::<ColumnNullability>(ctx, data.input),
         OperatorData::Output(data) => analyses.get::<ColumnNullability>(ctx, data.input),
+        OperatorData::Rename(r) => {
+            let input_nullability = analyses.get::<ColumnNullability>(ctx, r.input)?;
+            Ok(r.defs
+                .iter()
+                .map(|(renamed, original)| {
+                    (
+                        *renamed,
+                        lookup_nullability(&input_nullability, *original).unwrap_or(true),
+                    )
+                })
+                .collect())
+        }
     }
 }
 
@@ -1026,6 +1046,10 @@ impl CachedAnalysis for AvailableColumns {
             OperatorData::Sort(data) => analyses.get::<AvailableColumns>(ctx, data.input),
             OperatorData::Limit(data) => analyses.get::<AvailableColumns>(ctx, data.input),
             OperatorData::Output(data) => analyses.get::<AvailableColumns>(ctx, data.input),
+            OperatorData::Rename(r) => {
+                analyses.get::<AvailableColumns>(ctx, r.input)?;
+                Ok(r.defs.iter().map(|(renamed, _)| *renamed).collect())
+            }
         }
     }
 }

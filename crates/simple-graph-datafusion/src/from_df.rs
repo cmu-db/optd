@@ -101,7 +101,7 @@ impl BindingContext {
             }
         }
 
-        // Unqualified fallback — only if unambiguous.
+        // Unqualified fallback — only if unambiguous (or all matches are the same handle).
         let matches: Vec<Column> = self
             .scopes
             .iter()
@@ -111,8 +111,10 @@ impl BindingContext {
             .map(|(_, c)| *c)
             .collect();
 
-        match matches.len() {
-            1 => Ok(matches[0]),
+        // Dedup: if all matches resolve to the same Column handle, it's unambiguous.
+        let unique: std::collections::HashSet<Column> = matches.iter().copied().collect();
+        match unique.len() {
+            1 => Ok(*unique.iter().next().unwrap()),
             0 => Err(FromDFError::Schema(format!(
                 "column not found: {}{}",
                 qualifier.map(|q| format!("{q}.")).unwrap_or_default(),
@@ -120,7 +122,7 @@ impl BindingContext {
             ))),
             _ => Err(FromDFError::Schema(format!(
                 "ambiguous column reference '{name}' matches {} columns",
-                matches.len()
+                unique.len()
             ))),
         }
     }
@@ -154,8 +156,41 @@ fn convert_plan(
         LogicalPlan::Limit(limit) => convert_limit(limit, ctx, bindings),
         LogicalPlan::Join(join) => convert_join(join, ctx, bindings),
         LogicalPlan::SubqueryAlias(alias) => {
-            // Transparent — pass through, but re-qualify columns with the alias.
-            convert_plan(&alias.input, ctx, bindings)
+            let depth = bindings.scopes.len();
+            let input = convert_plan(&alias.input, ctx, bindings)?;
+            let alias_name = alias.alias.table().to_string();
+            // Build defs: for each column in the alias schema, create a renamed handle.
+            let schema = alias.schema.as_ref();
+            let mut defs = Vec::new();
+            for i in 0..schema.fields().len() {
+                let (_, field) = schema.qualified_field(i);
+                let original = bindings.resolve(None, field.name()).unwrap_or_else(|_| {
+                    // Fall back: find by name in scopes added since depth.
+                    bindings.scopes[depth..]
+                        .iter()
+                        .flat_map(|s| s.bindings.iter())
+                        .find(|((_, n), _)| n == field.name())
+                        .map(|(_, c)| *c)
+                        .unwrap_or_else(|| {
+                            ColumnData::new(field.name().clone(), field.data_type().clone())
+                                .add(ctx)
+                        })
+                });
+                let renamed = ColumnData::with_qualifier(
+                    field.name().clone(),
+                    field.data_type().clone(),
+                    alias_name.clone(),
+                )
+                .add(ctx);
+                bindings.bind(Some(alias_name.clone()), field.name().clone(), renamed);
+                defs.push((renamed, original));
+            }
+            Ok(OperatorData::Rename(simple_graph::Rename {
+                alias: alias_name,
+                defs,
+                input,
+            })
+            .add(ctx))
         }
         other => Err(FromDFError::Unsupported(format!(
             "{}",
@@ -176,8 +211,17 @@ fn convert_scan(
     let columns: Vec<Column> = (0..schema.fields().len())
         .map(|i| {
             let (qualifier, field) = schema.qualified_field(i);
-            let col = ColumnData::new(field.name().clone(), field.data_type().clone()).add(ctx);
             let q = qualifier.map(|r| r.to_string());
+            let col = if let Some(ref q_str) = q {
+                ColumnData::with_qualifier(
+                    field.name().clone(),
+                    field.data_type().clone(),
+                    q_str.clone(),
+                )
+                .add(ctx)
+            } else {
+                ColumnData::new(field.name().clone(), field.data_type().clone()).add(ctx)
+            };
             bindings.bind(q, field.name().clone(), col);
             col
         })
@@ -477,6 +521,11 @@ fn convert_expr(
 ) -> FromDFResult<simple_graph::Expr> {
     let data = match expr {
         DFExpr::Column(col) => {
+            let c = bindings.resolve(col.relation.as_ref().map(|r| r.table()), &col.name)?;
+            ExprData::ColumnRef(c)
+        }
+        // Correlated outer reference — resolve the same way as a regular column.
+        DFExpr::OuterReferenceColumn(_, col) => {
             let c = bindings.resolve(col.relation.as_ref().map(|r| r.table()), &col.name)?;
             ExprData::ColumnRef(c)
         }

@@ -209,6 +209,7 @@ impl<'a> Exporter<'a> {
             OperatorData::Sort(sort) => self.export_sort(sort),
             OperatorData::Limit(limit) => self.export_limit(limit),
             OperatorData::Aggregation(aggregation) => self.export_aggregation(aggregation),
+            OperatorData::Rename(r) => self.export_operator(r.input),
         }
     }
 

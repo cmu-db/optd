@@ -267,6 +267,7 @@ fn collect_selection_predicates(
             collect_selection_predicates(query, join.outer, predicates);
             collect_selection_predicates(query, join.inner, predicates);
         }
+        OperatorData::Rename(r) => collect_selection_predicates(query, r.input, predicates),
     }
 }
 
@@ -325,6 +326,9 @@ fn collect_unique_selection_predicates(
             collect_expr_subquery_selections(query, join.on, visited, predicates);
             collect_unique_selection_predicates(query, join.outer, visited, predicates);
             collect_unique_selection_predicates(query, join.inner, visited, predicates);
+        }
+        OperatorData::Rename(r) => {
+            collect_unique_selection_predicates(query, r.input, visited, predicates);
         }
     }
 }

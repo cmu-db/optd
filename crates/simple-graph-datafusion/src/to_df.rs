@@ -88,8 +88,75 @@ async fn collect_tables(
             }
         }
         stack.extend(op.get(ctx).inputs());
+        // Also walk into subquery operators embedded in expressions.
+        stack.extend(collect_subquery_operators(op, ctx));
     }
     Ok(map)
+}
+
+/// Collects subquery `Operator` handles embedded in expressions of `op`.
+fn collect_subquery_operators(op: Operator, ctx: &QueryContext) -> Vec<Operator> {
+    let mut result = Vec::new();
+    collect_expr_subqueries_for_operator(op, ctx, &mut result);
+    result
+}
+
+fn collect_expr_subqueries_for_operator(op: Operator, ctx: &QueryContext, out: &mut Vec<Operator>) {
+    let collect_expr = |expr: simple_graph::Expr, out: &mut Vec<Operator>| {
+        collect_expr_subqueries(expr, ctx, out);
+    };
+    match op.get(ctx) {
+        OperatorData::Selection(s) => collect_expr(s.predicate, out),
+        OperatorData::Map(m) => {
+            for (_, e) in &m.computations {
+                collect_expr(*e, out);
+            }
+        }
+        OperatorData::Join(j) => collect_expr(j.on, out),
+        OperatorData::Aggregation(a) => {
+            for e in &a.keys {
+                collect_expr(*e, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_expr_subqueries(expr: simple_graph::Expr, ctx: &QueryContext, out: &mut Vec<Operator>) {
+    match expr.get(ctx) {
+        ExprData::Exists { subquery, .. }
+        | ExprData::ScalarSubquery { subquery }
+        | ExprData::InSubquery { subquery, .. } => out.push(*subquery),
+        ExprData::Unary { expr, .. } | ExprData::Cast { expr, .. } => {
+            collect_expr_subqueries(*expr, ctx, out);
+        }
+        ExprData::Binary { left, right, .. } => {
+            collect_expr_subqueries(*left, ctx, out);
+            collect_expr_subqueries(*right, ctx, out);
+        }
+        ExprData::Nary { exprs, .. } | ExprData::ScalarFunction { args: exprs, .. } => {
+            for e in exprs {
+                collect_expr_subqueries(*e, ctx, out);
+            }
+        }
+        ExprData::Like { expr, pattern, .. } => {
+            collect_expr_subqueries(*expr, ctx, out);
+            collect_expr_subqueries(*pattern, ctx, out);
+        }
+        ExprData::CaseWhen {
+            when_then,
+            else_expr,
+        } => {
+            for (w, t) in when_then {
+                collect_expr_subqueries(*w, ctx, out);
+                collect_expr_subqueries(*t, ctx, out);
+            }
+            if let Some(e) = else_expr {
+                collect_expr_subqueries(*e, ctx, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn convert_operator(
@@ -121,7 +188,13 @@ fn convert_operator(
             let exprs: Vec<DFExpr> = proj
                 .columns
                 .iter()
-                .map(|col| DFExpr::Column(DFColumn::new_unqualified(&ctx.column(*col).name)))
+                .map(|col| {
+                    let cd = ctx.column(*col);
+                    match &cd.qualifier {
+                        Some(q) => DFExpr::Column(DFColumn::new(Some(q.as_str()), &cd.name)),
+                        None => DFExpr::Column(DFColumn::new_unqualified(&cd.name)),
+                    }
+                })
                 .collect();
             Ok(LogicalPlanBuilder::from(input).project(exprs)?.build()?)
         }
@@ -202,6 +275,13 @@ fn convert_operator(
 
         OperatorData::Output(out) => convert_operator(out.input, ctx, tables, session),
 
+        OperatorData::Rename(r) => {
+            let input = convert_operator(r.input, ctx, tables, session)?;
+            Ok(LogicalPlanBuilder::from(input)
+                .alias(r.alias.as_str())?
+                .build()?)
+        }
+
         OperatorData::TableFunction(_) => Err(ToDFError::Unsupported("TableFunction".into())),
     }
 }
@@ -213,9 +293,13 @@ fn convert_expr(
     session: &SessionContext,
 ) -> ToDFResult<DFExpr> {
     match expr.get(ctx) {
-        ExprData::ColumnRef(col) => Ok(DFExpr::Column(DFColumn::new_unqualified(
-            &ctx.column(*col).name,
-        ))),
+        ExprData::ColumnRef(col) => {
+            let cd = ctx.column(*col);
+            Ok(match &cd.qualifier {
+                Some(q) => DFExpr::Column(DFColumn::new(Some(q.as_str()), &cd.name)),
+                None => DFExpr::Column(DFColumn::new_unqualified(&cd.name)),
+            })
+        }
         ExprData::Literal(scalar) => Ok(DFExpr::Literal(convert_scalar(scalar)?, None)),
         ExprData::Unary { op, expr } => {
             let inner = convert_expr(*expr, ctx, tables, session)?;

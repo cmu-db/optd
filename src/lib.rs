@@ -76,6 +76,9 @@ pub enum OperatorData {
     Projection(Projection),
     /// Marks the final query output.
     Output(Output),
+    /// Renames the output of its input under a new qualifier.
+    /// Corresponds to SQL `(subquery) AS alias` or `table AS alias`.
+    Rename(Rename),
 }
 
 impl OperatorData {
@@ -220,6 +223,18 @@ pub struct Output {
     pub input: Operator,
 }
 
+/// Renames the output of its input under a new qualifier.
+///
+/// `defs` maps each renamed column handle to the original column it replaces:
+/// `(renamed, original)`. The `alias` is the new table qualifier.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Rename {
+    pub alias: String,
+    pub defs: Vec<(Column, Column)>,
+    pub input: Operator,
+}
+
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum JoinType {
@@ -274,14 +289,30 @@ impl std::fmt::Display for Column {
 pub struct ColumnData {
     pub name: String,
     pub ty: DataType,
+    /// Optional table qualifier (e.g. `"customer"` for `customer.c_custkey`).
+    pub qualifier: Option<String>,
 }
 
 impl ColumnData {
-    /// Creates column metadata.
+    /// Creates column metadata without a qualifier.
     pub fn new(name: impl Into<String>, ty: DataType) -> Self {
         Self {
             name: name.into(),
             ty,
+            qualifier: None,
+        }
+    }
+
+    /// Creates column metadata with a qualifier.
+    pub fn with_qualifier(
+        name: impl Into<String>,
+        ty: DataType,
+        qualifier: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            ty,
+            qualifier: Some(qualifier.into()),
         }
     }
 
@@ -1348,7 +1379,7 @@ impl<'a> QueryFormatter<'a> {
                     self.collect_aggregate_subquery_inputs(aggregate, &mut inputs);
                 }
             }
-            OperatorData::Projection(_) | OperatorData::Output(_) => {}
+            OperatorData::Projection(_) | OperatorData::Output(_) | OperatorData::Rename(_) => {}
         }
         inputs
     }
@@ -1493,6 +1524,7 @@ impl Relation for OperatorData {
             Self::Aggregation(operator) => operator.inputs(),
             Self::Projection(operator) => operator.inputs(),
             Self::Output(operator) => operator.inputs(),
+            Self::Rename(operator) => operator.inputs(),
         }
     }
 }
@@ -1511,6 +1543,7 @@ impl OperatorDisplayFormat for OperatorData {
             Self::Aggregation(operator) => operator.format(formatter),
             Self::Projection(operator) => operator.format(formatter),
             Self::Output(operator) => operator.format(formatter),
+            Self::Rename(operator) => operator.format(formatter),
         }
     }
 }
@@ -1777,6 +1810,35 @@ impl OperatorDisplayFormat for Output {
             kind: "output".to_string(),
             title: "= Output".to_string(),
             fields: Vec::new(),
+            inputs: vec![OperatorDisplayInput {
+                name: "input".to_string(),
+                target: self.input,
+            }],
+        }
+    }
+}
+
+impl Relation for Rename {
+    fn inputs(&self) -> Vec<Operator> {
+        vec![self.input]
+    }
+}
+
+impl OperatorDisplayFormat for Rename {
+    fn format(&self, formatter: &QueryFormatter<'_>) -> OperatorDisplay {
+        OperatorDisplay {
+            kind: "rename".to_string(),
+            title: format!("ρ Rename({})", self.alias),
+            fields: vec![display_list_field(
+                "defs",
+                self.defs.iter().map(|(renamed, original)| {
+                    format!(
+                        "{} ← {}",
+                        formatter.format_column_name(*renamed),
+                        formatter.format_column_name(*original)
+                    )
+                }),
+            )],
             inputs: vec![OperatorDisplayInput {
                 name: "input".to_string(),
                 target: self.input,
