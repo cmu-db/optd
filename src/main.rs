@@ -1,10 +1,11 @@
 use arrow_schema::DataType;
 use simple_graph::{
-    AggregateExpr, AggregateFunction, Aggregation, BinaryOp, BoxDrawingRenderer, BoxRendererConfig,
-    ColorMode, ColumnData, ExprData, FreeColumns, Join, JoinType, Map, NaryOp, OperatorData,
-    OptimizerContext, Output, PassManager, Projection, QueryContext, QueryFormatConfig,
-    QueryFormatter, ScalarFunction, ScalarValue, Scan, Selection, SubqueryToJoin, TableFunction,
-    TableFunctionDef, TableRef, UnaryOp, tpch::tpch_query,
+    AggregateExpr, AggregateFunction, Aggregation, AnalysisContext, BinaryOp, BoxDrawingRenderer,
+    BoxRendererConfig, ColorMode, ColumnData, ExprData, FreeColumns, Join, JoinOrdering, JoinType,
+    Map, NaryOp, OperatorData, OptimizerContext, Output, PassManager, Projection, QueryContext,
+    QueryFormatConfig, QueryFormatter, ScalarFunction, ScalarValue, Scan, Selection,
+    SubqueryToJoin, TableFunction, TableFunctionDef, TableRef, UnaryOp, build_hypergraph,
+    tpch::tpch_query,
 };
 
 fn main() {
@@ -31,6 +32,7 @@ fn main() {
         let mut opt = OptimizerContext::new(query);
         let mut pm = PassManager::new(10);
         pm.add_pass(SubqueryToJoin);
+        pm.add_pass(JoinOrdering::new());
         pm.run(&mut opt).unwrap();
         if let Some(root) = opt.query.root() {
             let resolved = opt.rewrites.resolve(root);
@@ -38,6 +40,14 @@ fn main() {
         }
         let query = opt.into_query();
         println!("=== initial ===\n{initial}");
+        // Print hypergraph for each join group root.
+        if let Some(root) = query.root() {
+            let mut analyses = AnalysisContext::new();
+            let hg = build_hypergraph(&query, &mut analyses, root);
+            if !hg.nodes.is_empty() {
+                println!("=== hypergraph ===\n{}", hg.pretty(&query));
+            }
+        }
         println!("=== optimized ===");
         query
     } else {

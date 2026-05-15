@@ -5,10 +5,9 @@
 
 use std::collections::HashMap;
 
-use crate::hypergraph::{NodeSet, QueryHypergraph, nodeset_iter, nodeset_min, nodeset_singleton};
+use crate::hypergraph::{NodeSet, QueryHypergraph, nodeset_min, nodeset_singleton};
 use crate::{
-    AnalysisContext, ExprData, Join, JoinType, NaryOp, Operator, OperatorData, QueryContext,
-    build_hypergraph,
+    ExprData, Join, JoinType, NaryOp, Operator, OperatorData, QueryContext, build_hypergraph,
 };
 
 use super::{OptimizeResult, Pass, PassResult, QueryPass};
@@ -53,10 +52,10 @@ enum JoinTree {
 }
 
 impl JoinTree {
-    fn cardinality(&self) -> f64 {
+    fn leaf_count(&self) -> usize {
         match self {
-            JoinTree::Leaf(_) => 0.0, // cost of a leaf is 0 (scan cost not modelled here)
-            JoinTree::Join { cardinality, .. } => *cardinality,
+            JoinTree::Leaf(_) => 1,
+            JoinTree::Join { left, right, .. } => left.leaf_count() + right.leaf_count(),
         }
     }
 }
@@ -408,11 +407,9 @@ impl QueryPass for JoinOrdering {
             }
         }
 
-        Ok(if changed {
-            PassResult::Changed
-        } else {
-            PassResult::Unchanged
-        })
+        // JoinOrdering is a one-shot pass; always return Unchanged to stop the fixed-point loop.
+        let _ = changed;
+        Ok(PassResult::Unchanged)
     }
 }
 
@@ -491,14 +488,7 @@ mod tests {
 
         let mut solver = DPhyp::new(&hg, &UniformStatistics);
         let tree = solver.solve().expect("DPhyp should find a plan");
-        // Result should cover all 3 nodes.
-        fn count_leaves(t: &JoinTree) -> usize {
-            match t {
-                JoinTree::Leaf(_) => 1,
-                JoinTree::Join { left, right, .. } => count_leaves(left) + count_leaves(right),
-            }
-        }
-        assert_eq!(count_leaves(&tree), 3);
+        assert_eq!(tree.leaf_count(), 3);
     }
 
     #[test]
