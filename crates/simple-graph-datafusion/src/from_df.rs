@@ -456,6 +456,20 @@ fn combine_predicates(
     }
 }
 
+/// Converts a subquery `LogicalPlan` while preserving outer scope visibility
+/// for correlated references. Saves the current scope depth and restores it
+/// after conversion so inner columns don't leak into the outer context.
+fn convert_subquery_plan(
+    plan: &LogicalPlan,
+    ctx: &mut QueryContext,
+    bindings: &mut BindingContext,
+) -> FromDFResult<Operator> {
+    let depth = bindings.scopes.len();
+    let result = convert_plan(plan, ctx, bindings);
+    bindings.scopes.truncate(depth);
+    result
+}
+
 fn convert_expr(
     expr: &DFExpr,
     ctx: &mut QueryContext,
@@ -514,6 +528,26 @@ fn convert_expr(
         DFExpr::Alias(alias) => {
             // Strip the alias — simple-graph doesn't have named expressions.
             return convert_expr(&alias.expr, ctx, bindings);
+        }
+        DFExpr::Exists(exists) => {
+            let subquery = convert_subquery_plan(&exists.subquery.subquery, ctx, bindings)?;
+            ExprData::Exists {
+                subquery,
+                negated: exists.negated,
+            }
+        }
+        DFExpr::InSubquery(insub) => {
+            let expr = convert_expr(&insub.expr, ctx, bindings)?;
+            let subquery = convert_subquery_plan(&insub.subquery.subquery, ctx, bindings)?;
+            ExprData::InSubquery {
+                expr,
+                subquery,
+                negated: insub.negated,
+            }
+        }
+        DFExpr::ScalarSubquery(sub) => {
+            let subquery = convert_subquery_plan(&sub.subquery, ctx, bindings)?;
+            ExprData::ScalarSubquery { subquery }
         }
         DFExpr::Between(between) => {
             // expr BETWEEN low AND high → (expr >= low) AND (expr <= high)
