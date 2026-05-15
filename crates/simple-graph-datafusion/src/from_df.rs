@@ -258,19 +258,14 @@ fn convert_projection(
 ) -> FromDFResult<Operator> {
     let input = convert_plan(&proj.input, ctx, bindings)?;
 
-    let all_columns = proj.expr.iter().all(|e| matches!(e, DFExpr::Column(_)));
+    let projected_columns: Option<Vec<Column>> = proj
+        .expr
+        .iter()
+        .map(|e| resolve_projected_column(e, bindings))
+        .collect::<FromDFResult<Option<Vec<_>>>>()?;
 
-    if all_columns {
-        let columns: Vec<Column> = proj
-            .expr
-            .iter()
-            .map(|e| {
-                let DFExpr::Column(col) = e else {
-                    unreachable!()
-                };
-                bindings.resolve(col.relation.as_ref().map(|r| r.table()), &col.name)
-            })
-            .collect::<FromDFResult<_>>()?;
+    if let Some(columns) = projected_columns {
+        bind_projection_output_names(proj, &columns, bindings);
         Ok(OperatorData::Projection(SGProjection { columns, input }).add(ctx))
     } else {
         let mut computations = Vec::new();
@@ -309,6 +304,34 @@ fn convert_projection(
             input: after_map,
         })
         .add(ctx))
+    }
+}
+
+fn resolve_projected_column(
+    expr: &DFExpr,
+    bindings: &BindingContext,
+) -> FromDFResult<Option<Column>> {
+    match expr {
+        DFExpr::Column(col) => Ok(Some(
+            bindings.resolve(col.relation.as_ref().map(|r| r.table()), &col.name)?,
+        )),
+        DFExpr::Alias(alias) => resolve_projected_column(&alias.expr, bindings),
+        _ => Ok(None),
+    }
+}
+
+fn bind_projection_output_names(
+    proj: &Projection,
+    columns: &[Column],
+    bindings: &mut BindingContext,
+) {
+    for (i, column) in columns.iter().enumerate() {
+        let (qualifier, field) = proj.schema.qualified_field(i);
+        bindings.bind(
+            qualifier.map(|r| r.to_string()),
+            field.name().clone(),
+            *column,
+        );
     }
 }
 

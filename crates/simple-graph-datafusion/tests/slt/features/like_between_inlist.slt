@@ -1,0 +1,37 @@
+# LIKE, BETWEEN, IN list predicates
+
+statement ok
+CREATE TABLE items (id BIGINT, name VARCHAR, price DOUBLE);
+
+statement ok
+INSERT INTO items VALUES (1, 'apple', 1.5), (2, 'apricot', 2.0), (3, 'banana', 0.8), (4, 'cherry', 3.0);
+
+query T
+SELECT name FROM items WHERE name LIKE 'ap%' ORDER BY name;
+----
+apple
+apricot
+
+query T
+SELECT name FROM items WHERE name NOT LIKE 'ap%' ORDER BY name;
+----
+banana
+cherry
+
+query IR
+SELECT id, price FROM items WHERE price BETWEEN 1.0 AND 2.5 ORDER BY id;
+----
+1	1.5
+2	2
+
+query I
+SELECT id FROM items WHERE id IN (1, 3) ORDER BY id;
+----
+1
+3
+
+query I
+SELECT id FROM items WHERE id NOT IN (1, 3) ORDER BY id;
+----
+2
+4
