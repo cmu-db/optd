@@ -16,8 +16,8 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::SessionContext;
 use simple_graph::{
-    AggregateExpr, AggregateFunction, BinaryOp, ExprData, NaryOp, Operator, OperatorData,
-    QueryContext, Relation, ScalarValue, TableRef, UnaryOp,
+    AggregateExpr, AggregateFunction, AnalysisContext, BinaryOp, ExprData, FreeColumns, NaryOp,
+    Operator, OperatorData, QueryContext, Relation, ScalarValue, TableRef, UnaryOp,
 };
 
 /// Error type for the simple-graph → DataFusion converter.
@@ -165,6 +165,16 @@ fn convert_operator(
     tables: &TableMap,
     session: &SessionContext,
 ) -> ToDFResult<LogicalPlan> {
+    convert_operator_inner(op, ctx, tables, session, &std::collections::HashSet::new())
+}
+
+fn convert_operator_inner(
+    op: Operator,
+    ctx: &QueryContext,
+    tables: &TableMap,
+    session: &SessionContext,
+    outer_refs: &std::collections::HashSet<simple_graph::Column>,
+) -> ToDFResult<LogicalPlan> {
     match op.get(ctx) {
         OperatorData::Scan(scan) => {
             let source = tables
@@ -178,13 +188,13 @@ fn convert_operator(
         }
 
         OperatorData::Selection(sel) => {
-            let input = convert_operator(sel.input, ctx, tables, session)?;
-            let predicate = convert_expr(sel.predicate, ctx, tables, session)?;
+            let input = convert_operator_inner(sel.input, ctx, tables, session, outer_refs)?;
+            let predicate = convert_expr(sel.predicate, ctx, tables, session, outer_refs)?;
             Ok(LogicalPlanBuilder::from(input).filter(predicate)?.build()?)
         }
 
         OperatorData::Projection(proj) => {
-            let input = convert_operator(proj.input, ctx, tables, session)?;
+            let input = convert_operator_inner(proj.input, ctx, tables, session, outer_refs)?;
             let exprs: Vec<DFExpr> = proj
                 .columns
                 .iter()
@@ -200,7 +210,7 @@ fn convert_operator(
         }
 
         OperatorData::Map(map) => {
-            let input = convert_operator(map.input, ctx, tables, session)?;
+            let input = convert_operator_inner(map.input, ctx, tables, session, outer_refs)?;
             let input_schema = input.schema().clone();
             let mut exprs: Vec<DFExpr> = input_schema
                 .fields()
@@ -209,24 +219,24 @@ fn convert_operator(
                 .collect();
             for (col, expr) in &map.computations {
                 let name = ctx.column(*col).name.clone();
-                exprs.push(convert_expr(*expr, ctx, tables, session)?.alias(name));
+                exprs.push(convert_expr(*expr, ctx, tables, session, outer_refs)?.alias(name));
             }
             Ok(LogicalPlanBuilder::from(input).project(exprs)?.build()?)
         }
 
         OperatorData::Aggregation(agg) => {
-            let input = convert_operator(agg.input, ctx, tables, session)?;
+            let input = convert_operator_inner(agg.input, ctx, tables, session, outer_refs)?;
             let group_exprs: Vec<DFExpr> = agg
                 .keys
                 .iter()
-                .map(|e| convert_expr(*e, ctx, tables, session))
+                .map(|e| convert_expr(*e, ctx, tables, session, outer_refs))
                 .collect::<ToDFResult<_>>()?;
             let aggr_exprs: Vec<DFExpr> = agg
                 .aggregates
                 .iter()
                 .map(|(col, agg_expr)| {
                     let name = ctx.column(*col).name.clone();
-                    Ok(convert_agg_expr(agg_expr, ctx, tables, session)?.alias(name))
+                    Ok(convert_agg_expr(agg_expr, ctx, tables, session, outer_refs)?.alias(name))
                 })
                 .collect::<ToDFResult<_>>()?;
             Ok(LogicalPlanBuilder::from(input)
@@ -235,13 +245,13 @@ fn convert_operator(
         }
 
         OperatorData::Sort(sort) => {
-            let input = convert_operator(sort.input, ctx, tables, session)?;
+            let input = convert_operator_inner(sort.input, ctx, tables, session, outer_refs)?;
             let sort_exprs: Vec<SortExpr> = sort
                 .keys
                 .iter()
                 .map(|key| {
                     Ok(SortExpr {
-                        expr: convert_expr(key.expr, ctx, tables, session)?,
+                        expr: convert_expr(key.expr, ctx, tables, session, outer_refs)?,
                         asc: matches!(key.direction, simple_graph::SortDirection::Asc),
                         nulls_first: matches!(key.nulls, simple_graph::NullOrdering::First),
                     })
@@ -251,32 +261,34 @@ fn convert_operator(
         }
 
         OperatorData::Limit(limit) => {
-            let input = convert_operator(limit.input, ctx, tables, session)?;
+            let input = convert_operator_inner(limit.input, ctx, tables, session, outer_refs)?;
             Ok(LogicalPlanBuilder::from(input)
                 .limit(limit.offset, limit.fetch)?
                 .build()?)
         }
 
         OperatorData::Join(join) => {
-            let outer = convert_operator(join.outer, ctx, tables, session)?;
-            let inner = convert_operator(join.inner, ctx, tables, session)?;
+            let outer = convert_operator_inner(join.outer, ctx, tables, session, outer_refs)?;
+            let inner = convert_operator_inner(join.inner, ctx, tables, session, outer_refs)?;
             let join_type = convert_join_type(&join.join_type)?;
-            let condition = convert_expr(join.on, ctx, tables, session)?;
+            let condition = convert_expr(join.on, ctx, tables, session, outer_refs)?;
             Ok(LogicalPlanBuilder::from(outer)
                 .join_on(inner, join_type, Some(condition))?
                 .build()?)
         }
 
         OperatorData::CrossProduct(cross) => {
-            let outer = convert_operator(cross.outer, ctx, tables, session)?;
-            let inner = convert_operator(cross.inner, ctx, tables, session)?;
+            let outer = convert_operator_inner(cross.outer, ctx, tables, session, outer_refs)?;
+            let inner = convert_operator_inner(cross.inner, ctx, tables, session, outer_refs)?;
             Ok(LogicalPlanBuilder::from(outer).cross_join(inner)?.build()?)
         }
 
-        OperatorData::Output(out) => convert_operator(out.input, ctx, tables, session),
+        OperatorData::Output(out) => {
+            convert_operator_inner(out.input, ctx, tables, session, outer_refs)
+        }
 
         OperatorData::Rename(r) => {
-            let input = convert_operator(r.input, ctx, tables, session)?;
+            let input = convert_operator_inner(r.input, ctx, tables, session, outer_refs)?;
             Ok(LogicalPlanBuilder::from(input)
                 .alias(r.alias.as_str())?
                 .build()?)
@@ -291,18 +303,33 @@ fn convert_expr(
     ctx: &QueryContext,
     tables: &TableMap,
     session: &SessionContext,
+    outer_refs: &std::collections::HashSet<simple_graph::Column>,
 ) -> ToDFResult<DFExpr> {
     match expr.get(ctx) {
         ExprData::ColumnRef(col) => {
             let cd = ctx.column(*col);
-            Ok(match &cd.qualifier {
-                Some(q) => DFExpr::Column(DFColumn::new(Some(q.as_str()), &cd.name)),
-                None => DFExpr::Column(DFColumn::new_unqualified(&cd.name)),
-            })
+            if outer_refs.contains(col) {
+                // Correlated outer reference.
+                let field = std::sync::Arc::new(datafusion::arrow::datatypes::Field::new(
+                    &cd.name,
+                    cd.ty.clone(),
+                    true,
+                ));
+                let df_col = match &cd.qualifier {
+                    Some(q) => DFColumn::new(Some(q.as_str()), &cd.name),
+                    None => DFColumn::new_unqualified(&cd.name),
+                };
+                Ok(DFExpr::OuterReferenceColumn(field, df_col))
+            } else {
+                Ok(match &cd.qualifier {
+                    Some(q) => DFExpr::Column(DFColumn::new(Some(q.as_str()), &cd.name)),
+                    None => DFExpr::Column(DFColumn::new_unqualified(&cd.name)),
+                })
+            }
         }
         ExprData::Literal(scalar) => Ok(DFExpr::Literal(convert_scalar(scalar)?, None)),
         ExprData::Unary { op, expr } => {
-            let inner = convert_expr(*expr, ctx, tables, session)?;
+            let inner = convert_expr(*expr, ctx, tables, session, outer_refs)?;
             Ok(match op {
                 UnaryOp::Not => datafusion::logical_expr::not(inner),
                 UnaryOp::IsNull => inner.is_null(),
@@ -311,8 +338,8 @@ fn convert_expr(
             })
         }
         ExprData::Binary { op, left, right } => {
-            let l = convert_expr(*left, ctx, tables, session)?;
-            let r = convert_expr(*right, ctx, tables, session)?;
+            let l = convert_expr(*left, ctx, tables, session, outer_refs)?;
+            let r = convert_expr(*right, ctx, tables, session, outer_refs)?;
             Ok(match op {
                 BinaryOp::Eq => l.eq(r),
                 BinaryOp::NotEq => l.not_eq(r),
@@ -327,7 +354,9 @@ fn convert_expr(
             })
         }
         ExprData::Nary { op, exprs } => {
-            let mut iter = exprs.iter().map(|e| convert_expr(*e, ctx, tables, session));
+            let mut iter = exprs
+                .iter()
+                .map(|e| convert_expr(*e, ctx, tables, session, outer_refs));
             let first = iter
                 .next()
                 .ok_or_else(|| ToDFError::Unsupported("empty nary expr".into()))??;
@@ -340,14 +369,14 @@ fn convert_expr(
             })
         }
         ExprData::Cast { expr, ty } => Ok(DFExpr::Cast(datafusion::logical_expr::Cast {
-            expr: Box::new(convert_expr(*expr, ctx, tables, session)?),
+            expr: Box::new(convert_expr(*expr, ctx, tables, session, outer_refs)?),
             data_type: ty.clone(),
         })),
         ExprData::ScalarFunction { function, args } => {
             use simple_graph::ScalarFunction;
             let df_args: Vec<DFExpr> = args
                 .iter()
-                .map(|a| convert_expr(*a, ctx, tables, session))
+                .map(|a| convert_expr(*a, ctx, tables, session, outer_refs))
                 .collect::<ToDFResult<_>>()?;
             match function {
                 ScalarFunction::Extension(name) => match session.udf(name) {
@@ -371,8 +400,8 @@ fn convert_expr(
             case_insensitive,
         } => Ok(DFExpr::Like(datafusion::logical_expr::Like {
             negated: *negated,
-            expr: Box::new(convert_expr(*expr, ctx, tables, session)?),
-            pattern: Box::new(convert_expr(*pattern, ctx, tables, session)?),
+            expr: Box::new(convert_expr(*expr, ctx, tables, session, outer_refs)?),
+            pattern: Box::new(convert_expr(*pattern, ctx, tables, session, outer_refs)?),
             escape_char: None,
             case_insensitive: *case_insensitive,
         })),
@@ -381,27 +410,28 @@ fn convert_expr(
             else_expr,
         } => {
             let mut builder = datafusion::logical_expr::when(
-                convert_expr(when_then[0].0, ctx, tables, session)?,
-                convert_expr(when_then[0].1, ctx, tables, session)?,
+                convert_expr(when_then[0].0, ctx, tables, session, outer_refs)?,
+                convert_expr(when_then[0].1, ctx, tables, session, outer_refs)?,
             );
             for (w, t) in &when_then[1..] {
                 builder = builder.when(
-                    convert_expr(*w, ctx, tables, session)?,
-                    convert_expr(*t, ctx, tables, session)?,
+                    convert_expr(*w, ctx, tables, session, outer_refs)?,
+                    convert_expr(*t, ctx, tables, session, outer_refs)?,
                 );
             }
             Ok(if let Some(else_e) = else_expr {
-                builder.otherwise(convert_expr(*else_e, ctx, tables, session)?)?
+                builder.otherwise(convert_expr(*else_e, ctx, tables, session, outer_refs)?)?
             } else {
                 builder.end()?
             })
         }
         ExprData::Exists { subquery, negated } => {
-            let inner = convert_operator(*subquery, ctx, tables, session)?;
+            let free = free_columns_for(ctx, *subquery);
+            let inner = convert_operator_inner(*subquery, ctx, tables, session, &free)?;
             Ok(DFExpr::Exists(datafusion::logical_expr::expr::Exists {
                 subquery: datafusion::logical_expr::Subquery {
                     subquery: Arc::new(inner),
-                    outer_ref_columns: vec![],
+                    outer_ref_columns: free_to_df_cols(ctx, &free),
                     spans: Default::default(),
                 },
                 negated: *negated,
@@ -412,14 +442,15 @@ fn convert_expr(
             subquery,
             negated,
         } => {
-            let inner_expr = convert_expr(*expr, ctx, tables, session)?;
-            let inner_plan = convert_operator(*subquery, ctx, tables, session)?;
+            let inner_expr = convert_expr(*expr, ctx, tables, session, outer_refs)?;
+            let free = free_columns_for(ctx, *subquery);
+            let inner_plan = convert_operator_inner(*subquery, ctx, tables, session, &free)?;
             Ok(DFExpr::InSubquery(
                 datafusion::logical_expr::expr::InSubquery {
                     expr: Box::new(inner_expr),
                     subquery: datafusion::logical_expr::Subquery {
                         subquery: Arc::new(inner_plan),
-                        outer_ref_columns: vec![],
+                        outer_ref_columns: free_to_df_cols(ctx, &free),
                         spans: Default::default(),
                     },
                     negated: *negated,
@@ -427,10 +458,11 @@ fn convert_expr(
             ))
         }
         ExprData::ScalarSubquery { subquery } => {
-            let inner = convert_operator(*subquery, ctx, tables, session)?;
+            let free = free_columns_for(ctx, *subquery);
+            let inner = convert_operator_inner(*subquery, ctx, tables, session, &free)?;
             Ok(DFExpr::ScalarSubquery(datafusion::logical_expr::Subquery {
                 subquery: Arc::new(inner),
-                outer_ref_columns: vec![],
+                outer_ref_columns: free_to_df_cols(ctx, &free),
                 spans: Default::default(),
             }))
         }
@@ -438,16 +470,47 @@ fn convert_expr(
     }
 }
 
+/// Returns the free (correlated outer reference) columns for a subquery operator.
+fn free_columns_for(
+    ctx: &QueryContext,
+    subquery: simple_graph::Operator,
+) -> std::collections::HashSet<simple_graph::Column> {
+    let mut analyses = simple_graph::AnalysisContext::new();
+    let free: std::collections::HashSet<_> = analyses
+        .get::<simple_graph::FreeColumns>(ctx, subquery)
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    free
+}
+
+/// Converts free columns to DataFusion column expressions for `outer_ref_columns`.
+fn free_to_df_cols(
+    ctx: &QueryContext,
+    free: &std::collections::HashSet<simple_graph::Column>,
+) -> Vec<DFExpr> {
+    free.iter()
+        .map(|col| {
+            let cd = ctx.column(*col);
+            match &cd.qualifier {
+                Some(q) => DFExpr::Column(DFColumn::new(Some(q.as_str()), &cd.name)),
+                None => DFExpr::Column(DFColumn::new_unqualified(&cd.name)),
+            }
+        })
+        .collect()
+}
+
 fn convert_agg_expr(
     agg: &AggregateExpr,
     ctx: &QueryContext,
     tables: &TableMap,
     session: &SessionContext,
+    outer_refs: &std::collections::HashSet<simple_graph::Column>,
 ) -> ToDFResult<DFExpr> {
     match agg {
         AggregateExpr::CountStar => Ok(count_all()),
         AggregateExpr::Func { func, arg, .. } => {
-            let arg_expr = convert_expr(*arg, ctx, tables, session)?;
+            let arg_expr = convert_expr(*arg, ctx, tables, session, outer_refs)?;
             Ok(match func {
                 AggregateFunction::Count => count(arg_expr),
                 AggregateFunction::Sum => sum(arg_expr),

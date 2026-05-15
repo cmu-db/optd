@@ -469,9 +469,19 @@ fn free_columns(
     let input_columns = input_available_columns(ctx, analyses, operator_data)?;
     let mut columns = Vec::new();
 
+    // Columns used directly by this operator but not available from its inputs.
     for column in analyses.get::<UsedColumns>(ctx, operator)? {
         if !input_columns.contains(&column) {
             push_unique_column(&mut columns, column);
+        }
+    }
+
+    // Bubble up free columns from inputs that are also not available here.
+    for input in operator_data.inputs() {
+        for column in analyses.get::<FreeColumns>(ctx, input)? {
+            if !input_columns.contains(&column) {
+                push_unique_column(&mut columns, column);
+            }
         }
     }
 
