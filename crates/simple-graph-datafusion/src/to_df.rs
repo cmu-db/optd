@@ -201,8 +201,11 @@ fn convert_operator_inner(
                 .iter()
                 .map(|col| {
                     let cd = ctx.column(*col);
-                    // Use qualified ref only if the name is ambiguous in the input schema.
-                    let count = input_schema.fields_with_unqualified_name(&cd.name).len();
+                    // Use qualified ref only if the name is genuinely ambiguous
+                    // (multiple distinct qualified fields with that name).
+                    let count = input_schema
+                        .qualified_fields_with_unqualified_name(&cd.name)
+                        .len();
                     if count > 1 {
                         match &cd.qualifier {
                             Some(q) => DFExpr::Column(DFColumn::new(Some(q.as_str()), &cd.name)),
@@ -495,8 +498,11 @@ fn convert_expr(
 fn normalize_col_ref(expr: DFExpr, schema: &datafusion::common::DFSchema) -> DFExpr {
     if let DFExpr::Column(ref col) = expr {
         if col.relation.is_some() {
-            let count = schema.fields_with_unqualified_name(&col.name).len();
-            if count == 1 {
+            // Count distinct qualified fields with this name (ignores unqualified aliases).
+            let count = schema
+                .qualified_fields_with_unqualified_name(&col.name)
+                .len();
+            if count <= 1 {
                 return DFExpr::Column(DFColumn::new_unqualified(&col.name));
             }
         }
