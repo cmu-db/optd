@@ -100,7 +100,9 @@ pub enum Rewrite {
 /// Rules only need to pattern-match and return [`Rewrite::Keep`] or [`Rewrite::Replace`].
 pub trait OperatorRewrite: Pass {
     /// Traversal order. Defaults to bottom-up.
-    const DIRECTION: Direction = Direction::BottomUp;
+    fn direction(&self) -> Direction {
+        Direction::BottomUp
+    }
 
     fn rewrite(&mut self, op: Operator, ctx: &mut OptimizerContext) -> OptimizeResult<Rewrite>;
 }
@@ -131,7 +133,7 @@ impl<R: OperatorRewrite> QueryPass for OperatorRewriteAdaptor<R> {
             return Ok(PassResult::Unchanged);
         };
 
-        let ops = match R::DIRECTION {
+        let ops = match self.rule.direction() {
             Direction::BottomUp => collect_post_order(root, &ctx.query, &ctx.rewrites),
             Direction::TopDown => collect_pre_order(root, &ctx.query, &ctx.rewrites),
         };
@@ -139,7 +141,7 @@ impl<R: OperatorRewrite> QueryPass for OperatorRewriteAdaptor<R> {
         let mut changed = false;
         for op in ops {
             let mut current = ctx.rewrites.resolve(op);
-            if R::DIRECTION == Direction::BottomUp {
+            if self.rule.direction() == Direction::BottomUp {
                 if let Some(rebuilt) = rebuild_with_resolved_inputs(current, ctx) {
                     ctx.rewrites.replace(current, rebuilt);
                     current = rebuilt;
@@ -156,7 +158,7 @@ impl<R: OperatorRewrite> QueryPass for OperatorRewriteAdaptor<R> {
             }
         }
 
-        if changed && R::DIRECTION == Direction::TopDown {
+        if changed && self.rule.direction() == Direction::TopDown {
             for op in collect_post_order(root, &ctx.query, &ctx.rewrites) {
                 let current = ctx.rewrites.resolve(op);
                 if let Some(rebuilt) = rebuild_with_resolved_inputs(current, ctx) {
@@ -504,7 +506,9 @@ mod tests {
         }
 
         impl OperatorRewrite for ReplaceScanTopDown {
-            const DIRECTION: Direction = Direction::TopDown;
+            fn direction(&self) -> Direction {
+                Direction::TopDown
+            }
 
             fn rewrite(
                 &mut self,

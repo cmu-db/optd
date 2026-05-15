@@ -8,9 +8,23 @@ use datafusion::prelude::SessionContext;
 use prost::Message;
 use simple_graph::{
     AggregateExpr, Aggregation, ColumnData, CrossProduct, ExprData, Limit, Map, NullOrdering,
-    OperatorData, Output, Projection, QueryContext, ScalarValue, Scan, Selection, Sort,
+    Operator, OperatorData, Output, Projection, QueryContext, ScalarValue, Scan, Selection, Sort,
     SortDirection, SortKey, TableRef, substrait,
 };
+
+fn find_join_root(ctx: &QueryContext, op: Operator) -> Option<Operator> {
+    match ctx.operator(op) {
+        OperatorData::Join(_) | OperatorData::CrossProduct(_) => Some(op),
+        OperatorData::Output(o) => find_join_root(ctx, o.input),
+        OperatorData::Projection(p) => find_join_root(ctx, p.input),
+        OperatorData::Selection(s) => find_join_root(ctx, s.input),
+        OperatorData::Sort(s) => find_join_root(ctx, s.input),
+        OperatorData::Limit(l) => find_join_root(ctx, l.input),
+        OperatorData::Map(m) => find_join_root(ctx, m.input),
+        OperatorData::Rename(r) => find_join_root(ctx, r.input),
+        _ => None,
+    }
+}
 
 #[tokio::test]
 async fn imports_substrait_plan_produced_by_datafusion() {
@@ -527,4 +541,60 @@ fn cast_and_case_when_users_query() -> QueryContext {
     ctx.set_root(output);
 
     ctx
+}
+
+/// Parses a SQL query with inner joins, a left outer join, and a multi-relation
+/// WHERE predicate (a.x + b.y = c.z - d.w) via DataFusion → Substrait → simple-graph IR,
+/// then prints both the query plan and the hypergraph.
+#[tokio::test]
+async fn hypergraph_of_mixed_join_query() {
+    // Four tables: A(x), B(y), C(z), D(w)
+    let ctx = SessionContext::new();
+    for (name, col, ty) in [
+        ("a", "x", DataType::Int64),
+        ("b", "y", DataType::Int64),
+        ("c", "z", DataType::Int64),
+        ("d", "w", DataType::Int64),
+    ] {
+        let schema = Arc::new(Schema::new(vec![Field::new(col, ty, true)]));
+        let batch = RecordBatch::new_empty(Arc::clone(&schema));
+        ctx.register_table(
+            name,
+            Arc::new(MemTable::try_new(schema, vec![vec![batch]]).unwrap()),
+        )
+        .unwrap();
+    }
+
+    // SQL:
+    //   A INNER JOIN B ON a.x = b.y
+    //     LEFT OUTER JOIN C ON b.y = c.z
+    //     INNER JOIN D ON a.x + b.y = c.z - d.w
+    let sql = "
+        SELECT a.x, b.y, c.z, d.w
+        FROM a
+        JOIN b ON a.x = b.y
+        LEFT JOIN c ON b.y = c.z
+        JOIN d ON a.x + b.y = c.z - d.w
+    ";
+
+    let bytes = datafusion_substrait::serializer::serialize_bytes(sql, &ctx)
+        .await
+        .unwrap();
+    let plan = ::substrait::proto::Plan::decode(bytes.as_slice()).unwrap();
+    let query = simple_graph::substrait::from_plan(&plan).unwrap();
+
+    println!("=== Query Plan ===");
+    println!("{}", query.pretty());
+
+    let root = query.root().unwrap();
+    let mut analyses = simple_graph::AnalysisContext::new();
+    let join_root = find_join_root(&query, root).unwrap_or(root);
+    let hg = simple_graph::build_hypergraph(&query, &mut analyses, join_root);
+
+    println!("=== Hypergraph ===");
+    println!("{}", hg.pretty(&query));
+
+    // Sanity checks: 4 base-relation nodes, at least 3 edges.
+    assert_eq!(hg.nodes.len(), 4, "expected 4 nodes (a, b, c, d)");
+    assert!(hg.edges.len() >= 3, "expected at least 3 edges");
 }

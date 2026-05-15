@@ -1,0 +1,51 @@
+# Join queries for hypergraph construction experiments.
+# Tables: A(x INT, y INT), B(y INT, z INT), C(z INT, w INT), D(w INT, v INT)
+
+statement ok
+CREATE TABLE a (x BIGINT, y BIGINT);
+
+statement ok
+CREATE TABLE b (y BIGINT, z BIGINT);
+
+statement ok
+CREATE TABLE c (z BIGINT, w BIGINT);
+
+statement ok
+CREATE TABLE d (w BIGINT, v BIGINT);
+
+# Inner join: A ⋈ B on a.x = b.y
+statement ok
+-- simple_graph: debug-hypergraph
+SELECT a.x, b.z
+FROM a
+JOIN b ON a.x = b.y;
+
+# Left outer join: A ⟕ B on a.x = b.y
+statement ok
+-- simple_graph: debug-hypergraph
+SELECT a.x, b.z
+FROM a
+LEFT JOIN b ON a.x = b.y;
+
+# Three-way inner join: A ⋈ B ⋈ C
+statement ok
+-- simple_graph: debug-hypergraph
+SELECT a.x, b.z, c.w
+FROM a
+JOIN b ON a.x = b.y
+JOIN c ON b.z = c.z;
+
+# Mixed: (A ⟕ B) ⋈ C with multi-relation predicate a.x + b.z = c.z
+statement ok
+-- simple_graph: debug-hypergraph
+SELECT a.x, b.z, c.w
+FROM a
+LEFT JOIN b ON a.x = b.y
+JOIN c ON a.x + b.z = c.z;
+
+# Four-way with WHERE clause hyperedge: a.x + b.y = c.z - d.w
+statement ok
+-- simple_graph: debug-hypergraph
+SELECT a.x, b.z, c.w, d.v
+FROM a, b, c, d
+WHERE a.x + b.y = c.z - d.w;

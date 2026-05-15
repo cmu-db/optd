@@ -3139,6 +3139,7 @@ dependencies = [
  "prost",
  "serde",
  "serde_json",
+ "simple-graph-datafusion",
  "sqllogictest",
  "substrait 0.63.0",
  "tokio",

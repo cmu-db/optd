@@ -12,9 +12,12 @@ use datafusion::logical_expr::LogicalPlan;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner};
 use datafusion::prelude::SessionContext;
+use simple_graph::{AnalysisContext, Operator, OperatorData, QueryContext, build_hypergraph};
+use simple_graph_datafusion::from_df::from_logical_plan;
 use sqllogictest::{AsyncDB, DBOutput, DefaultColumnType};
 
 const PLAN_ONLY_MARKER: &str = "-- simple_graph: plan-only";
+const DEBUG_HYPERGRAPH_MARKER: &str = "-- simple_graph: debug-hypergraph";
 
 #[derive(Debug)]
 struct SubstraitRoundTripQueryPlanner;
@@ -71,6 +74,24 @@ impl AsyncDB for DataFusionSubstraitDb {
             let dataframe = self.ctx.sql(plan_only_sql).await?;
             let (state, logical_plan) = dataframe.into_parts();
             state.create_physical_plan(&logical_plan).await?;
+            return Ok(DBOutput::StatementComplete(0));
+        }
+
+        if let Some(debug_sql) = strip_debug_hypergraph_marker(sql) {
+            let dataframe = self.ctx.sql(debug_sql).await?;
+            let (_, logical_plan) = dataframe.into_parts();
+            let mut query = QueryContext::new();
+            match from_logical_plan(&logical_plan, &mut query) {
+                Ok(root) => {
+                    query.set_root(root);
+                    eprintln!("=== Query Plan ===\n{}", query.pretty());
+                    let mut analyses = AnalysisContext::new();
+                    let join_root = find_join_root(&query, root).unwrap_or(root);
+                    let hg = build_hypergraph(&query, &mut analyses, join_root);
+                    eprintln!("=== Hypergraph ===\n{}", hg.pretty(&query));
+                }
+                Err(e) => eprintln!("simple_graph import error: {e}"),
+            }
             return Ok(DBOutput::StatementComplete(0));
         }
 
@@ -270,9 +291,30 @@ fn string_field(name: &str) -> Field {
     Field::new(name, DataType::Utf8, false)
 }
 
+/// Walks down through unary operators to find the topmost Join or CrossProduct.
+fn find_join_root(ctx: &QueryContext, op: Operator) -> Option<Operator> {
+    match ctx.operator(op) {
+        OperatorData::Join(_) | OperatorData::CrossProduct(_) => Some(op),
+        OperatorData::Output(o) => find_join_root(ctx, o.input),
+        OperatorData::Projection(p) => find_join_root(ctx, p.input),
+        OperatorData::Selection(s) => find_join_root(ctx, s.input),
+        OperatorData::Sort(s) => find_join_root(ctx, s.input),
+        OperatorData::Limit(l) => find_join_root(ctx, l.input),
+        OperatorData::Map(m) => find_join_root(ctx, m.input),
+        OperatorData::Rename(r) => find_join_root(ctx, r.input),
+        _ => None,
+    }
+}
+
 fn strip_plan_only_marker(sql: &str) -> Option<&str> {
     let sql = sql.trim_start();
     sql.strip_prefix(PLAN_ONLY_MARKER).map(str::trim_start)
+}
+
+fn strip_debug_hypergraph_marker(sql: &str) -> Option<&str> {
+    let sql = sql.trim_start();
+    sql.strip_prefix(DEBUG_HYPERGRAPH_MARKER)
+        .map(str::trim_start)
 }
 
 fn column_type(data_type: &DataType) -> DefaultColumnType {

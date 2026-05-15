@@ -6,6 +6,7 @@ use std::sync::Arc;
 pub mod analysis;
 pub mod catalog;
 mod display;
+pub mod hypergraph;
 pub mod optimize;
 pub mod substrait;
 pub mod tpch;
@@ -21,6 +22,10 @@ pub use catalog::{
 pub use display::{
     BoxDrawingRenderer, BoxRendererConfig, BoxRendererTheme, ColorMode, DisplayField, DisplayInput,
     DisplayNode, DisplayNodeRecord, DisplayPlan, DisplayProperties, DisplayValue,
+};
+pub use hypergraph::{
+    Hyperedge, HyperedgeJoinType, HypergraphNode, HypergraphOf, JoinGroupOf, NodeId,
+    QueryHypergraph, build_hypergraph,
 };
 pub use optimize::{
     Direction, OperatorRewrite, OperatorRewriteAdaptor, OptimizeError, OptimizeResult, Pass,
@@ -1097,6 +1102,11 @@ impl<'a> QueryFormatter<'a> {
             .map(|expr| self.format_expr(*expr))
             .collect::<Vec<_>>()
             .join(", ")
+    }
+
+    /// Formats a scalar expression as a string. Public for use by hypergraph pretty printing.
+    pub fn format_expr_pub(&self, expr: Expr) -> String {
+        self.format_expr(expr)
     }
 
     fn format_expr(&self, expr: Expr) -> String {

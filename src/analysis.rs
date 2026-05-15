@@ -183,7 +183,7 @@ impl AnalysisContext {
         A::get(ctx, self, op)
     }
 
-    fn registry_entry<A>(&mut self) -> Rc<dyn Analysis>
+    pub(crate) fn registry_entry<A>(&mut self) -> Rc<dyn Analysis>
     where
         A: Analysis + Default + 'static,
     {
