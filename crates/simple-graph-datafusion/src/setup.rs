@@ -228,5 +228,11 @@ async fn print_q13_ir() {
     let mut ctx = QueryContext::new();
     let root = from_logical_plan(&plan, &mut ctx).unwrap();
     ctx.set_root(root);
-    println!("=== simple-graph IR ===\n{}", ctx.pretty());
+    println!(
+        "=== simple-graph IR ===\n{}",
+        ctx.pretty_with_config(
+            simple_graph::QueryFormatConfig::new()
+                .with_analysis::<simple_graph::AvailableColumns>()
+        )
+    );
 }
