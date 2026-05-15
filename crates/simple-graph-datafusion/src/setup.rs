@@ -3,7 +3,6 @@
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use std::sync::Arc;
 
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::error::Result as DFResult;

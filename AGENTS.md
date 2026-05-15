@@ -19,6 +19,7 @@ This is a Rust 2024 crate for relational query IR experiments.
 - `cargo test` runs unit tests, integration tests, and doc tests.
 - `cargo test --test datafusion_substrait` runs only the DataFusion/Substrait bridge tests.
 - `cargo fmt` formats Rust code using `rustfmt`; run this before committing.
+- `cargo clippy --workspace` checks for lints; fix all warnings before committing.
 
 The default feature set includes `serde`. Use `cargo test --no-default-features` when checking code that should not depend on serialization.
 

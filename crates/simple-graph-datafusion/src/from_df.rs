@@ -55,7 +55,13 @@ struct Scope {
 /// Each operator that introduces columns pushes a scope. Subquery boundaries
 /// push a fresh stack. Resolution walks from innermost to outermost scope.
 pub struct BindingContext {
-    scopes: Vec<Scope>,
+    pub(crate) scopes: Vec<Scope>,
+}
+
+impl Default for BindingContext {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl BindingContext {

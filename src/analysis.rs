@@ -1128,10 +1128,10 @@ impl Analyzable for ParentOf {
         // Rebuild cache if root changed or not yet computed.
         {
             let cache = analysis.cache.borrow();
-            if let Some((cached_root, ref map)) = *cache {
-                if cached_root == root {
-                    return Ok(map.get(&op).copied());
-                }
+            if let Some((cached_root, ref map)) = *cache
+                && cached_root == root
+            {
+                return Ok(map.get(&op).copied());
             }
         }
 

@@ -179,6 +179,10 @@ impl<V> DisplayProperties<V> {
         self.entries.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
     pub fn insert(&mut self, order: usize, key: impl Into<String>, value: V) {
         self.entries.insert((order, key.into()), value);
     }
@@ -336,16 +340,9 @@ impl Default for BoxRendererTheme {
 }
 
 /// Renders a generic [`DisplayNode`] tree using box drawing characters.
+#[derive(Default)]
 pub struct BoxDrawingRenderer {
     config: BoxRendererConfig,
-}
-
-impl Default for BoxDrawingRenderer {
-    fn default() -> Self {
-        Self {
-            config: BoxRendererConfig::default(),
-        }
-    }
 }
 
 impl BoxDrawingRenderer {

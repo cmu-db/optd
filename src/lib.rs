@@ -83,6 +83,7 @@ pub enum OperatorData {
 
 impl OperatorData {
     /// Appends this operator to `ctx` and returns its handle.
+    #[allow(clippy::should_implement_trait)]
     pub fn add(self, ctx: &mut QueryContext) -> Operator {
         QueryContext::add_operator(ctx, self)
     }
@@ -317,6 +318,7 @@ impl ColumnData {
     }
 
     /// Appends this column metadata to `ctx` and returns its handle.
+    #[allow(clippy::should_implement_trait)]
     pub fn add(self, ctx: &mut QueryContext) -> Column {
         QueryContext::add_column(ctx, self)
     }
@@ -392,6 +394,7 @@ pub enum ExprData {
 
 impl ExprData {
     /// Appends this expression to `ctx` and returns its handle.
+    #[allow(clippy::should_implement_trait)]
     pub fn add(self, ctx: &mut QueryContext) -> Expr {
         QueryContext::add_expr(ctx, self)
     }
@@ -645,7 +648,7 @@ impl ScalarValue {
 
 /// Owns the query IR graph and all node arenas.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct QueryContext {
     root: Option<Operator>,
     operators: Vec<OperatorData>,

@@ -16,8 +16,8 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::SessionContext;
 use simple_graph::{
-    AggregateExpr, AggregateFunction, AnalysisContext, BinaryOp, ExprData, FreeColumns, NaryOp,
-    Operator, OperatorData, QueryContext, Relation, ScalarValue, TableRef, UnaryOp,
+    AggregateExpr, AggregateFunction, BinaryOp, ExprData, NaryOp, Operator, OperatorData,
+    QueryContext, Relation, ScalarValue, TableRef, UnaryOp,
 };
 
 /// Error type for the simple-graph → DataFusion converter.
@@ -78,14 +78,14 @@ async fn collect_tables(
         if !visited.insert(op) {
             continue;
         }
-        if let OperatorData::Scan(scan) = op.get(ctx) {
-            if !map.contains_key(&scan.table) {
-                let provider = session
-                    .table_provider(TableReference::bare(scan.table.table()))
-                    .await
-                    .map_err(|_| ToDFError::TableNotFound(scan.table.clone()))?;
-                map.insert(scan.table.clone(), provider_as_source(provider));
-            }
+        if let OperatorData::Scan(scan) = op.get(ctx)
+            && !map.contains_key(&scan.table)
+        {
+            let provider = session
+                .table_provider(TableReference::bare(scan.table.table()))
+                .await
+                .map_err(|_| ToDFError::TableNotFound(scan.table.clone()))?;
+            map.insert(scan.table.clone(), provider_as_source(provider));
         }
         stack.extend(op.get(ctx).inputs());
         // Also walk into subquery operators embedded in expressions.
@@ -501,7 +501,6 @@ fn convert_expr(
                 spans: Default::default(),
             }))
         }
-        other => Err(ToDFError::Unsupported(format!("expr {other:?}"))),
     }
 }
 
@@ -511,15 +510,15 @@ fn convert_expr(
 /// the "qualified AND unqualified field" ambiguity error from DataFusion's
 /// join schema normalization.
 fn normalize_col_ref(expr: DFExpr, schema: &datafusion::common::DFSchema) -> DFExpr {
-    if let DFExpr::Column(ref col) = expr {
-        if col.relation.is_some() {
-            // Count distinct qualified fields with this name (ignores unqualified aliases).
-            let count = schema
-                .qualified_fields_with_unqualified_name(&col.name)
-                .len();
-            if count <= 1 {
-                return DFExpr::Column(DFColumn::new_unqualified(&col.name));
-            }
+    if let DFExpr::Column(ref col) = expr
+        && col.relation.is_some()
+    {
+        // Count distinct qualified fields with this name (ignores unqualified aliases).
+        let count = schema
+            .qualified_fields_with_unqualified_name(&col.name)
+            .len();
+        if count <= 1 {
+            return DFExpr::Column(DFColumn::new_unqualified(&col.name));
         }
     }
     expr

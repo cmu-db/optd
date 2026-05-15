@@ -1323,19 +1323,18 @@ impl Converter {
         table: TableRef,
         base_schema: Option<&NamedStruct>,
     ) -> Result<Relation, SubstraitError> {
-        if let Some(catalog) = self.catalog.clone() {
-            if let Ok(operator) = self
+        if let Some(catalog) = self.catalog.clone()
+            && let Ok(operator) = self
                 .ctx
                 .add_scan_from_catalog(catalog.as_ref(), table.clone())
-            {
-                let OperatorData::Scan(scan) = operator.get(&self.ctx) else {
-                    unreachable!("add_scan_from_catalog always creates a scan")
-                };
-                return Ok(Relation {
-                    operator,
-                    columns: scan.columns.clone(),
-                });
-            }
+        {
+            let OperatorData::Scan(scan) = operator.get(&self.ctx) else {
+                unreachable!("add_scan_from_catalog always creates a scan")
+            };
+            return Ok(Relation {
+                operator,
+                columns: scan.columns.clone(),
+            });
         }
 
         let columns = self.convert_named_struct(base_schema)?;
@@ -2068,7 +2067,7 @@ impl Converter {
                     .ifs
                     .iter()
                     .find_map(|clause| clause.then.as_ref())
-                    .or_else(|| if_then.r#else.as_deref())
+                    .or(if_then.r#else.as_deref())
                 {
                     self.expr_output_type(expr)
                 } else {
