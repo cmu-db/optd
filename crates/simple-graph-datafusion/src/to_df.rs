@@ -195,14 +195,21 @@ fn convert_operator_inner(
 
         OperatorData::Projection(proj) => {
             let input = convert_operator_inner(proj.input, ctx, tables, session, outer_refs)?;
+            let input_schema = input.schema().clone();
             let exprs: Vec<DFExpr> = proj
                 .columns
                 .iter()
                 .map(|col| {
                     let cd = ctx.column(*col);
-                    match &cd.qualifier {
-                        Some(q) => DFExpr::Column(DFColumn::new(Some(q.as_str()), &cd.name)),
-                        None => DFExpr::Column(DFColumn::new_unqualified(&cd.name)),
+                    // Use qualified ref only if the name is ambiguous in the input schema.
+                    let count = input_schema.fields_with_unqualified_name(&cd.name).len();
+                    if count > 1 {
+                        match &cd.qualifier {
+                            Some(q) => DFExpr::Column(DFColumn::new(Some(q.as_str()), &cd.name)),
+                            None => DFExpr::Column(DFColumn::new_unqualified(&cd.name)),
+                        }
+                    } else {
+                        DFExpr::Column(DFColumn::new_unqualified(&cd.name))
                     }
                 })
                 .collect();
@@ -212,10 +219,14 @@ fn convert_operator_inner(
         OperatorData::Map(map) => {
             let input = convert_operator_inner(map.input, ctx, tables, session, outer_refs)?;
             let input_schema = input.schema().clone();
-            let mut exprs: Vec<DFExpr> = input_schema
-                .fields()
-                .iter()
-                .map(|f| DFExpr::Column(DFColumn::new_unqualified(f.name())))
+            let mut exprs: Vec<DFExpr> = (0..input_schema.fields().len())
+                .map(|i| {
+                    let (qualifier, field) = input_schema.qualified_field(i);
+                    match qualifier {
+                        Some(q) => DFExpr::Column(DFColumn::new(Some(q.table()), field.name())),
+                        None => DFExpr::Column(DFColumn::new_unqualified(field.name())),
+                    }
+                })
                 .collect();
             for (col, expr) in &map.computations {
                 let name = ctx.column(*col).name.clone();
@@ -226,17 +237,23 @@ fn convert_operator_inner(
 
         OperatorData::Aggregation(agg) => {
             let input = convert_operator_inner(agg.input, ctx, tables, session, outer_refs)?;
+            let input_schema = input.schema().clone();
             let group_exprs: Vec<DFExpr> = agg
                 .keys
                 .iter()
-                .map(|e| convert_expr(*e, ctx, tables, session, outer_refs))
+                .map(|e| {
+                    let expr = convert_expr(*e, ctx, tables, session, outer_refs)?;
+                    Ok(normalize_col_ref(expr, &input_schema))
+                })
                 .collect::<ToDFResult<_>>()?;
             let aggr_exprs: Vec<DFExpr> = agg
                 .aggregates
                 .iter()
                 .map(|(col, agg_expr)| {
                     let name = ctx.column(*col).name.clone();
-                    Ok(convert_agg_expr(agg_expr, ctx, tables, session, outer_refs)?.alias(name))
+                    let expr = convert_agg_expr(agg_expr, ctx, tables, session, outer_refs)?;
+                    // Normalize column refs inside aggregate args.
+                    Ok(normalize_expr_cols(expr, &input_schema).alias(name))
                 })
                 .collect::<ToDFResult<_>>()?;
             Ok(LogicalPlanBuilder::from(input)
@@ -471,6 +488,39 @@ fn convert_expr(
 }
 
 /// Returns the free (correlated outer reference) columns for a subquery operator.
+/// Strips the qualifier from a `Column` expression if the column name is
+/// unambiguous in `schema` (only one field with that name). This avoids
+/// the "qualified AND unqualified field" ambiguity error from DataFusion's
+/// join schema normalization.
+fn normalize_col_ref(expr: DFExpr, schema: &datafusion::common::DFSchema) -> DFExpr {
+    if let DFExpr::Column(ref col) = expr {
+        if col.relation.is_some() {
+            let count = schema.fields_with_unqualified_name(&col.name).len();
+            if count == 1 {
+                return DFExpr::Column(DFColumn::new_unqualified(&col.name));
+            }
+        }
+    }
+    expr
+}
+
+/// Recursively normalizes column refs in an expression tree.
+fn normalize_expr_cols(expr: DFExpr, schema: &datafusion::common::DFSchema) -> DFExpr {
+    use datafusion::logical_expr::expr::AggregateFunction as DFAggFn;
+    match expr {
+        DFExpr::Column(_) => normalize_col_ref(expr, schema),
+        DFExpr::AggregateFunction(DFAggFn { func, mut params }) => {
+            params.args = params
+                .args
+                .into_iter()
+                .map(|a| normalize_expr_cols(a, schema))
+                .collect();
+            DFExpr::AggregateFunction(DFAggFn { func, params })
+        }
+        other => other,
+    }
+}
+
 fn free_columns_for(
     ctx: &QueryContext,
     subquery: simple_graph::Operator,
