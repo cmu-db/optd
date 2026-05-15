@@ -368,7 +368,7 @@ impl BoxDrawingRenderer {
             [] => parent,
             [input] => self.render_unary_node(parent, input),
             [outer, inner] => self.render_binary_node(parent, outer, inner),
-            inputs => self.render_nary_node(parent, inputs),
+            inputs => self.render_nary_node(parent, node.id.as_deref(), inputs),
         }
     }
 
@@ -495,13 +495,25 @@ impl BoxDrawingRenderer {
         RenderedBlock { lines, width }
     }
 
-    fn render_nary_node(&self, parent: RenderedBlock, inputs: &[DisplayInput]) -> RenderedBlock {
+    fn render_nary_node(
+        &self,
+        parent: RenderedBlock,
+        parent_id: Option<&str>,
+        inputs: &[DisplayInput],
+    ) -> RenderedBlock {
         let mut width = parent.width;
         let mut lines = parent.lines;
 
-        for input in inputs {
+        for (index, input) in inputs.iter().enumerate() {
             let child = self.render_node(&input.node);
             width = width.max(child.width);
+            if index > 0
+                && let Some(parent_id) = parent_id
+            {
+                let anchor = render_input_source_anchor(parent_id);
+                width = width.max(anchor.width);
+                lines.extend(anchor.lines);
+            }
             lines.push(format!("│ {}", input.name));
             lines.extend(child.lines);
         }
@@ -790,6 +802,18 @@ fn render_title_line(title: &str, id: Option<&str>, width: usize) -> String {
             format!("{title}{}{id}", " ".repeat(padding))
         }
         None => format!("{title:width$}"),
+    }
+}
+
+fn render_input_source_anchor(parent_id: &str) -> RenderedBlock {
+    let content_width = parent_id.chars().count().max(1);
+    RenderedBlock {
+        width: content_width + 4,
+        lines: vec![
+            format!("┌{}┐", "─".repeat(content_width + 2)),
+            format!("│ {parent_id} │"),
+            format!("└{}┘", "─".repeat(content_width + 2)),
+        ],
     }
 }
 
