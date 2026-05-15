@@ -330,6 +330,15 @@ fn convert_operator_inner(
         }
 
         OperatorData::TableFunction(_) => Err(ToDFError::Unsupported("TableFunction".into())),
+
+        OperatorData::SingleRow => {
+            use datafusion::common::DFSchema;
+            use datafusion::logical_expr::EmptyRelation;
+            Ok(LogicalPlan::EmptyRelation(EmptyRelation {
+                produce_one_row: true,
+                schema: Arc::new(DFSchema::empty()),
+            }))
+        }
     }
 }
 

@@ -1,3 +1,6 @@
+pub mod subquery_to_join;
+pub use subquery_to_join::SubqueryToJoin;
+
 use std::collections::{HashMap, HashSet};
 
 use crate::{Operator, OptimizerContext, QueryContext, Relation};

@@ -268,6 +268,7 @@ fn collect_selection_predicates(
             collect_selection_predicates(query, join.inner, predicates);
         }
         OperatorData::Rename(r) => collect_selection_predicates(query, r.input, predicates),
+        OperatorData::SingleRow => {}
     }
 }
 
@@ -330,6 +331,7 @@ fn collect_unique_selection_predicates(
         OperatorData::Rename(r) => {
             collect_unique_selection_predicates(query, r.input, visited, predicates);
         }
+        OperatorData::SingleRow => {}
     }
 }
 

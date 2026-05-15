@@ -210,6 +210,7 @@ impl<'a> Exporter<'a> {
             OperatorData::Limit(limit) => self.export_limit(limit),
             OperatorData::Aggregation(aggregation) => self.export_aggregation(aggregation),
             OperatorData::Rename(r) => self.export_operator(r.input),
+            OperatorData::SingleRow => Err(SubstraitError::UnsupportedRel("SingleRow".into())),
         }
     }
 
@@ -942,7 +943,7 @@ fn join_type_to_substrait(join_type: JoinType) -> Result<join_rel::JoinType, Sub
         JoinType::RightOuter => Ok(join_rel::JoinType::Right),
         JoinType::FullOuter => Ok(join_rel::JoinType::Outer),
         JoinType::Single => Ok(join_rel::JoinType::LeftSingle),
-        JoinType::Mark(_) => Err(SubstraitError::UnsupportedJoin("mark join marker column")),
+        JoinType::LeftMark(_) => Err(SubstraitError::UnsupportedJoin("mark join marker column")),
     }
 }
 

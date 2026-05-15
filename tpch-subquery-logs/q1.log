@@ -1,3 +1,89 @@
+  "nodes": [
+    {
+      "id": 0,
+      "kind": "scan",
+      "title": "⊞ lineitem",
+      "columns": [
+        "l_returnflag(#0)",
+        "l_linestatus(#1)",
+        "l_quantity(#2)",
+        "l_extendedprice(#3)",
+        "l_discount(#4)",
+        "l_tax(#5)",
+        "l_shipdate(#6)"
+      ]
+    },
+    {
+      "id": 1,
+      "kind": "selection",
+      "title": "σ Selection",
+      "predicate": "((l_shipdate(#6) <= 10524::Date32))",
+      "input": 0
+    },
+    {
+      "id": 2,
+      "kind": "map",
+      "title": "χ Map",
+      "computations": [
+        "disc_price(#7) := (l_extendedprice(#3) * (100::Decimal128(15, 2) - l_discount(#4)))",
+        "charge(#8) := ((l_extendedprice(#3) * (100::Decimal128(15, 2) - l_discount(#4))) * (100::Decimal128(15, 2) + l_tax(#5)))"
+      ],
+      "input": 1
+    },
+    {
+      "id": 3,
+      "kind": "aggregation",
+      "title": "γ Aggregation",
+      "keys": "l_returnflag(#0), l_linestatus(#1)",
+      "aggregates": [
+        "sum_qty(#9) := sum(l_quantity(#2))",
+        "sum_base_price(#10) := sum(l_extendedprice(#3))",
+        "sum_disc_price(#11) := sum(disc_price(#7))",
+        "sum_charge(#12) := sum(charge(#8))",
+        "avg_qty(#13) := avg(l_quantity(#2))",
+        "avg_price(#14) := avg(l_extendedprice(#3))",
+        "avg_disc(#15) := avg(l_discount(#4))",
+        "count_order(#16) := count(l_returnflag(#0))"
+      ],
+      "input": 2
+    },
+    {
+      "id": 4,
+      "kind": "sort",
+      "title": "⇞ Sort",
+      "keys": [
+        "l_returnflag(#0) Asc NullsLast",
+        "l_linestatus(#1) Asc NullsLast"
+      ],
+      "input": 3
+    },
+    {
+      "id": 5,
+      "kind": "projection",
+      "title": "π Projection",
+      "columns": [
+        "l_returnflag(#0)",
+        "l_linestatus(#1)",
+        "sum_qty(#9)",
+        "sum_base_price(#10)",
+        "sum_disc_price(#11)",
+        "sum_charge(#12)",
+        "avg_qty(#13)",
+        "avg_price(#14)",
+        "avg_disc(#15)",
+        "count_order(#16)"
+      ],
+      "input": 4
+    },
+    {
+      "id": 6,
+      "kind": "output",
+      "title": "= Output",
+      "input": 5
+    }
+  ]
+}
+=== optimized ===
 {
   "nodes": [
     {

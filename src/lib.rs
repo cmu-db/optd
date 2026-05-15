@@ -24,7 +24,7 @@ pub use display::{
 };
 pub use optimize::{
     Direction, OperatorRewrite, OperatorRewriteAdaptor, OptimizeError, OptimizeResult, Pass,
-    PassManager, PassResult, QueryPass, Rewrite, RewriteMap,
+    PassManager, PassResult, QueryPass, Rewrite, RewriteMap, SubqueryToJoin,
 };
 
 /// An opaque reference to a relational operator in a [`QueryContext`].
@@ -79,6 +79,9 @@ pub enum OperatorData {
     /// Renames the output of its input under a new qualifier.
     /// Corresponds to SQL `(subquery) AS alias` or `table AS alias`.
     Rename(Rename),
+    /// Produces exactly one row with no columns. Corresponds to SQL `SELECT expr`
+    /// with no `FROM` clause (DataFusion `EmptyRelation` with `produce_one_row=true`).
+    SingleRow,
 }
 
 impl OperatorData {
@@ -246,7 +249,7 @@ pub enum JoinType {
     RightOuter,
     FullOuter,
     Single,
-    Mark(Column),
+    LeftMark(Column),
 }
 
 impl std::fmt::Display for JoinType {
@@ -259,7 +262,7 @@ impl std::fmt::Display for JoinType {
             JoinType::RightOuter => f.write_str("RightOuter"),
             JoinType::FullOuter => f.write_str("FullOuter"),
             JoinType::Single => f.write_str("Single"),
-            JoinType::Mark(_) => f.write_str("Mark"),
+            JoinType::LeftMark(_col) => write!(f, "LeftMark"),
         }
     }
 }
@@ -1264,7 +1267,7 @@ impl<'a> QueryFormatter<'a> {
             JoinType::RightOuter => "⟖",
             JoinType::FullOuter => "⟗",
             JoinType::Single => "⋈₁",
-            JoinType::Mark(_) => "⋈ᵐ",
+            JoinType::LeftMark(_) => "⟕ᵐ",
         }
     }
 
@@ -1382,7 +1385,10 @@ impl<'a> QueryFormatter<'a> {
                     self.collect_aggregate_subquery_inputs(aggregate, &mut inputs);
                 }
             }
-            OperatorData::Projection(_) | OperatorData::Output(_) | OperatorData::Rename(_) => {}
+            OperatorData::Projection(_)
+            | OperatorData::Output(_)
+            | OperatorData::Rename(_)
+            | OperatorData::SingleRow => {}
         }
         inputs
     }
@@ -1528,6 +1534,7 @@ impl Relation for OperatorData {
             Self::Projection(operator) => operator.inputs(),
             Self::Output(operator) => operator.inputs(),
             Self::Rename(operator) => operator.inputs(),
+            Self::SingleRow => vec![],
         }
     }
 }
@@ -1547,6 +1554,12 @@ impl OperatorDisplayFormat for OperatorData {
             Self::Projection(operator) => operator.format(formatter),
             Self::Output(operator) => operator.format(formatter),
             Self::Rename(operator) => operator.format(formatter),
+            Self::SingleRow => OperatorDisplay {
+                kind: "single_row".to_string(),
+                title: "① SingleRow".to_string(),
+                fields: vec![],
+                inputs: vec![],
+            },
         }
     }
 }
@@ -1650,13 +1663,20 @@ impl Relation for Join {
 
 impl OperatorDisplayFormat for Join {
     fn format(&self, formatter: &QueryFormatter<'_>) -> OperatorDisplay {
+        let mut fields = vec![
+            display_scalar_field("join_type", self.join_type.to_string()),
+            display_scalar_field("condition", formatter.format_expr(self.on)),
+        ];
+        if let JoinType::LeftMark(col) = self.join_type {
+            fields.push(display_scalar_field(
+                "marker",
+                formatter.format_column_name(col),
+            ));
+        }
         OperatorDisplay {
             kind: "join".to_string(),
             title: formatter.format_join_title(&self.join_type),
-            fields: vec![
-                display_scalar_field("join_type", self.join_type.to_string()),
-                display_scalar_field("condition", formatter.format_expr(self.on)),
-            ],
+            fields,
             inputs: vec![
                 OperatorDisplayInput {
                     name: "outer".to_string(),

@@ -2,9 +2,9 @@ use arrow_schema::DataType;
 use simple_graph::{
     AggregateExpr, AggregateFunction, Aggregation, BinaryOp, BoxDrawingRenderer, BoxRendererConfig,
     ColorMode, ColumnData, ExprData, FreeColumns, Join, JoinType, Map, NaryOp, OperatorData,
-    Output, Projection, QueryContext, QueryFormatConfig, QueryFormatter, ScalarFunction,
-    ScalarValue, Scan, Selection, TableFunction, TableFunctionDef, TableRef, UnaryOp,
-    tpch::tpch_query,
+    OptimizerContext, Output, PassManager, Projection, QueryContext, QueryFormatConfig,
+    QueryFormatter, ScalarFunction, ScalarValue, Scan, Selection, SubqueryToJoin, TableFunction,
+    TableFunctionDef, TableRef, UnaryOp, tpch::tpch_query,
 };
 
 fn main() {
@@ -24,6 +24,24 @@ fn main() {
             args.query
         );
         std::process::exit(2);
+    };
+
+    let query = if args.optimize {
+        let initial = format_query(&query, args.format).unwrap_or_else(|e| e);
+        let mut opt = OptimizerContext::new(query);
+        let mut pm = PassManager::new(10);
+        pm.add_pass(SubqueryToJoin);
+        pm.run(&mut opt).unwrap();
+        if let Some(root) = opt.query.root() {
+            let resolved = opt.rewrites.resolve(root);
+            opt.query.set_root(resolved);
+        }
+        let query = opt.into_query();
+        println!("=== initial ===\n{initial}");
+        println!("=== optimized ===");
+        query
+    } else {
+        query
     };
 
     match format_query(&query, args.format) {
@@ -58,12 +76,14 @@ impl OutputFormat {
 struct CliArgs {
     query: u8,
     format: OutputFormat,
+    optimize: bool,
 }
 
 impl CliArgs {
     fn parse(args: impl IntoIterator<Item = String>) -> Result<Self, String> {
         let mut query = None;
         let mut format = OutputFormat::Box;
+        let mut optimize = false;
         let mut args = args.into_iter();
 
         while let Some(arg) = args.next() {
@@ -72,6 +92,7 @@ impl CliArgs {
                     print_usage();
                     std::process::exit(0);
                 }
+                "--optimize" => optimize = true,
                 "--format" => {
                     let value = args
                         .next()
@@ -100,12 +121,18 @@ impl CliArgs {
         }
 
         let query = query.ok_or_else(|| "missing query number".to_string())?;
-        Ok(Self { query, format })
+        Ok(Self {
+            query,
+            format,
+            optimize,
+        })
     }
 }
 
 fn print_usage() {
-    eprintln!("usage: simple-graph [--format box|flat|json|context] <tpch-query-number>");
+    eprintln!(
+        "usage: simple-graph [--format box|flat|json|context] [--optimize] <tpch-query-number>"
+    );
 }
 
 fn format_query(query: &QueryContext, format: OutputFormat) -> Result<String, String> {

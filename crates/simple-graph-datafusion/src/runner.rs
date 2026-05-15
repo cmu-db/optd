@@ -9,11 +9,24 @@ use datafusion::prelude::SessionContext;
 use datafusion_sqllogictest::{
     DFColumnType, DFSqlLogicTestError, convert_batches, convert_schema_to_types,
 };
-use simple_graph::{OptimizerContext, QueryContext};
+use simple_graph::{OptimizerContext, PassManager, QueryContext, SubqueryToJoin};
 use sqllogictest::{AsyncDB, DBOutput};
 
+use crate::explain_udfs::register_explain_udfs;
 use crate::from_df::from_logical_plan;
 use crate::to_df::to_logical_plan;
+
+fn optimize(ctx: QueryContext) -> Result<QueryContext, simple_graph::OptimizeError> {
+    let mut opt = OptimizerContext::new(ctx);
+    let mut pm = PassManager::new(10);
+    pm.add_pass(SubqueryToJoin);
+    pm.run(&mut opt)?;
+    if let Some(root) = opt.query.root() {
+        let resolved = opt.rewrites.resolve(root);
+        opt.query.set_root(resolved);
+    }
+    Ok(opt.into_query())
+}
 
 pub struct SimpleGraphRunner {
     session: SessionContext,
@@ -21,6 +34,7 @@ pub struct SimpleGraphRunner {
 
 impl SimpleGraphRunner {
     pub fn new(session: SessionContext) -> Self {
+        register_explain_udfs(&session);
         Self { session }
     }
 }
@@ -33,8 +47,8 @@ impl AsyncDB for SimpleGraphRunner {
     async fn run(&mut self, sql: &str) -> Result<DBOutput<DFColumnType>, DFSqlLogicTestError> {
         let (schema, results) = match self.try_via_ir(sql).await {
             Ok(pair) => pair,
-            Err(e) if e == "non-query plan" => {
-                // DDL and other non-query statements — execute directly.
+            Err(_) => {
+                // IR conversion failed or unsupported — execute directly via DataFusion.
                 let plan = self
                     .session
                     .state()
@@ -54,11 +68,6 @@ impl AsyncDB for SimpleGraphRunner {
                     std::sync::Arc::new(datafusion::arrow::datatypes::Schema::empty())
                 });
                 (schema, batches)
-            }
-            Err(e) => {
-                return Err(DFSqlLogicTestError::DataFusion(
-                    datafusion::error::DataFusionError::Plan(e),
-                ));
             }
         };
 
@@ -107,7 +116,8 @@ impl SimpleGraphRunner {
             | LogicalPlan::Limit(_)
             | LogicalPlan::Join(_)
             | LogicalPlan::TableScan(_)
-            | LogicalPlan::SubqueryAlias(_) => {}
+            | LogicalPlan::SubqueryAlias(_)
+            | LogicalPlan::EmptyRelation(_) => {}
             _ => return Err("non-query plan".into()),
         }
 
@@ -115,8 +125,7 @@ impl SimpleGraphRunner {
         let root = from_logical_plan(&plan, &mut ctx).map_err(|e| e.to_string())?;
         ctx.set_root(root);
 
-        let opt_ctx = OptimizerContext::new(ctx);
-        let ctx = opt_ctx.into_query();
+        let ctx = optimize(ctx).map_err(|e| e.to_string())?;
 
         let df_plan = to_logical_plan(&ctx, &self.session)
             .await

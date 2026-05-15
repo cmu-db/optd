@@ -1,3 +1,89 @@
+  "nodes": [
+    {
+      "id": 0,
+      "kind": "scan",
+      "title": "⊞ orders",
+      "columns": [
+        "o_orderkey(#0)",
+        "o_orderpriority(#1)"
+      ]
+    },
+    {
+      "id": 1,
+      "kind": "scan",
+      "title": "⊞ lineitem",
+      "columns": [
+        "l_orderkey(#2)",
+        "l_shipmode(#3)",
+        "l_commitdate(#4)",
+        "l_receiptdate(#5)",
+        "l_shipdate(#6)"
+      ]
+    },
+    {
+      "id": 2,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 0,
+      "inner": 1
+    },
+    {
+      "id": 3,
+      "kind": "selection",
+      "title": "σ Selection",
+      "predicate": "((o_orderkey(#0) = l_orderkey(#2)) AND in(l_shipmode(#3), \"FOB\", \"SHIP\") AND (l_commitdate(#4) < l_receiptdate(#5)) AND (l_shipdate(#6) < l_commitdate(#4)) AND (l_receiptdate(#5) >= 9131::Date32) AND (l_receiptdate(#5) < 9496::Date32))",
+      "input": 2
+    },
+    {
+      "id": 4,
+      "kind": "map",
+      "title": "χ Map",
+      "computations": [
+        "high_priority(#7) := CASE WHEN ((o_orderpriority(#1) = \"1-URGENT\") OR (o_orderpriority(#1) = \"2-HIGH\")) THEN 1 ELSE 0 END",
+        "low_priority(#8) := CASE WHEN ((o_orderpriority(#1) = \"1-URGENT\") OR (o_orderpriority(#1) = \"2-HIGH\")) THEN 0 ELSE 1 END"
+      ],
+      "input": 3
+    },
+    {
+      "id": 5,
+      "kind": "aggregation",
+      "title": "γ Aggregation",
+      "keys": "l_shipmode(#3)",
+      "aggregates": [
+        "high_line_count(#9) := sum(high_priority(#7))",
+        "low_line_count(#10) := sum(low_priority(#8))"
+      ],
+      "input": 4
+    },
+    {
+      "id": 6,
+      "kind": "sort",
+      "title": "⇞ Sort",
+      "keys": [
+        "l_shipmode(#3) Asc NullsLast"
+      ],
+      "input": 5
+    },
+    {
+      "id": 7,
+      "kind": "projection",
+      "title": "π Projection",
+      "columns": [
+        "l_shipmode(#3)",
+        "high_line_count(#9)",
+        "low_line_count(#10)"
+      ],
+      "input": 6
+    },
+    {
+      "id": 8,
+      "kind": "output",
+      "title": "= Output",
+      "input": 7
+    }
+  ]
+}
+=== optimized ===
 {
   "nodes": [
     {

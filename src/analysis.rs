@@ -312,7 +312,7 @@ fn directly_created_columns(operator: &OperatorData) -> Vec<Column> {
             .map(|(column, _)| *column)
             .collect(),
         OperatorData::Join(operator) => match operator.join_type {
-            JoinType::Mark(column) => vec![column],
+            JoinType::LeftMark(column) => vec![column],
             _ => Vec::new(),
         },
         OperatorData::Selection(_)
@@ -320,7 +320,8 @@ fn directly_created_columns(operator: &OperatorData) -> Vec<Column> {
         | OperatorData::Sort(_)
         | OperatorData::Limit(_)
         | OperatorData::Projection(_)
-        | OperatorData::Output(_) => Vec::new(),
+        | OperatorData::Output(_)
+        | OperatorData::SingleRow => Vec::new(),
         OperatorData::Rename(r) => r.defs.iter().map(|(renamed, _)| *renamed).collect(),
     }
 }
@@ -334,7 +335,10 @@ fn directly_used_columns(
     let mut columns = Vec::new();
 
     match operator_data {
-        OperatorData::Scan(_) | OperatorData::CrossProduct(_) | OperatorData::Limit(_) => {}
+        OperatorData::Scan(_)
+        | OperatorData::CrossProduct(_)
+        | OperatorData::Limit(_)
+        | OperatorData::SingleRow => {}
         OperatorData::Sort(data) => {
             for key in &data.keys {
                 collect_expr_used_columns(ctx, key.expr, &mut columns)?;
@@ -386,7 +390,7 @@ fn input_available_columns(
     let mut columns = Vec::new();
 
     match operator_data {
-        OperatorData::Scan(_) | OperatorData::TableFunction(_) => {}
+        OperatorData::Scan(_) | OperatorData::TableFunction(_) | OperatorData::SingleRow => {}
         OperatorData::Selection(data) => {
             extend_unique_columns(
                 &mut columns,
@@ -659,7 +663,7 @@ fn output_column_nullability(
 ) -> AnalysisResult<Vec<(Column, bool)>> {
     match operator.get(ctx) {
         OperatorData::Scan(data) => Ok(scan_column_nullability(data, analyses)),
-        OperatorData::TableFunction(_) => Ok(analyses
+        OperatorData::TableFunction(_) | OperatorData::SingleRow => Ok(analyses
             .get::<CreatedColumns>(ctx, operator)?
             .into_iter()
             .map(|column| (column, true))
@@ -702,7 +706,7 @@ fn output_column_nullability(
                 }
             }
 
-            if let JoinType::Mark(column) = data.join_type {
+            if let JoinType::LeftMark(column) = data.join_type {
                 push_unique_nullability(&mut columns, column, false);
             }
 
@@ -1010,7 +1014,7 @@ impl CachedAnalysis for AvailableColumns {
         op: Operator,
     ) -> AnalysisResult<Self::Output> {
         match op.get(ctx) {
-            OperatorData::Scan(_) | OperatorData::TableFunction(_) => {
+            OperatorData::Scan(_) | OperatorData::TableFunction(_) | OperatorData::SingleRow => {
                 analyses.get::<CreatedColumns>(ctx, op)
             }
             OperatorData::Selection(data) => analyses.get::<AvailableColumns>(ctx, data.input),

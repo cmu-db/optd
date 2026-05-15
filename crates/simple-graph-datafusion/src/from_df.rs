@@ -155,6 +155,7 @@ fn convert_plan(
 ) -> FromDFResult<Operator> {
     match plan {
         LogicalPlan::TableScan(scan) => convert_scan(scan, ctx, bindings),
+        LogicalPlan::EmptyRelation(_) => Ok(OperatorData::SingleRow.add(ctx)),
         LogicalPlan::Filter(filter) => convert_filter(filter, ctx, bindings),
         LogicalPlan::Projection(proj) => convert_projection(proj, ctx, bindings),
         LogicalPlan::Aggregate(agg) => convert_aggregate(agg, ctx, bindings),

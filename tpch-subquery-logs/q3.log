@@ -1,3 +1,114 @@
+  "nodes": [
+    {
+      "id": 0,
+      "kind": "scan",
+      "title": "⊞ customer",
+      "columns": [
+        "c_custkey(#0)",
+        "c_mktsegment(#1)"
+      ]
+    },
+    {
+      "id": 1,
+      "kind": "scan",
+      "title": "⊞ orders",
+      "columns": [
+        "o_orderkey(#2)",
+        "o_custkey(#3)",
+        "o_orderdate(#4)",
+        "o_shippriority(#5)"
+      ]
+    },
+    {
+      "id": 3,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 0,
+      "inner": 1
+    },
+    {
+      "id": 2,
+      "kind": "scan",
+      "title": "⊞ lineitem",
+      "columns": [
+        "l_orderkey(#6)",
+        "l_extendedprice(#7)",
+        "l_discount(#8)",
+        "l_shipdate(#9)"
+      ]
+    },
+    {
+      "id": 4,
+      "kind": "cross_product",
+      "title": "× CrossProduct",
+      "outer": 3,
+      "inner": 2
+    },
+    {
+      "id": 5,
+      "kind": "selection",
+      "title": "σ Selection",
+      "predicate": "((c_custkey(#0) = o_custkey(#3)) AND (o_orderkey(#2) = l_orderkey(#6)) AND (c_mktsegment(#1) = \"BUILDING\") AND (o_orderdate(#4) < 9204::Date32) AND (l_shipdate(#9) > 9204::Date32))",
+      "input": 4
+    },
+    {
+      "id": 6,
+      "kind": "map",
+      "title": "χ Map",
+      "computations": [
+        "revenue_expr(#10) := (l_extendedprice(#7) * (100::Decimal128(15, 2) - l_discount(#8)))"
+      ],
+      "input": 5
+    },
+    {
+      "id": 7,
+      "kind": "aggregation",
+      "title": "γ Aggregation",
+      "keys": "l_orderkey(#6), o_orderdate(#4), o_shippriority(#5)",
+      "aggregates": [
+        "revenue(#11) := sum(revenue_expr(#10))"
+      ],
+      "input": 6
+    },
+    {
+      "id": 8,
+      "kind": "sort",
+      "title": "⇞ Sort",
+      "keys": [
+        "revenue(#11) Desc NullsLast",
+        "o_orderdate(#4) Asc NullsLast"
+      ],
+      "input": 7
+    },
+    {
+      "id": 9,
+      "kind": "limit",
+      "title": "τ Limit",
+      "fetch": "10",
+      "offset": "0",
+      "input": 8
+    },
+    {
+      "id": 10,
+      "kind": "projection",
+      "title": "π Projection",
+      "columns": [
+        "l_orderkey(#6)",
+        "revenue(#11)",
+        "o_orderdate(#4)",
+        "o_shippriority(#5)"
+      ],
+      "input": 9
+    },
+    {
+      "id": 11,
+      "kind": "output",
+      "title": "= Output",
+      "input": 10
+    }
+  ]
+}
+=== optimized ===
 {
   "nodes": [
     {
