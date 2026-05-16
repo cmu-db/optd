@@ -1,0 +1,240 @@
+query T
+SELECT explain_flat('select
+    ps_partkey,
+    sum(ps_supplycost * ps_availqty) as value
+from
+    partsupp,
+    supplier,
+    nation
+where
+    ps_suppkey = s_suppkey
+  and s_nationkey = n_nationkey
+  and n_name = ''GERMANY''
+group by
+    ps_partkey having
+    sum(ps_supplycost * ps_availqty) > (
+    select
+    sum(ps_supplycost * ps_availqty) * 0.0001
+    from
+    partsupp,
+    supplier,
+    nation
+    where
+    ps_suppkey = s_suppkey
+                  and s_nationkey = n_nationkey
+                  and n_name = ''GERMANY''
+    )
+order by
+    value desc
+limit 10;');
+----
+ 
+01){
+02)--"nodes": [
+03)----{
+04)------"id": 0,
+05)------"kind": "scan",
+06)------"title": "⊞ partsupp",
+07)------"columns": [
+08)--------"ps_partkey(#0)",
+09)--------"ps_suppkey(#1)",
+10)--------"ps_availqty(#2)",
+11)--------"ps_supplycost(#3)",
+12)--------"ps_comment(#4)"
+13)------]
+14)----},
+15)----{
+16)------"id": 1,
+17)------"kind": "scan",
+18)------"title": "⊞ supplier",
+19)------"columns": [
+20)--------"s_suppkey(#5)",
+21)--------"s_name(#6)",
+22)--------"s_address(#7)",
+23)--------"s_nationkey(#8)",
+24)--------"s_phone(#9)",
+25)--------"s_acctbal(#10)",
+26)--------"s_comment(#11)"
+27)------]
+28)----},
+29)----{
+30)------"id": 2,
+31)------"kind": "join",
+32)------"title": "⋈ InnerJoin",
+33)------"join_type": "Inner",
+34)------"condition": "true",
+35)------"outer": 0,
+36)------"inner": 1
+37)----},
+38)----{
+39)------"id": 3,
+40)------"kind": "scan",
+41)------"title": "⊞ nation",
+42)------"columns": [
+43)--------"n_nationkey(#12)",
+44)--------"n_name(#13)",
+45)--------"n_regionkey(#14)",
+46)--------"n_comment(#15)"
+47)------]
+48)----},
+49)----{
+50)------"id": 4,
+51)------"kind": "join",
+52)------"title": "⋈ InnerJoin",
+53)------"join_type": "Inner",
+54)------"condition": "true",
+55)------"outer": 2,
+56)------"inner": 3
+57)----},
+58)----{
+59)------"id": 5,
+60)------"kind": "selection",
+61)------"title": "σ Selection",
+62)------"predicate": "(((ps_suppkey(#1) = s_suppkey(#5)) AND (s_nationkey(#8) = n_nationkey(#12))) AND (n_name(#13) = \"GERMANY\"))",
+63)------"input": 4
+64)----},
+65)----{
+66)------"id": 6,
+67)------"kind": "aggregation",
+68)------"title": "γ Aggregation",
+69)------"keys": "ps_partkey(#0)",
+70)------"aggregates": [
+71)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#16) := sum((ps_supplycost(#3) * ps_availqty(#2)))"
+72)------],
+73)------"input": 5
+74)----},
+75)----{
+76)------"id": 7,
+77)------"kind": "scan",
+78)------"title": "⊞ partsupp",
+79)------"columns": [
+80)--------"ps_partkey(#17)",
+81)--------"ps_suppkey(#18)",
+82)--------"ps_availqty(#19)",
+83)--------"ps_supplycost(#20)",
+84)--------"ps_comment(#21)"
+85)------]
+86)----},
+87)----{
+88)------"id": 8,
+89)------"kind": "scan",
+90)------"title": "⊞ supplier",
+91)------"columns": [
+92)--------"s_suppkey(#22)",
+93)--------"s_name(#23)",
+94)--------"s_address(#24)",
+95)--------"s_nationkey(#25)",
+96)--------"s_phone(#26)",
+97)--------"s_acctbal(#27)",
+98)--------"s_comment(#28)"
+99)------]
+100)----},
+101)----{
+102)------"id": 9,
+103)------"kind": "join",
+104)------"title": "⋈ InnerJoin",
+105)------"join_type": "Inner",
+106)------"condition": "true",
+107)------"outer": 7,
+108)------"inner": 8
+109)----},
+110)----{
+111)------"id": 10,
+112)------"kind": "scan",
+113)------"title": "⊞ nation",
+114)------"columns": [
+115)--------"n_nationkey(#29)",
+116)--------"n_name(#30)",
+117)--------"n_regionkey(#31)",
+118)--------"n_comment(#32)"
+119)------]
+120)----},
+121)----{
+122)------"id": 11,
+123)------"kind": "join",
+124)------"title": "⋈ InnerJoin",
+125)------"join_type": "Inner",
+126)------"condition": "true",
+127)------"outer": 9,
+128)------"inner": 10
+129)----},
+130)----{
+131)------"id": 12,
+132)------"kind": "selection",
+133)------"title": "σ Selection",
+134)------"predicate": "(((ps_suppkey(#18) = s_suppkey(#22)) AND (s_nationkey(#25) = n_nationkey(#29))) AND (n_name(#30) = \"GERMANY\"))",
+135)------"input": 11
+136)----},
+137)----{
+138)------"id": 13,
+139)------"kind": "aggregation",
+140)------"title": "γ Aggregation",
+141)------"keys": "",
+142)------"aggregates": [
+143)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#33) := sum((ps_supplycost(#20) * ps_availqty(#19)))"
+144)------],
+145)------"input": 12
+146)----},
+147)----{
+148)------"id": 14,
+149)------"kind": "map",
+150)------"title": "χ Map",
+151)------"computations": [
+152)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty) * Float64(0.0001)(#34) := (sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#33) * 0.0001)"
+153)------],
+154)------"input": 13
+155)----},
+156)----{
+157)------"id": 15,
+158)------"kind": "projection",
+159)------"title": "π Projection",
+160)------"columns": [
+161)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty) * Float64(0.0001)(#34)"
+162)------],
+163)------"input": 14
+164)----},
+165)----{
+166)------"id": 20,
+167)------"kind": "join",
+168)------"title": "⋈₁ SingleJoin",
+169)------"join_type": "Single",
+170)------"condition": "true",
+171)------"outer": 6,
+172)------"inner": 15
+173)----},
+174)----{
+175)------"id": 21,
+176)------"kind": "selection",
+177)------"title": "σ Selection",
+178)------"predicate": "(sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#16) > sum(partsupp.ps_supplycost * partsupp.ps_availqty) * Float64(0.0001)(#34))",
+179)------"input": 20
+180)----},
+181)----{
+182)------"id": 22,
+183)------"kind": "projection",
+184)------"title": "π Projection",
+185)------"columns": [
+186)--------"ps_partkey(#0)",
+187)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#16)"
+188)------],
+189)------"input": 21
+190)----},
+191)----{
+192)------"id": 23,
+193)------"kind": "sort",
+194)------"title": "⇞ Sort",
+195)------"keys": [
+196)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#16) Desc NullsFirst"
+197)------],
+198)------"input": 22
+199)----},
+200)----{
+201)------"id": 24,
+202)------"kind": "limit",
+203)------"title": "τ Limit",
+204)------"fetch": "10",
+205)------"offset": "0",
+206)------"input": 23
+207)----}
+208)--]
+209)}

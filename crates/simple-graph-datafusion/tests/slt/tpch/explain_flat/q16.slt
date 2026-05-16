@@ -1,0 +1,164 @@
+query T
+SELECT explain_flat('select
+    p_brand,
+    p_type,
+    p_size,
+    count(distinct ps_suppkey) as supplier_cnt
+from
+    partsupp,
+    part
+where
+        p_partkey = ps_partkey
+  and p_brand <> ''Brand#45''
+  and p_type not like ''MEDIUM POLISHED%''
+  and p_size in (49, 14, 23, 45, 19, 3, 36, 9)
+  and ps_suppkey not in (
+    select
+        s_suppkey
+    from
+        supplier
+    where
+            s_comment like ''%Customer%Complaints%''
+)
+group by
+    p_brand,
+    p_type,
+    p_size
+order by
+    supplier_cnt desc,
+    p_brand,
+    p_type,
+    p_size
+limit 10;');
+----
+ 
+01){
+02)--"nodes": [
+03)----{
+04)------"id": 0,
+05)------"kind": "scan",
+06)------"title": "⊞ partsupp",
+07)------"columns": [
+08)--------"ps_partkey(#0)",
+09)--------"ps_suppkey(#1)",
+10)--------"ps_availqty(#2)",
+11)--------"ps_supplycost(#3)",
+12)--------"ps_comment(#4)"
+13)------]
+14)----},
+15)----{
+16)------"id": 1,
+17)------"kind": "scan",
+18)------"title": "⊞ part",
+19)------"columns": [
+20)--------"p_partkey(#5)",
+21)--------"p_name(#6)",
+22)--------"p_mfgr(#7)",
+23)--------"p_brand(#8)",
+24)--------"p_type(#9)",
+25)--------"p_size(#10)",
+26)--------"p_container(#11)",
+27)--------"p_retailprice(#12)",
+28)--------"p_comment(#13)"
+29)------]
+30)----},
+31)----{
+32)------"id": 2,
+33)------"kind": "join",
+34)------"title": "⋈ InnerJoin",
+35)------"join_type": "Inner",
+36)------"condition": "true",
+37)------"outer": 0,
+38)------"inner": 1
+39)----},
+40)----{
+41)------"id": 3,
+42)------"kind": "scan",
+43)------"title": "⊞ supplier",
+44)------"columns": [
+45)--------"s_suppkey(#14)",
+46)--------"s_name(#15)",
+47)--------"s_address(#16)",
+48)--------"s_nationkey(#17)",
+49)--------"s_phone(#18)",
+50)--------"s_acctbal(#19)",
+51)--------"s_comment(#20)"
+52)------]
+53)----},
+54)----{
+55)------"id": 4,
+56)------"kind": "selection",
+57)------"title": "σ Selection",
+58)------"predicate": "(s_comment(#20) LIKE \"%Customer%Complaints%\")",
+59)------"input": 3
+60)----},
+61)----{
+62)------"id": 5,
+63)------"kind": "projection",
+64)------"title": "π Projection",
+65)------"columns": [
+66)--------"s_suppkey(#14)"
+67)------],
+68)------"input": 4
+69)----},
+70)----{
+71)------"id": 11,
+72)------"kind": "join",
+73)------"title": "⟕ᵐ LeftMarkJoin",
+74)------"join_type": "LeftMark",
+75)------"condition": "(ps_suppkey(#1) = s_suppkey(#14))",
+76)------"marker": "in_mark(#22)",
+77)------"outer": 2,
+78)------"inner": 5
+79)----},
+80)----{
+81)------"id": 12,
+82)------"kind": "selection",
+83)------"title": "σ Selection",
+84)------"predicate": "(((((p_partkey(#5) = ps_partkey(#0)) AND (p_brand(#8) != \"Brand#45\")) AND (p_type(#9) NOT LIKE \"MEDIUM POLISHED%\")) AND ((p_size(#10) = 49) OR (p_size(#10) = 14) OR (p_size(#10) = 23) OR (p_size(#10) = 45) OR (p_size(#10) = 19) OR (p_size(#10) = 3) OR (p_size(#10) = 36) OR (p_size(#10) = 9))) AND NOT(in_mark(#22)))",
+85)------"input": 11
+86)----},
+87)----{
+88)------"id": 13,
+89)------"kind": "aggregation",
+90)------"title": "γ Aggregation",
+91)------"keys": "p_brand(#8), p_type(#9), p_size(#10)",
+92)------"aggregates": [
+93)--------"count(DISTINCT partsupp.ps_suppkey)(#21) := count(DISTINCT ps_suppkey(#1))"
+94)------],
+95)------"input": 12
+96)----},
+97)----{
+98)------"id": 14,
+99)------"kind": "projection",
+100)------"title": "π Projection",
+101)------"columns": [
+102)--------"p_brand(#8)",
+103)--------"p_type(#9)",
+104)--------"p_size(#10)",
+105)--------"count(DISTINCT partsupp.ps_suppkey)(#21)"
+106)------],
+107)------"input": 13
+108)----},
+109)----{
+110)------"id": 15,
+111)------"kind": "sort",
+112)------"title": "⇞ Sort",
+113)------"keys": [
+114)--------"count(DISTINCT partsupp.ps_suppkey)(#21) Desc NullsFirst",
+115)--------"p_brand(#8) Asc NullsLast",
+116)--------"p_type(#9) Asc NullsLast",
+117)--------"p_size(#10) Asc NullsLast"
+118)------],
+119)------"input": 14
+120)----},
+121)----{
+122)------"id": 16,
+123)------"kind": "limit",
+124)------"title": "τ Limit",
+125)------"fetch": "10",
+126)------"offset": "0",
+127)------"input": 15
+128)----}
+129)--]
+130)}

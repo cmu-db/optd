@@ -1,0 +1,256 @@
+query T
+SELECT explain_flat('select
+    nation,
+    o_year,
+    sum(amount) as sum_profit
+from
+    (
+        select
+            n_name as nation,
+            extract(year from o_orderdate) as o_year,
+            l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity as amount
+        from
+            part,
+            supplier,
+            lineitem,
+            partsupp,
+            orders,
+            nation
+        where
+                s_suppkey = l_suppkey
+          and ps_suppkey = l_suppkey
+          and ps_partkey = l_partkey
+          and p_partkey = l_partkey
+          and o_orderkey = l_orderkey
+          and s_nationkey = n_nationkey
+          and p_name like ''%green%''
+    ) as profit
+group by
+    nation,
+    o_year
+order by
+    nation,
+    o_year desc
+limit 10;');
+----
+ 
+01){
+02)--"nodes": [
+03)----{
+04)------"id": 0,
+05)------"kind": "scan",
+06)------"title": "⊞ part",
+07)------"columns": [
+08)--------"p_partkey(#0)",
+09)--------"p_name(#1)",
+10)--------"p_mfgr(#2)",
+11)--------"p_brand(#3)",
+12)--------"p_type(#4)",
+13)--------"p_size(#5)",
+14)--------"p_container(#6)",
+15)--------"p_retailprice(#7)",
+16)--------"p_comment(#8)"
+17)------]
+18)----},
+19)----{
+20)------"id": 1,
+21)------"kind": "scan",
+22)------"title": "⊞ supplier",
+23)------"columns": [
+24)--------"s_suppkey(#9)",
+25)--------"s_name(#10)",
+26)--------"s_address(#11)",
+27)--------"s_nationkey(#12)",
+28)--------"s_phone(#13)",
+29)--------"s_acctbal(#14)",
+30)--------"s_comment(#15)"
+31)------]
+32)----},
+33)----{
+34)------"id": 2,
+35)------"kind": "join",
+36)------"title": "⋈ InnerJoin",
+37)------"join_type": "Inner",
+38)------"condition": "true",
+39)------"outer": 0,
+40)------"inner": 1
+41)----},
+42)----{
+43)------"id": 3,
+44)------"kind": "scan",
+45)------"title": "⊞ lineitem",
+46)------"columns": [
+47)--------"l_orderkey(#16)",
+48)--------"l_partkey(#17)",
+49)--------"l_suppkey(#18)",
+50)--------"l_linenumber(#19)",
+51)--------"l_quantity(#20)",
+52)--------"l_extendedprice(#21)",
+53)--------"l_discount(#22)",
+54)--------"l_tax(#23)",
+55)--------"l_returnflag(#24)",
+56)--------"l_linestatus(#25)",
+57)--------"l_shipdate(#26)",
+58)--------"l_commitdate(#27)",
+59)--------"l_receiptdate(#28)",
+60)--------"l_shipinstruct(#29)",
+61)--------"l_shipmode(#30)",
+62)--------"l_comment(#31)"
+63)------]
+64)----},
+65)----{
+66)------"id": 4,
+67)------"kind": "join",
+68)------"title": "⋈ InnerJoin",
+69)------"join_type": "Inner",
+70)------"condition": "true",
+71)------"outer": 2,
+72)------"inner": 3
+73)----},
+74)----{
+75)------"id": 5,
+76)------"kind": "scan",
+77)------"title": "⊞ partsupp",
+78)------"columns": [
+79)--------"ps_partkey(#32)",
+80)--------"ps_suppkey(#33)",
+81)--------"ps_availqty(#34)",
+82)--------"ps_supplycost(#35)",
+83)--------"ps_comment(#36)"
+84)------]
+85)----},
+86)----{
+87)------"id": 6,
+88)------"kind": "join",
+89)------"title": "⋈ InnerJoin",
+90)------"join_type": "Inner",
+91)------"condition": "true",
+92)------"outer": 4,
+93)------"inner": 5
+94)----},
+95)----{
+96)------"id": 7,
+97)------"kind": "scan",
+98)------"title": "⊞ orders",
+99)------"columns": [
+100)--------"o_orderkey(#37)",
+101)--------"o_custkey(#38)",
+102)--------"o_orderstatus(#39)",
+103)--------"o_totalprice(#40)",
+104)--------"o_orderdate(#41)",
+105)--------"o_orderpriority(#42)",
+106)--------"o_clerk(#43)",
+107)--------"o_shippriority(#44)",
+108)--------"o_comment(#45)"
+109)------]
+110)----},
+111)----{
+112)------"id": 8,
+113)------"kind": "join",
+114)------"title": "⋈ InnerJoin",
+115)------"join_type": "Inner",
+116)------"condition": "true",
+117)------"outer": 6,
+118)------"inner": 7
+119)----},
+120)----{
+121)------"id": 9,
+122)------"kind": "scan",
+123)------"title": "⊞ nation",
+124)------"columns": [
+125)--------"n_nationkey(#46)",
+126)--------"n_name(#47)",
+127)--------"n_regionkey(#48)",
+128)--------"n_comment(#49)"
+129)------]
+130)----},
+131)----{
+132)------"id": 10,
+133)------"kind": "join",
+134)------"title": "⋈ InnerJoin",
+135)------"join_type": "Inner",
+136)------"condition": "true",
+137)------"outer": 8,
+138)------"inner": 9
+139)----},
+140)----{
+141)------"id": 11,
+142)------"kind": "selection",
+143)------"title": "σ Selection",
+144)------"predicate": "(((((((s_suppkey(#9) = l_suppkey(#18)) AND (ps_suppkey(#33) = l_suppkey(#18))) AND (ps_partkey(#32) = l_partkey(#17))) AND (p_partkey(#0) = l_partkey(#17))) AND (o_orderkey(#37) = l_orderkey(#16))) AND (s_nationkey(#12) = n_nationkey(#46))) AND (p_name(#1) LIKE \"%green%\"))",
+145)------"input": 10
+146)----},
+147)----{
+148)------"id": 12,
+149)------"kind": "map",
+150)------"title": "χ Map",
+151)------"computations": [
+152)--------"nation(#50) := n_name(#47)",
+153)--------"o_year(#51) := date_part(\"YEAR\", o_orderdate(#41))",
+154)--------"amount(#52) := ((l_extendedprice(#21) * (1 - l_discount(#22))) - (ps_supplycost(#35) * l_quantity(#20)))"
+155)------],
+156)------"input": 11
+157)----},
+158)----{
+159)------"id": 13,
+160)------"kind": "projection",
+161)------"title": "π Projection",
+162)------"columns": [
+163)--------"nation(#50)",
+164)--------"o_year(#51)",
+165)--------"amount(#52)"
+166)------],
+167)------"input": 12
+168)----},
+169)----{
+170)------"id": 14,
+171)------"kind": "rename",
+172)------"title": "ρ Rename(profit)",
+173)------"defs": [
+174)--------"nation(#53) ← nation(#50)",
+175)--------"o_year(#54) ← o_year(#51)",
+176)--------"amount(#55) ← amount(#52)"
+177)------],
+178)------"input": 13
+179)----},
+180)----{
+181)------"id": 15,
+182)------"kind": "aggregation",
+183)------"title": "γ Aggregation",
+184)------"keys": "nation(#53), o_year(#54)",
+185)------"aggregates": [
+186)--------"sum(profit.amount)(#56) := sum(amount(#55))"
+187)------],
+188)------"input": 14
+189)----},
+190)----{
+191)------"id": 16,
+192)------"kind": "projection",
+193)------"title": "π Projection",
+194)------"columns": [
+195)--------"nation(#53)",
+196)--------"o_year(#54)",
+197)--------"sum(profit.amount)(#56)"
+198)------],
+199)------"input": 15
+200)----},
+201)----{
+202)------"id": 17,
+203)------"kind": "sort",
+204)------"title": "⇞ Sort",
+205)------"keys": [
+206)--------"nation(#53) Asc NullsLast",
+207)--------"o_year(#54) Desc NullsFirst"
+208)------],
+209)------"input": 16
+210)----},
+211)----{
+212)------"id": 18,
+213)------"kind": "limit",
+214)------"title": "τ Limit",
+215)------"fetch": "10",
+216)------"offset": "0",
+217)------"input": 17
+218)----}
+219)--]
+220)}

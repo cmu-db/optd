@@ -1,0 +1,181 @@
+query T
+SELECT explain_flat('select
+    c_custkey,
+    c_name,
+    sum(l_extendedprice * (1 - l_discount)) as revenue,
+    c_acctbal,
+    n_name,
+    c_address,
+    c_phone,
+    c_comment
+from
+    customer,
+    orders,
+    lineitem,
+    nation
+where
+        c_custkey = o_custkey
+  and l_orderkey = o_orderkey
+  and o_orderdate >= date ''1993-10-01''
+  and o_orderdate < date ''1994-01-01''
+  and l_returnflag = ''R''
+  and c_nationkey = n_nationkey
+group by
+    c_custkey,
+    c_name,
+    c_acctbal,
+    c_phone,
+    n_name,
+    c_address,
+    c_comment
+order by
+    revenue desc
+limit 10;');
+----
+ 
+01){
+02)--"nodes": [
+03)----{
+04)------"id": 0,
+05)------"kind": "scan",
+06)------"title": "⊞ customer",
+07)------"columns": [
+08)--------"c_custkey(#0)",
+09)--------"c_name(#1)",
+10)--------"c_address(#2)",
+11)--------"c_nationkey(#3)",
+12)--------"c_phone(#4)",
+13)--------"c_acctbal(#5)",
+14)--------"c_mktsegment(#6)",
+15)--------"c_comment(#7)"
+16)------]
+17)----},
+18)----{
+19)------"id": 1,
+20)------"kind": "scan",
+21)------"title": "⊞ orders",
+22)------"columns": [
+23)--------"o_orderkey(#8)",
+24)--------"o_custkey(#9)",
+25)--------"o_orderstatus(#10)",
+26)--------"o_totalprice(#11)",
+27)--------"o_orderdate(#12)",
+28)--------"o_orderpriority(#13)",
+29)--------"o_clerk(#14)",
+30)--------"o_shippriority(#15)",
+31)--------"o_comment(#16)"
+32)------]
+33)----},
+34)----{
+35)------"id": 2,
+36)------"kind": "join",
+37)------"title": "⋈ InnerJoin",
+38)------"join_type": "Inner",
+39)------"condition": "true",
+40)------"outer": 0,
+41)------"inner": 1
+42)----},
+43)----{
+44)------"id": 3,
+45)------"kind": "scan",
+46)------"title": "⊞ lineitem",
+47)------"columns": [
+48)--------"l_orderkey(#17)",
+49)--------"l_partkey(#18)",
+50)--------"l_suppkey(#19)",
+51)--------"l_linenumber(#20)",
+52)--------"l_quantity(#21)",
+53)--------"l_extendedprice(#22)",
+54)--------"l_discount(#23)",
+55)--------"l_tax(#24)",
+56)--------"l_returnflag(#25)",
+57)--------"l_linestatus(#26)",
+58)--------"l_shipdate(#27)",
+59)--------"l_commitdate(#28)",
+60)--------"l_receiptdate(#29)",
+61)--------"l_shipinstruct(#30)",
+62)--------"l_shipmode(#31)",
+63)--------"l_comment(#32)"
+64)------]
+65)----},
+66)----{
+67)------"id": 4,
+68)------"kind": "join",
+69)------"title": "⋈ InnerJoin",
+70)------"join_type": "Inner",
+71)------"condition": "true",
+72)------"outer": 2,
+73)------"inner": 3
+74)----},
+75)----{
+76)------"id": 5,
+77)------"kind": "scan",
+78)------"title": "⊞ nation",
+79)------"columns": [
+80)--------"n_nationkey(#33)",
+81)--------"n_name(#34)",
+82)--------"n_regionkey(#35)",
+83)--------"n_comment(#36)"
+84)------]
+85)----},
+86)----{
+87)------"id": 6,
+88)------"kind": "join",
+89)------"title": "⋈ InnerJoin",
+90)------"join_type": "Inner",
+91)------"condition": "true",
+92)------"outer": 4,
+93)------"inner": 5
+94)----},
+95)----{
+96)------"id": 7,
+97)------"kind": "selection",
+98)------"title": "σ Selection",
+99)------"predicate": "((((((c_custkey(#0) = o_custkey(#9)) AND (l_orderkey(#17) = o_orderkey(#8))) AND (o_orderdate(#12) >= CAST(\"1993-10-01\" AS Date32))) AND (o_orderdate(#12) < CAST(\"1994-01-01\" AS Date32))) AND (l_returnflag(#25) = \"R\")) AND (c_nationkey(#3) = n_nationkey(#33)))",
+100)------"input": 6
+101)----},
+102)----{
+103)------"id": 8,
+104)------"kind": "aggregation",
+105)------"title": "γ Aggregation",
+106)------"keys": "c_custkey(#0), c_name(#1), c_acctbal(#5), c_phone(#4), n_name(#34), c_address(#2), c_comment(#7)",
+107)------"aggregates": [
+108)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#37) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
+109)------],
+110)------"input": 7
+111)----},
+112)----{
+113)------"id": 9,
+114)------"kind": "projection",
+115)------"title": "π Projection",
+116)------"columns": [
+117)--------"c_custkey(#0)",
+118)--------"c_name(#1)",
+119)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#37)",
+120)--------"c_acctbal(#5)",
+121)--------"n_name(#34)",
+122)--------"c_address(#2)",
+123)--------"c_phone(#4)",
+124)--------"c_comment(#7)"
+125)------],
+126)------"input": 8
+127)----},
+128)----{
+129)------"id": 10,
+130)------"kind": "sort",
+131)------"title": "⇞ Sort",
+132)------"keys": [
+133)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#37) Desc NullsFirst"
+134)------],
+135)------"input": 9
+136)----},
+137)----{
+138)------"id": 11,
+139)------"kind": "limit",
+140)------"title": "τ Limit",
+141)------"fetch": "10",
+142)------"offset": "0",
+143)------"input": 10
+144)----}
+145)--]
+146)}

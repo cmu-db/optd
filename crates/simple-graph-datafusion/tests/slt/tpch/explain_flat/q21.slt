@@ -1,0 +1,374 @@
+query T
+SELECT explain_flat('select
+    s_name,
+    count(*) as numwait
+from
+    supplier,
+    lineitem l1,
+    orders,
+    nation
+where
+        s_suppkey = l1.l_suppkey
+  and o_orderkey = l1.l_orderkey
+  and o_orderstatus = ''F''
+  and l1.l_receiptdate > l1.l_commitdate
+  and exists (
+        select
+            *
+        from
+            lineitem l2
+        where
+                l2.l_orderkey = l1.l_orderkey
+          and l2.l_suppkey <> l1.l_suppkey
+    )
+  and not exists (
+        select
+            *
+        from
+            lineitem l3
+        where
+                l3.l_orderkey = l1.l_orderkey
+          and l3.l_suppkey <> l1.l_suppkey
+          and l3.l_receiptdate > l3.l_commitdate
+    )
+  and s_nationkey = n_nationkey
+  and n_name = ''SAUDI ARABIA''
+group by
+    s_name
+order by
+    numwait desc,
+    s_name;');
+----
+ 
+01){
+02)--"nodes": [
+03)----{
+04)------"id": 0,
+05)------"kind": "scan",
+06)------"title": "⊞ supplier",
+07)------"columns": [
+08)--------"s_suppkey(#0)",
+09)--------"s_name(#1)",
+10)--------"s_address(#2)",
+11)--------"s_nationkey(#3)",
+12)--------"s_phone(#4)",
+13)--------"s_acctbal(#5)",
+14)--------"s_comment(#6)"
+15)------]
+16)----},
+17)----{
+18)------"id": 1,
+19)------"kind": "scan",
+20)------"title": "⊞ lineitem",
+21)------"columns": [
+22)--------"l_orderkey(#7)",
+23)--------"l_partkey(#8)",
+24)--------"l_suppkey(#9)",
+25)--------"l_linenumber(#10)",
+26)--------"l_quantity(#11)",
+27)--------"l_extendedprice(#12)",
+28)--------"l_discount(#13)",
+29)--------"l_tax(#14)",
+30)--------"l_returnflag(#15)",
+31)--------"l_linestatus(#16)",
+32)--------"l_shipdate(#17)",
+33)--------"l_commitdate(#18)",
+34)--------"l_receiptdate(#19)",
+35)--------"l_shipinstruct(#20)",
+36)--------"l_shipmode(#21)",
+37)--------"l_comment(#22)"
+38)------]
+39)----},
+40)----{
+41)------"id": 2,
+42)------"kind": "rename",
+43)------"title": "ρ Rename(l1)",
+44)------"defs": [
+45)--------"l_orderkey(#23) ← l_orderkey(#7)",
+46)--------"l_partkey(#24) ← l_partkey(#8)",
+47)--------"l_suppkey(#25) ← l_suppkey(#9)",
+48)--------"l_linenumber(#26) ← l_linenumber(#10)",
+49)--------"l_quantity(#27) ← l_quantity(#11)",
+50)--------"l_extendedprice(#28) ← l_extendedprice(#12)",
+51)--------"l_discount(#29) ← l_discount(#13)",
+52)--------"l_tax(#30) ← l_tax(#14)",
+53)--------"l_returnflag(#31) ← l_returnflag(#15)",
+54)--------"l_linestatus(#32) ← l_linestatus(#16)",
+55)--------"l_shipdate(#33) ← l_shipdate(#17)",
+56)--------"l_commitdate(#34) ← l_commitdate(#18)",
+57)--------"l_receiptdate(#35) ← l_receiptdate(#19)",
+58)--------"l_shipinstruct(#36) ← l_shipinstruct(#20)",
+59)--------"l_shipmode(#37) ← l_shipmode(#21)",
+60)--------"l_comment(#38) ← l_comment(#22)"
+61)------],
+62)------"input": 1
+63)----},
+64)----{
+65)------"id": 3,
+66)------"kind": "join",
+67)------"title": "⋈ InnerJoin",
+68)------"join_type": "Inner",
+69)------"condition": "true",
+70)------"outer": 0,
+71)------"inner": 2
+72)----},
+73)----{
+74)------"id": 4,
+75)------"kind": "scan",
+76)------"title": "⊞ orders",
+77)------"columns": [
+78)--------"o_orderkey(#39)",
+79)--------"o_custkey(#40)",
+80)--------"o_orderstatus(#41)",
+81)--------"o_totalprice(#42)",
+82)--------"o_orderdate(#43)",
+83)--------"o_orderpriority(#44)",
+84)--------"o_clerk(#45)",
+85)--------"o_shippriority(#46)",
+86)--------"o_comment(#47)"
+87)------]
+88)----},
+89)----{
+90)------"id": 5,
+91)------"kind": "join",
+92)------"title": "⋈ InnerJoin",
+93)------"join_type": "Inner",
+94)------"condition": "true",
+95)------"outer": 3,
+96)------"inner": 4
+97)----},
+98)----{
+99)------"id": 6,
+100)------"kind": "scan",
+101)------"title": "⊞ nation",
+102)------"columns": [
+103)--------"n_nationkey(#48)",
+104)--------"n_name(#49)",
+105)--------"n_regionkey(#50)",
+106)--------"n_comment(#51)"
+107)------]
+108)----},
+109)----{
+110)------"id": 7,
+111)------"kind": "join",
+112)------"title": "⋈ InnerJoin",
+113)------"join_type": "Inner",
+114)------"condition": "true",
+115)------"outer": 5,
+116)------"inner": 6
+117)----},
+118)----{
+119)------"id": 8,
+120)------"kind": "scan",
+121)------"title": "⊞ lineitem",
+122)------"columns": [
+123)--------"l_orderkey(#52)",
+124)--------"l_partkey(#53)",
+125)--------"l_suppkey(#54)",
+126)--------"l_linenumber(#55)",
+127)--------"l_quantity(#56)",
+128)--------"l_extendedprice(#57)",
+129)--------"l_discount(#58)",
+130)--------"l_tax(#59)",
+131)--------"l_returnflag(#60)",
+132)--------"l_linestatus(#61)",
+133)--------"l_shipdate(#62)",
+134)--------"l_commitdate(#63)",
+135)--------"l_receiptdate(#64)",
+136)--------"l_shipinstruct(#65)",
+137)--------"l_shipmode(#66)",
+138)--------"l_comment(#67)"
+139)------]
+140)----},
+141)----{
+142)------"id": 9,
+143)------"kind": "rename",
+144)------"title": "ρ Rename(l2)",
+145)------"defs": [
+146)--------"l_orderkey(#68) ← l_orderkey(#52)",
+147)--------"l_partkey(#69) ← l_partkey(#53)",
+148)--------"l_suppkey(#70) ← l_suppkey(#54)",
+149)--------"l_linenumber(#71) ← l_linenumber(#55)",
+150)--------"l_quantity(#72) ← l_quantity(#56)",
+151)--------"l_extendedprice(#73) ← l_extendedprice(#57)",
+152)--------"l_discount(#74) ← l_discount(#58)",
+153)--------"l_tax(#75) ← l_tax(#59)",
+154)--------"l_returnflag(#76) ← l_returnflag(#60)",
+155)--------"l_linestatus(#77) ← l_linestatus(#61)",
+156)--------"l_shipdate(#78) ← l_shipdate(#62)",
+157)--------"l_commitdate(#79) ← l_commitdate(#63)",
+158)--------"l_receiptdate(#80) ← l_receiptdate(#64)",
+159)--------"l_shipinstruct(#81) ← l_shipinstruct(#65)",
+160)--------"l_shipmode(#82) ← l_shipmode(#66)",
+161)--------"l_comment(#83) ← l_comment(#67)"
+162)------],
+163)------"input": 8
+164)----},
+165)----{
+166)------"id": 10,
+167)------"kind": "selection",
+168)------"title": "σ Selection",
+169)------"predicate": "((l_orderkey(#68) = l_orderkey(#23)) AND (l_suppkey(#70) != l_suppkey(#25)))",
+170)------"input": 9
+171)----},
+172)----{
+173)------"id": 11,
+174)------"kind": "projection",
+175)------"title": "π Projection",
+176)------"columns": [
+177)--------"l_orderkey(#68)",
+178)--------"l_partkey(#69)",
+179)--------"l_suppkey(#70)",
+180)--------"l_linenumber(#71)",
+181)--------"l_quantity(#72)",
+182)--------"l_extendedprice(#73)",
+183)--------"l_discount(#74)",
+184)--------"l_tax(#75)",
+185)--------"l_returnflag(#76)",
+186)--------"l_linestatus(#77)",
+187)--------"l_shipdate(#78)",
+188)--------"l_commitdate(#79)",
+189)--------"l_receiptdate(#80)",
+190)--------"l_shipinstruct(#81)",
+191)--------"l_shipmode(#82)",
+192)--------"l_comment(#83)"
+193)------],
+194)------"input": 10
+195)----},
+196)----{
+197)------"id": 20,
+198)------"kind": "join",
+199)------"title": "⟕ᵐ LeftMarkJoin",
+200)------"join_type": "LeftMark",
+201)------"condition": "true",
+202)------"marker": "exists_mark(#117)",
+203)------"outer": 7,
+204)------"inner": 11
+205)----},
+206)----{
+207)------"id": 12,
+208)------"kind": "scan",
+209)------"title": "⊞ lineitem",
+210)------"columns": [
+211)--------"l_orderkey(#84)",
+212)--------"l_partkey(#85)",
+213)--------"l_suppkey(#86)",
+214)--------"l_linenumber(#87)",
+215)--------"l_quantity(#88)",
+216)--------"l_extendedprice(#89)",
+217)--------"l_discount(#90)",
+218)--------"l_tax(#91)",
+219)--------"l_returnflag(#92)",
+220)--------"l_linestatus(#93)",
+221)--------"l_shipdate(#94)",
+222)--------"l_commitdate(#95)",
+223)--------"l_receiptdate(#96)",
+224)--------"l_shipinstruct(#97)",
+225)--------"l_shipmode(#98)",
+226)--------"l_comment(#99)"
+227)------]
+228)----},
+229)----{
+230)------"id": 13,
+231)------"kind": "rename",
+232)------"title": "ρ Rename(l3)",
+233)------"defs": [
+234)--------"l_orderkey(#100) ← l_orderkey(#84)",
+235)--------"l_partkey(#101) ← l_partkey(#85)",
+236)--------"l_suppkey(#102) ← l_suppkey(#86)",
+237)--------"l_linenumber(#103) ← l_linenumber(#87)",
+238)--------"l_quantity(#104) ← l_quantity(#88)",
+239)--------"l_extendedprice(#105) ← l_extendedprice(#89)",
+240)--------"l_discount(#106) ← l_discount(#90)",
+241)--------"l_tax(#107) ← l_tax(#91)",
+242)--------"l_returnflag(#108) ← l_returnflag(#92)",
+243)--------"l_linestatus(#109) ← l_linestatus(#93)",
+244)--------"l_shipdate(#110) ← l_shipdate(#94)",
+245)--------"l_commitdate(#111) ← l_commitdate(#95)",
+246)--------"l_receiptdate(#112) ← l_receiptdate(#96)",
+247)--------"l_shipinstruct(#113) ← l_shipinstruct(#97)",
+248)--------"l_shipmode(#114) ← l_shipmode(#98)",
+249)--------"l_comment(#115) ← l_comment(#99)"
+250)------],
+251)------"input": 12
+252)----},
+253)----{
+254)------"id": 14,
+255)------"kind": "selection",
+256)------"title": "σ Selection",
+257)------"predicate": "(((l_orderkey(#100) = l_orderkey(#23)) AND (l_suppkey(#102) != l_suppkey(#25))) AND (l_receiptdate(#112) > l_commitdate(#111)))",
+258)------"input": 13
+259)----},
+260)----{
+261)------"id": 15,
+262)------"kind": "projection",
+263)------"title": "π Projection",
+264)------"columns": [
+265)--------"l_orderkey(#100)",
+266)--------"l_partkey(#101)",
+267)--------"l_suppkey(#102)",
+268)--------"l_linenumber(#103)",
+269)--------"l_quantity(#104)",
+270)--------"l_extendedprice(#105)",
+271)--------"l_discount(#106)",
+272)--------"l_tax(#107)",
+273)--------"l_returnflag(#108)",
+274)--------"l_linestatus(#109)",
+275)--------"l_shipdate(#110)",
+276)--------"l_commitdate(#111)",
+277)--------"l_receiptdate(#112)",
+278)--------"l_shipinstruct(#113)",
+279)--------"l_shipmode(#114)",
+280)--------"l_comment(#115)"
+281)------],
+282)------"input": 14
+283)----},
+284)----{
+285)------"id": 21,
+286)------"kind": "join",
+287)------"title": "⟕ᵐ LeftMarkJoin",
+288)------"join_type": "LeftMark",
+289)------"condition": "true",
+290)------"marker": "exists_mark(#118)",
+291)------"outer": 20,
+292)------"inner": 15
+293)----},
+294)----{
+295)------"id": 22,
+296)------"kind": "selection",
+297)------"title": "σ Selection",
+298)------"predicate": "((((((((s_suppkey(#0) = l_suppkey(#25)) AND (o_orderkey(#39) = l_orderkey(#23))) AND (o_orderstatus(#41) = \"F\")) AND (l_receiptdate(#35) > l_commitdate(#34))) AND exists_mark(#117)) AND NOT(exists_mark(#118))) AND (s_nationkey(#3) = n_nationkey(#48))) AND (n_name(#49) = \"SAUDI ARABIA\"))",
+299)------"input": 21
+300)----},
+301)----{
+302)------"id": 23,
+303)------"kind": "aggregation",
+304)------"title": "γ Aggregation",
+305)------"keys": "s_name(#1)",
+306)------"aggregates": [
+307)--------"count(Int64(1))(#116) := count_star()"
+308)------],
+309)------"input": 22
+310)----},
+311)----{
+312)------"id": 24,
+313)------"kind": "projection",
+314)------"title": "π Projection",
+315)------"columns": [
+316)--------"s_name(#1)",
+317)--------"count(Int64(1))(#116)"
+318)------],
+319)------"input": 23
+320)----},
+321)----{
+322)------"id": 25,
+323)------"kind": "sort",
+324)------"title": "⇞ Sort",
+325)------"keys": [
+326)--------"count(Int64(1))(#116) Desc NullsFirst",
+327)--------"s_name(#1) Asc NullsLast"
+328)------],
+329)------"input": 24
+330)----}
+331)--]
+332)}

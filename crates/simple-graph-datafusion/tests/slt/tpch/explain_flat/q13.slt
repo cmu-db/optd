@@ -1,0 +1,146 @@
+query T
+SELECT explain_flat('select
+    c_count,
+    count(*) as custdist
+from
+    (
+        select
+            c_custkey,
+            count(o_orderkey)
+        from
+            customer left outer join orders on
+                        c_custkey = o_custkey
+                    and o_comment not like ''%special%requests%''
+        group by
+            c_custkey
+    ) as c_orders (c_custkey, c_count)
+group by
+    c_count
+order by
+    custdist desc,
+    c_count desc
+limit 10;');
+----
+ 
+01){
+02)--"nodes": [
+03)----{
+04)------"id": 0,
+05)------"kind": "scan",
+06)------"title": "⊞ customer",
+07)------"columns": [
+08)--------"c_custkey(#0)",
+09)--------"c_name(#1)",
+10)--------"c_address(#2)",
+11)--------"c_nationkey(#3)",
+12)--------"c_phone(#4)",
+13)--------"c_acctbal(#5)",
+14)--------"c_mktsegment(#6)",
+15)--------"c_comment(#7)"
+16)------]
+17)----},
+18)----{
+19)------"id": 1,
+20)------"kind": "scan",
+21)------"title": "⊞ orders",
+22)------"columns": [
+23)--------"o_orderkey(#8)",
+24)--------"o_custkey(#9)",
+25)--------"o_orderstatus(#10)",
+26)--------"o_totalprice(#11)",
+27)--------"o_orderdate(#12)",
+28)--------"o_orderpriority(#13)",
+29)--------"o_clerk(#14)",
+30)--------"o_shippriority(#15)",
+31)--------"o_comment(#16)"
+32)------]
+33)----},
+34)----{
+35)------"id": 2,
+36)------"kind": "join",
+37)------"title": "⟕ LeftOuterJoin",
+38)------"join_type": "LeftOuter",
+39)------"condition": "((c_custkey(#0) = o_custkey(#9)) AND (o_comment(#16) NOT LIKE \"%special%requests%\"))",
+40)------"outer": 0,
+41)------"inner": 1
+42)----},
+43)----{
+44)------"id": 3,
+45)------"kind": "aggregation",
+46)------"title": "γ Aggregation",
+47)------"keys": "c_custkey(#0)",
+48)------"aggregates": [
+49)--------"count(orders.o_orderkey)(#17) := count(o_orderkey(#8))"
+50)------],
+51)------"input": 2
+52)----},
+53)----{
+54)------"id": 4,
+55)------"kind": "projection",
+56)------"title": "π Projection",
+57)------"columns": [
+58)--------"c_custkey(#0)",
+59)--------"count(orders.o_orderkey)(#17)"
+60)------],
+61)------"input": 3
+62)----},
+63)----{
+64)------"id": 5,
+65)------"kind": "projection",
+66)------"title": "π Projection",
+67)------"columns": [
+68)--------"c_custkey(#0)",
+69)--------"count(orders.o_orderkey)(#17)"
+70)------],
+71)------"input": 4
+72)----},
+73)----{
+74)------"id": 6,
+75)------"kind": "rename",
+76)------"title": "ρ Rename(c_orders)",
+77)------"defs": [
+78)--------"c_custkey(#18) ← c_custkey(#0)",
+79)--------"c_count(#19) ← count(orders.o_orderkey)(#17)"
+80)------],
+81)------"input": 5
+82)----},
+83)----{
+84)------"id": 7,
+85)------"kind": "aggregation",
+86)------"title": "γ Aggregation",
+87)------"keys": "c_count(#19)",
+88)------"aggregates": [
+89)--------"count(Int64(1))(#20) := count_star()"
+90)------],
+91)------"input": 6
+92)----},
+93)----{
+94)------"id": 8,
+95)------"kind": "projection",
+96)------"title": "π Projection",
+97)------"columns": [
+98)--------"c_count(#19)",
+99)--------"count(Int64(1))(#20)"
+100)------],
+101)------"input": 7
+102)----},
+103)----{
+104)------"id": 9,
+105)------"kind": "sort",
+106)------"title": "⇞ Sort",
+107)------"keys": [
+108)--------"count(Int64(1))(#20) Desc NullsFirst",
+109)--------"c_count(#19) Desc NullsFirst"
+110)------],
+111)------"input": 8
+112)----},
+113)----{
+114)------"id": 10,
+115)------"kind": "limit",
+116)------"title": "τ Limit",
+117)------"fetch": "10",
+118)------"offset": "0",
+119)------"input": 9
+120)----}
+121)--]
+122)}

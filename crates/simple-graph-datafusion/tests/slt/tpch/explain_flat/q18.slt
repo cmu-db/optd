@@ -1,0 +1,211 @@
+query T
+SELECT explain_flat('select
+    c_name,
+    c_custkey,
+    o_orderkey,
+    o_orderdate,
+    o_totalprice,
+    sum(l_quantity)
+from
+    customer,
+    orders,
+    lineitem
+where
+        o_orderkey in (
+        select
+            l_orderkey
+        from
+            lineitem
+        group by
+            l_orderkey having
+                sum(l_quantity) > 300
+    )
+  and c_custkey = o_custkey
+  and o_orderkey = l_orderkey
+group by
+    c_name,
+    c_custkey,
+    o_orderkey,
+    o_orderdate,
+    o_totalprice
+order by
+    o_totalprice desc,
+    o_orderdate;');
+----
+ 
+01){
+02)--"nodes": [
+03)----{
+04)------"id": 0,
+05)------"kind": "scan",
+06)------"title": "⊞ customer",
+07)------"columns": [
+08)--------"c_custkey(#0)",
+09)--------"c_name(#1)",
+10)--------"c_address(#2)",
+11)--------"c_nationkey(#3)",
+12)--------"c_phone(#4)",
+13)--------"c_acctbal(#5)",
+14)--------"c_mktsegment(#6)",
+15)--------"c_comment(#7)"
+16)------]
+17)----},
+18)----{
+19)------"id": 1,
+20)------"kind": "scan",
+21)------"title": "⊞ orders",
+22)------"columns": [
+23)--------"o_orderkey(#8)",
+24)--------"o_custkey(#9)",
+25)--------"o_orderstatus(#10)",
+26)--------"o_totalprice(#11)",
+27)--------"o_orderdate(#12)",
+28)--------"o_orderpriority(#13)",
+29)--------"o_clerk(#14)",
+30)--------"o_shippriority(#15)",
+31)--------"o_comment(#16)"
+32)------]
+33)----},
+34)----{
+35)------"id": 2,
+36)------"kind": "join",
+37)------"title": "⋈ InnerJoin",
+38)------"join_type": "Inner",
+39)------"condition": "true",
+40)------"outer": 0,
+41)------"inner": 1
+42)----},
+43)----{
+44)------"id": 3,
+45)------"kind": "scan",
+46)------"title": "⊞ lineitem",
+47)------"columns": [
+48)--------"l_orderkey(#17)",
+49)--------"l_partkey(#18)",
+50)--------"l_suppkey(#19)",
+51)--------"l_linenumber(#20)",
+52)--------"l_quantity(#21)",
+53)--------"l_extendedprice(#22)",
+54)--------"l_discount(#23)",
+55)--------"l_tax(#24)",
+56)--------"l_returnflag(#25)",
+57)--------"l_linestatus(#26)",
+58)--------"l_shipdate(#27)",
+59)--------"l_commitdate(#28)",
+60)--------"l_receiptdate(#29)",
+61)--------"l_shipinstruct(#30)",
+62)--------"l_shipmode(#31)",
+63)--------"l_comment(#32)"
+64)------]
+65)----},
+66)----{
+67)------"id": 4,
+68)------"kind": "join",
+69)------"title": "⋈ InnerJoin",
+70)------"join_type": "Inner",
+71)------"condition": "true",
+72)------"outer": 2,
+73)------"inner": 3
+74)----},
+75)----{
+76)------"id": 5,
+77)------"kind": "scan",
+78)------"title": "⊞ lineitem",
+79)------"columns": [
+80)--------"l_orderkey(#33)",
+81)--------"l_partkey(#34)",
+82)--------"l_suppkey(#35)",
+83)--------"l_linenumber(#36)",
+84)--------"l_quantity(#37)",
+85)--------"l_extendedprice(#38)",
+86)--------"l_discount(#39)",
+87)--------"l_tax(#40)",
+88)--------"l_returnflag(#41)",
+89)--------"l_linestatus(#42)",
+90)--------"l_shipdate(#43)",
+91)--------"l_commitdate(#44)",
+92)--------"l_receiptdate(#45)",
+93)--------"l_shipinstruct(#46)",
+94)--------"l_shipmode(#47)",
+95)--------"l_comment(#48)"
+96)------]
+97)----},
+98)----{
+99)------"id": 6,
+100)------"kind": "aggregation",
+101)------"title": "γ Aggregation",
+102)------"keys": "l_orderkey(#33)",
+103)------"aggregates": [
+104)--------"sum(lineitem.l_quantity)(#49) := sum(l_quantity(#37))"
+105)------],
+106)------"input": 5
+107)----},
+108)----{
+109)------"id": 7,
+110)------"kind": "selection",
+111)------"title": "σ Selection",
+112)------"predicate": "(sum(lineitem.l_quantity)(#49) > 300)",
+113)------"input": 6
+114)----},
+115)----{
+116)------"id": 8,
+117)------"kind": "projection",
+118)------"title": "π Projection",
+119)------"columns": [
+120)--------"l_orderkey(#33)"
+121)------],
+122)------"input": 7
+123)----},
+124)----{
+125)------"id": 13,
+126)------"kind": "join",
+127)------"title": "⟕ᵐ LeftMarkJoin",
+128)------"join_type": "LeftMark",
+129)------"condition": "(o_orderkey(#8) = l_orderkey(#33))",
+130)------"marker": "in_mark(#51)",
+131)------"outer": 4,
+132)------"inner": 8
+133)----},
+134)----{
+135)------"id": 14,
+136)------"kind": "selection",
+137)------"title": "σ Selection",
+138)------"predicate": "((in_mark(#51) AND (c_custkey(#0) = o_custkey(#9))) AND (o_orderkey(#8) = l_orderkey(#17)))",
+139)------"input": 13
+140)----},
+141)----{
+142)------"id": 15,
+143)------"kind": "aggregation",
+144)------"title": "γ Aggregation",
+145)------"keys": "c_name(#1), c_custkey(#0), o_orderkey(#8), o_orderdate(#12), o_totalprice(#11)",
+146)------"aggregates": [
+147)--------"sum(lineitem.l_quantity)(#50) := sum(l_quantity(#21))"
+148)------],
+149)------"input": 14
+150)----},
+151)----{
+152)------"id": 16,
+153)------"kind": "projection",
+154)------"title": "π Projection",
+155)------"columns": [
+156)--------"c_name(#1)",
+157)--------"c_custkey(#0)",
+158)--------"o_orderkey(#8)",
+159)--------"o_orderdate(#12)",
+160)--------"o_totalprice(#11)",
+161)--------"sum(lineitem.l_quantity)(#50)"
+162)------],
+163)------"input": 15
+164)----},
+165)----{
+166)------"id": 17,
+167)------"kind": "sort",
+168)------"title": "⇞ Sort",
+169)------"keys": [
+170)--------"o_totalprice(#11) Desc NullsFirst",
+171)--------"o_orderdate(#12) Asc NullsLast"
+172)------],
+173)------"input": 16
+174)----}
+175)--]
+176)}

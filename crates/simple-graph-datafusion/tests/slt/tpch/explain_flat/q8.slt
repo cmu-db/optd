@@ -1,0 +1,326 @@
+query T
+SELECT explain_flat('select
+    o_year,
+    cast(cast(sum(case
+                      when nation = ''BRAZIL'' then volume
+                      else 0
+        end) as decimal(12,2)) / cast(sum(volume) as decimal(12,2)) as decimal(15,2)) as mkt_share
+from
+    (
+        select
+            extract(year from o_orderdate) as o_year,
+            l_extendedprice * (1 - l_discount) as volume,
+            n2.n_name as nation
+        from
+            part,
+            supplier,
+            lineitem,
+            orders,
+            customer,
+            nation n1,
+            nation n2,
+            region
+        where
+                p_partkey = l_partkey
+          and s_suppkey = l_suppkey
+          and l_orderkey = o_orderkey
+          and o_custkey = c_custkey
+          and c_nationkey = n1.n_nationkey
+          and n1.n_regionkey = r_regionkey
+          and r_name = ''AMERICA''
+          and s_nationkey = n2.n_nationkey
+          and o_orderdate between date ''1995-01-01'' and date ''1996-12-31''
+          and p_type = ''ECONOMY ANODIZED STEEL''
+    ) as all_nations
+group by
+    o_year
+order by
+    o_year;');
+----
+ 
+01){
+02)--"nodes": [
+03)----{
+04)------"id": 0,
+05)------"kind": "scan",
+06)------"title": "⊞ part",
+07)------"columns": [
+08)--------"p_partkey(#0)",
+09)--------"p_name(#1)",
+10)--------"p_mfgr(#2)",
+11)--------"p_brand(#3)",
+12)--------"p_type(#4)",
+13)--------"p_size(#5)",
+14)--------"p_container(#6)",
+15)--------"p_retailprice(#7)",
+16)--------"p_comment(#8)"
+17)------]
+18)----},
+19)----{
+20)------"id": 1,
+21)------"kind": "scan",
+22)------"title": "⊞ supplier",
+23)------"columns": [
+24)--------"s_suppkey(#9)",
+25)--------"s_name(#10)",
+26)--------"s_address(#11)",
+27)--------"s_nationkey(#12)",
+28)--------"s_phone(#13)",
+29)--------"s_acctbal(#14)",
+30)--------"s_comment(#15)"
+31)------]
+32)----},
+33)----{
+34)------"id": 2,
+35)------"kind": "join",
+36)------"title": "⋈ InnerJoin",
+37)------"join_type": "Inner",
+38)------"condition": "true",
+39)------"outer": 0,
+40)------"inner": 1
+41)----},
+42)----{
+43)------"id": 3,
+44)------"kind": "scan",
+45)------"title": "⊞ lineitem",
+46)------"columns": [
+47)--------"l_orderkey(#16)",
+48)--------"l_partkey(#17)",
+49)--------"l_suppkey(#18)",
+50)--------"l_linenumber(#19)",
+51)--------"l_quantity(#20)",
+52)--------"l_extendedprice(#21)",
+53)--------"l_discount(#22)",
+54)--------"l_tax(#23)",
+55)--------"l_returnflag(#24)",
+56)--------"l_linestatus(#25)",
+57)--------"l_shipdate(#26)",
+58)--------"l_commitdate(#27)",
+59)--------"l_receiptdate(#28)",
+60)--------"l_shipinstruct(#29)",
+61)--------"l_shipmode(#30)",
+62)--------"l_comment(#31)"
+63)------]
+64)----},
+65)----{
+66)------"id": 4,
+67)------"kind": "join",
+68)------"title": "⋈ InnerJoin",
+69)------"join_type": "Inner",
+70)------"condition": "true",
+71)------"outer": 2,
+72)------"inner": 3
+73)----},
+74)----{
+75)------"id": 5,
+76)------"kind": "scan",
+77)------"title": "⊞ orders",
+78)------"columns": [
+79)--------"o_orderkey(#32)",
+80)--------"o_custkey(#33)",
+81)--------"o_orderstatus(#34)",
+82)--------"o_totalprice(#35)",
+83)--------"o_orderdate(#36)",
+84)--------"o_orderpriority(#37)",
+85)--------"o_clerk(#38)",
+86)--------"o_shippriority(#39)",
+87)--------"o_comment(#40)"
+88)------]
+89)----},
+90)----{
+91)------"id": 6,
+92)------"kind": "join",
+93)------"title": "⋈ InnerJoin",
+94)------"join_type": "Inner",
+95)------"condition": "true",
+96)------"outer": 4,
+97)------"inner": 5
+98)----},
+99)----{
+100)------"id": 7,
+101)------"kind": "scan",
+102)------"title": "⊞ customer",
+103)------"columns": [
+104)--------"c_custkey(#41)",
+105)--------"c_name(#42)",
+106)--------"c_address(#43)",
+107)--------"c_nationkey(#44)",
+108)--------"c_phone(#45)",
+109)--------"c_acctbal(#46)",
+110)--------"c_mktsegment(#47)",
+111)--------"c_comment(#48)"
+112)------]
+113)----},
+114)----{
+115)------"id": 8,
+116)------"kind": "join",
+117)------"title": "⋈ InnerJoin",
+118)------"join_type": "Inner",
+119)------"condition": "true",
+120)------"outer": 6,
+121)------"inner": 7
+122)----},
+123)----{
+124)------"id": 9,
+125)------"kind": "scan",
+126)------"title": "⊞ nation",
+127)------"columns": [
+128)--------"n_nationkey(#49)",
+129)--------"n_name(#50)",
+130)--------"n_regionkey(#51)",
+131)--------"n_comment(#52)"
+132)------]
+133)----},
+134)----{
+135)------"id": 10,
+136)------"kind": "rename",
+137)------"title": "ρ Rename(n1)",
+138)------"defs": [
+139)--------"n_nationkey(#53) ← n_nationkey(#49)",
+140)--------"n_name(#54) ← n_name(#50)",
+141)--------"n_regionkey(#55) ← n_regionkey(#51)",
+142)--------"n_comment(#56) ← n_comment(#52)"
+143)------],
+144)------"input": 9
+145)----},
+146)----{
+147)------"id": 11,
+148)------"kind": "join",
+149)------"title": "⋈ InnerJoin",
+150)------"join_type": "Inner",
+151)------"condition": "true",
+152)------"outer": 8,
+153)------"inner": 10
+154)----},
+155)----{
+156)------"id": 12,
+157)------"kind": "scan",
+158)------"title": "⊞ nation",
+159)------"columns": [
+160)--------"n_nationkey(#57)",
+161)--------"n_name(#58)",
+162)--------"n_regionkey(#59)",
+163)--------"n_comment(#60)"
+164)------]
+165)----},
+166)----{
+167)------"id": 13,
+168)------"kind": "rename",
+169)------"title": "ρ Rename(n2)",
+170)------"defs": [
+171)--------"n_nationkey(#61) ← n_nationkey(#57)",
+172)--------"n_name(#62) ← n_name(#58)",
+173)--------"n_regionkey(#63) ← n_regionkey(#59)",
+174)--------"n_comment(#64) ← n_comment(#60)"
+175)------],
+176)------"input": 12
+177)----},
+178)----{
+179)------"id": 14,
+180)------"kind": "join",
+181)------"title": "⋈ InnerJoin",
+182)------"join_type": "Inner",
+183)------"condition": "true",
+184)------"outer": 11,
+185)------"inner": 13
+186)----},
+187)----{
+188)------"id": 15,
+189)------"kind": "scan",
+190)------"title": "⊞ region",
+191)------"columns": [
+192)--------"r_regionkey(#65)",
+193)--------"r_name(#66)",
+194)--------"r_comment(#67)"
+195)------]
+196)----},
+197)----{
+198)------"id": 16,
+199)------"kind": "join",
+200)------"title": "⋈ InnerJoin",
+201)------"join_type": "Inner",
+202)------"condition": "true",
+203)------"outer": 14,
+204)------"inner": 15
+205)----},
+206)----{
+207)------"id": 17,
+208)------"kind": "selection",
+209)------"title": "σ Selection",
+210)------"predicate": "((((((((((p_partkey(#0) = l_partkey(#17)) AND (s_suppkey(#9) = l_suppkey(#18))) AND (l_orderkey(#16) = o_orderkey(#32))) AND (o_custkey(#33) = c_custkey(#41))) AND (c_nationkey(#44) = n_nationkey(#53))) AND (n_regionkey(#55) = r_regionkey(#65))) AND (r_name(#66) = \"AMERICA\")) AND (s_nationkey(#12) = n_nationkey(#61))) AND ((o_orderdate(#36) >= CAST(\"1995-01-01\" AS Date32)) AND (o_orderdate(#36) <= CAST(\"1996-12-31\" AS Date32)))) AND (p_type(#4) = \"ECONOMY ANODIZED STEEL\"))",
+211)------"input": 16
+212)----},
+213)----{
+214)------"id": 18,
+215)------"kind": "map",
+216)------"title": "χ Map",
+217)------"computations": [
+218)--------"o_year(#68) := date_part(\"YEAR\", o_orderdate(#36))",
+219)--------"volume(#69) := (l_extendedprice(#21) * (1 - l_discount(#22)))",
+220)--------"nation(#70) := n_name(#62)"
+221)------],
+222)------"input": 17
+223)----},
+224)----{
+225)------"id": 19,
+226)------"kind": "projection",
+227)------"title": "π Projection",
+228)------"columns": [
+229)--------"o_year(#68)",
+230)--------"volume(#69)",
+231)--------"nation(#70)"
+232)------],
+233)------"input": 18
+234)----},
+235)----{
+236)------"id": 20,
+237)------"kind": "rename",
+238)------"title": "ρ Rename(all_nations)",
+239)------"defs": [
+240)--------"o_year(#71) ← o_year(#68)",
+241)--------"volume(#72) ← volume(#69)",
+242)--------"nation(#73) ← nation(#70)"
+243)------],
+244)------"input": 19
+245)----},
+246)----{
+247)------"id": 21,
+248)------"kind": "aggregation",
+249)------"title": "γ Aggregation",
+250)------"keys": "o_year(#71)",
+251)------"aggregates": [
+252)--------"sum(CASE WHEN all_nations.nation = Utf8(\"BRAZIL\") THEN all_nations.volume ELSE Int64(0) END)(#74) := sum(CASE WHEN (nation(#73) = \"BRAZIL\") THEN volume(#72) ELSE 0 END)",
+253)--------"sum(all_nations.volume)(#75) := sum(volume(#72))"
+254)------],
+255)------"input": 20
+256)----},
+257)----{
+258)------"id": 22,
+259)------"kind": "map",
+260)------"title": "χ Map",
+261)------"computations": [
+262)--------"mkt_share(#76) := CAST((CAST(sum(CASE WHEN all_nations.nation = Utf8(\"BRAZIL\") THEN all_nations.volume ELSE Int64(0) END)(#74) AS Decimal128(12, 2)) / CAST(sum(all_nations.volume)(#75) AS Decimal128(12, 2))) AS Decimal128(15, 2))"
+263)------],
+264)------"input": 21
+265)----},
+266)----{
+267)------"id": 23,
+268)------"kind": "projection",
+269)------"title": "π Projection",
+270)------"columns": [
+271)--------"o_year(#71)",
+272)--------"mkt_share(#76)"
+273)------],
+274)------"input": 22
+275)----},
+276)----{
+277)------"id": 24,
+278)------"kind": "sort",
+279)------"title": "⇞ Sort",
+280)------"keys": [
+281)--------"o_year(#71) Asc NullsLast"
+282)------],
+283)------"input": 23
+284)----}
+285)--]
+286)}

@@ -1,0 +1,258 @@
+query T
+SELECT explain_flat('with revenue0 (supplier_no, total_revenue) as (
+	select
+		l_suppkey,
+		sum(l_extendedprice * (1 - l_discount))
+	from
+		lineitem
+	where
+		l_shipdate >= date ''1996-01-01''
+		and l_shipdate < date ''1996-01-01'' + interval ''3'' month
+	group by
+		l_suppkey
+)
+select
+	s_suppkey,
+	s_name,
+	s_address,
+	s_phone,
+	total_revenue
+from
+	supplier,
+	revenue0
+where
+	s_suppkey = supplier_no
+	and total_revenue = (
+		select
+			max(total_revenue)
+		from
+			revenue0
+	)
+order by
+	s_suppkey;');
+----
+ 
+01){
+02)--"nodes": [
+03)----{
+04)------"id": 0,
+05)------"kind": "scan",
+06)------"title": "⊞ supplier",
+07)------"columns": [
+08)--------"s_suppkey(#0)",
+09)--------"s_name(#1)",
+10)--------"s_address(#2)",
+11)--------"s_nationkey(#3)",
+12)--------"s_phone(#4)",
+13)--------"s_acctbal(#5)",
+14)--------"s_comment(#6)"
+15)------]
+16)----},
+17)----{
+18)------"id": 1,
+19)------"kind": "scan",
+20)------"title": "⊞ lineitem",
+21)------"columns": [
+22)--------"l_orderkey(#7)",
+23)--------"l_partkey(#8)",
+24)--------"l_suppkey(#9)",
+25)--------"l_linenumber(#10)",
+26)--------"l_quantity(#11)",
+27)--------"l_extendedprice(#12)",
+28)--------"l_discount(#13)",
+29)--------"l_tax(#14)",
+30)--------"l_returnflag(#15)",
+31)--------"l_linestatus(#16)",
+32)--------"l_shipdate(#17)",
+33)--------"l_commitdate(#18)",
+34)--------"l_receiptdate(#19)",
+35)--------"l_shipinstruct(#20)",
+36)--------"l_shipmode(#21)",
+37)--------"l_comment(#22)"
+38)------]
+39)----},
+40)----{
+41)------"id": 2,
+42)------"kind": "selection",
+43)------"title": "σ Selection",
+44)------"predicate": "((l_shipdate(#17) >= CAST(\"1996-01-01\" AS Date32)) AND (l_shipdate(#17) < (CAST(\"1996-01-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))",
+45)------"input": 1
+46)----},
+47)----{
+48)------"id": 3,
+49)------"kind": "aggregation",
+50)------"title": "γ Aggregation",
+51)------"keys": "l_suppkey(#9)",
+52)------"aggregates": [
+53)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23) := sum((l_extendedprice(#12) * (1 - l_discount(#13))))"
+54)------],
+55)------"input": 2
+56)----},
+57)----{
+58)------"id": 4,
+59)------"kind": "projection",
+60)------"title": "π Projection",
+61)------"columns": [
+62)--------"l_suppkey(#9)",
+63)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+64)------],
+65)------"input": 3
+66)----},
+67)----{
+68)------"id": 5,
+69)------"kind": "projection",
+70)------"title": "π Projection",
+71)------"columns": [
+72)--------"l_suppkey(#9)",
+73)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+74)------],
+75)------"input": 4
+76)----},
+77)----{
+78)------"id": 6,
+79)------"kind": "rename",
+80)------"title": "ρ Rename(revenue0)",
+81)------"defs": [
+82)--------"supplier_no(#24) ← l_suppkey(#9)",
+83)--------"total_revenue(#25) ← sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+84)------],
+85)------"input": 5
+86)----},
+87)----{
+88)------"id": 7,
+89)------"kind": "join",
+90)------"title": "⋈ InnerJoin",
+91)------"join_type": "Inner",
+92)------"condition": "true",
+93)------"outer": 0,
+94)------"inner": 6
+95)----},
+96)----{
+97)------"id": 8,
+98)------"kind": "scan",
+99)------"title": "⊞ lineitem",
+100)------"columns": [
+101)--------"l_orderkey(#26)",
+102)--------"l_partkey(#27)",
+103)--------"l_suppkey(#28)",
+104)--------"l_linenumber(#29)",
+105)--------"l_quantity(#30)",
+106)--------"l_extendedprice(#31)",
+107)--------"l_discount(#32)",
+108)--------"l_tax(#33)",
+109)--------"l_returnflag(#34)",
+110)--------"l_linestatus(#35)",
+111)--------"l_shipdate(#36)",
+112)--------"l_commitdate(#37)",
+113)--------"l_receiptdate(#38)",
+114)--------"l_shipinstruct(#39)",
+115)--------"l_shipmode(#40)",
+116)--------"l_comment(#41)"
+117)------]
+118)----},
+119)----{
+120)------"id": 9,
+121)------"kind": "selection",
+122)------"title": "σ Selection",
+123)------"predicate": "((l_shipdate(#36) >= CAST(\"1996-01-01\" AS Date32)) AND (l_shipdate(#36) < (CAST(\"1996-01-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))",
+124)------"input": 8
+125)----},
+126)----{
+127)------"id": 10,
+128)------"kind": "aggregation",
+129)------"title": "γ Aggregation",
+130)------"keys": "l_suppkey(#28)",
+131)------"aggregates": [
+132)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42) := sum((l_extendedprice(#31) * (1 - l_discount(#32))))"
+133)------],
+134)------"input": 9
+135)----},
+136)----{
+137)------"id": 11,
+138)------"kind": "projection",
+139)------"title": "π Projection",
+140)------"columns": [
+141)--------"l_suppkey(#28)",
+142)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+143)------],
+144)------"input": 10
+145)----},
+146)----{
+147)------"id": 12,
+148)------"kind": "projection",
+149)------"title": "π Projection",
+150)------"columns": [
+151)--------"l_suppkey(#28)",
+152)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+153)------],
+154)------"input": 11
+155)----},
+156)----{
+157)------"id": 13,
+158)------"kind": "rename",
+159)------"title": "ρ Rename(revenue0)",
+160)------"defs": [
+161)--------"supplier_no(#43) ← l_suppkey(#28)",
+162)--------"total_revenue(#44) ← sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+163)------],
+164)------"input": 12
+165)----},
+166)----{
+167)------"id": 14,
+168)------"kind": "aggregation",
+169)------"title": "γ Aggregation",
+170)------"keys": "",
+171)------"aggregates": [
+172)--------"max(revenue0.total_revenue)(#45) := max(total_revenue(#44))"
+173)------],
+174)------"input": 13
+175)----},
+176)----{
+177)------"id": 15,
+178)------"kind": "projection",
+179)------"title": "π Projection",
+180)------"columns": [
+181)--------"max(revenue0.total_revenue)(#45)"
+182)------],
+183)------"input": 14
+184)----},
+185)----{
+186)------"id": 19,
+187)------"kind": "join",
+188)------"title": "⋈₁ SingleJoin",
+189)------"join_type": "Single",
+190)------"condition": "true",
+191)------"outer": 7,
+192)------"inner": 15
+193)----},
+194)----{
+195)------"id": 20,
+196)------"kind": "selection",
+197)------"title": "σ Selection",
+198)------"predicate": "((s_suppkey(#0) = supplier_no(#24)) AND (total_revenue(#25) = max(revenue0.total_revenue)(#45)))",
+199)------"input": 19
+200)----},
+201)----{
+202)------"id": 21,
+203)------"kind": "projection",
+204)------"title": "π Projection",
+205)------"columns": [
+206)--------"s_suppkey(#0)",
+207)--------"s_name(#1)",
+208)--------"s_address(#2)",
+209)--------"s_phone(#4)",
+210)--------"total_revenue(#25)"
+211)------],
+212)------"input": 20
+213)----},
+214)----{
+215)------"id": 22,
+216)------"kind": "sort",
+217)------"title": "⇞ Sort",
+218)------"keys": [
+219)--------"s_suppkey(#0) Asc NullsLast"
+220)------],
+221)------"input": 21
+222)----}
+223)--]
+224)}
