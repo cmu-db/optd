@@ -31,27 +31,27 @@ SELECT explain_json('SELECT id FROM t WHERE val > 1.0');
 ----
  
 01){
-02)  "id": "@2",
-03)  "kind": "projection",
-04)  "title": "π Projection",
-05)  "columns": [
-06)    "id(#0)"
-07)  ],
-08)  "input": {
-09)    "id": "@1",
-10)    "kind": "selection",
-11)    "title": "σ Selection",
-12)    "predicate": "(val(#1) > 1)",
-13)    "input": {
-14)      "id": "@0",
-15)      "kind": "scan",
-16)      "title": "⊞ t",
-17)      "columns": [
-18)        "id(#0)",
-19)        "val(#1)"
-20)      ]
-21)    }
-22)  }
+02)--"id": "@2",
+03)--"kind": "projection",
+04)--"title": "π Projection",
+05)--"columns": [
+06)----"id(#0)"
+07)--],
+08)--"input": {
+09)----"id": "@1",
+10)----"kind": "selection",
+11)----"title": "σ Selection",
+12)----"predicate": "(val(#1) > 1)",
+13)----"input": {
+14)------"id": "@0",
+15)------"kind": "scan",
+16)------"title": "⊞ t",
+17)------"columns": [
+18)--------"id(#0)",
+19)--------"val(#1)"
+20)------]
+21)----}
+22)--}
 23)}
 
 query T
@@ -59,31 +59,31 @@ SELECT explain_flat('SELECT id FROM t WHERE val > 1.0');
 ----
  
 01){
-02)  "nodes": [
-03)    {
-04)      "id": 0,
-05)      "kind": "scan",
-06)      "title": "⊞ t",
-07)      "columns": [
-08)        "id(#0)",
-09)        "val(#1)"
-10)      ]
-11)    },
-12)    {
-13)      "id": 1,
-14)      "kind": "selection",
-15)      "title": "σ Selection",
-16)      "predicate": "(val(#1) > 1)",
-17)      "input": 0
-18)    },
-19)    {
-20)      "id": 2,
-21)      "kind": "projection",
-22)      "title": "π Projection",
-23)      "columns": [
-24)        "id(#0)"
-25)      ],
-26)      "input": 1
-27)    }
-28)  ]
+02)--"nodes": [
+03)----{
+04)------"id": 0,
+05)------"kind": "scan",
+06)------"title": "⊞ t",
+07)------"columns": [
+08)--------"id(#0)",
+09)--------"val(#1)"
+10)------]
+11)----},
+12)----{
+13)------"id": 1,
+14)------"kind": "selection",
+15)------"title": "σ Selection",
+16)------"predicate": "(val(#1) > 1)",
+17)------"input": 0
+18)----},
+19)----{
+20)------"id": 2,
+21)------"kind": "projection",
+22)------"title": "π Projection",
+23)------"columns": [
+24)--------"id(#0)"
+25)------],
+26)------"input": 1
+27)----}
+28)--]
 29)}

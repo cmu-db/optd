@@ -129,10 +129,18 @@ fn explain_sql(
     .map_err(|_| datafusion::error::DataFusionError::Plan("explain thread panicked".into()))??;
 
     Ok(match format {
-        Format::Box => ctx.pretty().trim().to_string(),
-        Format::Json => ctx.pretty_json().trim().to_string(),
-        Format::Flat => ctx.pretty_flat().trim().to_string(),
+        Format::Box => trim_trailing_line_whitespace(&ctx.pretty()),
+        Format::Json => trim_trailing_line_whitespace(&ctx.pretty_json()),
+        Format::Flat => trim_trailing_line_whitespace(&ctx.pretty_flat()),
     })
+}
+
+fn trim_trailing_line_whitespace(text: &str) -> String {
+    text.trim()
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 async fn build_ir(
