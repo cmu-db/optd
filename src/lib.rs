@@ -29,7 +29,8 @@ pub use hypergraph::{
 };
 pub use optimize::{
     Direction, JoinOrdering, OperatorRewrite, OperatorRewriteAdaptor, OptimizeError,
-    OptimizeResult, Pass, PassManager, PassResult, QueryPass, Rewrite, RewriteMap, SubqueryToJoin,
+    OptimizeResult, Pass, PassManager, PassResult, PredicatePushdown, QueryPass, Rewrite,
+    RewriteMap, SubqueryToJoin,
 };
 
 /// An opaque reference to a relational operator in a [`QueryContext`].

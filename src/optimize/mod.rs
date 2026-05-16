@@ -1,6 +1,8 @@
 pub mod join_ordering;
+pub mod predicate_pushdown;
 pub mod subquery_to_join;
 pub use join_ordering::JoinOrdering;
+pub use predicate_pushdown::PredicatePushdown;
 pub use subquery_to_join::SubqueryToJoin;
 
 use std::collections::{HashMap, HashSet};

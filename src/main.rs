@@ -1,11 +1,12 @@
 use arrow_schema::DataType;
+use simple_graph::optimize::join_ordering::collect_join_group_roots;
 use simple_graph::{
     AggregateExpr, AggregateFunction, Aggregation, AnalysisContext, BinaryOp, BoxDrawingRenderer,
     BoxRendererConfig, ColorMode, ColumnData, ExprData, FreeColumns, Join, JoinOrdering, JoinType,
-    Map, NaryOp, OperatorData, OptimizerContext, Output, PassManager, Projection, QueryContext,
-    QueryFormatConfig, QueryFormatter, ScalarFunction, ScalarValue, Scan, Selection,
-    SubqueryToJoin, TableFunction, TableFunctionDef, TableRef, UnaryOp, build_hypergraph,
-    tpch::tpch_query,
+    Map, NaryOp, OperatorData, OperatorRewriteAdaptor, OptimizerContext, Output, PassManager,
+    PredicatePushdown, Projection, QueryContext, QueryFormatConfig, QueryFormatter, ScalarFunction,
+    ScalarValue, Scan, Selection, SubqueryToJoin, TableFunction, TableFunctionDef, TableRef,
+    UnaryOp, build_hypergraph, tpch::tpch_query,
 };
 
 fn main() {
@@ -32,8 +33,9 @@ fn main() {
         let mut opt = OptimizerContext::new(query);
         let mut pm = PassManager::new(10);
         pm.add_pass(SubqueryToJoin);
+        pm.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
         pm.add_pass(JoinOrdering::new());
-        pm.run(&mut opt).unwrap();
+        let _res = pm.run(&mut opt);
         if let Some(root) = opt.query.root() {
             let resolved = opt.rewrites.resolve(root);
             opt.query.set_root(resolved);
@@ -43,9 +45,11 @@ fn main() {
         // Print hypergraph for each join group root.
         if let Some(root) = query.root() {
             let mut analyses = AnalysisContext::new();
-            let hg = build_hypergraph(&query, &mut analyses, root);
-            if !hg.nodes.is_empty() {
-                println!("=== hypergraph ===\n{}", hg.pretty(&query));
+            for group_root in collect_join_group_roots(&query, root) {
+                let hg = build_hypergraph(&query, &mut analyses, group_root);
+                if hg.nodes.len() > 1 {
+                    println!("=== hypergraph ===\n{}", hg.pretty(&query));
+                }
             }
         }
         println!("=== optimized ===");
