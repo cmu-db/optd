@@ -38,21 +38,18 @@ The exporter now handles:
 
 ## Tested Interop
 
-Integration tests are in [`tests/datafusion_substrait.rs`](tests/datafusion_substrait.rs).
-
-Current tests cover both directions:
-
-- DataFusion SQL -> Substrait protobuf bytes -> `simple_graph::substrait::from_plan`
-- `simple_graph::substrait::to_plan` -> Substrait protobuf bytes -> DataFusion consumer
+Root-crate Substrait/DataFusion integration tests have been removed. Current automated coverage is
+through unit tests in the root crate and sqllogictest coverage in
+`crates/simple-graph-datafusion/tests/`.
 
 Run:
 
 ```bash
-cargo test --test datafusion_substrait
 cargo test
 ```
 
-Important detail: DataFusion uses `substrait 0.62.x`, while this crate uses `substrait 0.63.x`. Interop tests cross the version boundary through protobuf bytes using `prost::Message`, not direct Rust type sharing.
+Important detail: DataFusion and this crate may use different `substrait` crate versions. Interop
+checks should cross that boundary through protobuf bytes, not direct Rust type sharing.
 
 ## Importer Coverage
 

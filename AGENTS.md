@@ -10,14 +10,13 @@ This is a Rust 2024 crate for relational query IR experiments.
 - `src/display.rs` contains generic display nodes and box/JSON rendering.
 - `src/substrait.rs` imports and exports Substrait plans.
 - `src/main.rs` is an executable example that builds and prints sample plans.
-- `tests/` contains integration tests, currently focused on DataFusion/Substrait interop.
+- `crates/simple-graph-datafusion/` contains the DataFusion bridge and its sqllogictest coverage.
 
 ## Build, Test, and Development Commands
 
 - `cargo build` compiles the library and example binary.
 - `cargo run` runs `src/main.rs` and prints example query plans.
 - `cargo test` runs unit tests, integration tests, and doc tests.
-- `cargo test --test datafusion_substrait` runs only the DataFusion/Substrait bridge tests.
 - `cargo fmt` formats Rust code using `rustfmt`; run this before committing.
 - `cargo clippy --workspace` checks for lints; fix all warnings before committing.
 
@@ -31,7 +30,7 @@ Prefer descriptive struct names for operator payloads, for example `Scan`, `Proj
 
 ## Testing Guidelines
 
-Tests use Rust’s built-in test framework plus async `tokio` tests for DataFusion interop. Put narrow module tests beside implementation code under `#[cfg(test)]`; put cross-crate behavior in `tests/`.
+Tests use Rust’s built-in test framework plus async `tokio` tests for DataFusion interop. Put narrow module tests beside implementation code under `#[cfg(test)]`; DataFusion bridge behavior lives under `crates/simple-graph-datafusion/tests/`.
 
 Name tests by behavior, such as `imports_sort_and_fetch` or `datafusion_consumes_substrait_plan_produced_by_simple_graph`. Add tests for new IR operators, analyses, formatter behavior, and Substrait conversion paths.
 

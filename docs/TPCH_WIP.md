@@ -13,7 +13,27 @@ Implemented exporter coverage:
 - `TableFunction` for representable local-file reads
 - scalar expressions (`Literal`, `ColumnRef`, `Unary`, `Binary`, `Nary`, `Cast`, `CaseWhen`, `ScalarFunction`, `Exists`, `InSubquery`, `ScalarSubquery`) with conservative output typing
 
-Integration tests currently validate DataFusion consumer interoperability for these operators. A sqllogictest harness validates DataFusion SQL plans after a Substrait export/import round trip with logical optimizer rules disabled. Plan-only sqllogictests carry all TPC-H Q1-Q22 SQL shapes over empty benchmark schemas as separate files under `tests/slt/tpch/`; the full TPC-H run is gated behind `INCLUDE_TPCH=true cargo test --test sqllogictest_harness` until remaining Substrait gaps are closed.
+Root-crate integration tests for these operators have been removed. The DataFusion bridge keeps its
+own sqllogictest coverage under `crates/simple-graph-datafusion/tests/`.
+
+## Local TPC-H Data Setup
+
+The DataFusion sqllogictest TPC-H suite reads local Parquet files instead of generating tables at
+test time. Generate the files once with `tpchgen-cli`:
+
+```sh
+tpchgen-cli -s 0.1 -f parquet -o crates/simple-graph-datafusion/data/tpch/sf-0.1
+```
+
+The generated `crates/simple-graph-datafusion/data/` contents are ignored by git. Keep only
+`crates/simple-graph-datafusion/data/.gitignore` tracked.
+
+Run the TPC-H SLT suite with either:
+
+```sh
+cargo test -p simple-graph-datafusion --test slt tpch
+cargo nextest run -p simple-graph-datafusion --test slt tpch
+```
 
 The Rust TPC-H matrix now has one direct IR builder function per query (`tpch_q1` through `tpch_q22`). Each builder manually constructs a `QueryContext` using simple-graph IR operators. The IR can now represent SQL subquery expressions directly with `Exists`, `InSubquery`, and `ScalarSubquery`; later passes should lower those forms to semi/anti/single/mark joins before Substrait export. Q6 remains the first export+consume green query while the other builders track the relational and expression shapes that still need lowering plus Substrait/DataFusion compatibility work.
 
@@ -56,42 +76,11 @@ The Rust TPC-H matrix now has one direct IR builder function per query (`tpch_q1
    - current TPC-H sqllogictest blocker: DataFusion Substrait producer rejects scalar subquery expressions (`Cannot convert <subquery> to Substrait`) starting at Q2
 
 4. **TPC-H query coverage harness**
-   - add an integration matrix for TPC-H queries (Q1..Q22)
+   - add or restore an integration matrix for TPC-H queries (Q1..Q22)
    - track per-query status:
      - exports successfully
      - DataFusion consumes exported plan
      - output schema compatibility
-
-## Current TPC-H sqllogictest Status
-
-Command: `INCLUDE_TPCH=true cargo test --test sqllogictest_harness`
-
-Last checked: May 14, 2026.
-
-| Query | File | Status | Current failure |
-| --- | --- | --- | --- |
-| Q01 | `tests/slt/tpch/q01.slt` | Pass | None |
-| Q02 | `tests/slt/tpch/q02.slt` | Fail | DataFusion Substrait producer: `Cannot convert <subquery> to Substrait` |
-| Q03 | `tests/slt/tpch/q03.slt` | Pass | None |
-| Q04 | `tests/slt/tpch/q04.slt` | Fail | DataFusion Substrait producer: `Cannot convert Exists { subquery: <subquery>, negated: false } to Substrait` |
-| Q05 | `tests/slt/tpch/q05.slt` | Pass | None |
-| Q06 | `tests/slt/tpch/q06.slt` | Pass | None |
-| Q07 | `tests/slt/tpch/q07.slt` | Pass | None |
-| Q08 | `tests/slt/tpch/q08.slt` | Pass | None |
-| Q09 | `tests/slt/tpch/q09.slt` | Pass | None |
-| Q10 | `tests/slt/tpch/q10.slt` | Pass | None |
-| Q11 | `tests/slt/tpch/q11.slt` | Fail | DataFusion Substrait producer: `Cannot convert <subquery> to Substrait` |
-| Q12 | `tests/slt/tpch/q12.slt` | Pass | None |
-| Q13 | `tests/slt/tpch/q13.slt` | Pass | None |
-| Q14 | `tests/slt/tpch/q14.slt` | Pass | None |
-| Q15 | `tests/slt/tpch/q15.slt` | Fail | DataFusion Substrait producer: `Cannot convert <subquery> to Substrait` |
-| Q16 | `tests/slt/tpch/q16.slt` | Fail | Physical planner: `Physical plan does not support logical expression InSubquery(...)` |
-| Q17 | `tests/slt/tpch/q17.slt` | Fail | DataFusion Substrait producer: `Cannot convert <subquery> to Substrait` |
-| Q18 | `tests/slt/tpch/q18.slt` | Fail | Physical planner: `Physical plan does not support logical expression InSubquery(...)` |
-| Q19 | `tests/slt/tpch/q19.slt` | Pass | None |
-| Q20 | `tests/slt/tpch/q20.slt` | Fail | DataFusion Substrait producer: `Cannot convert <subquery> to Substrait` |
-| Q21 | `tests/slt/tpch/q21.slt` | Fail | DataFusion Substrait producer: `Cannot convert Exists { subquery: <subquery>, negated: false } to Substrait` |
-| Q22 | `tests/slt/tpch/q22.slt` | Fail | DataFusion Substrait producer: `Cannot convert <subquery> to Substrait` |
 
 ## Tracking Template
 
@@ -99,5 +88,5 @@ Last checked: May 14, 2026.
 - [x] Cast/conditional expression coverage complete
 - [x] Semi/anti/subquery expression semantics represented
 - [ ] Subquery-to-join lowering pass added
-- [x] TPC-H integration harness added
+- [ ] TPC-H integration harness added
 - [ ] Q1–Q22 export+consume matrix green
