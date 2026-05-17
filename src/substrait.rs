@@ -210,7 +210,7 @@ impl<'a> Exporter<'a> {
             OperatorData::Limit(limit) => self.export_limit(limit),
             OperatorData::Aggregation(aggregation) => self.export_aggregation(aggregation),
             OperatorData::Rename(r) => self.export_operator(r.input),
-            OperatorData::SingleRow => Err(SubstraitError::UnsupportedRel("SingleRow".into())),
+            OperatorData::SingleRow => Err(SubstraitError::UnsupportedRel("SingleRow")),
         }
     }
 
