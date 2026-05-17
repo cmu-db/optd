@@ -5,7 +5,10 @@ pub use join_ordering::JoinOrdering;
 pub use predicate_pushdown::PredicatePushdown;
 pub use subquery_to_join::SubqueryToJoin;
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Instant,
+};
 
 use crate::{Operator, OperatorData, OptimizerContext, QueryContext, Relation};
 
@@ -78,6 +81,21 @@ pub enum PassResult {
 /// A pass that rewrites a full query.
 pub trait QueryPass: Pass {
     fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<PassResult>;
+}
+
+/// Timing information for one pass invocation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PassProfile {
+    /// 1-based fixpoint iteration number.
+    pub iteration: usize,
+    /// 0-based registration index of the pass in the manager.
+    pub pass_index: usize,
+    /// Pass name returned by [`Pass::name`].
+    pub pass: &'static str,
+    /// Pass result. `None` means the pass returned an error.
+    pub result: Option<PassResult>,
+    /// Wall-clock time spent inside this pass invocation, in milliseconds.
+    pub duration_ms: f64,
 }
 
 /// Traversal direction for [`OperatorRewrite`] rules.
@@ -329,6 +347,7 @@ pub struct PassManager {
     passes: Vec<Box<dyn QueryPass>>,
     max_iterations: usize,
     next_run_id: u64,
+    profiles: Vec<PassProfile>,
 }
 
 impl PassManager {
@@ -338,6 +357,7 @@ impl PassManager {
             passes: Vec::new(),
             max_iterations,
             next_run_id: 1,
+            profiles: Vec::new(),
         }
     }
 
@@ -346,15 +366,48 @@ impl PassManager {
         self.passes.push(Box::new(pass));
     }
 
+    /// Returns profiling records from the most recent [`PassManager::run`].
+    pub fn profiles(&self) -> &[PassProfile] {
+        &self.profiles
+    }
+
     /// Runs all passes in a fixpoint loop until convergence or `max_iterations`.
     pub fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<()> {
+        self.profiles.clear();
         ctx.optimizer_run_id = self.next_run_id;
         self.next_run_id += 1;
 
-        for _ in 0..self.max_iterations {
+        for iteration in 1..=self.max_iterations {
             let mut any_changed = false;
-            for pass in &mut self.passes {
-                if pass.run(ctx)? == PassResult::Changed {
+            for (pass_index, pass) in self.passes.iter_mut().enumerate() {
+                let pass_name = pass.name();
+                let started = Instant::now();
+                let result = pass.run(ctx);
+                let duration_ms = started.elapsed().as_secs_f64() * 1_000.0;
+                let result = match result {
+                    Ok(result) => {
+                        self.profiles.push(PassProfile {
+                            iteration,
+                            pass_index,
+                            pass: pass_name,
+                            result: Some(result),
+                            duration_ms,
+                        });
+                        result
+                    }
+                    Err(error) => {
+                        self.profiles.push(PassProfile {
+                            iteration,
+                            pass_index,
+                            pass: pass_name,
+                            result: None,
+                            duration_ms,
+                        });
+                        return Err(error);
+                    }
+                };
+
+                if result == PassResult::Changed {
                     any_changed = true;
                     // Resolve the query root through the pass's rewrite map.
                     if let Some(root) = ctx.query.root() {
@@ -756,6 +809,14 @@ mod tests {
         pm.add_pass(NoopPass);
         let mut ctx = OptimizerContext::new(QueryContext::new());
         pm.run(&mut ctx).unwrap();
+
+        let profiles = pm.profiles();
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].iteration, 1);
+        assert_eq!(profiles[0].pass_index, 0);
+        assert_eq!(profiles[0].pass, "noop");
+        assert_eq!(profiles[0].result, Some(PassResult::Unchanged));
+        assert!(profiles[0].duration_ms >= 0.0);
     }
 
     #[test]
@@ -814,5 +875,64 @@ mod tests {
         pm.run(&mut ctx).unwrap();
 
         assert_eq!(*log.lock().unwrap(), vec!["a", "b", "a", "b"]);
+        assert_eq!(pm.profiles().len(), 4);
+        assert_eq!(
+            pm.profiles()
+                .iter()
+                .map(|profile| (profile.iteration, profile.pass_index, profile.pass))
+                .collect::<Vec<_>>(),
+            vec![(1, 0, "a"), (1, 1, "b"), (2, 0, "a"), (2, 1, "b")]
+        );
+    }
+
+    #[test]
+    fn pass_manager_replaces_profiles_on_each_run() {
+        let mut pm = PassManager::new(10);
+        pm.add_pass(NoopPass);
+
+        let mut first = OptimizerContext::new(QueryContext::new());
+        pm.run(&mut first).unwrap();
+        assert_eq!(pm.profiles().len(), 1);
+
+        let mut second = OptimizerContext::new(QueryContext::new());
+        pm.run(&mut second).unwrap();
+
+        assert_eq!(pm.profiles().len(), 1);
+        assert_eq!(pm.profiles()[0].iteration, 1);
+    }
+
+    #[test]
+    fn pass_manager_records_failed_pass_profile() {
+        struct ErrorPass;
+
+        impl Pass for ErrorPass {
+            fn name(&self) -> &'static str {
+                "error"
+            }
+        }
+
+        impl QueryPass for ErrorPass {
+            fn run(&mut self, _ctx: &mut OptimizerContext) -> OptimizeResult<PassResult> {
+                Err(OptimizeError::PassError {
+                    pass: self.name(),
+                    message: "boom".to_string(),
+                })
+            }
+        }
+
+        let mut pm = PassManager::new(10);
+        pm.add_pass(ErrorPass);
+        let mut ctx = OptimizerContext::new(QueryContext::new());
+
+        assert!(matches!(
+            pm.run(&mut ctx),
+            Err(OptimizeError::PassError { pass: "error", .. })
+        ));
+
+        let profiles = pm.profiles();
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].pass, "error");
+        assert_eq!(profiles[0].result, None);
+        assert!(profiles[0].duration_ms >= 0.0);
     }
 }

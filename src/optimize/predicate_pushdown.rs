@@ -22,6 +22,10 @@ impl Pass for PredicatePushdown {
 }
 
 impl OperatorRewrite for PredicatePushdown {
+    fn direction(&self) -> crate::optimize::Direction {
+        crate::optimize::Direction::TopDown
+    }
+
     fn rewrite(&mut self, op: Operator, ctx: &mut OptimizerContext) -> OptimizeResult<Rewrite> {
         let OperatorData::Selection(sel) = ctx.query.operator(op).clone() else {
             return Ok(Rewrite::Keep);
