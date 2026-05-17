@@ -1,14 +1,14 @@
 //! Predicate pushdown: moves filter predicates into join conditions or onto inputs.
 //!
 //! For `Selection(pred, Join/CrossProduct(outer, inner))`, splits `pred` into conjuncts
-//! and routes each one:
-//! - refs only outer columns → `Selection` on outer input
-//! - refs only inner columns → `Selection` on inner input
-//! - refs columns from both sides → join `ON` condition
-//! - refs columns outside this join → stays in the `Selection` above
+//! and routes each one when that movement preserves the join's NULL-extension semantics:
+//! - refs only preserved-side columns → `Selection` on that input
+//! - refs columns from both sides of an inner join → join `ON` condition
+//! - refs columns from a NULL-supplying side, a full outer join side, or outside this join
+//!   → stays in the `Selection` above
 
 use crate::{
-    AvailableColumns, Expr, ExprData, NaryOp, Operator, OperatorData, OptimizerContext,
+    AvailableColumns, Expr, ExprData, JoinType, NaryOp, Operator, OperatorData, OptimizerContext,
     ScalarValue, Selection, expr_used_columns,
     optimize::{OperatorRewrite, OptimizeResult, Pass, Rewrite},
 };
@@ -54,14 +54,17 @@ impl OperatorRewrite for PredicatePushdown {
 
         for c in conjuncts {
             let used = expr_used_columns(&ctx.query, c).unwrap_or_default();
-            if used.iter().all(|col| outer_cols.contains(col)) {
-                push_outer.push(c);
-            } else if used.iter().all(|col| inner_cols.contains(col)) {
-                push_inner.push(c);
-            } else if used
+            let refs_outer = used.iter().all(|col| outer_cols.contains(col));
+            let refs_inner = used.iter().all(|col| inner_cols.contains(col));
+            let refs_join_inputs = used
                 .iter()
-                .all(|col| outer_cols.contains(col) || inner_cols.contains(col))
-            {
+                .all(|col| outer_cols.contains(col) || inner_cols.contains(col));
+
+            if refs_outer && can_push_outer(&join_type) {
+                push_outer.push(c);
+            } else if refs_inner && can_push_inner(&join_type) {
+                push_inner.push(c);
+            } else if refs_join_inputs && can_push_into_join(&join_type) {
                 push_join.push(c);
             } else {
                 keep.push(c);
@@ -110,6 +113,26 @@ impl OperatorRewrite for PredicatePushdown {
 
         Ok(Rewrite::Replace(result))
     }
+}
+
+fn can_push_outer(join_type: &JoinType) -> bool {
+    matches!(
+        join_type,
+        JoinType::Inner
+            | JoinType::LeftSemi
+            | JoinType::LeftAnti
+            | JoinType::LeftOuter
+            | JoinType::Single
+            | JoinType::LeftMark(_)
+    )
+}
+
+fn can_push_inner(join_type: &JoinType) -> bool {
+    matches!(join_type, JoinType::Inner | JoinType::RightOuter)
+}
+
+fn can_push_into_join(join_type: &JoinType) -> bool {
+    matches!(join_type, JoinType::Inner)
 }
 
 fn wrap_selection(preds: Vec<Expr>, input: Operator, ctx: &mut crate::QueryContext) -> Operator {

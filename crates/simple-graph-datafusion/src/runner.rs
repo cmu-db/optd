@@ -9,7 +9,10 @@ use datafusion::prelude::SessionContext;
 use datafusion_sqllogictest::{
     DFColumnType, DFSqlLogicTestError, convert_batches, convert_schema_to_types,
 };
-use simple_graph::{OptimizerContext, PassManager, QueryContext, SubqueryToJoin};
+use simple_graph::{
+    OperatorRewriteAdaptor, OptimizerContext, PassManager, PredicatePushdown, QueryContext,
+    SubqueryToJoin,
+};
 use sqllogictest::{AsyncDB, DBOutput};
 
 use crate::explain_udfs::register_explain_udfs;
@@ -20,6 +23,7 @@ fn optimize(ctx: QueryContext) -> Result<QueryContext, simple_graph::OptimizeErr
     let mut opt = OptimizerContext::new(ctx);
     let mut pm = PassManager::new(10);
     pm.add_pass(SubqueryToJoin);
+    pm.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
     pm.run(&mut opt)?;
     if let Some(root) = opt.query.root() {
         let resolved = opt.rewrites.resolve(root);
