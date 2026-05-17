@@ -13,7 +13,8 @@ pub mod tpch;
 
 pub use analysis::{
     Analysis, AnalysisContext, AnalysisError, AnalysisResult, Analyzable, AvailableColumns,
-    ColumnNullability, CreatedColumns, FreeColumns, ParentOf, UsedColumns, expr_used_columns,
+    ColumnNullability, CreatedColumns, FreeColumns, ParentIndex, ParentsOf, UsedColumns,
+    expr_used_columns,
 };
 pub use catalog::{
     Catalog, CatalogError, CatalogResult, MemoryCatalog, ResolvedTableRef, TableId, TableMetadata,
@@ -680,6 +681,7 @@ pub struct OptimizerContext {
     pub query: QueryContext,
     pub analyses: AnalysisContext,
     pub rewrites: optimize::RewriteMap,
+    pub(crate) optimizer_run_id: u64,
 }
 
 impl OptimizerContext {
@@ -689,6 +691,7 @@ impl OptimizerContext {
             query,
             analyses: AnalysisContext::new(),
             rewrites: optimize::RewriteMap::new(),
+            optimizer_run_id: 0,
         }
     }
 
@@ -698,6 +701,7 @@ impl OptimizerContext {
             query,
             analyses: AnalysisContext::with_catalog(catalog),
             rewrites: optimize::RewriteMap::new(),
+            optimizer_run_id: 0,
         }
     }
 

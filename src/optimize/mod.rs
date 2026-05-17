@@ -89,6 +89,24 @@ pub enum Direction {
     TopDown,
 }
 
+impl Direction {
+    fn collect_ops(
+        self,
+        root: Operator,
+        query: &QueryContext,
+        rewrites: &RewriteMap,
+    ) -> Vec<Operator> {
+        match self {
+            Self::BottomUp => collect_post_order(root, query, rewrites),
+            Self::TopDown => collect_pre_order(root, query, rewrites),
+        }
+    }
+
+    fn materialize_inputs_before_rule(self) -> bool {
+        matches!(self, Self::BottomUp)
+    }
+}
+
 /// Result returned by an [`OperatorRewrite`] rule.
 #[derive(Debug)]
 pub enum Rewrite {
@@ -137,36 +155,24 @@ impl<R: OperatorRewrite> QueryPass for OperatorRewriteAdaptor<R> {
             return Ok(PassResult::Unchanged);
         };
 
-        let ops = match self.rule.direction() {
-            Direction::BottomUp => collect_post_order(root, &ctx.query, &ctx.rewrites),
-            Direction::TopDown => collect_pre_order(root, &ctx.query, &ctx.rewrites),
-        };
+        let direction = self.rule.direction();
+        let ops = direction.collect_ops(root, &ctx.query, &ctx.rewrites);
 
         let mut changed = false;
         for op in ops {
             let mut current = ctx.rewrites.resolve(op);
-            if self.rule.direction() == Direction::BottomUp {
-                if let Some(rebuilt) = rebuild_with_resolved_inputs(current, ctx) {
-                    ctx.rewrites.replace(current, rebuilt);
-                    current = rebuilt;
-                    changed = true;
-                }
+            if direction.materialize_inputs_before_rule() {
+                let materialized = materialize_operator_inputs(current, ctx);
+                current = materialized.op;
+                changed |= materialized.changed;
             }
 
             match self.rule.rewrite(current, ctx)? {
                 Rewrite::Keep => {}
                 Rewrite::Replace(replacement) => {
                     ctx.rewrites.replace(current, replacement);
+                    materialize_reachable_rewrites(root, ctx);
                     changed = true;
-                }
-            }
-        }
-
-        if changed && self.rule.direction() == Direction::TopDown {
-            for op in collect_post_order(root, &ctx.query, &ctx.rewrites) {
-                let current = ctx.rewrites.resolve(op);
-                if let Some(rebuilt) = rebuild_with_resolved_inputs(current, ctx) {
-                    ctx.rewrites.replace(current, rebuilt);
                 }
             }
         }
@@ -179,82 +185,95 @@ impl<R: OperatorRewrite> QueryPass for OperatorRewriteAdaptor<R> {
     }
 }
 
-fn rebuild_with_resolved_inputs(op: Operator, ctx: &mut OptimizerContext) -> Option<Operator> {
-    let data = ctx.query.operator(op).clone();
-    let (rebuilt, changed) = resolve_operator_inputs(data, ctx);
-    changed.then(|| rebuilt.add(&mut ctx.query))
+#[derive(Debug, Clone, Copy)]
+struct MaterializedOperator {
+    op: Operator,
+    changed: bool,
 }
 
-fn resolve_operator_inputs(data: OperatorData, ctx: &OptimizerContext) -> (OperatorData, bool) {
+fn materialize_operator_inputs(op: Operator, ctx: &mut OptimizerContext) -> MaterializedOperator {
+    let data = ctx.query.operator(op).clone();
+    let (rebuilt, changed) = operator_with_resolved_inputs(data, ctx);
+    if changed {
+        let rebuilt = rebuilt.add(&mut ctx.query);
+        ctx.rewrites.replace(op, rebuilt);
+        MaterializedOperator {
+            op: rebuilt,
+            changed: true,
+        }
+    } else {
+        MaterializedOperator { op, changed: false }
+    }
+}
+
+pub(crate) fn materialize_reachable_rewrites(
+    root: Operator,
+    ctx: &mut OptimizerContext,
+) -> Operator {
+    for op in collect_post_order(root, &ctx.query, &ctx.rewrites) {
+        let current = ctx.rewrites.resolve(op);
+        materialize_operator_inputs(current, ctx);
+    }
+
+    ctx.rewrites.resolve(root)
+}
+
+fn operator_with_resolved_inputs(
+    data: OperatorData,
+    ctx: &OptimizerContext,
+) -> (OperatorData, bool) {
     match data {
         OperatorData::Selection(mut s) => {
-            let input = ctx.rewrites.resolve(s.input);
-            let changed = input != s.input;
-            s.input = input;
+            let changed = resolve_input(&mut s.input, ctx);
             (OperatorData::Selection(s), changed)
         }
         OperatorData::Map(mut m) => {
-            let input = ctx.rewrites.resolve(m.input);
-            let changed = input != m.input;
-            m.input = input;
+            let changed = resolve_input(&mut m.input, ctx);
             (OperatorData::Map(m), changed)
         }
         OperatorData::Join(mut j) => {
-            let outer = ctx.rewrites.resolve(j.outer);
-            let inner = ctx.rewrites.resolve(j.inner);
-            let changed = outer != j.outer || inner != j.inner;
-            j.outer = outer;
-            j.inner = inner;
+            let changed = resolve_input(&mut j.outer, ctx) | resolve_input(&mut j.inner, ctx);
             (OperatorData::Join(j), changed)
         }
         OperatorData::CrossProduct(mut cp) => {
-            let outer = ctx.rewrites.resolve(cp.outer);
-            let inner = ctx.rewrites.resolve(cp.inner);
-            let changed = outer != cp.outer || inner != cp.inner;
-            cp.outer = outer;
-            cp.inner = inner;
+            let changed = resolve_input(&mut cp.outer, ctx) | resolve_input(&mut cp.inner, ctx);
             (OperatorData::CrossProduct(cp), changed)
         }
         OperatorData::Sort(mut s) => {
-            let input = ctx.rewrites.resolve(s.input);
-            let changed = input != s.input;
-            s.input = input;
+            let changed = resolve_input(&mut s.input, ctx);
             (OperatorData::Sort(s), changed)
         }
         OperatorData::Limit(mut l) => {
-            let input = ctx.rewrites.resolve(l.input);
-            let changed = input != l.input;
-            l.input = input;
+            let changed = resolve_input(&mut l.input, ctx);
             (OperatorData::Limit(l), changed)
         }
         OperatorData::Aggregation(mut a) => {
-            let input = ctx.rewrites.resolve(a.input);
-            let changed = input != a.input;
-            a.input = input;
+            let changed = resolve_input(&mut a.input, ctx);
             (OperatorData::Aggregation(a), changed)
         }
         OperatorData::Projection(mut p) => {
-            let input = ctx.rewrites.resolve(p.input);
-            let changed = input != p.input;
-            p.input = input;
+            let changed = resolve_input(&mut p.input, ctx);
             (OperatorData::Projection(p), changed)
         }
         OperatorData::Output(mut o) => {
-            let input = ctx.rewrites.resolve(o.input);
-            let changed = input != o.input;
-            o.input = input;
+            let changed = resolve_input(&mut o.input, ctx);
             (OperatorData::Output(o), changed)
         }
         OperatorData::Rename(mut r) => {
-            let input = ctx.rewrites.resolve(r.input);
-            let changed = input != r.input;
-            r.input = input;
+            let changed = resolve_input(&mut r.input, ctx);
             (OperatorData::Rename(r), changed)
         }
         data @ (OperatorData::Scan(_)
         | OperatorData::TableFunction(_)
         | OperatorData::SingleRow) => (data, false),
     }
+}
+
+fn resolve_input(input: &mut Operator, ctx: &OptimizerContext) -> bool {
+    let resolved = ctx.rewrites.resolve(*input);
+    let changed = resolved != *input;
+    *input = resolved;
+    changed
 }
 
 fn collect_post_order(root: Operator, ctx: &QueryContext, rewrites: &RewriteMap) -> Vec<Operator> {
@@ -309,6 +328,7 @@ fn pre_order(
 pub struct PassManager {
     passes: Vec<Box<dyn QueryPass>>,
     max_iterations: usize,
+    next_run_id: u64,
 }
 
 impl PassManager {
@@ -317,6 +337,7 @@ impl PassManager {
         Self {
             passes: Vec::new(),
             max_iterations,
+            next_run_id: 1,
         }
     }
 
@@ -327,6 +348,9 @@ impl PassManager {
 
     /// Runs all passes in a fixpoint loop until convergence or `max_iterations`.
     pub fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<()> {
+        ctx.optimizer_run_id = self.next_run_id;
+        self.next_run_id += 1;
+
         for _ in 0..self.max_iterations {
             let mut any_changed = false;
             for pass in &mut self.passes {
@@ -352,7 +376,10 @@ impl PassManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ColumnData, OperatorData, Output, QueryContext, Scan, TableRef};
+    use crate::{
+        ColumnData, ExprData, Join, JoinType, OperatorData, Output, QueryContext, ScalarValue,
+        Scan, Selection, TableRef,
+    };
     use arrow_schema::DataType;
 
     // --- RewriteMap tests ---
@@ -552,6 +579,148 @@ mod tests {
             panic!("expected rebuilt output");
         };
         assert_eq!(rebuilt.input, replacement);
+    }
+
+    #[test]
+    fn top_down_operator_rewrite_adaptor_rebuilds_new_intermediate_nodes() {
+        struct WrapSelectionAndReplaceScan {
+            replacement: Operator,
+        }
+
+        impl Pass for WrapSelectionAndReplaceScan {
+            fn name(&self) -> &'static str {
+                "wrap_selection_and_replace_scan"
+            }
+        }
+
+        impl OperatorRewrite for WrapSelectionAndReplaceScan {
+            fn direction(&self) -> Direction {
+                Direction::TopDown
+            }
+
+            fn rewrite(
+                &mut self,
+                op: Operator,
+                ctx: &mut OptimizerContext,
+            ) -> OptimizeResult<Rewrite> {
+                Ok(match ctx.query.operator(op).clone() {
+                    OperatorData::Selection(selection) => {
+                        let inner = OperatorData::Selection(Selection {
+                            predicate: selection.predicate,
+                            input: selection.input,
+                        })
+                        .add(&mut ctx.query);
+                        let outer = OperatorData::Selection(Selection {
+                            predicate: selection.predicate,
+                            input: inner,
+                        })
+                        .add(&mut ctx.query);
+                        Rewrite::Replace(outer)
+                    }
+                    OperatorData::Scan(_) => Rewrite::Replace(self.replacement),
+                    _ => Rewrite::Keep,
+                })
+            }
+        }
+
+        let mut ctx = QueryContext::new();
+        let col = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("old"),
+            columns: vec![col],
+        })
+        .add(&mut ctx);
+        let replacement = OperatorData::Scan(Scan {
+            table: TableRef::bare("new"),
+            columns: vec![col],
+        })
+        .add(&mut ctx);
+        let predicate = ExprData::Literal(ScalarValue::Boolean(true)).add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
+            predicate,
+            input: scan,
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: selection }).add(&mut ctx);
+        ctx.set_root(output);
+
+        let mut opt_ctx = OptimizerContext::new(ctx);
+        let mut pass = OperatorRewriteAdaptor::new(WrapSelectionAndReplaceScan { replacement });
+
+        assert_eq!(pass.run(&mut opt_ctx).unwrap(), PassResult::Changed);
+
+        let root = opt_ctx.rewrites.resolve(output);
+        let OperatorData::Output(rebuilt_output) = opt_ctx.query.operator(root) else {
+            panic!("expected rebuilt output");
+        };
+        let OperatorData::Selection(outer) = opt_ctx.query.operator(rebuilt_output.input) else {
+            panic!("expected outer selection");
+        };
+        let OperatorData::Selection(inner) = opt_ctx.query.operator(outer.input) else {
+            panic!("expected inner selection");
+        };
+        assert_eq!(inner.input, replacement);
+    }
+
+    #[test]
+    fn materialize_reachable_rewrites_rebuilds_shared_parent_paths() {
+        let mut ctx = QueryContext::new();
+        let col = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("t"),
+            columns: vec![col],
+        })
+        .add(&mut ctx);
+        let left_predicate = ExprData::Literal(ScalarValue::Boolean(true)).add(&mut ctx);
+        let left = OperatorData::Selection(Selection {
+            predicate: left_predicate,
+            input: scan,
+        })
+        .add(&mut ctx);
+        let right_predicate = ExprData::Literal(ScalarValue::Boolean(true)).add(&mut ctx);
+        let right = OperatorData::Selection(Selection {
+            predicate: right_predicate,
+            input: scan,
+        })
+        .add(&mut ctx);
+        let on = ExprData::Literal(ScalarValue::Boolean(true)).add(&mut ctx);
+        let join = OperatorData::Join(Join {
+            join_type: JoinType::Inner,
+            on,
+            outer: left,
+            inner: right,
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: join }).add(&mut ctx);
+        ctx.set_root(output);
+
+        let replacement = OperatorData::Scan(Scan {
+            table: TableRef::bare("replacement"),
+            columns: vec![col],
+        })
+        .add(&mut ctx);
+        let mut opt_ctx = OptimizerContext::new(ctx);
+        opt_ctx.rewrites.replace(scan, replacement);
+
+        let root = materialize_reachable_rewrites(output, &mut opt_ctx);
+
+        assert_ne!(root, output);
+        let OperatorData::Output(rebuilt_output) = opt_ctx.query.operator(root) else {
+            panic!("root should remain an output");
+        };
+        let OperatorData::Join(rebuilt_join) = opt_ctx.query.operator(rebuilt_output.input) else {
+            panic!("output input should remain a join");
+        };
+        let OperatorData::Selection(rebuilt_left) = opt_ctx.query.operator(rebuilt_join.outer)
+        else {
+            panic!("join outer should remain a selection");
+        };
+        let OperatorData::Selection(rebuilt_right) = opt_ctx.query.operator(rebuilt_join.inner)
+        else {
+            panic!("join inner should remain a selection");
+        };
+        assert_eq!(rebuilt_left.input, replacement);
+        assert_eq!(rebuilt_right.input, replacement);
     }
 
     // --- PassManager tests ---

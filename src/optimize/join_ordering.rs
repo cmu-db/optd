@@ -47,8 +47,6 @@ enum JoinTree {
         right: Box<JoinTree>,
         /// Predicates from connecting hyperedges (indices into hg.edges).
         edge_indices: Vec<usize>,
-        #[allow(dead_code)]
-        cardinality: f64,
     },
 }
 
@@ -60,6 +58,26 @@ impl JoinTree {
             JoinTree::Join { left, right, .. } => left.leaf_count() + right.leaf_count(),
         }
     }
+
+    #[cfg(test)]
+    fn leaf_set(&self) -> NodeSet {
+        match self {
+            JoinTree::Leaf(nid) => nodeset_singleton(*nid),
+            JoinTree::Join { left, right, .. } => left.leaf_set() | right.leaf_set(),
+        }
+    }
+
+    #[cfg(test)]
+    fn has_join_with_leaves(&self, leaves: NodeSet) -> bool {
+        match self {
+            JoinTree::Leaf(_) => false,
+            JoinTree::Join { left, right, .. } => {
+                self.leaf_set() == leaves
+                    || left.has_join_with_leaves(leaves)
+                    || right.has_join_with_leaves(leaves)
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -69,8 +87,15 @@ impl JoinTree {
 struct DPhyp<'a> {
     hg: &'a QueryHypergraph,
     stats: &'a dyn Statistics,
-    /// DP table: NodeSet → (cost, JoinTree).
-    dp: HashMap<NodeSet, (f64, JoinTree)>,
+    /// DP table: NodeSet → best known plan for that subset.
+    dp: HashMap<NodeSet, PlanState>,
+}
+
+#[derive(Clone)]
+struct PlanState {
+    cost: f64,
+    cardinality: f64,
+    tree: JoinTree,
 }
 
 impl<'a> DPhyp<'a> {
@@ -87,12 +112,20 @@ impl<'a> DPhyp<'a> {
         if n == 0 {
             return None;
         }
+        assert!(n <= 64, "DPhyp requires <=64 nodes per join group");
 
         // Initialise singletons.
         for i in 0..n {
             let s = nodeset_singleton(i);
-            let cost = self.stats.cardinality(i, self.hg);
-            self.dp.insert(s, (cost, JoinTree::Leaf(i)));
+            let cardinality = self.stats.cardinality(i, self.hg);
+            self.dp.insert(
+                s,
+                PlanState {
+                    cost: cardinality,
+                    cardinality,
+                    tree: JoinTree::Leaf(i),
+                },
+            );
         }
 
         // Process nodes in descending order (largest index first).
@@ -103,8 +136,9 @@ impl<'a> DPhyp<'a> {
             self.enumerate_csg_rec(sv, bv);
         }
 
-        let all: NodeSet = (1u64 << n) - 1;
-        self.dp.get(&all).map(|(_, t)| t.clone())
+        self.dp
+            .get(&all_nodes_mask(n))
+            .map(|state| state.tree.clone())
     }
 
     fn enumerate_csg_rec(&mut self, s1: NodeSet, x: NodeSet) {
@@ -130,7 +164,7 @@ impl<'a> DPhyp<'a> {
         // Iterate neighbors in descending order.
         let mut v = nbrs;
         while v != 0 {
-            let bit = 1u64 << (63 - v.leading_zeros() as u32);
+            let bit = 1u64 << (63 - v.leading_zeros());
             v &= !bit;
             let s2 = bit;
             if self.has_edge(s1, s2) {
@@ -155,10 +189,10 @@ impl<'a> DPhyp<'a> {
     }
 
     fn emit_csg_cmp(&mut self, s1: NodeSet, s2: NodeSet) {
-        let Some((cost1, tree1)) = self.dp.get(&s1).cloned() else {
+        let Some(left) = self.dp.get(&s1).cloned() else {
             return;
         };
-        let Some((cost2, tree2)) = self.dp.get(&s2).cloned() else {
+        let Some(right) = self.dp.get(&s2).cloned() else {
             return;
         };
 
@@ -180,27 +214,27 @@ impl<'a> DPhyp<'a> {
         }
 
         let sel = self.stats.selectivity(s1, s2, self.hg);
-        let card = cost1 * cost2 * sel;
-        let new_cost = cost1 + cost2 + card;
+        let cardinality = left.cardinality * right.cardinality * sel;
+        let new_cost = left.cost + right.cost + cardinality;
         let combined = s1 | s2;
 
         let better = self
             .dp
             .get(&combined)
-            .map_or(true, |&(existing_cost, _)| new_cost < existing_cost);
+            .is_none_or(|existing| new_cost < existing.cost);
 
         if better {
             self.dp.insert(
                 combined,
-                (
-                    new_cost,
-                    JoinTree::Join {
-                        left: Box::new(tree1),
-                        right: Box::new(tree2),
+                PlanState {
+                    cost: new_cost,
+                    cardinality,
+                    tree: JoinTree::Join {
+                        left: Box::new(left.tree),
+                        right: Box::new(right.tree),
                         edge_indices,
-                        cardinality: card,
                     },
-                ),
+                },
             );
         }
     }
@@ -244,6 +278,14 @@ fn non_empty_subsets(s: NodeSet) -> Vec<NodeSet> {
     }
     result.reverse();
     result
+}
+
+fn all_nodes_mask(n: usize) -> NodeSet {
+    if n == 64 {
+        NodeSet::MAX
+    } else {
+        (1u64 << n) - 1
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -303,7 +345,7 @@ fn join_tree_to_ir(tree: &JoinTree, hg: &QueryHypergraph, ctx: &mut QueryContext
 ///
 /// A join group root is a `Join` or `CrossProduct` whose parent is not also
 /// a `Join`/`CrossProduct`. We walk top-down and stop descending into a
-/// subtree once we find a join group root.
+/// subtree once we find a join group root for each contiguous join group.
 pub fn collect_join_group_roots(ctx: &QueryContext, root: Operator) -> Vec<Operator> {
     let mut roots = Vec::new();
     collect_roots_rec(ctx, root, false, &mut roots);
@@ -320,10 +362,6 @@ fn collect_roots_rec(
         ctx.operator(op),
         OperatorData::Join(_) | OperatorData::CrossProduct(_)
     );
-
-    if is_join && !parent_is_join {
-        out.push(op);
-    }
 
     // Recurse into children.
     match ctx.operator(op) {
@@ -345,6 +383,10 @@ fn collect_roots_rec(
         OperatorData::Aggregation(a) => collect_roots_rec(ctx, a.input, false, out),
         _ => {}
     }
+
+    if is_join && !parent_is_join {
+        out.push(op);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -353,17 +395,22 @@ fn collect_roots_rec(
 
 pub struct JoinOrdering {
     pub stats: Box<dyn Statistics>,
+    last_run: Option<(usize, u64)>,
 }
 
 impl JoinOrdering {
     pub fn new() -> Self {
         Self {
             stats: Box::new(UniformStatistics),
+            last_run: None,
         }
     }
 
     pub fn with_stats(stats: Box<dyn Statistics>) -> Self {
-        Self { stats }
+        Self {
+            stats,
+            last_run: None,
+        }
     }
 }
 
@@ -381,6 +428,14 @@ impl Pass for JoinOrdering {
 
 impl QueryPass for JoinOrdering {
     fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<PassResult> {
+        let run_key = (
+            (&ctx.query as *const QueryContext) as usize,
+            ctx.optimizer_run_id,
+        );
+        if self.last_run == Some(run_key) {
+            return Ok(PassResult::Unchanged);
+        }
+
         let Some(root) = ctx.query.root() else {
             return Ok(PassResult::Unchanged);
         };
@@ -390,28 +445,39 @@ impl QueryPass for JoinOrdering {
             return Ok(PassResult::Unchanged);
         }
 
-        let mut changed = false;
-        for group_root in group_roots {
-            let hg = build_hypergraph(&ctx.query, &mut ctx.analyses, group_root);
-            if hg.nodes.len() < 2 {
-                continue;
-            }
-            assert!(
-                hg.nodes.len() <= 64,
-                "DPhyp requires ≤64 nodes per join group"
-            );
-
-            let mut solver = DPhyp::new(&hg, self.stats.as_ref());
-            if let Some(tree) = solver.solve() {
-                let new_op = join_tree_to_ir(&tree, &hg, &mut ctx.query);
-                ctx.rewrites.replace(group_root, new_op);
-                changed = true;
-            }
+        let groups = group_roots
+            .into_iter()
+            .filter_map(|group_root| {
+                let hg = build_hypergraph(&ctx.query, &mut ctx.analyses, group_root);
+                (hg.nodes.len() >= 2).then_some((group_root, hg))
+            })
+            .collect::<Vec<_>>();
+        if groups.is_empty() {
+            return Ok(PassResult::Unchanged);
         }
 
-        // JoinOrdering is a one-shot pass; always return Unchanged to stop the fixed-point loop.
-        let _ = changed;
-        Ok(PassResult::Unchanged)
+        self.last_run = Some(run_key);
+
+        let replacements = groups
+            .iter()
+            .filter_map(|(group_root, hg)| {
+                let mut solver = DPhyp::new(hg, self.stats.as_ref());
+                solver
+                    .solve()
+                    .map(|tree| (*group_root, join_tree_to_ir(&tree, hg, &mut ctx.query)))
+            })
+            .collect::<Vec<_>>();
+        if replacements.is_empty() {
+            return Ok(PassResult::Unchanged);
+        }
+
+        for (group_root, new_op) in replacements {
+            ctx.rewrites.replace(group_root, new_op);
+        }
+
+        super::materialize_reachable_rewrites(root, ctx);
+
+        Ok(PassResult::Changed)
     }
 }
 
@@ -423,10 +489,12 @@ impl QueryPass for JoinOrdering {
 mod tests {
     use super::*;
     use crate::{
-        AnalysisContext, BinaryOp, ColumnData, ExprData, Join, JoinType, OperatorData,
-        QueryContext, Scan, TableRef,
+        AnalysisContext, BinaryOp, ColumnData, ExprData, HypergraphNode, Join, JoinType,
+        OperatorData, OptimizerContext, Output, PassManager, QueryContext, QueryHypergraph,
+        ScalarValue, Scan, Selection, TableRef,
     };
     use arrow_schema::DataType;
+    use std::{cell::RefCell, rc::Rc};
 
     fn three_way_chain() -> (QueryContext, Operator) {
         let mut ctx = QueryContext::new();
@@ -499,5 +567,213 @@ mod tests {
         let roots = collect_join_group_roots(&ctx, root);
         assert_eq!(roots.len(), 1);
         assert_eq!(roots[0], root);
+    }
+
+    #[test]
+    fn collect_join_group_roots_returns_bottom_up_order() {
+        let (mut ctx, inner) = three_way_chain();
+        let predicate = ExprData::Literal(ScalarValue::Boolean(true)).add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
+            predicate,
+            input: inner,
+        })
+        .add(&mut ctx);
+        let c = ColumnData::new("extra", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("D"),
+            columns: vec![c],
+        })
+        .add(&mut ctx);
+        let on = ExprData::Literal(ScalarValue::Boolean(true)).add(&mut ctx);
+        let outer = OperatorData::Join(Join {
+            join_type: JoinType::Inner,
+            on,
+            outer: selection,
+            inner: scan,
+        })
+        .add(&mut ctx);
+
+        let roots = collect_join_group_roots(&ctx, outer);
+
+        assert_eq!(roots, vec![inner, outer]);
+    }
+
+    #[test]
+    fn dphyp_uses_child_cardinalities_for_join_cardinality() {
+        struct SkewStats;
+
+        impl Statistics for SkewStats {
+            fn cardinality(&self, node_idx: usize, _hg: &QueryHypergraph) -> f64 {
+                match node_idx {
+                    0 => 1000.0,
+                    1 | 2 => 10.0,
+                    _ => unreachable!("test graph has three nodes"),
+                }
+            }
+
+            fn selectivity(&self, _left: NodeSet, _right: NodeSet, _hg: &QueryHypergraph) -> f64 {
+                0.1
+            }
+        }
+
+        let (ctx, root) = three_way_chain();
+        let mut analyses = AnalysisContext::new();
+        let hg = build_hypergraph(&ctx, &mut analyses, root);
+        let mut solver = DPhyp::new(&hg, &SkewStats);
+
+        let tree = solver.solve().expect("DPhyp should find a plan");
+
+        assert!(tree.has_join_with_leaves(nodeset_singleton(1) | nodeset_singleton(2)));
+    }
+
+    #[test]
+    fn dphyp_solve_handles_64_node_all_mask() {
+        let mut ctx = QueryContext::new();
+        let mut nodes = Vec::new();
+        for idx in 0..64 {
+            let scan = OperatorData::Scan(Scan {
+                table: TableRef::bare(format!("t{idx}")),
+                columns: vec![],
+            })
+            .add(&mut ctx);
+            nodes.push(HypergraphNode {
+                root: scan,
+                label: format!("t{idx}"),
+                available: vec![],
+            });
+        }
+        let hg = QueryHypergraph {
+            nodes,
+            edges: vec![],
+        };
+        let mut solver = DPhyp::new(&hg, &UniformStatistics);
+
+        assert_eq!(all_nodes_mask(64), NodeSet::MAX);
+        assert!(solver.solve().is_none());
+    }
+
+    #[test]
+    fn join_ordering_reports_changed_so_pass_manager_updates_root() {
+        let (ctx, root) = three_way_chain();
+        let mut opt = OptimizerContext::new(ctx);
+        let mut pm = PassManager::new(10);
+        pm.add_pass(JoinOrdering::new());
+
+        pm.run(&mut opt).unwrap();
+
+        assert_ne!(opt.query.root(), Some(root));
+    }
+
+    #[test]
+    fn join_ordering_rebuilds_parent_above_join_group() {
+        let (mut ctx, join_root) = three_way_chain();
+        let output = OperatorData::Output(Output { input: join_root }).add(&mut ctx);
+        ctx.set_root(output);
+        let mut opt = OptimizerContext::new(ctx);
+        let mut pm = PassManager::new(10);
+        pm.add_pass(JoinOrdering::new());
+
+        pm.run(&mut opt).unwrap();
+
+        let root = opt.query.root().unwrap();
+        assert_ne!(root, output);
+        let OperatorData::Output(rebuilt) = opt.query.operator(root) else {
+            panic!("root should remain an output");
+        };
+        assert_ne!(rebuilt.input, join_root);
+    }
+
+    #[test]
+    fn join_ordering_pass_manager_can_be_reused_for_another_context() {
+        let (ctx1, root1) = three_way_chain();
+        let (ctx2, root2) = three_way_chain();
+        let mut opt1 = OptimizerContext::new(ctx1);
+        let mut opt2 = OptimizerContext::new(ctx2);
+        let mut pm = PassManager::new(10);
+        pm.add_pass(JoinOrdering::new());
+
+        pm.run(&mut opt1).unwrap();
+        pm.run(&mut opt2).unwrap();
+
+        assert_ne!(opt1.query.root(), Some(root1));
+        assert_ne!(opt2.query.root(), Some(root2));
+    }
+
+    #[test]
+    fn join_ordering_noop_before_join_exists_does_not_consume_pass() {
+        struct CreateJoinAfterFirstPass {
+            fired: bool,
+            created_join: Rc<RefCell<Option<Operator>>>,
+        }
+
+        impl Pass for CreateJoinAfterFirstPass {
+            fn name(&self) -> &'static str {
+                "create_join_after_first_pass"
+            }
+        }
+
+        impl QueryPass for CreateJoinAfterFirstPass {
+            fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<PassResult> {
+                if self.fired {
+                    return Ok(PassResult::Unchanged);
+                }
+                self.fired = true;
+
+                let a = ColumnData::new("a", DataType::Int64).add(&mut ctx.query);
+                let b = ColumnData::new("b", DataType::Int64).add(&mut ctx.query);
+                let scan_a = OperatorData::Scan(Scan {
+                    table: TableRef::bare("A"),
+                    columns: vec![a],
+                })
+                .add(&mut ctx.query);
+                let scan_b = OperatorData::Scan(Scan {
+                    table: TableRef::bare("B"),
+                    columns: vec![b],
+                })
+                .add(&mut ctx.query);
+                let on = ExprData::Binary {
+                    op: BinaryOp::Eq,
+                    left: ExprData::ColumnRef(a).add(&mut ctx.query),
+                    right: ExprData::ColumnRef(b).add(&mut ctx.query),
+                }
+                .add(&mut ctx.query);
+                let join = OperatorData::Join(Join {
+                    join_type: JoinType::Inner,
+                    on,
+                    outer: scan_a,
+                    inner: scan_b,
+                })
+                .add(&mut ctx.query);
+
+                *self.created_join.borrow_mut() = Some(join);
+                if let Some(root) = ctx.query.root() {
+                    ctx.rewrites.replace(root, join);
+                } else {
+                    ctx.query.set_root(join);
+                }
+                Ok(PassResult::Changed)
+            }
+        }
+
+        let mut ctx = QueryContext::new();
+        let seed = OperatorData::Scan(Scan {
+            table: TableRef::bare("seed"),
+            columns: vec![],
+        })
+        .add(&mut ctx);
+        ctx.set_root(seed);
+        let created_join = Rc::new(RefCell::new(None));
+        let mut opt = OptimizerContext::new(ctx);
+        let mut pm = PassManager::new(10);
+        pm.add_pass(JoinOrdering::new());
+        pm.add_pass(CreateJoinAfterFirstPass {
+            fired: false,
+            created_join: Rc::clone(&created_join),
+        });
+
+        pm.run(&mut opt).unwrap();
+
+        let created_join = created_join.borrow().expect("join should be created");
+        assert_ne!(opt.query.root(), Some(created_join));
     }
 }

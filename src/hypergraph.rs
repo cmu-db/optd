@@ -7,7 +7,7 @@
 //! Hyperedges are join predicates with TES-left/TES-right sets encoding reordering
 //! constraints, computed via the CD-A algorithm (Algorithm 1 in the paper).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::analysis::Analysis;
 use crate::{
@@ -1073,7 +1073,7 @@ fn is_join_op(op: Operator, ctx: &QueryContext) -> bool {
 /// `Join` or `CrossProduct`. If `op` itself is not inside any join group,
 /// returns `None`.
 ///
-/// Uses [`crate::ParentOf`] to walk up the operator tree.
+/// Uses [`crate::ParentsOf`] to walk up the reachable plan.
 #[derive(Default)]
 pub struct JoinGroupOf;
 
@@ -1086,30 +1086,34 @@ impl Analyzable for JoinGroupOf {
         analyses: &mut AnalysisContext,
         op: Operator,
     ) -> AnalysisResult<Self::Value> {
-        use crate::ParentOf;
+        use crate::ParentsOf;
 
-        // Walk up from op, tracking the highest join/cross-product ancestor.
-        let mut highest_join: Option<Operator> = None;
-        let mut cursor = op;
+        // Walk all parent paths from op, tracking the highest join/cross-product
+        // ancestor seen on each path. Tree-shaped plans produce one path; DAGs
+        // may produce multiple paths, but this API can return only one group.
+        let mut stack = vec![(op, is_join_op(op, ctx).then_some(op))];
+        let mut visited = HashSet::new();
+        while let Some((cursor, highest_join)) = stack.pop() {
+            if !visited.insert((cursor, highest_join)) {
+                continue;
+            }
 
-        // Include op itself if it is a join.
-        if is_join_op(cursor, ctx) {
-            highest_join = Some(cursor);
-        }
+            let parents = analyses.get::<ParentsOf>(ctx, cursor)?;
+            if parents.is_empty() && highest_join.is_some() {
+                return Ok(highest_join);
+            }
 
-        loop {
-            match analyses.get::<ParentOf>(ctx, cursor)? {
-                None => break,
-                Some(parent) => {
-                    if is_join_op(parent, ctx) {
-                        highest_join = Some(parent);
-                    }
-                    cursor = parent;
-                }
+            for parent in parents {
+                let next_highest = if is_join_op(parent, ctx) {
+                    Some(parent)
+                } else {
+                    highest_join
+                };
+                stack.push((parent, next_highest));
             }
         }
 
-        Ok(highest_join)
+        Ok(None)
     }
 }
 

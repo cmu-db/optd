@@ -50,7 +50,7 @@ impl std::error::Error for AnalysisError {}
 ///
 /// Each analysis decides its own computation strategy and caching.
 /// Bottom-up analyses recurse into inputs via [`AnalysisContext::get`].
-/// Top-down analyses use [`AnalysisContext::get::<ParentOf>`] to walk from root.
+/// Top-down analyses use [`AnalysisContext::get::<ParentsOf>`] to walk from root.
 pub trait Analyzable: 'static {
     /// The value produced for one operator.
     type Value: Clone;
@@ -1091,18 +1091,58 @@ impl Analyzable for AvailableColumns {
     }
 }
 
-/// Analysis that returns the immediate parent of an operator in the reachable plan.
+/// Parent index for one reachable plan version.
 ///
-/// Returns `None` for the root. Builds and caches a full parent map on first call.
-/// The cache is keyed on the root at time of computation; call [`AnalysisContext::clear`]
-/// if the root changes.
-#[derive(Default)]
-pub struct ParentOf {
-    /// Cached (root, parent_map) pair. Invalidated when root changes.
-    cache: RefCell<Option<(Operator, HashMap<Operator, Operator>)>>,
+/// The index is derived from a single root. It may contain multiple parents for
+/// an operator when the reachable plan is DAG-shaped.
+#[derive(Debug, Clone)]
+pub struct ParentIndex {
+    root: Operator,
+    parents: HashMap<Operator, Vec<Operator>>,
 }
 
-impl Analysis for ParentOf {
+impl ParentIndex {
+    /// Builds a parent index for the reachable plan under `root`.
+    pub fn build(ctx: &QueryContext, root: Operator) -> Self {
+        let mut parents: HashMap<Operator, Vec<Operator>> = HashMap::new();
+        let mut stack = vec![root];
+        let mut visited = HashSet::new();
+        while let Some(current) = stack.pop() {
+            if !visited.insert(current) {
+                continue;
+            }
+            for child in relational_inputs(current, ctx) {
+                parents.entry(child).or_default().push(current);
+                stack.push(child);
+            }
+        }
+
+        Self { root, parents }
+    }
+
+    /// Returns the root this index was built from.
+    pub fn root(&self) -> Operator {
+        self.root
+    }
+
+    /// Returns all immediate parents of `op` in this reachable plan.
+    pub fn parents(&self, op: Operator) -> &[Operator] {
+        self.parents.get(&op).map(Vec::as_slice).unwrap_or(&[])
+    }
+}
+
+/// Analysis that returns all immediate parents of an operator in the reachable plan.
+///
+/// Returns an empty vector for the root or for unreachable operators. Builds and
+/// caches a full parent index on first call. The cache is keyed on the root at
+/// time of computation; call [`AnalysisContext::clear`] if the root changes.
+#[derive(Default)]
+pub struct ParentsOf {
+    /// Cached parent index. Invalidated when root changes.
+    cache: RefCell<Option<ParentIndex>>,
+}
+
+impl Analysis for ParentsOf {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -1112,49 +1152,35 @@ impl Analysis for ParentOf {
     }
 }
 
-impl Analyzable for ParentOf {
-    /// `Some(parent)` if `op` has a parent in the reachable plan, `None` if `op` is the root
-    /// or unreachable.
-    type Value = Option<Operator>;
+impl Analyzable for ParentsOf {
+    /// Immediate parents of `op` in the reachable plan.
+    type Value = Vec<Operator>;
 
     fn get(
         ctx: &QueryContext,
         analyses: &mut AnalysisContext,
         op: Operator,
-    ) -> AnalysisResult<Option<Operator>> {
+    ) -> AnalysisResult<Vec<Operator>> {
         let Some(root) = ctx.root() else {
-            return Ok(None);
+            return Ok(Vec::new());
         };
 
         let entry = analyses.registry_entry::<Self>();
         let analysis = typed_analysis::<Self>(&entry)?;
 
-        // Rebuild cache if root changed or not yet computed.
         {
             let cache = analysis.cache.borrow();
-            if let Some((cached_root, ref map)) = *cache
-                && cached_root == root
+            if let Some(ref index) = *cache
+                && index.root() == root
             {
-                return Ok(map.get(&op).copied());
+                return Ok(index.parents(op).to_vec());
             }
         }
 
-        // Build parent map with a DFS from root.
-        let mut map: HashMap<Operator, Operator> = HashMap::new();
-        let mut stack = vec![root];
-        let mut visited = HashSet::new();
-        while let Some(current) = stack.pop() {
-            if !visited.insert(current) {
-                continue;
-            }
-            for child in relational_inputs(current, ctx) {
-                map.entry(child).or_insert(current);
-                stack.push(child);
-            }
-        }
-
-        *analysis.cache.borrow_mut() = Some((root, map.clone()));
-        Ok(map.get(&op).copied())
+        let index = ParentIndex::build(ctx, root);
+        let parents = index.parents(op).to_vec();
+        *analysis.cache.borrow_mut() = Some(index);
+        Ok(parents)
     }
 }
 
@@ -1791,7 +1817,7 @@ mod tests {
     }
 
     #[test]
-    fn parent_of_returns_immediate_parent() {
+    fn parents_of_returns_multiple_immediate_parents() {
         let mut ctx = QueryContext::new();
         let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
         let scan = OperatorData::Scan(Scan {
@@ -1799,24 +1825,33 @@ mod tests {
             columns: vec![id],
         })
         .add(&mut ctx);
-        let id_ref = ExprData::ColumnRef(id).add(&mut ctx);
-        let selection = OperatorData::Selection(crate::Selection {
-            predicate: id_ref,
+        let left_predicate = ExprData::ColumnRef(id).add(&mut ctx);
+        let left = OperatorData::Selection(crate::Selection {
+            predicate: left_predicate,
             input: scan,
         })
         .add(&mut ctx);
-        let output = OperatorData::Output(crate::Output { input: selection }).add(&mut ctx);
-        ctx.set_root(output);
+        let right_predicate = ExprData::ColumnRef(id).add(&mut ctx);
+        let right = OperatorData::Selection(crate::Selection {
+            predicate: right_predicate,
+            input: scan,
+        })
+        .add(&mut ctx);
+        let on = ExprData::Literal(crate::ScalarValue::Boolean(true)).add(&mut ctx);
+        let join = OperatorData::Join(Join {
+            join_type: JoinType::Inner,
+            on,
+            outer: left,
+            inner: right,
+        })
+        .add(&mut ctx);
+        ctx.set_root(join);
 
         let mut analyses = AnalysisContext::new();
-        assert_eq!(analyses.get::<ParentOf>(&ctx, output).unwrap(), None);
-        assert_eq!(
-            analyses.get::<ParentOf>(&ctx, selection).unwrap(),
-            Some(output)
-        );
-        assert_eq!(
-            analyses.get::<ParentOf>(&ctx, scan).unwrap(),
-            Some(selection)
-        );
+        let parents = analyses.get::<ParentsOf>(&ctx, scan).unwrap();
+
+        assert_eq!(parents.len(), 2);
+        assert!(parents.contains(&left));
+        assert!(parents.contains(&right));
     }
 }
