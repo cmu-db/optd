@@ -117,6 +117,7 @@ impl SimpleGraphRunner {
             | LogicalPlan::Join(_)
             | LogicalPlan::TableScan(_)
             | LogicalPlan::SubqueryAlias(_)
+            | LogicalPlan::Values(_)
             | LogicalPlan::EmptyRelation(_) => {}
             _ => return Err("non-query plan".into()),
         }

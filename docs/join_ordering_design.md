@@ -23,7 +23,7 @@ It does not re-derive the hypergraph; it consumes it.
 
 A single SQL query can contain multiple independent join groups separated by blocking
 operators (Aggregation, Sort, Limit, Projection). Each group is a maximal subtree of
-`Join` and `CrossProduct` operators. The WIP doc notes this as a follow-up; it is a
+`Join` and `CrossProduct` operators. This design notes it as a follow-up; it is a
 prerequisite for the pass.
 
 ### Identifying Join Groups

@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use datafusion::arrow::datatypes::Field;
 use datafusion::common::{Column as DFColumn, TableReference};
 use datafusion::datasource::provider_as_source;
 use datafusion::execution::FunctionRegistry;
@@ -13,6 +14,7 @@ use datafusion::functions_aggregate::count::count_all;
 use datafusion::functions_aggregate::expr_fn::{avg, count, max, min, sum};
 use datafusion::logical_expr::{
     Expr as DFExpr, JoinType as DFJoinType, LogicalPlan, LogicalPlanBuilder, SortExpr, TableSource,
+    logical_plan::Values,
 };
 use datafusion::prelude::SessionContext;
 use simple_graph::{
@@ -331,15 +333,71 @@ fn convert_operator_inner(
 
         OperatorData::TableFunction(_) => Err(ToDFError::Unsupported("TableFunction".into())),
 
-        OperatorData::SingleRow => {
-            use datafusion::common::DFSchema;
+        OperatorData::ConstScan(const_scan) => {
             use datafusion::logical_expr::EmptyRelation;
-            Ok(LogicalPlan::EmptyRelation(EmptyRelation {
-                produce_one_row: true,
-                schema: Arc::new(DFSchema::empty()),
-            }))
+            let schema = const_scan_schema(const_scan, ctx)?;
+            match const_scan.rows.len() {
+                0 => Ok(LogicalPlan::EmptyRelation(EmptyRelation {
+                    produce_one_row: false,
+                    schema,
+                })),
+                1 if const_scan.rows[0].is_empty() => {
+                    Ok(LogicalPlan::EmptyRelation(EmptyRelation {
+                        produce_one_row: true,
+                        schema,
+                    }))
+                }
+                _ => {
+                    let values = const_scan
+                        .rows
+                        .iter()
+                        .map(|row| {
+                            row.iter()
+                                .map(|expr| convert_expr(*expr, ctx, tables, session, outer_refs))
+                                .collect::<ToDFResult<Vec<_>>>()
+                        })
+                        .collect::<ToDFResult<Vec<_>>>()?;
+                    if values
+                        .iter()
+                        .any(|row| row.len() != const_scan.columns.len())
+                    {
+                        return Err(ToDFError::Unsupported(
+                            "ConstScan row width must match number of columns".into(),
+                        ));
+                    }
+                    Ok(LogicalPlan::Values(Values { schema, values }))
+                }
+            }
         }
     }
+}
+
+fn const_scan_schema(
+    const_scan: &simple_graph::ConstScan,
+    ctx: &QueryContext,
+) -> ToDFResult<datafusion::common::DFSchemaRef> {
+    use datafusion::common::DFSchema;
+    let qualified_fields = const_scan
+        .columns
+        .iter()
+        .map(|column| {
+            let column = ctx.column(*column);
+            let qualifier = column
+                .qualifier
+                .as_ref()
+                .map(|q| TableReference::bare(q.as_str()));
+            (
+                qualifier,
+                Arc::new(Field::new(&column.name, column.ty.clone(), true)),
+            )
+        })
+        .collect::<Vec<_>>();
+    let schema = if qualified_fields.is_empty() {
+        DFSchema::empty()
+    } else {
+        DFSchema::new_with_metadata(qualified_fields, HashMap::new())?
+    };
+    Ok(Arc::new(schema))
 }
 
 fn convert_expr(
@@ -648,5 +706,118 @@ fn convert_join_type(jt: &simple_graph::JoinType) -> ToDFResult<DFJoinType> {
         simple_graph::JoinType::LeftSemi => Ok(DFJoinType::LeftSemi),
         simple_graph::JoinType::LeftAnti => Ok(DFJoinType::LeftAnti),
         other => Err(ToDFError::Unsupported(format!("join type {other:?}"))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ToDFError, to_logical_plan};
+    use datafusion::arrow::datatypes::DataType;
+    use datafusion::logical_expr::LogicalPlan;
+    use datafusion::prelude::SessionContext;
+    use simple_graph::{ColumnData, ConstScan, ExprData, OperatorData, QueryContext, ScalarValue};
+
+    #[tokio::test]
+    async fn exports_zero_row_const_scan_as_empty_relation() {
+        let session = SessionContext::new();
+        let mut ctx = QueryContext::new();
+        let root = OperatorData::ConstScan(ConstScan {
+            columns: vec![],
+            rows: vec![],
+        })
+        .add(&mut ctx);
+        ctx.set_root(root);
+
+        let plan = to_logical_plan(&ctx, &session).await.unwrap();
+        match plan {
+            LogicalPlan::EmptyRelation(empty) => assert!(!empty.produce_one_row),
+            other => panic!("expected EmptyRelation, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn exports_one_empty_row_const_scan_as_single_row_empty_relation() {
+        let session = SessionContext::new();
+        let mut ctx = QueryContext::new();
+        let root = OperatorData::ConstScan(ConstScan {
+            columns: vec![],
+            rows: vec![vec![]],
+        })
+        .add(&mut ctx);
+        ctx.set_root(root);
+
+        let plan = to_logical_plan(&ctx, &session).await.unwrap();
+        match plan {
+            LogicalPlan::EmptyRelation(empty) => assert!(empty.produce_one_row),
+            other => panic!("expected EmptyRelation, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn exports_const_scan_with_non_empty_row_values_as_values_plan() {
+        let session = SessionContext::new();
+        let mut ctx = QueryContext::new();
+        let a = ColumnData::new("a", DataType::Int64).add(&mut ctx);
+        let value = ExprData::Literal(ScalarValue::Int64(1)).add(&mut ctx);
+        let root = OperatorData::ConstScan(ConstScan {
+            columns: vec![a],
+            rows: vec![vec![value]],
+        })
+        .add(&mut ctx);
+        ctx.set_root(root);
+
+        let plan = to_logical_plan(&ctx, &session).await.unwrap();
+        match plan {
+            LogicalPlan::Values(values) => {
+                assert_eq!(values.values.len(), 1);
+                assert_eq!(values.values[0].len(), 1);
+            }
+            other => panic!("expected Values plan, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_const_scan_values_with_mismatched_row_width() {
+        let session = SessionContext::new();
+        let mut ctx = QueryContext::new();
+        let a = ColumnData::new("a", DataType::Int64).add(&mut ctx);
+        let value = ExprData::Literal(ScalarValue::Int64(1)).add(&mut ctx);
+        let root = OperatorData::ConstScan(ConstScan {
+            columns: vec![a],
+            rows: vec![vec![value], vec![]],
+        })
+        .add(&mut ctx);
+        ctx.set_root(root);
+
+        let error = to_logical_plan(&ctx, &session).await.unwrap_err();
+        match error {
+            ToDFError::Unsupported(message) => {
+                assert!(message.contains("row width must match number of columns"))
+            }
+            other => panic!("expected Unsupported error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn exports_const_scan_schema_into_empty_relation_schema() {
+        let session = SessionContext::new();
+        let mut ctx = QueryContext::new();
+        let a = ColumnData::new("a", DataType::Int64).add(&mut ctx);
+        let root = OperatorData::ConstScan(ConstScan {
+            columns: vec![a],
+            rows: vec![],
+        })
+        .add(&mut ctx);
+        ctx.set_root(root);
+
+        let plan = to_logical_plan(&ctx, &session).await.unwrap();
+        match plan {
+            LogicalPlan::EmptyRelation(empty) => {
+                assert_eq!(empty.schema.fields().len(), 1);
+                let (_, field) = empty.schema.qualified_field(0);
+                assert_eq!(field.name(), "a");
+            }
+            other => panic!("expected EmptyRelation, got {other:?}"),
+        }
     }
 }

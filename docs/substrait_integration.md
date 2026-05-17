@@ -1,4 +1,4 @@
-# Substrait Integration WIP
+# Substrait Integration
 
 This document is a handoff for the current Substrait work in `simple-graph`.
 
@@ -72,6 +72,7 @@ Exporter gaps remain:
 
 - some table-function extension/file formats are intentionally conservative
 - expression coverage is still conservative compared to full Substrait expression space
+- `ConstScan` export is currently unsupported in Substrait (`SubstraitError::UnsupportedRel("ConstScan")`)
 
 Importer limitations to watch:
 
@@ -79,6 +80,9 @@ Importer limitations to watch:
 - `ColumnData` no longer stores nullability; nullability is analysis/catalog-derived
 - Substrait type handling is still a conservative subset
 - local file import maps file formats to `TableFunctionDef`, but exporter does not emit local files
+
+Note: the DataFusion bridge (`crates/simple-graph-datafusion`) now handles
+`EmptyRelation`/`Values` via `ConstScan`, but that is separate from Substrait conversion.
 
 ## Recommended Next Steps
 

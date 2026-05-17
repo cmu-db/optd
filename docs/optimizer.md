@@ -1,4 +1,4 @@
-# Optimizer WIP
+# Optimizer
 
 ## Goal
 
@@ -53,20 +53,24 @@ into query passes:
 
 Do not add more pass levels until the IR has a concrete need for them.
 
-## Operator Rewrite Interface Sketch
-
-Most early rules are local bottom-up rewrites, but this interface still needs design work before it
-is treated as final. The useful shape is probably an adaptor-owned traversal where a rule receives
-the original operator plus already-rewritten inputs.
+## Operator Rewrite Interface
 
 ```rust
 pub trait OperatorRewrite: Pass {
+    fn direction(&self) -> Direction {
+        Direction::BottomUp
+    }
+
     fn rewrite(
         &mut self,
         operator: Operator,
         ctx: &mut OptimizerContext,
-        inputs: &[Operator],
     ) -> OptimizeResult<Rewrite>;
+}
+
+pub enum Direction {
+    BottomUp,
+    TopDown,
 }
 
 pub enum Rewrite {
@@ -75,22 +79,8 @@ pub enum Rewrite {
 }
 ```
 
-The adaptor owns traversal, replacement tracking, and parent reconstruction. A rule should not need
-to walk the graph manually for simple rewrites.
-
-Open design points:
-
-- Should `inputs` be plain `&[Operator]`, or should they preserve input roles such as `input`,
-  `outer`, and `inner`?
-- Should the rule return only `Rewrite`, or also metadata such as "do not revisit this operator in
-  this pass"?
-- Should rules see the original children, rewritten children, or both?
-- Should operator rewrites be allowed to create expressions, or should expression normalization run
-  in a separate adaptor first?
-- How should shared subplans be handled when only one parent changed?
-
-Until these are answered, `OperatorRewrite` should be considered a candidate convenience interface,
-not the foundational optimizer contract.
+`OperatorRewriteAdaptor` now owns traversal, rewrite-map updates, and parent/root
+materialization. Rules pattern-match one operator and return `Keep`/`Replace`.
 
 ## Expression Rewrite Interface
 
@@ -334,11 +324,8 @@ These should be deterministic heuristic rewrites. Cost-based planning can come l
 
 ## Open Questions
 
-- Should optimizer code live in `src/optimize.rs` or a `src/optimize/` module tree?
 - Should mutation APIs like `operator_mut` remain available to optimizer passes, or should pass
   implementations only receive append helpers?
-- What exact shape should `OperatorRewrite` have once input roles, shared subplans, and scheduling
-  are accounted for?
 - Should run tracking be handle-based, fingerprint-based, or both?
 - How should expression-level rewrites compose with operator rewrites in one fixpoint pipeline?
 - What boundary model should be used once CTEs or shared-subplan operators exist?

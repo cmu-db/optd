@@ -283,7 +283,7 @@ fn operator_with_resolved_inputs(
         }
         data @ (OperatorData::Scan(_)
         | OperatorData::TableFunction(_)
-        | OperatorData::SingleRow) => (data, false),
+        | OperatorData::ConstScan(_)) => (data, false),
     }
 }
 

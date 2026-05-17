@@ -71,7 +71,9 @@ pub enum OperatorData {
     Map(Map),
     /// Reads rows produced by a table-valued function.
     TableFunction(TableFunction),
+    /// Joins two inputs using the provided join type and condition.
     Join(Join),
+    /// Produces the Cartesian product of the two inputs.
     CrossProduct(CrossProduct),
     /// Orders rows by one or more sort keys.
     Sort(Sort),
@@ -86,9 +88,8 @@ pub enum OperatorData {
     /// Renames the output of its input under a new qualifier.
     /// Corresponds to SQL `(subquery) AS alias` or `table AS alias`.
     Rename(Rename),
-    /// Produces exactly one row with no columns. Corresponds to SQL `SELECT expr`
-    /// with no `FROM` clause (DataFusion `EmptyRelation` with `produce_one_row=true`).
-    SingleRow,
+    /// Produces constant rows from literal expressions.
+    ConstScan(ConstScan),
 }
 
 impl OperatorData {
@@ -105,6 +106,14 @@ impl OperatorData {
 pub struct Scan {
     pub table: TableRef,
     pub columns: Vec<Column>,
+}
+
+/// Produces literal rows with no input dependencies.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ConstScan {
+    pub columns: Vec<Column>,
+    pub rows: Vec<Vec<Expr>>,
 }
 
 /// Filters rows from its input.
@@ -1403,7 +1412,7 @@ impl<'a> QueryFormatter<'a> {
             OperatorData::Projection(_)
             | OperatorData::Output(_)
             | OperatorData::Rename(_)
-            | OperatorData::SingleRow => {}
+            | OperatorData::ConstScan(_) => {}
         }
         inputs
     }
@@ -1549,7 +1558,7 @@ impl Relation for OperatorData {
             Self::Projection(operator) => operator.inputs(),
             Self::Output(operator) => operator.inputs(),
             Self::Rename(operator) => operator.inputs(),
-            Self::SingleRow => vec![],
+            Self::ConstScan(operator) => operator.inputs(),
         }
     }
 }
@@ -1569,12 +1578,7 @@ impl OperatorDisplayFormat for OperatorData {
             Self::Projection(operator) => operator.format(formatter),
             Self::Output(operator) => operator.format(formatter),
             Self::Rename(operator) => operator.format(formatter),
-            Self::SingleRow => OperatorDisplay {
-                kind: "single_row".to_string(),
-                title: "① SingleRow".to_string(),
-                fields: vec![],
-                inputs: vec![],
-            },
+            Self::ConstScan(operator) => operator.format(formatter),
         }
     }
 }
@@ -1592,6 +1596,27 @@ impl OperatorDisplayFormat for Scan {
                     .iter()
                     .map(|column| formatter.format_column_name(*column)),
             )],
+            inputs: Vec::new(),
+        }
+    }
+}
+
+impl Relation for ConstScan {}
+
+impl OperatorDisplayFormat for ConstScan {
+    fn format(&self, formatter: &QueryFormatter<'_>) -> OperatorDisplay {
+        OperatorDisplay {
+            kind: "const_scan".to_string(),
+            title: "⊞ ConstScan".to_string(),
+            fields: vec![
+                display_list_field(
+                    "columns",
+                    self.columns
+                        .iter()
+                        .map(|column| formatter.format_column_name(*column)),
+                ),
+                display_scalar_field("rows", self.rows.len().to_string()),
+            ],
             inputs: Vec::new(),
         }
     }

@@ -1,4 +1,4 @@
-# TPC-H Support WIP
+# TPC-H Support
 
 This document tracks the remaining work to make Substrait import/export in `simple-graph` practical for TPC-H query plans.
 

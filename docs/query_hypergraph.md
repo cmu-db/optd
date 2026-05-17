@@ -13,8 +13,8 @@ the input to join-ordering algorithms (DPhyp, CD-E, etc.).
 
 The paper's Section 2.5 defines hyperedges as *pairs of sets* `(left_set, right_set)` —
 not a single SES — to support efficient physical operators (e.g. hash join) for
-multi-relation predicates. The TES of a join operator is computed bottom-up using the
-CD-A / CD-E algorithms (Algorithms 1 and 3 in the paper).
+multi-relation predicates. The current implementation computes TES bottom-up using
+**CD-E** (Algorithm 3 in the paper).
 
 ---
 
@@ -117,12 +117,12 @@ pub struct HypergraphNode {
 /// For a simple two-relation inner join, left = {node_a}, right = {node_b}.
 /// For a multi-relation predicate or after TES extension, the sets may be larger.
 pub struct Hyperedge {
-    /// The predicate expression (from a Join or cross-node Selection).
-    pub predicate: Expr,
-    /// Left side of the hyperedge: nodes that must be in the left input.
-    pub left: Vec<NodeId>,
-    /// Right side of the hyperedge: nodes that must be in the right input.
-    pub right: Vec<NodeId>,
+    /// The predicate expression. `None` for cross-product dummy edges.
+    pub predicate: Option<Expr>,
+    /// Left side of the hyperedge as a bitset.
+    pub left: NodeSet,
+    /// Right side of the hyperedge as a bitset.
+    pub right: NodeSet,
     /// The IR operator this edge came from.
     pub source: Operator,
     /// Join type of the source operator (determines assoc/l-asscom/r-asscom).
@@ -161,10 +161,12 @@ pub struct QueryHypergraph {
 
 ## TES Construction Algorithm
 
-We implement **CD-A** (Algorithm 1 from the paper) as the baseline. CD-E (Algorithm 3)
-is the target for completeness but requires a connectivity check; it is a follow-up.
+The implementation uses **CD-E** (Algorithm 3), which extends CD-A with:
 
-### CD-A (baseline)
+1. extending with `TES(◦_a)` (not full subtree relations), and
+2. gating each extension on connectivity checks to avoid redundant restrictions.
+
+### CD-A (background)
 
 ```
 fn compute_tes(join_op: Operator, ctx: &QueryContext) -> (NodeSet, NodeSet):
@@ -188,11 +190,10 @@ fn compute_tes(join_op: Operator, ctx: &QueryContext) -> (NodeSet, NodeSet):
 ```
 
 The compatibility predicates `assoc`, `l_asscom`, `r_asscom` are looked up from the
-tables in the paper (Tables 1–3). For the first implementation, only inner joins and
-cross products are needed; all three predicates return `true` for `(Inner, Inner)`, so
-TES == SES for all-inner-join queries.
+tables in the paper (Tables 1–3). Inner-join-only groups still degenerate to TES == SES,
+but mixed join types use the full compatibility checks.
 
-### CD-E (follow-up)
+### CD-E (implemented)
 
 CD-E amends CD-A with:
 1. Replace `left_relations(◦_a)` / `right_relations(◦_a)` with `TES-left(◦_a)` /
@@ -219,7 +220,7 @@ fn build_hypergraph(ctx, analyses, join_group_root) -> QueryHypergraph:
                 collect(j.inner)
                 for predicate in conjuncts(j.on, ctx):
                     (left_ses, right_ses) = split_ses(predicate, node_map, ctx)
-                    (tes_l, tes_r) = cd_a(op, ctx, node_map)
+                    (tes_l, tes_r) = cd_e(op, ctx, node_map)
                     edges.push(Hyperedge {
                         predicate,
                         left: tes_l, right: tes_r,
@@ -232,9 +233,9 @@ fn build_hypergraph(ctx, analyses, join_group_root) -> QueryHypergraph:
                 collect(cp.inner)
                 // Add a dummy always-true edge to keep the graph connected (§2.6)
                 edges.push(Hyperedge {
-                    predicate: always_true,
-                    left: [representative(cp.outer, node_map)],
-                    right: [representative(cp.inner, node_map)],
+                    predicate: None,
+                    left: singleton(representative(cp.outer, node_map)),
+                    right: singleton(representative(cp.inner, node_map)),
                     source: op,
                     join_type: HyperedgeJoinType::Inner,
                 })
@@ -284,8 +285,7 @@ pub fn l_asscom(outer: HyperedgeJoinType, inner: HyperedgeJoinType) -> bool
 pub fn r_asscom(outer: HyperedgeJoinType, inner: HyperedgeJoinType) -> bool
 ```
 
-For the first implementation, only `Inner` is needed. All three return `true` for
-`(Inner, Inner)`. The full tables are needed for outer-join TES computation.
+The implementation includes the full compatibility tables used by TES construction.
 
 ---
 
@@ -351,26 +351,18 @@ pub use hypergraph::{
 
 ---
 
-## Implementation Tasks
+## Implementation Status
 
-1. Add `src/hypergraph.rs` with the data model.
-2. Implement `assoc`, `l_asscom`, `r_asscom` for `Inner` only (extend to full tables later).
-3. Implement `build_hypergraph` with CD-A TES construction.
-4. Implement `QueryHypergraph::pretty`.
-5. Re-export from `lib.rs`.
-6. Add unit tests.
-7. Run `cargo fmt` and `cargo clippy --workspace`.
+- `src/hypergraph.rs` is implemented and re-exported from `src/lib.rs`.
+- `NodeSet = u64` helpers (`nodeset_singleton`, `nodeset_min`, `nodeset_iter`) are in use.
+- Hyperedges use `(left: NodeSet, right: NodeSet)` and optional predicates.
+- TES construction uses CD-E and compatibility-table checks.
+- Unit tests cover node/edge construction, predicate splitting, compatibility behavior, and pretty printing.
 
 ---
 
 ## Open Questions
 
-- **CD-E connectivity check**: The paper's Algorithm 3 requires a connectivity check
-  (Algorithm 5, union-find over hyperedges). Implement after CD-A is working and tested.
-  CD-E is strictly better than CD-A for outer-join queries (Table 4: 100% vs 63.8%
-  complete queries).
-- **Full compatibility tables**: Tables 1–3 cover 8 join types × 8 join types. Implement
-  the full tables when outer-join support is added.
 - **Null-rejecting predicate detection**: The paper distinguishes `'E` (null-rejecting on
   left) from `E`. This requires inspecting predicate expressions to determine null
   rejection. Use the existing `ColumnNullability` analysis as a starting point.

@@ -12,12 +12,13 @@ use datafusion::logical_expr::{
     Aggregate, BinaryExpr, Expr as DFExpr, Filter, Join, JoinType as DFJoinType, Limit,
     LogicalPlan, Operator as DFOperator, Projection, Sort, TableScan,
     expr::{AggregateFunction as DFAggregateFunction, Case},
+    logical_plan::{EmptyRelation, Values as DFValues},
 };
 use simple_graph::{
-    AggregateExpr, AggregateFunction, Aggregation, BinaryOp, Column, ColumnData, ExprData,
-    Join as SGJoin, JoinType, Limit as SGLimit, Map, NaryOp, NullOrdering, Operator, OperatorData,
-    Projection as SGProjection, QueryContext, ScalarValue, Scan, Selection, Sort as SGSort,
-    SortDirection, SortKey, TableRef,
+    AggregateExpr, AggregateFunction, Aggregation, BinaryOp, Column, ColumnData, ConstScan,
+    ExprData, Join as SGJoin, JoinType, Limit as SGLimit, Map, NaryOp, NullOrdering, Operator,
+    OperatorData, Projection as SGProjection, QueryContext, ScalarValue, Scan, Selection,
+    Sort as SGSort, SortDirection, SortKey, TableRef,
 };
 
 /// Error type for the DataFusion → simple-graph converter.
@@ -155,7 +156,8 @@ fn convert_plan(
 ) -> FromDFResult<Operator> {
     match plan {
         LogicalPlan::TableScan(scan) => convert_scan(scan, ctx, bindings),
-        LogicalPlan::EmptyRelation(_) => Ok(OperatorData::SingleRow.add(ctx)),
+        LogicalPlan::EmptyRelation(empty) => convert_empty_relation(empty, ctx, bindings),
+        LogicalPlan::Values(values) => convert_values(values, ctx, bindings),
         LogicalPlan::Filter(filter) => convert_filter(filter, ctx, bindings),
         LogicalPlan::Projection(proj) => convert_projection(proj, ctx, bindings),
         LogicalPlan::Aggregate(agg) => convert_aggregate(agg, ctx, bindings),
@@ -192,6 +194,7 @@ fn convert_plan(
                 bindings.bind(Some(alias_name.clone()), field.name().clone(), renamed);
                 defs.push((renamed, original));
             }
+
             Ok(OperatorData::Rename(simple_graph::Rename {
                 alias: alias_name,
                 defs,
@@ -204,6 +207,77 @@ fn convert_plan(
             other.display_indent()
         ))),
     }
+}
+
+fn convert_empty_relation(
+    empty: &EmptyRelation,
+    ctx: &mut QueryContext,
+    bindings: &mut BindingContext,
+) -> FromDFResult<Operator> {
+    bindings.push();
+    let mut columns = Vec::new();
+    let schema = empty.schema.as_ref();
+    for i in 0..schema.fields().len() {
+        let (qualifier, field) = schema.qualified_field(i);
+        let qualifier = qualifier.map(|q| q.table().to_string());
+        let column = match &qualifier {
+            Some(q) => ColumnData::with_qualifier(
+                field.name().clone(),
+                field.data_type().clone(),
+                q.clone(),
+            )
+            .add(ctx),
+            None => ColumnData::new(field.name().clone(), field.data_type().clone()).add(ctx),
+        };
+        bindings.bind(qualifier, field.name().clone(), column);
+        columns.push(column);
+    }
+    Ok(OperatorData::ConstScan(ConstScan {
+        columns,
+        rows: if empty.produce_one_row {
+            vec![vec![]]
+        } else {
+            vec![]
+        },
+    })
+    .add(ctx))
+}
+
+fn convert_values(
+    values: &DFValues,
+    ctx: &mut QueryContext,
+    bindings: &mut BindingContext,
+) -> FromDFResult<Operator> {
+    bindings.push();
+    let mut columns = Vec::new();
+    let schema = values.schema.as_ref();
+    for i in 0..schema.fields().len() {
+        let (qualifier, field) = schema.qualified_field(i);
+        let qualifier = qualifier.map(|q| q.table().to_string());
+        let column = match &qualifier {
+            Some(q) => ColumnData::with_qualifier(
+                field.name().clone(),
+                field.data_type().clone(),
+                q.clone(),
+            )
+            .add(ctx),
+            None => ColumnData::new(field.name().clone(), field.data_type().clone()).add(ctx),
+        };
+        bindings.bind(qualifier, field.name().clone(), column);
+        columns.push(column);
+    }
+
+    let rows = values
+        .values
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|expr| convert_expr(expr, ctx, bindings))
+                .collect::<FromDFResult<Vec<_>>>()
+        })
+        .collect::<FromDFResult<Vec<_>>>()?;
+
+    Ok(OperatorData::ConstScan(ConstScan { columns, rows }).add(ctx))
 }
 
 fn convert_scan(
@@ -839,5 +913,93 @@ fn eval_usize_expr(expr: &DFExpr) -> Option<usize> {
         DFExpr::Literal(DFScalarValue::Int32(Some(n)), _) => (*n).try_into().ok(),
         DFExpr::Literal(DFScalarValue::UInt64(Some(n)), _) => (*n).try_into().ok(),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::from_logical_plan;
+    use datafusion::arrow::datatypes::{DataType, Field};
+    use datafusion::common::DFSchema;
+    use datafusion::logical_expr::{EmptyRelation, LogicalPlan};
+    use datafusion::prelude::SessionContext;
+    use simple_graph::{OperatorData, QueryContext};
+    use std::sync::Arc;
+
+    #[test]
+    fn imports_empty_relation_as_zero_row_const_scan() {
+        let plan = LogicalPlan::EmptyRelation(EmptyRelation {
+            produce_one_row: false,
+            schema: Arc::new(DFSchema::empty()),
+        });
+        let mut ctx = QueryContext::new();
+        let root = from_logical_plan(&plan, &mut ctx).unwrap();
+        match ctx.operator(root) {
+            OperatorData::ConstScan(const_scan) => {
+                assert!(const_scan.columns.is_empty());
+                assert!(const_scan.rows.is_empty());
+            }
+            other => panic!("expected ConstScan, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn imports_single_row_empty_relation_as_one_empty_row_const_scan() {
+        let plan = LogicalPlan::EmptyRelation(EmptyRelation {
+            produce_one_row: true,
+            schema: Arc::new(DFSchema::empty()),
+        });
+        let mut ctx = QueryContext::new();
+        let root = from_logical_plan(&plan, &mut ctx).unwrap();
+        match ctx.operator(root) {
+            OperatorData::ConstScan(const_scan) => {
+                assert!(const_scan.columns.is_empty());
+                assert_eq!(const_scan.rows, vec![vec![]]);
+            }
+            other => panic!("expected ConstScan, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn imports_empty_relation_schema_as_const_scan_columns() {
+        let schema = DFSchema::from_unqualified_fields(
+            vec![Arc::new(Field::new("a", DataType::Int64, true))].into(),
+            std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let plan = LogicalPlan::EmptyRelation(EmptyRelation {
+            produce_one_row: false,
+            schema: Arc::new(schema),
+        });
+        let mut ctx = QueryContext::new();
+        let root = from_logical_plan(&plan, &mut ctx).unwrap();
+        match ctx.operator(root) {
+            OperatorData::ConstScan(const_scan) => {
+                assert_eq!(const_scan.columns.len(), 1);
+                assert_eq!(ctx.column(const_scan.columns[0]).name, "a");
+                assert!(const_scan.rows.is_empty());
+            }
+            other => panic!("expected ConstScan, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn imports_values_as_const_scan_with_rows_and_columns() {
+        let session = SessionContext::new();
+        let plan = session
+            .state()
+            .create_logical_plan("VALUES (1, 2), (3, 4)")
+            .await
+            .unwrap();
+        let mut ctx = QueryContext::new();
+        let root = from_logical_plan(&plan, &mut ctx).unwrap();
+        match ctx.operator(root) {
+            OperatorData::ConstScan(const_scan) => {
+                assert_eq!(const_scan.columns.len(), 2);
+                assert_eq!(const_scan.rows.len(), 2);
+                assert_eq!(const_scan.rows[0].len(), 2);
+            }
+            other => panic!("expected ConstScan, got {other:?}"),
+        }
     }
 }

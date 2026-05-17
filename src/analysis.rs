@@ -320,8 +320,8 @@ fn directly_created_columns(operator: &OperatorData) -> Vec<Column> {
         | OperatorData::Sort(_)
         | OperatorData::Limit(_)
         | OperatorData::Projection(_)
-        | OperatorData::Output(_)
-        | OperatorData::SingleRow => Vec::new(),
+        | OperatorData::Output(_) => Vec::new(),
+        OperatorData::ConstScan(operator) => operator.columns.clone(),
         OperatorData::Rename(r) => r.defs.iter().map(|(renamed, _)| *renamed).collect(),
     }
 }
@@ -338,7 +338,7 @@ fn directly_used_columns(
         OperatorData::Scan(_)
         | OperatorData::CrossProduct(_)
         | OperatorData::Limit(_)
-        | OperatorData::SingleRow => {}
+        | OperatorData::ConstScan(_) => {}
         OperatorData::Sort(data) => {
             for key in &data.keys {
                 collect_expr_used_columns(ctx, key.expr, &mut columns)?;
@@ -390,7 +390,7 @@ fn input_available_columns(
     let mut columns = Vec::new();
 
     match operator_data {
-        OperatorData::Scan(_) | OperatorData::TableFunction(_) | OperatorData::SingleRow => {}
+        OperatorData::Scan(_) | OperatorData::TableFunction(_) | OperatorData::ConstScan(_) => {}
         OperatorData::Selection(data) => {
             extend_unique_columns(
                 &mut columns,
@@ -663,7 +663,7 @@ fn output_column_nullability(
 ) -> AnalysisResult<Vec<(Column, bool)>> {
     match operator.get(ctx) {
         OperatorData::Scan(data) => Ok(scan_column_nullability(data, analyses)),
-        OperatorData::TableFunction(_) | OperatorData::SingleRow => Ok(analyses
+        OperatorData::TableFunction(_) | OperatorData::ConstScan(_) => Ok(analyses
             .get::<CreatedColumns>(ctx, operator)?
             .into_iter()
             .map(|column| (column, true))
@@ -1014,7 +1014,7 @@ impl CachedAnalysis for AvailableColumns {
         op: Operator,
     ) -> AnalysisResult<Self::Output> {
         match op.get(ctx) {
-            OperatorData::Scan(_) | OperatorData::TableFunction(_) | OperatorData::SingleRow => {
+            OperatorData::Scan(_) | OperatorData::TableFunction(_) | OperatorData::ConstScan(_) => {
                 analyses.get::<CreatedColumns>(ctx, op)
             }
             OperatorData::Selection(data) => analyses.get::<AvailableColumns>(ctx, data.input),
