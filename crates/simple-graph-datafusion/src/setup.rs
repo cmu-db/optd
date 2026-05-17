@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 
 use datafusion::error::{DataFusionError, Result as DFResult};
-use datafusion::prelude::{ParquetReadOptions, SessionContext};
+use datafusion::prelude::{ParquetReadOptions, SessionConfig, SessionContext};
 
 const TPCH_DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/tpch/sf-0.1");
 const TPCH_TABLES: &[&str] = &[
@@ -18,7 +18,7 @@ const TPCH_TABLES: &[&str] = &[
 
 /// Creates a `SessionContext` with all TPC-H tables registered from local Parquet files.
 pub async fn setup_tpch_session() -> DFResult<SessionContext> {
-    let ctx = SessionContext::new();
+    let ctx = session_context_with_information_schema();
 
     for table in TPCH_TABLES {
         let path = tpch_parquet_path(table);
@@ -42,6 +42,11 @@ pub async fn setup_tpch_session() -> DFResult<SessionContext> {
     }
 
     Ok(ctx)
+}
+
+/// Creates a `SessionContext` configured for interactive CLI use.
+pub fn session_context_with_information_schema() -> SessionContext {
+    SessionContext::new_with_config(SessionConfig::new().with_information_schema(true))
 }
 
 fn tpch_parquet_path(table: &str) -> PathBuf {

@@ -98,6 +98,15 @@ pub struct PassProfile {
     pub duration_ms: f64,
 }
 
+/// A query snapshot captured immediately after one pass invocation.
+#[derive(Debug, Clone)]
+pub struct PassTrace {
+    /// Profile data for the pass invocation.
+    pub profile: PassProfile,
+    /// Query state after this pass invocation and root resolution.
+    pub query: QueryContext,
+}
+
 /// Traversal direction for [`OperatorRewrite`] rules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
@@ -373,6 +382,21 @@ impl PassManager {
 
     /// Runs all passes in a fixpoint loop until convergence or `max_iterations`.
     pub fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<()> {
+        self.run_inner(ctx, None)
+    }
+
+    /// Runs all passes and captures a query snapshot after each pass invocation.
+    pub fn run_with_trace(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<Vec<PassTrace>> {
+        let mut trace = Vec::new();
+        self.run_inner(ctx, Some(&mut trace))?;
+        Ok(trace)
+    }
+
+    fn run_inner(
+        &mut self,
+        ctx: &mut OptimizerContext,
+        mut trace: Option<&mut Vec<PassTrace>>,
+    ) -> OptimizeResult<()> {
         self.profiles.clear();
         ctx.optimizer_run_id = self.next_run_id;
         self.next_run_id += 1;
@@ -384,30 +408,38 @@ impl PassManager {
                 let started = Instant::now();
                 let result = pass.run(ctx);
                 let duration_ms = started.elapsed().as_secs_f64() * 1_000.0;
-                let result = match result {
+                let profile = match result {
                     Ok(result) => {
-                        self.profiles.push(PassProfile {
+                        let profile = PassProfile {
                             iteration,
                             pass_index,
                             pass: pass_name,
                             result: Some(result),
                             duration_ms,
-                        });
-                        result
+                        };
+                        self.profiles.push(profile.clone());
+                        profile
                     }
                     Err(error) => {
-                        self.profiles.push(PassProfile {
+                        let profile = PassProfile {
                             iteration,
                             pass_index,
                             pass: pass_name,
                             result: None,
                             duration_ms,
-                        });
+                        };
+                        self.profiles.push(profile.clone());
+                        if let Some(trace) = trace.as_deref_mut() {
+                            trace.push(PassTrace {
+                                profile,
+                                query: ctx.query.clone(),
+                            });
+                        }
                         return Err(error);
                     }
                 };
 
-                if result == PassResult::Changed {
+                if profile.result == Some(PassResult::Changed) {
                     any_changed = true;
                     // Resolve the query root through the pass's rewrite map.
                     if let Some(root) = ctx.query.root() {
@@ -416,6 +448,13 @@ impl PassManager {
                             ctx.query.set_root(resolved);
                         }
                     }
+                }
+
+                if let Some(trace) = trace.as_deref_mut() {
+                    trace.push(PassTrace {
+                        profile,
+                        query: ctx.query.clone(),
+                    });
                 }
             }
             if !any_changed {

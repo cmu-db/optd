@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use datafusion::arrow::array::RecordBatch;
+use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::logical_expr::LogicalPlan;
 use datafusion::prelude::SessionContext;
 use datafusion_sqllogictest::{
@@ -11,11 +12,13 @@ use datafusion_sqllogictest::{
 };
 use simple_graph::{
     OperatorRewriteAdaptor, OptimizerContext, PassManager, PredicatePushdown, QueryContext,
-    SubqueryToJoin,
+    QueryFormatConfig, SubqueryToJoin,
 };
 use sqllogictest::{AsyncDB, DBOutput};
 
-use crate::explain_udfs::register_explain_udfs;
+use crate::explain_udfs::{
+    ExplainStep, explain_steps_box, explain_steps_box_with_config, register_explain_udfs,
+};
 use crate::from_df::from_logical_plan;
 use crate::to_df::to_logical_plan;
 
@@ -36,20 +39,22 @@ pub struct SimpleGraphRunner {
     session: SessionContext,
 }
 
+pub enum RunnerOutput {
+    StatementComplete,
+    Rows {
+        schema: SchemaRef,
+        batches: Vec<RecordBatch>,
+    },
+}
+
 impl SimpleGraphRunner {
     pub fn new(session: SessionContext) -> Self {
         register_explain_udfs(&session);
         Self { session }
     }
-}
 
-#[async_trait]
-impl AsyncDB for SimpleGraphRunner {
-    type Error = DFSqlLogicTestError;
-    type ColumnType = DFColumnType;
-
-    async fn run(&mut self, sql: &str) -> Result<DBOutput<DFColumnType>, DFSqlLogicTestError> {
-        let (schema, results) = match self.try_via_ir(sql).await {
+    pub async fn execute_sql(&self, sql: &str) -> Result<RunnerOutput, DFSqlLogicTestError> {
+        let (schema, batches) = match self.try_via_ir(sql).await {
             Ok(pair) => pair,
             Err(_) => {
                 // IR conversion failed or unsupported — execute directly via DataFusion.
@@ -75,13 +80,40 @@ impl AsyncDB for SimpleGraphRunner {
             }
         };
 
-        let types = convert_schema_to_types(schema.fields());
-        let rows = convert_batches(&schema, results, false)?;
-
-        if rows.is_empty() && types.is_empty() {
-            Ok(DBOutput::StatementComplete(0))
+        if batches.is_empty() && schema.fields().is_empty() {
+            Ok(RunnerOutput::StatementComplete)
         } else {
-            Ok(DBOutput::Rows { types, rows })
+            Ok(RunnerOutput::Rows { schema, batches })
+        }
+    }
+
+    pub fn explain_steps_box(&self, sql: &str) -> Result<Vec<ExplainStep>, DFSqlLogicTestError> {
+        explain_steps_box(sql, &self.session).map_err(DFSqlLogicTestError::DataFusion)
+    }
+
+    pub fn explain_steps_box_with_config(
+        &self,
+        sql: &str,
+        config: QueryFormatConfig,
+    ) -> Result<Vec<ExplainStep>, DFSqlLogicTestError> {
+        explain_steps_box_with_config(sql, &self.session, config)
+            .map_err(DFSqlLogicTestError::DataFusion)
+    }
+}
+
+#[async_trait]
+impl AsyncDB for SimpleGraphRunner {
+    type Error = DFSqlLogicTestError;
+    type ColumnType = DFColumnType;
+
+    async fn run(&mut self, sql: &str) -> Result<DBOutput<DFColumnType>, DFSqlLogicTestError> {
+        match self.execute_sql(sql).await? {
+            RunnerOutput::StatementComplete => Ok(DBOutput::StatementComplete(0)),
+            RunnerOutput::Rows { schema, batches } => {
+                let types = convert_schema_to_types(schema.fields());
+                let rows = convert_batches(&schema, batches, false)?;
+                Ok(DBOutput::Rows { types, rows })
+            }
         }
     }
 

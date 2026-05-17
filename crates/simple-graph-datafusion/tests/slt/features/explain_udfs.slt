@@ -87,3 +87,19 @@ SELECT explain_flat('SELECT id FROM t WHERE val > 1.0');
 27)----}
 28)--]
 29)}
+
+query ITT
+SELECT step, pass, result
+FROM explain_steps('SELECT id FROM t WHERE val > 1.0', 'flat')
+ORDER BY step;
+----
+0	initial	initial
+1	subquery_to_join	unchanged
+2	predicate_pushdown	unchanged
+
+query T
+SELECT pass
+FROM explain_steps('SELECT l.id FROM t l JOIN t r ON l.id = r.id WHERE r.val > 1.0', 'flat')
+WHERE result = 'changed' AND plan LIKE '%σ Selection%';
+----
+predicate_pushdown
