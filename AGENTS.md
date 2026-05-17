@@ -34,6 +34,10 @@ Tests use Rust’s built-in test framework plus async `tokio` tests for DataFusi
 
 Name tests by behavior, such as `imports_sort_and_fetch` or `datafusion_consumes_substrait_plan_produced_by_simple_graph`. Add tests for new IR operators, analyses, formatter behavior, and Substrait conversion paths.
 
+For optimizer or SQL semantics changes, prefer an SLT regression test when the behavior is observable through the DataFusion bridge. Add the narrow SLT case first, run the focused SLT command, and confirm it fails on the current branch while the bug is still present. Then implement the fix, re-run the focused SLT, and finish with `cargo test --workspace`. In the handoff, explicitly note the before/after result: the new SLT failed before the fix and passed after.
+
+If a new SLT passes before the fix, check whether the relevant optimizer pass or conversion path is actually enabled in the tested execution path before treating the test as coverage.
+
 ## Commit & Pull Request Guidelines
 
 Recent commits use short imperative titles, for example `Add sort and limit operators` and `Export simple plans to Substrait`. Keep commits focused and include tests with behavior changes.
