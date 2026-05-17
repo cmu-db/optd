@@ -47,11 +47,13 @@ enum JoinTree {
         right: Box<JoinTree>,
         /// Predicates from connecting hyperedges (indices into hg.edges).
         edge_indices: Vec<usize>,
+        #[allow(dead_code)]
         cardinality: f64,
     },
 }
 
 impl JoinTree {
+    #[cfg(test)]
     fn leaf_count(&self) -> usize {
         match self {
             JoinTree::Leaf(_) => 1,

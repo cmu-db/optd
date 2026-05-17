@@ -108,11 +108,7 @@ impl OperatorRewrite for PredicatePushdown {
     }
 }
 
-fn wrap_selection(
-    mut preds: Vec<Expr>,
-    input: Operator,
-    ctx: &mut crate::QueryContext,
-) -> Operator {
+fn wrap_selection(preds: Vec<Expr>, input: Operator, ctx: &mut crate::QueryContext) -> Operator {
     if preds.is_empty() {
         return input;
     }
