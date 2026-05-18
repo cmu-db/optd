@@ -16,9 +16,9 @@ use datafusion::logical_expr::{
 };
 use optd::{
     AggregateExpr, AggregateFunction, Aggregation, BinaryOp, Column, ColumnData, ConstScan,
-    ExprData, Join as SGJoin, JoinType, Limit as SGLimit, Map, NaryOp, NullOrdering, Operator,
-    OperatorData, Projection as SGProjection, QueryContext, ScalarValue, Scan, Selection,
-    Sort as SGSort, SortDirection, SortKey, TableRef,
+    ExprData, Join as OptdJoin, JoinType, Limit as OptdLimit, Map, NaryOp, NullOrdering, Operator,
+    OperatorData, Projection as OptdProjection, QueryContext, ScalarValue, Scan, Selection,
+    Sort as OptdSort, SortDirection, SortKey, TableRef,
 };
 
 /// Error type for the DataFusion → optd converter.
@@ -347,7 +347,7 @@ fn convert_projection(
 
     if let Some(columns) = projected_columns {
         bind_projection_output_names(proj, &columns, bindings);
-        Ok(OperatorData::Projection(SGProjection { columns, input }).add(ctx))
+        Ok(OperatorData::Projection(OptdProjection { columns, input }).add(ctx))
     } else {
         let mut computations = Vec::new();
         let mut output_cols = Vec::new();
@@ -380,7 +380,7 @@ fn convert_projection(
             .add(ctx)
         };
 
-        Ok(OperatorData::Projection(SGProjection {
+        Ok(OperatorData::Projection(OptdProjection {
             columns: output_cols,
             input: after_map,
         })
@@ -476,11 +476,11 @@ fn convert_sort(
         })
         .collect::<FromDFResult<_>>()?;
 
-    let sort_op = OperatorData::Sort(SGSort { keys, input }).add(ctx);
+    let sort_op = OperatorData::Sort(OptdSort { keys, input }).add(ctx);
 
     // DataFusion may push a LIMIT into Sort.fetch.
     if let Some(fetch) = sort.fetch {
-        return Ok(OperatorData::Limit(SGLimit {
+        return Ok(OperatorData::Limit(OptdLimit {
             fetch: Some(fetch),
             offset: 0,
             input: sort_op,
@@ -502,7 +502,7 @@ fn convert_limit(
         .as_ref()
         .and_then(|e| eval_usize_expr(e))
         .unwrap_or(0);
-    Ok(OperatorData::Limit(SGLimit {
+    Ok(OperatorData::Limit(OptdLimit {
         fetch,
         offset,
         input,
@@ -559,7 +559,7 @@ fn convert_join(
         .add(ctx),
     };
 
-    Ok(OperatorData::Join(SGJoin {
+    Ok(OperatorData::Join(OptdJoin {
         join_type,
         on,
         outer,
