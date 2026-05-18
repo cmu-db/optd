@@ -2,7 +2,7 @@
 
 ## Goal
 
-Build an optimization framework for `simple-graph` that matches the existing IR model:
+Build an optimization framework for `optd` that matches the existing IR model:
 operators, expressions, and columns are arena-allocated handles owned by `QueryContext`.
 
 The optimizer should favor append-only rewrites. A pass creates replacement nodes and redirects

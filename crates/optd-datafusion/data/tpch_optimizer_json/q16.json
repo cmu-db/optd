@@ -1,0 +1,1205 @@
+{
+  "passes": [
+    {
+      "passName": "Initial",
+      "root": {
+        "op": "limit",
+        "title": "τ Limit",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "sort",
+            "title": "⇞ Sort",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "projection",
+                "title": "π Projection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "aggregation",
+                    "title": "γ Aggregation",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "join",
+                            "title": "⋈ InnerJoin",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "scan",
+                                "title": "⊞ Scan",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "table": "partsupp",
+                                "columns": [
+                                  "ps_partkey(#0)",
+                                  "ps_suppkey(#1)",
+                                  "ps_availqty(#2)",
+                                  "ps_supplycost(#3)",
+                                  "ps_comment(#4)"
+                                ],
+                                "operator_id": "@0",
+                                "table_name": "partsupp"
+                              },
+                              {
+                                "op": "scan",
+                                "title": "⊞ Scan",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "table": "part",
+                                "columns": [
+                                  "p_partkey(#5)",
+                                  "p_name(#6)",
+                                  "p_mfgr(#7)",
+                                  "p_brand(#8)",
+                                  "p_type(#9)",
+                                  "p_size(#10)",
+                                  "p_container(#11)",
+                                  "p_retailprice(#12)",
+                                  "p_comment(#13)"
+                                ],
+                                "operator_id": "@1",
+                                "table_name": "part"
+                              }
+                            ],
+                            "condition": "true",
+                            "join_type": "Inner",
+                            "operator_id": "@2"
+                          },
+                          {
+                            "op": "projection",
+                            "title": "π Projection",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "selection",
+                                "title": "σ Selection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "scan",
+                                    "title": "⊞ Scan",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "table": "supplier",
+                                    "columns": [
+                                      "s_suppkey(#14)",
+                                      "s_name(#15)",
+                                      "s_address(#16)",
+                                      "s_nationkey(#17)",
+                                      "s_phone(#18)",
+                                      "s_acctbal(#19)",
+                                      "s_comment(#20)"
+                                    ],
+                                    "operator_id": "@3",
+                                    "table_name": "supplier"
+                                  }
+                                ],
+                                "operator_id": "@4",
+                                "predicate": "(s_comment(#20) LIKE \"%Customer%Complaints%\")"
+                              }
+                            ],
+                            "columns": [
+                              "s_suppkey(#14)"
+                            ],
+                            "operator_id": "@5"
+                          }
+                        ],
+                        "operator_id": "@6",
+                        "predicate": "(((((p_partkey(#5) = ps_partkey(#0)) AND (p_brand(#8) != \"Brand#45\")) AND (p_type(#9) NOT LIKE \"MEDIUM POLISHED%\")) AND ((p_size(#10) = 49) OR (p_size(#10) = 14) OR (p_size(#10) = 23) OR (p_size(#10) = 45) OR (p_size(#10) = 19) OR (p_size(#10) = 3) OR (p_size(#10) = 36) OR (p_size(#10) = 9))) AND (ps_suppkey(#1) NOT IN @5))"
+                      }
+                    ],
+                    "aggregates": [
+                      "count(DISTINCT partsupp.ps_suppkey)(#21) := count(DISTINCT ps_suppkey(#1))"
+                    ],
+                    "keys": "p_brand(#8), p_type(#9), p_size(#10)",
+                    "operator_id": "@7"
+                  }
+                ],
+                "columns": [
+                  "p_brand(#8)",
+                  "p_type(#9)",
+                  "p_size(#10)",
+                  "count(DISTINCT partsupp.ps_suppkey)(#21)"
+                ],
+                "operator_id": "@8"
+              }
+            ],
+            "keys": [
+              "count(DISTINCT partsupp.ps_suppkey)(#21) Desc NullsFirst",
+              "p_brand(#8) Asc NullsLast",
+              "p_type(#9) Asc NullsLast",
+              "p_size(#10) Asc NullsLast"
+            ],
+            "operator_id": "@9"
+          }
+        ],
+        "fetch": "10",
+        "offset": "0",
+        "operator_id": "@10"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "limit",
+        "title": "τ Limit",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "sort",
+            "title": "⇞ Sort",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "projection",
+                "title": "π Projection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "aggregation",
+                    "title": "γ Aggregation",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "join",
+                            "title": "⟕ᵐ LeftMarkJoin",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "join",
+                                "title": "⋈ InnerJoin",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "scan",
+                                    "title": "⊞ Scan",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "table": "partsupp",
+                                    "columns": [
+                                      "ps_partkey(#0)",
+                                      "ps_suppkey(#1)",
+                                      "ps_availqty(#2)",
+                                      "ps_supplycost(#3)",
+                                      "ps_comment(#4)"
+                                    ],
+                                    "operator_id": "@0",
+                                    "table_name": "partsupp"
+                                  },
+                                  {
+                                    "op": "scan",
+                                    "title": "⊞ Scan",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "table": "part",
+                                    "columns": [
+                                      "p_partkey(#5)",
+                                      "p_name(#6)",
+                                      "p_mfgr(#7)",
+                                      "p_brand(#8)",
+                                      "p_type(#9)",
+                                      "p_size(#10)",
+                                      "p_container(#11)",
+                                      "p_retailprice(#12)",
+                                      "p_comment(#13)"
+                                    ],
+                                    "operator_id": "@1",
+                                    "table_name": "part"
+                                  }
+                                ],
+                                "condition": "true",
+                                "join_type": "Inner",
+                                "operator_id": "@2"
+                              },
+                              {
+                                "op": "projection",
+                                "title": "π Projection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "selection",
+                                    "title": "σ Selection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "supplier",
+                                        "columns": [
+                                          "s_suppkey(#14)",
+                                          "s_name(#15)",
+                                          "s_address(#16)",
+                                          "s_nationkey(#17)",
+                                          "s_phone(#18)",
+                                          "s_acctbal(#19)",
+                                          "s_comment(#20)"
+                                        ],
+                                        "operator_id": "@3",
+                                        "table_name": "supplier"
+                                      }
+                                    ],
+                                    "operator_id": "@4",
+                                    "predicate": "(s_comment(#20) LIKE \"%Customer%Complaints%\")"
+                                  }
+                                ],
+                                "columns": [
+                                  "s_suppkey(#14)"
+                                ],
+                                "operator_id": "@5"
+                              }
+                            ],
+                            "condition": "(ps_suppkey(#1) = s_suppkey(#14))",
+                            "join_type": "LeftMark",
+                            "marker": "in_mark(#22)",
+                            "operator_id": "@11"
+                          }
+                        ],
+                        "operator_id": "@12",
+                        "predicate": "(((((p_partkey(#5) = ps_partkey(#0)) AND (p_brand(#8) != \"Brand#45\")) AND (p_type(#9) NOT LIKE \"MEDIUM POLISHED%\")) AND ((p_size(#10) = 49) OR (p_size(#10) = 14) OR (p_size(#10) = 23) OR (p_size(#10) = 45) OR (p_size(#10) = 19) OR (p_size(#10) = 3) OR (p_size(#10) = 36) OR (p_size(#10) = 9))) AND NOT(in_mark(#22)))"
+                      }
+                    ],
+                    "aggregates": [
+                      "count(DISTINCT partsupp.ps_suppkey)(#21) := count(DISTINCT ps_suppkey(#1))"
+                    ],
+                    "keys": "p_brand(#8), p_type(#9), p_size(#10)",
+                    "operator_id": "@13"
+                  }
+                ],
+                "columns": [
+                  "p_brand(#8)",
+                  "p_type(#9)",
+                  "p_size(#10)",
+                  "count(DISTINCT partsupp.ps_suppkey)(#21)"
+                ],
+                "operator_id": "@14"
+              }
+            ],
+            "keys": [
+              "count(DISTINCT partsupp.ps_suppkey)(#21) Desc NullsFirst",
+              "p_brand(#8) Asc NullsLast",
+              "p_type(#9) Asc NullsLast",
+              "p_size(#10) Asc NullsLast"
+            ],
+            "operator_id": "@15"
+          }
+        ],
+        "fetch": "10",
+        "offset": "0",
+        "operator_id": "@16"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "limit",
+        "title": "τ Limit",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "sort",
+            "title": "⇞ Sort",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "projection",
+                "title": "π Projection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "aggregation",
+                    "title": "γ Aggregation",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "join",
+                            "title": "⟕ᵐ LeftMarkJoin",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "selection",
+                                "title": "σ Selection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "join",
+                                    "title": "⋈ InnerJoin",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "partsupp",
+                                        "columns": [
+                                          "ps_partkey(#0)",
+                                          "ps_suppkey(#1)",
+                                          "ps_availqty(#2)",
+                                          "ps_supplycost(#3)",
+                                          "ps_comment(#4)"
+                                        ],
+                                        "operator_id": "@0",
+                                        "table_name": "partsupp"
+                                      },
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "part",
+                                        "columns": [
+                                          "p_partkey(#5)",
+                                          "p_name(#6)",
+                                          "p_mfgr(#7)",
+                                          "p_brand(#8)",
+                                          "p_type(#9)",
+                                          "p_size(#10)",
+                                          "p_container(#11)",
+                                          "p_retailprice(#12)",
+                                          "p_comment(#13)"
+                                        ],
+                                        "operator_id": "@1",
+                                        "table_name": "part"
+                                      }
+                                    ],
+                                    "condition": "true",
+                                    "join_type": "Inner",
+                                    "operator_id": "@2"
+                                  }
+                                ],
+                                "operator_id": "@17",
+                                "predicate": "((p_partkey(#5) = ps_partkey(#0)) AND (p_brand(#8) != \"Brand#45\") AND (p_type(#9) NOT LIKE \"MEDIUM POLISHED%\") AND ((p_size(#10) = 49) OR (p_size(#10) = 14) OR (p_size(#10) = 23) OR (p_size(#10) = 45) OR (p_size(#10) = 19) OR (p_size(#10) = 3) OR (p_size(#10) = 36) OR (p_size(#10) = 9)))"
+                              },
+                              {
+                                "op": "projection",
+                                "title": "π Projection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "selection",
+                                    "title": "σ Selection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "supplier",
+                                        "columns": [
+                                          "s_suppkey(#14)",
+                                          "s_name(#15)",
+                                          "s_address(#16)",
+                                          "s_nationkey(#17)",
+                                          "s_phone(#18)",
+                                          "s_acctbal(#19)",
+                                          "s_comment(#20)"
+                                        ],
+                                        "operator_id": "@3",
+                                        "table_name": "supplier"
+                                      }
+                                    ],
+                                    "operator_id": "@4",
+                                    "predicate": "(s_comment(#20) LIKE \"%Customer%Complaints%\")"
+                                  }
+                                ],
+                                "columns": [
+                                  "s_suppkey(#14)"
+                                ],
+                                "operator_id": "@5"
+                              }
+                            ],
+                            "condition": "(ps_suppkey(#1) = s_suppkey(#14))",
+                            "join_type": "LeftMark",
+                            "marker": "in_mark(#22)",
+                            "operator_id": "@18"
+                          }
+                        ],
+                        "operator_id": "@19",
+                        "predicate": "NOT(in_mark(#22))"
+                      }
+                    ],
+                    "aggregates": [
+                      "count(DISTINCT partsupp.ps_suppkey)(#21) := count(DISTINCT ps_suppkey(#1))"
+                    ],
+                    "keys": "p_brand(#8), p_type(#9), p_size(#10)",
+                    "operator_id": "@20"
+                  }
+                ],
+                "columns": [
+                  "p_brand(#8)",
+                  "p_type(#9)",
+                  "p_size(#10)",
+                  "count(DISTINCT partsupp.ps_suppkey)(#21)"
+                ],
+                "operator_id": "@21"
+              }
+            ],
+            "keys": [
+              "count(DISTINCT partsupp.ps_suppkey)(#21) Desc NullsFirst",
+              "p_brand(#8) Asc NullsLast",
+              "p_type(#9) Asc NullsLast",
+              "p_size(#10) Asc NullsLast"
+            ],
+            "operator_id": "@22"
+          }
+        ],
+        "fetch": "10",
+        "offset": "0",
+        "operator_id": "@23"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "limit",
+        "title": "τ Limit",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "sort",
+            "title": "⇞ Sort",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "projection",
+                "title": "π Projection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "aggregation",
+                    "title": "γ Aggregation",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "join",
+                            "title": "⟕ᵐ LeftMarkJoin",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "selection",
+                                "title": "σ Selection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "join",
+                                    "title": "⋈ InnerJoin",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "partsupp",
+                                        "columns": [
+                                          "ps_partkey(#0)",
+                                          "ps_suppkey(#1)",
+                                          "ps_availqty(#2)",
+                                          "ps_supplycost(#3)",
+                                          "ps_comment(#4)"
+                                        ],
+                                        "operator_id": "@0",
+                                        "table_name": "partsupp"
+                                      },
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "part",
+                                        "columns": [
+                                          "p_partkey(#5)",
+                                          "p_name(#6)",
+                                          "p_mfgr(#7)",
+                                          "p_brand(#8)",
+                                          "p_type(#9)",
+                                          "p_size(#10)",
+                                          "p_container(#11)",
+                                          "p_retailprice(#12)",
+                                          "p_comment(#13)"
+                                        ],
+                                        "operator_id": "@1",
+                                        "table_name": "part"
+                                      }
+                                    ],
+                                    "condition": "true",
+                                    "join_type": "Inner",
+                                    "operator_id": "@2"
+                                  }
+                                ],
+                                "operator_id": "@17",
+                                "predicate": "((p_partkey(#5) = ps_partkey(#0)) AND (p_brand(#8) != \"Brand#45\") AND (p_type(#9) NOT LIKE \"MEDIUM POLISHED%\") AND ((p_size(#10) = 49) OR (p_size(#10) = 14) OR (p_size(#10) = 23) OR (p_size(#10) = 45) OR (p_size(#10) = 19) OR (p_size(#10) = 3) OR (p_size(#10) = 36) OR (p_size(#10) = 9)))"
+                              },
+                              {
+                                "op": "projection",
+                                "title": "π Projection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "selection",
+                                    "title": "σ Selection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "supplier",
+                                        "columns": [
+                                          "s_suppkey(#14)",
+                                          "s_name(#15)",
+                                          "s_address(#16)",
+                                          "s_nationkey(#17)",
+                                          "s_phone(#18)",
+                                          "s_acctbal(#19)",
+                                          "s_comment(#20)"
+                                        ],
+                                        "operator_id": "@3",
+                                        "table_name": "supplier"
+                                      }
+                                    ],
+                                    "operator_id": "@4",
+                                    "predicate": "(s_comment(#20) LIKE \"%Customer%Complaints%\")"
+                                  }
+                                ],
+                                "columns": [
+                                  "s_suppkey(#14)"
+                                ],
+                                "operator_id": "@5"
+                              }
+                            ],
+                            "condition": "(ps_suppkey(#1) = s_suppkey(#14))",
+                            "join_type": "LeftMark",
+                            "marker": "in_mark(#22)",
+                            "operator_id": "@18"
+                          }
+                        ],
+                        "operator_id": "@19",
+                        "predicate": "NOT(in_mark(#22))"
+                      }
+                    ],
+                    "aggregates": [
+                      "count(DISTINCT partsupp.ps_suppkey)(#21) := count(DISTINCT ps_suppkey(#1))"
+                    ],
+                    "keys": "p_brand(#8), p_type(#9), p_size(#10)",
+                    "operator_id": "@20"
+                  }
+                ],
+                "columns": [
+                  "p_brand(#8)",
+                  "p_type(#9)",
+                  "p_size(#10)",
+                  "count(DISTINCT partsupp.ps_suppkey)(#21)"
+                ],
+                "operator_id": "@21"
+              }
+            ],
+            "keys": [
+              "count(DISTINCT partsupp.ps_suppkey)(#21) Desc NullsFirst",
+              "p_brand(#8) Asc NullsLast",
+              "p_type(#9) Asc NullsLast",
+              "p_size(#10) Asc NullsLast"
+            ],
+            "operator_id": "@22"
+          }
+        ],
+        "fetch": "10",
+        "offset": "0",
+        "operator_id": "@23"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "limit",
+        "title": "τ Limit",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "sort",
+            "title": "⇞ Sort",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "projection",
+                "title": "π Projection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "aggregation",
+                    "title": "γ Aggregation",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "join",
+                            "title": "⟕ᵐ LeftMarkJoin",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "join",
+                                "title": "⋈ InnerJoin",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "scan",
+                                    "title": "⊞ Scan",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "table": "partsupp",
+                                    "columns": [
+                                      "ps_partkey(#0)",
+                                      "ps_suppkey(#1)",
+                                      "ps_availqty(#2)",
+                                      "ps_supplycost(#3)",
+                                      "ps_comment(#4)"
+                                    ],
+                                    "operator_id": "@0",
+                                    "table_name": "partsupp"
+                                  },
+                                  {
+                                    "op": "selection",
+                                    "title": "σ Selection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "part",
+                                        "columns": [
+                                          "p_partkey(#5)",
+                                          "p_name(#6)",
+                                          "p_mfgr(#7)",
+                                          "p_brand(#8)",
+                                          "p_type(#9)",
+                                          "p_size(#10)",
+                                          "p_container(#11)",
+                                          "p_retailprice(#12)",
+                                          "p_comment(#13)"
+                                        ],
+                                        "operator_id": "@1",
+                                        "table_name": "part"
+                                      }
+                                    ],
+                                    "operator_id": "@24",
+                                    "predicate": "((p_brand(#8) != \"Brand#45\") AND (p_type(#9) NOT LIKE \"MEDIUM POLISHED%\") AND ((p_size(#10) = 49) OR (p_size(#10) = 14) OR (p_size(#10) = 23) OR (p_size(#10) = 45) OR (p_size(#10) = 19) OR (p_size(#10) = 3) OR (p_size(#10) = 36) OR (p_size(#10) = 9)))"
+                                  }
+                                ],
+                                "condition": "(true AND (p_partkey(#5) = ps_partkey(#0)))",
+                                "join_type": "Inner",
+                                "operator_id": "@25"
+                              },
+                              {
+                                "op": "projection",
+                                "title": "π Projection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "selection",
+                                    "title": "σ Selection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "supplier",
+                                        "columns": [
+                                          "s_suppkey(#14)",
+                                          "s_name(#15)",
+                                          "s_address(#16)",
+                                          "s_nationkey(#17)",
+                                          "s_phone(#18)",
+                                          "s_acctbal(#19)",
+                                          "s_comment(#20)"
+                                        ],
+                                        "operator_id": "@3",
+                                        "table_name": "supplier"
+                                      }
+                                    ],
+                                    "operator_id": "@4",
+                                    "predicate": "(s_comment(#20) LIKE \"%Customer%Complaints%\")"
+                                  }
+                                ],
+                                "columns": [
+                                  "s_suppkey(#14)"
+                                ],
+                                "operator_id": "@5"
+                              }
+                            ],
+                            "condition": "(ps_suppkey(#1) = s_suppkey(#14))",
+                            "join_type": "LeftMark",
+                            "marker": "in_mark(#22)",
+                            "operator_id": "@26"
+                          }
+                        ],
+                        "operator_id": "@27",
+                        "predicate": "NOT(in_mark(#22))"
+                      }
+                    ],
+                    "aggregates": [
+                      "count(DISTINCT partsupp.ps_suppkey)(#21) := count(DISTINCT ps_suppkey(#1))"
+                    ],
+                    "keys": "p_brand(#8), p_type(#9), p_size(#10)",
+                    "operator_id": "@28"
+                  }
+                ],
+                "columns": [
+                  "p_brand(#8)",
+                  "p_type(#9)",
+                  "p_size(#10)",
+                  "count(DISTINCT partsupp.ps_suppkey)(#21)"
+                ],
+                "operator_id": "@29"
+              }
+            ],
+            "keys": [
+              "count(DISTINCT partsupp.ps_suppkey)(#21) Desc NullsFirst",
+              "p_brand(#8) Asc NullsLast",
+              "p_type(#9) Asc NullsLast",
+              "p_size(#10) Asc NullsLast"
+            ],
+            "operator_id": "@30"
+          }
+        ],
+        "fetch": "10",
+        "offset": "0",
+        "operator_id": "@31"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "limit",
+        "title": "τ Limit",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "sort",
+            "title": "⇞ Sort",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "projection",
+                "title": "π Projection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "aggregation",
+                    "title": "γ Aggregation",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "join",
+                            "title": "⟕ᵐ LeftMarkJoin",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "join",
+                                "title": "⋈ InnerJoin",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "scan",
+                                    "title": "⊞ Scan",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "table": "partsupp",
+                                    "columns": [
+                                      "ps_partkey(#0)",
+                                      "ps_suppkey(#1)",
+                                      "ps_availqty(#2)",
+                                      "ps_supplycost(#3)",
+                                      "ps_comment(#4)"
+                                    ],
+                                    "operator_id": "@0",
+                                    "table_name": "partsupp"
+                                  },
+                                  {
+                                    "op": "selection",
+                                    "title": "σ Selection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "part",
+                                        "columns": [
+                                          "p_partkey(#5)",
+                                          "p_name(#6)",
+                                          "p_mfgr(#7)",
+                                          "p_brand(#8)",
+                                          "p_type(#9)",
+                                          "p_size(#10)",
+                                          "p_container(#11)",
+                                          "p_retailprice(#12)",
+                                          "p_comment(#13)"
+                                        ],
+                                        "operator_id": "@1",
+                                        "table_name": "part"
+                                      }
+                                    ],
+                                    "operator_id": "@24",
+                                    "predicate": "((p_brand(#8) != \"Brand#45\") AND (p_type(#9) NOT LIKE \"MEDIUM POLISHED%\") AND ((p_size(#10) = 49) OR (p_size(#10) = 14) OR (p_size(#10) = 23) OR (p_size(#10) = 45) OR (p_size(#10) = 19) OR (p_size(#10) = 3) OR (p_size(#10) = 36) OR (p_size(#10) = 9)))"
+                                  }
+                                ],
+                                "condition": "(true AND (p_partkey(#5) = ps_partkey(#0)))",
+                                "join_type": "Inner",
+                                "operator_id": "@25"
+                              },
+                              {
+                                "op": "projection",
+                                "title": "π Projection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "selection",
+                                    "title": "σ Selection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "supplier",
+                                        "columns": [
+                                          "s_suppkey(#14)",
+                                          "s_name(#15)",
+                                          "s_address(#16)",
+                                          "s_nationkey(#17)",
+                                          "s_phone(#18)",
+                                          "s_acctbal(#19)",
+                                          "s_comment(#20)"
+                                        ],
+                                        "operator_id": "@3",
+                                        "table_name": "supplier"
+                                      }
+                                    ],
+                                    "operator_id": "@4",
+                                    "predicate": "(s_comment(#20) LIKE \"%Customer%Complaints%\")"
+                                  }
+                                ],
+                                "columns": [
+                                  "s_suppkey(#14)"
+                                ],
+                                "operator_id": "@5"
+                              }
+                            ],
+                            "condition": "(ps_suppkey(#1) = s_suppkey(#14))",
+                            "join_type": "LeftMark",
+                            "marker": "in_mark(#22)",
+                            "operator_id": "@26"
+                          }
+                        ],
+                        "operator_id": "@27",
+                        "predicate": "NOT(in_mark(#22))"
+                      }
+                    ],
+                    "aggregates": [
+                      "count(DISTINCT partsupp.ps_suppkey)(#21) := count(DISTINCT ps_suppkey(#1))"
+                    ],
+                    "keys": "p_brand(#8), p_type(#9), p_size(#10)",
+                    "operator_id": "@28"
+                  }
+                ],
+                "columns": [
+                  "p_brand(#8)",
+                  "p_type(#9)",
+                  "p_size(#10)",
+                  "count(DISTINCT partsupp.ps_suppkey)(#21)"
+                ],
+                "operator_id": "@29"
+              }
+            ],
+            "keys": [
+              "count(DISTINCT partsupp.ps_suppkey)(#21) Desc NullsFirst",
+              "p_brand(#8) Asc NullsLast",
+              "p_type(#9) Asc NullsLast",
+              "p_size(#10) Asc NullsLast"
+            ],
+            "operator_id": "@30"
+          }
+        ],
+        "fetch": "10",
+        "offset": "0",
+        "operator_id": "@31"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "limit",
+        "title": "τ Limit",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "sort",
+            "title": "⇞ Sort",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "projection",
+                "title": "π Projection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "aggregation",
+                    "title": "γ Aggregation",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "join",
+                            "title": "⟕ᵐ LeftMarkJoin",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "join",
+                                "title": "⋈ InnerJoin",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "scan",
+                                    "title": "⊞ Scan",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "table": "partsupp",
+                                    "columns": [
+                                      "ps_partkey(#0)",
+                                      "ps_suppkey(#1)",
+                                      "ps_availqty(#2)",
+                                      "ps_supplycost(#3)",
+                                      "ps_comment(#4)"
+                                    ],
+                                    "operator_id": "@0",
+                                    "table_name": "partsupp"
+                                  },
+                                  {
+                                    "op": "selection",
+                                    "title": "σ Selection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "part",
+                                        "columns": [
+                                          "p_partkey(#5)",
+                                          "p_name(#6)",
+                                          "p_mfgr(#7)",
+                                          "p_brand(#8)",
+                                          "p_type(#9)",
+                                          "p_size(#10)",
+                                          "p_container(#11)",
+                                          "p_retailprice(#12)",
+                                          "p_comment(#13)"
+                                        ],
+                                        "operator_id": "@1",
+                                        "table_name": "part"
+                                      }
+                                    ],
+                                    "operator_id": "@24",
+                                    "predicate": "((p_brand(#8) != \"Brand#45\") AND (p_type(#9) NOT LIKE \"MEDIUM POLISHED%\") AND ((p_size(#10) = 49) OR (p_size(#10) = 14) OR (p_size(#10) = 23) OR (p_size(#10) = 45) OR (p_size(#10) = 19) OR (p_size(#10) = 3) OR (p_size(#10) = 36) OR (p_size(#10) = 9)))"
+                                  }
+                                ],
+                                "condition": "(true AND (p_partkey(#5) = ps_partkey(#0)))",
+                                "join_type": "Inner",
+                                "operator_id": "@25"
+                              },
+                              {
+                                "op": "projection",
+                                "title": "π Projection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "selection",
+                                    "title": "σ Selection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "supplier",
+                                        "columns": [
+                                          "s_suppkey(#14)",
+                                          "s_name(#15)",
+                                          "s_address(#16)",
+                                          "s_nationkey(#17)",
+                                          "s_phone(#18)",
+                                          "s_acctbal(#19)",
+                                          "s_comment(#20)"
+                                        ],
+                                        "operator_id": "@3",
+                                        "table_name": "supplier"
+                                      }
+                                    ],
+                                    "operator_id": "@4",
+                                    "predicate": "(s_comment(#20) LIKE \"%Customer%Complaints%\")"
+                                  }
+                                ],
+                                "columns": [
+                                  "s_suppkey(#14)"
+                                ],
+                                "operator_id": "@5"
+                              }
+                            ],
+                            "condition": "(ps_suppkey(#1) = s_suppkey(#14))",
+                            "join_type": "LeftMark",
+                            "marker": "in_mark(#22)",
+                            "operator_id": "@26"
+                          }
+                        ],
+                        "operator_id": "@27",
+                        "predicate": "NOT(in_mark(#22))"
+                      }
+                    ],
+                    "aggregates": [
+                      "count(DISTINCT partsupp.ps_suppkey)(#21) := count(DISTINCT ps_suppkey(#1))"
+                    ],
+                    "keys": "p_brand(#8), p_type(#9), p_size(#10)",
+                    "operator_id": "@28"
+                  }
+                ],
+                "columns": [
+                  "p_brand(#8)",
+                  "p_type(#9)",
+                  "p_size(#10)",
+                  "count(DISTINCT partsupp.ps_suppkey)(#21)"
+                ],
+                "operator_id": "@29"
+              }
+            ],
+            "keys": [
+              "count(DISTINCT partsupp.ps_suppkey)(#21) Desc NullsFirst",
+              "p_brand(#8) Asc NullsLast",
+              "p_type(#9) Asc NullsLast",
+              "p_size(#10) Asc NullsLast"
+            ],
+            "operator_id": "@30"
+          }
+        ],
+        "fetch": "10",
+        "offset": "0",
+        "operator_id": "@31"
+      }
+    }
+  ],
+  "query": "select\n    p_brand,\n    p_type,\n    p_size,\n    count(distinct ps_suppkey) as supplier_cnt\nfrom\n    partsupp,\n    part\nwhere\n        p_partkey = ps_partkey\n  and p_brand <> 'Brand#45'\n  and p_type not like 'MEDIUM POLISHED%'\n  and p_size in (49, 14, 23, 45, 19, 3, 36, 9)\n  and ps_suppkey not in (\n    select\n        s_suppkey\n    from\n        supplier\n    where\n            s_comment like '%Customer%Complaints%'\n)\ngroup by\n    p_brand,\n    p_type,\n    p_size\norder by\n    supplier_cnt desc,\n    p_brand,\n    p_type,\n    p_size\nlimit 10;"
+}

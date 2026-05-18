@@ -1,4 +1,4 @@
-use simple_graph::{ColumnData, OperatorData, Output, QueryContext, Rename, Scan};
+use optd::{ColumnData, OperatorData, Output, QueryContext, Rename, Scan};
 
 fn main() {
     let mut ctx = QueryContext::new();
@@ -6,7 +6,7 @@ fn main() {
     // original columns and scan
     let id = ColumnData::new("id", arrow_schema::DataType::Int64).add(&mut ctx);
     let scan = OperatorData::Scan(Scan {
-        table: simple_graph::TableRef::bare("users"),
+        table: optd::TableRef::bare("users"),
         columns: vec![id],
     })
     .add(&mut ctx);

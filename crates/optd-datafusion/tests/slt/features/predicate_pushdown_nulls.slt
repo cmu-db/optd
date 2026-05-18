@@ -1,0 +1,60 @@
+# Predicate pushdown must preserve NULL semantics around outer joins
+
+statement ok
+CREATE TABLE pp_left (id BIGINT, name VARCHAR);
+
+statement ok
+CREATE TABLE pp_right (id BIGINT, val BIGINT);
+
+statement ok
+INSERT INTO pp_left VALUES (1, 'one'), (2, 'two'), (3, 'three');
+
+statement ok
+INSERT INTO pp_right VALUES (1, 10), (2, NULL), (4, 40);
+
+query I
+SELECT l.id
+FROM pp_left l
+LEFT JOIN pp_right r ON l.id = r.id
+WHERE r.val IS NULL
+ORDER BY l.id;
+----
+2
+3
+
+query I
+SELECT l.id
+FROM pp_left l
+LEFT JOIN pp_right r ON l.id = r.id
+WHERE r.val = 10
+ORDER BY l.id;
+----
+1
+
+query I
+SELECT l.id
+FROM pp_left l
+LEFT JOIN pp_right r ON l.id = r.id
+WHERE l.id > 1
+ORDER BY l.id;
+----
+2
+3
+
+query I
+SELECT r.id
+FROM pp_left l
+FULL OUTER JOIN pp_right r ON l.id = r.id
+WHERE l.id IS NULL
+ORDER BY r.id;
+----
+4
+
+query I
+SELECT r.id
+FROM pp_left l
+RIGHT JOIN pp_right r ON l.id = r.id
+WHERE l.id IS NULL
+ORDER BY r.id;
+----
+4

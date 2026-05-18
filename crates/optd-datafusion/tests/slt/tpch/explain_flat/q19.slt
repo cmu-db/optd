@@ -1,0 +1,118 @@
+query T
+SELECT explain_flat('select
+    sum(l_extendedprice* (1 - l_discount)) as revenue
+from
+    lineitem,
+    part
+where
+    (
+                p_partkey = l_partkey
+            and p_brand = ''Brand#12''
+            and p_container in (''SM CASE'', ''SM BOX'', ''SM PACK'', ''SM PKG'')
+            and l_quantity >= 1 and l_quantity <= 1 + 10
+            and p_size between 1 and 5
+            and l_shipmode in (''AIR'', ''AIR REG'')
+            and l_shipinstruct = ''DELIVER IN PERSON''
+        )
+   or
+    (
+                p_partkey = l_partkey
+            and p_brand = ''Brand#23''
+            and p_container in (''MED BAG'', ''MED BOX'', ''MED PKG'', ''MED PACK'')
+            and l_quantity >= 10 and l_quantity <= 10 + 10
+            and p_size between 1 and 10
+            and l_shipmode in (''AIR'', ''AIR REG'')
+            and l_shipinstruct = ''DELIVER IN PERSON''
+        )
+   or
+    (
+                p_partkey = l_partkey
+            and p_brand = ''Brand#34''
+            and p_container in (''LG CASE'', ''LG BOX'', ''LG PACK'', ''LG PKG'')
+            and l_quantity >= 20 and l_quantity <= 20 + 10
+            and p_size between 1 and 15
+            and l_shipmode in (''AIR'', ''AIR REG'')
+            and l_shipinstruct = ''DELIVER IN PERSON''
+        );');
+----
+ 
+01){
+02)--"nodes": [
+03)----{
+04)------"id": 0,
+05)------"kind": "scan",
+06)------"title": "⊞ Scan",
+07)------"table_name": "lineitem",
+08)------"columns": [
+09)--------"l_orderkey(#0)",
+10)--------"l_partkey(#1)",
+11)--------"l_suppkey(#2)",
+12)--------"l_linenumber(#3)",
+13)--------"l_quantity(#4)",
+14)--------"l_extendedprice(#5)",
+15)--------"l_discount(#6)",
+16)--------"l_tax(#7)",
+17)--------"l_returnflag(#8)",
+18)--------"l_linestatus(#9)",
+19)--------"l_shipdate(#10)",
+20)--------"l_commitdate(#11)",
+21)--------"l_receiptdate(#12)",
+22)--------"l_shipinstruct(#13)",
+23)--------"l_shipmode(#14)",
+24)--------"l_comment(#15)"
+25)------]
+26)----},
+27)----{
+28)------"id": 1,
+29)------"kind": "scan",
+30)------"title": "⊞ Scan",
+31)------"table_name": "part",
+32)------"columns": [
+33)--------"p_partkey(#16)",
+34)--------"p_name(#17)",
+35)--------"p_mfgr(#18)",
+36)--------"p_brand(#19)",
+37)--------"p_type(#20)",
+38)--------"p_size(#21)",
+39)--------"p_container(#22)",
+40)--------"p_retailprice(#23)",
+41)--------"p_comment(#24)"
+42)------]
+43)----},
+44)----{
+45)------"id": 2,
+46)------"kind": "join",
+47)------"title": "⋈ InnerJoin",
+48)------"join_type": "Inner",
+49)------"condition": "true",
+50)------"outer": 0,
+51)------"inner": 1
+52)----},
+53)----{
+54)------"id": 3,
+55)------"kind": "selection",
+56)------"title": "σ Selection",
+57)------"predicate": "((((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#12\")) AND ((p_container(#22) = \"SM CASE\") OR (p_container(#22) = \"SM BOX\") OR (p_container(#22) = \"SM PACK\") OR (p_container(#22) = \"SM PKG\"))) AND (l_quantity(#4) >= 1)) AND (l_quantity(#4) <= (1 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 5))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\")) OR ((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#23\")) AND ((p_container(#22) = \"MED BAG\") OR (p_container(#22) = \"MED BOX\") OR (p_container(#22) = \"MED PKG\") OR (p_container(#22) = \"MED PACK\"))) AND (l_quantity(#4) >= 10)) AND (l_quantity(#4) <= (10 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 10))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\"))) OR ((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#34\")) AND ((p_container(#22) = \"LG CASE\") OR (p_container(#22) = \"LG BOX\") OR (p_container(#22) = \"LG PACK\") OR (p_container(#22) = \"LG PKG\"))) AND (l_quantity(#4) >= 20)) AND (l_quantity(#4) <= (20 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 15))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\")))",
+58)------"input": 2
+59)----},
+60)----{
+61)------"id": 4,
+62)------"kind": "aggregation",
+63)------"title": "γ Aggregation",
+64)------"keys": "",
+65)------"aggregates": [
+66)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#25) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))"
+67)------],
+68)------"input": 3
+69)----},
+70)----{
+71)------"id": 5,
+72)------"kind": "projection",
+73)------"title": "π Projection",
+74)------"columns": [
+75)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#25)"
+76)------],
+77)------"input": 4
+78)----}
+79)--]
+80)}

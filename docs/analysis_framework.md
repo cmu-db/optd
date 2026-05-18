@@ -2,7 +2,7 @@
 
 ## Goal
 
-Provide a uniform interface for demand-driven query analyses over the `simple-graph` IR.
+Provide a uniform interface for demand-driven query analyses over the `optd` IR.
 Analyses are invoked through a single `AnalysisContext::get` entry point and may use any
 internal computation strategy — recursive bottom-up, top-down via `ParentOf`, whole-plan
 traversal, or catalog lookups.

@@ -2542,6 +2542,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
+name = "optd"
+version = "0.1.0"
+dependencies = [
+ "anstyle",
+ "arrow-schema",
+ "fixedbitset",
+ "serde",
+ "serde_json",
+ "substrait 0.63.0",
+]
+
+[[package]]
+name = "optd-datafusion"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "clap",
+ "datafusion",
+ "datafusion-sqllogictest",
+ "optd",
+ "rustyline",
+ "sqllogictest",
+ "tokio",
+]
+
+[[package]]
 name = "ordered-float"
 version = "2.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3226,32 +3252,6 @@ name = "similar"
 version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
-
-[[package]]
-name = "simple-graph"
-version = "0.1.0"
-dependencies = [
- "anstyle",
- "arrow-schema",
- "fixedbitset",
- "serde",
- "serde_json",
- "substrait 0.63.0",
-]
-
-[[package]]
-name = "simple-graph-datafusion"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "clap",
- "datafusion",
- "datafusion-sqllogictest",
- "rustyline",
- "simple-graph",
- "sqllogictest",
- "tokio",
-]
 
 [[package]]
 name = "siphasher"

@@ -1,6 +1,6 @@
 use arrow_schema::DataType;
-use simple_graph::optimize::join_ordering::collect_join_group_roots;
-use simple_graph::{
+use optd::optimize::join_ordering::collect_join_group_roots;
+use optd::{
     AggregateExpr, AggregateFunction, Aggregation, AnalysisContext, BinaryOp, BoxDrawingRenderer,
     BoxRendererConfig, ColorMode, ColumnData, ExprData, FreeColumns, Join, JoinOrdering, JoinType,
     Map, NaryOp, OperatorData, OperatorRewriteAdaptor, OptimizerContext, Output, PassManager,
@@ -41,7 +41,7 @@ fn main() {
                 Ok(trace) => {
                     println!(
                         "{}",
-                        simple_graph::optimizer_visualizer_trace_json(&initial, &trace)
+                        optd::optimizer_visualizer_trace_json(&initial, &trace)
                     );
                     return;
                 }
@@ -178,7 +178,7 @@ impl CliArgs {
 
 fn print_usage() {
     eprintln!(
-        "usage: simple-graph [--format box|flat|json|context|optimizer-json] [--optimize] <tpch-query-number>"
+        "usage: optd [--format box|flat|json|context|optimizer-json] [--optimize] <tpch-query-number>"
     );
 }
 

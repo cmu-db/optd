@@ -1,6 +1,6 @@
 # Substrait Integration
 
-This document is a handoff for the current Substrait work in `simple-graph`.
+This document is a handoff for the current Substrait work in `optd`.
 
 ## Current State
 
@@ -40,7 +40,7 @@ The exporter now handles:
 
 Root-crate Substrait/DataFusion integration tests have been removed. Current automated coverage is
 through unit tests in the root crate and sqllogictest coverage in
-`crates/simple-graph-datafusion/tests/`.
+`crates/optd-datafusion/tests/`.
 
 Run:
 
@@ -81,7 +81,7 @@ Importer limitations to watch:
 - Substrait type handling is still a conservative subset
 - local file import maps file formats to `TableFunctionDef`, but exporter does not emit local files
 
-Note: the DataFusion bridge (`crates/simple-graph-datafusion`) now handles
+Note: the DataFusion bridge (`crates/optd-datafusion`) now handles
 `EmptyRelation`/`Values` via `ConstScan`, but that is separate from Substrait conversion.
 
 ## Recommended Next Steps

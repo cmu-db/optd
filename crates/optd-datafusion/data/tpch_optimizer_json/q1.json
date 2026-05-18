@@ -1,0 +1,287 @@
+{
+  "passes": [
+    {
+      "passName": "Initial",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "selection",
+                    "title": "σ Selection",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "scan",
+                        "title": "⊞ Scan",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "table": "lineitem",
+                        "columns": [
+                          "l_orderkey(#0)",
+                          "l_partkey(#1)",
+                          "l_suppkey(#2)",
+                          "l_linenumber(#3)",
+                          "l_quantity(#4)",
+                          "l_extendedprice(#5)",
+                          "l_discount(#6)",
+                          "l_tax(#7)",
+                          "l_returnflag(#8)",
+                          "l_linestatus(#9)",
+                          "l_shipdate(#10)",
+                          "l_commitdate(#11)",
+                          "l_receiptdate(#12)",
+                          "l_shipinstruct(#13)",
+                          "l_shipmode(#14)",
+                          "l_comment(#15)"
+                        ],
+                        "operator_id": "@0",
+                        "table_name": "lineitem"
+                      }
+                    ],
+                    "operator_id": "@1",
+                    "predicate": "(l_shipdate(#10) <= CAST(\"1998-09-02\" AS Date32))"
+                  }
+                ],
+                "aggregates": [
+                  "sum(lineitem.l_quantity)(#16) := sum(l_quantity(#4))",
+                  "sum(lineitem.l_extendedprice)(#17) := sum(l_extendedprice(#5))",
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#18) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))",
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount * Int64(1) + lineitem.l_tax)(#19) := sum(((l_extendedprice(#5) * (1 - l_discount(#6))) * (1 + l_tax(#7))))",
+                  "avg(lineitem.l_quantity)(#20) := avg(l_quantity(#4))",
+                  "avg(lineitem.l_extendedprice)(#21) := avg(l_extendedprice(#5))",
+                  "avg(lineitem.l_discount)(#22) := avg(l_discount(#6))",
+                  "count(Int64(1))(#23) := count_star()"
+                ],
+                "keys": "l_returnflag(#8), l_linestatus(#9)",
+                "operator_id": "@2"
+              }
+            ],
+            "columns": [
+              "l_returnflag(#8)",
+              "l_linestatus(#9)",
+              "sum(lineitem.l_quantity)(#16)",
+              "sum(lineitem.l_extendedprice)(#17)",
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#18)",
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount * Int64(1) + lineitem.l_tax)(#19)",
+              "avg(lineitem.l_quantity)(#20)",
+              "avg(lineitem.l_extendedprice)(#21)",
+              "avg(lineitem.l_discount)(#22)",
+              "count(Int64(1))(#23)"
+            ],
+            "operator_id": "@3"
+          }
+        ],
+        "keys": [
+          "l_returnflag(#8) Asc NullsLast",
+          "l_linestatus(#9) Asc NullsLast"
+        ],
+        "operator_id": "@4"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "selection",
+                    "title": "σ Selection",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "scan",
+                        "title": "⊞ Scan",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "table": "lineitem",
+                        "columns": [
+                          "l_orderkey(#0)",
+                          "l_partkey(#1)",
+                          "l_suppkey(#2)",
+                          "l_linenumber(#3)",
+                          "l_quantity(#4)",
+                          "l_extendedprice(#5)",
+                          "l_discount(#6)",
+                          "l_tax(#7)",
+                          "l_returnflag(#8)",
+                          "l_linestatus(#9)",
+                          "l_shipdate(#10)",
+                          "l_commitdate(#11)",
+                          "l_receiptdate(#12)",
+                          "l_shipinstruct(#13)",
+                          "l_shipmode(#14)",
+                          "l_comment(#15)"
+                        ],
+                        "operator_id": "@0",
+                        "table_name": "lineitem"
+                      }
+                    ],
+                    "operator_id": "@1",
+                    "predicate": "(l_shipdate(#10) <= CAST(\"1998-09-02\" AS Date32))"
+                  }
+                ],
+                "aggregates": [
+                  "sum(lineitem.l_quantity)(#16) := sum(l_quantity(#4))",
+                  "sum(lineitem.l_extendedprice)(#17) := sum(l_extendedprice(#5))",
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#18) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))",
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount * Int64(1) + lineitem.l_tax)(#19) := sum(((l_extendedprice(#5) * (1 - l_discount(#6))) * (1 + l_tax(#7))))",
+                  "avg(lineitem.l_quantity)(#20) := avg(l_quantity(#4))",
+                  "avg(lineitem.l_extendedprice)(#21) := avg(l_extendedprice(#5))",
+                  "avg(lineitem.l_discount)(#22) := avg(l_discount(#6))",
+                  "count(Int64(1))(#23) := count_star()"
+                ],
+                "keys": "l_returnflag(#8), l_linestatus(#9)",
+                "operator_id": "@2"
+              }
+            ],
+            "columns": [
+              "l_returnflag(#8)",
+              "l_linestatus(#9)",
+              "sum(lineitem.l_quantity)(#16)",
+              "sum(lineitem.l_extendedprice)(#17)",
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#18)",
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount * Int64(1) + lineitem.l_tax)(#19)",
+              "avg(lineitem.l_quantity)(#20)",
+              "avg(lineitem.l_extendedprice)(#21)",
+              "avg(lineitem.l_discount)(#22)",
+              "count(Int64(1))(#23)"
+            ],
+            "operator_id": "@3"
+          }
+        ],
+        "keys": [
+          "l_returnflag(#8) Asc NullsLast",
+          "l_linestatus(#9) Asc NullsLast"
+        ],
+        "operator_id": "@4"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "selection",
+                    "title": "σ Selection",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "scan",
+                        "title": "⊞ Scan",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "table": "lineitem",
+                        "columns": [
+                          "l_orderkey(#0)",
+                          "l_partkey(#1)",
+                          "l_suppkey(#2)",
+                          "l_linenumber(#3)",
+                          "l_quantity(#4)",
+                          "l_extendedprice(#5)",
+                          "l_discount(#6)",
+                          "l_tax(#7)",
+                          "l_returnflag(#8)",
+                          "l_linestatus(#9)",
+                          "l_shipdate(#10)",
+                          "l_commitdate(#11)",
+                          "l_receiptdate(#12)",
+                          "l_shipinstruct(#13)",
+                          "l_shipmode(#14)",
+                          "l_comment(#15)"
+                        ],
+                        "operator_id": "@0",
+                        "table_name": "lineitem"
+                      }
+                    ],
+                    "operator_id": "@1",
+                    "predicate": "(l_shipdate(#10) <= CAST(\"1998-09-02\" AS Date32))"
+                  }
+                ],
+                "aggregates": [
+                  "sum(lineitem.l_quantity)(#16) := sum(l_quantity(#4))",
+                  "sum(lineitem.l_extendedprice)(#17) := sum(l_extendedprice(#5))",
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#18) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))",
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount * Int64(1) + lineitem.l_tax)(#19) := sum(((l_extendedprice(#5) * (1 - l_discount(#6))) * (1 + l_tax(#7))))",
+                  "avg(lineitem.l_quantity)(#20) := avg(l_quantity(#4))",
+                  "avg(lineitem.l_extendedprice)(#21) := avg(l_extendedprice(#5))",
+                  "avg(lineitem.l_discount)(#22) := avg(l_discount(#6))",
+                  "count(Int64(1))(#23) := count_star()"
+                ],
+                "keys": "l_returnflag(#8), l_linestatus(#9)",
+                "operator_id": "@2"
+              }
+            ],
+            "columns": [
+              "l_returnflag(#8)",
+              "l_linestatus(#9)",
+              "sum(lineitem.l_quantity)(#16)",
+              "sum(lineitem.l_extendedprice)(#17)",
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#18)",
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount * Int64(1) + lineitem.l_tax)(#19)",
+              "avg(lineitem.l_quantity)(#20)",
+              "avg(lineitem.l_extendedprice)(#21)",
+              "avg(lineitem.l_discount)(#22)",
+              "count(Int64(1))(#23)"
+            ],
+            "operator_id": "@3"
+          }
+        ],
+        "keys": [
+          "l_returnflag(#8) Asc NullsLast",
+          "l_linestatus(#9) Asc NullsLast"
+        ],
+        "operator_id": "@4"
+      }
+    }
+  ],
+  "query": "select\n    l_returnflag,\n    l_linestatus,\n    sum(l_quantity) as sum_qty,\n    sum(l_extendedprice) as sum_base_price,\n    sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,\n    sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge,\n    avg(l_quantity) as avg_qty,\n    avg(l_extendedprice) as avg_price,\n    avg(l_discount) as avg_disc,\n    count(*) as count_order\nfrom\n    lineitem\nwhere\n        l_shipdate <= date '1998-09-02'\ngroup by\n    l_returnflag,\n    l_linestatus\norder by\n    l_returnflag,\n\tl_linestatus;"
+}

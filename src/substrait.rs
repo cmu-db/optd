@@ -177,7 +177,7 @@ impl<'a> Exporter<'a> {
         } else {
             vec![proto::extensions::SimpleExtensionUrn {
                 extension_urn_anchor: 1,
-                urn: "extension:io.substrait:functions_simple_graph".to_string(),
+                urn: "extension:io.substrait:functions_optd".to_string(),
             }]
         };
 

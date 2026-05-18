@@ -1,0 +1,30 @@
+# ConstScan / EmptyRelation schema-provenance regressions
+
+# Empty result with one projected column must still report one output column type.
+query I
+SELECT CAST(NULL AS BIGINT) AS a WHERE FALSE;
+----
+
+# Empty result with multiple projected columns must keep full schema.
+query IT
+SELECT CAST(NULL AS BIGINT) AS a, CAST(NULL AS VARCHAR) AS b WHERE FALSE;
+----
+
+# Empty subquery output should preserve projected column provenance through aliasing.
+query I
+SELECT a
+FROM (SELECT CAST(NULL AS BIGINT) AS a WHERE FALSE) q
+ORDER BY a;
+----
+
+# Mixed empty/non-empty branches should keep schema and return non-empty branch rows.
+query I
+SELECT a
+FROM (
+  SELECT CAST(NULL AS BIGINT) AS a WHERE FALSE
+  UNION ALL
+  SELECT 1 AS a
+) q
+ORDER BY a;
+----
+1

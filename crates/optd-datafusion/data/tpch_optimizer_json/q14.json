@@ -1,0 +1,550 @@
+{
+  "passes": [
+    {
+      "passName": "Initial",
+      "root": {
+        "op": "projection",
+        "title": "π Projection",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "map",
+            "title": "χ Map",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "selection",
+                    "title": "σ Selection",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "join",
+                        "title": "⋈ InnerJoin",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "lineitem",
+                            "columns": [
+                              "l_orderkey(#0)",
+                              "l_partkey(#1)",
+                              "l_suppkey(#2)",
+                              "l_linenumber(#3)",
+                              "l_quantity(#4)",
+                              "l_extendedprice(#5)",
+                              "l_discount(#6)",
+                              "l_tax(#7)",
+                              "l_returnflag(#8)",
+                              "l_linestatus(#9)",
+                              "l_shipdate(#10)",
+                              "l_commitdate(#11)",
+                              "l_receiptdate(#12)",
+                              "l_shipinstruct(#13)",
+                              "l_shipmode(#14)",
+                              "l_comment(#15)"
+                            ],
+                            "operator_id": "@0",
+                            "table_name": "lineitem"
+                          },
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "part",
+                            "columns": [
+                              "p_partkey(#16)",
+                              "p_name(#17)",
+                              "p_mfgr(#18)",
+                              "p_brand(#19)",
+                              "p_type(#20)",
+                              "p_size(#21)",
+                              "p_container(#22)",
+                              "p_retailprice(#23)",
+                              "p_comment(#24)"
+                            ],
+                            "operator_id": "@1",
+                            "table_name": "part"
+                          }
+                        ],
+                        "condition": "true",
+                        "join_type": "Inner",
+                        "operator_id": "@2"
+                      }
+                    ],
+                    "operator_id": "@3",
+                    "predicate": "(((l_partkey(#1) = p_partkey(#16)) AND (l_shipdate(#10) >= CAST(\"1995-09-01\" AS Date32))) AND (l_shipdate(#10) < CAST(\"1995-10-01\" AS Date32)))"
+                  }
+                ],
+                "aggregates": [
+                  "sum(CASE WHEN part.p_type LIKE Utf8(\"PROMO%\") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#25) := sum(CASE WHEN (p_type(#20) LIKE \"PROMO%\") THEN (l_extendedprice(#5) * (1 - l_discount(#6))) ELSE 0 END)",
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#26) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))"
+                ],
+                "keys": "",
+                "operator_id": "@4"
+              }
+            ],
+            "computations": [
+              "promo_revenue(#27) := ((100 * sum(CASE WHEN part.p_type LIKE Utf8(\"PROMO%\") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#25)) / sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#26))"
+            ],
+            "operator_id": "@5"
+          }
+        ],
+        "columns": [
+          "promo_revenue(#27)"
+        ],
+        "operator_id": "@6"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "projection",
+        "title": "π Projection",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "map",
+            "title": "χ Map",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "selection",
+                    "title": "σ Selection",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "join",
+                        "title": "⋈ InnerJoin",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "lineitem",
+                            "columns": [
+                              "l_orderkey(#0)",
+                              "l_partkey(#1)",
+                              "l_suppkey(#2)",
+                              "l_linenumber(#3)",
+                              "l_quantity(#4)",
+                              "l_extendedprice(#5)",
+                              "l_discount(#6)",
+                              "l_tax(#7)",
+                              "l_returnflag(#8)",
+                              "l_linestatus(#9)",
+                              "l_shipdate(#10)",
+                              "l_commitdate(#11)",
+                              "l_receiptdate(#12)",
+                              "l_shipinstruct(#13)",
+                              "l_shipmode(#14)",
+                              "l_comment(#15)"
+                            ],
+                            "operator_id": "@0",
+                            "table_name": "lineitem"
+                          },
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "part",
+                            "columns": [
+                              "p_partkey(#16)",
+                              "p_name(#17)",
+                              "p_mfgr(#18)",
+                              "p_brand(#19)",
+                              "p_type(#20)",
+                              "p_size(#21)",
+                              "p_container(#22)",
+                              "p_retailprice(#23)",
+                              "p_comment(#24)"
+                            ],
+                            "operator_id": "@1",
+                            "table_name": "part"
+                          }
+                        ],
+                        "condition": "true",
+                        "join_type": "Inner",
+                        "operator_id": "@2"
+                      }
+                    ],
+                    "operator_id": "@3",
+                    "predicate": "(((l_partkey(#1) = p_partkey(#16)) AND (l_shipdate(#10) >= CAST(\"1995-09-01\" AS Date32))) AND (l_shipdate(#10) < CAST(\"1995-10-01\" AS Date32)))"
+                  }
+                ],
+                "aggregates": [
+                  "sum(CASE WHEN part.p_type LIKE Utf8(\"PROMO%\") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#25) := sum(CASE WHEN (p_type(#20) LIKE \"PROMO%\") THEN (l_extendedprice(#5) * (1 - l_discount(#6))) ELSE 0 END)",
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#26) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))"
+                ],
+                "keys": "",
+                "operator_id": "@4"
+              }
+            ],
+            "computations": [
+              "promo_revenue(#27) := ((100 * sum(CASE WHEN part.p_type LIKE Utf8(\"PROMO%\") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#25)) / sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#26))"
+            ],
+            "operator_id": "@5"
+          }
+        ],
+        "columns": [
+          "promo_revenue(#27)"
+        ],
+        "operator_id": "@6"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "projection",
+        "title": "π Projection",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "map",
+            "title": "χ Map",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⋈ InnerJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "lineitem",
+                            "columns": [
+                              "l_orderkey(#0)",
+                              "l_partkey(#1)",
+                              "l_suppkey(#2)",
+                              "l_linenumber(#3)",
+                              "l_quantity(#4)",
+                              "l_extendedprice(#5)",
+                              "l_discount(#6)",
+                              "l_tax(#7)",
+                              "l_returnflag(#8)",
+                              "l_linestatus(#9)",
+                              "l_shipdate(#10)",
+                              "l_commitdate(#11)",
+                              "l_receiptdate(#12)",
+                              "l_shipinstruct(#13)",
+                              "l_shipmode(#14)",
+                              "l_comment(#15)"
+                            ],
+                            "operator_id": "@0",
+                            "table_name": "lineitem"
+                          }
+                        ],
+                        "operator_id": "@7",
+                        "predicate": "((l_shipdate(#10) >= CAST(\"1995-09-01\" AS Date32)) AND (l_shipdate(#10) < CAST(\"1995-10-01\" AS Date32)))"
+                      },
+                      {
+                        "op": "scan",
+                        "title": "⊞ Scan",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "table": "part",
+                        "columns": [
+                          "p_partkey(#16)",
+                          "p_name(#17)",
+                          "p_mfgr(#18)",
+                          "p_brand(#19)",
+                          "p_type(#20)",
+                          "p_size(#21)",
+                          "p_container(#22)",
+                          "p_retailprice(#23)",
+                          "p_comment(#24)"
+                        ],
+                        "operator_id": "@1",
+                        "table_name": "part"
+                      }
+                    ],
+                    "condition": "(true AND (l_partkey(#1) = p_partkey(#16)))",
+                    "join_type": "Inner",
+                    "operator_id": "@8"
+                  }
+                ],
+                "aggregates": [
+                  "sum(CASE WHEN part.p_type LIKE Utf8(\"PROMO%\") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#25) := sum(CASE WHEN (p_type(#20) LIKE \"PROMO%\") THEN (l_extendedprice(#5) * (1 - l_discount(#6))) ELSE 0 END)",
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#26) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))"
+                ],
+                "keys": "",
+                "operator_id": "@9"
+              }
+            ],
+            "computations": [
+              "promo_revenue(#27) := ((100 * sum(CASE WHEN part.p_type LIKE Utf8(\"PROMO%\") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#25)) / sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#26))"
+            ],
+            "operator_id": "@10"
+          }
+        ],
+        "columns": [
+          "promo_revenue(#27)"
+        ],
+        "operator_id": "@11"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "projection",
+        "title": "π Projection",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "map",
+            "title": "χ Map",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⋈ InnerJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "lineitem",
+                            "columns": [
+                              "l_orderkey(#0)",
+                              "l_partkey(#1)",
+                              "l_suppkey(#2)",
+                              "l_linenumber(#3)",
+                              "l_quantity(#4)",
+                              "l_extendedprice(#5)",
+                              "l_discount(#6)",
+                              "l_tax(#7)",
+                              "l_returnflag(#8)",
+                              "l_linestatus(#9)",
+                              "l_shipdate(#10)",
+                              "l_commitdate(#11)",
+                              "l_receiptdate(#12)",
+                              "l_shipinstruct(#13)",
+                              "l_shipmode(#14)",
+                              "l_comment(#15)"
+                            ],
+                            "operator_id": "@0",
+                            "table_name": "lineitem"
+                          }
+                        ],
+                        "operator_id": "@7",
+                        "predicate": "((l_shipdate(#10) >= CAST(\"1995-09-01\" AS Date32)) AND (l_shipdate(#10) < CAST(\"1995-10-01\" AS Date32)))"
+                      },
+                      {
+                        "op": "scan",
+                        "title": "⊞ Scan",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "table": "part",
+                        "columns": [
+                          "p_partkey(#16)",
+                          "p_name(#17)",
+                          "p_mfgr(#18)",
+                          "p_brand(#19)",
+                          "p_type(#20)",
+                          "p_size(#21)",
+                          "p_container(#22)",
+                          "p_retailprice(#23)",
+                          "p_comment(#24)"
+                        ],
+                        "operator_id": "@1",
+                        "table_name": "part"
+                      }
+                    ],
+                    "condition": "(true AND (l_partkey(#1) = p_partkey(#16)))",
+                    "join_type": "Inner",
+                    "operator_id": "@8"
+                  }
+                ],
+                "aggregates": [
+                  "sum(CASE WHEN part.p_type LIKE Utf8(\"PROMO%\") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#25) := sum(CASE WHEN (p_type(#20) LIKE \"PROMO%\") THEN (l_extendedprice(#5) * (1 - l_discount(#6))) ELSE 0 END)",
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#26) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))"
+                ],
+                "keys": "",
+                "operator_id": "@9"
+              }
+            ],
+            "computations": [
+              "promo_revenue(#27) := ((100 * sum(CASE WHEN part.p_type LIKE Utf8(\"PROMO%\") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#25)) / sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#26))"
+            ],
+            "operator_id": "@10"
+          }
+        ],
+        "columns": [
+          "promo_revenue(#27)"
+        ],
+        "operator_id": "@11"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "projection",
+        "title": "π Projection",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "map",
+            "title": "χ Map",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⋈ InnerJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "lineitem",
+                            "columns": [
+                              "l_orderkey(#0)",
+                              "l_partkey(#1)",
+                              "l_suppkey(#2)",
+                              "l_linenumber(#3)",
+                              "l_quantity(#4)",
+                              "l_extendedprice(#5)",
+                              "l_discount(#6)",
+                              "l_tax(#7)",
+                              "l_returnflag(#8)",
+                              "l_linestatus(#9)",
+                              "l_shipdate(#10)",
+                              "l_commitdate(#11)",
+                              "l_receiptdate(#12)",
+                              "l_shipinstruct(#13)",
+                              "l_shipmode(#14)",
+                              "l_comment(#15)"
+                            ],
+                            "operator_id": "@0",
+                            "table_name": "lineitem"
+                          }
+                        ],
+                        "operator_id": "@7",
+                        "predicate": "((l_shipdate(#10) >= CAST(\"1995-09-01\" AS Date32)) AND (l_shipdate(#10) < CAST(\"1995-10-01\" AS Date32)))"
+                      },
+                      {
+                        "op": "scan",
+                        "title": "⊞ Scan",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "table": "part",
+                        "columns": [
+                          "p_partkey(#16)",
+                          "p_name(#17)",
+                          "p_mfgr(#18)",
+                          "p_brand(#19)",
+                          "p_type(#20)",
+                          "p_size(#21)",
+                          "p_container(#22)",
+                          "p_retailprice(#23)",
+                          "p_comment(#24)"
+                        ],
+                        "operator_id": "@1",
+                        "table_name": "part"
+                      }
+                    ],
+                    "condition": "(true AND (l_partkey(#1) = p_partkey(#16)))",
+                    "join_type": "Inner",
+                    "operator_id": "@8"
+                  }
+                ],
+                "aggregates": [
+                  "sum(CASE WHEN part.p_type LIKE Utf8(\"PROMO%\") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#25) := sum(CASE WHEN (p_type(#20) LIKE \"PROMO%\") THEN (l_extendedprice(#5) * (1 - l_discount(#6))) ELSE 0 END)",
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#26) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))"
+                ],
+                "keys": "",
+                "operator_id": "@9"
+              }
+            ],
+            "computations": [
+              "promo_revenue(#27) := ((100 * sum(CASE WHEN part.p_type LIKE Utf8(\"PROMO%\") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#25)) / sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#26))"
+            ],
+            "operator_id": "@10"
+          }
+        ],
+        "columns": [
+          "promo_revenue(#27)"
+        ],
+        "operator_id": "@11"
+      }
+    }
+  ],
+  "query": "select\n            100.00 * sum(case\n                             when p_type like 'PROMO%'\n                                 then l_extendedprice * (1 - l_discount)\n                             else 0\n            end) / sum(l_extendedprice * (1 - l_discount)) as promo_revenue\nfrom\n    lineitem,\n    part\nwhere\n        l_partkey = p_partkey\n  and l_shipdate >= date '1995-09-01'\n  and l_shipdate < date '1995-10-01';"
+}

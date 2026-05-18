@@ -326,10 +326,16 @@ fn join_tree_to_ir(tree: &JoinTree, hg: &QueryHypergraph, ctx: &mut QueryContext
                 .add(ctx),
             };
 
-            // Use the join type from the first connecting edge.
+            // Use the join type from the source operator of the first connecting edge.
             let join_type = edge_indices
                 .first()
-                .map(|&i| hg.edges[i].join_type.to_ir_join_type())
+                .and_then(|&i| {
+                    if let OperatorData::Join(j) = ctx.operator(hg.edges[i].source) {
+                        Some(j.join_type.clone())
+                    } else {
+                        None
+                    }
+                })
                 .unwrap_or(JoinType::Inner);
 
             OperatorData::Join(Join {

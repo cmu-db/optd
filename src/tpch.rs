@@ -1675,7 +1675,7 @@ pub fn tpch_q22() -> QueryContext {
     finish(&mut ctx, sorted, &["cntrycode", "numcust", "totacctbal"]);
     ctx
 }
-/// Builds a direct simple-graph IR shape for a supported TPC-H query number.
+/// Builds a direct optd IR shape for a supported TPC-H query number.
 pub fn tpch_query(query: u8) -> Option<QueryContext> {
     match query {
         1 => Some(tpch_q1()),

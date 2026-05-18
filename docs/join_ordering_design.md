@@ -252,7 +252,7 @@ The pass accepts a `Box<dyn Statistics>`. The default is `UniformStatistics`.
 ## Plan Reconstruction
 
 After DPhyp fills the DP table, `dp[all_nodes].plan` is a `JoinTree`. Convert it back
-to simple-graph IR operators:
+to optd IR operators:
 
 ```rust
 fn join_tree_to_ir(
@@ -376,7 +376,7 @@ trivial). For larger groups the ordering matters for cardinality estimates.
 5. `src/hypergraph.rs`: `HyperedgeJoinType::to_ir_join_type()` for plan reconstruction.
 6. `src/optimize/join_ordering.rs`: `DPhyp` — full implementation of `Solve`/`EmitCsg`/`EnumerateCsgRec`/`EmitCsg`/`EnumerateCmpRec`/`EmitCsgCmp`.
 7. `src/optimize/join_ordering.rs`: `Statistics` trait + `UniformStatistics` placeholder.
-8. `src/optimize/join_ordering.rs`: `join_tree_to_ir` — converts `JoinTree` back to simple-graph IR.
+8. `src/optimize/join_ordering.rs`: `join_tree_to_ir` — converts `JoinTree` back to optd IR.
 9. `src/optimize/join_ordering.rs`: `collect_join_group_roots` — finds all join group roots bottom-up.
 10. `src/optimize/join_ordering.rs`: `JoinOrdering` pass implementing `QueryPass`.
 

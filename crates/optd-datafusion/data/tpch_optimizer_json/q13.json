@@ -1,0 +1,470 @@
+{
+  "passes": [
+    {
+      "passName": "Initial",
+      "root": {
+        "op": "limit",
+        "title": "τ Limit",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "sort",
+            "title": "⇞ Sort",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "projection",
+                "title": "π Projection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "aggregation",
+                    "title": "γ Aggregation",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "rename",
+                        "title": "ρ Rename(c_orders)",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "projection",
+                            "title": "π Projection",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "projection",
+                                "title": "π Projection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "aggregation",
+                                    "title": "γ Aggregation",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "join",
+                                        "title": "⟕ LeftOuterJoin",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "customer",
+                                            "columns": [
+                                              "c_custkey(#0)",
+                                              "c_name(#1)",
+                                              "c_address(#2)",
+                                              "c_nationkey(#3)",
+                                              "c_phone(#4)",
+                                              "c_acctbal(#5)",
+                                              "c_mktsegment(#6)",
+                                              "c_comment(#7)"
+                                            ],
+                                            "operator_id": "@0",
+                                            "table_name": "customer"
+                                          },
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "orders",
+                                            "columns": [
+                                              "o_orderkey(#8)",
+                                              "o_custkey(#9)",
+                                              "o_orderstatus(#10)",
+                                              "o_totalprice(#11)",
+                                              "o_orderdate(#12)",
+                                              "o_orderpriority(#13)",
+                                              "o_clerk(#14)",
+                                              "o_shippriority(#15)",
+                                              "o_comment(#16)"
+                                            ],
+                                            "operator_id": "@1",
+                                            "table_name": "orders"
+                                          }
+                                        ],
+                                        "condition": "((c_custkey(#0) = o_custkey(#9)) AND (o_comment(#16) NOT LIKE \"%special%requests%\"))",
+                                        "join_type": "LeftOuter",
+                                        "operator_id": "@2"
+                                      }
+                                    ],
+                                    "aggregates": [
+                                      "count(orders.o_orderkey)(#17) := count(o_orderkey(#8))"
+                                    ],
+                                    "keys": "c_custkey(#0)",
+                                    "operator_id": "@3"
+                                  }
+                                ],
+                                "columns": [
+                                  "c_custkey(#0)",
+                                  "count(orders.o_orderkey)(#17)"
+                                ],
+                                "operator_id": "@4"
+                              }
+                            ],
+                            "columns": [
+                              "c_custkey(#0)",
+                              "count(orders.o_orderkey)(#17)"
+                            ],
+                            "operator_id": "@5"
+                          }
+                        ],
+                        "defs": [
+                          "c_custkey(#18) <- c_custkey(#0)",
+                          "c_count(#19) <- count(orders.o_orderkey)(#17)"
+                        ],
+                        "operator_id": "@6"
+                      }
+                    ],
+                    "aggregates": [
+                      "count(Int64(1))(#20) := count_star()"
+                    ],
+                    "keys": "c_count(#19)",
+                    "operator_id": "@7"
+                  }
+                ],
+                "columns": [
+                  "c_count(#19)",
+                  "count(Int64(1))(#20)"
+                ],
+                "operator_id": "@8"
+              }
+            ],
+            "keys": [
+              "count(Int64(1))(#20) Desc NullsFirst",
+              "c_count(#19) Desc NullsFirst"
+            ],
+            "operator_id": "@9"
+          }
+        ],
+        "fetch": "10",
+        "offset": "0",
+        "operator_id": "@10"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "limit",
+        "title": "τ Limit",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "sort",
+            "title": "⇞ Sort",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "projection",
+                "title": "π Projection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "aggregation",
+                    "title": "γ Aggregation",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "rename",
+                        "title": "ρ Rename(c_orders)",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "projection",
+                            "title": "π Projection",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "projection",
+                                "title": "π Projection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "aggregation",
+                                    "title": "γ Aggregation",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "join",
+                                        "title": "⟕ LeftOuterJoin",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "customer",
+                                            "columns": [
+                                              "c_custkey(#0)",
+                                              "c_name(#1)",
+                                              "c_address(#2)",
+                                              "c_nationkey(#3)",
+                                              "c_phone(#4)",
+                                              "c_acctbal(#5)",
+                                              "c_mktsegment(#6)",
+                                              "c_comment(#7)"
+                                            ],
+                                            "operator_id": "@0",
+                                            "table_name": "customer"
+                                          },
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "orders",
+                                            "columns": [
+                                              "o_orderkey(#8)",
+                                              "o_custkey(#9)",
+                                              "o_orderstatus(#10)",
+                                              "o_totalprice(#11)",
+                                              "o_orderdate(#12)",
+                                              "o_orderpriority(#13)",
+                                              "o_clerk(#14)",
+                                              "o_shippriority(#15)",
+                                              "o_comment(#16)"
+                                            ],
+                                            "operator_id": "@1",
+                                            "table_name": "orders"
+                                          }
+                                        ],
+                                        "condition": "((c_custkey(#0) = o_custkey(#9)) AND (o_comment(#16) NOT LIKE \"%special%requests%\"))",
+                                        "join_type": "LeftOuter",
+                                        "operator_id": "@2"
+                                      }
+                                    ],
+                                    "aggregates": [
+                                      "count(orders.o_orderkey)(#17) := count(o_orderkey(#8))"
+                                    ],
+                                    "keys": "c_custkey(#0)",
+                                    "operator_id": "@3"
+                                  }
+                                ],
+                                "columns": [
+                                  "c_custkey(#0)",
+                                  "count(orders.o_orderkey)(#17)"
+                                ],
+                                "operator_id": "@4"
+                              }
+                            ],
+                            "columns": [
+                              "c_custkey(#0)",
+                              "count(orders.o_orderkey)(#17)"
+                            ],
+                            "operator_id": "@5"
+                          }
+                        ],
+                        "defs": [
+                          "c_custkey(#18) <- c_custkey(#0)",
+                          "c_count(#19) <- count(orders.o_orderkey)(#17)"
+                        ],
+                        "operator_id": "@6"
+                      }
+                    ],
+                    "aggregates": [
+                      "count(Int64(1))(#20) := count_star()"
+                    ],
+                    "keys": "c_count(#19)",
+                    "operator_id": "@7"
+                  }
+                ],
+                "columns": [
+                  "c_count(#19)",
+                  "count(Int64(1))(#20)"
+                ],
+                "operator_id": "@8"
+              }
+            ],
+            "keys": [
+              "count(Int64(1))(#20) Desc NullsFirst",
+              "c_count(#19) Desc NullsFirst"
+            ],
+            "operator_id": "@9"
+          }
+        ],
+        "fetch": "10",
+        "offset": "0",
+        "operator_id": "@10"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "limit",
+        "title": "τ Limit",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "sort",
+            "title": "⇞ Sort",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "projection",
+                "title": "π Projection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "aggregation",
+                    "title": "γ Aggregation",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "rename",
+                        "title": "ρ Rename(c_orders)",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "projection",
+                            "title": "π Projection",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "projection",
+                                "title": "π Projection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "aggregation",
+                                    "title": "γ Aggregation",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "join",
+                                        "title": "⟕ LeftOuterJoin",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "customer",
+                                            "columns": [
+                                              "c_custkey(#0)",
+                                              "c_name(#1)",
+                                              "c_address(#2)",
+                                              "c_nationkey(#3)",
+                                              "c_phone(#4)",
+                                              "c_acctbal(#5)",
+                                              "c_mktsegment(#6)",
+                                              "c_comment(#7)"
+                                            ],
+                                            "operator_id": "@0",
+                                            "table_name": "customer"
+                                          },
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "orders",
+                                            "columns": [
+                                              "o_orderkey(#8)",
+                                              "o_custkey(#9)",
+                                              "o_orderstatus(#10)",
+                                              "o_totalprice(#11)",
+                                              "o_orderdate(#12)",
+                                              "o_orderpriority(#13)",
+                                              "o_clerk(#14)",
+                                              "o_shippriority(#15)",
+                                              "o_comment(#16)"
+                                            ],
+                                            "operator_id": "@1",
+                                            "table_name": "orders"
+                                          }
+                                        ],
+                                        "condition": "((c_custkey(#0) = o_custkey(#9)) AND (o_comment(#16) NOT LIKE \"%special%requests%\"))",
+                                        "join_type": "LeftOuter",
+                                        "operator_id": "@2"
+                                      }
+                                    ],
+                                    "aggregates": [
+                                      "count(orders.o_orderkey)(#17) := count(o_orderkey(#8))"
+                                    ],
+                                    "keys": "c_custkey(#0)",
+                                    "operator_id": "@3"
+                                  }
+                                ],
+                                "columns": [
+                                  "c_custkey(#0)",
+                                  "count(orders.o_orderkey)(#17)"
+                                ],
+                                "operator_id": "@4"
+                              }
+                            ],
+                            "columns": [
+                              "c_custkey(#0)",
+                              "count(orders.o_orderkey)(#17)"
+                            ],
+                            "operator_id": "@5"
+                          }
+                        ],
+                        "defs": [
+                          "c_custkey(#18) <- c_custkey(#0)",
+                          "c_count(#19) <- count(orders.o_orderkey)(#17)"
+                        ],
+                        "operator_id": "@6"
+                      }
+                    ],
+                    "aggregates": [
+                      "count(Int64(1))(#20) := count_star()"
+                    ],
+                    "keys": "c_count(#19)",
+                    "operator_id": "@7"
+                  }
+                ],
+                "columns": [
+                  "c_count(#19)",
+                  "count(Int64(1))(#20)"
+                ],
+                "operator_id": "@8"
+              }
+            ],
+            "keys": [
+              "count(Int64(1))(#20) Desc NullsFirst",
+              "c_count(#19) Desc NullsFirst"
+            ],
+            "operator_id": "@9"
+          }
+        ],
+        "fetch": "10",
+        "offset": "0",
+        "operator_id": "@10"
+      }
+    }
+  ],
+  "query": "select\n    c_count,\n    count(*) as custdist\nfrom\n    (\n        select\n            c_custkey,\n            count(o_orderkey)\n        from\n            customer left outer join orders on\n                        c_custkey = o_custkey\n                    and o_comment not like '%special%requests%'\n        group by\n            c_custkey\n    ) as c_orders (c_custkey, c_count)\ngroup by\n    c_count\norder by\n    custdist desc,\n    c_count desc\nlimit 10;"
+}

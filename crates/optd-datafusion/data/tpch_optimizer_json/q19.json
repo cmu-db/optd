@@ -1,0 +1,455 @@
+{
+  "passes": [
+    {
+      "passName": "Initial",
+      "root": {
+        "op": "projection",
+        "title": "π Projection",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "aggregation",
+            "title": "γ Aggregation",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "selection",
+                "title": "σ Selection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⋈ InnerJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "scan",
+                        "title": "⊞ Scan",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "table": "lineitem",
+                        "columns": [
+                          "l_orderkey(#0)",
+                          "l_partkey(#1)",
+                          "l_suppkey(#2)",
+                          "l_linenumber(#3)",
+                          "l_quantity(#4)",
+                          "l_extendedprice(#5)",
+                          "l_discount(#6)",
+                          "l_tax(#7)",
+                          "l_returnflag(#8)",
+                          "l_linestatus(#9)",
+                          "l_shipdate(#10)",
+                          "l_commitdate(#11)",
+                          "l_receiptdate(#12)",
+                          "l_shipinstruct(#13)",
+                          "l_shipmode(#14)",
+                          "l_comment(#15)"
+                        ],
+                        "operator_id": "@0",
+                        "table_name": "lineitem"
+                      },
+                      {
+                        "op": "scan",
+                        "title": "⊞ Scan",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "table": "part",
+                        "columns": [
+                          "p_partkey(#16)",
+                          "p_name(#17)",
+                          "p_mfgr(#18)",
+                          "p_brand(#19)",
+                          "p_type(#20)",
+                          "p_size(#21)",
+                          "p_container(#22)",
+                          "p_retailprice(#23)",
+                          "p_comment(#24)"
+                        ],
+                        "operator_id": "@1",
+                        "table_name": "part"
+                      }
+                    ],
+                    "condition": "true",
+                    "join_type": "Inner",
+                    "operator_id": "@2"
+                  }
+                ],
+                "operator_id": "@3",
+                "predicate": "((((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#12\")) AND ((p_container(#22) = \"SM CASE\") OR (p_container(#22) = \"SM BOX\") OR (p_container(#22) = \"SM PACK\") OR (p_container(#22) = \"SM PKG\"))) AND (l_quantity(#4) >= 1)) AND (l_quantity(#4) <= (1 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 5))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\")) OR ((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#23\")) AND ((p_container(#22) = \"MED BAG\") OR (p_container(#22) = \"MED BOX\") OR (p_container(#22) = \"MED PKG\") OR (p_container(#22) = \"MED PACK\"))) AND (l_quantity(#4) >= 10)) AND (l_quantity(#4) <= (10 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 10))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\"))) OR ((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#34\")) AND ((p_container(#22) = \"LG CASE\") OR (p_container(#22) = \"LG BOX\") OR (p_container(#22) = \"LG PACK\") OR (p_container(#22) = \"LG PKG\"))) AND (l_quantity(#4) >= 20)) AND (l_quantity(#4) <= (20 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 15))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\")))"
+              }
+            ],
+            "aggregates": [
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#25) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))"
+            ],
+            "keys": "",
+            "operator_id": "@4"
+          }
+        ],
+        "columns": [
+          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#25)"
+        ],
+        "operator_id": "@5"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "projection",
+        "title": "π Projection",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "aggregation",
+            "title": "γ Aggregation",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "selection",
+                "title": "σ Selection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⋈ InnerJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "scan",
+                        "title": "⊞ Scan",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "table": "lineitem",
+                        "columns": [
+                          "l_orderkey(#0)",
+                          "l_partkey(#1)",
+                          "l_suppkey(#2)",
+                          "l_linenumber(#3)",
+                          "l_quantity(#4)",
+                          "l_extendedprice(#5)",
+                          "l_discount(#6)",
+                          "l_tax(#7)",
+                          "l_returnflag(#8)",
+                          "l_linestatus(#9)",
+                          "l_shipdate(#10)",
+                          "l_commitdate(#11)",
+                          "l_receiptdate(#12)",
+                          "l_shipinstruct(#13)",
+                          "l_shipmode(#14)",
+                          "l_comment(#15)"
+                        ],
+                        "operator_id": "@0",
+                        "table_name": "lineitem"
+                      },
+                      {
+                        "op": "scan",
+                        "title": "⊞ Scan",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "table": "part",
+                        "columns": [
+                          "p_partkey(#16)",
+                          "p_name(#17)",
+                          "p_mfgr(#18)",
+                          "p_brand(#19)",
+                          "p_type(#20)",
+                          "p_size(#21)",
+                          "p_container(#22)",
+                          "p_retailprice(#23)",
+                          "p_comment(#24)"
+                        ],
+                        "operator_id": "@1",
+                        "table_name": "part"
+                      }
+                    ],
+                    "condition": "true",
+                    "join_type": "Inner",
+                    "operator_id": "@2"
+                  }
+                ],
+                "operator_id": "@3",
+                "predicate": "((((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#12\")) AND ((p_container(#22) = \"SM CASE\") OR (p_container(#22) = \"SM BOX\") OR (p_container(#22) = \"SM PACK\") OR (p_container(#22) = \"SM PKG\"))) AND (l_quantity(#4) >= 1)) AND (l_quantity(#4) <= (1 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 5))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\")) OR ((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#23\")) AND ((p_container(#22) = \"MED BAG\") OR (p_container(#22) = \"MED BOX\") OR (p_container(#22) = \"MED PKG\") OR (p_container(#22) = \"MED PACK\"))) AND (l_quantity(#4) >= 10)) AND (l_quantity(#4) <= (10 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 10))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\"))) OR ((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#34\")) AND ((p_container(#22) = \"LG CASE\") OR (p_container(#22) = \"LG BOX\") OR (p_container(#22) = \"LG PACK\") OR (p_container(#22) = \"LG PKG\"))) AND (l_quantity(#4) >= 20)) AND (l_quantity(#4) <= (20 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 15))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\")))"
+              }
+            ],
+            "aggregates": [
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#25) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))"
+            ],
+            "keys": "",
+            "operator_id": "@4"
+          }
+        ],
+        "columns": [
+          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#25)"
+        ],
+        "operator_id": "@5"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "projection",
+        "title": "π Projection",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "aggregation",
+            "title": "γ Aggregation",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "join",
+                "title": "⋈ InnerJoin",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "scan",
+                    "title": "⊞ Scan",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "table": "lineitem",
+                    "columns": [
+                      "l_orderkey(#0)",
+                      "l_partkey(#1)",
+                      "l_suppkey(#2)",
+                      "l_linenumber(#3)",
+                      "l_quantity(#4)",
+                      "l_extendedprice(#5)",
+                      "l_discount(#6)",
+                      "l_tax(#7)",
+                      "l_returnflag(#8)",
+                      "l_linestatus(#9)",
+                      "l_shipdate(#10)",
+                      "l_commitdate(#11)",
+                      "l_receiptdate(#12)",
+                      "l_shipinstruct(#13)",
+                      "l_shipmode(#14)",
+                      "l_comment(#15)"
+                    ],
+                    "operator_id": "@0",
+                    "table_name": "lineitem"
+                  },
+                  {
+                    "op": "scan",
+                    "title": "⊞ Scan",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "table": "part",
+                    "columns": [
+                      "p_partkey(#16)",
+                      "p_name(#17)",
+                      "p_mfgr(#18)",
+                      "p_brand(#19)",
+                      "p_type(#20)",
+                      "p_size(#21)",
+                      "p_container(#22)",
+                      "p_retailprice(#23)",
+                      "p_comment(#24)"
+                    ],
+                    "operator_id": "@1",
+                    "table_name": "part"
+                  }
+                ],
+                "condition": "(true AND ((((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#12\")) AND ((p_container(#22) = \"SM CASE\") OR (p_container(#22) = \"SM BOX\") OR (p_container(#22) = \"SM PACK\") OR (p_container(#22) = \"SM PKG\"))) AND (l_quantity(#4) >= 1)) AND (l_quantity(#4) <= (1 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 5))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\")) OR ((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#23\")) AND ((p_container(#22) = \"MED BAG\") OR (p_container(#22) = \"MED BOX\") OR (p_container(#22) = \"MED PKG\") OR (p_container(#22) = \"MED PACK\"))) AND (l_quantity(#4) >= 10)) AND (l_quantity(#4) <= (10 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 10))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\"))) OR ((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#34\")) AND ((p_container(#22) = \"LG CASE\") OR (p_container(#22) = \"LG BOX\") OR (p_container(#22) = \"LG PACK\") OR (p_container(#22) = \"LG PKG\"))) AND (l_quantity(#4) >= 20)) AND (l_quantity(#4) <= (20 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 15))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\"))))",
+                "join_type": "Inner",
+                "operator_id": "@6"
+              }
+            ],
+            "aggregates": [
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#25) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))"
+            ],
+            "keys": "",
+            "operator_id": "@7"
+          }
+        ],
+        "columns": [
+          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#25)"
+        ],
+        "operator_id": "@8"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "projection",
+        "title": "π Projection",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "aggregation",
+            "title": "γ Aggregation",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "join",
+                "title": "⋈ InnerJoin",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "scan",
+                    "title": "⊞ Scan",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "table": "lineitem",
+                    "columns": [
+                      "l_orderkey(#0)",
+                      "l_partkey(#1)",
+                      "l_suppkey(#2)",
+                      "l_linenumber(#3)",
+                      "l_quantity(#4)",
+                      "l_extendedprice(#5)",
+                      "l_discount(#6)",
+                      "l_tax(#7)",
+                      "l_returnflag(#8)",
+                      "l_linestatus(#9)",
+                      "l_shipdate(#10)",
+                      "l_commitdate(#11)",
+                      "l_receiptdate(#12)",
+                      "l_shipinstruct(#13)",
+                      "l_shipmode(#14)",
+                      "l_comment(#15)"
+                    ],
+                    "operator_id": "@0",
+                    "table_name": "lineitem"
+                  },
+                  {
+                    "op": "scan",
+                    "title": "⊞ Scan",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "table": "part",
+                    "columns": [
+                      "p_partkey(#16)",
+                      "p_name(#17)",
+                      "p_mfgr(#18)",
+                      "p_brand(#19)",
+                      "p_type(#20)",
+                      "p_size(#21)",
+                      "p_container(#22)",
+                      "p_retailprice(#23)",
+                      "p_comment(#24)"
+                    ],
+                    "operator_id": "@1",
+                    "table_name": "part"
+                  }
+                ],
+                "condition": "(true AND ((((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#12\")) AND ((p_container(#22) = \"SM CASE\") OR (p_container(#22) = \"SM BOX\") OR (p_container(#22) = \"SM PACK\") OR (p_container(#22) = \"SM PKG\"))) AND (l_quantity(#4) >= 1)) AND (l_quantity(#4) <= (1 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 5))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\")) OR ((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#23\")) AND ((p_container(#22) = \"MED BAG\") OR (p_container(#22) = \"MED BOX\") OR (p_container(#22) = \"MED PKG\") OR (p_container(#22) = \"MED PACK\"))) AND (l_quantity(#4) >= 10)) AND (l_quantity(#4) <= (10 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 10))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\"))) OR ((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#34\")) AND ((p_container(#22) = \"LG CASE\") OR (p_container(#22) = \"LG BOX\") OR (p_container(#22) = \"LG PACK\") OR (p_container(#22) = \"LG PKG\"))) AND (l_quantity(#4) >= 20)) AND (l_quantity(#4) <= (20 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 15))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\"))))",
+                "join_type": "Inner",
+                "operator_id": "@6"
+              }
+            ],
+            "aggregates": [
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#25) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))"
+            ],
+            "keys": "",
+            "operator_id": "@7"
+          }
+        ],
+        "columns": [
+          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#25)"
+        ],
+        "operator_id": "@8"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "projection",
+        "title": "π Projection",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "aggregation",
+            "title": "γ Aggregation",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "join",
+                "title": "⋈ InnerJoin",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "scan",
+                    "title": "⊞ Scan",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "table": "lineitem",
+                    "columns": [
+                      "l_orderkey(#0)",
+                      "l_partkey(#1)",
+                      "l_suppkey(#2)",
+                      "l_linenumber(#3)",
+                      "l_quantity(#4)",
+                      "l_extendedprice(#5)",
+                      "l_discount(#6)",
+                      "l_tax(#7)",
+                      "l_returnflag(#8)",
+                      "l_linestatus(#9)",
+                      "l_shipdate(#10)",
+                      "l_commitdate(#11)",
+                      "l_receiptdate(#12)",
+                      "l_shipinstruct(#13)",
+                      "l_shipmode(#14)",
+                      "l_comment(#15)"
+                    ],
+                    "operator_id": "@0",
+                    "table_name": "lineitem"
+                  },
+                  {
+                    "op": "scan",
+                    "title": "⊞ Scan",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "table": "part",
+                    "columns": [
+                      "p_partkey(#16)",
+                      "p_name(#17)",
+                      "p_mfgr(#18)",
+                      "p_brand(#19)",
+                      "p_type(#20)",
+                      "p_size(#21)",
+                      "p_container(#22)",
+                      "p_retailprice(#23)",
+                      "p_comment(#24)"
+                    ],
+                    "operator_id": "@1",
+                    "table_name": "part"
+                  }
+                ],
+                "condition": "(true AND ((((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#12\")) AND ((p_container(#22) = \"SM CASE\") OR (p_container(#22) = \"SM BOX\") OR (p_container(#22) = \"SM PACK\") OR (p_container(#22) = \"SM PKG\"))) AND (l_quantity(#4) >= 1)) AND (l_quantity(#4) <= (1 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 5))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\")) OR ((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#23\")) AND ((p_container(#22) = \"MED BAG\") OR (p_container(#22) = \"MED BOX\") OR (p_container(#22) = \"MED PKG\") OR (p_container(#22) = \"MED PACK\"))) AND (l_quantity(#4) >= 10)) AND (l_quantity(#4) <= (10 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 10))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\"))) OR ((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#34\")) AND ((p_container(#22) = \"LG CASE\") OR (p_container(#22) = \"LG BOX\") OR (p_container(#22) = \"LG PACK\") OR (p_container(#22) = \"LG PKG\"))) AND (l_quantity(#4) >= 20)) AND (l_quantity(#4) <= (20 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 15))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\"))))",
+                "join_type": "Inner",
+                "operator_id": "@6"
+              }
+            ],
+            "aggregates": [
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#25) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))"
+            ],
+            "keys": "",
+            "operator_id": "@7"
+          }
+        ],
+        "columns": [
+          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#25)"
+        ],
+        "operator_id": "@8"
+      }
+    }
+  ],
+  "query": "select\n    sum(l_extendedprice* (1 - l_discount)) as revenue\nfrom\n    lineitem,\n    part\nwhere\n    (\n                p_partkey = l_partkey\n            and p_brand = 'Brand#12'\n            and p_container in ('SM CASE', 'SM BOX', 'SM PACK', 'SM PKG')\n            and l_quantity >= 1 and l_quantity <= 1 + 10\n            and p_size between 1 and 5\n            and l_shipmode in ('AIR', 'AIR REG')\n            and l_shipinstruct = 'DELIVER IN PERSON'\n        )\n   or\n    (\n                p_partkey = l_partkey\n            and p_brand = 'Brand#23'\n            and p_container in ('MED BAG', 'MED BOX', 'MED PKG', 'MED PACK')\n            and l_quantity >= 10 and l_quantity <= 10 + 10\n            and p_size between 1 and 10\n            and l_shipmode in ('AIR', 'AIR REG')\n            and l_shipinstruct = 'DELIVER IN PERSON'\n        )\n   or\n    (\n                p_partkey = l_partkey\n            and p_brand = 'Brand#34'\n            and p_container in ('LG CASE', 'LG BOX', 'LG PACK', 'LG PKG')\n            and l_quantity >= 20 and l_quantity <= 20 + 10\n            and p_size between 1 and 15\n            and l_shipmode in ('AIR', 'AIR REG')\n            and l_shipinstruct = 'DELIVER IN PERSON'\n        );"
+}

@@ -1,0 +1,2962 @@
+{
+  "passes": [
+    {
+      "passName": "Initial",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "selection",
+                    "title": "σ Selection",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "join",
+                        "title": "⋈ InnerJoin",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "join",
+                            "title": "⋈ InnerJoin",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "join",
+                                "title": "⋈ InnerJoin",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "join",
+                                    "title": "⋈ InnerJoin",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "join",
+                                        "title": "⋈ InnerJoin",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "customer",
+                                            "columns": [
+                                              "c_custkey(#0)",
+                                              "c_name(#1)",
+                                              "c_address(#2)",
+                                              "c_nationkey(#3)",
+                                              "c_phone(#4)",
+                                              "c_acctbal(#5)",
+                                              "c_mktsegment(#6)",
+                                              "c_comment(#7)"
+                                            ],
+                                            "operator_id": "@0",
+                                            "table_name": "customer"
+                                          },
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "orders",
+                                            "columns": [
+                                              "o_orderkey(#8)",
+                                              "o_custkey(#9)",
+                                              "o_orderstatus(#10)",
+                                              "o_totalprice(#11)",
+                                              "o_orderdate(#12)",
+                                              "o_orderpriority(#13)",
+                                              "o_clerk(#14)",
+                                              "o_shippriority(#15)",
+                                              "o_comment(#16)"
+                                            ],
+                                            "operator_id": "@1",
+                                            "table_name": "orders"
+                                          }
+                                        ],
+                                        "condition": "true",
+                                        "join_type": "Inner",
+                                        "operator_id": "@2"
+                                      },
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "lineitem",
+                                        "columns": [
+                                          "l_orderkey(#17)",
+                                          "l_partkey(#18)",
+                                          "l_suppkey(#19)",
+                                          "l_linenumber(#20)",
+                                          "l_quantity(#21)",
+                                          "l_extendedprice(#22)",
+                                          "l_discount(#23)",
+                                          "l_tax(#24)",
+                                          "l_returnflag(#25)",
+                                          "l_linestatus(#26)",
+                                          "l_shipdate(#27)",
+                                          "l_commitdate(#28)",
+                                          "l_receiptdate(#29)",
+                                          "l_shipinstruct(#30)",
+                                          "l_shipmode(#31)",
+                                          "l_comment(#32)"
+                                        ],
+                                        "operator_id": "@3",
+                                        "table_name": "lineitem"
+                                      }
+                                    ],
+                                    "condition": "true",
+                                    "join_type": "Inner",
+                                    "operator_id": "@4"
+                                  },
+                                  {
+                                    "op": "scan",
+                                    "title": "⊞ Scan",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "table": "supplier",
+                                    "columns": [
+                                      "s_suppkey(#33)",
+                                      "s_name(#34)",
+                                      "s_address(#35)",
+                                      "s_nationkey(#36)",
+                                      "s_phone(#37)",
+                                      "s_acctbal(#38)",
+                                      "s_comment(#39)"
+                                    ],
+                                    "operator_id": "@5",
+                                    "table_name": "supplier"
+                                  }
+                                ],
+                                "condition": "true",
+                                "join_type": "Inner",
+                                "operator_id": "@6"
+                              },
+                              {
+                                "op": "scan",
+                                "title": "⊞ Scan",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "table": "nation",
+                                "columns": [
+                                  "n_nationkey(#40)",
+                                  "n_name(#41)",
+                                  "n_regionkey(#42)",
+                                  "n_comment(#43)"
+                                ],
+                                "operator_id": "@7",
+                                "table_name": "nation"
+                              }
+                            ],
+                            "condition": "true",
+                            "join_type": "Inner",
+                            "operator_id": "@8"
+                          },
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "region",
+                            "columns": [
+                              "r_regionkey(#44)",
+                              "r_name(#45)",
+                              "r_comment(#46)"
+                            ],
+                            "operator_id": "@9",
+                            "table_name": "region"
+                          }
+                        ],
+                        "condition": "true",
+                        "join_type": "Inner",
+                        "operator_id": "@10"
+                      }
+                    ],
+                    "operator_id": "@11",
+                    "predicate": "(((((((((c_custkey(#0) = o_custkey(#9)) AND (l_orderkey(#17) = o_orderkey(#8))) AND (l_suppkey(#19) = s_suppkey(#33))) AND (c_nationkey(#3) = s_nationkey(#36))) AND (s_nationkey(#36) = n_nationkey(#40))) AND (n_regionkey(#42) = r_regionkey(#44))) AND (r_name(#45) = \"ASIA\")) AND (o_orderdate(#12) >= CAST(\"1994-01-01\" AS Date32))) AND (o_orderdate(#12) < CAST(\"1995-01-01\" AS Date32)))"
+                  }
+                ],
+                "aggregates": [
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
+                ],
+                "keys": "n_name(#41)",
+                "operator_id": "@12"
+              }
+            ],
+            "columns": [
+              "n_name(#41)",
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47)"
+            ],
+            "operator_id": "@13"
+          }
+        ],
+        "keys": [
+          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) Desc NullsFirst"
+        ],
+        "operator_id": "@14"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "selection",
+                    "title": "σ Selection",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "join",
+                        "title": "⋈ InnerJoin",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "join",
+                            "title": "⋈ InnerJoin",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "join",
+                                "title": "⋈ InnerJoin",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "join",
+                                    "title": "⋈ InnerJoin",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "join",
+                                        "title": "⋈ InnerJoin",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "customer",
+                                            "columns": [
+                                              "c_custkey(#0)",
+                                              "c_name(#1)",
+                                              "c_address(#2)",
+                                              "c_nationkey(#3)",
+                                              "c_phone(#4)",
+                                              "c_acctbal(#5)",
+                                              "c_mktsegment(#6)",
+                                              "c_comment(#7)"
+                                            ],
+                                            "operator_id": "@0",
+                                            "table_name": "customer"
+                                          },
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "orders",
+                                            "columns": [
+                                              "o_orderkey(#8)",
+                                              "o_custkey(#9)",
+                                              "o_orderstatus(#10)",
+                                              "o_totalprice(#11)",
+                                              "o_orderdate(#12)",
+                                              "o_orderpriority(#13)",
+                                              "o_clerk(#14)",
+                                              "o_shippriority(#15)",
+                                              "o_comment(#16)"
+                                            ],
+                                            "operator_id": "@1",
+                                            "table_name": "orders"
+                                          }
+                                        ],
+                                        "condition": "true",
+                                        "join_type": "Inner",
+                                        "operator_id": "@2"
+                                      },
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "lineitem",
+                                        "columns": [
+                                          "l_orderkey(#17)",
+                                          "l_partkey(#18)",
+                                          "l_suppkey(#19)",
+                                          "l_linenumber(#20)",
+                                          "l_quantity(#21)",
+                                          "l_extendedprice(#22)",
+                                          "l_discount(#23)",
+                                          "l_tax(#24)",
+                                          "l_returnflag(#25)",
+                                          "l_linestatus(#26)",
+                                          "l_shipdate(#27)",
+                                          "l_commitdate(#28)",
+                                          "l_receiptdate(#29)",
+                                          "l_shipinstruct(#30)",
+                                          "l_shipmode(#31)",
+                                          "l_comment(#32)"
+                                        ],
+                                        "operator_id": "@3",
+                                        "table_name": "lineitem"
+                                      }
+                                    ],
+                                    "condition": "true",
+                                    "join_type": "Inner",
+                                    "operator_id": "@4"
+                                  },
+                                  {
+                                    "op": "scan",
+                                    "title": "⊞ Scan",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "table": "supplier",
+                                    "columns": [
+                                      "s_suppkey(#33)",
+                                      "s_name(#34)",
+                                      "s_address(#35)",
+                                      "s_nationkey(#36)",
+                                      "s_phone(#37)",
+                                      "s_acctbal(#38)",
+                                      "s_comment(#39)"
+                                    ],
+                                    "operator_id": "@5",
+                                    "table_name": "supplier"
+                                  }
+                                ],
+                                "condition": "true",
+                                "join_type": "Inner",
+                                "operator_id": "@6"
+                              },
+                              {
+                                "op": "scan",
+                                "title": "⊞ Scan",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "table": "nation",
+                                "columns": [
+                                  "n_nationkey(#40)",
+                                  "n_name(#41)",
+                                  "n_regionkey(#42)",
+                                  "n_comment(#43)"
+                                ],
+                                "operator_id": "@7",
+                                "table_name": "nation"
+                              }
+                            ],
+                            "condition": "true",
+                            "join_type": "Inner",
+                            "operator_id": "@8"
+                          },
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "region",
+                            "columns": [
+                              "r_regionkey(#44)",
+                              "r_name(#45)",
+                              "r_comment(#46)"
+                            ],
+                            "operator_id": "@9",
+                            "table_name": "region"
+                          }
+                        ],
+                        "condition": "true",
+                        "join_type": "Inner",
+                        "operator_id": "@10"
+                      }
+                    ],
+                    "operator_id": "@11",
+                    "predicate": "(((((((((c_custkey(#0) = o_custkey(#9)) AND (l_orderkey(#17) = o_orderkey(#8))) AND (l_suppkey(#19) = s_suppkey(#33))) AND (c_nationkey(#3) = s_nationkey(#36))) AND (s_nationkey(#36) = n_nationkey(#40))) AND (n_regionkey(#42) = r_regionkey(#44))) AND (r_name(#45) = \"ASIA\")) AND (o_orderdate(#12) >= CAST(\"1994-01-01\" AS Date32))) AND (o_orderdate(#12) < CAST(\"1995-01-01\" AS Date32)))"
+                  }
+                ],
+                "aggregates": [
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
+                ],
+                "keys": "n_name(#41)",
+                "operator_id": "@12"
+              }
+            ],
+            "columns": [
+              "n_name(#41)",
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47)"
+            ],
+            "operator_id": "@13"
+          }
+        ],
+        "keys": [
+          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) Desc NullsFirst"
+        ],
+        "operator_id": "@14"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⋈ InnerJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "join",
+                            "title": "⋈ InnerJoin",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "join",
+                                "title": "⋈ InnerJoin",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "join",
+                                    "title": "⋈ InnerJoin",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "join",
+                                        "title": "⋈ InnerJoin",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "customer",
+                                            "columns": [
+                                              "c_custkey(#0)",
+                                              "c_name(#1)",
+                                              "c_address(#2)",
+                                              "c_nationkey(#3)",
+                                              "c_phone(#4)",
+                                              "c_acctbal(#5)",
+                                              "c_mktsegment(#6)",
+                                              "c_comment(#7)"
+                                            ],
+                                            "operator_id": "@0",
+                                            "table_name": "customer"
+                                          },
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "orders",
+                                            "columns": [
+                                              "o_orderkey(#8)",
+                                              "o_custkey(#9)",
+                                              "o_orderstatus(#10)",
+                                              "o_totalprice(#11)",
+                                              "o_orderdate(#12)",
+                                              "o_orderpriority(#13)",
+                                              "o_clerk(#14)",
+                                              "o_shippriority(#15)",
+                                              "o_comment(#16)"
+                                            ],
+                                            "operator_id": "@1",
+                                            "table_name": "orders"
+                                          }
+                                        ],
+                                        "condition": "true",
+                                        "join_type": "Inner",
+                                        "operator_id": "@2"
+                                      },
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "lineitem",
+                                        "columns": [
+                                          "l_orderkey(#17)",
+                                          "l_partkey(#18)",
+                                          "l_suppkey(#19)",
+                                          "l_linenumber(#20)",
+                                          "l_quantity(#21)",
+                                          "l_extendedprice(#22)",
+                                          "l_discount(#23)",
+                                          "l_tax(#24)",
+                                          "l_returnflag(#25)",
+                                          "l_linestatus(#26)",
+                                          "l_shipdate(#27)",
+                                          "l_commitdate(#28)",
+                                          "l_receiptdate(#29)",
+                                          "l_shipinstruct(#30)",
+                                          "l_shipmode(#31)",
+                                          "l_comment(#32)"
+                                        ],
+                                        "operator_id": "@3",
+                                        "table_name": "lineitem"
+                                      }
+                                    ],
+                                    "condition": "true",
+                                    "join_type": "Inner",
+                                    "operator_id": "@4"
+                                  },
+                                  {
+                                    "op": "scan",
+                                    "title": "⊞ Scan",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "table": "supplier",
+                                    "columns": [
+                                      "s_suppkey(#33)",
+                                      "s_name(#34)",
+                                      "s_address(#35)",
+                                      "s_nationkey(#36)",
+                                      "s_phone(#37)",
+                                      "s_acctbal(#38)",
+                                      "s_comment(#39)"
+                                    ],
+                                    "operator_id": "@5",
+                                    "table_name": "supplier"
+                                  }
+                                ],
+                                "condition": "true",
+                                "join_type": "Inner",
+                                "operator_id": "@6"
+                              },
+                              {
+                                "op": "scan",
+                                "title": "⊞ Scan",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "table": "nation",
+                                "columns": [
+                                  "n_nationkey(#40)",
+                                  "n_name(#41)",
+                                  "n_regionkey(#42)",
+                                  "n_comment(#43)"
+                                ],
+                                "operator_id": "@7",
+                                "table_name": "nation"
+                              }
+                            ],
+                            "condition": "true",
+                            "join_type": "Inner",
+                            "operator_id": "@8"
+                          }
+                        ],
+                        "operator_id": "@15",
+                        "predicate": "((c_custkey(#0) = o_custkey(#9)) AND (l_orderkey(#17) = o_orderkey(#8)) AND (l_suppkey(#19) = s_suppkey(#33)) AND (c_nationkey(#3) = s_nationkey(#36)) AND (s_nationkey(#36) = n_nationkey(#40)) AND (o_orderdate(#12) >= CAST(\"1994-01-01\" AS Date32)) AND (o_orderdate(#12) < CAST(\"1995-01-01\" AS Date32)))"
+                      },
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "region",
+                            "columns": [
+                              "r_regionkey(#44)",
+                              "r_name(#45)",
+                              "r_comment(#46)"
+                            ],
+                            "operator_id": "@9",
+                            "table_name": "region"
+                          }
+                        ],
+                        "operator_id": "@16",
+                        "predicate": "(r_name(#45) = \"ASIA\")"
+                      }
+                    ],
+                    "condition": "(true AND (n_regionkey(#42) = r_regionkey(#44)))",
+                    "join_type": "Inner",
+                    "operator_id": "@17"
+                  }
+                ],
+                "aggregates": [
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
+                ],
+                "keys": "n_name(#41)",
+                "operator_id": "@18"
+              }
+            ],
+            "columns": [
+              "n_name(#41)",
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47)"
+            ],
+            "operator_id": "@19"
+          }
+        ],
+        "keys": [
+          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) Desc NullsFirst"
+        ],
+        "operator_id": "@20"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⋈ InnerJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "join",
+                            "title": "⋈ InnerJoin",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "join",
+                                "title": "⋈ InnerJoin",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "join",
+                                    "title": "⋈ InnerJoin",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "join",
+                                        "title": "⋈ InnerJoin",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "customer",
+                                            "columns": [
+                                              "c_custkey(#0)",
+                                              "c_name(#1)",
+                                              "c_address(#2)",
+                                              "c_nationkey(#3)",
+                                              "c_phone(#4)",
+                                              "c_acctbal(#5)",
+                                              "c_mktsegment(#6)",
+                                              "c_comment(#7)"
+                                            ],
+                                            "operator_id": "@0",
+                                            "table_name": "customer"
+                                          },
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "orders",
+                                            "columns": [
+                                              "o_orderkey(#8)",
+                                              "o_custkey(#9)",
+                                              "o_orderstatus(#10)",
+                                              "o_totalprice(#11)",
+                                              "o_orderdate(#12)",
+                                              "o_orderpriority(#13)",
+                                              "o_clerk(#14)",
+                                              "o_shippriority(#15)",
+                                              "o_comment(#16)"
+                                            ],
+                                            "operator_id": "@1",
+                                            "table_name": "orders"
+                                          }
+                                        ],
+                                        "condition": "true",
+                                        "join_type": "Inner",
+                                        "operator_id": "@2"
+                                      },
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "lineitem",
+                                        "columns": [
+                                          "l_orderkey(#17)",
+                                          "l_partkey(#18)",
+                                          "l_suppkey(#19)",
+                                          "l_linenumber(#20)",
+                                          "l_quantity(#21)",
+                                          "l_extendedprice(#22)",
+                                          "l_discount(#23)",
+                                          "l_tax(#24)",
+                                          "l_returnflag(#25)",
+                                          "l_linestatus(#26)",
+                                          "l_shipdate(#27)",
+                                          "l_commitdate(#28)",
+                                          "l_receiptdate(#29)",
+                                          "l_shipinstruct(#30)",
+                                          "l_shipmode(#31)",
+                                          "l_comment(#32)"
+                                        ],
+                                        "operator_id": "@3",
+                                        "table_name": "lineitem"
+                                      }
+                                    ],
+                                    "condition": "true",
+                                    "join_type": "Inner",
+                                    "operator_id": "@4"
+                                  },
+                                  {
+                                    "op": "scan",
+                                    "title": "⊞ Scan",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "table": "supplier",
+                                    "columns": [
+                                      "s_suppkey(#33)",
+                                      "s_name(#34)",
+                                      "s_address(#35)",
+                                      "s_nationkey(#36)",
+                                      "s_phone(#37)",
+                                      "s_acctbal(#38)",
+                                      "s_comment(#39)"
+                                    ],
+                                    "operator_id": "@5",
+                                    "table_name": "supplier"
+                                  }
+                                ],
+                                "condition": "true",
+                                "join_type": "Inner",
+                                "operator_id": "@6"
+                              },
+                              {
+                                "op": "scan",
+                                "title": "⊞ Scan",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "table": "nation",
+                                "columns": [
+                                  "n_nationkey(#40)",
+                                  "n_name(#41)",
+                                  "n_regionkey(#42)",
+                                  "n_comment(#43)"
+                                ],
+                                "operator_id": "@7",
+                                "table_name": "nation"
+                              }
+                            ],
+                            "condition": "true",
+                            "join_type": "Inner",
+                            "operator_id": "@8"
+                          }
+                        ],
+                        "operator_id": "@15",
+                        "predicate": "((c_custkey(#0) = o_custkey(#9)) AND (l_orderkey(#17) = o_orderkey(#8)) AND (l_suppkey(#19) = s_suppkey(#33)) AND (c_nationkey(#3) = s_nationkey(#36)) AND (s_nationkey(#36) = n_nationkey(#40)) AND (o_orderdate(#12) >= CAST(\"1994-01-01\" AS Date32)) AND (o_orderdate(#12) < CAST(\"1995-01-01\" AS Date32)))"
+                      },
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "region",
+                            "columns": [
+                              "r_regionkey(#44)",
+                              "r_name(#45)",
+                              "r_comment(#46)"
+                            ],
+                            "operator_id": "@9",
+                            "table_name": "region"
+                          }
+                        ],
+                        "operator_id": "@16",
+                        "predicate": "(r_name(#45) = \"ASIA\")"
+                      }
+                    ],
+                    "condition": "(true AND (n_regionkey(#42) = r_regionkey(#44)))",
+                    "join_type": "Inner",
+                    "operator_id": "@17"
+                  }
+                ],
+                "aggregates": [
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
+                ],
+                "keys": "n_name(#41)",
+                "operator_id": "@18"
+              }
+            ],
+            "columns": [
+              "n_name(#41)",
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47)"
+            ],
+            "operator_id": "@19"
+          }
+        ],
+        "keys": [
+          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) Desc NullsFirst"
+        ],
+        "operator_id": "@20"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⋈ InnerJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "join",
+                        "title": "⋈ InnerJoin",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "selection",
+                            "title": "σ Selection",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "join",
+                                "title": "⋈ InnerJoin",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "join",
+                                    "title": "⋈ InnerJoin",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "join",
+                                        "title": "⋈ InnerJoin",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "customer",
+                                            "columns": [
+                                              "c_custkey(#0)",
+                                              "c_name(#1)",
+                                              "c_address(#2)",
+                                              "c_nationkey(#3)",
+                                              "c_phone(#4)",
+                                              "c_acctbal(#5)",
+                                              "c_mktsegment(#6)",
+                                              "c_comment(#7)"
+                                            ],
+                                            "operator_id": "@0",
+                                            "table_name": "customer"
+                                          },
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "orders",
+                                            "columns": [
+                                              "o_orderkey(#8)",
+                                              "o_custkey(#9)",
+                                              "o_orderstatus(#10)",
+                                              "o_totalprice(#11)",
+                                              "o_orderdate(#12)",
+                                              "o_orderpriority(#13)",
+                                              "o_clerk(#14)",
+                                              "o_shippriority(#15)",
+                                              "o_comment(#16)"
+                                            ],
+                                            "operator_id": "@1",
+                                            "table_name": "orders"
+                                          }
+                                        ],
+                                        "condition": "true",
+                                        "join_type": "Inner",
+                                        "operator_id": "@2"
+                                      },
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "lineitem",
+                                        "columns": [
+                                          "l_orderkey(#17)",
+                                          "l_partkey(#18)",
+                                          "l_suppkey(#19)",
+                                          "l_linenumber(#20)",
+                                          "l_quantity(#21)",
+                                          "l_extendedprice(#22)",
+                                          "l_discount(#23)",
+                                          "l_tax(#24)",
+                                          "l_returnflag(#25)",
+                                          "l_linestatus(#26)",
+                                          "l_shipdate(#27)",
+                                          "l_commitdate(#28)",
+                                          "l_receiptdate(#29)",
+                                          "l_shipinstruct(#30)",
+                                          "l_shipmode(#31)",
+                                          "l_comment(#32)"
+                                        ],
+                                        "operator_id": "@3",
+                                        "table_name": "lineitem"
+                                      }
+                                    ],
+                                    "condition": "true",
+                                    "join_type": "Inner",
+                                    "operator_id": "@4"
+                                  },
+                                  {
+                                    "op": "scan",
+                                    "title": "⊞ Scan",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "table": "supplier",
+                                    "columns": [
+                                      "s_suppkey(#33)",
+                                      "s_name(#34)",
+                                      "s_address(#35)",
+                                      "s_nationkey(#36)",
+                                      "s_phone(#37)",
+                                      "s_acctbal(#38)",
+                                      "s_comment(#39)"
+                                    ],
+                                    "operator_id": "@5",
+                                    "table_name": "supplier"
+                                  }
+                                ],
+                                "condition": "true",
+                                "join_type": "Inner",
+                                "operator_id": "@6"
+                              }
+                            ],
+                            "operator_id": "@21",
+                            "predicate": "((c_custkey(#0) = o_custkey(#9)) AND (l_orderkey(#17) = o_orderkey(#8)) AND (l_suppkey(#19) = s_suppkey(#33)) AND (c_nationkey(#3) = s_nationkey(#36)) AND (o_orderdate(#12) >= CAST(\"1994-01-01\" AS Date32)) AND (o_orderdate(#12) < CAST(\"1995-01-01\" AS Date32)))"
+                          },
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "nation",
+                            "columns": [
+                              "n_nationkey(#40)",
+                              "n_name(#41)",
+                              "n_regionkey(#42)",
+                              "n_comment(#43)"
+                            ],
+                            "operator_id": "@7",
+                            "table_name": "nation"
+                          }
+                        ],
+                        "condition": "(true AND (s_nationkey(#36) = n_nationkey(#40)))",
+                        "join_type": "Inner",
+                        "operator_id": "@22"
+                      },
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "region",
+                            "columns": [
+                              "r_regionkey(#44)",
+                              "r_name(#45)",
+                              "r_comment(#46)"
+                            ],
+                            "operator_id": "@9",
+                            "table_name": "region"
+                          }
+                        ],
+                        "operator_id": "@16",
+                        "predicate": "(r_name(#45) = \"ASIA\")"
+                      }
+                    ],
+                    "condition": "(true AND (n_regionkey(#42) = r_regionkey(#44)))",
+                    "join_type": "Inner",
+                    "operator_id": "@23"
+                  }
+                ],
+                "aggregates": [
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
+                ],
+                "keys": "n_name(#41)",
+                "operator_id": "@24"
+              }
+            ],
+            "columns": [
+              "n_name(#41)",
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47)"
+            ],
+            "operator_id": "@25"
+          }
+        ],
+        "keys": [
+          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) Desc NullsFirst"
+        ],
+        "operator_id": "@26"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⋈ InnerJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "join",
+                        "title": "⋈ InnerJoin",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "selection",
+                            "title": "σ Selection",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "join",
+                                "title": "⋈ InnerJoin",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "join",
+                                    "title": "⋈ InnerJoin",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "join",
+                                        "title": "⋈ InnerJoin",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "customer",
+                                            "columns": [
+                                              "c_custkey(#0)",
+                                              "c_name(#1)",
+                                              "c_address(#2)",
+                                              "c_nationkey(#3)",
+                                              "c_phone(#4)",
+                                              "c_acctbal(#5)",
+                                              "c_mktsegment(#6)",
+                                              "c_comment(#7)"
+                                            ],
+                                            "operator_id": "@0",
+                                            "table_name": "customer"
+                                          },
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "orders",
+                                            "columns": [
+                                              "o_orderkey(#8)",
+                                              "o_custkey(#9)",
+                                              "o_orderstatus(#10)",
+                                              "o_totalprice(#11)",
+                                              "o_orderdate(#12)",
+                                              "o_orderpriority(#13)",
+                                              "o_clerk(#14)",
+                                              "o_shippriority(#15)",
+                                              "o_comment(#16)"
+                                            ],
+                                            "operator_id": "@1",
+                                            "table_name": "orders"
+                                          }
+                                        ],
+                                        "condition": "true",
+                                        "join_type": "Inner",
+                                        "operator_id": "@2"
+                                      },
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "lineitem",
+                                        "columns": [
+                                          "l_orderkey(#17)",
+                                          "l_partkey(#18)",
+                                          "l_suppkey(#19)",
+                                          "l_linenumber(#20)",
+                                          "l_quantity(#21)",
+                                          "l_extendedprice(#22)",
+                                          "l_discount(#23)",
+                                          "l_tax(#24)",
+                                          "l_returnflag(#25)",
+                                          "l_linestatus(#26)",
+                                          "l_shipdate(#27)",
+                                          "l_commitdate(#28)",
+                                          "l_receiptdate(#29)",
+                                          "l_shipinstruct(#30)",
+                                          "l_shipmode(#31)",
+                                          "l_comment(#32)"
+                                        ],
+                                        "operator_id": "@3",
+                                        "table_name": "lineitem"
+                                      }
+                                    ],
+                                    "condition": "true",
+                                    "join_type": "Inner",
+                                    "operator_id": "@4"
+                                  },
+                                  {
+                                    "op": "scan",
+                                    "title": "⊞ Scan",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "table": "supplier",
+                                    "columns": [
+                                      "s_suppkey(#33)",
+                                      "s_name(#34)",
+                                      "s_address(#35)",
+                                      "s_nationkey(#36)",
+                                      "s_phone(#37)",
+                                      "s_acctbal(#38)",
+                                      "s_comment(#39)"
+                                    ],
+                                    "operator_id": "@5",
+                                    "table_name": "supplier"
+                                  }
+                                ],
+                                "condition": "true",
+                                "join_type": "Inner",
+                                "operator_id": "@6"
+                              }
+                            ],
+                            "operator_id": "@21",
+                            "predicate": "((c_custkey(#0) = o_custkey(#9)) AND (l_orderkey(#17) = o_orderkey(#8)) AND (l_suppkey(#19) = s_suppkey(#33)) AND (c_nationkey(#3) = s_nationkey(#36)) AND (o_orderdate(#12) >= CAST(\"1994-01-01\" AS Date32)) AND (o_orderdate(#12) < CAST(\"1995-01-01\" AS Date32)))"
+                          },
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "nation",
+                            "columns": [
+                              "n_nationkey(#40)",
+                              "n_name(#41)",
+                              "n_regionkey(#42)",
+                              "n_comment(#43)"
+                            ],
+                            "operator_id": "@7",
+                            "table_name": "nation"
+                          }
+                        ],
+                        "condition": "(true AND (s_nationkey(#36) = n_nationkey(#40)))",
+                        "join_type": "Inner",
+                        "operator_id": "@22"
+                      },
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "region",
+                            "columns": [
+                              "r_regionkey(#44)",
+                              "r_name(#45)",
+                              "r_comment(#46)"
+                            ],
+                            "operator_id": "@9",
+                            "table_name": "region"
+                          }
+                        ],
+                        "operator_id": "@16",
+                        "predicate": "(r_name(#45) = \"ASIA\")"
+                      }
+                    ],
+                    "condition": "(true AND (n_regionkey(#42) = r_regionkey(#44)))",
+                    "join_type": "Inner",
+                    "operator_id": "@23"
+                  }
+                ],
+                "aggregates": [
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
+                ],
+                "keys": "n_name(#41)",
+                "operator_id": "@24"
+              }
+            ],
+            "columns": [
+              "n_name(#41)",
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47)"
+            ],
+            "operator_id": "@25"
+          }
+        ],
+        "keys": [
+          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) Desc NullsFirst"
+        ],
+        "operator_id": "@26"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⋈ InnerJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "join",
+                        "title": "⋈ InnerJoin",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "join",
+                            "title": "⋈ InnerJoin",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "selection",
+                                "title": "σ Selection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "join",
+                                    "title": "⋈ InnerJoin",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "join",
+                                        "title": "⋈ InnerJoin",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "customer",
+                                            "columns": [
+                                              "c_custkey(#0)",
+                                              "c_name(#1)",
+                                              "c_address(#2)",
+                                              "c_nationkey(#3)",
+                                              "c_phone(#4)",
+                                              "c_acctbal(#5)",
+                                              "c_mktsegment(#6)",
+                                              "c_comment(#7)"
+                                            ],
+                                            "operator_id": "@0",
+                                            "table_name": "customer"
+                                          },
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "orders",
+                                            "columns": [
+                                              "o_orderkey(#8)",
+                                              "o_custkey(#9)",
+                                              "o_orderstatus(#10)",
+                                              "o_totalprice(#11)",
+                                              "o_orderdate(#12)",
+                                              "o_orderpriority(#13)",
+                                              "o_clerk(#14)",
+                                              "o_shippriority(#15)",
+                                              "o_comment(#16)"
+                                            ],
+                                            "operator_id": "@1",
+                                            "table_name": "orders"
+                                          }
+                                        ],
+                                        "condition": "true",
+                                        "join_type": "Inner",
+                                        "operator_id": "@2"
+                                      },
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "lineitem",
+                                        "columns": [
+                                          "l_orderkey(#17)",
+                                          "l_partkey(#18)",
+                                          "l_suppkey(#19)",
+                                          "l_linenumber(#20)",
+                                          "l_quantity(#21)",
+                                          "l_extendedprice(#22)",
+                                          "l_discount(#23)",
+                                          "l_tax(#24)",
+                                          "l_returnflag(#25)",
+                                          "l_linestatus(#26)",
+                                          "l_shipdate(#27)",
+                                          "l_commitdate(#28)",
+                                          "l_receiptdate(#29)",
+                                          "l_shipinstruct(#30)",
+                                          "l_shipmode(#31)",
+                                          "l_comment(#32)"
+                                        ],
+                                        "operator_id": "@3",
+                                        "table_name": "lineitem"
+                                      }
+                                    ],
+                                    "condition": "true",
+                                    "join_type": "Inner",
+                                    "operator_id": "@4"
+                                  }
+                                ],
+                                "operator_id": "@27",
+                                "predicate": "((c_custkey(#0) = o_custkey(#9)) AND (l_orderkey(#17) = o_orderkey(#8)) AND (o_orderdate(#12) >= CAST(\"1994-01-01\" AS Date32)) AND (o_orderdate(#12) < CAST(\"1995-01-01\" AS Date32)))"
+                              },
+                              {
+                                "op": "scan",
+                                "title": "⊞ Scan",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "table": "supplier",
+                                "columns": [
+                                  "s_suppkey(#33)",
+                                  "s_name(#34)",
+                                  "s_address(#35)",
+                                  "s_nationkey(#36)",
+                                  "s_phone(#37)",
+                                  "s_acctbal(#38)",
+                                  "s_comment(#39)"
+                                ],
+                                "operator_id": "@5",
+                                "table_name": "supplier"
+                              }
+                            ],
+                            "condition": "(true AND (l_suppkey(#19) = s_suppkey(#33)) AND (c_nationkey(#3) = s_nationkey(#36)))",
+                            "join_type": "Inner",
+                            "operator_id": "@28"
+                          },
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "nation",
+                            "columns": [
+                              "n_nationkey(#40)",
+                              "n_name(#41)",
+                              "n_regionkey(#42)",
+                              "n_comment(#43)"
+                            ],
+                            "operator_id": "@7",
+                            "table_name": "nation"
+                          }
+                        ],
+                        "condition": "(true AND (s_nationkey(#36) = n_nationkey(#40)))",
+                        "join_type": "Inner",
+                        "operator_id": "@29"
+                      },
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "region",
+                            "columns": [
+                              "r_regionkey(#44)",
+                              "r_name(#45)",
+                              "r_comment(#46)"
+                            ],
+                            "operator_id": "@9",
+                            "table_name": "region"
+                          }
+                        ],
+                        "operator_id": "@16",
+                        "predicate": "(r_name(#45) = \"ASIA\")"
+                      }
+                    ],
+                    "condition": "(true AND (n_regionkey(#42) = r_regionkey(#44)))",
+                    "join_type": "Inner",
+                    "operator_id": "@30"
+                  }
+                ],
+                "aggregates": [
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
+                ],
+                "keys": "n_name(#41)",
+                "operator_id": "@31"
+              }
+            ],
+            "columns": [
+              "n_name(#41)",
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47)"
+            ],
+            "operator_id": "@32"
+          }
+        ],
+        "keys": [
+          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) Desc NullsFirst"
+        ],
+        "operator_id": "@33"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⋈ InnerJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "join",
+                        "title": "⋈ InnerJoin",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "join",
+                            "title": "⋈ InnerJoin",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "selection",
+                                "title": "σ Selection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "join",
+                                    "title": "⋈ InnerJoin",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "join",
+                                        "title": "⋈ InnerJoin",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "customer",
+                                            "columns": [
+                                              "c_custkey(#0)",
+                                              "c_name(#1)",
+                                              "c_address(#2)",
+                                              "c_nationkey(#3)",
+                                              "c_phone(#4)",
+                                              "c_acctbal(#5)",
+                                              "c_mktsegment(#6)",
+                                              "c_comment(#7)"
+                                            ],
+                                            "operator_id": "@0",
+                                            "table_name": "customer"
+                                          },
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "orders",
+                                            "columns": [
+                                              "o_orderkey(#8)",
+                                              "o_custkey(#9)",
+                                              "o_orderstatus(#10)",
+                                              "o_totalprice(#11)",
+                                              "o_orderdate(#12)",
+                                              "o_orderpriority(#13)",
+                                              "o_clerk(#14)",
+                                              "o_shippriority(#15)",
+                                              "o_comment(#16)"
+                                            ],
+                                            "operator_id": "@1",
+                                            "table_name": "orders"
+                                          }
+                                        ],
+                                        "condition": "true",
+                                        "join_type": "Inner",
+                                        "operator_id": "@2"
+                                      },
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "lineitem",
+                                        "columns": [
+                                          "l_orderkey(#17)",
+                                          "l_partkey(#18)",
+                                          "l_suppkey(#19)",
+                                          "l_linenumber(#20)",
+                                          "l_quantity(#21)",
+                                          "l_extendedprice(#22)",
+                                          "l_discount(#23)",
+                                          "l_tax(#24)",
+                                          "l_returnflag(#25)",
+                                          "l_linestatus(#26)",
+                                          "l_shipdate(#27)",
+                                          "l_commitdate(#28)",
+                                          "l_receiptdate(#29)",
+                                          "l_shipinstruct(#30)",
+                                          "l_shipmode(#31)",
+                                          "l_comment(#32)"
+                                        ],
+                                        "operator_id": "@3",
+                                        "table_name": "lineitem"
+                                      }
+                                    ],
+                                    "condition": "true",
+                                    "join_type": "Inner",
+                                    "operator_id": "@4"
+                                  }
+                                ],
+                                "operator_id": "@27",
+                                "predicate": "((c_custkey(#0) = o_custkey(#9)) AND (l_orderkey(#17) = o_orderkey(#8)) AND (o_orderdate(#12) >= CAST(\"1994-01-01\" AS Date32)) AND (o_orderdate(#12) < CAST(\"1995-01-01\" AS Date32)))"
+                              },
+                              {
+                                "op": "scan",
+                                "title": "⊞ Scan",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "table": "supplier",
+                                "columns": [
+                                  "s_suppkey(#33)",
+                                  "s_name(#34)",
+                                  "s_address(#35)",
+                                  "s_nationkey(#36)",
+                                  "s_phone(#37)",
+                                  "s_acctbal(#38)",
+                                  "s_comment(#39)"
+                                ],
+                                "operator_id": "@5",
+                                "table_name": "supplier"
+                              }
+                            ],
+                            "condition": "(true AND (l_suppkey(#19) = s_suppkey(#33)) AND (c_nationkey(#3) = s_nationkey(#36)))",
+                            "join_type": "Inner",
+                            "operator_id": "@28"
+                          },
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "nation",
+                            "columns": [
+                              "n_nationkey(#40)",
+                              "n_name(#41)",
+                              "n_regionkey(#42)",
+                              "n_comment(#43)"
+                            ],
+                            "operator_id": "@7",
+                            "table_name": "nation"
+                          }
+                        ],
+                        "condition": "(true AND (s_nationkey(#36) = n_nationkey(#40)))",
+                        "join_type": "Inner",
+                        "operator_id": "@29"
+                      },
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "region",
+                            "columns": [
+                              "r_regionkey(#44)",
+                              "r_name(#45)",
+                              "r_comment(#46)"
+                            ],
+                            "operator_id": "@9",
+                            "table_name": "region"
+                          }
+                        ],
+                        "operator_id": "@16",
+                        "predicate": "(r_name(#45) = \"ASIA\")"
+                      }
+                    ],
+                    "condition": "(true AND (n_regionkey(#42) = r_regionkey(#44)))",
+                    "join_type": "Inner",
+                    "operator_id": "@30"
+                  }
+                ],
+                "aggregates": [
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
+                ],
+                "keys": "n_name(#41)",
+                "operator_id": "@31"
+              }
+            ],
+            "columns": [
+              "n_name(#41)",
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47)"
+            ],
+            "operator_id": "@32"
+          }
+        ],
+        "keys": [
+          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) Desc NullsFirst"
+        ],
+        "operator_id": "@33"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⋈ InnerJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "join",
+                        "title": "⋈ InnerJoin",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "join",
+                            "title": "⋈ InnerJoin",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "join",
+                                "title": "⋈ InnerJoin",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "selection",
+                                    "title": "σ Selection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "join",
+                                        "title": "⋈ InnerJoin",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "customer",
+                                            "columns": [
+                                              "c_custkey(#0)",
+                                              "c_name(#1)",
+                                              "c_address(#2)",
+                                              "c_nationkey(#3)",
+                                              "c_phone(#4)",
+                                              "c_acctbal(#5)",
+                                              "c_mktsegment(#6)",
+                                              "c_comment(#7)"
+                                            ],
+                                            "operator_id": "@0",
+                                            "table_name": "customer"
+                                          },
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "orders",
+                                            "columns": [
+                                              "o_orderkey(#8)",
+                                              "o_custkey(#9)",
+                                              "o_orderstatus(#10)",
+                                              "o_totalprice(#11)",
+                                              "o_orderdate(#12)",
+                                              "o_orderpriority(#13)",
+                                              "o_clerk(#14)",
+                                              "o_shippriority(#15)",
+                                              "o_comment(#16)"
+                                            ],
+                                            "operator_id": "@1",
+                                            "table_name": "orders"
+                                          }
+                                        ],
+                                        "condition": "true",
+                                        "join_type": "Inner",
+                                        "operator_id": "@2"
+                                      }
+                                    ],
+                                    "operator_id": "@34",
+                                    "predicate": "((c_custkey(#0) = o_custkey(#9)) AND (o_orderdate(#12) >= CAST(\"1994-01-01\" AS Date32)) AND (o_orderdate(#12) < CAST(\"1995-01-01\" AS Date32)))"
+                                  },
+                                  {
+                                    "op": "scan",
+                                    "title": "⊞ Scan",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "table": "lineitem",
+                                    "columns": [
+                                      "l_orderkey(#17)",
+                                      "l_partkey(#18)",
+                                      "l_suppkey(#19)",
+                                      "l_linenumber(#20)",
+                                      "l_quantity(#21)",
+                                      "l_extendedprice(#22)",
+                                      "l_discount(#23)",
+                                      "l_tax(#24)",
+                                      "l_returnflag(#25)",
+                                      "l_linestatus(#26)",
+                                      "l_shipdate(#27)",
+                                      "l_commitdate(#28)",
+                                      "l_receiptdate(#29)",
+                                      "l_shipinstruct(#30)",
+                                      "l_shipmode(#31)",
+                                      "l_comment(#32)"
+                                    ],
+                                    "operator_id": "@3",
+                                    "table_name": "lineitem"
+                                  }
+                                ],
+                                "condition": "(true AND (l_orderkey(#17) = o_orderkey(#8)))",
+                                "join_type": "Inner",
+                                "operator_id": "@35"
+                              },
+                              {
+                                "op": "scan",
+                                "title": "⊞ Scan",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "table": "supplier",
+                                "columns": [
+                                  "s_suppkey(#33)",
+                                  "s_name(#34)",
+                                  "s_address(#35)",
+                                  "s_nationkey(#36)",
+                                  "s_phone(#37)",
+                                  "s_acctbal(#38)",
+                                  "s_comment(#39)"
+                                ],
+                                "operator_id": "@5",
+                                "table_name": "supplier"
+                              }
+                            ],
+                            "condition": "(true AND (l_suppkey(#19) = s_suppkey(#33)) AND (c_nationkey(#3) = s_nationkey(#36)))",
+                            "join_type": "Inner",
+                            "operator_id": "@36"
+                          },
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "nation",
+                            "columns": [
+                              "n_nationkey(#40)",
+                              "n_name(#41)",
+                              "n_regionkey(#42)",
+                              "n_comment(#43)"
+                            ],
+                            "operator_id": "@7",
+                            "table_name": "nation"
+                          }
+                        ],
+                        "condition": "(true AND (s_nationkey(#36) = n_nationkey(#40)))",
+                        "join_type": "Inner",
+                        "operator_id": "@37"
+                      },
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "region",
+                            "columns": [
+                              "r_regionkey(#44)",
+                              "r_name(#45)",
+                              "r_comment(#46)"
+                            ],
+                            "operator_id": "@9",
+                            "table_name": "region"
+                          }
+                        ],
+                        "operator_id": "@16",
+                        "predicate": "(r_name(#45) = \"ASIA\")"
+                      }
+                    ],
+                    "condition": "(true AND (n_regionkey(#42) = r_regionkey(#44)))",
+                    "join_type": "Inner",
+                    "operator_id": "@38"
+                  }
+                ],
+                "aggregates": [
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
+                ],
+                "keys": "n_name(#41)",
+                "operator_id": "@39"
+              }
+            ],
+            "columns": [
+              "n_name(#41)",
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47)"
+            ],
+            "operator_id": "@40"
+          }
+        ],
+        "keys": [
+          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) Desc NullsFirst"
+        ],
+        "operator_id": "@41"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⋈ InnerJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "join",
+                        "title": "⋈ InnerJoin",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "join",
+                            "title": "⋈ InnerJoin",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "join",
+                                "title": "⋈ InnerJoin",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "selection",
+                                    "title": "σ Selection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "join",
+                                        "title": "⋈ InnerJoin",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "customer",
+                                            "columns": [
+                                              "c_custkey(#0)",
+                                              "c_name(#1)",
+                                              "c_address(#2)",
+                                              "c_nationkey(#3)",
+                                              "c_phone(#4)",
+                                              "c_acctbal(#5)",
+                                              "c_mktsegment(#6)",
+                                              "c_comment(#7)"
+                                            ],
+                                            "operator_id": "@0",
+                                            "table_name": "customer"
+                                          },
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "orders",
+                                            "columns": [
+                                              "o_orderkey(#8)",
+                                              "o_custkey(#9)",
+                                              "o_orderstatus(#10)",
+                                              "o_totalprice(#11)",
+                                              "o_orderdate(#12)",
+                                              "o_orderpriority(#13)",
+                                              "o_clerk(#14)",
+                                              "o_shippriority(#15)",
+                                              "o_comment(#16)"
+                                            ],
+                                            "operator_id": "@1",
+                                            "table_name": "orders"
+                                          }
+                                        ],
+                                        "condition": "true",
+                                        "join_type": "Inner",
+                                        "operator_id": "@2"
+                                      }
+                                    ],
+                                    "operator_id": "@34",
+                                    "predicate": "((c_custkey(#0) = o_custkey(#9)) AND (o_orderdate(#12) >= CAST(\"1994-01-01\" AS Date32)) AND (o_orderdate(#12) < CAST(\"1995-01-01\" AS Date32)))"
+                                  },
+                                  {
+                                    "op": "scan",
+                                    "title": "⊞ Scan",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "table": "lineitem",
+                                    "columns": [
+                                      "l_orderkey(#17)",
+                                      "l_partkey(#18)",
+                                      "l_suppkey(#19)",
+                                      "l_linenumber(#20)",
+                                      "l_quantity(#21)",
+                                      "l_extendedprice(#22)",
+                                      "l_discount(#23)",
+                                      "l_tax(#24)",
+                                      "l_returnflag(#25)",
+                                      "l_linestatus(#26)",
+                                      "l_shipdate(#27)",
+                                      "l_commitdate(#28)",
+                                      "l_receiptdate(#29)",
+                                      "l_shipinstruct(#30)",
+                                      "l_shipmode(#31)",
+                                      "l_comment(#32)"
+                                    ],
+                                    "operator_id": "@3",
+                                    "table_name": "lineitem"
+                                  }
+                                ],
+                                "condition": "(true AND (l_orderkey(#17) = o_orderkey(#8)))",
+                                "join_type": "Inner",
+                                "operator_id": "@35"
+                              },
+                              {
+                                "op": "scan",
+                                "title": "⊞ Scan",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "table": "supplier",
+                                "columns": [
+                                  "s_suppkey(#33)",
+                                  "s_name(#34)",
+                                  "s_address(#35)",
+                                  "s_nationkey(#36)",
+                                  "s_phone(#37)",
+                                  "s_acctbal(#38)",
+                                  "s_comment(#39)"
+                                ],
+                                "operator_id": "@5",
+                                "table_name": "supplier"
+                              }
+                            ],
+                            "condition": "(true AND (l_suppkey(#19) = s_suppkey(#33)) AND (c_nationkey(#3) = s_nationkey(#36)))",
+                            "join_type": "Inner",
+                            "operator_id": "@36"
+                          },
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "nation",
+                            "columns": [
+                              "n_nationkey(#40)",
+                              "n_name(#41)",
+                              "n_regionkey(#42)",
+                              "n_comment(#43)"
+                            ],
+                            "operator_id": "@7",
+                            "table_name": "nation"
+                          }
+                        ],
+                        "condition": "(true AND (s_nationkey(#36) = n_nationkey(#40)))",
+                        "join_type": "Inner",
+                        "operator_id": "@37"
+                      },
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "region",
+                            "columns": [
+                              "r_regionkey(#44)",
+                              "r_name(#45)",
+                              "r_comment(#46)"
+                            ],
+                            "operator_id": "@9",
+                            "table_name": "region"
+                          }
+                        ],
+                        "operator_id": "@16",
+                        "predicate": "(r_name(#45) = \"ASIA\")"
+                      }
+                    ],
+                    "condition": "(true AND (n_regionkey(#42) = r_regionkey(#44)))",
+                    "join_type": "Inner",
+                    "operator_id": "@38"
+                  }
+                ],
+                "aggregates": [
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
+                ],
+                "keys": "n_name(#41)",
+                "operator_id": "@39"
+              }
+            ],
+            "columns": [
+              "n_name(#41)",
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47)"
+            ],
+            "operator_id": "@40"
+          }
+        ],
+        "keys": [
+          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) Desc NullsFirst"
+        ],
+        "operator_id": "@41"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⋈ InnerJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "join",
+                        "title": "⋈ InnerJoin",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "join",
+                            "title": "⋈ InnerJoin",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "join",
+                                "title": "⋈ InnerJoin",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "join",
+                                    "title": "⋈ InnerJoin",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "customer",
+                                        "columns": [
+                                          "c_custkey(#0)",
+                                          "c_name(#1)",
+                                          "c_address(#2)",
+                                          "c_nationkey(#3)",
+                                          "c_phone(#4)",
+                                          "c_acctbal(#5)",
+                                          "c_mktsegment(#6)",
+                                          "c_comment(#7)"
+                                        ],
+                                        "operator_id": "@0",
+                                        "table_name": "customer"
+                                      },
+                                      {
+                                        "op": "selection",
+                                        "title": "σ Selection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "orders",
+                                            "columns": [
+                                              "o_orderkey(#8)",
+                                              "o_custkey(#9)",
+                                              "o_orderstatus(#10)",
+                                              "o_totalprice(#11)",
+                                              "o_orderdate(#12)",
+                                              "o_orderpriority(#13)",
+                                              "o_clerk(#14)",
+                                              "o_shippriority(#15)",
+                                              "o_comment(#16)"
+                                            ],
+                                            "operator_id": "@1",
+                                            "table_name": "orders"
+                                          }
+                                        ],
+                                        "operator_id": "@42",
+                                        "predicate": "((o_orderdate(#12) >= CAST(\"1994-01-01\" AS Date32)) AND (o_orderdate(#12) < CAST(\"1995-01-01\" AS Date32)))"
+                                      }
+                                    ],
+                                    "condition": "(true AND (c_custkey(#0) = o_custkey(#9)))",
+                                    "join_type": "Inner",
+                                    "operator_id": "@43"
+                                  },
+                                  {
+                                    "op": "scan",
+                                    "title": "⊞ Scan",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "table": "lineitem",
+                                    "columns": [
+                                      "l_orderkey(#17)",
+                                      "l_partkey(#18)",
+                                      "l_suppkey(#19)",
+                                      "l_linenumber(#20)",
+                                      "l_quantity(#21)",
+                                      "l_extendedprice(#22)",
+                                      "l_discount(#23)",
+                                      "l_tax(#24)",
+                                      "l_returnflag(#25)",
+                                      "l_linestatus(#26)",
+                                      "l_shipdate(#27)",
+                                      "l_commitdate(#28)",
+                                      "l_receiptdate(#29)",
+                                      "l_shipinstruct(#30)",
+                                      "l_shipmode(#31)",
+                                      "l_comment(#32)"
+                                    ],
+                                    "operator_id": "@3",
+                                    "table_name": "lineitem"
+                                  }
+                                ],
+                                "condition": "(true AND (l_orderkey(#17) = o_orderkey(#8)))",
+                                "join_type": "Inner",
+                                "operator_id": "@44"
+                              },
+                              {
+                                "op": "scan",
+                                "title": "⊞ Scan",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "table": "supplier",
+                                "columns": [
+                                  "s_suppkey(#33)",
+                                  "s_name(#34)",
+                                  "s_address(#35)",
+                                  "s_nationkey(#36)",
+                                  "s_phone(#37)",
+                                  "s_acctbal(#38)",
+                                  "s_comment(#39)"
+                                ],
+                                "operator_id": "@5",
+                                "table_name": "supplier"
+                              }
+                            ],
+                            "condition": "(true AND (l_suppkey(#19) = s_suppkey(#33)) AND (c_nationkey(#3) = s_nationkey(#36)))",
+                            "join_type": "Inner",
+                            "operator_id": "@45"
+                          },
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "nation",
+                            "columns": [
+                              "n_nationkey(#40)",
+                              "n_name(#41)",
+                              "n_regionkey(#42)",
+                              "n_comment(#43)"
+                            ],
+                            "operator_id": "@7",
+                            "table_name": "nation"
+                          }
+                        ],
+                        "condition": "(true AND (s_nationkey(#36) = n_nationkey(#40)))",
+                        "join_type": "Inner",
+                        "operator_id": "@46"
+                      },
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "region",
+                            "columns": [
+                              "r_regionkey(#44)",
+                              "r_name(#45)",
+                              "r_comment(#46)"
+                            ],
+                            "operator_id": "@9",
+                            "table_name": "region"
+                          }
+                        ],
+                        "operator_id": "@16",
+                        "predicate": "(r_name(#45) = \"ASIA\")"
+                      }
+                    ],
+                    "condition": "(true AND (n_regionkey(#42) = r_regionkey(#44)))",
+                    "join_type": "Inner",
+                    "operator_id": "@47"
+                  }
+                ],
+                "aggregates": [
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
+                ],
+                "keys": "n_name(#41)",
+                "operator_id": "@48"
+              }
+            ],
+            "columns": [
+              "n_name(#41)",
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47)"
+            ],
+            "operator_id": "@49"
+          }
+        ],
+        "keys": [
+          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) Desc NullsFirst"
+        ],
+        "operator_id": "@50"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⋈ InnerJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "join",
+                        "title": "⋈ InnerJoin",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "join",
+                            "title": "⋈ InnerJoin",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "join",
+                                "title": "⋈ InnerJoin",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "join",
+                                    "title": "⋈ InnerJoin",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "customer",
+                                        "columns": [
+                                          "c_custkey(#0)",
+                                          "c_name(#1)",
+                                          "c_address(#2)",
+                                          "c_nationkey(#3)",
+                                          "c_phone(#4)",
+                                          "c_acctbal(#5)",
+                                          "c_mktsegment(#6)",
+                                          "c_comment(#7)"
+                                        ],
+                                        "operator_id": "@0",
+                                        "table_name": "customer"
+                                      },
+                                      {
+                                        "op": "selection",
+                                        "title": "σ Selection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "orders",
+                                            "columns": [
+                                              "o_orderkey(#8)",
+                                              "o_custkey(#9)",
+                                              "o_orderstatus(#10)",
+                                              "o_totalprice(#11)",
+                                              "o_orderdate(#12)",
+                                              "o_orderpriority(#13)",
+                                              "o_clerk(#14)",
+                                              "o_shippriority(#15)",
+                                              "o_comment(#16)"
+                                            ],
+                                            "operator_id": "@1",
+                                            "table_name": "orders"
+                                          }
+                                        ],
+                                        "operator_id": "@42",
+                                        "predicate": "((o_orderdate(#12) >= CAST(\"1994-01-01\" AS Date32)) AND (o_orderdate(#12) < CAST(\"1995-01-01\" AS Date32)))"
+                                      }
+                                    ],
+                                    "condition": "(true AND (c_custkey(#0) = o_custkey(#9)))",
+                                    "join_type": "Inner",
+                                    "operator_id": "@43"
+                                  },
+                                  {
+                                    "op": "scan",
+                                    "title": "⊞ Scan",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "table": "lineitem",
+                                    "columns": [
+                                      "l_orderkey(#17)",
+                                      "l_partkey(#18)",
+                                      "l_suppkey(#19)",
+                                      "l_linenumber(#20)",
+                                      "l_quantity(#21)",
+                                      "l_extendedprice(#22)",
+                                      "l_discount(#23)",
+                                      "l_tax(#24)",
+                                      "l_returnflag(#25)",
+                                      "l_linestatus(#26)",
+                                      "l_shipdate(#27)",
+                                      "l_commitdate(#28)",
+                                      "l_receiptdate(#29)",
+                                      "l_shipinstruct(#30)",
+                                      "l_shipmode(#31)",
+                                      "l_comment(#32)"
+                                    ],
+                                    "operator_id": "@3",
+                                    "table_name": "lineitem"
+                                  }
+                                ],
+                                "condition": "(true AND (l_orderkey(#17) = o_orderkey(#8)))",
+                                "join_type": "Inner",
+                                "operator_id": "@44"
+                              },
+                              {
+                                "op": "scan",
+                                "title": "⊞ Scan",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "table": "supplier",
+                                "columns": [
+                                  "s_suppkey(#33)",
+                                  "s_name(#34)",
+                                  "s_address(#35)",
+                                  "s_nationkey(#36)",
+                                  "s_phone(#37)",
+                                  "s_acctbal(#38)",
+                                  "s_comment(#39)"
+                                ],
+                                "operator_id": "@5",
+                                "table_name": "supplier"
+                              }
+                            ],
+                            "condition": "(true AND (l_suppkey(#19) = s_suppkey(#33)) AND (c_nationkey(#3) = s_nationkey(#36)))",
+                            "join_type": "Inner",
+                            "operator_id": "@45"
+                          },
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "nation",
+                            "columns": [
+                              "n_nationkey(#40)",
+                              "n_name(#41)",
+                              "n_regionkey(#42)",
+                              "n_comment(#43)"
+                            ],
+                            "operator_id": "@7",
+                            "table_name": "nation"
+                          }
+                        ],
+                        "condition": "(true AND (s_nationkey(#36) = n_nationkey(#40)))",
+                        "join_type": "Inner",
+                        "operator_id": "@46"
+                      },
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "region",
+                            "columns": [
+                              "r_regionkey(#44)",
+                              "r_name(#45)",
+                              "r_comment(#46)"
+                            ],
+                            "operator_id": "@9",
+                            "table_name": "region"
+                          }
+                        ],
+                        "operator_id": "@16",
+                        "predicate": "(r_name(#45) = \"ASIA\")"
+                      }
+                    ],
+                    "condition": "(true AND (n_regionkey(#42) = r_regionkey(#44)))",
+                    "join_type": "Inner",
+                    "operator_id": "@47"
+                  }
+                ],
+                "aggregates": [
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
+                ],
+                "keys": "n_name(#41)",
+                "operator_id": "@48"
+              }
+            ],
+            "columns": [
+              "n_name(#41)",
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47)"
+            ],
+            "operator_id": "@49"
+          }
+        ],
+        "keys": [
+          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) Desc NullsFirst"
+        ],
+        "operator_id": "@50"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⋈ InnerJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "join",
+                        "title": "⋈ InnerJoin",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "join",
+                            "title": "⋈ InnerJoin",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "join",
+                                "title": "⋈ InnerJoin",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "join",
+                                    "title": "⋈ InnerJoin",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "scan",
+                                        "title": "⊞ Scan",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "table": "customer",
+                                        "columns": [
+                                          "c_custkey(#0)",
+                                          "c_name(#1)",
+                                          "c_address(#2)",
+                                          "c_nationkey(#3)",
+                                          "c_phone(#4)",
+                                          "c_acctbal(#5)",
+                                          "c_mktsegment(#6)",
+                                          "c_comment(#7)"
+                                        ],
+                                        "operator_id": "@0",
+                                        "table_name": "customer"
+                                      },
+                                      {
+                                        "op": "selection",
+                                        "title": "σ Selection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "orders",
+                                            "columns": [
+                                              "o_orderkey(#8)",
+                                              "o_custkey(#9)",
+                                              "o_orderstatus(#10)",
+                                              "o_totalprice(#11)",
+                                              "o_orderdate(#12)",
+                                              "o_orderpriority(#13)",
+                                              "o_clerk(#14)",
+                                              "o_shippriority(#15)",
+                                              "o_comment(#16)"
+                                            ],
+                                            "operator_id": "@1",
+                                            "table_name": "orders"
+                                          }
+                                        ],
+                                        "operator_id": "@42",
+                                        "predicate": "((o_orderdate(#12) >= CAST(\"1994-01-01\" AS Date32)) AND (o_orderdate(#12) < CAST(\"1995-01-01\" AS Date32)))"
+                                      }
+                                    ],
+                                    "condition": "(true AND (c_custkey(#0) = o_custkey(#9)))",
+                                    "join_type": "Inner",
+                                    "operator_id": "@43"
+                                  },
+                                  {
+                                    "op": "scan",
+                                    "title": "⊞ Scan",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "table": "lineitem",
+                                    "columns": [
+                                      "l_orderkey(#17)",
+                                      "l_partkey(#18)",
+                                      "l_suppkey(#19)",
+                                      "l_linenumber(#20)",
+                                      "l_quantity(#21)",
+                                      "l_extendedprice(#22)",
+                                      "l_discount(#23)",
+                                      "l_tax(#24)",
+                                      "l_returnflag(#25)",
+                                      "l_linestatus(#26)",
+                                      "l_shipdate(#27)",
+                                      "l_commitdate(#28)",
+                                      "l_receiptdate(#29)",
+                                      "l_shipinstruct(#30)",
+                                      "l_shipmode(#31)",
+                                      "l_comment(#32)"
+                                    ],
+                                    "operator_id": "@3",
+                                    "table_name": "lineitem"
+                                  }
+                                ],
+                                "condition": "(true AND (l_orderkey(#17) = o_orderkey(#8)))",
+                                "join_type": "Inner",
+                                "operator_id": "@44"
+                              },
+                              {
+                                "op": "scan",
+                                "title": "⊞ Scan",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "table": "supplier",
+                                "columns": [
+                                  "s_suppkey(#33)",
+                                  "s_name(#34)",
+                                  "s_address(#35)",
+                                  "s_nationkey(#36)",
+                                  "s_phone(#37)",
+                                  "s_acctbal(#38)",
+                                  "s_comment(#39)"
+                                ],
+                                "operator_id": "@5",
+                                "table_name": "supplier"
+                              }
+                            ],
+                            "condition": "(true AND (l_suppkey(#19) = s_suppkey(#33)) AND (c_nationkey(#3) = s_nationkey(#36)))",
+                            "join_type": "Inner",
+                            "operator_id": "@45"
+                          },
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "nation",
+                            "columns": [
+                              "n_nationkey(#40)",
+                              "n_name(#41)",
+                              "n_regionkey(#42)",
+                              "n_comment(#43)"
+                            ],
+                            "operator_id": "@7",
+                            "table_name": "nation"
+                          }
+                        ],
+                        "condition": "(true AND (s_nationkey(#36) = n_nationkey(#40)))",
+                        "join_type": "Inner",
+                        "operator_id": "@46"
+                      },
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "region",
+                            "columns": [
+                              "r_regionkey(#44)",
+                              "r_name(#45)",
+                              "r_comment(#46)"
+                            ],
+                            "operator_id": "@9",
+                            "table_name": "region"
+                          }
+                        ],
+                        "operator_id": "@16",
+                        "predicate": "(r_name(#45) = \"ASIA\")"
+                      }
+                    ],
+                    "condition": "(true AND (n_regionkey(#42) = r_regionkey(#44)))",
+                    "join_type": "Inner",
+                    "operator_id": "@47"
+                  }
+                ],
+                "aggregates": [
+                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
+                ],
+                "keys": "n_name(#41)",
+                "operator_id": "@48"
+              }
+            ],
+            "columns": [
+              "n_name(#41)",
+              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47)"
+            ],
+            "operator_id": "@49"
+          }
+        ],
+        "keys": [
+          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) Desc NullsFirst"
+        ],
+        "operator_id": "@50"
+      }
+    }
+  ],
+  "query": "select\n    n_name,\n    sum(l_extendedprice * (1 - l_discount)) as revenue\nfrom\n    customer,\n    orders,\n    lineitem,\n    supplier,\n    nation,\n    region\nwhere\n        c_custkey = o_custkey\n  and l_orderkey = o_orderkey\n  and l_suppkey = s_suppkey\n  and c_nationkey = s_nationkey\n  and s_nationkey = n_nationkey\n  and n_regionkey = r_regionkey\n  and r_name = 'ASIA'\n  and o_orderdate >= date '1994-01-01'\n  and o_orderdate < date '1995-01-01'\ngroup by\n    n_name\norder by\n    revenue desc;"
+}

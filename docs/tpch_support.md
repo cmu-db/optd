@@ -1,6 +1,6 @@
 # TPC-H Support
 
-This document tracks the remaining work to make Substrait import/export in `simple-graph` practical for TPC-H query plans.
+This document tracks the remaining work to make Substrait import/export in `optd` practical for TPC-H query plans.
 
 ## Current Baseline
 
@@ -14,7 +14,7 @@ Implemented exporter coverage:
 - scalar expressions (`Literal`, `ColumnRef`, `Unary`, `Binary`, `Nary`, `Cast`, `CaseWhen`, `ScalarFunction`, `Exists`, `InSubquery`, `ScalarSubquery`) with conservative output typing
 
 Root-crate integration tests for these operators have been removed. The DataFusion bridge keeps its
-own sqllogictest coverage under `crates/simple-graph-datafusion/tests/`.
+own sqllogictest coverage under `crates/optd-datafusion/tests/`.
 
 ## Local TPC-H Data Setup
 
@@ -22,20 +22,20 @@ The DataFusion sqllogictest TPC-H suite reads local Parquet files instead of gen
 test time. Generate the files once with `tpchgen-cli`:
 
 ```sh
-tpchgen-cli -s 0.1 -f parquet -o crates/simple-graph-datafusion/data/tpch/sf-0.1
+tpchgen-cli -s 0.1 -f parquet -o crates/optd-datafusion/data/tpch/sf-0.1
 ```
 
-The generated `crates/simple-graph-datafusion/data/` contents are ignored by git. Keep only
-`crates/simple-graph-datafusion/data/.gitignore` tracked.
+The generated `crates/optd-datafusion/data/` contents are ignored by git. Keep only
+`crates/optd-datafusion/data/.gitignore` tracked.
 
 Run the TPC-H SLT suite with either:
 
 ```sh
-cargo test -p simple-graph-datafusion --test slt tpch
-cargo nextest run -p simple-graph-datafusion --test slt tpch
+cargo test -p optd-datafusion --test slt tpch
+cargo nextest run -p optd-datafusion --test slt tpch
 ```
 
-The Rust TPC-H matrix now has one direct IR builder function per query (`tpch_q1` through `tpch_q22`). Each builder manually constructs a `QueryContext` using simple-graph IR operators. The IR can now represent SQL subquery expressions directly with `Exists`, `InSubquery`, and `ScalarSubquery`; later passes should lower those forms to semi/anti/single/mark joins before Substrait export. Q6 remains the first export+consume green query while the other builders track the relational and expression shapes that still need lowering plus Substrait/DataFusion compatibility work.
+The Rust TPC-H matrix now has one direct IR builder function per query (`tpch_q1` through `tpch_q22`). Each builder manually constructs a `QueryContext` using optd IR operators. The IR can now represent SQL subquery expressions directly with `Exists`, `InSubquery`, and `ScalarSubquery`; later passes should lower those forms to semi/anti/single/mark joins before Substrait export. Q6 remains the first export+consume green query while the other builders track the relational and expression shapes that still need lowering plus Substrait/DataFusion compatibility work.
 
 ## Gaps Most Likely to Block TPC-H
 

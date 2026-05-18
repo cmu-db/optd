@@ -1,0 +1,256 @@
+query T
+SELECT explain_flat('select
+    s_name,
+    s_address
+from
+    supplier,
+    nation
+where
+        s_suppkey in (
+        select
+            ps_suppkey
+        from
+            partsupp
+        where
+                ps_partkey in (
+                select
+                    p_partkey
+                from
+                    part
+                where
+                        p_name like ''forest%''
+            )
+          and ps_availqty > (
+            select
+                    0.5 * sum(l_quantity)
+            from
+                lineitem
+            where
+                    l_partkey = ps_partkey
+              and l_suppkey = ps_suppkey
+              and l_shipdate >= date ''1994-01-01''
+              and l_shipdate < date ''1994-01-01'' + interval ''1'' year
+        )
+    )
+  and s_nationkey = n_nationkey
+  and n_name = ''CANADA''
+order by
+    s_name;');
+----
+ 
+01){
+02)--"nodes": [
+03)----{
+04)------"id": 0,
+05)------"kind": "scan",
+06)------"title": "⊞ Scan",
+07)------"table_name": "supplier",
+08)------"columns": [
+09)--------"s_suppkey(#0)",
+10)--------"s_name(#1)",
+11)--------"s_address(#2)",
+12)--------"s_nationkey(#3)",
+13)--------"s_phone(#4)",
+14)--------"s_acctbal(#5)",
+15)--------"s_comment(#6)"
+16)------]
+17)----},
+18)----{
+19)------"id": 1,
+20)------"kind": "scan",
+21)------"title": "⊞ Scan",
+22)------"table_name": "nation",
+23)------"columns": [
+24)--------"n_nationkey(#7)",
+25)--------"n_name(#8)",
+26)--------"n_regionkey(#9)",
+27)--------"n_comment(#10)"
+28)------]
+29)----},
+30)----{
+31)------"id": 2,
+32)------"kind": "join",
+33)------"title": "⋈ InnerJoin",
+34)------"join_type": "Inner",
+35)------"condition": "true",
+36)------"outer": 0,
+37)------"inner": 1
+38)----},
+39)----{
+40)------"id": 3,
+41)------"kind": "scan",
+42)------"title": "⊞ Scan",
+43)------"table_name": "partsupp",
+44)------"columns": [
+45)--------"ps_partkey(#11)",
+46)--------"ps_suppkey(#12)",
+47)--------"ps_availqty(#13)",
+48)--------"ps_supplycost(#14)",
+49)--------"ps_comment(#15)"
+50)------]
+51)----},
+52)----{
+53)------"id": 4,
+54)------"kind": "scan",
+55)------"title": "⊞ Scan",
+56)------"table_name": "part",
+57)------"columns": [
+58)--------"p_partkey(#16)",
+59)--------"p_name(#17)",
+60)--------"p_mfgr(#18)",
+61)--------"p_brand(#19)",
+62)--------"p_type(#20)",
+63)--------"p_size(#21)",
+64)--------"p_container(#22)",
+65)--------"p_retailprice(#23)",
+66)--------"p_comment(#24)"
+67)------]
+68)----},
+69)----{
+70)------"id": 5,
+71)------"kind": "selection",
+72)------"title": "σ Selection",
+73)------"predicate": "(p_name(#17) LIKE \"forest%\")",
+74)------"input": 4
+75)----},
+76)----{
+77)------"id": 6,
+78)------"kind": "projection",
+79)------"title": "π Projection",
+80)------"columns": [
+81)--------"p_partkey(#16)"
+82)------],
+83)------"input": 5
+84)----},
+85)----{
+86)------"id": 21,
+87)------"kind": "join",
+88)------"title": "⟕ᵐ LeftMarkJoin",
+89)------"join_type": "LeftMark",
+90)------"condition": "(ps_partkey(#11) = p_partkey(#16))",
+91)------"marker": "in_mark(#44)",
+92)------"outer": 3,
+93)------"inner": 6
+94)----},
+95)----{
+96)------"id": 7,
+97)------"kind": "scan",
+98)------"title": "⊞ Scan",
+99)------"table_name": "lineitem",
+100)------"columns": [
+101)--------"l_orderkey(#25)",
+102)--------"l_partkey(#26)",
+103)--------"l_suppkey(#27)",
+104)--------"l_linenumber(#28)",
+105)--------"l_quantity(#29)",
+106)--------"l_extendedprice(#30)",
+107)--------"l_discount(#31)",
+108)--------"l_tax(#32)",
+109)--------"l_returnflag(#33)",
+110)--------"l_linestatus(#34)",
+111)--------"l_shipdate(#35)",
+112)--------"l_commitdate(#36)",
+113)--------"l_receiptdate(#37)",
+114)--------"l_shipinstruct(#38)",
+115)--------"l_shipmode(#39)",
+116)--------"l_comment(#40)"
+117)------]
+118)----},
+119)----{
+120)------"id": 8,
+121)------"kind": "selection",
+122)------"title": "σ Selection",
+123)------"predicate": "((((l_partkey(#26) = ps_partkey(#11)) AND (l_suppkey(#27) = ps_suppkey(#12))) AND (l_shipdate(#35) >= CAST(\"1994-01-01\" AS Date32))) AND (l_shipdate(#35) < (CAST(\"1994-01-01\" AS Date32) + INTERVAL(12mo 0d 0ns))))",
+124)------"input": 7
+125)----},
+126)----{
+127)------"id": 9,
+128)------"kind": "aggregation",
+129)------"title": "γ Aggregation",
+130)------"keys": "",
+131)------"aggregates": [
+132)--------"sum(lineitem.l_quantity)(#41) := sum(l_quantity(#29))"
+133)------],
+134)------"input": 8
+135)----},
+136)----{
+137)------"id": 10,
+138)------"kind": "map",
+139)------"title": "χ Map",
+140)------"computations": [
+141)--------"Float64(0.5) * sum(lineitem.l_quantity)(#42) := (0.5 * sum(lineitem.l_quantity)(#41))"
+142)------],
+143)------"input": 9
+144)----},
+145)----{
+146)------"id": 11,
+147)------"kind": "projection",
+148)------"title": "π Projection",
+149)------"columns": [
+150)--------"Float64(0.5) * sum(lineitem.l_quantity)(#42)"
+151)------],
+152)------"input": 10
+153)----},
+154)----{
+155)------"id": 22,
+156)------"kind": "join",
+157)------"title": "⟕₁ SingleJoin",
+158)------"join_type": "Single",
+159)------"condition": "true",
+160)------"outer": 21,
+161)------"inner": 11
+162)----},
+163)----{
+164)------"id": 23,
+165)------"kind": "selection",
+166)------"title": "σ Selection",
+167)------"predicate": "(in_mark(#44) AND (ps_availqty(#13) > Float64(0.5) * sum(lineitem.l_quantity)(#42)))",
+168)------"input": 22
+169)----},
+170)----{
+171)------"id": 24,
+172)------"kind": "projection",
+173)------"title": "π Projection",
+174)------"columns": [
+175)--------"ps_suppkey(#12)"
+176)------],
+177)------"input": 23
+178)----},
+179)----{
+180)------"id": 25,
+181)------"kind": "join",
+182)------"title": "⟕ᵐ LeftMarkJoin",
+183)------"join_type": "LeftMark",
+184)------"condition": "(s_suppkey(#0) = ps_suppkey(#12))",
+185)------"marker": "in_mark(#43)",
+186)------"outer": 2,
+187)------"inner": 24
+188)----},
+189)----{
+190)------"id": 26,
+191)------"kind": "selection",
+192)------"title": "σ Selection",
+193)------"predicate": "((in_mark(#43) AND (s_nationkey(#3) = n_nationkey(#7))) AND (n_name(#8) = \"CANADA\"))",
+194)------"input": 25
+195)----},
+196)----{
+197)------"id": 27,
+198)------"kind": "projection",
+199)------"title": "π Projection",
+200)------"columns": [
+201)--------"s_name(#1)",
+202)--------"s_address(#2)"
+203)------],
+204)------"input": 26
+205)----},
+206)----{
+207)------"id": 28,
+208)------"kind": "sort",
+209)------"title": "⇞ Sort",
+210)------"keys": [
+211)--------"s_name(#1) Asc NullsLast"
+212)------],
+213)------"input": 27
+214)----}
+215)--]
+216)}

@@ -1,14 +1,18 @@
 [workspace]
 members = [
     ".",
-    "crates/simple-graph-datafusion",
+    "crates/optd-datafusion",
 ]
 resolver = "2"
 
 [package]
-name = "simple-graph"
+name = "optd"
 version = "0.1.0"
 edition = "2024"
+
+[[bin]]
+name = "optd-example"
+path = "src/main.rs"
 
 [features]
 default = ["serde"]

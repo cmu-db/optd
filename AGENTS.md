@@ -10,7 +10,7 @@ This is a Rust 2024 crate for relational query IR experiments.
 - `src/display.rs` contains generic display nodes and box/JSON rendering.
 - `src/substrait.rs` imports and exports Substrait plans.
 - `src/main.rs` is an executable example that builds and prints sample plans.
-- `crates/simple-graph-datafusion/` contains the DataFusion bridge and its sqllogictest coverage.
+- `crates/optd-datafusion/` contains the DataFusion bridge and its sqllogictest coverage.
 
 ## Build, Test, and Development Commands
 
@@ -30,9 +30,9 @@ Prefer descriptive struct names for operator payloads, for example `Scan`, `Proj
 
 ## Testing Guidelines
 
-Tests use Rust’s built-in test framework plus async `tokio` tests for DataFusion interop. Put narrow module tests beside implementation code under `#[cfg(test)]`; DataFusion bridge behavior lives under `crates/simple-graph-datafusion/tests/`.
+Tests use Rust’s built-in test framework plus async `tokio` tests for DataFusion interop. Put narrow module tests beside implementation code under `#[cfg(test)]`; DataFusion bridge behavior lives under `crates/optd-datafusion/tests/`.
 
-Name tests by behavior, such as `imports_sort_and_fetch` or `datafusion_consumes_substrait_plan_produced_by_simple_graph`. Add tests for new IR operators, analyses, formatter behavior, and Substrait conversion paths.
+Name tests by behavior, such as `imports_sort_and_fetch` or `datafusion_consumes_substrait_plan_produced_by_optd`. Add tests for new IR operators, analyses, formatter behavior, and Substrait conversion paths.
 
 For optimizer or SQL semantics changes, prefer an SLT regression test when the behavior is observable through the DataFusion bridge. Add the narrow SLT case first, run the focused SLT command, and confirm it fails on the current branch while the bug is still present. Then implement the fix, re-run the focused SLT, and finish with `cargo test --workspace`. In the handoff, explicitly note the before/after result: the new SLT failed before the fix and passed after.
 

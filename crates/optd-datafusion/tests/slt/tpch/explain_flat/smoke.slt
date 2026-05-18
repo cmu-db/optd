@@ -1,0 +1,39 @@
+query T
+SELECT explain_flat('SELECT COUNT(*) FROM nation;');
+----
+ 
+01){
+02)--"nodes": [
+03)----{
+04)------"id": 0,
+05)------"kind": "scan",
+06)------"title": "⊞ Scan",
+07)------"table_name": "nation",
+08)------"columns": [
+09)--------"n_nationkey(#0)",
+10)--------"n_name(#1)",
+11)--------"n_regionkey(#2)",
+12)--------"n_comment(#3)"
+13)------]
+14)----},
+15)----{
+16)------"id": 1,
+17)------"kind": "aggregation",
+18)------"title": "γ Aggregation",
+19)------"keys": "",
+20)------"aggregates": [
+21)--------"count(Int64(1))(#4) := count_star()"
+22)------],
+23)------"input": 0
+24)----},
+25)----{
+26)------"id": 2,
+27)------"kind": "projection",
+28)------"title": "π Projection",
+29)------"columns": [
+30)--------"count(Int64(1))(#4)"
+31)------],
+32)------"input": 1
+33)----}
+34)--]
+35)}

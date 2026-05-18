@@ -1,0 +1,200 @@
+{
+  "passes": [
+    {
+      "passName": "Initial",
+      "root": {
+        "op": "projection",
+        "title": "π Projection",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "aggregation",
+            "title": "γ Aggregation",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "selection",
+                "title": "σ Selection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "scan",
+                    "title": "⊞ Scan",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "table": "lineitem",
+                    "columns": [
+                      "l_orderkey(#0)",
+                      "l_partkey(#1)",
+                      "l_suppkey(#2)",
+                      "l_linenumber(#3)",
+                      "l_quantity(#4)",
+                      "l_extendedprice(#5)",
+                      "l_discount(#6)",
+                      "l_tax(#7)",
+                      "l_returnflag(#8)",
+                      "l_linestatus(#9)",
+                      "l_shipdate(#10)",
+                      "l_commitdate(#11)",
+                      "l_receiptdate(#12)",
+                      "l_shipinstruct(#13)",
+                      "l_shipmode(#14)",
+                      "l_comment(#15)"
+                    ],
+                    "operator_id": "@0",
+                    "table_name": "lineitem"
+                  }
+                ],
+                "operator_id": "@1",
+                "predicate": "((((l_shipdate(#10) >= CAST(\"1994-01-01\" AS Date32)) AND (l_shipdate(#10) < CAST(\"1995-01-01\" AS Date32))) AND ((l_discount(#6) >= (0.06 - 0.01)) AND (l_discount(#6) <= (0.06 + 0.01)))) AND (l_quantity(#4) < 24))"
+              }
+            ],
+            "aggregates": [
+              "sum(lineitem.l_extendedprice * lineitem.l_discount)(#16) := sum((l_extendedprice(#5) * l_discount(#6)))"
+            ],
+            "keys": "",
+            "operator_id": "@2"
+          }
+        ],
+        "columns": [
+          "sum(lineitem.l_extendedprice * lineitem.l_discount)(#16)"
+        ],
+        "operator_id": "@3"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "projection",
+        "title": "π Projection",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "aggregation",
+            "title": "γ Aggregation",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "selection",
+                "title": "σ Selection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "scan",
+                    "title": "⊞ Scan",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "table": "lineitem",
+                    "columns": [
+                      "l_orderkey(#0)",
+                      "l_partkey(#1)",
+                      "l_suppkey(#2)",
+                      "l_linenumber(#3)",
+                      "l_quantity(#4)",
+                      "l_extendedprice(#5)",
+                      "l_discount(#6)",
+                      "l_tax(#7)",
+                      "l_returnflag(#8)",
+                      "l_linestatus(#9)",
+                      "l_shipdate(#10)",
+                      "l_commitdate(#11)",
+                      "l_receiptdate(#12)",
+                      "l_shipinstruct(#13)",
+                      "l_shipmode(#14)",
+                      "l_comment(#15)"
+                    ],
+                    "operator_id": "@0",
+                    "table_name": "lineitem"
+                  }
+                ],
+                "operator_id": "@1",
+                "predicate": "((((l_shipdate(#10) >= CAST(\"1994-01-01\" AS Date32)) AND (l_shipdate(#10) < CAST(\"1995-01-01\" AS Date32))) AND ((l_discount(#6) >= (0.06 - 0.01)) AND (l_discount(#6) <= (0.06 + 0.01)))) AND (l_quantity(#4) < 24))"
+              }
+            ],
+            "aggregates": [
+              "sum(lineitem.l_extendedprice * lineitem.l_discount)(#16) := sum((l_extendedprice(#5) * l_discount(#6)))"
+            ],
+            "keys": "",
+            "operator_id": "@2"
+          }
+        ],
+        "columns": [
+          "sum(lineitem.l_extendedprice * lineitem.l_discount)(#16)"
+        ],
+        "operator_id": "@3"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "projection",
+        "title": "π Projection",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "aggregation",
+            "title": "γ Aggregation",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "selection",
+                "title": "σ Selection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "scan",
+                    "title": "⊞ Scan",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "table": "lineitem",
+                    "columns": [
+                      "l_orderkey(#0)",
+                      "l_partkey(#1)",
+                      "l_suppkey(#2)",
+                      "l_linenumber(#3)",
+                      "l_quantity(#4)",
+                      "l_extendedprice(#5)",
+                      "l_discount(#6)",
+                      "l_tax(#7)",
+                      "l_returnflag(#8)",
+                      "l_linestatus(#9)",
+                      "l_shipdate(#10)",
+                      "l_commitdate(#11)",
+                      "l_receiptdate(#12)",
+                      "l_shipinstruct(#13)",
+                      "l_shipmode(#14)",
+                      "l_comment(#15)"
+                    ],
+                    "operator_id": "@0",
+                    "table_name": "lineitem"
+                  }
+                ],
+                "operator_id": "@1",
+                "predicate": "((((l_shipdate(#10) >= CAST(\"1994-01-01\" AS Date32)) AND (l_shipdate(#10) < CAST(\"1995-01-01\" AS Date32))) AND ((l_discount(#6) >= (0.06 - 0.01)) AND (l_discount(#6) <= (0.06 + 0.01)))) AND (l_quantity(#4) < 24))"
+              }
+            ],
+            "aggregates": [
+              "sum(lineitem.l_extendedprice * lineitem.l_discount)(#16) := sum((l_extendedprice(#5) * l_discount(#6)))"
+            ],
+            "keys": "",
+            "operator_id": "@2"
+          }
+        ],
+        "columns": [
+          "sum(lineitem.l_extendedprice * lineitem.l_discount)(#16)"
+        ],
+        "operator_id": "@3"
+      }
+    }
+  ],
+  "query": "select\n    sum(l_extendedprice * l_discount) as revenue\nfrom\n    lineitem\nwhere\n        l_shipdate >= date '1994-01-01'\n  and l_shipdate < date '1995-01-01'\n  and l_discount between 0.06 - 0.01 and 0.06 + 0.01\n  and l_quantity < 24;"
+}

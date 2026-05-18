@@ -1,0 +1,122 @@
+statement ok
+CREATE TABLE t (id BIGINT, val DOUBLE);
+
+query T
+SELECT explain_box('SELECT id FROM t WHERE val > 1.0');
+----
+ 
+01)┌─────────────────┐
+02)│ π Projection @2 │
+03)├─────────────────┤
+04)│ columns:        │
+05)│   id(#0)        │
+06)└─────────────────┘
+07)│ input
+08)┌──────────────────────────┐
+09)│ σ Selection           @1 │
+10)├──────────────────────────┤
+11)│ predicate: (val(#1) > 1) │
+12)└──────────────────────────┘
+13)│ input
+14)┌───────────────┐
+15)│ ⊞ Scan     @0 │
+16)├───────────────┤
+17)│ table_name: t │
+18)│ columns:      │
+19)│   id(#0)      │
+20)│   val(#1)     │
+21)└───────────────┘
+
+query T
+SELECT explain_json('SELECT id FROM t WHERE val > 1.0');
+----
+ 
+01){
+02)--"id": "@2",
+03)--"kind": "projection",
+04)--"title": "π Projection",
+05)--"columns": [
+06)----"id(#0)"
+07)--],
+08)--"input": {
+09)----"id": "@1",
+10)----"kind": "selection",
+11)----"title": "σ Selection",
+12)----"predicate": "(val(#1) > 1)",
+13)----"input": {
+14)------"id": "@0",
+15)------"kind": "scan",
+16)------"title": "⊞ Scan",
+17)------"table_name": "t",
+18)------"columns": [
+19)--------"id(#0)",
+20)--------"val(#1)"
+21)------]
+22)----}
+23)--}
+24)}
+
+query T
+SELECT explain_flat('SELECT id FROM t WHERE val > 1.0');
+----
+ 
+01){
+02)--"nodes": [
+03)----{
+04)------"id": 0,
+05)------"kind": "scan",
+06)------"title": "⊞ Scan",
+07)------"table_name": "t",
+08)------"columns": [
+09)--------"id(#0)",
+10)--------"val(#1)"
+11)------]
+12)----},
+13)----{
+14)------"id": 1,
+15)------"kind": "selection",
+16)------"title": "σ Selection",
+17)------"predicate": "(val(#1) > 1)",
+18)------"input": 0
+19)----},
+20)----{
+21)------"id": 2,
+22)------"kind": "projection",
+23)------"title": "π Projection",
+24)------"columns": [
+25)--------"id(#0)"
+26)------],
+27)------"input": 1
+28)----}
+29)--]
+30)}
+
+query T
+SELECT CASE
+  WHEN explain_optimizer_json('SELECT id FROM t WHERE val > 1.0') LIKE '%"passName": "Initial"%'
+   AND explain_optimizer_json('SELECT id FROM t WHERE val > 1.0') LIKE '%"query": "SELECT id FROM t WHERE val > 1.0"%'
+   AND explain_optimizer_json('SELECT id FROM t WHERE val > 1.0') LIKE '%"passName": "JoinOrdering"%'
+   AND explain_optimizer_json('SELECT id FROM t WHERE val > 1.0') LIKE '%"op": "projection"%'
+   AND explain_optimizer_json('SELECT id FROM t WHERE val > 1.0') LIKE '%"title": "π Projection"%'
+  THEN 'ok'
+  ELSE 'bad'
+END;
+----
+ok
+
+query ITT
+SELECT step, pass, result
+FROM explain_steps('SELECT id FROM t WHERE val > 1.0', 'flat')
+ORDER BY step;
+----
+0	initial	initial
+1	SubqueryToJoin	unchanged
+2	PredicatePushdown	unchanged
+3	JoinOrdering	unchanged
+
+query T
+SELECT pass
+FROM explain_steps('SELECT l.id FROM t l JOIN t r ON l.id = r.id WHERE r.val > 1.0', 'flat')
+WHERE step = 2;
+----
+PredicatePushdown

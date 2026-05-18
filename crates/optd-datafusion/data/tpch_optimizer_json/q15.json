@@ -1,0 +1,2002 @@
+{
+  "passes": [
+    {
+      "passName": "Initial",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "selection",
+                "title": "σ Selection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⋈ InnerJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "scan",
+                        "title": "⊞ Scan",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "table": "supplier",
+                        "columns": [
+                          "s_suppkey(#0)",
+                          "s_name(#1)",
+                          "s_address(#2)",
+                          "s_nationkey(#3)",
+                          "s_phone(#4)",
+                          "s_acctbal(#5)",
+                          "s_comment(#6)"
+                        ],
+                        "operator_id": "@0",
+                        "table_name": "supplier"
+                      },
+                      {
+                        "op": "rename",
+                        "title": "ρ Rename(revenue0)",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "projection",
+                            "title": "π Projection",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "projection",
+                                "title": "π Projection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "aggregation",
+                                    "title": "γ Aggregation",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "selection",
+                                        "title": "σ Selection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "lineitem",
+                                            "columns": [
+                                              "l_orderkey(#7)",
+                                              "l_partkey(#8)",
+                                              "l_suppkey(#9)",
+                                              "l_linenumber(#10)",
+                                              "l_quantity(#11)",
+                                              "l_extendedprice(#12)",
+                                              "l_discount(#13)",
+                                              "l_tax(#14)",
+                                              "l_returnflag(#15)",
+                                              "l_linestatus(#16)",
+                                              "l_shipdate(#17)",
+                                              "l_commitdate(#18)",
+                                              "l_receiptdate(#19)",
+                                              "l_shipinstruct(#20)",
+                                              "l_shipmode(#21)",
+                                              "l_comment(#22)"
+                                            ],
+                                            "operator_id": "@1",
+                                            "table_name": "lineitem"
+                                          }
+                                        ],
+                                        "operator_id": "@2",
+                                        "predicate": "((l_shipdate(#17) >= CAST(\"1996-01-01\" AS Date32)) AND (l_shipdate(#17) < (CAST(\"1996-01-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))"
+                                      }
+                                    ],
+                                    "aggregates": [
+                                      "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23) := sum((l_extendedprice(#12) * (1 - l_discount(#13))))"
+                                    ],
+                                    "keys": "l_suppkey(#9)",
+                                    "operator_id": "@3"
+                                  }
+                                ],
+                                "columns": [
+                                  "l_suppkey(#9)",
+                                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                                ],
+                                "operator_id": "@4"
+                              }
+                            ],
+                            "columns": [
+                              "l_suppkey(#9)",
+                              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                            ],
+                            "operator_id": "@5"
+                          }
+                        ],
+                        "defs": [
+                          "supplier_no(#24) <- l_suppkey(#9)",
+                          "total_revenue(#25) <- sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                        ],
+                        "operator_id": "@6"
+                      }
+                    ],
+                    "condition": "true",
+                    "join_type": "Inner",
+                    "operator_id": "@7"
+                  },
+                  {
+                    "op": "projection",
+                    "title": "π Projection",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "aggregation",
+                        "title": "γ Aggregation",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "rename",
+                            "title": "ρ Rename(revenue0)",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "projection",
+                                "title": "π Projection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "projection",
+                                    "title": "π Projection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "aggregation",
+                                        "title": "γ Aggregation",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "selection",
+                                            "title": "σ Selection",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "scan",
+                                                "title": "⊞ Scan",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "table": "lineitem",
+                                                "columns": [
+                                                  "l_orderkey(#26)",
+                                                  "l_partkey(#27)",
+                                                  "l_suppkey(#28)",
+                                                  "l_linenumber(#29)",
+                                                  "l_quantity(#30)",
+                                                  "l_extendedprice(#31)",
+                                                  "l_discount(#32)",
+                                                  "l_tax(#33)",
+                                                  "l_returnflag(#34)",
+                                                  "l_linestatus(#35)",
+                                                  "l_shipdate(#36)",
+                                                  "l_commitdate(#37)",
+                                                  "l_receiptdate(#38)",
+                                                  "l_shipinstruct(#39)",
+                                                  "l_shipmode(#40)",
+                                                  "l_comment(#41)"
+                                                ],
+                                                "operator_id": "@8",
+                                                "table_name": "lineitem"
+                                              }
+                                            ],
+                                            "operator_id": "@9",
+                                            "predicate": "((l_shipdate(#36) >= CAST(\"1996-01-01\" AS Date32)) AND (l_shipdate(#36) < (CAST(\"1996-01-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))"
+                                          }
+                                        ],
+                                        "aggregates": [
+                                          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42) := sum((l_extendedprice(#31) * (1 - l_discount(#32))))"
+                                        ],
+                                        "keys": "l_suppkey(#28)",
+                                        "operator_id": "@10"
+                                      }
+                                    ],
+                                    "columns": [
+                                      "l_suppkey(#28)",
+                                      "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                                    ],
+                                    "operator_id": "@11"
+                                  }
+                                ],
+                                "columns": [
+                                  "l_suppkey(#28)",
+                                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                                ],
+                                "operator_id": "@12"
+                              }
+                            ],
+                            "defs": [
+                              "supplier_no(#43) <- l_suppkey(#28)",
+                              "total_revenue(#44) <- sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                            ],
+                            "operator_id": "@13"
+                          }
+                        ],
+                        "aggregates": [
+                          "max(revenue0.total_revenue)(#45) := max(total_revenue(#44))"
+                        ],
+                        "keys": "",
+                        "operator_id": "@14"
+                      }
+                    ],
+                    "columns": [
+                      "max(revenue0.total_revenue)(#45)"
+                    ],
+                    "operator_id": "@15"
+                  }
+                ],
+                "operator_id": "@16",
+                "predicate": "((s_suppkey(#0) = supplier_no(#24)) AND (total_revenue(#25) = SCALAR_SUBQUERY(@15)))"
+              }
+            ],
+            "columns": [
+              "s_suppkey(#0)",
+              "s_name(#1)",
+              "s_address(#2)",
+              "s_phone(#4)",
+              "total_revenue(#25)"
+            ],
+            "operator_id": "@17"
+          }
+        ],
+        "keys": [
+          "s_suppkey(#0) Asc NullsLast"
+        ],
+        "operator_id": "@18"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "selection",
+                "title": "σ Selection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⟕₁ SingleJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "join",
+                        "title": "⋈ InnerJoin",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "supplier",
+                            "columns": [
+                              "s_suppkey(#0)",
+                              "s_name(#1)",
+                              "s_address(#2)",
+                              "s_nationkey(#3)",
+                              "s_phone(#4)",
+                              "s_acctbal(#5)",
+                              "s_comment(#6)"
+                            ],
+                            "operator_id": "@0",
+                            "table_name": "supplier"
+                          },
+                          {
+                            "op": "rename",
+                            "title": "ρ Rename(revenue0)",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "projection",
+                                "title": "π Projection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "projection",
+                                    "title": "π Projection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "aggregation",
+                                        "title": "γ Aggregation",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "selection",
+                                            "title": "σ Selection",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "scan",
+                                                "title": "⊞ Scan",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "table": "lineitem",
+                                                "columns": [
+                                                  "l_orderkey(#7)",
+                                                  "l_partkey(#8)",
+                                                  "l_suppkey(#9)",
+                                                  "l_linenumber(#10)",
+                                                  "l_quantity(#11)",
+                                                  "l_extendedprice(#12)",
+                                                  "l_discount(#13)",
+                                                  "l_tax(#14)",
+                                                  "l_returnflag(#15)",
+                                                  "l_linestatus(#16)",
+                                                  "l_shipdate(#17)",
+                                                  "l_commitdate(#18)",
+                                                  "l_receiptdate(#19)",
+                                                  "l_shipinstruct(#20)",
+                                                  "l_shipmode(#21)",
+                                                  "l_comment(#22)"
+                                                ],
+                                                "operator_id": "@1",
+                                                "table_name": "lineitem"
+                                              }
+                                            ],
+                                            "operator_id": "@2",
+                                            "predicate": "((l_shipdate(#17) >= CAST(\"1996-01-01\" AS Date32)) AND (l_shipdate(#17) < (CAST(\"1996-01-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))"
+                                          }
+                                        ],
+                                        "aggregates": [
+                                          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23) := sum((l_extendedprice(#12) * (1 - l_discount(#13))))"
+                                        ],
+                                        "keys": "l_suppkey(#9)",
+                                        "operator_id": "@3"
+                                      }
+                                    ],
+                                    "columns": [
+                                      "l_suppkey(#9)",
+                                      "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                                    ],
+                                    "operator_id": "@4"
+                                  }
+                                ],
+                                "columns": [
+                                  "l_suppkey(#9)",
+                                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                                ],
+                                "operator_id": "@5"
+                              }
+                            ],
+                            "defs": [
+                              "supplier_no(#24) <- l_suppkey(#9)",
+                              "total_revenue(#25) <- sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                            ],
+                            "operator_id": "@6"
+                          }
+                        ],
+                        "condition": "true",
+                        "join_type": "Inner",
+                        "operator_id": "@7"
+                      },
+                      {
+                        "op": "projection",
+                        "title": "π Projection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "aggregation",
+                            "title": "γ Aggregation",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "rename",
+                                "title": "ρ Rename(revenue0)",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "projection",
+                                    "title": "π Projection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "projection",
+                                        "title": "π Projection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "aggregation",
+                                            "title": "γ Aggregation",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "selection",
+                                                "title": "σ Selection",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "children": [
+                                                  {
+                                                    "op": "scan",
+                                                    "title": "⊞ Scan",
+                                                    "cost": 0.0,
+                                                    "rows": 0.0,
+                                                    "table": "lineitem",
+                                                    "columns": [
+                                                      "l_orderkey(#26)",
+                                                      "l_partkey(#27)",
+                                                      "l_suppkey(#28)",
+                                                      "l_linenumber(#29)",
+                                                      "l_quantity(#30)",
+                                                      "l_extendedprice(#31)",
+                                                      "l_discount(#32)",
+                                                      "l_tax(#33)",
+                                                      "l_returnflag(#34)",
+                                                      "l_linestatus(#35)",
+                                                      "l_shipdate(#36)",
+                                                      "l_commitdate(#37)",
+                                                      "l_receiptdate(#38)",
+                                                      "l_shipinstruct(#39)",
+                                                      "l_shipmode(#40)",
+                                                      "l_comment(#41)"
+                                                    ],
+                                                    "operator_id": "@8",
+                                                    "table_name": "lineitem"
+                                                  }
+                                                ],
+                                                "operator_id": "@9",
+                                                "predicate": "((l_shipdate(#36) >= CAST(\"1996-01-01\" AS Date32)) AND (l_shipdate(#36) < (CAST(\"1996-01-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))"
+                                              }
+                                            ],
+                                            "aggregates": [
+                                              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42) := sum((l_extendedprice(#31) * (1 - l_discount(#32))))"
+                                            ],
+                                            "keys": "l_suppkey(#28)",
+                                            "operator_id": "@10"
+                                          }
+                                        ],
+                                        "columns": [
+                                          "l_suppkey(#28)",
+                                          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                                        ],
+                                        "operator_id": "@11"
+                                      }
+                                    ],
+                                    "columns": [
+                                      "l_suppkey(#28)",
+                                      "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                                    ],
+                                    "operator_id": "@12"
+                                  }
+                                ],
+                                "defs": [
+                                  "supplier_no(#43) <- l_suppkey(#28)",
+                                  "total_revenue(#44) <- sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                                ],
+                                "operator_id": "@13"
+                              }
+                            ],
+                            "aggregates": [
+                              "max(revenue0.total_revenue)(#45) := max(total_revenue(#44))"
+                            ],
+                            "keys": "",
+                            "operator_id": "@14"
+                          }
+                        ],
+                        "columns": [
+                          "max(revenue0.total_revenue)(#45)"
+                        ],
+                        "operator_id": "@15"
+                      }
+                    ],
+                    "condition": "true",
+                    "join_type": "Single",
+                    "operator_id": "@19"
+                  }
+                ],
+                "operator_id": "@20",
+                "predicate": "((s_suppkey(#0) = supplier_no(#24)) AND (total_revenue(#25) = max(revenue0.total_revenue)(#45)))"
+              }
+            ],
+            "columns": [
+              "s_suppkey(#0)",
+              "s_name(#1)",
+              "s_address(#2)",
+              "s_phone(#4)",
+              "total_revenue(#25)"
+            ],
+            "operator_id": "@21"
+          }
+        ],
+        "keys": [
+          "s_suppkey(#0) Asc NullsLast"
+        ],
+        "operator_id": "@22"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "selection",
+                "title": "σ Selection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⟕₁ SingleJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "join",
+                            "title": "⋈ InnerJoin",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "scan",
+                                "title": "⊞ Scan",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "table": "supplier",
+                                "columns": [
+                                  "s_suppkey(#0)",
+                                  "s_name(#1)",
+                                  "s_address(#2)",
+                                  "s_nationkey(#3)",
+                                  "s_phone(#4)",
+                                  "s_acctbal(#5)",
+                                  "s_comment(#6)"
+                                ],
+                                "operator_id": "@0",
+                                "table_name": "supplier"
+                              },
+                              {
+                                "op": "rename",
+                                "title": "ρ Rename(revenue0)",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "projection",
+                                    "title": "π Projection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "projection",
+                                        "title": "π Projection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "aggregation",
+                                            "title": "γ Aggregation",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "selection",
+                                                "title": "σ Selection",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "children": [
+                                                  {
+                                                    "op": "scan",
+                                                    "title": "⊞ Scan",
+                                                    "cost": 0.0,
+                                                    "rows": 0.0,
+                                                    "table": "lineitem",
+                                                    "columns": [
+                                                      "l_orderkey(#7)",
+                                                      "l_partkey(#8)",
+                                                      "l_suppkey(#9)",
+                                                      "l_linenumber(#10)",
+                                                      "l_quantity(#11)",
+                                                      "l_extendedprice(#12)",
+                                                      "l_discount(#13)",
+                                                      "l_tax(#14)",
+                                                      "l_returnflag(#15)",
+                                                      "l_linestatus(#16)",
+                                                      "l_shipdate(#17)",
+                                                      "l_commitdate(#18)",
+                                                      "l_receiptdate(#19)",
+                                                      "l_shipinstruct(#20)",
+                                                      "l_shipmode(#21)",
+                                                      "l_comment(#22)"
+                                                    ],
+                                                    "operator_id": "@1",
+                                                    "table_name": "lineitem"
+                                                  }
+                                                ],
+                                                "operator_id": "@2",
+                                                "predicate": "((l_shipdate(#17) >= CAST(\"1996-01-01\" AS Date32)) AND (l_shipdate(#17) < (CAST(\"1996-01-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))"
+                                              }
+                                            ],
+                                            "aggregates": [
+                                              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23) := sum((l_extendedprice(#12) * (1 - l_discount(#13))))"
+                                            ],
+                                            "keys": "l_suppkey(#9)",
+                                            "operator_id": "@3"
+                                          }
+                                        ],
+                                        "columns": [
+                                          "l_suppkey(#9)",
+                                          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                                        ],
+                                        "operator_id": "@4"
+                                      }
+                                    ],
+                                    "columns": [
+                                      "l_suppkey(#9)",
+                                      "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                                    ],
+                                    "operator_id": "@5"
+                                  }
+                                ],
+                                "defs": [
+                                  "supplier_no(#24) <- l_suppkey(#9)",
+                                  "total_revenue(#25) <- sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                                ],
+                                "operator_id": "@6"
+                              }
+                            ],
+                            "condition": "true",
+                            "join_type": "Inner",
+                            "operator_id": "@7"
+                          }
+                        ],
+                        "operator_id": "@23",
+                        "predicate": "(s_suppkey(#0) = supplier_no(#24))"
+                      },
+                      {
+                        "op": "projection",
+                        "title": "π Projection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "aggregation",
+                            "title": "γ Aggregation",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "rename",
+                                "title": "ρ Rename(revenue0)",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "projection",
+                                    "title": "π Projection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "projection",
+                                        "title": "π Projection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "aggregation",
+                                            "title": "γ Aggregation",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "selection",
+                                                "title": "σ Selection",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "children": [
+                                                  {
+                                                    "op": "scan",
+                                                    "title": "⊞ Scan",
+                                                    "cost": 0.0,
+                                                    "rows": 0.0,
+                                                    "table": "lineitem",
+                                                    "columns": [
+                                                      "l_orderkey(#26)",
+                                                      "l_partkey(#27)",
+                                                      "l_suppkey(#28)",
+                                                      "l_linenumber(#29)",
+                                                      "l_quantity(#30)",
+                                                      "l_extendedprice(#31)",
+                                                      "l_discount(#32)",
+                                                      "l_tax(#33)",
+                                                      "l_returnflag(#34)",
+                                                      "l_linestatus(#35)",
+                                                      "l_shipdate(#36)",
+                                                      "l_commitdate(#37)",
+                                                      "l_receiptdate(#38)",
+                                                      "l_shipinstruct(#39)",
+                                                      "l_shipmode(#40)",
+                                                      "l_comment(#41)"
+                                                    ],
+                                                    "operator_id": "@8",
+                                                    "table_name": "lineitem"
+                                                  }
+                                                ],
+                                                "operator_id": "@9",
+                                                "predicate": "((l_shipdate(#36) >= CAST(\"1996-01-01\" AS Date32)) AND (l_shipdate(#36) < (CAST(\"1996-01-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))"
+                                              }
+                                            ],
+                                            "aggregates": [
+                                              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42) := sum((l_extendedprice(#31) * (1 - l_discount(#32))))"
+                                            ],
+                                            "keys": "l_suppkey(#28)",
+                                            "operator_id": "@10"
+                                          }
+                                        ],
+                                        "columns": [
+                                          "l_suppkey(#28)",
+                                          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                                        ],
+                                        "operator_id": "@11"
+                                      }
+                                    ],
+                                    "columns": [
+                                      "l_suppkey(#28)",
+                                      "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                                    ],
+                                    "operator_id": "@12"
+                                  }
+                                ],
+                                "defs": [
+                                  "supplier_no(#43) <- l_suppkey(#28)",
+                                  "total_revenue(#44) <- sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                                ],
+                                "operator_id": "@13"
+                              }
+                            ],
+                            "aggregates": [
+                              "max(revenue0.total_revenue)(#45) := max(total_revenue(#44))"
+                            ],
+                            "keys": "",
+                            "operator_id": "@14"
+                          }
+                        ],
+                        "columns": [
+                          "max(revenue0.total_revenue)(#45)"
+                        ],
+                        "operator_id": "@15"
+                      }
+                    ],
+                    "condition": "true",
+                    "join_type": "Single",
+                    "operator_id": "@24"
+                  }
+                ],
+                "operator_id": "@25",
+                "predicate": "(total_revenue(#25) = max(revenue0.total_revenue)(#45))"
+              }
+            ],
+            "columns": [
+              "s_suppkey(#0)",
+              "s_name(#1)",
+              "s_address(#2)",
+              "s_phone(#4)",
+              "total_revenue(#25)"
+            ],
+            "operator_id": "@26"
+          }
+        ],
+        "keys": [
+          "s_suppkey(#0) Asc NullsLast"
+        ],
+        "operator_id": "@27"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "selection",
+                "title": "σ Selection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⟕₁ SingleJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "selection",
+                        "title": "σ Selection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "join",
+                            "title": "⋈ InnerJoin",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "scan",
+                                "title": "⊞ Scan",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "table": "supplier",
+                                "columns": [
+                                  "s_suppkey(#0)",
+                                  "s_name(#1)",
+                                  "s_address(#2)",
+                                  "s_nationkey(#3)",
+                                  "s_phone(#4)",
+                                  "s_acctbal(#5)",
+                                  "s_comment(#6)"
+                                ],
+                                "operator_id": "@0",
+                                "table_name": "supplier"
+                              },
+                              {
+                                "op": "rename",
+                                "title": "ρ Rename(revenue0)",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "projection",
+                                    "title": "π Projection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "projection",
+                                        "title": "π Projection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "aggregation",
+                                            "title": "γ Aggregation",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "selection",
+                                                "title": "σ Selection",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "children": [
+                                                  {
+                                                    "op": "scan",
+                                                    "title": "⊞ Scan",
+                                                    "cost": 0.0,
+                                                    "rows": 0.0,
+                                                    "table": "lineitem",
+                                                    "columns": [
+                                                      "l_orderkey(#7)",
+                                                      "l_partkey(#8)",
+                                                      "l_suppkey(#9)",
+                                                      "l_linenumber(#10)",
+                                                      "l_quantity(#11)",
+                                                      "l_extendedprice(#12)",
+                                                      "l_discount(#13)",
+                                                      "l_tax(#14)",
+                                                      "l_returnflag(#15)",
+                                                      "l_linestatus(#16)",
+                                                      "l_shipdate(#17)",
+                                                      "l_commitdate(#18)",
+                                                      "l_receiptdate(#19)",
+                                                      "l_shipinstruct(#20)",
+                                                      "l_shipmode(#21)",
+                                                      "l_comment(#22)"
+                                                    ],
+                                                    "operator_id": "@1",
+                                                    "table_name": "lineitem"
+                                                  }
+                                                ],
+                                                "operator_id": "@2",
+                                                "predicate": "((l_shipdate(#17) >= CAST(\"1996-01-01\" AS Date32)) AND (l_shipdate(#17) < (CAST(\"1996-01-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))"
+                                              }
+                                            ],
+                                            "aggregates": [
+                                              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23) := sum((l_extendedprice(#12) * (1 - l_discount(#13))))"
+                                            ],
+                                            "keys": "l_suppkey(#9)",
+                                            "operator_id": "@3"
+                                          }
+                                        ],
+                                        "columns": [
+                                          "l_suppkey(#9)",
+                                          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                                        ],
+                                        "operator_id": "@4"
+                                      }
+                                    ],
+                                    "columns": [
+                                      "l_suppkey(#9)",
+                                      "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                                    ],
+                                    "operator_id": "@5"
+                                  }
+                                ],
+                                "defs": [
+                                  "supplier_no(#24) <- l_suppkey(#9)",
+                                  "total_revenue(#25) <- sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                                ],
+                                "operator_id": "@6"
+                              }
+                            ],
+                            "condition": "true",
+                            "join_type": "Inner",
+                            "operator_id": "@7"
+                          }
+                        ],
+                        "operator_id": "@23",
+                        "predicate": "(s_suppkey(#0) = supplier_no(#24))"
+                      },
+                      {
+                        "op": "projection",
+                        "title": "π Projection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "aggregation",
+                            "title": "γ Aggregation",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "rename",
+                                "title": "ρ Rename(revenue0)",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "projection",
+                                    "title": "π Projection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "projection",
+                                        "title": "π Projection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "aggregation",
+                                            "title": "γ Aggregation",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "selection",
+                                                "title": "σ Selection",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "children": [
+                                                  {
+                                                    "op": "scan",
+                                                    "title": "⊞ Scan",
+                                                    "cost": 0.0,
+                                                    "rows": 0.0,
+                                                    "table": "lineitem",
+                                                    "columns": [
+                                                      "l_orderkey(#26)",
+                                                      "l_partkey(#27)",
+                                                      "l_suppkey(#28)",
+                                                      "l_linenumber(#29)",
+                                                      "l_quantity(#30)",
+                                                      "l_extendedprice(#31)",
+                                                      "l_discount(#32)",
+                                                      "l_tax(#33)",
+                                                      "l_returnflag(#34)",
+                                                      "l_linestatus(#35)",
+                                                      "l_shipdate(#36)",
+                                                      "l_commitdate(#37)",
+                                                      "l_receiptdate(#38)",
+                                                      "l_shipinstruct(#39)",
+                                                      "l_shipmode(#40)",
+                                                      "l_comment(#41)"
+                                                    ],
+                                                    "operator_id": "@8",
+                                                    "table_name": "lineitem"
+                                                  }
+                                                ],
+                                                "operator_id": "@9",
+                                                "predicate": "((l_shipdate(#36) >= CAST(\"1996-01-01\" AS Date32)) AND (l_shipdate(#36) < (CAST(\"1996-01-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))"
+                                              }
+                                            ],
+                                            "aggregates": [
+                                              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42) := sum((l_extendedprice(#31) * (1 - l_discount(#32))))"
+                                            ],
+                                            "keys": "l_suppkey(#28)",
+                                            "operator_id": "@10"
+                                          }
+                                        ],
+                                        "columns": [
+                                          "l_suppkey(#28)",
+                                          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                                        ],
+                                        "operator_id": "@11"
+                                      }
+                                    ],
+                                    "columns": [
+                                      "l_suppkey(#28)",
+                                      "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                                    ],
+                                    "operator_id": "@12"
+                                  }
+                                ],
+                                "defs": [
+                                  "supplier_no(#43) <- l_suppkey(#28)",
+                                  "total_revenue(#44) <- sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                                ],
+                                "operator_id": "@13"
+                              }
+                            ],
+                            "aggregates": [
+                              "max(revenue0.total_revenue)(#45) := max(total_revenue(#44))"
+                            ],
+                            "keys": "",
+                            "operator_id": "@14"
+                          }
+                        ],
+                        "columns": [
+                          "max(revenue0.total_revenue)(#45)"
+                        ],
+                        "operator_id": "@15"
+                      }
+                    ],
+                    "condition": "true",
+                    "join_type": "Single",
+                    "operator_id": "@24"
+                  }
+                ],
+                "operator_id": "@25",
+                "predicate": "(total_revenue(#25) = max(revenue0.total_revenue)(#45))"
+              }
+            ],
+            "columns": [
+              "s_suppkey(#0)",
+              "s_name(#1)",
+              "s_address(#2)",
+              "s_phone(#4)",
+              "total_revenue(#25)"
+            ],
+            "operator_id": "@26"
+          }
+        ],
+        "keys": [
+          "s_suppkey(#0) Asc NullsLast"
+        ],
+        "operator_id": "@27"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "selection",
+                "title": "σ Selection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⟕₁ SingleJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "join",
+                        "title": "⋈ InnerJoin",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "supplier",
+                            "columns": [
+                              "s_suppkey(#0)",
+                              "s_name(#1)",
+                              "s_address(#2)",
+                              "s_nationkey(#3)",
+                              "s_phone(#4)",
+                              "s_acctbal(#5)",
+                              "s_comment(#6)"
+                            ],
+                            "operator_id": "@0",
+                            "table_name": "supplier"
+                          },
+                          {
+                            "op": "rename",
+                            "title": "ρ Rename(revenue0)",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "projection",
+                                "title": "π Projection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "projection",
+                                    "title": "π Projection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "aggregation",
+                                        "title": "γ Aggregation",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "selection",
+                                            "title": "σ Selection",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "scan",
+                                                "title": "⊞ Scan",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "table": "lineitem",
+                                                "columns": [
+                                                  "l_orderkey(#7)",
+                                                  "l_partkey(#8)",
+                                                  "l_suppkey(#9)",
+                                                  "l_linenumber(#10)",
+                                                  "l_quantity(#11)",
+                                                  "l_extendedprice(#12)",
+                                                  "l_discount(#13)",
+                                                  "l_tax(#14)",
+                                                  "l_returnflag(#15)",
+                                                  "l_linestatus(#16)",
+                                                  "l_shipdate(#17)",
+                                                  "l_commitdate(#18)",
+                                                  "l_receiptdate(#19)",
+                                                  "l_shipinstruct(#20)",
+                                                  "l_shipmode(#21)",
+                                                  "l_comment(#22)"
+                                                ],
+                                                "operator_id": "@1",
+                                                "table_name": "lineitem"
+                                              }
+                                            ],
+                                            "operator_id": "@2",
+                                            "predicate": "((l_shipdate(#17) >= CAST(\"1996-01-01\" AS Date32)) AND (l_shipdate(#17) < (CAST(\"1996-01-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))"
+                                          }
+                                        ],
+                                        "aggregates": [
+                                          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23) := sum((l_extendedprice(#12) * (1 - l_discount(#13))))"
+                                        ],
+                                        "keys": "l_suppkey(#9)",
+                                        "operator_id": "@3"
+                                      }
+                                    ],
+                                    "columns": [
+                                      "l_suppkey(#9)",
+                                      "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                                    ],
+                                    "operator_id": "@4"
+                                  }
+                                ],
+                                "columns": [
+                                  "l_suppkey(#9)",
+                                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                                ],
+                                "operator_id": "@5"
+                              }
+                            ],
+                            "defs": [
+                              "supplier_no(#24) <- l_suppkey(#9)",
+                              "total_revenue(#25) <- sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                            ],
+                            "operator_id": "@6"
+                          }
+                        ],
+                        "condition": "(true AND (s_suppkey(#0) = supplier_no(#24)))",
+                        "join_type": "Inner",
+                        "operator_id": "@28"
+                      },
+                      {
+                        "op": "projection",
+                        "title": "π Projection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "aggregation",
+                            "title": "γ Aggregation",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "rename",
+                                "title": "ρ Rename(revenue0)",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "projection",
+                                    "title": "π Projection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "projection",
+                                        "title": "π Projection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "aggregation",
+                                            "title": "γ Aggregation",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "selection",
+                                                "title": "σ Selection",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "children": [
+                                                  {
+                                                    "op": "scan",
+                                                    "title": "⊞ Scan",
+                                                    "cost": 0.0,
+                                                    "rows": 0.0,
+                                                    "table": "lineitem",
+                                                    "columns": [
+                                                      "l_orderkey(#26)",
+                                                      "l_partkey(#27)",
+                                                      "l_suppkey(#28)",
+                                                      "l_linenumber(#29)",
+                                                      "l_quantity(#30)",
+                                                      "l_extendedprice(#31)",
+                                                      "l_discount(#32)",
+                                                      "l_tax(#33)",
+                                                      "l_returnflag(#34)",
+                                                      "l_linestatus(#35)",
+                                                      "l_shipdate(#36)",
+                                                      "l_commitdate(#37)",
+                                                      "l_receiptdate(#38)",
+                                                      "l_shipinstruct(#39)",
+                                                      "l_shipmode(#40)",
+                                                      "l_comment(#41)"
+                                                    ],
+                                                    "operator_id": "@8",
+                                                    "table_name": "lineitem"
+                                                  }
+                                                ],
+                                                "operator_id": "@9",
+                                                "predicate": "((l_shipdate(#36) >= CAST(\"1996-01-01\" AS Date32)) AND (l_shipdate(#36) < (CAST(\"1996-01-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))"
+                                              }
+                                            ],
+                                            "aggregates": [
+                                              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42) := sum((l_extendedprice(#31) * (1 - l_discount(#32))))"
+                                            ],
+                                            "keys": "l_suppkey(#28)",
+                                            "operator_id": "@10"
+                                          }
+                                        ],
+                                        "columns": [
+                                          "l_suppkey(#28)",
+                                          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                                        ],
+                                        "operator_id": "@11"
+                                      }
+                                    ],
+                                    "columns": [
+                                      "l_suppkey(#28)",
+                                      "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                                    ],
+                                    "operator_id": "@12"
+                                  }
+                                ],
+                                "defs": [
+                                  "supplier_no(#43) <- l_suppkey(#28)",
+                                  "total_revenue(#44) <- sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                                ],
+                                "operator_id": "@13"
+                              }
+                            ],
+                            "aggregates": [
+                              "max(revenue0.total_revenue)(#45) := max(total_revenue(#44))"
+                            ],
+                            "keys": "",
+                            "operator_id": "@14"
+                          }
+                        ],
+                        "columns": [
+                          "max(revenue0.total_revenue)(#45)"
+                        ],
+                        "operator_id": "@15"
+                      }
+                    ],
+                    "condition": "true",
+                    "join_type": "Single",
+                    "operator_id": "@29"
+                  }
+                ],
+                "operator_id": "@30",
+                "predicate": "(total_revenue(#25) = max(revenue0.total_revenue)(#45))"
+              }
+            ],
+            "columns": [
+              "s_suppkey(#0)",
+              "s_name(#1)",
+              "s_address(#2)",
+              "s_phone(#4)",
+              "total_revenue(#25)"
+            ],
+            "operator_id": "@31"
+          }
+        ],
+        "keys": [
+          "s_suppkey(#0) Asc NullsLast"
+        ],
+        "operator_id": "@32"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "selection",
+                "title": "σ Selection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⟕₁ SingleJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "join",
+                        "title": "⋈ InnerJoin",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "supplier",
+                            "columns": [
+                              "s_suppkey(#0)",
+                              "s_name(#1)",
+                              "s_address(#2)",
+                              "s_nationkey(#3)",
+                              "s_phone(#4)",
+                              "s_acctbal(#5)",
+                              "s_comment(#6)"
+                            ],
+                            "operator_id": "@0",
+                            "table_name": "supplier"
+                          },
+                          {
+                            "op": "rename",
+                            "title": "ρ Rename(revenue0)",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "projection",
+                                "title": "π Projection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "projection",
+                                    "title": "π Projection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "aggregation",
+                                        "title": "γ Aggregation",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "selection",
+                                            "title": "σ Selection",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "scan",
+                                                "title": "⊞ Scan",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "table": "lineitem",
+                                                "columns": [
+                                                  "l_orderkey(#7)",
+                                                  "l_partkey(#8)",
+                                                  "l_suppkey(#9)",
+                                                  "l_linenumber(#10)",
+                                                  "l_quantity(#11)",
+                                                  "l_extendedprice(#12)",
+                                                  "l_discount(#13)",
+                                                  "l_tax(#14)",
+                                                  "l_returnflag(#15)",
+                                                  "l_linestatus(#16)",
+                                                  "l_shipdate(#17)",
+                                                  "l_commitdate(#18)",
+                                                  "l_receiptdate(#19)",
+                                                  "l_shipinstruct(#20)",
+                                                  "l_shipmode(#21)",
+                                                  "l_comment(#22)"
+                                                ],
+                                                "operator_id": "@1",
+                                                "table_name": "lineitem"
+                                              }
+                                            ],
+                                            "operator_id": "@2",
+                                            "predicate": "((l_shipdate(#17) >= CAST(\"1996-01-01\" AS Date32)) AND (l_shipdate(#17) < (CAST(\"1996-01-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))"
+                                          }
+                                        ],
+                                        "aggregates": [
+                                          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23) := sum((l_extendedprice(#12) * (1 - l_discount(#13))))"
+                                        ],
+                                        "keys": "l_suppkey(#9)",
+                                        "operator_id": "@3"
+                                      }
+                                    ],
+                                    "columns": [
+                                      "l_suppkey(#9)",
+                                      "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                                    ],
+                                    "operator_id": "@4"
+                                  }
+                                ],
+                                "columns": [
+                                  "l_suppkey(#9)",
+                                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                                ],
+                                "operator_id": "@5"
+                              }
+                            ],
+                            "defs": [
+                              "supplier_no(#24) <- l_suppkey(#9)",
+                              "total_revenue(#25) <- sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                            ],
+                            "operator_id": "@6"
+                          }
+                        ],
+                        "condition": "(true AND (s_suppkey(#0) = supplier_no(#24)))",
+                        "join_type": "Inner",
+                        "operator_id": "@28"
+                      },
+                      {
+                        "op": "projection",
+                        "title": "π Projection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "aggregation",
+                            "title": "γ Aggregation",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "rename",
+                                "title": "ρ Rename(revenue0)",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "projection",
+                                    "title": "π Projection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "projection",
+                                        "title": "π Projection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "aggregation",
+                                            "title": "γ Aggregation",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "selection",
+                                                "title": "σ Selection",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "children": [
+                                                  {
+                                                    "op": "scan",
+                                                    "title": "⊞ Scan",
+                                                    "cost": 0.0,
+                                                    "rows": 0.0,
+                                                    "table": "lineitem",
+                                                    "columns": [
+                                                      "l_orderkey(#26)",
+                                                      "l_partkey(#27)",
+                                                      "l_suppkey(#28)",
+                                                      "l_linenumber(#29)",
+                                                      "l_quantity(#30)",
+                                                      "l_extendedprice(#31)",
+                                                      "l_discount(#32)",
+                                                      "l_tax(#33)",
+                                                      "l_returnflag(#34)",
+                                                      "l_linestatus(#35)",
+                                                      "l_shipdate(#36)",
+                                                      "l_commitdate(#37)",
+                                                      "l_receiptdate(#38)",
+                                                      "l_shipinstruct(#39)",
+                                                      "l_shipmode(#40)",
+                                                      "l_comment(#41)"
+                                                    ],
+                                                    "operator_id": "@8",
+                                                    "table_name": "lineitem"
+                                                  }
+                                                ],
+                                                "operator_id": "@9",
+                                                "predicate": "((l_shipdate(#36) >= CAST(\"1996-01-01\" AS Date32)) AND (l_shipdate(#36) < (CAST(\"1996-01-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))"
+                                              }
+                                            ],
+                                            "aggregates": [
+                                              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42) := sum((l_extendedprice(#31) * (1 - l_discount(#32))))"
+                                            ],
+                                            "keys": "l_suppkey(#28)",
+                                            "operator_id": "@10"
+                                          }
+                                        ],
+                                        "columns": [
+                                          "l_suppkey(#28)",
+                                          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                                        ],
+                                        "operator_id": "@11"
+                                      }
+                                    ],
+                                    "columns": [
+                                      "l_suppkey(#28)",
+                                      "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                                    ],
+                                    "operator_id": "@12"
+                                  }
+                                ],
+                                "defs": [
+                                  "supplier_no(#43) <- l_suppkey(#28)",
+                                  "total_revenue(#44) <- sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                                ],
+                                "operator_id": "@13"
+                              }
+                            ],
+                            "aggregates": [
+                              "max(revenue0.total_revenue)(#45) := max(total_revenue(#44))"
+                            ],
+                            "keys": "",
+                            "operator_id": "@14"
+                          }
+                        ],
+                        "columns": [
+                          "max(revenue0.total_revenue)(#45)"
+                        ],
+                        "operator_id": "@15"
+                      }
+                    ],
+                    "condition": "true",
+                    "join_type": "Single",
+                    "operator_id": "@29"
+                  }
+                ],
+                "operator_id": "@30",
+                "predicate": "(total_revenue(#25) = max(revenue0.total_revenue)(#45))"
+              }
+            ],
+            "columns": [
+              "s_suppkey(#0)",
+              "s_name(#1)",
+              "s_address(#2)",
+              "s_phone(#4)",
+              "total_revenue(#25)"
+            ],
+            "operator_id": "@31"
+          }
+        ],
+        "keys": [
+          "s_suppkey(#0) Asc NullsLast"
+        ],
+        "operator_id": "@32"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "selection",
+                "title": "σ Selection",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "join",
+                    "title": "⟕₁ SingleJoin",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "join",
+                        "title": "⋈ InnerJoin",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "scan",
+                            "title": "⊞ Scan",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "table": "supplier",
+                            "columns": [
+                              "s_suppkey(#0)",
+                              "s_name(#1)",
+                              "s_address(#2)",
+                              "s_nationkey(#3)",
+                              "s_phone(#4)",
+                              "s_acctbal(#5)",
+                              "s_comment(#6)"
+                            ],
+                            "operator_id": "@0",
+                            "table_name": "supplier"
+                          },
+                          {
+                            "op": "rename",
+                            "title": "ρ Rename(revenue0)",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "projection",
+                                "title": "π Projection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "projection",
+                                    "title": "π Projection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "aggregation",
+                                        "title": "γ Aggregation",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "selection",
+                                            "title": "σ Selection",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "scan",
+                                                "title": "⊞ Scan",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "table": "lineitem",
+                                                "columns": [
+                                                  "l_orderkey(#7)",
+                                                  "l_partkey(#8)",
+                                                  "l_suppkey(#9)",
+                                                  "l_linenumber(#10)",
+                                                  "l_quantity(#11)",
+                                                  "l_extendedprice(#12)",
+                                                  "l_discount(#13)",
+                                                  "l_tax(#14)",
+                                                  "l_returnflag(#15)",
+                                                  "l_linestatus(#16)",
+                                                  "l_shipdate(#17)",
+                                                  "l_commitdate(#18)",
+                                                  "l_receiptdate(#19)",
+                                                  "l_shipinstruct(#20)",
+                                                  "l_shipmode(#21)",
+                                                  "l_comment(#22)"
+                                                ],
+                                                "operator_id": "@1",
+                                                "table_name": "lineitem"
+                                              }
+                                            ],
+                                            "operator_id": "@2",
+                                            "predicate": "((l_shipdate(#17) >= CAST(\"1996-01-01\" AS Date32)) AND (l_shipdate(#17) < (CAST(\"1996-01-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))"
+                                          }
+                                        ],
+                                        "aggregates": [
+                                          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23) := sum((l_extendedprice(#12) * (1 - l_discount(#13))))"
+                                        ],
+                                        "keys": "l_suppkey(#9)",
+                                        "operator_id": "@3"
+                                      }
+                                    ],
+                                    "columns": [
+                                      "l_suppkey(#9)",
+                                      "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                                    ],
+                                    "operator_id": "@4"
+                                  }
+                                ],
+                                "columns": [
+                                  "l_suppkey(#9)",
+                                  "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                                ],
+                                "operator_id": "@5"
+                              }
+                            ],
+                            "defs": [
+                              "supplier_no(#24) <- l_suppkey(#9)",
+                              "total_revenue(#25) <- sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+                            ],
+                            "operator_id": "@6"
+                          }
+                        ],
+                        "condition": "(true AND (s_suppkey(#0) = supplier_no(#24)))",
+                        "join_type": "Inner",
+                        "operator_id": "@28"
+                      },
+                      {
+                        "op": "projection",
+                        "title": "π Projection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "aggregation",
+                            "title": "γ Aggregation",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "rename",
+                                "title": "ρ Rename(revenue0)",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "projection",
+                                    "title": "π Projection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "projection",
+                                        "title": "π Projection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "aggregation",
+                                            "title": "γ Aggregation",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "selection",
+                                                "title": "σ Selection",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "children": [
+                                                  {
+                                                    "op": "scan",
+                                                    "title": "⊞ Scan",
+                                                    "cost": 0.0,
+                                                    "rows": 0.0,
+                                                    "table": "lineitem",
+                                                    "columns": [
+                                                      "l_orderkey(#26)",
+                                                      "l_partkey(#27)",
+                                                      "l_suppkey(#28)",
+                                                      "l_linenumber(#29)",
+                                                      "l_quantity(#30)",
+                                                      "l_extendedprice(#31)",
+                                                      "l_discount(#32)",
+                                                      "l_tax(#33)",
+                                                      "l_returnflag(#34)",
+                                                      "l_linestatus(#35)",
+                                                      "l_shipdate(#36)",
+                                                      "l_commitdate(#37)",
+                                                      "l_receiptdate(#38)",
+                                                      "l_shipinstruct(#39)",
+                                                      "l_shipmode(#40)",
+                                                      "l_comment(#41)"
+                                                    ],
+                                                    "operator_id": "@8",
+                                                    "table_name": "lineitem"
+                                                  }
+                                                ],
+                                                "operator_id": "@9",
+                                                "predicate": "((l_shipdate(#36) >= CAST(\"1996-01-01\" AS Date32)) AND (l_shipdate(#36) < (CAST(\"1996-01-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))"
+                                              }
+                                            ],
+                                            "aggregates": [
+                                              "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42) := sum((l_extendedprice(#31) * (1 - l_discount(#32))))"
+                                            ],
+                                            "keys": "l_suppkey(#28)",
+                                            "operator_id": "@10"
+                                          }
+                                        ],
+                                        "columns": [
+                                          "l_suppkey(#28)",
+                                          "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                                        ],
+                                        "operator_id": "@11"
+                                      }
+                                    ],
+                                    "columns": [
+                                      "l_suppkey(#28)",
+                                      "sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                                    ],
+                                    "operator_id": "@12"
+                                  }
+                                ],
+                                "defs": [
+                                  "supplier_no(#43) <- l_suppkey(#28)",
+                                  "total_revenue(#44) <- sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+                                ],
+                                "operator_id": "@13"
+                              }
+                            ],
+                            "aggregates": [
+                              "max(revenue0.total_revenue)(#45) := max(total_revenue(#44))"
+                            ],
+                            "keys": "",
+                            "operator_id": "@14"
+                          }
+                        ],
+                        "columns": [
+                          "max(revenue0.total_revenue)(#45)"
+                        ],
+                        "operator_id": "@15"
+                      }
+                    ],
+                    "condition": "true",
+                    "join_type": "Single",
+                    "operator_id": "@29"
+                  }
+                ],
+                "operator_id": "@30",
+                "predicate": "(total_revenue(#25) = max(revenue0.total_revenue)(#45))"
+              }
+            ],
+            "columns": [
+              "s_suppkey(#0)",
+              "s_name(#1)",
+              "s_address(#2)",
+              "s_phone(#4)",
+              "total_revenue(#25)"
+            ],
+            "operator_id": "@31"
+          }
+        ],
+        "keys": [
+          "s_suppkey(#0) Asc NullsLast"
+        ],
+        "operator_id": "@32"
+      }
+    }
+  ],
+  "query": "with revenue0 (supplier_no, total_revenue) as (\n\tselect\n\t\tl_suppkey,\n\t\tsum(l_extendedprice * (1 - l_discount))\n\tfrom\n\t\tlineitem\n\twhere\n\t\tl_shipdate >= date '1996-01-01'\n\t\tand l_shipdate < date '1996-01-01' + interval '3' month\n\tgroup by\n\t\tl_suppkey\n)\nselect\n\ts_suppkey,\n\ts_name,\n\ts_address,\n\ts_phone,\n\ttotal_revenue\nfrom\n\tsupplier,\n\trevenue0\nwhere\n\ts_suppkey = supplier_no\n\tand total_revenue = (\n\t\tselect\n\t\t\tmax(total_revenue)\n\t\tfrom\n\t\t\trevenue0\n\t)\norder by\n\ts_suppkey;"
+}

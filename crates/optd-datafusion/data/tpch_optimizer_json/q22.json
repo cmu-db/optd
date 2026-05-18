@@ -1,0 +1,1721 @@
+{
+  "passes": [
+    {
+      "passName": "Initial",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "rename",
+                    "title": "ρ Rename(custsale)",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "projection",
+                        "title": "π Projection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "map",
+                            "title": "χ Map",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "selection",
+                                "title": "σ Selection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "scan",
+                                    "title": "⊞ Scan",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "table": "customer",
+                                    "columns": [
+                                      "c_custkey(#0)",
+                                      "c_name(#1)",
+                                      "c_address(#2)",
+                                      "c_nationkey(#3)",
+                                      "c_phone(#4)",
+                                      "c_acctbal(#5)",
+                                      "c_mktsegment(#6)",
+                                      "c_comment(#7)"
+                                    ],
+                                    "operator_id": "@0",
+                                    "table_name": "customer"
+                                  },
+                                  {
+                                    "op": "projection",
+                                    "title": "π Projection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "aggregation",
+                                        "title": "γ Aggregation",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "selection",
+                                            "title": "σ Selection",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "scan",
+                                                "title": "⊞ Scan",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "table": "customer",
+                                                "columns": [
+                                                  "c_custkey(#8)",
+                                                  "c_name(#9)",
+                                                  "c_address(#10)",
+                                                  "c_nationkey(#11)",
+                                                  "c_phone(#12)",
+                                                  "c_acctbal(#13)",
+                                                  "c_mktsegment(#14)",
+                                                  "c_comment(#15)"
+                                                ],
+                                                "operator_id": "@1",
+                                                "table_name": "customer"
+                                              }
+                                            ],
+                                            "operator_id": "@2",
+                                            "predicate": "((c_acctbal(#13) > 0) AND ((substr(c_phone(#12), 1, 2) = \"13\") OR (substr(c_phone(#12), 1, 2) = \"31\") OR (substr(c_phone(#12), 1, 2) = \"23\") OR (substr(c_phone(#12), 1, 2) = \"29\") OR (substr(c_phone(#12), 1, 2) = \"30\") OR (substr(c_phone(#12), 1, 2) = \"18\") OR (substr(c_phone(#12), 1, 2) = \"17\")))"
+                                          }
+                                        ],
+                                        "aggregates": [
+                                          "avg(customer.c_acctbal)(#16) := avg(c_acctbal(#13))"
+                                        ],
+                                        "keys": "",
+                                        "operator_id": "@3"
+                                      }
+                                    ],
+                                    "columns": [
+                                      "avg(customer.c_acctbal)(#16)"
+                                    ],
+                                    "operator_id": "@4"
+                                  },
+                                  {
+                                    "op": "projection",
+                                    "title": "π Projection",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "selection",
+                                        "title": "σ Selection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "orders",
+                                            "columns": [
+                                              "o_orderkey(#17)",
+                                              "o_custkey(#18)",
+                                              "o_orderstatus(#19)",
+                                              "o_totalprice(#20)",
+                                              "o_orderdate(#21)",
+                                              "o_orderpriority(#22)",
+                                              "o_clerk(#23)",
+                                              "o_shippriority(#24)",
+                                              "o_comment(#25)"
+                                            ],
+                                            "operator_id": "@5",
+                                            "table_name": "orders"
+                                          }
+                                        ],
+                                        "operator_id": "@6",
+                                        "predicate": "(o_custkey(#18) = c_custkey(#0))"
+                                      }
+                                    ],
+                                    "columns": [
+                                      "o_orderkey(#17)",
+                                      "o_custkey(#18)",
+                                      "o_orderstatus(#19)",
+                                      "o_totalprice(#20)",
+                                      "o_orderdate(#21)",
+                                      "o_orderpriority(#22)",
+                                      "o_clerk(#23)",
+                                      "o_shippriority(#24)",
+                                      "o_comment(#25)"
+                                    ],
+                                    "operator_id": "@7"
+                                  }
+                                ],
+                                "operator_id": "@8",
+                                "predicate": "((((substr(c_phone(#4), 1, 2) = \"13\") OR (substr(c_phone(#4), 1, 2) = \"31\") OR (substr(c_phone(#4), 1, 2) = \"23\") OR (substr(c_phone(#4), 1, 2) = \"29\") OR (substr(c_phone(#4), 1, 2) = \"30\") OR (substr(c_phone(#4), 1, 2) = \"18\") OR (substr(c_phone(#4), 1, 2) = \"17\")) AND (c_acctbal(#5) > SCALAR_SUBQUERY(@4))) AND NOT EXISTS(@7))"
+                              }
+                            ],
+                            "computations": [
+                              "cntrycode(#26) := substr(c_phone(#4), 1, 2)"
+                            ],
+                            "operator_id": "@9"
+                          }
+                        ],
+                        "columns": [
+                          "cntrycode(#26)",
+                          "c_acctbal(#5)"
+                        ],
+                        "operator_id": "@10"
+                      }
+                    ],
+                    "defs": [
+                      "cntrycode(#27) <- cntrycode(#26)",
+                      "c_acctbal(#28) <- c_acctbal(#5)"
+                    ],
+                    "operator_id": "@11"
+                  }
+                ],
+                "aggregates": [
+                  "count(Int64(1))(#29) := count_star()",
+                  "sum(custsale.c_acctbal)(#30) := sum(c_acctbal(#28))"
+                ],
+                "keys": "cntrycode(#27)",
+                "operator_id": "@12"
+              }
+            ],
+            "columns": [
+              "cntrycode(#27)",
+              "count(Int64(1))(#29)",
+              "sum(custsale.c_acctbal)(#30)"
+            ],
+            "operator_id": "@13"
+          }
+        ],
+        "keys": [
+          "cntrycode(#27) Asc NullsLast"
+        ],
+        "operator_id": "@14"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "rename",
+                    "title": "ρ Rename(custsale)",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "projection",
+                        "title": "π Projection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "map",
+                            "title": "χ Map",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "selection",
+                                "title": "σ Selection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "join",
+                                    "title": "⟕ᵐ LeftMarkJoin",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "join",
+                                        "title": "⟕₁ SingleJoin",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "scan",
+                                            "title": "⊞ Scan",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "table": "customer",
+                                            "columns": [
+                                              "c_custkey(#0)",
+                                              "c_name(#1)",
+                                              "c_address(#2)",
+                                              "c_nationkey(#3)",
+                                              "c_phone(#4)",
+                                              "c_acctbal(#5)",
+                                              "c_mktsegment(#6)",
+                                              "c_comment(#7)"
+                                            ],
+                                            "operator_id": "@0",
+                                            "table_name": "customer"
+                                          },
+                                          {
+                                            "op": "projection",
+                                            "title": "π Projection",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "aggregation",
+                                                "title": "γ Aggregation",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "children": [
+                                                  {
+                                                    "op": "selection",
+                                                    "title": "σ Selection",
+                                                    "cost": 0.0,
+                                                    "rows": 0.0,
+                                                    "children": [
+                                                      {
+                                                        "op": "scan",
+                                                        "title": "⊞ Scan",
+                                                        "cost": 0.0,
+                                                        "rows": 0.0,
+                                                        "table": "customer",
+                                                        "columns": [
+                                                          "c_custkey(#8)",
+                                                          "c_name(#9)",
+                                                          "c_address(#10)",
+                                                          "c_nationkey(#11)",
+                                                          "c_phone(#12)",
+                                                          "c_acctbal(#13)",
+                                                          "c_mktsegment(#14)",
+                                                          "c_comment(#15)"
+                                                        ],
+                                                        "operator_id": "@1",
+                                                        "table_name": "customer"
+                                                      }
+                                                    ],
+                                                    "operator_id": "@2",
+                                                    "predicate": "((c_acctbal(#13) > 0) AND ((substr(c_phone(#12), 1, 2) = \"13\") OR (substr(c_phone(#12), 1, 2) = \"31\") OR (substr(c_phone(#12), 1, 2) = \"23\") OR (substr(c_phone(#12), 1, 2) = \"29\") OR (substr(c_phone(#12), 1, 2) = \"30\") OR (substr(c_phone(#12), 1, 2) = \"18\") OR (substr(c_phone(#12), 1, 2) = \"17\")))"
+                                                  }
+                                                ],
+                                                "aggregates": [
+                                                  "avg(customer.c_acctbal)(#16) := avg(c_acctbal(#13))"
+                                                ],
+                                                "keys": "",
+                                                "operator_id": "@3"
+                                              }
+                                            ],
+                                            "columns": [
+                                              "avg(customer.c_acctbal)(#16)"
+                                            ],
+                                            "operator_id": "@4"
+                                          }
+                                        ],
+                                        "condition": "true",
+                                        "join_type": "Single",
+                                        "operator_id": "@15"
+                                      },
+                                      {
+                                        "op": "projection",
+                                        "title": "π Projection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "selection",
+                                            "title": "σ Selection",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "scan",
+                                                "title": "⊞ Scan",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "table": "orders",
+                                                "columns": [
+                                                  "o_orderkey(#17)",
+                                                  "o_custkey(#18)",
+                                                  "o_orderstatus(#19)",
+                                                  "o_totalprice(#20)",
+                                                  "o_orderdate(#21)",
+                                                  "o_orderpriority(#22)",
+                                                  "o_clerk(#23)",
+                                                  "o_shippriority(#24)",
+                                                  "o_comment(#25)"
+                                                ],
+                                                "operator_id": "@5",
+                                                "table_name": "orders"
+                                              }
+                                            ],
+                                            "operator_id": "@6",
+                                            "predicate": "(o_custkey(#18) = c_custkey(#0))"
+                                          }
+                                        ],
+                                        "columns": [
+                                          "o_orderkey(#17)",
+                                          "o_custkey(#18)",
+                                          "o_orderstatus(#19)",
+                                          "o_totalprice(#20)",
+                                          "o_orderdate(#21)",
+                                          "o_orderpriority(#22)",
+                                          "o_clerk(#23)",
+                                          "o_shippriority(#24)",
+                                          "o_comment(#25)"
+                                        ],
+                                        "operator_id": "@7"
+                                      }
+                                    ],
+                                    "condition": "true",
+                                    "join_type": "LeftMark",
+                                    "marker": "exists_mark(#31)",
+                                    "operator_id": "@16"
+                                  }
+                                ],
+                                "operator_id": "@17",
+                                "predicate": "((((substr(c_phone(#4), 1, 2) = \"13\") OR (substr(c_phone(#4), 1, 2) = \"31\") OR (substr(c_phone(#4), 1, 2) = \"23\") OR (substr(c_phone(#4), 1, 2) = \"29\") OR (substr(c_phone(#4), 1, 2) = \"30\") OR (substr(c_phone(#4), 1, 2) = \"18\") OR (substr(c_phone(#4), 1, 2) = \"17\")) AND (c_acctbal(#5) > avg(customer.c_acctbal)(#16))) AND NOT(exists_mark(#31)))"
+                              }
+                            ],
+                            "computations": [
+                              "cntrycode(#26) := substr(c_phone(#4), 1, 2)"
+                            ],
+                            "operator_id": "@18"
+                          }
+                        ],
+                        "columns": [
+                          "cntrycode(#26)",
+                          "c_acctbal(#5)"
+                        ],
+                        "operator_id": "@19"
+                      }
+                    ],
+                    "defs": [
+                      "cntrycode(#27) <- cntrycode(#26)",
+                      "c_acctbal(#28) <- c_acctbal(#5)"
+                    ],
+                    "operator_id": "@20"
+                  }
+                ],
+                "aggregates": [
+                  "count(Int64(1))(#29) := count_star()",
+                  "sum(custsale.c_acctbal)(#30) := sum(c_acctbal(#28))"
+                ],
+                "keys": "cntrycode(#27)",
+                "operator_id": "@21"
+              }
+            ],
+            "columns": [
+              "cntrycode(#27)",
+              "count(Int64(1))(#29)",
+              "sum(custsale.c_acctbal)(#30)"
+            ],
+            "operator_id": "@22"
+          }
+        ],
+        "keys": [
+          "cntrycode(#27) Asc NullsLast"
+        ],
+        "operator_id": "@23"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "rename",
+                    "title": "ρ Rename(custsale)",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "projection",
+                        "title": "π Projection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "map",
+                            "title": "χ Map",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "selection",
+                                "title": "σ Selection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "join",
+                                    "title": "⟕ᵐ LeftMarkJoin",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "selection",
+                                        "title": "σ Selection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "join",
+                                            "title": "⟕₁ SingleJoin",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "scan",
+                                                "title": "⊞ Scan",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "table": "customer",
+                                                "columns": [
+                                                  "c_custkey(#0)",
+                                                  "c_name(#1)",
+                                                  "c_address(#2)",
+                                                  "c_nationkey(#3)",
+                                                  "c_phone(#4)",
+                                                  "c_acctbal(#5)",
+                                                  "c_mktsegment(#6)",
+                                                  "c_comment(#7)"
+                                                ],
+                                                "operator_id": "@0",
+                                                "table_name": "customer"
+                                              },
+                                              {
+                                                "op": "projection",
+                                                "title": "π Projection",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "children": [
+                                                  {
+                                                    "op": "aggregation",
+                                                    "title": "γ Aggregation",
+                                                    "cost": 0.0,
+                                                    "rows": 0.0,
+                                                    "children": [
+                                                      {
+                                                        "op": "selection",
+                                                        "title": "σ Selection",
+                                                        "cost": 0.0,
+                                                        "rows": 0.0,
+                                                        "children": [
+                                                          {
+                                                            "op": "scan",
+                                                            "title": "⊞ Scan",
+                                                            "cost": 0.0,
+                                                            "rows": 0.0,
+                                                            "table": "customer",
+                                                            "columns": [
+                                                              "c_custkey(#8)",
+                                                              "c_name(#9)",
+                                                              "c_address(#10)",
+                                                              "c_nationkey(#11)",
+                                                              "c_phone(#12)",
+                                                              "c_acctbal(#13)",
+                                                              "c_mktsegment(#14)",
+                                                              "c_comment(#15)"
+                                                            ],
+                                                            "operator_id": "@1",
+                                                            "table_name": "customer"
+                                                          }
+                                                        ],
+                                                        "operator_id": "@2",
+                                                        "predicate": "((c_acctbal(#13) > 0) AND ((substr(c_phone(#12), 1, 2) = \"13\") OR (substr(c_phone(#12), 1, 2) = \"31\") OR (substr(c_phone(#12), 1, 2) = \"23\") OR (substr(c_phone(#12), 1, 2) = \"29\") OR (substr(c_phone(#12), 1, 2) = \"30\") OR (substr(c_phone(#12), 1, 2) = \"18\") OR (substr(c_phone(#12), 1, 2) = \"17\")))"
+                                                      }
+                                                    ],
+                                                    "aggregates": [
+                                                      "avg(customer.c_acctbal)(#16) := avg(c_acctbal(#13))"
+                                                    ],
+                                                    "keys": "",
+                                                    "operator_id": "@3"
+                                                  }
+                                                ],
+                                                "columns": [
+                                                  "avg(customer.c_acctbal)(#16)"
+                                                ],
+                                                "operator_id": "@4"
+                                              }
+                                            ],
+                                            "condition": "true",
+                                            "join_type": "Single",
+                                            "operator_id": "@15"
+                                          }
+                                        ],
+                                        "operator_id": "@24",
+                                        "predicate": "(((substr(c_phone(#4), 1, 2) = \"13\") OR (substr(c_phone(#4), 1, 2) = \"31\") OR (substr(c_phone(#4), 1, 2) = \"23\") OR (substr(c_phone(#4), 1, 2) = \"29\") OR (substr(c_phone(#4), 1, 2) = \"30\") OR (substr(c_phone(#4), 1, 2) = \"18\") OR (substr(c_phone(#4), 1, 2) = \"17\")) AND (c_acctbal(#5) > avg(customer.c_acctbal)(#16)))"
+                                      },
+                                      {
+                                        "op": "projection",
+                                        "title": "π Projection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "selection",
+                                            "title": "σ Selection",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "scan",
+                                                "title": "⊞ Scan",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "table": "orders",
+                                                "columns": [
+                                                  "o_orderkey(#17)",
+                                                  "o_custkey(#18)",
+                                                  "o_orderstatus(#19)",
+                                                  "o_totalprice(#20)",
+                                                  "o_orderdate(#21)",
+                                                  "o_orderpriority(#22)",
+                                                  "o_clerk(#23)",
+                                                  "o_shippriority(#24)",
+                                                  "o_comment(#25)"
+                                                ],
+                                                "operator_id": "@5",
+                                                "table_name": "orders"
+                                              }
+                                            ],
+                                            "operator_id": "@6",
+                                            "predicate": "(o_custkey(#18) = c_custkey(#0))"
+                                          }
+                                        ],
+                                        "columns": [
+                                          "o_orderkey(#17)",
+                                          "o_custkey(#18)",
+                                          "o_orderstatus(#19)",
+                                          "o_totalprice(#20)",
+                                          "o_orderdate(#21)",
+                                          "o_orderpriority(#22)",
+                                          "o_clerk(#23)",
+                                          "o_shippriority(#24)",
+                                          "o_comment(#25)"
+                                        ],
+                                        "operator_id": "@7"
+                                      }
+                                    ],
+                                    "condition": "true",
+                                    "join_type": "LeftMark",
+                                    "marker": "exists_mark(#31)",
+                                    "operator_id": "@25"
+                                  }
+                                ],
+                                "operator_id": "@26",
+                                "predicate": "NOT(exists_mark(#31))"
+                              }
+                            ],
+                            "computations": [
+                              "cntrycode(#26) := substr(c_phone(#4), 1, 2)"
+                            ],
+                            "operator_id": "@27"
+                          }
+                        ],
+                        "columns": [
+                          "cntrycode(#26)",
+                          "c_acctbal(#5)"
+                        ],
+                        "operator_id": "@28"
+                      }
+                    ],
+                    "defs": [
+                      "cntrycode(#27) <- cntrycode(#26)",
+                      "c_acctbal(#28) <- c_acctbal(#5)"
+                    ],
+                    "operator_id": "@29"
+                  }
+                ],
+                "aggregates": [
+                  "count(Int64(1))(#29) := count_star()",
+                  "sum(custsale.c_acctbal)(#30) := sum(c_acctbal(#28))"
+                ],
+                "keys": "cntrycode(#27)",
+                "operator_id": "@30"
+              }
+            ],
+            "columns": [
+              "cntrycode(#27)",
+              "count(Int64(1))(#29)",
+              "sum(custsale.c_acctbal)(#30)"
+            ],
+            "operator_id": "@31"
+          }
+        ],
+        "keys": [
+          "cntrycode(#27) Asc NullsLast"
+        ],
+        "operator_id": "@32"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "rename",
+                    "title": "ρ Rename(custsale)",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "projection",
+                        "title": "π Projection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "map",
+                            "title": "χ Map",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "selection",
+                                "title": "σ Selection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "join",
+                                    "title": "⟕ᵐ LeftMarkJoin",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "selection",
+                                        "title": "σ Selection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "join",
+                                            "title": "⟕₁ SingleJoin",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "scan",
+                                                "title": "⊞ Scan",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "table": "customer",
+                                                "columns": [
+                                                  "c_custkey(#0)",
+                                                  "c_name(#1)",
+                                                  "c_address(#2)",
+                                                  "c_nationkey(#3)",
+                                                  "c_phone(#4)",
+                                                  "c_acctbal(#5)",
+                                                  "c_mktsegment(#6)",
+                                                  "c_comment(#7)"
+                                                ],
+                                                "operator_id": "@0",
+                                                "table_name": "customer"
+                                              },
+                                              {
+                                                "op": "projection",
+                                                "title": "π Projection",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "children": [
+                                                  {
+                                                    "op": "aggregation",
+                                                    "title": "γ Aggregation",
+                                                    "cost": 0.0,
+                                                    "rows": 0.0,
+                                                    "children": [
+                                                      {
+                                                        "op": "selection",
+                                                        "title": "σ Selection",
+                                                        "cost": 0.0,
+                                                        "rows": 0.0,
+                                                        "children": [
+                                                          {
+                                                            "op": "scan",
+                                                            "title": "⊞ Scan",
+                                                            "cost": 0.0,
+                                                            "rows": 0.0,
+                                                            "table": "customer",
+                                                            "columns": [
+                                                              "c_custkey(#8)",
+                                                              "c_name(#9)",
+                                                              "c_address(#10)",
+                                                              "c_nationkey(#11)",
+                                                              "c_phone(#12)",
+                                                              "c_acctbal(#13)",
+                                                              "c_mktsegment(#14)",
+                                                              "c_comment(#15)"
+                                                            ],
+                                                            "operator_id": "@1",
+                                                            "table_name": "customer"
+                                                          }
+                                                        ],
+                                                        "operator_id": "@2",
+                                                        "predicate": "((c_acctbal(#13) > 0) AND ((substr(c_phone(#12), 1, 2) = \"13\") OR (substr(c_phone(#12), 1, 2) = \"31\") OR (substr(c_phone(#12), 1, 2) = \"23\") OR (substr(c_phone(#12), 1, 2) = \"29\") OR (substr(c_phone(#12), 1, 2) = \"30\") OR (substr(c_phone(#12), 1, 2) = \"18\") OR (substr(c_phone(#12), 1, 2) = \"17\")))"
+                                                      }
+                                                    ],
+                                                    "aggregates": [
+                                                      "avg(customer.c_acctbal)(#16) := avg(c_acctbal(#13))"
+                                                    ],
+                                                    "keys": "",
+                                                    "operator_id": "@3"
+                                                  }
+                                                ],
+                                                "columns": [
+                                                  "avg(customer.c_acctbal)(#16)"
+                                                ],
+                                                "operator_id": "@4"
+                                              }
+                                            ],
+                                            "condition": "true",
+                                            "join_type": "Single",
+                                            "operator_id": "@15"
+                                          }
+                                        ],
+                                        "operator_id": "@24",
+                                        "predicate": "(((substr(c_phone(#4), 1, 2) = \"13\") OR (substr(c_phone(#4), 1, 2) = \"31\") OR (substr(c_phone(#4), 1, 2) = \"23\") OR (substr(c_phone(#4), 1, 2) = \"29\") OR (substr(c_phone(#4), 1, 2) = \"30\") OR (substr(c_phone(#4), 1, 2) = \"18\") OR (substr(c_phone(#4), 1, 2) = \"17\")) AND (c_acctbal(#5) > avg(customer.c_acctbal)(#16)))"
+                                      },
+                                      {
+                                        "op": "projection",
+                                        "title": "π Projection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "selection",
+                                            "title": "σ Selection",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "scan",
+                                                "title": "⊞ Scan",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "table": "orders",
+                                                "columns": [
+                                                  "o_orderkey(#17)",
+                                                  "o_custkey(#18)",
+                                                  "o_orderstatus(#19)",
+                                                  "o_totalprice(#20)",
+                                                  "o_orderdate(#21)",
+                                                  "o_orderpriority(#22)",
+                                                  "o_clerk(#23)",
+                                                  "o_shippriority(#24)",
+                                                  "o_comment(#25)"
+                                                ],
+                                                "operator_id": "@5",
+                                                "table_name": "orders"
+                                              }
+                                            ],
+                                            "operator_id": "@6",
+                                            "predicate": "(o_custkey(#18) = c_custkey(#0))"
+                                          }
+                                        ],
+                                        "columns": [
+                                          "o_orderkey(#17)",
+                                          "o_custkey(#18)",
+                                          "o_orderstatus(#19)",
+                                          "o_totalprice(#20)",
+                                          "o_orderdate(#21)",
+                                          "o_orderpriority(#22)",
+                                          "o_clerk(#23)",
+                                          "o_shippriority(#24)",
+                                          "o_comment(#25)"
+                                        ],
+                                        "operator_id": "@7"
+                                      }
+                                    ],
+                                    "condition": "true",
+                                    "join_type": "LeftMark",
+                                    "marker": "exists_mark(#31)",
+                                    "operator_id": "@25"
+                                  }
+                                ],
+                                "operator_id": "@26",
+                                "predicate": "NOT(exists_mark(#31))"
+                              }
+                            ],
+                            "computations": [
+                              "cntrycode(#26) := substr(c_phone(#4), 1, 2)"
+                            ],
+                            "operator_id": "@27"
+                          }
+                        ],
+                        "columns": [
+                          "cntrycode(#26)",
+                          "c_acctbal(#5)"
+                        ],
+                        "operator_id": "@28"
+                      }
+                    ],
+                    "defs": [
+                      "cntrycode(#27) <- cntrycode(#26)",
+                      "c_acctbal(#28) <- c_acctbal(#5)"
+                    ],
+                    "operator_id": "@29"
+                  }
+                ],
+                "aggregates": [
+                  "count(Int64(1))(#29) := count_star()",
+                  "sum(custsale.c_acctbal)(#30) := sum(c_acctbal(#28))"
+                ],
+                "keys": "cntrycode(#27)",
+                "operator_id": "@30"
+              }
+            ],
+            "columns": [
+              "cntrycode(#27)",
+              "count(Int64(1))(#29)",
+              "sum(custsale.c_acctbal)(#30)"
+            ],
+            "operator_id": "@31"
+          }
+        ],
+        "keys": [
+          "cntrycode(#27) Asc NullsLast"
+        ],
+        "operator_id": "@32"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "rename",
+                    "title": "ρ Rename(custsale)",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "projection",
+                        "title": "π Projection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "map",
+                            "title": "χ Map",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "selection",
+                                "title": "σ Selection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "join",
+                                    "title": "⟕ᵐ LeftMarkJoin",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "selection",
+                                        "title": "σ Selection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "join",
+                                            "title": "⟕₁ SingleJoin",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "selection",
+                                                "title": "σ Selection",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "children": [
+                                                  {
+                                                    "op": "scan",
+                                                    "title": "⊞ Scan",
+                                                    "cost": 0.0,
+                                                    "rows": 0.0,
+                                                    "table": "customer",
+                                                    "columns": [
+                                                      "c_custkey(#0)",
+                                                      "c_name(#1)",
+                                                      "c_address(#2)",
+                                                      "c_nationkey(#3)",
+                                                      "c_phone(#4)",
+                                                      "c_acctbal(#5)",
+                                                      "c_mktsegment(#6)",
+                                                      "c_comment(#7)"
+                                                    ],
+                                                    "operator_id": "@0",
+                                                    "table_name": "customer"
+                                                  }
+                                                ],
+                                                "operator_id": "@33",
+                                                "predicate": "((substr(c_phone(#4), 1, 2) = \"13\") OR (substr(c_phone(#4), 1, 2) = \"31\") OR (substr(c_phone(#4), 1, 2) = \"23\") OR (substr(c_phone(#4), 1, 2) = \"29\") OR (substr(c_phone(#4), 1, 2) = \"30\") OR (substr(c_phone(#4), 1, 2) = \"18\") OR (substr(c_phone(#4), 1, 2) = \"17\"))"
+                                              },
+                                              {
+                                                "op": "projection",
+                                                "title": "π Projection",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "children": [
+                                                  {
+                                                    "op": "aggregation",
+                                                    "title": "γ Aggregation",
+                                                    "cost": 0.0,
+                                                    "rows": 0.0,
+                                                    "children": [
+                                                      {
+                                                        "op": "selection",
+                                                        "title": "σ Selection",
+                                                        "cost": 0.0,
+                                                        "rows": 0.0,
+                                                        "children": [
+                                                          {
+                                                            "op": "scan",
+                                                            "title": "⊞ Scan",
+                                                            "cost": 0.0,
+                                                            "rows": 0.0,
+                                                            "table": "customer",
+                                                            "columns": [
+                                                              "c_custkey(#8)",
+                                                              "c_name(#9)",
+                                                              "c_address(#10)",
+                                                              "c_nationkey(#11)",
+                                                              "c_phone(#12)",
+                                                              "c_acctbal(#13)",
+                                                              "c_mktsegment(#14)",
+                                                              "c_comment(#15)"
+                                                            ],
+                                                            "operator_id": "@1",
+                                                            "table_name": "customer"
+                                                          }
+                                                        ],
+                                                        "operator_id": "@2",
+                                                        "predicate": "((c_acctbal(#13) > 0) AND ((substr(c_phone(#12), 1, 2) = \"13\") OR (substr(c_phone(#12), 1, 2) = \"31\") OR (substr(c_phone(#12), 1, 2) = \"23\") OR (substr(c_phone(#12), 1, 2) = \"29\") OR (substr(c_phone(#12), 1, 2) = \"30\") OR (substr(c_phone(#12), 1, 2) = \"18\") OR (substr(c_phone(#12), 1, 2) = \"17\")))"
+                                                      }
+                                                    ],
+                                                    "aggregates": [
+                                                      "avg(customer.c_acctbal)(#16) := avg(c_acctbal(#13))"
+                                                    ],
+                                                    "keys": "",
+                                                    "operator_id": "@3"
+                                                  }
+                                                ],
+                                                "columns": [
+                                                  "avg(customer.c_acctbal)(#16)"
+                                                ],
+                                                "operator_id": "@4"
+                                              }
+                                            ],
+                                            "condition": "true",
+                                            "join_type": "Single",
+                                            "operator_id": "@34"
+                                          }
+                                        ],
+                                        "operator_id": "@35",
+                                        "predicate": "(c_acctbal(#5) > avg(customer.c_acctbal)(#16))"
+                                      },
+                                      {
+                                        "op": "projection",
+                                        "title": "π Projection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "selection",
+                                            "title": "σ Selection",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "scan",
+                                                "title": "⊞ Scan",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "table": "orders",
+                                                "columns": [
+                                                  "o_orderkey(#17)",
+                                                  "o_custkey(#18)",
+                                                  "o_orderstatus(#19)",
+                                                  "o_totalprice(#20)",
+                                                  "o_orderdate(#21)",
+                                                  "o_orderpriority(#22)",
+                                                  "o_clerk(#23)",
+                                                  "o_shippriority(#24)",
+                                                  "o_comment(#25)"
+                                                ],
+                                                "operator_id": "@5",
+                                                "table_name": "orders"
+                                              }
+                                            ],
+                                            "operator_id": "@6",
+                                            "predicate": "(o_custkey(#18) = c_custkey(#0))"
+                                          }
+                                        ],
+                                        "columns": [
+                                          "o_orderkey(#17)",
+                                          "o_custkey(#18)",
+                                          "o_orderstatus(#19)",
+                                          "o_totalprice(#20)",
+                                          "o_orderdate(#21)",
+                                          "o_orderpriority(#22)",
+                                          "o_clerk(#23)",
+                                          "o_shippriority(#24)",
+                                          "o_comment(#25)"
+                                        ],
+                                        "operator_id": "@7"
+                                      }
+                                    ],
+                                    "condition": "true",
+                                    "join_type": "LeftMark",
+                                    "marker": "exists_mark(#31)",
+                                    "operator_id": "@36"
+                                  }
+                                ],
+                                "operator_id": "@37",
+                                "predicate": "NOT(exists_mark(#31))"
+                              }
+                            ],
+                            "computations": [
+                              "cntrycode(#26) := substr(c_phone(#4), 1, 2)"
+                            ],
+                            "operator_id": "@38"
+                          }
+                        ],
+                        "columns": [
+                          "cntrycode(#26)",
+                          "c_acctbal(#5)"
+                        ],
+                        "operator_id": "@39"
+                      }
+                    ],
+                    "defs": [
+                      "cntrycode(#27) <- cntrycode(#26)",
+                      "c_acctbal(#28) <- c_acctbal(#5)"
+                    ],
+                    "operator_id": "@40"
+                  }
+                ],
+                "aggregates": [
+                  "count(Int64(1))(#29) := count_star()",
+                  "sum(custsale.c_acctbal)(#30) := sum(c_acctbal(#28))"
+                ],
+                "keys": "cntrycode(#27)",
+                "operator_id": "@41"
+              }
+            ],
+            "columns": [
+              "cntrycode(#27)",
+              "count(Int64(1))(#29)",
+              "sum(custsale.c_acctbal)(#30)"
+            ],
+            "operator_id": "@42"
+          }
+        ],
+        "keys": [
+          "cntrycode(#27) Asc NullsLast"
+        ],
+        "operator_id": "@43"
+      }
+    },
+    {
+      "passName": "subquery_to_join",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "rename",
+                    "title": "ρ Rename(custsale)",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "projection",
+                        "title": "π Projection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "map",
+                            "title": "χ Map",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "selection",
+                                "title": "σ Selection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "join",
+                                    "title": "⟕ᵐ LeftMarkJoin",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "selection",
+                                        "title": "σ Selection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "join",
+                                            "title": "⟕₁ SingleJoin",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "selection",
+                                                "title": "σ Selection",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "children": [
+                                                  {
+                                                    "op": "scan",
+                                                    "title": "⊞ Scan",
+                                                    "cost": 0.0,
+                                                    "rows": 0.0,
+                                                    "table": "customer",
+                                                    "columns": [
+                                                      "c_custkey(#0)",
+                                                      "c_name(#1)",
+                                                      "c_address(#2)",
+                                                      "c_nationkey(#3)",
+                                                      "c_phone(#4)",
+                                                      "c_acctbal(#5)",
+                                                      "c_mktsegment(#6)",
+                                                      "c_comment(#7)"
+                                                    ],
+                                                    "operator_id": "@0",
+                                                    "table_name": "customer"
+                                                  }
+                                                ],
+                                                "operator_id": "@33",
+                                                "predicate": "((substr(c_phone(#4), 1, 2) = \"13\") OR (substr(c_phone(#4), 1, 2) = \"31\") OR (substr(c_phone(#4), 1, 2) = \"23\") OR (substr(c_phone(#4), 1, 2) = \"29\") OR (substr(c_phone(#4), 1, 2) = \"30\") OR (substr(c_phone(#4), 1, 2) = \"18\") OR (substr(c_phone(#4), 1, 2) = \"17\"))"
+                                              },
+                                              {
+                                                "op": "projection",
+                                                "title": "π Projection",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "children": [
+                                                  {
+                                                    "op": "aggregation",
+                                                    "title": "γ Aggregation",
+                                                    "cost": 0.0,
+                                                    "rows": 0.0,
+                                                    "children": [
+                                                      {
+                                                        "op": "selection",
+                                                        "title": "σ Selection",
+                                                        "cost": 0.0,
+                                                        "rows": 0.0,
+                                                        "children": [
+                                                          {
+                                                            "op": "scan",
+                                                            "title": "⊞ Scan",
+                                                            "cost": 0.0,
+                                                            "rows": 0.0,
+                                                            "table": "customer",
+                                                            "columns": [
+                                                              "c_custkey(#8)",
+                                                              "c_name(#9)",
+                                                              "c_address(#10)",
+                                                              "c_nationkey(#11)",
+                                                              "c_phone(#12)",
+                                                              "c_acctbal(#13)",
+                                                              "c_mktsegment(#14)",
+                                                              "c_comment(#15)"
+                                                            ],
+                                                            "operator_id": "@1",
+                                                            "table_name": "customer"
+                                                          }
+                                                        ],
+                                                        "operator_id": "@2",
+                                                        "predicate": "((c_acctbal(#13) > 0) AND ((substr(c_phone(#12), 1, 2) = \"13\") OR (substr(c_phone(#12), 1, 2) = \"31\") OR (substr(c_phone(#12), 1, 2) = \"23\") OR (substr(c_phone(#12), 1, 2) = \"29\") OR (substr(c_phone(#12), 1, 2) = \"30\") OR (substr(c_phone(#12), 1, 2) = \"18\") OR (substr(c_phone(#12), 1, 2) = \"17\")))"
+                                                      }
+                                                    ],
+                                                    "aggregates": [
+                                                      "avg(customer.c_acctbal)(#16) := avg(c_acctbal(#13))"
+                                                    ],
+                                                    "keys": "",
+                                                    "operator_id": "@3"
+                                                  }
+                                                ],
+                                                "columns": [
+                                                  "avg(customer.c_acctbal)(#16)"
+                                                ],
+                                                "operator_id": "@4"
+                                              }
+                                            ],
+                                            "condition": "true",
+                                            "join_type": "Single",
+                                            "operator_id": "@34"
+                                          }
+                                        ],
+                                        "operator_id": "@35",
+                                        "predicate": "(c_acctbal(#5) > avg(customer.c_acctbal)(#16))"
+                                      },
+                                      {
+                                        "op": "projection",
+                                        "title": "π Projection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "selection",
+                                            "title": "σ Selection",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "scan",
+                                                "title": "⊞ Scan",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "table": "orders",
+                                                "columns": [
+                                                  "o_orderkey(#17)",
+                                                  "o_custkey(#18)",
+                                                  "o_orderstatus(#19)",
+                                                  "o_totalprice(#20)",
+                                                  "o_orderdate(#21)",
+                                                  "o_orderpriority(#22)",
+                                                  "o_clerk(#23)",
+                                                  "o_shippriority(#24)",
+                                                  "o_comment(#25)"
+                                                ],
+                                                "operator_id": "@5",
+                                                "table_name": "orders"
+                                              }
+                                            ],
+                                            "operator_id": "@6",
+                                            "predicate": "(o_custkey(#18) = c_custkey(#0))"
+                                          }
+                                        ],
+                                        "columns": [
+                                          "o_orderkey(#17)",
+                                          "o_custkey(#18)",
+                                          "o_orderstatus(#19)",
+                                          "o_totalprice(#20)",
+                                          "o_orderdate(#21)",
+                                          "o_orderpriority(#22)",
+                                          "o_clerk(#23)",
+                                          "o_shippriority(#24)",
+                                          "o_comment(#25)"
+                                        ],
+                                        "operator_id": "@7"
+                                      }
+                                    ],
+                                    "condition": "true",
+                                    "join_type": "LeftMark",
+                                    "marker": "exists_mark(#31)",
+                                    "operator_id": "@36"
+                                  }
+                                ],
+                                "operator_id": "@37",
+                                "predicate": "NOT(exists_mark(#31))"
+                              }
+                            ],
+                            "computations": [
+                              "cntrycode(#26) := substr(c_phone(#4), 1, 2)"
+                            ],
+                            "operator_id": "@38"
+                          }
+                        ],
+                        "columns": [
+                          "cntrycode(#26)",
+                          "c_acctbal(#5)"
+                        ],
+                        "operator_id": "@39"
+                      }
+                    ],
+                    "defs": [
+                      "cntrycode(#27) <- cntrycode(#26)",
+                      "c_acctbal(#28) <- c_acctbal(#5)"
+                    ],
+                    "operator_id": "@40"
+                  }
+                ],
+                "aggregates": [
+                  "count(Int64(1))(#29) := count_star()",
+                  "sum(custsale.c_acctbal)(#30) := sum(c_acctbal(#28))"
+                ],
+                "keys": "cntrycode(#27)",
+                "operator_id": "@41"
+              }
+            ],
+            "columns": [
+              "cntrycode(#27)",
+              "count(Int64(1))(#29)",
+              "sum(custsale.c_acctbal)(#30)"
+            ],
+            "operator_id": "@42"
+          }
+        ],
+        "keys": [
+          "cntrycode(#27) Asc NullsLast"
+        ],
+        "operator_id": "@43"
+      }
+    },
+    {
+      "passName": "predicate_pushdown",
+      "root": {
+        "op": "sort",
+        "title": "⇞ Sort",
+        "cost": 0.0,
+        "rows": 0.0,
+        "children": [
+          {
+            "op": "projection",
+            "title": "π Projection",
+            "cost": 0.0,
+            "rows": 0.0,
+            "children": [
+              {
+                "op": "aggregation",
+                "title": "γ Aggregation",
+                "cost": 0.0,
+                "rows": 0.0,
+                "children": [
+                  {
+                    "op": "rename",
+                    "title": "ρ Rename(custsale)",
+                    "cost": 0.0,
+                    "rows": 0.0,
+                    "children": [
+                      {
+                        "op": "projection",
+                        "title": "π Projection",
+                        "cost": 0.0,
+                        "rows": 0.0,
+                        "children": [
+                          {
+                            "op": "map",
+                            "title": "χ Map",
+                            "cost": 0.0,
+                            "rows": 0.0,
+                            "children": [
+                              {
+                                "op": "selection",
+                                "title": "σ Selection",
+                                "cost": 0.0,
+                                "rows": 0.0,
+                                "children": [
+                                  {
+                                    "op": "join",
+                                    "title": "⟕ᵐ LeftMarkJoin",
+                                    "cost": 0.0,
+                                    "rows": 0.0,
+                                    "children": [
+                                      {
+                                        "op": "selection",
+                                        "title": "σ Selection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "join",
+                                            "title": "⟕₁ SingleJoin",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "selection",
+                                                "title": "σ Selection",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "children": [
+                                                  {
+                                                    "op": "scan",
+                                                    "title": "⊞ Scan",
+                                                    "cost": 0.0,
+                                                    "rows": 0.0,
+                                                    "table": "customer",
+                                                    "columns": [
+                                                      "c_custkey(#0)",
+                                                      "c_name(#1)",
+                                                      "c_address(#2)",
+                                                      "c_nationkey(#3)",
+                                                      "c_phone(#4)",
+                                                      "c_acctbal(#5)",
+                                                      "c_mktsegment(#6)",
+                                                      "c_comment(#7)"
+                                                    ],
+                                                    "operator_id": "@0",
+                                                    "table_name": "customer"
+                                                  }
+                                                ],
+                                                "operator_id": "@33",
+                                                "predicate": "((substr(c_phone(#4), 1, 2) = \"13\") OR (substr(c_phone(#4), 1, 2) = \"31\") OR (substr(c_phone(#4), 1, 2) = \"23\") OR (substr(c_phone(#4), 1, 2) = \"29\") OR (substr(c_phone(#4), 1, 2) = \"30\") OR (substr(c_phone(#4), 1, 2) = \"18\") OR (substr(c_phone(#4), 1, 2) = \"17\"))"
+                                              },
+                                              {
+                                                "op": "projection",
+                                                "title": "π Projection",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "children": [
+                                                  {
+                                                    "op": "aggregation",
+                                                    "title": "γ Aggregation",
+                                                    "cost": 0.0,
+                                                    "rows": 0.0,
+                                                    "children": [
+                                                      {
+                                                        "op": "selection",
+                                                        "title": "σ Selection",
+                                                        "cost": 0.0,
+                                                        "rows": 0.0,
+                                                        "children": [
+                                                          {
+                                                            "op": "scan",
+                                                            "title": "⊞ Scan",
+                                                            "cost": 0.0,
+                                                            "rows": 0.0,
+                                                            "table": "customer",
+                                                            "columns": [
+                                                              "c_custkey(#8)",
+                                                              "c_name(#9)",
+                                                              "c_address(#10)",
+                                                              "c_nationkey(#11)",
+                                                              "c_phone(#12)",
+                                                              "c_acctbal(#13)",
+                                                              "c_mktsegment(#14)",
+                                                              "c_comment(#15)"
+                                                            ],
+                                                            "operator_id": "@1",
+                                                            "table_name": "customer"
+                                                          }
+                                                        ],
+                                                        "operator_id": "@2",
+                                                        "predicate": "((c_acctbal(#13) > 0) AND ((substr(c_phone(#12), 1, 2) = \"13\") OR (substr(c_phone(#12), 1, 2) = \"31\") OR (substr(c_phone(#12), 1, 2) = \"23\") OR (substr(c_phone(#12), 1, 2) = \"29\") OR (substr(c_phone(#12), 1, 2) = \"30\") OR (substr(c_phone(#12), 1, 2) = \"18\") OR (substr(c_phone(#12), 1, 2) = \"17\")))"
+                                                      }
+                                                    ],
+                                                    "aggregates": [
+                                                      "avg(customer.c_acctbal)(#16) := avg(c_acctbal(#13))"
+                                                    ],
+                                                    "keys": "",
+                                                    "operator_id": "@3"
+                                                  }
+                                                ],
+                                                "columns": [
+                                                  "avg(customer.c_acctbal)(#16)"
+                                                ],
+                                                "operator_id": "@4"
+                                              }
+                                            ],
+                                            "condition": "true",
+                                            "join_type": "Single",
+                                            "operator_id": "@34"
+                                          }
+                                        ],
+                                        "operator_id": "@35",
+                                        "predicate": "(c_acctbal(#5) > avg(customer.c_acctbal)(#16))"
+                                      },
+                                      {
+                                        "op": "projection",
+                                        "title": "π Projection",
+                                        "cost": 0.0,
+                                        "rows": 0.0,
+                                        "children": [
+                                          {
+                                            "op": "selection",
+                                            "title": "σ Selection",
+                                            "cost": 0.0,
+                                            "rows": 0.0,
+                                            "children": [
+                                              {
+                                                "op": "scan",
+                                                "title": "⊞ Scan",
+                                                "cost": 0.0,
+                                                "rows": 0.0,
+                                                "table": "orders",
+                                                "columns": [
+                                                  "o_orderkey(#17)",
+                                                  "o_custkey(#18)",
+                                                  "o_orderstatus(#19)",
+                                                  "o_totalprice(#20)",
+                                                  "o_orderdate(#21)",
+                                                  "o_orderpriority(#22)",
+                                                  "o_clerk(#23)",
+                                                  "o_shippriority(#24)",
+                                                  "o_comment(#25)"
+                                                ],
+                                                "operator_id": "@5",
+                                                "table_name": "orders"
+                                              }
+                                            ],
+                                            "operator_id": "@6",
+                                            "predicate": "(o_custkey(#18) = c_custkey(#0))"
+                                          }
+                                        ],
+                                        "columns": [
+                                          "o_orderkey(#17)",
+                                          "o_custkey(#18)",
+                                          "o_orderstatus(#19)",
+                                          "o_totalprice(#20)",
+                                          "o_orderdate(#21)",
+                                          "o_orderpriority(#22)",
+                                          "o_clerk(#23)",
+                                          "o_shippriority(#24)",
+                                          "o_comment(#25)"
+                                        ],
+                                        "operator_id": "@7"
+                                      }
+                                    ],
+                                    "condition": "true",
+                                    "join_type": "LeftMark",
+                                    "marker": "exists_mark(#31)",
+                                    "operator_id": "@36"
+                                  }
+                                ],
+                                "operator_id": "@37",
+                                "predicate": "NOT(exists_mark(#31))"
+                              }
+                            ],
+                            "computations": [
+                              "cntrycode(#26) := substr(c_phone(#4), 1, 2)"
+                            ],
+                            "operator_id": "@38"
+                          }
+                        ],
+                        "columns": [
+                          "cntrycode(#26)",
+                          "c_acctbal(#5)"
+                        ],
+                        "operator_id": "@39"
+                      }
+                    ],
+                    "defs": [
+                      "cntrycode(#27) <- cntrycode(#26)",
+                      "c_acctbal(#28) <- c_acctbal(#5)"
+                    ],
+                    "operator_id": "@40"
+                  }
+                ],
+                "aggregates": [
+                  "count(Int64(1))(#29) := count_star()",
+                  "sum(custsale.c_acctbal)(#30) := sum(c_acctbal(#28))"
+                ],
+                "keys": "cntrycode(#27)",
+                "operator_id": "@41"
+              }
+            ],
+            "columns": [
+              "cntrycode(#27)",
+              "count(Int64(1))(#29)",
+              "sum(custsale.c_acctbal)(#30)"
+            ],
+            "operator_id": "@42"
+          }
+        ],
+        "keys": [
+          "cntrycode(#27) Asc NullsLast"
+        ],
+        "operator_id": "@43"
+      }
+    }
+  ],
+  "query": "select\n    cntrycode,\n    count(*) as numcust,\n    sum(c_acctbal) as totacctbal\nfrom\n    (\n        select\n            substring(c_phone from 1 for 2) as cntrycode,\n            c_acctbal\n        from\n            customer\n        where\n                substring(c_phone from 1 for 2) in\n                ('13', '31', '23', '29', '30', '18', '17')\n          and c_acctbal > (\n            select\n                avg(c_acctbal)\n            from\n                customer\n            where\n                    c_acctbal > 0.00\n              and substring(c_phone from 1 for 2) in\n                  ('13', '31', '23', '29', '30', '18', '17')\n        )\n          and not exists (\n                select\n                    *\n                from\n                    orders\n                where\n                        o_custkey = c_custkey\n            )\n    ) as custsale\ngroup by\n    cntrycode\norder by\n    cntrycode;"
+}
