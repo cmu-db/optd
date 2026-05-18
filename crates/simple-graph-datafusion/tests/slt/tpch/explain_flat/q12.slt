@@ -36,88 +36,90 @@ order by
 03)----{
 04)------"id": 0,
 05)------"kind": "scan",
-06)------"title": "⊞ lineitem",
-07)------"columns": [
-08)--------"l_orderkey(#0)",
-09)--------"l_partkey(#1)",
-10)--------"l_suppkey(#2)",
-11)--------"l_linenumber(#3)",
-12)--------"l_quantity(#4)",
-13)--------"l_extendedprice(#5)",
-14)--------"l_discount(#6)",
-15)--------"l_tax(#7)",
-16)--------"l_returnflag(#8)",
-17)--------"l_linestatus(#9)",
-18)--------"l_shipdate(#10)",
-19)--------"l_commitdate(#11)",
-20)--------"l_receiptdate(#12)",
-21)--------"l_shipinstruct(#13)",
-22)--------"l_shipmode(#14)",
-23)--------"l_comment(#15)"
-24)------]
-25)----},
-26)----{
-27)------"id": 1,
-28)------"kind": "scan",
-29)------"title": "⊞ orders",
-30)------"columns": [
-31)--------"o_orderkey(#16)",
-32)--------"o_custkey(#17)",
-33)--------"o_orderstatus(#18)",
-34)--------"o_totalprice(#19)",
-35)--------"o_orderdate(#20)",
-36)--------"o_orderpriority(#21)",
-37)--------"o_clerk(#22)",
-38)--------"o_shippriority(#23)",
-39)--------"o_comment(#24)"
-40)------]
-41)----},
-42)----{
-43)------"id": 2,
-44)------"kind": "join",
-45)------"title": "⋈ InnerJoin",
-46)------"join_type": "Inner",
-47)------"condition": "(l_orderkey(#0) = o_orderkey(#16))",
-48)------"outer": 0,
-49)------"inner": 1
-50)----},
-51)----{
-52)------"id": 3,
-53)------"kind": "selection",
-54)------"title": "σ Selection",
-55)------"predicate": "((((((l_shipmode(#14) = \"MAIL\") OR (l_shipmode(#14) = \"SHIP\")) AND (l_commitdate(#11) < l_receiptdate(#12))) AND (l_shipdate(#10) < l_commitdate(#11))) AND (l_receiptdate(#12) >= CAST(\"1994-01-01\" AS Date32))) AND (l_receiptdate(#12) < CAST(\"1995-01-01\" AS Date32)))",
-56)------"input": 2
-57)----},
-58)----{
-59)------"id": 4,
-60)------"kind": "aggregation",
-61)------"title": "γ Aggregation",
-62)------"keys": "l_shipmode(#14)",
-63)------"aggregates": [
-64)--------"sum(CASE WHEN orders.o_orderpriority = Utf8(\"1-URGENT\") OR orders.o_orderpriority = Utf8(\"2-HIGH\") THEN Int64(1) ELSE Int64(0) END)(#25) := sum(CASE WHEN ((o_orderpriority(#21) = \"1-URGENT\") OR (o_orderpriority(#21) = \"2-HIGH\")) THEN 1 ELSE 0 END)",
-65)--------"sum(CASE WHEN orders.o_orderpriority != Utf8(\"1-URGENT\") AND orders.o_orderpriority != Utf8(\"2-HIGH\") THEN Int64(1) ELSE Int64(0) END)(#26) := sum(CASE WHEN ((o_orderpriority(#21) != \"1-URGENT\") AND (o_orderpriority(#21) != \"2-HIGH\")) THEN 1 ELSE 0 END)"
-66)------],
-67)------"input": 3
-68)----},
-69)----{
-70)------"id": 5,
-71)------"kind": "projection",
-72)------"title": "π Projection",
-73)------"columns": [
-74)--------"l_shipmode(#14)",
-75)--------"sum(CASE WHEN orders.o_orderpriority = Utf8(\"1-URGENT\") OR orders.o_orderpriority = Utf8(\"2-HIGH\") THEN Int64(1) ELSE Int64(0) END)(#25)",
-76)--------"sum(CASE WHEN orders.o_orderpriority != Utf8(\"1-URGENT\") AND orders.o_orderpriority != Utf8(\"2-HIGH\") THEN Int64(1) ELSE Int64(0) END)(#26)"
-77)------],
-78)------"input": 4
-79)----},
-80)----{
-81)------"id": 6,
-82)------"kind": "sort",
-83)------"title": "⇞ Sort",
-84)------"keys": [
-85)--------"l_shipmode(#14) Asc NullsLast"
-86)------],
-87)------"input": 5
-88)----}
-89)--]
-90)}
+06)------"title": "⊞ Scan",
+07)------"table_name": "lineitem",
+08)------"columns": [
+09)--------"l_orderkey(#0)",
+10)--------"l_partkey(#1)",
+11)--------"l_suppkey(#2)",
+12)--------"l_linenumber(#3)",
+13)--------"l_quantity(#4)",
+14)--------"l_extendedprice(#5)",
+15)--------"l_discount(#6)",
+16)--------"l_tax(#7)",
+17)--------"l_returnflag(#8)",
+18)--------"l_linestatus(#9)",
+19)--------"l_shipdate(#10)",
+20)--------"l_commitdate(#11)",
+21)--------"l_receiptdate(#12)",
+22)--------"l_shipinstruct(#13)",
+23)--------"l_shipmode(#14)",
+24)--------"l_comment(#15)"
+25)------]
+26)----},
+27)----{
+28)------"id": 1,
+29)------"kind": "scan",
+30)------"title": "⊞ Scan",
+31)------"table_name": "orders",
+32)------"columns": [
+33)--------"o_orderkey(#16)",
+34)--------"o_custkey(#17)",
+35)--------"o_orderstatus(#18)",
+36)--------"o_totalprice(#19)",
+37)--------"o_orderdate(#20)",
+38)--------"o_orderpriority(#21)",
+39)--------"o_clerk(#22)",
+40)--------"o_shippriority(#23)",
+41)--------"o_comment(#24)"
+42)------]
+43)----},
+44)----{
+45)------"id": 2,
+46)------"kind": "join",
+47)------"title": "⋈ InnerJoin",
+48)------"join_type": "Inner",
+49)------"condition": "(l_orderkey(#0) = o_orderkey(#16))",
+50)------"outer": 0,
+51)------"inner": 1
+52)----},
+53)----{
+54)------"id": 3,
+55)------"kind": "selection",
+56)------"title": "σ Selection",
+57)------"predicate": "((((((l_shipmode(#14) = \"MAIL\") OR (l_shipmode(#14) = \"SHIP\")) AND (l_commitdate(#11) < l_receiptdate(#12))) AND (l_shipdate(#10) < l_commitdate(#11))) AND (l_receiptdate(#12) >= CAST(\"1994-01-01\" AS Date32))) AND (l_receiptdate(#12) < CAST(\"1995-01-01\" AS Date32)))",
+58)------"input": 2
+59)----},
+60)----{
+61)------"id": 4,
+62)------"kind": "aggregation",
+63)------"title": "γ Aggregation",
+64)------"keys": "l_shipmode(#14)",
+65)------"aggregates": [
+66)--------"sum(CASE WHEN orders.o_orderpriority = Utf8(\"1-URGENT\") OR orders.o_orderpriority = Utf8(\"2-HIGH\") THEN Int64(1) ELSE Int64(0) END)(#25) := sum(CASE WHEN ((o_orderpriority(#21) = \"1-URGENT\") OR (o_orderpriority(#21) = \"2-HIGH\")) THEN 1 ELSE 0 END)",
+67)--------"sum(CASE WHEN orders.o_orderpriority != Utf8(\"1-URGENT\") AND orders.o_orderpriority != Utf8(\"2-HIGH\") THEN Int64(1) ELSE Int64(0) END)(#26) := sum(CASE WHEN ((o_orderpriority(#21) != \"1-URGENT\") AND (o_orderpriority(#21) != \"2-HIGH\")) THEN 1 ELSE 0 END)"
+68)------],
+69)------"input": 3
+70)----},
+71)----{
+72)------"id": 5,
+73)------"kind": "projection",
+74)------"title": "π Projection",
+75)------"columns": [
+76)--------"l_shipmode(#14)",
+77)--------"sum(CASE WHEN orders.o_orderpriority = Utf8(\"1-URGENT\") OR orders.o_orderpriority = Utf8(\"2-HIGH\") THEN Int64(1) ELSE Int64(0) END)(#25)",
+78)--------"sum(CASE WHEN orders.o_orderpriority != Utf8(\"1-URGENT\") AND orders.o_orderpriority != Utf8(\"2-HIGH\") THEN Int64(1) ELSE Int64(0) END)(#26)"
+79)------],
+80)------"input": 4
+81)----},
+82)----{
+83)------"id": 6,
+84)------"kind": "sort",
+85)------"title": "⇞ Sort",
+86)------"keys": [
+87)--------"l_shipmode(#14) Asc NullsLast"
+88)------],
+89)------"input": 5
+90)----}
+91)--]
+92)}

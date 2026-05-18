@@ -23,6 +23,7 @@ pub use catalog::{
 pub use display::{
     BoxDrawingRenderer, BoxRendererConfig, BoxRendererTheme, ColorMode, DisplayField, DisplayInput,
     DisplayNode, DisplayNodeRecord, DisplayPlan, DisplayProperties, DisplayValue,
+    OptimizerVisualizerNode, OptimizerVisualizerPass, OptimizerVisualizerValue,
 };
 pub use hypergraph::{
     Hyperedge, HyperedgeJoinType, HypergraphNode, HypergraphOf, JoinGroupOf, NodeId, NodeSet,
@@ -873,6 +874,36 @@ impl QueryContext {
         let plan = QueryFormatter::with_config(self, config).format_plan();
         serde_json::to_string_pretty(&plan).expect("display plan serialization should not fail")
     }
+
+    /// Formats the reachable query plan as an optd optimizer visualizer pass.
+    #[cfg(feature = "serde")]
+    pub fn optimizer_visualizer_pass(
+        &self,
+        pass_name: impl Into<String>,
+    ) -> OptimizerVisualizerPass {
+        let node = QueryFormatter::new(self).format();
+        OptimizerVisualizerPass::new(pass_name, OptimizerVisualizerNode::from_display_node(&node))
+    }
+
+    /// Formats the reachable query plan as optd optimizer visualizer JSON.
+    #[cfg(feature = "serde")]
+    pub fn optimizer_visualizer_json(&self, pass_name: impl Into<String>) -> String {
+        serde_json::to_string_pretty(&vec![self.optimizer_visualizer_pass(pass_name)])
+            .expect("optimizer visualizer serialization should not fail")
+    }
+}
+
+/// Formats an optimizer trace as optd optimizer visualizer JSON.
+#[cfg(feature = "serde")]
+pub fn optimizer_visualizer_trace_json(initial: &QueryContext, traces: &[PassTrace]) -> String {
+    let mut passes = Vec::with_capacity(traces.len() + 1);
+    passes.push(initial.optimizer_visualizer_pass("Initial"));
+    passes.extend(traces.iter().map(|trace| {
+        let profile = &trace.profile;
+        trace.query.optimizer_visualizer_pass(profile.pass)
+    }));
+    serde_json::to_string_pretty(&passes)
+        .expect("optimizer visualizer trace serialization should not fail")
 }
 
 /// Configuration for query-specific formatting.
@@ -1589,13 +1620,16 @@ impl OperatorDisplayFormat for Scan {
     fn format(&self, formatter: &QueryFormatter<'_>) -> OperatorDisplay {
         OperatorDisplay {
             kind: "scan".to_string(),
-            title: format!("⊞ {}", self.table),
-            fields: vec![display_list_field(
-                "columns",
-                self.columns
-                    .iter()
-                    .map(|column| formatter.format_column_name(*column)),
-            )],
+            title: "⊞ Scan".to_string(),
+            fields: vec![
+                display_scalar_field("table_name", self.table.to_string()),
+                display_list_field(
+                    "columns",
+                    self.columns
+                        .iter()
+                        .map(|column| formatter.format_column_name(*column)),
+                ),
+            ],
             inputs: Vec::new(),
         }
     }
@@ -1896,7 +1930,7 @@ impl OperatorDisplayFormat for Rename {
                 "defs",
                 self.defs.iter().map(|(renamed, original)| {
                     format!(
-                        "{} ← {}",
+                        "{} <- {}",
                         formatter.format_column_name(*renamed),
                         formatter.format_column_name(*original)
                     )
@@ -2021,13 +2055,14 @@ mod tests {
 │ predicate: (age(#1) >= 18) │
 └────────────────────────────┘
 │ input
-┌──────────────┐
-│ ⊞ users   @0 │
-├──────────────┤
-│ columns:     │
-│   id(#0)     │
-│   age(#1)    │
-└──────────────┘
+┌───────────────────┐
+│ ⊞ Scan         @0 │
+├───────────────────┤
+│ table_name: users │
+│ columns:          │
+│   id(#0)          │
+│   age(#1)         │
+└───────────────────┘
 "
         );
     }
@@ -2049,7 +2084,8 @@ mod tests {
         let tree: serde_json::Value = serde_json::from_str(&json).unwrap();
 
         assert_eq!(tree["title"], "= Output");
-        assert_eq!(tree["input"]["title"], "⊞ users");
+        assert_eq!(tree["input"]["title"], "⊞ Scan");
+        assert_eq!(tree["input"]["table_name"], "users");
         assert_eq!(tree["input"]["columns"][0], "id(#0)");
         assert!(tree.get("inputs").is_none());
         assert!(tree["input"].get("fields").is_none());
@@ -2058,6 +2094,65 @@ mod tests {
         let node_json = serde_json::to_value(&node).unwrap();
         assert_eq!(node_json["rows"], "10");
         assert!(node_json.get("metadata").is_none());
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn optimizer_visualizer_json_uses_titles_for_nodes() {
+        let mut ctx = QueryContext::new();
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let age = ColumnData::new("age", DataType::Int32).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![id, age],
+        })
+        .add(&mut ctx);
+        let age_ref = ExprData::ColumnRef(age).add(&mut ctx);
+        let adult_age = ExprData::Literal(ScalarValue::Int32(18)).add(&mut ctx);
+        let predicate = ExprData::Binary {
+            op: BinaryOp::GtEq,
+            left: age_ref,
+            right: adult_age,
+        }
+        .add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
+            predicate,
+            input: scan,
+        })
+        .add(&mut ctx);
+        let output = OperatorData::Output(Output { input: selection }).add(&mut ctx);
+        ctx.set_root(output);
+
+        let json = ctx.optimizer_visualizer_json("0. Initial");
+        let passes: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(passes[0]["passName"], "0. Initial");
+        assert_eq!(passes[0]["root"]["op"], "output");
+        assert_eq!(passes[0]["root"]["title"], "= Output");
+        assert_eq!(passes[0]["root"]["cost"], 0.0);
+        assert_eq!(passes[0]["root"]["rows"], 0.0);
+        assert_eq!(passes[0]["root"]["children"][0]["op"], "selection");
+        assert_eq!(passes[0]["root"]["children"][0]["title"], "σ Selection");
+        assert_eq!(
+            passes[0]["root"]["children"][0]["predicate"],
+            "(age(#1) >= 18)"
+        );
+        assert_eq!(
+            passes[0]["root"]["children"][0]["children"][0]["table"],
+            "users"
+        );
+        assert_eq!(
+            passes[0]["root"]["children"][0]["children"][0]["title"],
+            "⊞ Scan"
+        );
+        assert_eq!(
+            passes[0]["root"]["children"][0]["children"][0]["table_name"],
+            "users"
+        );
+        assert_eq!(
+            passes[0]["root"]["children"][0]["children"][0]["columns"][0],
+            "id(#0)"
+        );
     }
 
     #[test]
@@ -2152,7 +2247,7 @@ mod tests {
 
         assert_eq!(ctx.root(), Some(scan));
         assert_eq!(ctx.operator_count(), 1);
-        assert_eq!(QueryFormatter::new(&ctx).format().title, "⊞ users");
+        assert_eq!(QueryFormatter::new(&ctx).format().title, "⊞ Scan");
     }
 
     #[test]
@@ -2235,7 +2330,7 @@ mod tests {
         assert!(
             pretty
                 .lines()
-                .any(|line| line.contains("⊞ orders") && line.contains("@1"))
+                .any(|line| line.contains("⊞ Scan") && line.contains("@1"))
         );
     }
 

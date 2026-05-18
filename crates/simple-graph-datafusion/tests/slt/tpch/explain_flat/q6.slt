@@ -15,51 +15,52 @@ where
 03)----{
 04)------"id": 0,
 05)------"kind": "scan",
-06)------"title": "⊞ lineitem",
-07)------"columns": [
-08)--------"l_orderkey(#0)",
-09)--------"l_partkey(#1)",
-10)--------"l_suppkey(#2)",
-11)--------"l_linenumber(#3)",
-12)--------"l_quantity(#4)",
-13)--------"l_extendedprice(#5)",
-14)--------"l_discount(#6)",
-15)--------"l_tax(#7)",
-16)--------"l_returnflag(#8)",
-17)--------"l_linestatus(#9)",
-18)--------"l_shipdate(#10)",
-19)--------"l_commitdate(#11)",
-20)--------"l_receiptdate(#12)",
-21)--------"l_shipinstruct(#13)",
-22)--------"l_shipmode(#14)",
-23)--------"l_comment(#15)"
-24)------]
-25)----},
-26)----{
-27)------"id": 1,
-28)------"kind": "selection",
-29)------"title": "σ Selection",
-30)------"predicate": "((((l_shipdate(#10) >= CAST(\"1994-01-01\" AS Date32)) AND (l_shipdate(#10) < CAST(\"1995-01-01\" AS Date32))) AND ((l_discount(#6) >= (0.06 - 0.01)) AND (l_discount(#6) <= (0.06 + 0.01)))) AND (l_quantity(#4) < 24))",
-31)------"input": 0
-32)----},
-33)----{
-34)------"id": 2,
-35)------"kind": "aggregation",
-36)------"title": "γ Aggregation",
-37)------"keys": "",
-38)------"aggregates": [
-39)--------"sum(lineitem.l_extendedprice * lineitem.l_discount)(#16) := sum((l_extendedprice(#5) * l_discount(#6)))"
-40)------],
-41)------"input": 1
-42)----},
-43)----{
-44)------"id": 3,
-45)------"kind": "projection",
-46)------"title": "π Projection",
-47)------"columns": [
-48)--------"sum(lineitem.l_extendedprice * lineitem.l_discount)(#16)"
-49)------],
-50)------"input": 2
-51)----}
-52)--]
-53)}
+06)------"title": "⊞ Scan",
+07)------"table_name": "lineitem",
+08)------"columns": [
+09)--------"l_orderkey(#0)",
+10)--------"l_partkey(#1)",
+11)--------"l_suppkey(#2)",
+12)--------"l_linenumber(#3)",
+13)--------"l_quantity(#4)",
+14)--------"l_extendedprice(#5)",
+15)--------"l_discount(#6)",
+16)--------"l_tax(#7)",
+17)--------"l_returnflag(#8)",
+18)--------"l_linestatus(#9)",
+19)--------"l_shipdate(#10)",
+20)--------"l_commitdate(#11)",
+21)--------"l_receiptdate(#12)",
+22)--------"l_shipinstruct(#13)",
+23)--------"l_shipmode(#14)",
+24)--------"l_comment(#15)"
+25)------]
+26)----},
+27)----{
+28)------"id": 1,
+29)------"kind": "selection",
+30)------"title": "σ Selection",
+31)------"predicate": "((((l_shipdate(#10) >= CAST(\"1994-01-01\" AS Date32)) AND (l_shipdate(#10) < CAST(\"1995-01-01\" AS Date32))) AND ((l_discount(#6) >= (0.06 - 0.01)) AND (l_discount(#6) <= (0.06 + 0.01)))) AND (l_quantity(#4) < 24))",
+32)------"input": 0
+33)----},
+34)----{
+35)------"id": 2,
+36)------"kind": "aggregation",
+37)------"title": "γ Aggregation",
+38)------"keys": "",
+39)------"aggregates": [
+40)--------"sum(lineitem.l_extendedprice * lineitem.l_discount)(#16) := sum((l_extendedprice(#5) * l_discount(#6)))"
+41)------],
+42)------"input": 1
+43)----},
+44)----{
+45)------"id": 3,
+46)------"kind": "projection",
+47)------"title": "π Projection",
+48)------"columns": [
+49)--------"sum(lineitem.l_extendedprice * lineitem.l_discount)(#16)"
+50)------],
+51)------"input": 2
+52)----}
+53)--]
+54)}

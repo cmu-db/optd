@@ -23,152 +23,155 @@ where
 03)----{
 04)------"id": 0,
 05)------"kind": "scan",
-06)------"title": "⊞ lineitem",
-07)------"columns": [
-08)--------"l_orderkey(#0)",
-09)--------"l_partkey(#1)",
-10)--------"l_suppkey(#2)",
-11)--------"l_linenumber(#3)",
-12)--------"l_quantity(#4)",
-13)--------"l_extendedprice(#5)",
-14)--------"l_discount(#6)",
-15)--------"l_tax(#7)",
-16)--------"l_returnflag(#8)",
-17)--------"l_linestatus(#9)",
-18)--------"l_shipdate(#10)",
-19)--------"l_commitdate(#11)",
-20)--------"l_receiptdate(#12)",
-21)--------"l_shipinstruct(#13)",
-22)--------"l_shipmode(#14)",
-23)--------"l_comment(#15)"
-24)------]
-25)----},
-26)----{
-27)------"id": 1,
-28)------"kind": "scan",
-29)------"title": "⊞ part",
-30)------"columns": [
-31)--------"p_partkey(#16)",
-32)--------"p_name(#17)",
-33)--------"p_mfgr(#18)",
-34)--------"p_brand(#19)",
-35)--------"p_type(#20)",
-36)--------"p_size(#21)",
-37)--------"p_container(#22)",
-38)--------"p_retailprice(#23)",
-39)--------"p_comment(#24)"
-40)------]
-41)----},
-42)----{
-43)------"id": 2,
-44)------"kind": "join",
-45)------"title": "⋈ InnerJoin",
-46)------"join_type": "Inner",
-47)------"condition": "true",
-48)------"outer": 0,
-49)------"inner": 1
-50)----},
-51)----{
-52)------"id": 3,
-53)------"kind": "scan",
-54)------"title": "⊞ lineitem",
-55)------"columns": [
-56)--------"l_orderkey(#25)",
-57)--------"l_partkey(#26)",
-58)--------"l_suppkey(#27)",
-59)--------"l_linenumber(#28)",
-60)--------"l_quantity(#29)",
-61)--------"l_extendedprice(#30)",
-62)--------"l_discount(#31)",
-63)--------"l_tax(#32)",
-64)--------"l_returnflag(#33)",
-65)--------"l_linestatus(#34)",
-66)--------"l_shipdate(#35)",
-67)--------"l_commitdate(#36)",
-68)--------"l_receiptdate(#37)",
-69)--------"l_shipinstruct(#38)",
-70)--------"l_shipmode(#39)",
-71)--------"l_comment(#40)"
-72)------]
-73)----},
-74)----{
-75)------"id": 4,
-76)------"kind": "selection",
-77)------"title": "σ Selection",
-78)------"predicate": "(l_partkey(#26) = p_partkey(#16))",
-79)------"input": 3
-80)----},
-81)----{
-82)------"id": 5,
-83)------"kind": "aggregation",
-84)------"title": "γ Aggregation",
-85)------"keys": "",
-86)------"aggregates": [
-87)--------"avg(lineitem.l_quantity)(#41) := avg(l_quantity(#29))"
-88)------],
-89)------"input": 4
-90)----},
-91)----{
-92)------"id": 6,
-93)------"kind": "map",
-94)------"title": "χ Map",
-95)------"computations": [
-96)--------"Float64(0.2) * avg(lineitem.l_quantity)(#42) := (0.2 * avg(lineitem.l_quantity)(#41))"
-97)------],
-98)------"input": 5
-99)----},
-100)----{
-101)------"id": 7,
-102)------"kind": "projection",
-103)------"title": "π Projection",
-104)------"columns": [
-105)--------"Float64(0.2) * avg(lineitem.l_quantity)(#42)"
-106)------],
-107)------"input": 6
-108)----},
-109)----{
-110)------"id": 12,
-111)------"kind": "join",
-112)------"title": "⋈₁ SingleJoin",
-113)------"join_type": "Single",
-114)------"condition": "true",
-115)------"outer": 2,
-116)------"inner": 7
-117)----},
-118)----{
-119)------"id": 13,
-120)------"kind": "selection",
-121)------"title": "σ Selection",
-122)------"predicate": "((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#23\")) AND (p_container(#22) = \"MED BOX\")) AND (l_quantity(#4) < Float64(0.2) * avg(lineitem.l_quantity)(#42)))",
-123)------"input": 12
-124)----},
-125)----{
-126)------"id": 14,
-127)------"kind": "aggregation",
-128)------"title": "γ Aggregation",
-129)------"keys": "",
-130)------"aggregates": [
-131)--------"sum(lineitem.l_extendedprice)(#43) := sum(l_extendedprice(#5))"
-132)------],
-133)------"input": 13
-134)----},
-135)----{
-136)------"id": 15,
-137)------"kind": "map",
-138)------"title": "χ Map",
-139)------"computations": [
-140)--------"avg_yearly(#44) := (sum(lineitem.l_extendedprice)(#43) / 7)"
-141)------],
-142)------"input": 14
-143)----},
-144)----{
-145)------"id": 16,
-146)------"kind": "projection",
-147)------"title": "π Projection",
-148)------"columns": [
-149)--------"avg_yearly(#44)"
-150)------],
-151)------"input": 15
-152)----}
-153)--]
-154)}
+06)------"title": "⊞ Scan",
+07)------"table_name": "lineitem",
+08)------"columns": [
+09)--------"l_orderkey(#0)",
+10)--------"l_partkey(#1)",
+11)--------"l_suppkey(#2)",
+12)--------"l_linenumber(#3)",
+13)--------"l_quantity(#4)",
+14)--------"l_extendedprice(#5)",
+15)--------"l_discount(#6)",
+16)--------"l_tax(#7)",
+17)--------"l_returnflag(#8)",
+18)--------"l_linestatus(#9)",
+19)--------"l_shipdate(#10)",
+20)--------"l_commitdate(#11)",
+21)--------"l_receiptdate(#12)",
+22)--------"l_shipinstruct(#13)",
+23)--------"l_shipmode(#14)",
+24)--------"l_comment(#15)"
+25)------]
+26)----},
+27)----{
+28)------"id": 1,
+29)------"kind": "scan",
+30)------"title": "⊞ Scan",
+31)------"table_name": "part",
+32)------"columns": [
+33)--------"p_partkey(#16)",
+34)--------"p_name(#17)",
+35)--------"p_mfgr(#18)",
+36)--------"p_brand(#19)",
+37)--------"p_type(#20)",
+38)--------"p_size(#21)",
+39)--------"p_container(#22)",
+40)--------"p_retailprice(#23)",
+41)--------"p_comment(#24)"
+42)------]
+43)----},
+44)----{
+45)------"id": 2,
+46)------"kind": "join",
+47)------"title": "⋈ InnerJoin",
+48)------"join_type": "Inner",
+49)------"condition": "true",
+50)------"outer": 0,
+51)------"inner": 1
+52)----},
+53)----{
+54)------"id": 3,
+55)------"kind": "scan",
+56)------"title": "⊞ Scan",
+57)------"table_name": "lineitem",
+58)------"columns": [
+59)--------"l_orderkey(#25)",
+60)--------"l_partkey(#26)",
+61)--------"l_suppkey(#27)",
+62)--------"l_linenumber(#28)",
+63)--------"l_quantity(#29)",
+64)--------"l_extendedprice(#30)",
+65)--------"l_discount(#31)",
+66)--------"l_tax(#32)",
+67)--------"l_returnflag(#33)",
+68)--------"l_linestatus(#34)",
+69)--------"l_shipdate(#35)",
+70)--------"l_commitdate(#36)",
+71)--------"l_receiptdate(#37)",
+72)--------"l_shipinstruct(#38)",
+73)--------"l_shipmode(#39)",
+74)--------"l_comment(#40)"
+75)------]
+76)----},
+77)----{
+78)------"id": 4,
+79)------"kind": "selection",
+80)------"title": "σ Selection",
+81)------"predicate": "(l_partkey(#26) = p_partkey(#16))",
+82)------"input": 3
+83)----},
+84)----{
+85)------"id": 5,
+86)------"kind": "aggregation",
+87)------"title": "γ Aggregation",
+88)------"keys": "",
+89)------"aggregates": [
+90)--------"avg(lineitem.l_quantity)(#41) := avg(l_quantity(#29))"
+91)------],
+92)------"input": 4
+93)----},
+94)----{
+95)------"id": 6,
+96)------"kind": "map",
+97)------"title": "χ Map",
+98)------"computations": [
+99)--------"Float64(0.2) * avg(lineitem.l_quantity)(#42) := (0.2 * avg(lineitem.l_quantity)(#41))"
+100)------],
+101)------"input": 5
+102)----},
+103)----{
+104)------"id": 7,
+105)------"kind": "projection",
+106)------"title": "π Projection",
+107)------"columns": [
+108)--------"Float64(0.2) * avg(lineitem.l_quantity)(#42)"
+109)------],
+110)------"input": 6
+111)----},
+112)----{
+113)------"id": 12,
+114)------"kind": "join",
+115)------"title": "⋈₁ SingleJoin",
+116)------"join_type": "Single",
+117)------"condition": "true",
+118)------"outer": 2,
+119)------"inner": 7
+120)----},
+121)----{
+122)------"id": 13,
+123)------"kind": "selection",
+124)------"title": "σ Selection",
+125)------"predicate": "((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#23\")) AND (p_container(#22) = \"MED BOX\")) AND (l_quantity(#4) < Float64(0.2) * avg(lineitem.l_quantity)(#42)))",
+126)------"input": 12
+127)----},
+128)----{
+129)------"id": 14,
+130)------"kind": "aggregation",
+131)------"title": "γ Aggregation",
+132)------"keys": "",
+133)------"aggregates": [
+134)--------"sum(lineitem.l_extendedprice)(#43) := sum(l_extendedprice(#5))"
+135)------],
+136)------"input": 13
+137)----},
+138)----{
+139)------"id": 15,
+140)------"kind": "map",
+141)------"title": "χ Map",
+142)------"computations": [
+143)--------"avg_yearly(#44) := (sum(lineitem.l_extendedprice)(#43) / 7)"
+144)------],
+145)------"input": 14
+146)----},
+147)----{
+148)------"id": 16,
+149)------"kind": "projection",
+150)------"title": "π Projection",
+151)------"columns": [
+152)--------"avg_yearly(#44)"
+153)------],
+154)------"input": 15
+155)----}
+156)--]
+157)}

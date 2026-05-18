@@ -27,120 +27,122 @@ limit 10;');
 03)----{
 04)------"id": 0,
 05)------"kind": "scan",
-06)------"title": "⊞ customer",
-07)------"columns": [
-08)--------"c_custkey(#0)",
-09)--------"c_name(#1)",
-10)--------"c_address(#2)",
-11)--------"c_nationkey(#3)",
-12)--------"c_phone(#4)",
-13)--------"c_acctbal(#5)",
-14)--------"c_mktsegment(#6)",
-15)--------"c_comment(#7)"
-16)------]
-17)----},
-18)----{
-19)------"id": 1,
-20)------"kind": "scan",
-21)------"title": "⊞ orders",
-22)------"columns": [
-23)--------"o_orderkey(#8)",
-24)--------"o_custkey(#9)",
-25)--------"o_orderstatus(#10)",
-26)--------"o_totalprice(#11)",
-27)--------"o_orderdate(#12)",
-28)--------"o_orderpriority(#13)",
-29)--------"o_clerk(#14)",
-30)--------"o_shippriority(#15)",
-31)--------"o_comment(#16)"
-32)------]
-33)----},
-34)----{
-35)------"id": 2,
-36)------"kind": "join",
-37)------"title": "⟕ LeftOuterJoin",
-38)------"join_type": "LeftOuter",
-39)------"condition": "((c_custkey(#0) = o_custkey(#9)) AND (o_comment(#16) NOT LIKE \"%special%requests%\"))",
-40)------"outer": 0,
-41)------"inner": 1
-42)----},
-43)----{
-44)------"id": 3,
-45)------"kind": "aggregation",
-46)------"title": "γ Aggregation",
-47)------"keys": "c_custkey(#0)",
-48)------"aggregates": [
-49)--------"count(orders.o_orderkey)(#17) := count(o_orderkey(#8))"
-50)------],
-51)------"input": 2
-52)----},
-53)----{
-54)------"id": 4,
-55)------"kind": "projection",
-56)------"title": "π Projection",
-57)------"columns": [
-58)--------"c_custkey(#0)",
-59)--------"count(orders.o_orderkey)(#17)"
-60)------],
-61)------"input": 3
-62)----},
-63)----{
-64)------"id": 5,
-65)------"kind": "projection",
-66)------"title": "π Projection",
-67)------"columns": [
-68)--------"c_custkey(#0)",
-69)--------"count(orders.o_orderkey)(#17)"
-70)------],
-71)------"input": 4
-72)----},
-73)----{
-74)------"id": 6,
-75)------"kind": "rename",
-76)------"title": "ρ Rename(c_orders)",
-77)------"defs": [
-78)--------"c_custkey(#18) ← c_custkey(#0)",
-79)--------"c_count(#19) ← count(orders.o_orderkey)(#17)"
-80)------],
-81)------"input": 5
-82)----},
-83)----{
-84)------"id": 7,
-85)------"kind": "aggregation",
-86)------"title": "γ Aggregation",
-87)------"keys": "c_count(#19)",
-88)------"aggregates": [
-89)--------"count(Int64(1))(#20) := count_star()"
-90)------],
-91)------"input": 6
-92)----},
-93)----{
-94)------"id": 8,
-95)------"kind": "projection",
-96)------"title": "π Projection",
-97)------"columns": [
-98)--------"c_count(#19)",
-99)--------"count(Int64(1))(#20)"
-100)------],
-101)------"input": 7
-102)----},
-103)----{
-104)------"id": 9,
-105)------"kind": "sort",
-106)------"title": "⇞ Sort",
-107)------"keys": [
-108)--------"count(Int64(1))(#20) Desc NullsFirst",
-109)--------"c_count(#19) Desc NullsFirst"
-110)------],
-111)------"input": 8
-112)----},
-113)----{
-114)------"id": 10,
-115)------"kind": "limit",
-116)------"title": "τ Limit",
-117)------"fetch": "10",
-118)------"offset": "0",
-119)------"input": 9
-120)----}
-121)--]
-122)}
+06)------"title": "⊞ Scan",
+07)------"table_name": "customer",
+08)------"columns": [
+09)--------"c_custkey(#0)",
+10)--------"c_name(#1)",
+11)--------"c_address(#2)",
+12)--------"c_nationkey(#3)",
+13)--------"c_phone(#4)",
+14)--------"c_acctbal(#5)",
+15)--------"c_mktsegment(#6)",
+16)--------"c_comment(#7)"
+17)------]
+18)----},
+19)----{
+20)------"id": 1,
+21)------"kind": "scan",
+22)------"title": "⊞ Scan",
+23)------"table_name": "orders",
+24)------"columns": [
+25)--------"o_orderkey(#8)",
+26)--------"o_custkey(#9)",
+27)--------"o_orderstatus(#10)",
+28)--------"o_totalprice(#11)",
+29)--------"o_orderdate(#12)",
+30)--------"o_orderpriority(#13)",
+31)--------"o_clerk(#14)",
+32)--------"o_shippriority(#15)",
+33)--------"o_comment(#16)"
+34)------]
+35)----},
+36)----{
+37)------"id": 2,
+38)------"kind": "join",
+39)------"title": "⟕ LeftOuterJoin",
+40)------"join_type": "LeftOuter",
+41)------"condition": "((c_custkey(#0) = o_custkey(#9)) AND (o_comment(#16) NOT LIKE \"%special%requests%\"))",
+42)------"outer": 0,
+43)------"inner": 1
+44)----},
+45)----{
+46)------"id": 3,
+47)------"kind": "aggregation",
+48)------"title": "γ Aggregation",
+49)------"keys": "c_custkey(#0)",
+50)------"aggregates": [
+51)--------"count(orders.o_orderkey)(#17) := count(o_orderkey(#8))"
+52)------],
+53)------"input": 2
+54)----},
+55)----{
+56)------"id": 4,
+57)------"kind": "projection",
+58)------"title": "π Projection",
+59)------"columns": [
+60)--------"c_custkey(#0)",
+61)--------"count(orders.o_orderkey)(#17)"
+62)------],
+63)------"input": 3
+64)----},
+65)----{
+66)------"id": 5,
+67)------"kind": "projection",
+68)------"title": "π Projection",
+69)------"columns": [
+70)--------"c_custkey(#0)",
+71)--------"count(orders.o_orderkey)(#17)"
+72)------],
+73)------"input": 4
+74)----},
+75)----{
+76)------"id": 6,
+77)------"kind": "rename",
+78)------"title": "ρ Rename(c_orders)",
+79)------"defs": [
+80)--------"c_custkey(#18) ← c_custkey(#0)",
+81)--------"c_count(#19) ← count(orders.o_orderkey)(#17)"
+82)------],
+83)------"input": 5
+84)----},
+85)----{
+86)------"id": 7,
+87)------"kind": "aggregation",
+88)------"title": "γ Aggregation",
+89)------"keys": "c_count(#19)",
+90)------"aggregates": [
+91)--------"count(Int64(1))(#20) := count_star()"
+92)------],
+93)------"input": 6
+94)----},
+95)----{
+96)------"id": 8,
+97)------"kind": "projection",
+98)------"title": "π Projection",
+99)------"columns": [
+100)--------"c_count(#19)",
+101)--------"count(Int64(1))(#20)"
+102)------],
+103)------"input": 7
+104)----},
+105)----{
+106)------"id": 9,
+107)------"kind": "sort",
+108)------"title": "⇞ Sort",
+109)------"keys": [
+110)--------"count(Int64(1))(#20) Desc NullsFirst",
+111)--------"c_count(#19) Desc NullsFirst"
+112)------],
+113)------"input": 8
+114)----},
+115)----{
+116)------"id": 10,
+117)------"kind": "limit",
+118)------"title": "τ Limit",
+119)------"fetch": "10",
+120)------"offset": "0",
+121)------"input": 9
+122)----}
+123)--]
+124)}

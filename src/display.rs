@@ -218,6 +218,144 @@ pub struct DisplayInput {
     pub node: Box<DisplayNode>,
 }
 
+/// optd optimizer visualizer pass wrapper.
+#[derive(Debug, Clone)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize),
+    serde(rename_all = "camelCase")
+)]
+pub struct OptimizerVisualizerPass {
+    pub pass_name: String,
+    pub root: OptimizerVisualizerNode,
+}
+
+/// optd optimizer visualizer node shape.
+#[derive(Debug, Clone)]
+pub struct OptimizerVisualizerNode {
+    pub op: String,
+    pub title: String,
+    pub cost: f64,
+    pub rows: f64,
+    pub table: Option<String>,
+    pub children: Vec<OptimizerVisualizerNode>,
+    pub properties: BTreeMap<String, OptimizerVisualizerValue>,
+}
+
+/// Extra display property value for an optd optimizer visualizer node.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(untagged))]
+pub enum OptimizerVisualizerValue {
+    String(String),
+    Strings(Vec<String>),
+}
+
+impl OptimizerVisualizerPass {
+    pub fn new(pass_name: impl Into<String>, root: OptimizerVisualizerNode) -> Self {
+        Self {
+            pass_name: pass_name.into(),
+            root,
+        }
+    }
+}
+
+impl OptimizerVisualizerNode {
+    pub fn from_display_node(node: &DisplayNode) -> Self {
+        let mut properties = BTreeMap::new();
+        if let Some(id) = &node.id {
+            properties.insert(
+                "operator_id".to_string(),
+                OptimizerVisualizerValue::String(id.clone()),
+            );
+        }
+        for field in &node.fields {
+            properties.insert(
+                field.key.clone(),
+                OptimizerVisualizerValue::from_display_value(&field.value),
+            );
+        }
+        for (key, value) in &node.metadata {
+            properties.insert(
+                key.clone(),
+                OptimizerVisualizerValue::from_display_value(value),
+            );
+        }
+
+        Self {
+            op: node.kind.clone(),
+            title: node.title.clone(),
+            cost: 0.0,
+            rows: 0.0,
+            table: display_node_table(node),
+            children: node
+                .inputs
+                .iter()
+                .map(|input| OptimizerVisualizerNode::from_display_node(&input.node))
+                .collect(),
+            properties,
+        }
+    }
+}
+
+impl OptimizerVisualizerValue {
+    fn from_display_value(value: &DisplayValue) -> Self {
+        match value {
+            DisplayValue::Atom(value) => Self::String(value.clone()),
+            DisplayValue::List(values) => Self::Strings(values.clone()),
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl Serialize for OptimizerVisualizerNode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut len = 4 + self.properties.len();
+        if self.table.is_some() {
+            len += 1;
+        }
+        if !self.children.is_empty() {
+            len += 1;
+        }
+
+        let mut map = serializer.serialize_map(Some(len))?;
+        map.serialize_entry("op", &self.op)?;
+        map.serialize_entry("title", &self.title)?;
+        map.serialize_entry("cost", &self.cost)?;
+        map.serialize_entry("rows", &self.rows)?;
+        if let Some(table) = &self.table {
+            map.serialize_entry("table", table)?;
+        }
+        if !self.children.is_empty() {
+            map.serialize_entry("children", &self.children)?;
+        }
+        for (key, value) in &self.properties {
+            map.serialize_entry(key, value)?;
+        }
+        map.end()
+    }
+}
+
+fn display_node_table(node: &DisplayNode) -> Option<String> {
+    if node.kind != "scan" {
+        return None;
+    }
+
+    node.fields.iter().find_map(|field| {
+        if field.key != "table_name" {
+            return None;
+        }
+
+        match &field.value {
+            DisplayValue::Atom(table) if !table.is_empty() => Some(table.clone()),
+            _ => None,
+        }
+    })
+}
+
 #[cfg(feature = "serde")]
 fn serialize_display_header<M>(map: &mut M, kind: &str, title: &str) -> Result<(), M::Error>
 where

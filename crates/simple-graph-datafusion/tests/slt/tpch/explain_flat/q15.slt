@@ -37,222 +37,225 @@ order by
 03)----{
 04)------"id": 0,
 05)------"kind": "scan",
-06)------"title": "⊞ supplier",
-07)------"columns": [
-08)--------"s_suppkey(#0)",
-09)--------"s_name(#1)",
-10)--------"s_address(#2)",
-11)--------"s_nationkey(#3)",
-12)--------"s_phone(#4)",
-13)--------"s_acctbal(#5)",
-14)--------"s_comment(#6)"
-15)------]
-16)----},
-17)----{
-18)------"id": 1,
-19)------"kind": "scan",
-20)------"title": "⊞ lineitem",
-21)------"columns": [
-22)--------"l_orderkey(#7)",
-23)--------"l_partkey(#8)",
-24)--------"l_suppkey(#9)",
-25)--------"l_linenumber(#10)",
-26)--------"l_quantity(#11)",
-27)--------"l_extendedprice(#12)",
-28)--------"l_discount(#13)",
-29)--------"l_tax(#14)",
-30)--------"l_returnflag(#15)",
-31)--------"l_linestatus(#16)",
-32)--------"l_shipdate(#17)",
-33)--------"l_commitdate(#18)",
-34)--------"l_receiptdate(#19)",
-35)--------"l_shipinstruct(#20)",
-36)--------"l_shipmode(#21)",
-37)--------"l_comment(#22)"
-38)------]
-39)----},
-40)----{
-41)------"id": 2,
-42)------"kind": "selection",
-43)------"title": "σ Selection",
-44)------"predicate": "((l_shipdate(#17) >= CAST(\"1996-01-01\" AS Date32)) AND (l_shipdate(#17) < (CAST(\"1996-01-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))",
-45)------"input": 1
-46)----},
-47)----{
-48)------"id": 3,
-49)------"kind": "aggregation",
-50)------"title": "γ Aggregation",
-51)------"keys": "l_suppkey(#9)",
-52)------"aggregates": [
-53)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23) := sum((l_extendedprice(#12) * (1 - l_discount(#13))))"
-54)------],
-55)------"input": 2
-56)----},
-57)----{
-58)------"id": 4,
-59)------"kind": "projection",
-60)------"title": "π Projection",
-61)------"columns": [
-62)--------"l_suppkey(#9)",
-63)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
-64)------],
-65)------"input": 3
-66)----},
-67)----{
-68)------"id": 5,
-69)------"kind": "projection",
-70)------"title": "π Projection",
-71)------"columns": [
-72)--------"l_suppkey(#9)",
-73)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
-74)------],
-75)------"input": 4
-76)----},
-77)----{
-78)------"id": 6,
-79)------"kind": "rename",
-80)------"title": "ρ Rename(revenue0)",
-81)------"defs": [
-82)--------"supplier_no(#24) ← l_suppkey(#9)",
-83)--------"total_revenue(#25) ← sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
-84)------],
-85)------"input": 5
-86)----},
-87)----{
-88)------"id": 7,
-89)------"kind": "join",
-90)------"title": "⋈ InnerJoin",
-91)------"join_type": "Inner",
-92)------"condition": "true",
-93)------"outer": 0,
-94)------"inner": 6
-95)----},
-96)----{
-97)------"id": 8,
-98)------"kind": "scan",
-99)------"title": "⊞ lineitem",
-100)------"columns": [
-101)--------"l_orderkey(#26)",
-102)--------"l_partkey(#27)",
-103)--------"l_suppkey(#28)",
-104)--------"l_linenumber(#29)",
-105)--------"l_quantity(#30)",
-106)--------"l_extendedprice(#31)",
-107)--------"l_discount(#32)",
-108)--------"l_tax(#33)",
-109)--------"l_returnflag(#34)",
-110)--------"l_linestatus(#35)",
-111)--------"l_shipdate(#36)",
-112)--------"l_commitdate(#37)",
-113)--------"l_receiptdate(#38)",
-114)--------"l_shipinstruct(#39)",
-115)--------"l_shipmode(#40)",
-116)--------"l_comment(#41)"
-117)------]
-118)----},
-119)----{
-120)------"id": 9,
-121)------"kind": "selection",
-122)------"title": "σ Selection",
-123)------"predicate": "((l_shipdate(#36) >= CAST(\"1996-01-01\" AS Date32)) AND (l_shipdate(#36) < (CAST(\"1996-01-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))",
-124)------"input": 8
-125)----},
-126)----{
-127)------"id": 10,
-128)------"kind": "aggregation",
-129)------"title": "γ Aggregation",
-130)------"keys": "l_suppkey(#28)",
-131)------"aggregates": [
-132)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42) := sum((l_extendedprice(#31) * (1 - l_discount(#32))))"
-133)------],
-134)------"input": 9
-135)----},
-136)----{
-137)------"id": 11,
-138)------"kind": "projection",
-139)------"title": "π Projection",
-140)------"columns": [
-141)--------"l_suppkey(#28)",
-142)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
-143)------],
-144)------"input": 10
-145)----},
-146)----{
-147)------"id": 12,
-148)------"kind": "projection",
-149)------"title": "π Projection",
-150)------"columns": [
-151)--------"l_suppkey(#28)",
-152)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
-153)------],
-154)------"input": 11
-155)----},
-156)----{
-157)------"id": 13,
-158)------"kind": "rename",
-159)------"title": "ρ Rename(revenue0)",
-160)------"defs": [
-161)--------"supplier_no(#43) ← l_suppkey(#28)",
-162)--------"total_revenue(#44) ← sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
-163)------],
-164)------"input": 12
-165)----},
-166)----{
-167)------"id": 14,
-168)------"kind": "aggregation",
-169)------"title": "γ Aggregation",
-170)------"keys": "",
-171)------"aggregates": [
-172)--------"max(revenue0.total_revenue)(#45) := max(total_revenue(#44))"
-173)------],
-174)------"input": 13
-175)----},
-176)----{
-177)------"id": 15,
-178)------"kind": "projection",
-179)------"title": "π Projection",
-180)------"columns": [
-181)--------"max(revenue0.total_revenue)(#45)"
-182)------],
-183)------"input": 14
-184)----},
-185)----{
-186)------"id": 19,
-187)------"kind": "join",
-188)------"title": "⋈₁ SingleJoin",
-189)------"join_type": "Single",
-190)------"condition": "true",
-191)------"outer": 7,
-192)------"inner": 15
-193)----},
-194)----{
-195)------"id": 20,
-196)------"kind": "selection",
-197)------"title": "σ Selection",
-198)------"predicate": "((s_suppkey(#0) = supplier_no(#24)) AND (total_revenue(#25) = max(revenue0.total_revenue)(#45)))",
-199)------"input": 19
-200)----},
-201)----{
-202)------"id": 21,
-203)------"kind": "projection",
-204)------"title": "π Projection",
-205)------"columns": [
-206)--------"s_suppkey(#0)",
-207)--------"s_name(#1)",
-208)--------"s_address(#2)",
-209)--------"s_phone(#4)",
-210)--------"total_revenue(#25)"
-211)------],
-212)------"input": 20
-213)----},
-214)----{
-215)------"id": 22,
-216)------"kind": "sort",
-217)------"title": "⇞ Sort",
-218)------"keys": [
-219)--------"s_suppkey(#0) Asc NullsLast"
-220)------],
-221)------"input": 21
-222)----}
-223)--]
-224)}
+06)------"title": "⊞ Scan",
+07)------"table_name": "supplier",
+08)------"columns": [
+09)--------"s_suppkey(#0)",
+10)--------"s_name(#1)",
+11)--------"s_address(#2)",
+12)--------"s_nationkey(#3)",
+13)--------"s_phone(#4)",
+14)--------"s_acctbal(#5)",
+15)--------"s_comment(#6)"
+16)------]
+17)----},
+18)----{
+19)------"id": 1,
+20)------"kind": "scan",
+21)------"title": "⊞ Scan",
+22)------"table_name": "lineitem",
+23)------"columns": [
+24)--------"l_orderkey(#7)",
+25)--------"l_partkey(#8)",
+26)--------"l_suppkey(#9)",
+27)--------"l_linenumber(#10)",
+28)--------"l_quantity(#11)",
+29)--------"l_extendedprice(#12)",
+30)--------"l_discount(#13)",
+31)--------"l_tax(#14)",
+32)--------"l_returnflag(#15)",
+33)--------"l_linestatus(#16)",
+34)--------"l_shipdate(#17)",
+35)--------"l_commitdate(#18)",
+36)--------"l_receiptdate(#19)",
+37)--------"l_shipinstruct(#20)",
+38)--------"l_shipmode(#21)",
+39)--------"l_comment(#22)"
+40)------]
+41)----},
+42)----{
+43)------"id": 2,
+44)------"kind": "selection",
+45)------"title": "σ Selection",
+46)------"predicate": "((l_shipdate(#17) >= CAST(\"1996-01-01\" AS Date32)) AND (l_shipdate(#17) < (CAST(\"1996-01-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))",
+47)------"input": 1
+48)----},
+49)----{
+50)------"id": 3,
+51)------"kind": "aggregation",
+52)------"title": "γ Aggregation",
+53)------"keys": "l_suppkey(#9)",
+54)------"aggregates": [
+55)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23) := sum((l_extendedprice(#12) * (1 - l_discount(#13))))"
+56)------],
+57)------"input": 2
+58)----},
+59)----{
+60)------"id": 4,
+61)------"kind": "projection",
+62)------"title": "π Projection",
+63)------"columns": [
+64)--------"l_suppkey(#9)",
+65)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+66)------],
+67)------"input": 3
+68)----},
+69)----{
+70)------"id": 5,
+71)------"kind": "projection",
+72)------"title": "π Projection",
+73)------"columns": [
+74)--------"l_suppkey(#9)",
+75)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+76)------],
+77)------"input": 4
+78)----},
+79)----{
+80)------"id": 6,
+81)------"kind": "rename",
+82)------"title": "ρ Rename(revenue0)",
+83)------"defs": [
+84)--------"supplier_no(#24) ← l_suppkey(#9)",
+85)--------"total_revenue(#25) ← sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+86)------],
+87)------"input": 5
+88)----},
+89)----{
+90)------"id": 7,
+91)------"kind": "join",
+92)------"title": "⋈ InnerJoin",
+93)------"join_type": "Inner",
+94)------"condition": "true",
+95)------"outer": 0,
+96)------"inner": 6
+97)----},
+98)----{
+99)------"id": 8,
+100)------"kind": "scan",
+101)------"title": "⊞ Scan",
+102)------"table_name": "lineitem",
+103)------"columns": [
+104)--------"l_orderkey(#26)",
+105)--------"l_partkey(#27)",
+106)--------"l_suppkey(#28)",
+107)--------"l_linenumber(#29)",
+108)--------"l_quantity(#30)",
+109)--------"l_extendedprice(#31)",
+110)--------"l_discount(#32)",
+111)--------"l_tax(#33)",
+112)--------"l_returnflag(#34)",
+113)--------"l_linestatus(#35)",
+114)--------"l_shipdate(#36)",
+115)--------"l_commitdate(#37)",
+116)--------"l_receiptdate(#38)",
+117)--------"l_shipinstruct(#39)",
+118)--------"l_shipmode(#40)",
+119)--------"l_comment(#41)"
+120)------]
+121)----},
+122)----{
+123)------"id": 9,
+124)------"kind": "selection",
+125)------"title": "σ Selection",
+126)------"predicate": "((l_shipdate(#36) >= CAST(\"1996-01-01\" AS Date32)) AND (l_shipdate(#36) < (CAST(\"1996-01-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))",
+127)------"input": 8
+128)----},
+129)----{
+130)------"id": 10,
+131)------"kind": "aggregation",
+132)------"title": "γ Aggregation",
+133)------"keys": "l_suppkey(#28)",
+134)------"aggregates": [
+135)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42) := sum((l_extendedprice(#31) * (1 - l_discount(#32))))"
+136)------],
+137)------"input": 9
+138)----},
+139)----{
+140)------"id": 11,
+141)------"kind": "projection",
+142)------"title": "π Projection",
+143)------"columns": [
+144)--------"l_suppkey(#28)",
+145)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+146)------],
+147)------"input": 10
+148)----},
+149)----{
+150)------"id": 12,
+151)------"kind": "projection",
+152)------"title": "π Projection",
+153)------"columns": [
+154)--------"l_suppkey(#28)",
+155)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+156)------],
+157)------"input": 11
+158)----},
+159)----{
+160)------"id": 13,
+161)------"kind": "rename",
+162)------"title": "ρ Rename(revenue0)",
+163)------"defs": [
+164)--------"supplier_no(#43) ← l_suppkey(#28)",
+165)--------"total_revenue(#44) ← sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+166)------],
+167)------"input": 12
+168)----},
+169)----{
+170)------"id": 14,
+171)------"kind": "aggregation",
+172)------"title": "γ Aggregation",
+173)------"keys": "",
+174)------"aggregates": [
+175)--------"max(revenue0.total_revenue)(#45) := max(total_revenue(#44))"
+176)------],
+177)------"input": 13
+178)----},
+179)----{
+180)------"id": 15,
+181)------"kind": "projection",
+182)------"title": "π Projection",
+183)------"columns": [
+184)--------"max(revenue0.total_revenue)(#45)"
+185)------],
+186)------"input": 14
+187)----},
+188)----{
+189)------"id": 19,
+190)------"kind": "join",
+191)------"title": "⋈₁ SingleJoin",
+192)------"join_type": "Single",
+193)------"condition": "true",
+194)------"outer": 7,
+195)------"inner": 15
+196)----},
+197)----{
+198)------"id": 20,
+199)------"kind": "selection",
+200)------"title": "σ Selection",
+201)------"predicate": "((s_suppkey(#0) = supplier_no(#24)) AND (total_revenue(#25) = max(revenue0.total_revenue)(#45)))",
+202)------"input": 19
+203)----},
+204)----{
+205)------"id": 21,
+206)------"kind": "projection",
+207)------"title": "π Projection",
+208)------"columns": [
+209)--------"s_suppkey(#0)",
+210)--------"s_name(#1)",
+211)--------"s_address(#2)",
+212)--------"s_phone(#4)",
+213)--------"total_revenue(#25)"
+214)------],
+215)------"input": 20
+216)----},
+217)----{
+218)------"id": 22,
+219)------"kind": "sort",
+220)------"title": "⇞ Sort",
+221)------"keys": [
+222)--------"s_suppkey(#0) Asc NullsLast"
+223)------],
+224)------"input": 21
+225)----}
+226)--]
+227)}

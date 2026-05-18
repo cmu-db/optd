@@ -43,184 +43,187 @@ order by
 03)----{
 04)------"id": 0,
 05)------"kind": "scan",
-06)------"title": "⊞ customer",
-07)------"columns": [
-08)--------"c_custkey(#0)",
-09)--------"c_name(#1)",
-10)--------"c_address(#2)",
-11)--------"c_nationkey(#3)",
-12)--------"c_phone(#4)",
-13)--------"c_acctbal(#5)",
-14)--------"c_mktsegment(#6)",
-15)--------"c_comment(#7)"
-16)------]
-17)----},
-18)----{
-19)------"id": 1,
-20)------"kind": "scan",
-21)------"title": "⊞ customer",
-22)------"columns": [
-23)--------"c_custkey(#8)",
-24)--------"c_name(#9)",
-25)--------"c_address(#10)",
-26)--------"c_nationkey(#11)",
-27)--------"c_phone(#12)",
-28)--------"c_acctbal(#13)",
-29)--------"c_mktsegment(#14)",
-30)--------"c_comment(#15)"
-31)------]
-32)----},
-33)----{
-34)------"id": 2,
-35)------"kind": "selection",
-36)------"title": "σ Selection",
-37)------"predicate": "((c_acctbal(#13) > 0) AND ((substr(c_phone(#12), 1, 2) = \"13\") OR (substr(c_phone(#12), 1, 2) = \"31\") OR (substr(c_phone(#12), 1, 2) = \"23\") OR (substr(c_phone(#12), 1, 2) = \"29\") OR (substr(c_phone(#12), 1, 2) = \"30\") OR (substr(c_phone(#12), 1, 2) = \"18\") OR (substr(c_phone(#12), 1, 2) = \"17\")))",
-38)------"input": 1
-39)----},
-40)----{
-41)------"id": 3,
-42)------"kind": "aggregation",
-43)------"title": "γ Aggregation",
-44)------"keys": "",
-45)------"aggregates": [
-46)--------"avg(customer.c_acctbal)(#16) := avg(c_acctbal(#13))"
-47)------],
-48)------"input": 2
-49)----},
-50)----{
-51)------"id": 4,
-52)------"kind": "projection",
-53)------"title": "π Projection",
-54)------"columns": [
-55)--------"avg(customer.c_acctbal)(#16)"
-56)------],
-57)------"input": 3
-58)----},
-59)----{
-60)------"id": 15,
-61)------"kind": "join",
-62)------"title": "⋈₁ SingleJoin",
-63)------"join_type": "Single",
-64)------"condition": "true",
-65)------"outer": 0,
-66)------"inner": 4
-67)----},
-68)----{
-69)------"id": 5,
-70)------"kind": "scan",
-71)------"title": "⊞ orders",
-72)------"columns": [
-73)--------"o_orderkey(#17)",
-74)--------"o_custkey(#18)",
-75)--------"o_orderstatus(#19)",
-76)--------"o_totalprice(#20)",
-77)--------"o_orderdate(#21)",
-78)--------"o_orderpriority(#22)",
-79)--------"o_clerk(#23)",
-80)--------"o_shippriority(#24)",
-81)--------"o_comment(#25)"
-82)------]
-83)----},
-84)----{
-85)------"id": 6,
-86)------"kind": "selection",
-87)------"title": "σ Selection",
-88)------"predicate": "(o_custkey(#18) = c_custkey(#0))",
-89)------"input": 5
-90)----},
-91)----{
-92)------"id": 7,
-93)------"kind": "projection",
-94)------"title": "π Projection",
-95)------"columns": [
-96)--------"o_orderkey(#17)",
-97)--------"o_custkey(#18)",
-98)--------"o_orderstatus(#19)",
-99)--------"o_totalprice(#20)",
-100)--------"o_orderdate(#21)",
-101)--------"o_orderpriority(#22)",
-102)--------"o_clerk(#23)",
-103)--------"o_shippriority(#24)",
-104)--------"o_comment(#25)"
-105)------],
-106)------"input": 6
-107)----},
-108)----{
-109)------"id": 16,
-110)------"kind": "join",
-111)------"title": "⟕ᵐ LeftMarkJoin",
-112)------"join_type": "LeftMark",
-113)------"condition": "true",
-114)------"marker": "exists_mark(#31)",
-115)------"outer": 15,
-116)------"inner": 7
-117)----},
-118)----{
-119)------"id": 17,
-120)------"kind": "selection",
-121)------"title": "σ Selection",
-122)------"predicate": "((((substr(c_phone(#4), 1, 2) = \"13\") OR (substr(c_phone(#4), 1, 2) = \"31\") OR (substr(c_phone(#4), 1, 2) = \"23\") OR (substr(c_phone(#4), 1, 2) = \"29\") OR (substr(c_phone(#4), 1, 2) = \"30\") OR (substr(c_phone(#4), 1, 2) = \"18\") OR (substr(c_phone(#4), 1, 2) = \"17\")) AND (c_acctbal(#5) > avg(customer.c_acctbal)(#16))) AND NOT(exists_mark(#31)))",
-123)------"input": 16
-124)----},
-125)----{
-126)------"id": 18,
-127)------"kind": "map",
-128)------"title": "χ Map",
-129)------"computations": [
-130)--------"cntrycode(#26) := substr(c_phone(#4), 1, 2)"
-131)------],
-132)------"input": 17
-133)----},
-134)----{
-135)------"id": 19,
-136)------"kind": "projection",
-137)------"title": "π Projection",
-138)------"columns": [
-139)--------"cntrycode(#26)",
-140)--------"c_acctbal(#5)"
-141)------],
-142)------"input": 18
-143)----},
-144)----{
-145)------"id": 20,
-146)------"kind": "rename",
-147)------"title": "ρ Rename(custsale)",
-148)------"defs": [
-149)--------"cntrycode(#27) ← cntrycode(#26)",
-150)--------"c_acctbal(#28) ← c_acctbal(#5)"
-151)------],
-152)------"input": 19
-153)----},
-154)----{
-155)------"id": 21,
-156)------"kind": "aggregation",
-157)------"title": "γ Aggregation",
-158)------"keys": "cntrycode(#27)",
-159)------"aggregates": [
-160)--------"count(Int64(1))(#29) := count_star()",
-161)--------"sum(custsale.c_acctbal)(#30) := sum(c_acctbal(#28))"
-162)------],
-163)------"input": 20
-164)----},
-165)----{
-166)------"id": 22,
-167)------"kind": "projection",
-168)------"title": "π Projection",
-169)------"columns": [
-170)--------"cntrycode(#27)",
-171)--------"count(Int64(1))(#29)",
-172)--------"sum(custsale.c_acctbal)(#30)"
-173)------],
-174)------"input": 21
-175)----},
-176)----{
-177)------"id": 23,
-178)------"kind": "sort",
-179)------"title": "⇞ Sort",
-180)------"keys": [
-181)--------"cntrycode(#27) Asc NullsLast"
-182)------],
-183)------"input": 22
-184)----}
-185)--]
-186)}
+06)------"title": "⊞ Scan",
+07)------"table_name": "customer",
+08)------"columns": [
+09)--------"c_custkey(#0)",
+10)--------"c_name(#1)",
+11)--------"c_address(#2)",
+12)--------"c_nationkey(#3)",
+13)--------"c_phone(#4)",
+14)--------"c_acctbal(#5)",
+15)--------"c_mktsegment(#6)",
+16)--------"c_comment(#7)"
+17)------]
+18)----},
+19)----{
+20)------"id": 1,
+21)------"kind": "scan",
+22)------"title": "⊞ Scan",
+23)------"table_name": "customer",
+24)------"columns": [
+25)--------"c_custkey(#8)",
+26)--------"c_name(#9)",
+27)--------"c_address(#10)",
+28)--------"c_nationkey(#11)",
+29)--------"c_phone(#12)",
+30)--------"c_acctbal(#13)",
+31)--------"c_mktsegment(#14)",
+32)--------"c_comment(#15)"
+33)------]
+34)----},
+35)----{
+36)------"id": 2,
+37)------"kind": "selection",
+38)------"title": "σ Selection",
+39)------"predicate": "((c_acctbal(#13) > 0) AND ((substr(c_phone(#12), 1, 2) = \"13\") OR (substr(c_phone(#12), 1, 2) = \"31\") OR (substr(c_phone(#12), 1, 2) = \"23\") OR (substr(c_phone(#12), 1, 2) = \"29\") OR (substr(c_phone(#12), 1, 2) = \"30\") OR (substr(c_phone(#12), 1, 2) = \"18\") OR (substr(c_phone(#12), 1, 2) = \"17\")))",
+40)------"input": 1
+41)----},
+42)----{
+43)------"id": 3,
+44)------"kind": "aggregation",
+45)------"title": "γ Aggregation",
+46)------"keys": "",
+47)------"aggregates": [
+48)--------"avg(customer.c_acctbal)(#16) := avg(c_acctbal(#13))"
+49)------],
+50)------"input": 2
+51)----},
+52)----{
+53)------"id": 4,
+54)------"kind": "projection",
+55)------"title": "π Projection",
+56)------"columns": [
+57)--------"avg(customer.c_acctbal)(#16)"
+58)------],
+59)------"input": 3
+60)----},
+61)----{
+62)------"id": 15,
+63)------"kind": "join",
+64)------"title": "⋈₁ SingleJoin",
+65)------"join_type": "Single",
+66)------"condition": "true",
+67)------"outer": 0,
+68)------"inner": 4
+69)----},
+70)----{
+71)------"id": 5,
+72)------"kind": "scan",
+73)------"title": "⊞ Scan",
+74)------"table_name": "orders",
+75)------"columns": [
+76)--------"o_orderkey(#17)",
+77)--------"o_custkey(#18)",
+78)--------"o_orderstatus(#19)",
+79)--------"o_totalprice(#20)",
+80)--------"o_orderdate(#21)",
+81)--------"o_orderpriority(#22)",
+82)--------"o_clerk(#23)",
+83)--------"o_shippriority(#24)",
+84)--------"o_comment(#25)"
+85)------]
+86)----},
+87)----{
+88)------"id": 6,
+89)------"kind": "selection",
+90)------"title": "σ Selection",
+91)------"predicate": "(o_custkey(#18) = c_custkey(#0))",
+92)------"input": 5
+93)----},
+94)----{
+95)------"id": 7,
+96)------"kind": "projection",
+97)------"title": "π Projection",
+98)------"columns": [
+99)--------"o_orderkey(#17)",
+100)--------"o_custkey(#18)",
+101)--------"o_orderstatus(#19)",
+102)--------"o_totalprice(#20)",
+103)--------"o_orderdate(#21)",
+104)--------"o_orderpriority(#22)",
+105)--------"o_clerk(#23)",
+106)--------"o_shippriority(#24)",
+107)--------"o_comment(#25)"
+108)------],
+109)------"input": 6
+110)----},
+111)----{
+112)------"id": 16,
+113)------"kind": "join",
+114)------"title": "⟕ᵐ LeftMarkJoin",
+115)------"join_type": "LeftMark",
+116)------"condition": "true",
+117)------"marker": "exists_mark(#31)",
+118)------"outer": 15,
+119)------"inner": 7
+120)----},
+121)----{
+122)------"id": 17,
+123)------"kind": "selection",
+124)------"title": "σ Selection",
+125)------"predicate": "((((substr(c_phone(#4), 1, 2) = \"13\") OR (substr(c_phone(#4), 1, 2) = \"31\") OR (substr(c_phone(#4), 1, 2) = \"23\") OR (substr(c_phone(#4), 1, 2) = \"29\") OR (substr(c_phone(#4), 1, 2) = \"30\") OR (substr(c_phone(#4), 1, 2) = \"18\") OR (substr(c_phone(#4), 1, 2) = \"17\")) AND (c_acctbal(#5) > avg(customer.c_acctbal)(#16))) AND NOT(exists_mark(#31)))",
+126)------"input": 16
+127)----},
+128)----{
+129)------"id": 18,
+130)------"kind": "map",
+131)------"title": "χ Map",
+132)------"computations": [
+133)--------"cntrycode(#26) := substr(c_phone(#4), 1, 2)"
+134)------],
+135)------"input": 17
+136)----},
+137)----{
+138)------"id": 19,
+139)------"kind": "projection",
+140)------"title": "π Projection",
+141)------"columns": [
+142)--------"cntrycode(#26)",
+143)--------"c_acctbal(#5)"
+144)------],
+145)------"input": 18
+146)----},
+147)----{
+148)------"id": 20,
+149)------"kind": "rename",
+150)------"title": "ρ Rename(custsale)",
+151)------"defs": [
+152)--------"cntrycode(#27) ← cntrycode(#26)",
+153)--------"c_acctbal(#28) ← c_acctbal(#5)"
+154)------],
+155)------"input": 19
+156)----},
+157)----{
+158)------"id": 21,
+159)------"kind": "aggregation",
+160)------"title": "γ Aggregation",
+161)------"keys": "cntrycode(#27)",
+162)------"aggregates": [
+163)--------"count(Int64(1))(#29) := count_star()",
+164)--------"sum(custsale.c_acctbal)(#30) := sum(c_acctbal(#28))"
+165)------],
+166)------"input": 20
+167)----},
+168)----{
+169)------"id": 22,
+170)------"kind": "projection",
+171)------"title": "π Projection",
+172)------"columns": [
+173)--------"cntrycode(#27)",
+174)--------"count(Int64(1))(#29)",
+175)--------"sum(custsale.c_acctbal)(#30)"
+176)------],
+177)------"input": 21
+178)----},
+179)----{
+180)------"id": 23,
+181)------"kind": "sort",
+182)------"title": "⇞ Sort",
+183)------"keys": [
+184)--------"cntrycode(#27) Asc NullsLast"
+185)------],
+186)------"input": 22
+187)----}
+188)--]
+189)}

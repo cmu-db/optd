@@ -45,237 +45,243 @@ order by
 03)----{
 04)------"id": 0,
 05)------"kind": "scan",
-06)------"title": "⊞ supplier",
-07)------"columns": [
-08)--------"s_suppkey(#0)",
-09)--------"s_name(#1)",
-10)--------"s_address(#2)",
-11)--------"s_nationkey(#3)",
-12)--------"s_phone(#4)",
-13)--------"s_acctbal(#5)",
-14)--------"s_comment(#6)"
-15)------]
-16)----},
-17)----{
-18)------"id": 1,
-19)------"kind": "scan",
-20)------"title": "⊞ lineitem",
-21)------"columns": [
-22)--------"l_orderkey(#7)",
-23)--------"l_partkey(#8)",
-24)--------"l_suppkey(#9)",
-25)--------"l_linenumber(#10)",
-26)--------"l_quantity(#11)",
-27)--------"l_extendedprice(#12)",
-28)--------"l_discount(#13)",
-29)--------"l_tax(#14)",
-30)--------"l_returnflag(#15)",
-31)--------"l_linestatus(#16)",
-32)--------"l_shipdate(#17)",
-33)--------"l_commitdate(#18)",
-34)--------"l_receiptdate(#19)",
-35)--------"l_shipinstruct(#20)",
-36)--------"l_shipmode(#21)",
-37)--------"l_comment(#22)"
-38)------]
-39)----},
-40)----{
-41)------"id": 2,
-42)------"kind": "join",
-43)------"title": "⋈ InnerJoin",
-44)------"join_type": "Inner",
-45)------"condition": "true",
-46)------"outer": 0,
-47)------"inner": 1
-48)----},
-49)----{
-50)------"id": 3,
-51)------"kind": "scan",
-52)------"title": "⊞ orders",
-53)------"columns": [
-54)--------"o_orderkey(#23)",
-55)--------"o_custkey(#24)",
-56)--------"o_orderstatus(#25)",
-57)--------"o_totalprice(#26)",
-58)--------"o_orderdate(#27)",
-59)--------"o_orderpriority(#28)",
-60)--------"o_clerk(#29)",
-61)--------"o_shippriority(#30)",
-62)--------"o_comment(#31)"
-63)------]
-64)----},
-65)----{
-66)------"id": 4,
-67)------"kind": "join",
-68)------"title": "⋈ InnerJoin",
-69)------"join_type": "Inner",
-70)------"condition": "true",
-71)------"outer": 2,
-72)------"inner": 3
-73)----},
-74)----{
-75)------"id": 5,
-76)------"kind": "scan",
-77)------"title": "⊞ customer",
-78)------"columns": [
-79)--------"c_custkey(#32)",
-80)--------"c_name(#33)",
-81)--------"c_address(#34)",
-82)--------"c_nationkey(#35)",
-83)--------"c_phone(#36)",
-84)--------"c_acctbal(#37)",
-85)--------"c_mktsegment(#38)",
-86)--------"c_comment(#39)"
-87)------]
-88)----},
-89)----{
-90)------"id": 6,
-91)------"kind": "join",
-92)------"title": "⋈ InnerJoin",
-93)------"join_type": "Inner",
-94)------"condition": "true",
-95)------"outer": 4,
-96)------"inner": 5
-97)----},
-98)----{
-99)------"id": 7,
-100)------"kind": "scan",
-101)------"title": "⊞ nation",
-102)------"columns": [
-103)--------"n_nationkey(#40)",
-104)--------"n_name(#41)",
-105)--------"n_regionkey(#42)",
-106)--------"n_comment(#43)"
-107)------]
-108)----},
-109)----{
-110)------"id": 8,
-111)------"kind": "rename",
-112)------"title": "ρ Rename(n1)",
-113)------"defs": [
-114)--------"n_nationkey(#44) ← n_nationkey(#40)",
-115)--------"n_name(#45) ← n_name(#41)",
-116)--------"n_regionkey(#46) ← n_regionkey(#42)",
-117)--------"n_comment(#47) ← n_comment(#43)"
-118)------],
-119)------"input": 7
-120)----},
-121)----{
-122)------"id": 9,
-123)------"kind": "join",
-124)------"title": "⋈ InnerJoin",
-125)------"join_type": "Inner",
-126)------"condition": "true",
-127)------"outer": 6,
-128)------"inner": 8
-129)----},
-130)----{
-131)------"id": 10,
-132)------"kind": "scan",
-133)------"title": "⊞ nation",
-134)------"columns": [
-135)--------"n_nationkey(#48)",
-136)--------"n_name(#49)",
-137)--------"n_regionkey(#50)",
-138)--------"n_comment(#51)"
-139)------]
-140)----},
-141)----{
-142)------"id": 11,
-143)------"kind": "rename",
-144)------"title": "ρ Rename(n2)",
-145)------"defs": [
-146)--------"n_nationkey(#52) ← n_nationkey(#48)",
-147)--------"n_name(#53) ← n_name(#49)",
-148)--------"n_regionkey(#54) ← n_regionkey(#50)",
-149)--------"n_comment(#55) ← n_comment(#51)"
-150)------],
-151)------"input": 10
-152)----},
-153)----{
-154)------"id": 12,
-155)------"kind": "join",
-156)------"title": "⋈ InnerJoin",
-157)------"join_type": "Inner",
-158)------"condition": "true",
-159)------"outer": 9,
-160)------"inner": 11
-161)----},
-162)----{
-163)------"id": 13,
-164)------"kind": "selection",
-165)------"title": "σ Selection",
-166)------"predicate": "(((((((s_suppkey(#0) = l_suppkey(#9)) AND (o_orderkey(#23) = l_orderkey(#7))) AND (c_custkey(#32) = o_custkey(#24))) AND (s_nationkey(#3) = n_nationkey(#44))) AND (c_nationkey(#35) = n_nationkey(#52))) AND (((n_name(#45) = \"FRANCE\") AND (n_name(#53) = \"GERMANY\")) OR ((n_name(#45) = \"GERMANY\") AND (n_name(#53) = \"FRANCE\")))) AND ((l_shipdate(#17) >= CAST(\"1995-01-01\" AS Date32)) AND (l_shipdate(#17) <= CAST(\"1996-12-31\" AS Date32))))",
-167)------"input": 12
-168)----},
-169)----{
-170)------"id": 14,
-171)------"kind": "map",
-172)------"title": "χ Map",
-173)------"computations": [
-174)--------"supp_nation(#56) := n_name(#45)",
-175)--------"cust_nation(#57) := n_name(#53)",
-176)--------"l_year(#58) := date_part(\"YEAR\", l_shipdate(#17))",
-177)--------"volume(#59) := (l_extendedprice(#12) * (1 - l_discount(#13)))"
-178)------],
-179)------"input": 13
-180)----},
-181)----{
-182)------"id": 15,
-183)------"kind": "projection",
-184)------"title": "π Projection",
-185)------"columns": [
-186)--------"supp_nation(#56)",
-187)--------"cust_nation(#57)",
-188)--------"l_year(#58)",
-189)--------"volume(#59)"
-190)------],
-191)------"input": 14
-192)----},
-193)----{
-194)------"id": 16,
-195)------"kind": "rename",
-196)------"title": "ρ Rename(shipping)",
-197)------"defs": [
-198)--------"supp_nation(#60) ← supp_nation(#56)",
-199)--------"cust_nation(#61) ← cust_nation(#57)",
-200)--------"l_year(#62) ← l_year(#58)",
-201)--------"volume(#63) ← volume(#59)"
-202)------],
-203)------"input": 15
-204)----},
-205)----{
-206)------"id": 17,
-207)------"kind": "aggregation",
-208)------"title": "γ Aggregation",
-209)------"keys": "supp_nation(#60), cust_nation(#61), l_year(#62)",
-210)------"aggregates": [
-211)--------"sum(shipping.volume)(#64) := sum(volume(#63))"
-212)------],
-213)------"input": 16
-214)----},
-215)----{
-216)------"id": 18,
-217)------"kind": "projection",
-218)------"title": "π Projection",
-219)------"columns": [
-220)--------"supp_nation(#60)",
-221)--------"cust_nation(#61)",
-222)--------"l_year(#62)",
-223)--------"sum(shipping.volume)(#64)"
-224)------],
-225)------"input": 17
-226)----},
-227)----{
-228)------"id": 19,
-229)------"kind": "sort",
-230)------"title": "⇞ Sort",
-231)------"keys": [
-232)--------"supp_nation(#60) Asc NullsLast",
-233)--------"cust_nation(#61) Asc NullsLast",
-234)--------"l_year(#62) Asc NullsLast"
-235)------],
-236)------"input": 18
-237)----}
-238)--]
-239)}
+06)------"title": "⊞ Scan",
+07)------"table_name": "supplier",
+08)------"columns": [
+09)--------"s_suppkey(#0)",
+10)--------"s_name(#1)",
+11)--------"s_address(#2)",
+12)--------"s_nationkey(#3)",
+13)--------"s_phone(#4)",
+14)--------"s_acctbal(#5)",
+15)--------"s_comment(#6)"
+16)------]
+17)----},
+18)----{
+19)------"id": 1,
+20)------"kind": "scan",
+21)------"title": "⊞ Scan",
+22)------"table_name": "lineitem",
+23)------"columns": [
+24)--------"l_orderkey(#7)",
+25)--------"l_partkey(#8)",
+26)--------"l_suppkey(#9)",
+27)--------"l_linenumber(#10)",
+28)--------"l_quantity(#11)",
+29)--------"l_extendedprice(#12)",
+30)--------"l_discount(#13)",
+31)--------"l_tax(#14)",
+32)--------"l_returnflag(#15)",
+33)--------"l_linestatus(#16)",
+34)--------"l_shipdate(#17)",
+35)--------"l_commitdate(#18)",
+36)--------"l_receiptdate(#19)",
+37)--------"l_shipinstruct(#20)",
+38)--------"l_shipmode(#21)",
+39)--------"l_comment(#22)"
+40)------]
+41)----},
+42)----{
+43)------"id": 2,
+44)------"kind": "join",
+45)------"title": "⋈ InnerJoin",
+46)------"join_type": "Inner",
+47)------"condition": "true",
+48)------"outer": 0,
+49)------"inner": 1
+50)----},
+51)----{
+52)------"id": 3,
+53)------"kind": "scan",
+54)------"title": "⊞ Scan",
+55)------"table_name": "orders",
+56)------"columns": [
+57)--------"o_orderkey(#23)",
+58)--------"o_custkey(#24)",
+59)--------"o_orderstatus(#25)",
+60)--------"o_totalprice(#26)",
+61)--------"o_orderdate(#27)",
+62)--------"o_orderpriority(#28)",
+63)--------"o_clerk(#29)",
+64)--------"o_shippriority(#30)",
+65)--------"o_comment(#31)"
+66)------]
+67)----},
+68)----{
+69)------"id": 4,
+70)------"kind": "join",
+71)------"title": "⋈ InnerJoin",
+72)------"join_type": "Inner",
+73)------"condition": "true",
+74)------"outer": 2,
+75)------"inner": 3
+76)----},
+77)----{
+78)------"id": 5,
+79)------"kind": "scan",
+80)------"title": "⊞ Scan",
+81)------"table_name": "customer",
+82)------"columns": [
+83)--------"c_custkey(#32)",
+84)--------"c_name(#33)",
+85)--------"c_address(#34)",
+86)--------"c_nationkey(#35)",
+87)--------"c_phone(#36)",
+88)--------"c_acctbal(#37)",
+89)--------"c_mktsegment(#38)",
+90)--------"c_comment(#39)"
+91)------]
+92)----},
+93)----{
+94)------"id": 6,
+95)------"kind": "join",
+96)------"title": "⋈ InnerJoin",
+97)------"join_type": "Inner",
+98)------"condition": "true",
+99)------"outer": 4,
+100)------"inner": 5
+101)----},
+102)----{
+103)------"id": 7,
+104)------"kind": "scan",
+105)------"title": "⊞ Scan",
+106)------"table_name": "nation",
+107)------"columns": [
+108)--------"n_nationkey(#40)",
+109)--------"n_name(#41)",
+110)--------"n_regionkey(#42)",
+111)--------"n_comment(#43)"
+112)------]
+113)----},
+114)----{
+115)------"id": 8,
+116)------"kind": "rename",
+117)------"title": "ρ Rename(n1)",
+118)------"defs": [
+119)--------"n_nationkey(#44) ← n_nationkey(#40)",
+120)--------"n_name(#45) ← n_name(#41)",
+121)--------"n_regionkey(#46) ← n_regionkey(#42)",
+122)--------"n_comment(#47) ← n_comment(#43)"
+123)------],
+124)------"input": 7
+125)----},
+126)----{
+127)------"id": 9,
+128)------"kind": "join",
+129)------"title": "⋈ InnerJoin",
+130)------"join_type": "Inner",
+131)------"condition": "true",
+132)------"outer": 6,
+133)------"inner": 8
+134)----},
+135)----{
+136)------"id": 10,
+137)------"kind": "scan",
+138)------"title": "⊞ Scan",
+139)------"table_name": "nation",
+140)------"columns": [
+141)--------"n_nationkey(#48)",
+142)--------"n_name(#49)",
+143)--------"n_regionkey(#50)",
+144)--------"n_comment(#51)"
+145)------]
+146)----},
+147)----{
+148)------"id": 11,
+149)------"kind": "rename",
+150)------"title": "ρ Rename(n2)",
+151)------"defs": [
+152)--------"n_nationkey(#52) ← n_nationkey(#48)",
+153)--------"n_name(#53) ← n_name(#49)",
+154)--------"n_regionkey(#54) ← n_regionkey(#50)",
+155)--------"n_comment(#55) ← n_comment(#51)"
+156)------],
+157)------"input": 10
+158)----},
+159)----{
+160)------"id": 12,
+161)------"kind": "join",
+162)------"title": "⋈ InnerJoin",
+163)------"join_type": "Inner",
+164)------"condition": "true",
+165)------"outer": 9,
+166)------"inner": 11
+167)----},
+168)----{
+169)------"id": 13,
+170)------"kind": "selection",
+171)------"title": "σ Selection",
+172)------"predicate": "(((((((s_suppkey(#0) = l_suppkey(#9)) AND (o_orderkey(#23) = l_orderkey(#7))) AND (c_custkey(#32) = o_custkey(#24))) AND (s_nationkey(#3) = n_nationkey(#44))) AND (c_nationkey(#35) = n_nationkey(#52))) AND (((n_name(#45) = \"FRANCE\") AND (n_name(#53) = \"GERMANY\")) OR ((n_name(#45) = \"GERMANY\") AND (n_name(#53) = \"FRANCE\")))) AND ((l_shipdate(#17) >= CAST(\"1995-01-01\" AS Date32)) AND (l_shipdate(#17) <= CAST(\"1996-12-31\" AS Date32))))",
+173)------"input": 12
+174)----},
+175)----{
+176)------"id": 14,
+177)------"kind": "map",
+178)------"title": "χ Map",
+179)------"computations": [
+180)--------"supp_nation(#56) := n_name(#45)",
+181)--------"cust_nation(#57) := n_name(#53)",
+182)--------"l_year(#58) := date_part(\"YEAR\", l_shipdate(#17))",
+183)--------"volume(#59) := (l_extendedprice(#12) * (1 - l_discount(#13)))"
+184)------],
+185)------"input": 13
+186)----},
+187)----{
+188)------"id": 15,
+189)------"kind": "projection",
+190)------"title": "π Projection",
+191)------"columns": [
+192)--------"supp_nation(#56)",
+193)--------"cust_nation(#57)",
+194)--------"l_year(#58)",
+195)--------"volume(#59)"
+196)------],
+197)------"input": 14
+198)----},
+199)----{
+200)------"id": 16,
+201)------"kind": "rename",
+202)------"title": "ρ Rename(shipping)",
+203)------"defs": [
+204)--------"supp_nation(#60) ← supp_nation(#56)",
+205)--------"cust_nation(#61) ← cust_nation(#57)",
+206)--------"l_year(#62) ← l_year(#58)",
+207)--------"volume(#63) ← volume(#59)"
+208)------],
+209)------"input": 15
+210)----},
+211)----{
+212)------"id": 17,
+213)------"kind": "aggregation",
+214)------"title": "γ Aggregation",
+215)------"keys": "supp_nation(#60), cust_nation(#61), l_year(#62)",
+216)------"aggregates": [
+217)--------"sum(shipping.volume)(#64) := sum(volume(#63))"
+218)------],
+219)------"input": 16
+220)----},
+221)----{
+222)------"id": 18,
+223)------"kind": "projection",
+224)------"title": "π Projection",
+225)------"columns": [
+226)--------"supp_nation(#60)",
+227)--------"cust_nation(#61)",
+228)--------"l_year(#62)",
+229)--------"sum(shipping.volume)(#64)"
+230)------],
+231)------"input": 17
+232)----},
+233)----{
+234)------"id": 19,
+235)------"kind": "sort",
+236)------"title": "⇞ Sort",
+237)------"keys": [
+238)--------"supp_nation(#60) Asc NullsLast",
+239)--------"cust_nation(#61) Asc NullsLast",
+240)--------"l_year(#62) Asc NullsLast"
+241)------],
+242)------"input": 18
+243)----}
+244)--]
+245)}

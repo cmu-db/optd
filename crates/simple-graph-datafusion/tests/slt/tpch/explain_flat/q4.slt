@@ -27,118 +27,120 @@ order by
 03)----{
 04)------"id": 0,
 05)------"kind": "scan",
-06)------"title": "⊞ orders",
-07)------"columns": [
-08)--------"o_orderkey(#0)",
-09)--------"o_custkey(#1)",
-10)--------"o_orderstatus(#2)",
-11)--------"o_totalprice(#3)",
-12)--------"o_orderdate(#4)",
-13)--------"o_orderpriority(#5)",
-14)--------"o_clerk(#6)",
-15)--------"o_shippriority(#7)",
-16)--------"o_comment(#8)"
-17)------]
-18)----},
-19)----{
-20)------"id": 1,
-21)------"kind": "scan",
-22)------"title": "⊞ lineitem",
-23)------"columns": [
-24)--------"l_orderkey(#9)",
-25)--------"l_partkey(#10)",
-26)--------"l_suppkey(#11)",
-27)--------"l_linenumber(#12)",
-28)--------"l_quantity(#13)",
-29)--------"l_extendedprice(#14)",
-30)--------"l_discount(#15)",
-31)--------"l_tax(#16)",
-32)--------"l_returnflag(#17)",
-33)--------"l_linestatus(#18)",
-34)--------"l_shipdate(#19)",
-35)--------"l_commitdate(#20)",
-36)--------"l_receiptdate(#21)",
-37)--------"l_shipinstruct(#22)",
-38)--------"l_shipmode(#23)",
-39)--------"l_comment(#24)"
-40)------]
-41)----},
-42)----{
-43)------"id": 2,
-44)------"kind": "selection",
-45)------"title": "σ Selection",
-46)------"predicate": "((l_orderkey(#9) = o_orderkey(#0)) AND (l_commitdate(#20) < l_receiptdate(#21)))",
-47)------"input": 1
-48)----},
-49)----{
-50)------"id": 3,
-51)------"kind": "projection",
-52)------"title": "π Projection",
-53)------"columns": [
-54)--------"l_orderkey(#9)",
-55)--------"l_partkey(#10)",
-56)--------"l_suppkey(#11)",
-57)--------"l_linenumber(#12)",
-58)--------"l_quantity(#13)",
-59)--------"l_extendedprice(#14)",
-60)--------"l_discount(#15)",
-61)--------"l_tax(#16)",
-62)--------"l_returnflag(#17)",
-63)--------"l_linestatus(#18)",
-64)--------"l_shipdate(#19)",
-65)--------"l_commitdate(#20)",
-66)--------"l_receiptdate(#21)",
-67)--------"l_shipinstruct(#22)",
-68)--------"l_shipmode(#23)",
-69)--------"l_comment(#24)"
-70)------],
-71)------"input": 2
-72)----},
-73)----{
-74)------"id": 8,
-75)------"kind": "join",
-76)------"title": "⟕ᵐ LeftMarkJoin",
-77)------"join_type": "LeftMark",
-78)------"condition": "true",
-79)------"marker": "exists_mark(#26)",
-80)------"outer": 0,
-81)------"inner": 3
-82)----},
-83)----{
-84)------"id": 9,
-85)------"kind": "selection",
-86)------"title": "σ Selection",
-87)------"predicate": "(((o_orderdate(#4) >= \"1993-07-01\") AND (o_orderdate(#4) < (CAST(\"1993-07-01\" AS Date32) + INTERVAL(3mo 0d 0ns)))) AND exists_mark(#26))",
-88)------"input": 8
-89)----},
-90)----{
-91)------"id": 10,
-92)------"kind": "aggregation",
-93)------"title": "γ Aggregation",
-94)------"keys": "o_orderpriority(#5)",
-95)------"aggregates": [
-96)--------"count(Int64(1))(#25) := count_star()"
-97)------],
-98)------"input": 9
-99)----},
-100)----{
-101)------"id": 11,
-102)------"kind": "projection",
-103)------"title": "π Projection",
-104)------"columns": [
-105)--------"o_orderpriority(#5)",
-106)--------"count(Int64(1))(#25)"
-107)------],
-108)------"input": 10
-109)----},
-110)----{
-111)------"id": 12,
-112)------"kind": "sort",
-113)------"title": "⇞ Sort",
-114)------"keys": [
-115)--------"o_orderpriority(#5) Asc NullsLast"
-116)------],
-117)------"input": 11
-118)----}
-119)--]
-120)}
+06)------"title": "⊞ Scan",
+07)------"table_name": "orders",
+08)------"columns": [
+09)--------"o_orderkey(#0)",
+10)--------"o_custkey(#1)",
+11)--------"o_orderstatus(#2)",
+12)--------"o_totalprice(#3)",
+13)--------"o_orderdate(#4)",
+14)--------"o_orderpriority(#5)",
+15)--------"o_clerk(#6)",
+16)--------"o_shippriority(#7)",
+17)--------"o_comment(#8)"
+18)------]
+19)----},
+20)----{
+21)------"id": 1,
+22)------"kind": "scan",
+23)------"title": "⊞ Scan",
+24)------"table_name": "lineitem",
+25)------"columns": [
+26)--------"l_orderkey(#9)",
+27)--------"l_partkey(#10)",
+28)--------"l_suppkey(#11)",
+29)--------"l_linenumber(#12)",
+30)--------"l_quantity(#13)",
+31)--------"l_extendedprice(#14)",
+32)--------"l_discount(#15)",
+33)--------"l_tax(#16)",
+34)--------"l_returnflag(#17)",
+35)--------"l_linestatus(#18)",
+36)--------"l_shipdate(#19)",
+37)--------"l_commitdate(#20)",
+38)--------"l_receiptdate(#21)",
+39)--------"l_shipinstruct(#22)",
+40)--------"l_shipmode(#23)",
+41)--------"l_comment(#24)"
+42)------]
+43)----},
+44)----{
+45)------"id": 2,
+46)------"kind": "selection",
+47)------"title": "σ Selection",
+48)------"predicate": "((l_orderkey(#9) = o_orderkey(#0)) AND (l_commitdate(#20) < l_receiptdate(#21)))",
+49)------"input": 1
+50)----},
+51)----{
+52)------"id": 3,
+53)------"kind": "projection",
+54)------"title": "π Projection",
+55)------"columns": [
+56)--------"l_orderkey(#9)",
+57)--------"l_partkey(#10)",
+58)--------"l_suppkey(#11)",
+59)--------"l_linenumber(#12)",
+60)--------"l_quantity(#13)",
+61)--------"l_extendedprice(#14)",
+62)--------"l_discount(#15)",
+63)--------"l_tax(#16)",
+64)--------"l_returnflag(#17)",
+65)--------"l_linestatus(#18)",
+66)--------"l_shipdate(#19)",
+67)--------"l_commitdate(#20)",
+68)--------"l_receiptdate(#21)",
+69)--------"l_shipinstruct(#22)",
+70)--------"l_shipmode(#23)",
+71)--------"l_comment(#24)"
+72)------],
+73)------"input": 2
+74)----},
+75)----{
+76)------"id": 8,
+77)------"kind": "join",
+78)------"title": "⟕ᵐ LeftMarkJoin",
+79)------"join_type": "LeftMark",
+80)------"condition": "true",
+81)------"marker": "exists_mark(#26)",
+82)------"outer": 0,
+83)------"inner": 3
+84)----},
+85)----{
+86)------"id": 9,
+87)------"kind": "selection",
+88)------"title": "σ Selection",
+89)------"predicate": "(((o_orderdate(#4) >= \"1993-07-01\") AND (o_orderdate(#4) < (CAST(\"1993-07-01\" AS Date32) + INTERVAL(3mo 0d 0ns)))) AND exists_mark(#26))",
+90)------"input": 8
+91)----},
+92)----{
+93)------"id": 10,
+94)------"kind": "aggregation",
+95)------"title": "γ Aggregation",
+96)------"keys": "o_orderpriority(#5)",
+97)------"aggregates": [
+98)--------"count(Int64(1))(#25) := count_star()"
+99)------],
+100)------"input": 9
+101)----},
+102)----{
+103)------"id": 11,
+104)------"kind": "projection",
+105)------"title": "π Projection",
+106)------"columns": [
+107)--------"o_orderpriority(#5)",
+108)--------"count(Int64(1))(#25)"
+109)------],
+110)------"input": 10
+111)----},
+112)----{
+113)------"id": 12,
+114)------"kind": "sort",
+115)------"title": "⇞ Sort",
+116)------"keys": [
+117)--------"o_orderpriority(#5) Asc NullsLast"
+118)------],
+119)------"input": 11
+120)----}
+121)--]
+122)}

@@ -7,32 +7,33 @@ SELECT explain_flat('SELECT COUNT(*) FROM nation;');
 03)----{
 04)------"id": 0,
 05)------"kind": "scan",
-06)------"title": "⊞ nation",
-07)------"columns": [
-08)--------"n_nationkey(#0)",
-09)--------"n_name(#1)",
-10)--------"n_regionkey(#2)",
-11)--------"n_comment(#3)"
-12)------]
-13)----},
-14)----{
-15)------"id": 1,
-16)------"kind": "aggregation",
-17)------"title": "γ Aggregation",
-18)------"keys": "",
-19)------"aggregates": [
-20)--------"count(Int64(1))(#4) := count_star()"
-21)------],
-22)------"input": 0
-23)----},
-24)----{
-25)------"id": 2,
-26)------"kind": "projection",
-27)------"title": "π Projection",
-28)------"columns": [
-29)--------"count(Int64(1))(#4)"
-30)------],
-31)------"input": 1
-32)----}
-33)--]
-34)}
+06)------"title": "⊞ Scan",
+07)------"table_name": "nation",
+08)------"columns": [
+09)--------"n_nationkey(#0)",
+10)--------"n_name(#1)",
+11)--------"n_regionkey(#2)",
+12)--------"n_comment(#3)"
+13)------]
+14)----},
+15)----{
+16)------"id": 1,
+17)------"kind": "aggregation",
+18)------"title": "γ Aggregation",
+19)------"keys": "",
+20)------"aggregates": [
+21)--------"count(Int64(1))(#4) := count_star()"
+22)------],
+23)------"input": 0
+24)----},
+25)----{
+26)------"id": 2,
+27)------"kind": "projection",
+28)------"title": "π Projection",
+29)------"columns": [
+30)--------"count(Int64(1))(#4)"
+31)------],
+32)------"input": 1
+33)----}
+34)--]
+35)}

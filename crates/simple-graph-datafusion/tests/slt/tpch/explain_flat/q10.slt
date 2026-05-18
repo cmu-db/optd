@@ -38,144 +38,148 @@ limit 10;');
 03)----{
 04)------"id": 0,
 05)------"kind": "scan",
-06)------"title": "⊞ customer",
-07)------"columns": [
-08)--------"c_custkey(#0)",
-09)--------"c_name(#1)",
-10)--------"c_address(#2)",
-11)--------"c_nationkey(#3)",
-12)--------"c_phone(#4)",
-13)--------"c_acctbal(#5)",
-14)--------"c_mktsegment(#6)",
-15)--------"c_comment(#7)"
-16)------]
-17)----},
-18)----{
-19)------"id": 1,
-20)------"kind": "scan",
-21)------"title": "⊞ orders",
-22)------"columns": [
-23)--------"o_orderkey(#8)",
-24)--------"o_custkey(#9)",
-25)--------"o_orderstatus(#10)",
-26)--------"o_totalprice(#11)",
-27)--------"o_orderdate(#12)",
-28)--------"o_orderpriority(#13)",
-29)--------"o_clerk(#14)",
-30)--------"o_shippriority(#15)",
-31)--------"o_comment(#16)"
-32)------]
-33)----},
-34)----{
-35)------"id": 2,
-36)------"kind": "join",
-37)------"title": "⋈ InnerJoin",
-38)------"join_type": "Inner",
-39)------"condition": "true",
-40)------"outer": 0,
-41)------"inner": 1
-42)----},
-43)----{
-44)------"id": 3,
-45)------"kind": "scan",
-46)------"title": "⊞ lineitem",
-47)------"columns": [
-48)--------"l_orderkey(#17)",
-49)--------"l_partkey(#18)",
-50)--------"l_suppkey(#19)",
-51)--------"l_linenumber(#20)",
-52)--------"l_quantity(#21)",
-53)--------"l_extendedprice(#22)",
-54)--------"l_discount(#23)",
-55)--------"l_tax(#24)",
-56)--------"l_returnflag(#25)",
-57)--------"l_linestatus(#26)",
-58)--------"l_shipdate(#27)",
-59)--------"l_commitdate(#28)",
-60)--------"l_receiptdate(#29)",
-61)--------"l_shipinstruct(#30)",
-62)--------"l_shipmode(#31)",
-63)--------"l_comment(#32)"
-64)------]
-65)----},
-66)----{
-67)------"id": 4,
-68)------"kind": "join",
-69)------"title": "⋈ InnerJoin",
-70)------"join_type": "Inner",
-71)------"condition": "true",
-72)------"outer": 2,
-73)------"inner": 3
-74)----},
-75)----{
-76)------"id": 5,
-77)------"kind": "scan",
-78)------"title": "⊞ nation",
-79)------"columns": [
-80)--------"n_nationkey(#33)",
-81)--------"n_name(#34)",
-82)--------"n_regionkey(#35)",
-83)--------"n_comment(#36)"
-84)------]
-85)----},
-86)----{
-87)------"id": 6,
-88)------"kind": "join",
-89)------"title": "⋈ InnerJoin",
-90)------"join_type": "Inner",
-91)------"condition": "true",
-92)------"outer": 4,
-93)------"inner": 5
-94)----},
-95)----{
-96)------"id": 7,
-97)------"kind": "selection",
-98)------"title": "σ Selection",
-99)------"predicate": "((((((c_custkey(#0) = o_custkey(#9)) AND (l_orderkey(#17) = o_orderkey(#8))) AND (o_orderdate(#12) >= CAST(\"1993-10-01\" AS Date32))) AND (o_orderdate(#12) < CAST(\"1994-01-01\" AS Date32))) AND (l_returnflag(#25) = \"R\")) AND (c_nationkey(#3) = n_nationkey(#33)))",
-100)------"input": 6
-101)----},
-102)----{
-103)------"id": 8,
-104)------"kind": "aggregation",
-105)------"title": "γ Aggregation",
-106)------"keys": "c_custkey(#0), c_name(#1), c_acctbal(#5), c_phone(#4), n_name(#34), c_address(#2), c_comment(#7)",
-107)------"aggregates": [
-108)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#37) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
-109)------],
-110)------"input": 7
-111)----},
-112)----{
-113)------"id": 9,
-114)------"kind": "projection",
-115)------"title": "π Projection",
-116)------"columns": [
-117)--------"c_custkey(#0)",
-118)--------"c_name(#1)",
-119)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#37)",
-120)--------"c_acctbal(#5)",
-121)--------"n_name(#34)",
-122)--------"c_address(#2)",
-123)--------"c_phone(#4)",
-124)--------"c_comment(#7)"
-125)------],
-126)------"input": 8
-127)----},
-128)----{
-129)------"id": 10,
-130)------"kind": "sort",
-131)------"title": "⇞ Sort",
-132)------"keys": [
-133)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#37) Desc NullsFirst"
-134)------],
-135)------"input": 9
-136)----},
-137)----{
-138)------"id": 11,
-139)------"kind": "limit",
-140)------"title": "τ Limit",
-141)------"fetch": "10",
-142)------"offset": "0",
-143)------"input": 10
-144)----}
-145)--]
-146)}
+06)------"title": "⊞ Scan",
+07)------"table_name": "customer",
+08)------"columns": [
+09)--------"c_custkey(#0)",
+10)--------"c_name(#1)",
+11)--------"c_address(#2)",
+12)--------"c_nationkey(#3)",
+13)--------"c_phone(#4)",
+14)--------"c_acctbal(#5)",
+15)--------"c_mktsegment(#6)",
+16)--------"c_comment(#7)"
+17)------]
+18)----},
+19)----{
+20)------"id": 1,
+21)------"kind": "scan",
+22)------"title": "⊞ Scan",
+23)------"table_name": "orders",
+24)------"columns": [
+25)--------"o_orderkey(#8)",
+26)--------"o_custkey(#9)",
+27)--------"o_orderstatus(#10)",
+28)--------"o_totalprice(#11)",
+29)--------"o_orderdate(#12)",
+30)--------"o_orderpriority(#13)",
+31)--------"o_clerk(#14)",
+32)--------"o_shippriority(#15)",
+33)--------"o_comment(#16)"
+34)------]
+35)----},
+36)----{
+37)------"id": 2,
+38)------"kind": "join",
+39)------"title": "⋈ InnerJoin",
+40)------"join_type": "Inner",
+41)------"condition": "true",
+42)------"outer": 0,
+43)------"inner": 1
+44)----},
+45)----{
+46)------"id": 3,
+47)------"kind": "scan",
+48)------"title": "⊞ Scan",
+49)------"table_name": "lineitem",
+50)------"columns": [
+51)--------"l_orderkey(#17)",
+52)--------"l_partkey(#18)",
+53)--------"l_suppkey(#19)",
+54)--------"l_linenumber(#20)",
+55)--------"l_quantity(#21)",
+56)--------"l_extendedprice(#22)",
+57)--------"l_discount(#23)",
+58)--------"l_tax(#24)",
+59)--------"l_returnflag(#25)",
+60)--------"l_linestatus(#26)",
+61)--------"l_shipdate(#27)",
+62)--------"l_commitdate(#28)",
+63)--------"l_receiptdate(#29)",
+64)--------"l_shipinstruct(#30)",
+65)--------"l_shipmode(#31)",
+66)--------"l_comment(#32)"
+67)------]
+68)----},
+69)----{
+70)------"id": 4,
+71)------"kind": "join",
+72)------"title": "⋈ InnerJoin",
+73)------"join_type": "Inner",
+74)------"condition": "true",
+75)------"outer": 2,
+76)------"inner": 3
+77)----},
+78)----{
+79)------"id": 5,
+80)------"kind": "scan",
+81)------"title": "⊞ Scan",
+82)------"table_name": "nation",
+83)------"columns": [
+84)--------"n_nationkey(#33)",
+85)--------"n_name(#34)",
+86)--------"n_regionkey(#35)",
+87)--------"n_comment(#36)"
+88)------]
+89)----},
+90)----{
+91)------"id": 6,
+92)------"kind": "join",
+93)------"title": "⋈ InnerJoin",
+94)------"join_type": "Inner",
+95)------"condition": "true",
+96)------"outer": 4,
+97)------"inner": 5
+98)----},
+99)----{
+100)------"id": 7,
+101)------"kind": "selection",
+102)------"title": "σ Selection",
+103)------"predicate": "((((((c_custkey(#0) = o_custkey(#9)) AND (l_orderkey(#17) = o_orderkey(#8))) AND (o_orderdate(#12) >= CAST(\"1993-10-01\" AS Date32))) AND (o_orderdate(#12) < CAST(\"1994-01-01\" AS Date32))) AND (l_returnflag(#25) = \"R\")) AND (c_nationkey(#3) = n_nationkey(#33)))",
+104)------"input": 6
+105)----},
+106)----{
+107)------"id": 8,
+108)------"kind": "aggregation",
+109)------"title": "γ Aggregation",
+110)------"keys": "c_custkey(#0), c_name(#1), c_acctbal(#5), c_phone(#4), n_name(#34), c_address(#2), c_comment(#7)",
+111)------"aggregates": [
+112)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#37) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
+113)------],
+114)------"input": 7
+115)----},
+116)----{
+117)------"id": 9,
+118)------"kind": "projection",
+119)------"title": "π Projection",
+120)------"columns": [
+121)--------"c_custkey(#0)",
+122)--------"c_name(#1)",
+123)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#37)",
+124)--------"c_acctbal(#5)",
+125)--------"n_name(#34)",
+126)--------"c_address(#2)",
+127)--------"c_phone(#4)",
+128)--------"c_comment(#7)"
+129)------],
+130)------"input": 8
+131)----},
+132)----{
+133)------"id": 10,
+134)------"kind": "sort",
+135)------"title": "⇞ Sort",
+136)------"keys": [
+137)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#37) Desc NullsFirst"
+138)------],
+139)------"input": 9
+140)----},
+141)----{
+142)------"id": 11,
+143)------"kind": "limit",
+144)------"title": "τ Limit",
+145)------"fetch": "10",
+146)------"offset": "0",
+147)------"input": 10
+148)----}
+149)--]
+150)}

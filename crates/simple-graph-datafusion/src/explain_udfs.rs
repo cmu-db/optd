@@ -4,6 +4,7 @@
 //! - `explain_box(sql)`  — box-drawing plan with free-column analysis
 //! - `explain_json(sql)` — recursive JSON display tree
 //! - `explain_flat(sql)` — flat DFS post-order JSON
+//! - `explain_optimizer_json(sql)` — optd optimizer visualizer pass timeline
 //! - `explain_steps(sql, format)` — table function with plan snapshots after each optimizer step
 
 use std::sync::Arc;
@@ -21,18 +22,20 @@ use datafusion::logical_expr::{
 use datafusion::prelude::SessionContext;
 use simple_graph::{
     OperatorRewriteAdaptor, OptimizerContext, PassManager, PassResult, PredicatePushdown,
-    QueryContext, QueryFormatConfig, SubqueryToJoin,
+    QueryContext, QueryFormatConfig, SubqueryToJoin, optimizer_visualizer_trace_json,
 };
 
 use crate::from_df::from_logical_plan;
 
-/// Registers `explain_box`, `explain_json`, `explain_flat`, and `explain_steps` on `ctx`.
+/// Registers `explain_box`, `explain_json`, `explain_flat`, `explain_optimizer_json`, and
+/// `explain_steps` on `ctx`.
 pub fn register_explain_udfs(ctx: &SessionContext) {
     let state = Arc::new(ctx.state());
     for (name, format) in [
         ("explain_box", Format::Box),
         ("explain_json", Format::Json),
         ("explain_flat", Format::Flat),
+        ("explain_optimizer_json", Format::OptimizerJson),
     ] {
         ctx.register_udf(ScalarUDF::from(ExplainUdf {
             name,
@@ -55,6 +58,7 @@ enum Format {
     Box,
     Json,
     Flat,
+    OptimizerJson,
 }
 
 impl Format {
@@ -63,8 +67,9 @@ impl Format {
             "box" => Ok(Self::Box),
             "json" => Ok(Self::Json),
             "flat" => Ok(Self::Flat),
+            "optimizer-json" | "optimizer_json" => Ok(Self::OptimizerJson),
             other => Err(DataFusionError::Plan(format!(
-                "unsupported explain format '{other}', expected 'box', 'json', or 'flat'"
+                "unsupported explain format '{other}', expected 'box', 'json', 'flat', or 'optimizer-json'"
             ))),
         }
     }
@@ -201,6 +206,18 @@ fn explain_sql(
 
     // Spawn a dedicated thread with its own single-threaded runtime so we can
     // call async APIs (create_logical_plan) without blocking the caller's runtime.
+    if format == Format::OptimizerJson {
+        return std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| datafusion::error::DataFusionError::External(Box::new(e)))?
+                .block_on(build_optimizer_visualizer_trace(&sql, &state))
+        })
+        .join()
+        .map_err(|_| datafusion::error::DataFusionError::Plan("explain thread panicked".into()))?;
+    }
+
     let ctx = std::thread::spawn(move || {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -239,6 +256,7 @@ fn format_query(ctx: &QueryContext, format: Format, config: QueryFormatConfig) -
         Format::Box => ctx.pretty_with_config(config),
         Format::Json => ctx.pretty_json(),
         Format::Flat => ctx.pretty_flat(),
+        Format::OptimizerJson => ctx.optimizer_visualizer_json("0. Plan"),
     };
     trim_trailing_line_whitespace(&text)
 }
@@ -314,6 +332,26 @@ async fn build_ir_trace(
     }));
 
     Ok(steps)
+}
+
+async fn build_optimizer_visualizer_trace(
+    sql: &str,
+    state: &datafusion::execution::SessionState,
+) -> datafusion::error::Result<String> {
+    let plan = state.create_logical_plan(sql).await?;
+    let mut ctx = QueryContext::new();
+    let root =
+        from_logical_plan(&plan, &mut ctx).map_err(|e| DataFusionError::Plan(e.to_string()))?;
+    ctx.set_root(root);
+    let initial = ctx.clone();
+
+    let mut opt = OptimizerContext::new(ctx);
+    let mut pm = explain_pass_manager();
+    let trace = pm
+        .run_with_trace(&mut opt)
+        .map_err(|e| DataFusionError::Plan(e.to_string()))?;
+
+    Ok(optimizer_visualizer_trace_json(&initial, &trace))
 }
 
 fn explain_pass_manager() -> PassManager {

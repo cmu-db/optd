@@ -50,253 +50,262 @@ limit 10;');
 03)----{
 04)------"id": 0,
 05)------"kind": "scan",
-06)------"title": "⊞ part",
-07)------"columns": [
-08)--------"p_partkey(#0)",
-09)--------"p_name(#1)",
-10)--------"p_mfgr(#2)",
-11)--------"p_brand(#3)",
-12)--------"p_type(#4)",
-13)--------"p_size(#5)",
-14)--------"p_container(#6)",
-15)--------"p_retailprice(#7)",
-16)--------"p_comment(#8)"
-17)------]
-18)----},
-19)----{
-20)------"id": 1,
-21)------"kind": "scan",
-22)------"title": "⊞ supplier",
-23)------"columns": [
-24)--------"s_suppkey(#9)",
-25)--------"s_name(#10)",
-26)--------"s_address(#11)",
-27)--------"s_nationkey(#12)",
-28)--------"s_phone(#13)",
-29)--------"s_acctbal(#14)",
-30)--------"s_comment(#15)"
-31)------]
-32)----},
-33)----{
-34)------"id": 2,
-35)------"kind": "join",
-36)------"title": "⋈ InnerJoin",
-37)------"join_type": "Inner",
-38)------"condition": "true",
-39)------"outer": 0,
-40)------"inner": 1
-41)----},
-42)----{
-43)------"id": 3,
-44)------"kind": "scan",
-45)------"title": "⊞ partsupp",
-46)------"columns": [
-47)--------"ps_partkey(#16)",
-48)--------"ps_suppkey(#17)",
-49)--------"ps_availqty(#18)",
-50)--------"ps_supplycost(#19)",
-51)--------"ps_comment(#20)"
-52)------]
-53)----},
-54)----{
-55)------"id": 4,
-56)------"kind": "join",
-57)------"title": "⋈ InnerJoin",
-58)------"join_type": "Inner",
-59)------"condition": "true",
-60)------"outer": 2,
-61)------"inner": 3
-62)----},
-63)----{
-64)------"id": 5,
-65)------"kind": "scan",
-66)------"title": "⊞ nation",
-67)------"columns": [
-68)--------"n_nationkey(#21)",
-69)--------"n_name(#22)",
-70)--------"n_regionkey(#23)",
-71)--------"n_comment(#24)"
-72)------]
-73)----},
-74)----{
-75)------"id": 6,
-76)------"kind": "join",
-77)------"title": "⋈ InnerJoin",
-78)------"join_type": "Inner",
-79)------"condition": "true",
-80)------"outer": 4,
-81)------"inner": 5
-82)----},
-83)----{
-84)------"id": 7,
-85)------"kind": "scan",
-86)------"title": "⊞ region",
-87)------"columns": [
-88)--------"r_regionkey(#25)",
-89)--------"r_name(#26)",
-90)--------"r_comment(#27)"
-91)------]
-92)----},
-93)----{
-94)------"id": 8,
-95)------"kind": "join",
-96)------"title": "⋈ InnerJoin",
-97)------"join_type": "Inner",
-98)------"condition": "true",
-99)------"outer": 6,
-100)------"inner": 7
-101)----},
-102)----{
-103)------"id": 9,
-104)------"kind": "scan",
-105)------"title": "⊞ partsupp",
-106)------"columns": [
-107)--------"ps_partkey(#28)",
-108)--------"ps_suppkey(#29)",
-109)--------"ps_availqty(#30)",
-110)--------"ps_supplycost(#31)",
-111)--------"ps_comment(#32)"
-112)------]
-113)----},
-114)----{
-115)------"id": 10,
-116)------"kind": "scan",
-117)------"title": "⊞ supplier",
-118)------"columns": [
-119)--------"s_suppkey(#33)",
-120)--------"s_name(#34)",
-121)--------"s_address(#35)",
-122)--------"s_nationkey(#36)",
-123)--------"s_phone(#37)",
-124)--------"s_acctbal(#38)",
-125)--------"s_comment(#39)"
-126)------]
-127)----},
-128)----{
-129)------"id": 11,
-130)------"kind": "join",
-131)------"title": "⋈ InnerJoin",
-132)------"join_type": "Inner",
-133)------"condition": "true",
-134)------"outer": 9,
-135)------"inner": 10
-136)----},
-137)----{
-138)------"id": 12,
-139)------"kind": "scan",
-140)------"title": "⊞ nation",
-141)------"columns": [
-142)--------"n_nationkey(#40)",
-143)--------"n_name(#41)",
-144)--------"n_regionkey(#42)",
-145)--------"n_comment(#43)"
-146)------]
-147)----},
-148)----{
-149)------"id": 13,
-150)------"kind": "join",
-151)------"title": "⋈ InnerJoin",
-152)------"join_type": "Inner",
-153)------"condition": "true",
-154)------"outer": 11,
-155)------"inner": 12
-156)----},
-157)----{
-158)------"id": 14,
-159)------"kind": "scan",
-160)------"title": "⊞ region",
-161)------"columns": [
-162)--------"r_regionkey(#44)",
-163)--------"r_name(#45)",
-164)--------"r_comment(#46)"
-165)------]
-166)----},
-167)----{
-168)------"id": 15,
-169)------"kind": "join",
-170)------"title": "⋈ InnerJoin",
-171)------"join_type": "Inner",
-172)------"condition": "true",
-173)------"outer": 13,
-174)------"inner": 14
+06)------"title": "⊞ Scan",
+07)------"table_name": "part",
+08)------"columns": [
+09)--------"p_partkey(#0)",
+10)--------"p_name(#1)",
+11)--------"p_mfgr(#2)",
+12)--------"p_brand(#3)",
+13)--------"p_type(#4)",
+14)--------"p_size(#5)",
+15)--------"p_container(#6)",
+16)--------"p_retailprice(#7)",
+17)--------"p_comment(#8)"
+18)------]
+19)----},
+20)----{
+21)------"id": 1,
+22)------"kind": "scan",
+23)------"title": "⊞ Scan",
+24)------"table_name": "supplier",
+25)------"columns": [
+26)--------"s_suppkey(#9)",
+27)--------"s_name(#10)",
+28)--------"s_address(#11)",
+29)--------"s_nationkey(#12)",
+30)--------"s_phone(#13)",
+31)--------"s_acctbal(#14)",
+32)--------"s_comment(#15)"
+33)------]
+34)----},
+35)----{
+36)------"id": 2,
+37)------"kind": "join",
+38)------"title": "⋈ InnerJoin",
+39)------"join_type": "Inner",
+40)------"condition": "true",
+41)------"outer": 0,
+42)------"inner": 1
+43)----},
+44)----{
+45)------"id": 3,
+46)------"kind": "scan",
+47)------"title": "⊞ Scan",
+48)------"table_name": "partsupp",
+49)------"columns": [
+50)--------"ps_partkey(#16)",
+51)--------"ps_suppkey(#17)",
+52)--------"ps_availqty(#18)",
+53)--------"ps_supplycost(#19)",
+54)--------"ps_comment(#20)"
+55)------]
+56)----},
+57)----{
+58)------"id": 4,
+59)------"kind": "join",
+60)------"title": "⋈ InnerJoin",
+61)------"join_type": "Inner",
+62)------"condition": "true",
+63)------"outer": 2,
+64)------"inner": 3
+65)----},
+66)----{
+67)------"id": 5,
+68)------"kind": "scan",
+69)------"title": "⊞ Scan",
+70)------"table_name": "nation",
+71)------"columns": [
+72)--------"n_nationkey(#21)",
+73)--------"n_name(#22)",
+74)--------"n_regionkey(#23)",
+75)--------"n_comment(#24)"
+76)------]
+77)----},
+78)----{
+79)------"id": 6,
+80)------"kind": "join",
+81)------"title": "⋈ InnerJoin",
+82)------"join_type": "Inner",
+83)------"condition": "true",
+84)------"outer": 4,
+85)------"inner": 5
+86)----},
+87)----{
+88)------"id": 7,
+89)------"kind": "scan",
+90)------"title": "⊞ Scan",
+91)------"table_name": "region",
+92)------"columns": [
+93)--------"r_regionkey(#25)",
+94)--------"r_name(#26)",
+95)--------"r_comment(#27)"
+96)------]
+97)----},
+98)----{
+99)------"id": 8,
+100)------"kind": "join",
+101)------"title": "⋈ InnerJoin",
+102)------"join_type": "Inner",
+103)------"condition": "true",
+104)------"outer": 6,
+105)------"inner": 7
+106)----},
+107)----{
+108)------"id": 9,
+109)------"kind": "scan",
+110)------"title": "⊞ Scan",
+111)------"table_name": "partsupp",
+112)------"columns": [
+113)--------"ps_partkey(#28)",
+114)--------"ps_suppkey(#29)",
+115)--------"ps_availqty(#30)",
+116)--------"ps_supplycost(#31)",
+117)--------"ps_comment(#32)"
+118)------]
+119)----},
+120)----{
+121)------"id": 10,
+122)------"kind": "scan",
+123)------"title": "⊞ Scan",
+124)------"table_name": "supplier",
+125)------"columns": [
+126)--------"s_suppkey(#33)",
+127)--------"s_name(#34)",
+128)--------"s_address(#35)",
+129)--------"s_nationkey(#36)",
+130)--------"s_phone(#37)",
+131)--------"s_acctbal(#38)",
+132)--------"s_comment(#39)"
+133)------]
+134)----},
+135)----{
+136)------"id": 11,
+137)------"kind": "join",
+138)------"title": "⋈ InnerJoin",
+139)------"join_type": "Inner",
+140)------"condition": "true",
+141)------"outer": 9,
+142)------"inner": 10
+143)----},
+144)----{
+145)------"id": 12,
+146)------"kind": "scan",
+147)------"title": "⊞ Scan",
+148)------"table_name": "nation",
+149)------"columns": [
+150)--------"n_nationkey(#40)",
+151)--------"n_name(#41)",
+152)--------"n_regionkey(#42)",
+153)--------"n_comment(#43)"
+154)------]
+155)----},
+156)----{
+157)------"id": 13,
+158)------"kind": "join",
+159)------"title": "⋈ InnerJoin",
+160)------"join_type": "Inner",
+161)------"condition": "true",
+162)------"outer": 11,
+163)------"inner": 12
+164)----},
+165)----{
+166)------"id": 14,
+167)------"kind": "scan",
+168)------"title": "⊞ Scan",
+169)------"table_name": "region",
+170)------"columns": [
+171)--------"r_regionkey(#44)",
+172)--------"r_name(#45)",
+173)--------"r_comment(#46)"
+174)------]
 175)----},
 176)----{
-177)------"id": 16,
-178)------"kind": "selection",
-179)------"title": "σ Selection",
-180)------"predicate": "(((((p_partkey(#0) = ps_partkey(#28)) AND (s_suppkey(#33) = ps_suppkey(#29))) AND (s_nationkey(#36) = n_nationkey(#40))) AND (n_regionkey(#42) = r_regionkey(#44))) AND (r_name(#45) = \"EUROPE\"))",
-181)------"input": 15
-182)----},
-183)----{
-184)------"id": 17,
-185)------"kind": "aggregation",
-186)------"title": "γ Aggregation",
-187)------"keys": "",
-188)------"aggregates": [
-189)--------"min(partsupp.ps_supplycost)(#47) := min(ps_supplycost(#31))"
-190)------],
-191)------"input": 16
-192)----},
-193)----{
-194)------"id": 18,
-195)------"kind": "projection",
-196)------"title": "π Projection",
-197)------"columns": [
-198)--------"min(partsupp.ps_supplycost)(#47)"
+177)------"id": 15,
+178)------"kind": "join",
+179)------"title": "⋈ InnerJoin",
+180)------"join_type": "Inner",
+181)------"condition": "true",
+182)------"outer": 13,
+183)------"inner": 14
+184)----},
+185)----{
+186)------"id": 16,
+187)------"kind": "selection",
+188)------"title": "σ Selection",
+189)------"predicate": "(((((p_partkey(#0) = ps_partkey(#28)) AND (s_suppkey(#33) = ps_suppkey(#29))) AND (s_nationkey(#36) = n_nationkey(#40))) AND (n_regionkey(#42) = r_regionkey(#44))) AND (r_name(#45) = \"EUROPE\"))",
+190)------"input": 15
+191)----},
+192)----{
+193)------"id": 17,
+194)------"kind": "aggregation",
+195)------"title": "γ Aggregation",
+196)------"keys": "",
+197)------"aggregates": [
+198)--------"min(partsupp.ps_supplycost)(#47) := min(ps_supplycost(#31))"
 199)------],
-200)------"input": 17
+200)------"input": 16
 201)----},
 202)----{
-203)------"id": 23,
-204)------"kind": "join",
-205)------"title": "⋈₁ SingleJoin",
-206)------"join_type": "Single",
-207)------"condition": "true",
-208)------"outer": 8,
-209)------"inner": 18
+203)------"id": 18,
+204)------"kind": "projection",
+205)------"title": "π Projection",
+206)------"columns": [
+207)--------"min(partsupp.ps_supplycost)(#47)"
+208)------],
+209)------"input": 17
 210)----},
 211)----{
-212)------"id": 24,
-213)------"kind": "selection",
-214)------"title": "σ Selection",
-215)------"predicate": "((((((((p_partkey(#0) = ps_partkey(#16)) AND (s_suppkey(#9) = ps_suppkey(#17))) AND (p_size(#5) = 15)) AND (p_type(#4) LIKE \"%BRASS\")) AND (s_nationkey(#12) = n_nationkey(#21))) AND (n_regionkey(#23) = r_regionkey(#25))) AND (r_name(#26) = \"EUROPE\")) AND (ps_supplycost(#19) = min(partsupp.ps_supplycost)(#47)))",
-216)------"input": 23
-217)----},
-218)----{
-219)------"id": 25,
-220)------"kind": "projection",
-221)------"title": "π Projection",
-222)------"columns": [
-223)--------"s_acctbal(#14)",
-224)--------"s_name(#10)",
-225)--------"n_name(#22)",
-226)--------"p_partkey(#0)",
-227)--------"p_mfgr(#2)",
-228)--------"s_address(#11)",
-229)--------"s_phone(#13)",
-230)--------"s_comment(#15)"
-231)------],
-232)------"input": 24
-233)----},
-234)----{
-235)------"id": 26,
-236)------"kind": "sort",
-237)------"title": "⇞ Sort",
-238)------"keys": [
-239)--------"s_acctbal(#14) Desc NullsFirst",
-240)--------"n_name(#22) Asc NullsLast",
-241)--------"s_name(#10) Asc NullsLast",
-242)--------"p_partkey(#0) Asc NullsLast"
-243)------],
-244)------"input": 25
-245)----},
-246)----{
-247)------"id": 27,
-248)------"kind": "limit",
-249)------"title": "τ Limit",
-250)------"fetch": "10",
-251)------"offset": "0",
-252)------"input": 26
-253)----}
-254)--]
-255)}
+212)------"id": 23,
+213)------"kind": "join",
+214)------"title": "⋈₁ SingleJoin",
+215)------"join_type": "Single",
+216)------"condition": "true",
+217)------"outer": 8,
+218)------"inner": 18
+219)----},
+220)----{
+221)------"id": 24,
+222)------"kind": "selection",
+223)------"title": "σ Selection",
+224)------"predicate": "((((((((p_partkey(#0) = ps_partkey(#16)) AND (s_suppkey(#9) = ps_suppkey(#17))) AND (p_size(#5) = 15)) AND (p_type(#4) LIKE \"%BRASS\")) AND (s_nationkey(#12) = n_nationkey(#21))) AND (n_regionkey(#23) = r_regionkey(#25))) AND (r_name(#26) = \"EUROPE\")) AND (ps_supplycost(#19) = min(partsupp.ps_supplycost)(#47)))",
+225)------"input": 23
+226)----},
+227)----{
+228)------"id": 25,
+229)------"kind": "projection",
+230)------"title": "π Projection",
+231)------"columns": [
+232)--------"s_acctbal(#14)",
+233)--------"s_name(#10)",
+234)--------"n_name(#22)",
+235)--------"p_partkey(#0)",
+236)--------"p_mfgr(#2)",
+237)--------"s_address(#11)",
+238)--------"s_phone(#13)",
+239)--------"s_comment(#15)"
+240)------],
+241)------"input": 24
+242)----},
+243)----{
+244)------"id": 26,
+245)------"kind": "sort",
+246)------"title": "⇞ Sort",
+247)------"keys": [
+248)--------"s_acctbal(#14) Desc NullsFirst",
+249)--------"n_name(#22) Asc NullsLast",
+250)--------"s_name(#10) Asc NullsLast",
+251)--------"p_partkey(#0) Asc NullsLast"
+252)------],
+253)------"input": 25
+254)----},
+255)----{
+256)------"id": 27,
+257)------"kind": "limit",
+258)------"title": "τ Limit",
+259)------"fetch": "10",
+260)------"offset": "0",
+261)------"input": 26
+262)----}
+263)--]
+264)}

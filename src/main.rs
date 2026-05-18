@@ -28,6 +28,37 @@ fn main() {
         std::process::exit(2);
     };
 
+    if args.optimize && args.format == OutputFormat::OptimizerJson {
+        #[cfg(feature = "serde")]
+        {
+            let initial = query.clone();
+            let mut opt = OptimizerContext::new(query);
+            let mut pm = PassManager::new(10);
+            pm.add_pass(SubqueryToJoin);
+            pm.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
+            pm.add_pass(JoinOrdering::new());
+            match pm.run_with_trace(&mut opt) {
+                Ok(trace) => {
+                    println!(
+                        "{}",
+                        simple_graph::optimizer_visualizer_trace_json(&initial, &trace)
+                    );
+                    return;
+                }
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(2);
+                }
+            }
+        }
+
+        #[cfg(not(feature = "serde"))]
+        {
+            eprintln!("--format optimizer-json requires the serde feature");
+            std::process::exit(2);
+        }
+    }
+
     let query = if args.optimize {
         let initial = format_query(&query, args.format).unwrap_or_else(|e| e);
         let mut opt = OptimizerContext::new(query);
@@ -73,6 +104,7 @@ enum OutputFormat {
     Flat,
     Json,
     Context,
+    OptimizerJson,
 }
 
 impl OutputFormat {
@@ -82,6 +114,7 @@ impl OutputFormat {
             "flat" => Some(Self::Flat),
             "json" => Some(Self::Json),
             "context" => Some(Self::Context),
+            "optimizer-json" => Some(Self::OptimizerJson),
             _ => None,
         }
     }
@@ -112,13 +145,13 @@ impl CliArgs {
                         .next()
                         .ok_or_else(|| "--format requires a value".to_string())?;
                     format = OutputFormat::parse(&value).ok_or_else(|| {
-                        format!("unknown format {value:?}; expected box, flat, json, or context")
+                        format!("unknown format {value:?}; expected box, flat, json, context, or optimizer-json")
                     })?;
                 }
                 _ if arg.starts_with("--format=") => {
                     let value = arg.trim_start_matches("--format=");
                     format = OutputFormat::parse(value).ok_or_else(|| {
-                        format!("unknown format {value:?}; expected box, flat, json, or context")
+                        format!("unknown format {value:?}; expected box, flat, json, context, or optimizer-json")
                     })?;
                 }
                 _ if arg.starts_with('-') => return Err(format!("unknown option {arg:?}")),
@@ -145,7 +178,7 @@ impl CliArgs {
 
 fn print_usage() {
     eprintln!(
-        "usage: simple-graph [--format box|flat|json|context] [--optimize] <tpch-query-number>"
+        "usage: simple-graph [--format box|flat|json|context|optimizer-json] [--optimize] <tpch-query-number>"
     );
 }
 
@@ -155,6 +188,7 @@ fn format_query(query: &QueryContext, format: OutputFormat) -> Result<String, St
         OutputFormat::Flat => format_flat(query),
         OutputFormat::Json => format_json(query),
         OutputFormat::Context => format_context(query),
+        OutputFormat::OptimizerJson => format_optimizer_json(query),
     }
 }
 
@@ -186,6 +220,16 @@ fn format_context(query: &QueryContext) -> Result<String, String> {
 #[cfg(not(feature = "serde"))]
 fn format_context(_query: &QueryContext) -> Result<String, String> {
     Err("--format context requires the serde feature".to_string())
+}
+
+#[cfg(feature = "serde")]
+fn format_optimizer_json(query: &QueryContext) -> Result<String, String> {
+    Ok(query.optimizer_visualizer_json("0. Plan"))
+}
+
+#[cfg(not(feature = "serde"))]
+fn format_optimizer_json(_query: &QueryContext) -> Result<String, String> {
+    Err("--format optimizer-json requires the serde feature".to_string())
 }
 
 #[allow(dead_code)]
