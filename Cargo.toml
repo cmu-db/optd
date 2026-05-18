@@ -1,7 +1,7 @@
 [workspace]
 members = [
     ".",
-    "crates/optd-datafusion",
+    "connectors/optd-datafusion",
 ]
 resolver = "2"
 
