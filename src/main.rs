@@ -33,7 +33,7 @@ fn main() {
         {
             let initial = query.clone();
             let mut opt = OptimizerContext::new(query);
-            let mut pm = PassManager::new(10);
+            let mut pm = PassManager::new();
             pm.add_pass(SubqueryToJoin);
             pm.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
             pm.add_pass(JoinOrdering::new());
@@ -62,7 +62,7 @@ fn main() {
     let query = if args.optimize {
         let initial = format_query(&query, args.format).unwrap_or_else(|e| e);
         let mut opt = OptimizerContext::new(query);
-        let mut pm = PassManager::new(10);
+        let mut pm = PassManager::new();
         pm.add_pass(SubqueryToJoin);
         pm.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
         pm.add_pass(JoinOrdering::new());

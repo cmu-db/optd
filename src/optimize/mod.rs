@@ -55,14 +55,16 @@ pub enum OptimizeError {
     /// A pass returned an error with a message.
     PassError { pass: &'static str, message: String },
     /// The pass manager reached its iteration limit without converging.
-    MaxIterationsReached,
+    MaxIterationsReached { pass: &'static str },
 }
 
 impl std::fmt::Display for OptimizeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::PassError { pass, message } => write!(f, "pass '{pass}' failed: {message}"),
-            Self::MaxIterationsReached => write!(f, "optimizer reached max iterations"),
+            Self::MaxIterationsReached { pass } => {
+                write!(f, "optimizer reached max iterations at {pass}")
+            }
         }
     }
 }
@@ -374,17 +376,27 @@ fn pre_order(
 /// Runs query passes in registration order until no pass reports changes.
 pub struct PassManager {
     passes: Vec<Box<dyn QueryPass>>,
-    max_iterations: usize,
+    max_iterations: Option<usize>,
     next_run_id: u64,
     profiles: Vec<PassProfile>,
 }
 
 impl PassManager {
-    /// Creates a pass manager with the given iteration limit.
-    pub fn new(max_iterations: usize) -> Self {
+    /// Creates a pass manager with no iteration limit.
+    pub fn new() -> Self {
         Self {
             passes: Vec::new(),
-            max_iterations,
+            max_iterations: None,
+            next_run_id: 1,
+            profiles: Vec::new(),
+        }
+    }
+
+    /// Creates a pass manager with a per-pass iteration limit.
+    pub fn with_max_iterations(max_iterations: usize) -> Self {
+        Self {
+            passes: Vec::new(),
+            max_iterations: Some(max_iterations),
             next_run_id: 1,
             profiles: Vec::new(),
         }
@@ -423,7 +435,14 @@ impl PassManager {
 
         for (pass_index, pass) in self.passes.iter_mut().enumerate() {
             let mut converged = false;
-            for iteration in 1..=self.max_iterations {
+            let mut iteration = 0usize;
+            loop {
+                iteration += 1;
+                if let Some(max) = self.max_iterations {
+                    if iteration > max {
+                        break;
+                    }
+                }
                 let pass_name = pass.name();
                 let started = Instant::now();
                 let result = pass.run(ctx);
@@ -481,7 +500,7 @@ impl PassManager {
             }
 
             if !converged {
-                return Err(OptimizeError::MaxIterationsReached);
+                return Err(OptimizeError::MaxIterationsReached { pass: pass.name() });
             }
         }
         Ok(())
@@ -578,7 +597,7 @@ mod tests {
         ctx.set_root(scan);
 
         let mut opt_ctx = OptimizerContext::new(ctx);
-        let mut pm = PassManager::new(10);
+        let mut pm = PassManager::new();
         pm.add_pass(ReplaceRootPass { fired: false });
         pm.run(&mut opt_ctx).unwrap();
 
@@ -867,7 +886,7 @@ mod tests {
 
     #[test]
     fn noop_pass_converges_in_one_iteration() {
-        let mut pm = PassManager::new(10);
+        let mut pm = PassManager::new();
         pm.add_pass(NoopPass);
         let mut ctx = OptimizerContext::new(QueryContext::new());
         pm.run(&mut ctx).unwrap();
@@ -883,12 +902,12 @@ mod tests {
 
     #[test]
     fn always_changes_pass_hits_max_iterations() {
-        let mut pm = PassManager::new(3);
+        let mut pm = PassManager::with_max_iterations(3);
         pm.add_pass(AlwaysChangesPass(0));
         let mut ctx = OptimizerContext::new(QueryContext::new());
         assert!(matches!(
             pm.run(&mut ctx),
-            Err(OptimizeError::MaxIterationsReached)
+            Err(OptimizeError::MaxIterationsReached { .. })
         ));
     }
 
@@ -921,7 +940,7 @@ mod tests {
             }
         }
 
-        let mut pm = PassManager::new(10);
+        let mut pm = PassManager::new();
         pm.add_pass(LogPass {
             name: "a",
             log: Arc::clone(&log),
@@ -949,7 +968,7 @@ mod tests {
 
     #[test]
     fn pass_manager_replaces_profiles_on_each_run() {
-        let mut pm = PassManager::new(10);
+        let mut pm = PassManager::new();
         pm.add_pass(NoopPass);
 
         let mut first = OptimizerContext::new(QueryContext::new());
@@ -982,7 +1001,7 @@ mod tests {
             }
         }
 
-        let mut pm = PassManager::new(10);
+        let mut pm = PassManager::new();
         pm.add_pass(ErrorPass);
         let mut ctx = OptimizerContext::new(QueryContext::new());
 

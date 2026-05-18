@@ -96,6 +96,8 @@ SELECT CASE
   WHEN explain_optimizer_json('SELECT id FROM t WHERE val > 1.0') LIKE '%"passName": "Initial"%'
    AND explain_optimizer_json('SELECT id FROM t WHERE val > 1.0') LIKE '%"query": "SELECT id FROM t WHERE val > 1.0"%'
    AND explain_optimizer_json('SELECT id FROM t WHERE val > 1.0') LIKE '%"passName": "JoinOrdering"%'
+   AND explain_optimizer_json('SELECT id FROM t WHERE val > 1.0') LIKE '%"durationMs":%'
+   AND explain_optimizer_json('SELECT id FROM t WHERE val > 1.0') LIKE '%"result": "unchanged"%'
    AND explain_optimizer_json('SELECT id FROM t WHERE val > 1.0') LIKE '%"op": "projection"%'
    AND explain_optimizer_json('SELECT id FROM t WHERE val > 1.0') LIKE '%"title": "π Projection"%'
   THEN 'ok'

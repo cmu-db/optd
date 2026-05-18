@@ -447,7 +447,7 @@ mod tests {
 
     fn run_pass(ctx: QueryContext) -> QueryContext {
         let mut opt = OptimizerContext::new(ctx);
-        let mut pm = PassManager::new(10);
+        let mut pm = PassManager::new();
         pm.add_pass(SubqueryToJoin);
         pm.run(&mut opt).unwrap();
         if let Some(root) = opt.query.root() {

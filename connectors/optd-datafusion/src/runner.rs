@@ -36,7 +36,7 @@ fn optimize(ctx: QueryContext) -> Result<QueryContext, optd::OptimizeError> {
 
 /// Returns the canonical optimizer pass pipeline used across all execution paths.
 pub fn default_pass_manager() -> PassManager {
-    let mut pm = PassManager::new(10);
+    let mut pm = PassManager::new();
     pm.add_pass(SubqueryToJoin);
     pm.add_pass(OperatorRewriteAdaptor::new(ExprSimplify));
     pm.add_pass(OperatorRewriteAdaptor::new(MarkJoinToSemiJoin));

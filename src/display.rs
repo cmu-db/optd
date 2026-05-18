@@ -227,6 +227,14 @@ pub struct DisplayInput {
 )]
 pub struct OptimizerVisualizerPass {
     pub pass_name: String,
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub iteration: Option<usize>,
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub pass_index: Option<usize>,
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub result: Option<String>,
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub duration_ms: Option<f64>,
     pub root: OptimizerVisualizerNode,
 }
 
@@ -255,8 +263,26 @@ impl OptimizerVisualizerPass {
     pub fn new(pass_name: impl Into<String>, root: OptimizerVisualizerNode) -> Self {
         Self {
             pass_name: pass_name.into(),
+            iteration: None,
+            pass_index: None,
+            result: None,
+            duration_ms: None,
             root,
         }
+    }
+
+    pub fn with_profile(
+        mut self,
+        iteration: usize,
+        pass_index: usize,
+        result: impl Into<String>,
+        duration_ms: f64,
+    ) -> Self {
+        self.iteration = Some(iteration);
+        self.pass_index = Some(pass_index);
+        self.result = Some(result.into());
+        self.duration_ms = Some(duration_ms);
+        self
     }
 }
 

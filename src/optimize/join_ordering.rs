@@ -707,7 +707,7 @@ mod tests {
     fn join_ordering_reports_changed_so_pass_manager_updates_root() {
         let (ctx, root) = three_way_chain();
         let mut opt = OptimizerContext::new(ctx);
-        let mut pm = PassManager::new(10);
+        let mut pm = PassManager::new();
         pm.add_pass(JoinOrdering::new());
 
         pm.run(&mut opt).unwrap();
@@ -721,7 +721,7 @@ mod tests {
         let output = OperatorData::Output(Output { input: join_root }).add(&mut ctx);
         ctx.set_root(output);
         let mut opt = OptimizerContext::new(ctx);
-        let mut pm = PassManager::new(10);
+        let mut pm = PassManager::new();
         pm.add_pass(JoinOrdering::new());
 
         pm.run(&mut opt).unwrap();
@@ -740,7 +740,7 @@ mod tests {
         let (ctx2, root2) = three_way_chain();
         let mut opt1 = OptimizerContext::new(ctx1);
         let mut opt2 = OptimizerContext::new(ctx2);
-        let mut pm = PassManager::new(10);
+        let mut pm = PassManager::new();
         pm.add_pass(JoinOrdering::new());
 
         pm.run(&mut opt1).unwrap();
@@ -815,7 +815,7 @@ mod tests {
         ctx.set_root(seed);
         let created_join = Rc::new(RefCell::new(None));
         let mut opt = OptimizerContext::new(ctx);
-        let mut pm = PassManager::new(10);
+        let mut pm = PassManager::new();
         pm.add_pass(JoinOrdering::new());
         pm.add_pass(CreateJoinAfterFirstPass {
             fired: false,

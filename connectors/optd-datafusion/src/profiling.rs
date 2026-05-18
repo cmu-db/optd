@@ -12,7 +12,8 @@ use datafusion::{
 };
 use optd::{
     ExprSimplify, JoinOrdering, MarkJoinToSemiJoin, OperatorRewriteAdaptor, OptimizerContext,
-    PassManager, PassProfile, PredicatePushdown, ProjectionElimination, QueryContext, SubqueryToJoin,
+    PassManager, PassProfile, PredicatePushdown, ProjectionElimination, QueryContext,
+    SubqueryToJoin,
 };
 use optd::{Operator, OperatorData, optimize::join_ordering::collect_join_group_roots};
 
@@ -227,7 +228,7 @@ pub async fn profile_passes_sql(
     query.set_root(root);
 
     let mut opt = OptimizerContext::new(query);
-    let mut pass_manager = PassManager::new(100);
+    let mut pass_manager = PassManager::new();
     pass_manager.add_pass(SubqueryToJoin);
     pass_manager.add_pass(OperatorRewriteAdaptor::new(ExprSimplify));
     pass_manager.add_pass(OperatorRewriteAdaptor::new(MarkJoinToSemiJoin));

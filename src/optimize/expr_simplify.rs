@@ -94,9 +94,9 @@ fn simplify(expr: Expr, ctx: &mut OptimizerContext, changed: &mut bool) -> Expr 
     match expr.get(&ctx.query).clone() {
         ExprData::Unary {
             op: UnaryOp::Not,
-            expr: inner,
+            expr: original_inner,
         } => {
-            let inner = simplify(inner, ctx, changed);
+            let inner = simplify(original_inner, ctx, changed);
             match inner.get(&ctx.query).clone() {
                 ExprData::Literal(ScalarValue::Boolean(b)) => {
                     *changed = true;
@@ -110,7 +110,7 @@ fn simplify(expr: Expr, ctx: &mut OptimizerContext, changed: &mut bool) -> Expr 
                     double_inner
                 }
                 _ => {
-                    if inner != expr {
+                    if inner != original_inner {
                         *changed = true;
                         ExprData::Unary {
                             op: UnaryOp::Not,
@@ -124,10 +124,7 @@ fn simplify(expr: Expr, ctx: &mut OptimizerContext, changed: &mut bool) -> Expr 
             }
         }
         ExprData::Nary { op, exprs } => {
-            let simplified: Vec<Expr> = exprs
-                .iter()
-                .map(|&e| simplify(e, ctx, changed))
-                .collect();
+            let simplified: Vec<Expr> = exprs.iter().map(|&e| simplify(e, ctx, changed)).collect();
             let exprs_changed = simplified.iter().zip(exprs.iter()).any(|(a, b)| a != b);
             simplify_nary(op, simplified, exprs_changed, expr, ctx, changed)
         }
@@ -169,8 +166,7 @@ fn simplify_nary(
                     }
                     ExprData::Literal(ScalarValue::Boolean(false)) => {
                         *changed = true;
-                        return ExprData::Literal(ScalarValue::Boolean(false))
-                            .add(&mut ctx.query);
+                        return ExprData::Literal(ScalarValue::Boolean(false)).add(&mut ctx.query);
                     }
                     _ => kept.push(e),
                 }
@@ -199,8 +195,7 @@ fn simplify_nary(
                     }
                     ExprData::Literal(ScalarValue::Boolean(true)) => {
                         *changed = true;
-                        return ExprData::Literal(ScalarValue::Boolean(true))
-                            .add(&mut ctx.query);
+                        return ExprData::Literal(ScalarValue::Boolean(true)).add(&mut ctx.query);
                     }
                     _ => kept.push(e),
                 }
@@ -219,5 +214,47 @@ fn simplify_nary(
                 .add(&mut ctx.query),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        ColumnData, ExprData, OperatorData, OperatorRewriteAdaptor, PassManager, QueryContext,
+        Scan, TableRef,
+    };
+    use arrow_schema::DataType;
+
+    #[test]
+    fn non_foldable_not_predicate_converges() {
+        let mut query = QueryContext::new();
+        let id = ColumnData::new("id", DataType::Boolean).add(&mut query);
+        let id_ref = ExprData::ColumnRef(id).add(&mut query);
+        let predicate = ExprData::Unary {
+            op: UnaryOp::Not,
+            expr: id_ref,
+        }
+        .add(&mut query);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("t"),
+            columns: vec![id],
+        })
+        .add(&mut query);
+        let selection = OperatorData::Selection(Selection {
+            predicate,
+            input: scan,
+        })
+        .add(&mut query);
+        query.set_root(selection);
+
+        let mut ctx = OptimizerContext::new(query);
+        let mut pm = PassManager::with_max_iterations(3);
+        pm.add_pass(OperatorRewriteAdaptor::new(ExprSimplify));
+
+        pm.run(&mut ctx).unwrap();
+
+        assert_eq!(pm.profiles().len(), 1);
+        assert_eq!(pm.profiles()[0].result, Some(crate::PassResult::Unchanged));
     }
 }

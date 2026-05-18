@@ -21,8 +21,7 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::SessionContext;
 use optd::{
-    OptimizerContext, PassResult, QueryContext, QueryFormatConfig,
-    optimizer_visualizer_trace_json,
+    OptimizerContext, PassResult, QueryContext, QueryFormatConfig, optimizer_visualizer_trace_json,
 };
 
 use crate::from_df::from_logical_plan;

@@ -1,20 +1,20 @@
-use std::{error::Error, fs, path::PathBuf};
+use std::{error::Error, fs, path::PathBuf, sync::Arc};
 
 use clap::Parser;
+use datafusion::arrow::array::{ArrayRef, Float64Array, Int64Array, StringArray};
+use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::arrow::util::pretty::pretty_format_batches;
-use rustyline::DefaultEditor;
-use rustyline::error::ReadlineError;
 use optd::FreeColumns;
 use optd::QueryFormatConfig;
-use optd_datafusion::runner::{RunnerOutput, OptdRunner};
+use optd_datafusion::explain_udfs::ExplainStep;
+use optd_datafusion::runner::{OptdRunner, RunnerOutput};
 use optd_datafusion::setup::{session_context_with_information_schema, setup_tpch_session};
+use rustyline::DefaultEditor;
+use rustyline::error::ReadlineError;
 
 #[derive(Debug, Parser)]
-#[command(
-    name = "optd",
-    about = "Run SQL through the optd DataFusion bridge"
-)]
+#[command(name = "optd", about = "Run SQL through the optd DataFusion bridge")]
 struct Args {
     /// Execute SQL and exit. May be passed more than once.
     #[arg(short = 'c', long = "command")]
@@ -157,22 +157,58 @@ fn log_explain_steps(runner: &OptdRunner, statement: &str) -> Result<(), Box<dyn
         statement,
         QueryFormatConfig::new().with_analysis::<FreeColumns>(),
     )?;
-    for step in steps {
-        println!(
-            "-- explain_steps step={} pass={} result={}",
-            step.step, step.pass, step.result
-        );
-        if let Some(iteration) = step.iteration {
-            println!("-- iteration={iteration}");
-        }
-        if let Some(pass_index) = step.pass_index {
-            println!("-- pass_index={pass_index}");
-        }
-        if let Some(duration_ms) = step.duration_ms {
-            println!("-- duration_ms={duration_ms:.3}");
-        }
+    for step in &steps {
+        println!("-- explain_steps step={} pass={}", step.step, step.pass);
         println!("{}", step.plan);
     }
+    log_explain_step_metrics(&steps)?;
+    Ok(())
+}
+
+fn log_explain_step_metrics(steps: &[ExplainStep]) -> Result<(), Box<dyn Error>> {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("step", DataType::Int64, false),
+        Field::new("iteration", DataType::Int64, true),
+        Field::new("pass_index", DataType::Int64, true),
+        Field::new("pass", DataType::Utf8, false),
+        Field::new("result", DataType::Utf8, false),
+        Field::new("duration_ms", DataType::Float64, true),
+    ]));
+    let batch = RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(Int64Array::from(
+                steps.iter().map(|step| step.step).collect::<Vec<_>>(),
+            )) as ArrayRef,
+            Arc::new(Int64Array::from(
+                steps.iter().map(|step| step.iteration).collect::<Vec<_>>(),
+            )) as ArrayRef,
+            Arc::new(Int64Array::from(
+                steps.iter().map(|step| step.pass_index).collect::<Vec<_>>(),
+            )) as ArrayRef,
+            Arc::new(StringArray::from(
+                steps
+                    .iter()
+                    .map(|step| step.pass.as_str())
+                    .collect::<Vec<_>>(),
+            )) as ArrayRef,
+            Arc::new(StringArray::from(
+                steps
+                    .iter()
+                    .map(|step| step.result.as_str())
+                    .collect::<Vec<_>>(),
+            )) as ArrayRef,
+            Arc::new(Float64Array::from(
+                steps
+                    .iter()
+                    .map(|step| step.duration_ms)
+                    .collect::<Vec<_>>(),
+            )) as ArrayRef,
+        ],
+    )?;
+
+    println!("-- explain_steps metrics");
+    println!("{}", pretty_format_batches(&[batch])?);
     Ok(())
 }
 

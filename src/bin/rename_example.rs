@@ -12,7 +12,8 @@ fn main() {
     .add(&mut ctx);
 
     // renamed column with qualifier
-    let renamed_id = ColumnData::with_qualifier("id", arrow_schema::DataType::Int64, "alias_users").add(&mut ctx);
+    let renamed_id = ColumnData::with_qualifier("id", arrow_schema::DataType::Int64, "alias_users")
+        .add(&mut ctx);
 
     // defs: (renamed, original)
     let defs = vec![(renamed_id, id)];
@@ -33,7 +34,7 @@ fn main() {
         println!("{}", ctx.optimizer_visualizer_json("rename-example"));
     }
 
-    #[cfg(not(feature = "serde") )]
+    #[cfg(not(feature = "serde"))]
     {
         eprintln!("enable serde feature to print JSON");
     }

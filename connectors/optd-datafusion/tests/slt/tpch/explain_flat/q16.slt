@@ -31,4 +31,124 @@ order by
     p_size
 limit 10;');
 ----
-Error during planning: optimizer reached max iterations
+ 
+01){
+02)--"nodes": [
+03)----{
+04)------"id": 0,
+05)------"kind": "scan",
+06)------"title": "⊞ Scan",
+07)------"table_name": "partsupp",
+08)------"columns": [
+09)--------"ps_partkey(#0)",
+10)--------"ps_suppkey(#1)",
+11)--------"ps_availqty(#2)",
+12)--------"ps_supplycost(#3)",
+13)--------"ps_comment(#4)"
+14)------]
+15)----},
+16)----{
+17)------"id": 1,
+18)------"kind": "scan",
+19)------"title": "⊞ Scan",
+20)------"table_name": "part",
+21)------"columns": [
+22)--------"p_partkey(#5)",
+23)--------"p_name(#6)",
+24)--------"p_mfgr(#7)",
+25)--------"p_brand(#8)",
+26)--------"p_type(#9)",
+27)--------"p_size(#10)",
+28)--------"p_container(#11)",
+29)--------"p_retailprice(#12)",
+30)--------"p_comment(#13)"
+31)------]
+32)----},
+33)----{
+34)------"id": 29,
+35)------"kind": "selection",
+36)------"title": "σ Selection",
+37)------"predicate": "((p_brand(#8) != \"Brand#45\") AND (p_type(#9) NOT LIKE \"MEDIUM POLISHED%\") AND ((p_size(#10) = 49) OR (p_size(#10) = 14) OR (p_size(#10) = 23) OR (p_size(#10) = 45) OR (p_size(#10) = 19) OR (p_size(#10) = 3) OR (p_size(#10) = 36) OR (p_size(#10) = 9)))",
+38)------"input": 1
+39)----},
+40)----{
+41)------"id": 38,
+42)------"kind": "join",
+43)------"title": "⋈ InnerJoin",
+44)------"join_type": "Inner",
+45)------"condition": "(true AND (p_partkey(#5) = ps_partkey(#0)))",
+46)------"outer": 0,
+47)------"inner": 29
+48)----},
+49)----{
+50)------"id": 3,
+51)------"kind": "scan",
+52)------"title": "⊞ Scan",
+53)------"table_name": "supplier",
+54)------"columns": [
+55)--------"s_suppkey(#14)",
+56)--------"s_name(#15)",
+57)--------"s_address(#16)",
+58)--------"s_nationkey(#17)",
+59)--------"s_phone(#18)",
+60)--------"s_acctbal(#19)",
+61)--------"s_comment(#20)"
+62)------]
+63)----},
+64)----{
+65)------"id": 4,
+66)------"kind": "selection",
+67)------"title": "σ Selection",
+68)------"predicate": "(s_comment(#20) LIKE \"%Customer%Complaints%\")",
+69)------"input": 3
+70)----},
+71)----{
+72)------"id": 5,
+73)------"kind": "projection",
+74)------"title": "π Projection",
+75)------"columns": [
+76)--------"s_suppkey(#14)"
+77)------],
+78)------"input": 4
+79)----},
+80)----{
+81)------"id": 39,
+82)------"kind": "join",
+83)------"title": "▷ LeftAntiJoin",
+84)------"join_type": "LeftAnti",
+85)------"condition": "(ps_suppkey(#1) = s_suppkey(#14))",
+86)------"outer": 38,
+87)------"inner": 5
+88)----},
+89)----{
+90)------"id": 40,
+91)------"kind": "aggregation",
+92)------"title": "γ Aggregation",
+93)------"keys": "p_brand(#8), p_type(#9), p_size(#10)",
+94)------"aggregates": [
+95)--------"count(DISTINCT partsupp.ps_suppkey)(#21) := count(DISTINCT ps_suppkey(#1))"
+96)------],
+97)------"input": 39
+98)----},
+99)----{
+100)------"id": 41,
+101)------"kind": "sort",
+102)------"title": "⇞ Sort",
+103)------"keys": [
+104)--------"count(DISTINCT partsupp.ps_suppkey)(#21) Desc NullsFirst",
+105)--------"p_brand(#8) Asc NullsLast",
+106)--------"p_type(#9) Asc NullsLast",
+107)--------"p_size(#10) Asc NullsLast"
+108)------],
+109)------"input": 40
+110)----},
+111)----{
+112)------"id": 42,
+113)------"kind": "limit",
+114)------"title": "τ Limit",
+115)------"fetch": "10",
+116)------"offset": "0",
+117)------"input": 41
+118)----}
+119)--]
+120)}

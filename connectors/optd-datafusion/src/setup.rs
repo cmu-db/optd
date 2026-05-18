@@ -118,8 +118,7 @@ mod tests {
         println!(
             "=== optd IR ===\n{}",
             ctx.pretty_with_config(
-                optd::QueryFormatConfig::new()
-                    .with_analysis::<optd::AvailableColumns>()
+                optd::QueryFormatConfig::new().with_analysis::<optd::AvailableColumns>()
             )
         );
     }

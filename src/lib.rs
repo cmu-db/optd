@@ -901,7 +901,19 @@ pub fn optimizer_visualizer_trace_json(initial: &QueryContext, traces: &[PassTra
     passes.push(initial.optimizer_visualizer_pass("Initial"));
     passes.extend(traces.iter().map(|trace| {
         let profile = &trace.profile;
-        trace.query.optimizer_visualizer_pass(profile.pass)
+        trace
+            .query
+            .optimizer_visualizer_pass(profile.pass)
+            .with_profile(
+                profile.iteration,
+                profile.pass_index,
+                match profile.result {
+                    Some(PassResult::Changed) => "changed",
+                    Some(PassResult::Unchanged) => "unchanged",
+                    None => "error",
+                },
+                profile.duration_ms,
+            )
     }));
     serde_json::to_string_pretty(&passes)
         .expect("optimizer visualizer trace serialization should not fail")
@@ -2134,6 +2146,7 @@ mod tests {
         assert_eq!(passes[0]["root"]["rows"], 0.0);
         assert_eq!(passes[0]["root"]["children"][0]["op"], "selection");
         assert_eq!(passes[0]["root"]["children"][0]["title"], "σ Selection");
+        assert!(passes[0].get("durationMs").is_none());
         assert_eq!(
             passes[0]["root"]["children"][0]["predicate"],
             "(age(#1) >= 18)"
@@ -2154,6 +2167,41 @@ mod tests {
             passes[0]["root"]["children"][0]["children"][0]["columns"][0],
             "id(#0)"
         );
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn optimizer_visualizer_trace_json_includes_pass_profile() {
+        let mut ctx = QueryContext::new();
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![id],
+        })
+        .add(&mut ctx);
+        ctx.set_root(scan);
+
+        let trace = vec![PassTrace {
+            profile: PassProfile {
+                iteration: 2,
+                pass_index: 3,
+                pass: "PredicatePushdown",
+                result: Some(PassResult::Changed),
+                duration_ms: 1.25,
+            },
+            query: ctx.clone(),
+        }];
+
+        let json = optimizer_visualizer_trace_json(&ctx, &trace);
+        let passes: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(passes[0]["passName"], "Initial");
+        assert!(passes[0].get("durationMs").is_none());
+        assert_eq!(passes[1]["passName"], "PredicatePushdown");
+        assert_eq!(passes[1]["iteration"], 2);
+        assert_eq!(passes[1]["passIndex"], 3);
+        assert_eq!(passes[1]["result"], "changed");
+        assert_eq!(passes[1]["durationMs"], 1.25);
     }
 
     #[test]
