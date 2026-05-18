@@ -97,7 +97,7 @@ order by
 62)------"kind": "join",
 63)------"title": "⋈ InnerJoin",
 64)------"join_type": "Inner",
-65)------"condition": "(true AND (o_orderkey(#8) = l_orderkey(#17)))",
+65)------"condition": "(o_orderkey(#8) = l_orderkey(#17))",
 66)------"outer": 1,
 67)------"inner": 3
 68)----},
@@ -165,7 +165,7 @@ order by
 130)------"kind": "join",
 131)------"title": "⋈ InnerJoin",
 132)------"join_type": "Inner",
-133)------"condition": "(true AND (c_custkey(#0) = o_custkey(#9)))",
+133)------"condition": "(c_custkey(#0) = o_custkey(#9))",
 134)------"outer": 0,
 135)------"inner": 42
 136)----},

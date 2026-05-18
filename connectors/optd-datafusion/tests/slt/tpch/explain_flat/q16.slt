@@ -76,7 +76,7 @@ limit 10;');
 42)------"kind": "join",
 43)------"title": "⋈ InnerJoin",
 44)------"join_type": "Inner",
-45)------"condition": "(true AND (p_partkey(#5) = ps_partkey(#0)))",
+45)------"condition": "(p_partkey(#5) = ps_partkey(#0))",
 46)------"outer": 0,
 47)------"inner": 29
 48)----},

@@ -73,7 +73,7 @@ where
 53)------"kind": "join",
 54)------"title": "⋈ InnerJoin",
 55)------"join_type": "Inner",
-56)------"condition": "(true AND (p_partkey(#16) = l_partkey(#1)))",
+56)------"condition": "(p_partkey(#16) = l_partkey(#1))",
 57)------"outer": 0,
 58)------"inner": 23
 59)----},

@@ -79,7 +79,7 @@ order by
 39)------"kind": "join",
 40)------"title": "⋈ InnerJoin",
 41)------"join_type": "Inner",
-42)------"condition": "(true AND (s_nationkey(#3) = n_nationkey(#7)))",
+42)------"condition": "(s_nationkey(#3) = n_nationkey(#7))",
 43)------"outer": 0,
 44)------"inner": 44
 45)----},

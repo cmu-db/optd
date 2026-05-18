@@ -81,7 +81,7 @@ order by
 39)------"kind": "join",
 40)------"title": "⋈ InnerJoin",
 41)------"join_type": "Inner",
-42)------"condition": "(true AND (s_nationkey(#3) = n_nationkey(#48)))",
+42)------"condition": "(s_nationkey(#3) = n_nationkey(#48))",
 43)------"outer": 0,
 44)------"inner": 44
 45)----},
@@ -169,7 +169,7 @@ order by
 127)------"kind": "join",
 128)------"title": "⋈ InnerJoin",
 129)------"join_type": "Inner",
-130)------"condition": "(true AND (o_orderkey(#39) = l_orderkey(#23)))",
+130)------"condition": "(o_orderkey(#39) = l_orderkey(#23))",
 131)------"outer": 62,
 132)------"inner": 53
 133)----},
@@ -178,7 +178,7 @@ order by
 136)------"kind": "join",
 137)------"title": "⋈ InnerJoin",
 138)------"join_type": "Inner",
-139)------"condition": "(true AND (s_suppkey(#0) = l_suppkey(#25)))",
+139)------"condition": "(s_suppkey(#0) = l_suppkey(#25))",
 140)------"outer": 83,
 141)------"inner": 84
 142)----},

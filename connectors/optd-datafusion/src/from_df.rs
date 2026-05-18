@@ -549,7 +549,9 @@ fn convert_join(
         exprs.push(convert_expr(filter, ctx, bindings)?);
     }
 
-    if exprs.len() == 0 && matches!(join.join_type, DFJoinType::Inner) {
+    if matches!(join.join_type, DFJoinType::Inner)
+        && (exprs.is_empty() || (exprs.len() == 1 && is_true_expr(exprs[0], ctx)))
+    {
         return Ok(OperatorData::CrossProduct(CrossProduct {
             outer,
             inner,
@@ -590,6 +592,13 @@ fn convert_join_type(jt: &DFJoinType) -> FromDFResult<JoinType> {
         DFJoinType::LeftAnti => Ok(JoinType::LeftAnti),
         other => Err(FromDFError::Unsupported(format!("join type {other:?}"))),
     }
+}
+
+fn is_true_expr(expr: optd::Expr, ctx: &QueryContext) -> bool {
+    matches!(
+        expr.get(ctx),
+        ExprData::Literal(ScalarValue::Boolean(true))
+    )
 }
 
 fn combine_predicates(

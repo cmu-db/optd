@@ -105,7 +105,7 @@ order by
 71)------"kind": "join",
 72)------"title": "⋈ InnerJoin",
 73)------"join_type": "Inner",
-74)------"condition": "(true AND (s_suppkey(#0) = supplier_no(#24)))",
+74)------"condition": "(s_suppkey(#0) = supplier_no(#24))",
 75)------"outer": 0,
 76)------"inner": 40
 77)----},

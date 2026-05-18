@@ -113,7 +113,7 @@ limit 10;');
 66)------"kind": "join",
 67)------"title": "⋈ InnerJoin",
 68)------"join_type": "Inner",
-69)------"condition": "(true AND (p_partkey(#0) = ps_partkey(#16)) AND (s_suppkey(#9) = ps_suppkey(#17)))",
+69)------"condition": "((p_partkey(#0) = ps_partkey(#16)) AND (s_suppkey(#9) = ps_suppkey(#17)))",
 70)------"outer": 110,
 71)------"inner": 3
 72)----},
@@ -152,7 +152,7 @@ limit 10;');
 105)------"kind": "join",
 106)------"title": "⋈ InnerJoin",
 107)------"join_type": "Inner",
-108)------"condition": "(true AND (n_regionkey(#23) = r_regionkey(#25)))",
+108)------"condition": "(n_regionkey(#23) = r_regionkey(#25))",
 109)------"outer": 5,
 110)------"inner": 46
 111)----},
@@ -161,7 +161,7 @@ limit 10;');
 114)------"kind": "join",
 115)------"title": "⋈ InnerJoin",
 116)------"join_type": "Inner",
-117)------"condition": "(true AND (s_nationkey(#12) = n_nationkey(#21)))",
+117)------"condition": "(s_nationkey(#12) = n_nationkey(#21))",
 118)------"outer": 111,
 119)------"inner": 112
 120)----},
@@ -198,7 +198,7 @@ limit 10;');
 151)------"kind": "join",
 152)------"title": "⋈ InnerJoin",
 153)------"join_type": "Inner",
-154)------"condition": "(true AND (s_suppkey(#33) = ps_suppkey(#29)))",
+154)------"condition": "(s_suppkey(#33) = ps_suppkey(#29))",
 155)------"outer": 9,
 156)------"inner": 10
 157)----},
@@ -237,7 +237,7 @@ limit 10;');
 190)------"kind": "join",
 191)------"title": "⋈ InnerJoin",
 192)------"join_type": "Inner",
-193)------"condition": "(true AND (n_regionkey(#42) = r_regionkey(#44)))",
+193)------"condition": "(n_regionkey(#42) = r_regionkey(#44))",
 194)------"outer": 12,
 195)------"inner": 35
 196)----},
@@ -246,7 +246,7 @@ limit 10;');
 199)------"kind": "join",
 200)------"title": "⋈ InnerJoin",
 201)------"join_type": "Inner",
-202)------"condition": "(true AND (s_nationkey(#36) = n_nationkey(#40)))",
+202)------"condition": "(s_nationkey(#36) = n_nationkey(#40))",
 203)------"outer": 107,
 204)------"inner": 108
 205)----},

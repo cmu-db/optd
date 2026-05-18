@@ -316,6 +316,28 @@ fn join_tree_to_ir(tree: &JoinTree, hg: &QueryHypergraph, ctx: &mut QueryContext
                 .filter_map(|&i| hg.edges[i].predicate)
                 .collect();
 
+            // If no predicates and join type is inner, use CrossProduct.
+            if preds.is_empty() {
+                let join_type = edge_indices
+                    .first()
+                    .and_then(|&i| {
+                        if let OperatorData::Join(j) = ctx.operator(hg.edges[i].source) {
+                            Some(j.join_type.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(JoinType::Inner);
+
+                if join_type == JoinType::Inner {
+                    return OperatorData::CrossProduct(crate::CrossProduct {
+                        outer,
+                        inner,
+                    })
+                    .add(ctx);
+                }
+            }
+
             let on = match preds.len() {
                 0 => ExprData::Literal(crate::ScalarValue::Boolean(true)).add(ctx),
                 1 => preds.remove(0),

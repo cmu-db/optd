@@ -92,7 +92,7 @@ limit 10;');
 56)------"kind": "join",
 57)------"title": "⋈ InnerJoin",
 58)------"join_type": "Inner",
-59)------"condition": "(true AND (s_nationkey(#12) = n_nationkey(#46)))",
+59)------"condition": "(s_nationkey(#12) = n_nationkey(#46))",
 60)------"outer": 1,
 61)------"inner": 9
 62)----},
@@ -147,7 +147,7 @@ limit 10;');
 111)------"kind": "join",
 112)------"title": "⋈ InnerJoin",
 113)------"join_type": "Inner",
-114)------"condition": "(true AND (ps_suppkey(#33) = l_suppkey(#18)) AND (ps_partkey(#32) = l_partkey(#17)))",
+114)------"condition": "((ps_suppkey(#33) = l_suppkey(#18)) AND (ps_partkey(#32) = l_partkey(#17)))",
 115)------"outer": 3,
 116)------"inner": 5
 117)----},
@@ -173,7 +173,7 @@ limit 10;');
 137)------"kind": "join",
 138)------"title": "⋈ InnerJoin",
 139)------"join_type": "Inner",
-140)------"condition": "(true AND (o_orderkey(#37) = l_orderkey(#16)))",
+140)------"condition": "(o_orderkey(#37) = l_orderkey(#16))",
 141)------"outer": 78,
 142)------"inner": 7
 143)----},
@@ -182,7 +182,7 @@ limit 10;');
 146)------"kind": "join",
 147)------"title": "⋈ InnerJoin",
 148)------"join_type": "Inner",
-149)------"condition": "(true AND (s_suppkey(#9) = l_suppkey(#18)) AND (p_partkey(#0) = l_partkey(#17)))",
+149)------"condition": "((s_suppkey(#9) = l_suppkey(#18)) AND (p_partkey(#0) = l_partkey(#17)))",
 150)------"outer": 77,
 151)------"inner": 79
 152)----},

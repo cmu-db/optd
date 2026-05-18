@@ -1,0 +1,47 @@
+# Cross product conversion from a trivial DataFusion join predicate.
+
+statement ok
+CREATE TABLE a (a_id BIGINT);
+
+statement ok
+INSERT INTO a VALUES (1), (2);
+
+statement ok
+CREATE TABLE b (b_id BIGINT);
+
+statement ok
+INSERT INTO b VALUES (10), (20);
+
+query T
+SELECT explain_flat('SELECT a.a_id, b.b_id FROM a JOIN b ON true');
+----
+ 
+01){
+02)--"nodes": [
+03)----{
+04)------"id": 0,
+05)------"kind": "scan",
+06)------"title": "⊞ Scan",
+07)------"table_name": "a",
+08)------"columns": [
+09)--------"a_id(#0)"
+10)------]
+11)----},
+12)----{
+13)------"id": 1,
+14)------"kind": "scan",
+15)------"title": "⊞ Scan",
+16)------"table_name": "b",
+17)------"columns": [
+18)--------"b_id(#1)"
+19)------]
+20)----},
+21)----{
+22)------"id": 4,
+23)------"kind": "cross_product",
+24)------"title": "× CrossProduct",
+25)------"outer": 0,
+26)------"inner": 1
+27)----}
+28)--]
+29)}
