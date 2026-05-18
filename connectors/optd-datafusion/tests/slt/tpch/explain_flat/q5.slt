@@ -61,147 +61,144 @@ order by
 34)------]
 35)----},
 36)----{
-37)------"id": 2,
-38)------"kind": "join",
-39)------"title": "⋈ InnerJoin",
-40)------"join_type": "Inner",
-41)------"condition": "true",
-42)------"outer": 0,
-43)------"inner": 1
-44)----},
-45)----{
-46)------"id": 3,
-47)------"kind": "scan",
-48)------"title": "⊞ Scan",
-49)------"table_name": "lineitem",
-50)------"columns": [
-51)--------"l_orderkey(#17)",
-52)--------"l_partkey(#18)",
-53)--------"l_suppkey(#19)",
-54)--------"l_linenumber(#20)",
-55)--------"l_quantity(#21)",
-56)--------"l_extendedprice(#22)",
-57)--------"l_discount(#23)",
-58)--------"l_tax(#24)",
-59)--------"l_returnflag(#25)",
-60)--------"l_linestatus(#26)",
-61)--------"l_shipdate(#27)",
-62)--------"l_commitdate(#28)",
-63)--------"l_receiptdate(#29)",
-64)--------"l_shipinstruct(#30)",
-65)--------"l_shipmode(#31)",
-66)--------"l_comment(#32)"
-67)------]
-68)----},
-69)----{
-70)------"id": 4,
-71)------"kind": "join",
-72)------"title": "⋈ InnerJoin",
-73)------"join_type": "Inner",
-74)------"condition": "true",
-75)------"outer": 2,
-76)------"inner": 3
-77)----},
-78)----{
-79)------"id": 5,
-80)------"kind": "scan",
-81)------"title": "⊞ Scan",
-82)------"table_name": "supplier",
-83)------"columns": [
-84)--------"s_suppkey(#33)",
-85)--------"s_name(#34)",
-86)--------"s_address(#35)",
-87)--------"s_nationkey(#36)",
-88)--------"s_phone(#37)",
-89)--------"s_acctbal(#38)",
-90)--------"s_comment(#39)"
-91)------]
-92)----},
-93)----{
-94)------"id": 6,
-95)------"kind": "join",
-96)------"title": "⋈ InnerJoin",
-97)------"join_type": "Inner",
-98)------"condition": "true",
-99)------"outer": 4,
-100)------"inner": 5
-101)----},
-102)----{
-103)------"id": 7,
-104)------"kind": "scan",
-105)------"title": "⊞ Scan",
-106)------"table_name": "nation",
-107)------"columns": [
-108)--------"n_nationkey(#40)",
-109)--------"n_name(#41)",
-110)--------"n_regionkey(#42)",
-111)--------"n_comment(#43)"
-112)------]
-113)----},
-114)----{
-115)------"id": 8,
-116)------"kind": "join",
-117)------"title": "⋈ InnerJoin",
-118)------"join_type": "Inner",
-119)------"condition": "true",
-120)------"outer": 6,
-121)------"inner": 7
+37)------"id": 42,
+38)------"kind": "selection",
+39)------"title": "σ Selection",
+40)------"predicate": "((o_orderdate(#12) >= CAST(\"1994-01-01\" AS Date32)) AND (o_orderdate(#12) < CAST(\"1995-01-01\" AS Date32)))",
+41)------"input": 1
+42)----},
+43)----{
+44)------"id": 3,
+45)------"kind": "scan",
+46)------"title": "⊞ Scan",
+47)------"table_name": "lineitem",
+48)------"columns": [
+49)--------"l_orderkey(#17)",
+50)--------"l_partkey(#18)",
+51)--------"l_suppkey(#19)",
+52)--------"l_linenumber(#20)",
+53)--------"l_quantity(#21)",
+54)--------"l_extendedprice(#22)",
+55)--------"l_discount(#23)",
+56)--------"l_tax(#24)",
+57)--------"l_returnflag(#25)",
+58)--------"l_linestatus(#26)",
+59)--------"l_shipdate(#27)",
+60)--------"l_commitdate(#28)",
+61)--------"l_receiptdate(#29)",
+62)--------"l_shipinstruct(#30)",
+63)--------"l_shipmode(#31)",
+64)--------"l_comment(#32)"
+65)------]
+66)----},
+67)----{
+68)------"id": 52,
+69)------"kind": "join",
+70)------"title": "⋈ InnerJoin",
+71)------"join_type": "Inner",
+72)------"condition": "(true AND (l_orderkey(#17) = o_orderkey(#8)))",
+73)------"outer": 42,
+74)------"inner": 3
+75)----},
+76)----{
+77)------"id": 53,
+78)------"kind": "join",
+79)------"title": "⋈ InnerJoin",
+80)------"join_type": "Inner",
+81)------"condition": "(true AND (c_custkey(#0) = o_custkey(#9)))",
+82)------"outer": 0,
+83)------"inner": 52
+84)----},
+85)----{
+86)------"id": 5,
+87)------"kind": "scan",
+88)------"title": "⊞ Scan",
+89)------"table_name": "supplier",
+90)------"columns": [
+91)--------"s_suppkey(#33)",
+92)--------"s_name(#34)",
+93)--------"s_address(#35)",
+94)--------"s_nationkey(#36)",
+95)--------"s_phone(#37)",
+96)--------"s_acctbal(#38)",
+97)--------"s_comment(#39)"
+98)------]
+99)----},
+100)----{
+101)------"id": 7,
+102)------"kind": "scan",
+103)------"title": "⊞ Scan",
+104)------"table_name": "nation",
+105)------"columns": [
+106)--------"n_nationkey(#40)",
+107)--------"n_name(#41)",
+108)--------"n_regionkey(#42)",
+109)--------"n_comment(#43)"
+110)------]
+111)----},
+112)----{
+113)------"id": 9,
+114)------"kind": "scan",
+115)------"title": "⊞ Scan",
+116)------"table_name": "region",
+117)------"columns": [
+118)--------"r_regionkey(#44)",
+119)--------"r_name(#45)",
+120)--------"r_comment(#46)"
+121)------]
 122)----},
 123)----{
-124)------"id": 9,
-125)------"kind": "scan",
-126)------"title": "⊞ Scan",
-127)------"table_name": "region",
-128)------"columns": [
-129)--------"r_regionkey(#44)",
-130)--------"r_name(#45)",
-131)--------"r_comment(#46)"
-132)------]
-133)----},
-134)----{
-135)------"id": 10,
-136)------"kind": "join",
-137)------"title": "⋈ InnerJoin",
-138)------"join_type": "Inner",
-139)------"condition": "true",
-140)------"outer": 8,
-141)------"inner": 9
-142)----},
-143)----{
-144)------"id": 11,
-145)------"kind": "selection",
-146)------"title": "σ Selection",
-147)------"predicate": "(((((((((c_custkey(#0) = o_custkey(#9)) AND (l_orderkey(#17) = o_orderkey(#8))) AND (l_suppkey(#19) = s_suppkey(#33))) AND (c_nationkey(#3) = s_nationkey(#36))) AND (s_nationkey(#36) = n_nationkey(#40))) AND (n_regionkey(#42) = r_regionkey(#44))) AND (r_name(#45) = \"ASIA\")) AND (o_orderdate(#12) >= CAST(\"1994-01-01\" AS Date32))) AND (o_orderdate(#12) < CAST(\"1995-01-01\" AS Date32)))",
-148)------"input": 10
-149)----},
-150)----{
-151)------"id": 12,
-152)------"kind": "aggregation",
-153)------"title": "γ Aggregation",
-154)------"keys": "n_name(#41)",
-155)------"aggregates": [
-156)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
-157)------],
-158)------"input": 11
-159)----},
-160)----{
-161)------"id": 13,
-162)------"kind": "projection",
-163)------"title": "π Projection",
-164)------"columns": [
-165)--------"n_name(#41)",
-166)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47)"
-167)------],
-168)------"input": 12
-169)----},
-170)----{
-171)------"id": 14,
-172)------"kind": "sort",
-173)------"title": "⇞ Sort",
-174)------"keys": [
-175)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) Desc NullsFirst"
-176)------],
-177)------"input": 13
-178)----}
-179)--]
-180)}
+124)------"id": 16,
+125)------"kind": "selection",
+126)------"title": "σ Selection",
+127)------"predicate": "(r_name(#45) = \"ASIA\")",
+128)------"input": 9
+129)----},
+130)----{
+131)------"id": 54,
+132)------"kind": "join",
+133)------"title": "⋈ InnerJoin",
+134)------"join_type": "Inner",
+135)------"condition": "(true AND (n_regionkey(#42) = r_regionkey(#44)))",
+136)------"outer": 7,
+137)------"inner": 16
+138)----},
+139)----{
+140)------"id": 55,
+141)------"kind": "join",
+142)------"title": "⋈ InnerJoin",
+143)------"join_type": "Inner",
+144)------"condition": "(true AND (s_nationkey(#36) = n_nationkey(#40)))",
+145)------"outer": 5,
+146)------"inner": 54
+147)----},
+148)----{
+149)------"id": 56,
+150)------"kind": "join",
+151)------"title": "⋈ InnerJoin",
+152)------"join_type": "Inner",
+153)------"condition": "(true AND (l_suppkey(#19) = s_suppkey(#33)) AND (c_nationkey(#3) = s_nationkey(#36)))",
+154)------"outer": 53,
+155)------"inner": 55
+156)----},
+157)----{
+158)------"id": 57,
+159)------"kind": "aggregation",
+160)------"title": "γ Aggregation",
+161)------"keys": "n_name(#41)",
+162)------"aggregates": [
+163)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
+164)------],
+165)------"input": 56
+166)----},
+167)----{
+168)------"id": 58,
+169)------"kind": "sort",
+170)------"title": "⇞ Sort",
+171)------"keys": [
+172)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) Desc NullsFirst"
+173)------],
+174)------"input": 57
+175)----}
+176)--]
+177)}

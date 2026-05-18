@@ -58,7 +58,7 @@ limit 10;');
 34)------]
 35)----},
 36)----{
-37)------"id": 2,
+37)------"id": 24,
 38)------"kind": "join",
 39)------"title": "⟕ LeftOuterJoin",
 40)------"join_type": "LeftOuter",
@@ -67,82 +67,52 @@ limit 10;');
 43)------"inner": 1
 44)----},
 45)----{
-46)------"id": 3,
+46)------"id": 25,
 47)------"kind": "aggregation",
 48)------"title": "γ Aggregation",
 49)------"keys": "c_custkey(#0)",
 50)------"aggregates": [
 51)--------"count(orders.o_orderkey)(#17) := count(o_orderkey(#8))"
 52)------],
-53)------"input": 2
+53)------"input": 24
 54)----},
 55)----{
-56)------"id": 4,
-57)------"kind": "projection",
-58)------"title": "π Projection",
-59)------"columns": [
-60)--------"c_custkey(#0)",
-61)--------"count(orders.o_orderkey)(#17)"
+56)------"id": 26,
+57)------"kind": "rename",
+58)------"title": "ρ Rename(c_orders)",
+59)------"defs": [
+60)--------"c_custkey(#18) <- c_custkey(#0)",
+61)--------"c_count(#19) <- count(orders.o_orderkey)(#17)"
 62)------],
-63)------"input": 3
+63)------"input": 25
 64)----},
 65)----{
-66)------"id": 5,
-67)------"kind": "projection",
-68)------"title": "π Projection",
-69)------"columns": [
-70)--------"c_custkey(#0)",
-71)--------"count(orders.o_orderkey)(#17)"
+66)------"id": 27,
+67)------"kind": "aggregation",
+68)------"title": "γ Aggregation",
+69)------"keys": "c_count(#19)",
+70)------"aggregates": [
+71)--------"count(Int64(1))(#20) := count_star()"
 72)------],
-73)------"input": 4
+73)------"input": 26
 74)----},
 75)----{
-76)------"id": 6,
-77)------"kind": "rename",
-78)------"title": "ρ Rename(c_orders)",
-79)------"defs": [
-80)--------"c_custkey(#18) <- c_custkey(#0)",
-81)--------"c_count(#19) <- count(orders.o_orderkey)(#17)"
+76)------"id": 28,
+77)------"kind": "sort",
+78)------"title": "⇞ Sort",
+79)------"keys": [
+80)--------"count(Int64(1))(#20) Desc NullsFirst",
+81)--------"c_count(#19) Desc NullsFirst"
 82)------],
-83)------"input": 5
+83)------"input": 27
 84)----},
 85)----{
-86)------"id": 7,
-87)------"kind": "aggregation",
-88)------"title": "γ Aggregation",
-89)------"keys": "c_count(#19)",
-90)------"aggregates": [
-91)--------"count(Int64(1))(#20) := count_star()"
-92)------],
-93)------"input": 6
-94)----},
-95)----{
-96)------"id": 8,
-97)------"kind": "projection",
-98)------"title": "π Projection",
-99)------"columns": [
-100)--------"c_count(#19)",
-101)--------"count(Int64(1))(#20)"
-102)------],
-103)------"input": 7
-104)----},
-105)----{
-106)------"id": 9,
-107)------"kind": "sort",
-108)------"title": "⇞ Sort",
-109)------"keys": [
-110)--------"count(Int64(1))(#20) Desc NullsFirst",
-111)--------"c_count(#19) Desc NullsFirst"
-112)------],
-113)------"input": 8
-114)----},
-115)----{
-116)------"id": 10,
-117)------"kind": "limit",
-118)------"title": "τ Limit",
-119)------"fetch": "10",
-120)------"offset": "0",
-121)------"input": 9
-122)----}
-123)--]
-124)}
+86)------"id": 29,
+87)------"kind": "limit",
+88)------"title": "τ Limit",
+89)------"fetch": "10",
+90)------"offset": "0",
+91)------"input": 28
+92)----}
+93)--]
+94)}

@@ -1,8 +1,14 @@
+pub mod expr_simplify;
 pub mod join_ordering;
+pub mod mark_join_to_semi_join;
 pub mod predicate_pushdown;
+pub mod projection_elimination;
 pub mod subquery_to_join;
+pub use expr_simplify::ExprSimplify;
 pub use join_ordering::JoinOrdering;
+pub use mark_join_to_semi_join::MarkJoinToSemiJoin;
 pub use predicate_pushdown::PredicatePushdown;
+pub use projection_elimination::ProjectionElimination;
 pub use subquery_to_join::SubqueryToJoin;
 
 use std::{

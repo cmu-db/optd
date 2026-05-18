@@ -80,39 +80,23 @@ where
 42)------]
 43)----},
 44)----{
-45)------"id": 2,
+45)------"id": 9,
 46)------"kind": "join",
 47)------"title": "⋈ InnerJoin",
 48)------"join_type": "Inner",
-49)------"condition": "true",
+49)------"condition": "(true AND ((((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#12\")) AND ((p_container(#22) = \"SM CASE\") OR (p_container(#22) = \"SM BOX\") OR (p_container(#22) = \"SM PACK\") OR (p_container(#22) = \"SM PKG\"))) AND (l_quantity(#4) >= 1)) AND (l_quantity(#4) <= (1 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 5))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\")) OR ((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#23\")) AND ((p_container(#22) = \"MED BAG\") OR (p_container(#22) = \"MED BOX\") OR (p_container(#22) = \"MED PKG\") OR (p_container(#22) = \"MED PACK\"))) AND (l_quantity(#4) >= 10)) AND (l_quantity(#4) <= (10 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 10))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\"))) OR ((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#34\")) AND ((p_container(#22) = \"LG CASE\") OR (p_container(#22) = \"LG BOX\") OR (p_container(#22) = \"LG PACK\") OR (p_container(#22) = \"LG PKG\"))) AND (l_quantity(#4) >= 20)) AND (l_quantity(#4) <= (20 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 15))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\"))))",
 50)------"outer": 0,
 51)------"inner": 1
 52)----},
 53)----{
-54)------"id": 3,
-55)------"kind": "selection",
-56)------"title": "σ Selection",
-57)------"predicate": "((((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#12\")) AND ((p_container(#22) = \"SM CASE\") OR (p_container(#22) = \"SM BOX\") OR (p_container(#22) = \"SM PACK\") OR (p_container(#22) = \"SM PKG\"))) AND (l_quantity(#4) >= 1)) AND (l_quantity(#4) <= (1 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 5))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\")) OR ((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#23\")) AND ((p_container(#22) = \"MED BAG\") OR (p_container(#22) = \"MED BOX\") OR (p_container(#22) = \"MED PKG\") OR (p_container(#22) = \"MED PACK\"))) AND (l_quantity(#4) >= 10)) AND (l_quantity(#4) <= (10 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 10))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\"))) OR ((((((((p_partkey(#16) = l_partkey(#1)) AND (p_brand(#19) = \"Brand#34\")) AND ((p_container(#22) = \"LG CASE\") OR (p_container(#22) = \"LG BOX\") OR (p_container(#22) = \"LG PACK\") OR (p_container(#22) = \"LG PKG\"))) AND (l_quantity(#4) >= 20)) AND (l_quantity(#4) <= (20 + 10))) AND ((p_size(#21) >= 1) AND (p_size(#21) <= 15))) AND ((l_shipmode(#14) = \"AIR\") OR (l_shipmode(#14) = \"AIR REG\"))) AND (l_shipinstruct(#13) = \"DELIVER IN PERSON\")))",
-58)------"input": 2
-59)----},
-60)----{
-61)------"id": 4,
-62)------"kind": "aggregation",
-63)------"title": "γ Aggregation",
-64)------"keys": "",
-65)------"aggregates": [
-66)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#25) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))"
-67)------],
-68)------"input": 3
-69)----},
-70)----{
-71)------"id": 5,
-72)------"kind": "projection",
-73)------"title": "π Projection",
-74)------"columns": [
-75)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#25)"
-76)------],
-77)------"input": 4
-78)----}
-79)--]
-80)}
+54)------"id": 10,
+55)------"kind": "aggregation",
+56)------"title": "γ Aggregation",
+57)------"keys": "",
+58)------"aggregates": [
+59)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#25) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))"
+60)------],
+61)------"input": 9
+62)----}
+63)--]
+64)}

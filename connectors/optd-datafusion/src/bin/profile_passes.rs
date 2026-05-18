@@ -1,5 +1,5 @@
 use optd_datafusion::profiling::{
-    predicate_pushdown_queries, profile_predicate_pushdown_sql, synthetic_session,
+    predicate_pushdown_queries, profile_passes_sql, synthetic_session,
 };
 
 #[tokio::main]
@@ -16,10 +16,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("query\trun\titeration\tpass_index\tpass\tresult\tduration_ms");
     for query in queries {
         // Warm up SQL planning and conversion once per shape.
-        let _ = profile_predicate_pushdown_sql(&session, &query.sql).await?;
+        let _ = profile_passes_sql(&session, &query.sql).await?;
 
         for run in 0..runs {
-            for profile in profile_predicate_pushdown_sql(&session, &query.sql).await? {
+            for profile in profile_passes_sql(&session, &query.sql).await? {
                 println!(
                     "{}\t{}\t{}\t{}\t{}\t{:?}\t{:.6}",
                     query.name,

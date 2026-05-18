@@ -11,8 +11,8 @@ use datafusion::{
     prelude::SessionContext,
 };
 use optd::{
-    JoinOrdering, OperatorRewriteAdaptor, OptimizerContext, PassManager, PassProfile,
-    PredicatePushdown, QueryContext,
+    ExprSimplify, JoinOrdering, MarkJoinToSemiJoin, OperatorRewriteAdaptor, OptimizerContext,
+    PassManager, PassProfile, PredicatePushdown, ProjectionElimination, QueryContext, SubqueryToJoin,
 };
 use optd::{Operator, OperatorData, optimize::join_ordering::collect_join_group_roots};
 
@@ -212,11 +212,11 @@ fn n_join_n_predicates_query(n: usize, name: &str, select: &str) -> ProfileQuery
     }
 }
 
-/// Profiles optd PredicatePushdown + JoinOrdering for one DataFusion SQL query.
+/// Profiles all optd optimizer passes for one DataFusion SQL query.
 ///
 /// The SQL is planned by DataFusion but not optimized by DataFusion before
 /// conversion, so the measured pass sees the unoptimized logical shape.
-pub async fn profile_predicate_pushdown_sql(
+pub async fn profile_passes_sql(
     session: &SessionContext,
     sql: &str,
 ) -> ProfilingResult<Vec<PassProfile>> {
@@ -228,7 +228,11 @@ pub async fn profile_predicate_pushdown_sql(
 
     let mut opt = OptimizerContext::new(query);
     let mut pass_manager = PassManager::new(100);
+    pass_manager.add_pass(SubqueryToJoin);
+    pass_manager.add_pass(OperatorRewriteAdaptor::new(ExprSimplify));
+    pass_manager.add_pass(OperatorRewriteAdaptor::new(MarkJoinToSemiJoin));
     pass_manager.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
+    pass_manager.add_pass(OperatorRewriteAdaptor::new(ProjectionElimination));
     if supports_join_ordering(&opt.query) {
         pass_manager.add_pass(JoinOrdering::new());
     }

@@ -21,12 +21,12 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::SessionContext;
 use optd::{
-    JoinOrdering, OperatorRewriteAdaptor, OptimizerContext, PassManager, PassResult,
-    PredicatePushdown, QueryContext, QueryFormatConfig, SubqueryToJoin,
+    OptimizerContext, PassResult, QueryContext, QueryFormatConfig,
     optimizer_visualizer_trace_json,
 };
 
 use crate::from_df::from_logical_plan;
+use crate::runner::default_pass_manager;
 
 /// Registers `explain_box`, `explain_json`, `explain_flat`, `explain_optimizer_json`, and
 /// `explain_steps` on `ctx`.
@@ -281,7 +281,7 @@ async fn build_ir(
     ctx.set_root(root);
 
     let mut opt = OptimizerContext::new(ctx);
-    let mut pm = scalar_explain_pass_manager();
+    let mut pm = default_pass_manager();
     pm.run(&mut opt)
         .map_err(|e| DataFusionError::Plan(e.to_string()))?;
     if let Some(root) = opt.query.root() {
@@ -314,7 +314,7 @@ async fn build_ir_trace(
     }];
 
     let mut opt = OptimizerContext::new(ctx);
-    let mut pm = explain_pass_manager();
+    let mut pm = default_pass_manager();
     let trace = pm
         .run_with_trace(&mut opt)
         .map_err(|e| DataFusionError::Plan(e.to_string()))?;
@@ -347,7 +347,7 @@ async fn build_optimizer_visualizer_trace(
     let initial = ctx.clone();
 
     let mut opt = OptimizerContext::new(ctx);
-    let mut pm = explain_pass_manager();
+    let mut pm = default_pass_manager();
     let trace = pm
         .run_with_trace(&mut opt)
         .map_err(|e| DataFusionError::Plan(e.to_string()))?;
@@ -357,20 +357,6 @@ async fn build_optimizer_visualizer_trace(
         "{{\n  \"passes\": {},\n  \"query\": {:?}\n}}",
         passes, sql
     ))
-}
-
-fn explain_pass_manager() -> PassManager {
-    let mut pm = PassManager::new(10);
-    pm.add_pass(SubqueryToJoin);
-    pm.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
-    pm.add_pass(JoinOrdering::new());
-    pm
-}
-
-fn scalar_explain_pass_manager() -> PassManager {
-    let mut pm = PassManager::new(10);
-    pm.add_pass(SubqueryToJoin);
-    pm
 }
 
 fn pass_result(result: Option<PassResult>) -> String {

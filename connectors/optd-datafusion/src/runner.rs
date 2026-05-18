@@ -11,8 +11,9 @@ use datafusion_sqllogictest::{
     DFColumnType, DFSqlLogicTestError, convert_batches, convert_schema_to_types,
 };
 use optd::{
-    JoinOrdering, OperatorRewriteAdaptor, OptimizerContext, PassManager, PredicatePushdown,
-    QueryContext, QueryFormatConfig, SubqueryToJoin,
+    ExprSimplify, JoinOrdering, MarkJoinToSemiJoin, OperatorRewriteAdaptor, OptimizerContext,
+    PassManager, PredicatePushdown, ProjectionElimination, QueryContext, QueryFormatConfig,
+    SubqueryToJoin,
 };
 use sqllogictest::{AsyncDB, DBOutput};
 
@@ -24,16 +25,25 @@ use crate::to_df::to_logical_plan;
 
 fn optimize(ctx: QueryContext) -> Result<QueryContext, optd::OptimizeError> {
     let mut opt = OptimizerContext::new(ctx);
-    let mut pm = PassManager::new(10);
-    pm.add_pass(SubqueryToJoin);
-    pm.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
-    pm.add_pass(JoinOrdering::new());
+    let mut pm = default_pass_manager();
     pm.run(&mut opt)?;
     if let Some(root) = opt.query.root() {
         let resolved = opt.rewrites.resolve(root);
         opt.query.set_root(resolved);
     }
     Ok(opt.into_query())
+}
+
+/// Returns the canonical optimizer pass pipeline used across all execution paths.
+pub fn default_pass_manager() -> PassManager {
+    let mut pm = PassManager::new(10);
+    pm.add_pass(SubqueryToJoin);
+    pm.add_pass(OperatorRewriteAdaptor::new(ExprSimplify));
+    pm.add_pass(OperatorRewriteAdaptor::new(MarkJoinToSemiJoin));
+    pm.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
+    pm.add_pass(OperatorRewriteAdaptor::new(ProjectionElimination));
+    pm.add_pass(JoinOrdering::new());
+    pm
 }
 
 pub struct OptdRunner {

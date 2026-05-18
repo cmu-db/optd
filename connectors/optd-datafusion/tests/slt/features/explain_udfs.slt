@@ -111,12 +111,15 @@ ORDER BY step;
 ----
 0	initial	initial
 1	SubqueryToJoin	unchanged
-2	PredicatePushdown	unchanged
-3	JoinOrdering	unchanged
+2	ExprSimplify	unchanged
+3	MarkJoinToSemiJoin	unchanged
+4	PredicatePushdown	unchanged
+5	ProjectionElimination	unchanged
+6	JoinOrdering	unchanged
 
 query T
 SELECT pass
 FROM explain_steps('SELECT l.id FROM t l JOIN t r ON l.id = r.id WHERE r.val > 1.0', 'flat')
 WHERE step = 2;
 ----
-PredicatePushdown
+ExprSimplify

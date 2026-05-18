@@ -41,40 +41,40 @@ where
 25)------]
 26)----},
 27)----{
-28)------"id": 1,
-29)------"kind": "scan",
-30)------"title": "⊞ Scan",
-31)------"table_name": "part",
-32)------"columns": [
-33)--------"p_partkey(#16)",
-34)--------"p_name(#17)",
-35)--------"p_mfgr(#18)",
-36)--------"p_brand(#19)",
-37)--------"p_type(#20)",
-38)--------"p_size(#21)",
-39)--------"p_container(#22)",
-40)--------"p_retailprice(#23)",
-41)--------"p_comment(#24)"
-42)------]
-43)----},
-44)----{
-45)------"id": 2,
-46)------"kind": "join",
-47)------"title": "⋈ InnerJoin",
-48)------"join_type": "Inner",
-49)------"condition": "true",
-50)------"outer": 0,
-51)------"inner": 1
-52)----},
-53)----{
-54)------"id": 3,
-55)------"kind": "selection",
-56)------"title": "σ Selection",
-57)------"predicate": "(((l_partkey(#1) = p_partkey(#16)) AND (l_shipdate(#10) >= CAST(\"1995-09-01\" AS Date32))) AND (l_shipdate(#10) < CAST(\"1995-10-01\" AS Date32)))",
-58)------"input": 2
+28)------"id": 7,
+29)------"kind": "selection",
+30)------"title": "σ Selection",
+31)------"predicate": "((l_shipdate(#10) >= CAST(\"1995-09-01\" AS Date32)) AND (l_shipdate(#10) < CAST(\"1995-10-01\" AS Date32)))",
+32)------"input": 0
+33)----},
+34)----{
+35)------"id": 1,
+36)------"kind": "scan",
+37)------"title": "⊞ Scan",
+38)------"table_name": "part",
+39)------"columns": [
+40)--------"p_partkey(#16)",
+41)--------"p_name(#17)",
+42)--------"p_mfgr(#18)",
+43)--------"p_brand(#19)",
+44)--------"p_type(#20)",
+45)--------"p_size(#21)",
+46)--------"p_container(#22)",
+47)--------"p_retailprice(#23)",
+48)--------"p_comment(#24)"
+49)------]
+50)----},
+51)----{
+52)------"id": 12,
+53)------"kind": "join",
+54)------"title": "⋈ InnerJoin",
+55)------"join_type": "Inner",
+56)------"condition": "(true AND (l_partkey(#1) = p_partkey(#16)))",
+57)------"outer": 7,
+58)------"inner": 1
 59)----},
 60)----{
-61)------"id": 4,
+61)------"id": 13,
 62)------"kind": "aggregation",
 63)------"title": "γ Aggregation",
 64)------"keys": "",
@@ -82,25 +82,25 @@ where
 66)--------"sum(CASE WHEN part.p_type LIKE Utf8(\"PROMO%\") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#25) := sum(CASE WHEN (p_type(#20) LIKE \"PROMO%\") THEN (l_extendedprice(#5) * (1 - l_discount(#6))) ELSE 0 END)",
 67)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#26) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))"
 68)------],
-69)------"input": 3
+69)------"input": 12
 70)----},
 71)----{
-72)------"id": 5,
+72)------"id": 14,
 73)------"kind": "map",
 74)------"title": "χ Map",
 75)------"computations": [
 76)--------"promo_revenue(#27) := ((100 * sum(CASE WHEN part.p_type LIKE Utf8(\"PROMO%\") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#25)) / sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#26))"
 77)------],
-78)------"input": 4
+78)------"input": 13
 79)----},
 80)----{
-81)------"id": 6,
+81)------"id": 15,
 82)------"kind": "projection",
 83)------"title": "π Projection",
 84)------"columns": [
 85)--------"promo_revenue(#27)"
 86)------],
-87)------"input": 5
+87)------"input": 14
 88)----}
 89)--]
 90)}

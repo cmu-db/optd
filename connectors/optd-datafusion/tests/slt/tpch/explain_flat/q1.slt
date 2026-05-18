@@ -73,32 +73,14 @@ order by
 49)------"input": 1
 50)----},
 51)----{
-52)------"id": 3,
-53)------"kind": "projection",
-54)------"title": "π Projection",
-55)------"columns": [
-56)--------"l_returnflag(#8)",
-57)--------"l_linestatus(#9)",
-58)--------"sum(lineitem.l_quantity)(#16)",
-59)--------"sum(lineitem.l_extendedprice)(#17)",
-60)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#18)",
-61)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount * Int64(1) + lineitem.l_tax)(#19)",
-62)--------"avg(lineitem.l_quantity)(#20)",
-63)--------"avg(lineitem.l_extendedprice)(#21)",
-64)--------"avg(lineitem.l_discount)(#22)",
-65)--------"count(Int64(1))(#23)"
-66)------],
-67)------"input": 2
-68)----},
-69)----{
-70)------"id": 4,
-71)------"kind": "sort",
-72)------"title": "⇞ Sort",
-73)------"keys": [
-74)--------"l_returnflag(#8) Asc NullsLast",
-75)--------"l_linestatus(#9) Asc NullsLast"
-76)------],
-77)------"input": 3
-78)----}
-79)--]
-80)}
+52)------"id": 5,
+53)------"kind": "sort",
+54)------"title": "⇞ Sort",
+55)------"keys": [
+56)--------"l_returnflag(#8) Asc NullsLast",
+57)--------"l_linestatus(#9) Asc NullsLast"
+58)------],
+59)------"input": 2
+60)----}
+61)--]
+62)}

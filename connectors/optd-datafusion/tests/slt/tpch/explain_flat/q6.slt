@@ -52,15 +52,6 @@ where
 40)--------"sum(lineitem.l_extendedprice * lineitem.l_discount)(#16) := sum((l_extendedprice(#5) * l_discount(#6)))"
 41)------],
 42)------"input": 1
-43)----},
-44)----{
-45)------"id": 3,
-46)------"kind": "projection",
-47)------"title": "π Projection",
-48)------"columns": [
-49)--------"sum(lineitem.l_extendedprice * lineitem.l_discount)(#16)"
-50)------],
-51)------"input": 2
-52)----}
-53)--]
-54)}
+43)----}
+44)--]
+45)}

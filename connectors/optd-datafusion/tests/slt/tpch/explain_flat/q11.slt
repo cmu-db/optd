@@ -60,51 +60,51 @@ limit 10;');
 29)------]
 30)----},
 31)----{
-32)------"id": 2,
-33)------"kind": "join",
-34)------"title": "⋈ InnerJoin",
-35)------"join_type": "Inner",
-36)------"condition": "true",
-37)------"outer": 0,
-38)------"inner": 1
-39)----},
-40)----{
-41)------"id": 3,
-42)------"kind": "scan",
-43)------"title": "⊞ Scan",
-44)------"table_name": "nation",
-45)------"columns": [
-46)--------"n_nationkey(#12)",
-47)--------"n_name(#13)",
-48)--------"n_regionkey(#14)",
-49)--------"n_comment(#15)"
-50)------]
-51)----},
-52)----{
-53)------"id": 4,
-54)------"kind": "join",
-55)------"title": "⋈ InnerJoin",
-56)------"join_type": "Inner",
-57)------"condition": "true",
-58)------"outer": 2,
-59)------"inner": 3
-60)----},
-61)----{
-62)------"id": 5,
-63)------"kind": "selection",
-64)------"title": "σ Selection",
-65)------"predicate": "(((ps_suppkey(#1) = s_suppkey(#5)) AND (s_nationkey(#8) = n_nationkey(#12))) AND (n_name(#13) = \"GERMANY\"))",
-66)------"input": 4
+32)------"id": 3,
+33)------"kind": "scan",
+34)------"title": "⊞ Scan",
+35)------"table_name": "nation",
+36)------"columns": [
+37)--------"n_nationkey(#12)",
+38)--------"n_name(#13)",
+39)--------"n_regionkey(#14)",
+40)--------"n_comment(#15)"
+41)------]
+42)----},
+43)----{
+44)------"id": 26,
+45)------"kind": "selection",
+46)------"title": "σ Selection",
+47)------"predicate": "(n_name(#13) = \"GERMANY\")",
+48)------"input": 3
+49)----},
+50)----{
+51)------"id": 63,
+52)------"kind": "join",
+53)------"title": "⋈ InnerJoin",
+54)------"join_type": "Inner",
+55)------"condition": "(true AND (s_nationkey(#8) = n_nationkey(#12)))",
+56)------"outer": 1,
+57)------"inner": 26
+58)----},
+59)----{
+60)------"id": 64,
+61)------"kind": "join",
+62)------"title": "⋈ InnerJoin",
+63)------"join_type": "Inner",
+64)------"condition": "(true AND (ps_suppkey(#1) = s_suppkey(#5)))",
+65)------"outer": 0,
+66)------"inner": 63
 67)----},
 68)----{
-69)------"id": 6,
+69)------"id": 68,
 70)------"kind": "aggregation",
 71)------"title": "γ Aggregation",
 72)------"keys": "ps_partkey(#0)",
 73)------"aggregates": [
 74)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#16) := sum((ps_supplycost(#3) * ps_availqty(#2)))"
 75)------],
-76)------"input": 5
+76)------"input": 64
 77)----},
 78)----{
 79)------"id": 7,
@@ -135,112 +135,112 @@ limit 10;');
 104)------]
 105)----},
 106)----{
-107)------"id": 9,
-108)------"kind": "join",
-109)------"title": "⋈ InnerJoin",
-110)------"join_type": "Inner",
-111)------"condition": "true",
-112)------"outer": 7,
-113)------"inner": 8
-114)----},
-115)----{
-116)------"id": 10,
-117)------"kind": "scan",
-118)------"title": "⊞ Scan",
-119)------"table_name": "nation",
-120)------"columns": [
-121)--------"n_nationkey(#29)",
-122)--------"n_name(#30)",
-123)--------"n_regionkey(#31)",
-124)--------"n_comment(#32)"
-125)------]
-126)----},
-127)----{
-128)------"id": 11,
-129)------"kind": "join",
-130)------"title": "⋈ InnerJoin",
-131)------"join_type": "Inner",
-132)------"condition": "true",
-133)------"outer": 9,
-134)------"inner": 10
-135)----},
-136)----{
-137)------"id": 12,
-138)------"kind": "selection",
-139)------"title": "σ Selection",
-140)------"predicate": "(((ps_suppkey(#18) = s_suppkey(#22)) AND (s_nationkey(#25) = n_nationkey(#29))) AND (n_name(#30) = \"GERMANY\"))",
-141)------"input": 11
+107)------"id": 10,
+108)------"kind": "scan",
+109)------"title": "⊞ Scan",
+110)------"table_name": "nation",
+111)------"columns": [
+112)--------"n_nationkey(#29)",
+113)--------"n_name(#30)",
+114)--------"n_regionkey(#31)",
+115)--------"n_comment(#32)"
+116)------]
+117)----},
+118)----{
+119)------"id": 35,
+120)------"kind": "selection",
+121)------"title": "σ Selection",
+122)------"predicate": "(n_name(#30) = \"GERMANY\")",
+123)------"input": 10
+124)----},
+125)----{
+126)------"id": 65,
+127)------"kind": "join",
+128)------"title": "⋈ InnerJoin",
+129)------"join_type": "Inner",
+130)------"condition": "(true AND (s_nationkey(#25) = n_nationkey(#29)))",
+131)------"outer": 8,
+132)------"inner": 35
+133)----},
+134)----{
+135)------"id": 66,
+136)------"kind": "join",
+137)------"title": "⋈ InnerJoin",
+138)------"join_type": "Inner",
+139)------"condition": "(true AND (ps_suppkey(#18) = s_suppkey(#22)))",
+140)------"outer": 7,
+141)------"inner": 65
 142)----},
 143)----{
-144)------"id": 13,
+144)------"id": 69,
 145)------"kind": "aggregation",
 146)------"title": "γ Aggregation",
 147)------"keys": "",
 148)------"aggregates": [
 149)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#33) := sum((ps_supplycost(#20) * ps_availqty(#19)))"
 150)------],
-151)------"input": 12
+151)------"input": 66
 152)----},
 153)----{
-154)------"id": 14,
+154)------"id": 70,
 155)------"kind": "map",
 156)------"title": "χ Map",
 157)------"computations": [
 158)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty) * Float64(0.0001)(#34) := (sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#33) * 0.0001)"
 159)------],
-160)------"input": 13
+160)------"input": 69
 161)----},
 162)----{
-163)------"id": 15,
+163)------"id": 71,
 164)------"kind": "projection",
 165)------"title": "π Projection",
 166)------"columns": [
 167)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty) * Float64(0.0001)(#34)"
 168)------],
-169)------"input": 14
+169)------"input": 70
 170)----},
 171)----{
-172)------"id": 20,
+172)------"id": 72,
 173)------"kind": "join",
 174)------"title": "⟕₁ SingleJoin",
 175)------"join_type": "Single",
 176)------"condition": "true",
-177)------"outer": 6,
-178)------"inner": 15
+177)------"outer": 68,
+178)------"inner": 71
 179)----},
 180)----{
-181)------"id": 21,
+181)------"id": 73,
 182)------"kind": "selection",
 183)------"title": "σ Selection",
 184)------"predicate": "(sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#16) > sum(partsupp.ps_supplycost * partsupp.ps_availqty) * Float64(0.0001)(#34))",
-185)------"input": 20
+185)------"input": 72
 186)----},
 187)----{
-188)------"id": 22,
+188)------"id": 74,
 189)------"kind": "projection",
 190)------"title": "π Projection",
 191)------"columns": [
 192)--------"ps_partkey(#0)",
 193)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#16)"
 194)------],
-195)------"input": 21
+195)------"input": 73
 196)----},
 197)----{
-198)------"id": 23,
+198)------"id": 75,
 199)------"kind": "sort",
 200)------"title": "⇞ Sort",
 201)------"keys": [
 202)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#16) Desc NullsFirst"
 203)------],
-204)------"input": 22
+204)------"input": 74
 205)----},
 206)----{
-207)------"id": 24,
+207)------"id": 76,
 208)------"kind": "limit",
 209)------"title": "τ Limit",
 210)------"fetch": "10",
 211)------"offset": "0",
-212)------"input": 23
+212)------"input": 75
 213)----}
 214)--]
 215)}
