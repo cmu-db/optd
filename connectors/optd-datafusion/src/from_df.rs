@@ -16,7 +16,7 @@ use datafusion::logical_expr::{
 };
 use optd::{
     AggregateExpr, AggregateFunction, Aggregation, BinaryOp, Column, ColumnData, ConstScan,
-    ExprData, Join as OptdJoin, JoinType, Limit as OptdLimit, Map, NaryOp, NullOrdering, Operator,
+    ExprData, Join as OptdJoin, JoinType, CrossProduct, Limit as OptdLimit, Map, NaryOp, NullOrdering, Operator,
     OperatorData, Projection as OptdProjection, QueryContext, ScalarValue, Scan, Selection,
     Sort as OptdSort, SortDirection, SortKey, TableRef,
 };
@@ -547,6 +547,14 @@ fn convert_join(
 
     if let Some(filter) = &join.filter {
         exprs.push(convert_expr(filter, ctx, bindings)?);
+    }
+
+    if exprs.len() == 0 && matches!(join.join_type, DFJoinType::Inner) {
+        return Ok(OperatorData::CrossProduct(CrossProduct {
+            outer,
+            inner,
+        })
+        .add(ctx));
     }
 
     let on = match exprs.len() {
