@@ -71,6 +71,20 @@ pub trait Pass {
     fn name(&self) -> &'static str;
 }
 
+/// Formats an internal pass name for display.
+pub fn display_pass_name(pass: &str) -> String {
+    pass.split('_')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
+
 /// Whether a pass changed the reachable plan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PassResult {
@@ -380,12 +394,12 @@ impl PassManager {
         &self.profiles
     }
 
-    /// Runs all passes in a fixpoint loop until convergence or `max_iterations`.
+    /// Runs each pass to fixpoint in registration order, up to `max_iterations` per pass.
     pub fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<()> {
         self.run_inner(ctx, None)
     }
 
-    /// Runs all passes and captures a query snapshot after each pass invocation.
+    /// Runs each pass to fixpoint in registration order and captures a query snapshot after each invocation.
     pub fn run_with_trace(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<Vec<PassTrace>> {
         let mut trace = Vec::new();
         self.run_inner(ctx, Some(&mut trace))?;
@@ -401,25 +415,15 @@ impl PassManager {
         ctx.optimizer_run_id = self.next_run_id;
         self.next_run_id += 1;
 
-        for iteration in 1..=self.max_iterations {
-            let mut any_changed = false;
-            for (pass_index, pass) in self.passes.iter_mut().enumerate() {
+        for (pass_index, pass) in self.passes.iter_mut().enumerate() {
+            let mut converged = false;
+            for iteration in 1..=self.max_iterations {
                 let pass_name = pass.name();
                 let started = Instant::now();
                 let result = pass.run(ctx);
                 let duration_ms = started.elapsed().as_secs_f64() * 1_000.0;
-                let profile = match result {
-                    Ok(result) => {
-                        let profile = PassProfile {
-                            iteration,
-                            pass_index,
-                            pass: pass_name,
-                            result: Some(result),
-                            duration_ms,
-                        };
-                        self.profiles.push(profile.clone());
-                        profile
-                    }
+                let result_value = match result {
+                    Ok(result) => Some(result),
                     Err(error) => {
                         let profile = PassProfile {
                             iteration,
@@ -438,9 +442,17 @@ impl PassManager {
                         return Err(error);
                     }
                 };
+                let changed = result_value == Some(PassResult::Changed);
+                let profile = PassProfile {
+                    iteration,
+                    pass_index,
+                    pass: pass_name,
+                    result: result_value,
+                    duration_ms,
+                };
+                self.profiles.push(profile.clone());
 
-                if profile.result == Some(PassResult::Changed) {
-                    any_changed = true;
+                if changed {
                     // Resolve the query root through the pass's rewrite map.
                     if let Some(root) = ctx.query.root() {
                         let resolved = ctx.rewrites.resolve(root);
@@ -450,18 +462,23 @@ impl PassManager {
                     }
                 }
 
-                if let Some(trace) = trace.as_deref_mut() {
-                    trace.push(PassTrace {
-                        profile,
-                        query: ctx.query.clone(),
-                    });
+                if !changed {
+                    if let Some(trace) = trace.as_deref_mut() {
+                        trace.push(PassTrace {
+                            profile,
+                            query: ctx.query.clone(),
+                        });
+                    }
+                    converged = true;
+                    break;
                 }
             }
-            if !any_changed {
-                return Ok(());
+
+            if !converged {
+                return Err(OptimizeError::MaxIterationsReached);
             }
         }
-        Err(OptimizeError::MaxIterationsReached)
+        Ok(())
     }
 }
 
@@ -913,14 +930,14 @@ mod tests {
         let mut ctx = OptimizerContext::new(QueryContext::new());
         pm.run(&mut ctx).unwrap();
 
-        assert_eq!(*log.lock().unwrap(), vec!["a", "b", "a", "b"]);
+        assert_eq!(*log.lock().unwrap(), vec!["a", "a", "b", "b"]);
         assert_eq!(pm.profiles().len(), 4);
         assert_eq!(
             pm.profiles()
                 .iter()
                 .map(|profile| (profile.iteration, profile.pass_index, profile.pass))
                 .collect::<Vec<_>>(),
-            vec![(1, 0, "a"), (1, 1, "b"), (2, 0, "a"), (2, 1, "b")]
+            vec![(1, 0, "a"), (2, 0, "a"), (1, 1, "b"), (2, 1, "b")]
         );
     }
 

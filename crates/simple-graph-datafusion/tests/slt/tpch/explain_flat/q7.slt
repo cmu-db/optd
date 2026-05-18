@@ -158,10 +158,10 @@ order by
 116)------"kind": "rename",
 117)------"title": "ρ Rename(n1)",
 118)------"defs": [
-119)--------"n_nationkey(#44) ← n_nationkey(#40)",
-120)--------"n_name(#45) ← n_name(#41)",
-121)--------"n_regionkey(#46) ← n_regionkey(#42)",
-122)--------"n_comment(#47) ← n_comment(#43)"
+119)--------"n_nationkey(#44) <- n_nationkey(#40)",
+120)--------"n_name(#45) <- n_name(#41)",
+121)--------"n_regionkey(#46) <- n_regionkey(#42)",
+122)--------"n_comment(#47) <- n_comment(#43)"
 123)------],
 124)------"input": 7
 125)----},
@@ -191,10 +191,10 @@ order by
 149)------"kind": "rename",
 150)------"title": "ρ Rename(n2)",
 151)------"defs": [
-152)--------"n_nationkey(#52) ← n_nationkey(#48)",
-153)--------"n_name(#53) ← n_name(#49)",
-154)--------"n_regionkey(#54) ← n_regionkey(#50)",
-155)--------"n_comment(#55) ← n_comment(#51)"
+152)--------"n_nationkey(#52) <- n_nationkey(#48)",
+153)--------"n_name(#53) <- n_name(#49)",
+154)--------"n_regionkey(#54) <- n_regionkey(#50)",
+155)--------"n_comment(#55) <- n_comment(#51)"
 156)------],
 157)------"input": 10
 158)----},
@@ -243,10 +243,10 @@ order by
 201)------"kind": "rename",
 202)------"title": "ρ Rename(shipping)",
 203)------"defs": [
-204)--------"supp_nation(#60) ← supp_nation(#56)",
-205)--------"cust_nation(#61) ← cust_nation(#57)",
-206)--------"l_year(#62) ← l_year(#58)",
-207)--------"volume(#63) ← volume(#59)"
+204)--------"supp_nation(#60) <- supp_nation(#56)",
+205)--------"cust_nation(#61) <- cust_nation(#57)",
+206)--------"l_year(#62) <- l_year(#58)",
+207)--------"volume(#63) <- volume(#59)"
 208)------],
 209)------"input": 15
 210)----},

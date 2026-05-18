@@ -1321,7 +1321,7 @@ impl<'a> QueryFormatter<'a> {
             JoinType::LeftOuter => "⟕",
             JoinType::RightOuter => "⟖",
             JoinType::FullOuter => "⟗",
-            JoinType::Single => "⋈₁",
+            JoinType::Single => "⟕₁",
             JoinType::LeftMark(_) => "⟕ᵐ",
         }
     }

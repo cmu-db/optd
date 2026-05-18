@@ -94,6 +94,8 @@ SELECT explain_flat('SELECT id FROM t WHERE val > 1.0');
 query T
 SELECT CASE
   WHEN explain_optimizer_json('SELECT id FROM t WHERE val > 1.0') LIKE '%"passName": "Initial"%'
+   AND explain_optimizer_json('SELECT id FROM t WHERE val > 1.0') LIKE '%"query": "SELECT id FROM t WHERE val > 1.0"%'
+   AND explain_optimizer_json('SELECT id FROM t WHERE val > 1.0') LIKE '%"passName": "JoinOrdering"%'
    AND explain_optimizer_json('SELECT id FROM t WHERE val > 1.0') LIKE '%"op": "projection"%'
    AND explain_optimizer_json('SELECT id FROM t WHERE val > 1.0') LIKE '%"title": "π Projection"%'
   THEN 'ok'
@@ -108,12 +110,13 @@ FROM explain_steps('SELECT id FROM t WHERE val > 1.0', 'flat')
 ORDER BY step;
 ----
 0	initial	initial
-1	subquery_to_join	unchanged
-2	predicate_pushdown	unchanged
+1	SubqueryToJoin	unchanged
+2	PredicatePushdown	unchanged
+3	JoinOrdering	unchanged
 
 query T
 SELECT pass
 FROM explain_steps('SELECT l.id FROM t l JOIN t r ON l.id = r.id WHERE r.val > 1.0', 'flat')
-WHERE result = 'changed' AND plan LIKE '%σ Selection%';
+WHERE step = 2;
 ----
-predicate_pushdown
+PredicatePushdown

@@ -10,7 +10,7 @@ use crate::{
     ExprData, Join, JoinType, NaryOp, Operator, OperatorData, QueryContext, build_hypergraph,
 };
 
-use super::{OptimizeResult, Pass, PassResult, QueryPass};
+use super::{OptimizeError, OptimizeResult, Pass, PassResult, QueryPass};
 use crate::OptimizerContext;
 
 // ---------------------------------------------------------------------------
@@ -107,12 +107,17 @@ impl<'a> DPhyp<'a> {
         }
     }
 
-    fn solve(&mut self) -> Option<JoinTree> {
+    fn solve(&mut self) -> OptimizeResult<Option<JoinTree>> {
         let n = self.hg.nodes.len();
         if n == 0 {
-            return None;
+            return Ok(None);
         }
-        assert!(n <= 64, "DPhyp requires <=64 nodes per join group");
+        if n > 64 {
+            return Err(OptimizeError::PassError {
+                pass: "JoinOrdering",
+                message: format!("join group has {n} nodes; DPhyp supports at most 64 nodes"),
+            });
+        }
 
         // Initialise singletons.
         for i in 0..n {
@@ -136,9 +141,10 @@ impl<'a> DPhyp<'a> {
             self.enumerate_csg_rec(sv, bv);
         }
 
-        self.dp
+        Ok(self
+            .dp
             .get(&all_nodes_mask(n))
-            .map(|state| state.tree.clone())
+            .map(|state| state.tree.clone()))
     }
 
     fn enumerate_csg_rec(&mut self, s1: NodeSet, x: NodeSet) {
@@ -422,7 +428,7 @@ impl Default for JoinOrdering {
 
 impl Pass for JoinOrdering {
     fn name(&self) -> &'static str {
-        "join_ordering"
+        "JoinOrdering"
     }
 }
 
@@ -458,15 +464,17 @@ impl QueryPass for JoinOrdering {
 
         self.last_run = Some(run_key);
 
-        let replacements = groups
-            .iter()
-            .filter_map(|(group_root, hg)| {
-                let mut solver = DPhyp::new(hg, self.stats.as_ref());
-                solver
-                    .solve()
-                    .map(|tree| (*group_root, join_tree_to_ir(&tree, hg, &mut ctx.query)))
-            })
-            .collect::<Vec<_>>();
+        let replacements =
+            groups
+                .iter()
+                .try_fold(Vec::new(), |mut replacements, (group_root, hg)| {
+                    let mut solver = DPhyp::new(hg, self.stats.as_ref());
+                    if let Some(tree) = solver.solve()? {
+                        replacements
+                            .push((*group_root, join_tree_to_ir(&tree, hg, &mut ctx.query)));
+                    }
+                    Ok::<_, OptimizeError>(replacements)
+                })?;
         if replacements.is_empty() {
             return Ok(PassResult::Unchanged);
         }
@@ -557,7 +565,10 @@ mod tests {
         assert_eq!(hg.nodes.len(), 3);
 
         let mut solver = DPhyp::new(&hg, &UniformStatistics);
-        let tree = solver.solve().expect("DPhyp should find a plan");
+        let tree = solver
+            .solve()
+            .expect("solver should not error")
+            .expect("DPhyp should find a plan");
         assert_eq!(tree.leaf_count(), 3);
     }
 
@@ -621,7 +632,10 @@ mod tests {
         let hg = build_hypergraph(&ctx, &mut analyses, root);
         let mut solver = DPhyp::new(&hg, &SkewStats);
 
-        let tree = solver.solve().expect("DPhyp should find a plan");
+        let tree = solver
+            .solve()
+            .expect("solver should not error")
+            .expect("DPhyp should find a plan");
 
         assert!(tree.has_join_with_leaves(nodeset_singleton(1) | nodeset_singleton(2)));
     }
@@ -649,7 +663,38 @@ mod tests {
         let mut solver = DPhyp::new(&hg, &UniformStatistics);
 
         assert_eq!(all_nodes_mask(64), NodeSet::MAX);
-        assert!(solver.solve().is_none());
+        assert!(matches!(solver.solve(), Ok(None)));
+    }
+
+    #[test]
+    fn dphyp_solve_rejects_65_node_groups() {
+        let mut ctx = QueryContext::new();
+        let mut nodes = Vec::new();
+        for idx in 0..65 {
+            let scan = OperatorData::Scan(Scan {
+                table: TableRef::bare(format!("t{idx}")),
+                columns: vec![],
+            })
+            .add(&mut ctx);
+            nodes.push(HypergraphNode {
+                root: scan,
+                label: format!("t{idx}"),
+                available: vec![],
+            });
+        }
+        let hg = QueryHypergraph {
+            nodes,
+            edges: vec![],
+        };
+        let mut solver = DPhyp::new(&hg, &UniformStatistics);
+
+        assert!(matches!(
+            solver.solve(),
+            Err(OptimizeError::PassError {
+                pass: "JoinOrdering",
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -774,6 +819,6 @@ mod tests {
         pm.run(&mut opt).unwrap();
 
         let created_join = created_join.borrow().expect("join should be created");
-        assert_ne!(opt.query.root(), Some(created_join));
+        assert_eq!(opt.query.root(), Some(created_join));
     }
 }

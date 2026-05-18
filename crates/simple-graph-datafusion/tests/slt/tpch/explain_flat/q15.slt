@@ -115,8 +115,8 @@ order by
 81)------"kind": "rename",
 82)------"title": "ρ Rename(revenue0)",
 83)------"defs": [
-84)--------"supplier_no(#24) ← l_suppkey(#9)",
-85)--------"total_revenue(#25) ← sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
+84)--------"supplier_no(#24) <- l_suppkey(#9)",
+85)--------"total_revenue(#25) <- sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23)"
 86)------],
 87)------"input": 5
 88)----},
@@ -195,8 +195,8 @@ order by
 161)------"kind": "rename",
 162)------"title": "ρ Rename(revenue0)",
 163)------"defs": [
-164)--------"supplier_no(#43) ← l_suppkey(#28)",
-165)--------"total_revenue(#44) ← sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
+164)--------"supplier_no(#43) <- l_suppkey(#28)",
+165)--------"total_revenue(#44) <- sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42)"
 166)------],
 167)------"input": 12
 168)----},
@@ -222,7 +222,7 @@ order by
 188)----{
 189)------"id": 19,
 190)------"kind": "join",
-191)------"title": "⋈₁ SingleJoin",
+191)------"title": "⟕₁ SingleJoin",
 192)------"join_type": "Single",
 193)------"condition": "true",
 194)------"outer": 7,

@@ -101,8 +101,8 @@ limit 10;');
 77)------"kind": "rename",
 78)------"title": "ρ Rename(c_orders)",
 79)------"defs": [
-80)--------"c_custkey(#18) ← c_custkey(#0)",
-81)--------"c_count(#19) ← count(orders.o_orderkey)(#17)"
+80)--------"c_custkey(#18) <- c_custkey(#0)",
+81)--------"c_count(#19) <- count(orders.o_orderkey)(#17)"
 82)------],
 83)------"input": 5
 84)----},

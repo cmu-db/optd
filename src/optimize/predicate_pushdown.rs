@@ -17,7 +17,7 @@ pub struct PredicatePushdown;
 
 impl Pass for PredicatePushdown {
     fn name(&self) -> &'static str {
-        "predicate_pushdown"
+        "PredicatePushdown"
     }
 }
 

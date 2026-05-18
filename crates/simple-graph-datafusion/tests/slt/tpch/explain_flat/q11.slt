@@ -202,7 +202,7 @@ limit 10;');
 171)----{
 172)------"id": 20,
 173)------"kind": "join",
-174)------"title": "⋈₁ SingleJoin",
+174)------"title": "⟕₁ SingleJoin",
 175)------"join_type": "Single",
 176)------"condition": "true",
 177)------"outer": 6,

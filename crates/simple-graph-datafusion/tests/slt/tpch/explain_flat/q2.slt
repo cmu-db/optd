@@ -258,7 +258,7 @@ limit 10;');
 211)----{
 212)------"id": 23,
 213)------"kind": "join",
-214)------"title": "⋈₁ SingleJoin",
+214)------"title": "⟕₁ SingleJoin",
 215)------"join_type": "Single",
 216)------"condition": "true",
 217)------"outer": 8,

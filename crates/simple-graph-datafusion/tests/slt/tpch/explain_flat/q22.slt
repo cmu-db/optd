@@ -101,7 +101,7 @@ order by
 61)----{
 62)------"id": 15,
 63)------"kind": "join",
-64)------"title": "⋈₁ SingleJoin",
+64)------"title": "⟕₁ SingleJoin",
 65)------"join_type": "Single",
 66)------"condition": "true",
 67)------"outer": 0,
@@ -189,8 +189,8 @@ order by
 149)------"kind": "rename",
 150)------"title": "ρ Rename(custsale)",
 151)------"defs": [
-152)--------"cntrycode(#27) ← cntrycode(#26)",
-153)--------"c_acctbal(#28) ← c_acctbal(#5)"
+152)--------"cntrycode(#27) <- cntrycode(#26)",
+153)--------"c_acctbal(#28) <- c_acctbal(#5)"
 154)------],
 155)------"input": 19
 156)----},

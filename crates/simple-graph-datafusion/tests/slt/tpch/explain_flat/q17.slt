@@ -132,7 +132,7 @@ where
 112)----{
 113)------"id": 12,
 114)------"kind": "join",
-115)------"title": "⋈₁ SingleJoin",
+115)------"title": "⟕₁ SingleJoin",
 116)------"join_type": "Single",
 117)------"condition": "true",
 118)------"outer": 2,

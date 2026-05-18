@@ -49,7 +49,7 @@ impl ExprRewrite {
 
 impl Pass for SubqueryToJoin {
     fn name(&self) -> &'static str {
-        "subquery_to_join"
+        "SubqueryToJoin"
     }
 }
 
@@ -61,7 +61,7 @@ impl QueryPass for SubqueryToJoin {
 
 impl Pass for SubqueryToJoinRule {
     fn name(&self) -> &'static str {
-        "subquery_to_join"
+        "SubqueryToJoin"
     }
 }
 

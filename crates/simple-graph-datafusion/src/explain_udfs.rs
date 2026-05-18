@@ -21,8 +21,9 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::SessionContext;
 use simple_graph::{
-    OperatorRewriteAdaptor, OptimizerContext, PassManager, PassResult, PredicatePushdown,
-    QueryContext, QueryFormatConfig, SubqueryToJoin, optimizer_visualizer_trace_json,
+    JoinOrdering, OperatorRewriteAdaptor, OptimizerContext, PassManager, PassResult,
+    PredicatePushdown, QueryContext, QueryFormatConfig, SubqueryToJoin,
+    optimizer_visualizer_trace_json,
 };
 
 use crate::from_df::from_logical_plan;
@@ -351,13 +352,18 @@ async fn build_optimizer_visualizer_trace(
         .run_with_trace(&mut opt)
         .map_err(|e| DataFusionError::Plan(e.to_string()))?;
 
-    Ok(optimizer_visualizer_trace_json(&initial, &trace))
+    let passes = optimizer_visualizer_trace_json(&initial, &trace);
+    Ok(format!(
+        "{{\n  \"passes\": {},\n  \"query\": {:?}\n}}",
+        passes, sql
+    ))
 }
 
 fn explain_pass_manager() -> PassManager {
     let mut pm = PassManager::new(10);
     pm.add_pass(SubqueryToJoin);
     pm.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
+    pm.add_pass(JoinOrdering::new());
     pm
 }
 

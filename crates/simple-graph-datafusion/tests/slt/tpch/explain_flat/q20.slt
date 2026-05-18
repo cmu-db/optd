@@ -194,7 +194,7 @@ order by
 154)----{
 155)------"id": 22,
 156)------"kind": "join",
-157)------"title": "⋈₁ SingleJoin",
+157)------"title": "⟕₁ SingleJoin",
 158)------"join_type": "Single",
 159)------"condition": "true",
 160)------"outer": 21,
