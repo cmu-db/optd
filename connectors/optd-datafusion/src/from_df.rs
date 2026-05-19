@@ -358,14 +358,14 @@ fn convert_projection(
             let q = qualifier.map(|r| r.to_string());
 
             if let DFExpr::Column(col) = expr {
-                let sg_col =
+                let optd_col =
                     bindings.resolve(col.relation.as_ref().map(|r| r.table()), &col.name)?;
-                output_cols.push(sg_col);
+                output_cols.push(optd_col);
             } else {
-                let sg_expr = convert_expr(expr, ctx, bindings)?;
+                let optd_expr = convert_expr(expr, ctx, bindings)?;
                 let col = ColumnData::new(field.name().clone(), field.data_type().clone()).add(ctx);
                 bindings.bind(q, field.name().clone(), col);
-                computations.push((col, sg_expr));
+                computations.push((col, optd_expr));
                 output_cols.push(col);
             }
         }
@@ -657,8 +657,8 @@ fn convert_expr(
                     exprs: vec![left, right],
                 },
                 other => match convert_binary_op(other) {
-                    Some(sg_op) => ExprData::Binary {
-                        op: sg_op,
+                    Some(optd_op) => ExprData::Binary {
+                        op: optd_op,
                         left,
                         right,
                     },
