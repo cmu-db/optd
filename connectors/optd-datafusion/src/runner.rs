@@ -11,9 +11,9 @@ use datafusion_sqllogictest::{
     DFColumnType, DFSqlLogicTestError, convert_batches, convert_schema_to_types,
 };
 use optd::{
-    ExprSimplify, JoinOrdering, MarkJoinToSemiJoin, OperatorRewriteAdaptor, OptimizerContext,
-    PassManager, PredicatePushdown, ProjectionElimination, QueryContext, QueryFormatConfig,
-    SubqueryToJoin,
+    ExprSimplify, JoinOrdering, JoinTreeNormalize, MarkJoinToSemiJoin, OperatorRewriteAdaptor,
+    OptimizerContext, PassManager, PredicatePushdown, ProjectionElimination, QueryContext,
+    QueryFormatConfig, SubqueryToJoin,
 };
 use sqllogictest::{AsyncDB, DBOutput};
 
@@ -42,6 +42,7 @@ pub fn default_pass_manager() -> PassManager {
     pm.add_pass(OperatorRewriteAdaptor::new(ExprSimplify));
     pm.add_pass(OperatorRewriteAdaptor::new(MarkJoinToSemiJoin));
     pm.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
+    pm.add_pass(JoinTreeNormalize::new());
     pm.add_pass(OperatorRewriteAdaptor::new(ProjectionElimination));
     pm.add_pass(JoinOrdering::new());
     pm
@@ -81,6 +82,16 @@ impl OptdRunner {
         Self { session }
     }
 
+    pub fn optd_enabled(&self) -> bool {
+        self.session
+            .copied_config()
+            .options()
+            .extensions
+            .get::<OptdExtensionConfig>()
+            .map(|config| config.optd_enabled)
+            .unwrap_or_else(|| OptdExtensionConfig::default().optd_enabled)
+    }
+
     pub fn log_explain_steps_enabled(&self) -> bool {
         self.session
             .copied_config()
@@ -92,35 +103,21 @@ impl OptdRunner {
     }
 
     pub async fn execute_sql(&self, sql: &str) -> Result<RunnerOutput, DFSqlLogicTestError> {
-        let (schema, batches) = match self.try_via_ir(sql).await {
-            Ok(pair) => pair,
-            Err(TryViaIrError::Unsupported(_)) => {
-                // IR conversion failed or unsupported — execute directly via DataFusion.
-                let plan = self
-                    .session
-                    .state()
-                    .create_logical_plan(sql)
-                    .await
-                    .map_err(DFSqlLogicTestError::DataFusion)?;
-                let df = self
-                    .session
-                    .execute_logical_plan(plan)
-                    .await
-                    .map_err(DFSqlLogicTestError::DataFusion)?;
-                let batches = df
-                    .collect()
-                    .await
-                    .map_err(DFSqlLogicTestError::DataFusion)?;
-                let schema = batches.first().map(|b| b.schema()).unwrap_or_else(|| {
-                    std::sync::Arc::new(datafusion::arrow::datatypes::Schema::empty())
-                });
-                (schema, batches)
+        let (schema, batches) = if self.optd_enabled() {
+            match self.try_via_ir(sql).await {
+                Ok(pair) => pair,
+                Err(TryViaIrError::Unsupported(_)) => {
+                    // IR conversion failed or unsupported — execute directly via DataFusion.
+                    self.execute_datafusion(sql).await?
+                }
+                Err(TryViaIrError::Failed(error)) => {
+                    return Err(DFSqlLogicTestError::DataFusion(
+                        datafusion::error::DataFusionError::Execution(error),
+                    ));
+                }
             }
-            Err(TryViaIrError::Failed(error)) => {
-                return Err(DFSqlLogicTestError::DataFusion(
-                    datafusion::error::DataFusionError::Execution(error),
-                ));
-            }
+        } else {
+            self.execute_datafusion(sql).await?
         };
 
         if batches.is_empty() && schema.fields().is_empty() {
@@ -128,6 +125,32 @@ impl OptdRunner {
         } else {
             Ok(RunnerOutput::Rows { schema, batches })
         }
+    }
+
+    async fn execute_datafusion(
+        &self,
+        sql: &str,
+    ) -> Result<(SchemaRef, Vec<RecordBatch>), DFSqlLogicTestError> {
+        let plan = self
+            .session
+            .state()
+            .create_logical_plan(sql)
+            .await
+            .map_err(DFSqlLogicTestError::DataFusion)?;
+        let df = self
+            .session
+            .execute_logical_plan(plan)
+            .await
+            .map_err(DFSqlLogicTestError::DataFusion)?;
+        let batches = df
+            .collect()
+            .await
+            .map_err(DFSqlLogicTestError::DataFusion)?;
+        let schema = batches
+            .first()
+            .map(|b| b.schema())
+            .unwrap_or_else(|| std::sync::Arc::new(datafusion::arrow::datatypes::Schema::empty()));
+        Ok((schema, batches))
     }
 
     pub fn explain_steps_box(&self, sql: &str) -> Result<Vec<ExplainStep>, DFSqlLogicTestError> {
@@ -276,6 +299,7 @@ mod tests {
     fn explain_step_logging_follows_session_extension_value() {
         let session = SessionContext::new_with_config(SessionConfig::new().with_option_extension(
             OptdExtensionConfig {
+                optd_enabled: true,
                 log_explain_steps: false,
             },
         ));
@@ -287,6 +311,24 @@ mod tests {
     fn explain_step_logging_uses_extension_default_when_missing() {
         let runner = OptdRunner::new(SessionContext::new());
         assert!(runner.log_explain_steps_enabled());
+    }
+
+    #[test]
+    fn optd_enabled_follows_session_extension_value() {
+        let session = SessionContext::new_with_config(SessionConfig::new().with_option_extension(
+            OptdExtensionConfig {
+                optd_enabled: false,
+                log_explain_steps: true,
+            },
+        ));
+        let runner = OptdRunner::new(session);
+        assert!(!runner.optd_enabled());
+    }
+
+    #[test]
+    fn optd_enabled_uses_extension_default_when_missing() {
+        let runner = OptdRunner::new(SessionContext::new());
+        assert!(runner.optd_enabled());
     }
 
     #[tokio::test]

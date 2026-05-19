@@ -31,11 +31,14 @@ impl OperatorRewrite for PredicatePushdown {
             return Ok(Rewrite::Keep);
         };
 
-        let (join_type, existing_on, outer, inner) = match ctx.query.operator(sel.input).clone() {
-            OperatorData::Join(j) => (j.join_type, Some(j.on), j.outer, j.inner),
-            OperatorData::CrossProduct(cp) => (crate::JoinType::Inner, None, cp.outer, cp.inner),
-            _ => return Ok(Rewrite::Keep),
-        };
+        let (join_type, existing_on, outer, inner, was_cross_product) =
+            match ctx.query.operator(sel.input).clone() {
+                OperatorData::Join(j) => (j.join_type, Some(j.on), j.outer, j.inner, false),
+                OperatorData::CrossProduct(cp) => {
+                    (crate::JoinType::Inner, None, cp.outer, cp.inner, true)
+                }
+                _ => return Ok(Rewrite::Keep),
+            };
 
         let outer_cols: Vec<_> = ctx
             .analyses
@@ -78,10 +81,16 @@ impl OperatorRewrite for PredicatePushdown {
         let new_outer = wrap_selection(push_outer, outer, &mut ctx.query);
         let new_inner = wrap_selection(push_inner, inner, &mut ctx.query);
 
-        let new_on = {
+        let new_join_input = if was_cross_product && push_join.is_empty() {
+            OperatorData::CrossProduct(crate::CrossProduct {
+                outer: new_outer,
+                inner: new_inner,
+            })
+            .add(&mut ctx.query)
+        } else {
             let mut all_on: Vec<Expr> = existing_on.into_iter().collect();
             all_on.extend(push_join);
-            match all_on.len() {
+            let new_on = match all_on.len() {
                 0 => ExprData::Literal(ScalarValue::Boolean(true)).add(&mut ctx.query),
                 1 => all_on.remove(0),
                 _ => ExprData::Nary {
@@ -89,24 +98,24 @@ impl OperatorRewrite for PredicatePushdown {
                     exprs: all_on,
                 }
                 .add(&mut ctx.query),
-            }
+            };
+
+            OperatorData::Join(crate::Join {
+                join_type,
+                on: new_on,
+                outer: new_outer,
+                inner: new_inner,
+            })
+            .add(&mut ctx.query)
         };
 
-        let new_join = OperatorData::Join(crate::Join {
-            join_type,
-            on: new_on,
-            outer: new_outer,
-            inner: new_inner,
-        })
-        .add(&mut ctx.query);
-
         let result = if keep.is_empty() {
-            new_join
+            new_join_input
         } else {
             let pred = make_and(keep, &mut ctx.query);
             OperatorData::Selection(Selection {
                 predicate: pred,
-                input: new_join,
+                input: new_join_input,
             })
             .add(&mut ctx.query)
         };
@@ -165,5 +174,64 @@ fn split_conjuncts(expr: Expr, ctx: &crate::QueryContext) -> Vec<Expr> {
             .flat_map(|&e| split_conjuncts(e, ctx))
             .collect(),
         _ => vec![expr],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        BinaryOp, ColumnData, CrossProduct, OperatorRewriteAdaptor, PassManager, QueryContext,
+        Scan, TableRef,
+    };
+    use arrow_schema::DataType;
+
+    #[test]
+    fn filtered_cross_product_stays_cross_product_without_join_predicate() {
+        let mut query = QueryContext::new();
+        let a = ColumnData::new("a", DataType::Int64).add(&mut query);
+        let b = ColumnData::new("b", DataType::Int64).add(&mut query);
+        let scan_a = OperatorData::Scan(Scan {
+            table: TableRef::bare("A"),
+            columns: vec![a],
+        })
+        .add(&mut query);
+        let scan_b = OperatorData::Scan(Scan {
+            table: TableRef::bare("B"),
+            columns: vec![b],
+        })
+        .add(&mut query);
+        let cross = OperatorData::CrossProduct(CrossProduct {
+            outer: scan_a,
+            inner: scan_b,
+        })
+        .add(&mut query);
+        let predicate = ExprData::Binary {
+            op: BinaryOp::Gt,
+            left: ExprData::ColumnRef(a).add(&mut query),
+            right: ExprData::Literal(ScalarValue::Int64(1)).add(&mut query),
+        }
+        .add(&mut query);
+        let root = OperatorData::Selection(Selection {
+            predicate,
+            input: cross,
+        })
+        .add(&mut query);
+        query.set_root(root);
+
+        let mut opt = OptimizerContext::new(query);
+        let mut pm = PassManager::new();
+        pm.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
+        pm.run(&mut opt).expect("predicate pushdown should succeed");
+
+        let root = opt.query.root().expect("root should be set");
+        let OperatorData::CrossProduct(cross) = opt.query.operator(root) else {
+            panic!("expected cross product root");
+        };
+        assert!(matches!(
+            opt.query.operator(cross.outer),
+            OperatorData::Selection(_)
+        ));
+        assert_eq!(cross.inner, scan_b);
     }
 }

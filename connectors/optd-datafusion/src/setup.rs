@@ -136,6 +136,7 @@ mod tests {
             .extensions
             .get::<OptdExtensionConfig>()
             .unwrap();
+        assert!(optd.optd_enabled);
         assert!(optd.log_explain_steps);
     }
 

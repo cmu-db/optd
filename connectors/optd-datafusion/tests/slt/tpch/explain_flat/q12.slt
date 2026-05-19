@@ -82,7 +82,7 @@ order by
 49)------]
 50)----},
 51)----{
-52)------"id": 16,
+52)------"id": 21,
 53)------"kind": "join",
 54)------"title": "⋈ InnerJoin",
 55)------"join_type": "Inner",
@@ -91,7 +91,7 @@ order by
 58)------"inner": 1
 59)----},
 60)----{
-61)------"id": 17,
+61)------"id": 22,
 62)------"kind": "aggregation",
 63)------"title": "γ Aggregation",
 64)------"keys": "l_shipmode(#14)",
@@ -99,22 +99,22 @@ order by
 66)--------"sum(CASE WHEN orders.o_orderpriority = Utf8(\"1-URGENT\") OR orders.o_orderpriority = Utf8(\"2-HIGH\") THEN Int64(1) ELSE Int64(0) END)(#25) := sum(CASE WHEN ((o_orderpriority(#21) = \"1-URGENT\") OR (o_orderpriority(#21) = \"2-HIGH\")) THEN 1 ELSE 0 END)",
 67)--------"sum(CASE WHEN orders.o_orderpriority != Utf8(\"1-URGENT\") AND orders.o_orderpriority != Utf8(\"2-HIGH\") THEN Int64(1) ELSE Int64(0) END)(#26) := sum(CASE WHEN ((o_orderpriority(#21) != \"1-URGENT\") AND (o_orderpriority(#21) != \"2-HIGH\")) THEN 1 ELSE 0 END)"
 68)------],
-69)------"input": 16
+69)------"input": 21
 70)----},
 71)----{
-72)------"id": 18,
+72)------"id": 23,
 73)------"kind": "sort",
 74)------"title": "⇞ Sort",
 75)------"keys": [
 76)--------"l_shipmode(#14) Asc NullsLast"
 77)------],
-78)------"input": 17
+78)------"input": 22
 79)----},
 80)----{
-81)------"id": 19,
+81)------"id": 24,
 82)------"kind": "output",
 83)------"title": "= Output",
-84)------"input": 18
+84)------"input": 23
 85)----}
 86)--]
 87)}

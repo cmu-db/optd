@@ -132,8 +132,9 @@ ORDER BY step;
 2	ExprSimplify	unchanged
 3	MarkJoinToSemiJoin	unchanged
 4	PredicatePushdown	unchanged
-5	ProjectionElimination	unchanged
-6	JoinOrdering	unchanged
+5	JoinTreeNormalize	unchanged
+6	ProjectionElimination	unchanged
+7	JoinOrdering	unchanged
 
 query T
 SELECT pass

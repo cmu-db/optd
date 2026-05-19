@@ -304,11 +304,20 @@ impl<'a> HypergraphBuilder<'a> {
                 let left_nodes = self.collect(outer);
                 let right_nodes = self.collect(inner);
 
-                // CD-E: compute TES for this join operator (Algorithm 3, Birler & Neumann 2025).
-                let (tes_left, tes_right) = self.cd_e(op, jt, left_nodes, right_nodes);
+                // Split conjunctive predicates into individual edges (§4.5). Inner
+                // join conjuncts each get their own SES/TES so a predicate like
+                // `A.x = C.x AND B.y = C.y` does not force both edges to wait for
+                // `A`, `B`, and `C`.
+                let predicates = conjuncts(on, self.ctx);
+                let (record_tes_left, record_tes_right) =
+                    self.cd_e_for_predicate(on, jt, left_nodes, right_nodes);
 
-                // Split conjunctive predicates into individual edges (§4.5).
-                for predicate in conjuncts(on, self.ctx) {
+                for predicate in predicates {
+                    let (tes_left, tes_right) = if jt == HyperedgeJoinType::Inner {
+                        self.cd_e_for_predicate(predicate, jt, left_nodes, right_nodes)
+                    } else {
+                        (record_tes_left, record_tes_right)
+                    };
                     self.edges.push(Hyperedge {
                         predicate: Some(predicate),
                         left: tes_left,
@@ -322,8 +331,8 @@ impl<'a> HypergraphBuilder<'a> {
                     join_type: jt,
                     left_nodes,
                     right_nodes,
-                    tes_left,
-                    tes_right,
+                    tes_left: record_tes_left,
+                    tes_right: record_tes_right,
                 });
 
                 left_nodes | right_nodes
@@ -381,14 +390,15 @@ impl<'a> HypergraphBuilder<'a> {
     /// Improvements over CD-A:
     /// 1. Extends with `TES(◦_a)` instead of the full subtree `T(◦_a)`.
     /// 2. Gates each extension on a connectivity check — skips redundant restrictions.
-    fn cd_e(
+    fn cd_e_for_predicate(
         &self,
-        join_op: Operator,
+        predicate: Expr,
         join_type: HyperedgeJoinType,
         left_nodes: NodeSet,
         right_nodes: NodeSet,
     ) -> (NodeSet, NodeSet) {
-        let (mut tes_left, mut tes_right) = self.ses(join_op, left_nodes, right_nodes);
+        let (mut tes_left, mut tes_right) =
+            self.ses_for_predicate(predicate, left_nodes, right_nodes);
 
         for rec in &self.join_stack {
             let in_left = (rec.left_nodes | rec.right_nodes) & !left_nodes == 0
@@ -499,18 +509,13 @@ impl<'a> HypergraphBuilder<'a> {
         find(&mut parent, r1_rep) == find(&mut parent, r2_rep)
     }
 
-    /// Computes the SES split into (left, right) NodeSets.
-    fn ses(
+    /// Computes the SES split for one predicate into (left, right) NodeSets.
+    fn ses_for_predicate(
         &self,
-        join_op: Operator,
+        predicate: Expr,
         left_nodes: NodeSet,
         right_nodes: NodeSet,
     ) -> (NodeSet, NodeSet) {
-        let predicate = match self.ctx.operator(join_op) {
-            OperatorData::Join(j) => j.on,
-            _ => return (left_nodes, right_nodes),
-        };
-
         let used = expr_used_columns(self.ctx, predicate).unwrap_or_default();
         let mut ses_left: NodeSet = 0;
         let mut ses_right: NodeSet = 0;
@@ -914,6 +919,76 @@ mod tests {
             "conjunctive predicate should split into 2 edges"
         );
         let _ = (scan_a, scan_b); // suppress unused warnings
+    }
+
+    #[test]
+    fn inner_join_conjuncts_get_independent_hyperedge_endpoints() {
+        let mut ctx = QueryContext::new();
+        let a = ColumnData::new("a", DataType::Int64).add(&mut ctx);
+        let b = ColumnData::new("b", DataType::Int64).add(&mut ctx);
+        let c1 = ColumnData::new("c1", DataType::Int64).add(&mut ctx);
+        let c2 = ColumnData::new("c2", DataType::Int64).add(&mut ctx);
+
+        let scan_a = OperatorData::Scan(Scan {
+            table: TableRef::bare("A"),
+            columns: vec![a],
+        })
+        .add(&mut ctx);
+        let scan_b = OperatorData::Scan(Scan {
+            table: TableRef::bare("B"),
+            columns: vec![b],
+        })
+        .add(&mut ctx);
+        let scan_c = OperatorData::Scan(Scan {
+            table: TableRef::bare("C"),
+            columns: vec![c1, c2],
+        })
+        .add(&mut ctx);
+
+        let cross_ab = OperatorData::CrossProduct(CrossProduct {
+            outer: scan_a,
+            inner: scan_b,
+        })
+        .add(&mut ctx);
+        let eq_ac = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: ExprData::ColumnRef(a).add(&mut ctx),
+            right: ExprData::ColumnRef(c1).add(&mut ctx),
+        }
+        .add(&mut ctx);
+        let eq_bc = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: ExprData::ColumnRef(b).add(&mut ctx),
+            right: ExprData::ColumnRef(c2).add(&mut ctx),
+        }
+        .add(&mut ctx);
+        let on = ExprData::Nary {
+            op: NaryOp::And,
+            exprs: vec![eq_ac, eq_bc],
+        }
+        .add(&mut ctx);
+        let join = OperatorData::Join(Join {
+            join_type: JoinType::Inner,
+            on,
+            outer: cross_ab,
+            inner: scan_c,
+        })
+        .add(&mut ctx);
+
+        let mut analyses = AnalysisContext::new();
+        let hg = build_hypergraph(&ctx, &mut analyses, join);
+
+        assert_eq!(hg.nodes.len(), 3);
+        assert_eq!(hg.edges.len(), 3);
+
+        let real_edges = hg
+            .edges
+            .iter()
+            .filter(|edge| edge.predicate.is_some())
+            .map(|edge| (edge.left, edge.right))
+            .collect::<Vec<_>>();
+        assert!(real_edges.contains(&(nodeset_singleton(0), nodeset_singleton(2))));
+        assert!(real_edges.contains(&(nodeset_singleton(1), nodeset_singleton(2))));
     }
 
     /// Builds a plan:

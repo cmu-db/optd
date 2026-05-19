@@ -36,127 +36,127 @@ limit 10;');
 01){
 02)--"nodes": [
 03)----{
-04)------"id": 0,
+04)------"id": 5,
 05)------"kind": "scan",
 06)------"title": "⊞ Scan",
-07)------"table_name": "customer",
+07)------"table_name": "nation",
 08)------"columns": [
-09)--------"c_custkey(#0)",
-10)--------"c_name(#1)",
-11)--------"c_address(#2)",
-12)--------"c_nationkey(#3)",
-13)--------"c_phone(#4)",
-14)--------"c_acctbal(#5)",
-15)--------"c_mktsegment(#6)",
-16)--------"c_comment(#7)"
-17)------]
-18)----},
-19)----{
-20)------"id": 5,
-21)------"kind": "scan",
-22)------"title": "⊞ Scan",
-23)------"table_name": "nation",
-24)------"columns": [
-25)--------"n_nationkey(#33)",
-26)--------"n_name(#34)",
-27)--------"n_regionkey(#35)",
-28)--------"n_comment(#36)"
+09)--------"n_nationkey(#33)",
+10)--------"n_name(#34)",
+11)--------"n_regionkey(#35)",
+12)--------"n_comment(#36)"
+13)------]
+14)----},
+15)----{
+16)------"id": 0,
+17)------"kind": "scan",
+18)------"title": "⊞ Scan",
+19)------"table_name": "customer",
+20)------"columns": [
+21)--------"c_custkey(#0)",
+22)--------"c_name(#1)",
+23)--------"c_address(#2)",
+24)--------"c_nationkey(#3)",
+25)--------"c_phone(#4)",
+26)--------"c_acctbal(#5)",
+27)--------"c_mktsegment(#6)",
+28)--------"c_comment(#7)"
 29)------]
 30)----},
 31)----{
-32)------"id": 38,
+32)------"id": 46,
 33)------"kind": "join",
 34)------"title": "⋈ InnerJoin",
 35)------"join_type": "Inner",
 36)------"condition": "(c_nationkey(#3) = n_nationkey(#33))",
-37)------"outer": 0,
-38)------"inner": 5
+37)------"outer": 5,
+38)------"inner": 0
 39)----},
 40)----{
-41)------"id": 1,
+41)------"id": 3,
 42)------"kind": "scan",
 43)------"title": "⊞ Scan",
-44)------"table_name": "orders",
+44)------"table_name": "lineitem",
 45)------"columns": [
-46)--------"o_orderkey(#8)",
-47)--------"o_custkey(#9)",
-48)--------"o_orderstatus(#10)",
-49)--------"o_totalprice(#11)",
-50)--------"o_orderdate(#12)",
-51)--------"o_orderpriority(#13)",
-52)--------"o_clerk(#14)",
-53)--------"o_shippriority(#15)",
-54)--------"o_comment(#16)"
-55)------]
-56)----},
-57)----{
-58)------"id": 29,
-59)------"kind": "selection",
-60)------"title": "σ Selection",
-61)------"predicate": "((o_orderdate(#12) >= CAST(\"1993-10-01\" AS Date32)) AND (o_orderdate(#12) < CAST(\"1994-01-01\" AS Date32)))",
-62)------"input": 1
+46)--------"l_orderkey(#17)",
+47)--------"l_partkey(#18)",
+48)--------"l_suppkey(#19)",
+49)--------"l_linenumber(#20)",
+50)--------"l_quantity(#21)",
+51)--------"l_extendedprice(#22)",
+52)--------"l_discount(#23)",
+53)--------"l_tax(#24)",
+54)--------"l_returnflag(#25)",
+55)--------"l_linestatus(#26)",
+56)--------"l_shipdate(#27)",
+57)--------"l_commitdate(#28)",
+58)--------"l_receiptdate(#29)",
+59)--------"l_shipinstruct(#30)",
+60)--------"l_shipmode(#31)",
+61)--------"l_comment(#32)"
+62)------]
 63)----},
 64)----{
-65)------"id": 3,
-66)------"kind": "scan",
-67)------"title": "⊞ Scan",
-68)------"table_name": "lineitem",
-69)------"columns": [
-70)--------"l_orderkey(#17)",
-71)--------"l_partkey(#18)",
-72)--------"l_suppkey(#19)",
-73)--------"l_linenumber(#20)",
-74)--------"l_quantity(#21)",
-75)--------"l_extendedprice(#22)",
-76)--------"l_discount(#23)",
-77)--------"l_tax(#24)",
-78)--------"l_returnflag(#25)",
-79)--------"l_linestatus(#26)",
-80)--------"l_shipdate(#27)",
-81)--------"l_commitdate(#28)",
-82)--------"l_receiptdate(#29)",
-83)--------"l_shipinstruct(#30)",
-84)--------"l_shipmode(#31)",
-85)--------"l_comment(#32)"
+65)------"id": 21,
+66)------"kind": "selection",
+67)------"title": "σ Selection",
+68)------"predicate": "(l_returnflag(#25) = \"R\")",
+69)------"input": 3
+70)----},
+71)----{
+72)------"id": 1,
+73)------"kind": "scan",
+74)------"title": "⊞ Scan",
+75)------"table_name": "orders",
+76)------"columns": [
+77)--------"o_orderkey(#8)",
+78)--------"o_custkey(#9)",
+79)--------"o_orderstatus(#10)",
+80)--------"o_totalprice(#11)",
+81)--------"o_orderdate(#12)",
+82)--------"o_orderpriority(#13)",
+83)--------"o_clerk(#14)",
+84)--------"o_shippriority(#15)",
+85)--------"o_comment(#16)"
 86)------]
 87)----},
 88)----{
-89)------"id": 21,
+89)------"id": 29,
 90)------"kind": "selection",
 91)------"title": "σ Selection",
-92)------"predicate": "(l_returnflag(#25) = \"R\")",
-93)------"input": 3
+92)------"predicate": "((o_orderdate(#12) >= CAST(\"1993-10-01\" AS Date32)) AND (o_orderdate(#12) < CAST(\"1994-01-01\" AS Date32)))",
+93)------"input": 1
 94)----},
 95)----{
-96)------"id": 39,
+96)------"id": 47,
 97)------"kind": "join",
 98)------"title": "⋈ InnerJoin",
 99)------"join_type": "Inner",
 100)------"condition": "(l_orderkey(#17) = o_orderkey(#8))",
-101)------"outer": 29,
-102)------"inner": 21
+101)------"outer": 21,
+102)------"inner": 29
 103)----},
 104)----{
-105)------"id": 40,
+105)------"id": 48,
 106)------"kind": "join",
 107)------"title": "⋈ InnerJoin",
 108)------"join_type": "Inner",
 109)------"condition": "(c_custkey(#0) = o_custkey(#9))",
-110)------"outer": 38,
-111)------"inner": 39
+110)------"outer": 46,
+111)------"inner": 47
 112)----},
 113)----{
-114)------"id": 41,
+114)------"id": 49,
 115)------"kind": "aggregation",
 116)------"title": "γ Aggregation",
 117)------"keys": "c_custkey(#0), c_name(#1), c_acctbal(#5), c_phone(#4), n_name(#34), c_address(#2), c_comment(#7)",
 118)------"aggregates": [
 119)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#37) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
 120)------],
-121)------"input": 40
+121)------"input": 48
 122)----},
 123)----{
-124)------"id": 42,
+124)------"id": 50,
 125)------"kind": "projection",
 126)------"title": "π Projection",
 127)------"columns": [
@@ -169,30 +169,30 @@ limit 10;');
 134)--------"c_phone(#4)",
 135)--------"c_comment(#7)"
 136)------],
-137)------"input": 41
+137)------"input": 49
 138)----},
 139)----{
-140)------"id": 43,
+140)------"id": 51,
 141)------"kind": "sort",
 142)------"title": "⇞ Sort",
 143)------"keys": [
 144)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#37) Desc NullsFirst"
 145)------],
-146)------"input": 42
+146)------"input": 50
 147)----},
 148)----{
-149)------"id": 44,
+149)------"id": 52,
 150)------"kind": "limit",
 151)------"title": "τ Limit",
 152)------"fetch": "10",
 153)------"offset": "0",
-154)------"input": 43
+154)------"input": 51
 155)----},
 156)----{
-157)------"id": 45,
+157)------"id": 53,
 158)------"kind": "output",
 159)------"title": "= Output",
-160)------"input": 44
+160)------"input": 52
 161)----}
 162)--]
 163)}

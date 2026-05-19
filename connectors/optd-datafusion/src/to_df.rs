@@ -3,7 +3,7 @@
 //! Table providers are collected asynchronously once in [`to_logical_plan`];
 //! all subsequent conversion is synchronous.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use datafusion::arrow::datatypes::Field;
@@ -504,8 +504,16 @@ fn convert_operator_inner(
                     outer_refs,
                     column_qualifiers,
                 )?;
-                let condition =
-                    convert_expr(join.on, ctx, tables, session, outer_refs, column_qualifiers)?;
+                let condition = convert_join_condition(
+                    join.on,
+                    join.outer,
+                    join.inner,
+                    ctx,
+                    tables,
+                    session,
+                    outer_refs,
+                    column_qualifiers,
+                )?;
                 let plan = LogicalPlanBuilder::from(outer)
                     .join_on(inner, DFJoinType::LeftMark, Some(condition))?
                     .build()?;
@@ -546,8 +554,16 @@ fn convert_operator_inner(
                     spans: Default::default(),
                 });
             }
-            let condition =
-                convert_expr(join.on, ctx, tables, session, outer_refs, column_qualifiers)?;
+            let condition = convert_join_condition(
+                join.on,
+                join.outer,
+                join.inner,
+                ctx,
+                tables,
+                session,
+                outer_refs,
+                column_qualifiers,
+            )?;
             let df_join_type = if use_lateral_subquery {
                 DFJoinType::Inner
             } else {
@@ -752,10 +768,109 @@ fn convert_semi_anti_join(
         outer_refs,
         column_qualifiers,
     )?;
-    let condition = convert_expr(join.on, ctx, tables, session, outer_refs, column_qualifiers)?;
+    let condition = convert_join_condition(
+        join.on,
+        join.outer,
+        join.inner,
+        ctx,
+        tables,
+        session,
+        outer_refs,
+        column_qualifiers,
+    )?;
     Ok(LogicalPlanBuilder::from(outer)
         .join_on(inner, convert_join_type(&join.join_type)?, Some(condition))?
         .build()?)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn convert_join_condition(
+    on: optd::Expr,
+    outer: Operator,
+    inner: Operator,
+    ctx: &QueryContext,
+    tables: &TableMap,
+    session: &SessionContext,
+    outer_refs: &HashSet<optd::Column>,
+    column_qualifiers: &ColumnQualifiers,
+) -> ToDFResult<DFExpr> {
+    let outer_cols = available_columns_set(ctx, outer);
+    let inner_cols = available_columns_set(ctx, inner);
+    convert_join_condition_inner(
+        on,
+        &outer_cols,
+        &inner_cols,
+        ctx,
+        tables,
+        session,
+        outer_refs,
+        column_qualifiers,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn convert_join_condition_inner(
+    expr: optd::Expr,
+    outer_cols: &HashSet<optd::Column>,
+    inner_cols: &HashSet<optd::Column>,
+    ctx: &QueryContext,
+    tables: &TableMap,
+    session: &SessionContext,
+    outer_refs: &HashSet<optd::Column>,
+    column_qualifiers: &ColumnQualifiers,
+) -> ToDFResult<DFExpr> {
+    match expr.get(ctx) {
+        ExprData::Nary {
+            op: NaryOp::And,
+            exprs,
+        } => {
+            let mut exprs = exprs.iter();
+            let first = exprs
+                .next()
+                .ok_or_else(|| ToDFError::Unsupported("empty join condition".into()))?;
+            let first = convert_join_condition_inner(
+                *first,
+                outer_cols,
+                inner_cols,
+                ctx,
+                tables,
+                session,
+                outer_refs,
+                column_qualifiers,
+            )?;
+            exprs.try_fold(first, |acc, expr| {
+                Ok(acc.and(convert_join_condition_inner(
+                    *expr,
+                    outer_cols,
+                    inner_cols,
+                    ctx,
+                    tables,
+                    session,
+                    outer_refs,
+                    column_qualifiers,
+                )?))
+            })
+        }
+        ExprData::Binary {
+            op: BinaryOp::Eq,
+            left,
+            right,
+        } => {
+            let left_col = column_ref(*left, ctx);
+            let right_col = column_ref(*right, ctx);
+            let swap = left_col.is_some_and(|col| inner_cols.contains(&col))
+                && right_col.is_some_and(|col| outer_cols.contains(&col));
+            let (left, right) = if swap {
+                (*right, *left)
+            } else {
+                (*left, *right)
+            };
+            let left = convert_expr(left, ctx, tables, session, outer_refs, column_qualifiers)?;
+            let right = convert_expr(right, ctx, tables, session, outer_refs, column_qualifiers)?;
+            Ok(left.eq(right))
+        }
+        _ => convert_expr(expr, ctx, tables, session, outer_refs, column_qualifiers),
+    }
 }
 
 fn convert_conjuncts(
@@ -788,6 +903,22 @@ fn single_available_column(op: Operator, ctx: &QueryContext) -> Option<optd::Col
         .get::<optd::AvailableColumns>(ctx, op)
         .unwrap_or_default();
     (cols.len() == 1).then_some(cols[0])
+}
+
+fn available_columns_set(ctx: &QueryContext, op: Operator) -> HashSet<optd::Column> {
+    let mut analyses = optd::AnalysisContext::new();
+    analyses
+        .get::<optd::AvailableColumns>(ctx, op)
+        .unwrap_or_default()
+        .into_iter()
+        .collect()
+}
+
+fn column_ref(expr: optd::Expr, ctx: &QueryContext) -> Option<optd::Column> {
+    match expr.get(ctx) {
+        ExprData::ColumnRef(col) => Some(*col),
+        _ => None,
+    }
 }
 
 fn scalar_subquery_expr(

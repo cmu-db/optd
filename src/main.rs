@@ -2,11 +2,12 @@ use arrow_schema::DataType;
 use optd::optimize::join_ordering::collect_join_group_roots;
 use optd::{
     AggregateExpr, AggregateFunction, Aggregation, AnalysisContext, BinaryOp, BoxDrawingRenderer,
-    BoxRendererConfig, ColorMode, ColumnData, ExprData, FreeColumns, Join, JoinOrdering, JoinType,
-    Map, NaryOp, OperatorData, OperatorRewriteAdaptor, OptimizerContext, Output, PassManager,
-    PredicatePushdown, Projection, QueryContext, QueryFormatConfig, QueryFormatter, ScalarFunction,
-    ScalarValue, Scan, Selection, SubqueryToJoin, TableFunction, TableFunctionDef, TableRef,
-    UnaryOp, build_hypergraph, tpch::tpch_query,
+    BoxRendererConfig, ColorMode, ColumnData, ExprData, FreeColumns, Join, JoinOrdering,
+    JoinTreeNormalize, JoinType, Map, NaryOp, OperatorData, OperatorRewriteAdaptor,
+    OptimizerContext, Output, PassManager, PredicatePushdown, Projection, QueryContext,
+    QueryFormatConfig, QueryFormatter, ScalarFunction, ScalarValue, Scan, Selection,
+    SubqueryToJoin, TableFunction, TableFunctionDef, TableRef, UnaryOp, build_hypergraph,
+    tpch::tpch_query,
 };
 
 fn main() {
@@ -36,6 +37,7 @@ fn main() {
             let mut pm = PassManager::new();
             pm.add_pass(SubqueryToJoin);
             pm.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
+            pm.add_pass(JoinTreeNormalize::new());
             pm.add_pass(JoinOrdering::new());
             match pm.run_with_trace(&mut opt) {
                 Ok(trace) => {
@@ -65,6 +67,7 @@ fn main() {
         let mut pm = PassManager::new();
         pm.add_pass(SubqueryToJoin);
         pm.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
+        pm.add_pass(JoinTreeNormalize::new());
         pm.add_pass(JoinOrdering::new());
         let _res = pm.run(&mut opt);
         if let Some(root) = opt.query.root() {
