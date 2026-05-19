@@ -48,77 +48,77 @@ limit 10;');
 14)------]
 15)----},
 16)----{
-17)------"id": 1,
+17)------"id": 3,
 18)------"kind": "scan",
 19)------"title": "⊞ Scan",
-20)------"table_name": "part",
+20)------"table_name": "supplier",
 21)------"columns": [
-22)--------"p_partkey(#5)",
-23)--------"p_name(#6)",
-24)--------"p_mfgr(#7)",
-25)--------"p_brand(#8)",
-26)--------"p_type(#9)",
-27)--------"p_size(#10)",
-28)--------"p_container(#11)",
-29)--------"p_retailprice(#12)",
-30)--------"p_comment(#13)"
-31)------]
-32)----},
-33)----{
-34)------"id": 33,
-35)------"kind": "selection",
-36)------"title": "σ Selection",
-37)------"predicate": "((p_brand(#8) != \"Brand#45\") AND (p_type(#9) NOT LIKE \"MEDIUM POLISHED%\") AND ((p_size(#10) = 49) OR (p_size(#10) = 14) OR (p_size(#10) = 23) OR (p_size(#10) = 45) OR (p_size(#10) = 19) OR (p_size(#10) = 3) OR (p_size(#10) = 36) OR (p_size(#10) = 9)))",
-38)------"input": 1
-39)----},
-40)----{
-41)------"id": 44,
-42)------"kind": "join",
-43)------"title": "⋈ InnerJoin",
-44)------"join_type": "Inner",
-45)------"condition": "(p_partkey(#5) = ps_partkey(#0))",
-46)------"outer": 0,
-47)------"inner": 33
-48)----},
-49)----{
-50)------"id": 3,
-51)------"kind": "scan",
-52)------"title": "⊞ Scan",
-53)------"table_name": "supplier",
-54)------"columns": [
-55)--------"s_suppkey(#14)",
-56)--------"s_name(#15)",
-57)--------"s_address(#16)",
-58)--------"s_nationkey(#17)",
-59)--------"s_phone(#18)",
-60)--------"s_acctbal(#19)",
-61)--------"s_comment(#20)"
-62)------]
-63)----},
-64)----{
-65)------"id": 4,
-66)------"kind": "selection",
-67)------"title": "σ Selection",
-68)------"predicate": "(s_comment(#20) LIKE \"%Customer%Complaints%\")",
-69)------"input": 3
-70)----},
-71)----{
-72)------"id": 5,
-73)------"kind": "projection",
-74)------"title": "π Projection",
-75)------"columns": [
-76)--------"s_suppkey(#14)"
-77)------],
-78)------"input": 4
+22)--------"s_suppkey(#14)",
+23)--------"s_name(#15)",
+24)--------"s_address(#16)",
+25)--------"s_nationkey(#17)",
+26)--------"s_phone(#18)",
+27)--------"s_acctbal(#19)",
+28)--------"s_comment(#20)"
+29)------]
+30)----},
+31)----{
+32)------"id": 4,
+33)------"kind": "selection",
+34)------"title": "σ Selection",
+35)------"predicate": "(s_comment(#20) LIKE \"%Customer%Complaints%\")",
+36)------"input": 3
+37)----},
+38)----{
+39)------"id": 5,
+40)------"kind": "projection",
+41)------"title": "π Projection",
+42)------"columns": [
+43)--------"s_suppkey(#14)"
+44)------],
+45)------"input": 4
+46)----},
+47)----{
+48)------"id": 44,
+49)------"kind": "join",
+50)------"title": "▷ LeftAntiJoin",
+51)------"join_type": "LeftAnti",
+52)------"condition": "(ps_suppkey(#1) = s_suppkey(#14))",
+53)------"outer": 0,
+54)------"inner": 5
+55)----},
+56)----{
+57)------"id": 1,
+58)------"kind": "scan",
+59)------"title": "⊞ Scan",
+60)------"table_name": "part",
+61)------"columns": [
+62)--------"p_partkey(#5)",
+63)--------"p_name(#6)",
+64)--------"p_mfgr(#7)",
+65)--------"p_brand(#8)",
+66)--------"p_type(#9)",
+67)--------"p_size(#10)",
+68)--------"p_container(#11)",
+69)--------"p_retailprice(#12)",
+70)--------"p_comment(#13)"
+71)------]
+72)----},
+73)----{
+74)------"id": 33,
+75)------"kind": "selection",
+76)------"title": "σ Selection",
+77)------"predicate": "((p_brand(#8) != \"Brand#45\") AND (p_type(#9) NOT LIKE \"MEDIUM POLISHED%\") AND ((p_size(#10) = 49) OR (p_size(#10) = 14) OR (p_size(#10) = 23) OR (p_size(#10) = 45) OR (p_size(#10) = 19) OR (p_size(#10) = 3) OR (p_size(#10) = 36) OR (p_size(#10) = 9)))",
+78)------"input": 1
 79)----},
 80)----{
 81)------"id": 45,
 82)------"kind": "join",
-83)------"title": "▷ LeftAntiJoin",
-84)------"join_type": "LeftAnti",
-85)------"condition": "(ps_suppkey(#1) = s_suppkey(#14))",
+83)------"title": "⋈ InnerJoin",
+84)------"join_type": "Inner",
+85)------"condition": "(p_partkey(#5) = ps_partkey(#0))",
 86)------"outer": 44,
-87)------"inner": 5
+87)------"inner": 33
 88)----},
 89)----{
 90)------"id": 46,

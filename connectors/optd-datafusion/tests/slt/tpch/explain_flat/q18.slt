@@ -69,96 +69,96 @@ order by
 34)------]
 35)----},
 36)----{
-37)------"id": 3,
+37)------"id": 5,
 38)------"kind": "scan",
 39)------"title": "⊞ Scan",
 40)------"table_name": "lineitem",
 41)------"columns": [
-42)--------"l_orderkey(#17)",
-43)--------"l_partkey(#18)",
-44)--------"l_suppkey(#19)",
-45)--------"l_linenumber(#20)",
-46)--------"l_quantity(#21)",
-47)--------"l_extendedprice(#22)",
-48)--------"l_discount(#23)",
-49)--------"l_tax(#24)",
-50)--------"l_returnflag(#25)",
-51)--------"l_linestatus(#26)",
-52)--------"l_shipdate(#27)",
-53)--------"l_commitdate(#28)",
-54)--------"l_receiptdate(#29)",
-55)--------"l_shipinstruct(#30)",
-56)--------"l_shipmode(#31)",
-57)--------"l_comment(#32)"
+42)--------"l_orderkey(#33)",
+43)--------"l_partkey(#34)",
+44)--------"l_suppkey(#35)",
+45)--------"l_linenumber(#36)",
+46)--------"l_quantity(#37)",
+47)--------"l_extendedprice(#38)",
+48)--------"l_discount(#39)",
+49)--------"l_tax(#40)",
+50)--------"l_returnflag(#41)",
+51)--------"l_linestatus(#42)",
+52)--------"l_shipdate(#43)",
+53)--------"l_commitdate(#44)",
+54)--------"l_receiptdate(#45)",
+55)--------"l_shipinstruct(#46)",
+56)--------"l_shipmode(#47)",
+57)--------"l_comment(#48)"
 58)------]
 59)----},
 60)----{
-61)------"id": 48,
-62)------"kind": "join",
-63)------"title": "⋈ InnerJoin",
-64)------"join_type": "Inner",
-65)------"condition": "(o_orderkey(#8) = l_orderkey(#17))",
-66)------"outer": 1,
-67)------"inner": 3
-68)----},
-69)----{
-70)------"id": 5,
-71)------"kind": "scan",
-72)------"title": "⊞ Scan",
-73)------"table_name": "lineitem",
-74)------"columns": [
-75)--------"l_orderkey(#33)",
-76)--------"l_partkey(#34)",
-77)--------"l_suppkey(#35)",
-78)--------"l_linenumber(#36)",
-79)--------"l_quantity(#37)",
-80)--------"l_extendedprice(#38)",
-81)--------"l_discount(#39)",
-82)--------"l_tax(#40)",
-83)--------"l_returnflag(#41)",
-84)--------"l_linestatus(#42)",
-85)--------"l_shipdate(#43)",
-86)--------"l_commitdate(#44)",
-87)--------"l_receiptdate(#45)",
-88)--------"l_shipinstruct(#46)",
-89)--------"l_shipmode(#47)",
-90)--------"l_comment(#48)"
-91)------]
-92)----},
-93)----{
-94)------"id": 6,
-95)------"kind": "aggregation",
-96)------"title": "γ Aggregation",
-97)------"keys": "l_orderkey(#33)",
-98)------"aggregates": [
-99)--------"sum(lineitem.l_quantity)(#49) := sum(l_quantity(#37))"
-100)------],
-101)------"input": 5
-102)----},
-103)----{
-104)------"id": 7,
-105)------"kind": "selection",
-106)------"title": "σ Selection",
-107)------"predicate": "(sum(lineitem.l_quantity)(#49) > 300)",
-108)------"input": 6
-109)----},
-110)----{
-111)------"id": 8,
-112)------"kind": "projection",
-113)------"title": "π Projection",
-114)------"columns": [
-115)--------"l_orderkey(#33)"
-116)------],
-117)------"input": 7
+61)------"id": 6,
+62)------"kind": "aggregation",
+63)------"title": "γ Aggregation",
+64)------"keys": "l_orderkey(#33)",
+65)------"aggregates": [
+66)--------"sum(lineitem.l_quantity)(#49) := sum(l_quantity(#37))"
+67)------],
+68)------"input": 5
+69)----},
+70)----{
+71)------"id": 7,
+72)------"kind": "selection",
+73)------"title": "σ Selection",
+74)------"predicate": "(sum(lineitem.l_quantity)(#49) > 300)",
+75)------"input": 6
+76)----},
+77)----{
+78)------"id": 8,
+79)------"kind": "projection",
+80)------"title": "π Projection",
+81)------"columns": [
+82)--------"l_orderkey(#33)"
+83)------],
+84)------"input": 7
+85)----},
+86)----{
+87)------"id": 48,
+88)------"kind": "join",
+89)------"title": "⋉ LeftSemiJoin",
+90)------"join_type": "LeftSemi",
+91)------"condition": "(o_orderkey(#8) = l_orderkey(#33))",
+92)------"outer": 1,
+93)------"inner": 8
+94)----},
+95)----{
+96)------"id": 3,
+97)------"kind": "scan",
+98)------"title": "⊞ Scan",
+99)------"table_name": "lineitem",
+100)------"columns": [
+101)--------"l_orderkey(#17)",
+102)--------"l_partkey(#18)",
+103)--------"l_suppkey(#19)",
+104)--------"l_linenumber(#20)",
+105)--------"l_quantity(#21)",
+106)--------"l_extendedprice(#22)",
+107)--------"l_discount(#23)",
+108)--------"l_tax(#24)",
+109)--------"l_returnflag(#25)",
+110)--------"l_linestatus(#26)",
+111)--------"l_shipdate(#27)",
+112)--------"l_commitdate(#28)",
+113)--------"l_receiptdate(#29)",
+114)--------"l_shipinstruct(#30)",
+115)--------"l_shipmode(#31)",
+116)--------"l_comment(#32)"
+117)------]
 118)----},
 119)----{
 120)------"id": 49,
 121)------"kind": "join",
-122)------"title": "⋉ LeftSemiJoin",
-123)------"join_type": "LeftSemi",
-124)------"condition": "(o_orderkey(#8) = l_orderkey(#33))",
+122)------"title": "⋈ InnerJoin",
+123)------"join_type": "Inner",
+124)------"condition": "(o_orderkey(#8) = l_orderkey(#17))",
 125)------"outer": 48,
-126)------"inner": 8
+126)------"inner": 3
 127)----},
 128)----{
 129)------"id": 50,

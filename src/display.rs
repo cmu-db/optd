@@ -243,8 +243,6 @@ pub struct OptimizerVisualizerPass {
 pub struct OptimizerVisualizerNode {
     pub op: String,
     pub title: String,
-    pub cost: f64,
-    pub rows: f64,
     pub table: Option<String>,
     pub children: Vec<OptimizerVisualizerNode>,
     pub properties: BTreeMap<String, OptimizerVisualizerValue>,
@@ -311,8 +309,6 @@ impl OptimizerVisualizerNode {
         Self {
             op: node.kind.clone(),
             title: node.title.clone(),
-            cost: 0.0,
-            rows: 0.0,
             table: display_node_table(node),
             children: node
                 .inputs
@@ -339,7 +335,7 @@ impl Serialize for OptimizerVisualizerNode {
     where
         S: Serializer,
     {
-        let mut len = 4 + self.properties.len();
+        let mut len = 2 + self.properties.len();
         if self.table.is_some() {
             len += 1;
         }
@@ -350,8 +346,6 @@ impl Serialize for OptimizerVisualizerNode {
         let mut map = serializer.serialize_map(Some(len))?;
         map.serialize_entry("op", &self.op)?;
         map.serialize_entry("title", &self.title)?;
-        map.serialize_entry("cost", &self.cost)?;
-        map.serialize_entry("rows", &self.rows)?;
         if let Some(table) = &self.table {
             map.serialize_entry("table", table)?;
         }
@@ -574,9 +568,19 @@ impl BoxDrawingRenderer {
     }
 
     fn render_metadata_entry(&self, key: &str, value: &DisplayValue) -> Vec<RenderDetail> {
-        match value {
-            DisplayValue::Atom(value) => {
-                vec![RenderDetail::metadata_scalar(key, value)]
+        let display_value = match (key, value) {
+            ("estimated_rows", DisplayValue::Atom(s)) => {
+                if let Ok(n) = s.parse::<f64>() {
+                    DisplayValue::Atom(format_human_num(n))
+                } else {
+                    value.clone()
+                }
+            }
+            _ => value.clone(),
+        };
+        match display_value {
+            DisplayValue::Atom(v) => {
+                vec![RenderDetail::metadata_scalar(key, &v)]
             }
             DisplayValue::List(values) => {
                 let mut details = Vec::with_capacity(values.len() + 1);
@@ -584,7 +588,7 @@ impl BoxDrawingRenderer {
                 details.extend(
                     values
                         .iter()
-                        .map(|value| RenderDetail::metadata_value(format!("  {value}"))),
+                        .map(|v| RenderDetail::metadata_value(format!("  {v}"))),
                 );
                 details
             }
@@ -990,5 +994,15 @@ impl std::fmt::Display for RenderedBlock {
         }
 
         Ok(())
+    }
+}
+
+fn format_human_num(n: f64) -> String {
+    if n >= 1_000_000.0 {
+        format!("{:.1}m", n / 1_000_000.0)
+    } else if n >= 1_000.0 {
+        format!("{:.1}k", n / 1_000.0)
+    } else {
+        format!("{:.1}", n)
     }
 }

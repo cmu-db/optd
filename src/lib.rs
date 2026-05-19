@@ -883,7 +883,11 @@ impl QueryContext {
         &self,
         pass_name: impl Into<String>,
     ) -> OptimizerVisualizerPass {
-        let node = QueryFormatter::new(self).format();
+        let node = QueryFormatter::with_config(
+            self,
+            QueryFormatConfig::new().with_analysis::<CardinalityEstimationV1>(),
+        )
+        .format();
         OptimizerVisualizerPass::new(pass_name, OptimizerVisualizerNode::from_display_node(&node))
     }
 
@@ -989,10 +993,10 @@ impl DisplayableOperatorAnalysis for AvailableColumns {
 }
 
 impl DisplayableOperatorAnalysis for CardinalityEstimationV1 {
-    const DISPLAY_KEY: &'static str = "estimate_rows_v1";
+    const DISPLAY_KEY: &'static str = "estimated_rows";
 
     fn format_output(_formatter: &QueryFormatter<'_>, output: Self::Value) -> DisplayValue {
-        DisplayValue::Atom(output.rows.to_string())
+        DisplayValue::Atom(output.rows.value.to_string())
     }
 }
 
@@ -2151,8 +2155,9 @@ mod tests {
         assert_eq!(passes[0]["passName"], "0. Initial");
         assert_eq!(passes[0]["root"]["op"], "output");
         assert_eq!(passes[0]["root"]["title"], "= Output");
-        assert_eq!(passes[0]["root"]["cost"], 0.0);
-        assert_eq!(passes[0]["root"]["rows"], 0.0);
+        assert_eq!(passes[0]["root"]["estimated_rows"], "330");
+        assert!(passes[0]["root"].get("cost").is_none());
+        assert!(passes[0]["root"].get("rows").is_none());
         assert_eq!(passes[0]["root"]["children"][0]["op"], "selection");
         assert_eq!(passes[0]["root"]["children"][0]["title"], "σ Selection");
         assert!(passes[0].get("durationMs").is_none());
@@ -2288,6 +2293,25 @@ mod tests {
         let nodes = plan["nodes"].as_array().unwrap();
         assert_eq!(nodes[0]["analysis::available_columns"][0], "id(#0)");
         assert_eq!(nodes[1]["analysis::available_columns"][0], "id(#0)");
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn optimizer_visualizer_node_passes_through_metadata_rows() {
+        let node = DisplayNode::with_kind("const_scan", "⊞ ConstScan")
+            .with_field("rows", "7")
+            .with_metadata("estimated_rows", "7");
+
+        let visualizer = OptimizerVisualizerNode::from_display_node(&node);
+
+        assert!(matches!(
+            visualizer.properties.get("estimated_rows"),
+            Some(OptimizerVisualizerValue::String(value)) if value == "7"
+        ));
+        assert!(matches!(
+            visualizer.properties.get("rows"),
+            Some(OptimizerVisualizerValue::String(value)) if value == "7"
+        ));
     }
 
     #[test]

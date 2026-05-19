@@ -82,8 +82,6 @@ SELECT explain_flat('SELECT a.a_id, b.b_id, c.a_id, c.b_id FROM a, b, c WHERE a.
 67)--]
 68)}
 
-# Transient equality edges are preserved for backend join execution.
-
 statement ok
 CREATE TABLE ta (x BIGINT);
 

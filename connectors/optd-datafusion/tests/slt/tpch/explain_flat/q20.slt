@@ -56,213 +56,213 @@ order by
 16)------]
 17)----},
 18)----{
-19)------"id": 1,
+19)------"id": 3,
 20)------"kind": "scan",
 21)------"title": "⊞ Scan",
-22)------"table_name": "nation",
+22)------"table_name": "partsupp",
 23)------"columns": [
-24)--------"n_nationkey(#7)",
-25)--------"n_name(#8)",
-26)--------"n_regionkey(#9)",
-27)--------"n_comment(#10)"
-28)------]
-29)----},
-30)----{
-31)------"id": 50,
-32)------"kind": "selection",
-33)------"title": "σ Selection",
-34)------"predicate": "(n_name(#8) = \"CANADA\")",
-35)------"input": 1
-36)----},
-37)----{
-38)------"id": 58,
-39)------"kind": "join",
-40)------"title": "⋈ InnerJoin",
-41)------"join_type": "Inner",
-42)------"condition": "(s_nationkey(#3) = n_nationkey(#7))",
-43)------"outer": 0,
-44)------"inner": 50
-45)----},
-46)----{
-47)------"id": 3,
-48)------"kind": "scan",
-49)------"title": "⊞ Scan",
-50)------"table_name": "partsupp",
-51)------"columns": [
-52)--------"ps_partkey(#11)",
-53)--------"ps_suppkey(#12)",
-54)--------"ps_availqty(#13)",
-55)--------"ps_supplycost(#14)",
-56)--------"ps_comment(#15)"
-57)------]
-58)----},
-59)----{
-60)------"id": 4,
-61)------"kind": "scan",
-62)------"title": "⊞ Scan",
-63)------"table_name": "part",
-64)------"columns": [
-65)--------"p_partkey(#16)",
-66)--------"p_name(#17)",
-67)--------"p_mfgr(#18)",
-68)--------"p_brand(#19)",
-69)--------"p_type(#20)",
-70)--------"p_size(#21)",
-71)--------"p_container(#22)",
-72)--------"p_retailprice(#23)",
-73)--------"p_comment(#24)"
-74)------]
-75)----},
-76)----{
-77)------"id": 5,
-78)------"kind": "selection",
-79)------"title": "σ Selection",
-80)------"predicate": "(p_name(#17) LIKE \"forest%\")",
-81)------"input": 4
-82)----},
-83)----{
-84)------"id": 6,
-85)------"kind": "projection",
-86)------"title": "π Projection",
-87)------"columns": [
-88)--------"p_partkey(#16)"
-89)------],
-90)------"input": 5
-91)----},
-92)----{
-93)------"id": 56,
-94)------"kind": "join",
-95)------"title": "⟕ᵐ LeftMarkJoin",
-96)------"join_type": "LeftMark",
-97)------"condition": "(ps_partkey(#11) = p_partkey(#16))",
-98)------"marker": "in_mark(#44)",
-99)------"outer": 3,
-100)------"inner": 6
-101)----},
-102)----{
-103)------"id": 60,
-104)------"kind": "selection",
-105)------"title": "σ Selection",
-106)------"predicate": "in_mark(#44)",
-107)------"input": 56
-108)----},
-109)----{
-110)------"id": 7,
-111)------"kind": "scan",
-112)------"title": "⊞ Scan",
-113)------"table_name": "lineitem",
-114)------"columns": [
-115)--------"l_orderkey(#25)",
-116)--------"l_partkey(#26)",
-117)--------"l_suppkey(#27)",
-118)--------"l_linenumber(#28)",
-119)--------"l_quantity(#29)",
-120)--------"l_extendedprice(#30)",
-121)--------"l_discount(#31)",
-122)--------"l_tax(#32)",
-123)--------"l_returnflag(#33)",
-124)--------"l_linestatus(#34)",
-125)--------"l_shipdate(#35)",
-126)--------"l_commitdate(#36)",
-127)--------"l_receiptdate(#37)",
-128)--------"l_shipinstruct(#38)",
-129)--------"l_shipmode(#39)",
-130)--------"l_comment(#40)"
-131)------]
-132)----},
-133)----{
-134)------"id": 8,
-135)------"kind": "selection",
-136)------"title": "σ Selection",
-137)------"predicate": "((((l_partkey(#26) = ps_partkey(#11)) AND (l_suppkey(#27) = ps_suppkey(#12))) AND (l_shipdate(#35) >= CAST(\"1994-01-01\" AS Date32))) AND (l_shipdate(#35) < (CAST(\"1994-01-01\" AS Date32) + INTERVAL(12mo 0d 0ns))))",
-138)------"input": 7
+24)--------"ps_partkey(#11)",
+25)--------"ps_suppkey(#12)",
+26)--------"ps_availqty(#13)",
+27)--------"ps_supplycost(#14)",
+28)--------"ps_comment(#15)"
+29)------]
+30)----},
+31)----{
+32)------"id": 4,
+33)------"kind": "scan",
+34)------"title": "⊞ Scan",
+35)------"table_name": "part",
+36)------"columns": [
+37)--------"p_partkey(#16)",
+38)--------"p_name(#17)",
+39)--------"p_mfgr(#18)",
+40)--------"p_brand(#19)",
+41)--------"p_type(#20)",
+42)--------"p_size(#21)",
+43)--------"p_container(#22)",
+44)--------"p_retailprice(#23)",
+45)--------"p_comment(#24)"
+46)------]
+47)----},
+48)----{
+49)------"id": 5,
+50)------"kind": "selection",
+51)------"title": "σ Selection",
+52)------"predicate": "(p_name(#17) LIKE \"forest%\")",
+53)------"input": 4
+54)----},
+55)----{
+56)------"id": 6,
+57)------"kind": "projection",
+58)------"title": "π Projection",
+59)------"columns": [
+60)--------"p_partkey(#16)"
+61)------],
+62)------"input": 5
+63)----},
+64)----{
+65)------"id": 56,
+66)------"kind": "join",
+67)------"title": "⟕ᵐ LeftMarkJoin",
+68)------"join_type": "LeftMark",
+69)------"condition": "(ps_partkey(#11) = p_partkey(#16))",
+70)------"marker": "in_mark(#44)",
+71)------"outer": 3,
+72)------"inner": 6
+73)----},
+74)----{
+75)------"id": 60,
+76)------"kind": "selection",
+77)------"title": "σ Selection",
+78)------"predicate": "in_mark(#44)",
+79)------"input": 56
+80)----},
+81)----{
+82)------"id": 7,
+83)------"kind": "scan",
+84)------"title": "⊞ Scan",
+85)------"table_name": "lineitem",
+86)------"columns": [
+87)--------"l_orderkey(#25)",
+88)--------"l_partkey(#26)",
+89)--------"l_suppkey(#27)",
+90)--------"l_linenumber(#28)",
+91)--------"l_quantity(#29)",
+92)--------"l_extendedprice(#30)",
+93)--------"l_discount(#31)",
+94)--------"l_tax(#32)",
+95)--------"l_returnflag(#33)",
+96)--------"l_linestatus(#34)",
+97)--------"l_shipdate(#35)",
+98)--------"l_commitdate(#36)",
+99)--------"l_receiptdate(#37)",
+100)--------"l_shipinstruct(#38)",
+101)--------"l_shipmode(#39)",
+102)--------"l_comment(#40)"
+103)------]
+104)----},
+105)----{
+106)------"id": 8,
+107)------"kind": "selection",
+108)------"title": "σ Selection",
+109)------"predicate": "((((l_partkey(#26) = ps_partkey(#11)) AND (l_suppkey(#27) = ps_suppkey(#12))) AND (l_shipdate(#35) >= CAST(\"1994-01-01\" AS Date32))) AND (l_shipdate(#35) < (CAST(\"1994-01-01\" AS Date32) + INTERVAL(12mo 0d 0ns))))",
+110)------"input": 7
+111)----},
+112)----{
+113)------"id": 9,
+114)------"kind": "aggregation",
+115)------"title": "γ Aggregation",
+116)------"keys": "",
+117)------"aggregates": [
+118)--------"sum(lineitem.l_quantity)(#41) := sum(l_quantity(#29))"
+119)------],
+120)------"input": 8
+121)----},
+122)----{
+123)------"id": 10,
+124)------"kind": "map",
+125)------"title": "χ Map",
+126)------"computations": [
+127)--------"Float64(0.5) * sum(lineitem.l_quantity)(#42) := (0.5 * sum(lineitem.l_quantity)(#41))"
+128)------],
+129)------"input": 9
+130)----},
+131)----{
+132)------"id": 11,
+133)------"kind": "projection",
+134)------"title": "π Projection",
+135)------"columns": [
+136)--------"Float64(0.5) * sum(lineitem.l_quantity)(#42)"
+137)------],
+138)------"input": 10
 139)----},
 140)----{
-141)------"id": 9,
-142)------"kind": "aggregation",
-143)------"title": "γ Aggregation",
-144)------"keys": "",
-145)------"aggregates": [
-146)--------"sum(lineitem.l_quantity)(#41) := sum(l_quantity(#29))"
-147)------],
-148)------"input": 8
-149)----},
-150)----{
-151)------"id": 10,
-152)------"kind": "map",
-153)------"title": "χ Map",
-154)------"computations": [
-155)--------"Float64(0.5) * sum(lineitem.l_quantity)(#42) := (0.5 * sum(lineitem.l_quantity)(#41))"
-156)------],
-157)------"input": 9
-158)----},
-159)----{
-160)------"id": 11,
-161)------"kind": "projection",
-162)------"title": "π Projection",
-163)------"columns": [
-164)--------"Float64(0.5) * sum(lineitem.l_quantity)(#42)"
-165)------],
-166)------"input": 10
-167)----},
-168)----{
-169)------"id": 61,
-170)------"kind": "join",
-171)------"title": "⟕₁ SingleJoin",
-172)------"join_type": "Single",
-173)------"condition": "true",
-174)------"outer": 60,
-175)------"inner": 11
-176)----},
-177)----{
-178)------"id": 62,
-179)------"kind": "selection",
-180)------"title": "σ Selection",
-181)------"predicate": "(ps_availqty(#13) > Float64(0.5) * sum(lineitem.l_quantity)(#42))",
-182)------"input": 61
-183)----},
-184)----{
-185)------"id": 63,
-186)------"kind": "projection",
-187)------"title": "π Projection",
-188)------"columns": [
-189)--------"ps_suppkey(#12)"
-190)------],
-191)------"input": 62
+141)------"id": 61,
+142)------"kind": "join",
+143)------"title": "⟕₁ SingleJoin",
+144)------"join_type": "Single",
+145)------"condition": "true",
+146)------"outer": 60,
+147)------"inner": 11
+148)----},
+149)----{
+150)------"id": 62,
+151)------"kind": "selection",
+152)------"title": "σ Selection",
+153)------"predicate": "(ps_availqty(#13) > Float64(0.5) * sum(lineitem.l_quantity)(#42))",
+154)------"input": 61
+155)----},
+156)----{
+157)------"id": 63,
+158)------"kind": "projection",
+159)------"title": "π Projection",
+160)------"columns": [
+161)--------"ps_suppkey(#12)"
+162)------],
+163)------"input": 62
+164)----},
+165)----{
+166)------"id": 64,
+167)------"kind": "join",
+168)------"title": "⋉ LeftSemiJoin",
+169)------"join_type": "LeftSemi",
+170)------"condition": "(s_suppkey(#0) = ps_suppkey(#12))",
+171)------"outer": 0,
+172)------"inner": 63
+173)----},
+174)----{
+175)------"id": 1,
+176)------"kind": "scan",
+177)------"title": "⊞ Scan",
+178)------"table_name": "nation",
+179)------"columns": [
+180)--------"n_nationkey(#7)",
+181)--------"n_name(#8)",
+182)--------"n_regionkey(#9)",
+183)--------"n_comment(#10)"
+184)------]
+185)----},
+186)----{
+187)------"id": 50,
+188)------"kind": "selection",
+189)------"title": "σ Selection",
+190)------"predicate": "(n_name(#8) = \"CANADA\")",
+191)------"input": 1
 192)----},
 193)----{
-194)------"id": 64,
+194)------"id": 65,
 195)------"kind": "join",
-196)------"title": "⋉ LeftSemiJoin",
-197)------"join_type": "LeftSemi",
-198)------"condition": "(s_suppkey(#0) = ps_suppkey(#12))",
-199)------"outer": 58,
-200)------"inner": 63
+196)------"title": "⋈ InnerJoin",
+197)------"join_type": "Inner",
+198)------"condition": "(s_nationkey(#3) = n_nationkey(#7))",
+199)------"outer": 64,
+200)------"inner": 50
 201)----},
 202)----{
-203)------"id": 65,
+203)------"id": 66,
 204)------"kind": "projection",
 205)------"title": "π Projection",
 206)------"columns": [
 207)--------"s_name(#1)",
 208)--------"s_address(#2)"
 209)------],
-210)------"input": 64
+210)------"input": 65
 211)----},
 212)----{
-213)------"id": 66,
+213)------"id": 67,
 214)------"kind": "sort",
 215)------"title": "⇞ Sort",
 216)------"keys": [
 217)--------"s_name(#1) Asc NullsLast"
 218)------],
-219)------"input": 65
+219)------"input": 66
 220)----},
 221)----{
-222)------"id": 67,
+222)------"id": 68,
 223)------"kind": "output",
 224)------"title": "= Output",
-225)------"input": 66
+225)------"input": 67
 226)----}
 227)--]
 228)}

@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use datafusion_sqllogictest::{DFSqlLogicTestError, TestContext};
 use optd_datafusion::runner::OptdRunner;
@@ -14,8 +15,31 @@ fn main() {
     let paths = collect_slt_paths(&filters);
 
     if override_files {
-        for path in paths {
-            update_slt(&path).unwrap_or_else(|err| panic!("failed to update {path:?}: {err:?}"));
+        let total = paths.len();
+        for (index, path) in paths.iter().enumerate() {
+            let started = Instant::now();
+            eprintln!("START [{}/{}] {}", index + 1, total, path.display());
+            match update_slt(path) {
+                Ok(()) => {
+                    eprintln!(
+                        "PASS  [{}/{}] {} ({:.3}s)",
+                        index + 1,
+                        total,
+                        path.display(),
+                        started.elapsed().as_secs_f64(),
+                    );
+                }
+                Err(err) => {
+                    eprintln!(
+                        "FAIL  [{}/{}] {} ({:.3}s)",
+                        index + 1,
+                        total,
+                        path.display(),
+                        started.elapsed().as_secs_f64(),
+                    );
+                    panic!("failed to update {path:?}: {err:?}");
+                }
+            }
         }
         return;
     }
