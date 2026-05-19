@@ -11,6 +11,8 @@ use std::path::PathBuf;
 use datafusion::error::{DataFusionError, Result as DFResult};
 use datafusion::prelude::{ParquetReadOptions, SessionConfig, SessionContext};
 
+use crate::config::OptdExtensionConfig;
+
 const TPCH_DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/tpch/sf-0.1");
 const TPCH_TABLES: &[&str] = &[
     "lineitem", "orders", "customer", "part", "partsupp", "supplier", "nation", "region",
@@ -46,7 +48,10 @@ pub async fn setup_tpch_session() -> DFResult<SessionContext> {
 
 /// Creates a `SessionContext` configured for interactive CLI use.
 pub fn session_context_with_information_schema() -> SessionContext {
-    SessionContext::new_with_config(SessionConfig::new().with_information_schema(true))
+    let config = SessionConfig::new()
+        .with_information_schema(true)
+        .with_option_extension(OptdExtensionConfig::default());
+    SessionContext::new_with_config(config)
 }
 
 fn tpch_parquet_path(table: &str) -> PathBuf {
@@ -56,6 +61,19 @@ fn tpch_parquet_path(table: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::OptdExtensionConfig;
+
+    #[test]
+    fn session_context_registers_optd_extension_defaults() {
+        let ctx = session_context_with_information_schema();
+        let config = ctx.copied_config();
+        let optd = config
+            .options()
+            .extensions
+            .get::<OptdExtensionConfig>()
+            .unwrap();
+        assert!(optd.log_explain_steps);
+    }
 
     #[tokio::test]
     async fn lineitem_count_at_sf01() {

@@ -17,6 +17,7 @@ use optd::{
 };
 use sqllogictest::{AsyncDB, DBOutput};
 
+use crate::config::OptdExtensionConfig;
 use crate::explain_udfs::{
     ExplainStep, explain_steps_box, explain_steps_box_with_config, register_explain_udfs,
 };
@@ -78,6 +79,16 @@ impl OptdRunner {
     pub fn new(session: SessionContext) -> Self {
         register_explain_udfs(&session);
         Self { session }
+    }
+
+    pub fn log_explain_steps_enabled(&self) -> bool {
+        self.session
+            .copied_config()
+            .options()
+            .extensions
+            .get::<OptdExtensionConfig>()
+            .map(|config| config.log_explain_steps)
+            .unwrap_or_else(|| OptdExtensionConfig::default().log_explain_steps)
     }
 
     pub async fn execute_sql(&self, sql: &str) -> Result<RunnerOutput, DFSqlLogicTestError> {
@@ -251,5 +262,29 @@ fn collect_table_scans<'a>(
     }
     for input in plan.inputs() {
         collect_table_scans(input, out);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OptdRunner;
+    use crate::config::OptdExtensionConfig;
+    use datafusion::prelude::{SessionConfig, SessionContext};
+
+    #[test]
+    fn explain_step_logging_follows_session_extension_value() {
+        let session = SessionContext::new_with_config(SessionConfig::new().with_option_extension(
+            OptdExtensionConfig {
+                log_explain_steps: false,
+            },
+        ));
+        let runner = OptdRunner::new(session);
+        assert!(!runner.log_explain_steps_enabled());
+    }
+
+    #[test]
+    fn explain_step_logging_uses_extension_default_when_missing() {
+        let runner = OptdRunner::new(SessionContext::new());
+        assert!(runner.log_explain_steps_enabled());
     }
 }

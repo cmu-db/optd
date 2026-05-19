@@ -16,9 +16,9 @@ use datafusion::logical_expr::{
 };
 use optd::{
     AggregateExpr, AggregateFunction, Aggregation, BinaryOp, Column, ColumnData, ConstScan,
-    ExprData, Join as OptdJoin, JoinType, CrossProduct, Limit as OptdLimit, Map, NaryOp, NullOrdering, Operator,
-    OperatorData, Projection as OptdProjection, QueryContext, ScalarValue, Scan, Selection,
-    Sort as OptdSort, SortDirection, SortKey, TableRef,
+    CrossProduct, ExprData, Join as OptdJoin, JoinType, Limit as OptdLimit, Map, NaryOp,
+    NullOrdering, Operator, OperatorData, Projection as OptdProjection, QueryContext, ScalarValue,
+    Scan, Selection, Sort as OptdSort, SortDirection, SortKey, TableRef,
 };
 
 /// Error type for the DataFusion → optd converter.
@@ -552,11 +552,7 @@ fn convert_join(
     if matches!(join.join_type, DFJoinType::Inner)
         && (exprs.is_empty() || (exprs.len() == 1 && is_true_expr(exprs[0], ctx)))
     {
-        return Ok(OperatorData::CrossProduct(CrossProduct {
-            outer,
-            inner,
-        })
-        .add(ctx));
+        return Ok(OperatorData::CrossProduct(CrossProduct { outer, inner }).add(ctx));
     }
 
     let on = match exprs.len() {
@@ -595,10 +591,7 @@ fn convert_join_type(jt: &DFJoinType) -> FromDFResult<JoinType> {
 }
 
 fn is_true_expr(expr: optd::Expr, ctx: &QueryContext) -> bool {
-    matches!(
-        expr.get(ctx),
-        ExprData::Literal(ScalarValue::Boolean(true))
-    )
+    matches!(expr.get(ctx), ExprData::Literal(ScalarValue::Boolean(true)))
 }
 
 fn combine_predicates(

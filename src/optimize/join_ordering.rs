@@ -330,11 +330,8 @@ fn join_tree_to_ir(tree: &JoinTree, hg: &QueryHypergraph, ctx: &mut QueryContext
                     .unwrap_or(JoinType::Inner);
 
                 if join_type == JoinType::Inner {
-                    return OperatorData::CrossProduct(crate::CrossProduct {
-                        outer,
-                        inner,
-                    })
-                    .add(ctx);
+                    return OperatorData::CrossProduct(crate::CrossProduct { outer, inner })
+                        .add(ctx);
                 }
             }
 

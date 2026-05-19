@@ -14,7 +14,10 @@ use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
 
 #[derive(Debug, Parser)]
-#[command(name = "optd", about = "Run SQL through the optd DataFusion bridge")]
+#[command(
+    name = "optd-cli",
+    about = "Run SQL through the optd DataFusion bridge"
+)]
 struct Args {
     /// Execute SQL and exit. May be passed more than once.
     #[arg(short = 'c', long = "command")]
@@ -27,15 +30,6 @@ struct Args {
     /// Register local TPC-H parquet tables before executing SQL.
     #[arg(long)]
     tpch: bool,
-
-    /// Print box-formatted optd optimizer steps before executing each statement.
-    #[arg(long)]
-    log_explain_steps: bool,
-}
-
-#[derive(Clone, Copy)]
-struct ExecuteOptions {
-    log_explain_steps: bool,
 }
 
 #[tokio::main]
@@ -47,28 +41,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
         session_context_with_information_schema()
     };
     let runner = OptdRunner::new(session);
-    let options = ExecuteOptions {
-        log_explain_steps: args.log_explain_steps,
-    };
 
     if args.commands.is_empty() && args.files.is_empty() {
-        repl(&runner, options).await?;
+        repl(&runner).await?;
         return Ok(());
     }
 
     for sql in args.commands {
-        execute_script(&runner, &sql, options).await?;
+        execute_script(&runner, &sql).await?;
     }
 
     for path in args.files {
         let sql = fs::read_to_string(&path)?;
-        execute_script(&runner, &sql, options).await?;
+        execute_script(&runner, &sql).await?;
     }
 
     Ok(())
 }
 
-async fn repl(runner: &OptdRunner, options: ExecuteOptions) -> Result<(), Box<dyn Error>> {
+async fn repl(runner: &OptdRunner) -> Result<(), Box<dyn Error>> {
     let mut editor = DefaultEditor::new()?;
     let mut buffer = String::new();
 
@@ -100,7 +91,7 @@ async fn repl(runner: &OptdRunner, options: ExecuteOptions) -> Result<(), Box<dy
 
                 let (statements, trailing) = split_complete_statements(&buffer);
                 for statement in statements {
-                    if let Err(err) = execute_statement(runner, &statement, options).await {
+                    if let Err(err) = execute_statement(runner, &statement).await {
                         eprintln!("{err}");
                     }
                 }
@@ -118,23 +109,15 @@ async fn repl(runner: &OptdRunner, options: ExecuteOptions) -> Result<(), Box<dy
     Ok(())
 }
 
-async fn execute_script(
-    runner: &OptdRunner,
-    sql: &str,
-    options: ExecuteOptions,
-) -> Result<(), Box<dyn Error>> {
+async fn execute_script(runner: &OptdRunner, sql: &str) -> Result<(), Box<dyn Error>> {
     for statement in split_statements(sql) {
-        execute_statement(runner, &statement, options).await?;
+        execute_statement(runner, &statement).await?;
     }
     Ok(())
 }
 
-async fn execute_statement(
-    runner: &OptdRunner,
-    statement: &str,
-    options: ExecuteOptions,
-) -> Result<(), Box<dyn Error>> {
-    if options.log_explain_steps {
+async fn execute_statement(runner: &OptdRunner, statement: &str) -> Result<(), Box<dyn Error>> {
+    if runner.log_explain_steps_enabled() {
         if let Err(err) = log_explain_steps(runner, statement) {
             eprintln!("{err}");
         }
