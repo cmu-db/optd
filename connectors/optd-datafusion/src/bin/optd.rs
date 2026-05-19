@@ -135,7 +135,9 @@ async fn execute_statement(
     options: ExecuteOptions,
 ) -> Result<(), Box<dyn Error>> {
     if options.log_explain_steps {
-        log_explain_steps(runner, statement)?;
+        if let Err(err) = log_explain_steps(runner, statement) {
+            eprintln!("{err}");
+        }
     }
 
     match runner.execute_sql(statement).await? {

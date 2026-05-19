@@ -50,6 +50,22 @@ pub struct OptdRunner {
     session: SessionContext,
 }
 
+#[derive(Debug)]
+enum TryViaIrError {
+    Unsupported(String),
+    Failed(String),
+}
+
+impl std::fmt::Display for TryViaIrError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unsupported(msg) | Self::Failed(msg) => f.write_str(msg),
+        }
+    }
+}
+
+impl std::error::Error for TryViaIrError {}
+
 pub enum RunnerOutput {
     StatementComplete,
     Rows {
@@ -67,7 +83,7 @@ impl OptdRunner {
     pub async fn execute_sql(&self, sql: &str) -> Result<RunnerOutput, DFSqlLogicTestError> {
         let (schema, batches) = match self.try_via_ir(sql).await {
             Ok(pair) => pair,
-            Err(_) => {
+            Err(TryViaIrError::Unsupported(_)) => {
                 // IR conversion failed or unsupported — execute directly via DataFusion.
                 let plan = self
                     .session
@@ -88,6 +104,11 @@ impl OptdRunner {
                     std::sync::Arc::new(datafusion::arrow::datatypes::Schema::empty())
                 });
                 (schema, batches)
+            }
+            Err(TryViaIrError::Failed(error)) => {
+                return Err(DFSqlLogicTestError::DataFusion(
+                    datafusion::error::DataFusionError::Execution(error),
+                ));
             }
         };
 
@@ -145,14 +166,14 @@ impl OptdRunner {
     async fn try_via_ir(
         &self,
         sql: &str,
-    ) -> Result<(datafusion::arrow::datatypes::SchemaRef, Vec<RecordBatch>), String> {
+    ) -> Result<(datafusion::arrow::datatypes::SchemaRef, Vec<RecordBatch>), TryViaIrError> {
         // Parse without executing to avoid double-executing DDL.
         let plan = self
             .session
             .state()
             .create_logical_plan(sql)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| TryViaIrError::Failed(e.to_string()))?;
 
         // Only attempt IR conversion for relational query plans.
         match &plan {
@@ -166,35 +187,69 @@ impl OptdRunner {
             | LogicalPlan::SubqueryAlias(_)
             | LogicalPlan::Values(_)
             | LogicalPlan::EmptyRelation(_) => {}
-            _ => return Err("non-query plan".into()),
+            _ => return Err(TryViaIrError::Unsupported("non-query plan".into())),
         }
 
+        reject_non_catalog_scans(&plan, &self.session).await?;
+
         let mut ctx = QueryContext::new();
-        let root = from_logical_plan(&plan, &mut ctx).map_err(|e| e.to_string())?;
+        let root =
+            from_logical_plan(&plan, &mut ctx).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
         ctx.set_root(root);
 
-        let ctx = optimize(ctx).map_err(|e| e.to_string())?;
+        let ctx = optimize(ctx).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
 
         let df_plan = to_logical_plan(&ctx, &self.session)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| TryViaIrError::Failed(e.to_string()))?;
 
         // Optimize before execution so rules like COUNT(*) → scan work correctly.
         let optimized = self
             .session
             .state()
             .optimize(&df_plan)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| TryViaIrError::Failed(e.to_string()))?;
 
         let df = self
             .session
             .execute_logical_plan(optimized)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| TryViaIrError::Failed(e.to_string()))?;
 
         let schema = df.schema().inner().clone();
-        let batches = df.collect().await.map_err(|e| e.to_string())?;
+        let batches = df
+            .collect()
+            .await
+            .map_err(|e| TryViaIrError::Failed(e.to_string()))?;
         let schema = batches.first().map(|b| b.schema()).unwrap_or(schema);
         Ok((schema, batches))
+    }
+}
+
+async fn reject_non_catalog_scans(
+    plan: &LogicalPlan,
+    session: &SessionContext,
+) -> Result<(), TryViaIrError> {
+    let mut scans = Vec::new();
+    collect_table_scans(plan, &mut scans);
+    for table in scans {
+        if session.table_provider(table.clone()).await.is_err() {
+            return Err(TryViaIrError::Unsupported(format!(
+                "non-catalog table scan: {table}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn collect_table_scans<'a>(
+    plan: &'a LogicalPlan,
+    out: &mut Vec<datafusion::common::TableReference>,
+) {
+    if let LogicalPlan::TableScan(scan) = plan {
+        out.push(scan.table_name.clone());
+    }
+    for input in plan.inputs() {
+        collect_table_scans(input, out);
     }
 }
