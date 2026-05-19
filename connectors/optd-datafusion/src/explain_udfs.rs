@@ -17,7 +17,7 @@ use datafusion::common::ScalarValue as DFScalarValue;
 use datafusion::datasource::MemTable;
 use datafusion::error::{DataFusionError, Result as DFResult};
 use datafusion::logical_expr::{
-    ColumnarValue, Expr as DFExpr, ScalarUDF, ScalarUDFImpl, Signature, Volatility,
+    ColumnarValue, Expr as DFExpr, LogicalPlan, ScalarUDF, ScalarUDFImpl, Signature, Volatility,
 };
 use datafusion::prelude::SessionContext;
 use optd::{
@@ -275,9 +275,10 @@ async fn build_ir(
     state: &datafusion::execution::SessionState,
 ) -> datafusion::error::Result<QueryContext> {
     let plan = state.create_logical_plan(sql).await?;
+    let plan = explain_input_plan(&plan);
     let mut ctx = QueryContext::new();
     let root =
-        from_logical_plan(&plan, &mut ctx).map_err(|e| DataFusionError::Plan(e.to_string()))?;
+        from_logical_plan(plan, &mut ctx).map_err(|e| DataFusionError::Plan(e.to_string()))?;
     ctx.set_root(root);
 
     let mut opt = OptimizerContext::new(ctx);
@@ -298,9 +299,10 @@ async fn build_ir_trace(
     config: QueryFormatConfig,
 ) -> datafusion::error::Result<Vec<ExplainStep>> {
     let plan = state.create_logical_plan(sql).await?;
+    let plan = explain_input_plan(&plan);
     let mut ctx = QueryContext::new();
     let root =
-        from_logical_plan(&plan, &mut ctx).map_err(|e| DataFusionError::Plan(e.to_string()))?;
+        from_logical_plan(plan, &mut ctx).map_err(|e| DataFusionError::Plan(e.to_string()))?;
     ctx.set_root(root);
 
     let mut steps = vec![ExplainStep {
@@ -340,9 +342,10 @@ async fn build_optimizer_visualizer_trace(
     state: &datafusion::execution::SessionState,
 ) -> datafusion::error::Result<String> {
     let plan = state.create_logical_plan(sql).await?;
+    let plan = explain_input_plan(&plan);
     let mut ctx = QueryContext::new();
     let root =
-        from_logical_plan(&plan, &mut ctx).map_err(|e| DataFusionError::Plan(e.to_string()))?;
+        from_logical_plan(plan, &mut ctx).map_err(|e| DataFusionError::Plan(e.to_string()))?;
     ctx.set_root(root);
     let initial = ctx.clone();
 
@@ -358,6 +361,14 @@ async fn build_optimizer_visualizer_trace(
         "{{\n  \"passes\": {},\n  \"query\": {:?}\n}}",
         passes, sql
     ))
+}
+
+fn explain_input_plan(plan: &LogicalPlan) -> &LogicalPlan {
+    match plan {
+        LogicalPlan::Explain(explain) => explain.plan.as_ref(),
+        LogicalPlan::Analyze(analyze) => analyze.input.as_ref(),
+        _ => plan,
+    }
 }
 
 fn pass_result(result: Option<PassResult>) -> String {

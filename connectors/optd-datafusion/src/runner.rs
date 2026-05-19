@@ -1,11 +1,11 @@
 //! [`OptdRunner`] — routes SQL through optd IR before execution.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::logical_expr::LogicalPlan;
+use datafusion::logical_expr::{Analyze, Explain, LogicalPlan};
 use datafusion::prelude::SessionContext;
 use datafusion_sqllogictest::{
     DFColumnType, DFSqlLogicTestError, convert_batches, convert_schema_to_types,
@@ -209,33 +209,7 @@ impl OptdRunner {
             .await
             .map_err(|e| TryViaIrError::Failed(e.to_string()))?;
 
-        // Only attempt IR conversion for relational query plans.
-        match &plan {
-            LogicalPlan::Projection(_)
-            | LogicalPlan::Filter(_)
-            | LogicalPlan::Aggregate(_)
-            | LogicalPlan::Sort(_)
-            | LogicalPlan::Limit(_)
-            | LogicalPlan::Join(_)
-            | LogicalPlan::TableScan(_)
-            | LogicalPlan::SubqueryAlias(_)
-            | LogicalPlan::Values(_)
-            | LogicalPlan::EmptyRelation(_) => {}
-            _ => return Err(TryViaIrError::Unsupported("non-query plan".into())),
-        }
-
-        reject_non_catalog_scans(&plan, &self.session).await?;
-
-        let mut ctx = QueryContext::new();
-        let root =
-            from_logical_plan(&plan, &mut ctx).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
-        ctx.set_root(root);
-
-        let ctx = optimize(ctx).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
-
-        let df_plan = to_logical_plan(&ctx, &self.session)
-            .await
-            .map_err(|e| TryViaIrError::Failed(e.to_string()))?;
+        let df_plan = self.optimize_plan_via_ir(&plan).await?;
 
         // Optimize before execution so rules like COUNT(*) → scan work correctly.
         let optimized = self
@@ -258,6 +232,69 @@ impl OptdRunner {
         let schema = batches.first().map(|b| b.schema()).unwrap_or(schema);
         Ok((schema, batches))
     }
+
+    async fn optimize_plan_via_ir(&self, plan: &LogicalPlan) -> Result<LogicalPlan, TryViaIrError> {
+        match plan {
+            LogicalPlan::Explain(explain) => {
+                let child = self.optimize_relational_plan_via_ir(&explain.plan).await?;
+                Ok(LogicalPlan::Explain(Explain {
+                    verbose: explain.verbose,
+                    explain_format: explain.explain_format.clone(),
+                    plan: Arc::new(child),
+                    stringified_plans: explain.stringified_plans.clone(),
+                    schema: Arc::clone(&explain.schema),
+                    logical_optimization_succeeded: explain.logical_optimization_succeeded,
+                }))
+            }
+            LogicalPlan::Analyze(analyze) => {
+                let child = self.optimize_relational_plan_via_ir(&analyze.input).await?;
+                Ok(LogicalPlan::Analyze(Analyze {
+                    verbose: analyze.verbose,
+                    input: Arc::new(child),
+                    schema: Arc::clone(&analyze.schema),
+                }))
+            }
+            other => self.optimize_relational_plan_via_ir(other).await,
+        }
+    }
+
+    async fn optimize_relational_plan_via_ir(
+        &self,
+        plan: &LogicalPlan,
+    ) -> Result<LogicalPlan, TryViaIrError> {
+        if !is_supported_relational_plan(plan) {
+            return Err(TryViaIrError::Unsupported("non-query plan".into()));
+        }
+
+        reject_non_catalog_scans(plan, &self.session).await?;
+
+        let mut ctx = QueryContext::new();
+        let root =
+            from_logical_plan(plan, &mut ctx).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
+        ctx.set_root(root);
+
+        let ctx = optimize(ctx).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
+
+        to_logical_plan(&ctx, &self.session)
+            .await
+            .map_err(|e| TryViaIrError::Failed(e.to_string()))
+    }
+}
+
+fn is_supported_relational_plan(plan: &LogicalPlan) -> bool {
+    matches!(
+        plan,
+        LogicalPlan::Projection(_)
+            | LogicalPlan::Filter(_)
+            | LogicalPlan::Aggregate(_)
+            | LogicalPlan::Sort(_)
+            | LogicalPlan::Limit(_)
+            | LogicalPlan::Join(_)
+            | LogicalPlan::TableScan(_)
+            | LogicalPlan::SubqueryAlias(_)
+            | LogicalPlan::Values(_)
+            | LogicalPlan::EmptyRelation(_)
+    )
 }
 
 async fn reject_non_catalog_scans(
@@ -340,5 +377,37 @@ mod tests {
                 panic!("SHOW TABLES should return rows");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn explain_optimizes_child_via_ir() {
+        let runner = OptdRunner::new(session_context_with_information_schema());
+        let result = runner
+            .try_via_ir("EXPLAIN SELECT * FROM (VALUES (1)) AS t(a)")
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn explain_analyze_optimizes_child_via_ir() {
+        let runner = OptdRunner::new(session_context_with_information_schema());
+        let (_, batches) = runner
+            .try_via_ir("EXPLAIN ANALYZE SELECT * FROM (VALUES (1)) AS t(a)")
+            .await
+            .unwrap();
+
+        let row_count: usize = batches.iter().map(|batch| batch.num_rows()).sum();
+        assert!(row_count > 0);
+    }
+
+    #[test]
+    fn explain_steps_unwraps_explain_analyze() {
+        let runner = OptdRunner::new(session_context_with_information_schema());
+        let steps = runner
+            .explain_steps_box("EXPLAIN ANALYZE SELECT * FROM (VALUES (1)) AS t(a)")
+            .unwrap();
+
+        assert!(!steps.is_empty());
     }
 }
