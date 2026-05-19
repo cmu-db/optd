@@ -93,7 +93,7 @@ order by
 58)------]
 59)----},
 60)----{
-61)------"id": 41,
+61)------"id": 48,
 62)------"kind": "join",
 63)------"title": "⋈ InnerJoin",
 64)------"join_type": "Inner",
@@ -152,42 +152,48 @@ order by
 117)------"input": 7
 118)----},
 119)----{
-120)------"id": 42,
+120)------"id": 49,
 121)------"kind": "join",
 122)------"title": "⋉ LeftSemiJoin",
 123)------"join_type": "LeftSemi",
 124)------"condition": "(o_orderkey(#8) = l_orderkey(#33))",
-125)------"outer": 41,
+125)------"outer": 48,
 126)------"inner": 8
 127)----},
 128)----{
-129)------"id": 43,
+129)------"id": 50,
 130)------"kind": "join",
 131)------"title": "⋈ InnerJoin",
 132)------"join_type": "Inner",
 133)------"condition": "(c_custkey(#0) = o_custkey(#9))",
 134)------"outer": 0,
-135)------"inner": 42
+135)------"inner": 49
 136)----},
 137)----{
-138)------"id": 44,
+138)------"id": 51,
 139)------"kind": "aggregation",
 140)------"title": "γ Aggregation",
 141)------"keys": "c_name(#1), c_custkey(#0), o_orderkey(#8), o_orderdate(#12), o_totalprice(#11)",
 142)------"aggregates": [
 143)--------"sum(lineitem.l_quantity)(#50) := sum(l_quantity(#21))"
 144)------],
-145)------"input": 43
+145)------"input": 50
 146)----},
 147)----{
-148)------"id": 45,
+148)------"id": 52,
 149)------"kind": "sort",
 150)------"title": "⇞ Sort",
 151)------"keys": [
 152)--------"o_totalprice(#11) Desc NullsFirst",
 153)--------"o_orderdate(#12) Asc NullsLast"
 154)------],
-155)------"input": 44
-156)----}
-157)--]
-158)}
+155)------"input": 51
+156)----},
+157)----{
+158)------"id": 53,
+159)------"kind": "output",
+160)------"title": "= Output",
+161)------"input": 52
+162)----}
+163)--]
+164)}

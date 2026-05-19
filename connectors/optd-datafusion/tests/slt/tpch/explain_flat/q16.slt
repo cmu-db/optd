@@ -65,20 +65,20 @@ limit 10;');
 31)------]
 32)----},
 33)----{
-34)------"id": 29,
+34)------"id": 33,
 35)------"kind": "selection",
 36)------"title": "σ Selection",
 37)------"predicate": "((p_brand(#8) != \"Brand#45\") AND (p_type(#9) NOT LIKE \"MEDIUM POLISHED%\") AND ((p_size(#10) = 49) OR (p_size(#10) = 14) OR (p_size(#10) = 23) OR (p_size(#10) = 45) OR (p_size(#10) = 19) OR (p_size(#10) = 3) OR (p_size(#10) = 36) OR (p_size(#10) = 9)))",
 38)------"input": 1
 39)----},
 40)----{
-41)------"id": 38,
+41)------"id": 44,
 42)------"kind": "join",
 43)------"title": "⋈ InnerJoin",
 44)------"join_type": "Inner",
 45)------"condition": "(p_partkey(#5) = ps_partkey(#0))",
 46)------"outer": 0,
-47)------"inner": 29
+47)------"inner": 33
 48)----},
 49)----{
 50)------"id": 3,
@@ -112,26 +112,26 @@ limit 10;');
 78)------"input": 4
 79)----},
 80)----{
-81)------"id": 39,
+81)------"id": 45,
 82)------"kind": "join",
 83)------"title": "▷ LeftAntiJoin",
 84)------"join_type": "LeftAnti",
 85)------"condition": "(ps_suppkey(#1) = s_suppkey(#14))",
-86)------"outer": 38,
+86)------"outer": 44,
 87)------"inner": 5
 88)----},
 89)----{
-90)------"id": 40,
+90)------"id": 46,
 91)------"kind": "aggregation",
 92)------"title": "γ Aggregation",
 93)------"keys": "p_brand(#8), p_type(#9), p_size(#10)",
 94)------"aggregates": [
 95)--------"count(DISTINCT partsupp.ps_suppkey)(#21) := count(DISTINCT ps_suppkey(#1))"
 96)------],
-97)------"input": 39
+97)------"input": 45
 98)----},
 99)----{
-100)------"id": 41,
+100)------"id": 47,
 101)------"kind": "sort",
 102)------"title": "⇞ Sort",
 103)------"keys": [
@@ -140,15 +140,21 @@ limit 10;');
 106)--------"p_type(#9) Asc NullsLast",
 107)--------"p_size(#10) Asc NullsLast"
 108)------],
-109)------"input": 40
+109)------"input": 46
 110)----},
 111)----{
-112)------"id": 42,
+112)------"id": 48,
 113)------"kind": "limit",
 114)------"title": "τ Limit",
 115)------"fetch": "10",
 116)------"offset": "0",
-117)------"input": 41
-118)----}
-119)--]
-120)}
+117)------"input": 47
+118)----},
+119)----{
+120)------"id": 49,
+121)------"kind": "output",
+122)------"title": "= Output",
+123)------"input": 48
+124)----}
+125)--]
+126)}

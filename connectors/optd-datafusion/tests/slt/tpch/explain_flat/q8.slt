@@ -58,7 +58,7 @@ order by
 18)------]
 19)----},
 20)----{
-21)------"id": 96,
+21)------"id": 103,
 22)------"kind": "selection",
 23)------"title": "σ Selection",
 24)------"predicate": "(p_type(#4) = \"ECONOMY ANODIZED STEEL\")",
@@ -80,12 +80,12 @@ order by
 40)------]
 41)----},
 42)----{
-43)------"id": 111,
+43)------"id": 119,
 44)------"kind": "join",
 45)------"title": "⋈ InnerJoin",
 46)------"join_type": "Inner",
 47)------"condition": "true",
-48)------"outer": 96,
+48)------"outer": 103,
 49)------"inner": 1
 50)----},
 51)----{
@@ -113,12 +113,12 @@ order by
 73)------]
 74)----},
 75)----{
-76)------"id": 112,
+76)------"id": 120,
 77)------"kind": "join",
 78)------"title": "⋈ InnerJoin",
 79)------"join_type": "Inner",
 80)------"condition": "((p_partkey(#0) = l_partkey(#17)) AND (s_suppkey(#9) = l_suppkey(#18)))",
-81)------"outer": 111,
+81)------"outer": 119,
 82)------"inner": 3
 83)----},
 84)----{
@@ -146,12 +146,12 @@ order by
 106)------"input": 12
 107)----},
 108)----{
-109)------"id": 113,
+109)------"id": 121,
 110)------"kind": "join",
 111)------"title": "⋈ InnerJoin",
 112)------"join_type": "Inner",
 113)------"condition": "(s_nationkey(#12) = n_nationkey(#61))",
-114)------"outer": 112,
+114)------"outer": 120,
 115)------"inner": 13
 116)----},
 117)----{
@@ -172,7 +172,7 @@ order by
 132)------]
 133)----},
 134)----{
-135)------"id": 69,
+135)------"id": 74,
 136)------"kind": "selection",
 137)------"title": "σ Selection",
 138)------"predicate": "((o_orderdate(#36) >= CAST(\"1995-01-01\" AS Date32)) AND (o_orderdate(#36) <= CAST(\"1996-12-31\" AS Date32)))",
@@ -195,12 +195,12 @@ order by
 155)------]
 156)----},
 157)----{
-158)------"id": 114,
+158)------"id": 122,
 159)------"kind": "join",
 160)------"title": "⋈ InnerJoin",
 161)------"join_type": "Inner",
 162)------"condition": "(o_custkey(#33) = c_custkey(#41))",
-163)------"outer": 69,
+163)------"outer": 74,
 164)------"inner": 7
 165)----},
 166)----{
@@ -239,41 +239,41 @@ order by
 199)------]
 200)----},
 201)----{
-202)------"id": 26,
+202)------"id": 27,
 203)------"kind": "selection",
 204)------"title": "σ Selection",
 205)------"predicate": "(r_name(#66) = \"AMERICA\")",
 206)------"input": 15
 207)----},
 208)----{
-209)------"id": 115,
+209)------"id": 123,
 210)------"kind": "join",
 211)------"title": "⋈ InnerJoin",
 212)------"join_type": "Inner",
 213)------"condition": "(n_regionkey(#55) = r_regionkey(#65))",
 214)------"outer": 10,
-215)------"inner": 26
+215)------"inner": 27
 216)----},
 217)----{
-218)------"id": 116,
+218)------"id": 124,
 219)------"kind": "join",
 220)------"title": "⋈ InnerJoin",
 221)------"join_type": "Inner",
 222)------"condition": "(c_nationkey(#44) = n_nationkey(#53))",
-223)------"outer": 114,
-224)------"inner": 115
+223)------"outer": 122,
+224)------"inner": 123
 225)----},
 226)----{
-227)------"id": 117,
+227)------"id": 125,
 228)------"kind": "join",
 229)------"title": "⋈ InnerJoin",
 230)------"join_type": "Inner",
 231)------"condition": "(l_orderkey(#16) = o_orderkey(#32))",
-232)------"outer": 113,
-233)------"inner": 116
+232)------"outer": 121,
+233)------"inner": 124
 234)----},
 235)----{
-236)------"id": 118,
+236)------"id": 126,
 237)------"kind": "map",
 238)------"title": "χ Map",
 239)------"computations": [
@@ -281,10 +281,10 @@ order by
 241)--------"volume(#69) := (l_extendedprice(#21) * (1 - l_discount(#22)))",
 242)--------"nation(#70) := n_name(#62)"
 243)------],
-244)------"input": 117
+244)------"input": 125
 245)----},
 246)----{
-247)------"id": 119,
+247)------"id": 127,
 248)------"kind": "projection",
 249)------"title": "π Projection",
 250)------"columns": [
@@ -292,10 +292,10 @@ order by
 252)--------"volume(#69)",
 253)--------"nation(#70)"
 254)------],
-255)------"input": 118
+255)------"input": 126
 256)----},
 257)----{
-258)------"id": 120,
+258)------"id": 128,
 259)------"kind": "rename",
 260)------"title": "ρ Rename(all_nations)",
 261)------"defs": [
@@ -303,10 +303,10 @@ order by
 263)--------"volume(#72) <- volume(#69)",
 264)--------"nation(#73) <- nation(#70)"
 265)------],
-266)------"input": 119
+266)------"input": 127
 267)----},
 268)----{
-269)------"id": 121,
+269)------"id": 129,
 270)------"kind": "aggregation",
 271)------"title": "γ Aggregation",
 272)------"keys": "o_year(#71)",
@@ -314,35 +314,41 @@ order by
 274)--------"sum(CASE WHEN all_nations.nation = Utf8(\"BRAZIL\") THEN all_nations.volume ELSE Int64(0) END)(#74) := sum(CASE WHEN (nation(#73) = \"BRAZIL\") THEN volume(#72) ELSE 0 END)",
 275)--------"sum(all_nations.volume)(#75) := sum(volume(#72))"
 276)------],
-277)------"input": 120
+277)------"input": 128
 278)----},
 279)----{
-280)------"id": 122,
+280)------"id": 130,
 281)------"kind": "map",
 282)------"title": "χ Map",
 283)------"computations": [
 284)--------"mkt_share(#76) := CAST((CAST(sum(CASE WHEN all_nations.nation = Utf8(\"BRAZIL\") THEN all_nations.volume ELSE Int64(0) END)(#74) AS Decimal128(12, 2)) / CAST(sum(all_nations.volume)(#75) AS Decimal128(12, 2))) AS Decimal128(15, 2))"
 285)------],
-286)------"input": 121
+286)------"input": 129
 287)----},
 288)----{
-289)------"id": 123,
+289)------"id": 131,
 290)------"kind": "projection",
 291)------"title": "π Projection",
 292)------"columns": [
 293)--------"o_year(#71)",
 294)--------"mkt_share(#76)"
 295)------],
-296)------"input": 122
+296)------"input": 130
 297)----},
 298)----{
-299)------"id": 124,
+299)------"id": 132,
 300)------"kind": "sort",
 301)------"title": "⇞ Sort",
 302)------"keys": [
 303)--------"o_year(#71) Asc NullsLast"
 304)------],
-305)------"input": 123
-306)----}
-307)--]
-308)}
+305)------"input": 131
+306)----},
+307)----{
+308)------"id": 133,
+309)------"kind": "output",
+310)------"title": "= Output",
+311)------"input": 132
+312)----}
+313)--]
+314)}

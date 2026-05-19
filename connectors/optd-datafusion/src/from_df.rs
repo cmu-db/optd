@@ -17,8 +17,8 @@ use datafusion::logical_expr::{
 use optd::{
     AggregateExpr, AggregateFunction, Aggregation, BinaryOp, Column, ColumnData, ConstScan,
     CrossProduct, ExprData, Join as OptdJoin, JoinType, Limit as OptdLimit, Map, NaryOp,
-    NullOrdering, Operator, OperatorData, Projection as OptdProjection, QueryContext, ScalarValue,
-    Scan, Selection, Sort as OptdSort, SortDirection, SortKey, TableRef,
+    NullOrdering, Operator, OperatorData, Output, Projection as OptdProjection, QueryContext,
+    ScalarValue, Scan, Selection, Sort as OptdSort, SortDirection, SortKey, TableRef,
 };
 
 /// Error type for the DataFusion → optd converter.
@@ -142,7 +142,8 @@ impl BindingContext {
 /// Converts a DataFusion `LogicalPlan` into optd IR.
 pub fn from_logical_plan(plan: &LogicalPlan, ctx: &mut QueryContext) -> FromDFResult<Operator> {
     let mut bindings = BindingContext::new();
-    convert_plan(plan, ctx, &mut bindings)
+    let root = convert_plan(plan, ctx, &mut bindings)?;
+    Ok(OperatorData::Output(Output { input: root }).add(ctx))
 }
 
 // ---------------------------------------------------------------------------
@@ -952,7 +953,10 @@ mod tests {
         });
         let mut ctx = QueryContext::new();
         let root = from_logical_plan(&plan, &mut ctx).unwrap();
-        match ctx.operator(root) {
+        let OperatorData::Output(output) = ctx.operator(root) else {
+            panic!("expected Output root, got {:?}", ctx.operator(root));
+        };
+        match ctx.operator(output.input) {
             OperatorData::ConstScan(const_scan) => {
                 assert!(const_scan.columns.is_empty());
                 assert!(const_scan.rows.is_empty());
@@ -969,7 +973,10 @@ mod tests {
         });
         let mut ctx = QueryContext::new();
         let root = from_logical_plan(&plan, &mut ctx).unwrap();
-        match ctx.operator(root) {
+        let OperatorData::Output(output) = ctx.operator(root) else {
+            panic!("expected Output root, got {:?}", ctx.operator(root));
+        };
+        match ctx.operator(output.input) {
             OperatorData::ConstScan(const_scan) => {
                 assert!(const_scan.columns.is_empty());
                 assert_eq!(const_scan.rows, vec![vec![]]);
@@ -991,7 +998,10 @@ mod tests {
         });
         let mut ctx = QueryContext::new();
         let root = from_logical_plan(&plan, &mut ctx).unwrap();
-        match ctx.operator(root) {
+        let OperatorData::Output(output) = ctx.operator(root) else {
+            panic!("expected Output root, got {:?}", ctx.operator(root));
+        };
+        match ctx.operator(output.input) {
             OperatorData::ConstScan(const_scan) => {
                 assert_eq!(const_scan.columns.len(), 1);
                 assert_eq!(ctx.column(const_scan.columns[0]).name, "a");
@@ -1011,7 +1021,10 @@ mod tests {
             .unwrap();
         let mut ctx = QueryContext::new();
         let root = from_logical_plan(&plan, &mut ctx).unwrap();
-        match ctx.operator(root) {
+        let OperatorData::Output(output) = ctx.operator(root) else {
+            panic!("expected Output root, got {:?}", ctx.operator(root));
+        };
+        match ctx.operator(output.input) {
             OperatorData::ConstScan(const_scan) => {
                 assert_eq!(const_scan.columns.len(), 2);
                 assert_eq!(const_scan.rows.len(), 2);

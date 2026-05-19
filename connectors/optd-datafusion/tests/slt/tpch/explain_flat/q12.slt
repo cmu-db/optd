@@ -58,7 +58,7 @@ order by
 25)------]
 26)----},
 27)----{
-28)------"id": 7,
+28)------"id": 8,
 29)------"kind": "selection",
 30)------"title": "σ Selection",
 31)------"predicate": "(((l_shipmode(#14) = \"MAIL\") OR (l_shipmode(#14) = \"SHIP\")) AND (l_commitdate(#11) < l_receiptdate(#12)) AND (l_shipdate(#10) < l_commitdate(#11)) AND (l_receiptdate(#12) >= CAST(\"1994-01-01\" AS Date32)) AND (l_receiptdate(#12) < CAST(\"1995-01-01\" AS Date32)))",
@@ -82,16 +82,16 @@ order by
 49)------]
 50)----},
 51)----{
-52)------"id": 13,
+52)------"id": 16,
 53)------"kind": "join",
 54)------"title": "⋈ InnerJoin",
 55)------"join_type": "Inner",
 56)------"condition": "(l_orderkey(#0) = o_orderkey(#16))",
-57)------"outer": 7,
+57)------"outer": 8,
 58)------"inner": 1
 59)----},
 60)----{
-61)------"id": 14,
+61)------"id": 17,
 62)------"kind": "aggregation",
 63)------"title": "γ Aggregation",
 64)------"keys": "l_shipmode(#14)",
@@ -99,16 +99,22 @@ order by
 66)--------"sum(CASE WHEN orders.o_orderpriority = Utf8(\"1-URGENT\") OR orders.o_orderpriority = Utf8(\"2-HIGH\") THEN Int64(1) ELSE Int64(0) END)(#25) := sum(CASE WHEN ((o_orderpriority(#21) = \"1-URGENT\") OR (o_orderpriority(#21) = \"2-HIGH\")) THEN 1 ELSE 0 END)",
 67)--------"sum(CASE WHEN orders.o_orderpriority != Utf8(\"1-URGENT\") AND orders.o_orderpriority != Utf8(\"2-HIGH\") THEN Int64(1) ELSE Int64(0) END)(#26) := sum(CASE WHEN ((o_orderpriority(#21) != \"1-URGENT\") AND (o_orderpriority(#21) != \"2-HIGH\")) THEN 1 ELSE 0 END)"
 68)------],
-69)------"input": 13
+69)------"input": 16
 70)----},
 71)----{
-72)------"id": 15,
+72)------"id": 18,
 73)------"kind": "sort",
 74)------"title": "⇞ Sort",
 75)------"keys": [
 76)--------"l_shipmode(#14) Asc NullsLast"
 77)------],
-78)------"input": 14
-79)----}
-80)--]
-81)}
+78)------"input": 17
+79)----},
+80)----{
+81)------"id": 19,
+82)------"kind": "output",
+83)------"title": "= Output",
+84)------"input": 18
+85)----}
+86)--]
+87)}

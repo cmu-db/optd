@@ -37,11 +37,17 @@ SELECT explain_flat('SELECT a.a_id, b.b_id FROM a JOIN b ON true');
 19)------]
 20)----},
 21)----{
-22)------"id": 4,
+22)------"id": 6,
 23)------"kind": "cross_product",
 24)------"title": "× CrossProduct",
 25)------"outer": 0,
 26)------"inner": 1
-27)----}
-28)--]
-29)}
+27)----},
+28)----{
+29)------"id": 7,
+30)------"kind": "output",
+31)------"title": "= Output",
+32)------"input": 6
+33)----}
+34)--]
+35)}

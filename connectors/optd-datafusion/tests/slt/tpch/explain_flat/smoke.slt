@@ -25,6 +25,12 @@ SELECT explain_flat('SELECT COUNT(*) FROM nation;');
 21)--------"count(Int64(1))(#4) := count_star()"
 22)------],
 23)------"input": 0
-24)----}
-25)--]
-26)}
+24)----},
+25)----{
+26)------"id": 4,
+27)------"kind": "output",
+28)------"title": "= Output",
+29)------"input": 1
+30)----}
+31)--]
+32)}

@@ -52,6 +52,12 @@ where
 40)--------"sum(lineitem.l_extendedprice * lineitem.l_discount)(#16) := sum((l_extendedprice(#5) * l_discount(#6)))"
 41)------],
 42)------"input": 1
-43)----}
-44)--]
-45)}
+43)----},
+44)----{
+45)------"id": 5,
+46)------"kind": "output",
+47)------"title": "= Output",
+48)------"input": 2
+49)----}
+50)--]
+51)}

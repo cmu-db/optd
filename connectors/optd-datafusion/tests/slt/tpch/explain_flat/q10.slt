@@ -64,7 +64,7 @@ limit 10;');
 29)------]
 30)----},
 31)----{
-32)------"id": 34,
+32)------"id": 38,
 33)------"kind": "join",
 34)------"title": "⋈ InnerJoin",
 35)------"join_type": "Inner",
@@ -90,7 +90,7 @@ limit 10;');
 55)------]
 56)----},
 57)----{
-58)------"id": 26,
+58)------"id": 29,
 59)------"kind": "selection",
 60)------"title": "σ Selection",
 61)------"predicate": "((o_orderdate(#12) >= CAST(\"1993-10-01\" AS Date32)) AND (o_orderdate(#12) < CAST(\"1994-01-01\" AS Date32)))",
@@ -121,42 +121,42 @@ limit 10;');
 86)------]
 87)----},
 88)----{
-89)------"id": 19,
+89)------"id": 21,
 90)------"kind": "selection",
 91)------"title": "σ Selection",
 92)------"predicate": "(l_returnflag(#25) = \"R\")",
 93)------"input": 3
 94)----},
 95)----{
-96)------"id": 35,
+96)------"id": 39,
 97)------"kind": "join",
 98)------"title": "⋈ InnerJoin",
 99)------"join_type": "Inner",
 100)------"condition": "(l_orderkey(#17) = o_orderkey(#8))",
-101)------"outer": 26,
-102)------"inner": 19
+101)------"outer": 29,
+102)------"inner": 21
 103)----},
 104)----{
-105)------"id": 36,
+105)------"id": 40,
 106)------"kind": "join",
 107)------"title": "⋈ InnerJoin",
 108)------"join_type": "Inner",
 109)------"condition": "(c_custkey(#0) = o_custkey(#9))",
-110)------"outer": 34,
-111)------"inner": 35
+110)------"outer": 38,
+111)------"inner": 39
 112)----},
 113)----{
-114)------"id": 37,
+114)------"id": 41,
 115)------"kind": "aggregation",
 116)------"title": "γ Aggregation",
 117)------"keys": "c_custkey(#0), c_name(#1), c_acctbal(#5), c_phone(#4), n_name(#34), c_address(#2), c_comment(#7)",
 118)------"aggregates": [
 119)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#37) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
 120)------],
-121)------"input": 36
+121)------"input": 40
 122)----},
 123)----{
-124)------"id": 38,
+124)------"id": 42,
 125)------"kind": "projection",
 126)------"title": "π Projection",
 127)------"columns": [
@@ -169,24 +169,30 @@ limit 10;');
 134)--------"c_phone(#4)",
 135)--------"c_comment(#7)"
 136)------],
-137)------"input": 37
+137)------"input": 41
 138)----},
 139)----{
-140)------"id": 39,
+140)------"id": 43,
 141)------"kind": "sort",
 142)------"title": "⇞ Sort",
 143)------"keys": [
 144)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#37) Desc NullsFirst"
 145)------],
-146)------"input": 38
+146)------"input": 42
 147)----},
 148)----{
-149)------"id": 40,
+149)------"id": 44,
 150)------"kind": "limit",
 151)------"title": "τ Limit",
 152)------"fetch": "10",
 153)------"offset": "0",
-154)------"input": 39
-155)----}
-156)--]
-157)}
+154)------"input": 43
+155)----},
+156)----{
+157)------"id": 45,
+158)------"kind": "output",
+159)------"title": "= Output",
+160)------"input": 44
+161)----}
+162)--]
+163)}

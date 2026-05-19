@@ -80,7 +80,7 @@ where
 42)------]
 43)----},
 44)----{
-45)------"id": 9,
+45)------"id": 12,
 46)------"kind": "join",
 47)------"title": "⋈ InnerJoin",
 48)------"join_type": "Inner",
@@ -89,14 +89,20 @@ where
 51)------"inner": 1
 52)----},
 53)----{
-54)------"id": 10,
+54)------"id": 13,
 55)------"kind": "aggregation",
 56)------"title": "γ Aggregation",
 57)------"keys": "",
 58)------"aggregates": [
 59)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#25) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))"
 60)------],
-61)------"input": 9
-62)----}
-63)--]
-64)}
+61)------"input": 12
+62)----},
+63)----{
+64)------"id": 14,
+65)------"kind": "output",
+66)------"title": "= Output",
+67)------"input": 13
+68)----}
+69)--]
+70)}

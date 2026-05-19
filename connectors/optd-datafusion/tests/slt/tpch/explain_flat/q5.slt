@@ -61,7 +61,7 @@ order by
 34)------]
 35)----},
 36)----{
-37)------"id": 42,
+37)------"id": 47,
 38)------"kind": "selection",
 39)------"title": "σ Selection",
 40)------"predicate": "((o_orderdate(#12) >= CAST(\"1994-01-01\" AS Date32)) AND (o_orderdate(#12) < CAST(\"1995-01-01\" AS Date32)))",
@@ -92,22 +92,22 @@ order by
 65)------]
 66)----},
 67)----{
-68)------"id": 52,
+68)------"id": 59,
 69)------"kind": "join",
 70)------"title": "⋈ InnerJoin",
 71)------"join_type": "Inner",
 72)------"condition": "(l_orderkey(#17) = o_orderkey(#8))",
-73)------"outer": 42,
+73)------"outer": 47,
 74)------"inner": 3
 75)----},
 76)----{
-77)------"id": 53,
+77)------"id": 60,
 78)------"kind": "join",
 79)------"title": "⋈ InnerJoin",
 80)------"join_type": "Inner",
 81)------"condition": "(c_custkey(#0) = o_custkey(#9))",
 82)------"outer": 0,
-83)------"inner": 52
+83)------"inner": 59
 84)----},
 85)----{
 86)------"id": 5,
@@ -148,57 +148,63 @@ order by
 121)------]
 122)----},
 123)----{
-124)------"id": 16,
+124)------"id": 17,
 125)------"kind": "selection",
 126)------"title": "σ Selection",
 127)------"predicate": "(r_name(#45) = \"ASIA\")",
 128)------"input": 9
 129)----},
 130)----{
-131)------"id": 54,
+131)------"id": 61,
 132)------"kind": "join",
 133)------"title": "⋈ InnerJoin",
 134)------"join_type": "Inner",
 135)------"condition": "(n_regionkey(#42) = r_regionkey(#44))",
 136)------"outer": 7,
-137)------"inner": 16
+137)------"inner": 17
 138)----},
 139)----{
-140)------"id": 55,
+140)------"id": 62,
 141)------"kind": "join",
 142)------"title": "⋈ InnerJoin",
 143)------"join_type": "Inner",
 144)------"condition": "(s_nationkey(#36) = n_nationkey(#40))",
 145)------"outer": 5,
-146)------"inner": 54
+146)------"inner": 61
 147)----},
 148)----{
-149)------"id": 56,
+149)------"id": 63,
 150)------"kind": "join",
 151)------"title": "⋈ InnerJoin",
 152)------"join_type": "Inner",
 153)------"condition": "((l_suppkey(#19) = s_suppkey(#33)) AND (c_nationkey(#3) = s_nationkey(#36)))",
-154)------"outer": 53,
-155)------"inner": 55
+154)------"outer": 60,
+155)------"inner": 62
 156)----},
 157)----{
-158)------"id": 57,
+158)------"id": 64,
 159)------"kind": "aggregation",
 160)------"title": "γ Aggregation",
 161)------"keys": "n_name(#41)",
 162)------"aggregates": [
 163)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
 164)------],
-165)------"input": 56
+165)------"input": 63
 166)----},
 167)----{
-168)------"id": 58,
+168)------"id": 65,
 169)------"kind": "sort",
 170)------"title": "⇞ Sort",
 171)------"keys": [
 172)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) Desc NullsFirst"
 173)------],
-174)------"input": 57
-175)----}
-176)--]
-177)}
+174)------"input": 64
+175)----},
+176)----{
+177)------"id": 66,
+178)------"kind": "output",
+179)------"title": "= Output",
+180)------"input": 65
+181)----}
+182)--]
+183)}

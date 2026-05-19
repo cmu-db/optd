@@ -41,7 +41,7 @@ where
 25)------]
 26)----},
 27)----{
-28)------"id": 7,
+28)------"id": 8,
 29)------"kind": "selection",
 30)------"title": "σ Selection",
 31)------"predicate": "((l_shipdate(#10) >= CAST(\"1995-09-01\" AS Date32)) AND (l_shipdate(#10) < CAST(\"1995-10-01\" AS Date32)))",
@@ -65,16 +65,16 @@ where
 49)------]
 50)----},
 51)----{
-52)------"id": 12,
+52)------"id": 14,
 53)------"kind": "join",
 54)------"title": "⋈ InnerJoin",
 55)------"join_type": "Inner",
 56)------"condition": "(l_partkey(#1) = p_partkey(#16))",
-57)------"outer": 7,
+57)------"outer": 8,
 58)------"inner": 1
 59)----},
 60)----{
-61)------"id": 13,
+61)------"id": 15,
 62)------"kind": "aggregation",
 63)------"title": "γ Aggregation",
 64)------"keys": "",
@@ -82,25 +82,31 @@ where
 66)--------"sum(CASE WHEN part.p_type LIKE Utf8(\"PROMO%\") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#25) := sum(CASE WHEN (p_type(#20) LIKE \"PROMO%\") THEN (l_extendedprice(#5) * (1 - l_discount(#6))) ELSE 0 END)",
 67)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#26) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))"
 68)------],
-69)------"input": 12
+69)------"input": 14
 70)----},
 71)----{
-72)------"id": 14,
+72)------"id": 16,
 73)------"kind": "map",
 74)------"title": "χ Map",
 75)------"computations": [
 76)--------"promo_revenue(#27) := ((100 * sum(CASE WHEN part.p_type LIKE Utf8(\"PROMO%\") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#25)) / sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#26))"
 77)------],
-78)------"input": 13
+78)------"input": 15
 79)----},
 80)----{
-81)------"id": 15,
+81)------"id": 17,
 82)------"kind": "projection",
 83)------"title": "π Projection",
 84)------"columns": [
 85)--------"promo_revenue(#27)"
 86)------],
-87)------"input": 14
-88)----}
-89)--]
-90)}
+87)------"input": 16
+88)----},
+89)----{
+90)------"id": 18,
+91)------"kind": "output",
+92)------"title": "= Output",
+93)------"input": 17
+94)----}
+95)--]
+96)}
