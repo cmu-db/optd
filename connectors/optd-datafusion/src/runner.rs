@@ -269,6 +269,7 @@ fn collect_table_scans<'a>(
 mod tests {
     use super::OptdRunner;
     use crate::config::OptdExtensionConfig;
+    use crate::setup::session_context_with_information_schema;
     use datafusion::prelude::{SessionConfig, SessionContext};
 
     #[test]
@@ -286,5 +287,19 @@ mod tests {
     fn explain_step_logging_uses_extension_default_when_missing() {
         let runner = OptdRunner::new(SessionContext::new());
         assert!(runner.log_explain_steps_enabled());
+    }
+
+    #[tokio::test]
+    async fn show_tables_runs_via_ir_round_trip() {
+        let runner = OptdRunner::new(session_context_with_information_schema());
+        let result = runner.execute_sql("SHOW TABLES").await.unwrap();
+        match result {
+            super::RunnerOutput::Rows { batches, .. } => {
+                assert!(!batches.is_empty());
+            }
+            super::RunnerOutput::StatementComplete => {
+                panic!("SHOW TABLES should return rows");
+            }
+        }
     }
 }

@@ -285,7 +285,7 @@ fn convert_scan(
     ctx: &mut QueryContext,
     bindings: &mut BindingContext,
 ) -> FromDFResult<Operator> {
-    let table = TableRef::bare(scan.table_name.table());
+    let table = df_table_ref_to_optd(&scan.table_name);
     let schema = scan.projected_schema.as_ref();
 
     bindings.push();
@@ -319,6 +319,14 @@ fn convert_scan(
             input: scan_op,
         })
         .add(ctx))
+    }
+}
+
+fn df_table_ref_to_optd(table: &datafusion::common::TableReference) -> TableRef {
+    match (table.catalog(), table.schema()) {
+        (Some(catalog), Some(schema)) => TableRef::full(catalog, schema, table.table()),
+        (None, Some(schema)) => TableRef::partial(schema, table.table()),
+        _ => TableRef::bare(table.table()),
     }
 }
 

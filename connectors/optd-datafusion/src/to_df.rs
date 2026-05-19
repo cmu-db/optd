@@ -53,6 +53,20 @@ pub type ToDFResult<T> = Result<T, ToDFError>;
 type TableMap = HashMap<TableRef, Arc<dyn TableSource>>;
 type ColumnQualifiers = HashMap<optd::Column, String>;
 
+fn optd_table_ref_to_df(table: &TableRef) -> TableReference {
+    match table {
+        TableRef::Bare { table } => TableReference::bare(table.as_ref()),
+        TableRef::Partial { schema, table } => {
+            TableReference::partial(schema.as_ref(), table.as_ref())
+        }
+        TableRef::Full {
+            catalog,
+            schema,
+            table,
+        } => TableReference::full(catalog.as_ref(), schema.as_ref(), table.as_ref()),
+    }
+}
+
 /// Converts a optd `QueryContext` root into a DataFusion `LogicalPlan`.
 pub async fn to_logical_plan(
     ctx: &QueryContext,
@@ -85,7 +99,7 @@ async fn collect_tables(
             && !map.contains_key(&scan.table)
         {
             let provider = session
-                .table_provider(TableReference::bare(scan.table.table()))
+                .table_provider(optd_table_ref_to_df(&scan.table))
                 .await
                 .map_err(|_| ToDFError::TableNotFound(scan.table.clone()))?;
             map.insert(scan.table.clone(), provider_as_source(provider));
@@ -192,9 +206,8 @@ fn convert_operator_inner(
                 .get(&scan.table)
                 .ok_or_else(|| ToDFError::TableNotFound(scan.table.clone()))?
                 .clone();
-            let plan =
-                LogicalPlanBuilder::scan(TableReference::bare(scan.table.table()), source, None)?
-                    .build()?;
+            let plan = LogicalPlanBuilder::scan(optd_table_ref_to_df(&scan.table), source, None)?
+                .build()?;
             if let Some(alias) = scan
                 .columns
                 .iter()

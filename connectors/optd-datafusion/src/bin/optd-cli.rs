@@ -138,10 +138,7 @@ async fn execute_statement(runner: &OptdRunner, statement: &str) -> Result<(), B
 }
 
 fn log_explain_steps(runner: &OptdRunner, statement: &str) -> Result<(), Box<dyn Error>> {
-    let steps = runner.explain_steps_box_with_config(
-        statement,
-        QueryFormatConfig::new().with_analysis::<FreeColumns>(),
-    )?;
+    let steps = runner.explain_steps_box_with_config(statement, QueryFormatConfig::new())?;
     for step in &steps {
         println!("-- explain_steps step={} pass={}", step.step, step.pass);
         println!("{}", step.plan);

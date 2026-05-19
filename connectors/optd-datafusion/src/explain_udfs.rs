@@ -21,7 +21,8 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::SessionContext;
 use optd::{
-    OptimizerContext, PassResult, QueryContext, QueryFormatConfig, optimizer_visualizer_trace_json,
+    OptimizerContext, PassProfile, PassResult, PassTrace, QueryContext, QueryFormatConfig,
+    optimizer_visualizer_trace_json,
 };
 
 use crate::from_df::from_logical_plan;
@@ -317,55 +318,19 @@ async fn build_ir_trace(
     let trace = pm
         .run_with_trace(&mut opt)
         .map_err(|e| DataFusionError::Plan(e.to_string()))?;
-
-    #[derive(Debug)]
-    struct AggregatedPassStep {
-        iteration: usize,
-        pass_index: usize,
-        pass: String,
-        result: Option<PassResult>,
-        duration_ms: f64,
-        plan: String,
-    }
-
-    let mut aggregated: Vec<AggregatedPassStep> = Vec::new();
-    for trace in trace {
+    let trace = aggregate_trace_by_pass(trace);
+    steps.extend(trace.into_iter().enumerate().map(|(idx, trace)| {
         let profile = trace.profile;
-        let plan = format_query(&trace.query, format, config.clone());
-        if let Some(last) = aggregated.last_mut()
-            && last.pass_index == profile.pass_index
-        {
-            last.iteration = profile.iteration;
-            last.result = merge_pass_result(last.result, profile.result);
-            last.duration_ms += profile.duration_ms;
-            last.plan = plan;
-            continue;
-        }
-
-        aggregated.push(AggregatedPassStep {
-            iteration: profile.iteration,
-            pass_index: profile.pass_index,
+        ExplainStep {
+            step: (idx + 1) as i64,
+            iteration: Some(profile.iteration as i64),
+            pass_index: Some(profile.pass_index as i64),
             pass: profile.pass.to_string(),
-            result: profile.result,
-            duration_ms: profile.duration_ms,
-            plan,
-        });
-    }
-
-    steps.extend(
-        aggregated
-            .into_iter()
-            .enumerate()
-            .map(|(idx, aggregated_pass)| ExplainStep {
-                step: (idx + 1) as i64,
-                iteration: Some(aggregated_pass.iteration as i64),
-                pass_index: Some(aggregated_pass.pass_index as i64),
-                pass: aggregated_pass.pass,
-                result: pass_result(aggregated_pass.result),
-                duration_ms: Some(aggregated_pass.duration_ms),
-                plan: aggregated_pass.plan,
-            }),
-    );
+            result: pass_result(profile.result),
+            duration_ms: Some(profile.duration_ms),
+            plan: format_query(&trace.query, format, config.clone()),
+        }
+    }));
 
     Ok(steps)
 }
@@ -386,6 +351,7 @@ async fn build_optimizer_visualizer_trace(
     let trace = pm
         .run_with_trace(&mut opt)
         .map_err(|e| DataFusionError::Plan(e.to_string()))?;
+    let trace = aggregate_trace_by_pass(trace);
 
     let passes = optimizer_visualizer_trace_json(&initial, &trace);
     Ok(format!(
@@ -411,6 +377,27 @@ fn merge_pass_result(left: Option<PassResult>, right: Option<PassResult>) -> Opt
         }
         (Some(PassResult::Unchanged), Some(PassResult::Unchanged)) => Some(PassResult::Unchanged),
     }
+}
+
+fn aggregate_trace_by_pass(trace: Vec<PassTrace>) -> Vec<PassTrace> {
+    let mut aggregated: Vec<PassTrace> = Vec::new();
+    for entry in trace {
+        if let Some(last) = aggregated.last_mut()
+            && last.profile.pass_index == entry.profile.pass_index
+        {
+            last.profile = PassProfile {
+                iteration: entry.profile.iteration,
+                pass_index: entry.profile.pass_index,
+                pass: entry.profile.pass,
+                result: merge_pass_result(last.profile.result, entry.profile.result),
+                duration_ms: last.profile.duration_ms + entry.profile.duration_ms,
+            };
+            last.query = entry.query;
+            continue;
+        }
+        aggregated.push(entry);
+    }
+    aggregated
 }
 
 fn string_literal_arg(expr: &DFExpr, name: &str) -> DFResult<String> {
