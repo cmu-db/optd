@@ -276,10 +276,7 @@ async fn reject_non_catalog_scans(
     Ok(())
 }
 
-fn collect_table_scans<'a>(
-    plan: &'a LogicalPlan,
-    out: &mut Vec<datafusion::common::TableReference>,
-) {
+fn collect_table_scans(plan: &LogicalPlan, out: &mut Vec<datafusion::common::TableReference>) {
     if let LogicalPlan::TableScan(scan) = plan {
         out.push(scan.table_name.clone());
     }

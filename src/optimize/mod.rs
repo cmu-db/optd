@@ -440,10 +440,10 @@ impl PassManager {
             let mut iteration = 0usize;
             loop {
                 iteration += 1;
-                if let Some(max) = self.max_iterations {
-                    if iteration > max {
-                        break;
-                    }
+                if let Some(max) = self.max_iterations
+                    && iteration > max
+                {
+                    break;
                 }
                 let pass_name = pass.name();
                 let started = Instant::now();
@@ -507,6 +507,12 @@ impl PassManager {
             }
         }
         Ok(())
+    }
+}
+
+impl Default for PassManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

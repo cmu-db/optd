@@ -1,6 +1,6 @@
 use std::any::{Any, TypeId, type_name};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -233,6 +233,14 @@ impl Estimate {
             source,
         }
     }
+
+    fn max_by_value(&self, other: Self) -> Self {
+        if self.value >= other.value {
+            self.clone()
+        } else {
+            other
+        }
+    }
 }
 
 impl std::fmt::Display for Estimate {
@@ -299,6 +307,15 @@ impl ColumnProfile {
 pub struct CardinalityProfile {
     pub rows: Estimate,
     pub columns: BTreeMap<Column, ColumnProfile>,
+    pub equivalence_classes: Vec<ColumnEquivalenceClass>,
+}
+
+/// Columns known equal in a derived profile, with the best known class NDV.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColumnEquivalenceClass {
+    pub columns: BTreeSet<Column>,
+    pub distinct: Estimate,
 }
 
 impl CardinalityProfile {
@@ -307,8 +324,17 @@ impl CardinalityProfile {
         let columns = columns
             .into_iter()
             .map(|column| (column, ColumnProfile::unknown(&rows)))
-            .collect();
-        Self { rows, columns }
+            .collect::<BTreeMap<_, _>>();
+        Self::new(rows, columns)
+    }
+
+    pub fn new(rows: Estimate, columns: BTreeMap<Column, ColumnProfile>) -> Self {
+        let equivalence_classes = singleton_equivalence_classes(&columns);
+        Self {
+            rows,
+            columns,
+            equivalence_classes,
+        }
     }
 
     fn cap_by_rows(&self, rows: Estimate) -> Self {
@@ -317,8 +343,83 @@ impl CardinalityProfile {
             .iter()
             .map(|(&column, profile)| (column, profile.cap_by_rows(&rows)))
             .collect();
-        Self { rows, columns }
+        let equivalence_classes = filter_equivalence_classes(&self.equivalence_classes, &columns);
+        Self {
+            rows,
+            columns,
+            equivalence_classes,
+        }
     }
+}
+
+fn singleton_equivalence_classes(
+    columns: &BTreeMap<Column, ColumnProfile>,
+) -> Vec<ColumnEquivalenceClass> {
+    columns
+        .iter()
+        .map(|(&column, profile)| ColumnEquivalenceClass {
+            columns: BTreeSet::from([column]),
+            distinct: profile.distinct.clone(),
+        })
+        .collect()
+}
+
+fn filter_equivalence_classes(
+    classes: &[ColumnEquivalenceClass],
+    columns: &BTreeMap<Column, ColumnProfile>,
+) -> Vec<ColumnEquivalenceClass> {
+    let mut filtered = Vec::new();
+    for class in classes {
+        let kept = class
+            .columns
+            .iter()
+            .copied()
+            .filter(|column| columns.contains_key(column))
+            .collect::<BTreeSet<_>>();
+        if kept.is_empty() {
+            continue;
+        }
+        let distinct = kept
+            .iter()
+            .filter_map(|column| columns.get(column))
+            .map(|profile| profile.distinct.clone())
+            .max_by(|a, b| a.value.total_cmp(&b.value))
+            .unwrap_or_else(|| class.distinct.clone());
+        filtered.push(ColumnEquivalenceClass {
+            columns: kept,
+            distinct,
+        });
+    }
+    filtered
+}
+
+fn rename_equivalence_classes(
+    classes: &[ColumnEquivalenceClass],
+    rename_map: &BTreeMap<Column, Column>,
+) -> Vec<ColumnEquivalenceClass> {
+    classes
+        .iter()
+        .filter_map(|class| {
+            let columns = class
+                .columns
+                .iter()
+                .filter_map(|column| rename_map.get(column).copied())
+                .collect::<BTreeSet<_>>();
+            (!columns.is_empty()).then(|| ColumnEquivalenceClass {
+                columns,
+                distinct: class.distinct.clone(),
+            })
+        })
+        .collect()
+}
+
+fn merge_equivalence_class_lists(
+    left: &[ColumnEquivalenceClass],
+    right: &[ColumnEquivalenceClass],
+) -> Vec<ColumnEquivalenceClass> {
+    let mut merged = left.to_vec();
+    merged.extend_from_slice(right);
+    merged
 }
 
 /// Input profiles supplied when estimating a virtual join-ordering DP state.
@@ -1155,10 +1256,7 @@ fn scan_profile(scan: &Scan, ctx: &QueryContext, analyses: &AnalysisContext) -> 
         columns.insert(*column, profile);
     }
 
-    CardinalityProfile {
-        rows: row_estimate,
-        columns,
-    }
+    CardinalityProfile::new(row_estimate, columns)
 }
 
 fn column_profile_from_stats(
@@ -1212,38 +1310,47 @@ fn const_scan_profile(data: &crate::ConstScan, ctx: &QueryContext) -> Cardinalit
             },
         );
     }
-    CardinalityProfile { rows, columns }
+    CardinalityProfile::new(rows, columns)
 }
 
 fn project_profile(input: &CardinalityProfile, columns: &[Column]) -> CardinalityProfile {
+    let columns = columns
+        .iter()
+        .filter_map(|column| {
+            input
+                .columns
+                .get(column)
+                .cloned()
+                .map(|profile| (*column, profile))
+        })
+        .collect();
+    let equivalence_classes = filter_equivalence_classes(&input.equivalence_classes, &columns);
     CardinalityProfile {
         rows: input.rows.clone(),
-        columns: columns
-            .iter()
-            .filter_map(|column| {
-                input
-                    .columns
-                    .get(column)
-                    .cloned()
-                    .map(|profile| (*column, profile))
-            })
-            .collect(),
+        columns,
+        equivalence_classes,
     }
 }
 
 fn rename_profile(input: &CardinalityProfile, defs: &[(Column, Column)]) -> CardinalityProfile {
+    let rename_map = defs
+        .iter()
+        .map(|(renamed, original)| (*original, *renamed))
+        .collect::<BTreeMap<_, _>>();
+    let columns = defs
+        .iter()
+        .filter_map(|(renamed, original)| {
+            input
+                .columns
+                .get(original)
+                .cloned()
+                .map(|profile| (*renamed, profile))
+        })
+        .collect();
     CardinalityProfile {
         rows: input.rows.clone(),
-        columns: defs
-            .iter()
-            .filter_map(|(renamed, original)| {
-                input
-                    .columns
-                    .get(original)
-                    .cloned()
-                    .map(|profile| (*renamed, profile))
-            })
-            .collect(),
+        columns,
+        equivalence_classes: rename_equivalence_classes(&input.equivalence_classes, &rename_map),
     }
 }
 
@@ -1367,10 +1474,7 @@ fn aggregation_profile(
         };
         columns.insert(*column, profile);
     }
-    CardinalityProfile {
-        rows: group_rows,
-        columns,
-    }
+    CardinalityProfile::new(group_rows, columns)
 }
 
 fn apply_selection_profile(
@@ -1394,7 +1498,12 @@ fn scale_profile(profile: CardinalityProfile, factor: f64) -> CardinalityProfile
         .iter()
         .map(|(&column, column_profile)| (column, column_profile.scale_frequency(factor, &rows)))
         .collect();
-    CardinalityProfile { rows, columns }
+    let equivalence_classes = filter_equivalence_classes(&profile.equivalence_classes, &columns);
+    CardinalityProfile {
+        rows,
+        columns,
+        equivalence_classes,
+    }
 }
 
 fn cross_product_profile(
@@ -1429,7 +1538,14 @@ fn cross_product_profile(
             .cap(output.frequency.value, EstimateSource::Derived);
         columns.insert(column, output);
     }
-    CardinalityProfile { rows, columns }
+    CardinalityProfile {
+        rows,
+        columns,
+        equivalence_classes: merge_equivalence_class_lists(
+            &left.equivalence_classes,
+            &right.equivalence_classes,
+        ),
+    }
 }
 
 fn join_profile_from_predicates(
@@ -1439,8 +1555,8 @@ fn join_profile_from_predicates(
     predicates: &[Expr],
     ctx: &QueryContext,
 ) -> CardinalityProfile {
-    let selectivity = join_selectivity(left, right, predicates, ctx);
-    join_profile_with_selectivity(left, right, join_type, selectivity)
+    let estimate = join_selectivity_with_classes(left, right, predicates, ctx);
+    join_profile_with_selectivity_and_classes(left, right, join_type, estimate)
 }
 
 pub(crate) fn join_profile_with_selectivity(
@@ -1449,24 +1565,60 @@ pub(crate) fn join_profile_with_selectivity(
     join_type: JoinType,
     selectivity: Estimate,
 ) -> CardinalityProfile {
+    let equivalence_classes =
+        merge_equivalence_class_lists(&left.equivalence_classes, &right.equivalence_classes);
+    join_profile_with_selectivity_and_classes(
+        left,
+        right,
+        join_type,
+        JoinSelectivityEstimate {
+            match_probability: Estimate::derived(
+                (right.rows.value * selectivity.value).clamp(0.0, 1.0),
+                Some(0.0),
+                Some(1.0),
+            ),
+            selectivity,
+            equivalence_classes,
+        },
+    )
+}
+
+fn join_profile_with_selectivity_and_classes(
+    left: &CardinalityProfile,
+    right: &CardinalityProfile,
+    join_type: JoinType,
+    estimate: JoinSelectivityEstimate,
+) -> CardinalityProfile {
+    let selectivity = estimate.selectivity;
     let inner_rows = Estimate::derived(
         left.rows.value * right.rows.value * selectivity.value,
         Some(0.0),
         multiply_options(left.rows.upper, right.rows.upper).map(|v| v * selectivity.value),
     );
     match join_type {
-        JoinType::LeftSemi => semi_join_profile(left, inner_rows.value),
-        JoinType::LeftAnti => semi_join_profile(left, left.rows.value - inner_rows.value),
+        JoinType::LeftSemi => semi_join_profile(left, estimate.match_probability.value),
+        JoinType::LeftAnti => anti_join_profile(left, estimate.match_probability.value),
         JoinType::Single => left.cap_by_rows(left.rows.clone()),
-        JoinType::LeftOuter => combine_join_columns(left, right, inner_rows, Some(left.rows.value)),
-        JoinType::RightOuter => {
-            combine_join_columns(left, right, inner_rows, Some(right.rows.value))
-        }
+        JoinType::LeftOuter => combine_join_columns(
+            left,
+            right,
+            inner_rows,
+            Some(left.rows.value),
+            estimate.equivalence_classes,
+        ),
+        JoinType::RightOuter => combine_join_columns(
+            left,
+            right,
+            inner_rows,
+            Some(right.rows.value),
+            estimate.equivalence_classes,
+        ),
         JoinType::FullOuter => combine_join_columns(
             left,
             right,
             inner_rows,
             Some(left.rows.value.max(right.rows.value)),
+            estimate.equivalence_classes,
         ),
         JoinType::LeftMark(column) => {
             let mut profile = left.cap_by_rows(left.rows.clone());
@@ -1485,13 +1637,24 @@ pub(crate) fn join_profile_with_selectivity(
             );
             profile
         }
-        JoinType::Inner => combine_join_columns(left, right, inner_rows, None),
+        JoinType::Inner => {
+            combine_join_columns(left, right, inner_rows, None, estimate.equivalence_classes)
+        }
     }
 }
 
-fn semi_join_profile(input: &CardinalityProfile, row_value: f64) -> CardinalityProfile {
+fn semi_join_profile(input: &CardinalityProfile, match_probability: f64) -> CardinalityProfile {
     let rows = Estimate::derived(
-        row_value.clamp(0.0, input.rows.value),
+        (input.rows.value * match_probability.clamp(0.0, 1.0)).clamp(0.0, input.rows.value),
+        Some(0.0),
+        input.rows.upper,
+    );
+    input.cap_by_rows(rows)
+}
+
+fn anti_join_profile(input: &CardinalityProfile, match_probability: f64) -> CardinalityProfile {
+    let rows = Estimate::derived(
+        (input.rows.value * (1.0 - match_probability.clamp(0.0, 1.0))).clamp(0.0, input.rows.value),
         Some(0.0),
         input.rows.upper,
     );
@@ -1503,6 +1666,7 @@ fn combine_join_columns(
     right: &CardinalityProfile,
     mut rows: Estimate,
     lower_bound: Option<f64>,
+    equivalence_classes: Vec<ColumnEquivalenceClass>,
 ) -> CardinalityProfile {
     if let Some(min_rows) = lower_bound {
         rows.value = rows.value.max(min_rows);
@@ -1515,46 +1679,91 @@ fn combine_join_columns(
     for (&column, profile) in &right.columns {
         columns.insert(column, profile.cap_by_rows(&rows));
     }
-    CardinalityProfile { rows, columns }
+    let equivalence_classes = filter_equivalence_classes(&equivalence_classes, &columns);
+    CardinalityProfile {
+        rows,
+        columns,
+        equivalence_classes,
+    }
 }
 
+#[cfg(test)]
 pub(crate) fn join_selectivity(
     left: &CardinalityProfile,
     right: &CardinalityProfile,
     predicates: &[Expr],
     ctx: &QueryContext,
 ) -> Estimate {
-    let mut classes = EqualityClasses::default();
-    let mut selectivity = 1.0;
+    join_selectivity_with_classes(left, right, predicates, ctx).selectivity
+}
+
+struct JoinSelectivityEstimate {
+    selectivity: Estimate,
+    equivalence_classes: Vec<ColumnEquivalenceClass>,
+    match_probability: Estimate,
+}
+
+fn join_selectivity_with_classes(
+    left: &CardinalityProfile,
+    right: &CardinalityProfile,
+    predicates: &[Expr],
+    ctx: &QueryContext,
+) -> JoinSelectivityEstimate {
+    let mut classes = EquivalenceClassState::from_profiles(left, right);
+    let mut equality_edges = Vec::new();
+    let mut residual_selectivity = 1.0;
     for predicate in predicates
         .iter()
         .flat_map(|predicate| conjuncts(*predicate, ctx))
     {
         if let Some((left_col, right_col)) = column_equality(predicate, ctx) {
-            if classes.union(left_col, right_col) {
-                let left_side = left.columns.contains_key(&left_col);
-                let right_side = right.columns.contains_key(&left_col);
-                let other_left_side = left.columns.contains_key(&right_col);
-                let other_right_side = right.columns.contains_key(&right_col);
-                if (left_side && other_right_side) || (right_side && other_left_side) {
-                    let left_ndv = left
-                        .columns
-                        .get(&left_col)
-                        .or_else(|| left.columns.get(&right_col))
-                        .map_or(left.rows.value, |profile| profile.distinct.value);
-                    let right_ndv = right
-                        .columns
-                        .get(&left_col)
-                        .or_else(|| right.columns.get(&right_col))
-                        .map_or(right.rows.value, |profile| profile.distinct.value);
-                    selectivity *= 1.0 / left_ndv.max(right_ndv).max(1.0);
-                }
-            }
+            equality_edges.push(EqualityEdge {
+                left: left_col,
+                right: right_col,
+                chosen_ndv: classes
+                    .class_distinct(left_col)
+                    .max_by_value(classes.class_distinct(right_col)),
+            });
         } else {
-            selectivity *= filter_selectivity_for_predicate(left, right, predicate, ctx).value;
+            residual_selectivity *=
+                filter_selectivity_for_predicate(left, right, predicate, ctx).value;
         }
     }
-    Estimate::derived(selectivity.clamp(0.0, 1.0), Some(0.0), Some(1.0))
+
+    equality_edges.sort_by(|a, b| b.chosen_ndv.value.total_cmp(&a.chosen_ndv.value));
+    let mut equality_selectivity = 1.0;
+    let mut match_probability = 0.0_f64;
+    for edge in equality_edges {
+        if classes.equivalent(edge.left, edge.right) {
+            continue;
+        }
+        let connects_inputs =
+            column_sides(edge.left, left, right) != column_sides(edge.right, left, right);
+        let chosen_ndv = edge.chosen_ndv.value.max(1.0);
+        if connects_inputs {
+            equality_selectivity *= 1.0 / chosen_ndv;
+            let left_match = right.rows.value / chosen_ndv;
+            let right_match = left.rows.value / chosen_ndv;
+            match_probability = match_probability.max(left_match.min(right_match).clamp(0.0, 1.0));
+        }
+        classes.union(edge.left, edge.right, edge.chosen_ndv);
+    }
+
+    let selectivity = (equality_selectivity * residual_selectivity).clamp(0.0, 1.0);
+    JoinSelectivityEstimate {
+        selectivity: Estimate::derived(selectivity, Some(0.0), Some(1.0)),
+        equivalence_classes: classes.into_classes(),
+        match_probability: Estimate::derived(
+            (if match_probability == 0.0 && equality_selectivity == 1.0 {
+                residual_selectivity
+            } else {
+                match_probability * residual_selectivity
+            })
+            .clamp(0.0, 1.0),
+            Some(0.0),
+            Some(1.0),
+        ),
+    }
 }
 
 pub(crate) fn connecting_edge_indices(
@@ -1797,32 +2006,137 @@ fn column_equality_from_parts(
     Some((*left_col, *right_col))
 }
 
-#[derive(Clone, Default)]
-struct EqualityClasses {
-    parent: HashMap<Column, Column>,
+struct EqualityEdge {
+    left: Column,
+    right: Column,
+    chosen_ndv: Estimate,
 }
 
-impl EqualityClasses {
-    fn union(&mut self, left: Column, right: Column) -> bool {
+#[derive(Clone, Default)]
+struct EquivalenceClassState {
+    parent: HashMap<Column, Column>,
+    distinct: HashMap<Column, Estimate>,
+}
+
+impl EquivalenceClassState {
+    fn from_profiles(left: &CardinalityProfile, right: &CardinalityProfile) -> Self {
+        let mut state = Self::default();
+        for profile in [left, right] {
+            for (&column, column_profile) in &profile.columns {
+                state.parent.entry(column).or_insert(column);
+                state
+                    .distinct
+                    .entry(column)
+                    .or_insert_with(|| column_profile.distinct.clone());
+            }
+            for class in &profile.equivalence_classes {
+                let mut iter = class.columns.iter().copied();
+                let Some(first) = iter.next() else {
+                    continue;
+                };
+                let first_root = state.find(first);
+                state.distinct.insert(first_root, class.distinct.clone());
+                for column in iter {
+                    state.union(first, column, class.distinct.clone());
+                }
+            }
+        }
+        state
+    }
+
+    fn equivalent(&mut self, left: Column, right: Column) -> bool {
+        self.find(left) == self.find(right)
+    }
+
+    fn union(&mut self, left: Column, right: Column, distinct: Estimate) -> bool {
         let left_root = self.find(left);
         let right_root = self.find(right);
         if left_root == right_root {
             false
         } else {
             self.parent.insert(right_root, left_root);
+            let left_distinct = self
+                .distinct
+                .remove(&left_root)
+                .unwrap_or_else(|| distinct.clone());
+            let right_distinct = self
+                .distinct
+                .remove(&right_root)
+                .unwrap_or_else(|| distinct.clone());
+            self.distinct.insert(
+                left_root,
+                left_distinct
+                    .max_by_value(right_distinct)
+                    .max_by_value(distinct),
+            );
             true
         }
+    }
+
+    fn class_distinct(&mut self, column: Column) -> Estimate {
+        let root = self.find(column);
+        self.distinct
+            .get(&root)
+            .cloned()
+            .unwrap_or_else(|| Estimate::default(100.0))
     }
 
     fn find(&mut self, column: Column) -> Column {
         let parent = *self.parent.entry(column).or_insert(column);
         if parent == column {
+            self.distinct
+                .entry(column)
+                .or_insert_with(|| Estimate::default(100.0));
             column
         } else {
             let root = self.find(parent);
             self.parent.insert(column, root);
             root
         }
+    }
+
+    fn into_classes(mut self) -> Vec<ColumnEquivalenceClass> {
+        let columns = self.parent.keys().copied().collect::<Vec<_>>();
+        let mut grouped = BTreeMap::<Column, BTreeSet<Column>>::new();
+        for column in columns {
+            let root = self.find(column);
+            grouped.entry(root).or_default().insert(column);
+        }
+        grouped
+            .into_iter()
+            .map(|(root, columns)| ColumnEquivalenceClass {
+                columns,
+                distinct: self
+                    .distinct
+                    .get(&root)
+                    .cloned()
+                    .unwrap_or_else(|| Estimate::default(100.0)),
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ColumnSide {
+    Left,
+    Right,
+    Both,
+    Neither,
+}
+
+fn column_sides(
+    column: Column,
+    left: &CardinalityProfile,
+    right: &CardinalityProfile,
+) -> ColumnSide {
+    match (
+        left.columns.contains_key(&column),
+        right.columns.contains_key(&column),
+    ) {
+        (true, false) => ColumnSide::Left,
+        (false, true) => ColumnSide::Right,
+        (true, true) => ColumnSide::Both,
+        (false, false) => ColumnSide::Neither,
     }
 }
 
@@ -1929,8 +2243,76 @@ fn mock_table_statistics(table: &str) -> Option<TableStatistics> {
     Some(TableStatistics {
         row_count: Some(row_count),
         size_bytes: None,
-        column_statistics: BTreeMap::new(),
+        column_statistics: mock_column_statistics(table, row_count),
     })
+}
+
+fn mock_column_statistics(table: &str, row_count: usize) -> BTreeMap<String, ColumnStatistics> {
+    let mut stats = BTreeMap::new();
+    stats.insert("id".to_string(), mock_column_stat(row_count, row_count));
+
+    let referenced = match table {
+        "aka_title" | "cast_info" | "complete_cast" | "movie_companies" | "movie_info"
+        | "movie_info_idx" | "movie_keyword" | "movie_link" => Some(("movie_id", 2_528_312)),
+        _ => None,
+    };
+    if let Some((column, distinct)) = referenced {
+        stats.insert(column.to_string(), mock_column_stat(row_count, distinct));
+    }
+    if table == "movie_link" {
+        stats.insert(
+            "linked_movie_id".to_string(),
+            mock_column_stat(row_count, 2_528_312),
+        );
+    }
+
+    for (column, distinct) in [
+        ("keyword_id", 134_170),
+        ("company_id", 234_997),
+        ("company_type_id", 4),
+        ("info_type_id", 113),
+        ("kind_id", 7),
+        ("link_type_id", 18),
+        ("person_id", 4_167_491),
+        ("person_role_id", 4_167_491),
+        ("role_id", 12),
+        ("role_type_id", 12),
+        ("subject_id", 4),
+        ("status_id", 4),
+    ] {
+        stats.insert(column.to_string(), mock_column_stat(row_count, distinct));
+    }
+
+    for (column, distinct) in [
+        ("r_regionkey", 5),
+        ("n_nationkey", 25),
+        ("n_regionkey", 5),
+        ("s_suppkey", 10_000),
+        ("s_nationkey", 25),
+        ("c_custkey", 150_000),
+        ("c_nationkey", 25),
+        ("p_partkey", 200_000),
+        ("ps_partkey", 200_000),
+        ("ps_suppkey", 10_000),
+        ("o_orderkey", 1_500_000),
+        ("o_custkey", 150_000),
+        ("l_orderkey", 1_500_000),
+        ("l_partkey", 200_000),
+        ("l_suppkey", 10_000),
+    ] {
+        stats.insert(column.to_string(), mock_column_stat(row_count, distinct));
+    }
+
+    stats
+}
+
+fn mock_column_stat(row_count: usize, distinct: usize) -> ColumnStatistics {
+    ColumnStatistics {
+        lower_bound: None,
+        upper_bound: None,
+        frequency: Some(row_count),
+        distinct: Some(distinct.min(row_count)),
+    }
 }
 
 /// Analysis that records columns introduced directly by an operator.
@@ -3264,16 +3646,13 @@ mod tests {
             frequency: rows.clone(),
             distinct: Estimate::exact(100.0),
         };
-        let left = CardinalityProfile {
-            rows: rows.clone(),
-            columns: [(a, profile.clone()), (b, profile.clone())]
+        let left = CardinalityProfile::new(
+            rows.clone(),
+            [(a, profile.clone()), (b, profile.clone())]
                 .into_iter()
                 .collect(),
-        };
-        let right = CardinalityProfile {
-            rows,
-            columns: [(c, profile)].into_iter().collect(),
-        };
+        );
+        let right = CardinalityProfile::new(rows, [(c, profile)].into_iter().collect());
 
         let ab = equality_expr(&mut ctx, a, b);
         let bc = equality_expr(&mut ctx, b, c);
@@ -3282,6 +3661,238 @@ mod tests {
         let selectivity = join_selectivity(&left, &right, &[ab, bc, ac], &ctx);
 
         assert_eq!(selectivity.value, 0.01);
+    }
+
+    #[test]
+    fn cardinality_estimation_uses_pk_fk_containment_for_two_fk_tables() {
+        let mut ctx = QueryContext::new();
+        let title_id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let mi_movie_id = ColumnData::new("movie_id", DataType::Int64).add(&mut ctx);
+        let mk_movie_id = ColumnData::new("movie_id", DataType::Int64).add(&mut ctx);
+        let title = OperatorData::Scan(Scan {
+            table: TableRef::bare("title"),
+            columns: vec![title_id],
+        })
+        .add(&mut ctx);
+        let mi = OperatorData::Scan(Scan {
+            table: TableRef::bare("movie_info"),
+            columns: vec![mi_movie_id],
+        })
+        .add(&mut ctx);
+        let mk = OperatorData::Scan(Scan {
+            table: TableRef::bare("movie_keyword"),
+            columns: vec![mk_movie_id],
+        })
+        .add(&mut ctx);
+
+        let on_title_mi = equality_expr(&mut ctx, title_id, mi_movie_id);
+        let title_mi = OperatorData::Join(Join {
+            join_type: JoinType::Inner,
+            on: on_title_mi,
+            outer: title,
+            inner: mi,
+        })
+        .add(&mut ctx);
+        let on_title_mk = equality_expr(&mut ctx, title_id, mk_movie_id);
+        let on_mi_mk = equality_expr(&mut ctx, mi_movie_id, mk_movie_id);
+        let on = ExprData::Nary {
+            op: NaryOp::And,
+            exprs: vec![on_title_mk, on_mi_mk],
+        }
+        .add(&mut ctx);
+        let join = OperatorData::Join(Join {
+            join_type: JoinType::Inner,
+            on,
+            outer: title_mi,
+            inner: mk,
+        })
+        .add(&mut ctx);
+
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        for table in ["title", "movie_info", "movie_keyword"] {
+            catalog
+                .create_table(TableRef::bare(table), schema(), None)
+                .unwrap();
+        }
+        catalog
+            .set_table_statistics(
+                TableRef::bare("title"),
+                table_stats_for_column("id", 100, 100),
+            )
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                TableRef::bare("movie_info"),
+                table_stats_for_column("movie_id", 1_000, 100),
+            )
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                TableRef::bare("movie_keyword"),
+                table_stats_for_column("movie_id", 2_000, 100),
+            )
+            .unwrap();
+        let mut analyses = AnalysisContext::with_catalog(catalog);
+
+        let profile = analyses.get::<CardinalityEstimationV1>(&ctx, join).unwrap();
+
+        assert_eq!(profile.rows.value, 20_000.0);
+    }
+
+    #[test]
+    fn cardinality_estimation_picks_largest_ndv_for_parallel_edges() {
+        let mut ctx = QueryContext::new();
+        let a = ColumnData::new("a", DataType::Int64).add(&mut ctx);
+        let b = ColumnData::new("b", DataType::Int64).add(&mut ctx);
+        let c = ColumnData::new("c", DataType::Int64).add(&mut ctx);
+        let rows = Estimate::exact(10_000.0);
+        let mut left = CardinalityProfile::new(
+            rows.clone(),
+            [
+                (a, test_column_profile(10_000.0, 100.0)),
+                (b, test_column_profile(10_000.0, 1_000.0)),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        left.equivalence_classes = vec![ColumnEquivalenceClass {
+            columns: BTreeSet::from([a, b]),
+            distinct: Estimate::exact(1_000.0),
+        }];
+        let right = CardinalityProfile::new(
+            rows,
+            [(c, test_column_profile(10_000.0, 100.0))]
+                .into_iter()
+                .collect(),
+        );
+        let ac = equality_expr(&mut ctx, a, c);
+        let bc = equality_expr(&mut ctx, b, c);
+
+        let selectivity = join_selectivity(&left, &right, &[ac, bc], &ctx);
+
+        assert_eq!(selectivity.value, 0.001);
+    }
+
+    #[test]
+    fn cardinality_estimation_uses_match_probability_for_semi_and_anti() {
+        let mut ctx = QueryContext::new();
+        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
+        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
+        let left_scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("left_t"),
+            columns: vec![left_key],
+        })
+        .add(&mut ctx);
+        let right_scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("right_t"),
+            columns: vec![right_key],
+        })
+        .add(&mut ctx);
+        let on = equality_expr(&mut ctx, left_key, right_key);
+        let semi = OperatorData::Join(Join {
+            join_type: JoinType::LeftSemi,
+            on,
+            outer: left_scan,
+            inner: right_scan,
+        })
+        .add(&mut ctx);
+        let on = equality_expr(&mut ctx, left_key, right_key);
+        let anti = OperatorData::Join(Join {
+            join_type: JoinType::LeftAnti,
+            on,
+            outer: left_scan,
+            inner: right_scan,
+        })
+        .add(&mut ctx);
+
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(TableRef::bare("left_t"), schema(), None)
+            .unwrap();
+        catalog
+            .create_table(TableRef::bare("right_t"), schema(), None)
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                TableRef::bare("left_t"),
+                table_stats_for_column("left_key", 1_000, 1_000),
+            )
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                TableRef::bare("right_t"),
+                table_stats_for_column("right_key", 100, 1_000),
+            )
+            .unwrap();
+        let mut analyses = AnalysisContext::with_catalog(catalog);
+
+        assert_eq!(
+            analyses
+                .get::<CardinalityEstimationV1>(&ctx, semi)
+                .unwrap()
+                .rows
+                .value,
+            100.0
+        );
+        assert_eq!(
+            analyses
+                .get::<CardinalityEstimationV1>(&ctx, anti)
+                .unwrap()
+                .rows
+                .value,
+            900.0
+        );
+    }
+
+    #[test]
+    fn cardinality_estimation_preserves_outer_join_lower_bound() {
+        let mut ctx = QueryContext::new();
+        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
+        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
+        let left_scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("left_t"),
+            columns: vec![left_key],
+        })
+        .add(&mut ctx);
+        let right_scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("right_t"),
+            columns: vec![right_key],
+        })
+        .add(&mut ctx);
+        let on = equality_expr(&mut ctx, left_key, right_key);
+        let join = OperatorData::Join(Join {
+            join_type: JoinType::LeftOuter,
+            on,
+            outer: left_scan,
+            inner: right_scan,
+        })
+        .add(&mut ctx);
+
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(TableRef::bare("left_t"), schema(), None)
+            .unwrap();
+        catalog
+            .create_table(TableRef::bare("right_t"), schema(), None)
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                TableRef::bare("left_t"),
+                table_stats_for_column("left_key", 100, 1_000),
+            )
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                TableRef::bare("right_t"),
+                table_stats_for_column("right_key", 10, 1_000),
+            )
+            .unwrap();
+        let mut analyses = AnalysisContext::with_catalog(catalog);
+
+        let profile = analyses.get::<CardinalityEstimationV1>(&ctx, join).unwrap();
+
+        assert_eq!(profile.rows.value, 100.0);
+        assert_eq!(profile.rows.lower, Some(100.0));
     }
 
     fn equality_expr(ctx: &mut QueryContext, left: Column, right: Column) -> Expr {
@@ -3317,6 +3928,15 @@ mod tests {
             )]
             .into_iter()
             .collect(),
+        }
+    }
+
+    fn test_column_profile(rows: f64, distinct: f64) -> ColumnProfile {
+        ColumnProfile {
+            lower_bound: None,
+            upper_bound: None,
+            frequency: Estimate::exact(rows),
+            distinct: Estimate::exact(distinct),
         }
     }
 }

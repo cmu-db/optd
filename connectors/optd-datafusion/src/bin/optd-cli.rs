@@ -125,10 +125,10 @@ async fn execute_script(runner: &OptdRunner, sql: &str) -> Result<(), Box<dyn Er
 }
 
 async fn execute_statement(runner: &OptdRunner, statement: &str) -> Result<(), Box<dyn Error>> {
-    if runner.log_explain_steps_enabled() {
-        if let Err(err) = log_explain_steps(runner, statement) {
-            eprintln!("{err}");
-        }
+    if runner.log_explain_steps_enabled()
+        && let Err(err) = log_explain_steps(runner, statement)
+    {
+        eprintln!("{err}");
     }
 
     match runner.execute_sql(statement).await? {

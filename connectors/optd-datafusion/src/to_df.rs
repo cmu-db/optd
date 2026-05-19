@@ -965,6 +965,7 @@ fn correlated_subquery_outer_refs(
     outer_refs
 }
 
+#[allow(clippy::too_many_arguments)]
 fn convert_expr_replacing_column(
     expr: optd::Expr,
     replace_col: optd::Column,
@@ -1461,12 +1462,12 @@ fn lateral_column_qualifiers(
         if !visited.insert(op) {
             continue;
         }
-        if let OperatorData::Scan(scan) = op.get(ctx) {
-            if conflicts.contains(scan.table.table()) {
-                let alias = format!("optd_lateral_{}", op).replace('@', "");
-                for column in &scan.columns {
-                    qualifiers.insert(*column, alias.clone());
-                }
+        if let OperatorData::Scan(scan) = op.get(ctx)
+            && conflicts.contains(scan.table.table())
+        {
+            let alias = format!("optd_lateral_{}", op).replace('@', "");
+            for column in &scan.columns {
+                qualifiers.insert(*column, alias.clone());
             }
         }
         stack.extend(op.get(ctx).inputs());

@@ -36,10 +36,10 @@ impl OperatorRewrite for ExprSimplify {
         }
 
         // Selection(true, input) → input
-        if let OperatorData::Selection(Selection { predicate, input }) = &new_data {
-            if is_true(*predicate, ctx) {
-                return Ok(Rewrite::Replace(*input));
-            }
+        if let OperatorData::Selection(Selection { predicate, input }) = &new_data
+            && is_true(*predicate, ctx)
+        {
+            return Ok(Rewrite::Replace(*input));
         }
 
         Ok(Rewrite::Replace(new_data.add(&mut ctx.query)))
