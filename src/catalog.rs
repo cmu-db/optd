@@ -4,6 +4,8 @@ use std::sync::{Arc, RwLock};
 
 pub use arrow_schema::{Schema, SchemaRef};
 
+use crate::ScalarValue;
+
 /// Stable identifier for a catalog-registered table.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -154,10 +156,21 @@ impl From<&ResolvedTableRef> for TableRef {
 
 /// Table-level statistics that a catalog may provide to optimizer analyses.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TableStatistics {
     pub row_count: Option<usize>,
     pub size_bytes: Option<usize>,
+    pub column_statistics: BTreeMap<String, ColumnStatistics>,
+}
+
+/// Column-level statistics that a catalog may provide to optimizer analyses.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColumnStatistics {
+    pub lower_bound: Option<ScalarValue>,
+    pub upper_bound: Option<ScalarValue>,
+    pub frequency: Option<usize>,
+    pub distinct: Option<usize>,
 }
 
 /// Metadata recorded for a catalog table.

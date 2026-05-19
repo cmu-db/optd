@@ -5,9 +5,11 @@
 
 use std::collections::HashMap;
 
+use crate::analysis::{connecting_edge_indices, join_profile_with_selectivity};
 use crate::hypergraph::{NodeSet, QueryHypergraph, nodeset_min, nodeset_singleton};
 use crate::{
-    ExprData, Join, JoinType, NaryOp, Operator, OperatorData, QueryContext, build_hypergraph,
+    CardinalityProfile, Estimate, ExprData, Join, JoinInputProfiles, JoinType, NaryOp, Operator,
+    OperatorData, QueryContext, build_hypergraph,
 };
 
 use super::{OptimizeError, OptimizeResult, Pass, PassResult, QueryPass};
@@ -19,19 +21,40 @@ use crate::OptimizerContext;
 
 /// Provides cardinality and selectivity estimates for cost computation.
 pub trait Statistics: Send + Sync {
-    fn cardinality(&self, node_idx: usize, hg: &QueryHypergraph) -> f64;
-    fn selectivity(&self, left: NodeSet, right: NodeSet, hg: &QueryHypergraph) -> f64;
+    fn base_profile(&self, node_idx: usize, hg: &QueryHypergraph) -> CardinalityProfile;
+
+    fn join_selectivity(
+        &self,
+        left: NodeSet,
+        right: NodeSet,
+        hg: &QueryHypergraph,
+        inputs: JoinInputProfiles<'_>,
+    ) -> Estimate;
 }
 
 /// Uniform statistics: 1000 rows per relation, 0.1 selectivity per join.
 pub struct UniformStatistics;
 
 impl Statistics for UniformStatistics {
-    fn cardinality(&self, _node_idx: usize, _hg: &QueryHypergraph) -> f64 {
-        1000.0
+    fn base_profile(&self, node_idx: usize, hg: &QueryHypergraph) -> CardinalityProfile {
+        CardinalityProfile::unknown_for_columns(1000.0, hg.nodes[node_idx].available.clone())
     }
-    fn selectivity(&self, _left: NodeSet, _right: NodeSet, _hg: &QueryHypergraph) -> f64 {
-        0.1
+
+    fn join_selectivity(
+        &self,
+        left: NodeSet,
+        right: NodeSet,
+        hg: &QueryHypergraph,
+        _inputs: JoinInputProfiles<'_>,
+    ) -> Estimate {
+        let has_real_predicate = connecting_edge_indices(left, right, hg)
+            .iter()
+            .any(|idx| hg.edges[*idx].predicate.is_some());
+        if has_real_predicate {
+            Estimate::derived(0.1, Some(0.0), Some(1.0))
+        } else {
+            Estimate::exact(1.0)
+        }
     }
 }
 
@@ -94,7 +117,7 @@ struct DPhyp<'a> {
 #[derive(Clone)]
 struct PlanState {
     cost: f64,
-    cardinality: f64,
+    profile: CardinalityProfile,
     tree: JoinTree,
 }
 
@@ -122,12 +145,12 @@ impl<'a> DPhyp<'a> {
         // Initialise singletons.
         for i in 0..n {
             let s = nodeset_singleton(i);
-            let cardinality = self.stats.cardinality(i, self.hg);
+            let profile = self.stats.base_profile(i, self.hg);
             self.dp.insert(
                 s,
                 PlanState {
-                    cost: cardinality,
-                    cardinality,
+                    cost: profile.rows.value,
+                    profile,
                     tree: JoinTree::Leaf(i),
                 },
             );
@@ -202,26 +225,26 @@ impl<'a> DPhyp<'a> {
             return;
         };
 
-        // Collect connecting edge indices.
-        let edge_indices: Vec<usize> = self
-            .hg
-            .edges
-            .iter()
-            .enumerate()
-            .filter(|(_, e)| {
-                (e.left & s1 == e.left && e.right & s2 == e.right)
-                    || (e.left & s2 == e.left && e.right & s1 == e.right)
-            })
-            .map(|(i, _)| i)
-            .collect();
-
+        let edge_indices = connecting_edge_indices(s1, s2, self.hg);
         if edge_indices.is_empty() {
             return;
         }
 
-        let sel = self.stats.selectivity(s1, s2, self.hg);
-        let cardinality = left.cardinality * right.cardinality * sel;
-        let new_cost = left.cost + right.cost + cardinality;
+        let sel = self.stats.join_selectivity(
+            s1,
+            s2,
+            self.hg,
+            JoinInputProfiles {
+                left: &left.profile,
+                right: &right.profile,
+            },
+        );
+        let join_type = edge_indices
+            .first()
+            .map(|idx| self.hg.edges[*idx].join_type.to_ir_join_type())
+            .unwrap_or(JoinType::Inner);
+        let profile = join_profile_with_selectivity(&left.profile, &right.profile, join_type, sel);
+        let new_cost = left.cost + right.cost + profile.rows.value;
         let combined = s1 | s2;
 
         let better = self
@@ -234,7 +257,7 @@ impl<'a> DPhyp<'a> {
                 combined,
                 PlanState {
                     cost: new_cost,
-                    cardinality,
+                    profile,
                     tree: JoinTree::Join {
                         left: Box::new(left.tree),
                         right: Box::new(right.tree),
@@ -639,16 +662,23 @@ mod tests {
         struct SkewStats;
 
         impl Statistics for SkewStats {
-            fn cardinality(&self, node_idx: usize, _hg: &QueryHypergraph) -> f64 {
-                match node_idx {
+            fn base_profile(&self, node_idx: usize, hg: &QueryHypergraph) -> CardinalityProfile {
+                let rows = match node_idx {
                     0 => 1000.0,
                     1 | 2 => 10.0,
                     _ => unreachable!("test graph has three nodes"),
-                }
+                };
+                CardinalityProfile::unknown_for_columns(rows, hg.nodes[node_idx].available.clone())
             }
 
-            fn selectivity(&self, _left: NodeSet, _right: NodeSet, _hg: &QueryHypergraph) -> f64 {
-                0.1
+            fn join_selectivity(
+                &self,
+                _left: NodeSet,
+                _right: NodeSet,
+                _hg: &QueryHypergraph,
+                _inputs: JoinInputProfiles<'_>,
+            ) -> Estimate {
+                Estimate::derived(0.1, Some(0.0), Some(1.0))
             }
         }
 

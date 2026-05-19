@@ -13,12 +13,13 @@ pub mod tpch;
 
 pub use analysis::{
     Analysis, AnalysisContext, AnalysisError, AnalysisResult, Analyzable, AvailableColumns,
-    ColumnNullability, CreatedColumns, FreeColumns, ParentIndex, ParentsOf, UsedColumns,
+    CardinalityEstimationV1, CardinalityProfile, ColumnNullability, ColumnProfile, CreatedColumns,
+    Estimate, EstimateSource, FreeColumns, JoinInputProfiles, ParentIndex, ParentsOf, UsedColumns,
     expr_used_columns,
 };
 pub use catalog::{
-    Catalog, CatalogError, CatalogResult, MemoryCatalog, ResolvedTableRef, TableId, TableMetadata,
-    TableRef, TableStatistics,
+    Catalog, CatalogError, CatalogResult, ColumnStatistics, MemoryCatalog, ResolvedTableRef,
+    TableId, TableMetadata, TableRef, TableStatistics,
 };
 pub use display::{
     BoxDrawingRenderer, BoxRendererConfig, BoxRendererTheme, ColorMode, DisplayField, DisplayInput,
@@ -289,7 +290,7 @@ impl std::fmt::Display for JoinType {
 ///
 /// The corresponding payload is [`ColumnData`].
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Column(usize);
 
 impl Column {
@@ -984,6 +985,14 @@ impl DisplayableOperatorAnalysis for AvailableColumns {
 
     fn format_output(formatter: &QueryFormatter<'_>, output: Self::Value) -> DisplayValue {
         formatter.format_columns(output)
+    }
+}
+
+impl DisplayableOperatorAnalysis for CardinalityEstimationV1 {
+    const DISPLAY_KEY: &'static str = "estimate_rows_v1";
+
+    fn format_output(_formatter: &QueryFormatter<'_>, output: Self::Value) -> DisplayValue {
+        DisplayValue::Atom(output.rows.to_string())
     }
 }
 

@@ -5,7 +5,7 @@ use datafusion::arrow::array::{ArrayRef, Float64Array, Int64Array, StringArray};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::arrow::util::pretty::pretty_format_batches;
-use optd::QueryFormatConfig;
+use optd::{CardinalityEstimationV1, QueryFormatConfig};
 use optd_datafusion::explain_udfs::ExplainStep;
 use optd_datafusion::runner::{OptdRunner, RunnerOutput};
 use optd_datafusion::setup::{
@@ -146,7 +146,10 @@ async fn execute_statement(runner: &OptdRunner, statement: &str) -> Result<(), B
 }
 
 fn log_explain_steps(runner: &OptdRunner, statement: &str) -> Result<(), Box<dyn Error>> {
-    let steps = runner.explain_steps_box_with_config(statement, QueryFormatConfig::new())?;
+    let steps = runner.explain_steps_box_with_config(
+        statement,
+        QueryFormatConfig::new().with_analysis::<CardinalityEstimationV1>(),
+    )?;
     for step in &steps {
         println!("-- explain_steps step={} pass={}", step.step, step.pass);
         println!("{}", step.plan);
