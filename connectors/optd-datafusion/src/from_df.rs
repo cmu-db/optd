@@ -355,6 +355,9 @@ fn convert_projection(
         .collect::<FromDFResult<Option<Vec<_>>>>()?;
 
     if let Some(columns) = projected_columns {
+        if projection_has_repeated_columns(&columns) {
+            return materialize_projected_column_aliases(proj, ctx, bindings, input, &columns);
+        }
         bind_projection_output_names(proj, &columns, bindings);
         Ok(OperatorData::Projection(OptdProjection { columns, input }).add(ctx))
     } else {
@@ -395,6 +398,62 @@ fn convert_projection(
         })
         .add(ctx))
     }
+}
+
+fn projection_has_repeated_columns(columns: &[Column]) -> bool {
+    let mut seen = HashMap::new();
+    for column in columns {
+        let count = seen.entry(*column).or_insert(0);
+        *count += 1;
+        if *count > 1 {
+            return true;
+        }
+    }
+    false
+}
+
+fn materialize_projected_column_aliases(
+    proj: &Projection,
+    ctx: &mut QueryContext,
+    bindings: &mut BindingContext,
+    input: Operator,
+    columns: &[Column],
+) -> FromDFResult<Operator> {
+    let mut column_counts = HashMap::new();
+    for column in columns {
+        *column_counts.entry(*column).or_insert(0) += 1;
+    }
+
+    let mut computations = Vec::new();
+    let mut output_cols = Vec::new();
+
+    bindings.push();
+    for (i, source_col) in columns.iter().enumerate() {
+        let (qualifier, field) = proj.schema.qualified_field(i);
+        let q = qualifier.map(|r| r.to_string());
+        let output_col = if column_counts[source_col] > 1 {
+            let col = ColumnData::new(field.name().clone(), field.data_type().clone()).add(ctx);
+            let expr = ExprData::ColumnRef(*source_col).add(ctx);
+            computations.push((col, expr));
+            col
+        } else {
+            *source_col
+        };
+        bindings.bind(q, field.name().clone(), output_col);
+        output_cols.push(output_col);
+    }
+
+    let after_map = OperatorData::Map(Map {
+        computations,
+        input,
+    })
+    .add(ctx);
+
+    Ok(OperatorData::Projection(OptdProjection {
+        columns: output_cols,
+        input: after_map,
+    })
+    .add(ctx))
 }
 
 fn resolve_projected_column(

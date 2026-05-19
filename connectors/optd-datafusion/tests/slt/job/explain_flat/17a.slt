@@ -65,20 +65,20 @@ SELECT explain_flat('SELECT MIN(n.name) AS member_in_charnamed_american_movie, M
 61)------"input": 2
 62)----},
 63)----{
-64)------"id": 61,
+64)------"id": 67,
 65)------"kind": "selection",
 66)------"title": "σ Selection",
 67)------"predicate": "(country_code(#23) = \"[us]\")",
 68)------"input": 3
 69)----},
 70)----{
-71)------"id": 71,
+71)------"id": 78,
 72)------"kind": "join",
 73)------"title": "⋈ InnerJoin",
 74)------"join_type": "Inner",
 75)------"condition": "true",
 76)------"outer": 1,
-77)------"inner": 61
+77)------"inner": 67
 78)----},
 79)----{
 80)------"id": 5,
@@ -103,20 +103,20 @@ SELECT explain_flat('SELECT MIN(n.name) AS member_in_charnamed_american_movie, M
 99)------"input": 5
 100)----},
 101)----{
-102)------"id": 52,
+102)------"id": 57,
 103)------"kind": "selection",
 104)------"title": "σ Selection",
 105)------"predicate": "(keyword(#32) = \"character-name-in-title\")",
 106)------"input": 6
 107)----},
 108)----{
-109)------"id": 72,
+109)------"id": 79,
 110)------"kind": "join",
 111)------"title": "⋈ InnerJoin",
 112)------"join_type": "Inner",
 113)------"condition": "true",
-114)------"outer": 71,
-115)------"inner": 52
+114)------"outer": 78,
+115)------"inner": 57
 116)----},
 117)----{
 118)------"id": 8,
@@ -145,12 +145,12 @@ SELECT explain_flat('SELECT MIN(n.name) AS member_in_charnamed_american_movie, M
 141)------"input": 8
 142)----},
 143)----{
-144)------"id": 73,
+144)------"id": 80,
 145)------"kind": "join",
 146)------"title": "⋈ InnerJoin",
 147)------"join_type": "Inner",
 148)------"condition": "((company_id(#41) = id(#21)) AND (movie_id(#9) = movie_id(#40)))",
-149)------"outer": 72,
+149)------"outer": 79,
 150)------"inner": 9
 151)----},
 152)----{
@@ -176,12 +176,12 @@ SELECT explain_flat('SELECT MIN(n.name) AS member_in_charnamed_american_movie, M
 172)------"input": 11
 173)----},
 174)----{
-175)------"id": 74,
+175)------"id": 81,
 176)------"kind": "join",
 177)------"title": "⋈ InnerJoin",
 178)------"join_type": "Inner",
 179)------"condition": "((keyword_id(#49) = id(#31)) AND (movie_id(#9) = movie_id(#48)) AND (movie_id(#40) = movie_id(#48)))",
-180)------"outer": 73,
+180)------"outer": 80,
 181)------"inner": 12
 182)----},
 183)----{
@@ -225,12 +225,12 @@ SELECT explain_flat('SELECT MIN(n.name) AS member_in_charnamed_american_movie, M
 221)------"input": 17
 222)----},
 223)----{
-224)------"id": 75,
+224)------"id": 82,
 225)------"kind": "join",
 226)------"title": "⋈ InnerJoin",
 227)------"join_type": "Inner",
 228)------"condition": "((movie_id(#9) = id(#80)) AND (id(#80) = movie_id(#48)) AND (id(#80) = movie_id(#40)))",
-229)------"outer": 74,
+229)------"outer": 81,
 230)------"inner": 18
 231)----},
 232)----{
@@ -268,46 +268,56 @@ SELECT explain_flat('SELECT MIN(n.name) AS member_in_charnamed_american_movie, M
 264)------"input": 14
 265)----},
 266)----{
-267)------"id": 30,
+267)------"id": 32,
 268)------"kind": "selection",
 269)------"title": "σ Selection",
 270)------"predicate": "(name(#60) LIKE \"B%\")",
 271)------"input": 15
 272)----},
 273)----{
-274)------"id": 76,
+274)------"id": 83,
 275)------"kind": "join",
 276)------"title": "⋈ InnerJoin",
 277)------"join_type": "Inner",
 278)------"condition": "(id(#59) = person_id(#8))",
-279)------"outer": 75,
-280)------"inner": 30
+279)------"outer": 82,
+280)------"inner": 32
 281)----},
 282)----{
-283)------"id": 77,
+283)------"id": 84,
 284)------"kind": "aggregation",
 285)------"title": "γ Aggregation",
 286)------"keys": "",
 287)------"aggregates": [
 288)--------"min(n.name)(#92) := min(name(#60))"
 289)------],
-290)------"input": 76
+290)------"input": 83
 291)----},
 292)----{
-293)------"id": 78,
-294)------"kind": "projection",
-295)------"title": "π Projection",
-296)------"columns": [
-297)--------"min(n.name)(#92)",
-298)--------"min(n.name)(#92)"
+293)------"id": 85,
+294)------"kind": "map",
+295)------"title": "χ Map",
+296)------"computations": [
+297)--------"member_in_charnamed_american_movie(#93) := min(n.name)(#92)",
+298)--------"a1(#94) := min(n.name)(#92)"
 299)------],
-300)------"input": 77
+300)------"input": 84
 301)----},
 302)----{
-303)------"id": 79,
-304)------"kind": "output",
-305)------"title": "= Output",
-306)------"input": 78
-307)----}
-308)--]
-309)}
+303)------"id": 86,
+304)------"kind": "projection",
+305)------"title": "π Projection",
+306)------"columns": [
+307)--------"member_in_charnamed_american_movie(#93)",
+308)--------"a1(#94)"
+309)------],
+310)------"input": 85
+311)----},
+312)----{
+313)------"id": 87,
+314)------"kind": "output",
+315)------"title": "= Output",
+316)------"input": 86
+317)----}
+318)--]
+319)}

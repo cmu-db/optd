@@ -26,9 +26,9 @@ recorded as `query error` expectations. They should be flipped back to normal
 
 | Status | Case | Location | Error class | Likely owner |
 | --- | --- | --- | --- | --- |
-| [ ] | `job/results/17a.slt.disabled` | line 1 | duplicate projection expression name | DataFusion import/export alias preservation |
-| [ ] | `job/results/17b.slt.disabled` | line 1 | duplicate projection expression name | DataFusion import/export alias preservation |
-| [ ] | `job/results/17c.slt.disabled` | line 1 | duplicate projection expression name | DataFusion import/export alias preservation |
+| [x] | `job/results/17a.slt.disabled` | line 1 | duplicate projection expression name | DataFusion import/export alias preservation |
+| [x] | `job/results/17b.slt.disabled` | line 1 | duplicate projection expression name | DataFusion import/export alias preservation |
+| [x] | `job/results/17c.slt.disabled` | line 1 | duplicate projection expression name | DataFusion import/export alias preservation |
 
 ## Failure Classes
 
@@ -68,21 +68,24 @@ position 0 and "min(n.name)" at position 1 have the same name. Consider aliasing
 
 Known failing cases:
 
-- [ ] `connectors/optd-datafusion/tests/slt/job/results/17a.slt.disabled:1`
+- [x] `connectors/optd-datafusion/tests/slt/job/results/17a.slt.disabled:1`
   - Query projects `MIN(n.name)` as `member_in_charnamed_american_movie` and
     again as `a1`.
-  - Current expected record is `query error ... duplicate expression name`.
-- [ ] `connectors/optd-datafusion/tests/slt/job/results/17b.slt.disabled:1`
+  - Fixed by materializing repeated projected columns as `Map` computations,
+    preserving the distinct output aliases.
+- [x] `connectors/optd-datafusion/tests/slt/job/results/17b.slt.disabled:1`
   - Query projects `MIN(n.name)` as `member_in_charnamed_movie` and again as
     `a1`.
-  - Current expected record is `query error ... duplicate expression name`.
-- [ ] `connectors/optd-datafusion/tests/slt/job/results/17c.slt.disabled:1`
+  - Fixed by materializing repeated projected columns as `Map` computations,
+    preserving the distinct output aliases.
+- [x] `connectors/optd-datafusion/tests/slt/job/results/17c.slt.disabled:1`
   - Query projects `MIN(n.name)` as `member_in_charnamed_movie` and again as
     `a1`.
-  - Current expected record is `query error ... duplicate expression name`.
+  - Fixed by materializing repeated projected columns as `Map` computations,
+    preserving the distinct output aliases.
 
-Likely fix direction: preserve projection output aliases when importing
-DataFusion projections, or synthesize unique aliases when exporting optd
-projections that repeat the same underlying expression/column. After fixing,
-regenerate these disabled result files and change the corresponding checklist
-entries to `[x]`.
+Implemented fix: when a DataFusion projection emits the same input column more
+than once, `from_df` now materializes each repeated projection output as a
+`Map` computation with the projection field name. This mirrors DataFusion's
+aggregate deduplication while preserving the distinct user-visible aliases that
+the final projection needs.
