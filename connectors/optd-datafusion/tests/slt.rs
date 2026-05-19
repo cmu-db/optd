@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use datafusion_sqllogictest::{DFSqlLogicTestError, TestContext};
 use optd_datafusion::runner::OptdRunner;
-use optd_datafusion::setup::setup_tpch_session;
+use optd_datafusion::setup::{setup_job_session, setup_tpch_session};
 use sqllogictest::{
     Runner, default_column_validator, default_normalizer, default_validator, harness::Failed,
 };
@@ -79,6 +79,10 @@ fn run_slt(path: impl AsRef<Path>) -> Result<(), Failed> {
             setup_tpch_session()
                 .await
                 .map_err(|e| Failed::from(e.to_string()))?
+        } else if path.components().any(|c| c.as_os_str() == "job") {
+            setup_job_session()
+                .await
+                .map_err(|e| Failed::from(e.to_string()))?
         } else {
             match TestContext::try_new_for_test_file(&path).await {
                 Some(ctx) => ctx.session_ctx().clone(),
@@ -99,6 +103,10 @@ fn update_slt(path: impl AsRef<Path>) -> Result<(), Failed> {
     build_runtime().block_on(async {
         let session = if path.components().any(|c| c.as_os_str() == "tpch") {
             setup_tpch_session()
+                .await
+                .map_err(|e| Failed::from(e.to_string()))?
+        } else if path.components().any(|c| c.as_os_str() == "job") {
+            setup_job_session()
                 .await
                 .map_err(|e| Failed::from(e.to_string()))?
         } else {

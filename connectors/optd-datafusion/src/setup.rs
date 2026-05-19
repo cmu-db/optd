@@ -1,9 +1,9 @@
-//! Session setup for local TPC-H Parquet data.
+//! Session setup for local benchmark Parquet data.
 //!
 //! Generate the data with:
 //!
 //! ```text
-//! tpchgen-cli -s 0.1 -f parquet -o crates/optd-datafusion/data/tpch/sf-0.1
+//! ./scripts/generate_tpch.sh
 //! ```
 
 use std::path::PathBuf;
@@ -14,23 +14,87 @@ use datafusion::prelude::{ParquetReadOptions, SessionConfig, SessionContext};
 use crate::config::OptdExtensionConfig;
 
 const TPCH_DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/tpch/sf-0.1");
+const JOB_DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/job");
 const TPCH_TABLES: &[&str] = &[
     "lineitem", "orders", "customer", "part", "partsupp", "supplier", "nation", "region",
+];
+const JOB_TABLES: &[&str] = &[
+    "aka_name",
+    "aka_title",
+    "cast_info",
+    "char_name",
+    "comp_cast_type",
+    "company_name",
+    "company_type",
+    "complete_cast",
+    "info_type",
+    "keyword",
+    "kind_type",
+    "link_type",
+    "movie_companies",
+    "movie_info",
+    "movie_info_idx",
+    "movie_keyword",
+    "movie_link",
+    "name",
+    "person_info",
+    "role_type",
+    "title",
 ];
 
 /// Creates a `SessionContext` with all TPC-H tables registered from local Parquet files.
 pub async fn setup_tpch_session() -> DFResult<SessionContext> {
     let ctx = session_context_with_information_schema();
+    register_tpch_tables(&ctx).await?;
+    Ok(ctx)
+}
 
-    for table in TPCH_TABLES {
-        let path = tpch_parquet_path(table);
+/// Registers all TPC-H tables from local Parquet files.
+pub async fn register_tpch_tables(ctx: &SessionContext) -> DFResult<()> {
+    register_parquet_tables(
+        ctx,
+        TPCH_TABLES,
+        TPCH_DATA_DIR,
+        "TPC-H",
+        "./scripts/generate_tpch.sh",
+    )
+    .await
+}
+
+/// Creates a `SessionContext` with all JOB tables registered from local Parquet files.
+pub async fn setup_job_session() -> DFResult<SessionContext> {
+    let ctx = session_context_with_information_schema();
+    register_job_tables(&ctx).await?;
+    Ok(ctx)
+}
+
+/// Registers all JOB tables from local Parquet files.
+pub async fn register_job_tables(ctx: &SessionContext) -> DFResult<()> {
+    register_parquet_tables(
+        ctx,
+        JOB_TABLES,
+        JOB_DATA_DIR,
+        "JOB",
+        "./scripts/generate_job_parquet.sh",
+    )
+    .await
+}
+
+async fn register_parquet_tables(
+    ctx: &SessionContext,
+    tables: &[&str],
+    data_dir: &str,
+    dataset_name: &str,
+    generate_command: &str,
+) -> DFResult<()> {
+    for table in tables {
+        let path = parquet_path(data_dir, table);
         if !path.exists() {
             return Err(DataFusionError::External(Box::new(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 format!(
-                    "missing TPC-H parquet data at {}. Generate it with: \
-                     tpchgen-cli -s 0.1 -f parquet -o crates/optd-datafusion/data/tpch/sf-0.1",
-                    path.display()
+                    "missing {dataset_name} parquet data at {}. Generate it with: {generate_command}",
+                    path.display(),
                 ),
             ))));
         }
@@ -43,7 +107,7 @@ pub async fn setup_tpch_session() -> DFResult<SessionContext> {
         .await?;
     }
 
-    Ok(ctx)
+    Ok(())
 }
 
 /// Creates a `SessionContext` configured for interactive CLI use.
@@ -54,8 +118,8 @@ pub fn session_context_with_information_schema() -> SessionContext {
     SessionContext::new_with_config(config)
 }
 
-fn tpch_parquet_path(table: &str) -> PathBuf {
-    PathBuf::from(TPCH_DATA_DIR).join(format!("{table}.parquet"))
+fn parquet_path(data_dir: &str, table: &str) -> PathBuf {
+    PathBuf::from(data_dir).join(format!("{table}.parquet"))
 }
 
 #[cfg(test)]

@@ -5,11 +5,12 @@ use datafusion::arrow::array::{ArrayRef, Float64Array, Int64Array, StringArray};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::arrow::util::pretty::pretty_format_batches;
-use optd::FreeColumns;
 use optd::QueryFormatConfig;
 use optd_datafusion::explain_udfs::ExplainStep;
 use optd_datafusion::runner::{OptdRunner, RunnerOutput};
-use optd_datafusion::setup::{session_context_with_information_schema, setup_tpch_session};
+use optd_datafusion::setup::{
+    register_job_tables, register_tpch_tables, session_context_with_information_schema,
+};
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
 
@@ -30,16 +31,23 @@ struct Args {
     /// Register local TPC-H parquet tables before executing SQL.
     #[arg(long)]
     tpch: bool,
+
+    /// Register local JOB parquet tables before executing SQL.
+    #[arg(long)]
+    job: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
-    let session = if args.tpch {
-        setup_tpch_session().await?
-    } else {
-        session_context_with_information_schema()
-    };
+
+    let session = session_context_with_information_schema();
+    if args.tpch {
+        register_tpch_tables(&session).await?;
+    }
+    if args.job {
+        register_job_tables(&session).await?;
+    }
     let runner = OptdRunner::new(session);
 
     if args.commands.is_empty() && args.files.is_empty() {

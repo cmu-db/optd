@@ -14,7 +14,7 @@ Implemented exporter coverage:
 - scalar expressions (`Literal`, `ColumnRef`, `Unary`, `Binary`, `Nary`, `Cast`, `CaseWhen`, `ScalarFunction`, `Exists`, `InSubquery`, `ScalarSubquery`) with conservative output typing
 
 Root-crate integration tests for these operators have been removed. The DataFusion bridge keeps its
-own sqllogictest coverage under `crates/optd-datafusion/tests/`.
+own sqllogictest coverage under `connectors/optd-datafusion/tests/`.
 
 ## Local TPC-H Data Setup
 
@@ -22,11 +22,11 @@ The DataFusion sqllogictest TPC-H suite reads local Parquet files instead of gen
 test time. Generate the files once with `tpchgen-cli`:
 
 ```sh
-tpchgen-cli -s 0.1 -f parquet -o crates/optd-datafusion/data/tpch/sf-0.1
+./scripts/generate_tpch.sh
 ```
 
-The generated `crates/optd-datafusion/data/` contents are ignored by git. Keep only
-`crates/optd-datafusion/data/.gitignore` tracked.
+The generated `connectors/optd-datafusion/data/` contents are ignored by git.
+See `docs/data_generation.md` for TPC-H and JOB data-generation details.
 
 Run the TPC-H SLT suite with either:
 

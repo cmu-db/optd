@@ -1,0 +1,294 @@
+query T
+SELECT explain_flat('SELECT MIN(n.name) AS member_in_charnamed_movie FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t WHERE k.keyword =''character-name-in-title'' AND n.name  LIKE ''%B%'' AND n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id;');
+----
+ 
+01){
+02)--"nodes": [
+03)----{
+04)------"id": 0,
+05)------"kind": "scan",
+06)------"title": "⊞ Scan",
+07)------"table_name": "cast_info",
+08)------"columns": [
+09)--------"id(#0)",
+10)--------"person_id(#1)",
+11)--------"movie_id(#2)",
+12)--------"person_role_id(#3)",
+13)--------"note(#4)",
+14)--------"nr_order(#5)",
+15)--------"role_id(#6)"
+16)------]
+17)----},
+18)----{
+19)------"id": 1,
+20)------"kind": "rename",
+21)------"title": "ρ Rename(ci)",
+22)------"defs": [
+23)--------"id(#7) <- id(#0)",
+24)--------"person_id(#8) <- person_id(#1)",
+25)--------"movie_id(#9) <- movie_id(#2)",
+26)--------"person_role_id(#10) <- person_role_id(#3)",
+27)--------"note(#11) <- note(#4)",
+28)--------"nr_order(#12) <- nr_order(#5)",
+29)--------"role_id(#13) <- role_id(#6)"
+30)------],
+31)------"input": 0
+32)----},
+33)----{
+34)------"id": 2,
+35)------"kind": "scan",
+36)------"title": "⊞ Scan",
+37)------"table_name": "company_name",
+38)------"columns": [
+39)--------"id(#14)",
+40)--------"name(#15)",
+41)--------"country_code(#16)",
+42)--------"imdb_id(#17)",
+43)--------"name_pcode_nf(#18)",
+44)--------"name_pcode_sf(#19)",
+45)--------"md5sum(#20)"
+46)------]
+47)----},
+48)----{
+49)------"id": 3,
+50)------"kind": "rename",
+51)------"title": "ρ Rename(cn)",
+52)------"defs": [
+53)--------"id(#21) <- id(#14)",
+54)--------"name(#22) <- name(#15)",
+55)--------"country_code(#23) <- country_code(#16)",
+56)--------"imdb_id(#24) <- imdb_id(#17)",
+57)--------"name_pcode_nf(#25) <- name_pcode_nf(#18)",
+58)--------"name_pcode_sf(#26) <- name_pcode_sf(#19)",
+59)--------"md5sum(#27) <- md5sum(#20)"
+60)------],
+61)------"input": 2
+62)----},
+63)----{
+64)------"id": 61,
+65)------"kind": "cross_product",
+66)------"title": "× CrossProduct",
+67)------"outer": 1,
+68)------"inner": 3
+69)----},
+70)----{
+71)------"id": 5,
+72)------"kind": "scan",
+73)------"title": "⊞ Scan",
+74)------"table_name": "keyword",
+75)------"columns": [
+76)--------"id(#28)",
+77)--------"keyword(#29)",
+78)--------"phonetic_code(#30)"
+79)------]
+80)----},
+81)----{
+82)------"id": 6,
+83)------"kind": "rename",
+84)------"title": "ρ Rename(k)",
+85)------"defs": [
+86)--------"id(#31) <- id(#28)",
+87)--------"keyword(#32) <- keyword(#29)",
+88)--------"phonetic_code(#33) <- phonetic_code(#30)"
+89)------],
+90)------"input": 5
+91)----},
+92)----{
+93)------"id": 51,
+94)------"kind": "selection",
+95)------"title": "σ Selection",
+96)------"predicate": "(keyword(#32) = \"character-name-in-title\")",
+97)------"input": 6
+98)----},
+99)----{
+100)------"id": 62,
+101)------"kind": "join",
+102)------"title": "⋈ InnerJoin",
+103)------"join_type": "Inner",
+104)------"condition": "true",
+105)------"outer": 61,
+106)------"inner": 51
+107)----},
+108)----{
+109)------"id": 8,
+110)------"kind": "scan",
+111)------"title": "⊞ Scan",
+112)------"table_name": "movie_companies",
+113)------"columns": [
+114)--------"id(#34)",
+115)--------"movie_id(#35)",
+116)--------"company_id(#36)",
+117)--------"company_type_id(#37)",
+118)--------"note(#38)"
+119)------]
+120)----},
+121)----{
+122)------"id": 9,
+123)------"kind": "rename",
+124)------"title": "ρ Rename(mc)",
+125)------"defs": [
+126)--------"id(#39) <- id(#34)",
+127)--------"movie_id(#40) <- movie_id(#35)",
+128)--------"company_id(#41) <- company_id(#36)",
+129)--------"company_type_id(#42) <- company_type_id(#37)",
+130)--------"note(#43) <- note(#38)"
+131)------],
+132)------"input": 8
+133)----},
+134)----{
+135)------"id": 63,
+136)------"kind": "join",
+137)------"title": "⋈ InnerJoin",
+138)------"join_type": "Inner",
+139)------"condition": "((company_id(#41) = id(#21)) AND (movie_id(#9) = movie_id(#40)))",
+140)------"outer": 62,
+141)------"inner": 9
+142)----},
+143)----{
+144)------"id": 11,
+145)------"kind": "scan",
+146)------"title": "⊞ Scan",
+147)------"table_name": "movie_keyword",
+148)------"columns": [
+149)--------"id(#44)",
+150)--------"movie_id(#45)",
+151)--------"keyword_id(#46)"
+152)------]
+153)----},
+154)----{
+155)------"id": 12,
+156)------"kind": "rename",
+157)------"title": "ρ Rename(mk)",
+158)------"defs": [
+159)--------"id(#47) <- id(#44)",
+160)--------"movie_id(#48) <- movie_id(#45)",
+161)--------"keyword_id(#49) <- keyword_id(#46)"
+162)------],
+163)------"input": 11
+164)----},
+165)----{
+166)------"id": 64,
+167)------"kind": "join",
+168)------"title": "⋈ InnerJoin",
+169)------"join_type": "Inner",
+170)------"condition": "((keyword_id(#49) = id(#31)) AND (movie_id(#9) = movie_id(#48)) AND (movie_id(#40) = movie_id(#48)))",
+171)------"outer": 63,
+172)------"inner": 12
+173)----},
+174)----{
+175)------"id": 17,
+176)------"kind": "scan",
+177)------"title": "⊞ Scan",
+178)------"table_name": "title",
+179)------"columns": [
+180)--------"id(#68)",
+181)--------"title(#69)",
+182)--------"imdb_index(#70)",
+183)--------"kind_id(#71)",
+184)--------"production_year(#72)",
+185)--------"imdb_id(#73)",
+186)--------"phonetic_code(#74)",
+187)--------"episode_of_id(#75)",
+188)--------"season_nr(#76)",
+189)--------"episode_nr(#77)",
+190)--------"series_years(#78)",
+191)--------"md5sum(#79)"
+192)------]
+193)----},
+194)----{
+195)------"id": 18,
+196)------"kind": "rename",
+197)------"title": "ρ Rename(t)",
+198)------"defs": [
+199)--------"id(#80) <- id(#68)",
+200)--------"title(#81) <- title(#69)",
+201)--------"imdb_index(#82) <- imdb_index(#70)",
+202)--------"kind_id(#83) <- kind_id(#71)",
+203)--------"production_year(#84) <- production_year(#72)",
+204)--------"imdb_id(#85) <- imdb_id(#73)",
+205)--------"phonetic_code(#86) <- phonetic_code(#74)",
+206)--------"episode_of_id(#87) <- episode_of_id(#75)",
+207)--------"season_nr(#88) <- season_nr(#76)",
+208)--------"episode_nr(#89) <- episode_nr(#77)",
+209)--------"series_years(#90) <- series_years(#78)",
+210)--------"md5sum(#91) <- md5sum(#79)"
+211)------],
+212)------"input": 17
+213)----},
+214)----{
+215)------"id": 65,
+216)------"kind": "join",
+217)------"title": "⋈ InnerJoin",
+218)------"join_type": "Inner",
+219)------"condition": "((movie_id(#9) = id(#80)) AND (id(#80) = movie_id(#48)) AND (id(#80) = movie_id(#40)))",
+220)------"outer": 64,
+221)------"inner": 18
+222)----},
+223)----{
+224)------"id": 14,
+225)------"kind": "scan",
+226)------"title": "⊞ Scan",
+227)------"table_name": "name",
+228)------"columns": [
+229)--------"id(#50)",
+230)--------"name(#51)",
+231)--------"imdb_index(#52)",
+232)--------"imdb_id(#53)",
+233)--------"gender(#54)",
+234)--------"name_pcode_cf(#55)",
+235)--------"name_pcode_nf(#56)",
+236)--------"surname_pcode(#57)",
+237)--------"md5sum(#58)"
+238)------]
+239)----},
+240)----{
+241)------"id": 15,
+242)------"kind": "rename",
+243)------"title": "ρ Rename(n)",
+244)------"defs": [
+245)--------"id(#59) <- id(#50)",
+246)--------"name(#60) <- name(#51)",
+247)--------"imdb_index(#61) <- imdb_index(#52)",
+248)--------"imdb_id(#62) <- imdb_id(#53)",
+249)--------"gender(#63) <- gender(#54)",
+250)--------"name_pcode_cf(#64) <- name_pcode_cf(#55)",
+251)--------"name_pcode_nf(#65) <- name_pcode_nf(#56)",
+252)--------"surname_pcode(#66) <- surname_pcode(#57)",
+253)--------"md5sum(#67) <- md5sum(#58)"
+254)------],
+255)------"input": 14
+256)----},
+257)----{
+258)------"id": 30,
+259)------"kind": "selection",
+260)------"title": "σ Selection",
+261)------"predicate": "(name(#60) LIKE \"%B%\")",
+262)------"input": 15
+263)----},
+264)----{
+265)------"id": 66,
+266)------"kind": "join",
+267)------"title": "⋈ InnerJoin",
+268)------"join_type": "Inner",
+269)------"condition": "(id(#59) = person_id(#8))",
+270)------"outer": 65,
+271)------"inner": 30
+272)----},
+273)----{
+274)------"id": 67,
+275)------"kind": "aggregation",
+276)------"title": "γ Aggregation",
+277)------"keys": "",
+278)------"aggregates": [
+279)--------"min(n.name)(#92) := min(name(#60))"
+280)------],
+281)------"input": 66
+282)----},
+283)----{
+284)------"id": 68,
+285)------"kind": "output",
+286)------"title": "= Output",
+287)------"input": 67
+288)----}
+289)--]
+290)}
