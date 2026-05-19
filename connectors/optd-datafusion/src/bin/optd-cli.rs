@@ -194,6 +194,7 @@ fn log_explain_step_metrics(steps: &[ExplainStep]) -> Result<(), Box<dyn Error>>
 
     println!("-- explain_steps metrics");
     println!("{}", pretty_format_batches(&[batch])?);
+    println!("-- explain_steps end\n");
     Ok(())
 }
 

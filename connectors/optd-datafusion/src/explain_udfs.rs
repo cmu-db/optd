@@ -318,18 +318,54 @@ async fn build_ir_trace(
         .run_with_trace(&mut opt)
         .map_err(|e| DataFusionError::Plan(e.to_string()))?;
 
-    steps.extend(trace.into_iter().enumerate().map(|(idx, trace)| {
+    #[derive(Debug)]
+    struct AggregatedPassStep {
+        iteration: usize,
+        pass_index: usize,
+        pass: String,
+        result: Option<PassResult>,
+        duration_ms: f64,
+        plan: String,
+    }
+
+    let mut aggregated: Vec<AggregatedPassStep> = Vec::new();
+    for trace in trace {
         let profile = trace.profile;
-        ExplainStep {
-            step: (idx + 1) as i64,
-            iteration: Some(profile.iteration as i64),
-            pass_index: Some(profile.pass_index as i64),
-            pass: profile.pass.to_string(),
-            result: pass_result(profile.result),
-            duration_ms: Some(profile.duration_ms),
-            plan: format_query(&trace.query, format, config.clone()),
+        let plan = format_query(&trace.query, format, config.clone());
+        if let Some(last) = aggregated.last_mut()
+            && last.pass_index == profile.pass_index
+        {
+            last.iteration = profile.iteration;
+            last.result = merge_pass_result(last.result, profile.result);
+            last.duration_ms += profile.duration_ms;
+            last.plan = plan;
+            continue;
         }
-    }));
+
+        aggregated.push(AggregatedPassStep {
+            iteration: profile.iteration,
+            pass_index: profile.pass_index,
+            pass: profile.pass.to_string(),
+            result: profile.result,
+            duration_ms: profile.duration_ms,
+            plan,
+        });
+    }
+
+    steps.extend(
+        aggregated
+            .into_iter()
+            .enumerate()
+            .map(|(idx, aggregated_pass)| ExplainStep {
+                step: (idx + 1) as i64,
+                iteration: Some(aggregated_pass.iteration as i64),
+                pass_index: Some(aggregated_pass.pass_index as i64),
+                pass: aggregated_pass.pass,
+                result: pass_result(aggregated_pass.result),
+                duration_ms: Some(aggregated_pass.duration_ms),
+                plan: aggregated_pass.plan,
+            }),
+    );
 
     Ok(steps)
 }
@@ -365,6 +401,16 @@ fn pass_result(result: Option<PassResult>) -> String {
         None => "error",
     }
     .to_string()
+}
+
+fn merge_pass_result(left: Option<PassResult>, right: Option<PassResult>) -> Option<PassResult> {
+    match (left, right) {
+        (None, _) | (_, None) => None,
+        (Some(PassResult::Changed), _) | (_, Some(PassResult::Changed)) => {
+            Some(PassResult::Changed)
+        }
+        (Some(PassResult::Unchanged), Some(PassResult::Unchanged)) => Some(PassResult::Unchanged),
+    }
 }
 
 fn string_literal_arg(expr: &DFExpr, name: &str) -> DFResult<String> {

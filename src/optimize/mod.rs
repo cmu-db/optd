@@ -487,13 +487,14 @@ impl PassManager {
                     }
                 }
 
+                if let Some(trace) = trace.as_deref_mut() {
+                    trace.push(PassTrace {
+                        profile,
+                        query: ctx.query.clone(),
+                    });
+                }
+
                 if !changed {
-                    if let Some(trace) = trace.as_deref_mut() {
-                        trace.push(PassTrace {
-                            profile,
-                            query: ctx.query.clone(),
-                        });
-                    }
                     converged = true;
                     break;
                 }
@@ -980,6 +981,41 @@ mod tests {
 
         assert_eq!(pm.profiles().len(), 1);
         assert_eq!(pm.profiles()[0].iteration, 1);
+    }
+
+    #[test]
+    fn run_with_trace_records_each_pass_invocation() {
+        struct OneChangeThenStable {
+            calls: usize,
+        }
+
+        impl Pass for OneChangeThenStable {
+            fn name(&self) -> &'static str {
+                "one_change_then_stable"
+            }
+        }
+
+        impl QueryPass for OneChangeThenStable {
+            fn run(&mut self, _ctx: &mut OptimizerContext) -> OptimizeResult<PassResult> {
+                self.calls += 1;
+                if self.calls == 1 {
+                    Ok(PassResult::Changed)
+                } else {
+                    Ok(PassResult::Unchanged)
+                }
+            }
+        }
+
+        let mut pm = PassManager::new();
+        pm.add_pass(OneChangeThenStable { calls: 0 });
+        let mut ctx = OptimizerContext::new(QueryContext::new());
+
+        let trace = pm.run_with_trace(&mut ctx).unwrap();
+        assert_eq!(trace.len(), 2);
+        assert_eq!(trace[0].profile.iteration, 1);
+        assert_eq!(trace[0].profile.result, Some(PassResult::Changed));
+        assert_eq!(trace[1].profile.iteration, 2);
+        assert_eq!(trace[1].profile.result, Some(PassResult::Unchanged));
     }
 
     #[test]
