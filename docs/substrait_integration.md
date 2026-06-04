@@ -4,7 +4,7 @@ This document is a handoff for the current Substrait work in `optd`.
 
 ## Current State
 
-Main implementation lives in [`src/substrait.rs`](src/substrait.rs). Public entry points:
+Main implementation lives in [`optd/core/src/substrait.rs`](../optd/core/src/substrait.rs). Public entry points:
 
 - `substrait::from_plan(&Plan) -> Result<QueryContext, SubstraitError>`
 - `substrait::from_plan_with_catalog(&Plan, Arc<dyn Catalog>) -> Result<QueryContext, SubstraitError>`
@@ -38,9 +38,9 @@ The exporter now handles:
 
 ## Tested Interop
 
-Root-crate Substrait/DataFusion integration tests have been removed. Current automated coverage is
-through unit tests in the root crate and sqllogictest coverage in
-`connectors/optd-datafusion/tests/`.
+Core-crate Substrait/DataFusion integration tests have been removed. Current automated coverage is
+through unit tests in `optd-core` and sqllogictest coverage in
+`optd/connectors/datafusion/tests/`.
 
 Run:
 
@@ -81,7 +81,7 @@ Importer limitations to watch:
 - Substrait type handling is still a conservative subset
 - local file import maps file formats to `TableFunctionDef`, but exporter does not emit local files
 
-Note: the DataFusion bridge (`connectors/optd-datafusion`) now handles
+Note: the DataFusion bridge (`optd/connectors/datafusion`) now handles
 `EmptyRelation`/`Values` via `ConstScan`, but that is separate from Substrait conversion.
 
 ## Recommended Next Steps

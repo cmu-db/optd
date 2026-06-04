@@ -281,9 +281,9 @@ These should be deterministic heuristic rewrites. Cost-based planning can come l
 
 2. Add optimizer module skeleton.
 
-   Create `src/optimize.rs` or `src/optimize/mod.rs` with `OptimizeError`, `OptimizeResult`,
+   Create `optd/core/src/optimize.rs` or `optd/core/src/optimize/mod.rs` with `OptimizeError`, `OptimizeResult`,
    `Pass`, `QueryPass`, `PassResult`, and `PassManager`. Re-export stable public pieces from
-   `src/lib.rs`.
+   `optd/core/src/lib.rs`.
 
 3. Implement append-only rewrite infrastructure.
 

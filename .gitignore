@@ -1,2 +1,8 @@
-/target
-/connectors/optd-datafusion/data/
+# Rust build output.
+/target/
+
+# Connector-local generated datasets and downloaded benchmark inputs.
+/optd/connectors/datafusion/data/
+
+# Generated/scratch artifacts.
+/artifacts/

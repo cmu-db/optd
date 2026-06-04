@@ -329,8 +329,8 @@ after the pass completes.
 ## File Layout
 
 ```
-src/optimize/join_ordering.rs    # JoinOrdering pass, DPhyp, JoinTree, Statistics trait
-src/optimize/mod.rs              # pub use join_ordering::JoinOrdering
+optd/core/src/optimize/join_ordering.rs    # JoinOrdering pass, DPhyp, JoinTree, Statistics trait
+optd/core/src/optimize/mod.rs              # pub use join_ordering::JoinOrdering
 ```
 
 The `collect_join_group_roots` helper lives in `join_ordering.rs` (not in `hypergraph.rs`,
@@ -369,16 +369,16 @@ trivial). For larger groups the ordering matters for cardinality estimates.
 ## Implementation Tasks
 
 ### Done
-1. `src/hypergraph.rs`: `NodeSet = u64` type alias + `nodeset_singleton`, `nodeset_min`, `nodeset_iter` helpers.
-2. `src/hypergraph.rs`: `Hyperedge.left`/`.right` changed from `Vec<NodeId>` to `NodeSet`.
-3. `src/hypergraph.rs`: Compatibility tables (`assoc`, `l_asscom`, `r_asscom`) corrected to match Tables 1–3 from Birler & Neumann 2025.
-4. `src/hypergraph.rs`: Builder upgraded to CD-E (Algorithm 3): uses `TES(◦_a)` instead of full subtree, gates extensions on connectivity check (Algorithm 5, union-find).
-5. `src/hypergraph.rs`: `HyperedgeJoinType::to_ir_join_type()` for plan reconstruction.
-6. `src/optimize/join_ordering.rs`: `DPhyp` — full implementation of `Solve`/`EmitCsg`/`EnumerateCsgRec`/`EmitCsg`/`EnumerateCmpRec`/`EmitCsgCmp`.
-7. `src/optimize/join_ordering.rs`: `Statistics` trait + `UniformStatistics` placeholder.
-8. `src/optimize/join_ordering.rs`: `join_tree_to_ir` — converts `JoinTree` back to optd IR.
-9. `src/optimize/join_ordering.rs`: `collect_join_group_roots` — finds all join group roots bottom-up.
-10. `src/optimize/join_ordering.rs`: `JoinOrdering` pass implementing `QueryPass`.
+1. `optd/core/src/hypergraph.rs`: `NodeSet = u64` type alias + `nodeset_singleton`, `nodeset_min`, `nodeset_iter` helpers.
+2. `optd/core/src/hypergraph.rs`: `Hyperedge.left`/`.right` changed from `Vec<NodeId>` to `NodeSet`.
+3. `optd/core/src/hypergraph.rs`: Compatibility tables (`assoc`, `l_asscom`, `r_asscom`) corrected to match Tables 1–3 from Birler & Neumann 2025.
+4. `optd/core/src/hypergraph.rs`: Builder upgraded to CD-E (Algorithm 3): uses `TES(◦_a)` instead of full subtree, gates extensions on connectivity check (Algorithm 5, union-find).
+5. `optd/core/src/hypergraph.rs`: `HyperedgeJoinType::to_ir_join_type()` for plan reconstruction.
+6. `optd/core/src/optimize/join_ordering.rs`: `DPhyp` — full implementation of `Solve`/`EmitCsg`/`EnumerateCsgRec`/`EmitCsg`/`EnumerateCmpRec`/`EmitCsgCmp`.
+7. `optd/core/src/optimize/join_ordering.rs`: `Statistics` trait + `UniformStatistics` placeholder.
+8. `optd/core/src/optimize/join_ordering.rs`: `join_tree_to_ir` — converts `JoinTree` back to optd IR.
+9. `optd/core/src/optimize/join_ordering.rs`: `collect_join_group_roots` — finds all join group roots bottom-up.
+10. `optd/core/src/optimize/join_ordering.rs`: `JoinOrdering` pass implementing `QueryPass`.
 
 ### Open / Follow-ups
 - **Linearized DP** (Neumann & Radke §4.2): IKKBZ ordering + O(n³) DP for 15–100 node groups without hyperedges.

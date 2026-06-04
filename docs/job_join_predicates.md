@@ -1,7 +1,7 @@
 # JOB Join Predicate Placement
 
 This tracks the `InnerJoin true` shapes visible in the JOB `explain_flat` SLT
-plans, especially `connectors/optd-datafusion/tests/slt/job/explain_flat/3c.slt`.
+plans, especially `optd/connectors/datafusion/tests/slt/job/explain_flat/3c.slt`.
 
 ## Observation
 

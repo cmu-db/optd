@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-output_dir="${1:-connectors/optd-datafusion/data/job}"
-work_dir="${2:-connectors/optd-datafusion/data/job-source}"
+output_dir="${1:-optd/connectors/datafusion/data/job}"
+work_dir="${2:-optd/connectors/datafusion/data/job-source}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 schema_sql="${repo_root}/scripts/job_schema_duckdb.sql"
 source_url="${JOB_IMDB_URL:-https://bonsai.cedardb.com/job/imdb.tgz}"

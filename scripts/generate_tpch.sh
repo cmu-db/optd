@@ -2,7 +2,7 @@
 set -euo pipefail
 
 scale_factor="${1:-0.1}"
-output_dir="${2:-connectors/optd-datafusion/data/tpch/sf-${scale_factor}}"
+output_dir="${2:-optd/connectors/datafusion/data/tpch/sf-${scale_factor}}"
 compression="${TPCH_PARQUET_COMPRESSION:-SNAPPY}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 

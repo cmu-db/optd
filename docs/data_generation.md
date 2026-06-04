@@ -1,7 +1,7 @@
 # Data Generation
 
 This repository keeps benchmark data out of git. Generate local Parquet files under
-`connectors/optd-datafusion/data/` before running SQLLogicTest suites or local benchmark
+`optd/connectors/datafusion/data/` before running SQLLogicTest suites or local benchmark
 experiments that read real tables.
 
 ## TPC-H
@@ -15,16 +15,16 @@ TPC-H data is generated directly as Parquet using `tpchgen-cli`.
 The default scale factor is `0.1`, and files are written to:
 
 ```text
-connectors/optd-datafusion/data/tpch/sf-0.1/
+optd/connectors/datafusion/data/tpch/sf-0.1/
 ```
 
 To generate another scale factor or output directory:
 
 ```sh
-./scripts/generate_tpch.sh 1 connectors/optd-datafusion/data/tpch/sf-1
+./scripts/generate_tpch.sh 1 optd/connectors/datafusion/data/tpch/sf-1
 ```
 
-The connector currently registers SF 0.1 from `connectors/optd-datafusion/data/tpch/sf-0.1`.
+The connector currently registers SF 0.1 from `optd/connectors/datafusion/data/tpch/sf-0.1`.
 Use that default location for the existing TPC-H SLT tests.
 
 ## Join Order Benchmark
@@ -42,21 +42,21 @@ JOB table.
 The default output directory is:
 
 ```text
-connectors/optd-datafusion/data/job/
+optd/connectors/datafusion/data/job/
 ```
 
 The default staging directory is:
 
 ```text
-connectors/optd-datafusion/data/job-source/
+optd/connectors/datafusion/data/job-source/
 ```
 
 To choose explicit locations:
 
 ```sh
 ./scripts/generate_job_parquet.sh \
-  connectors/optd-datafusion/data/job \
-  connectors/optd-datafusion/data/job-source
+  optd/connectors/datafusion/data/job \
+  optd/connectors/datafusion/data/job-source
 ```
 
 The script uses `scripts/job_schema_duckdb.sql`, a DuckDB-compatible version of the JOB schema.
@@ -68,5 +68,5 @@ It expects the extracted CSV files to use the CedarDB/JOB filenames, for example
 After generating the default TPC-H dataset:
 
 ```sh
-cargo test -p optd-datafusion --test slt tpch
+cargo nextest run --release -p optd-datafusion --test slt tpch
 ```

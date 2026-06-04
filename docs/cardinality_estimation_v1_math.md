@@ -16,7 +16,7 @@ version is intentionally rough:
 ## Sample-Pass Evidence
 
 The generated pass JSON under
-`connectors/optd-datafusion/data/sample-passes/job_optimizer_json/` shows this
+`optd/connectors/datafusion/data/sample-passes/job_optimizer_json/` shows this
 clearly.
 
 JOB `1a` has the cluster:

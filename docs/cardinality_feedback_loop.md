@@ -113,25 +113,25 @@ error
 A reusable script lives at:
 
 ```text
-connectors/optd-datafusion/scripts/compare_cardinality.py
+optd/connectors/datafusion/scripts/compare_cardinality.py
 ```
 
 Example CLI:
 
 ```sh
-python3 connectors/optd-datafusion/scripts/compare_cardinality.py \
+python3 optd/connectors/datafusion/scripts/compare_cardinality.py \
   --dataset tpch \
   --cli target/release/optd-cli \
   --setup-flag=--tpch \
-  --queries connectors/optd-datafusion/tests/slt/tpch/results \
+  --queries optd/connectors/datafusion/tests/slt/tpch/results \
   --timeout 10 \
   --output /tmp/optd_tpch_ce.tsv
 
-python3 connectors/optd-datafusion/scripts/compare_cardinality.py \
+python3 optd/connectors/datafusion/scripts/compare_cardinality.py \
   --dataset job \
   --cli target/release/optd-cli \
   --setup-flag=--job \
-  --queries connectors/optd-datafusion/tests/slt/job/results \
+  --queries optd/connectors/datafusion/tests/slt/job/results \
   --timeout 15 \
   --timeout-override '^16=8' \
   --timeout-override '^19d$=8' \

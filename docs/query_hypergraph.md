@@ -319,7 +319,7 @@ impl QueryHypergraph {
 ## File Layout
 
 ```
-src/hypergraph.rs    # HypergraphNode, Hyperedge, HyperedgeJoinType, NodeId,
+optd/core/src/hypergraph.rs    # HypergraphNode, Hyperedge, HyperedgeJoinType, NodeId,
                      # QueryHypergraph, build_hypergraph, assoc/l_asscom/r_asscom,
                      # QueryHypergraph::pretty
 ```
@@ -353,7 +353,7 @@ pub use hypergraph::{
 
 ## Implementation Status
 
-- `src/hypergraph.rs` is implemented and re-exported from `src/lib.rs`.
+- `optd/core/src/hypergraph.rs` is implemented and re-exported from `optd/core/src/lib.rs`.
 - `NodeSet = u64` helpers (`nodeset_singleton`, `nodeset_min`, `nodeset_iter`) are in use.
 - Hyperedges use `(left: NodeSet, right: NodeSet)` and optional predicates.
 - TES construction uses CD-E and compatibility-table checks.

@@ -14,7 +14,7 @@ Implemented exporter coverage:
 - scalar expressions (`Literal`, `ColumnRef`, `Unary`, `Binary`, `Nary`, `Cast`, `CaseWhen`, `ScalarFunction`, `Exists`, `InSubquery`, `ScalarSubquery`) with conservative output typing
 
 Root-crate integration tests for these operators have been removed. The DataFusion bridge keeps its
-own sqllogictest coverage under `connectors/optd-datafusion/tests/`.
+own sqllogictest coverage under `optd/connectors/datafusion/tests/`.
 
 ## Local TPC-H Data Setup
 
@@ -25,14 +25,13 @@ test time. Generate the files once with `tpchgen-cli`:
 ./scripts/generate_tpch.sh
 ```
 
-The generated `connectors/optd-datafusion/data/` contents are ignored by git.
+The generated `optd/connectors/datafusion/data/` contents are ignored by git.
 See `docs/data_generation.md` for TPC-H and JOB data-generation details.
 
 Run the TPC-H SLT suite with either:
 
 ```sh
-cargo test -p optd-datafusion --test slt tpch
-cargo nextest run -p optd-datafusion --test slt tpch
+cargo nextest run --release -p optd-datafusion --test slt tpch
 ```
 
 The Rust TPC-H matrix now has one direct IR builder function per query (`tpch_q1` through `tpch_q22`). Each builder manually constructs a `QueryContext` using optd IR operators. The IR can now represent SQL subquery expressions directly with `Exists`, `InSubquery`, and `ScalarSubquery`; later passes should lower those forms to semi/anti/single/mark joins before Substrait export. Q6 remains the first export+consume green query while the other builders track the relational and expression shapes that still need lowering plus Substrait/DataFusion compatibility work.

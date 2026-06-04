@@ -1,26 +1,29 @@
 # JOB Result Failure Inventory
 
-This tracks known execution failures in the disabled JOB result SLT suite. The
-enabled JOB plan-shape suite under `connectors/optd-datafusion/tests/slt/job/explain_flat/`
-is green; the result suite is kept as `.slt.disabled` files so normal test
-discovery does not run the long JOB execution workload by default.
+This tracks known execution failures and long-running cases in the JOB result
+SLT suite. The enabled JOB plan-shape suite under
+`optd/connectors/datafusion/tests/slt/job/explain_flat/` is green. The result suite
+is enabled, but a few queries are long-running benchmark cases and should be
+treated separately from normal refactor verification.
 
-Observed command, after temporarily renaming
-`connectors/optd-datafusion/tests/slt/job/results/*.slt.disabled` to `*.slt`:
+Observed command:
 
 ```sh
-cargo test --release -p optd-datafusion --test slt -- job/results
+cargo nextest run --release -p optd-datafusion --test slt job/results
 ```
 
-Observed result:
+Observed result with nextest hard timeout configured:
 
 ```text
-113 passed; 0 failed
+109 passed; 4 timed out
 ```
 
-The suite passes because the three currently unsupported result cases are
-recorded as `query error` expectations. They should be flipped back to normal
-`query ...` records as each issue is fixed.
+Use this command to run the JOB result suite while excluding the known
+long-running cases:
+
+```sh
+cargo nextest run --release -p optd-datafusion --test slt -E 'test(/job\/results/) and not test(/job\/results\/(16a|16c|16d|19d)\.slt/)'
+```
 
 ## Failure Summary
 
@@ -29,6 +32,10 @@ recorded as `query error` expectations. They should be flipped back to normal
 | [x] | `job/results/17a.slt.disabled` | line 1 | duplicate projection expression name | DataFusion import/export alias preservation |
 | [x] | `job/results/17b.slt.disabled` | line 1 | duplicate projection expression name | DataFusion import/export alias preservation |
 | [x] | `job/results/17c.slt.disabled` | line 1 | duplicate projection expression name | DataFusion import/export alias preservation |
+| [ ] | `job/results/16a.slt` | line 1 | exceeds 240s nextest timeout | JOB benchmark execution/runtime |
+| [ ] | `job/results/16c.slt` | line 1 | exceeds 240s nextest timeout | JOB benchmark execution/runtime |
+| [ ] | `job/results/16d.slt` | line 1 | exceeds 240s nextest timeout | JOB benchmark execution/runtime |
+| [ ] | `job/results/19d.slt` | line 1 | exceeds 240s nextest timeout | JOB benchmark execution/runtime |
 
 ## Failure Classes
 
@@ -55,7 +62,7 @@ named like `min(n.name)` and a projection that emits that same column twice:
     min(n.name)(#92)
 ```
 
-When `connectors/optd-datafusion/src/to_df.rs` exports that projection back to a
+When `optd/connectors/datafusion/src/to_df.rs` exports that projection back to a
 DataFusion logical plan, both projected expressions have the same display name.
 DataFusion rejects the plan:
 
@@ -68,17 +75,17 @@ position 0 and "min(n.name)" at position 1 have the same name. Consider aliasing
 
 Known failing cases:
 
-- [x] `connectors/optd-datafusion/tests/slt/job/results/17a.slt.disabled:1`
+- [x] `optd/connectors/datafusion/tests/slt/job/results/17a.slt.disabled:1`
   - Query projects `MIN(n.name)` as `member_in_charnamed_american_movie` and
     again as `a1`.
   - Fixed by materializing repeated projected columns as `Map` computations,
     preserving the distinct output aliases.
-- [x] `connectors/optd-datafusion/tests/slt/job/results/17b.slt.disabled:1`
+- [x] `optd/connectors/datafusion/tests/slt/job/results/17b.slt.disabled:1`
   - Query projects `MIN(n.name)` as `member_in_charnamed_movie` and again as
     `a1`.
   - Fixed by materializing repeated projected columns as `Map` computations,
     preserving the distinct output aliases.
-- [x] `connectors/optd-datafusion/tests/slt/job/results/17c.slt.disabled:1`
+- [x] `optd/connectors/datafusion/tests/slt/job/results/17c.slt.disabled:1`
   - Query projects `MIN(n.name)` as `member_in_charnamed_movie` and again as
     `a1`.
   - Fixed by materializing repeated projected columns as `Map` computations,
@@ -89,3 +96,17 @@ than once, `from_df` now materializes each repeated projection output as a
 `Map` computation with the projection field name. This mirrors DataFusion's
 aggregate deduplication while preserving the distinct user-visible aliases that
 the final projection needs.
+
+### Long-Running JOB Result Queries
+
+The following cases exceeded the configured nextest hard timeout of 240 seconds
+in release mode:
+
+- `optd/connectors/datafusion/tests/slt/job/results/16a.slt`
+- `optd/connectors/datafusion/tests/slt/job/results/16c.slt`
+- `optd/connectors/datafusion/tests/slt/job/results/16d.slt`
+- `optd/connectors/datafusion/tests/slt/job/results/19d.slt`
+
+These are treated as benchmark/runtime long runners rather than refactor
+regressions. `job/results/16b.slt` is also slow, but passed in roughly
+142-149 seconds.

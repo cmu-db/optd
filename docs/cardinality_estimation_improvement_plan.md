@@ -44,7 +44,7 @@ Improve in layers:
 
 ## Existing Hook
 
-`connectors/optd-datafusion/src/statistics.rs` already collects:
+`optd/connectors/datafusion/src/statistics.rs` already collects:
 
 - `COUNT(*)`
 - `COUNT(column)`
