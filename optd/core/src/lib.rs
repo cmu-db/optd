@@ -34,7 +34,7 @@ pub use optimize::{
     Direction, ExprSimplify, JoinOrdering, JoinTreeNormalize, MarkJoinToSemiJoin, OperatorRewrite,
     OperatorRewriteAdaptor, OptimizeError, OptimizeResult, Pass, PassManager, PassProfile,
     PassResult, PassTrace, PredicatePushdown, ProjectionElimination, QueryPass, Rewrite,
-    RewriteMap, SubqueryToJoin,
+    RewriteMap, SubqueryToJoin, Unnesting,
 };
 
 /// An opaque reference to a relational operator in a [`QueryContext`].

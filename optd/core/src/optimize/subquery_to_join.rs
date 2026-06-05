@@ -19,8 +19,8 @@
 use arrow_schema::DataType;
 
 use crate::{
-    AnalysisContext, AvailableColumns, BinaryOp, Column, ColumnData, Expr, ExprData, Join,
-    JoinType, Operator, OperatorData, OptimizerContext, Selection,
+    AvailableColumns, BinaryOp, Column, ColumnData, Expr, ExprData, Join, JoinType, Operator,
+    OperatorData, OptimizerContext, Selection,
     optimize::{
         OperatorRewrite, OperatorRewriteAdaptor, OptimizeResult, Pass, PassResult, QueryPass,
         Rewrite,
@@ -413,8 +413,8 @@ fn lift_subqueries_from_expr(
 
 /// Returns the single available column of `subquery`, asserting there is exactly one.
 fn single_available_column(subquery: Operator, ctx: &mut OptimizerContext) -> Column {
-    let mut analyses = AnalysisContext::new();
-    let cols = analyses
+    let cols = ctx
+        .analyses
         .get::<AvailableColumns>(&ctx.query, subquery)
         .expect("subquery available columns");
     assert_eq!(

@@ -1,8 +1,9 @@
 pub mod config;
 pub mod explain_udfs;
-pub mod from_df;
+pub mod from_df_logical;
 pub mod profiling;
 pub mod runner;
 pub mod setup;
 pub mod statistics;
-pub mod to_df;
+pub mod to_df_logical;
+pub mod to_df_physical;

@@ -6,6 +6,11 @@ edition = "2024"
 [dependencies]
 optd-core = { path = "../../core" }
 datafusion = "=53.1.0"
+datafusion-catalog = "=53.1.0"
+datafusion-common = "=53.1.0"
+datafusion-datasource = "=53.1.0"
+datafusion-optimizer = "=53.1.0"
+datafusion-physical-expr = "=53.1.0"
 datafusion-sqllogictest = "=53.1.0"
 async-trait = "0.1"
 clap = { version = "4.6.1", features = ["derive"] }

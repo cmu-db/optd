@@ -502,56 +502,58 @@ where
 /// Returns columns referenced by an expression.
 pub fn expr_used_columns(ctx: &QueryContext, expr: Expr) -> AnalysisResult<Vec<Column>> {
     let mut columns = Vec::new();
-    collect_expr_used_columns(ctx, expr, &mut columns)?;
+    let mut analyses = AnalysisContext::new();
+    collect_expr_used_columns(ctx, &mut analyses, expr, &mut columns)?;
     Ok(columns)
 }
 
 fn collect_expr_used_columns(
     ctx: &QueryContext,
+    analyses: &mut AnalysisContext,
     expr: Expr,
     columns: &mut Vec<Column>,
 ) -> AnalysisResult<()> {
     match expr.get(ctx) {
         ExprData::Literal(_) => {}
         ExprData::ColumnRef(column) => push_unique_column(columns, *column),
-        ExprData::Unary { expr, .. } => collect_expr_used_columns(ctx, *expr, columns)?,
+        ExprData::Unary { expr, .. } => collect_expr_used_columns(ctx, analyses, *expr, columns)?,
         ExprData::Binary { left, right, .. } => {
-            collect_expr_used_columns(ctx, *left, columns)?;
-            collect_expr_used_columns(ctx, *right, columns)?;
+            collect_expr_used_columns(ctx, analyses, *left, columns)?;
+            collect_expr_used_columns(ctx, analyses, *right, columns)?;
         }
         ExprData::Nary { exprs, .. } => {
             for expr in exprs {
-                collect_expr_used_columns(ctx, *expr, columns)?;
+                collect_expr_used_columns(ctx, analyses, *expr, columns)?;
             }
         }
-        ExprData::Cast { expr, .. } => collect_expr_used_columns(ctx, *expr, columns)?,
+        ExprData::Cast { expr, .. } => collect_expr_used_columns(ctx, analyses, *expr, columns)?,
         ExprData::CaseWhen {
             when_then,
             else_expr,
         } => {
             for (when, then) in when_then {
-                collect_expr_used_columns(ctx, *when, columns)?;
-                collect_expr_used_columns(ctx, *then, columns)?;
+                collect_expr_used_columns(ctx, analyses, *when, columns)?;
+                collect_expr_used_columns(ctx, analyses, *then, columns)?;
             }
             if let Some(else_expr) = else_expr {
-                collect_expr_used_columns(ctx, *else_expr, columns)?;
+                collect_expr_used_columns(ctx, analyses, *else_expr, columns)?;
             }
         }
         ExprData::ScalarFunction { args, .. } => {
             for arg in args {
-                collect_expr_used_columns(ctx, *arg, columns)?;
+                collect_expr_used_columns(ctx, analyses, *arg, columns)?;
             }
         }
         ExprData::Exists { subquery, .. } | ExprData::ScalarSubquery { subquery } => {
-            collect_subquery_free_columns(ctx, *subquery, columns)?;
+            collect_subquery_free_columns(ctx, analyses, *subquery, columns)?;
         }
         ExprData::InSubquery { expr, subquery, .. } => {
-            collect_expr_used_columns(ctx, *expr, columns)?;
-            collect_subquery_free_columns(ctx, *subquery, columns)?;
+            collect_expr_used_columns(ctx, analyses, *expr, columns)?;
+            collect_subquery_free_columns(ctx, analyses, *subquery, columns)?;
         }
         ExprData::Like { expr, pattern, .. } => {
-            collect_expr_used_columns(ctx, *expr, columns)?;
-            collect_expr_used_columns(ctx, *pattern, columns)?;
+            collect_expr_used_columns(ctx, analyses, *expr, columns)?;
+            collect_expr_used_columns(ctx, analyses, *pattern, columns)?;
         }
     }
 
@@ -560,22 +562,23 @@ fn collect_expr_used_columns(
 
 fn collect_subquery_free_columns(
     ctx: &QueryContext,
+    analyses: &mut AnalysisContext,
     operator: Operator,
     columns: &mut Vec<Column>,
 ) -> AnalysisResult<()> {
-    let mut analyses = AnalysisContext::new();
     extend_unique_columns(columns, analyses.get::<FreeColumns>(ctx, operator)?);
     Ok(())
 }
 
 fn collect_aggregate_expr_used_columns(
     ctx: &QueryContext,
+    analyses: &mut AnalysisContext,
     aggregate: &AggregateExpr,
     columns: &mut Vec<Column>,
 ) -> AnalysisResult<()> {
     match aggregate {
         AggregateExpr::CountStar => Ok(()),
-        AggregateExpr::Func { arg, .. } => collect_expr_used_columns(ctx, *arg, columns),
+        AggregateExpr::Func { arg, .. } => collect_expr_used_columns(ctx, analyses, *arg, columns),
     }
 }
 
@@ -635,31 +638,31 @@ fn directly_used_columns(
         | OperatorData::ConstScan(_) => {}
         OperatorData::Sort(data) => {
             for key in &data.keys {
-                collect_expr_used_columns(ctx, key.expr, &mut columns)?;
+                collect_expr_used_columns(ctx, analyses, key.expr, &mut columns)?;
             }
         }
         OperatorData::Selection(data) => {
-            collect_expr_used_columns(ctx, data.predicate, &mut columns)?;
+            collect_expr_used_columns(ctx, analyses, data.predicate, &mut columns)?;
         }
         OperatorData::Map(data) => {
             for (_, expr) in &data.computations {
-                collect_expr_used_columns(ctx, *expr, &mut columns)?;
+                collect_expr_used_columns(ctx, analyses, *expr, &mut columns)?;
             }
         }
         OperatorData::TableFunction(data) => {
             for arg in &data.args {
-                collect_expr_used_columns(ctx, *arg, &mut columns)?;
+                collect_expr_used_columns(ctx, analyses, *arg, &mut columns)?;
             }
         }
         OperatorData::Join(data) => {
-            collect_expr_used_columns(ctx, data.on, &mut columns)?;
+            collect_expr_used_columns(ctx, analyses, data.on, &mut columns)?;
         }
         OperatorData::Aggregation(data) => {
             for key in &data.keys {
-                collect_expr_used_columns(ctx, *key, &mut columns)?;
+                collect_expr_used_columns(ctx, analyses, *key, &mut columns)?;
             }
             for (_, aggregate) in &data.aggregates {
-                collect_aggregate_expr_used_columns(ctx, aggregate, &mut columns)?;
+                collect_aggregate_expr_used_columns(ctx, analyses, aggregate, &mut columns)?;
             }
         }
         OperatorData::Projection(data) => {
@@ -859,6 +862,7 @@ fn expr_nullability(
 
 fn collect_non_null_columns_from_predicate(
     ctx: &QueryContext,
+    analyses: &mut AnalysisContext,
     expr: Expr,
     columns: &mut Vec<Column>,
 ) -> AnalysisResult<()> {
@@ -873,14 +877,16 @@ fn collect_non_null_columns_from_predicate(
         | ExprData::InSubquery { .. }
         | ExprData::ScalarSubquery { .. } => {}
         ExprData::Unary { op, expr } => match op {
-            crate::UnaryOp::IsNotNull => collect_expr_used_columns(ctx, *expr, columns)?,
+            crate::UnaryOp::IsNotNull => {
+                collect_expr_used_columns(ctx, analyses, *expr, columns)?;
+            }
             crate::UnaryOp::Not => {
                 if let ExprData::Unary {
                     op: crate::UnaryOp::IsNull,
                     expr,
                 } = expr.get(ctx)
                 {
-                    collect_expr_used_columns(ctx, *expr, columns)?;
+                    collect_expr_used_columns(ctx, analyses, *expr, columns)?;
                 }
             }
             crate::UnaryOp::IsNull | crate::UnaryOp::Negate => {}
@@ -892,8 +898,8 @@ fn collect_non_null_columns_from_predicate(
             | crate::BinaryOp::LtEq
             | crate::BinaryOp::Gt
             | crate::BinaryOp::GtEq => {
-                collect_expr_used_columns(ctx, *left, columns)?;
-                collect_expr_used_columns(ctx, *right, columns)?;
+                collect_expr_used_columns(ctx, analyses, *left, columns)?;
+                collect_expr_used_columns(ctx, analyses, *right, columns)?;
             }
             crate::BinaryOp::Add
             | crate::BinaryOp::Subtract
@@ -903,7 +909,7 @@ fn collect_non_null_columns_from_predicate(
         ExprData::Nary { op, exprs } => match op {
             crate::NaryOp::And => {
                 for expr in exprs {
-                    collect_non_null_columns_from_predicate(ctx, *expr, columns)?;
+                    collect_non_null_columns_from_predicate(ctx, analyses, *expr, columns)?;
                 }
             }
             crate::NaryOp::Or => {
@@ -912,9 +918,9 @@ fn collect_non_null_columns_from_predicate(
                     return Ok(());
                 };
 
-                let mut intersection = non_null_columns_from_predicate(ctx, *first)?;
+                let mut intersection = non_null_columns_from_predicate(ctx, analyses, *first)?;
                 for expr in iter {
-                    let branch = non_null_columns_from_predicate(ctx, *expr)?;
+                    let branch = non_null_columns_from_predicate(ctx, analyses, *expr)?;
                     intersection.retain(|column| branch.contains(column));
                 }
 
@@ -926,9 +932,13 @@ fn collect_non_null_columns_from_predicate(
     Ok(())
 }
 
-fn non_null_columns_from_predicate(ctx: &QueryContext, expr: Expr) -> AnalysisResult<Vec<Column>> {
+fn non_null_columns_from_predicate(
+    ctx: &QueryContext,
+    analyses: &mut AnalysisContext,
+    expr: Expr,
+) -> AnalysisResult<Vec<Column>> {
     let mut columns = Vec::new();
-    collect_non_null_columns_from_predicate(ctx, expr, &mut columns)?;
+    collect_non_null_columns_from_predicate(ctx, analyses, expr, &mut columns)?;
     Ok(columns)
 }
 
@@ -964,7 +974,7 @@ fn output_column_nullability(
             .collect()),
         OperatorData::Selection(data) => {
             let mut columns = analyses.get::<ColumnNullability>(ctx, data.input)?;
-            for column in non_null_columns_from_predicate(ctx, data.predicate)? {
+            for column in non_null_columns_from_predicate(ctx, analyses, data.predicate)? {
                 mark_non_null(&mut columns, column);
             }
             Ok(columns)
@@ -1005,7 +1015,7 @@ fn output_column_nullability(
             }
 
             if matches!(data.join_type, JoinType::Inner) {
-                for column in non_null_columns_from_predicate(ctx, data.on)? {
+                for column in non_null_columns_from_predicate(ctx, analyses, data.on)? {
                     mark_non_null(&mut columns, column);
                 }
             }

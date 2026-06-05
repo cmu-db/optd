@@ -13,11 +13,11 @@ use datafusion::{
 use optd_core::{
     ExprSimplify, JoinOrdering, MarkJoinToSemiJoin, OperatorRewriteAdaptor, OptimizerContext,
     PassManager, PassProfile, PredicatePushdown, ProjectionElimination, QueryContext,
-    SubqueryToJoin,
+    SubqueryToJoin, Unnesting,
 };
 use optd_core::{Operator, OperatorData, optimize::join_ordering::collect_join_group_roots};
 
-use crate::from_df::{FromDFError, from_logical_plan};
+use crate::from_df_logical::{FromDFError, from_logical_plan};
 
 /// Error produced while building or profiling a optd optimizer input.
 #[derive(Debug)]
@@ -231,6 +231,7 @@ pub async fn profile_passes_sql(
     let mut pass_manager = PassManager::new();
     pass_manager.add_pass(SubqueryToJoin);
     pass_manager.add_pass(OperatorRewriteAdaptor::new(ExprSimplify));
+    pass_manager.add_pass(Unnesting);
     pass_manager.add_pass(OperatorRewriteAdaptor::new(MarkJoinToSemiJoin));
     pass_manager.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
     pass_manager.add_pass(OperatorRewriteAdaptor::new(ProjectionElimination));

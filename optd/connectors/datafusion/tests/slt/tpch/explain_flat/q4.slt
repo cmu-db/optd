@@ -42,7 +42,7 @@ order by
 18)------]
 19)----},
 20)----{
-21)------"id": 21,
+21)------"id": 29,
 22)------"kind": "selection",
 23)------"title": "σ Selection",
 24)------"predicate": "((o_orderdate(#4) >= \"1993-07-01\") AND (o_orderdate(#4) < (CAST(\"1993-07-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))",
@@ -73,45 +73,45 @@ order by
 49)------]
 50)----},
 51)----{
-52)------"id": 2,
+52)------"id": 15,
 53)------"kind": "selection",
 54)------"title": "σ Selection",
-55)------"predicate": "((l_orderkey(#9) = o_orderkey(#0)) AND (l_commitdate(#20) < l_receiptdate(#21)))",
+55)------"predicate": "(l_commitdate(#20) < l_receiptdate(#21))",
 56)------"input": 1
 57)----},
 58)----{
-59)------"id": 34,
+59)------"id": 42,
 60)------"kind": "join",
 61)------"title": "⋉ LeftSemiJoin",
 62)------"join_type": "LeftSemi",
-63)------"condition": "true",
-64)------"outer": 21,
-65)------"inner": 2
+63)------"condition": "(l_orderkey(#9) = o_orderkey(#0))",
+64)------"outer": 29,
+65)------"inner": 15
 66)----},
 67)----{
-68)------"id": 35,
+68)------"id": 43,
 69)------"kind": "aggregation",
 70)------"title": "γ Aggregation",
 71)------"keys": "o_orderpriority(#5)",
 72)------"aggregates": [
 73)--------"count(Int64(1))(#25) := count_star()"
 74)------],
-75)------"input": 34
+75)------"input": 42
 76)----},
 77)----{
-78)------"id": 36,
+78)------"id": 44,
 79)------"kind": "sort",
 80)------"title": "⇞ Sort",
 81)------"keys": [
 82)--------"o_orderpriority(#5) Asc NullsLast"
 83)------],
-84)------"input": 35
+84)------"input": 43
 85)----},
 86)----{
-87)------"id": 37,
+87)------"id": 45,
 88)------"kind": "output",
 89)------"title": "= Output",
-90)------"input": 36
+90)------"input": 44
 91)----}
 92)--]
 93)}

@@ -5,15 +5,17 @@ use std::{sync::Arc, time::Duration};
 use async_trait::async_trait;
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::logical_expr::{Analyze, Explain, LogicalPlan};
+use datafusion::logical_expr::LogicalPlan;
 use datafusion::prelude::SessionContext;
+use datafusion_optimizer::Analyzer;
+use datafusion_optimizer::analyzer::type_coercion::TypeCoercion;
 use datafusion_sqllogictest::{
     DFColumnType, DFSqlLogicTestError, convert_batches, convert_schema_to_types,
 };
 use optd_core::{
     ExprSimplify, JoinOrdering, JoinTreeNormalize, MarkJoinToSemiJoin, OperatorRewriteAdaptor,
     OptimizerContext, PassManager, PredicatePushdown, ProjectionElimination, QueryContext,
-    QueryFormatConfig, SubqueryToJoin,
+    QueryFormatConfig, SubqueryToJoin, Unnesting,
 };
 use sqllogictest::{AsyncDB, DBOutput};
 
@@ -21,8 +23,8 @@ use crate::config::OptdExtensionConfig;
 use crate::explain_udfs::{
     ExplainStep, explain_steps_box, explain_steps_box_with_config, register_explain_udfs,
 };
-use crate::from_df::from_logical_plan;
-use crate::to_df::to_logical_plan;
+use crate::from_df_logical::from_logical_plan;
+use crate::to_df_logical::to_logical_plan;
 
 fn optimize(ctx: QueryContext) -> Result<QueryContext, optd_core::OptimizeError> {
     let mut opt = OptimizerContext::new(ctx);
@@ -40,6 +42,7 @@ pub fn default_pass_manager() -> PassManager {
     let mut pm = PassManager::new();
     pm.add_pass(SubqueryToJoin);
     pm.add_pass(OperatorRewriteAdaptor::new(ExprSimplify));
+    pm.add_pass(Unnesting);
     pm.add_pass(OperatorRewriteAdaptor::new(MarkJoinToSemiJoin));
     pm.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
     pm.add_pass(JoinTreeNormalize::new());
@@ -142,14 +145,12 @@ impl OptdRunner {
             .execute_logical_plan(plan)
             .await
             .map_err(DFSqlLogicTestError::DataFusion)?;
+        let schema = df.schema().inner().clone();
         let batches = df
             .collect()
             .await
             .map_err(DFSqlLogicTestError::DataFusion)?;
-        let schema = batches
-            .first()
-            .map(|b| b.schema())
-            .unwrap_or_else(|| std::sync::Arc::new(datafusion::arrow::datatypes::Schema::empty()));
+        let schema = batches.first().map(|b| b.schema()).unwrap_or(schema);
         Ok((schema, batches))
     }
 
@@ -195,8 +196,9 @@ impl AsyncDB for OptdRunner {
 }
 
 impl OptdRunner {
-    /// Attempts SQL → optd IR → DataFusion plan round-trip.
-    /// Returns an error if any step fails so the caller can fall back.
+    /// Attempts SQL → optd IR → DataFusion logical plan.
+    /// Direct physical planning is intentionally inactive until unnesting can
+    /// decorrelate the TPC-H subquery shapes that require it.
     async fn try_via_ir(
         &self,
         sql: &str,
@@ -209,21 +211,12 @@ impl OptdRunner {
             .await
             .map_err(|e| TryViaIrError::Failed(e.to_string()))?;
 
-        let df_plan = self.optimize_plan_via_ir(&plan).await?;
-
-        // Optimize before execution so rules like COUNT(*) → scan work correctly.
-        let optimized = self
-            .session
-            .state()
-            .optimize(&df_plan)
-            .map_err(|e| TryViaIrError::Failed(e.to_string()))?;
-
+        let plan = self.logical_plan_via_ir(&plan).await?;
         let df = self
             .session
-            .execute_logical_plan(optimized)
+            .execute_logical_plan(plan)
             .await
             .map_err(|e| TryViaIrError::Failed(e.to_string()))?;
-
         let schema = df.schema().inner().clone();
         let batches = df
             .collect()
@@ -233,44 +226,19 @@ impl OptdRunner {
         Ok((schema, batches))
     }
 
-    async fn optimize_plan_via_ir(&self, plan: &LogicalPlan) -> Result<LogicalPlan, TryViaIrError> {
-        match plan {
-            LogicalPlan::Explain(explain) => {
-                let child = self.optimize_relational_plan_via_ir(&explain.plan).await?;
-                Ok(LogicalPlan::Explain(Explain {
-                    verbose: explain.verbose,
-                    explain_format: explain.explain_format.clone(),
-                    plan: Arc::new(child),
-                    stringified_plans: explain.stringified_plans.clone(),
-                    schema: Arc::clone(&explain.schema),
-                    logical_optimization_succeeded: explain.logical_optimization_succeeded,
-                }))
-            }
-            LogicalPlan::Analyze(analyze) => {
-                let child = self.optimize_relational_plan_via_ir(&analyze.input).await?;
-                Ok(LogicalPlan::Analyze(Analyze {
-                    verbose: analyze.verbose,
-                    input: Arc::new(child),
-                    schema: Arc::clone(&analyze.schema),
-                }))
-            }
-            other => self.optimize_relational_plan_via_ir(other).await,
-        }
-    }
-
-    async fn optimize_relational_plan_via_ir(
-        &self,
-        plan: &LogicalPlan,
-    ) -> Result<LogicalPlan, TryViaIrError> {
+    async fn logical_plan_via_ir(&self, plan: &LogicalPlan) -> Result<LogicalPlan, TryViaIrError> {
         if !is_supported_relational_plan(plan) {
             return Err(TryViaIrError::Unsupported("non-query plan".into()));
         }
 
-        reject_non_catalog_scans(plan, &self.session).await?;
+        let plan =
+            apply_type_coercion(plan.clone()).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
+
+        reject_non_catalog_scans(&plan, &self.session).await?;
 
         let mut ctx = QueryContext::new();
         let root =
-            from_logical_plan(plan, &mut ctx).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
+            from_logical_plan(&plan, &mut ctx).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
         ctx.set_root(root);
 
         let ctx = optimize(ctx).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
@@ -279,6 +247,15 @@ impl OptdRunner {
             .await
             .map_err(|e| TryViaIrError::Failed(e.to_string()))
     }
+}
+
+fn apply_type_coercion(plan: LogicalPlan) -> datafusion::error::Result<LogicalPlan> {
+    let options = datafusion_common::config::ConfigOptions::default();
+    Analyzer::with_rules(vec![Arc::new(TypeCoercion::new())]).execute_and_check(
+        plan,
+        &options,
+        |_, _| {},
+    )
 }
 
 fn is_supported_relational_plan(plan: &LogicalPlan) -> bool {
@@ -365,8 +342,24 @@ mod tests {
         assert!(runner.optd_enabled());
     }
 
+    #[test]
+    fn default_pass_manager_runs_unnesting_after_expr_simplify() {
+        let mut opt = optd_core::OptimizerContext::new(optd_core::QueryContext::new());
+        let mut pm = super::default_pass_manager();
+        pm.run(&mut opt).unwrap();
+
+        let passes: Vec<_> = pm.profiles().iter().map(|profile| profile.pass).collect();
+        let expr_simplify = passes
+            .iter()
+            .position(|pass| *pass == "ExprSimplify")
+            .unwrap();
+        let unnesting = passes.iter().position(|pass| *pass == "Unnesting").unwrap();
+
+        assert_eq!(unnesting, expr_simplify + 1);
+    }
+
     #[tokio::test]
-    async fn show_tables_runs_via_ir_round_trip() {
+    async fn show_tables_falls_back_to_datafusion() {
         let runner = OptdRunner::new(session_context_with_information_schema());
         let result = runner.execute_sql("SHOW TABLES").await.unwrap();
         match result {
@@ -380,25 +373,67 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn explain_optimizes_child_via_ir() {
+    async fn explain_is_not_an_ir_query() {
         let runner = OptdRunner::new(session_context_with_information_schema());
         let result = runner
             .try_via_ir("EXPLAIN SELECT * FROM (VALUES (1)) AS t(a)")
             .await;
 
-        assert!(result.is_ok());
+        assert!(matches!(result, Err(super::TryViaIrError::Unsupported(_))));
     }
 
     #[tokio::test]
-    async fn explain_analyze_optimizes_child_via_ir() {
+    async fn explain_analyze_is_not_an_ir_query() {
+        let runner = OptdRunner::new(session_context_with_information_schema());
+        let result = runner
+            .try_via_ir("EXPLAIN ANALYZE SELECT * FROM (VALUES (1)) AS t(a)")
+            .await;
+
+        assert!(matches!(result, Err(super::TryViaIrError::Unsupported(_))));
+    }
+
+    #[tokio::test]
+    async fn optd_ir_execution_uses_logical_converter_while_physical_is_inactive() {
         let runner = OptdRunner::new(session_context_with_information_schema());
         let (_, batches) = runner
-            .try_via_ir("EXPLAIN ANALYZE SELECT * FROM (VALUES (1)) AS t(a)")
+            .try_via_ir(
+                "SELECT a \
+                 FROM (VALUES (1), (2)) AS t(a) \
+                 WHERE a = ( \
+                     SELECT max(b) \
+                     FROM (VALUES (1), (2)) AS u(b) \
+                     WHERE b = t.a \
+                 )",
+            )
             .await
             .unwrap();
 
-        let row_count: usize = batches.iter().map(|batch| batch.num_rows()).sum();
-        assert!(row_count > 0);
+        assert_eq!(
+            batches.iter().map(|batch| batch.num_rows()).sum::<usize>(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn optd_ir_execution_preserves_empty_query_schema() {
+        let runner = OptdRunner::new(session_context_with_information_schema());
+        let result = runner
+            .execute_sql("SELECT a FROM (VALUES (1)) AS t(a) WHERE a > 1")
+            .await
+            .unwrap();
+
+        match result {
+            super::RunnerOutput::Rows { schema, batches } => {
+                assert_eq!(schema.fields().len(), 1);
+                assert_eq!(
+                    batches.iter().map(|batch| batch.num_rows()).sum::<usize>(),
+                    0
+                );
+            }
+            super::RunnerOutput::StatementComplete => {
+                panic!("empty SELECT should preserve its row schema");
+            }
+        }
     }
 
     #[test]

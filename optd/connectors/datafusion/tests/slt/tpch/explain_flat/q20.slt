@@ -102,7 +102,7 @@ order by
 62)------"input": 5
 63)----},
 64)----{
-65)------"id": 56,
+65)------"id": 71,
 66)------"kind": "join",
 67)------"title": "⟕ᵐ LeftMarkJoin",
 68)------"join_type": "LeftMark",
@@ -112,11 +112,11 @@ order by
 72)------"inner": 6
 73)----},
 74)----{
-75)------"id": 60,
+75)------"id": 75,
 76)------"kind": "selection",
 77)------"title": "σ Selection",
 78)------"predicate": "in_mark(#44)",
-79)------"input": 56
+79)------"input": 71
 80)----},
 81)----{
 82)------"id": 7,
@@ -143,126 +143,128 @@ order by
 103)------]
 104)----},
 105)----{
-106)------"id": 8,
+106)------"id": 32,
 107)------"kind": "selection",
 108)------"title": "σ Selection",
-109)------"predicate": "((((l_partkey(#26) = ps_partkey(#11)) AND (l_suppkey(#27) = ps_suppkey(#12))) AND (l_shipdate(#35) >= CAST(\"1994-01-01\" AS Date32))) AND (l_shipdate(#35) < (CAST(\"1994-01-01\" AS Date32) + INTERVAL(12mo 0d 0ns))))",
+109)------"predicate": "((l_shipdate(#35) >= CAST(\"1994-01-01\" AS Date32)) AND (l_shipdate(#35) < (CAST(\"1994-01-01\" AS Date32) + INTERVAL(12mo 0d 0ns))))",
 110)------"input": 7
 111)----},
 112)----{
-113)------"id": 9,
+113)------"id": 36,
 114)------"kind": "aggregation",
 115)------"title": "γ Aggregation",
-116)------"keys": "",
+116)------"keys": "l_partkey(#26), l_suppkey(#27)",
 117)------"aggregates": [
 118)--------"sum(lineitem.l_quantity)(#41) := sum(l_quantity(#29))"
 119)------],
-120)------"input": 8
+120)------"input": 32
 121)----},
 122)----{
-123)------"id": 10,
+123)------"id": 37,
 124)------"kind": "map",
 125)------"title": "χ Map",
 126)------"computations": [
 127)--------"Float64(0.5) * sum(lineitem.l_quantity)(#42) := (0.5 * sum(lineitem.l_quantity)(#41))"
 128)------],
-129)------"input": 9
+129)------"input": 36
 130)----},
 131)----{
-132)------"id": 11,
+132)------"id": 38,
 133)------"kind": "projection",
 134)------"title": "π Projection",
 135)------"columns": [
-136)--------"Float64(0.5) * sum(lineitem.l_quantity)(#42)"
-137)------],
-138)------"input": 10
-139)----},
-140)----{
-141)------"id": 61,
-142)------"kind": "join",
-143)------"title": "⟕₁ SingleJoin",
-144)------"join_type": "Single",
-145)------"condition": "true",
-146)------"outer": 60,
-147)------"inner": 11
-148)----},
-149)----{
-150)------"id": 62,
-151)------"kind": "selection",
-152)------"title": "σ Selection",
-153)------"predicate": "(ps_availqty(#13) > Float64(0.5) * sum(lineitem.l_quantity)(#42))",
-154)------"input": 61
-155)----},
-156)----{
-157)------"id": 63,
-158)------"kind": "projection",
-159)------"title": "π Projection",
-160)------"columns": [
-161)--------"ps_suppkey(#12)"
-162)------],
-163)------"input": 62
-164)----},
-165)----{
-166)------"id": 64,
-167)------"kind": "join",
-168)------"title": "⋉ LeftSemiJoin",
-169)------"join_type": "LeftSemi",
-170)------"condition": "(s_suppkey(#0) = ps_suppkey(#12))",
-171)------"outer": 0,
-172)------"inner": 63
-173)----},
-174)----{
-175)------"id": 1,
-176)------"kind": "scan",
-177)------"title": "⊞ Scan",
-178)------"table_name": "nation",
-179)------"columns": [
-180)--------"n_nationkey(#7)",
-181)--------"n_name(#8)",
-182)--------"n_regionkey(#9)",
-183)--------"n_comment(#10)"
-184)------]
-185)----},
-186)----{
-187)------"id": 50,
-188)------"kind": "selection",
-189)------"title": "σ Selection",
-190)------"predicate": "(n_name(#8) = \"CANADA\")",
-191)------"input": 1
-192)----},
-193)----{
-194)------"id": 65,
-195)------"kind": "join",
-196)------"title": "⋈ InnerJoin",
-197)------"join_type": "Inner",
-198)------"condition": "(s_nationkey(#3) = n_nationkey(#7))",
-199)------"outer": 64,
-200)------"inner": 50
-201)----},
-202)----{
-203)------"id": 66,
-204)------"kind": "projection",
-205)------"title": "π Projection",
-206)------"columns": [
-207)--------"s_name(#1)",
-208)--------"s_address(#2)"
-209)------],
-210)------"input": 65
-211)----},
-212)----{
-213)------"id": 67,
-214)------"kind": "sort",
-215)------"title": "⇞ Sort",
-216)------"keys": [
-217)--------"s_name(#1) Asc NullsLast"
-218)------],
-219)------"input": 66
-220)----},
-221)----{
-222)------"id": 68,
-223)------"kind": "output",
-224)------"title": "= Output",
-225)------"input": 67
-226)----}
-227)--]
-228)}
+136)--------"Float64(0.5) * sum(lineitem.l_quantity)(#42)",
+137)--------"l_partkey(#26)",
+138)--------"l_suppkey(#27)"
+139)------],
+140)------"input": 37
+141)----},
+142)----{
+143)------"id": 76,
+144)------"kind": "join",
+145)------"title": "⟕ LeftOuterJoin",
+146)------"join_type": "LeftOuter",
+147)------"condition": "((l_partkey(#26) = ps_partkey(#11)) AND (l_suppkey(#27) = ps_suppkey(#12)))",
+148)------"outer": 75,
+149)------"inner": 38
+150)----},
+151)----{
+152)------"id": 77,
+153)------"kind": "selection",
+154)------"title": "σ Selection",
+155)------"predicate": "(ps_availqty(#13) > Float64(0.5) * sum(lineitem.l_quantity)(#42))",
+156)------"input": 76
+157)----},
+158)----{
+159)------"id": 78,
+160)------"kind": "projection",
+161)------"title": "π Projection",
+162)------"columns": [
+163)--------"ps_suppkey(#12)"
+164)------],
+165)------"input": 77
+166)----},
+167)----{
+168)------"id": 79,
+169)------"kind": "join",
+170)------"title": "⋉ LeftSemiJoin",
+171)------"join_type": "LeftSemi",
+172)------"condition": "(s_suppkey(#0) = ps_suppkey(#12))",
+173)------"outer": 0,
+174)------"inner": 78
+175)----},
+176)----{
+177)------"id": 1,
+178)------"kind": "scan",
+179)------"title": "⊞ Scan",
+180)------"table_name": "nation",
+181)------"columns": [
+182)--------"n_nationkey(#7)",
+183)--------"n_name(#8)",
+184)--------"n_regionkey(#9)",
+185)--------"n_comment(#10)"
+186)------]
+187)----},
+188)----{
+189)------"id": 65,
+190)------"kind": "selection",
+191)------"title": "σ Selection",
+192)------"predicate": "(n_name(#8) = \"CANADA\")",
+193)------"input": 1
+194)----},
+195)----{
+196)------"id": 80,
+197)------"kind": "join",
+198)------"title": "⋈ InnerJoin",
+199)------"join_type": "Inner",
+200)------"condition": "(s_nationkey(#3) = n_nationkey(#7))",
+201)------"outer": 79,
+202)------"inner": 65
+203)----},
+204)----{
+205)------"id": 81,
+206)------"kind": "projection",
+207)------"title": "π Projection",
+208)------"columns": [
+209)--------"s_name(#1)",
+210)--------"s_address(#2)"
+211)------],
+212)------"input": 80
+213)----},
+214)----{
+215)------"id": 82,
+216)------"kind": "sort",
+217)------"title": "⇞ Sort",
+218)------"keys": [
+219)--------"s_name(#1) Asc NullsLast"
+220)------],
+221)------"input": 81
+222)----},
+223)----{
+224)------"id": 83,
+225)------"kind": "output",
+226)------"title": "= Output",
+227)------"input": 82
+228)----}
+229)--]
+230)}

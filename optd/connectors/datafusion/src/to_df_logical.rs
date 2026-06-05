@@ -4,6 +4,7 @@
 //! all subsequent conversion is synchronous.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Deref;
 use std::sync::Arc;
 
 use datafusion::arrow::datatypes::Field;
@@ -50,10 +51,40 @@ impl From<datafusion::error::DataFusionError> for ToDFError {
 
 pub type ToDFResult<T> = Result<T, ToDFError>;
 
-type TableMap = HashMap<TableRef, Arc<dyn TableSource>>;
-type ColumnQualifiers = HashMap<optd_core::Column, String>;
+pub(crate) type TableMap = HashMap<TableRef, Arc<dyn TableSource>>;
+pub(crate) type ColumnQualifiers = HashMap<optd_core::Column, String>;
 
-fn optd_table_ref_to_df(table: &TableRef) -> TableReference {
+pub(crate) struct ToDfContext<'a> {
+    query: &'a QueryContext,
+    analyses: optd_core::AnalysisContext,
+    tables: &'a TableMap,
+    session: &'a SessionContext,
+}
+
+impl<'a> ToDfContext<'a> {
+    pub(crate) fn new(
+        query: &'a QueryContext,
+        tables: &'a TableMap,
+        session: &'a SessionContext,
+    ) -> Self {
+        Self {
+            query,
+            analyses: optd_core::AnalysisContext::new(),
+            tables,
+            session,
+        }
+    }
+}
+
+impl Deref for ToDfContext<'_> {
+    type Target = QueryContext;
+
+    fn deref(&self) -> &Self::Target {
+        self.query
+    }
+}
+
+pub(crate) fn optd_table_ref_to_df(table: &TableRef) -> TableReference {
     match table {
         TableRef::Bare { table } => TableReference::bare(table.as_ref()),
         TableRef::Partial { schema, table } => {
@@ -122,7 +153,7 @@ fn collect_expr_subqueries_for_operator(op: Operator, ctx: &QueryContext, out: &
     let collect_expr = |expr: optd_core::Expr, out: &mut Vec<Operator>| {
         collect_expr_subqueries(expr, ctx, out);
     };
-    match op.get(ctx) {
+    match op.get(ctx).clone() {
         OperatorData::Selection(s) => collect_expr(s.predicate, out),
         OperatorData::Map(m) => {
             for (_, e) in &m.computations {
@@ -140,36 +171,36 @@ fn collect_expr_subqueries_for_operator(op: Operator, ctx: &QueryContext, out: &
 }
 
 fn collect_expr_subqueries(expr: optd_core::Expr, ctx: &QueryContext, out: &mut Vec<Operator>) {
-    match expr.get(ctx) {
+    match expr.get(ctx).clone() {
         ExprData::Exists { subquery, .. }
         | ExprData::ScalarSubquery { subquery }
-        | ExprData::InSubquery { subquery, .. } => out.push(*subquery),
+        | ExprData::InSubquery { subquery, .. } => out.push(subquery),
         ExprData::Unary { expr, .. } | ExprData::Cast { expr, .. } => {
-            collect_expr_subqueries(*expr, ctx, out);
+            collect_expr_subqueries(expr, ctx, out);
         }
         ExprData::Binary { left, right, .. } => {
-            collect_expr_subqueries(*left, ctx, out);
-            collect_expr_subqueries(*right, ctx, out);
+            collect_expr_subqueries(left, ctx, out);
+            collect_expr_subqueries(right, ctx, out);
         }
         ExprData::Nary { exprs, .. } | ExprData::ScalarFunction { args: exprs, .. } => {
             for e in exprs {
-                collect_expr_subqueries(*e, ctx, out);
+                collect_expr_subqueries(e, ctx, out);
             }
         }
         ExprData::Like { expr, pattern, .. } => {
-            collect_expr_subqueries(*expr, ctx, out);
-            collect_expr_subqueries(*pattern, ctx, out);
+            collect_expr_subqueries(expr, ctx, out);
+            collect_expr_subqueries(pattern, ctx, out);
         }
         ExprData::CaseWhen {
             when_then,
             else_expr,
         } => {
             for (w, t) in when_then {
-                collect_expr_subqueries(*w, ctx, out);
-                collect_expr_subqueries(*t, ctx, out);
+                collect_expr_subqueries(w, ctx, out);
+                collect_expr_subqueries(t, ctx, out);
             }
             if let Some(e) = else_expr {
-                collect_expr_subqueries(*e, ctx, out);
+                collect_expr_subqueries(e, ctx, out);
             }
         }
         _ => {}
@@ -182,11 +213,10 @@ fn convert_operator(
     tables: &TableMap,
     session: &SessionContext,
 ) -> ToDFResult<LogicalPlan> {
+    let mut ctx = ToDfContext::new(ctx, tables, session);
     convert_operator_inner(
         op,
-        ctx,
-        tables,
-        session,
+        &mut ctx,
         &std::collections::HashSet::new(),
         &ColumnQualifiers::new(),
     )
@@ -194,15 +224,14 @@ fn convert_operator(
 
 fn convert_operator_inner(
     op: Operator,
-    ctx: &QueryContext,
-    tables: &TableMap,
-    session: &SessionContext,
+    ctx: &mut ToDfContext<'_>,
     outer_refs: &std::collections::HashSet<optd_core::Column>,
     column_qualifiers: &ColumnQualifiers,
 ) -> ToDFResult<LogicalPlan> {
-    match op.get(ctx) {
+    match op.get(ctx).clone() {
         OperatorData::Scan(scan) => {
-            let source = tables
+            let source = ctx
+                .tables
                 .get(&scan.table)
                 .ok_or_else(|| ToDFError::TableNotFound(scan.table.clone()))?
                 .clone();
@@ -220,32 +249,23 @@ fn convert_operator_inner(
         }
 
         OperatorData::Selection(sel) => {
-            if let OperatorData::Join(join) = sel.input.get(ctx)
+            if let OperatorData::Join(join) = sel.input.get(ctx).clone()
                 && matches!(join.join_type, optd_core::JoinType::Single)
                 && let Some(scalar_col) = single_available_column(join.inner, ctx)
             {
-                let input = convert_operator_inner(
-                    join.outer,
-                    ctx,
-                    tables,
-                    session,
-                    outer_refs,
-                    column_qualifiers,
-                )?;
-                let scalar_expr = scalar_subquery_expr(join.inner, join.on, ctx, tables, session)?;
+                let input = convert_operator_inner(join.outer, ctx, outer_refs, column_qualifiers)?;
+                let scalar_expr = scalar_subquery_expr(join.inner, join.on, ctx)?;
                 let predicate = convert_expr_replacing_column(
                     sel.predicate,
                     scalar_col,
                     &scalar_expr,
                     ctx,
-                    tables,
-                    session,
                     outer_refs,
                     column_qualifiers,
                 )?;
                 return Ok(LogicalPlanBuilder::from(input).filter(predicate)?.build()?);
             }
-            if let OperatorData::Join(join) = sel.input.get(ctx)
+            if let OperatorData::Join(join) = sel.input.get(ctx).clone()
                 && let optd_core::JoinType::LeftMark(marker) = join.join_type
                 && let Some((join_type, remaining)) =
                     classify_mark_selection(sel.predicate, marker, ctx)
@@ -256,55 +276,21 @@ fn convert_operator_inner(
                     outer: join.outer,
                     inner: join.inner,
                 };
-                let mut plan = convert_semi_anti_join(
-                    &join,
-                    ctx,
-                    tables,
-                    session,
-                    outer_refs,
-                    column_qualifiers,
-                )?;
+                let mut plan = convert_semi_anti_join(&join, ctx, outer_refs, column_qualifiers)?;
                 if !remaining.is_empty() {
-                    let predicate = convert_conjuncts(
-                        remaining,
-                        ctx,
-                        tables,
-                        session,
-                        outer_refs,
-                        column_qualifiers,
-                    )?;
+                    let predicate =
+                        convert_conjuncts(remaining, ctx, outer_refs, column_qualifiers)?;
                     plan = LogicalPlanBuilder::from(plan).filter(predicate)?.build()?;
                 }
                 return Ok(plan);
             }
-            let input = convert_operator_inner(
-                sel.input,
-                ctx,
-                tables,
-                session,
-                outer_refs,
-                column_qualifiers,
-            )?;
-            let predicate = convert_expr(
-                sel.predicate,
-                ctx,
-                tables,
-                session,
-                outer_refs,
-                column_qualifiers,
-            )?;
+            let input = convert_operator_inner(sel.input, ctx, outer_refs, column_qualifiers)?;
+            let predicate = convert_expr(sel.predicate, ctx, outer_refs, column_qualifiers)?;
             Ok(LogicalPlanBuilder::from(input).filter(predicate)?.build()?)
         }
 
         OperatorData::Projection(proj) => {
-            let input = convert_operator_inner(
-                proj.input,
-                ctx,
-                tables,
-                session,
-                outer_refs,
-                column_qualifiers,
-            )?;
+            let input = convert_operator_inner(proj.input, ctx, outer_refs, column_qualifiers)?;
             let input_schema = input.schema().clone();
             let exprs: Vec<DFExpr> = proj
                 .columns
@@ -334,14 +320,7 @@ fn convert_operator_inner(
         }
 
         OperatorData::Map(map) => {
-            let input = convert_operator_inner(
-                map.input,
-                ctx,
-                tables,
-                session,
-                outer_refs,
-                column_qualifiers,
-            )?;
+            let input = convert_operator_inner(map.input, ctx, outer_refs, column_qualifiers)?;
             let input_schema = input.schema().clone();
             let mut exprs: Vec<DFExpr> = (0..input_schema.fields().len())
                 .map(|i| {
@@ -354,30 +333,19 @@ fn convert_operator_inner(
                 .collect();
             for (col, expr) in &map.computations {
                 let name = ctx.column(*col).name.clone();
-                exprs.push(
-                    convert_expr(*expr, ctx, tables, session, outer_refs, column_qualifiers)?
-                        .alias(name),
-                );
+                exprs.push(convert_expr(*expr, ctx, outer_refs, column_qualifiers)?.alias(name));
             }
             Ok(LogicalPlanBuilder::from(input).project(exprs)?.build()?)
         }
 
         OperatorData::Aggregation(agg) => {
-            let input = convert_operator_inner(
-                agg.input,
-                ctx,
-                tables,
-                session,
-                outer_refs,
-                column_qualifiers,
-            )?;
+            let input = convert_operator_inner(agg.input, ctx, outer_refs, column_qualifiers)?;
             let input_schema = input.schema().clone();
             let group_exprs: Vec<DFExpr> = agg
                 .keys
                 .iter()
                 .map(|e| {
-                    let expr =
-                        convert_expr(*e, ctx, tables, session, outer_refs, column_qualifiers)?;
+                    let expr = convert_expr(*e, ctx, outer_refs, column_qualifiers)?;
                     Ok(normalize_col_ref(expr, &input_schema))
                 })
                 .collect::<ToDFResult<_>>()?;
@@ -386,14 +354,7 @@ fn convert_operator_inner(
                 .iter()
                 .map(|(col, agg_expr)| {
                     let name = ctx.column(*col).name.clone();
-                    let expr = convert_agg_expr(
-                        agg_expr,
-                        ctx,
-                        tables,
-                        session,
-                        outer_refs,
-                        column_qualifiers,
-                    )?;
+                    let expr = convert_agg_expr(agg_expr, ctx, outer_refs, column_qualifiers)?;
                     // Normalize column refs inside aggregate args.
                     Ok(normalize_expr_cols(expr, &input_schema).alias(name))
                 })
@@ -404,27 +365,13 @@ fn convert_operator_inner(
         }
 
         OperatorData::Sort(sort) => {
-            let input = convert_operator_inner(
-                sort.input,
-                ctx,
-                tables,
-                session,
-                outer_refs,
-                column_qualifiers,
-            )?;
+            let input = convert_operator_inner(sort.input, ctx, outer_refs, column_qualifiers)?;
             let sort_exprs: Vec<SortExpr> = sort
                 .keys
                 .iter()
                 .map(|key| {
                     Ok(SortExpr {
-                        expr: convert_expr(
-                            key.expr,
-                            ctx,
-                            tables,
-                            session,
-                            outer_refs,
-                            column_qualifiers,
-                        )?,
+                        expr: convert_expr(key.expr, ctx, outer_refs, column_qualifiers)?,
                         asc: matches!(key.direction, optd_core::SortDirection::Asc),
                         nulls_first: matches!(key.nulls, optd_core::NullOrdering::First),
                     })
@@ -434,30 +381,16 @@ fn convert_operator_inner(
         }
 
         OperatorData::Limit(limit) => {
-            let input = convert_operator_inner(
-                limit.input,
-                ctx,
-                tables,
-                session,
-                outer_refs,
-                column_qualifiers,
-            )?;
+            let input = convert_operator_inner(limit.input, ctx, outer_refs, column_qualifiers)?;
             Ok(LogicalPlanBuilder::from(input)
                 .limit(limit.offset, limit.fetch)?
                 .build()?)
         }
 
         OperatorData::Join(join) => {
-            let outer = convert_operator_inner(
-                join.outer,
-                ctx,
-                tables,
-                session,
-                outer_refs,
-                column_qualifiers,
-            )?;
+            let outer = convert_operator_inner(join.outer, ctx, outer_refs, column_qualifiers)?;
             let join_type = convert_join_type(&join.join_type)?;
-            let semi_anti_outer_refs = correlated_semi_anti_outer_refs(ctx, join);
+            let semi_anti_outer_refs = correlated_semi_anti_outer_refs(ctx, &join);
             if matches!(
                 join.join_type,
                 optd_core::JoinType::LeftSemi | optd_core::JoinType::LeftAnti
@@ -468,20 +401,12 @@ fn convert_operator_inner(
                 let mut inner = convert_operator_inner(
                     join.inner,
                     ctx,
-                    tables,
-                    session,
                     &semi_anti_outer_refs,
                     &inner_qualifiers,
                 )?;
                 if !is_true_expr(join.on, ctx) {
-                    let condition = convert_expr(
-                        join.on,
-                        ctx,
-                        tables,
-                        session,
-                        &semi_anti_outer_refs,
-                        &inner_qualifiers,
-                    )?;
+                    let condition =
+                        convert_expr(join.on, ctx, &semi_anti_outer_refs, &inner_qualifiers)?;
                     inner = LogicalPlanBuilder::from(inner).filter(condition)?.build()?;
                 }
                 let exists = DFExpr::Exists(datafusion::logical_expr::expr::Exists {
@@ -496,23 +421,28 @@ fn convert_operator_inner(
             }
 
             if let optd_core::JoinType::LeftMark(marker) = join.join_type {
-                let inner = convert_operator_inner(
+                let disambiguated_inner = disambiguating_join_inner_qualifiers(
+                    join.outer,
                     join.inner,
                     ctx,
-                    tables,
-                    session,
-                    outer_refs,
                     column_qualifiers,
-                )?;
+                );
+                let inner_qualifiers = disambiguated_inner
+                    .as_ref()
+                    .map(|(_, qualifiers)| qualifiers)
+                    .unwrap_or(column_qualifiers);
+                let mut inner =
+                    convert_operator_inner(join.inner, ctx, outer_refs, column_qualifiers)?;
+                if let Some((alias, _)) = &disambiguated_inner {
+                    inner = LogicalPlanBuilder::from(inner).alias(alias)?.build()?;
+                }
                 let condition = convert_join_condition(
                     join.on,
                     join.outer,
                     join.inner,
                     ctx,
-                    tables,
-                    session,
                     outer_refs,
-                    column_qualifiers,
+                    inner_qualifiers,
                 )?;
                 let plan = LogicalPlanBuilder::from(outer)
                     .join_on(inner, DFJoinType::LeftMark, Some(condition))?
@@ -527,10 +457,21 @@ fn convert_operator_inner(
                     optd_core::JoinType::Inner | optd_core::JoinType::Single
                 );
             let lateral_qualifiers;
+            let mut disambiguated_inner = None;
             let inner_qualifiers = if use_lateral_subquery {
                 let conflicts = available_qualifiers(join.outer, ctx);
                 lateral_qualifiers = lateral_column_qualifiers(join.inner, ctx, &conflicts);
                 &lateral_qualifiers
+            } else if let Some(qualifiers) = {
+                disambiguated_inner = disambiguating_join_inner_qualifiers(
+                    join.outer,
+                    join.inner,
+                    ctx,
+                    column_qualifiers,
+                );
+                disambiguated_inner.as_ref()
+            } {
+                &qualifiers.1
             } else {
                 column_qualifiers
             };
@@ -539,30 +480,29 @@ fn convert_operator_inner(
             } else {
                 outer_refs
             };
-            let mut inner = convert_operator_inner(
-                join.inner,
-                ctx,
-                tables,
-                session,
-                inner_refs,
-                inner_qualifiers,
-            )?;
+            let conversion_qualifiers = if use_lateral_subquery {
+                inner_qualifiers
+            } else {
+                column_qualifiers
+            };
+            let mut inner =
+                convert_operator_inner(join.inner, ctx, inner_refs, conversion_qualifiers)?;
             if use_lateral_subquery {
                 inner = LogicalPlan::Subquery(datafusion::logical_expr::Subquery {
                     subquery: Arc::new(inner),
                     outer_ref_columns: free_to_df_cols(ctx, &free),
                     spans: Default::default(),
                 });
+            } else if let Some((alias, _)) = &disambiguated_inner {
+                inner = LogicalPlanBuilder::from(inner).alias(alias)?.build()?;
             }
             let condition = convert_join_condition(
                 join.on,
                 join.outer,
                 join.inner,
                 ctx,
-                tables,
-                session,
                 outer_refs,
-                column_qualifiers,
+                inner_qualifiers,
             )?;
             let df_join_type = if use_lateral_subquery {
                 DFJoinType::Inner
@@ -575,43 +515,27 @@ fn convert_operator_inner(
         }
 
         OperatorData::CrossProduct(cross) => {
-            let outer = convert_operator_inner(
+            let outer = convert_operator_inner(cross.outer, ctx, outer_refs, column_qualifiers)?;
+            let disambiguated_inner = disambiguating_join_inner_qualifiers(
                 cross.outer,
-                ctx,
-                tables,
-                session,
-                outer_refs,
-                column_qualifiers,
-            )?;
-            let inner = convert_operator_inner(
                 cross.inner,
                 ctx,
-                tables,
-                session,
-                outer_refs,
                 column_qualifiers,
-            )?;
+            );
+            let mut inner =
+                convert_operator_inner(cross.inner, ctx, outer_refs, column_qualifiers)?;
+            if let Some((alias, _)) = &disambiguated_inner {
+                inner = LogicalPlanBuilder::from(inner).alias(alias)?.build()?;
+            }
             Ok(LogicalPlanBuilder::from(outer).cross_join(inner)?.build()?)
         }
 
-        OperatorData::Output(out) => convert_operator_inner(
-            out.input,
-            ctx,
-            tables,
-            session,
-            outer_refs,
-            column_qualifiers,
-        ),
+        OperatorData::Output(out) => {
+            convert_operator_inner(out.input, ctx, outer_refs, column_qualifiers)
+        }
 
         OperatorData::Rename(r) => {
-            let input = convert_operator_inner(
-                r.input,
-                ctx,
-                tables,
-                session,
-                outer_refs,
-                column_qualifiers,
-            )?;
+            let input = convert_operator_inner(r.input, ctx, outer_refs, column_qualifiers)?;
             let input_schema = input.schema().clone();
             let exprs = r
                 .defs
@@ -636,7 +560,7 @@ fn convert_operator_inner(
 
         OperatorData::ConstScan(const_scan) => {
             use datafusion::logical_expr::EmptyRelation;
-            let schema = const_scan_schema(const_scan, ctx)?;
+            let schema = const_scan_schema(&const_scan, ctx)?;
             match const_scan.rows.len() {
                 0 => Ok(LogicalPlan::EmptyRelation(EmptyRelation {
                     produce_one_row: false,
@@ -654,16 +578,7 @@ fn convert_operator_inner(
                         .iter()
                         .map(|row| {
                             row.iter()
-                                .map(|expr| {
-                                    convert_expr(
-                                        *expr,
-                                        ctx,
-                                        tables,
-                                        session,
-                                        outer_refs,
-                                        column_qualifiers,
-                                    )
-                                })
+                                .map(|expr| convert_expr(*expr, ctx, outer_refs, column_qualifiers))
                                 .collect::<ToDFResult<Vec<_>>>()
                         })
                         .collect::<ToDFResult<Vec<_>>>()?;
@@ -712,41 +627,19 @@ fn const_scan_schema(
 
 fn convert_semi_anti_join(
     join: &optd_core::Join,
-    ctx: &QueryContext,
-    tables: &TableMap,
-    session: &SessionContext,
+    ctx: &mut ToDfContext<'_>,
     outer_refs: &std::collections::HashSet<optd_core::Column>,
     column_qualifiers: &ColumnQualifiers,
 ) -> ToDFResult<LogicalPlan> {
-    let outer = convert_operator_inner(
-        join.outer,
-        ctx,
-        tables,
-        session,
-        outer_refs,
-        column_qualifiers,
-    )?;
+    let outer = convert_operator_inner(join.outer, ctx, outer_refs, column_qualifiers)?;
     let semi_anti_outer_refs = correlated_semi_anti_outer_refs(ctx, join);
     if !semi_anti_outer_refs.is_empty() {
         let conflicts = available_qualifiers(join.outer, ctx);
         let inner_qualifiers = lateral_column_qualifiers(join.inner, ctx, &conflicts);
-        let mut inner = convert_operator_inner(
-            join.inner,
-            ctx,
-            tables,
-            session,
-            &semi_anti_outer_refs,
-            &inner_qualifiers,
-        )?;
+        let mut inner =
+            convert_operator_inner(join.inner, ctx, &semi_anti_outer_refs, &inner_qualifiers)?;
         if !is_true_expr(join.on, ctx) {
-            let condition = convert_expr(
-                join.on,
-                ctx,
-                tables,
-                session,
-                &semi_anti_outer_refs,
-                &inner_qualifiers,
-            )?;
+            let condition = convert_expr(join.on, ctx, &semi_anti_outer_refs, &inner_qualifiers)?;
             inner = LogicalPlanBuilder::from(inner).filter(condition)?.build()?;
         }
         let exists = DFExpr::Exists(datafusion::logical_expr::expr::Exists {
@@ -760,37 +653,34 @@ fn convert_semi_anti_join(
         return Ok(LogicalPlanBuilder::from(outer).filter(exists)?.build()?);
     }
 
-    let inner = convert_operator_inner(
-        join.inner,
-        ctx,
-        tables,
-        session,
-        outer_refs,
-        column_qualifiers,
-    )?;
+    let disambiguated_inner =
+        disambiguating_join_inner_qualifiers(join.outer, join.inner, ctx, column_qualifiers);
+    let inner_qualifiers = disambiguated_inner
+        .as_ref()
+        .map(|(_, qualifiers)| qualifiers)
+        .unwrap_or(column_qualifiers);
+    let mut inner = convert_operator_inner(join.inner, ctx, outer_refs, column_qualifiers)?;
+    if let Some((alias, _)) = &disambiguated_inner {
+        inner = LogicalPlanBuilder::from(inner).alias(alias)?.build()?;
+    }
     let condition = convert_join_condition(
         join.on,
         join.outer,
         join.inner,
         ctx,
-        tables,
-        session,
         outer_refs,
-        column_qualifiers,
+        inner_qualifiers,
     )?;
     Ok(LogicalPlanBuilder::from(outer)
         .join_on(inner, convert_join_type(&join.join_type)?, Some(condition))?
         .build()?)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn convert_join_condition(
     on: optd_core::Expr,
     outer: Operator,
     inner: Operator,
-    ctx: &QueryContext,
-    tables: &TableMap,
-    session: &SessionContext,
+    ctx: &mut ToDfContext<'_>,
     outer_refs: &HashSet<optd_core::Column>,
     column_qualifiers: &ColumnQualifiers,
 ) -> ToDFResult<DFExpr> {
@@ -801,25 +691,20 @@ fn convert_join_condition(
         &outer_cols,
         &inner_cols,
         ctx,
-        tables,
-        session,
         outer_refs,
         column_qualifiers,
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn convert_join_condition_inner(
     expr: optd_core::Expr,
     outer_cols: &HashSet<optd_core::Column>,
     inner_cols: &HashSet<optd_core::Column>,
-    ctx: &QueryContext,
-    tables: &TableMap,
-    session: &SessionContext,
+    ctx: &mut ToDfContext<'_>,
     outer_refs: &HashSet<optd_core::Column>,
     column_qualifiers: &ColumnQualifiers,
 ) -> ToDFResult<DFExpr> {
-    match expr.get(ctx) {
+    match expr.get(ctx).clone() {
         ExprData::Nary {
             op: NaryOp::And,
             exprs,
@@ -833,8 +718,6 @@ fn convert_join_condition_inner(
                 outer_cols,
                 inner_cols,
                 ctx,
-                tables,
-                session,
                 outer_refs,
                 column_qualifiers,
             )?;
@@ -844,8 +727,6 @@ fn convert_join_condition_inner(
                     outer_cols,
                     inner_cols,
                     ctx,
-                    tables,
-                    session,
                     outer_refs,
                     column_qualifiers,
                 )?))
@@ -856,67 +737,100 @@ fn convert_join_condition_inner(
             left,
             right,
         } => {
-            let left_col = column_ref(*left, ctx);
-            let right_col = column_ref(*right, ctx);
+            let left_col = column_ref(left, ctx);
+            let right_col = column_ref(right, ctx);
             let swap = left_col.is_some_and(|col| inner_cols.contains(&col))
                 && right_col.is_some_and(|col| outer_cols.contains(&col));
-            let (left, right) = if swap {
-                (*right, *left)
-            } else {
-                (*left, *right)
-            };
-            let left = convert_expr(left, ctx, tables, session, outer_refs, column_qualifiers)?;
-            let right = convert_expr(right, ctx, tables, session, outer_refs, column_qualifiers)?;
+            let (left, right) = if swap { (right, left) } else { (left, right) };
+            let left = convert_expr(left, ctx, outer_refs, column_qualifiers)?;
+            let right = convert_expr(right, ctx, outer_refs, column_qualifiers)?;
             Ok(left.eq(right))
         }
-        _ => convert_expr(expr, ctx, tables, session, outer_refs, column_qualifiers),
+        _ => convert_expr(expr, ctx, outer_refs, column_qualifiers),
     }
 }
 
 fn convert_conjuncts(
     mut exprs: Vec<optd_core::Expr>,
-    ctx: &QueryContext,
-    tables: &TableMap,
-    session: &SessionContext,
+    ctx: &mut ToDfContext<'_>,
     outer_refs: &std::collections::HashSet<optd_core::Column>,
     column_qualifiers: &ColumnQualifiers,
 ) -> ToDFResult<DFExpr> {
     let first = exprs
         .pop()
         .ok_or_else(|| ToDFError::Unsupported("empty conjunct list".into()))?;
-    let first = convert_expr(first, ctx, tables, session, outer_refs, column_qualifiers)?;
+    let first = convert_expr(first, ctx, outer_refs, column_qualifiers)?;
     exprs.into_iter().try_fold(first, |acc, expr| {
-        Ok(acc.and(convert_expr(
-            expr,
-            ctx,
-            tables,
-            session,
-            outer_refs,
-            column_qualifiers,
-        )?))
+        Ok(acc.and(convert_expr(expr, ctx, outer_refs, column_qualifiers)?))
     })
 }
 
-fn single_available_column(op: Operator, ctx: &QueryContext) -> Option<optd_core::Column> {
-    let mut analyses = optd_core::AnalysisContext::new();
-    let cols = analyses
-        .get::<optd_core::AvailableColumns>(ctx, op)
+fn single_available_column(op: Operator, ctx: &mut ToDfContext<'_>) -> Option<optd_core::Column> {
+    let cols = ctx
+        .analyses
+        .get::<optd_core::AvailableColumns>(ctx.query, op)
         .unwrap_or_default();
     (cols.len() == 1).then_some(cols[0])
 }
 
-fn available_columns_set(ctx: &QueryContext, op: Operator) -> HashSet<optd_core::Column> {
-    let mut analyses = optd_core::AnalysisContext::new();
-    analyses
-        .get::<optd_core::AvailableColumns>(ctx, op)
+fn available_columns_set(ctx: &mut ToDfContext<'_>, op: Operator) -> HashSet<optd_core::Column> {
+    ctx.analyses
+        .get::<optd_core::AvailableColumns>(ctx.query, op)
         .unwrap_or_default()
         .into_iter()
         .collect()
 }
 
+fn available_columns(ctx: &mut ToDfContext<'_>, op: Operator) -> Vec<optd_core::Column> {
+    ctx.analyses
+        .get::<optd_core::AvailableColumns>(ctx.query, op)
+        .unwrap_or_default()
+}
+
+fn disambiguating_join_inner_qualifiers(
+    outer: Operator,
+    inner: Operator,
+    ctx: &mut ToDfContext<'_>,
+    base_qualifiers: &ColumnQualifiers,
+) -> Option<(String, ColumnQualifiers)> {
+    let outer_names = available_columns(ctx, outer)
+        .into_iter()
+        .map(|column| exported_field_name(ctx, column, base_qualifiers))
+        .collect::<HashSet<_>>();
+    let inner_columns = available_columns(ctx, inner);
+    let has_conflict = inner_columns
+        .iter()
+        .any(|column| outer_names.contains(&exported_field_name(ctx, *column, base_qualifiers)));
+    if !has_conflict {
+        return None;
+    }
+
+    let alias = format!("optd_join_inner_{}", inner).replace('@', "");
+    let mut qualifiers = base_qualifiers.clone();
+    for column in inner_columns {
+        qualifiers.insert(column, alias.clone());
+    }
+    Some((alias, qualifiers))
+}
+
+fn exported_field_name(
+    ctx: &QueryContext,
+    column: optd_core::Column,
+    column_qualifiers: &ColumnQualifiers,
+) -> (Option<String>, String) {
+    let cd = ctx.column(column);
+    (
+        column_qualifiers
+            .get(&column)
+            .cloned()
+            .or_else(|| cd.qualifier.clone()),
+        cd.name.clone(),
+    )
+}
+
 fn column_ref(expr: optd_core::Expr, ctx: &QueryContext) -> Option<optd_core::Column> {
-    match expr.get(ctx) {
-        ExprData::ColumnRef(col) => Some(*col),
+    match expr.get(ctx).clone() {
+        ExprData::ColumnRef(col) => Some(col),
         _ => None,
     }
 }
@@ -924,9 +838,7 @@ fn column_ref(expr: optd_core::Expr, ctx: &QueryContext) -> Option<optd_core::Co
 fn scalar_subquery_expr(
     subquery: Operator,
     on: optd_core::Expr,
-    ctx: &QueryContext,
-    tables: &TableMap,
-    session: &SessionContext,
+    ctx: &mut ToDfContext<'_>,
 ) -> ToDFResult<DFExpr> {
     let free = correlated_subquery_outer_refs(ctx, subquery, on);
     let conflicts = free
@@ -934,10 +846,9 @@ fn scalar_subquery_expr(
         .filter_map(|column| ctx.column(*column).qualifier.clone())
         .collect();
     let inner_qualifiers = lateral_column_qualifiers(subquery, ctx, &conflicts);
-    let mut inner =
-        convert_operator_inner(subquery, ctx, tables, session, &free, &inner_qualifiers)?;
+    let mut inner = convert_operator_inner(subquery, ctx, &free, &inner_qualifiers)?;
     if !is_true_expr(on, ctx) {
-        let condition = convert_expr(on, ctx, tables, session, &free, &inner_qualifiers)?;
+        let condition = convert_expr(on, ctx, &free, &inner_qualifiers)?;
         inner = LogicalPlanBuilder::from(inner).filter(condition)?.build()?;
     }
     Ok(DFExpr::ScalarSubquery(datafusion::logical_expr::Subquery {
@@ -948,14 +859,14 @@ fn scalar_subquery_expr(
 }
 
 fn correlated_subquery_outer_refs(
-    ctx: &QueryContext,
+    ctx: &mut ToDfContext<'_>,
     subquery: Operator,
     on: optd_core::Expr,
 ) -> std::collections::HashSet<optd_core::Column> {
     let mut outer_refs = free_columns_for(ctx, subquery);
-    let mut analyses = optd_core::AnalysisContext::new();
-    let inner_cols: std::collections::HashSet<_> = analyses
-        .get::<optd_core::AvailableColumns>(ctx, subquery)
+    let inner_cols: std::collections::HashSet<_> = ctx
+        .analyses
+        .get::<optd_core::AvailableColumns>(ctx.query, subquery)
         .unwrap_or_default()
         .into_iter()
         .collect();
@@ -965,30 +876,25 @@ fn correlated_subquery_outer_refs(
     outer_refs
 }
 
-#[allow(clippy::too_many_arguments)]
 fn convert_expr_replacing_column(
     expr: optd_core::Expr,
     replace_col: optd_core::Column,
     replacement: &DFExpr,
-    ctx: &QueryContext,
-    tables: &TableMap,
-    session: &SessionContext,
+    ctx: &mut ToDfContext<'_>,
     outer_refs: &std::collections::HashSet<optd_core::Column>,
     column_qualifiers: &ColumnQualifiers,
 ) -> ToDFResult<DFExpr> {
-    match expr.get(ctx) {
-        ExprData::ColumnRef(col) if *col == replace_col => Ok(replacement.clone()),
+    match expr.get(ctx).clone() {
+        ExprData::ColumnRef(col) if col == replace_col => Ok(replacement.clone()),
         ExprData::ColumnRef(_) | ExprData::Literal(_) => {
-            convert_expr(expr, ctx, tables, session, outer_refs, column_qualifiers)
+            convert_expr(expr, ctx, outer_refs, column_qualifiers)
         }
         ExprData::Unary { op, expr } => {
             let inner = convert_expr_replacing_column(
-                *expr,
+                expr,
                 replace_col,
                 replacement,
                 ctx,
-                tables,
-                session,
                 outer_refs,
                 column_qualifiers,
             )?;
@@ -1001,22 +907,18 @@ fn convert_expr_replacing_column(
         }
         ExprData::Binary { op, left, right } => {
             let l = convert_expr_replacing_column(
-                *left,
+                left,
                 replace_col,
                 replacement,
                 ctx,
-                tables,
-                session,
                 outer_refs,
                 column_qualifiers,
             )?;
             let r = convert_expr_replacing_column(
-                *right,
+                right,
                 replace_col,
                 replacement,
                 ctx,
-                tables,
-                session,
                 outer_refs,
                 column_qualifiers,
             )?;
@@ -1034,14 +936,12 @@ fn convert_expr_replacing_column(
             })
         }
         ExprData::Nary { op, exprs } => {
-            let mut iter = exprs.iter().map(|expr| {
+            let mut iter = exprs.into_iter().map(|expr| {
                 convert_expr_replacing_column(
-                    *expr,
+                    expr,
                     replace_col,
                     replacement,
                     ctx,
-                    tables,
-                    session,
                     outer_refs,
                     column_qualifiers,
                 )
@@ -1057,22 +957,20 @@ fn convert_expr_replacing_column(
                 })
             })
         }
-        _ => convert_expr(expr, ctx, tables, session, outer_refs, column_qualifiers),
+        _ => convert_expr(expr, ctx, outer_refs, column_qualifiers),
     }
 }
 
-fn convert_expr(
+pub(crate) fn convert_expr(
     expr: optd_core::Expr,
-    ctx: &QueryContext,
-    tables: &TableMap,
-    session: &SessionContext,
+    ctx: &mut ToDfContext<'_>,
     outer_refs: &std::collections::HashSet<optd_core::Column>,
     column_qualifiers: &ColumnQualifiers,
 ) -> ToDFResult<DFExpr> {
-    match expr.get(ctx) {
+    match expr.get(ctx).clone() {
         ExprData::ColumnRef(col) => {
-            let cd = ctx.column(*col);
-            if outer_refs.contains(col) {
+            let cd = ctx.column(col);
+            if outer_refs.contains(&col) {
                 // Correlated outer reference.
                 let field = std::sync::Arc::new(datafusion::arrow::datatypes::Field::new(
                     &cd.name,
@@ -1086,7 +984,7 @@ fn convert_expr(
                 Ok(DFExpr::OuterReferenceColumn(field, df_col))
             } else {
                 let qualifier = column_qualifiers
-                    .get(col)
+                    .get(&col)
                     .map(String::as_str)
                     .or(cd.qualifier.as_deref());
                 Ok(match qualifier {
@@ -1095,9 +993,9 @@ fn convert_expr(
                 })
             }
         }
-        ExprData::Literal(scalar) => Ok(DFExpr::Literal(convert_scalar(scalar)?, None)),
+        ExprData::Literal(scalar) => Ok(DFExpr::Literal(convert_scalar(&scalar)?, None)),
         ExprData::Unary { op, expr } => {
-            let inner = convert_expr(*expr, ctx, tables, session, outer_refs, column_qualifiers)?;
+            let inner = convert_expr(expr, ctx, outer_refs, column_qualifiers)?;
             Ok(match op {
                 UnaryOp::Not => datafusion::logical_expr::not(inner),
                 UnaryOp::IsNull => inner.is_null(),
@@ -1106,8 +1004,8 @@ fn convert_expr(
             })
         }
         ExprData::Binary { op, left, right } => {
-            let l = convert_expr(*left, ctx, tables, session, outer_refs, column_qualifiers)?;
-            let r = convert_expr(*right, ctx, tables, session, outer_refs, column_qualifiers)?;
+            let l = convert_expr(left, ctx, outer_refs, column_qualifiers)?;
+            let r = convert_expr(right, ctx, outer_refs, column_qualifiers)?;
             Ok(match op {
                 BinaryOp::Eq => l.eq(r),
                 BinaryOp::NotEq => l.not_eq(r),
@@ -1123,8 +1021,8 @@ fn convert_expr(
         }
         ExprData::Nary { op, exprs } => {
             let mut iter = exprs
-                .iter()
-                .map(|e| convert_expr(*e, ctx, tables, session, outer_refs, column_qualifiers));
+                .into_iter()
+                .map(|e| convert_expr(e, ctx, outer_refs, column_qualifiers));
             let first = iter
                 .next()
                 .ok_or_else(|| ToDFError::Unsupported("empty nary expr".into()))??;
@@ -1137,24 +1035,17 @@ fn convert_expr(
             })
         }
         ExprData::Cast { expr, ty } => Ok(DFExpr::Cast(datafusion::logical_expr::Cast {
-            expr: Box::new(convert_expr(
-                *expr,
-                ctx,
-                tables,
-                session,
-                outer_refs,
-                column_qualifiers,
-            )?),
+            expr: Box::new(convert_expr(expr, ctx, outer_refs, column_qualifiers)?),
             data_type: ty.clone(),
         })),
         ExprData::ScalarFunction { function, args } => {
             use optd_core::ScalarFunction;
             let df_args: Vec<DFExpr> = args
-                .iter()
-                .map(|a| convert_expr(*a, ctx, tables, session, outer_refs, column_qualifiers))
+                .into_iter()
+                .map(|a| convert_expr(a, ctx, outer_refs, column_qualifiers))
                 .collect::<ToDFResult<_>>()?;
             match function {
-                ScalarFunction::Extension(name) => match session.udf(name) {
+                ScalarFunction::Extension(name) => match ctx.session.udf(&name) {
                     Ok(udf) => Ok(DFExpr::ScalarFunction(
                         datafusion::logical_expr::expr::ScalarFunction {
                             func: udf,
@@ -1174,78 +1065,46 @@ fn convert_expr(
             pattern,
             case_insensitive,
         } => Ok(DFExpr::Like(datafusion::logical_expr::Like {
-            negated: *negated,
-            expr: Box::new(convert_expr(
-                *expr,
-                ctx,
-                tables,
-                session,
-                outer_refs,
-                column_qualifiers,
-            )?),
-            pattern: Box::new(convert_expr(
-                *pattern,
-                ctx,
-                tables,
-                session,
-                outer_refs,
-                column_qualifiers,
-            )?),
+            negated,
+            expr: Box::new(convert_expr(expr, ctx, outer_refs, column_qualifiers)?),
+            pattern: Box::new(convert_expr(pattern, ctx, outer_refs, column_qualifiers)?),
             escape_char: None,
-            case_insensitive: *case_insensitive,
+            case_insensitive,
         })),
         ExprData::CaseWhen {
             when_then,
             else_expr,
         } => {
+            let mut when_then = when_then.into_iter();
+            let (first_when, first_then) = when_then
+                .next()
+                .ok_or_else(|| ToDFError::Unsupported("empty CASE WHEN".into()))?;
             let mut builder = datafusion::logical_expr::when(
-                convert_expr(
-                    when_then[0].0,
-                    ctx,
-                    tables,
-                    session,
-                    outer_refs,
-                    column_qualifiers,
-                )?,
-                convert_expr(
-                    when_then[0].1,
-                    ctx,
-                    tables,
-                    session,
-                    outer_refs,
-                    column_qualifiers,
-                )?,
+                convert_expr(first_when, ctx, outer_refs, column_qualifiers)?,
+                convert_expr(first_then, ctx, outer_refs, column_qualifiers)?,
             );
-            for (w, t) in &when_then[1..] {
+            for (w, t) in when_then {
                 builder = builder.when(
-                    convert_expr(*w, ctx, tables, session, outer_refs, column_qualifiers)?,
-                    convert_expr(*t, ctx, tables, session, outer_refs, column_qualifiers)?,
+                    convert_expr(w, ctx, outer_refs, column_qualifiers)?,
+                    convert_expr(t, ctx, outer_refs, column_qualifiers)?,
                 );
             }
             Ok(if let Some(else_e) = else_expr {
-                builder.otherwise(convert_expr(
-                    *else_e,
-                    ctx,
-                    tables,
-                    session,
-                    outer_refs,
-                    column_qualifiers,
-                )?)?
+                builder.otherwise(convert_expr(else_e, ctx, outer_refs, column_qualifiers)?)?
             } else {
                 builder.end()?
             })
         }
         ExprData::Exists { subquery, negated } => {
-            let free = free_columns_for(ctx, *subquery);
-            let inner =
-                convert_operator_inner(*subquery, ctx, tables, session, &free, column_qualifiers)?;
+            let free = free_columns_for(ctx, subquery);
+            let inner = convert_operator_inner(subquery, ctx, &free, column_qualifiers)?;
             Ok(DFExpr::Exists(datafusion::logical_expr::expr::Exists {
                 subquery: datafusion::logical_expr::Subquery {
                     subquery: Arc::new(inner),
                     outer_ref_columns: free_to_df_cols(ctx, &free),
                     spans: Default::default(),
                 },
-                negated: *negated,
+                negated,
             }))
         }
         ExprData::InSubquery {
@@ -1253,11 +1112,9 @@ fn convert_expr(
             subquery,
             negated,
         } => {
-            let inner_expr =
-                convert_expr(*expr, ctx, tables, session, outer_refs, column_qualifiers)?;
-            let free = free_columns_for(ctx, *subquery);
-            let inner_plan =
-                convert_operator_inner(*subquery, ctx, tables, session, &free, column_qualifiers)?;
+            let inner_expr = convert_expr(expr, ctx, outer_refs, column_qualifiers)?;
+            let free = free_columns_for(ctx, subquery);
+            let inner_plan = convert_operator_inner(subquery, ctx, &free, column_qualifiers)?;
             Ok(DFExpr::InSubquery(
                 datafusion::logical_expr::expr::InSubquery {
                     expr: Box::new(inner_expr),
@@ -1266,14 +1123,13 @@ fn convert_expr(
                         outer_ref_columns: free_to_df_cols(ctx, &free),
                         spans: Default::default(),
                     },
-                    negated: *negated,
+                    negated,
                 },
             ))
         }
         ExprData::ScalarSubquery { subquery } => {
-            let free = free_columns_for(ctx, *subquery);
-            let inner =
-                convert_operator_inner(*subquery, ctx, tables, session, &free, column_qualifiers)?;
+            let free = free_columns_for(ctx, subquery);
+            let inner = convert_operator_inner(subquery, ctx, &free, column_qualifiers)?;
             Ok(DFExpr::ScalarSubquery(datafusion::logical_expr::Subquery {
                 subquery: Arc::new(inner),
                 outer_ref_columns: free_to_df_cols(ctx, &free),
@@ -1321,12 +1177,12 @@ fn normalize_expr_cols(expr: DFExpr, schema: &datafusion::common::DFSchema) -> D
 }
 
 fn free_columns_for(
-    ctx: &QueryContext,
+    ctx: &mut ToDfContext<'_>,
     subquery: optd_core::Operator,
 ) -> std::collections::HashSet<optd_core::Column> {
-    let mut analyses = optd_core::AnalysisContext::new();
-    let free: std::collections::HashSet<_> = analyses
-        .get::<optd_core::FreeColumns>(ctx, subquery)
+    let free: std::collections::HashSet<_> = ctx
+        .analyses
+        .get::<optd_core::FreeColumns>(ctx.query, subquery)
         .unwrap_or_default()
         .into_iter()
         .collect();
@@ -1350,13 +1206,13 @@ fn free_to_df_cols(
 }
 
 fn correlated_semi_anti_outer_refs(
-    ctx: &QueryContext,
+    ctx: &mut ToDfContext<'_>,
     join: &optd_core::Join,
 ) -> std::collections::HashSet<optd_core::Column> {
     let mut outer_refs = free_columns_for(ctx, join.inner);
-    let mut analyses = optd_core::AnalysisContext::new();
-    let inner_cols: std::collections::HashSet<_> = analyses
-        .get::<optd_core::AvailableColumns>(ctx, join.inner)
+    let inner_cols: std::collections::HashSet<_> = ctx
+        .analyses
+        .get::<optd_core::AvailableColumns>(ctx.query, join.inner)
         .unwrap_or_default()
         .into_iter()
         .collect();
@@ -1440,10 +1296,12 @@ fn is_true_expr(expr: optd_core::Expr, ctx: &QueryContext) -> bool {
     )
 }
 
-fn available_qualifiers(op: Operator, ctx: &QueryContext) -> std::collections::HashSet<String> {
-    let mut analyses = optd_core::AnalysisContext::new();
-    analyses
-        .get::<optd_core::AvailableColumns>(ctx, op)
+fn available_qualifiers(
+    op: Operator,
+    ctx: &mut ToDfContext<'_>,
+) -> std::collections::HashSet<String> {
+    ctx.analyses
+        .get::<optd_core::AvailableColumns>(ctx.query, op)
         .unwrap_or_default()
         .into_iter()
         .filter_map(|column| ctx.column(column).qualifier.clone())
@@ -1476,18 +1334,16 @@ fn lateral_column_qualifiers(
     qualifiers
 }
 
-fn convert_agg_expr(
+pub(crate) fn convert_agg_expr(
     agg: &AggregateExpr,
-    ctx: &QueryContext,
-    tables: &TableMap,
-    session: &SessionContext,
+    ctx: &mut ToDfContext<'_>,
     outer_refs: &std::collections::HashSet<optd_core::Column>,
     column_qualifiers: &ColumnQualifiers,
 ) -> ToDFResult<DFExpr> {
     match agg {
         AggregateExpr::CountStar => Ok(count_all()),
         AggregateExpr::Func { func, arg, .. } => {
-            let arg_expr = convert_expr(*arg, ctx, tables, session, outer_refs, column_qualifiers)?;
+            let arg_expr = convert_expr(*arg, ctx, outer_refs, column_qualifiers)?;
             Ok(match func {
                 AggregateFunction::Count => count(arg_expr),
                 AggregateFunction::Sum => sum(arg_expr),
@@ -1504,7 +1360,7 @@ fn convert_agg_expr(
     }
 }
 
-fn convert_scalar(scalar: &ScalarValue) -> ToDFResult<datafusion::common::ScalarValue> {
+pub(crate) fn convert_scalar(scalar: &ScalarValue) -> ToDFResult<datafusion::common::ScalarValue> {
     use datafusion::common::ScalarValue as DFSv;
     Ok(match scalar {
         ScalarValue::Null(_) => DFSv::Null,
@@ -1537,7 +1393,7 @@ fn convert_scalar(scalar: &ScalarValue) -> ToDFResult<datafusion::common::Scalar
     })
 }
 
-fn convert_join_type(jt: &optd_core::JoinType) -> ToDFResult<DFJoinType> {
+pub(crate) fn convert_join_type(jt: &optd_core::JoinType) -> ToDFResult<DFJoinType> {
     match jt {
         optd_core::JoinType::Inner => Ok(DFJoinType::Inner),
         optd_core::JoinType::LeftOuter => Ok(DFJoinType::Left),

@@ -25,7 +25,7 @@ use optd_core::{
     optimizer_visualizer_trace_json,
 };
 
-use crate::from_df::from_logical_plan;
+use crate::from_df_logical::from_logical_plan;
 use crate::runner::default_pass_manager;
 
 /// Registers `explain_box`, `explain_json`, `explain_flat`, `explain_optimizer_json`, and
@@ -473,4 +473,73 @@ fn steps_to_table(steps: Vec<ExplainStep>) -> DFResult<Arc<dyn TableProvider>> {
     .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
 
     Ok(Arc::new(MemTable::try_new(schema, vec![vec![batch]])?))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use optd_core::optimize::unnesting::correlated_subquery_joins;
+
+    use super::build_ir;
+    use crate::setup::setup_tpch_session;
+
+    #[tokio::test]
+    async fn tpch_queries_have_no_correlated_subquery_join_inputs_after_unnesting() {
+        let session = setup_tpch_session().await.unwrap();
+        let state = Arc::new(session.state());
+        let mut failures = Vec::new();
+
+        for entry in std::fs::read_dir("tests/slt/tpch/results").unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("slt") {
+                continue;
+            }
+
+            let sql = first_query_sql(&path);
+            let query = build_ir(&sql, &state).await.unwrap();
+            let Some(root) = query.root() else {
+                continue;
+            };
+            let correlated = correlated_subquery_joins(&query, root).unwrap();
+            if !correlated.is_empty() {
+                failures.push(format!(
+                    "{}: {:?}",
+                    path.file_name().unwrap().to_string_lossy(),
+                    correlated
+                        .iter()
+                        .map(|join| (join.join, join.join_type.clone(), join.free_columns.clone()))
+                        .collect::<Vec<_>>()
+                ));
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "remaining correlated subquery joins:\n{}",
+            failures.join("\n")
+        );
+    }
+
+    fn first_query_sql(path: &std::path::Path) -> String {
+        let text = std::fs::read_to_string(path).unwrap();
+        let mut in_query = false;
+        let mut lines = Vec::new();
+
+        for line in text.lines() {
+            if line.trim() == "----" {
+                break;
+            }
+            if in_query {
+                lines.push(line);
+                continue;
+            }
+            if line.starts_with("query ") {
+                in_query = true;
+            }
+        }
+
+        lines.join("\n")
+    }
 }

@@ -57,7 +57,7 @@ order by
 17)------]
 18)----},
 19)----{
-20)------"id": 44,
+20)------"id": 54,
 21)------"kind": "selection",
 22)------"title": "σ Selection",
 23)------"predicate": "((substr(c_phone(#4), 1, 2) = \"13\") OR (substr(c_phone(#4), 1, 2) = \"31\") OR (substr(c_phone(#4), 1, 2) = \"23\") OR (substr(c_phone(#4), 1, 2) = \"29\") OR (substr(c_phone(#4), 1, 2) = \"30\") OR (substr(c_phone(#4), 1, 2) = \"18\") OR (substr(c_phone(#4), 1, 2) = \"17\"))",
@@ -97,20 +97,20 @@ order by
 57)------"input": 2
 58)----},
 59)----{
-60)------"id": 75,
+60)------"id": 85,
 61)------"kind": "join",
 62)------"title": "⟕₁ SingleJoin",
 63)------"join_type": "Single",
 64)------"condition": "true",
-65)------"outer": 44,
+65)------"outer": 54,
 66)------"inner": 3
 67)----},
 68)----{
-69)------"id": 77,
+69)------"id": 87,
 70)------"kind": "selection",
 71)------"title": "σ Selection",
 72)------"predicate": "(c_acctbal(#5) > avg(customer.c_acctbal)(#16))",
-73)------"input": 75
+73)------"input": 85
 74)----},
 75)----{
 76)------"id": 5,
@@ -130,75 +130,68 @@ order by
 90)------]
 91)----},
 92)----{
-93)------"id": 6,
-94)------"kind": "selection",
-95)------"title": "σ Selection",
-96)------"predicate": "(o_custkey(#18) = c_custkey(#0))",
-97)------"input": 5
-98)----},
-99)----{
-100)------"id": 78,
-101)------"kind": "join",
-102)------"title": "▷ LeftAntiJoin",
-103)------"join_type": "LeftAnti",
-104)------"condition": "true",
-105)------"outer": 77,
-106)------"inner": 6
-107)----},
-108)----{
-109)------"id": 79,
-110)------"kind": "map",
-111)------"title": "χ Map",
-112)------"computations": [
-113)--------"cntrycode(#26) := substr(c_phone(#4), 1, 2)"
-114)------],
-115)------"input": 78
-116)----},
-117)----{
-118)------"id": 80,
-119)------"kind": "projection",
-120)------"title": "π Projection",
-121)------"columns": [
-122)--------"cntrycode(#26)",
-123)--------"c_acctbal(#5)"
-124)------],
-125)------"input": 79
-126)----},
-127)----{
-128)------"id": 81,
-129)------"kind": "rename",
-130)------"title": "ρ Rename(custsale)",
-131)------"defs": [
-132)--------"cntrycode(#27) <- cntrycode(#26)",
-133)--------"c_acctbal(#28) <- c_acctbal(#5)"
-134)------],
-135)------"input": 80
-136)----},
-137)----{
-138)------"id": 82,
-139)------"kind": "aggregation",
-140)------"title": "γ Aggregation",
-141)------"keys": "cntrycode(#27)",
-142)------"aggregates": [
-143)--------"count(Int64(1))(#29) := count_star()",
-144)--------"sum(custsale.c_acctbal)(#30) := sum(c_acctbal(#28))"
-145)------],
-146)------"input": 81
-147)----},
-148)----{
-149)------"id": 83,
-150)------"kind": "sort",
-151)------"title": "⇞ Sort",
-152)------"keys": [
-153)--------"cntrycode(#27) Asc NullsLast"
-154)------],
-155)------"input": 82
-156)----},
-157)----{
-158)------"id": 84,
-159)------"kind": "output",
-160)------"title": "= Output",
-161)------"input": 83
-162)----}
-163)--]
-164)}
+93)------"id": 88,
+94)------"kind": "join",
+95)------"title": "▷ LeftAntiJoin",
+96)------"join_type": "LeftAnti",
+97)------"condition": "(o_custkey(#18) = c_custkey(#0))",
+98)------"outer": 87,
+99)------"inner": 5
+100)----},
+101)----{
+102)------"id": 89,
+103)------"kind": "map",
+104)------"title": "χ Map",
+105)------"computations": [
+106)--------"cntrycode(#26) := substr(c_phone(#4), 1, 2)"
+107)------],
+108)------"input": 88
+109)----},
+110)----{
+111)------"id": 90,
+112)------"kind": "projection",
+113)------"title": "π Projection",
+114)------"columns": [
+115)--------"cntrycode(#26)",
+116)--------"c_acctbal(#5)"
+117)------],
+118)------"input": 89
+119)----},
+120)----{
+121)------"id": 91,
+122)------"kind": "rename",
+123)------"title": "ρ Rename(custsale)",
+124)------"defs": [
+125)--------"cntrycode(#27) <- cntrycode(#26)",
+126)--------"c_acctbal(#28) <- c_acctbal(#5)"
+127)------],
+128)------"input": 90
+129)----},
+130)----{
+131)------"id": 92,
+132)------"kind": "aggregation",
+133)------"title": "γ Aggregation",
+134)------"keys": "cntrycode(#27)",
+135)------"aggregates": [
+136)--------"count(Int64(1))(#29) := count_star()",
+137)--------"sum(custsale.c_acctbal)(#30) := sum(c_acctbal(#28))"
+138)------],
+139)------"input": 91
+140)----},
+141)----{
+142)------"id": 93,
+143)------"kind": "sort",
+144)------"title": "⇞ Sort",
+145)------"keys": [
+146)--------"cntrycode(#27) Asc NullsLast"
+147)------],
+148)------"input": 92
+149)----},
+150)----{
+151)------"id": 94,
+152)------"kind": "output",
+153)------"title": "= Output",
+154)------"input": 93
+155)----}
+156)--]
+157)}

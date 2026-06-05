@@ -156,8 +156,8 @@ mod tests {
 
     #[tokio::test]
     async fn to_logical_plan_round_trip_nation() {
-        use crate::from_df::from_logical_plan;
-        use crate::to_df::to_logical_plan;
+        use crate::from_df_logical::from_logical_plan;
+        use crate::to_df_logical::to_logical_plan;
         use optd_core::{OptimizerContext, QueryContext};
 
         let session = setup_tpch_session().await.unwrap();
@@ -186,7 +186,7 @@ mod tests {
 
     #[tokio::test]
     async fn print_q13_ir() {
-        use crate::from_df::from_logical_plan;
+        use crate::from_df_logical::from_logical_plan;
         use optd_core::QueryContext;
 
         let session = setup_tpch_session().await.unwrap();

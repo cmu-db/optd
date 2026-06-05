@@ -62,129 +62,123 @@ where
 42)------]
 43)----},
 44)----{
-45)------"id": 26,
+45)------"id": 38,
 46)------"kind": "selection",
 47)------"title": "σ Selection",
 48)------"predicate": "((p_brand(#19) = \"Brand#23\") AND (p_container(#22) = \"MED BOX\"))",
 49)------"input": 1
 50)----},
 51)----{
-52)------"id": 34,
-53)------"kind": "join",
-54)------"title": "⋈ InnerJoin",
-55)------"join_type": "Inner",
-56)------"condition": "(p_partkey(#16) = l_partkey(#1))",
-57)------"outer": 0,
-58)------"inner": 26
-59)----},
-60)----{
-61)------"id": 3,
-62)------"kind": "scan",
-63)------"title": "⊞ Scan",
-64)------"table_name": "lineitem",
-65)------"columns": [
-66)--------"l_orderkey(#25)",
-67)--------"l_partkey(#26)",
-68)--------"l_suppkey(#27)",
-69)--------"l_linenumber(#28)",
-70)--------"l_quantity(#29)",
-71)--------"l_extendedprice(#30)",
-72)--------"l_discount(#31)",
-73)--------"l_tax(#32)",
-74)--------"l_returnflag(#33)",
-75)--------"l_linestatus(#34)",
-76)--------"l_shipdate(#35)",
-77)--------"l_commitdate(#36)",
-78)--------"l_receiptdate(#37)",
-79)--------"l_shipinstruct(#38)",
-80)--------"l_shipmode(#39)",
-81)--------"l_comment(#40)"
-82)------]
-83)----},
-84)----{
-85)------"id": 4,
-86)------"kind": "selection",
-87)------"title": "σ Selection",
-88)------"predicate": "(l_partkey(#26) = p_partkey(#16))",
-89)------"input": 3
-90)----},
-91)----{
-92)------"id": 5,
-93)------"kind": "aggregation",
-94)------"title": "γ Aggregation",
-95)------"keys": "",
-96)------"aggregates": [
-97)--------"avg(lineitem.l_quantity)(#41) := avg(l_quantity(#29))"
-98)------],
-99)------"input": 4
-100)----},
-101)----{
-102)------"id": 6,
-103)------"kind": "map",
-104)------"title": "χ Map",
-105)------"computations": [
-106)--------"Float64(0.2) * avg(lineitem.l_quantity)(#42) := (0.2 * avg(lineitem.l_quantity)(#41))"
-107)------],
-108)------"input": 5
-109)----},
-110)----{
-111)------"id": 7,
-112)------"kind": "projection",
-113)------"title": "π Projection",
-114)------"columns": [
-115)--------"Float64(0.2) * avg(lineitem.l_quantity)(#42)"
-116)------],
-117)------"input": 6
-118)----},
-119)----{
-120)------"id": 35,
-121)------"kind": "join",
-122)------"title": "⟕₁ SingleJoin",
-123)------"join_type": "Single",
-124)------"condition": "true",
-125)------"outer": 34,
-126)------"inner": 7
-127)----},
-128)----{
-129)------"id": 36,
-130)------"kind": "selection",
-131)------"title": "σ Selection",
-132)------"predicate": "(l_quantity(#4) < Float64(0.2) * avg(lineitem.l_quantity)(#42))",
-133)------"input": 35
-134)----},
-135)----{
-136)------"id": 37,
-137)------"kind": "aggregation",
-138)------"title": "γ Aggregation",
-139)------"keys": "",
-140)------"aggregates": [
-141)--------"sum(lineitem.l_extendedprice)(#43) := sum(l_extendedprice(#5))"
-142)------],
-143)------"input": 36
-144)----},
-145)----{
-146)------"id": 38,
-147)------"kind": "map",
-148)------"title": "χ Map",
-149)------"computations": [
-150)--------"avg_yearly(#44) := (sum(lineitem.l_extendedprice)(#43) / 7)"
-151)------],
-152)------"input": 37
-153)----},
-154)----{
-155)------"id": 39,
-156)------"kind": "projection",
-157)------"title": "π Projection",
-158)------"columns": [
-159)--------"avg_yearly(#44)"
-160)------],
-161)------"input": 38
-162)----},
-163)----{
-164)------"id": 40,
-165)------"kind": "output",
-166)------"title": "= Output",
-167)------"input": 39
-168)----}
-169)--]
-170)}
+52)------"id": 3,
+53)------"kind": "scan",
+54)------"title": "⊞ Scan",
+55)------"table_name": "lineitem",
+56)------"columns": [
+57)--------"l_orderkey(#25)",
+58)--------"l_partkey(#26)",
+59)--------"l_suppkey(#27)",
+60)--------"l_linenumber(#28)",
+61)--------"l_quantity(#29)",
+62)--------"l_extendedprice(#30)",
+63)--------"l_discount(#31)",
+64)--------"l_tax(#32)",
+65)--------"l_returnflag(#33)",
+66)--------"l_linestatus(#34)",
+67)--------"l_shipdate(#35)",
+68)--------"l_commitdate(#36)",
+69)--------"l_receiptdate(#37)",
+70)--------"l_shipinstruct(#38)",
+71)--------"l_shipmode(#39)",
+72)--------"l_comment(#40)"
+73)------]
+74)----},
+75)----{
+76)------"id": 22,
+77)------"kind": "aggregation",
+78)------"title": "γ Aggregation",
+79)------"keys": "l_partkey(#26)",
+80)------"aggregates": [
+81)--------"avg(lineitem.l_quantity)(#41) := avg(l_quantity(#29))"
+82)------],
+83)------"input": 3
+84)----},
+85)----{
+86)------"id": 23,
+87)------"kind": "map",
+88)------"title": "χ Map",
+89)------"computations": [
+90)--------"Float64(0.2) * avg(lineitem.l_quantity)(#42) := (0.2 * avg(lineitem.l_quantity)(#41))"
+91)------],
+92)------"input": 22
+93)----},
+94)----{
+95)------"id": 24,
+96)------"kind": "projection",
+97)------"title": "π Projection",
+98)------"columns": [
+99)--------"Float64(0.2) * avg(lineitem.l_quantity)(#42)",
+100)--------"l_partkey(#26)"
+101)------],
+102)------"input": 23
+103)----},
+104)----{
+105)------"id": 46,
+106)------"kind": "join",
+107)------"title": "⟕ LeftOuterJoin",
+108)------"join_type": "LeftOuter",
+109)------"condition": "(l_partkey(#26) = p_partkey(#16))",
+110)------"outer": 38,
+111)------"inner": 24
+112)----},
+113)----{
+114)------"id": 47,
+115)------"kind": "join",
+116)------"title": "⋈ InnerJoin",
+117)------"join_type": "Inner",
+118)------"condition": "(p_partkey(#16) = l_partkey(#1))",
+119)------"outer": 0,
+120)------"inner": 46
+121)----},
+122)----{
+123)------"id": 48,
+124)------"kind": "selection",
+125)------"title": "σ Selection",
+126)------"predicate": "(l_quantity(#4) < Float64(0.2) * avg(lineitem.l_quantity)(#42))",
+127)------"input": 47
+128)----},
+129)----{
+130)------"id": 49,
+131)------"kind": "aggregation",
+132)------"title": "γ Aggregation",
+133)------"keys": "",
+134)------"aggregates": [
+135)--------"sum(lineitem.l_extendedprice)(#43) := sum(l_extendedprice(#5))"
+136)------],
+137)------"input": 48
+138)----},
+139)----{
+140)------"id": 50,
+141)------"kind": "map",
+142)------"title": "χ Map",
+143)------"computations": [
+144)--------"avg_yearly(#44) := (sum(lineitem.l_extendedprice)(#43) / 7)"
+145)------],
+146)------"input": 49
+147)----},
+148)----{
+149)------"id": 51,
+150)------"kind": "projection",
+151)------"title": "π Projection",
+152)------"columns": [
+153)--------"avg_yearly(#44)"
+154)------],
+155)------"input": 50
+156)----},
+157)----{
+158)------"id": 52,
+159)------"kind": "output",
+160)------"title": "= Output",
+161)------"input": 51
+162)----}
+163)--]
+164)}

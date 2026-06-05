@@ -5,6 +5,7 @@ pub mod mark_join_to_semi_join;
 pub mod predicate_pushdown;
 pub mod projection_elimination;
 pub mod subquery_to_join;
+pub mod unnesting;
 pub use expr_simplify::ExprSimplify;
 pub use join_ordering::JoinOrdering;
 pub use join_tree_normalize::JoinTreeNormalize;
@@ -12,6 +13,7 @@ pub use mark_join_to_semi_join::MarkJoinToSemiJoin;
 pub use predicate_pushdown::PredicatePushdown;
 pub use projection_elimination::ProjectionElimination;
 pub use subquery_to_join::SubqueryToJoin;
+pub use unnesting::Unnesting;
 
 use std::{
     collections::{HashMap, HashSet},
