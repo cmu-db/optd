@@ -13,9 +13,10 @@
 //!
 //! - `Exists` used in any other expression context → `JoinType::LeftMark`.
 //!   A boolean mark column is produced by the join and the subquery expression
-//!   is replaced with a `ColumnRef` to it. Expression-context `IN`/`NOT IN` is
-//!   intentionally kept as a subquery until optd has a true tri-valued marker
-//!   representation.
+//!   is replaced with a `ColumnRef` to it. `IN`/`NOT IN` expression contexts are
+//!   lowered with two non-null mark joins: one for definite equality matches and
+//!   one for NULL ambiguity. A `CASE` expression combines them into SQL's
+//!   TRUE/FALSE/UNKNOWN result.
 //!   If the marker is used only in conjunctive predicates the query optimizer
 //!   can usually translate the mark join into semi or anti semi joins.
 
@@ -119,6 +120,9 @@ fn rewrite_selection(
     if let Some(join) = try_direct_semijoin(&sel, ctx) {
         return Some(join);
     }
+    if is_nullable_direct_not_in(&sel, ctx) {
+        return None;
+    }
 
     // --- general case: lift subqueries from predicate into mark/single joins ---
     let mut input = sel.input;
@@ -129,6 +133,38 @@ fn rewrite_selection(
     } else {
         None
     }
+}
+
+fn is_nullable_direct_not_in(sel: &crate::Selection, ctx: &mut OptimizerContext) -> bool {
+    let predicate = match ctx.query.expr(sel.predicate) {
+        ExprData::Nary {
+            op: crate::NaryOp::And,
+            exprs,
+        } if exprs.len() == 1 => exprs[0],
+        _ => sel.predicate,
+    };
+
+    let (subquery, negated, lhs_expr) = match ctx.query.expr(predicate) {
+        ExprData::InSubquery {
+            expr,
+            subquery,
+            negated,
+        } => (*subquery, *negated, Some(*expr)),
+        ExprData::Unary {
+            op: crate::UnaryOp::Not,
+            expr,
+        } => match ctx.query.expr(*expr) {
+            ExprData::InSubquery {
+                expr: inner,
+                subquery,
+                negated,
+            } => (*subquery, !negated, Some(*inner)),
+            _ => return false,
+        },
+        _ => return false,
+    };
+
+    negated && !not_in_inputs_proven_non_null(sel.input, lhs_expr, subquery, ctx)
 }
 
 /// If `sel.predicate` is exactly `Exists(subquery)`, `NOT Exists(subquery)`,
@@ -223,7 +259,10 @@ fn lift_subqueries_from_expr(
     match ctx.query.expr(expr).clone() {
         ExprData::Exists { subquery, negated } => {
             let mark_col = fresh_mark_column("exists_mark", ctx);
-            let join_type = JoinType::LeftMark(mark_col);
+            let join_type = JoinType::LeftMark {
+                marker: mark_col,
+                nullable: false,
+            };
             let on = ExprData::Literal(crate::ScalarValue::Boolean(true)).add(&mut ctx.query);
             let join = OperatorData::Join(Join {
                 join_type,
@@ -247,7 +286,86 @@ fn lift_subqueries_from_expr(
             };
             ExprRewrite::Replace(replacement)
         }
-        ExprData::InSubquery { .. } => ExprRewrite::Keep,
+        ExprData::InSubquery {
+            expr: lhs_expr,
+            subquery,
+            negated,
+        } => {
+            let mut lhs_expr = lhs_expr;
+            lift_subqueries_from_expr(lhs_expr, input, ctx).apply_to(&mut lhs_expr);
+
+            let rhs_col = single_available_column(subquery, ctx);
+            let match_mark = fresh_mark_column("in_match_mark", ctx);
+            let rhs_for_match = ExprData::ColumnRef(rhs_col).add(&mut ctx.query);
+            let match_on = ExprData::Binary {
+                op: BinaryOp::Eq,
+                left: lhs_expr,
+                right: rhs_for_match,
+            }
+            .add(&mut ctx.query);
+            let match_join = OperatorData::Join(Join {
+                join_type: JoinType::LeftMark {
+                    marker: match_mark,
+                    nullable: false,
+                },
+                on: match_on,
+                outer: *input,
+                inner: subquery,
+            })
+            .add(&mut ctx.query);
+            *input = match_join;
+
+            let unknown_mark = fresh_mark_column("in_unknown_mark", ctx);
+            let lhs_is_null = ExprData::Unary {
+                op: crate::UnaryOp::IsNull,
+                expr: lhs_expr,
+            }
+            .add(&mut ctx.query);
+            let rhs_for_unknown = ExprData::ColumnRef(rhs_col).add(&mut ctx.query);
+            let rhs_is_null = ExprData::Unary {
+                op: crate::UnaryOp::IsNull,
+                expr: rhs_for_unknown,
+            }
+            .add(&mut ctx.query);
+            let unknown_on = ExprData::Nary {
+                op: crate::NaryOp::Or,
+                exprs: vec![lhs_is_null, rhs_is_null],
+            }
+            .add(&mut ctx.query);
+            let unknown_join = OperatorData::Join(Join {
+                join_type: JoinType::LeftMark {
+                    marker: unknown_mark,
+                    nullable: false,
+                },
+                on: unknown_on,
+                outer: *input,
+                inner: subquery,
+            })
+            .add(&mut ctx.query);
+            *input = unknown_join;
+
+            let match_ref = ExprData::ColumnRef(match_mark).add(&mut ctx.query);
+            let unknown_ref = ExprData::ColumnRef(unknown_mark).add(&mut ctx.query);
+            let true_expr = ExprData::Literal(ScalarValue::Boolean(true)).add(&mut ctx.query);
+            let null_expr =
+                ExprData::Literal(ScalarValue::Null(DataType::Boolean)).add(&mut ctx.query);
+            let false_expr = ExprData::Literal(ScalarValue::Boolean(false)).add(&mut ctx.query);
+            let in_result = ExprData::CaseWhen {
+                when_then: vec![(match_ref, true_expr), (unknown_ref, null_expr)],
+                else_expr: Some(false_expr),
+            }
+            .add(&mut ctx.query);
+            let replacement = if negated {
+                ExprData::Unary {
+                    op: crate::UnaryOp::Not,
+                    expr: in_result,
+                }
+                .add(&mut ctx.query)
+            } else {
+                in_result
+            };
+            ExprRewrite::Replace(replacement)
+        }
         ExprData::ScalarSubquery { subquery } => {
             let scalar_col = single_available_column(subquery, ctx);
             let on = ExprData::Literal(crate::ScalarValue::Boolean(true)).add(&mut ctx.query);
@@ -719,10 +837,10 @@ mod tests {
         assert_eq!(j.join_type, JoinType::LeftAnti);
     }
 
-    /// Expression-context IN needs SQL's TRUE/FALSE/UNKNOWN result, which a
-    /// plain boolean mark column cannot represent yet, so it is left untouched.
+    /// Expression-context IN needs SQL's TRUE/FALSE/UNKNOWN result, so it is
+    /// lifted to explicit match/unknown mark joins plus a CASE expression.
     #[test]
-    fn in_subquery_in_map_remains_subquery() {
+    fn in_subquery_in_map_becomes_null_aware_mark_join_expression() {
         let mut ctx = QueryContext::new();
         let uid = ColumnData::new("uid", DataType::Int64).add(&mut ctx);
         let oid = ColumnData::new("oid", DataType::Int64).add(&mut ctx);
@@ -753,9 +871,48 @@ mod tests {
         .add(&mut ctx);
         ctx.set_root(map);
 
-        let mut opt = OptimizerContext::new(ctx);
-        let result = SubqueryToJoin.run(&mut opt).unwrap();
-        assert_eq!(result, PassResult::Unchanged);
+        let ctx = run_pass(ctx);
+
+        let root = ctx.root().unwrap();
+        let OperatorData::Map(m) = ctx.operator(root) else {
+            panic!()
+        };
+        let OperatorData::Join(unknown_join) = ctx.operator(m.input) else {
+            panic!("expected mark join, got {:?}", ctx.operator(m.input))
+        };
+        assert!(matches!(
+            unknown_join.join_type,
+            JoinType::LeftMark {
+                nullable: false,
+                ..
+            }
+        ));
+        let OperatorData::Join(match_join) = ctx.operator(unknown_join.outer) else {
+            panic!("expected nested match mark join")
+        };
+        assert!(matches!(
+            match_join.join_type,
+            JoinType::LeftMark {
+                nullable: false,
+                ..
+            }
+        ));
+        assert!(matches!(
+            ctx.expr(match_join.on),
+            ExprData::Binary {
+                op: BinaryOp::Eq,
+                ..
+            }
+        ));
+        let ExprData::Nary {
+            op: crate::NaryOp::Or,
+            ..
+        } = ctx.expr(unknown_join.on)
+        else {
+            panic!("expected unknown marker OR predicate")
+        };
+        let (_, expr) = m.computations[0];
+        assert!(matches!(ctx.expr(expr), ExprData::CaseWhen { .. }));
     }
 
     /// EXISTS inside a Map computation (non-direct context) → Mark join.
@@ -799,7 +956,13 @@ mod tests {
         let OperatorData::Join(j) = ctx.operator(m.input) else {
             panic!()
         };
-        assert!(matches!(j.join_type, JoinType::LeftMark(_)));
+        assert!(matches!(
+            j.join_type,
+            JoinType::LeftMark {
+                nullable: false,
+                ..
+            }
+        ));
         // The computation expr should now be a ColumnRef to the mark column.
         let (_, expr) = m.computations[0];
         assert!(matches!(ctx.expr(expr), ExprData::ColumnRef(_)));

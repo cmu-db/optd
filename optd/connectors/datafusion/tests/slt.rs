@@ -5,6 +5,9 @@ use std::time::{Duration, Instant};
 use datafusion_sqllogictest::{DFSqlLogicTestError, TestContext};
 use optd_datafusion::runner::OptdRunner;
 use optd_datafusion::setup::{setup_job_session, setup_tpch_session};
+#[cfg(not(feature = "duckdb"))]
+use optd_datafusion::slt_reference::duckdb_feature_error;
+use optd_datafusion::slt_reference::{DataFusionRunner, ExpectedEngine, parse_slt_args};
 use sqllogictest::{
     Runner, default_column_validator, default_normalizer, default_validator, harness::Failed,
 };
@@ -22,15 +25,24 @@ const DISABLED_SLT_PATHS: &[&str] = &[
 ];
 
 fn main() {
-    let (override_files, filters) = parse_override_args();
-    let paths = collect_slt_paths(&filters);
+    let args = parse_slt_args(std::env::args().skip(1)).unwrap_or_else(|err| {
+        eprintln!("{err}");
+        std::process::exit(2);
+    });
+    let paths = collect_slt_paths(&args.filters);
 
-    if override_files {
+    if args.override_files {
         let total = paths.len();
         for (index, path) in paths.iter().enumerate() {
             let started = Instant::now();
-            eprintln!("START [{}/{}] {}", index + 1, total, path.display());
-            match update_slt(path) {
+            eprintln!(
+                "START [{}/{}] {} ({})",
+                index + 1,
+                total,
+                path.display(),
+                args.expected_engine
+            );
+            match update_slt(path, args.expected_engine) {
                 Ok(()) => {
                     eprintln!(
                         "PASS  [{}/{}] {} ({:.3}s)",
@@ -69,19 +81,6 @@ fn main() {
     }
 
     sqllogictest::harness::run(&sqllogictest::harness::Arguments::from_args(), tests).exit();
-}
-
-fn parse_override_args() -> (bool, Vec<String>) {
-    let mut override_files = false;
-    let mut filters = Vec::new();
-    for arg in std::env::args().skip(1) {
-        if arg == "--override" {
-            override_files = true;
-        } else if override_files && !arg.starts_with("--") {
-            filters.push(arg);
-        }
-    }
-    (override_files, filters)
 }
 
 fn collect_slt_paths(filters: &[String]) -> Vec<PathBuf> {
@@ -140,7 +139,7 @@ fn run_slt(path: impl AsRef<Path>) -> Result<(), Failed> {
     result
 }
 
-fn update_slt(path: impl AsRef<Path>) -> Result<(), Failed> {
+fn update_slt(path: impl AsRef<Path>, expected_engine: ExpectedEngine) -> Result<(), Failed> {
     let path = path.as_ref().to_path_buf();
     let runtime = build_runtime();
     let result = runtime.block_on(async {
@@ -159,24 +158,72 @@ fn update_slt(path: impl AsRef<Path>) -> Result<(), Failed> {
             }
         };
 
-        let mut runner = Runner::new(|| async {
-            Ok::<_, DFSqlLogicTestError>(OptdRunner::new(session.clone()))
-        });
-        runner
-            .update_test_file(
-                &path,
-                "\t",
-                default_validator,
-                default_normalizer,
-                default_column_validator,
-            )
-            .await
-            .map_err(|e| Failed::from(e.to_string()))?;
+        match expected_engine {
+            ExpectedEngine::OptdDataFusion => {
+                let mut runner = Runner::new(|| async {
+                    Ok::<_, DFSqlLogicTestError>(OptdRunner::new(session.clone()))
+                });
+                runner
+                    .update_test_file(
+                        &path,
+                        "\t",
+                        default_validator,
+                        default_normalizer,
+                        default_column_validator,
+                    )
+                    .await
+                    .map_err(|e| Failed::from(e.to_string()))?;
+            }
+            ExpectedEngine::DataFusion => {
+                let mut runner = Runner::new(|| async {
+                    Ok::<_, DFSqlLogicTestError>(DataFusionRunner::new(session.clone()))
+                });
+                runner
+                    .update_test_file(
+                        &path,
+                        "\t",
+                        default_validator,
+                        default_normalizer,
+                        default_column_validator,
+                    )
+                    .await
+                    .map_err(|e| Failed::from(e.to_string()))?;
+            }
+            ExpectedEngine::DuckDb => {
+                update_slt_with_duckdb(&path).await?;
+            }
+        }
         encode_blank_expected_rows(&path).map_err(|e| Failed::from(e.to_string()))?;
         Ok(())
     });
     runtime.shutdown_timeout(Duration::from_secs(5));
     result
+}
+
+#[cfg(feature = "duckdb")]
+async fn update_slt_with_duckdb(path: &Path) -> Result<(), Failed> {
+    use optd_datafusion::slt_reference::DuckDbRunner;
+
+    let path = path.to_path_buf();
+    let mut runner = Runner::new(|| {
+        let path = path.clone();
+        async move { DuckDbRunner::new_for_path(&path) }
+    });
+    runner
+        .update_test_file(
+            &path,
+            "\t",
+            default_validator,
+            default_normalizer,
+            default_column_validator,
+        )
+        .await
+        .map_err(|e| Failed::from(e.to_string()))
+}
+
+#[cfg(not(feature = "duckdb"))]
+async fn update_slt_with_duckdb(_path: &Path) -> Result<(), Failed> {
+    Err(Failed::from(duckdb_feature_error().to_string()))
 }
 
 fn encode_blank_expected_rows(path: &Path) -> std::io::Result<()> {

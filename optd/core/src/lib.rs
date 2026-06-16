@@ -331,7 +331,14 @@ pub enum JoinType {
     RightOuter,
     FullOuter,
     Single,
-    LeftMark(Column),
+    /// Left mark join. The marker is the SQL OR over all join predicate
+    /// results for each left row: TRUE if any predicate is TRUE, FALSE if no
+    /// predicate is TRUE and no UNKNOWN matters, and NULL if no predicate is
+    /// TRUE but an UNKNOWN result remains observable.
+    LeftMark {
+        marker: Column,
+        nullable: bool,
+    },
 }
 
 impl std::fmt::Display for JoinType {
@@ -344,7 +351,7 @@ impl std::fmt::Display for JoinType {
             JoinType::RightOuter => f.write_str("RightOuter"),
             JoinType::FullOuter => f.write_str("FullOuter"),
             JoinType::Single => f.write_str("Single"),
-            JoinType::LeftMark(_col) => write!(f, "LeftMark"),
+            JoinType::LeftMark { .. } => write!(f, "LeftMark"),
         }
     }
 }
@@ -1414,7 +1421,7 @@ impl<'a> QueryFormatter<'a> {
             JoinType::RightOuter => "⟖",
             JoinType::FullOuter => "⟗",
             JoinType::Single => "⟕₁",
-            JoinType::LeftMark(_) => "⟕ᵐ",
+            JoinType::LeftMark { .. } => "⟕ᵐ",
         }
     }
 
@@ -1833,10 +1840,18 @@ impl OperatorDisplayFormat for Join {
             display_scalar_field("join_type", self.join_type.to_string()),
             display_scalar_field("condition", formatter.format_expr(self.on)),
         ];
-        if let JoinType::LeftMark(col) = self.join_type {
+        if let JoinType::LeftMark {
+            marker: col,
+            nullable,
+        } = self.join_type
+        {
             fields.push(display_scalar_field(
                 "marker",
                 formatter.format_column_name(col),
+            ));
+            fields.push(display_scalar_field(
+                "marker_nullable",
+                nullable.to_string(),
             ));
         }
         OperatorDisplay {

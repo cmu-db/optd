@@ -453,7 +453,10 @@ fn try_simple_elimination(
         return Ok(None);
     }
 
-    let lift_outer_only = matches!(join.join_type, JoinType::LeftSemi | JoinType::LeftMark(_));
+    let lift_outer_only = matches!(
+        join.join_type,
+        JoinType::LeftSemi | JoinType::LeftMark { .. }
+    );
     let rewrite =
         lift_correlated_predicates(join.inner, lift_outer_only, &mut state.cclasses, ctx)?;
     if rewrite.predicates.is_empty() {
@@ -1221,7 +1224,7 @@ fn collect_correlated_subquery_joins(
 fn is_subquery_derived_join(join_type: &JoinType) -> bool {
     matches!(
         join_type,
-        JoinType::Single | JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark(_)
+        JoinType::Single | JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark { .. }
     )
 }
 
@@ -2367,7 +2370,10 @@ mod tests {
         .add(&mut query);
         let on = ExprData::Literal(ScalarValue::Boolean(true)).add(&mut query);
         let mark_join = OperatorData::Join(Join {
-            join_type: JoinType::LeftMark(marker),
+            join_type: JoinType::LeftMark {
+                marker,
+                nullable: false,
+            },
             on,
             outer,
             inner,

@@ -3,16 +3,16 @@
 //! Pattern: a `Selection` immediately above a `LeftMarkJoin` where the marker
 //! column appears only as a top-level conjunct in the selection predicate.
 //!
-//! - `exists_mark` used positively → `LeftSemi`
-//! - `NOT(exists_mark)` used positively → `LeftAnti`
+//! - marker used positively → `LeftSemi`
+//! - `NOT(marker)` used positively → `LeftAnti` only when the marker is
+//!   non-nullable
 //!
 //! The marker conjunct is removed from the predicate; if the remaining predicate
 //! is empty the `Selection` is dropped entirely.
 //!
-//! This pass relies on the current producer invariant that `SubqueryToJoin`
-//! creates `LeftMark` only for expression-context `EXISTS`. Expression-context
-//! `IN`/`NOT IN` remains as `InSubquery` because optd does not yet have a
-//! tri-valued marker column.
+//! Nullable mark columns preserve SQL's TRUE/FALSE/UNKNOWN semantics for
+//! quantified comparisons, so negated nullable markers cannot be collapsed into
+//! anti joins without an additional null-free proof.
 
 use crate::{
     Column, Expr, ExprData, Join, JoinType, NaryOp, Operator, OperatorData, OptimizerContext,
@@ -37,7 +37,7 @@ impl OperatorRewrite for MarkJoinToSemiJoin {
         let OperatorData::Join(join) = ctx.query.operator(sel.input).clone() else {
             return Ok(Rewrite::Keep);
         };
-        let JoinType::LeftMark(marker) = join.join_type else {
+        let JoinType::LeftMark { marker, nullable } = join.join_type else {
             return Ok(Rewrite::Keep);
         };
 
@@ -52,7 +52,7 @@ impl OperatorRewrite for MarkJoinToSemiJoin {
         let mut remaining: Vec<Expr> = Vec::new();
 
         for c in conjuncts {
-            match classify_marker(c, marker, ctx) {
+            match classify_marker(c, marker, nullable, ctx) {
                 Some(jt) if semi_type.is_none() => semi_type = Some(jt),
                 Some(_) => return Ok(Rewrite::Keep),
                 _ => remaining.push(c),
@@ -96,14 +96,21 @@ impl OperatorRewrite for MarkJoinToSemiJoin {
 
 /// Returns `Some(LeftSemi)` if `expr` is `ColumnRef(marker)`,
 /// `Some(LeftAnti)` if it is `NOT(ColumnRef(marker))`, else `None`.
-fn classify_marker(expr: Expr, marker: Column, ctx: &OptimizerContext) -> Option<JoinType> {
+fn classify_marker(
+    expr: Expr,
+    marker: Column,
+    marker_nullable: bool,
+    ctx: &OptimizerContext,
+) -> Option<JoinType> {
     match expr.get(&ctx.query) {
         ExprData::ColumnRef(col) if *col == marker => Some(JoinType::LeftSemi),
         ExprData::Unary {
             op: UnaryOp::Not,
             expr: inner,
         } => match inner.get(&ctx.query) {
-            ExprData::ColumnRef(col) if *col == marker => Some(JoinType::LeftAnti),
+            ExprData::ColumnRef(col) if *col == marker && !marker_nullable => {
+                Some(JoinType::LeftAnti)
+            }
             _ => None,
         },
         _ => None,
@@ -151,7 +158,9 @@ mod tests {
         optimize::{OperatorRewrite, Rewrite},
     };
 
-    fn mark_join_query() -> (
+    fn mark_join_query_with_nullable(
+        nullable: bool,
+    ) -> (
         OptimizerContext,
         crate::Operator,
         crate::Column,
@@ -174,7 +183,7 @@ mod tests {
         .add(&mut query);
         let on = ExprData::Literal(ScalarValue::Boolean(true)).add(&mut query);
         let join = OperatorData::Join(Join {
-            join_type: JoinType::LeftMark(marker),
+            join_type: JoinType::LeftMark { marker, nullable },
             on,
             outer,
             inner,
@@ -182,6 +191,15 @@ mod tests {
         .add(&mut query);
 
         (OptimizerContext::new(query), join, marker, outer_col)
+    }
+
+    fn mark_join_query() -> (
+        OptimizerContext,
+        crate::Operator,
+        crate::Column,
+        crate::Column,
+    ) {
+        mark_join_query_with_nullable(false)
     }
 
     #[test]
@@ -205,6 +223,79 @@ mod tests {
             panic!("expected join");
         };
         assert_eq!(join.join_type, JoinType::LeftSemi);
+    }
+
+    #[test]
+    fn converts_nullable_marker_filter_to_semi_join() {
+        let (mut opt, join, marker, _) = mark_join_query_with_nullable(true);
+        let predicate = ExprData::ColumnRef(marker).add(&mut opt.query);
+        let selection = OperatorData::Selection(Selection {
+            predicate,
+            input: join,
+        })
+        .add(&mut opt.query);
+
+        let rewrite = super::MarkJoinToSemiJoin
+            .rewrite(selection, &mut opt)
+            .unwrap();
+
+        let Rewrite::Replace(root) = rewrite else {
+            panic!("expected rewrite");
+        };
+        let OperatorData::Join(join) = root.get(&opt.query) else {
+            panic!("expected join");
+        };
+        assert_eq!(join.join_type, JoinType::LeftSemi);
+    }
+
+    #[test]
+    fn converts_non_null_not_marker_filter_to_anti_join() {
+        let (mut opt, join, marker, _) = mark_join_query_with_nullable(false);
+        let marker_expr = ExprData::ColumnRef(marker).add(&mut opt.query);
+        let predicate = ExprData::Unary {
+            op: crate::UnaryOp::Not,
+            expr: marker_expr,
+        }
+        .add(&mut opt.query);
+        let selection = OperatorData::Selection(Selection {
+            predicate,
+            input: join,
+        })
+        .add(&mut opt.query);
+
+        let rewrite = super::MarkJoinToSemiJoin
+            .rewrite(selection, &mut opt)
+            .unwrap();
+
+        let Rewrite::Replace(root) = rewrite else {
+            panic!("expected rewrite");
+        };
+        let OperatorData::Join(join) = root.get(&opt.query) else {
+            panic!("expected join");
+        };
+        assert_eq!(join.join_type, JoinType::LeftAnti);
+    }
+
+    #[test]
+    fn keeps_nullable_not_marker_filter_as_mark_join() {
+        let (mut opt, join, marker, _) = mark_join_query_with_nullable(true);
+        let marker_expr = ExprData::ColumnRef(marker).add(&mut opt.query);
+        let predicate = ExprData::Unary {
+            op: crate::UnaryOp::Not,
+            expr: marker_expr,
+        }
+        .add(&mut opt.query);
+        let selection = OperatorData::Selection(Selection {
+            predicate,
+            input: join,
+        })
+        .add(&mut opt.query);
+
+        let rewrite = super::MarkJoinToSemiJoin
+            .rewrite(selection, &mut opt)
+            .unwrap();
+
+        assert!(matches!(rewrite, Rewrite::Keep));
     }
 
     #[test]

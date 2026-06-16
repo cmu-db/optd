@@ -1,0 +1,58 @@
+# Focused coverage for projected IN/ANY lowering to nullable mark joins.
+
+statement ok
+CREATE TABLE projected_in_lhs (x BIGINT, flag BOOLEAN);
+
+statement ok
+CREATE TABLE projected_in_rhs (y BIGINT);
+
+statement ok
+INSERT INTO projected_in_lhs VALUES
+  (5, true),
+  (6, false),
+  (NULL, true);
+
+statement ok
+INSERT INTO projected_in_rhs VALUES
+  (5),
+  (NULL);
+
+query IB
+SELECT
+  x,
+  x IN (SELECT y FROM projected_in_rhs) AS in_result
+FROM projected_in_lhs
+ORDER BY x NULLS LAST;
+----
+5	true
+6	NULL
+NULL	NULL
+
+query IB
+SELECT
+  x,
+  NOT (x IN (SELECT y FROM projected_in_rhs)) AS not_in_result
+FROM projected_in_lhs
+ORDER BY x NULLS LAST;
+----
+5	false
+6	NULL
+NULL	NULL
+
+query IB
+SELECT
+  x,
+  (x IN (SELECT y FROM projected_in_rhs)) OR flag AS in_or_flag
+FROM projected_in_lhs
+ORDER BY x NULLS LAST;
+----
+5	true
+6	NULL
+NULL	true
+
+query T
+SELECT result
+FROM explain_steps('SELECT x, x IN (SELECT y FROM projected_in_rhs) FROM projected_in_lhs', 'flat')
+WHERE pass = 'SubqueryToJoin';
+----
+changed

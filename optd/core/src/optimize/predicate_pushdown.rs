@@ -132,7 +132,7 @@ fn can_push_outer(join_type: &JoinType) -> bool {
             | JoinType::LeftAnti
             | JoinType::LeftOuter
             | JoinType::Single
-            | JoinType::LeftMark(_)
+            | JoinType::LeftMark { .. }
     )
 }
 

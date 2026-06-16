@@ -946,7 +946,9 @@ fn join_type_to_substrait(join_type: JoinType) -> Result<join_rel::JoinType, Sub
         JoinType::RightOuter => Ok(join_rel::JoinType::Right),
         JoinType::FullOuter => Ok(join_rel::JoinType::Outer),
         JoinType::Single => Ok(join_rel::JoinType::LeftSingle),
-        JoinType::LeftMark(_) => Err(SubstraitError::UnsupportedJoin("mark join marker column")),
+        JoinType::LeftMark { .. } => {
+            Err(SubstraitError::UnsupportedJoin("mark join marker column"))
+        }
     }
 }
 

@@ -1,0 +1,51 @@
+# Adapted from DuckDB optimizer tests at bcb0c9c5306ccf1cf5c952ea9027740d2587edc0:
+# pushdown/pushdown_filter_on_coalesced_equal_outer_join_keys.test.
+
+statement ok
+CREATE TABLE outer_filter_left (id BIGINT, label VARCHAR);
+
+statement ok
+CREATE TABLE outer_filter_right (id BIGINT, value BIGINT);
+
+statement ok
+INSERT INTO outer_filter_left VALUES (1, 'one'), (2, 'two'), (NULL, 'left-null');
+
+statement ok
+INSERT INTO outer_filter_right VALUES (2, 20), (3, 30), (NULL, 99);
+
+query I
+SELECT COALESCE(l.id, r.id) AS joined_id
+FROM outer_filter_left AS l
+FULL OUTER JOIN outer_filter_right AS r ON l.id = r.id
+WHERE COALESCE(l.id, r.id) >= 2
+ORDER BY COALESCE(l.id, r.id);
+----
+2
+3
+
+query I
+SELECT COALESCE(l.id, r.id) AS joined_id
+FROM outer_filter_left AS l
+FULL OUTER JOIN outer_filter_right AS r ON l.id = r.id
+WHERE COALESCE(l.id, r.id) IS NULL
+ORDER BY COALESCE(l.id, r.id);
+----
+NULL
+NULL
+
+query I
+SELECT l.id
+FROM outer_filter_left AS l
+LEFT JOIN outer_filter_right AS r ON l.id = r.id
+WHERE r.value IS NULL
+ORDER BY l.id;
+----
+1
+NULL
+
+query T
+SELECT result
+FROM explain_steps('SELECT l.id FROM outer_filter_left AS l LEFT JOIN outer_filter_right AS r ON l.id = r.id WHERE l.id > 1', 'flat')
+WHERE pass = 'PredicatePushdown';
+----
+changed

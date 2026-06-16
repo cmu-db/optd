@@ -1,0 +1,69 @@
+# Adapted from DuckDB optimizer tests at bcb0c9c5306ccf1cf5c952ea9027740d2587edc0:
+# transitive_filters.test, pushdown/filter_cannot_pushdown.test,
+# pushdown/filters_on_limit_optimizer.test.
+
+query II
+SELECT col0, col1
+FROM (VALUES (5, 5), (6, 7), (6, 5), (4, 9)) AS tbl(col0, col1)
+WHERE col0 >= 5 AND col1 > col0
+ORDER BY col0, col1;
+----
+6	7
+
+query II
+SELECT col0, col1
+FROM (VALUES (5, 5), (6, 7), (6, 5), (4, 9)) AS tbl(col0, col1)
+WHERE col1 <= col0 AND col0 <= 5
+ORDER BY col0, col1;
+----
+5	5
+
+statement ok
+CREATE TABLE push_filter_nums (a BIGINT, b BIGINT);
+
+statement ok
+INSERT INTO push_filter_nums VALUES (1, 10), (2, 20), (3, 30), (4, 40), (5, 50);
+
+query I
+SELECT x
+FROM (
+  SELECT a, a + 1 AS x
+  FROM push_filter_nums
+) AS derived
+WHERE x > 3
+ORDER BY x;
+----
+4
+5
+6
+
+query I
+SELECT a
+FROM (
+  SELECT a
+  FROM push_filter_nums
+  ORDER BY a DESC
+  LIMIT 3
+) AS limited
+WHERE a < 4
+ORDER BY a;
+----
+3
+
+query II
+SELECT a, b
+FROM push_filter_nums
+WHERE a < 4 OR b = 50
+ORDER BY a;
+----
+1	10
+2	20
+3	30
+5	50
+
+query T
+SELECT result
+FROM explain_steps('SELECT l.a, r.b FROM push_filter_nums AS l JOIN push_filter_nums AS r ON l.a = r.a WHERE l.a < 4', 'flat')
+WHERE pass = 'PredicatePushdown';
+----
+changed

@@ -609,7 +609,7 @@ fn directly_created_columns(operator: &OperatorData) -> Vec<Column> {
             .map(|(column, _)| *column)
             .collect(),
         OperatorData::Join(operator) => match operator.join_type {
-            JoinType::LeftMark(column) => vec![column],
+            JoinType::LeftMark { marker: column, .. } => vec![column],
             _ => Vec::new(),
         },
         OperatorData::Selection(_)
@@ -1012,8 +1012,12 @@ fn output_column_nullability(
                 }
             }
 
-            if let JoinType::LeftMark(column) = data.join_type {
-                push_unique_nullability(&mut columns, column, false);
+            if let JoinType::LeftMark {
+                marker: column,
+                nullable,
+            } = data.join_type
+            {
+                push_unique_nullability(&mut columns, column, nullable);
             }
 
             if matches!(data.join_type, JoinType::Inner) {
@@ -1632,8 +1636,12 @@ fn join_profile_with_selectivity_and_classes(
             Some(left.rows.value.max(right.rows.value)),
             estimate.equivalence_classes,
         ),
-        JoinType::LeftMark(column) => {
+        JoinType::LeftMark {
+            marker: column,
+            nullable,
+        } => {
             let mut profile = left.cap_by_rows(left.rows.clone());
+            let max_distinct: f64 = if nullable { 3.0 } else { 2.0 };
             profile.columns.insert(
                 column,
                 ColumnProfile {
@@ -1641,9 +1649,9 @@ fn join_profile_with_selectivity_and_classes(
                     upper_bound: Some(ScalarValue::Boolean(true)),
                     frequency: profile.rows.clone(),
                     distinct: Estimate::derived(
-                        2.0_f64.min(profile.rows.value),
+                        max_distinct.min(profile.rows.value),
                         Some(0.0),
-                        Some(2.0),
+                        Some(max_distinct),
                     ),
                 },
             );
@@ -3239,6 +3247,49 @@ mod tests {
     }
 
     #[test]
+    fn column_nullability_uses_mark_join_nullable_flag() {
+        for (marker_nullable, expected_nullable) in [(false, false), (true, true)] {
+            let mut ctx = QueryContext::new();
+            let user_id = ColumnData::new("user_id", DataType::Int64).add(&mut ctx);
+            let order_user_id = ColumnData::new("order_user_id", DataType::Int64).add(&mut ctx);
+            let marker = ColumnData::new("mark", DataType::Boolean).add(&mut ctx);
+
+            let users = OperatorData::Scan(Scan {
+                table: TableRef::bare("users"),
+                columns: vec![user_id],
+            })
+            .add(&mut ctx);
+            let orders = OperatorData::Scan(Scan {
+                table: TableRef::bare("orders"),
+                columns: vec![order_user_id],
+            })
+            .add(&mut ctx);
+            let on = ExprData::Literal(ScalarValue::Boolean(true)).add(&mut ctx);
+            let join = OperatorData::Join(Join {
+                join_type: JoinType::LeftMark {
+                    marker,
+                    nullable: marker_nullable,
+                },
+                on,
+                outer: users,
+                inner: orders,
+            })
+            .add(&mut ctx);
+
+            let mut analyses = ctx.analyze();
+
+            assert_eq!(
+                analyses.get::<ColumnNullability>(&ctx, join).unwrap(),
+                vec![
+                    (user_id, true),
+                    (order_user_id, true),
+                    (marker, expected_nullable)
+                ]
+            );
+        }
+    }
+
+    #[test]
     fn expr_used_columns_deduplicates_by_first_use() {
         let mut ctx = QueryContext::new();
         let a = ColumnData::new("a", DataType::Int64).add(&mut ctx);
@@ -3643,6 +3694,62 @@ mod tests {
         let profile = analyses.get::<CardinalityEstimationV1>(&ctx, join).unwrap();
 
         assert_eq!(profile.rows.value, 50.0);
+    }
+
+    #[test]
+    fn cardinality_estimation_uses_mark_join_nullable_distinct_bound() {
+        for (marker_nullable, expected_upper) in [(false, Some(2.0)), (true, Some(3.0))] {
+            let mut ctx = QueryContext::new();
+            let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
+            let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
+            let marker = ColumnData::new("mark", DataType::Boolean).add(&mut ctx);
+            let left_scan = OperatorData::Scan(Scan {
+                table: TableRef::bare("left_t"),
+                columns: vec![left_key],
+            })
+            .add(&mut ctx);
+            let right_scan = OperatorData::Scan(Scan {
+                table: TableRef::bare("right_t"),
+                columns: vec![right_key],
+            })
+            .add(&mut ctx);
+            let on = equality_expr(&mut ctx, left_key, right_key);
+            let join = OperatorData::Join(Join {
+                join_type: JoinType::LeftMark {
+                    marker,
+                    nullable: marker_nullable,
+                },
+                on,
+                outer: left_scan,
+                inner: right_scan,
+            })
+            .add(&mut ctx);
+
+            let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+            catalog
+                .create_table(TableRef::bare("left_t"), schema(), None)
+                .unwrap();
+            catalog
+                .create_table(TableRef::bare("right_t"), schema(), None)
+                .unwrap();
+            catalog
+                .set_table_statistics(
+                    TableRef::bare("left_t"),
+                    table_stats_for_column("left_key", 100, 100),
+                )
+                .unwrap();
+            catalog
+                .set_table_statistics(
+                    TableRef::bare("right_t"),
+                    table_stats_for_column("right_key", 50, 50),
+                )
+                .unwrap();
+            let mut analyses = AnalysisContext::with_catalog(catalog);
+
+            let profile = analyses.get::<CardinalityEstimationV1>(&ctx, join).unwrap();
+
+            assert_eq!(profile.columns[&marker].distinct.upper, expected_upper);
+        }
     }
 
     #[test]

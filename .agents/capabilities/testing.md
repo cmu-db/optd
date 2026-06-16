@@ -16,6 +16,14 @@ cargo nextest run --release -p optd-datafusion --test slt
 cargo nextest run --release --workspace
 ```
 
+Regenerate SLT expected output with optd, unmodified DataFusion, or DuckDB:
+
+```sh
+cargo nextest run --release -p optd-datafusion --test slt -- --override <filter>
+cargo nextest run --release -p optd-datafusion --test slt -- --override --engine datafusion <filter>
+cargo nextest run --release -p optd-datafusion --features duckdb --test slt -- --override --engine duckdb <filter>
+```
+
 Known long-running JOB result cases can be excluded during broad refactor
 verification:
 

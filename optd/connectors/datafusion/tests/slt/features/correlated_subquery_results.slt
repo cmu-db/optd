@@ -1,0 +1,104 @@
+# Adapted from DuckDB optimizer tests at bcb0c9c5306ccf1cf5c952ea9027740d2587edc0:
+# joins/filter_on_subquery_with_aggregate.test,
+# joins/joins_with_correlated_subqueries.test, reported_bugs/in_vs_where.test.
+
+statement ok
+CREATE TABLE corr_sub_df (a BIGINT, b BIGINT);
+
+statement ok
+INSERT INTO corr_sub_df VALUES
+  (1, 1),
+  (2, 2),
+  (3, 3),
+  (4, 4),
+  (5, 5),
+  (6, 6),
+  (7, 7),
+  (8, 8),
+  (9, 9);
+
+query II
+WITH cte AS (
+  SELECT a, b
+  FROM corr_sub_df
+  WHERE a >= 7
+)
+SELECT *
+FROM cte
+WHERE a = (SELECT MAX(a) FROM cte);
+----
+9	9
+
+statement ok
+CREATE TABLE corr_sub_customers (c_id BIGINT);
+
+statement ok
+CREATE TABLE corr_sub_orders (o_id BIGINT, o_custkey BIGINT, o_total DOUBLE);
+
+statement ok
+INSERT INTO corr_sub_customers VALUES (1), (2), (3), (4);
+
+statement ok
+INSERT INTO corr_sub_orders VALUES
+  (10, 1, 50.0),
+  (11, 1, 75.0),
+  (12, 2, 20.0),
+  (13, 4, 100.0);
+
+query II
+SELECT
+  c_id,
+  (SELECT COUNT(*) FROM corr_sub_orders WHERE o_custkey = c_id) AS order_count
+FROM corr_sub_customers
+ORDER BY c_id;
+----
+1	2
+2	1
+3	0
+4	1
+
+query I
+SELECT c_id
+FROM corr_sub_customers
+WHERE EXISTS (
+  SELECT 1
+  FROM corr_sub_orders
+  WHERE o_custkey = c_id AND o_total > 60.0
+)
+ORDER BY c_id;
+----
+1
+4
+
+query I
+SELECT c_id
+FROM corr_sub_customers
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM corr_sub_orders
+  WHERE o_custkey = c_id
+)
+ORDER BY c_id;
+----
+3
+
+query I
+SELECT COUNT(t1.a)
+FROM (
+  SELECT CAST(id AS VARCHAR) AS a
+  FROM (VALUES (1), (2), (7), (7), (11)) AS ids(id)
+) AS t1,
+(
+  SELECT CAST(id AS VARCHAR) AS a
+  FROM (VALUES (7), (8), (9)) AS ids(id)
+) AS t2
+WHERE t1.a = t2.a AND t1.a IN ('7');
+----
+2
+
+query T
+SELECT result
+FROM explain_steps('SELECT c_id FROM corr_sub_customers WHERE EXISTS (SELECT 1 FROM corr_sub_orders WHERE o_custkey = c_id AND o_total > 60.0)', 'flat')
+WHERE pass = 'SubqueryToJoin';
+----
+changed

@@ -267,9 +267,9 @@ fn convert_operator_inner(
                 return Ok(LogicalPlanBuilder::from(input).filter(predicate)?.build()?);
             }
             if let OperatorData::Join(join) = sel.input.get(ctx).clone()
-                && let optd_core::JoinType::LeftMark(marker) = join.join_type
+                && let optd_core::JoinType::LeftMark { marker, nullable } = join.join_type
                 && let Some((join_type, remaining)) =
-                    classify_mark_selection(sel.predicate, marker, ctx)
+                    classify_mark_selection(sel.predicate, marker, nullable, ctx)
             {
                 let join = optd_core::Join {
                     join_type,
@@ -421,7 +421,7 @@ fn convert_operator_inner(
                 return Ok(LogicalPlanBuilder::from(outer).filter(exists)?.build()?);
             }
 
-            if let optd_core::JoinType::LeftMark(marker) = join.join_type {
+            if let optd_core::JoinType::LeftMark { marker, .. } = join.join_type {
                 let disambiguated_inner = disambiguating_join_inner_qualifiers(
                     join.outer,
                     join.inner,
@@ -1274,12 +1274,13 @@ fn project_mark_column(plan: LogicalPlan, marker_name: &str) -> ToDFResult<Logic
 fn classify_mark_selection(
     predicate: optd_core::Expr,
     marker: optd_core::Column,
+    marker_nullable: bool,
     ctx: &QueryContext,
 ) -> Option<(optd_core::JoinType, Vec<optd_core::Expr>)> {
     let mut join_type = None;
     let mut remaining = Vec::new();
     for conjunct in split_conjuncts(predicate, ctx) {
-        match classify_marker(conjunct, marker, ctx) {
+        match classify_marker(conjunct, marker, marker_nullable, ctx) {
             Some(classified) if join_type.is_none() => join_type = Some(classified),
             _ => remaining.push(conjunct),
         }
@@ -1290,6 +1291,7 @@ fn classify_mark_selection(
 fn classify_marker(
     expr: optd_core::Expr,
     marker: optd_core::Column,
+    marker_nullable: bool,
     ctx: &QueryContext,
 ) -> Option<optd_core::JoinType> {
     match ctx.expr(expr) {
@@ -1298,7 +1300,9 @@ fn classify_marker(
             op: UnaryOp::Not,
             expr,
         } => match ctx.expr(*expr) {
-            ExprData::ColumnRef(col) if *col == marker => Some(optd_core::JoinType::LeftAnti),
+            ExprData::ColumnRef(col) if *col == marker && !marker_nullable => {
+                Some(optd_core::JoinType::LeftAnti)
+            }
             _ => None,
         },
         _ => None,
@@ -1430,7 +1434,7 @@ pub(crate) fn convert_join_type(jt: &optd_core::JoinType) -> ToDFResult<DFJoinTy
         optd_core::JoinType::FullOuter => Ok(DFJoinType::Full),
         optd_core::JoinType::LeftSemi => Ok(DFJoinType::LeftSemi),
         optd_core::JoinType::LeftAnti => Ok(DFJoinType::LeftAnti),
-        optd_core::JoinType::LeftMark(_) => Ok(DFJoinType::LeftMark),
+        optd_core::JoinType::LeftMark { .. } => Ok(DFJoinType::LeftMark),
         optd_core::JoinType::Single => Ok(DFJoinType::Left),
     }
 }

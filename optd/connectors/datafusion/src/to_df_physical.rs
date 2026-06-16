@@ -389,7 +389,7 @@ async fn convert_join(
     if !free_columns_for(join.inner, ctx)?.is_empty() {
         return Err(ToPhysicalError::Unsupported("correlated join input".into()));
     }
-    if matches!(join.join_type, JoinType::LeftMark(_)) {
+    if matches!(join.join_type, JoinType::LeftMark { .. }) {
         return Err(ToPhysicalError::Unsupported("LeftMark join".into()));
     }
     if matches!(join.join_type, JoinType::Single) && !is_at_most_one_row(join.inner, ctx)? {

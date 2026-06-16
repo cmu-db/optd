@@ -4,6 +4,7 @@ pub mod from_df_logical;
 pub mod profiling;
 pub mod runner;
 pub mod setup;
+pub mod slt_reference;
 pub mod statistics;
 pub mod to_df_logical;
 pub mod to_df_physical;

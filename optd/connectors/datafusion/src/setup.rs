@@ -13,12 +13,12 @@ use datafusion::prelude::{ParquetReadOptions, SessionConfig, SessionContext};
 
 use crate::config::OptdExtensionConfig;
 
-const TPCH_DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/tpch/sf-0.1");
-const JOB_DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/job");
-const TPCH_TABLES: &[&str] = &[
+pub const TPCH_DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/tpch/sf-0.1");
+pub const JOB_DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/job");
+pub const TPCH_TABLES: &[&str] = &[
     "lineitem", "orders", "customer", "part", "partsupp", "supplier", "nation", "region",
 ];
-const JOB_TABLES: &[&str] = &[
+pub const JOB_TABLES: &[&str] = &[
     "aka_name",
     "aka_title",
     "cast_info",
@@ -118,7 +118,7 @@ pub fn session_context_with_information_schema() -> SessionContext {
     SessionContext::new_with_config(config)
 }
 
-fn parquet_path(data_dir: &str, table: &str) -> PathBuf {
+pub fn parquet_path(data_dir: &str, table: &str) -> PathBuf {
     PathBuf::from(data_dir).join(format!("{table}.parquet"))
 }
 

@@ -610,7 +610,7 @@ fn collect_correlated_subquery_joins(
 fn is_subquery_derived_join(join_type: &JoinType) -> bool {
     matches!(
         join_type,
-        JoinType::Single | JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark(_)
+        JoinType::Single | JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark { .. }
     )
 }
 
@@ -1180,7 +1180,10 @@ mod tests {
         .add(&mut query);
         let on = ExprData::Literal(ScalarValue::Boolean(true)).add(&mut query);
         let mark_join = OperatorData::Join(Join {
-            join_type: JoinType::LeftMark(marker),
+            join_type: JoinType::LeftMark {
+                marker,
+                nullable: false,
+            },
             on,
             outer,
             inner,

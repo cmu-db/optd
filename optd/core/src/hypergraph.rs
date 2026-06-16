@@ -84,7 +84,7 @@ impl HyperedgeJoinType {
     fn from_join_type(jt: &JoinType) -> Self {
         match jt {
             JoinType::Inner => Self::Inner,
-            JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark(_) => Self::LeftSemi,
+            JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark { .. } => Self::LeftSemi,
             JoinType::LeftOuter => Self::LeftOuter,
             JoinType::RightOuter => Self::LeftOuter, // treated symmetrically
             JoinType::FullOuter => Self::FullOuter,

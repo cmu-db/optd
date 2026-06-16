@@ -1,0 +1,45 @@
+# Adapted from DuckDB optimizer tests at bcb0c9c5306ccf1cf5c952ea9027740d2587edc0:
+# joins/delim_join_with_in_has_correct_results.test.
+
+statement ok
+CREATE TABLE subquery_in_t (t0 BIGINT);
+
+statement ok
+CREATE TABLE subquery_in_u (u0 BIGINT);
+
+statement ok
+INSERT INTO subquery_in_t VALUES (4), (NULL);
+
+statement ok
+INSERT INTO subquery_in_u VALUES (NULL), (NULL);
+
+query I
+SELECT
+  COUNT(*)
+FROM subquery_in_t
+WHERE t0 IN (
+    SELECT u0
+    FROM subquery_in_u
+    WHERE t0 = 4
+  );
+----
+0
+
+query I
+SELECT
+  COUNT(*)
+FROM subquery_in_t
+WHERE t0 NOT IN (
+    SELECT u0
+    FROM subquery_in_u
+    WHERE u0 IS NOT NULL
+  );
+----
+2
+
+query T
+SELECT result
+FROM explain_steps('SELECT COUNT(*) FROM subquery_in_t WHERE t0 IN (SELECT u0 FROM subquery_in_u WHERE t0 = 4)', 'flat')
+WHERE pass = 'SubqueryToJoin';
+----
+changed

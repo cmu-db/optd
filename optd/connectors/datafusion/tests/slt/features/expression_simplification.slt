@@ -1,0 +1,78 @@
+# Adapted from DuckDB optimizer tests at bcb0c9c5306ccf1cf5c952ea9027740d2587edc0:
+# conjunction_simplification.test, constant_folding.test,
+# comparison_simplification.test, case_simplification.test.
+
+statement ok
+CREATE TABLE expr_simplify_bool (id BIGINT, x BOOLEAN);
+
+statement ok
+INSERT INTO expr_simplify_bool VALUES (1, true), (2, false), (3, NULL);
+
+query IBB
+SELECT id, x AND true, x OR false
+FROM expr_simplify_bool
+ORDER BY id;
+----
+1	true	true
+2	false	false
+3	NULL	NULL
+
+query IB
+SELECT id, NOT (NOT x)
+FROM expr_simplify_bool
+ORDER BY id;
+----
+1	true
+2	false
+3	NULL
+
+query T
+SELECT result
+FROM explain_steps('SELECT id FROM expr_simplify_bool WHERE x AND true', 'flat')
+WHERE pass = 'ExprSimplify';
+----
+changed
+
+query T
+SELECT result
+FROM explain_steps('SELECT id FROM expr_simplify_bool WHERE NOT (NOT x)', 'flat')
+WHERE pass = 'ExprSimplify';
+----
+changed
+
+query I
+SELECT CASE WHEN 1 = 1 THEN 3 ELSE 5 END;
+----
+3
+
+query I
+SELECT CASE WHEN 1 IN (1 + 1, 2, 3, 4, NULL, 1) THEN (3 + 4) ELSE 2 + 2 + 2 END;
+----
+7
+
+query B
+SELECT 1 IN (1 + 1, 2, 3, 4, NULL);
+----
+NULL
+
+statement ok
+CREATE TABLE expr_simplify_num (id BIGINT, x BIGINT);
+
+statement ok
+INSERT INTO expr_simplify_num VALUES (1, 5), (2, NULL);
+
+query IBB
+SELECT id, x = NULL, x > NULL
+FROM expr_simplify_num
+ORDER BY id;
+----
+1	NULL	NULL
+2	NULL	NULL
+
+query II
+SELECT id, CASE WHEN 1 = 0 THEN x + 1 ELSE x + 2 END
+FROM expr_simplify_num
+WHERE x IS NOT NULL
+ORDER BY id;
+----
+1	7
