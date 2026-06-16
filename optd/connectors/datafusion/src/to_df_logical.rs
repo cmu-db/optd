@@ -11,11 +11,12 @@ use datafusion::arrow::datatypes::Field;
 use datafusion::common::{Column as DFColumn, TableReference};
 use datafusion::datasource::provider_as_source;
 use datafusion::execution::FunctionRegistry;
+use datafusion::functions::core::coalesce;
 use datafusion::functions_aggregate::count::count_all;
 use datafusion::functions_aggregate::expr_fn::{avg, count, max, min, sum};
 use datafusion::logical_expr::{
-    Expr as DFExpr, JoinType as DFJoinType, LogicalPlan, LogicalPlanBuilder, SortExpr, TableSource,
-    logical_plan::Values,
+    BinaryExpr, Expr as DFExpr, JoinType as DFJoinType, LogicalPlan, LogicalPlanBuilder,
+    Operator as DFOperator, SortExpr, TableSource, logical_plan::Values,
 };
 use datafusion::prelude::SessionContext;
 use optd_core::{
@@ -733,10 +734,14 @@ fn convert_join_condition_inner(
             })
         }
         ExprData::Binary {
-            op: BinaryOp::Eq,
+            op: BinaryOp::Eq | BinaryOp::IsNotDistinctFrom,
             left,
             right,
         } => {
+            let op = match expr.get(ctx) {
+                ExprData::Binary { op, .. } => *op,
+                _ => unreachable!(),
+            };
             let left_col = column_ref(left, ctx);
             let right_col = column_ref(right, ctx);
             let swap = left_col.is_some_and(|col| inner_cols.contains(&col))
@@ -744,7 +749,15 @@ fn convert_join_condition_inner(
             let (left, right) = if swap { (right, left) } else { (left, right) };
             let left = convert_expr(left, ctx, outer_refs, column_qualifiers)?;
             let right = convert_expr(right, ctx, outer_refs, column_qualifiers)?;
-            Ok(left.eq(right))
+            Ok(match op {
+                BinaryOp::Eq => left.eq(right),
+                BinaryOp::IsNotDistinctFrom => DFExpr::BinaryExpr(BinaryExpr {
+                    left: Box::new(left),
+                    op: DFOperator::IsNotDistinctFrom,
+                    right: Box::new(right),
+                }),
+                _ => unreachable!(),
+            })
         }
         _ => convert_expr(expr, ctx, outer_refs, column_qualifiers),
     }
@@ -924,6 +937,11 @@ fn convert_expr_replacing_column(
             )?;
             Ok(match op {
                 BinaryOp::Eq => l.eq(r),
+                BinaryOp::IsNotDistinctFrom => DFExpr::BinaryExpr(BinaryExpr {
+                    left: Box::new(l),
+                    op: DFOperator::IsNotDistinctFrom,
+                    right: Box::new(r),
+                }),
                 BinaryOp::NotEq => l.not_eq(r),
                 BinaryOp::Lt => l.lt(r),
                 BinaryOp::LtEq => l.lt_eq(r),
@@ -1008,6 +1026,11 @@ pub(crate) fn convert_expr(
             let r = convert_expr(right, ctx, outer_refs, column_qualifiers)?;
             Ok(match op {
                 BinaryOp::Eq => l.eq(r),
+                BinaryOp::IsNotDistinctFrom => DFExpr::BinaryExpr(BinaryExpr {
+                    left: Box::new(l),
+                    op: DFOperator::IsNotDistinctFrom,
+                    right: Box::new(r),
+                }),
                 BinaryOp::NotEq => l.not_eq(r),
                 BinaryOp::Lt => l.lt(r),
                 BinaryOp::LtEq => l.lt_eq(r),
@@ -1045,6 +1068,12 @@ pub(crate) fn convert_expr(
                 .map(|a| convert_expr(a, ctx, outer_refs, column_qualifiers))
                 .collect::<ToDFResult<_>>()?;
             match function {
+                ScalarFunction::Coalesce => Ok(DFExpr::ScalarFunction(
+                    datafusion::logical_expr::expr::ScalarFunction {
+                        func: coalesce(),
+                        args: df_args,
+                    },
+                )),
                 ScalarFunction::Extension(name) => match ctx.session.udf(&name) {
                     Ok(udf) => Ok(DFExpr::ScalarFunction(
                         datafusion::logical_expr::expr::ScalarFunction {

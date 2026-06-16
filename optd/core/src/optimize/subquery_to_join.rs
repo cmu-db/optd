@@ -6,21 +6,24 @@
 //!   column; that column is joined in and the expression is replaced with a
 //!   `ColumnRef` to it.
 //!
-//! - `Exists` / `InSubquery` as the **direct predicate** of a `Selection`
-//!   (possibly under a single `NOT`) → `JoinType::LeftSemi` / `JoinType::LeftAnti`.
-//!   The `Selection` is replaced by the join; no extra column is produced.
+//! - `Exists` and positive `InSubquery` as the **direct predicate** of a
+//!   `Selection` → `JoinType::LeftSemi`. `NOT EXISTS` → `JoinType::LeftAnti`.
+//!   `NOT IN` only becomes `LeftAnti` when both sides are proven non-null;
+//!   otherwise it is left unchanged to preserve SQL three-valued logic.
 //!
-//! - `Exists` / `InSubquery` used in any other expression context →
-//!   `JoinType::LeftMark(mark_col)`. A boolean mark column is produced by the join
-//!   and the subquery expression is replaced with a `ColumnRef` to it.
+//! - `Exists` used in any other expression context → `JoinType::LeftMark`.
+//!   A boolean mark column is produced by the join and the subquery expression
+//!   is replaced with a `ColumnRef` to it. Expression-context `IN`/`NOT IN` is
+//!   intentionally kept as a subquery until optd has a true tri-valued marker
+//!   representation.
 //!   If the marker is used only in conjunctive predicates the query optimizer
 //!   can usually translate the mark join into semi or anti semi joins.
 
 use arrow_schema::DataType;
 
 use crate::{
-    AvailableColumns, BinaryOp, Column, ColumnData, Expr, ExprData, Join, JoinType, Operator,
-    OperatorData, OptimizerContext, Selection,
+    AvailableColumns, BinaryOp, Column, ColumnData, ColumnNullability, Expr, ExprData, Join,
+    JoinType, Operator, OperatorData, OptimizerContext, ScalarValue, Selection,
     optimize::{
         OperatorRewrite, OperatorRewriteAdaptor, OptimizeResult, Pass, PassResult, QueryPass,
         Rewrite,
@@ -162,6 +165,13 @@ fn try_direct_semijoin(sel: &crate::Selection, ctx: &mut OptimizerContext) -> Op
         _ => return None,
     };
 
+    if negated
+        && in_expr.is_some()
+        && !not_in_inputs_proven_non_null(sel.input, in_expr, subquery, ctx)
+    {
+        return None;
+    }
+
     let join_type = if negated {
         JoinType::LeftAnti
     } else {
@@ -237,41 +247,7 @@ fn lift_subqueries_from_expr(
             };
             ExprRewrite::Replace(replacement)
         }
-        ExprData::InSubquery {
-            expr: lhs,
-            subquery,
-            negated,
-        } => {
-            let mark_col = fresh_mark_column("in_mark", ctx);
-            let rhs_col = single_available_column(subquery, ctx);
-            let rhs = ExprData::ColumnRef(rhs_col).add(&mut ctx.query);
-            let on = ExprData::Binary {
-                op: BinaryOp::Eq,
-                left: lhs,
-                right: rhs,
-            }
-            .add(&mut ctx.query);
-            let join = OperatorData::Join(Join {
-                join_type: JoinType::LeftMark(mark_col),
-                on,
-                outer: *input,
-                inner: subquery,
-            })
-            .add(&mut ctx.query);
-            *input = join;
-
-            let col_ref = ExprData::ColumnRef(mark_col).add(&mut ctx.query);
-            let replacement = if negated {
-                ExprData::Unary {
-                    op: crate::UnaryOp::Not,
-                    expr: col_ref,
-                }
-                .add(&mut ctx.query)
-            } else {
-                col_ref
-            };
-            ExprRewrite::Replace(replacement)
-        }
+        ExprData::InSubquery { .. } => ExprRewrite::Keep,
         ExprData::ScalarSubquery { subquery } => {
             let scalar_col = single_available_column(subquery, ctx);
             let on = ExprData::Literal(crate::ScalarValue::Boolean(true)).add(&mut ctx.query);
@@ -431,6 +407,51 @@ fn fresh_mark_column(name: &str, ctx: &mut OptimizerContext) -> Column {
     ColumnData::new(name, DataType::Boolean).add(&mut ctx.query)
 }
 
+fn not_in_inputs_proven_non_null(
+    outer_input: Operator,
+    lhs_expr: Option<Expr>,
+    subquery: Operator,
+    ctx: &mut OptimizerContext,
+) -> bool {
+    let Some(lhs_expr) = lhs_expr else {
+        return true;
+    };
+    expr_proven_non_null(lhs_expr, outer_input, ctx)
+        && column_proven_non_null(single_available_column(subquery, ctx), subquery, ctx)
+}
+
+fn expr_proven_non_null(expr: Expr, input: Operator, ctx: &mut OptimizerContext) -> bool {
+    match expr.get(&ctx.query) {
+        ExprData::Literal(ScalarValue::Null(_)) => false,
+        ExprData::Literal(_) => true,
+        ExprData::ColumnRef(column) => column_proven_non_null(*column, input, ctx),
+        ExprData::Unary {
+            op: crate::UnaryOp::IsNull | crate::UnaryOp::IsNotNull,
+            ..
+        } => true,
+        ExprData::Binary {
+            op: BinaryOp::IsNotDistinctFrom,
+            ..
+        }
+        | ExprData::Exists { .. }
+        | ExprData::InSubquery { .. }
+        | ExprData::Like { .. } => true,
+        _ => false,
+    }
+}
+
+fn column_proven_non_null(column: Column, input: Operator, ctx: &mut OptimizerContext) -> bool {
+    ctx.analyses
+        .get::<ColumnNullability>(&ctx.query, input)
+        .ok()
+        .and_then(|columns| {
+            columns
+                .into_iter()
+                .find_map(|(candidate, nullable)| (candidate == column).then_some(!nullable))
+        })
+        .unwrap_or(false)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -584,6 +605,157 @@ mod tests {
             panic!()
         };
         assert_eq!(*op, BinaryOp::Eq);
+    }
+
+    /// Nullable NOT IN cannot be lowered to an anti join. If the RHS contains
+    /// NULL and no equal match, SQL evaluates NOT IN to UNKNOWN, while a plain
+    /// anti join would incorrectly keep the outer row.
+    #[test]
+    fn nullable_not_in_direct_selection_remains_subquery() {
+        let mut ctx = QueryContext::new();
+        let uid = ColumnData::new("uid", DataType::Int64).add(&mut ctx);
+        let oid = ColumnData::new("oid", DataType::Int64).add(&mut ctx);
+
+        let users = OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![uid],
+        })
+        .add(&mut ctx);
+        let orders = OperatorData::Scan(Scan {
+            table: TableRef::bare("orders"),
+            columns: vec![oid],
+        })
+        .add(&mut ctx);
+
+        let uid_ref = ExprData::ColumnRef(uid).add(&mut ctx);
+        let not_in = ExprData::InSubquery {
+            expr: uid_ref,
+            subquery: orders,
+            negated: true,
+        }
+        .add(&mut ctx);
+        let sel = OperatorData::Selection(Selection {
+            predicate: not_in,
+            input: users,
+        })
+        .add(&mut ctx);
+        ctx.set_root(sel);
+
+        let ctx = run_pass(ctx);
+
+        let root = ctx.root().unwrap();
+        let OperatorData::Selection(sel) = ctx.operator(root) else {
+            panic!("expected unchanged selection, got {:?}", ctx.operator(root))
+        };
+        assert!(matches!(
+            ctx.expr(sel.predicate),
+            ExprData::InSubquery { negated: true, .. }
+        ));
+    }
+
+    /// NOT IN may become an anti join only after both sides are proven non-null.
+    /// The outer and inner IS NOT NULL filters model the nullability proof the
+    /// pass uses to avoid SQL UNKNOWN cases.
+    #[test]
+    fn non_null_not_in_direct_selection_becomes_anti_join() {
+        let mut ctx = QueryContext::new();
+        let uid = ColumnData::new("uid", DataType::Int64).add(&mut ctx);
+        let oid = ColumnData::new("oid", DataType::Int64).add(&mut ctx);
+
+        let users = OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![uid],
+        })
+        .add(&mut ctx);
+        let uid_ref_for_filter = ExprData::ColumnRef(uid).add(&mut ctx);
+        let uid_not_null = ExprData::Unary {
+            op: crate::UnaryOp::IsNotNull,
+            expr: uid_ref_for_filter,
+        }
+        .add(&mut ctx);
+        let users_non_null = OperatorData::Selection(Selection {
+            predicate: uid_not_null,
+            input: users,
+        })
+        .add(&mut ctx);
+
+        let orders = OperatorData::Scan(Scan {
+            table: TableRef::bare("orders"),
+            columns: vec![oid],
+        })
+        .add(&mut ctx);
+        let oid_ref_for_filter = ExprData::ColumnRef(oid).add(&mut ctx);
+        let oid_not_null = ExprData::Unary {
+            op: crate::UnaryOp::IsNotNull,
+            expr: oid_ref_for_filter,
+        }
+        .add(&mut ctx);
+        let orders_non_null = OperatorData::Selection(Selection {
+            predicate: oid_not_null,
+            input: orders,
+        })
+        .add(&mut ctx);
+
+        let uid_ref = ExprData::ColumnRef(uid).add(&mut ctx);
+        let not_in = ExprData::InSubquery {
+            expr: uid_ref,
+            subquery: orders_non_null,
+            negated: true,
+        }
+        .add(&mut ctx);
+        let sel = OperatorData::Selection(Selection {
+            predicate: not_in,
+            input: users_non_null,
+        })
+        .add(&mut ctx);
+        ctx.set_root(sel);
+
+        let ctx = run_pass(ctx);
+
+        let root = ctx.root().unwrap();
+        let OperatorData::Join(j) = ctx.operator(root) else {
+            panic!("expected anti join, got {:?}", ctx.operator(root))
+        };
+        assert_eq!(j.join_type, JoinType::LeftAnti);
+    }
+
+    /// Expression-context IN needs SQL's TRUE/FALSE/UNKNOWN result, which a
+    /// plain boolean mark column cannot represent yet, so it is left untouched.
+    #[test]
+    fn in_subquery_in_map_remains_subquery() {
+        let mut ctx = QueryContext::new();
+        let uid = ColumnData::new("uid", DataType::Int64).add(&mut ctx);
+        let oid = ColumnData::new("oid", DataType::Int64).add(&mut ctx);
+        let flag = ColumnData::new("flag", DataType::Boolean).add(&mut ctx);
+
+        let users = OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![uid],
+        })
+        .add(&mut ctx);
+        let orders = OperatorData::Scan(Scan {
+            table: TableRef::bare("orders"),
+            columns: vec![oid],
+        })
+        .add(&mut ctx);
+
+        let uid_ref = ExprData::ColumnRef(uid).add(&mut ctx);
+        let in_sub = ExprData::InSubquery {
+            expr: uid_ref,
+            subquery: orders,
+            negated: false,
+        }
+        .add(&mut ctx);
+        let map = OperatorData::Map(crate::Map {
+            computations: vec![(flag, in_sub)],
+            input: users,
+        })
+        .add(&mut ctx);
+        ctx.set_root(map);
+
+        let mut opt = OptimizerContext::new(ctx);
+        let result = SubqueryToJoin.run(&mut opt).unwrap();
+        assert_eq!(result, PassResult::Unchanged);
     }
 
     /// EXISTS inside a Map computation (non-direct context) → Mark join.

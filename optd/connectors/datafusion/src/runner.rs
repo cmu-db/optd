@@ -13,9 +13,9 @@ use datafusion_sqllogictest::{
     DFColumnType, DFSqlLogicTestError, convert_batches, convert_schema_to_types,
 };
 use optd_core::{
-    ExprSimplify, JoinOrdering, JoinTreeNormalize, MarkJoinToSemiJoin, OperatorRewriteAdaptor,
-    OptimizerContext, PassManager, PredicatePushdown, ProjectionElimination, QueryContext,
-    QueryFormatConfig, SubqueryToJoin, Unnesting,
+    ExprSimplify, HolisticUnnesting, JoinOrdering, JoinTreeNormalize, MarkJoinToSemiJoin,
+    OperatorRewriteAdaptor, OptimizerContext, PassManager, PredicatePushdown,
+    ProjectionElimination, QueryContext, QueryFormatConfig, SubqueryToJoin,
 };
 use sqllogictest::{AsyncDB, DBOutput};
 
@@ -42,7 +42,7 @@ pub fn default_pass_manager() -> PassManager {
     let mut pm = PassManager::new();
     pm.add_pass(SubqueryToJoin);
     pm.add_pass(OperatorRewriteAdaptor::new(ExprSimplify));
-    pm.add_pass(Unnesting);
+    pm.add_pass(HolisticUnnesting);
     pm.add_pass(OperatorRewriteAdaptor::new(MarkJoinToSemiJoin));
     pm.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
     pm.add_pass(JoinTreeNormalize::new());
@@ -343,7 +343,7 @@ mod tests {
     }
 
     #[test]
-    fn default_pass_manager_runs_unnesting_after_expr_simplify() {
+    fn default_pass_manager_runs_holistic_unnesting_after_expr_simplify() {
         let mut opt = optd_core::OptimizerContext::new(optd_core::QueryContext::new());
         let mut pm = super::default_pass_manager();
         pm.run(&mut opt).unwrap();
@@ -353,7 +353,10 @@ mod tests {
             .iter()
             .position(|pass| *pass == "ExprSimplify")
             .unwrap();
-        let unnesting = passes.iter().position(|pass| *pass == "Unnesting").unwrap();
+        let unnesting = passes
+            .iter()
+            .position(|pass| *pass == "HolisticUnnesting")
+            .unwrap();
 
         assert_eq!(unnesting, expr_simplify + 1);
     }

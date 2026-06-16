@@ -605,6 +605,7 @@ impl<'a> Exporter<'a> {
                 let right = self.export_expr(*right, scope)?;
                 let output_type = match op {
                     BinaryOp::Eq
+                    | BinaryOp::IsNotDistinctFrom
                     | BinaryOp::NotEq
                     | BinaryOp::Lt
                     | BinaryOp::LtEq
@@ -861,6 +862,7 @@ fn infer_expr_data_type(ctx: &QueryContext, expr: Expr) -> Option<DataType> {
         },
         ExprData::Binary { op, left, right: _ } => match op {
             BinaryOp::Eq
+            | BinaryOp::IsNotDistinctFrom
             | BinaryOp::NotEq
             | BinaryOp::Lt
             | BinaryOp::LtEq
@@ -903,6 +905,7 @@ fn unary_op_function_name(op: UnaryOp) -> &'static str {
 fn binary_op_function_name(op: BinaryOp) -> &'static str {
     match op {
         BinaryOp::Eq => "equal",
+        BinaryOp::IsNotDistinctFrom => "is_not_distinct_from",
         BinaryOp::NotEq => "not_equal",
         BinaryOp::Lt => "lt",
         BinaryOp::LtEq => "lte",
@@ -2267,6 +2270,11 @@ fn build_function_expr(name: &str, args: Vec<Expr>) -> ExprData {
     match (normalized.as_str(), args.as_slice()) {
         ("equal" | "eq", [left, right]) => ExprData::Binary {
             op: BinaryOp::Eq,
+            left: *left,
+            right: *right,
+        },
+        ("is_not_distinct_from" | "not_distinct", [left, right]) => ExprData::Binary {
+            op: BinaryOp::IsNotDistinctFrom,
             left: *left,
             right: *right,
         },

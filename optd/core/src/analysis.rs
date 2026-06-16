@@ -826,10 +826,11 @@ fn expr_nullability(
                 expr_nullability(ctx, input_nullability, *expr)
             }
         },
-        ExprData::Binary { left, right, .. } => {
-            Ok(expr_nullability(ctx, input_nullability, *left)?
-                || expr_nullability(ctx, input_nullability, *right)?)
-        }
+        ExprData::Binary { op, left, right } => match op {
+            crate::BinaryOp::IsNotDistinctFrom => Ok(false),
+            _ => Ok(expr_nullability(ctx, input_nullability, *left)?
+                || expr_nullability(ctx, input_nullability, *right)?),
+        },
         ExprData::Nary { exprs, .. } => {
             for expr in exprs {
                 if expr_nullability(ctx, input_nullability, *expr)? {
@@ -893,6 +894,7 @@ fn collect_non_null_columns_from_predicate(
         },
         ExprData::Binary { op, left, right } => match op {
             crate::BinaryOp::Eq
+            | crate::BinaryOp::IsNotDistinctFrom
             | crate::BinaryOp::NotEq
             | crate::BinaryOp::Lt
             | crate::BinaryOp::LtEq

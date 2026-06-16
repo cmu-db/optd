@@ -1,4 +1,5 @@
 pub mod expr_simplify;
+pub mod holistic_unnesting;
 pub mod join_ordering;
 pub mod join_tree_normalize;
 pub mod mark_join_to_semi_join;
@@ -7,6 +8,7 @@ pub mod projection_elimination;
 pub mod subquery_to_join;
 pub mod unnesting;
 pub use expr_simplify::ExprSimplify;
+pub use holistic_unnesting::HolisticUnnesting;
 pub use join_ordering::JoinOrdering;
 pub use join_tree_normalize::JoinTreeNormalize;
 pub use mark_join_to_semi_join::MarkJoinToSemiJoin;
@@ -275,58 +277,13 @@ fn operator_with_resolved_inputs(
     data: OperatorData,
     ctx: &OptimizerContext,
 ) -> (OperatorData, bool) {
-    match data {
-        OperatorData::Selection(mut s) => {
-            let changed = resolve_input(&mut s.input, ctx);
-            (OperatorData::Selection(s), changed)
-        }
-        OperatorData::Map(mut m) => {
-            let changed = resolve_input(&mut m.input, ctx);
-            (OperatorData::Map(m), changed)
-        }
-        OperatorData::Join(mut j) => {
-            let changed = resolve_input(&mut j.outer, ctx) | resolve_input(&mut j.inner, ctx);
-            (OperatorData::Join(j), changed)
-        }
-        OperatorData::CrossProduct(mut cp) => {
-            let changed = resolve_input(&mut cp.outer, ctx) | resolve_input(&mut cp.inner, ctx);
-            (OperatorData::CrossProduct(cp), changed)
-        }
-        OperatorData::Sort(mut s) => {
-            let changed = resolve_input(&mut s.input, ctx);
-            (OperatorData::Sort(s), changed)
-        }
-        OperatorData::Limit(mut l) => {
-            let changed = resolve_input(&mut l.input, ctx);
-            (OperatorData::Limit(l), changed)
-        }
-        OperatorData::Aggregation(mut a) => {
-            let changed = resolve_input(&mut a.input, ctx);
-            (OperatorData::Aggregation(a), changed)
-        }
-        OperatorData::Projection(mut p) => {
-            let changed = resolve_input(&mut p.input, ctx);
-            (OperatorData::Projection(p), changed)
-        }
-        OperatorData::Output(mut o) => {
-            let changed = resolve_input(&mut o.input, ctx);
-            (OperatorData::Output(o), changed)
-        }
-        OperatorData::Rename(mut r) => {
-            let changed = resolve_input(&mut r.input, ctx);
-            (OperatorData::Rename(r), changed)
-        }
-        data @ (OperatorData::Scan(_)
-        | OperatorData::TableFunction(_)
-        | OperatorData::ConstScan(_)) => (data, false),
-    }
-}
-
-fn resolve_input(input: &mut Operator, ctx: &OptimizerContext) -> bool {
-    let resolved = ctx.rewrites.resolve(*input);
-    let changed = resolved != *input;
-    *input = resolved;
-    changed
+    let mut changed = false;
+    let data = data.map_inputs(|input| {
+        let resolved = ctx.rewrites.resolve(input);
+        changed |= resolved != input;
+        resolved
+    });
+    (data, changed)
 }
 
 fn collect_post_order(root: Operator, ctx: &QueryContext, rewrites: &RewriteMap) -> Vec<Operator> {

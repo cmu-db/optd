@@ -11,9 +11,9 @@ use datafusion::{
     prelude::SessionContext,
 };
 use optd_core::{
-    ExprSimplify, JoinOrdering, MarkJoinToSemiJoin, OperatorRewriteAdaptor, OptimizerContext,
-    PassManager, PassProfile, PredicatePushdown, ProjectionElimination, QueryContext,
-    SubqueryToJoin, Unnesting,
+    ExprSimplify, HolisticUnnesting, JoinOrdering, JoinTreeNormalize, MarkJoinToSemiJoin,
+    OperatorRewriteAdaptor, OptimizerContext, PassManager, PassProfile, PredicatePushdown,
+    ProjectionElimination, QueryContext, SubqueryToJoin,
 };
 use optd_core::{Operator, OperatorData, optimize::join_ordering::collect_join_group_roots};
 
@@ -231,9 +231,10 @@ pub async fn profile_passes_sql(
     let mut pass_manager = PassManager::new();
     pass_manager.add_pass(SubqueryToJoin);
     pass_manager.add_pass(OperatorRewriteAdaptor::new(ExprSimplify));
-    pass_manager.add_pass(Unnesting);
+    pass_manager.add_pass(HolisticUnnesting);
     pass_manager.add_pass(OperatorRewriteAdaptor::new(MarkJoinToSemiJoin));
     pass_manager.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
+    pass_manager.add_pass(JoinTreeNormalize::new());
     pass_manager.add_pass(OperatorRewriteAdaptor::new(ProjectionElimination));
     if supports_join_ordering(&opt.query) {
         pass_manager.add_pass(JoinOrdering::new());

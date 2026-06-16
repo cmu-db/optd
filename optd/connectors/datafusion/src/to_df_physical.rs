@@ -417,7 +417,9 @@ async fn convert_join(
         )?);
     }
 
-    if let Some(on) = equijoin_keys(join.on, join.outer, join.inner, ctx, session, &left, &right)? {
+    if let Some((on, null_equality)) =
+        equijoin_keys(join.on, join.outer, join.inner, ctx, session, &left, &right)?
+    {
         let exec = HashJoinExec::try_new(
             left.exec,
             right.exec,
@@ -426,7 +428,7 @@ async fn convert_join(
             &df_join_type,
             None,
             PartitionMode::CollectLeft,
-            NullEquality::NullEqualsNothing,
+            null_equality,
             false,
         )?;
         return Ok(join_node(
@@ -520,20 +522,38 @@ fn equijoin_keys(
     session: &SessionContext,
     left: &PhysicalPlanNode,
     right: &PhysicalPlanNode,
-) -> ToPhysicalResult<Option<JoinOn>> {
+) -> ToPhysicalResult<Option<(JoinOn, NullEquality)>> {
     let conjuncts = split_conjuncts(expr, ctx);
     let outer_cols = available_columns_set(ctx, outer)?;
     let inner_cols = available_columns_set(ctx, inner)?;
     let mut keys = Vec::new();
+    let mut null_equality = None;
     for conjunct in conjuncts {
         let ExprData::Binary {
-            op: BinaryOp::Eq,
+            op: BinaryOp::Eq | BinaryOp::IsNotDistinctFrom,
             left: l,
             right: r,
         } = conjunct.get(ctx)
         else {
             return Ok(None);
         };
+        let key_null_equality = match conjunct.get(ctx) {
+            ExprData::Binary {
+                op: BinaryOp::Eq, ..
+            } => NullEquality::NullEqualsNothing,
+            ExprData::Binary {
+                op: BinaryOp::IsNotDistinctFrom,
+                ..
+            } => NullEquality::NullEqualsNull,
+            _ => unreachable!(),
+        };
+        if let Some(existing) = null_equality {
+            if existing != key_null_equality {
+                return Ok(None);
+            }
+        } else {
+            null_equality = Some(key_null_equality);
+        }
         let Some(l_col) = column_ref(*l, ctx) else {
             return Ok(None);
         };
@@ -553,7 +573,10 @@ fn equijoin_keys(
             physical_expr(right_expr, ctx, session, right.df_schema.as_ref())?,
         ));
     }
-    Ok(Some(keys))
+    Ok(Some((
+        keys,
+        null_equality.unwrap_or(NullEquality::NullEqualsNothing),
+    )))
 }
 
 fn join_filter(

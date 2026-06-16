@@ -31,10 +31,10 @@ pub use hypergraph::{
     QueryHypergraph, build_hypergraph, nodeset_iter, nodeset_min, nodeset_singleton,
 };
 pub use optimize::{
-    Direction, ExprSimplify, JoinOrdering, JoinTreeNormalize, MarkJoinToSemiJoin, OperatorRewrite,
-    OperatorRewriteAdaptor, OptimizeError, OptimizeResult, Pass, PassManager, PassProfile,
-    PassResult, PassTrace, PredicatePushdown, ProjectionElimination, QueryPass, Rewrite,
-    RewriteMap, SubqueryToJoin, Unnesting,
+    Direction, ExprSimplify, HolisticUnnesting, JoinOrdering, JoinTreeNormalize,
+    MarkJoinToSemiJoin, OperatorRewrite, OperatorRewriteAdaptor, OptimizeError, OptimizeResult,
+    Pass, PassManager, PassProfile, PassResult, PassTrace, PredicatePushdown,
+    ProjectionElimination, QueryPass, Rewrite, RewriteMap, SubqueryToJoin, Unnesting,
 };
 
 /// An opaque reference to a relational operator in a [`QueryContext`].
@@ -100,6 +100,69 @@ impl OperatorData {
     #[allow(clippy::should_implement_trait)]
     pub fn add(self, ctx: &mut QueryContext) -> Operator {
         QueryContext::add_operator(ctx, self)
+    }
+
+    /// Rebuilds this operator after applying `f` to each relational input.
+    ///
+    /// This centralizes the exhaustive input dispatch so generic tree rewrites
+    /// do not need to duplicate a `match` over every operator variant.
+    pub fn map_inputs(self, mut f: impl FnMut(Operator) -> Operator) -> Self {
+        self.try_map_inputs::<std::convert::Infallible>(|input| Ok(f(input)))
+            .expect("infallible input mapping cannot fail")
+    }
+
+    /// Rebuilds this operator after applying a fallible mapper to each input.
+    pub fn try_map_inputs<E>(
+        self,
+        mut f: impl FnMut(Operator) -> Result<Operator, E>,
+    ) -> Result<Self, E> {
+        Ok(match self {
+            OperatorData::Selection(mut operator) => {
+                operator.input = f(operator.input)?;
+                OperatorData::Selection(operator)
+            }
+            OperatorData::Map(mut operator) => {
+                operator.input = f(operator.input)?;
+                OperatorData::Map(operator)
+            }
+            OperatorData::Join(mut operator) => {
+                operator.outer = f(operator.outer)?;
+                operator.inner = f(operator.inner)?;
+                OperatorData::Join(operator)
+            }
+            OperatorData::CrossProduct(mut operator) => {
+                operator.outer = f(operator.outer)?;
+                operator.inner = f(operator.inner)?;
+                OperatorData::CrossProduct(operator)
+            }
+            OperatorData::Sort(mut operator) => {
+                operator.input = f(operator.input)?;
+                OperatorData::Sort(operator)
+            }
+            OperatorData::Limit(mut operator) => {
+                operator.input = f(operator.input)?;
+                OperatorData::Limit(operator)
+            }
+            OperatorData::Aggregation(mut operator) => {
+                operator.input = f(operator.input)?;
+                OperatorData::Aggregation(operator)
+            }
+            OperatorData::Projection(mut operator) => {
+                operator.input = f(operator.input)?;
+                OperatorData::Projection(operator)
+            }
+            OperatorData::Output(mut operator) => {
+                operator.input = f(operator.input)?;
+                OperatorData::Output(operator)
+            }
+            OperatorData::Rename(mut operator) => {
+                operator.input = f(operator.input)?;
+                OperatorData::Rename(operator)
+            }
+            OperatorData::Scan(operator) => OperatorData::Scan(operator),
+            OperatorData::TableFunction(operator) => OperatorData::TableFunction(operator),
+            OperatorData::ConstScan(operator) => OperatorData::ConstScan(operator),
+        })
     }
 }
 
@@ -442,6 +505,8 @@ pub enum UnaryOp {
 pub enum BinaryOp {
     /// Equality comparison.
     Eq,
+    /// Null-safe equality comparison (`IS NOT DISTINCT FROM`).
+    IsNotDistinctFrom,
     /// Inequality comparison.
     NotEq,
     /// Less-than comparison.
@@ -1316,6 +1381,7 @@ impl<'a> QueryFormatter<'a> {
     fn format_binary_op(&self, op: BinaryOp) -> &'static str {
         match op {
             BinaryOp::Eq => "=",
+            BinaryOp::IsNotDistinctFrom => "IS NOT DISTINCT FROM",
             BinaryOp::NotEq => "!=",
             BinaryOp::Lt => "<",
             BinaryOp::LtEq => "<=",
@@ -2700,6 +2766,85 @@ mod tests {
         assert!(rendered.contains("\u{1b}["));
         assert!(rendered.contains("analysis::free_columns"));
         assert!(rendered.contains("id(#0)"));
+    }
+
+    #[test]
+    fn operator_data_map_inputs_rewrites_unary_and_binary_inputs() {
+        let mut ctx = QueryContext::new();
+        let left_col = ColumnData::new("left_id", DataType::Int64).add(&mut ctx);
+        let right_col = ColumnData::new("right_id", DataType::Int64).add(&mut ctx);
+        let replacement_col = ColumnData::new("replacement_id", DataType::Int64).add(&mut ctx);
+        let left = OperatorData::Scan(Scan {
+            table: TableRef::bare("left_t"),
+            columns: vec![left_col],
+        })
+        .add(&mut ctx);
+        let right = OperatorData::Scan(Scan {
+            table: TableRef::bare("right_t"),
+            columns: vec![right_col],
+        })
+        .add(&mut ctx);
+        let replacement = OperatorData::Scan(Scan {
+            table: TableRef::bare("replacement_t"),
+            columns: vec![replacement_col],
+        })
+        .add(&mut ctx);
+        let predicate = ExprData::Literal(ScalarValue::Boolean(true)).add(&mut ctx);
+
+        let selection = OperatorData::Selection(Selection {
+            predicate,
+            input: left,
+        })
+        .map_inputs(|input| if input == left { replacement } else { input });
+        assert!(matches!(
+            selection,
+            OperatorData::Selection(Selection { input, .. }) if input == replacement
+        ));
+
+        let join = OperatorData::Join(Join {
+            join_type: JoinType::Inner,
+            on: predicate,
+            outer: left,
+            inner: right,
+        })
+        .map_inputs(|input| if input == right { replacement } else { input });
+        assert!(matches!(
+            join,
+            OperatorData::Join(Join { outer, inner, .. }) if outer == left && inner == replacement
+        ));
+    }
+
+    #[test]
+    fn operator_data_try_map_inputs_short_circuits_errors_and_leaves_leaf_operators() {
+        let mut ctx = QueryContext::new();
+        let col = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("t"),
+            columns: vec![col],
+        })
+        .add(&mut ctx);
+        let predicate = ExprData::Literal(ScalarValue::Boolean(true)).add(&mut ctx);
+
+        let err = OperatorData::Selection(Selection {
+            predicate,
+            input: scan,
+        })
+        .try_map_inputs(|_| Err::<Operator, _>("stop"))
+        .unwrap_err();
+        assert_eq!(err, "stop");
+
+        let mut calls = 0;
+        let leaf = OperatorData::Scan(Scan {
+            table: TableRef::bare("leaf"),
+            columns: vec![col],
+        })
+        .try_map_inputs::<()>(|input| {
+            calls += 1;
+            Ok(input)
+        })
+        .unwrap();
+        assert!(matches!(leaf, OperatorData::Scan(_)));
+        assert_eq!(calls, 0);
     }
 
     #[cfg(feature = "serde")]

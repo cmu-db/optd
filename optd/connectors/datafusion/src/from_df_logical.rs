@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use datafusion::common::ScalarValue as DFScalarValue;
+use datafusion::common::{NullEquality, ScalarValue as DFScalarValue};
 use datafusion::logical_expr::{
     Aggregate, BinaryExpr, Expr as DFExpr, Filter, Join, JoinType as DFJoinType, Limit,
     LogicalPlan, Operator as DFOperator, Projection, Sort, TableScan,
@@ -605,7 +605,10 @@ fn convert_join(
             let left = convert_expr(l, ctx, bindings)?;
             let right = convert_expr(r, ctx, bindings)?;
             Ok(ExprData::Binary {
-                op: BinaryOp::Eq,
+                op: match join.null_equality {
+                    NullEquality::NullEqualsNothing => BinaryOp::Eq,
+                    NullEquality::NullEqualsNull => BinaryOp::IsNotDistinctFrom,
+                },
                 left,
                 right,
             }
@@ -971,6 +974,7 @@ fn convert_scalar(scalar: &DFScalarValue) -> FromDFResult<ScalarValue> {
 fn convert_binary_op(op: &DFOperator) -> Option<BinaryOp> {
     match op {
         DFOperator::Eq => Some(BinaryOp::Eq),
+        DFOperator::IsNotDistinctFrom => Some(BinaryOp::IsNotDistinctFrom),
         DFOperator::NotEq => Some(BinaryOp::NotEq),
         DFOperator::Lt => Some(BinaryOp::Lt),
         DFOperator::LtEq => Some(BinaryOp::LtEq),

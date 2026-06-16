@@ -555,7 +555,13 @@ fn conjuncts(expr: Expr, ctx: &QueryContext) -> Vec<Expr> {
             exprs,
         } => exprs.iter().flat_map(|&e| conjuncts(e, ctx)).collect(),
         ExprData::Binary {
-            op: BinaryOp::Eq | BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq,
+            op:
+                BinaryOp::Eq
+                | BinaryOp::IsNotDistinctFrom
+                | BinaryOp::Lt
+                | BinaryOp::LtEq
+                | BinaryOp::Gt
+                | BinaryOp::GtEq,
             ..
         } => vec![expr],
         _ => vec![expr],

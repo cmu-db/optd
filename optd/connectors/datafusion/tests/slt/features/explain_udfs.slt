@@ -130,11 +130,12 @@ ORDER BY step;
 0	initial	initial
 1	SubqueryToJoin	unchanged
 2	ExprSimplify	unchanged
-3	MarkJoinToSemiJoin	unchanged
-4	PredicatePushdown	unchanged
-5	JoinTreeNormalize	unchanged
-6	ProjectionElimination	unchanged
-7	JoinOrdering	unchanged
+3	HolisticUnnesting	unchanged
+4	MarkJoinToSemiJoin	unchanged
+5	PredicatePushdown	unchanged
+6	JoinTreeNormalize	unchanged
+7	ProjectionElimination	unchanged
+8	JoinOrdering	unchanged
 
 query T
 SELECT pass

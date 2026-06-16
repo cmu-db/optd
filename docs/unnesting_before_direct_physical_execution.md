@@ -24,12 +24,12 @@ SQL
 
 ## Phase 1: TPC-H Unnesting
 
-Add and grow an optimizer pass named `Unnesting` in this pass order:
+The default pipeline now uses `HolisticUnnesting` in this pass order:
 
 ```text
 SubqueryToJoin
 ExprSimplify
-Unnesting
+HolisticUnnesting
 MarkJoinToSemiJoin
 PredicatePushdown
 ProjectionElimination
@@ -86,8 +86,8 @@ For the current compatibility phase:
 
 - Keep SQL runner tests on the logical path.
 - Keep `to_df_physical` tests as converter-only coverage.
-- Test that the optimizer pipeline includes `Unnesting` after `ExprSimplify`.
-- Test that `Unnesting` lifts correlated semi-join predicates and scalar aggregate predicates, then verify the rewritten inner input with `FreeColumns`.
+- Test that the optimizer pipeline includes `HolisticUnnesting` after `ExprSimplify`.
+- Test that `HolisticUnnesting` lifts correlated semi-join predicates and scalar aggregate predicates, then verify the rewritten inner input with `FreeColumns`.
 
 For Phase 1 implementation:
 
