@@ -1707,7 +1707,6 @@ fn combine_join_columns(
     }
 }
 
-#[cfg(test)]
 pub(crate) fn join_selectivity(
     left: &CardinalityProfile,
     right: &CardinalityProfile,
@@ -1716,6 +1715,10 @@ pub(crate) fn join_selectivity(
 ) -> Estimate {
     join_selectivity_with_classes(left, right, predicates, ctx).selectivity
 }
+
+// ---------------------------------------------------------------------------
+// Selectivity estimation
+// ---------------------------------------------------------------------------
 
 struct JoinSelectivityEstimate {
     selectivity: Estimate,
@@ -1750,6 +1753,9 @@ fn join_selectivity_with_classes(
         }
     }
 
+    // Process the most selective equality first, then union equivalent columns.
+    // This avoids multiplying selectivity again for transitive predicates such
+    // as a = b AND b = c AND a = c.
     equality_edges.sort_by(|a, b| b.chosen_ndv.value.total_cmp(&a.chosen_ndv.value));
     let mut equality_selectivity = 1.0;
     let mut match_probability = 0.0_f64;
@@ -1964,6 +1970,8 @@ fn range_selectivity(profile: &ColumnProfile, literal: &ScalarValue, op: BinaryO
     let Some(value) = scalar_to_f64(literal) else {
         return Estimate::derived(0.33, Some(0.0), Some(1.0));
     };
+    // Assume values are uniformly distributed over the collected [min, max]
+    // range. Missing or non-numeric bounds use the generic range fallback above.
     let width = (max - min).abs().max(1.0);
     let selected = match op {
         BinaryOp::Lt | BinaryOp::LtEq => ((value - min) / width).clamp(0.0, 1.0),
@@ -2550,7 +2558,10 @@ impl CachedAnalysis for AvailableColumns {
             }
             OperatorData::Join(data) => {
                 let mut columns = analyses.get::<AvailableColumns>(ctx, data.outer)?;
-                if !matches!(data.join_type, JoinType::LeftSemi | JoinType::LeftAnti) {
+                if !matches!(
+                    data.join_type,
+                    JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark { .. }
+                ) {
                     columns.extend(analyses.get::<AvailableColumns>(ctx, data.inner)?);
                 }
                 columns.extend(analyses.get::<CreatedColumns>(ctx, op)?);

@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 
 use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::common::{DataFusionError, Result as DFResult, ScalarValue as DFScalarValue};
+use datafusion::common::{
+    DataFusionError, Result as DFResult, ScalarValue as DFScalarValue, TableReference,
+};
 use datafusion::prelude::SessionContext;
 use optd_core::{Catalog, ColumnStatistics, ScalarValue, TableRef, TableStatistics};
 
@@ -14,7 +16,25 @@ pub async fn collect_table_statistics(
     table_name: &str,
     columns: &[&str],
 ) -> DFResult<TableStatistics> {
-    let sql = statistics_sql(table_name, columns);
+    let sql = statistics_sql(&quote_ident(table_name), columns);
+    collect_table_statistics_from_sql(session, &sql, columns).await
+}
+
+/// Collects table and column statistics for a resolved DataFusion table reference.
+pub async fn collect_table_statistics_for_table_ref(
+    session: &SessionContext,
+    table: &TableReference,
+    columns: &[&str],
+) -> DFResult<TableStatistics> {
+    let sql = statistics_sql(&quote_table_reference(table), columns);
+    collect_table_statistics_from_sql(session, &sql, columns).await
+}
+
+async fn collect_table_statistics_from_sql(
+    session: &SessionContext,
+    sql: &str,
+    columns: &[&str],
+) -> DFResult<TableStatistics> {
     let batches = session.sql(&sql).await?.collect().await?;
     let batch = first_batch(&batches)?;
 
@@ -59,7 +79,7 @@ pub async fn collect_and_set_table_statistics(
         .map_err(|err| DataFusionError::External(Box::new(err)))
 }
 
-fn statistics_sql(table_name: &str, columns: &[&str]) -> String {
+fn statistics_sql(table_sql: &str, columns: &[&str]) -> String {
     let mut exprs = vec!["COUNT(*) AS \"row_count\"".to_string()];
     for column in columns {
         let quoted = quote_ident(column);
@@ -70,15 +90,26 @@ fn statistics_sql(table_name: &str, columns: &[&str]) -> String {
         exprs.push(format!("MIN({quoted}) AS \"{column}__lower\""));
         exprs.push(format!("MAX({quoted}) AS \"{column}__upper\""));
     }
-    format!(
-        "SELECT {} FROM {}",
-        exprs.join(", "),
-        quote_ident(table_name)
-    )
+    format!("SELECT {} FROM {table_sql}", exprs.join(", "))
 }
 
 fn quote_ident(ident: &str) -> String {
     format!("\"{}\"", ident.replace('"', "\"\""))
+}
+
+fn quote_table_reference(table: &TableReference) -> String {
+    match (table.catalog(), table.schema()) {
+        (Some(catalog), Some(schema)) => {
+            format!(
+                "{}.{}.{}",
+                quote_ident(catalog),
+                quote_ident(schema),
+                quote_ident(table.table())
+            )
+        }
+        (None, Some(schema)) => format!("{}.{}", quote_ident(schema), quote_ident(table.table())),
+        _ => quote_ident(table.table()),
+    }
 }
 
 fn first_batch(batches: &[RecordBatch]) -> DFResult<&RecordBatch> {
@@ -169,5 +200,41 @@ mod tests {
         );
         assert_eq!(stats.column_statistics["name"].frequency, Some(3));
         assert_eq!(stats.column_statistics["name"].distinct, Some(2));
+    }
+
+    #[tokio::test]
+    async fn collect_table_statistics_handles_schema_qualified_tables() {
+        use datafusion::common::TableReference;
+
+        let session = SessionContext::new();
+        session
+            .sql("CREATE SCHEMA s")
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(Int64Array::from(vec![1, 2, 2, 4]))],
+        )
+        .unwrap();
+        let table = MemTable::try_new(schema, vec![vec![batch]]).unwrap();
+        session
+            .register_table(TableReference::partial("s", "t"), Arc::new(table))
+            .unwrap();
+
+        let table_ref = TableReference::partial("s", "t");
+        let stats = collect_table_statistics_for_table_ref(&session, &table_ref, &["id"])
+            .await
+            .unwrap();
+
+        assert_eq!(stats.row_count, Some(4));
+        assert_eq!(stats.column_statistics["id"].distinct, Some(3));
+        assert_eq!(
+            stats.column_statistics["id"].upper_bound,
+            Some(ScalarValue::Int64(4))
+        );
     }
 }

@@ -5,7 +5,10 @@
 
 use std::collections::HashMap;
 
-use crate::analysis::{connecting_edge_indices, join_profile_with_selectivity};
+use crate::analysis::{
+    CardinalityEstimationV1, connecting_edge_indices, join_profile_with_selectivity,
+    join_selectivity,
+};
 use crate::hypergraph::{NodeSet, QueryHypergraph, nodeset_min, nodeset_singleton};
 use crate::{
     CardinalityProfile, Estimate, ExprData, Join, JoinInputProfiles, JoinType, NaryOp, Operator,
@@ -54,6 +57,135 @@ impl Statistics for UniformStatistics {
             Estimate::derived(0.1, Some(0.0), Some(1.0))
         } else {
             Estimate::exact(1.0)
+        }
+    }
+}
+
+mod cost_model {
+    use crate::QueryHypergraph;
+    use crate::{BinaryOp, ExprData, NaryOp, QueryContext};
+
+    /// How expensive a join is to execute once cardinality estimation has
+    /// predicted its output rows. Hash-like joins process inputs plus output;
+    /// nested-loop-like joins still pay pairwise comparison work.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(super) enum JoinCostClass {
+        HashLike,
+        NestedLoopLike,
+    }
+
+    /// Estimates execution work for a candidate join.
+    ///
+    /// `*_width` is currently a column-count proxy for row materialization
+    /// cost. Cardinality estimation decides how many rows are produced; this
+    /// function decides whether producing them looks hash-like or pairwise.
+    pub(super) fn join_work_cost(
+        left_rows: f64,
+        left_width: usize,
+        right_rows: f64,
+        right_width: usize,
+        output_rows: f64,
+        output_width: usize,
+        class: JoinCostClass,
+    ) -> f64 {
+        match class {
+            JoinCostClass::HashLike => {
+                let left_bytes = left_rows * left_width.max(1) as f64;
+                let right_bytes = right_rows * right_width.max(1) as f64;
+                let output_bytes = output_rows * output_width.max(1) as f64;
+                left_bytes + right_bytes + (left_rows * right_rows).powf(0.75) + output_bytes
+            }
+            JoinCostClass::NestedLoopLike => left_rows * right_rows + output_rows,
+        }
+    }
+
+    pub(super) fn join_cost_class(
+        edge_indices: &[usize],
+        hg: &QueryHypergraph,
+        ctx: &QueryContext,
+    ) -> JoinCostClass {
+        if edge_indices.iter().any(|idx| {
+            hg.edges[*idx]
+                .predicate
+                .is_some_and(|predicate| contains_hash_join_key(predicate, ctx))
+        }) {
+            JoinCostClass::HashLike
+        } else {
+            JoinCostClass::NestedLoopLike
+        }
+    }
+
+    fn contains_hash_join_key(expr: crate::Expr, ctx: &QueryContext) -> bool {
+        match expr.get(ctx) {
+            ExprData::Binary { op, left, right }
+                if matches!(op, BinaryOp::Eq | BinaryOp::IsNotDistinctFrom) =>
+            {
+                matches!(
+                    (left.get(ctx), right.get(ctx)),
+                    (ExprData::ColumnRef(_), ExprData::ColumnRef(_))
+                )
+            }
+            ExprData::Nary {
+                op: NaryOp::And,
+                exprs,
+            } => exprs.iter().any(|expr| contains_hash_join_key(*expr, ctx)),
+            _ => false,
+        }
+    }
+}
+
+#[cfg(test)]
+use cost_model::JoinCostClass;
+use cost_model::{join_cost_class, join_work_cost};
+
+/// Cardinality-analysis backed statistics for one join hypergraph.
+struct CardinalityStatistics<'a> {
+    ctx: &'a QueryContext,
+    base_profiles: Vec<CardinalityProfile>,
+}
+
+impl<'a> CardinalityStatistics<'a> {
+    fn new(
+        ctx: &'a QueryContext,
+        analyses: &mut crate::AnalysisContext,
+        hg: &QueryHypergraph,
+    ) -> OptimizeResult<Self> {
+        let base_profiles = hg
+            .nodes
+            .iter()
+            .map(|node| {
+                analyses
+                    .get::<CardinalityEstimationV1>(ctx, node.root)
+                    .map_err(|err| OptimizeError::PassError {
+                        pass: "JoinOrdering",
+                        message: err.to_string(),
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { ctx, base_profiles })
+    }
+}
+
+impl Statistics for CardinalityStatistics<'_> {
+    fn base_profile(&self, node_idx: usize, _hg: &QueryHypergraph) -> CardinalityProfile {
+        self.base_profiles[node_idx].clone()
+    }
+
+    fn join_selectivity(
+        &self,
+        left: NodeSet,
+        right: NodeSet,
+        hg: &QueryHypergraph,
+        inputs: JoinInputProfiles<'_>,
+    ) -> Estimate {
+        let predicates = connecting_edge_indices(left, right, hg)
+            .into_iter()
+            .filter_map(|idx| hg.edges[idx].predicate)
+            .collect::<Vec<_>>();
+        if predicates.is_empty() {
+            Estimate::exact(1.0)
+        } else {
+            join_selectivity(inputs.left, inputs.right, &predicates, self.ctx)
         }
     }
 }
@@ -108,6 +240,7 @@ impl JoinTree {
 // ---------------------------------------------------------------------------
 
 struct DPhyp<'a> {
+    ctx: &'a QueryContext,
     hg: &'a QueryHypergraph,
     stats: &'a dyn Statistics,
     /// DP table: NodeSet → best known plan for that subset.
@@ -122,8 +255,9 @@ struct PlanState {
 }
 
 impl<'a> DPhyp<'a> {
-    fn new(hg: &'a QueryHypergraph, stats: &'a dyn Statistics) -> Self {
+    fn new(ctx: &'a QueryContext, hg: &'a QueryHypergraph, stats: &'a dyn Statistics) -> Self {
         Self {
+            ctx,
             hg,
             stats,
             dp: HashMap::new(),
@@ -244,7 +378,17 @@ impl<'a> DPhyp<'a> {
             .map(|idx| self.hg.edges[*idx].join_type.to_ir_join_type())
             .unwrap_or(JoinType::Inner);
         let profile = join_profile_with_selectivity(&left.profile, &right.profile, join_type, sel);
-        let new_cost = left.cost + right.cost + profile.rows.value;
+        let class = join_cost_class(&edge_indices, self.hg, self.ctx);
+        let work_cost = join_work_cost(
+            left.profile.rows.value,
+            left.profile.columns.len(),
+            right.profile.rows.value,
+            right.profile.columns.len(),
+            profile.rows.value,
+            profile.columns.len(),
+            class,
+        );
+        let new_cost = left.cost + right.cost + work_cost;
         let combined = s1 | s2;
 
         let better = self
@@ -448,23 +592,32 @@ fn collect_roots_rec(
 // ---------------------------------------------------------------------------
 
 pub struct JoinOrdering {
-    pub stats: Box<dyn Statistics>,
+    stats: JoinOrderingStatistics,
     last_run: Option<(usize, u64)>,
+}
+
+enum JoinOrderingStatistics {
+    Cardinality,
+    Custom(Box<dyn Statistics>),
 }
 
 impl JoinOrdering {
     pub fn new() -> Self {
         Self {
-            stats: Box::new(UniformStatistics),
+            stats: JoinOrderingStatistics::Cardinality,
             last_run: None,
         }
     }
 
     pub fn with_stats(stats: Box<dyn Statistics>) -> Self {
         Self {
-            stats,
+            stats: JoinOrderingStatistics::Custom(stats),
             last_run: None,
         }
+    }
+
+    pub fn uniform() -> Self {
+        Self::with_stats(Box::new(UniformStatistics))
     }
 }
 
@@ -494,6 +647,8 @@ impl QueryPass for JoinOrdering {
             return Ok(PassResult::Unchanged);
         };
 
+        ctx.analyses.clear();
+
         let group_roots = collect_join_group_roots(&ctx.query, root);
         if group_roots.is_empty() {
             return Ok(PassResult::Unchanged);
@@ -516,8 +671,19 @@ impl QueryPass for JoinOrdering {
             groups
                 .iter()
                 .try_fold(Vec::new(), |mut replacements, (group_root, hg)| {
-                    let mut solver = DPhyp::new(hg, self.stats.as_ref());
-                    if let Some(tree) = solver.solve()? {
+                    let tree = match &self.stats {
+                        JoinOrderingStatistics::Cardinality => {
+                            let stats =
+                                CardinalityStatistics::new(&ctx.query, &mut ctx.analyses, hg)?;
+                            let mut solver = DPhyp::new(&ctx.query, hg, &stats);
+                            solver.solve()?
+                        }
+                        JoinOrderingStatistics::Custom(stats) => {
+                            let mut solver = DPhyp::new(&ctx.query, hg, stats.as_ref());
+                            solver.solve()?
+                        }
+                    };
+                    if let Some(tree) = tree {
                         replacements
                             .push((*group_root, join_tree_to_ir(&tree, hg, &mut ctx.query)));
                     }
@@ -545,12 +711,13 @@ impl QueryPass for JoinOrdering {
 mod tests {
     use super::*;
     use crate::{
-        AnalysisContext, BinaryOp, ColumnData, ExprData, HypergraphNode, Join, JoinType,
-        OperatorData, OptimizerContext, Output, PassManager, QueryContext, QueryHypergraph,
-        ScalarValue, Scan, Selection, TableRef,
+        AnalysisContext, BinaryOp, Catalog, Column, ColumnData, ColumnStatistics, ExprData,
+        HypergraphNode, Join, JoinType, MemoryCatalog, OperatorData, OptimizerContext, Output,
+        PassManager, QueryContext, QueryHypergraph, ScalarValue, Scan, Selection, TableRef,
+        TableStatistics,
     };
-    use arrow_schema::DataType;
-    use std::{cell::RefCell, rc::Rc};
+    use arrow_schema::{DataType, Field, Schema};
+    use std::{cell::RefCell, rc::Rc, sync::Arc};
 
     fn three_way_chain() -> (QueryContext, Operator) {
         let mut ctx = QueryContext::new();
@@ -605,6 +772,55 @@ mod tests {
         (ctx, join_abc)
     }
 
+    fn two_way_join_with_predicate(
+        predicate: impl FnOnce(&mut QueryContext, Column, Column) -> crate::Expr,
+    ) -> (QueryContext, Operator) {
+        let mut ctx = QueryContext::new();
+        let a = ColumnData::new("a", DataType::Int64).add(&mut ctx);
+        let b = ColumnData::new("b", DataType::Int64).add(&mut ctx);
+        let sa = OperatorData::Scan(Scan {
+            table: TableRef::bare("A"),
+            columns: vec![a],
+        })
+        .add(&mut ctx);
+        let sb = OperatorData::Scan(Scan {
+            table: TableRef::bare("B"),
+            columns: vec![b],
+        })
+        .add(&mut ctx);
+        let on = predicate(&mut ctx, a, b);
+        let join = OperatorData::Join(Join {
+            join_type: JoinType::Inner,
+            on,
+            outer: sa,
+            inner: sb,
+        })
+        .add(&mut ctx);
+        ctx.set_root(join);
+        (ctx, join)
+    }
+
+    fn binary_predicate(
+        ctx: &mut QueryContext,
+        op: BinaryOp,
+        left: Column,
+        right: Column,
+    ) -> crate::Expr {
+        ExprData::Binary {
+            op,
+            left: ExprData::ColumnRef(left).add(ctx),
+            right: ExprData::ColumnRef(right).add(ctx),
+        }
+        .add(ctx)
+    }
+
+    fn join_cost_class_for_root(ctx: &QueryContext, root: Operator) -> JoinCostClass {
+        let mut analyses = AnalysisContext::new();
+        let hg = build_hypergraph(ctx, &mut analyses, root);
+        let edge_indices = connecting_edge_indices(nodeset_singleton(0), nodeset_singleton(1), &hg);
+        join_cost_class(&edge_indices, &hg, ctx)
+    }
+
     #[test]
     fn dphyp_three_way_chain_produces_plan() {
         let (ctx, root) = three_way_chain();
@@ -612,7 +828,7 @@ mod tests {
         let hg = build_hypergraph(&ctx, &mut analyses, root);
         assert_eq!(hg.nodes.len(), 3);
 
-        let mut solver = DPhyp::new(&hg, &UniformStatistics);
+        let mut solver = DPhyp::new(&ctx, &hg, &UniformStatistics);
         let tree = solver
             .solve()
             .expect("solver should not error")
@@ -685,7 +901,7 @@ mod tests {
         let (ctx, root) = three_way_chain();
         let mut analyses = AnalysisContext::new();
         let hg = build_hypergraph(&ctx, &mut analyses, root);
-        let mut solver = DPhyp::new(&hg, &SkewStats);
+        let mut solver = DPhyp::new(&ctx, &hg, &SkewStats);
 
         let tree = solver
             .solve()
@@ -693,6 +909,161 @@ mod tests {
             .expect("DPhyp should find a plan");
 
         assert!(tree.has_join_with_leaves(nodeset_singleton(1) | nodeset_singleton(2)));
+    }
+
+    #[test]
+    fn equi_join_is_hash_like_for_costing() {
+        let (ctx, root) =
+            two_way_join_with_predicate(|ctx, a, b| binary_predicate(ctx, BinaryOp::Eq, a, b));
+
+        assert_eq!(
+            join_cost_class_for_root(&ctx, root),
+            JoinCostClass::HashLike
+        );
+    }
+
+    #[test]
+    fn is_not_distinct_from_join_is_hash_like_for_costing() {
+        let (ctx, root) = two_way_join_with_predicate(|ctx, a, b| {
+            binary_predicate(ctx, BinaryOp::IsNotDistinctFrom, a, b)
+        });
+
+        assert_eq!(
+            join_cost_class_for_root(&ctx, root),
+            JoinCostClass::HashLike
+        );
+    }
+
+    #[test]
+    fn mixed_equi_and_residual_join_is_hash_like_for_costing() {
+        let (ctx, root) = two_way_join_with_predicate(|ctx, a, b| {
+            let eq = binary_predicate(ctx, BinaryOp::Eq, a, b);
+            let residual = binary_predicate(ctx, BinaryOp::Gt, a, b);
+            ExprData::Nary {
+                op: NaryOp::And,
+                exprs: vec![eq, residual],
+            }
+            .add(ctx)
+        });
+
+        assert_eq!(
+            join_cost_class_for_root(&ctx, root),
+            JoinCostClass::HashLike
+        );
+    }
+
+    #[test]
+    fn pure_non_equi_join_is_nested_loop_like_for_costing() {
+        let (ctx, root) =
+            two_way_join_with_predicate(|ctx, a, b| binary_predicate(ctx, BinaryOp::Gt, a, b));
+
+        assert_eq!(
+            join_cost_class_for_root(&ctx, root),
+            JoinCostClass::NestedLoopLike
+        );
+    }
+
+    #[test]
+    fn hash_like_cost_does_not_use_pairwise_input_product() {
+        assert_eq!(
+            join_work_cost(
+                1_000_000.0,
+                1,
+                1_000_000.0,
+                1,
+                10.0,
+                1,
+                JoinCostClass::HashLike
+            ),
+            1_002_000_010.0
+        );
+        assert_eq!(
+            join_work_cost(
+                1_000_000.0,
+                1,
+                1_000_000.0,
+                1,
+                10.0,
+                1,
+                JoinCostClass::NestedLoopLike
+            ),
+            1_000_000_000_010.0
+        );
+        assert_eq!(
+            join_work_cost(10.0, 3, 20.0, 4, 5.0, 7, JoinCostClass::HashLike),
+            30.0 + 80.0 + f64::powf(200.0, 0.75) + 35.0
+        );
+    }
+
+    #[test]
+    fn join_ordering_new_uses_cardinality_statistics_by_default() {
+        assert!(matches!(
+            JoinOrdering::new().stats,
+            JoinOrderingStatistics::Cardinality
+        ));
+    }
+
+    #[test]
+    fn cardinality_statistics_choose_small_filtered_branch() {
+        let (ctx, root) = three_way_chain();
+        let catalog = MemoryCatalog::new("memory", "public");
+        for (table, rows, distinct) in [
+            ("A", 1_000_000, 1_000_000),
+            ("B", 1_000, 1_000),
+            ("C", 10, 10),
+        ] {
+            catalog
+                .create_table(TableRef::bare(table), single_i64_schema(), None)
+                .unwrap();
+            catalog
+                .set_table_statistics(
+                    TableRef::bare(table),
+                    table_stats(table_column(table), rows, distinct),
+                )
+                .unwrap();
+        }
+        let mut analyses = AnalysisContext::with_catalog(Arc::new(catalog));
+        let hg = build_hypergraph(&ctx, &mut analyses, root);
+        let stats = CardinalityStatistics::new(&ctx, &mut analyses, &hg).unwrap();
+        let mut solver = DPhyp::new(&ctx, &hg, &stats);
+
+        let tree = solver
+            .solve()
+            .expect("solver should not error")
+            .expect("DPhyp should find a plan");
+
+        assert!(tree.has_join_with_leaves(nodeset_singleton(1) | nodeset_singleton(2)));
+    }
+
+    fn single_i64_schema() -> Arc<Schema> {
+        Arc::new(Schema::new(vec![Field::new("a", DataType::Int64, true)]))
+    }
+
+    fn table_column(table: &str) -> &'static str {
+        match table {
+            "A" => "a",
+            "B" => "b",
+            "C" => "c",
+            _ => unreachable!("unexpected test table"),
+        }
+    }
+
+    fn table_stats(column: &str, rows: usize, distinct: usize) -> TableStatistics {
+        TableStatistics {
+            row_count: Some(rows),
+            size_bytes: None,
+            column_statistics: [(
+                column.to_string(),
+                ColumnStatistics {
+                    lower_bound: None,
+                    upper_bound: None,
+                    frequency: Some(rows),
+                    distinct: Some(distinct),
+                },
+            )]
+            .into_iter()
+            .collect(),
+        }
     }
 
     #[test]
@@ -715,7 +1086,7 @@ mod tests {
             nodes,
             edges: vec![],
         };
-        let mut solver = DPhyp::new(&hg, &UniformStatistics);
+        let mut solver = DPhyp::new(&ctx, &hg, &UniformStatistics);
 
         assert_eq!(all_nodes_mask(64), NodeSet::MAX);
         assert!(matches!(solver.solve(), Ok(None)));
@@ -741,7 +1112,7 @@ mod tests {
             nodes,
             edges: vec![],
         };
-        let mut solver = DPhyp::new(&hg, &UniformStatistics);
+        let mut solver = DPhyp::new(&ctx, &hg, &UniformStatistics);
 
         assert!(matches!(
             solver.solve(),

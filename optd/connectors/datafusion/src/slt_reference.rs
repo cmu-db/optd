@@ -51,6 +51,7 @@ pub struct SltArgs {
     pub override_files: bool,
     pub filters: Vec<String>,
     pub expected_engine: ExpectedEngine,
+    pub physical_planning: bool,
 }
 
 impl Default for SltArgs {
@@ -59,6 +60,7 @@ impl Default for SltArgs {
             override_files: false,
             filters: Vec::new(),
             expected_engine: ExpectedEngine::OptdDataFusion,
+            physical_planning: false,
         }
     }
 }
@@ -70,6 +72,7 @@ pub fn parse_slt_args(args: impl IntoIterator<Item = String>) -> Result<SltArgs,
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--override" => parsed.override_files = true,
+            "--physical" => parsed.physical_planning = true,
             "--engine" => {
                 let engine = iter
                     .next()
@@ -82,6 +85,26 @@ pub fn parse_slt_args(args: impl IntoIterator<Item = String>) -> Result<SltArgs,
     }
 
     Ok(parsed)
+}
+
+pub fn strip_slt_args_for_harness(args: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut stripped = Vec::new();
+    let mut iter = args.into_iter();
+    if let Some(binary) = iter.next() {
+        stripped.push(binary);
+    }
+
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--physical" | "--override" => {}
+            "--engine" => {
+                let _ = iter.next();
+            }
+            _ => stripped.push(arg),
+        }
+    }
+
+    stripped
 }
 
 pub struct DataFusionRunner {
@@ -398,6 +421,12 @@ mod tests {
     }
 
     #[test]
+    fn parse_physical_flag() {
+        let args = parse(&["--physical"]).unwrap();
+        assert!(args.physical_planning);
+    }
+
+    #[test]
     fn parse_rejects_unknown_engine() {
         let err = parse(&["--engine", "sqlite"]).unwrap_err();
         assert!(err.contains("unknown engine"));
@@ -408,6 +437,22 @@ mod tests {
     fn parse_preserves_override_filter_behavior() {
         let args = parse(&["ignored", "--override", "tpch", "--flag", "features/values"]).unwrap();
         assert_eq!(args.filters, vec!["tpch", "features/values"]);
+    }
+
+    #[test]
+    fn strip_custom_args_for_harness() {
+        let args = strip_slt_args_for_harness(
+            [
+                "slt",
+                "--physical",
+                "--engine",
+                "datafusion",
+                "features/values.slt",
+            ]
+            .into_iter()
+            .map(str::to_string),
+        );
+        assert_eq!(args, vec!["slt", "features/values.slt"]);
     }
 
     #[tokio::test]

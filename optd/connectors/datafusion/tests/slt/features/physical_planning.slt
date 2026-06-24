@@ -1,0 +1,64 @@
+# Direct optd IR -> DataFusion physical plan smoke coverage.
+
+statement ok
+SET optd.physical_planning = true;
+
+query I
+SELECT a + 10
+FROM (VALUES (1), (2), (3)) AS t(a)
+WHERE a > 1
+ORDER BY 1;
+----
+12
+13
+
+query I
+SELECT sum(a)
+FROM (VALUES (1), (2), (3)) AS t(a);
+----
+6
+
+query I
+SELECT a
+FROM (VALUES (1), (2)) AS t(a)
+JOIN (VALUES (2), (3)) AS u(b) ON a = b;
+----
+2
+
+query I
+SELECT a
+FROM (VALUES (3), (1), (2)) AS t(a)
+ORDER BY a DESC
+LIMIT 2;
+----
+3
+2
+
+query I
+SELECT a
+FROM (VALUES (1)) AS t(a)
+WHERE a > 1;
+----
+
+query I
+SELECT sum(a.v)
+FROM (VALUES (1, 10), (2, 20)) AS a(k, v),
+     (VALUES (1, 'x'), (2, 'y')) AS b(k, tag)
+WHERE (a.k = b.k AND a.v > 5 AND b.tag = 'x')
+   OR (a.k = b.k AND a.v > 15 AND b.tag = 'y');
+----
+30
+
+query I
+SELECT a.k
+FROM (VALUES (1, 10), (2, 20)) AS a(k, s)
+WHERE EXISTS (
+    SELECT * FROM (VALUES (1, 30), (2, 20)) AS b(k, s)
+    WHERE b.k = a.k AND b.s != a.s
+)
+AND NOT EXISTS (
+    SELECT * FROM (VALUES (1, 10), (2, 30)) AS c(k, s)
+    WHERE c.k = a.k AND c.s != a.s
+);
+----
+1

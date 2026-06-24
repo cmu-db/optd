@@ -3,6 +3,7 @@ pub mod explain_udfs;
 pub mod from_df_logical;
 pub mod profiling;
 pub mod runner;
+pub mod runtime_statistics;
 pub mod setup;
 pub mod slt_reference;
 pub mod statistics;

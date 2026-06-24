@@ -2,12 +2,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use datafusion::prelude::SessionContext;
 use datafusion_sqllogictest::{DFSqlLogicTestError, TestContext};
+use optd_datafusion::config::OptdExtensionConfig;
 use optd_datafusion::runner::OptdRunner;
 use optd_datafusion::setup::{setup_job_session, setup_tpch_session};
 #[cfg(not(feature = "duckdb"))]
 use optd_datafusion::slt_reference::duckdb_feature_error;
-use optd_datafusion::slt_reference::{DataFusionRunner, ExpectedEngine, parse_slt_args};
+use optd_datafusion::slt_reference::{
+    DataFusionRunner, ExpectedEngine, parse_slt_args, strip_slt_args_for_harness,
+};
 use sqllogictest::{
     Runner, default_column_validator, default_normalizer, default_validator, harness::Failed,
 };
@@ -17,15 +21,12 @@ const DISABLED_SLT_PATHS: &[&str] = &[
     // Deferred: these JOB result queries currently exceed the nextest release
     // timeout in the full workspace run. Re-enable once the execution path is
     // fast enough or these cases get a dedicated long-running test profile.
-    "tests/slt/job/results/16a.slt",
-    "tests/slt/job/results/16b.slt",
-    "tests/slt/job/results/16c.slt",
-    "tests/slt/job/results/16d.slt",
     "tests/slt/job/results/19d.slt",
 ];
 
 fn main() {
-    let args = parse_slt_args(std::env::args().skip(1)).unwrap_or_else(|err| {
+    let raw_args = std::env::args().collect::<Vec<_>>();
+    let args = parse_slt_args(raw_args.iter().skip(1).cloned()).unwrap_or_else(|err| {
         eprintln!("{err}");
         std::process::exit(2);
     });
@@ -72,7 +73,7 @@ fn main() {
     for path in paths {
         tests.push(sqllogictest::harness::Trial::test(
             path.to_str().unwrap().to_string(),
-            move || run_slt(&path),
+            move || run_slt(&path, args.physical_planning),
         ));
     }
 
@@ -80,7 +81,12 @@ fn main() {
         panic!("no test files found under tests/slt/**/*.slt");
     }
 
-    sqllogictest::harness::run(&sqllogictest::harness::Arguments::from_args(), tests).exit();
+    let harness_args = strip_slt_args_for_harness(raw_args);
+    sqllogictest::harness::run(
+        &sqllogictest::harness::Arguments::from_iter(harness_args),
+        tests,
+    )
+    .exit();
 }
 
 fn collect_slt_paths(filters: &[String]) -> Vec<PathBuf> {
@@ -110,24 +116,20 @@ fn build_runtime() -> Runtime {
         .unwrap()
 }
 
-fn run_slt(path: impl AsRef<Path>) -> Result<(), Failed> {
+fn run_slt(path: impl AsRef<Path>, physical_planning: bool) -> Result<(), Failed> {
     let path = path.as_ref().to_path_buf();
     let runtime = build_runtime();
     let result = runtime.block_on(async {
-        let session = if path.components().any(|c| c.as_os_str() == "tpch") {
-            setup_tpch_session()
+        let (session, _test_context) = session_for_slt_file(&path).await?;
+        if physical_planning {
+            session
+                .sql("SET optd.physical_planning = true")
                 .await
                 .map_err(|e| Failed::from(e.to_string()))?
-        } else if path.components().any(|c| c.as_os_str() == "job") {
-            setup_job_session()
+                .collect()
                 .await
-                .map_err(|e| Failed::from(e.to_string()))?
-        } else {
-            match TestContext::try_new_for_test_file(&path).await {
-                Some(ctx) => ctx.session_ctx().clone(),
-                None => datafusion::prelude::SessionContext::new(),
-            }
-        };
+                .map_err(|e| Failed::from(e.to_string()))?;
+        }
 
         let mut runner = Runner::new(|| async {
             Ok::<_, DFSqlLogicTestError>(OptdRunner::new(session.clone()))
@@ -143,20 +145,7 @@ fn update_slt(path: impl AsRef<Path>, expected_engine: ExpectedEngine) -> Result
     let path = path.as_ref().to_path_buf();
     let runtime = build_runtime();
     let result = runtime.block_on(async {
-        let session = if path.components().any(|c| c.as_os_str() == "tpch") {
-            setup_tpch_session()
-                .await
-                .map_err(|e| Failed::from(e.to_string()))?
-        } else if path.components().any(|c| c.as_os_str() == "job") {
-            setup_job_session()
-                .await
-                .map_err(|e| Failed::from(e.to_string()))?
-        } else {
-            match TestContext::try_new_for_test_file(&path).await {
-                Some(ctx) => ctx.session_ctx().clone(),
-                None => datafusion::prelude::SessionContext::new(),
-            }
-        };
+        let (session, _test_context) = session_for_slt_file(&path).await?;
 
         match expected_engine {
             ExpectedEngine::OptdDataFusion => {
@@ -198,6 +187,41 @@ fn update_slt(path: impl AsRef<Path>, expected_engine: ExpectedEngine) -> Result
     });
     runtime.shutdown_timeout(Duration::from_secs(5));
     result
+}
+
+async fn session_for_slt_file(
+    path: &Path,
+) -> Result<(SessionContext, Option<TestContext>), Failed> {
+    let session = if path.components().any(|c| c.as_os_str() == "tpch") {
+        setup_tpch_session()
+            .await
+            .map_err(|e| Failed::from(e.to_string()))?
+    } else if path.components().any(|c| c.as_os_str() == "job") {
+        setup_job_session()
+            .await
+            .map_err(|e| Failed::from(e.to_string()))?
+    } else {
+        let Some(test_context) = TestContext::try_new_for_test_file(path).await else {
+            return Err(Failed::from(format!(
+                "DataFusion TestContext skipped or could not initialize {}",
+                path.display()
+            )));
+        };
+        let session = test_context.session_ctx().clone();
+        ensure_optd_extension(&session);
+        return Ok((session, Some(test_context)));
+    };
+    ensure_optd_extension(&session);
+    Ok((session, None))
+}
+
+fn ensure_optd_extension(session: &SessionContext) {
+    let state = session.state_ref();
+    let mut state = state.write();
+    let extensions = &mut state.config_mut().options_mut().extensions;
+    if extensions.get::<OptdExtensionConfig>().is_none() {
+        extensions.insert(OptdExtensionConfig::default());
+    }
 }
 
 #[cfg(feature = "duckdb")]

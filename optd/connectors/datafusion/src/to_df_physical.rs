@@ -1,11 +1,15 @@
 //! Converts optd IR directly into DataFusion physical [`ExecutionPlan`]s.
+//!
+//! Operator construction in this module should track DataFusion's planner
+//! conventions in:
+//! <https://github.com/apache/datafusion/blob/b426232b8a13c641a522bba414e932914f3b79f5/datafusion/core/src/physical_planner.rs>
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use datafusion::arrow::compute::SortOptions;
 use datafusion::arrow::datatypes::{Field, Schema, SchemaRef};
 use datafusion::execution::context::SessionContext;
-use datafusion::physical_expr::create_physical_expr;
 use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode, PhysicalGroupBy};
 use datafusion::physical_plan::coalesce_partitions::CoalescePartitionsExec;
 use datafusion::physical_plan::empty::EmptyExec;
@@ -21,9 +25,12 @@ use datafusion::physical_plan::sorts::sort::SortExec;
 use datafusion::physical_plan::{ExecutionPlan, ExecutionPlanProperties};
 use datafusion::physical_planner::create_aggregate_expr_and_maybe_filter;
 use datafusion_catalog::ScanArgs;
+use datafusion_common::tree_node::{Transformed, TreeNode};
 use datafusion_common::{DFSchema, DFSchemaRef, JoinSide, NullEquality, TableReference};
 use datafusion_datasource::memory::MemorySourceConfig;
-use datafusion_physical_expr::{LexOrdering, PhysicalExpr, create_physical_sort_exprs};
+use datafusion_optimizer::simplify_expressions::ExprSimplifier;
+use datafusion_physical_expr::expressions::Column as PhysicalColumn;
+use datafusion_physical_expr::{LexOrdering, PhysicalExpr, PhysicalSortExpr};
 use optd_core::{
     BinaryOp, ExprData, JoinType, NaryOp, Operator, OperatorData, QueryContext, TableRef,
 };
@@ -74,6 +81,7 @@ pub type ToPhysicalResult<T> = Result<T, ToPhysicalError>;
 struct PhysicalPlanNode {
     exec: Arc<dyn ExecutionPlan>,
     df_schema: DFSchemaRef,
+    columns: Vec<optd_core::Column>,
 }
 
 /// Converts a optd `QueryContext` root directly into a DataFusion physical plan.
@@ -84,82 +92,154 @@ pub async fn to_physical_plan(
     let root = ctx
         .root()
         .ok_or_else(|| ToPhysicalError::Unsupported("query has no root".into()))?;
-    let planned = convert_operator(root, ctx, session).await?;
+    let required = output_columns(root, ctx)?;
+    let planned = convert_operator(root, &required, ctx, session).await?;
     Ok(planned.exec)
 }
 
+// ---------------------------------------------------------------------------
+// Operator conversion and parent-driven column demand
+// ---------------------------------------------------------------------------
+
+// Conversion is demand-driven: each parent passes the exact columns it needs so
+// scans and intermediate projections can be narrowed before DataFusion physical
+// operators are built. Each operator projects back to its promised output order
+// before returning to keep parent schema assumptions stable.
 async fn convert_operator(
     op: Operator,
+    required: &[optd_core::Column],
     ctx: &QueryContext,
     session: &SessionContext,
 ) -> ToPhysicalResult<PhysicalPlanNode> {
     match op.get(ctx) {
-        OperatorData::Scan(scan) => {
-            let provider = session
-                .table_provider(optd_table_ref_to_df(&scan.table))
-                .await
-                .map_err(|_| ToPhysicalError::TableNotFound(scan.table.clone()))?;
-            let provider_schema = provider.schema();
-            let projection = scan
-                .columns
-                .iter()
-                .map(|column| {
-                    let name = &ctx.column(*column).name;
-                    provider_schema.index_of(name).map_err(|e| {
-                        datafusion::error::DataFusionError::ArrowError(Box::new(e), None)
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let args = ScanArgs::default().with_projection(Some(&projection));
-            let state = session.state();
-            let scanned = provider.scan_with_args(&state, args).await?;
-            let schema = df_schema_for_columns(ctx, &scan.columns)?;
-            Ok(PhysicalPlanNode {
-                exec: Arc::clone(scanned.plan()),
-                df_schema: schema,
-            })
-        }
+        OperatorData::Scan(scan) => convert_scan(scan, required, &[], ctx, session).await,
 
         OperatorData::Selection(sel) => {
             reject_subquery_exprs(sel.predicate, ctx)?;
-            let input = Box::pin(convert_operator(sel.input, ctx, session)).await?;
-            let predicate = physical_expr(sel.predicate, ctx, session, input.df_schema.as_ref())?;
+            if let OperatorData::Scan(scan) = sel.input.get(ctx) {
+                let input_required = merge_columns(required, &expr_columns(sel.predicate, ctx)?);
+                let input = Box::pin(convert_scan(
+                    scan,
+                    &input_required,
+                    &[sel.predicate],
+                    ctx,
+                    session,
+                ))
+                .await?;
+                let predicate = physical_expr(
+                    sel.predicate,
+                    ctx,
+                    session,
+                    input.df_schema.as_ref(),
+                    input.exec.schema().as_ref(),
+                )?;
+                let exec = FilterExecBuilder::new(predicate, input.exec)
+                    .with_batch_size(session.copied_config().batch_size())
+                    .build()?;
+                return project_columns(
+                    required,
+                    PhysicalPlanNode {
+                        exec: Arc::new(exec),
+                        df_schema: input.df_schema,
+                        columns: input.columns,
+                    },
+                    ctx,
+                    session,
+                );
+            }
+
+            let input_required = merge_columns(required, &expr_columns(sel.predicate, ctx)?);
+            let input =
+                Box::pin(convert_operator(sel.input, &input_required, ctx, session)).await?;
+            let predicate = physical_expr(
+                sel.predicate,
+                ctx,
+                session,
+                input.df_schema.as_ref(),
+                input.exec.schema().as_ref(),
+            )?;
             let exec = FilterExecBuilder::new(predicate, input.exec)
                 .with_batch_size(session.copied_config().batch_size())
                 .build()?;
-            Ok(PhysicalPlanNode {
-                exec: Arc::new(exec),
-                df_schema: input.df_schema,
-            })
+            project_columns(
+                required,
+                PhysicalPlanNode {
+                    exec: Arc::new(exec),
+                    df_schema: input.df_schema,
+                    columns: input.columns,
+                },
+                ctx,
+                session,
+            )
         }
 
         OperatorData::Projection(proj) => {
-            let input = Box::pin(convert_operator(proj.input, ctx, session)).await?;
-            project_columns(&proj.columns, input, ctx, session)
+            let input_required = filter_columns(&proj.columns, required);
+            let input =
+                Box::pin(convert_operator(proj.input, &input_required, ctx, session)).await?;
+            project_columns(required, input, ctx, session)
         }
 
         OperatorData::Map(map) => {
             for (_, expr) in &map.computations {
                 reject_subquery_exprs(*expr, ctx)?;
             }
-            let input = Box::pin(convert_operator(map.input, ctx, session)).await?;
-            let available = available_columns(map.input, ctx)?;
-            let mut exprs =
-                projection_exprs_for_columns(&available, ctx, session, input.df_schema.as_ref())?;
+            let input_available = available_columns(map.input, ctx)?;
+            let mut input_required = Vec::new();
+            for column in required {
+                if input_available.contains(column) {
+                    push_unique(&mut input_required, *column);
+                } else if let Some((_, expr)) = map
+                    .computations
+                    .iter()
+                    .find(|(computed, _)| computed == column)
+                {
+                    input_required = merge_columns(&input_required, &expr_columns(*expr, ctx)?);
+                }
+            }
+            let input =
+                Box::pin(convert_operator(map.input, &input_required, ctx, session)).await?;
+            let available = input.columns.clone();
+            let mut exprs = projection_exprs_for_columns(
+                &available,
+                ctx,
+                input.df_schema.as_ref(),
+                input.exec.schema().as_ref(),
+            )?;
             for (column, expr) in &map.computations {
-                let physical = physical_expr(*expr, ctx, session, input.df_schema.as_ref())?;
+                if !required.contains(column) {
+                    continue;
+                }
+                let physical = physical_expr(
+                    *expr,
+                    ctx,
+                    session,
+                    input.df_schema.as_ref(),
+                    input.exec.schema().as_ref(),
+                )?;
                 exprs.push(ProjectionExpr::new(
                     physical,
                     ctx.column(*column).name.clone(),
                 ));
             }
             let mut columns = available;
-            columns.extend(map.computations.iter().map(|(column, _)| *column));
+            columns.extend(
+                map.computations
+                    .iter()
+                    .map(|(column, _)| *column)
+                    .filter(|column| required.contains(column)),
+            );
             let schema = df_schema_for_columns(ctx, &columns)?;
-            Ok(PhysicalPlanNode {
-                exec: Arc::new(ProjectionExec::try_new(exprs, input.exec)?),
-                df_schema: schema,
-            })
+            project_columns(
+                required,
+                PhysicalPlanNode {
+                    exec: Arc::new(ProjectionExec::try_new(exprs, input.exec)?),
+                    df_schema: schema,
+                    columns,
+                },
+                ctx,
+                session,
+            )
         }
 
         OperatorData::Aggregation(agg) => {
@@ -171,7 +251,17 @@ async fn convert_operator(
                     reject_subquery_exprs(*arg, ctx)?;
                 }
             }
-            let input = Box::pin(convert_operator(agg.input, ctx, session)).await?;
+            let mut input_required = Vec::new();
+            for key in &agg.keys {
+                input_required = merge_columns(&input_required, &expr_columns(*key, ctx)?);
+            }
+            for (_, agg_expr) in &agg.aggregates {
+                if let optd_core::AggregateExpr::Func { arg, .. } = agg_expr {
+                    input_required = merge_columns(&input_required, &expr_columns(*arg, ctx)?);
+                }
+            }
+            let input =
+                Box::pin(convert_operator(agg.input, &input_required, ctx, session)).await?;
             let input_schema = input.exec.schema();
             let empty_tables = TableMap::new();
             let mut expr_ctx = ToDfContext::new(ctx, &empty_tables, session);
@@ -179,7 +269,13 @@ async fn convert_operator(
                 .keys
                 .iter()
                 .map(|expr| {
-                    let physical = physical_expr(*expr, ctx, session, input.df_schema.as_ref())?;
+                    let physical = physical_expr(
+                        *expr,
+                        ctx,
+                        session,
+                        input.df_schema.as_ref(),
+                        input.exec.schema().as_ref(),
+                    )?;
                     let logical = convert_expr(
                         *expr,
                         &mut expr_ctx,
@@ -234,51 +330,65 @@ async fn convert_operator(
                 input_schema,
             )?);
             let columns = output_columns(op, ctx)?;
-            Ok(PhysicalPlanNode {
-                exec: final_exec,
-                df_schema: df_schema_for_columns(ctx, &columns)?,
-            })
+            project_columns(
+                required,
+                PhysicalPlanNode {
+                    exec: final_exec,
+                    df_schema: df_schema_for_columns(ctx, &columns)?,
+                    columns,
+                },
+                ctx,
+                session,
+            )
         }
 
         OperatorData::Sort(sort) => {
             for key in &sort.keys {
                 reject_subquery_exprs(key.expr, ctx)?;
             }
-            let input = Box::pin(convert_operator(sort.input, ctx, session)).await?;
-            let empty_tables = TableMap::new();
-            let mut expr_ctx = ToDfContext::new(ctx, &empty_tables, session);
-            let logical = sort
+            let mut input_required = required.to_vec();
+            for key in &sort.keys {
+                input_required = merge_columns(&input_required, &expr_columns(key.expr, ctx)?);
+            }
+            let input =
+                Box::pin(convert_operator(sort.input, &input_required, ctx, session)).await?;
+            let sort_exprs = sort
                 .keys
                 .iter()
                 .map(|key| {
-                    Ok(datafusion::logical_expr::SortExpr {
-                        expr: convert_expr(
-                            key.expr,
-                            &mut expr_ctx,
-                            &Default::default(),
-                            &ColumnQualifiers::new(),
-                        )?,
-                        asc: matches!(key.direction, optd_core::SortDirection::Asc),
-                        nulls_first: matches!(key.nulls, optd_core::NullOrdering::First),
-                    })
+                    let expr = physical_expr(
+                        key.expr,
+                        ctx,
+                        session,
+                        input.df_schema.as_ref(),
+                        input.exec.schema().as_ref(),
+                    )?;
+                    Ok(PhysicalSortExpr::new(
+                        expr,
+                        SortOptions {
+                            descending: matches!(key.direction, optd_core::SortDirection::Desc),
+                            nulls_first: matches!(key.nulls, optd_core::NullOrdering::First),
+                        },
+                    ))
                 })
                 .collect::<ToPhysicalResult<Vec<_>>>()?;
-            let sort_exprs = create_physical_sort_exprs(
-                &logical,
-                input.df_schema.as_ref(),
-                session.state().execution_props(),
-            )?;
             let ordering = LexOrdering::new(sort_exprs)
                 .ok_or_else(|| ToPhysicalError::Unsupported("empty sort".into()))?;
             let input_exec = ensure_single_partition(input.exec);
-            Ok(PhysicalPlanNode {
-                exec: Arc::new(SortExec::new(ordering, input_exec)),
-                df_schema: input.df_schema,
-            })
+            project_columns(
+                required,
+                PhysicalPlanNode {
+                    exec: Arc::new(SortExec::new(ordering, input_exec)),
+                    df_schema: input.df_schema,
+                    columns: input.columns,
+                },
+                ctx,
+                session,
+            )
         }
 
         OperatorData::Limit(limit) => {
-            let input = Box::pin(convert_operator(limit.input, ctx, session)).await?;
+            let input = Box::pin(convert_operator(limit.input, required, ctx, session)).await?;
             let mut input_exec = input.exec;
             if input_exec.output_partitioning().partition_count() > 1 {
                 if let Some(fetch) = limit.fetch {
@@ -289,49 +399,89 @@ async fn convert_operator(
             Ok(PhysicalPlanNode {
                 exec: Arc::new(GlobalLimitExec::new(input_exec, limit.offset, limit.fetch)),
                 df_schema: input.df_schema,
+                columns: input.columns,
             })
         }
 
-        OperatorData::Join(join) => convert_join(join, ctx, session).await,
+        OperatorData::Join(join) => convert_join(join, required, ctx, session).await,
 
         OperatorData::CrossProduct(cross) => {
-            let left = Box::pin(convert_operator(cross.outer, ctx, session)).await?;
-            let right = Box::pin(convert_operator(cross.inner, ctx, session)).await?;
-            Ok(join_node(
-                Arc::new(CrossJoinExec::new(left.exec, right.exec)),
-                join_output_columns_for_type(&JoinType::Inner, cross.outer, cross.inner, ctx)?,
-                ctx,
-            )?)
-        }
-
-        OperatorData::Output(out) => Box::pin(convert_operator(out.input, ctx, session)).await,
-
-        OperatorData::Rename(rename) => {
-            let input = Box::pin(convert_operator(rename.input, ctx, session)).await?;
-            let original_columns = rename
-                .defs
-                .iter()
-                .map(|(_, original)| *original)
-                .collect::<Vec<_>>();
-            let mut exprs = projection_exprs_for_columns(
-                &original_columns,
+            let left_available = available_columns(cross.outer, ctx)?;
+            let right_available = available_columns(cross.inner, ctx)?;
+            let left_required = filter_columns(&left_available, required);
+            let right_required = filter_columns(&right_available, required);
+            let left =
+                Box::pin(convert_operator(cross.outer, &left_required, ctx, session)).await?;
+            let right =
+                Box::pin(convert_operator(cross.inner, &right_required, ctx, session)).await?;
+            project_columns(
+                required,
+                join_node(
+                    Arc::new(CrossJoinExec::new(left.exec, right.exec)),
+                    merge_columns(&left.columns, &right.columns),
+                    ctx,
+                )?,
                 ctx,
                 session,
-                input.df_schema.as_ref(),
-            )?;
-            for (expr, (renamed, _)) in exprs.iter_mut().zip(&rename.defs) {
-                *expr =
-                    ProjectionExpr::new(Arc::clone(&expr.expr), ctx.column(*renamed).name.clone());
-            }
-            let renamed_columns = rename
+            )
+        }
+
+        OperatorData::Output(out) => {
+            Box::pin(convert_operator(out.input, required, ctx, session)).await
+        }
+
+        OperatorData::Rename(rename) => {
+            let renamed_required = filter_columns(
+                &rename
+                    .defs
+                    .iter()
+                    .map(|(renamed, _)| *renamed)
+                    .collect::<Vec<_>>(),
+                required,
+            );
+            let original_required = rename
                 .defs
                 .iter()
-                .map(|(renamed, _)| *renamed)
+                .filter_map(|(renamed, original)| {
+                    renamed_required.contains(renamed).then_some(*original)
+                })
                 .collect::<Vec<_>>();
-            Ok(PhysicalPlanNode {
-                exec: Arc::new(ProjectionExec::try_new(exprs, input.exec)?),
-                df_schema: df_schema_for_columns(ctx, &renamed_columns)?,
-            })
+            let input = Box::pin(convert_operator(
+                rename.input,
+                &original_required,
+                ctx,
+                session,
+            ))
+            .await?;
+            let mut exprs = Vec::new();
+            let mut renamed_columns = Vec::new();
+            for (renamed, original) in &rename.defs {
+                if !renamed_required.contains(renamed) {
+                    continue;
+                }
+                let mut original_expr = projection_exprs_for_columns(
+                    &[*original],
+                    ctx,
+                    input.df_schema.as_ref(),
+                    input.exec.schema().as_ref(),
+                )?;
+                let expr = original_expr.pop().expect("one projection expr");
+                exprs.push(ProjectionExpr::new(
+                    Arc::clone(&expr.expr),
+                    ctx.column(*renamed).name.clone(),
+                ));
+                renamed_columns.push(*renamed);
+            }
+            project_columns(
+                required,
+                PhysicalPlanNode {
+                    exec: Arc::new(ProjectionExec::try_new(exprs, input.exec)?),
+                    df_schema: df_schema_for_columns(ctx, &renamed_columns)?,
+                    columns: renamed_columns,
+                },
+                ctx,
+                session,
+            )
         }
 
         OperatorData::ConstScan(const_scan) => match const_scan.rows.len() {
@@ -340,6 +490,7 @@ async fn convert_operator(
                 Ok(PhysicalPlanNode {
                     exec: Arc::new(EmptyExec::new(Arc::clone(&schema))),
                     df_schema: df_schema_for_columns(ctx, &const_scan.columns)?,
+                    columns: const_scan.columns.clone(),
                 })
             }
             1 if const_scan.rows[0].is_empty() => {
@@ -347,6 +498,7 @@ async fn convert_operator(
                 Ok(PhysicalPlanNode {
                     exec: Arc::new(PlaceholderRowExec::new(Arc::clone(&schema))),
                     df_schema: df_schema_for_columns(ctx, &const_scan.columns)?,
+                    columns: const_scan.columns.clone(),
                 })
             }
             _ => {
@@ -366,13 +518,14 @@ async fn convert_operator(
                     .iter()
                     .map(|row| {
                         row.iter()
-                            .map(|expr| physical_expr(*expr, ctx, session, &df_schema))
+                            .map(|expr| physical_expr(*expr, ctx, session, &df_schema, &schema))
                             .collect::<ToPhysicalResult<Vec<_>>>()
                     })
                     .collect::<ToPhysicalResult<Vec<_>>>()?;
                 Ok(PhysicalPlanNode {
                     exec: MemorySourceConfig::try_new_as_values(Arc::clone(&schema), values)?,
                     df_schema: df_schema_for_columns(ctx, &const_scan.columns)?,
+                    columns: const_scan.columns.clone(),
                 })
             }
         },
@@ -381,16 +534,59 @@ async fn convert_operator(
     }
 }
 
+async fn convert_scan(
+    scan: &optd_core::Scan,
+    required: &[optd_core::Column],
+    filters: &[optd_core::Expr],
+    ctx: &QueryContext,
+    session: &SessionContext,
+) -> ToPhysicalResult<PhysicalPlanNode> {
+    let provider = session
+        .table_provider(optd_table_ref_to_df(&scan.table))
+        .await
+        .map_err(|_| ToPhysicalError::TableNotFound(scan.table.clone()))?;
+    let provider_schema = provider.schema();
+    let mut columns = filter_columns(&scan.columns, required);
+    for filter in filters {
+        columns = merge_columns(&columns, &expr_columns(*filter, ctx)?);
+    }
+    let projection = columns
+        .iter()
+        .map(|column| {
+            let name = &ctx.column(*column).name;
+            provider_schema
+                .index_of(name)
+                .map_err(|e| datafusion::error::DataFusionError::ArrowError(Box::new(e), None))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let logical_filters = filters
+        .iter()
+        .map(|filter| scan_filter_expr(*filter, ctx, session))
+        .collect::<ToPhysicalResult<Vec<_>>>()?;
+    let mut args = ScanArgs::default().with_projection(Some(&projection));
+    if !logical_filters.is_empty() {
+        // Push filters to the provider for file/Parquet pruning. The caller
+        // still keeps a FilterExec above the scan because scan providers may
+        // only use these filters for pruning and not for complete evaluation.
+        args = args.with_filters(Some(&logical_filters));
+    }
+    let state = session.state();
+    let scanned = provider.scan_with_args(&state, args).await?;
+    Ok(PhysicalPlanNode {
+        exec: Arc::clone(scanned.plan()),
+        df_schema: df_schema_for_columns(ctx, &columns)?,
+        columns,
+    })
+}
+
 async fn convert_join(
     join: &optd_core::Join,
+    required: &[optd_core::Column],
     ctx: &QueryContext,
     session: &SessionContext,
 ) -> ToPhysicalResult<PhysicalPlanNode> {
     if !free_columns_for(join.inner, ctx)?.is_empty() {
         return Err(ToPhysicalError::Unsupported("correlated join input".into()));
-    }
-    if matches!(join.join_type, JoinType::LeftMark { .. }) {
-        return Err(ToPhysicalError::Unsupported("LeftMark join".into()));
     }
     if matches!(join.join_type, JoinType::Single) && !is_at_most_one_row(join.inner, ctx)? {
         return Err(ToPhysicalError::Unsupported(
@@ -398,87 +594,168 @@ async fn convert_join(
         ));
     }
     reject_subquery_exprs(join.on, ctx)?;
-    let left = Box::pin(convert_operator(join.outer, ctx, session)).await?;
-    let right = Box::pin(convert_operator(join.inner, ctx, session)).await?;
+    let left_available = available_columns(join.outer, ctx)?;
+    let right_available = available_columns(join.inner, ctx)?;
+    let predicate_columns = expr_columns(join.on, ctx)?;
+    let left_required = merge_columns(
+        &filter_columns(&left_available, required),
+        &filter_columns(&left_available, &predicate_columns),
+    );
+    let right_required = merge_columns(
+        &filter_columns(&right_available, required),
+        &filter_columns(&right_available, &predicate_columns),
+    );
+    let left = Box::pin(convert_operator(join.outer, &left_required, ctx, session)).await?;
+    let right = Box::pin(convert_operator(join.inner, &right_required, ctx, session)).await?;
     let df_join_type = convert_join_type(&join.join_type)?;
     if is_true_expr(join.on, ctx) {
         if matches!(join.join_type, JoinType::Inner) {
-            return Ok(join_node(
-                Arc::new(CrossJoinExec::new(left.exec, right.exec)),
-                join_output_columns_for_type(&join.join_type, join.outer, join.inner, ctx)?,
+            let output_columns = join_output_columns_from_nodes(&join.join_type, &left, &right);
+            return project_columns(
+                required,
+                join_node(
+                    Arc::new(CrossJoinExec::new(left.exec, right.exec)),
+                    output_columns,
+                    ctx,
+                )?,
                 ctx,
-            )?);
+                session,
+            );
         }
+        let output_columns = join_output_columns_from_nodes(&join.join_type, &left, &right);
         let exec = NestedLoopJoinExec::try_new(left.exec, right.exec, None, &df_join_type, None)?;
-        return Ok(join_node(
-            Arc::new(exec),
-            join_output_columns_for_type(&join.join_type, join.outer, join.inner, ctx)?,
+        return project_columns(
+            required,
+            join_node(Arc::new(exec), output_columns, ctx)?,
             ctx,
-        )?);
+            session,
+        );
     }
 
-    if let Some((on, null_equality)) =
-        equijoin_keys(join.on, join.outer, join.inner, ctx, session, &left, &right)?
-    {
+    let split = split_join_predicate(join.on, join.outer, join.inner, ctx, session, &left, &right)?;
+    if !split.on.is_empty() {
+        // Mixed equi/residual predicates should still use hash joins: the equi
+        // keys drive partition/build/probe work and DataFusion evaluates the
+        // remaining predicate as a JoinFilter.
+        let filter = split
+            .residual
+            .map(|expr| join_filter(expr, ctx, session, &left, &right))
+            .transpose()?;
+        let output_columns = join_output_columns_from_nodes(&join.join_type, &left, &right);
         let exec = HashJoinExec::try_new(
             left.exec,
             right.exec,
-            on,
-            None,
+            split.on,
+            filter,
             &df_join_type,
             None,
             PartitionMode::CollectLeft,
-            null_equality,
+            split.null_equality,
             false,
         )?;
-        return Ok(join_node(
-            Arc::new(exec),
-            join_output_columns_for_type(&join.join_type, join.outer, join.inner, ctx)?,
+        return project_columns(
+            required,
+            join_node(Arc::new(exec), output_columns, ctx)?,
             ctx,
-        )?);
+            session,
+        );
     }
 
     let filter = join_filter(join.on, ctx, session, &left, &right)?;
+    let output_columns = join_output_columns_from_nodes(&join.join_type, &left, &right);
     let exec =
         NestedLoopJoinExec::try_new(left.exec, right.exec, Some(filter), &df_join_type, None)?;
-    Ok(join_node(
-        Arc::new(exec),
-        join_output_columns_for_type(&join.join_type, join.outer, join.inner, ctx)?,
+    project_columns(
+        required,
+        join_node(Arc::new(exec), output_columns, ctx)?,
         ctx,
-    )?)
+        session,
+    )
 }
+
+// ---------------------------------------------------------------------------
+// Projection, schema, and required-column helpers
+// ---------------------------------------------------------------------------
 
 fn project_columns(
     columns: &[optd_core::Column],
     input: PhysicalPlanNode,
     ctx: &QueryContext,
-    session: &SessionContext,
+    _session: &SessionContext,
 ) -> ToPhysicalResult<PhysicalPlanNode> {
-    let exprs = projection_exprs_for_columns(columns, ctx, session, input.df_schema.as_ref())?;
+    if input.columns == columns {
+        return Ok(input);
+    }
+    let exprs = projection_exprs_for_columns(
+        columns,
+        ctx,
+        input.df_schema.as_ref(),
+        input.exec.schema().as_ref(),
+    )?;
     Ok(PhysicalPlanNode {
         exec: Arc::new(ProjectionExec::try_new(exprs, input.exec)?),
         df_schema: df_schema_for_columns(ctx, columns)?,
+        columns: columns.to_vec(),
     })
 }
 
 fn projection_exprs_for_columns(
     columns: &[optd_core::Column],
     ctx: &QueryContext,
-    session: &SessionContext,
     input_schema: &DFSchema,
+    physical_schema: &Schema,
 ) -> ToPhysicalResult<Vec<ProjectionExpr>> {
     columns
         .iter()
         .map(|column| {
             let logical = logical_column_expr(*column, ctx);
-            let physical =
-                create_physical_expr(&logical, input_schema, session.state().execution_props())?;
+            let datafusion::logical_expr::Expr::Column(df_column) = logical else {
+                unreachable!("logical_column_expr always returns a column expression");
+            };
+            let index = input_schema.index_of_column(&df_column)?;
+            let physical_name = physical_schema.field(index).name();
+            let physical = Arc::new(PhysicalColumn::new(physical_name, index));
             Ok(ProjectionExpr::new(
                 physical,
                 ctx.column(*column).name.clone(),
             ))
         })
         .collect()
+}
+
+fn filter_columns(
+    columns: &[optd_core::Column],
+    required: &[optd_core::Column],
+) -> Vec<optd_core::Column> {
+    columns
+        .iter()
+        .copied()
+        .filter(|column| required.contains(column))
+        .collect()
+}
+
+fn push_unique(columns: &mut Vec<optd_core::Column>, column: optd_core::Column) {
+    if !columns.contains(&column) {
+        columns.push(column);
+    }
+}
+
+fn merge_columns(
+    left: &[optd_core::Column],
+    right: &[optd_core::Column],
+) -> Vec<optd_core::Column> {
+    let mut merged = left.to_vec();
+    for column in right {
+        push_unique(&mut merged, *column);
+    }
+    merged
+}
+
+fn expr_columns(
+    expr: optd_core::Expr,
+    ctx: &QueryContext,
+) -> ToPhysicalResult<Vec<optd_core::Column>> {
+    optd_core::expr_used_columns(ctx, expr).map_err(|e| ToPhysicalError::Unsupported(e.to_string()))
 }
 
 fn logical_column_expr(
@@ -493,11 +770,44 @@ fn logical_column_expr(
     datafusion::logical_expr::Expr::Column(column)
 }
 
+fn scan_filter_expr(
+    expr: optd_core::Expr,
+    ctx: &QueryContext,
+    session: &SessionContext,
+) -> ToPhysicalResult<datafusion::logical_expr::Expr> {
+    let empty_tables = TableMap::new();
+    let mut expr_ctx = ToDfContext::new(ctx, &empty_tables, session);
+    let logical = convert_expr(
+        expr,
+        &mut expr_ctx,
+        &Default::default(),
+        &ColumnQualifiers::new(),
+    )?;
+    Ok(unnormalize_logical_columns(logical)?)
+}
+
+fn unnormalize_logical_columns(
+    expr: datafusion::logical_expr::Expr,
+) -> datafusion::error::Result<datafusion::logical_expr::Expr> {
+    Ok(expr
+        .transform_down(|expr| {
+            if let datafusion::logical_expr::Expr::Column(column) = expr {
+                Ok(Transformed::yes(datafusion::logical_expr::Expr::Column(
+                    datafusion_common::Column::new_unqualified(column.name),
+                )))
+            } else {
+                Ok(Transformed::no(expr))
+            }
+        })?
+        .data)
+}
+
 fn physical_expr(
     expr: optd_core::Expr,
     ctx: &QueryContext,
     session: &SessionContext,
     input_schema: &DFSchema,
+    physical_schema: &Schema,
 ) -> ToPhysicalResult<Arc<dyn PhysicalExpr>> {
     let empty_tables = TableMap::new();
     let mut expr_ctx = ToDfContext::new(ctx, &empty_tables, session);
@@ -507,14 +817,65 @@ fn physical_expr(
         &Default::default(),
         &ColumnQualifiers::new(),
     )?;
-    Ok(create_physical_expr(
-        &logical,
-        input_schema,
-        session.state().execution_props(),
-    )?)
+    physical_expr_from_logical(logical, session, input_schema, physical_schema)
 }
 
-fn equijoin_keys(
+fn physical_expr_from_logical(
+    logical: datafusion::logical_expr::Expr,
+    session: &SessionContext,
+    input_schema: &DFSchema,
+    physical_schema: &Schema,
+) -> ToPhysicalResult<Arc<dyn PhysicalExpr>> {
+    let state = session.state();
+    let simplify_context = datafusion::logical_expr::simplify::SimplifyContext::default()
+        .with_schema(Arc::new(input_schema.clone()))
+        .with_config_options(Arc::clone(state.config_options()))
+        .with_query_execution_start_time(state.execution_props().query_execution_start_time);
+    let simplifier = ExprSimplifier::new(simplify_context);
+    let logical = simplifier.simplify(logical)?;
+    let physical = state.create_physical_expr(logical, input_schema)?;
+    align_physical_columns_to_schema(physical, physical_schema)
+}
+
+fn align_physical_columns_to_schema(
+    expr: Arc<dyn PhysicalExpr>,
+    physical_schema: &Schema,
+) -> ToPhysicalResult<Arc<dyn PhysicalExpr>> {
+    Ok(expr
+        .transform_down(|expr| {
+            if let Some(column) = expr.as_any().downcast_ref::<PhysicalColumn>() {
+                let index = column.index();
+                let physical_name = physical_schema.field(index).name();
+                Ok(Transformed::yes(
+                    Arc::new(PhysicalColumn::new(physical_name, index)) as Arc<dyn PhysicalExpr>,
+                ))
+            } else {
+                Ok(Transformed::no(expr))
+            }
+        })?
+        .data)
+}
+
+// ---------------------------------------------------------------------------
+// Join predicate analysis
+// ---------------------------------------------------------------------------
+
+struct SplitJoinPredicate {
+    on: JoinOn,
+    residual: Option<optd_core::Expr>,
+    null_equality: NullEquality,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct JoinKeyCandidate {
+    left_expr: optd_core::Expr,
+    right_expr: optd_core::Expr,
+    left_col: optd_core::Column,
+    right_col: optd_core::Column,
+    null_equality: NullEquality,
+}
+
+fn split_join_predicate(
     expr: optd_core::Expr,
     outer: Operator,
     inner: Operator,
@@ -522,61 +883,152 @@ fn equijoin_keys(
     session: &SessionContext,
     left: &PhysicalPlanNode,
     right: &PhysicalPlanNode,
-) -> ToPhysicalResult<Option<(JoinOn, NullEquality)>> {
+) -> ToPhysicalResult<SplitJoinPredicate> {
     let conjuncts = split_conjuncts(expr, ctx);
     let outer_cols = available_columns_set(ctx, outer)?;
     let inner_cols = available_columns_set(ctx, inner)?;
+    let mut candidates = Vec::new();
+    let mut all_conjuncts_are_keys = true;
+    for conjunct in &conjuncts {
+        if let Some(candidate) = join_key_candidate(*conjunct, ctx, &outer_cols, &inner_cols)? {
+            candidates.push(candidate);
+        } else {
+            all_conjuncts_are_keys = false;
+        }
+    }
+
+    if candidates.is_empty() {
+        candidates = common_or_join_key_candidates(expr, ctx, &outer_cols, &inner_cols)?;
+        all_conjuncts_are_keys = false;
+    }
+
+    let (on, null_equality) = physical_join_keys(&candidates, ctx, session, left, right)?;
+    Ok(SplitJoinPredicate {
+        on,
+        residual: (!candidates.is_empty() && !all_conjuncts_are_keys).then_some(expr),
+        null_equality,
+    })
+}
+
+fn physical_join_keys(
+    candidates: &[JoinKeyCandidate],
+    ctx: &QueryContext,
+    session: &SessionContext,
+    left: &PhysicalPlanNode,
+    right: &PhysicalPlanNode,
+) -> ToPhysicalResult<(JoinOn, NullEquality)> {
     let mut keys = Vec::new();
     let mut null_equality = None;
-    for conjunct in conjuncts {
-        let ExprData::Binary {
-            op: BinaryOp::Eq | BinaryOp::IsNotDistinctFrom,
-            left: l,
-            right: r,
-        } = conjunct.get(ctx)
-        else {
-            return Ok(None);
-        };
-        let key_null_equality = match conjunct.get(ctx) {
-            ExprData::Binary {
-                op: BinaryOp::Eq, ..
-            } => NullEquality::NullEqualsNothing,
-            ExprData::Binary {
-                op: BinaryOp::IsNotDistinctFrom,
-                ..
-            } => NullEquality::NullEqualsNull,
-            _ => unreachable!(),
-        };
+    for candidate in candidates {
+        let key_null_equality = candidate.null_equality;
         if let Some(existing) = null_equality {
             if existing != key_null_equality {
-                return Ok(None);
+                return Ok((Vec::new(), NullEquality::NullEqualsNothing));
             }
         } else {
             null_equality = Some(key_null_equality);
         }
-        let Some(l_col) = column_ref(*l, ctx) else {
-            return Ok(None);
-        };
-        let Some(r_col) = column_ref(*r, ctx) else {
-            return Ok(None);
-        };
-        let (left_expr, right_expr) = if outer_cols.contains(&l_col) && inner_cols.contains(&r_col)
-        {
-            (*l, *r)
-        } else if outer_cols.contains(&r_col) && inner_cols.contains(&l_col) {
-            (*r, *l)
-        } else {
-            return Ok(None);
-        };
         keys.push((
-            physical_expr(left_expr, ctx, session, left.df_schema.as_ref())?,
-            physical_expr(right_expr, ctx, session, right.df_schema.as_ref())?,
+            physical_expr(
+                candidate.left_expr,
+                ctx,
+                session,
+                left.df_schema.as_ref(),
+                left.exec.schema().as_ref(),
+            )?,
+            physical_expr(
+                candidate.right_expr,
+                ctx,
+                session,
+                right.df_schema.as_ref(),
+                right.exec.schema().as_ref(),
+            )?,
         ));
     }
-    Ok(Some((
+    Ok((
         keys,
         null_equality.unwrap_or(NullEquality::NullEqualsNothing),
-    )))
+    ))
+}
+
+fn join_key_candidate(
+    expr: optd_core::Expr,
+    ctx: &QueryContext,
+    outer_cols: &HashSet<optd_core::Column>,
+    inner_cols: &HashSet<optd_core::Column>,
+) -> ToPhysicalResult<Option<JoinKeyCandidate>> {
+    let ExprData::Binary {
+        op: op @ (BinaryOp::Eq | BinaryOp::IsNotDistinctFrom),
+        left,
+        right,
+    } = expr.get(ctx)
+    else {
+        return Ok(None);
+    };
+    let null_equality = match op {
+        BinaryOp::Eq => NullEquality::NullEqualsNothing,
+        BinaryOp::IsNotDistinctFrom => NullEquality::NullEqualsNull,
+        _ => unreachable!(),
+    };
+    let Some(left_col) = column_ref(*left, ctx) else {
+        return Ok(None);
+    };
+    let Some(right_col) = column_ref(*right, ctx) else {
+        return Ok(None);
+    };
+    if outer_cols.contains(&left_col) && inner_cols.contains(&right_col) {
+        Ok(Some(JoinKeyCandidate {
+            left_expr: *left,
+            right_expr: *right,
+            left_col,
+            right_col,
+            null_equality,
+        }))
+    } else if outer_cols.contains(&right_col) && inner_cols.contains(&left_col) {
+        Ok(Some(JoinKeyCandidate {
+            left_expr: *right,
+            right_expr: *left,
+            left_col: right_col,
+            right_col: left_col,
+            null_equality,
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
+fn common_or_join_key_candidates(
+    expr: optd_core::Expr,
+    ctx: &QueryContext,
+    outer_cols: &HashSet<optd_core::Column>,
+    inner_cols: &HashSet<optd_core::Column>,
+) -> ToPhysicalResult<Vec<JoinKeyCandidate>> {
+    let arms = split_disjuncts(expr, ctx);
+    if arms.len() <= 1 {
+        return Ok(Vec::new());
+    }
+    let mut common = split_conjuncts(arms[0], ctx)
+        .into_iter()
+        .filter_map(|conjunct| {
+            join_key_candidate(conjunct, ctx, outer_cols, inner_cols).transpose()
+        })
+        .collect::<ToPhysicalResult<Vec<_>>>()?;
+    for arm in arms.iter().skip(1) {
+        let arm_keys = split_conjuncts(*arm, ctx)
+            .into_iter()
+            .filter_map(|conjunct| {
+                join_key_candidate(conjunct, ctx, outer_cols, inner_cols).transpose()
+            })
+            .collect::<ToPhysicalResult<Vec<_>>>()?;
+        common.retain(|candidate| {
+            arm_keys.iter().any(|arm_key| {
+                candidate.left_col == arm_key.left_col
+                    && candidate.right_col == arm_key.right_col
+                    && candidate.null_equality == arm_key.null_equality
+            })
+        });
+    }
+    Ok(common)
 }
 
 fn join_filter(
@@ -602,7 +1054,7 @@ fn join_filter(
     }
     let df_schema = DFSchema::new_with_metadata(qualified, Default::default())?;
     let schema = Arc::new(Schema::new(fields));
-    let expression = physical_expr(expr, ctx, session, &df_schema)?;
+    let expression = physical_expr(expr, ctx, session, &df_schema, &schema)?;
     let column_indices = left_indices
         .into_iter()
         .map(
@@ -629,21 +1081,25 @@ fn join_node(
     Ok(PhysicalPlanNode {
         exec,
         df_schema: df_schema_for_columns(ctx, &columns)?,
+        columns,
     })
 }
 
-fn join_output_columns_for_type(
+fn join_output_columns_from_nodes(
     join_type: &JoinType,
-    outer: Operator,
-    inner: Operator,
-    ctx: &QueryContext,
-) -> ToPhysicalResult<Vec<optd_core::Column>> {
-    let mut columns = available_columns(outer, ctx)?;
+    left: &PhysicalPlanNode,
+    right: &PhysicalPlanNode,
+) -> Vec<optd_core::Column> {
+    let mut columns = left.columns.clone();
     if matches!(join_type, JoinType::LeftSemi | JoinType::LeftAnti) {
-        return Ok(columns);
+        return columns;
     }
-    columns.extend(available_columns(inner, ctx)?);
-    Ok(columns)
+    if let JoinType::LeftMark { marker, .. } = join_type {
+        columns.push(*marker);
+        return columns;
+    }
+    columns.extend(right.columns.iter().copied());
+    columns
 }
 
 fn output_columns(op: Operator, ctx: &QueryContext) -> ToPhysicalResult<Vec<optd_core::Column>> {
@@ -720,6 +1176,19 @@ fn split_conjuncts(expr: optd_core::Expr, ctx: &QueryContext) -> Vec<optd_core::
         } => exprs
             .iter()
             .flat_map(|expr| split_conjuncts(*expr, ctx))
+            .collect(),
+        _ => vec![expr],
+    }
+}
+
+fn split_disjuncts(expr: optd_core::Expr, ctx: &QueryContext) -> Vec<optd_core::Expr> {
+    match expr.get(ctx) {
+        ExprData::Nary {
+            op: NaryOp::Or,
+            exprs,
+        } => exprs
+            .iter()
+            .flat_map(|expr| split_disjuncts(*expr, ctx))
             .collect(),
         _ => vec![expr],
     }

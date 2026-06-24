@@ -5,7 +5,9 @@ use datafusion::arrow::array::{ArrayRef, Float64Array, Int64Array, StringArray};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::arrow::util::pretty::pretty_format_batches;
+use datafusion::prelude::{SessionConfig, SessionContext};
 use optd_core::{CardinalityEstimationV1, FreeColumns, QueryFormatConfig};
+use optd_datafusion::config::OptdExtensionConfig;
 use optd_datafusion::explain_udfs::ExplainStep;
 use optd_datafusion::runner::{OptdRunner, RunnerOutput};
 use optd_datafusion::setup::{
@@ -35,13 +37,41 @@ struct Args {
     /// Register local JOB parquet tables before executing SQL.
     #[arg(long)]
     job: bool,
+
+    /// Execute optd-optimized IR through direct DataFusion physical planning.
+    #[arg(long)]
+    physical: bool,
+
+    /// Print the direct optd -> DataFusion physical plan instead of executing SQL.
+    #[arg(long)]
+    direct_physical_plan: bool,
+
+    /// Print the DataFusion physical plan after optd -> DataFusion logical conversion.
+    #[arg(long)]
+    logical_physical_plan: bool,
+
+    /// Override DataFusion target partitions before registering benchmark tables.
+    #[arg(long)]
+    target_partitions: Option<usize>,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
-    let session = session_context_with_information_schema();
+    let session = if args.physical || args.target_partitions.is_some() {
+        let mut optd_config = OptdExtensionConfig::default();
+        optd_config.physical_planning = args.physical;
+        let mut config = SessionConfig::new()
+            .with_information_schema(true)
+            .with_option_extension(optd_config);
+        if let Some(target_partitions) = args.target_partitions {
+            config = config.with_target_partitions(target_partitions);
+        }
+        SessionContext::new_with_config(config)
+    } else {
+        session_context_with_information_schema()
+    };
     if args.tpch {
         register_tpch_tables(&session).await?;
     }
@@ -56,12 +86,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     for sql in args.commands {
-        execute_script(&runner, &sql).await?;
+        if args.logical_physical_plan {
+            print_logical_physical_plan(&runner, &sql).await?;
+        } else if args.direct_physical_plan {
+            print_direct_physical_plan(&runner, &sql).await?;
+        } else {
+            execute_script(&runner, &sql).await?;
+        }
     }
 
     for path in args.files {
         let sql = fs::read_to_string(&path)?;
-        execute_script(&runner, &sql).await?;
+        if args.logical_physical_plan {
+            print_logical_physical_plan(&runner, &sql).await?;
+        } else if args.direct_physical_plan {
+            print_direct_physical_plan(&runner, &sql).await?;
+        } else {
+            execute_script(&runner, &sql).await?;
+        }
     }
 
     Ok(())
@@ -120,6 +162,23 @@ async fn repl(runner: &OptdRunner) -> Result<(), Box<dyn Error>> {
 async fn execute_script(runner: &OptdRunner, sql: &str) -> Result<(), Box<dyn Error>> {
     for statement in split_statements(sql) {
         execute_statement(runner, &statement).await?;
+    }
+    Ok(())
+}
+
+async fn print_direct_physical_plan(runner: &OptdRunner, sql: &str) -> Result<(), Box<dyn Error>> {
+    for statement in split_statements(sql) {
+        println!("{}", runner.explain_direct_physical_plan(&statement).await?);
+    }
+    Ok(())
+}
+
+async fn print_logical_physical_plan(runner: &OptdRunner, sql: &str) -> Result<(), Box<dyn Error>> {
+    for statement in split_statements(sql) {
+        println!(
+            "{}",
+            runner.explain_logical_physical_plan(&statement).await?
+        );
     }
     Ok(())
 }
