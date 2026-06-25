@@ -13,3 +13,12 @@ and the generated TPC-H/JOB SQLLogicTest data.
 The workflows also apply Rust CI speedups such as locked Cargo commands,
 Rust-aware caching, disabled incremental compilation, reduced test debug info,
 and nextest-based test execution.
+
+## Workflow overview
+
+| Workflow | Runs on | Purpose |
+| --- | --- | --- |
+| `check.yml` | Pull requests and pushes to `main` | Formatting, clippy on stable/beta, docs, and `cargo-hack` feature checks for `optd-core`. |
+| `test.yml` | Pull requests and pushes to `main` | Nextest workspace tests, `optd-core` no-default-features, light SLT, and TPC-H SLT with cached/generated data. |
+| `safety.yml` | Pull requests and pushes to `main` | Sanitizer and Miri checks scoped to `optd-core`. |
+| `scheduled.yml` | Manual dispatch and nightly schedule | Nightly tests, updated-dependency tests, and full SLT with cached/generated TPC-H and JOB data. |
