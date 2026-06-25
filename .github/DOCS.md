@@ -20,5 +20,5 @@ and nextest-based test execution.
 | --- | --- | --- |
 | `check.yml` | Pull requests and pushes to `main` | Formatting, clippy on stable/beta, docs, and `cargo-hack` feature checks for `optd-core`. |
 | `test.yml` | Pull requests and pushes to `main` | Nextest workspace tests, `optd-core` no-default-features, light SLT, and TPC-H SLT with cached/generated data. |
-| `safety.yml` | Pull requests and pushes to `main` | Sanitizer and Miri checks scoped to `optd-core`. |
+| `safety.yml` | Manual dispatch | Optional sanitizer and Miri checks scoped to `optd-core`; kept out of the required PR path because the repo has no first-party `unsafe` code today. |
 | `scheduled.yml` | Manual dispatch and nightly schedule | Nightly tests, updated-dependency tests, and full SLT with cached/generated TPC-H and JOB data. |
