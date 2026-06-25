@@ -33,19 +33,23 @@ jobs:
 
   clippy:
     runs-on: ubuntu-latest
-    name: rust-toolchain / clippy
+    name: ${{ matrix.toolchain }} / clippy
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, beta]
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust
+      - name: Install ${{ matrix.toolchain }}
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.96.0
+          toolchain: ${{ matrix.toolchain }}
           components: clippy
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - uses: Swatinem/rust-cache@v2
       - name: cargo clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        run: cargo +${{ matrix.toolchain }} clippy --workspace --all-targets --locked -- -D warnings
 
   doc:
     runs-on: ubuntu-latest
