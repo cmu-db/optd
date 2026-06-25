@@ -157,7 +157,7 @@ jobs:
       - name: cargo llvm-cov rust tests
         run: cargo llvm-cov nextest --workspace --locked -E 'not binary(slt)' --no-report
       - name: cargo llvm-cov tpch explain
-        run: cargo llvm-cov nextest --release -p optd-datafusion --test slt --locked -E 'test(/tests\/slt\/tpch\/explain_flat\/)' --no-report
+        run: cargo llvm-cov nextest --release -p optd-datafusion --test slt --locked -E 'test(/tests\/slt\/tpch\/explain_flat\//)' --no-report
       - name: cargo llvm-cov report
         run: cargo llvm-cov report --lcov --output-path lcov.info
       - name: Record Rust version
