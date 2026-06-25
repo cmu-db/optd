@@ -1,0 +1,109 @@
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+name: test
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_TERM_COLOR: always
+
+jobs:
+  required:
+    runs-on: ubuntu-latest
+    name: ubuntu / ${{ matrix.toolchain }}
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, beta]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ${{ matrix.toolchain }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache TPC-H data
+        id: cache-tpch
+        uses: actions/cache@v4
+        with:
+          path: optd/connectors/datafusion/data/tpch/sf-0.1
+          key: ${{ runner.os }}-tpch-sf-0.1-${{ hashFiles('scripts/generate_tpch.sh') }}
+      - name: Install tpchgen-cli
+        if: steps.cache-tpch.outputs.cache-hit != 'true'
+        run: cargo install tpchgen-cli --locked
+      - name: Generate TPC-H data
+        if: steps.cache-tpch.outputs.cache-hit != 'true'
+        run: ./scripts/generate_tpch.sh
+      - name: cargo nextest
+        run: cargo nextest run --workspace --locked -E 'not binary(slt)'
+
+  no-default-features:
+    runs-on: ubuntu-latest
+    name: ubuntu / stable / no-default-features
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo nextest
+        run: cargo nextest run -p optd-core --no-default-features --locked
+
+  slt-light:
+    runs-on: ubuntu-latest
+    name: ubuntu / stable / slt-light
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo nextest slt-light
+        run: cargo nextest run --release -p optd-datafusion --test slt --locked -E 'test(/tests\/slt\/(basic\.slt|features\/)/)'
+
+  slt-tpch:
+    runs-on: ubuntu-latest
+    name: ubuntu / stable / slt-tpch
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache TPC-H data
+        id: cache-tpch
+        uses: actions/cache@v4
+        with:
+          path: optd/connectors/datafusion/data/tpch/sf-0.1
+          key: ${{ runner.os }}-tpch-sf-0.1-${{ hashFiles('scripts/generate_tpch.sh') }}
+      - name: Install tpchgen-cli
+        if: steps.cache-tpch.outputs.cache-hit != 'true'
+        run: cargo install tpchgen-cli --locked
+      - name: Generate TPC-H data
+        if: steps.cache-tpch.outputs.cache-hit != 'true'
+        run: ./scripts/generate_tpch.sh
+      - name: cargo nextest tpch
+        run: cargo nextest run --release -p optd-datafusion --test slt --locked -E 'test(/tests\/slt\/tpch\//)'

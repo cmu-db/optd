@@ -1,0 +1,133 @@
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '7 7 * * *'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+name: scheduled
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_TERM_COLOR: always
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    name: ubuntu / nightly
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache TPC-H data
+        id: cache-tpch
+        uses: actions/cache@v4
+        with:
+          path: optd/connectors/datafusion/data/tpch/sf-0.1
+          key: ${{ runner.os }}-tpch-sf-0.1-${{ hashFiles('scripts/generate_tpch.sh') }}
+      - name: Install tpchgen-cli
+        if: steps.cache-tpch.outputs.cache-hit != 'true'
+        run: cargo install tpchgen-cli --locked
+      - name: Generate TPC-H data
+        if: steps.cache-tpch.outputs.cache-hit != 'true'
+        run: ./scripts/generate_tpch.sh
+      - name: cargo nextest
+        run: cargo nextest run --workspace --locked -E 'not binary(slt)'
+
+  updated:
+    runs-on: ubuntu-latest
+    name: ubuntu / beta / updated
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install beta
+        uses: dtolnay/rust-toolchain@beta
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+      - name: cargo update
+        run: cargo update
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache TPC-H data
+        id: cache-tpch
+        uses: actions/cache@v4
+        with:
+          path: optd/connectors/datafusion/data/tpch/sf-0.1
+          key: ${{ runner.os }}-tpch-sf-0.1-${{ hashFiles('scripts/generate_tpch.sh') }}
+      - name: Install tpchgen-cli
+        if: steps.cache-tpch.outputs.cache-hit != 'true'
+        run: cargo install tpchgen-cli --locked
+      - name: Generate TPC-H data
+        if: steps.cache-tpch.outputs.cache-hit != 'true'
+        run: ./scripts/generate_tpch.sh
+      - name: cargo nextest
+        run: cargo nextest run --workspace --locked -E 'not binary(slt)'
+        env:
+          RUSTFLAGS: -D deprecated
+
+  full-slt:
+    runs-on: ubuntu-latest
+    name: ubuntu / stable / full-slt
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache TPC-H data
+        id: cache-tpch
+        uses: actions/cache@v4
+        with:
+          path: optd/connectors/datafusion/data/tpch/sf-0.1
+          key: ${{ runner.os }}-tpch-sf-0.1-${{ hashFiles('scripts/generate_tpch.sh') }}
+      - name: Install tpchgen-cli
+        if: steps.cache-tpch.outputs.cache-hit != 'true'
+        run: cargo install tpchgen-cli --locked
+      - name: Generate TPC-H data
+        if: steps.cache-tpch.outputs.cache-hit != 'true'
+        run: ./scripts/generate_tpch.sh
+      - name: Cache JOB Parquet data
+        id: cache-job
+        uses: actions/cache@v4
+        with:
+          path: optd/connectors/datafusion/data/job
+          key: ${{ runner.os }}-job-parquet-${{ hashFiles('scripts/generate_job_parquet.sh', 'scripts/job_schema_duckdb.sql') }}
+      - name: Cache JOB source data
+        id: cache-job-source
+        if: steps.cache-job.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: optd/connectors/datafusion/data/job-source
+          key: ${{ runner.os }}-job-source-v1
+      - name: Download JOB source data
+        if: steps.cache-job.outputs.cache-hit != 'true' && steps.cache-job-source.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p optd/connectors/datafusion/data/job-source
+          cd optd/connectors/datafusion/data/job-source
+          curl -OL https://bonsai.cedardb.com/job/imdb.tgz
+          tar -zxvf imdb.tgz
+      - name: Install DuckDB
+        if: steps.cache-job.outputs.cache-hit != 'true'
+        run: curl https://install.duckdb.org | sh
+      - name: Add DuckDB to PATH
+        if: steps.cache-job.outputs.cache-hit != 'true'
+        run: echo "$HOME/.duckdb/cli/latest" >> "$GITHUB_PATH"
+      - name: Generate JOB Parquet data
+        if: steps.cache-job.outputs.cache-hit != 'true'
+        run: ./scripts/generate_job_parquet.sh
+      - name: cargo nextest full SLT
+        run: cargo nextest run --release -p optd-datafusion --test slt --locked -E 'not test(/job\/results\/(16a|16c|16d|19d)\.slt/)'

@@ -1,0 +1,54 @@
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+name: safety
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_TERM_COLOR: always
+
+jobs:
+  sanitizers:
+    runs-on: ubuntu-latest
+    name: nightly / sanitizers / optd-core
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly
+        uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Install LLVM symbolizer
+        run: sudo apt-get update && sudo apt-get install -y llvm
+      - name: cargo test -Zsanitizer=address
+        run: cargo test -p optd-core --lib --tests --all-features --target x86_64-unknown-linux-gnu
+        env:
+          ASAN_OPTIONS: detect_odr_violation=0:detect_leaks=0
+          RUSTFLAGS: -Z sanitizer=address
+      - name: cargo test -Zsanitizer=leak
+        if: always()
+        run: cargo test -p optd-core --lib --tests --all-features --target x86_64-unknown-linux-gnu
+        env:
+          RUSTFLAGS: -Z sanitizer=leak
+
+  miri:
+    runs-on: ubuntu-latest
+    name: nightly / miri / optd-core
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly with Miri
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - name: cargo miri setup
+        run: cargo miri setup
+      - name: cargo miri test
+        run: cargo miri test -p optd-core

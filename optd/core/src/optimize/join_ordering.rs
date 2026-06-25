@@ -117,9 +117,11 @@ mod cost_model {
 
     fn contains_hash_join_key(expr: crate::Expr, ctx: &QueryContext) -> bool {
         match expr.get(ctx) {
-            ExprData::Binary { op, left, right }
-                if matches!(op, BinaryOp::Eq | BinaryOp::IsNotDistinctFrom) =>
-            {
+            ExprData::Binary {
+                op: BinaryOp::Eq | BinaryOp::IsNotDistinctFrom,
+                left,
+                right,
+            } => {
                 matches!(
                     (left.get(ctx), right.get(ctx)),
                     (ExprData::ColumnRef(_), ExprData::ColumnRef(_))

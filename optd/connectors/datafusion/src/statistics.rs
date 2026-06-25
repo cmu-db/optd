@@ -35,7 +35,7 @@ async fn collect_table_statistics_from_sql(
     sql: &str,
     columns: &[&str],
 ) -> DFResult<TableStatistics> {
-    let batches = session.sql(&sql).await?.collect().await?;
+    let batches = session.sql(sql).await?.collect().await?;
     let batch = first_batch(&batches)?;
 
     let row_count = scalar_usize(batch, "row_count")?;
