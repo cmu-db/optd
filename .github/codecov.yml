@@ -19,7 +19,9 @@ ignore:
   # DataFusion bridge regression suites.
   - "optd/connectors/datafusion/tests"
 
-# Make comments less noisy
+# Allow the initial Codecov PR to post a comment before main has a baseline
+# report. Tighten this back after coverage is established on main.
 comment:
   layout: "files"
-  require_changes: true
+  require_changes: false
+  require_base: false
