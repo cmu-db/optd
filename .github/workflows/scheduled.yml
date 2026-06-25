@@ -82,11 +82,11 @@ jobs:
 
   full-slt:
     runs-on: ubuntu-latest
-    name: ubuntu / stable / full-slt
+    name: ubuntu / rust-toolchain / full-slt
     steps:
       - uses: actions/checkout@v4
-      - name: Install stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-nextest

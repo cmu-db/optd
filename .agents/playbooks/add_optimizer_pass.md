@@ -11,6 +11,8 @@
 Run:
 
 ```sh
-cargo test -p optd-core
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+actionlint
 cargo nextest run --release -p optd-datafusion --test slt
 ```

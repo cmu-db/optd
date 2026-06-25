@@ -20,11 +20,11 @@ env:
 jobs:
   fmt:
     runs-on: ubuntu-latest
-    name: stable / fmt
+    name: rust-toolchain / fmt
     steps:
       - uses: actions/checkout@v4
-      - name: Install stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
         with:
           components: rustfmt
       - name: cargo fmt --all --check
@@ -32,17 +32,12 @@ jobs:
 
   clippy:
     runs-on: ubuntu-latest
-    name: ${{ matrix.toolchain }} / clippy
-    strategy:
-      fail-fast: false
-      matrix:
-        toolchain: [stable, beta]
+    name: rust-toolchain / clippy
     steps:
       - uses: actions/checkout@v4
-      - name: Install ${{ matrix.toolchain }}
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ matrix.toolchain }}
           components: clippy
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
@@ -52,11 +47,11 @@ jobs:
 
   doc:
     runs-on: ubuntu-latest
-    name: stable / doc
+    name: rust-toolchain / doc
     steps:
       - uses: actions/checkout@v4
-      - name: Install stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - uses: Swatinem/rust-cache@v2
@@ -67,11 +62,11 @@ jobs:
 
   features:
     runs-on: ubuntu-latest
-    name: stable / features
+    name: rust-toolchain / features
     steps:
       - uses: actions/checkout@v4
-      - name: Install stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-hack

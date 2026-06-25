@@ -10,8 +10,10 @@ the behavior is observable through the DataFusion connector.
 Useful commands:
 
 ```sh
-cargo test -p optd-core
-cargo test -p optd-core --no-default-features
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+actionlint
+cargo nextest run -p optd-core --no-default-features --locked
 cargo nextest run --release -p optd-datafusion --test slt
 cargo nextest run --release --workspace
 ```

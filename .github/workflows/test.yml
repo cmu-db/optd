@@ -20,17 +20,11 @@ env:
 jobs:
   required:
     runs-on: ubuntu-latest
-    name: ubuntu / ${{ matrix.toolchain }}
-    strategy:
-      fail-fast: false
-      matrix:
-        toolchain: [stable, beta]
+    name: ubuntu / rust-toolchain
     steps:
       - uses: actions/checkout@v4
-      - name: Install ${{ matrix.toolchain }}
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.toolchain }}
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-nextest
@@ -55,11 +49,11 @@ jobs:
 
   no-default-features:
     runs-on: ubuntu-latest
-    name: ubuntu / stable / no-default-features
+    name: ubuntu / rust-toolchain / no-default-features
     steps:
       - uses: actions/checkout@v4
-      - name: Install stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-nextest
@@ -72,11 +66,11 @@ jobs:
 
   slt-light:
     runs-on: ubuntu-latest
-    name: ubuntu / stable / slt-light
+    name: ubuntu / rust-toolchain / slt-light
     steps:
       - uses: actions/checkout@v4
-      - name: Install stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-nextest
@@ -89,11 +83,11 @@ jobs:
 
   slt-tpch:
     runs-on: ubuntu-latest
-    name: ubuntu / stable / slt-tpch
+    name: ubuntu / rust-toolchain / slt-tpch
     steps:
       - uses: actions/checkout@v4
-      - name: Install stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-nextest
