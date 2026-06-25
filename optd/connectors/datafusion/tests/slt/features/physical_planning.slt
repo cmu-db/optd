@@ -1,7 +1,5 @@
-# Direct optd IR -> DataFusion physical plan smoke coverage.
-
-statement ok
-SET optd.physical_planning = true;
+# Direct optd IR -> DataFusion physical plan smoke coverage. SLT uses physical
+# planning by default; use the harness-level --logical flag to opt out.
 
 query I
 SELECT a + 10

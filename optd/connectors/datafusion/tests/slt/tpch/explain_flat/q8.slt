@@ -108,168 +108,168 @@ order by
 68)------]
 69)----},
 70)----{
-71)------"id": 5,
-72)------"kind": "scan",
-73)------"title": "⊞ Scan",
-74)------"table_name": "orders",
-75)------"columns": [
-76)--------"o_orderkey(#32)",
-77)--------"o_custkey(#33)",
-78)--------"o_orderstatus(#34)",
-79)--------"o_totalprice(#35)",
-80)--------"o_orderdate(#36)",
-81)--------"o_orderpriority(#37)",
-82)--------"o_clerk(#38)",
-83)--------"o_shippriority(#39)",
-84)--------"o_comment(#40)"
-85)------]
-86)----},
-87)----{
-88)------"id": 74,
-89)------"kind": "selection",
-90)------"title": "σ Selection",
-91)------"predicate": "((o_orderdate(#36) >= CAST(\"1995-01-01\" AS Date32)) AND (o_orderdate(#36) <= CAST(\"1996-12-31\" AS Date32)))",
-92)------"input": 5
-93)----},
-94)----{
-95)------"id": 135,
-96)------"kind": "join",
-97)------"title": "⋈ InnerJoin",
-98)------"join_type": "Inner",
-99)------"condition": "(o_custkey(#33) = c_custkey(#41))",
-100)------"outer": 7,
-101)------"inner": 74
+71)------"id": 135,
+72)------"kind": "join",
+73)------"title": "⋈ InnerJoin",
+74)------"join_type": "Inner",
+75)------"condition": "(c_nationkey(#44) = n_nationkey(#53))",
+76)------"outer": 134,
+77)------"inner": 7
+78)----},
+79)----{
+80)------"id": 5,
+81)------"kind": "scan",
+82)------"title": "⊞ Scan",
+83)------"table_name": "orders",
+84)------"columns": [
+85)--------"o_orderkey(#32)",
+86)--------"o_custkey(#33)",
+87)--------"o_orderstatus(#34)",
+88)--------"o_totalprice(#35)",
+89)--------"o_orderdate(#36)",
+90)--------"o_orderpriority(#37)",
+91)--------"o_clerk(#38)",
+92)--------"o_shippriority(#39)",
+93)--------"o_comment(#40)"
+94)------]
+95)----},
+96)----{
+97)------"id": 74,
+98)------"kind": "selection",
+99)------"title": "σ Selection",
+100)------"predicate": "((o_orderdate(#36) >= CAST(\"1995-01-01\" AS Date32)) AND (o_orderdate(#36) <= CAST(\"1996-12-31\" AS Date32)))",
+101)------"input": 5
 102)----},
 103)----{
 104)------"id": 136,
 105)------"kind": "join",
 106)------"title": "⋈ InnerJoin",
 107)------"join_type": "Inner",
-108)------"condition": "(c_nationkey(#44) = n_nationkey(#53))",
-109)------"outer": 134,
-110)------"inner": 135
+108)------"condition": "(o_custkey(#33) = c_custkey(#41))",
+109)------"outer": 135,
+110)------"inner": 74
 111)----},
 112)----{
-113)------"id": 12,
+113)------"id": 0,
 114)------"kind": "scan",
 115)------"title": "⊞ Scan",
-116)------"table_name": "nation",
+116)------"table_name": "part",
 117)------"columns": [
-118)--------"n_nationkey(#57)",
-119)--------"n_name(#58)",
-120)--------"n_regionkey(#59)",
-121)--------"n_comment(#60)"
-122)------]
-123)----},
-124)----{
-125)------"id": 13,
-126)------"kind": "rename",
-127)------"title": "ρ Rename(n2)",
-128)------"defs": [
-129)--------"n_nationkey(#61) <- n_nationkey(#57)",
-130)--------"n_name(#62) <- n_name(#58)",
-131)--------"n_regionkey(#63) <- n_regionkey(#59)",
-132)--------"n_comment(#64) <- n_comment(#60)"
-133)------],
-134)------"input": 12
+118)--------"p_partkey(#0)",
+119)--------"p_name(#1)",
+120)--------"p_mfgr(#2)",
+121)--------"p_brand(#3)",
+122)--------"p_type(#4)",
+123)--------"p_size(#5)",
+124)--------"p_container(#6)",
+125)--------"p_retailprice(#7)",
+126)--------"p_comment(#8)"
+127)------]
+128)----},
+129)----{
+130)------"id": 103,
+131)------"kind": "selection",
+132)------"title": "σ Selection",
+133)------"predicate": "(p_type(#4) = \"ECONOMY ANODIZED STEEL\")",
+134)------"input": 0
 135)----},
 136)----{
-137)------"id": 1,
+137)------"id": 3,
 138)------"kind": "scan",
 139)------"title": "⊞ Scan",
-140)------"table_name": "supplier",
+140)------"table_name": "lineitem",
 141)------"columns": [
-142)--------"s_suppkey(#9)",
-143)--------"s_name(#10)",
-144)--------"s_address(#11)",
-145)--------"s_nationkey(#12)",
-146)--------"s_phone(#13)",
-147)--------"s_acctbal(#14)",
-148)--------"s_comment(#15)"
-149)------]
-150)----},
-151)----{
-152)------"id": 137,
-153)------"kind": "join",
-154)------"title": "⋈ InnerJoin",
-155)------"join_type": "Inner",
-156)------"condition": "(s_nationkey(#12) = n_nationkey(#61))",
-157)------"outer": 13,
-158)------"inner": 1
+142)--------"l_orderkey(#16)",
+143)--------"l_partkey(#17)",
+144)--------"l_suppkey(#18)",
+145)--------"l_linenumber(#19)",
+146)--------"l_quantity(#20)",
+147)--------"l_extendedprice(#21)",
+148)--------"l_discount(#22)",
+149)--------"l_tax(#23)",
+150)--------"l_returnflag(#24)",
+151)--------"l_linestatus(#25)",
+152)--------"l_shipdate(#26)",
+153)--------"l_commitdate(#27)",
+154)--------"l_receiptdate(#28)",
+155)--------"l_shipinstruct(#29)",
+156)--------"l_shipmode(#30)",
+157)--------"l_comment(#31)"
+158)------]
 159)----},
 160)----{
-161)------"id": 0,
-162)------"kind": "scan",
-163)------"title": "⊞ Scan",
-164)------"table_name": "part",
-165)------"columns": [
-166)--------"p_partkey(#0)",
-167)--------"p_name(#1)",
-168)--------"p_mfgr(#2)",
-169)--------"p_brand(#3)",
-170)--------"p_type(#4)",
-171)--------"p_size(#5)",
-172)--------"p_container(#6)",
-173)--------"p_retailprice(#7)",
-174)--------"p_comment(#8)"
-175)------]
-176)----},
-177)----{
-178)------"id": 103,
-179)------"kind": "selection",
-180)------"title": "σ Selection",
-181)------"predicate": "(p_type(#4) = \"ECONOMY ANODIZED STEEL\")",
-182)------"input": 0
-183)----},
-184)----{
-185)------"id": 3,
-186)------"kind": "scan",
-187)------"title": "⊞ Scan",
-188)------"table_name": "lineitem",
-189)------"columns": [
-190)--------"l_orderkey(#16)",
-191)--------"l_partkey(#17)",
-192)--------"l_suppkey(#18)",
-193)--------"l_linenumber(#19)",
-194)--------"l_quantity(#20)",
-195)--------"l_extendedprice(#21)",
-196)--------"l_discount(#22)",
-197)--------"l_tax(#23)",
-198)--------"l_returnflag(#24)",
-199)--------"l_linestatus(#25)",
-200)--------"l_shipdate(#26)",
-201)--------"l_commitdate(#27)",
-202)--------"l_receiptdate(#28)",
-203)--------"l_shipinstruct(#29)",
-204)--------"l_shipmode(#30)",
-205)--------"l_comment(#31)"
-206)------]
-207)----},
-208)----{
-209)------"id": 138,
-210)------"kind": "join",
-211)------"title": "⋈ InnerJoin",
-212)------"join_type": "Inner",
-213)------"condition": "(p_partkey(#0) = l_partkey(#17))",
-214)------"outer": 103,
-215)------"inner": 3
+161)------"id": 137,
+162)------"kind": "join",
+163)------"title": "⋈ InnerJoin",
+164)------"join_type": "Inner",
+165)------"condition": "(p_partkey(#0) = l_partkey(#17))",
+166)------"outer": 103,
+167)------"inner": 3
+168)----},
+169)----{
+170)------"id": 138,
+171)------"kind": "join",
+172)------"title": "⋈ InnerJoin",
+173)------"join_type": "Inner",
+174)------"condition": "(l_orderkey(#16) = o_orderkey(#32))",
+175)------"outer": 136,
+176)------"inner": 137
+177)----},
+178)----{
+179)------"id": 12,
+180)------"kind": "scan",
+181)------"title": "⊞ Scan",
+182)------"table_name": "nation",
+183)------"columns": [
+184)--------"n_nationkey(#57)",
+185)--------"n_name(#58)",
+186)--------"n_regionkey(#59)",
+187)--------"n_comment(#60)"
+188)------]
+189)----},
+190)----{
+191)------"id": 13,
+192)------"kind": "rename",
+193)------"title": "ρ Rename(n2)",
+194)------"defs": [
+195)--------"n_nationkey(#61) <- n_nationkey(#57)",
+196)--------"n_name(#62) <- n_name(#58)",
+197)--------"n_regionkey(#63) <- n_regionkey(#59)",
+198)--------"n_comment(#64) <- n_comment(#60)"
+199)------],
+200)------"input": 12
+201)----},
+202)----{
+203)------"id": 1,
+204)------"kind": "scan",
+205)------"title": "⊞ Scan",
+206)------"table_name": "supplier",
+207)------"columns": [
+208)--------"s_suppkey(#9)",
+209)--------"s_name(#10)",
+210)--------"s_address(#11)",
+211)--------"s_nationkey(#12)",
+212)--------"s_phone(#13)",
+213)--------"s_acctbal(#14)",
+214)--------"s_comment(#15)"
+215)------]
 216)----},
 217)----{
 218)------"id": 139,
 219)------"kind": "join",
 220)------"title": "⋈ InnerJoin",
 221)------"join_type": "Inner",
-222)------"condition": "(s_suppkey(#9) = l_suppkey(#18))",
-223)------"outer": 137,
-224)------"inner": 138
+222)------"condition": "(s_nationkey(#12) = n_nationkey(#61))",
+223)------"outer": 13,
+224)------"inner": 1
 225)----},
 226)----{
 227)------"id": 140,
 228)------"kind": "join",
 229)------"title": "⋈ InnerJoin",
 230)------"join_type": "Inner",
-231)------"condition": "(l_orderkey(#16) = o_orderkey(#32))",
-232)------"outer": 136,
+231)------"condition": "(s_suppkey(#9) = l_suppkey(#18))",
+232)------"outer": 138,
 233)------"inner": 139
 234)----},
 235)----{

@@ -531,7 +531,7 @@ mod tests {
     #[test]
     fn physical_planning_uses_extension_default_when_missing() {
         let runner = OptdRunner::new(SessionContext::new());
-        assert!(!runner.physical_planning_enabled());
+        assert!(runner.physical_planning_enabled());
     }
 
     #[test]
@@ -568,16 +568,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn set_optd_physical_planning_enables_physical_path() {
+    async fn set_optd_physical_planning_disables_physical_path() {
         let runner = OptdRunner::new(session_context_with_information_schema());
-        assert!(!runner.physical_planning_enabled());
+        assert!(runner.physical_planning_enabled());
 
         runner
-            .execute_sql("SET optd.physical_planning = true")
+            .execute_sql("SET optd.physical_planning = false")
             .await
             .unwrap();
 
-        assert!(runner.physical_planning_enabled());
+        assert!(!runner.physical_planning_enabled());
     }
 
     #[tokio::test]
@@ -601,10 +601,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn optd_ir_execution_uses_logical_converter_while_physical_is_inactive() {
-        let runner = OptdRunner::new(session_context_with_information_schema());
-        let (_, batches) = runner
-            .try_via_ir(
+    async fn optd_ir_execution_uses_logical_converter_when_physical_is_disabled() {
+        let runner = OptdRunner::new(session_with_optd_config(OptdExtensionConfig {
+            optd_enabled: true,
+            log_explain_steps: true,
+            physical_planning: false,
+        }));
+        let (_, batches, path) = runner
+            .try_via_ir_with_path(
                 "SELECT a \
                  FROM (VALUES (1), (2)) AS t(a) \
                  WHERE a = ( \
@@ -616,6 +620,7 @@ mod tests {
             .await
             .unwrap();
 
+        assert_eq!(path, IrExecutionPath::Logical);
         assert_eq!(
             batches.iter().map(|batch| batch.num_rows()).sum::<usize>(),
             2

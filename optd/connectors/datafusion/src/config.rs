@@ -10,7 +10,7 @@ extensions_options! {
         pub log_explain_steps: bool, default = true
 
         /// Whether optd should execute optimized IR through direct DataFusion physical planning.
-        pub physical_planning: bool, default = false
+        pub physical_planning: bool, default = true
     }
 }
 

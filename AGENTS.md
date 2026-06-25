@@ -23,7 +23,7 @@ This is a Rust 2024 workspace for relational query IR experiments.
 - `cargo run -p optd-core --example basic` builds and prints example query plans.
 - `cargo run -p optd-core --example rename` runs the rename operator example.
 - `cargo test` runs unit tests, integration tests, and doc tests.
-- `cargo nextest run --release -p optd-datafusion --test slt` runs DataFusion SLT tests with configured per-test timeouts; use release mode because debug SLT is slow.
+- `cargo nextest run --release -p optd-datafusion --test slt` runs DataFusion SLT tests with configured per-test timeouts; use release mode because debug SLT is slow. SLT uses optd physical planning by default; pass `-- --logical` only to compare against the old logical conversion path.
 - `cargo nextest run --release --workspace` runs tests across all crates including SLT tests.
 - `cargo fmt --all --check` verifies Rust formatting across the workspace.
 - `cargo clippy --workspace --all-targets --locked -- -D warnings` checks for lints; fix all warnings before committing.

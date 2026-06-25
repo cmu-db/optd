@@ -3,6 +3,8 @@ permissions:
 
 on:
   workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize, reopened]
   schedule:
     - cron: '7 7 * * *'
 
@@ -19,6 +21,7 @@ env:
 
 jobs:
   nightly:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     name: ubuntu / nightly
     steps:
@@ -48,6 +51,7 @@ jobs:
         run: cargo nextest run --workspace --locked -E 'not binary(slt)'
 
   updated:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     name: ubuntu / beta / updated
     steps:
@@ -81,6 +85,7 @@ jobs:
           RUSTFLAGS: -D deprecated
 
   full-slt:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:full-slt')
     runs-on: ubuntu-latest
     name: ubuntu / rust-toolchain / full-slt
     steps:
@@ -138,4 +143,4 @@ jobs:
         if: steps.cache-job.outputs.cache-hit != 'true'
         run: ./scripts/generate_job_parquet.sh
       - name: cargo nextest full SLT
-        run: cargo nextest run --release -p optd-datafusion --test slt --locked -E 'not test(/job\/results\/(16a|16c|16d|19d)\.slt/)'
+        run: cargo nextest run --release -p optd-datafusion --test slt --locked

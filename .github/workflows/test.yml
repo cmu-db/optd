@@ -121,3 +121,51 @@ jobs:
         run: ./scripts/generate_tpch.sh
       - name: cargo nextest tpch
         run: cargo nextest run --release -p optd-datafusion --test slt --locked -E 'test(/tests\/slt\/tpch\//)'
+
+  coverage:
+    # Use llvm-cov to build and collect coverage in a format compatible with codecov.io.
+    runs-on: ubuntu-latest
+    name: ubuntu / rust-toolchain / coverage
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.96.0
+          components: llvm-tools-preview
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install cargo-nextest and cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest,cargo-llvm-cov
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache TPC-H data
+        id: cache-tpch
+        uses: actions/cache@v4
+        with:
+          path: optd/connectors/datafusion/data/tpch/sf-0.1
+          key: ${{ runner.os }}-tpch-sf-0.1-${{ hashFiles('scripts/generate_tpch.sh') }}
+      - name: Install tpchgen-cli
+        if: steps.cache-tpch.outputs.cache-hit != 'true'
+        run: cargo install tpchgen-cli --locked
+      - name: Generate TPC-H data
+        if: steps.cache-tpch.outputs.cache-hit != 'true'
+        run: ./scripts/generate_tpch.sh
+      - name: cargo llvm-cov clean
+        run: cargo llvm-cov clean --workspace
+      - name: cargo llvm-cov rust tests
+        run: cargo llvm-cov nextest --workspace --locked -E 'not binary(slt)' --no-report
+      - name: cargo llvm-cov tpch explain
+        run: cargo llvm-cov nextest --release -p optd-datafusion --test slt --locked -E 'test(/tests\/slt\/tpch\/explain_flat\/)' --no-report
+      - name: cargo llvm-cov report
+        run: cargo llvm-cov report --lcov --output-path lcov.info
+      - name: Record Rust version
+        run: echo "RUST=$(rustc --version)" >> "$GITHUB_ENV"
+      - name: Upload to codecov.io
+        uses: codecov/codecov-action@v6
+        with:
+          fail_ci_if_error: true
+          files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          env_vars: OS,RUST

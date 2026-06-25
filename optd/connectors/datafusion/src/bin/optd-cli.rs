@@ -38,9 +38,9 @@ struct Args {
     #[arg(long)]
     job: bool,
 
-    /// Execute optd-optimized IR through direct DataFusion physical planning.
+    /// Execute optd-optimized IR through the logical DataFusion conversion path.
     #[arg(long)]
-    physical: bool,
+    logical: bool,
 
     /// Print the direct optd -> DataFusion physical plan instead of executing SQL.
     #[arg(long)]
@@ -59,9 +59,9 @@ struct Args {
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
-    let session = if args.physical || args.target_partitions.is_some() {
+    let session = if args.logical || args.target_partitions.is_some() {
         let mut optd_config = OptdExtensionConfig::default();
-        optd_config.physical_planning = args.physical;
+        optd_config.physical_planning = !args.logical;
         let mut config = SessionConfig::new()
             .with_information_schema(true)
             .with_option_extension(optd_config);

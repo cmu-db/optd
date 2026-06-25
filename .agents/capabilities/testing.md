@@ -18,6 +18,9 @@ cargo nextest run --release -p optd-datafusion --test slt
 cargo nextest run --release --workspace
 ```
 
+SLT runs use optd physical planning by default. Pass `-- --logical` only when
+you need to compare against the old logical DataFusion conversion path.
+
 Regenerate SLT expected output with optd, unmodified DataFusion, or DuckDB:
 
 ```sh
@@ -26,9 +29,6 @@ cargo nextest run --release -p optd-datafusion --test slt -- --override --engine
 cargo nextest run --release -p optd-datafusion --features duckdb --test slt -- --override --engine duckdb <filter>
 ```
 
-Known long-running JOB result cases can be excluded during broad refactor
-verification:
-
-```sh
-cargo nextest run --release -p optd-datafusion --test slt -E 'not test(/job\/results\/(16a|16c|16d|19d)\.slt/)'
-```
+JOB `19d` is currently disabled in the SLT harness because it remains
+long-running under physical planning. Avoid re-enabling it during broad
+refactor verification unless that runtime is the target of the change.
