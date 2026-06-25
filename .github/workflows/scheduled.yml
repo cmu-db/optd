@@ -25,6 +25,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install nightly
         uses: dtolnay/rust-toolchain@nightly
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
@@ -52,6 +54,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install beta
         uses: dtolnay/rust-toolchain@beta
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
@@ -83,6 +87,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install stable
         uses: dtolnay/rust-toolchain@stable
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
