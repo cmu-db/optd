@@ -16,6 +16,7 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_TEST_DEBUG: 0
   CARGO_TERM_COLOR: always
+  TPCH_HF_REVISION: 3d3bbd2ad937afea3add733e7e179faaf085425f
 
 jobs:
   required:
@@ -39,13 +40,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: optd/connectors/datafusion/data/tpch/sf-0.1
-          key: ${{ runner.os }}-tpch-sf-0.1-${{ hashFiles('scripts/generate_tpch.sh') }}
-      - name: Install tpchgen-cli
+          key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ env.TPCH_HF_REVISION }}
+      - name: Download TPC-H data
         if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: cargo install tpchgen-cli --locked
-      - name: Generate TPC-H data
-        if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: ./scripts/generate_tpch.sh
+        run: bash ./scripts/download_tpch_hf.sh
       - name: cargo nextest
         run: cargo nextest run --workspace --locked -E 'not binary(slt)'
 
@@ -108,13 +106,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: optd/connectors/datafusion/data/tpch/sf-0.1
-          key: ${{ runner.os }}-tpch-sf-0.1-${{ hashFiles('scripts/generate_tpch.sh') }}
-      - name: Install tpchgen-cli
+          key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ env.TPCH_HF_REVISION }}
+      - name: Download TPC-H data
         if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: cargo install tpchgen-cli --locked
-      - name: Generate TPC-H data
-        if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: ./scripts/generate_tpch.sh
+        run: bash ./scripts/download_tpch_hf.sh
       - name: cargo nextest tpch
         run: cargo nextest run --release -p optd-datafusion --test slt --locked -E 'test(/tests\/slt\/tpch\//)'
 
@@ -143,13 +138,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: optd/connectors/datafusion/data/tpch/sf-0.1
-          key: ${{ runner.os }}-tpch-sf-0.1-${{ hashFiles('scripts/generate_tpch.sh') }}
-      - name: Install tpchgen-cli
+          key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ env.TPCH_HF_REVISION }}
+      - name: Download TPC-H data
         if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: cargo install tpchgen-cli --locked
-      - name: Generate TPC-H data
-        if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: ./scripts/generate_tpch.sh
+        run: bash ./scripts/download_tpch_hf.sh
       - name: cargo llvm-cov rust tests
         run: cargo llvm-cov nextest --workspace --locked -E 'not binary(slt)' --no-report
       - name: cargo llvm-cov tpch explain

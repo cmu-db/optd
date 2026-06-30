@@ -18,6 +18,8 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_TEST_DEBUG: 0
   CARGO_TERM_COLOR: always
+  TPCH_HF_REVISION: 3d3bbd2ad937afea3add733e7e179faaf085425f
+  JOB_HF_REVISION: 51a5d2387a6a63ebbf80fde95d2db597edf345e5
 
 jobs:
   nightly:
@@ -40,13 +42,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: optd/connectors/datafusion/data/tpch/sf-0.1
-          key: ${{ runner.os }}-tpch-sf-0.1-${{ hashFiles('scripts/generate_tpch.sh') }}
-      - name: Install tpchgen-cli
+          key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ env.TPCH_HF_REVISION }}
+      - name: Download TPC-H data
         if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: cargo install tpchgen-cli --locked
-      - name: Generate TPC-H data
-        if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: ./scripts/generate_tpch.sh
+        run: bash ./scripts/download_tpch_hf.sh
       - name: cargo nextest
         run: cargo nextest run --workspace --locked -E 'not binary(slt)'
 
@@ -72,13 +71,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: optd/connectors/datafusion/data/tpch/sf-0.1
-          key: ${{ runner.os }}-tpch-sf-0.1-${{ hashFiles('scripts/generate_tpch.sh') }}
-      - name: Install tpchgen-cli
+          key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ env.TPCH_HF_REVISION }}
+      - name: Download TPC-H data
         if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: cargo install tpchgen-cli --locked
-      - name: Generate TPC-H data
-        if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: ./scripts/generate_tpch.sh
+        run: bash ./scripts/download_tpch_hf.sh
       - name: cargo nextest
         run: cargo nextest run --workspace --locked -E 'not binary(slt)'
         env:
@@ -106,41 +102,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: optd/connectors/datafusion/data/tpch/sf-0.1
-          key: ${{ runner.os }}-tpch-sf-0.1-${{ hashFiles('scripts/generate_tpch.sh') }}
-      - name: Install tpchgen-cli
+          key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ env.TPCH_HF_REVISION }}
+      - name: Download TPC-H data
         if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: cargo install tpchgen-cli --locked
-      - name: Generate TPC-H data
-        if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: ./scripts/generate_tpch.sh
+        run: bash ./scripts/download_tpch_hf.sh
       - name: Cache JOB Parquet data
         id: cache-job
         uses: actions/cache@v4
         with:
           path: optd/connectors/datafusion/data/job
-          key: ${{ runner.os }}-job-parquet-${{ hashFiles('scripts/generate_job_parquet.sh', 'scripts/job_schema_duckdb.sql') }}
-      - name: Cache JOB source data
-        id: cache-job-source
+          key: ${{ runner.os }}-hf-job-${{ env.JOB_HF_REVISION }}
+      - name: Download JOB data
         if: steps.cache-job.outputs.cache-hit != 'true'
-        uses: actions/cache@v4
-        with:
-          path: optd/connectors/datafusion/data/job-source
-          key: ${{ runner.os }}-job-source-v1
-      - name: Download JOB source data
-        if: steps.cache-job.outputs.cache-hit != 'true' && steps.cache-job-source.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p optd/connectors/datafusion/data/job-source
-          cd optd/connectors/datafusion/data/job-source
-          curl -OL https://bonsai.cedardb.com/job/imdb.tgz
-          tar -zxvf imdb.tgz
-      - name: Install DuckDB
-        if: steps.cache-job.outputs.cache-hit != 'true'
-        run: curl https://install.duckdb.org | sh
-      - name: Add DuckDB to PATH
-        if: steps.cache-job.outputs.cache-hit != 'true'
-        run: echo "$HOME/.duckdb/cli/latest" >> "$GITHUB_PATH"
-      - name: Generate JOB Parquet data
-        if: steps.cache-job.outputs.cache-hit != 'true'
-        run: ./scripts/generate_job_parquet.sh
+        run: bash ./scripts/download_job_hf.sh
       - name: cargo nextest full SLT
         run: cargo nextest run --release -p optd-datafusion --test slt --locked
