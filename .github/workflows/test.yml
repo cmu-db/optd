@@ -24,10 +24,13 @@ jobs:
     name: ubuntu / rust-toolchain / workspace
     steps:
       - uses: actions/checkout@v4
+      - name: Read Rust toolchain
+        id: rust-toolchain
+        run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.96.0
+          toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-nextest
@@ -52,10 +55,13 @@ jobs:
     name: ubuntu / rust-toolchain / no-default-features
     steps:
       - uses: actions/checkout@v4
+      - name: Read Rust toolchain
+        id: rust-toolchain
+        run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.96.0
+          toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-nextest
@@ -66,15 +72,18 @@ jobs:
       - name: cargo nextest
         run: cargo nextest run -p optd-core --no-default-features --locked
 
-  slt-light:
+  slt-features:
     runs-on: ubuntu-latest
-    name: ubuntu / rust-toolchain / slt-light
+    name: ubuntu / rust-toolchain / slt / features
     steps:
       - uses: actions/checkout@v4
+      - name: Read Rust toolchain
+        id: rust-toolchain
+        run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.96.0
+          toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-nextest
@@ -82,18 +91,21 @@ jobs:
         with:
           tool: nextest
       - uses: Swatinem/rust-cache@v2
-      - name: cargo nextest slt-light
-        run: cargo nextest run --release -p optd-datafusion --test slt --locked -E 'test(/tests\/slt\/(basic\.slt|features\/)/)'
+      - name: cargo nextest slt-features
+        run: cargo nextest run --release -p optd-datafusion --test slt --locked -E 'test(/tests\/slt\/features\//)'
 
-  slt-tpch:
+  slt-tpch-0_1:
     runs-on: ubuntu-latest
-    name: ubuntu / rust-toolchain / slt-tpch
+    name: ubuntu / rust-toolchain / slt / tpch-sf-0.1
     steps:
       - uses: actions/checkout@v4
+      - name: Read Rust toolchain
+        id: rust-toolchain
+        run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.96.0
+          toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-nextest
@@ -119,10 +131,13 @@ jobs:
     name: ubuntu / rust-toolchain / coverage
     steps:
       - uses: actions/checkout@v4
+      - name: Read Rust toolchain
+        id: rust-toolchain
+        run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.96.0
+          toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
           components: llvm-tools-preview
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler

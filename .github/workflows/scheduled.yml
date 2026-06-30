@@ -83,13 +83,16 @@ jobs:
   full-slt:
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:full-slt')
     runs-on: ubuntu-latest
-    name: ubuntu / rust-toolchain / full-slt
+    name: ubuntu / rust-toolchain / slt / full
     steps:
       - uses: actions/checkout@v4
+      - name: Read Rust toolchain
+        id: rust-toolchain
+        run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.96.0
+          toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-nextest
