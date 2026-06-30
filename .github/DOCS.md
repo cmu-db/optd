@@ -19,7 +19,7 @@ and nextest-based test execution.
 | Workflow | Runs on | Purpose |
 | --- | --- | --- |
 | `check.yml` | Pull requests and pushes to `main` | Formatting, clippy, docs, and `cargo-hack` feature checks on the pinned Rust toolchain. |
-| `test.yml` | Pull requests and pushes to `main` | Nextest workspace tests, `optd-core` no-default-features, feature SLT, TPC-H SLT, and coverage on the pinned Rust toolchain. TPC-H data is cached after download from Hugging Face. |
+| `test.yml` | Pull requests and pushes to `main` | Nextest workspace tests, `optd-core` no-default-features, combined feature/TPC-H SLT, and coverage on the pinned Rust toolchain. TPC-H data is cached after download from Hugging Face. |
 | `safety.yml` | Manual dispatch | Optional sanitizer and Miri checks scoped to `optd-core`; kept out of the required PR path because the repo has no first-party `unsafe` code today. |
 | `scheduled.yml` | Manual dispatch, nightly schedule, and PRs labeled `ci:full-slt` | Nightly tests, updated-dependency tests, and full SLT using the default physical-planning path with cached TPC-H and JOB data downloaded from Hugging Face. |
 

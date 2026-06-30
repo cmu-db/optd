@@ -72,31 +72,9 @@ jobs:
       - name: cargo nextest
         run: cargo nextest run -p optd-core --no-default-features --locked
 
-  slt-features:
+  slt:
     runs-on: ubuntu-latest
-    name: ubuntu / rust-toolchain / slt / features
-    steps:
-      - uses: actions/checkout@v4
-      - name: Read Rust toolchain
-        id: rust-toolchain
-        run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
-      - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@v2
-        with:
-          tool: nextest
-      - uses: Swatinem/rust-cache@v2
-      - name: cargo nextest slt-features
-        run: cargo nextest run --release -p optd-datafusion --test slt --locked -E 'test(/tests\/slt\/features\//)'
-
-  slt-tpch-0_1:
-    runs-on: ubuntu-latest
-    name: ubuntu / rust-toolchain / slt / tpch-sf-0.1
+    name: ubuntu / rust-toolchain / slt
     steps:
       - uses: actions/checkout@v4
       - name: Read Rust toolchain
@@ -122,6 +100,8 @@ jobs:
       - name: Download TPC-H data
         if: steps.cache-tpch.outputs.cache-hit != 'true'
         run: bash ./scripts/download_tpch_hf.sh
+      - name: cargo nextest slt features
+        run: cargo nextest run --release -p optd-datafusion --test slt --locked -E 'test(/tests\/slt\/features\//)'
       - name: cargo nextest tpch
         run: cargo nextest run --release -p optd-datafusion --test slt --locked -E 'test(/tests\/slt\/tpch\//)'
 
