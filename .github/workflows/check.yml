@@ -20,7 +20,7 @@ env:
 jobs:
   fmt:
     runs-on: ubuntu-latest
-    name: rust-toolchain / fmt
+    name: ubuntu / rust-toolchain / fmt
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
@@ -33,7 +33,7 @@ jobs:
 
   clippy:
     runs-on: ubuntu-latest
-    name: rust-toolchain / clippy
+    name: ubuntu / rust-toolchain / clippy
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
@@ -49,7 +49,7 @@ jobs:
 
   doc:
     runs-on: ubuntu-latest
-    name: rust-toolchain / doc
+    name: ubuntu / rust-toolchain / doc
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
@@ -66,7 +66,7 @@ jobs:
 
   features:
     runs-on: ubuntu-latest
-    name: rust-toolchain / features
+    name: ubuntu / rust-toolchain / features
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust

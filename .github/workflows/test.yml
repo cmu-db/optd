@@ -21,7 +21,7 @@ env:
 jobs:
   required:
     runs-on: ubuntu-latest
-    name: ubuntu / rust-toolchain
+    name: ubuntu / rust-toolchain / workspace
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust

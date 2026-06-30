@@ -18,7 +18,7 @@ env:
 jobs:
   sanitizers:
     runs-on: ubuntu-latest
-    name: nightly / sanitizers / optd-core
+    name: ubuntu / nightly / sanitizers / optd-core
     steps:
       - uses: actions/checkout@v4
       - name: Install nightly
@@ -39,7 +39,7 @@ jobs:
 
   miri:
     runs-on: ubuntu-latest
-    name: nightly / miri / optd-core
+    name: ubuntu / nightly / miri / optd-core
     steps:
       - uses: actions/checkout@v4
       - name: Install nightly with Miri
