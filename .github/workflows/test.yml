@@ -20,17 +20,13 @@ env:
 jobs:
   required:
     runs-on: ubuntu-latest
-    name: ubuntu / ${{ matrix.toolchain }}
-    strategy:
-      fail-fast: false
-      matrix:
-        toolchain: [stable, beta]
+    name: ubuntu / rust-toolchain
     steps:
       - uses: actions/checkout@v4
-      - name: Install ${{ matrix.toolchain }}
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ matrix.toolchain }}
+          toolchain: 1.96.0
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-nextest
@@ -51,7 +47,7 @@ jobs:
         if: steps.cache-tpch.outputs.cache-hit != 'true'
         run: ./scripts/generate_tpch.sh
       - name: cargo nextest
-        run: cargo +${{ matrix.toolchain }} nextest run --workspace --locked -E 'not binary(slt)'
+        run: cargo nextest run --workspace --locked -E 'not binary(slt)'
 
   no-default-features:
     runs-on: ubuntu-latest

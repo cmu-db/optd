@@ -18,7 +18,10 @@ and nextest-based test execution.
 
 | Workflow | Runs on | Purpose |
 | --- | --- | --- |
-| `check.yml` | Pull requests and pushes to `main` | Formatting, clippy on stable/beta, docs, and `cargo-hack` feature checks. |
-| `test.yml` | Pull requests and pushes to `main` | Nextest workspace tests on stable/beta, plus `optd-core` no-default-features, light SLT, and TPC-H SLT with cached/generated data on the pinned Rust toolchain. |
+| `check.yml` | Pull requests and pushes to `main` | Formatting, clippy, docs, and `cargo-hack` feature checks on the pinned Rust toolchain. |
+| `test.yml` | Pull requests and pushes to `main` | Nextest workspace tests, `optd-core` no-default-features, light SLT, TPC-H SLT, and coverage on the pinned Rust toolchain. |
 | `safety.yml` | Manual dispatch | Optional sanitizer and Miri checks scoped to `optd-core`; kept out of the required PR path because the repo has no first-party `unsafe` code today. |
 | `scheduled.yml` | Manual dispatch, nightly schedule, and PRs labeled `ci:full-slt` | Nightly tests, updated-dependency tests, and full SLT using the default physical-planning path with cached/generated TPC-H and JOB data. |
+
+Beta and nightly compatibility checks are kept in scheduled/manual workflows so
+normal PR checks use one required Rust toolchain.
