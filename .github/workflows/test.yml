@@ -139,6 +139,8 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: nextest,cargo-llvm-cov
+      - name: cargo llvm-cov clean
+        run: cargo llvm-cov clean --workspace
       - uses: Swatinem/rust-cache@v2
       - name: Cache TPC-H data
         id: cache-tpch
@@ -152,8 +154,6 @@ jobs:
       - name: Generate TPC-H data
         if: steps.cache-tpch.outputs.cache-hit != 'true'
         run: ./scripts/generate_tpch.sh
-      - name: cargo llvm-cov clean
-        run: cargo llvm-cov clean --workspace
       - name: cargo llvm-cov rust tests
         run: cargo llvm-cov nextest --workspace --locked -E 'not binary(slt)' --no-report
       - name: cargo llvm-cov tpch explain
