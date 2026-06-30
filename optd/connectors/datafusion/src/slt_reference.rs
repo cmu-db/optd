@@ -60,7 +60,7 @@ impl Default for SltArgs {
             override_files: false,
             filters: Vec::new(),
             expected_engine: ExpectedEngine::OptdDataFusion,
-            physical_planning: false,
+            physical_planning: true,
         }
     }
 }
@@ -72,7 +72,7 @@ pub fn parse_slt_args(args: impl IntoIterator<Item = String>) -> Result<SltArgs,
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--override" => parsed.override_files = true,
-            "--physical" => parsed.physical_planning = true,
+            "--logical" => parsed.physical_planning = false,
             "--engine" => {
                 let engine = iter
                     .next()
@@ -96,7 +96,7 @@ pub fn strip_slt_args_for_harness(args: impl IntoIterator<Item = String>) -> Vec
 
     while let Some(arg) = iter.next() {
         match arg.as_str() {
-            "--physical" | "--override" => {}
+            "--logical" | "--override" => {}
             "--engine" => {
                 let _ = iter.next();
             }
@@ -421,9 +421,9 @@ mod tests {
     }
 
     #[test]
-    fn parse_physical_flag() {
-        let args = parse(&["--physical"]).unwrap();
-        assert!(args.physical_planning);
+    fn parse_logical_flag() {
+        let args = parse(&["--logical"]).unwrap();
+        assert!(!args.physical_planning);
     }
 
     #[test]
@@ -444,7 +444,7 @@ mod tests {
         let args = strip_slt_args_for_harness(
             [
                 "slt",
-                "--physical",
+                "--logical",
                 "--engine",
                 "datafusion",
                 "features/values.slt",

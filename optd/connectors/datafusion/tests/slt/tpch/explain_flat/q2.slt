@@ -72,140 +72,140 @@ limit 10;');
 25)------"input": 0
 26)----},
 27)----{
-28)------"id": 3,
+28)------"id": 14,
 29)------"kind": "scan",
 30)------"title": "⊞ Scan",
-31)------"table_name": "partsupp",
+31)------"table_name": "region",
 32)------"columns": [
-33)--------"ps_partkey(#16)",
-34)--------"ps_suppkey(#17)",
-35)--------"ps_availqty(#18)",
-36)--------"ps_supplycost(#19)",
-37)--------"ps_comment(#20)"
-38)------]
-39)----},
-40)----{
-41)------"id": 132,
-42)------"kind": "join",
-43)------"title": "⋈ InnerJoin",
-44)------"join_type": "Inner",
-45)------"condition": "(p_partkey(#0) = ps_partkey(#16))",
-46)------"outer": 107,
-47)------"inner": 3
-48)----},
-49)----{
-50)------"id": 14,
-51)------"kind": "scan",
-52)------"title": "⊞ Scan",
-53)------"table_name": "region",
-54)------"columns": [
-55)--------"r_regionkey(#44)",
-56)--------"r_name(#45)",
-57)--------"r_comment(#46)"
-58)------]
-59)----},
-60)----{
-61)------"id": 47,
-62)------"kind": "selection",
-63)------"title": "σ Selection",
-64)------"predicate": "(r_name(#45) = \"EUROPE\")",
-65)------"input": 14
-66)----},
-67)----{
-68)------"id": 12,
-69)------"kind": "scan",
-70)------"title": "⊞ Scan",
-71)------"table_name": "nation",
-72)------"columns": [
-73)--------"n_nationkey(#40)",
-74)--------"n_name(#41)",
-75)--------"n_regionkey(#42)",
-76)--------"n_comment(#43)"
-77)------]
-78)----},
-79)----{
-80)------"id": 129,
-81)------"kind": "join",
-82)------"title": "⋈ InnerJoin",
-83)------"join_type": "Inner",
-84)------"condition": "(n_regionkey(#42) = r_regionkey(#44))",
-85)------"outer": 47,
-86)------"inner": 12
-87)----},
-88)----{
-89)------"id": 9,
-90)------"kind": "scan",
-91)------"title": "⊞ Scan",
-92)------"table_name": "partsupp",
-93)------"columns": [
-94)--------"ps_partkey(#28)",
-95)--------"ps_suppkey(#29)",
-96)--------"ps_availqty(#30)",
-97)--------"ps_supplycost(#31)",
-98)--------"ps_comment(#32)"
-99)------]
-100)----},
-101)----{
-102)------"id": 10,
-103)------"kind": "scan",
-104)------"title": "⊞ Scan",
-105)------"table_name": "supplier",
-106)------"columns": [
-107)--------"s_suppkey(#33)",
-108)--------"s_name(#34)",
-109)--------"s_address(#35)",
-110)--------"s_nationkey(#36)",
-111)--------"s_phone(#37)",
-112)--------"s_acctbal(#38)",
-113)--------"s_comment(#39)"
-114)------]
-115)----},
-116)----{
-117)------"id": 130,
-118)------"kind": "join",
-119)------"title": "⋈ InnerJoin",
-120)------"join_type": "Inner",
-121)------"condition": "(s_suppkey(#33) = ps_suppkey(#29))",
-122)------"outer": 9,
-123)------"inner": 10
-124)----},
-125)----{
-126)------"id": 131,
-127)------"kind": "join",
-128)------"title": "⋈ InnerJoin",
-129)------"join_type": "Inner",
-130)------"condition": "(s_nationkey(#36) = n_nationkey(#40))",
-131)------"outer": 129,
-132)------"inner": 130
-133)----},
-134)----{
-135)------"id": 137,
-136)------"kind": "aggregation",
-137)------"title": "γ Aggregation",
-138)------"keys": "ps_partkey(#28)",
-139)------"aggregates": [
-140)--------"min(partsupp.ps_supplycost)(#47) := min(ps_supplycost(#31))"
-141)------],
-142)------"input": 131
-143)----},
-144)----{
-145)------"id": 138,
-146)------"kind": "projection",
-147)------"title": "π Projection",
-148)------"columns": [
-149)--------"min(partsupp.ps_supplycost)(#47)",
-150)--------"ps_partkey(#28)"
-151)------],
-152)------"input": 137
+33)--------"r_regionkey(#44)",
+34)--------"r_name(#45)",
+35)--------"r_comment(#46)"
+36)------]
+37)----},
+38)----{
+39)------"id": 47,
+40)------"kind": "selection",
+41)------"title": "σ Selection",
+42)------"predicate": "(r_name(#45) = \"EUROPE\")",
+43)------"input": 14
+44)----},
+45)----{
+46)------"id": 12,
+47)------"kind": "scan",
+48)------"title": "⊞ Scan",
+49)------"table_name": "nation",
+50)------"columns": [
+51)--------"n_nationkey(#40)",
+52)--------"n_name(#41)",
+53)--------"n_regionkey(#42)",
+54)--------"n_comment(#43)"
+55)------]
+56)----},
+57)----{
+58)------"id": 129,
+59)------"kind": "join",
+60)------"title": "⋈ InnerJoin",
+61)------"join_type": "Inner",
+62)------"condition": "(n_regionkey(#42) = r_regionkey(#44))",
+63)------"outer": 47,
+64)------"inner": 12
+65)----},
+66)----{
+67)------"id": 10,
+68)------"kind": "scan",
+69)------"title": "⊞ Scan",
+70)------"table_name": "supplier",
+71)------"columns": [
+72)--------"s_suppkey(#33)",
+73)--------"s_name(#34)",
+74)--------"s_address(#35)",
+75)--------"s_nationkey(#36)",
+76)--------"s_phone(#37)",
+77)--------"s_acctbal(#38)",
+78)--------"s_comment(#39)"
+79)------]
+80)----},
+81)----{
+82)------"id": 130,
+83)------"kind": "join",
+84)------"title": "⋈ InnerJoin",
+85)------"join_type": "Inner",
+86)------"condition": "(s_nationkey(#36) = n_nationkey(#40))",
+87)------"outer": 129,
+88)------"inner": 10
+89)----},
+90)----{
+91)------"id": 9,
+92)------"kind": "scan",
+93)------"title": "⊞ Scan",
+94)------"table_name": "partsupp",
+95)------"columns": [
+96)--------"ps_partkey(#28)",
+97)--------"ps_suppkey(#29)",
+98)--------"ps_availqty(#30)",
+99)--------"ps_supplycost(#31)",
+100)--------"ps_comment(#32)"
+101)------]
+102)----},
+103)----{
+104)------"id": 131,
+105)------"kind": "join",
+106)------"title": "⋈ InnerJoin",
+107)------"join_type": "Inner",
+108)------"condition": "(s_suppkey(#33) = ps_suppkey(#29))",
+109)------"outer": 130,
+110)------"inner": 9
+111)----},
+112)----{
+113)------"id": 137,
+114)------"kind": "aggregation",
+115)------"title": "γ Aggregation",
+116)------"keys": "ps_partkey(#28)",
+117)------"aggregates": [
+118)--------"min(partsupp.ps_supplycost)(#47) := min(ps_supplycost(#31))"
+119)------],
+120)------"input": 131
+121)----},
+122)----{
+123)------"id": 138,
+124)------"kind": "projection",
+125)------"title": "π Projection",
+126)------"columns": [
+127)--------"min(partsupp.ps_supplycost)(#47)",
+128)--------"ps_partkey(#28)"
+129)------],
+130)------"input": 137
+131)----},
+132)----{
+133)------"id": 139,
+134)------"kind": "join",
+135)------"title": "⟕ LeftOuterJoin",
+136)------"join_type": "LeftOuter",
+137)------"condition": "(p_partkey(#0) = ps_partkey(#28))",
+138)------"outer": 107,
+139)------"inner": 138
+140)----},
+141)----{
+142)------"id": 3,
+143)------"kind": "scan",
+144)------"title": "⊞ Scan",
+145)------"table_name": "partsupp",
+146)------"columns": [
+147)--------"ps_partkey(#16)",
+148)--------"ps_suppkey(#17)",
+149)--------"ps_availqty(#18)",
+150)--------"ps_supplycost(#19)",
+151)--------"ps_comment(#20)"
+152)------]
 153)----},
 154)----{
-155)------"id": 139,
+155)------"id": 140,
 156)------"kind": "join",
-157)------"title": "⟕ LeftOuterJoin",
-158)------"join_type": "LeftOuter",
-159)------"condition": "(p_partkey(#0) = ps_partkey(#28))",
-160)------"outer": 132,
-161)------"inner": 138
+157)------"title": "⋈ InnerJoin",
+158)------"join_type": "Inner",
+159)------"condition": "(p_partkey(#0) = ps_partkey(#16))",
+160)------"outer": 139,
+161)------"inner": 3
 162)----},
 163)----{
 164)------"id": 1,
@@ -271,23 +271,23 @@ limit 10;');
 224)------"inner": 134
 225)----},
 226)----{
-227)------"id": 140,
+227)------"id": 141,
 228)------"kind": "join",
 229)------"title": "⋈ InnerJoin",
 230)------"join_type": "Inner",
 231)------"condition": "(s_suppkey(#9) = ps_suppkey(#17))",
-232)------"outer": 139,
+232)------"outer": 140,
 233)------"inner": 135
 234)----},
 235)----{
-236)------"id": 141,
+236)------"id": 142,
 237)------"kind": "selection",
 238)------"title": "σ Selection",
 239)------"predicate": "(ps_supplycost(#19) = min(partsupp.ps_supplycost)(#47))",
-240)------"input": 140
+240)------"input": 141
 241)----},
 242)----{
-243)------"id": 142,
+243)------"id": 143,
 244)------"kind": "projection",
 245)------"title": "π Projection",
 246)------"columns": [
@@ -300,10 +300,10 @@ limit 10;');
 253)--------"s_phone(#13)",
 254)--------"s_comment(#15)"
 255)------],
-256)------"input": 141
+256)------"input": 142
 257)----},
 258)----{
-259)------"id": 143,
+259)------"id": 144,
 260)------"kind": "sort",
 261)------"title": "⇞ Sort",
 262)------"keys": [
@@ -312,21 +312,21 @@ limit 10;');
 265)--------"s_name(#10) Asc NullsLast",
 266)--------"p_partkey(#0) Asc NullsLast"
 267)------],
-268)------"input": 142
+268)------"input": 143
 269)----},
 270)----{
-271)------"id": 144,
+271)------"id": 145,
 272)------"kind": "limit",
 273)------"title": "τ Limit",
 274)------"fetch": "10",
 275)------"offset": "0",
-276)------"input": 143
+276)------"input": 144
 277)----},
 278)----{
-279)------"id": 145,
+279)------"id": 146,
 280)------"kind": "output",
 281)------"title": "= Output",
-282)------"input": 144
+282)------"input": 145
 283)----}
 284)--]
 285)}

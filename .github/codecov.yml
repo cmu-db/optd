@@ -1,0 +1,27 @@
+# Taken from https://github.com/cmu-db/optd-dsl/blob/main/.github/codecov.yml
+
+# ref: https://docs.codecov.com/docs/codecovyml-reference
+coverage:
+  # Hold ourselves to a high bar
+  range: 85..100
+  round: down
+  precision: 1
+  status:
+    # ref: https://docs.codecov.com/docs/commit-status
+    project:
+      default:
+        # Avoid false negatives
+        threshold: 1%
+
+# Test files aren't important for coverage
+ignore:
+  - "tests"
+  # DataFusion bridge regression suites.
+  - "optd/connectors/datafusion/tests"
+
+# Allow the initial Codecov PR to post a comment before main has a baseline
+# report. Tighten this back after coverage is established on main.
+comment:
+  layout: "files"
+  require_changes: false
+  require_base: false

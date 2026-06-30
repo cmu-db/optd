@@ -23,10 +23,11 @@ This is a Rust 2024 workspace for relational query IR experiments.
 - `cargo run -p optd-core --example basic` builds and prints example query plans.
 - `cargo run -p optd-core --example rename` runs the rename operator example.
 - `cargo test` runs unit tests, integration tests, and doc tests.
-- `cargo nextest run --release -p optd-datafusion --test slt` runs DataFusion SLT tests with configured per-test timeouts; use release mode because debug SLT is slow.
+- `cargo nextest run --release -p optd-datafusion --test slt` runs DataFusion SLT tests with configured per-test timeouts; use release mode because debug SLT is slow. SLT uses optd physical planning by default; pass `-- --logical` only to compare against the old logical conversion path.
 - `cargo nextest run --release --workspace` runs tests across all crates including SLT tests.
-- `cargo fmt` formats Rust code using `rustfmt`; run this before committing.
-- `cargo clippy --workspace` checks for lints; fix all warnings before committing.
+- `cargo fmt --all --check` verifies Rust formatting across the workspace.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings` checks for lints; fix all warnings before committing.
+- `actionlint` validates GitHub Actions workflow files.
 
 The default feature set includes `serde`. Use `cargo test -p optd-core --no-default-features` when checking code that should not depend on serialization.
 
@@ -89,4 +90,4 @@ Pull requests should include a concise summary, important design notes, and the 
 
 ## Agent-Specific Instructions
 
-Avoid rewriting unrelated files or generated lockfile sections unless dependency changes require it. Preserve existing API style, run `cargo fmt`, and verify with `cargo test` before handing off.
+Avoid rewriting unrelated files or generated lockfile sections unless dependency changes require it. Preserve existing API style, run `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, and `actionlint` before handing off when the relevant tools and workflow files are present.

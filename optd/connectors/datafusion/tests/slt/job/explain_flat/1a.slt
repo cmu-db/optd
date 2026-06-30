@@ -107,90 +107,90 @@ SELECT explain_flat('SELECT MIN(mc.note) AS production_note, MIN(t.title) AS mov
 103)------"inner": 9
 104)----},
 105)----{
-106)------"id": 55,
-107)------"kind": "join",
-108)------"title": "⋈ InnerJoin",
-109)------"join_type": "Inner",
-110)------"condition": "(id(#40) = movie_id(#24))",
-111)------"outer": 12,
-112)------"inner": 54
-113)----},
-114)----{
-115)------"id": 0,
-116)------"kind": "scan",
-117)------"title": "⊞ Scan",
-118)------"table_name": "company_type",
-119)------"columns": [
-120)--------"id(#0)",
-121)--------"kind(#1)"
-122)------]
-123)----},
-124)----{
-125)------"id": 1,
-126)------"kind": "rename",
-127)------"title": "ρ Rename(ct)",
-128)------"defs": [
-129)--------"id(#2) <- id(#0)",
-130)--------"kind(#3) <- kind(#1)"
-131)------],
-132)------"input": 0
-133)----},
-134)----{
-135)------"id": 37,
-136)------"kind": "selection",
-137)------"title": "σ Selection",
-138)------"predicate": "(kind(#3) = \"production companies\")",
-139)------"input": 1
-140)----},
-141)----{
-142)------"id": 5,
-143)------"kind": "scan",
-144)------"title": "⊞ Scan",
-145)------"table_name": "movie_companies",
-146)------"columns": [
-147)--------"id(#8)",
-148)--------"movie_id(#9)",
-149)--------"company_id(#10)",
-150)--------"company_type_id(#11)",
-151)--------"note(#12)"
-152)------]
-153)----},
-154)----{
-155)------"id": 6,
-156)------"kind": "rename",
-157)------"title": "ρ Rename(mc)",
-158)------"defs": [
-159)--------"id(#13) <- id(#8)",
-160)--------"movie_id(#14) <- movie_id(#9)",
-161)--------"company_id(#15) <- company_id(#10)",
-162)--------"company_type_id(#16) <- company_type_id(#11)",
-163)--------"note(#17) <- note(#12)"
-164)------],
-165)------"input": 5
-166)----},
-167)----{
-168)------"id": 30,
-169)------"kind": "selection",
-170)------"title": "σ Selection",
-171)------"predicate": "((note(#17) NOT LIKE \"%(as Metro-Goldwyn-Mayer Pictures)%\") AND ((note(#17) LIKE \"%(co-production)%\") OR (note(#17) LIKE \"%(presents)%\")))",
-172)------"input": 6
+106)------"id": 0,
+107)------"kind": "scan",
+108)------"title": "⊞ Scan",
+109)------"table_name": "company_type",
+110)------"columns": [
+111)--------"id(#0)",
+112)--------"kind(#1)"
+113)------]
+114)----},
+115)----{
+116)------"id": 1,
+117)------"kind": "rename",
+118)------"title": "ρ Rename(ct)",
+119)------"defs": [
+120)--------"id(#2) <- id(#0)",
+121)--------"kind(#3) <- kind(#1)"
+122)------],
+123)------"input": 0
+124)----},
+125)----{
+126)------"id": 37,
+127)------"kind": "selection",
+128)------"title": "σ Selection",
+129)------"predicate": "(kind(#3) = \"production companies\")",
+130)------"input": 1
+131)----},
+132)----{
+133)------"id": 5,
+134)------"kind": "scan",
+135)------"title": "⊞ Scan",
+136)------"table_name": "movie_companies",
+137)------"columns": [
+138)--------"id(#8)",
+139)--------"movie_id(#9)",
+140)--------"company_id(#10)",
+141)--------"company_type_id(#11)",
+142)--------"note(#12)"
+143)------]
+144)----},
+145)----{
+146)------"id": 6,
+147)------"kind": "rename",
+148)------"title": "ρ Rename(mc)",
+149)------"defs": [
+150)--------"id(#13) <- id(#8)",
+151)--------"movie_id(#14) <- movie_id(#9)",
+152)--------"company_id(#15) <- company_id(#10)",
+153)--------"company_type_id(#16) <- company_type_id(#11)",
+154)--------"note(#17) <- note(#12)"
+155)------],
+156)------"input": 5
+157)----},
+158)----{
+159)------"id": 30,
+160)------"kind": "selection",
+161)------"title": "σ Selection",
+162)------"predicate": "((note(#17) NOT LIKE \"%(as Metro-Goldwyn-Mayer Pictures)%\") AND ((note(#17) LIKE \"%(co-production)%\") OR (note(#17) LIKE \"%(presents)%\")))",
+163)------"input": 6
+164)----},
+165)----{
+166)------"id": 55,
+167)------"kind": "join",
+168)------"title": "⋈ InnerJoin",
+169)------"join_type": "Inner",
+170)------"condition": "(id(#2) = company_type_id(#16))",
+171)------"outer": 37,
+172)------"inner": 30
 173)----},
 174)----{
 175)------"id": 56,
 176)------"kind": "join",
 177)------"title": "⋈ InnerJoin",
 178)------"join_type": "Inner",
-179)------"condition": "(id(#2) = company_type_id(#16))",
-180)------"outer": 37,
-181)------"inner": 30
+179)------"condition": "(movie_id(#14) = movie_id(#24))",
+180)------"outer": 54,
+181)------"inner": 55
 182)----},
 183)----{
 184)------"id": 57,
 185)------"kind": "join",
 186)------"title": "⋈ InnerJoin",
 187)------"join_type": "Inner",
-188)------"condition": "((movie_id(#14) = movie_id(#24)) AND (id(#40) = movie_id(#14)))",
-189)------"outer": 55,
+188)------"condition": "((id(#40) = movie_id(#14)) AND (id(#40) = movie_id(#24)))",
+189)------"outer": 12,
 190)------"inner": 56
 191)----},
 192)----{

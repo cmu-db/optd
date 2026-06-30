@@ -18,9 +18,8 @@ use sqllogictest::{
 use tokio::runtime::Runtime;
 
 const DISABLED_SLT_PATHS: &[&str] = &[
-    // Deferred: these JOB result queries currently exceed the nextest release
-    // timeout in the full workspace run. Re-enable once the execution path is
-    // fast enough or these cases get a dedicated long-running test profile.
+    // Deferred: this JOB result query still runs too long under the default
+    // physical-planning path. Re-enable once the execution path is faster.
     "tests/slt/job/results/19d.slt",
 ];
 
@@ -121,9 +120,9 @@ fn run_slt(path: impl AsRef<Path>, physical_planning: bool) -> Result<(), Failed
     let runtime = build_runtime();
     let result = runtime.block_on(async {
         let (session, _test_context) = session_for_slt_file(&path).await?;
-        if physical_planning {
+        if !physical_planning {
             session
-                .sql("SET optd.physical_planning = true")
+                .sql("SET optd.physical_planning = false")
                 .await
                 .map_err(|e| Failed::from(e.to_string()))?
                 .collect()

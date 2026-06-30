@@ -11,6 +11,8 @@ Common checks:
 
 ```sh
 cargo metadata --no-deps
-cargo test -p optd-core
-cargo test --workspace
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+actionlint
+cargo nextest run --workspace --locked -E 'not binary(slt)'
 ```

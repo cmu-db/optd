@@ -98,53 +98,53 @@ SELECT explain_flat('SELECT MIN(lt.link) AS link_type, MIN(t1.title) AS first_mo
 94)------"inner": 9
 95)----},
 96)----{
-97)------"id": 66,
-98)------"kind": "join",
-99)------"title": "⋈ InnerJoin",
-100)------"join_type": "Inner",
-101)------"condition": "(linked_movie_id(#22) = id(#60))",
-102)------"outer": 15,
-103)------"inner": 65
-104)----},
-105)----{
-106)------"id": 11,
-107)------"kind": "scan",
-108)------"title": "⊞ Scan",
-109)------"table_name": "title",
-110)------"columns": [
-111)--------"id(#24)",
-112)--------"title(#25)",
-113)--------"imdb_index(#26)",
-114)--------"kind_id(#27)",
-115)--------"production_year(#28)",
-116)--------"imdb_id(#29)",
-117)--------"phonetic_code(#30)",
-118)--------"episode_of_id(#31)",
-119)--------"season_nr(#32)",
-120)--------"episode_nr(#33)",
-121)--------"series_years(#34)",
-122)--------"md5sum(#35)"
-123)------]
-124)----},
-125)----{
-126)------"id": 12,
-127)------"kind": "rename",
-128)------"title": "ρ Rename(t1)",
-129)------"defs": [
-130)--------"id(#36) <- id(#24)",
-131)--------"title(#37) <- title(#25)",
-132)--------"imdb_index(#38) <- imdb_index(#26)",
-133)--------"kind_id(#39) <- kind_id(#27)",
-134)--------"production_year(#40) <- production_year(#28)",
-135)--------"imdb_id(#41) <- imdb_id(#29)",
-136)--------"phonetic_code(#42) <- phonetic_code(#30)",
-137)--------"episode_of_id(#43) <- episode_of_id(#31)",
-138)--------"season_nr(#44) <- season_nr(#32)",
-139)--------"episode_nr(#45) <- episode_nr(#33)",
-140)--------"series_years(#46) <- series_years(#34)",
-141)--------"md5sum(#47) <- md5sum(#35)"
-142)------],
-143)------"input": 11
+97)------"id": 11,
+98)------"kind": "scan",
+99)------"title": "⊞ Scan",
+100)------"table_name": "title",
+101)------"columns": [
+102)--------"id(#24)",
+103)--------"title(#25)",
+104)--------"imdb_index(#26)",
+105)--------"kind_id(#27)",
+106)--------"production_year(#28)",
+107)--------"imdb_id(#29)",
+108)--------"phonetic_code(#30)",
+109)--------"episode_of_id(#31)",
+110)--------"season_nr(#32)",
+111)--------"episode_nr(#33)",
+112)--------"series_years(#34)",
+113)--------"md5sum(#35)"
+114)------]
+115)----},
+116)----{
+117)------"id": 12,
+118)------"kind": "rename",
+119)------"title": "ρ Rename(t1)",
+120)------"defs": [
+121)--------"id(#36) <- id(#24)",
+122)--------"title(#37) <- title(#25)",
+123)--------"imdb_index(#38) <- imdb_index(#26)",
+124)--------"kind_id(#39) <- kind_id(#27)",
+125)--------"production_year(#40) <- production_year(#28)",
+126)--------"imdb_id(#41) <- imdb_id(#29)",
+127)--------"phonetic_code(#42) <- phonetic_code(#30)",
+128)--------"episode_of_id(#43) <- episode_of_id(#31)",
+129)--------"season_nr(#44) <- season_nr(#32)",
+130)--------"episode_nr(#45) <- episode_nr(#33)",
+131)--------"series_years(#46) <- series_years(#34)",
+132)--------"md5sum(#47) <- md5sum(#35)"
+133)------],
+134)------"input": 11
+135)----},
+136)----{
+137)------"id": 66,
+138)------"kind": "join",
+139)------"title": "⋈ InnerJoin",
+140)------"join_type": "Inner",
+141)------"condition": "(movie_id(#21) = id(#36))",
+142)------"outer": 65,
+143)------"inner": 12
 144)----},
 145)----{
 146)------"id": 0,
@@ -212,7 +212,7 @@ SELECT explain_flat('SELECT MIN(lt.link) AS link_type, MIN(t1.title) AS first_mo
 208)------"title": "⋈ InnerJoin",
 209)------"join_type": "Inner",
 210)------"condition": "((id(#36) = movie_id(#14)) AND (movie_id(#14) = id(#36)))",
-211)------"outer": 12,
+211)------"outer": 66,
 212)------"inner": 67
 213)----},
 214)----{
@@ -220,8 +220,8 @@ SELECT explain_flat('SELECT MIN(lt.link) AS link_type, MIN(t1.title) AS first_mo
 216)------"kind": "join",
 217)------"title": "⋈ InnerJoin",
 218)------"join_type": "Inner",
-219)------"condition": "(movie_id(#21) = id(#36))",
-220)------"outer": 66,
+219)------"condition": "(linked_movie_id(#22) = id(#60))",
+220)------"outer": 15,
 221)------"inner": 68
 222)----},
 223)----{

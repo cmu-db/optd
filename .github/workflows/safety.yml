@@ -2,9 +2,7 @@ permissions:
   contents: read
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -20,14 +18,14 @@ env:
 jobs:
   sanitizers:
     runs-on: ubuntu-latest
-    name: nightly / sanitizers / optd-core
+    name: ubuntu / nightly / sanitizers / optd-core
     steps:
       - uses: actions/checkout@v4
       - name: Install nightly
         uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
-      - name: Install LLVM symbolizer
-        run: sudo apt-get update && sudo apt-get install -y llvm
+      - name: Install system tools
+        run: sudo apt-get update && sudo apt-get install -y llvm protobuf-compiler
       - name: cargo test -Zsanitizer=address
         run: cargo test -p optd-core --lib --tests --all-features --target x86_64-unknown-linux-gnu
         env:
@@ -41,13 +39,15 @@ jobs:
 
   miri:
     runs-on: ubuntu-latest
-    name: nightly / miri / optd-core
+    name: ubuntu / nightly / miri / optd-core
     steps:
       - uses: actions/checkout@v4
       - name: Install nightly with Miri
         uses: dtolnay/rust-toolchain@nightly
         with:
           components: miri
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: cargo miri setup
         run: cargo miri setup
       - name: cargo miri test

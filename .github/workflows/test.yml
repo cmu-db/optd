@@ -16,21 +16,23 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_TEST_DEBUG: 0
   CARGO_TERM_COLOR: always
+  TPCH_HF_REVISION: 3d3bbd2ad937afea3add733e7e179faaf085425f
 
 jobs:
   required:
     runs-on: ubuntu-latest
-    name: ubuntu / ${{ matrix.toolchain }}
-    strategy:
-      fail-fast: false
-      matrix:
-        toolchain: [stable, beta]
+    name: ubuntu / rust-toolchain / workspace
     steps:
       - uses: actions/checkout@v4
-      - name: Install ${{ matrix.toolchain }}
+      - name: Read Rust toolchain
+        id: rust-toolchain
+        run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ matrix.toolchain }}
+          toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
@@ -41,23 +43,27 @@ jobs:
         uses: actions/cache@v4
         with:
           path: optd/connectors/datafusion/data/tpch/sf-0.1
-          key: ${{ runner.os }}-tpch-sf-0.1-${{ hashFiles('scripts/generate_tpch.sh') }}
-      - name: Install tpchgen-cli
+          key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ env.TPCH_HF_REVISION }}
+      - name: Download TPC-H data
         if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: cargo install tpchgen-cli --locked
-      - name: Generate TPC-H data
-        if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: ./scripts/generate_tpch.sh
+        run: bash ./scripts/download_tpch_hf.sh
       - name: cargo nextest
         run: cargo nextest run --workspace --locked -E 'not binary(slt)'
 
   no-default-features:
     runs-on: ubuntu-latest
-    name: ubuntu / stable / no-default-features
+    name: ubuntu / rust-toolchain / no-default-features
     steps:
       - uses: actions/checkout@v4
-      - name: Install stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Read Rust toolchain
+        id: rust-toolchain
+        run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
@@ -66,28 +72,20 @@ jobs:
       - name: cargo nextest
         run: cargo nextest run -p optd-core --no-default-features --locked
 
-  slt-light:
+  slt:
     runs-on: ubuntu-latest
-    name: ubuntu / stable / slt-light
+    name: ubuntu / rust-toolchain / slt
     steps:
       - uses: actions/checkout@v4
-      - name: Install stable
-        uses: dtolnay/rust-toolchain@stable
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@v2
+      - name: Read Rust toolchain
+        id: rust-toolchain
+        run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
         with:
-          tool: nextest
-      - uses: Swatinem/rust-cache@v2
-      - name: cargo nextest slt-light
-        run: cargo nextest run --release -p optd-datafusion --test slt --locked -E 'test(/tests\/slt\/(basic\.slt|features\/)/)'
-
-  slt-tpch:
-    runs-on: ubuntu-latest
-    name: ubuntu / stable / slt-tpch
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install stable
-        uses: dtolnay/rust-toolchain@stable
+          toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
@@ -98,12 +96,59 @@ jobs:
         uses: actions/cache@v4
         with:
           path: optd/connectors/datafusion/data/tpch/sf-0.1
-          key: ${{ runner.os }}-tpch-sf-0.1-${{ hashFiles('scripts/generate_tpch.sh') }}
-      - name: Install tpchgen-cli
+          key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ env.TPCH_HF_REVISION }}
+      - name: Download TPC-H data
         if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: cargo install tpchgen-cli --locked
-      - name: Generate TPC-H data
-        if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: ./scripts/generate_tpch.sh
+        run: bash ./scripts/download_tpch_hf.sh
+      - name: cargo nextest slt features
+        run: cargo nextest run --release -p optd-datafusion --test slt --locked -E 'test(/tests\/slt\/features\//)'
       - name: cargo nextest tpch
         run: cargo nextest run --release -p optd-datafusion --test slt --locked -E 'test(/tests\/slt\/tpch\//)'
+
+  coverage:
+    # Use llvm-cov to build and collect coverage in a format compatible with codecov.io.
+    runs-on: ubuntu-latest
+    name: ubuntu / rust-toolchain / coverage
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read Rust toolchain
+        id: rust-toolchain
+        run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
+          components: llvm-tools-preview
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install cargo-nextest and cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest,cargo-llvm-cov
+      - name: cargo llvm-cov clean
+        run: cargo llvm-cov clean --workspace
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache TPC-H data
+        id: cache-tpch
+        uses: actions/cache@v4
+        with:
+          path: optd/connectors/datafusion/data/tpch/sf-0.1
+          key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ env.TPCH_HF_REVISION }}
+      - name: Download TPC-H data
+        if: steps.cache-tpch.outputs.cache-hit != 'true'
+        run: bash ./scripts/download_tpch_hf.sh
+      - name: cargo llvm-cov rust tests
+        run: cargo llvm-cov nextest --workspace --locked -E 'not binary(slt)' --no-report
+      - name: cargo llvm-cov tpch explain
+        run: cargo llvm-cov nextest --release -p optd-datafusion --test slt --locked -E 'test(/tests\/slt\/tpch\/explain_flat\//)' --no-report
+      - name: cargo llvm-cov report
+        run: cargo llvm-cov report --lcov --output-path lcov.info
+      - name: Record Rust version
+        run: echo "RUST=$(rustc --version)" >> "$GITHUB_ENV"
+      - name: Upload to codecov.io
+        uses: codecov/codecov-action@v6
+        with:
+          fail_ci_if_error: true
+          files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          env_vars: OS,RUST

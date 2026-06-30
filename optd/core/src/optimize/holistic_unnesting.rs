@@ -34,11 +34,7 @@ impl QueryPass for HolisticUnnesting {
 fn run_holistic_unnesting(ctx: &mut OptimizerContext) -> OptimizeResult<PassResult> {
     let mut changed = false;
 
-    loop {
-        let Some(root) = ctx.query.root() else {
-            break;
-        };
-
+    while let Some(root) = ctx.query.root() {
         let sites = collect_dependent_join_sites(root, ctx)?;
         if sites.is_empty() {
             break;

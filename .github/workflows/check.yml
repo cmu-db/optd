@@ -20,41 +20,53 @@ env:
 jobs:
   fmt:
     runs-on: ubuntu-latest
-    name: stable / fmt
+    name: ubuntu / rust-toolchain / fmt
     steps:
       - uses: actions/checkout@v4
-      - name: Install stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Read Rust toolchain
+        id: rust-toolchain
+        run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
           components: rustfmt
       - name: cargo fmt --all --check
         run: cargo fmt --all --check
 
   clippy:
     runs-on: ubuntu-latest
-    name: ${{ matrix.toolchain }} / clippy
-    strategy:
-      fail-fast: false
-      matrix:
-        toolchain: [stable, beta]
+    name: ubuntu / rust-toolchain / clippy
     steps:
       - uses: actions/checkout@v4
-      - name: Install ${{ matrix.toolchain }}
+      - name: Read Rust toolchain
+        id: rust-toolchain
+        run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ matrix.toolchain }}
+          toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
           components: clippy
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - uses: Swatinem/rust-cache@v2
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   doc:
     runs-on: ubuntu-latest
-    name: stable / doc
+    name: ubuntu / rust-toolchain / doc
     steps:
       - uses: actions/checkout@v4
-      - name: Install stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Read Rust toolchain
+        id: rust-toolchain
+        run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - uses: Swatinem/rust-cache@v2
       - name: cargo doc
         env:
@@ -63,11 +75,18 @@ jobs:
 
   features:
     runs-on: ubuntu-latest
-    name: stable / features
+    name: ubuntu / rust-toolchain / features
     steps:
       - uses: actions/checkout@v4
-      - name: Install stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Read Rust toolchain
+        id: rust-toolchain
+        run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-hack
         uses: taiki-e/install-action@v2
         with:

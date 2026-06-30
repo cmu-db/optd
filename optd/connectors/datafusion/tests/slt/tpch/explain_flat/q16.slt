@@ -79,81 +79,102 @@ limit 10;');
 45)------"input": 4
 46)----},
 47)----{
-48)------"id": 12,
-49)------"kind": "selection",
-50)------"title": "σ Selection",
-51)------"predicate": "(ps_suppkey(#1) NOT IN @5)",
-52)------"input": 0,
-53)------"not in subquery": 5
-54)----},
-55)----{
-56)------"id": 1,
-57)------"kind": "scan",
-58)------"title": "⊞ Scan",
-59)------"table_name": "part",
-60)------"columns": [
-61)--------"p_partkey(#5)",
-62)--------"p_name(#6)",
-63)--------"p_mfgr(#7)",
-64)--------"p_brand(#8)",
-65)--------"p_type(#9)",
-66)--------"p_size(#10)",
-67)--------"p_container(#11)",
-68)--------"p_retailprice(#12)",
-69)--------"p_comment(#13)"
-70)------]
-71)----},
-72)----{
-73)------"id": 13,
-74)------"kind": "selection",
-75)------"title": "σ Selection",
-76)------"predicate": "((p_brand(#8) != \"Brand#45\") AND (p_type(#9) NOT LIKE \"MEDIUM POLISHED%\") AND ((p_size(#10) = 49) OR (p_size(#10) = 14) OR (p_size(#10) = 23) OR (p_size(#10) = 45) OR (p_size(#10) = 19) OR (p_size(#10) = 3) OR (p_size(#10) = 36) OR (p_size(#10) = 9)))",
-77)------"input": 1
-78)----},
-79)----{
-80)------"id": 29,
-81)------"kind": "join",
-82)------"title": "⋈ InnerJoin",
-83)------"join_type": "Inner",
-84)------"condition": "(p_partkey(#5) = ps_partkey(#0))",
-85)------"outer": 12,
-86)------"inner": 13
-87)----},
-88)----{
-89)------"id": 30,
-90)------"kind": "aggregation",
-91)------"title": "γ Aggregation",
-92)------"keys": "p_brand(#8), p_type(#9), p_size(#10)",
-93)------"aggregates": [
-94)--------"count(DISTINCT partsupp.ps_suppkey)(#21) := count(DISTINCT ps_suppkey(#1))"
-95)------],
-96)------"input": 29
-97)----},
-98)----{
-99)------"id": 31,
-100)------"kind": "sort",
-101)------"title": "⇞ Sort",
-102)------"keys": [
-103)--------"count(DISTINCT partsupp.ps_suppkey)(#21) Desc NullsFirst",
-104)--------"p_brand(#8) Asc NullsLast",
-105)--------"p_type(#9) Asc NullsLast",
-106)--------"p_size(#10) Asc NullsLast"
-107)------],
-108)------"input": 30
-109)----},
-110)----{
-111)------"id": 32,
-112)------"kind": "limit",
-113)------"title": "τ Limit",
-114)------"fetch": "10",
-115)------"offset": "0",
-116)------"input": 31
-117)----},
-118)----{
-119)------"id": 33,
-120)------"kind": "output",
-121)------"title": "= Output",
-122)------"input": 32
-123)----}
-124)--]
-125)}
+48)------"id": 50,
+49)------"kind": "join",
+50)------"title": "⟕ᵐ LeftMarkJoin",
+51)------"join_type": "LeftMark",
+52)------"condition": "(ps_suppkey(#1) = s_suppkey(#14))",
+53)------"marker": "in_match_mark(#22)",
+54)------"marker_nullable": "false",
+55)------"outer": 0,
+56)------"inner": 5
+57)----},
+58)----{
+59)------"id": 1,
+60)------"kind": "scan",
+61)------"title": "⊞ Scan",
+62)------"table_name": "part",
+63)------"columns": [
+64)--------"p_partkey(#5)",
+65)--------"p_name(#6)",
+66)--------"p_mfgr(#7)",
+67)--------"p_brand(#8)",
+68)--------"p_type(#9)",
+69)--------"p_size(#10)",
+70)--------"p_container(#11)",
+71)--------"p_retailprice(#12)",
+72)--------"p_comment(#13)"
+73)------]
+74)----},
+75)----{
+76)------"id": 37,
+77)------"kind": "selection",
+78)------"title": "σ Selection",
+79)------"predicate": "((p_brand(#8) != \"Brand#45\") AND (p_type(#9) NOT LIKE \"MEDIUM POLISHED%\") AND ((p_size(#10) = 49) OR (p_size(#10) = 14) OR (p_size(#10) = 23) OR (p_size(#10) = 45) OR (p_size(#10) = 19) OR (p_size(#10) = 3) OR (p_size(#10) = 36) OR (p_size(#10) = 9)))",
+80)------"input": 1
+81)----},
+82)----{
+83)------"id": 51,
+84)------"kind": "join",
+85)------"title": "⋈ InnerJoin",
+86)------"join_type": "Inner",
+87)------"condition": "(p_partkey(#5) = ps_partkey(#0))",
+88)------"outer": 50,
+89)------"inner": 37
+90)----},
+91)----{
+92)------"id": 52,
+93)------"kind": "join",
+94)------"title": "⟕ᵐ LeftMarkJoin",
+95)------"join_type": "LeftMark",
+96)------"condition": "(IS_NULL(ps_suppkey(#1)) OR IS_NULL(s_suppkey(#14)))",
+97)------"marker": "in_unknown_mark(#23)",
+98)------"marker_nullable": "false",
+99)------"outer": 51,
+100)------"inner": 5
+101)----},
+102)----{
+103)------"id": 53,
+104)------"kind": "selection",
+105)------"title": "σ Selection",
+106)------"predicate": "NOT(CASE WHEN in_match_mark(#22) THEN true WHEN in_unknown_mark(#23) THEN NULL::Boolean ELSE false END)",
+107)------"input": 52
+108)----},
+109)----{
+110)------"id": 54,
+111)------"kind": "aggregation",
+112)------"title": "γ Aggregation",
+113)------"keys": "p_brand(#8), p_type(#9), p_size(#10)",
+114)------"aggregates": [
+115)--------"count(DISTINCT partsupp.ps_suppkey)(#21) := count(DISTINCT ps_suppkey(#1))"
+116)------],
+117)------"input": 53
+118)----},
+119)----{
+120)------"id": 55,
+121)------"kind": "sort",
+122)------"title": "⇞ Sort",
+123)------"keys": [
+124)--------"count(DISTINCT partsupp.ps_suppkey)(#21) Desc NullsFirst",
+125)--------"p_brand(#8) Asc NullsLast",
+126)--------"p_type(#9) Asc NullsLast",
+127)--------"p_size(#10) Asc NullsLast"
+128)------],
+129)------"input": 54
+130)----},
+131)----{
+132)------"id": 56,
+133)------"kind": "limit",
+134)------"title": "τ Limit",
+135)------"fetch": "10",
+136)------"offset": "0",
+137)------"input": 55
+138)----},
+139)----{
+140)------"id": 57,
+141)------"kind": "output",
+142)------"title": "= Output",
+143)------"input": 56
+144)----}
+145)--]
+146)}

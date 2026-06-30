@@ -3,6 +3,8 @@ permissions:
 
 on:
   workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize, reopened]
   schedule:
     - cron: '7 7 * * *'
 
@@ -16,15 +18,20 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_TEST_DEBUG: 0
   CARGO_TERM_COLOR: always
+  TPCH_HF_REVISION: 3d3bbd2ad937afea3add733e7e179faaf085425f
+  JOB_HF_REVISION: 51a5d2387a6a63ebbf80fde95d2db597edf345e5
 
 jobs:
   nightly:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    name: ubuntu / nightly
+    name: ubuntu / nightly / workspace
     steps:
       - uses: actions/checkout@v4
       - name: Install nightly
         uses: dtolnay/rust-toolchain@nightly
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
@@ -35,23 +42,23 @@ jobs:
         uses: actions/cache@v4
         with:
           path: optd/connectors/datafusion/data/tpch/sf-0.1
-          key: ${{ runner.os }}-tpch-sf-0.1-${{ hashFiles('scripts/generate_tpch.sh') }}
-      - name: Install tpchgen-cli
+          key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ env.TPCH_HF_REVISION }}
+      - name: Download TPC-H data
         if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: cargo install tpchgen-cli --locked
-      - name: Generate TPC-H data
-        if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: ./scripts/generate_tpch.sh
+        run: bash ./scripts/download_tpch_hf.sh
       - name: cargo nextest
         run: cargo nextest run --workspace --locked -E 'not binary(slt)'
 
   updated:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     name: ubuntu / beta / updated
     steps:
       - uses: actions/checkout@v4
       - name: Install beta
         uses: dtolnay/rust-toolchain@beta
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
@@ -64,25 +71,30 @@ jobs:
         uses: actions/cache@v4
         with:
           path: optd/connectors/datafusion/data/tpch/sf-0.1
-          key: ${{ runner.os }}-tpch-sf-0.1-${{ hashFiles('scripts/generate_tpch.sh') }}
-      - name: Install tpchgen-cli
+          key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ env.TPCH_HF_REVISION }}
+      - name: Download TPC-H data
         if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: cargo install tpchgen-cli --locked
-      - name: Generate TPC-H data
-        if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: ./scripts/generate_tpch.sh
+        run: bash ./scripts/download_tpch_hf.sh
       - name: cargo nextest
         run: cargo nextest run --workspace --locked -E 'not binary(slt)'
         env:
           RUSTFLAGS: -D deprecated
 
   full-slt:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:full-slt')
     runs-on: ubuntu-latest
-    name: ubuntu / stable / full-slt
+    name: ubuntu / rust-toolchain / slt / full
     steps:
       - uses: actions/checkout@v4
-      - name: Install stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Read Rust toolchain
+        id: rust-toolchain
+        run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
@@ -93,41 +105,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: optd/connectors/datafusion/data/tpch/sf-0.1
-          key: ${{ runner.os }}-tpch-sf-0.1-${{ hashFiles('scripts/generate_tpch.sh') }}
-      - name: Install tpchgen-cli
+          key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ env.TPCH_HF_REVISION }}
+      - name: Download TPC-H data
         if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: cargo install tpchgen-cli --locked
-      - name: Generate TPC-H data
-        if: steps.cache-tpch.outputs.cache-hit != 'true'
-        run: ./scripts/generate_tpch.sh
+        run: bash ./scripts/download_tpch_hf.sh
       - name: Cache JOB Parquet data
         id: cache-job
         uses: actions/cache@v4
         with:
           path: optd/connectors/datafusion/data/job
-          key: ${{ runner.os }}-job-parquet-${{ hashFiles('scripts/generate_job_parquet.sh', 'scripts/job_schema_duckdb.sql') }}
-      - name: Cache JOB source data
-        id: cache-job-source
+          key: ${{ runner.os }}-hf-job-${{ env.JOB_HF_REVISION }}
+      - name: Download JOB data
         if: steps.cache-job.outputs.cache-hit != 'true'
-        uses: actions/cache@v4
-        with:
-          path: optd/connectors/datafusion/data/job-source
-          key: ${{ runner.os }}-job-source-v1
-      - name: Download JOB source data
-        if: steps.cache-job.outputs.cache-hit != 'true' && steps.cache-job-source.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p optd/connectors/datafusion/data/job-source
-          cd optd/connectors/datafusion/data/job-source
-          curl -OL https://bonsai.cedardb.com/job/imdb.tgz
-          tar -zxvf imdb.tgz
-      - name: Install DuckDB
-        if: steps.cache-job.outputs.cache-hit != 'true'
-        run: curl https://install.duckdb.org | sh
-      - name: Add DuckDB to PATH
-        if: steps.cache-job.outputs.cache-hit != 'true'
-        run: echo "$HOME/.duckdb/cli/latest" >> "$GITHUB_PATH"
-      - name: Generate JOB Parquet data
-        if: steps.cache-job.outputs.cache-hit != 'true'
-        run: ./scripts/generate_job_parquet.sh
+        run: bash ./scripts/download_job_hf.sh
       - name: cargo nextest full SLT
-        run: cargo nextest run --release -p optd-datafusion --test slt --locked -E 'not test(/job\/results\/(16a|16c|16d|19d)\.slt/)'
+        run: cargo nextest run --release -p optd-datafusion --test slt --locked

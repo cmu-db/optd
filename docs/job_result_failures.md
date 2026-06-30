@@ -3,8 +3,8 @@
 This tracks known execution failures and long-running cases in the JOB result
 SLT suite. The enabled JOB plan-shape suite under
 `optd/connectors/datafusion/tests/slt/job/explain_flat/` is green. The result suite
-is enabled, but a few queries are long-running benchmark cases and should be
-treated separately from normal refactor verification.
+is enabled, but JOB `19d` remains a long-running benchmark case and is disabled
+in the SLT harness.
 
 Observed command:
 
@@ -12,17 +12,18 @@ Observed command:
 cargo nextest run --release -p optd-datafusion --test slt job/results
 ```
 
-Observed result with nextest hard timeout configured:
+Earlier nextest runs on the old path timed out on several cases:
 
 ```text
 109 passed; 4 timed out
 ```
 
-Use this command to run the JOB result suite while excluding the known
-long-running cases:
+With physical planning enabled by default, `16a`, `16c`, and `16d` have been
+observed to complete locally. Keep `19d` disabled until its runtime is fixed.
+Use this command to run the enabled JOB result suite:
 
 ```sh
-cargo nextest run --release -p optd-datafusion --test slt -E 'test(/job\/results/) and not test(/job\/results\/(16a|16c|16d|19d)\.slt/)'
+cargo nextest run --release -p optd-datafusion --test slt -E 'test(/job\/results/)'
 ```
 
 ## Failure Summary
@@ -32,9 +33,9 @@ cargo nextest run --release -p optd-datafusion --test slt -E 'test(/job\/results
 | [x] | `job/results/17a.slt.disabled` | line 1 | duplicate projection expression name | DataFusion import/export alias preservation |
 | [x] | `job/results/17b.slt.disabled` | line 1 | duplicate projection expression name | DataFusion import/export alias preservation |
 | [x] | `job/results/17c.slt.disabled` | line 1 | duplicate projection expression name | DataFusion import/export alias preservation |
-| [ ] | `job/results/16a.slt` | line 1 | exceeds 240s nextest timeout | JOB benchmark execution/runtime |
-| [ ] | `job/results/16c.slt` | line 1 | exceeds 240s nextest timeout | JOB benchmark execution/runtime |
-| [ ] | `job/results/16d.slt` | line 1 | exceeds 240s nextest timeout | JOB benchmark execution/runtime |
+| [x] | `job/results/16a.slt` | line 1 | completed under physical planning | JOB benchmark execution/runtime |
+| [x] | `job/results/16c.slt` | line 1 | completed under physical planning | JOB benchmark execution/runtime |
+| [x] | `job/results/16d.slt` | line 1 | completed under physical planning | JOB benchmark execution/runtime |
 | [ ] | `job/results/19d.slt` | line 1 | exceeds 240s nextest timeout | JOB benchmark execution/runtime |
 
 ## Failure Classes
@@ -97,16 +98,12 @@ than once, `from_df` now materializes each repeated projection output as a
 aggregate deduplication while preserving the distinct user-visible aliases that
 the final projection needs.
 
-### Long-Running JOB Result Queries
+### Long-Running JOB Result Query
 
-The following cases exceeded the configured nextest hard timeout of 240 seconds
-in release mode:
+The following case still runs too long under the default physical-planning path
+and is disabled in the SLT harness:
 
-- `optd/connectors/datafusion/tests/slt/job/results/16a.slt`
-- `optd/connectors/datafusion/tests/slt/job/results/16c.slt`
-- `optd/connectors/datafusion/tests/slt/job/results/16d.slt`
 - `optd/connectors/datafusion/tests/slt/job/results/19d.slt`
 
-These are treated as benchmark/runtime long runners rather than refactor
-regressions. `job/results/16b.slt` is also slow, but passed in roughly
-142-149 seconds.
+This is treated as a benchmark/runtime long runner rather than a refactor
+regression.
