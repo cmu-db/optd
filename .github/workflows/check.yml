@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     name: ubuntu / rust-toolchain / fmt
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Read Rust toolchain
         id: rust-toolchain
         run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     name: ubuntu / rust-toolchain / clippy
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Read Rust toolchain
         id: rust-toolchain
         run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
@@ -57,7 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     name: ubuntu / rust-toolchain / doc
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Read Rust toolchain
         id: rust-toolchain
         run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
@@ -77,7 +77,7 @@ jobs:
     runs-on: ubuntu-latest
     name: ubuntu / rust-toolchain / features
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Read Rust toolchain
         id: rust-toolchain
         run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"

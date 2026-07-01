@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     name: ubuntu / nightly / workspace
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install nightly
         uses: dtolnay/rust-toolchain@nightly
       - name: Install protoc
@@ -54,7 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     name: ubuntu / beta / updated
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install beta
         uses: dtolnay/rust-toolchain@beta
       - name: Install protoc
@@ -85,7 +85,7 @@ jobs:
     runs-on: ubuntu-latest
     name: ubuntu / rust-toolchain / slt / full
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Read Rust toolchain
         id: rust-toolchain
         run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
