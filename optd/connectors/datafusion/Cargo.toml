@@ -14,7 +14,7 @@ datafusion-physical-expr = "=53.1.0"
 datafusion-sqllogictest = "=53.1.0"
 async-trait = "0.1"
 clap = { version = "4.6.1", features = ["derive"] }
-duckdb = { version = "=1.10501.0", optional = true, features = ["bundled"] }
+duckdb = { version = "=1.10504.0", optional = true, features = ["bundled"] }
 rustyline = "17.0"
 sqllogictest = "0.29.1"
 tokio = { version = "1.48.0", features = ["macros", "rt", "rt-multi-thread"] }
