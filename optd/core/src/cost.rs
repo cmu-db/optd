@@ -24,6 +24,18 @@ pub trait CostModel: Send + Sync + 'static {
         analyses: &mut AnalysisContext,
     ) -> OptimizeResult<Self::Cost>;
 
+    /// Computes local cost for a virtual binary relational operator.
+    ///
+    /// This is used by search algorithms before a candidate operator exists in
+    /// the query arena.
+    fn binary_operator_cost(
+        &self,
+        left: &CardinalityProfile,
+        right: &CardinalityProfile,
+        output: &CardinalityProfile,
+        class: JoinAlgorithmClass,
+    ) -> Self::Cost;
+
     /// Recursively computes total costs for the operator's inputs.
     fn input_costs(
         &self,
@@ -109,7 +121,7 @@ impl CostModel for DefaultCostModel {
             OperatorData::Aggregation(_) => row_materialization_cost(&output),
             OperatorData::Sort(_) => sort_cost(output.rows.value),
             OperatorData::Limit(_) | OperatorData::Output(_) | OperatorData::Rename(_) => 0.0,
-            OperatorData::CrossProduct(data) => binary_operator_cost(
+            OperatorData::CrossProduct(data) => binary_rel_cost(
                 ctx,
                 analyses,
                 data.outer,
@@ -117,7 +129,7 @@ impl CostModel for DefaultCostModel {
                 &output,
                 JoinAlgorithmClass::NestedLoopLike,
             )?,
-            OperatorData::Join(data) => binary_operator_cost(
+            OperatorData::Join(data) => binary_rel_cost(
                 ctx,
                 analyses,
                 data.outer,
@@ -126,6 +138,16 @@ impl CostModel for DefaultCostModel {
                 join_algorithm_class_for_predicate(data.on, ctx),
             )?,
         })
+    }
+
+    fn binary_operator_cost(
+        &self,
+        left: &CardinalityProfile,
+        right: &CardinalityProfile,
+        output: &CardinalityProfile,
+        class: JoinAlgorithmClass,
+    ) -> Self::Cost {
+        join_algorithm_cost_for_profiles(left, right, output, class)
     }
 }
 
@@ -258,7 +280,7 @@ fn sort_cost(rows: f64) -> f64 {
     rows * rows.max(2.0).log2()
 }
 
-fn binary_operator_cost(
+fn binary_rel_cost(
     ctx: &QueryContext,
     analyses: &mut AnalysisContext,
     outer: Operator,

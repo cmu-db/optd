@@ -9,7 +9,7 @@ use crate::analysis::{
     CardinalityEstimationV1, connecting_edge_indices, join_profile_with_selectivity,
     join_selectivity,
 };
-use crate::cost::{join_algorithm_class, join_algorithm_cost_for_profiles};
+use crate::cost::{CostModel, DefaultCostModel, join_algorithm_class};
 use crate::hypergraph::{NodeSet, QueryHypergraph, nodeset_min, nodeset_singleton};
 use crate::{
     CardinalityProfile, Estimate, ExprData, Join, JoinInputProfiles, JoinType, NaryOp, Operator,
@@ -170,6 +170,7 @@ struct DPhyp<'a> {
     ctx: &'a QueryContext,
     hg: &'a QueryHypergraph,
     stats: &'a dyn Statistics,
+    cost_model: &'a dyn CostModel<Cost = f64>,
     /// DP table: NodeSet → best known plan for that subset.
     dp: HashMap<NodeSet, PlanState>,
 }
@@ -182,11 +183,17 @@ struct PlanState {
 }
 
 impl<'a> DPhyp<'a> {
-    fn new(ctx: &'a QueryContext, hg: &'a QueryHypergraph, stats: &'a dyn Statistics) -> Self {
+    fn new(
+        ctx: &'a QueryContext,
+        hg: &'a QueryHypergraph,
+        stats: &'a dyn Statistics,
+        cost_model: &'a dyn CostModel<Cost = f64>,
+    ) -> Self {
         Self {
             ctx,
             hg,
             stats,
+            cost_model,
             dp: HashMap::new(),
         }
     }
@@ -307,7 +314,8 @@ impl<'a> DPhyp<'a> {
         let profile = join_profile_with_selectivity(&left.profile, &right.profile, join_type, sel);
         let class = join_algorithm_class(&edge_indices, self.hg, self.ctx);
         let work_cost =
-            join_algorithm_cost_for_profiles(&left.profile, &right.profile, &profile, class);
+            self.cost_model
+                .binary_operator_cost(&left.profile, &right.profile, &profile, class);
         let new_cost = left.cost + right.cost + work_cost;
         let combined = s1 | s2;
 
@@ -513,6 +521,7 @@ fn collect_roots_rec(
 
 pub struct JoinOrdering {
     stats: JoinOrderingStatistics,
+    cost_model: Box<dyn CostModel<Cost = f64>>,
     last_run: Option<(usize, u64)>,
 }
 
@@ -525,6 +534,7 @@ impl JoinOrdering {
     pub fn new() -> Self {
         Self {
             stats: JoinOrderingStatistics::Cardinality,
+            cost_model: Box::new(DefaultCostModel),
             last_run: None,
         }
     }
@@ -532,6 +542,15 @@ impl JoinOrdering {
     pub fn with_stats(stats: Box<dyn Statistics>) -> Self {
         Self {
             stats: JoinOrderingStatistics::Custom(stats),
+            cost_model: Box::new(DefaultCostModel),
+            last_run: None,
+        }
+    }
+
+    pub fn with_cost_model(cost_model: Box<dyn CostModel<Cost = f64>>) -> Self {
+        Self {
+            stats: JoinOrderingStatistics::Cardinality,
+            cost_model,
             last_run: None,
         }
     }
@@ -595,11 +614,17 @@ impl QueryPass for JoinOrdering {
                         JoinOrderingStatistics::Cardinality => {
                             let stats =
                                 CardinalityStatistics::new(&ctx.query, &mut ctx.analyses, hg)?;
-                            let mut solver = DPhyp::new(&ctx.query, hg, &stats);
+                            let mut solver =
+                                DPhyp::new(&ctx.query, hg, &stats, self.cost_model.as_ref());
                             solver.solve()?
                         }
                         JoinOrderingStatistics::Custom(stats) => {
-                            let mut solver = DPhyp::new(&ctx.query, hg, stats.as_ref());
+                            let mut solver = DPhyp::new(
+                                &ctx.query,
+                                hg,
+                                stats.as_ref(),
+                                self.cost_model.as_ref(),
+                            );
                             solver.solve()?
                         }
                     };
@@ -748,12 +773,69 @@ mod tests {
         let hg = build_hypergraph(&ctx, &mut analyses, root);
         assert_eq!(hg.nodes.len(), 3);
 
-        let mut solver = DPhyp::new(&ctx, &hg, &UniformStatistics);
+        let mut solver = DPhyp::new(&ctx, &hg, &UniformStatistics, &DefaultCostModel);
         let tree = solver
             .solve()
             .expect("solver should not error")
             .expect("DPhyp should find a plan");
         assert_eq!(tree.leaf_count(), 3);
+    }
+
+    #[test]
+    fn dphyp_uses_custom_cost_model_for_candidate_joins() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        struct CountingCostModel {
+            calls: Arc<AtomicUsize>,
+        }
+
+        impl CostModel for CountingCostModel {
+            type Cost = f64;
+
+            fn zero(&self) -> Self::Cost {
+                0.0
+            }
+
+            fn add(&self, left: Self::Cost, right: Self::Cost) -> Self::Cost {
+                left + right
+            }
+
+            fn operator_cost(
+                &self,
+                _op: Operator,
+                _ctx: &QueryContext,
+                _analyses: &mut AnalysisContext,
+            ) -> OptimizeResult<Self::Cost> {
+                Ok(0.0)
+            }
+
+            fn binary_operator_cost(
+                &self,
+                left: &CardinalityProfile,
+                right: &CardinalityProfile,
+                output: &CardinalityProfile,
+                class: JoinAlgorithmClass,
+            ) -> Self::Cost {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                DefaultCostModel.binary_operator_cost(left, right, output, class)
+            }
+        }
+
+        let (ctx, root) = three_way_chain();
+        let mut analyses = AnalysisContext::new();
+        let hg = build_hypergraph(&ctx, &mut analyses, root);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let model = CountingCostModel {
+            calls: calls.clone(),
+        };
+        let mut solver = DPhyp::new(&ctx, &hg, &UniformStatistics, &model);
+
+        solver.solve().unwrap();
+
+        assert!(calls.load(Ordering::Relaxed) > 0);
     }
 
     #[test]
@@ -821,7 +903,7 @@ mod tests {
         let (ctx, root) = three_way_chain();
         let mut analyses = AnalysisContext::new();
         let hg = build_hypergraph(&ctx, &mut analyses, root);
-        let mut solver = DPhyp::new(&ctx, &hg, &SkewStats);
+        let mut solver = DPhyp::new(&ctx, &hg, &SkewStats, &DefaultCostModel);
 
         let tree = solver
             .solve()
@@ -945,7 +1027,7 @@ mod tests {
         let mut analyses = AnalysisContext::with_catalog(Arc::new(catalog));
         let hg = build_hypergraph(&ctx, &mut analyses, root);
         let stats = CardinalityStatistics::new(&ctx, &mut analyses, &hg).unwrap();
-        let mut solver = DPhyp::new(&ctx, &hg, &stats);
+        let mut solver = DPhyp::new(&ctx, &hg, &stats, &DefaultCostModel);
 
         let tree = solver
             .solve()
@@ -1006,7 +1088,7 @@ mod tests {
             nodes,
             edges: vec![],
         };
-        let mut solver = DPhyp::new(&ctx, &hg, &UniformStatistics);
+        let mut solver = DPhyp::new(&ctx, &hg, &UniformStatistics, &DefaultCostModel);
 
         assert_eq!(all_nodes_mask(64), NodeSet::MAX);
         assert!(matches!(solver.solve(), Ok(None)));
@@ -1032,7 +1114,7 @@ mod tests {
             nodes,
             edges: vec![],
         };
-        let mut solver = DPhyp::new(&ctx, &hg, &UniformStatistics);
+        let mut solver = DPhyp::new(&ctx, &hg, &UniformStatistics, &DefaultCostModel);
 
         assert!(matches!(
             solver.solve(),
