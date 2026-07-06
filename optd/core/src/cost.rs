@@ -38,27 +38,27 @@ pub trait CostModel: Send + Sync + 'static {
             .collect()
     }
 
-    /// Computes total cost from this operator's local cost and precomputed input costs.
-    fn total_cost_with_inputs(
+    /// Computes total cost from this operator's local cost and precomputed child costs.
+    fn total_cost_from_children(
         &self,
         op: Operator,
-        input_costs: &[Self::Cost],
+        child_costs: &[Self::Cost],
         ctx: &QueryContext,
         analyses: &mut AnalysisContext,
     ) -> OptimizeResult<Self::Cost> {
         let input_count = op.get(ctx).inputs().len();
-        if input_count != input_costs.len() {
+        if input_count != child_costs.len() {
             return Err(OptimizeError::PassError {
                 pass: "CostModel",
                 message: format!(
-                    "operator {op} has {input_count} inputs but received {} input costs",
-                    input_costs.len()
+                    "operator {op} has {input_count} inputs but received {} child costs",
+                    child_costs.len()
                 ),
             });
         }
 
         let operator_cost = self.operator_cost(op, ctx, analyses)?;
-        Ok(input_costs
+        Ok(child_costs
             .iter()
             .cloned()
             .fold(operator_cost, |acc, cost| self.add(acc, cost)))
@@ -72,7 +72,7 @@ pub trait CostModel: Send + Sync + 'static {
         analyses: &mut AnalysisContext,
     ) -> OptimizeResult<Self::Cost> {
         let input_costs = self.input_costs(op, ctx, analyses)?;
-        self.total_cost_with_inputs(op, &input_costs, ctx, analyses)
+        self.total_cost_from_children(op, &input_costs, ctx, analyses)
     }
 }
 
@@ -115,7 +115,7 @@ impl CostModel for DefaultCostModel {
                 data.outer,
                 data.inner,
                 &output,
-                JoinCostClass::NestedLoopLike,
+                JoinAlgorithmClass::NestedLoopLike,
             )?,
             OperatorData::Join(data) => binary_operator_cost(
                 ctx,
@@ -123,15 +123,47 @@ impl CostModel for DefaultCostModel {
                 data.outer,
                 data.inner,
                 &output,
-                join_cost_class_for_predicate(data.on, ctx),
+                join_algorithm_class_for_predicate(data.on, ctx),
             )?,
         })
     }
 }
 
+impl Operator {
+    /// Computes this operator's local cost with the default cost model.
+    pub fn operator_cost(self, ctx: &QueryContext) -> OptimizeResult<f64> {
+        let mut analyses = ctx.analyze();
+        self.operator_cost_with_analyses(ctx, &mut analyses)
+    }
+
+    /// Computes this operator's local cost with caller-provided analyses.
+    pub fn operator_cost_with_analyses(
+        self,
+        ctx: &QueryContext,
+        analyses: &mut AnalysisContext,
+    ) -> OptimizeResult<f64> {
+        DefaultCostModel.operator_cost(self, ctx, analyses)
+    }
+
+    /// Computes this operator subtree's total cost with the default cost model.
+    pub fn total_cost(self, ctx: &QueryContext) -> OptimizeResult<f64> {
+        let mut analyses = ctx.analyze();
+        self.total_cost_with_analyses(ctx, &mut analyses)
+    }
+
+    /// Computes this operator subtree's total cost with caller-provided analyses.
+    pub fn total_cost_with_analyses(
+        self,
+        ctx: &QueryContext,
+        analyses: &mut AnalysisContext,
+    ) -> OptimizeResult<f64> {
+        DefaultCostModel.total_cost(self, ctx, analyses)
+    }
+}
+
 /// How expensive a join is to execute after cardinality estimation predicts output rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum JoinCostClass {
+pub enum JoinAlgorithmClass {
     HashLike,
     NestedLoopLike,
 }
@@ -141,33 +173,33 @@ pub enum JoinCostClass {
 /// `*_width` is currently a column-count proxy for row materialization cost.
 /// Cardinality estimation decides how many rows are produced; this function
 /// decides whether producing them looks hash-like or pairwise.
-pub fn join_work_cost(
+pub fn join_algorithm_cost(
     left_rows: f64,
     left_width: usize,
     right_rows: f64,
     right_width: usize,
     output_rows: f64,
     output_width: usize,
-    class: JoinCostClass,
+    class: JoinAlgorithmClass,
 ) -> f64 {
     match class {
-        JoinCostClass::HashLike => {
+        JoinAlgorithmClass::HashLike => {
             let left_bytes = left_rows * left_width.max(1) as f64;
             let right_bytes = right_rows * right_width.max(1) as f64;
             let output_bytes = output_rows * output_width.max(1) as f64;
             left_bytes + right_bytes + (left_rows * right_rows).powf(0.75) + output_bytes
         }
-        JoinCostClass::NestedLoopLike => left_rows * right_rows + output_rows,
+        JoinAlgorithmClass::NestedLoopLike => left_rows * right_rows + output_rows,
     }
 }
 
-pub(crate) fn join_work_cost_for_profiles(
+pub(crate) fn join_algorithm_cost_for_profiles(
     left: &CardinalityProfile,
     right: &CardinalityProfile,
     output: &CardinalityProfile,
-    class: JoinCostClass,
+    class: JoinAlgorithmClass,
 ) -> f64 {
-    join_work_cost(
+    join_algorithm_cost(
         left.rows.value,
         left.columns.len(),
         right.rows.value,
@@ -178,27 +210,30 @@ pub(crate) fn join_work_cost_for_profiles(
     )
 }
 
-pub(crate) fn join_cost_class(
+pub(crate) fn join_algorithm_class(
     edge_indices: &[usize],
     hg: &QueryHypergraph,
     ctx: &QueryContext,
-) -> JoinCostClass {
+) -> JoinAlgorithmClass {
     if edge_indices.iter().any(|idx| {
         hg.edges[*idx]
             .predicate
             .is_some_and(|predicate| contains_hash_join_key(predicate, ctx))
     }) {
-        JoinCostClass::HashLike
+        JoinAlgorithmClass::HashLike
     } else {
-        JoinCostClass::NestedLoopLike
+        JoinAlgorithmClass::NestedLoopLike
     }
 }
 
-pub(crate) fn join_cost_class_for_predicate(predicate: Expr, ctx: &QueryContext) -> JoinCostClass {
+pub(crate) fn join_algorithm_class_for_predicate(
+    predicate: Expr,
+    ctx: &QueryContext,
+) -> JoinAlgorithmClass {
     if contains_hash_join_key(predicate, ctx) {
-        JoinCostClass::HashLike
+        JoinAlgorithmClass::HashLike
     } else {
-        JoinCostClass::NestedLoopLike
+        JoinAlgorithmClass::NestedLoopLike
     }
 }
 
@@ -229,11 +264,13 @@ fn binary_operator_cost(
     outer: Operator,
     inner: Operator,
     output: &CardinalityProfile,
-    class: JoinCostClass,
+    class: JoinAlgorithmClass,
 ) -> OptimizeResult<f64> {
     let left = cardinality_profile(ctx, analyses, outer)?;
     let right = cardinality_profile(ctx, analyses, inner)?;
-    Ok(join_work_cost_for_profiles(&left, &right, output, class))
+    Ok(join_algorithm_cost_for_profiles(
+        &left, &right, output, class,
+    ))
 }
 
 /// Returns true when `expr` contains a column-to-column equality predicate.
@@ -313,11 +350,11 @@ mod tests {
         (ctx, join)
     }
 
-    fn join_cost_class_for_root(ctx: &QueryContext, root: Operator) -> JoinCostClass {
+    fn join_algorithm_class_for_root(ctx: &QueryContext, root: Operator) -> JoinAlgorithmClass {
         let mut analyses = AnalysisContext::new();
         let hg = build_hypergraph(ctx, &mut analyses, root);
         let edge_indices = connecting_edge_indices(nodeset_singleton(0), nodeset_singleton(1), &hg);
-        join_cost_class(&edge_indices, &hg, ctx)
+        join_algorithm_class(&edge_indices, &hg, ctx)
     }
 
     #[test]
@@ -340,7 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn total_cost_with_inputs_rejects_wrong_input_count() {
+    fn total_cost_from_children_rejects_wrong_input_count() {
         let mut ctx = QueryContext::new();
         let (scan, _) = add_single_i64_column_scan(&mut ctx, "A", "a");
         let output = OperatorData::Output(Output { input: scan }).add(&mut ctx);
@@ -348,10 +385,13 @@ mod tests {
         let model = DefaultCostModel;
 
         let err = model
-            .total_cost_with_inputs(output, &[], &ctx, &mut analyses)
+            .total_cost_from_children(output, &[], &ctx, &mut analyses)
             .unwrap_err();
 
-        assert!(err.to_string().contains("has 1 inputs but received 0"));
+        assert!(
+            err.to_string()
+                .contains("has 1 inputs but received 0 child costs")
+        );
     }
 
     #[test]
@@ -378,6 +418,20 @@ mod tests {
             model.operator_cost(sort, &ctx, &mut analyses).unwrap(),
             1000.0 * f64::log2(1000.0)
         );
+    }
+
+    #[test]
+    fn operator_cost_convenience_uses_default_model() {
+        let mut ctx = QueryContext::new();
+        let (scan, column) = add_single_i64_column_scan(&mut ctx, "A", "a");
+        let selection = OperatorData::Selection(Selection {
+            predicate: ExprData::ColumnRef(column).add(&mut ctx),
+            input: scan,
+        })
+        .add(&mut ctx);
+
+        assert_eq!(scan.operator_cost(&ctx).unwrap(), 1000.0);
+        assert_eq!(selection.total_cost(&ctx).unwrap(), 1250.0);
     }
 
     #[test]
@@ -415,20 +469,28 @@ mod tests {
         );
         assert_eq!(
             model.operator_cost(hash_join, &ctx, &mut analyses).unwrap(),
-            join_work_cost(1000.0, 1, 1000.0, 1, 10000.0, 2, JoinCostClass::HashLike)
+            join_algorithm_cost(
+                1000.0,
+                1,
+                1000.0,
+                1,
+                10000.0,
+                2,
+                JoinAlgorithmClass::HashLike
+            )
         );
         assert_eq!(
             model
                 .operator_cost(nested_loop_join, &ctx, &mut analyses)
                 .unwrap(),
-            join_work_cost(
+            join_algorithm_cost(
                 1000.0,
                 1,
                 1000.0,
                 1,
                 250000.0,
                 2,
-                JoinCostClass::NestedLoopLike
+                JoinAlgorithmClass::NestedLoopLike
             )
         );
     }
@@ -446,8 +508,8 @@ mod tests {
             two_way_join_with_predicate(|ctx, a, b| binary_predicate(ctx, BinaryOp::Eq, a, b));
 
         assert_eq!(
-            join_cost_class_for_root(&ctx, root),
-            JoinCostClass::HashLike
+            join_algorithm_class_for_root(&ctx, root),
+            JoinAlgorithmClass::HashLike
         );
     }
 
@@ -458,8 +520,8 @@ mod tests {
         });
 
         assert_eq!(
-            join_cost_class_for_root(&ctx, root),
-            JoinCostClass::HashLike
+            join_algorithm_class_for_root(&ctx, root),
+            JoinAlgorithmClass::HashLike
         );
     }
 
@@ -476,8 +538,8 @@ mod tests {
         });
 
         assert_eq!(
-            join_cost_class_for_root(&ctx, root),
-            JoinCostClass::HashLike
+            join_algorithm_class_for_root(&ctx, root),
+            JoinAlgorithmClass::HashLike
         );
     }
 
@@ -487,39 +549,39 @@ mod tests {
             two_way_join_with_predicate(|ctx, a, b| binary_predicate(ctx, BinaryOp::Gt, a, b));
 
         assert_eq!(
-            join_cost_class_for_root(&ctx, root),
-            JoinCostClass::NestedLoopLike
+            join_algorithm_class_for_root(&ctx, root),
+            JoinAlgorithmClass::NestedLoopLike
         );
     }
 
     #[test]
     fn hash_like_cost_does_not_use_pairwise_input_product() {
         assert_eq!(
-            join_work_cost(
+            join_algorithm_cost(
                 1_000_000.0,
                 1,
                 1_000_000.0,
                 1,
                 10.0,
                 1,
-                JoinCostClass::HashLike
+                JoinAlgorithmClass::HashLike
             ),
             1_002_000_010.0
         );
         assert_eq!(
-            join_work_cost(
+            join_algorithm_cost(
                 1_000_000.0,
                 1,
                 1_000_000.0,
                 1,
                 10.0,
                 1,
-                JoinCostClass::NestedLoopLike
+                JoinAlgorithmClass::NestedLoopLike
             ),
             1_000_000_000_010.0
         );
         assert_eq!(
-            join_work_cost(10.0, 3, 20.0, 4, 5.0, 7, JoinCostClass::HashLike),
+            join_algorithm_cost(10.0, 3, 20.0, 4, 5.0, 7, JoinAlgorithmClass::HashLike),
             30.0 + 80.0 + f64::powf(200.0, 0.75) + 35.0
         );
     }
@@ -530,8 +592,8 @@ mod tests {
         let predicate = ExprData::Literal(crate::ScalarValue::Boolean(true)).add(&mut ctx);
 
         assert_eq!(
-            join_cost_class_for_predicate(predicate, &ctx),
-            JoinCostClass::NestedLoopLike
+            join_algorithm_class_for_predicate(predicate, &ctx),
+            JoinAlgorithmClass::NestedLoopLike
         );
     }
 }

@@ -9,7 +9,7 @@ use crate::analysis::{
     CardinalityEstimationV1, connecting_edge_indices, join_profile_with_selectivity,
     join_selectivity,
 };
-use crate::cost::{join_cost_class, join_work_cost_for_profiles};
+use crate::cost::{join_algorithm_class, join_algorithm_cost_for_profiles};
 use crate::hypergraph::{NodeSet, QueryHypergraph, nodeset_min, nodeset_singleton};
 use crate::{
     CardinalityProfile, Estimate, ExprData, Join, JoinInputProfiles, JoinType, NaryOp, Operator,
@@ -63,7 +63,7 @@ impl Statistics for UniformStatistics {
 }
 
 #[cfg(test)]
-use crate::cost::{JoinCostClass, join_work_cost};
+use crate::cost::{JoinAlgorithmClass, join_algorithm_cost};
 
 /// Cardinality-analysis backed statistics for one join hypergraph.
 struct CardinalityStatistics<'a> {
@@ -305,8 +305,9 @@ impl<'a> DPhyp<'a> {
             .map(|idx| self.hg.edges[*idx].join_type.to_ir_join_type())
             .unwrap_or(JoinType::Inner);
         let profile = join_profile_with_selectivity(&left.profile, &right.profile, join_type, sel);
-        let class = join_cost_class(&edge_indices, self.hg, self.ctx);
-        let work_cost = join_work_cost_for_profiles(&left.profile, &right.profile, &profile, class);
+        let class = join_algorithm_class(&edge_indices, self.hg, self.ctx);
+        let work_cost =
+            join_algorithm_cost_for_profiles(&left.profile, &right.profile, &profile, class);
         let new_cost = left.cost + right.cost + work_cost;
         let combined = s1 | s2;
 
@@ -733,11 +734,11 @@ mod tests {
         .add(ctx)
     }
 
-    fn join_cost_class_for_root(ctx: &QueryContext, root: Operator) -> JoinCostClass {
+    fn join_algorithm_class_for_root(ctx: &QueryContext, root: Operator) -> JoinAlgorithmClass {
         let mut analyses = AnalysisContext::new();
         let hg = build_hypergraph(ctx, &mut analyses, root);
         let edge_indices = connecting_edge_indices(nodeset_singleton(0), nodeset_singleton(1), &hg);
-        join_cost_class(&edge_indices, &hg, ctx)
+        join_algorithm_class(&edge_indices, &hg, ctx)
     }
 
     #[test]
@@ -836,8 +837,8 @@ mod tests {
             two_way_join_with_predicate(|ctx, a, b| binary_predicate(ctx, BinaryOp::Eq, a, b));
 
         assert_eq!(
-            join_cost_class_for_root(&ctx, root),
-            JoinCostClass::HashLike
+            join_algorithm_class_for_root(&ctx, root),
+            JoinAlgorithmClass::HashLike
         );
     }
 
@@ -848,8 +849,8 @@ mod tests {
         });
 
         assert_eq!(
-            join_cost_class_for_root(&ctx, root),
-            JoinCostClass::HashLike
+            join_algorithm_class_for_root(&ctx, root),
+            JoinAlgorithmClass::HashLike
         );
     }
 
@@ -866,8 +867,8 @@ mod tests {
         });
 
         assert_eq!(
-            join_cost_class_for_root(&ctx, root),
-            JoinCostClass::HashLike
+            join_algorithm_class_for_root(&ctx, root),
+            JoinAlgorithmClass::HashLike
         );
     }
 
@@ -877,39 +878,39 @@ mod tests {
             two_way_join_with_predicate(|ctx, a, b| binary_predicate(ctx, BinaryOp::Gt, a, b));
 
         assert_eq!(
-            join_cost_class_for_root(&ctx, root),
-            JoinCostClass::NestedLoopLike
+            join_algorithm_class_for_root(&ctx, root),
+            JoinAlgorithmClass::NestedLoopLike
         );
     }
 
     #[test]
     fn hash_like_cost_does_not_use_pairwise_input_product() {
         assert_eq!(
-            join_work_cost(
+            join_algorithm_cost(
                 1_000_000.0,
                 1,
                 1_000_000.0,
                 1,
                 10.0,
                 1,
-                JoinCostClass::HashLike
+                JoinAlgorithmClass::HashLike
             ),
             1_002_000_010.0
         );
         assert_eq!(
-            join_work_cost(
+            join_algorithm_cost(
                 1_000_000.0,
                 1,
                 1_000_000.0,
                 1,
                 10.0,
                 1,
-                JoinCostClass::NestedLoopLike
+                JoinAlgorithmClass::NestedLoopLike
             ),
             1_000_000_000_010.0
         );
         assert_eq!(
-            join_work_cost(10.0, 3, 20.0, 4, 5.0, 7, JoinCostClass::HashLike),
+            join_algorithm_cost(10.0, 3, 20.0, 4, 5.0, 7, JoinAlgorithmClass::HashLike),
             30.0 + 80.0 + f64::powf(200.0, 0.75) + 35.0
         );
     }
