@@ -47,6 +47,33 @@ fn optimize(
     Ok(opt.into_query())
 }
 
+pub(crate) async fn optimizer_context_from_logical_plan(
+    session: &SessionContext,
+    runtime_stats: &RuntimeStatisticsCatalogBuilder,
+    plan: &LogicalPlan,
+) -> Result<OptimizerContext, TryViaIrError> {
+    if !is_supported_relational_plan(plan) {
+        return Err(TryViaIrError::Unsupported("non-query plan".into()));
+    }
+
+    let plan =
+        apply_type_coercion(plan.clone()).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
+
+    reject_non_catalog_scans(&plan, session).await?;
+
+    let catalog = runtime_stats
+        .build_for_plan(&plan)
+        .await
+        .map_err(TryViaIrError::Failed)?;
+
+    let mut ctx = QueryContext::new();
+    let root =
+        from_logical_plan(&plan, &mut ctx).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
+    ctx.set_root(root);
+
+    Ok(OptimizerContext::with_catalog(ctx, catalog))
+}
+
 /// Returns the canonical optimizer pass pipeline used across all execution paths.
 pub fn default_pass_manager() -> PassManager {
     let mut pm = PassManager::new();
@@ -67,7 +94,7 @@ pub struct OptdRunner {
 }
 
 #[derive(Debug)]
-enum TryViaIrError {
+pub(crate) enum TryViaIrError {
     Unsupported(String),
     Failed(String),
 }
@@ -325,27 +352,9 @@ impl OptdRunner {
         &self,
         plan: &LogicalPlan,
     ) -> Result<QueryContext, TryViaIrError> {
-        if !is_supported_relational_plan(plan) {
-            return Err(TryViaIrError::Unsupported("non-query plan".into()));
-        }
-
-        let plan =
-            apply_type_coercion(plan.clone()).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
-
-        reject_non_catalog_scans(&plan, &self.session).await?;
-
-        let catalog = self
-            .runtime_stats
-            .build_for_plan(&plan)
-            .await
-            .map_err(TryViaIrError::Failed)?;
-
-        let mut ctx = QueryContext::new();
-        let root =
-            from_logical_plan(&plan, &mut ctx).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
-        ctx.set_root(root);
-
-        optimize(ctx, Some(catalog)).map_err(|e| TryViaIrError::Failed(e.to_string()))
+        let opt =
+            optimizer_context_from_logical_plan(&self.session, &self.runtime_stats, plan).await?;
+        optimize(opt.query, opt.analyses.catalog).map_err(|e| TryViaIrError::Failed(e.to_string()))
     }
 
     async fn execute_optimized_ir(

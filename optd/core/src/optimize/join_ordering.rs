@@ -315,10 +315,7 @@ impl<'a> DPhyp<'a> {
                 right: &right.profile,
             },
         );
-        let join_type = edge_indices
-            .first()
-            .map(|idx| self.hg.edges[*idx].join_type.to_ir_join_type())
-            .unwrap_or(JoinType::Inner);
+        let join_type = candidate_join_type(&edge_indices, self.hg, self.ctx);
         let profile =
             join_profile_with_selectivity(&left.profile, &right.profile, join_type.clone(), sel);
         let candidate = materialize_candidate_join(
@@ -444,6 +441,21 @@ fn materialize_candidate_join(
         inner,
     })
     .add(ctx)
+}
+
+fn candidate_join_type(
+    edge_indices: &[usize],
+    hg: &QueryHypergraph,
+    ctx: &QueryContext,
+) -> JoinType {
+    edge_indices
+        .first()
+        .and_then(|&idx| match hg.edges[idx].source.get(ctx) {
+            OperatorData::Join(join) => Some(join.join_type.clone()),
+            OperatorData::CrossProduct(_) => Some(JoinType::Inner),
+            _ => None,
+        })
+        .unwrap_or(JoinType::Inner)
 }
 
 // ---------------------------------------------------------------------------
@@ -800,6 +812,62 @@ mod tests {
         assert!(matches!(
             plan.root.get(&ctx),
             OperatorData::Join(_) | OperatorData::CrossProduct(_)
+        ));
+    }
+
+    #[test]
+    fn dphyp_preserves_source_left_mark_join_type() {
+        let mut ctx = QueryContext::new();
+        let a = ColumnData::new("a", DataType::Int64).add(&mut ctx);
+        let b = ColumnData::new("b", DataType::Int64).add(&mut ctx);
+        let marker = ColumnData::new("exists_mark", DataType::Boolean).add(&mut ctx);
+        let left = OperatorData::Scan(Scan {
+            table: TableRef::bare("A"),
+            columns: vec![a],
+        })
+        .add(&mut ctx);
+        let right = OperatorData::Scan(Scan {
+            table: TableRef::bare("B"),
+            columns: vec![b],
+        })
+        .add(&mut ctx);
+        let on = binary_predicate(&mut ctx, BinaryOp::Eq, a, b);
+        let root = OperatorData::Join(Join {
+            join_type: JoinType::LeftMark {
+                marker,
+                nullable: false,
+            },
+            on,
+            outer: left,
+            inner: right,
+        })
+        .add(&mut ctx);
+        let mut analyses = AnalysisContext::new();
+        let hg = build_hypergraph(&ctx, &mut analyses, root);
+
+        let plan = {
+            let mut solver = DPhyp::new(
+                &mut ctx,
+                &mut analyses,
+                &hg,
+                &UniformStatistics,
+                &DefaultCostModel,
+            );
+            solver
+                .solve()
+                .expect("solver should not error")
+                .expect("DPhyp should find a plan")
+        };
+
+        let OperatorData::Join(join) = plan.root.get(&ctx) else {
+            panic!("winning plan should be a join");
+        };
+        assert!(matches!(
+            join.join_type,
+            JoinType::LeftMark {
+                marker: actual,
+                nullable: false,
+            } if actual == marker
         ));
     }
 
