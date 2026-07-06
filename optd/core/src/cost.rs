@@ -24,18 +24,6 @@ pub trait CostModel: Send + Sync + 'static {
         analyses: &mut AnalysisContext,
     ) -> OptimizeResult<Self::Cost>;
 
-    /// Computes local cost for a virtual binary relational operator.
-    ///
-    /// This is used by search algorithms before a candidate operator exists in
-    /// the query arena.
-    fn binary_operator_cost(
-        &self,
-        left: &CardinalityProfile,
-        right: &CardinalityProfile,
-        output: &CardinalityProfile,
-        class: JoinAlgorithmClass,
-    ) -> Self::Cost;
-
     /// Recursively computes total costs for the operator's inputs.
     fn input_costs(
         &self,
@@ -138,16 +126,6 @@ impl CostModel for DefaultCostModel {
                 join_algorithm_class_for_predicate(data.on, ctx),
             )?,
         })
-    }
-
-    fn binary_operator_cost(
-        &self,
-        left: &CardinalityProfile,
-        right: &CardinalityProfile,
-        output: &CardinalityProfile,
-        class: JoinAlgorithmClass,
-    ) -> Self::Cost {
-        join_algorithm_cost_for_profiles(left, right, output, class)
     }
 }
 
