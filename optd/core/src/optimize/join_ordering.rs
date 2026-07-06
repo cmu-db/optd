@@ -9,6 +9,7 @@ use crate::analysis::{
     CardinalityEstimationV1, connecting_edge_indices, join_profile_with_selectivity,
     join_selectivity,
 };
+use crate::cost::{join_cost_class, join_work_cost_for_profiles};
 use crate::hypergraph::{NodeSet, QueryHypergraph, nodeset_min, nodeset_singleton};
 use crate::{
     CardinalityProfile, Estimate, ExprData, Join, JoinInputProfiles, JoinType, NaryOp, Operator,
@@ -61,84 +62,8 @@ impl Statistics for UniformStatistics {
     }
 }
 
-mod cost_model {
-    use crate::QueryHypergraph;
-    use crate::{BinaryOp, ExprData, NaryOp, QueryContext};
-
-    /// How expensive a join is to execute once cardinality estimation has
-    /// predicted its output rows. Hash-like joins process inputs plus output;
-    /// nested-loop-like joins still pay pairwise comparison work.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub(super) enum JoinCostClass {
-        HashLike,
-        NestedLoopLike,
-    }
-
-    /// Estimates execution work for a candidate join.
-    ///
-    /// `*_width` is currently a column-count proxy for row materialization
-    /// cost. Cardinality estimation decides how many rows are produced; this
-    /// function decides whether producing them looks hash-like or pairwise.
-    pub(super) fn join_work_cost(
-        left_rows: f64,
-        left_width: usize,
-        right_rows: f64,
-        right_width: usize,
-        output_rows: f64,
-        output_width: usize,
-        class: JoinCostClass,
-    ) -> f64 {
-        match class {
-            JoinCostClass::HashLike => {
-                let left_bytes = left_rows * left_width.max(1) as f64;
-                let right_bytes = right_rows * right_width.max(1) as f64;
-                let output_bytes = output_rows * output_width.max(1) as f64;
-                left_bytes + right_bytes + (left_rows * right_rows).powf(0.75) + output_bytes
-            }
-            JoinCostClass::NestedLoopLike => left_rows * right_rows + output_rows,
-        }
-    }
-
-    pub(super) fn join_cost_class(
-        edge_indices: &[usize],
-        hg: &QueryHypergraph,
-        ctx: &QueryContext,
-    ) -> JoinCostClass {
-        if edge_indices.iter().any(|idx| {
-            hg.edges[*idx]
-                .predicate
-                .is_some_and(|predicate| contains_hash_join_key(predicate, ctx))
-        }) {
-            JoinCostClass::HashLike
-        } else {
-            JoinCostClass::NestedLoopLike
-        }
-    }
-
-    fn contains_hash_join_key(expr: crate::Expr, ctx: &QueryContext) -> bool {
-        match expr.get(ctx) {
-            ExprData::Binary {
-                op: BinaryOp::Eq | BinaryOp::IsNotDistinctFrom,
-                left,
-                right,
-            } => {
-                matches!(
-                    (left.get(ctx), right.get(ctx)),
-                    (ExprData::ColumnRef(_), ExprData::ColumnRef(_))
-                )
-            }
-            ExprData::Nary {
-                op: NaryOp::And,
-                exprs,
-            } => exprs.iter().any(|expr| contains_hash_join_key(*expr, ctx)),
-            _ => false,
-        }
-    }
-}
-
 #[cfg(test)]
-use cost_model::JoinCostClass;
-use cost_model::{join_cost_class, join_work_cost};
+use crate::cost::{JoinCostClass, join_work_cost};
 
 /// Cardinality-analysis backed statistics for one join hypergraph.
 struct CardinalityStatistics<'a> {
@@ -381,15 +306,7 @@ impl<'a> DPhyp<'a> {
             .unwrap_or(JoinType::Inner);
         let profile = join_profile_with_selectivity(&left.profile, &right.profile, join_type, sel);
         let class = join_cost_class(&edge_indices, self.hg, self.ctx);
-        let work_cost = join_work_cost(
-            left.profile.rows.value,
-            left.profile.columns.len(),
-            right.profile.rows.value,
-            right.profile.columns.len(),
-            profile.rows.value,
-            profile.columns.len(),
-            class,
-        );
+        let work_cost = join_work_cost_for_profiles(&left.profile, &right.profile, &profile, class);
         let new_cost = left.cost + right.cost + work_cost;
         let combined = s1 | s2;
 

@@ -22,6 +22,7 @@ pub use catalog::{
     Catalog, CatalogError, CatalogResult, ColumnStatistics, MemoryCatalog, ResolvedTableRef,
     TableId, TableMetadata, TableRef, TableStatistics,
 };
+pub use cost::{CostModel, DefaultCostModel, JoinCostClass, join_work_cost};
 pub use display::{
     BoxDrawingRenderer, BoxRendererConfig, BoxRendererTheme, ColorMode, DisplayField, DisplayInput,
     DisplayNode, DisplayNodeRecord, DisplayPlan, DisplayProperties, DisplayValue,
