@@ -564,7 +564,7 @@ mod tests {
         .add(&mut ctx);
         ctx.set_root(scan);
 
-        let mut opt_ctx = OptimizerContext::new(ctx);
+        let mut opt_ctx = crate::test_optimizer_context(ctx);
         let mut pm = PassManager::new();
         pm.add_pass(ReplaceRootPass { fired: false });
         pm.run(&mut opt_ctx).unwrap();
@@ -613,7 +613,7 @@ mod tests {
         let output = OperatorData::Output(Output { input: scan }).add(&mut ctx);
         ctx.set_root(output);
 
-        let mut opt_ctx = OptimizerContext::new(ctx);
+        let mut opt_ctx = crate::test_optimizer_context(ctx);
         let mut pass = OperatorRewriteAdaptor::new(ReplaceScan { replacement });
 
         assert_eq!(pass.run(&mut opt_ctx).unwrap(), PassResult::Changed);
@@ -670,7 +670,7 @@ mod tests {
         let output = OperatorData::Output(Output { input: scan }).add(&mut ctx);
         ctx.set_root(output);
 
-        let mut opt_ctx = OptimizerContext::new(ctx);
+        let mut opt_ctx = crate::test_optimizer_context(ctx);
         let mut pass = OperatorRewriteAdaptor::new(ReplaceScanTopDown { replacement });
 
         assert_eq!(pass.run(&mut opt_ctx).unwrap(), PassResult::Changed);
@@ -746,7 +746,7 @@ mod tests {
         let output = OperatorData::Output(Output { input: selection }).add(&mut ctx);
         ctx.set_root(output);
 
-        let mut opt_ctx = OptimizerContext::new(ctx);
+        let mut opt_ctx = crate::test_optimizer_context(ctx);
         let mut pass = OperatorRewriteAdaptor::new(WrapSelectionAndReplaceScan { replacement });
 
         assert_eq!(pass.run(&mut opt_ctx).unwrap(), PassResult::Changed);
@@ -801,7 +801,7 @@ mod tests {
             columns: vec![col],
         })
         .add(&mut ctx);
-        let mut opt_ctx = OptimizerContext::new(ctx);
+        let mut opt_ctx = crate::test_optimizer_context(ctx);
         opt_ctx.rewrites.replace(scan, replacement);
 
         let root = materialize_reachable_rewrites(output, &mut opt_ctx);
@@ -856,7 +856,7 @@ mod tests {
     fn noop_pass_converges_in_one_iteration() {
         let mut pm = PassManager::new();
         pm.add_pass(NoopPass);
-        let mut ctx = OptimizerContext::new(QueryContext::new());
+        let mut ctx = crate::test_optimizer_context(QueryContext::new());
         pm.run(&mut ctx).unwrap();
 
         let profiles = pm.profiles();
@@ -872,7 +872,7 @@ mod tests {
     fn always_changes_pass_hits_max_iterations() {
         let mut pm = PassManager::with_max_iterations(3);
         pm.add_pass(AlwaysChangesPass(0));
-        let mut ctx = OptimizerContext::new(QueryContext::new());
+        let mut ctx = crate::test_optimizer_context(QueryContext::new());
         assert!(matches!(
             pm.run(&mut ctx),
             Err(OptimizeError::MaxIterationsReached { .. })
@@ -920,7 +920,7 @@ mod tests {
             calls: 0,
         });
 
-        let mut ctx = OptimizerContext::new(QueryContext::new());
+        let mut ctx = crate::test_optimizer_context(QueryContext::new());
         pm.run(&mut ctx).unwrap();
 
         assert_eq!(*log.lock().unwrap(), vec!["a", "a", "b", "b"]);
@@ -939,11 +939,11 @@ mod tests {
         let mut pm = PassManager::new();
         pm.add_pass(NoopPass);
 
-        let mut first = OptimizerContext::new(QueryContext::new());
+        let mut first = crate::test_optimizer_context(QueryContext::new());
         pm.run(&mut first).unwrap();
         assert_eq!(pm.profiles().len(), 1);
 
-        let mut second = OptimizerContext::new(QueryContext::new());
+        let mut second = crate::test_optimizer_context(QueryContext::new());
         pm.run(&mut second).unwrap();
 
         assert_eq!(pm.profiles().len(), 1);
@@ -975,7 +975,7 @@ mod tests {
 
         let mut pm = PassManager::new();
         pm.add_pass(OneChangeThenStable { calls: 0 });
-        let mut ctx = OptimizerContext::new(QueryContext::new());
+        let mut ctx = crate::test_optimizer_context(QueryContext::new());
 
         let trace = pm.run_with_trace(&mut ctx).unwrap();
         assert_eq!(trace.len(), 2);
@@ -1006,7 +1006,7 @@ mod tests {
 
         let mut pm = PassManager::new();
         pm.add_pass(ErrorPass);
-        let mut ctx = OptimizerContext::new(QueryContext::new());
+        let mut ctx = crate::test_optimizer_context(QueryContext::new());
 
         assert!(matches!(
             pm.run(&mut ctx),

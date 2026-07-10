@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::{
     AggregateExpr, AggregateFunction, BinaryOp, Catalog, Column, ColumnStatistics, Expr, ExprData,
     JoinType, NaryOp, NodeSet, Operator, OperatorData, QueryContext, QueryHypergraph, Relation,
-    ScalarValue, Scan, TableStatistics, UnaryOp,
+    ScalarValue, Scan, UnaryOp,
 };
 
 /// Result type used by query analyses.
@@ -159,7 +159,6 @@ pub enum EstimateSource {
     Exact,
     Catalog,
     Derived,
-    Mock,
     Default,
 }
 
@@ -198,15 +197,6 @@ impl Estimate {
             lower: Some(value),
             upper: Some(value),
             source: EstimateSource::Catalog,
-        }
-    }
-
-    pub fn mock(value: f64) -> Self {
-        Self {
-            value,
-            lower: Some(value),
-            upper: Some(value),
-            source: EstimateSource::Mock,
         }
     }
 
@@ -441,38 +431,31 @@ pub struct AtMostOneRow {
 }
 
 /// Registry of lazily-created analysis instances.
-#[derive(Default)]
 pub struct AnalysisContext {
-    pub analyses: AnalysisRegistry,
-    pub catalog: Option<Arc<dyn Catalog>>,
+    analyses: AnalysisRegistry,
+    catalog: Arc<dyn Catalog>,
 }
 
 impl AnalysisContext {
-    /// Creates an empty analysis context.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Creates an analysis context that can consult `catalog` during analysis.
-    pub fn with_catalog(catalog: Arc<dyn Catalog>) -> Self {
+    /// Creates analysis state backed by `catalog`.
+    pub fn new(catalog: Arc<dyn Catalog>) -> Self {
         Self {
             analyses: AnalysisRegistry::new(),
-            catalog: Some(catalog),
+            catalog,
         }
+    }
+
+    /// Returns the catalog used by every analysis in this context.
+    pub fn catalog(&self) -> &Arc<dyn Catalog> {
+        &self.catalog
     }
 
     /// Creates a fresh cache that uses the same catalog as this context.
     pub fn fork(&self) -> Self {
         Self {
             analyses: AnalysisRegistry::new(),
-            catalog: self.catalog.clone(),
+            catalog: Arc::clone(&self.catalog),
         }
-    }
-
-    /// Replaces the catalog used by catalog-aware analyses.
-    pub fn set_catalog(&mut self, catalog: Option<Arc<dyn Catalog>>) {
-        self.catalog = catalog;
-        self.clear();
     }
 
     /// Clears every registered analysis cache while preserving analysis instances.
@@ -514,10 +497,13 @@ where
 }
 
 /// Returns columns referenced by an expression.
-pub fn expr_used_columns(ctx: &QueryContext, expr: Expr) -> AnalysisResult<Vec<Column>> {
+pub fn expr_used_columns(
+    ctx: &QueryContext,
+    analyses: &mut AnalysisContext,
+    expr: Expr,
+) -> AnalysisResult<Vec<Column>> {
     let mut columns = Vec::new();
-    let mut analyses = AnalysisContext::new();
-    collect_expr_used_columns(ctx, &mut analyses, expr, &mut columns)?;
+    collect_expr_used_columns(ctx, analyses, expr, &mut columns)?;
     Ok(columns)
 }
 
@@ -982,7 +968,7 @@ fn output_column_nullability(
     operator: Operator,
 ) -> AnalysisResult<Vec<(Column, bool)>> {
     match operator.get(ctx) {
-        OperatorData::Scan(data) => Ok(scan_column_nullability(data, analyses)),
+        OperatorData::Scan(data) => scan_column_nullability(data, analyses),
         OperatorData::TableFunction(_) | OperatorData::ConstScan(_) => Ok(analyses
             .get::<CreatedColumns>(ctx, operator)?
             .into_iter()
@@ -1110,16 +1096,17 @@ fn output_column_nullability(
     }
 }
 
-fn scan_column_nullability(scan: &Scan, analyses: &AnalysisContext) -> Vec<(Column, bool)> {
-    let Some(catalog) = &analyses.catalog else {
-        return scan.columns.iter().map(|column| (*column, true)).collect();
-    };
+fn scan_column_nullability(
+    scan: &Scan,
+    analyses: &AnalysisContext,
+) -> AnalysisResult<Vec<(Column, bool)>> {
+    let metadata = analyses
+        .catalog
+        .table_by_ref(&scan.table)
+        .map_err(|error| AnalysisError::Catalog(error.to_string()))?;
 
-    let Ok(metadata) = catalog.table_by_ref(&scan.table) else {
-        return scan.columns.iter().map(|column| (*column, true)).collect();
-    };
-
-    scan.columns
+    Ok(scan
+        .columns
         .iter()
         .enumerate()
         .map(|(index, column)| {
@@ -1131,7 +1118,7 @@ fn scan_column_nullability(scan: &Scan, analyses: &AnalysisContext) -> Vec<(Colu
                 .unwrap_or(true);
             (*column, nullable)
         })
-        .collect()
+        .collect())
 }
 
 impl CachedAnalysis for AtMostOneRow {
@@ -1314,34 +1301,14 @@ fn scan_profile(
 ) -> AnalysisResult<CardinalityProfile> {
     let catalog_stats = analyses
         .catalog
-        .as_ref()
-        .map(|catalog| {
-            catalog
-                .table_by_ref(&scan.table)
-                .map_err(|error| AnalysisError::Catalog(error.to_string()))
-                .map(|metadata| metadata.statistics)
-        })
-        .transpose()?
-        .flatten();
-    // Hard-coded benchmark statistics are only a catalog-free fallback. Once
-    // a catalog is supplied it is authoritative, including when its table has
-    // no statistics.
-    let mock_stats = analyses
-        .catalog
-        .is_none()
-        .then(|| mock_table_statistics(scan.table.table()))
-        .flatten();
+        .table_by_ref(&scan.table)
+        .map_err(|error| AnalysisError::Catalog(error.to_string()))?
+        .statistics;
 
     let row_estimate = catalog_stats
         .as_ref()
         .and_then(|stats| stats.row_count)
         .map(|rows| Estimate::catalog(rows as f64))
-        .or_else(|| {
-            mock_stats
-                .as_ref()
-                .and_then(|stats| stats.row_count)
-                .map(|rows| Estimate::mock(rows as f64))
-        })
         .unwrap_or_else(|| Estimate::default(1000.0));
 
     let mut columns = BTreeMap::new();
@@ -1350,47 +1317,42 @@ fn scan_profile(
         let catalog_column = catalog_stats
             .as_ref()
             .and_then(|stats| stats.column_statistics.get(column_name));
-        let mock_column = mock_stats
-            .as_ref()
-            .and_then(|stats| stats.column_statistics.get(column_name));
         let profile = catalog_column
-            .map(|stats| column_profile_from_stats(stats, &row_estimate, EstimateSource::Catalog))
-            .or_else(|| {
-                mock_column.map(|stats| {
-                    column_profile_from_stats(stats, &row_estimate, EstimateSource::Mock)
-                })
-            })
-            .unwrap_or_else(|| ColumnProfile::unknown(&row_estimate));
+            .map(|stats| column_profile_from_stats(stats, &row_estimate))
+            .unwrap_or_else(|| default_scan_column_profile(&row_estimate));
         columns.insert(*column, profile);
     }
 
     Ok(CardinalityProfile::new(row_estimate, columns))
 }
 
-fn column_profile_from_stats(
-    stats: &ColumnStatistics,
-    rows: &Estimate,
-    source: EstimateSource,
-) -> ColumnProfile {
-    let frequency_value = stats.frequency.map_or(rows.value, |value| value as f64);
+fn column_profile_from_stats(stats: &ColumnStatistics, rows: &Estimate) -> ColumnProfile {
+    let frequency = stats
+        .frequency
+        .map(|value| Estimate::catalog(value as f64))
+        .unwrap_or_else(|| Estimate::default(rows.value));
     let distinct_value = stats
         .distinct
-        .map_or(frequency_value.min(rows.value), |value| value as f64);
+        .map_or(frequency.value.min(rows.value), |value| value as f64);
+    let distinct_value = distinct_value.min(frequency.value);
+    let distinct = stats
+        .distinct
+        .map(|_| Estimate::catalog(distinct_value))
+        .unwrap_or_else(|| Estimate::default(distinct_value));
     ColumnProfile {
         lower_bound: stats.lower_bound.clone(),
         upper_bound: stats.upper_bound.clone(),
-        frequency: Estimate {
-            value: frequency_value,
-            lower: Some(frequency_value),
-            upper: Some(frequency_value),
-            source,
-        },
-        distinct: Estimate {
-            value: distinct_value.min(frequency_value),
-            lower: Some(distinct_value.min(frequency_value)),
-            upper: Some(distinct_value.min(frequency_value)),
-            source,
-        },
+        frequency,
+        distinct,
+    }
+}
+
+fn default_scan_column_profile(rows: &Estimate) -> ColumnProfile {
+    ColumnProfile {
+        lower_bound: None,
+        upper_bound: None,
+        frequency: Estimate::default(rows.value),
+        distinct: Estimate::default(rows.value.min(100.0)),
     }
 }
 
@@ -2304,114 +2266,6 @@ fn clamp_to_bounds(value: f64, lower: Option<f64>, upper: Option<f64>) -> f64 {
     value
 }
 
-fn mock_table_statistics(table: &str) -> Option<TableStatistics> {
-    let row_count = match table {
-        "region" => 5,
-        "nation" => 25,
-        "supplier" => 10_000,
-        "customer" => 150_000,
-        "part" => 200_000,
-        "partsupp" => 800_000,
-        "orders" => 1_500_000,
-        "lineitem" => 6_001_215,
-        "aka_name" => 901_343,
-        "aka_title" => 361_472,
-        "cast_info" => 36_244_344,
-        "char_name" => 3_140_339,
-        "comp_cast_type" => 4,
-        "company_name" => 234_997,
-        "company_type" => 4,
-        "complete_cast" => 135_086,
-        "info_type" => 113,
-        "keyword" => 134_170,
-        "kind_type" => 7,
-        "link_type" => 18,
-        "movie_companies" => 2_609_129,
-        "movie_info" => 14_835_720,
-        "movie_info_idx" => 1_380_035,
-        "movie_keyword" => 4_523_930,
-        "movie_link" => 29_997,
-        "name" => 4_167_491,
-        "person_info" => 2_963_664,
-        "role_type" => 12,
-        "title" => 2_528_312,
-        _ => return None,
-    };
-    Some(TableStatistics {
-        row_count: Some(row_count),
-        size_bytes: None,
-        column_statistics: mock_column_statistics(table, row_count),
-    })
-}
-
-fn mock_column_statistics(table: &str, row_count: usize) -> BTreeMap<String, ColumnStatistics> {
-    let mut stats = BTreeMap::new();
-    stats.insert("id".to_string(), mock_column_stat(row_count, row_count));
-
-    let referenced = match table {
-        "aka_title" | "cast_info" | "complete_cast" | "movie_companies" | "movie_info"
-        | "movie_info_idx" | "movie_keyword" | "movie_link" => Some(("movie_id", 2_528_312)),
-        _ => None,
-    };
-    if let Some((column, distinct)) = referenced {
-        stats.insert(column.to_string(), mock_column_stat(row_count, distinct));
-    }
-    if table == "movie_link" {
-        stats.insert(
-            "linked_movie_id".to_string(),
-            mock_column_stat(row_count, 2_528_312),
-        );
-    }
-
-    for (column, distinct) in [
-        ("keyword_id", 134_170),
-        ("company_id", 234_997),
-        ("company_type_id", 4),
-        ("info_type_id", 113),
-        ("kind_id", 7),
-        ("link_type_id", 18),
-        ("person_id", 4_167_491),
-        ("person_role_id", 4_167_491),
-        ("role_id", 12),
-        ("role_type_id", 12),
-        ("subject_id", 4),
-        ("status_id", 4),
-    ] {
-        stats.insert(column.to_string(), mock_column_stat(row_count, distinct));
-    }
-
-    for (column, distinct) in [
-        ("r_regionkey", 5),
-        ("n_nationkey", 25),
-        ("n_regionkey", 5),
-        ("s_suppkey", 10_000),
-        ("s_nationkey", 25),
-        ("c_custkey", 150_000),
-        ("c_nationkey", 25),
-        ("p_partkey", 200_000),
-        ("ps_partkey", 200_000),
-        ("ps_suppkey", 10_000),
-        ("o_orderkey", 1_500_000),
-        ("o_custkey", 150_000),
-        ("l_orderkey", 1_500_000),
-        ("l_partkey", 200_000),
-        ("l_suppkey", 10_000),
-    ] {
-        stats.insert(column.to_string(), mock_column_stat(row_count, distinct));
-    }
-
-    stats
-}
-
-fn mock_column_stat(row_count: usize, distinct: usize) -> ColumnStatistics {
-    ColumnStatistics {
-        lower_bound: None,
-        upper_bound: None,
-        frequency: Some(row_count),
-        distinct: Some(distinct.min(row_count)),
-    }
-}
-
 /// Analysis that records columns introduced directly by an operator.
 #[derive(Default)]
 pub struct CreatedColumns {
@@ -2799,7 +2653,7 @@ mod tests {
     use crate::{
         AggregateExpr, AggregateFunction, Aggregation, BinaryOp, Catalog, ColumnData, ExprData,
         Join, JoinType, Limit, Map, MemoryCatalog, OperatorData, Output, Projection, ScalarValue,
-        Scan, Selection, TableFunction, TableFunctionDef, TableRef,
+        Scan, Selection, TableFunction, TableFunctionDef, TableRef, TableStatistics,
     };
     use arrow_schema::{DataType, Field, Schema};
     use std::sync::Arc;
@@ -2837,7 +2691,7 @@ mod tests {
         .add(&mut ctx);
         let output = OperatorData::Output(Output { input: projection }).add(&mut ctx);
 
-        let mut analyses = ctx.analyze();
+        let mut analyses = crate::test_analyses(&ctx);
 
         assert_eq!(
             analyses.get::<CreatedColumns>(&ctx, scan).unwrap(),
@@ -2913,7 +2767,7 @@ mod tests {
         .add(&mut ctx);
         let output = OperatorData::Output(Output { input: projection }).add(&mut ctx);
 
-        let mut analyses = ctx.analyze();
+        let mut analyses = crate::test_analyses(&ctx);
 
         assert_eq!(
             analyses.get::<AvailableColumns>(&ctx, users).unwrap(),
@@ -2993,7 +2847,7 @@ mod tests {
         .add(&mut ctx);
         let output = OperatorData::Output(Output { input: projection }).add(&mut ctx);
 
-        let mut analyses = ctx.analyze();
+        let mut analyses = crate::test_analyses(&ctx);
 
         assert_eq!(analyses.get::<UsedColumns>(&ctx, users).unwrap(), vec![]);
         assert_eq!(
@@ -3047,7 +2901,7 @@ mod tests {
         })
         .add(&mut ctx);
 
-        let mut analyses = ctx.analyze();
+        let mut analyses = crate::test_analyses(&ctx);
 
         assert_eq!(analyses.get::<FreeColumns>(&ctx, scan).unwrap(), vec![]);
         assert_eq!(
@@ -3114,7 +2968,7 @@ mod tests {
         })
         .add(&mut ctx);
 
-        let mut analyses = ctx.analyze();
+        let mut analyses = crate::test_analyses(&ctx);
 
         assert_eq!(
             analyses.get::<UsedColumns>(&ctx, parent).unwrap(),
@@ -3164,7 +3018,7 @@ mod tests {
         })
         .add(&mut ctx);
 
-        let mut analyses = ctx.analyze();
+        let mut analyses = crate::test_analyses(&ctx);
 
         assert_eq!(
             analyses.get::<ColumnNullability>(&ctx, scan).unwrap(),
@@ -3204,7 +3058,7 @@ mod tests {
             .add_scan_from_catalog(catalog.as_ref(), TableRef::bare("users"))
             .unwrap();
 
-        let mut analyses = AnalysisContext::with_catalog(catalog);
+        let mut analyses = AnalysisContext::new(catalog);
 
         let OperatorData::Scan(scan_data) = scan.get(&ctx) else {
             panic!("catalog scan should create a scan operator");
@@ -3238,7 +3092,7 @@ mod tests {
         })
         .add(&mut ctx);
 
-        let mut analyses = ctx.analyze();
+        let mut analyses = crate::test_analyses(&ctx);
 
         assert_eq!(
             analyses.get::<ColumnNullability>(&ctx, selection).unwrap(),
@@ -3278,7 +3132,7 @@ mod tests {
         })
         .add(&mut ctx);
 
-        let mut analyses = ctx.analyze();
+        let mut analyses = crate::test_analyses(&ctx);
 
         assert_eq!(
             analyses.get::<ColumnNullability>(&ctx, join).unwrap(),
@@ -3318,7 +3172,7 @@ mod tests {
         })
         .add(&mut ctx);
 
-        let mut analyses = ctx.analyze();
+        let mut analyses = crate::test_analyses(&ctx);
 
         assert_eq!(
             analyses.get::<ColumnNullability>(&ctx, join).unwrap(),
@@ -3356,7 +3210,7 @@ mod tests {
             })
             .add(&mut ctx);
 
-            let mut analyses = ctx.analyze();
+            let mut analyses = crate::test_analyses(&ctx);
 
             assert_eq!(
                 analyses.get::<ColumnNullability>(&ctx, join).unwrap(),
@@ -3384,7 +3238,11 @@ mod tests {
         }
         .add(&mut ctx);
 
-        assert_eq!(expr_used_columns(&ctx, expr).unwrap(), vec![a, b]);
+        let mut analyses = crate::test_analyses(&ctx);
+        assert_eq!(
+            expr_used_columns(&ctx, &mut analyses, expr).unwrap(),
+            vec![a, b]
+        );
     }
 
     #[test]
@@ -3420,7 +3278,7 @@ mod tests {
         })
         .add(&mut ctx);
 
-        let mut analyses = ctx.analyze();
+        let mut analyses = crate::test_analyses(&ctx);
 
         assert_eq!(
             analyses.get::<AvailableColumns>(&ctx, aggregation),
@@ -3440,7 +3298,7 @@ mod tests {
             columns: vec![first],
         })
         .add(&mut ctx);
-        let mut analyses = ctx.analyze();
+        let mut analyses = crate::test_analyses(&ctx);
 
         assert_eq!(
             analyses.get::<CreatedColumns>(&ctx, scan).unwrap(),
@@ -3495,7 +3353,7 @@ mod tests {
         .add(&mut ctx);
         ctx.set_root(join);
 
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let parents = analyses.get::<ParentsOf>(&ctx, scan).unwrap();
 
         assert_eq!(parents.len(), 2);
@@ -3537,7 +3395,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let mut analyses = AnalysisContext::with_catalog(catalog);
+        let mut analyses = AnalysisContext::new(catalog);
 
         let profile = analyses.get::<CardinalityEstimationV1>(&ctx, scan).unwrap();
 
@@ -3596,7 +3454,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let mut analyses = AnalysisContext::with_catalog(catalog);
+        let mut analyses = AnalysisContext::new(catalog);
 
         let profile = analyses
             .get::<CardinalityEstimationV1>(&ctx, selection)
@@ -3658,7 +3516,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let mut analyses = AnalysisContext::with_catalog(catalog);
+        let mut analyses = AnalysisContext::new(catalog);
 
         let profile = analyses.get::<CardinalityEstimationV1>(&ctx, map).unwrap();
 
@@ -3715,7 +3573,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let mut analyses = AnalysisContext::with_catalog(catalog);
+        let mut analyses = AnalysisContext::new(catalog);
 
         let profile = analyses
             .get::<CardinalityEstimationV1>(&ctx, aggregation)
@@ -3769,7 +3627,7 @@ mod tests {
                 table_stats_for_column("right_key", 50, 50),
             )
             .unwrap();
-        let mut analyses = AnalysisContext::with_catalog(catalog);
+        let mut analyses = AnalysisContext::new(catalog);
 
         let profile = analyses.get::<CardinalityEstimationV1>(&ctx, join).unwrap();
 
@@ -3824,7 +3682,7 @@ mod tests {
                     table_stats_for_column("right_key", 50, 50),
                 )
                 .unwrap();
-            let mut analyses = AnalysisContext::with_catalog(catalog);
+            let mut analyses = AnalysisContext::new(catalog);
 
             let profile = analyses.get::<CardinalityEstimationV1>(&ctx, join).unwrap();
 
@@ -3931,7 +3789,7 @@ mod tests {
                 table_stats_for_column("movie_id", 2_000, 100),
             )
             .unwrap();
-        let mut analyses = AnalysisContext::with_catalog(catalog);
+        let mut analyses = AnalysisContext::new(catalog);
 
         let profile = analyses.get::<CardinalityEstimationV1>(&ctx, join).unwrap();
 
@@ -4023,7 +3881,7 @@ mod tests {
                 table_stats_for_column("right_key", 100, 1_000),
             )
             .unwrap();
-        let mut analyses = AnalysisContext::with_catalog(catalog);
+        let mut analyses = AnalysisContext::new(catalog);
 
         assert_eq!(
             analyses
@@ -4086,7 +3944,7 @@ mod tests {
                 table_stats_for_column("right_key", 10, 1_000),
             )
             .unwrap();
-        let mut analyses = AnalysisContext::with_catalog(catalog);
+        let mut analyses = AnalysisContext::new(catalog);
 
         let profile = analyses.get::<CardinalityEstimationV1>(&ctx, join).unwrap();
 
@@ -4145,7 +4003,7 @@ mod tests {
                 )
                 .unwrap();
         }
-        let mut analyses = AnalysisContext::with_catalog(catalog);
+        let mut analyses = AnalysisContext::new(catalog);
 
         let profile = analyses.get::<CardinalityEstimationV1>(&ctx, ab).unwrap();
 
@@ -4187,7 +4045,7 @@ mod tests {
         })
         .add(&mut ctx);
 
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let estimated = analyses
             .get::<CardinalityEstimationV1>(&ctx, selection)
             .unwrap();
@@ -4206,13 +4064,46 @@ mod tests {
         })
         .add(&mut ctx);
         let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
-        let mut analyses = AnalysisContext::with_catalog(catalog);
+        let mut analyses = AnalysisContext::new(catalog);
 
         let error = analyses
             .get::<CardinalityEstimationV1>(&ctx, scan)
             .unwrap_err();
 
         assert!(matches!(error, AnalysisError::Catalog(_)));
+        let error = analyses.get::<ColumnNullability>(&ctx, scan).unwrap_err();
+        assert!(matches!(error, AnalysisError::Catalog(_)));
+    }
+
+    #[test]
+    fn resolved_scan_without_statistics_uses_explicit_defaults() {
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(TableRef::bare("users"), schema(), None)
+            .unwrap();
+        let mut ctx = QueryContext::new();
+        let scan = ctx
+            .add_scan_from_catalog(catalog.as_ref(), TableRef::bare("users"))
+            .unwrap();
+        let OperatorData::Scan(scan_data) = scan.get(&ctx) else {
+            panic!("catalog scan should create a scan operator");
+        };
+        let mut analyses = AnalysisContext::new(catalog);
+
+        let profile = analyses.get::<CardinalityEstimationV1>(&ctx, scan).unwrap();
+
+        assert_eq!(profile.rows.value, 1000.0);
+        assert_eq!(profile.rows.source, EstimateSource::Default);
+        for column in &scan_data.columns {
+            assert_eq!(
+                profile.columns[column].frequency.source,
+                EstimateSource::Default
+            );
+            assert_eq!(
+                profile.columns[column].distinct.source,
+                EstimateSource::Default
+            );
+        }
     }
 
     fn schema() -> Arc<Schema> {

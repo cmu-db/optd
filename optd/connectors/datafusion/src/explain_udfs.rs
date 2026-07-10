@@ -23,7 +23,7 @@ use datafusion::prelude::SessionContext;
 use optd_core::{
     AnalysisContext, BoxDrawingRenderer, Catalog, OptimizerContext, PassProfile, PassResult,
     PassTrace, PlannedQuery, QueryContext, QueryFormatConfig, QueryFormatter,
-    optimizer_visualizer_trace_json_with_catalog,
+    optimizer_visualizer_trace_json,
 };
 
 use crate::runner::{default_pass_manager, optimizer_context_from_logical_plan};
@@ -232,7 +232,7 @@ fn explain_sql(
 
     Ok(format_query(
         &opt.query,
-        opt.catalog.as_ref(),
+        &opt.catalog,
         format,
         QueryFormatConfig::default(),
     ))
@@ -260,21 +260,17 @@ fn explain_steps(
 
 fn format_query(
     ctx: &QueryContext,
-    catalog: Option<&Arc<dyn Catalog>>,
+    catalog: &Arc<dyn Catalog>,
     format: Format,
     config: QueryFormatConfig,
 ) -> String {
-    let analyses = || {
-        catalog.map_or_else(AnalysisContext::new, |catalog| {
-            AnalysisContext::with_catalog(catalog.clone())
-        })
-    };
+    let analyses = || AnalysisContext::new(Arc::clone(catalog));
     let text = match format {
         Format::Box => BoxDrawingRenderer::default()
             .render(&QueryFormatter::with_config_and_analyses(ctx, config, analyses()).format()),
         Format::Json => ctx.pretty_json(),
         Format::Flat => ctx.pretty_flat(),
-        Format::OptimizerJson => ctx.optimizer_visualizer_json_with_analyses("0. Plan", analyses()),
+        Format::OptimizerJson => ctx.optimizer_visualizer_json("0. Plan", analyses()),
     };
     trim_trailing_line_whitespace(&text)
 }
@@ -313,7 +309,7 @@ async fn build_ir_trace(
     let plan = state.create_logical_plan(sql).await?;
     let plan = explain_input_plan(&plan);
     let mut opt = optimizer_context_for_explain(state, plan).await?;
-    let catalog = opt.analyses.catalog.clone();
+    let catalog = Arc::clone(opt.analyses.catalog());
 
     let mut steps = vec![ExplainStep {
         step: 0,
@@ -322,7 +318,7 @@ async fn build_ir_trace(
         pass: "initial".to_string(),
         result: "initial".to_string(),
         duration_ms: None,
-        plan: format_query(&opt.query, catalog.as_ref(), format, config.clone()),
+        plan: format_query(&opt.query, &catalog, format, config.clone()),
     }];
 
     let mut pm = default_pass_manager();
@@ -339,7 +335,7 @@ async fn build_ir_trace(
             pass: profile.pass.to_string(),
             result: pass_result(profile.result),
             duration_ms: Some(profile.duration_ms),
-            plan: format_query(&trace.query, catalog.as_ref(), format, config.clone()),
+            plan: format_query(&trace.query, &catalog, format, config.clone()),
         }
     }));
 
@@ -354,18 +350,14 @@ async fn build_optimizer_visualizer_trace(
     let plan = explain_input_plan(&plan);
     let mut opt = optimizer_context_for_explain(state, plan).await?;
     let initial = opt.query.clone();
-    let catalog = opt
-        .analyses
-        .catalog
-        .clone()
-        .expect("explain planning always constructs a runtime catalog");
+    let catalog = Arc::clone(opt.analyses.catalog());
     let mut pm = default_pass_manager();
     let trace = pm
         .run_with_trace(&mut opt)
         .map_err(|e| DataFusionError::Plan(e.to_string()))?;
     let trace = aggregate_trace_by_pass(trace);
 
-    let passes = optimizer_visualizer_trace_json_with_catalog(&initial, &trace, catalog);
+    let passes = optimizer_visualizer_trace_json(&initial, &trace, catalog);
     Ok(format!(
         "{{\n  \"passes\": {},\n  \"query\": {:?}\n}}",
         passes, sql
@@ -556,7 +548,8 @@ mod tests {
             let Some(root) = query.query.root() else {
                 continue;
             };
-            let correlated = correlated_subquery_joins(&query.query, root).unwrap();
+            let mut analyses = query.analyze();
+            let correlated = correlated_subquery_joins(&query.query, root, &mut analyses).unwrap();
             if !correlated.is_empty() {
                 failures.push(format!(
                     "{}: {:?}",

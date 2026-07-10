@@ -391,7 +391,7 @@ impl<'a> HypergraphBuilder<'a> {
     /// 1. Extends with `TES(◦_a)` instead of the full subtree `T(◦_a)`.
     /// 2. Gates each extension on a connectivity check — skips redundant restrictions.
     fn cd_e_for_predicate(
-        &self,
+        &mut self,
         predicate: Expr,
         join_type: HyperedgeJoinType,
         left_nodes: NodeSet,
@@ -511,12 +511,12 @@ impl<'a> HypergraphBuilder<'a> {
 
     /// Computes the SES split for one predicate into (left, right) NodeSets.
     fn ses_for_predicate(
-        &self,
+        &mut self,
         predicate: Expr,
         left_nodes: NodeSet,
         right_nodes: NodeSet,
     ) -> (NodeSet, NodeSet) {
-        let used = expr_used_columns(self.ctx, predicate).unwrap_or_default();
+        let used = expr_used_columns(self.ctx, self.analyses, predicate).unwrap_or_default();
         let mut ses_left: NodeSet = 0;
         let mut ses_right: NodeSet = 0;
 
@@ -641,8 +641,8 @@ impl QueryHypergraph {
 mod tests {
     use super::*;
     use crate::{
-        AnalysisContext, BinaryOp, ColumnData, CrossProduct, ExprData, Join, JoinType,
-        OperatorData, QueryContext, ScalarValue, Scan, Selection, TableRef,
+        BinaryOp, ColumnData, CrossProduct, ExprData, Join, JoinType, OperatorData, QueryContext,
+        ScalarValue, Scan, Selection, TableRef,
     };
     use arrow_schema::DataType;
 
@@ -673,7 +673,7 @@ mod tests {
         })
         .add(&mut ctx);
 
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let hg = build_hypergraph(&ctx, &mut analyses, scan);
 
         assert_eq!(hg.nodes.len(), 1);
@@ -700,7 +700,7 @@ mod tests {
         })
         .add(&mut ctx);
 
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let hg = build_hypergraph(&ctx, &mut analyses, join);
 
         assert_eq!(hg.nodes.len(), 2);
@@ -721,7 +721,7 @@ mod tests {
         })
         .add(&mut ctx);
 
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let hg = build_hypergraph(&ctx, &mut analyses, cp);
 
         assert_eq!(hg.nodes.len(), 2);
@@ -783,7 +783,7 @@ mod tests {
         })
         .add(&mut ctx);
 
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let hg = build_hypergraph(&ctx, &mut analyses, join_abc);
 
         assert_eq!(hg.nodes.len(), 3);
@@ -860,7 +860,7 @@ mod tests {
         })
         .add(&mut ctx);
 
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let hg = build_hypergraph(&ctx, &mut analyses, join_abc);
 
         // sel_b is a node, so we have 3 nodes: scan_a, sel_b, scan_c
@@ -914,7 +914,7 @@ mod tests {
         })
         .add(&mut ctx);
 
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let hg = build_hypergraph(&ctx, &mut analyses, join);
 
         // scan_a and scan_b from two_scan_ctx are unused here; scan_a2/scan_b2 are the nodes.
@@ -981,7 +981,7 @@ mod tests {
         })
         .add(&mut ctx);
 
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let hg = build_hypergraph(&ctx, &mut analyses, join);
 
         assert_eq!(hg.nodes.len(), 3);
@@ -1079,7 +1079,7 @@ mod tests {
 
         ctx.set_root(inner);
 
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let hg = build_hypergraph(&ctx, &mut analyses, inner);
 
         println!("{}", hg.pretty(&ctx));
@@ -1120,7 +1120,7 @@ mod tests {
         })
         .add(&mut ctx);
 
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let hg = build_hypergraph(&ctx, &mut analyses, join);
         let pretty = hg.pretty(&ctx);
 

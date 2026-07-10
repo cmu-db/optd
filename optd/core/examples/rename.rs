@@ -1,3 +1,8 @@
+#[cfg(feature = "serde")]
+use std::sync::Arc;
+
+#[cfg(feature = "serde")]
+use optd_core::{AnalysisContext, Catalog, MemoryCatalog, TableRef};
 use optd_core::{ColumnData, OperatorData, Output, QueryContext, Rename, Scan};
 
 fn main() {
@@ -31,7 +36,22 @@ fn main() {
     // Print optimizer visualizer JSON
     #[cfg(feature = "serde")]
     {
-        println!("{}", ctx.optimizer_visualizer_json("rename-example"));
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(
+                TableRef::bare("users"),
+                Arc::new(arrow_schema::Schema::new(vec![arrow_schema::Field::new(
+                    "id",
+                    arrow_schema::DataType::Int64,
+                    true,
+                )])),
+                None,
+            )
+            .unwrap();
+        println!(
+            "{}",
+            ctx.optimizer_visualizer_json("rename-example", AnalysisContext::new(catalog))
+        );
     }
 
     #[cfg(not(feature = "serde"))]

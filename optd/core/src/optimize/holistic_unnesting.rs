@@ -266,7 +266,7 @@ fn collect_dependent_join_sites_inner(
             .into_iter()
             .filter(|column| outer_available.contains(column))
             .collect();
-        if let Ok(used) = expr_used_columns(&ctx.query, join.on) {
+        if let Ok(used) = expr_used_columns(&ctx.query, &mut ctx.analyses, join.on) {
             let inner_available: HashSet<_> = available_columns_for(ctx, join.inner)?
                 .into_iter()
                 .collect();
@@ -519,7 +519,7 @@ fn default_scalar_count_after_outer_join(
             let observed = map
                 .computations
                 .iter()
-                .any(|(_, expr)| expr_references_any(*expr, count_defaults, &ctx.query));
+                .any(|(_, expr)| expr_references_any(*expr, count_defaults, ctx));
             map.computations = map
                 .computations
                 .into_iter()
@@ -647,8 +647,8 @@ fn coalesce_count_defaults_in_expr(
     }
 }
 
-fn expr_references_any(expr: Expr, columns: &[Column], query: &crate::QueryContext) -> bool {
-    expr_used_columns(query, expr)
+fn expr_references_any(expr: Expr, columns: &[Column], ctx: &mut OptimizerContext) -> bool {
+    expr_used_columns(&ctx.query, &mut ctx.analyses, expr)
         .map(|used| used.into_iter().any(|column| columns.contains(&column)))
         .unwrap_or(false)
 }
@@ -940,7 +940,7 @@ fn lift_from_selection(
     let mut inner_columns = Vec::new();
 
     for conjunct in conjuncts {
-        let used = expr_used_columns(&ctx.query, conjunct).unwrap_or_default();
+        let used = expr_used_columns(&ctx.query, &mut ctx.analyses, conjunct).unwrap_or_default();
         let uses_input = used.iter().any(|column| input_columns.contains(column));
         let uses_outer = used.iter().any(|column| !input_columns.contains(column));
         if uses_input && uses_outer {
@@ -1166,12 +1166,10 @@ fn extend_unique_columns(columns: &mut Vec<Column>, incoming: impl IntoIterator<
 pub fn correlated_subquery_joins(
     query: &crate::QueryContext,
     root: Operator,
+    analyses: &mut AnalysisContext,
 ) -> OptimizeResult<Vec<CorrelatedSubqueryJoin>> {
-    // This inspection helper is intentionally independent of OptimizerContext;
-    // the optimizer pass itself reuses ctx.analyses.
-    let mut analyses = AnalysisContext::new();
     let mut out = Vec::new();
-    collect_correlated_subquery_joins(query, root, &mut analyses, &mut out)?;
+    collect_correlated_subquery_joins(query, root, analyses, &mut out)?;
     Ok(out)
 }
 
@@ -1230,8 +1228,8 @@ mod tests {
 
     use crate::{
         AggregateExpr, AggregateFunction, Aggregation, AvailableColumns, BinaryOp, ColumnData,
-        ExprData, FreeColumns, Join, JoinType, Limit, NaryOp, OperatorData, OptimizerContext,
-        PassResult, QueryContext, Rename, ScalarValue, Scan, Selection, TableRef,
+        ExprData, FreeColumns, Join, JoinType, Limit, NaryOp, OperatorData, PassResult,
+        QueryContext, Rename, ScalarValue, Scan, Selection, TableRef,
         optimize::{
             OperatorRewriteAdaptor, PassManager, QueryPass,
             holistic_unnesting::correlated_subquery_joins,
@@ -1404,7 +1402,7 @@ mod tests {
         .add(&mut query);
         query.set_root(root);
 
-        let mut opt = OptimizerContext::new(query);
+        let mut opt = crate::test_optimizer_context(query);
         let sites = super::collect_dependent_join_sites(root, &mut opt).unwrap();
 
         assert_eq!(sites.len(), 2);
@@ -1456,7 +1454,8 @@ mod tests {
         .add(&mut query);
         query.set_root(join);
 
-        let correlated = correlated_subquery_joins(&query, join).unwrap();
+        let mut analyses = crate::test_analyses(&query);
+        let correlated = correlated_subquery_joins(&query, join, &mut analyses).unwrap();
         assert_eq!(correlated.len(), 1);
         assert_eq!(correlated[0].join, join);
         assert_eq!(correlated[0].join_type, JoinType::Single);
@@ -1500,7 +1499,8 @@ mod tests {
         .add(&mut query);
         query.set_root(join);
 
-        let correlated = correlated_subquery_joins(&query, join).unwrap();
+        let mut analyses = crate::test_analyses(&query);
+        let correlated = correlated_subquery_joins(&query, join, &mut analyses).unwrap();
         assert!(correlated.is_empty());
     }
 
@@ -1567,7 +1567,7 @@ mod tests {
         .add(&mut query);
         query.set_root(join);
 
-        let mut opt = OptimizerContext::new(query);
+        let mut opt = crate::test_optimizer_context(query);
         let result = super::HolisticUnnesting.run(&mut opt).unwrap();
         assert_eq!(result, PassResult::Changed);
 
@@ -1642,7 +1642,7 @@ mod tests {
         .add(&mut query);
         query.set_root(join);
 
-        let mut opt = OptimizerContext::new(query);
+        let mut opt = crate::test_optimizer_context(query);
         let result = super::HolisticUnnesting.run(&mut opt).unwrap();
         assert_eq!(result, PassResult::Changed);
 
@@ -1718,7 +1718,7 @@ mod tests {
         .add(&mut query);
         query.set_root(root);
 
-        let mut opt = OptimizerContext::new(query);
+        let mut opt = crate::test_optimizer_context(query);
         let result = super::HolisticUnnesting.run(&mut opt).unwrap();
         assert_eq!(result, PassResult::Changed);
 
@@ -1777,7 +1777,7 @@ mod tests {
         .add(&mut query);
         query.set_root(join);
 
-        let mut opt = OptimizerContext::new(query);
+        let mut opt = crate::test_optimizer_context(query);
         let result = super::HolisticUnnesting.run(&mut opt).unwrap();
         assert_eq!(result, PassResult::Changed);
 
@@ -1842,7 +1842,7 @@ mod tests {
         .add(&mut query);
         query.set_root(join);
 
-        let mut opt = OptimizerContext::new(query);
+        let mut opt = crate::test_optimizer_context(query);
         let result = super::HolisticUnnesting.run(&mut opt).unwrap();
         assert_eq!(result, PassResult::Changed);
 
@@ -1901,7 +1901,7 @@ mod tests {
         .add(&mut query);
         query.set_root(join);
 
-        let mut opt = OptimizerContext::new(query);
+        let mut opt = crate::test_optimizer_context(query);
         let result = super::HolisticUnnesting.run(&mut opt).unwrap();
         assert_eq!(result, PassResult::Unchanged);
         assert_eq!(opt.query.root(), Some(join));
@@ -1961,7 +1961,7 @@ mod tests {
             .add(&mut query);
             query.set_root(root);
 
-            let mut opt = OptimizerContext::new(query);
+            let mut opt = crate::test_optimizer_context(query);
             let result = super::HolisticUnnesting.run(&mut opt).unwrap();
             assert_eq!(result, PassResult::Unchanged);
             assert_eq!(opt.query.root(), Some(root));
@@ -2041,7 +2041,7 @@ mod tests {
         .add(&mut query);
         query.set_root(join);
 
-        let mut opt = OptimizerContext::new(query);
+        let mut opt = crate::test_optimizer_context(query);
         let result = super::HolisticUnnesting.run(&mut opt).unwrap();
         assert_eq!(result, PassResult::Changed);
 
@@ -2105,12 +2105,12 @@ mod tests {
         .add(&mut query);
         query.set_root(join);
 
-        let mut opt = OptimizerContext::new(query);
+        let mut opt = crate::test_optimizer_context(query);
         let result = super::HolisticUnnesting.run(&mut opt).unwrap();
         assert_eq!(result, PassResult::Unchanged);
         assert_eq!(opt.query.root(), Some(join));
         assert_eq!(
-            correlated_subquery_joins(&opt.query, join).unwrap()[0].free_columns,
+            correlated_subquery_joins(&opt.query, join, &mut opt.analyses).unwrap()[0].free_columns,
             vec![outer_key]
         );
     }
@@ -2175,7 +2175,7 @@ mod tests {
         .add(&mut query);
         query.set_root(join);
 
-        let mut opt = OptimizerContext::new(query);
+        let mut opt = crate::test_optimizer_context(query);
         let result = super::HolisticUnnesting.run(&mut opt).unwrap();
         assert_eq!(result, PassResult::Changed);
 
@@ -2277,7 +2277,7 @@ mod tests {
         .add(&mut query);
         query.set_root(join);
 
-        let mut opt = OptimizerContext::new(query);
+        let mut opt = crate::test_optimizer_context(query);
         let result = super::HolisticUnnesting.run(&mut opt).unwrap();
         assert_eq!(result, PassResult::Changed);
 
@@ -2383,7 +2383,7 @@ mod tests {
         .add(&mut query);
         query.set_root(selection);
 
-        let mut opt = OptimizerContext::new(query);
+        let mut opt = crate::test_optimizer_context(query);
         let mut pm = PassManager::new();
         pm.add_pass(super::HolisticUnnesting);
         pm.add_pass(OperatorRewriteAdaptor::new(crate::MarkJoinToSemiJoin));

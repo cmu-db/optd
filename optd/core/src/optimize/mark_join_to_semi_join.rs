@@ -142,8 +142,8 @@ fn conjuncts_to_expr(mut exprs: Vec<Expr>, ctx: &mut OptimizerContext) -> Expr {
     }
 }
 
-fn expr_references_column(expr: Expr, column: Column, ctx: &OptimizerContext) -> bool {
-    expr_used_columns(&ctx.query, expr)
+fn expr_references_column(expr: Expr, column: Column, ctx: &mut OptimizerContext) -> bool {
+    expr_used_columns(&ctx.query, &mut ctx.analyses, expr)
         .map(|columns| columns.contains(&column))
         .unwrap_or(false)
 }
@@ -190,7 +190,12 @@ mod tests {
         })
         .add(&mut query);
 
-        (OptimizerContext::new(query), join, marker, outer_col)
+        (
+            crate::test_optimizer_context(query),
+            join,
+            marker,
+            outer_col,
+        )
     }
 
     fn mark_join_query() -> (

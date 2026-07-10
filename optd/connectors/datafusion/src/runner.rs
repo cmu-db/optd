@@ -64,7 +64,7 @@ pub(crate) async fn optimizer_context_from_logical_plan(
         from_logical_plan(&plan, &mut ctx).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
     ctx.set_root(root);
 
-    Ok(OptimizerContext::with_catalog(ctx, catalog))
+    Ok(OptimizerContext::new(ctx, catalog))
 }
 
 /// Returns the canonical optimizer pass pipeline used across all execution paths.
@@ -236,7 +236,7 @@ impl OptdRunner {
                     err.to_string(),
                 ))
             })?;
-        let physical = to_physical_plan(&plan.query, &self.session)
+        let physical = to_physical_plan(&plan, &self.session)
             .await
             .map_err(|err| {
                 DFSqlLogicTestError::DataFusion(datafusion::error::DataFusionError::Plan(
@@ -263,13 +263,11 @@ impl OptdRunner {
                     err.to_string(),
                 ))
             })?;
-        let plan = to_logical_plan(&ctx.query, &self.session)
-            .await
-            .map_err(|err| {
-                DFSqlLogicTestError::DataFusion(datafusion::error::DataFusionError::Plan(
-                    err.to_string(),
-                ))
-            })?;
+        let plan = to_logical_plan(&ctx, &self.session).await.map_err(|err| {
+            DFSqlLogicTestError::DataFusion(datafusion::error::DataFusionError::Plan(
+                err.to_string(),
+            ))
+        })?;
         let physical = self
             .session
             .state()
@@ -357,7 +355,7 @@ impl OptdRunner {
         opt: &PlannedQuery,
     ) -> Result<(SchemaRef, Vec<RecordBatch>, IrExecutionPath), TryViaIrError> {
         if self.physical_planning_enabled() {
-            match self.execute_physical_ir(&opt.query).await {
+            match self.execute_physical_ir(opt).await {
                 Ok((schema, batches)) => {
                     return Ok((schema, batches, IrExecutionPath::Physical));
                 }
@@ -365,22 +363,22 @@ impl OptdRunner {
                     // Unsupported direct physical shapes use the stable
                     // logical-conversion path. Build/execution errors are
                     // converter bugs and intentionally do not fall back.
-                    let (schema, batches) = self.execute_logical_ir(&opt.query).await?;
+                    let (schema, batches) = self.execute_logical_ir(opt).await?;
                     return Ok((schema, batches, IrExecutionPath::PhysicalUnsupported(msg)));
                 }
                 Err(err) => return Err(TryViaIrError::Failed(err.to_string())),
             }
         }
 
-        let (schema, batches) = self.execute_logical_ir(&opt.query).await?;
+        let (schema, batches) = self.execute_logical_ir(opt).await?;
         Ok((schema, batches, IrExecutionPath::Logical))
     }
 
     async fn execute_logical_ir(
         &self,
-        ctx: &QueryContext,
+        planned: &PlannedQuery,
     ) -> Result<(SchemaRef, Vec<RecordBatch>), TryViaIrError> {
-        let plan = to_logical_plan(ctx, &self.session)
+        let plan = to_logical_plan(planned, &self.session)
             .await
             .map_err(|e| TryViaIrError::Failed(e.to_string()))?;
         let df = self
@@ -399,9 +397,9 @@ impl OptdRunner {
 
     async fn execute_physical_ir(
         &self,
-        ctx: &QueryContext,
+        planned: &PlannedQuery,
     ) -> Result<(SchemaRef, Vec<RecordBatch>), ToPhysicalError> {
-        let plan = to_physical_plan(ctx, &self.session).await?;
+        let plan = to_physical_plan(planned, &self.session).await?;
         let schema = plan.schema();
         let batches = collect(plan, self.session.state().task_ctx())
             .await
@@ -540,7 +538,8 @@ mod tests {
 
     #[test]
     fn default_pass_manager_runs_holistic_unnesting_after_expr_simplify() {
-        let mut opt = optd_core::OptimizerContext::new(optd_core::QueryContext::new());
+        let catalog = std::sync::Arc::new(optd_core::MemoryCatalog::new("memory", "public"));
+        let mut opt = optd_core::OptimizerContext::new(optd_core::QueryContext::new(), catalog);
         let mut pm = super::default_pass_manager();
         pm.run(&mut opt).unwrap();
 

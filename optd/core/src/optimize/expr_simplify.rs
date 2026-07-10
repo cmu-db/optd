@@ -248,7 +248,7 @@ mod tests {
         .add(&mut query);
         query.set_root(selection);
 
-        let mut ctx = OptimizerContext::new(query);
+        let mut ctx = crate::test_optimizer_context(query);
         let mut pm = PassManager::with_max_iterations(3);
         pm.add_pass(OperatorRewriteAdaptor::new(ExprSimplify));
 

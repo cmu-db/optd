@@ -356,7 +356,7 @@ mod tests {
     }
 
     fn join_algorithm_class_for_root(ctx: &QueryContext, root: Operator) -> JoinAlgorithmClass {
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(ctx);
         let hg = build_hypergraph(ctx, &mut analyses, root);
         let edge_indices = connecting_edge_indices(nodeset_singleton(0), nodeset_singleton(1), &hg);
         join_algorithm_class(&edge_indices, &hg, ctx)
@@ -373,7 +373,7 @@ mod tests {
         })
         .add(&mut ctx);
         let output = OperatorData::Output(Output { input: selection }).add(&mut ctx);
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let model = DefaultCostModel;
 
         let total = model.total_cost(output, &ctx, &mut analyses).unwrap();
@@ -386,7 +386,7 @@ mod tests {
         let mut ctx = QueryContext::new();
         let (scan, _) = add_single_i64_column_scan(&mut ctx, "A", "a");
         let output = OperatorData::Output(Output { input: scan }).add(&mut ctx);
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let model = DefaultCostModel;
 
         let err = model
@@ -412,7 +412,7 @@ mod tests {
             input: scan,
         })
         .add(&mut ctx);
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let model = DefaultCostModel;
 
         assert_eq!(
@@ -435,7 +435,7 @@ mod tests {
         })
         .add(&mut ctx);
 
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         assert_eq!(scan.operator_cost(&ctx, &mut analyses).unwrap(), 1000.0);
         assert_eq!(selection.total_cost(&ctx, &mut analyses).unwrap(), 1250.0);
     }
@@ -466,7 +466,7 @@ mod tests {
             inner: right_scan,
         })
         .add(&mut ctx);
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let model = DefaultCostModel;
 
         assert_eq!(

@@ -1,14 +1,15 @@
-use arrow_schema::DataType;
+use arrow_schema::{DataType, Field, Schema};
 use optd_core::optimize::join_ordering::collect_join_group_roots;
 use optd_core::{
     AggregateExpr, AggregateFunction, Aggregation, AnalysisContext, BinaryOp, BoxDrawingRenderer,
-    BoxRendererConfig, ColorMode, ColumnData, ExprData, FreeColumns, Join, JoinOrdering,
-    JoinTreeNormalize, JoinType, Map, NaryOp, OperatorData, OperatorRewriteAdaptor,
+    BoxRendererConfig, Catalog, ColorMode, ColumnData, ExprData, FreeColumns, Join, JoinOrdering,
+    JoinTreeNormalize, JoinType, Map, MemoryCatalog, NaryOp, OperatorData, OperatorRewriteAdaptor,
     OptimizerContext, Output, PassManager, PredicatePushdown, Projection, QueryContext,
     QueryFormatConfig, QueryFormatter, ScalarFunction, ScalarValue, Scan, Selection,
     SubqueryToJoin, TableFunction, TableFunctionDef, TableRef, UnaryOp, build_hypergraph,
     tpch::tpch_query,
 };
+use std::sync::Arc;
 
 fn main() {
     let args = match CliArgs::parse(std::env::args().skip(1)) {
@@ -28,12 +29,13 @@ fn main() {
         );
         std::process::exit(2);
     };
+    let catalog = catalog_for_query(&query);
 
     if args.optimize && args.format == OutputFormat::OptimizerJson {
         #[cfg(feature = "serde")]
         {
             let initial = query.clone();
-            let mut opt = OptimizerContext::new(query);
+            let mut opt = OptimizerContext::new(query, Arc::clone(&catalog));
             let mut pm = PassManager::new();
             pm.add_pass(SubqueryToJoin);
             pm.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
@@ -43,7 +45,11 @@ fn main() {
                 Ok(trace) => {
                     println!(
                         "{}",
-                        optd_core::optimizer_visualizer_trace_json(&initial, &trace)
+                        optd_core::optimizer_visualizer_trace_json(
+                            &initial,
+                            &trace,
+                            Arc::clone(&catalog),
+                        )
                     );
                     return;
                 }
@@ -62,8 +68,8 @@ fn main() {
     }
 
     let query = if args.optimize {
-        let initial = format_query(&query, args.format).unwrap_or_else(|e| e);
-        let mut opt = OptimizerContext::new(query);
+        let initial = format_query(&query, args.format, Arc::clone(&catalog)).unwrap_or_else(|e| e);
+        let mut opt = OptimizerContext::new(query, Arc::clone(&catalog));
         let mut pm = PassManager::new();
         pm.add_pass(SubqueryToJoin);
         pm.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
@@ -78,7 +84,7 @@ fn main() {
         println!("=== initial ===\n{initial}");
         // Print hypergraph for each join group root.
         if let Some(root) = query.root() {
-            let mut analyses = AnalysisContext::new();
+            let mut analyses = AnalysisContext::new(Arc::clone(&catalog));
             for group_root in collect_join_group_roots(&query, root) {
                 let hg = build_hypergraph(&query, &mut analyses, group_root);
                 if hg.nodes.len() > 1 {
@@ -92,7 +98,7 @@ fn main() {
         query
     };
 
-    match format_query(&query, args.format) {
+    match format_query(&query, args.format, catalog) {
         Ok(output) => println!("{output}"),
         Err(error) => {
             eprintln!("{error}");
@@ -185,13 +191,17 @@ fn print_usage() {
     );
 }
 
-fn format_query(query: &QueryContext, format: OutputFormat) -> Result<String, String> {
+fn format_query(
+    query: &QueryContext,
+    format: OutputFormat,
+    catalog: Arc<dyn Catalog>,
+) -> Result<String, String> {
     match format {
-        OutputFormat::Box => Ok(pretty_with_free_column(query)),
+        OutputFormat::Box => Ok(pretty_with_free_column(query, Arc::clone(&catalog))),
         OutputFormat::Flat => format_flat(query),
         OutputFormat::Json => format_json(query),
         OutputFormat::Context => format_context(query),
-        OutputFormat::OptimizerJson => format_optimizer_json(query),
+        OutputFormat::OptimizerJson => format_optimizer_json(query, catalog),
     }
 }
 
@@ -226,12 +236,18 @@ fn format_context(_query: &QueryContext) -> Result<String, String> {
 }
 
 #[cfg(feature = "serde")]
-fn format_optimizer_json(query: &QueryContext) -> Result<String, String> {
-    Ok(query.optimizer_visualizer_json("0. Plan"))
+fn format_optimizer_json(
+    query: &QueryContext,
+    catalog: Arc<dyn Catalog>,
+) -> Result<String, String> {
+    Ok(query.optimizer_visualizer_json("0. Plan", AnalysisContext::new(catalog)))
 }
 
 #[cfg(not(feature = "serde"))]
-fn format_optimizer_json(_query: &QueryContext) -> Result<String, String> {
+fn format_optimizer_json(
+    _query: &QueryContext,
+    _catalog: Arc<dyn Catalog>,
+) -> Result<String, String> {
     Err("--format optimizer-json requires the serde feature".to_string())
 }
 
@@ -276,7 +292,10 @@ fn example_queries() {
     }
 
     println!("-- sales_rollup_query");
-    println!("{}", pretty_with_free_column(&query));
+    println!(
+        "{}",
+        pretty_with_free_column(&query, catalog_for_query(&query))
+    );
 
     // SQL-ish correlated scalar subquery shape:
     //
@@ -293,18 +312,43 @@ fn example_queries() {
     // u_userkey from the outer users input, so that inner side has a free column.
     let query = join_with_free_column_query();
     println!("-- join_with_free_column_query");
-    println!("{}", pretty_with_free_column(&query));
+    println!(
+        "{}",
+        pretty_with_free_column(&query, catalog_for_query(&query))
+    );
 }
 
-fn pretty_with_free_column(query: &QueryContext) -> String {
-    let display = QueryFormatter::with_config(
+fn pretty_with_free_column(query: &QueryContext, catalog: Arc<dyn Catalog>) -> String {
+    let display = QueryFormatter::with_config_and_analyses(
         query,
         QueryFormatConfig::new().with_analysis::<FreeColumns>(),
+        AnalysisContext::new(catalog),
     )
     .format();
 
     BoxDrawingRenderer::with_config(BoxRendererConfig::default().with_color_mode(ColorMode::Never))
         .render(&display)
+}
+
+fn catalog_for_query(query: &QueryContext) -> Arc<dyn Catalog> {
+    let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+    for scan in query.scans() {
+        if catalog.table_by_ref(&scan.table).is_ok() {
+            continue;
+        }
+        let fields = scan
+            .columns
+            .iter()
+            .map(|column| {
+                let column = query.column(*column);
+                Field::new(&column.name, column.ty.clone(), true)
+            })
+            .collect::<Vec<_>>();
+        catalog
+            .create_table(scan.table.clone(), Arc::new(Schema::new(fields)), None)
+            .expect("example scan table should register once");
+    }
+    catalog
 }
 
 fn sales_rollup_query() -> QueryContext {

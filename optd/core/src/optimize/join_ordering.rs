@@ -605,7 +605,7 @@ mod tests {
     }
 
     fn join_algorithm_class_for_root(ctx: &QueryContext, root: Operator) -> JoinAlgorithmClass {
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(ctx);
         let hg = build_hypergraph(ctx, &mut analyses, root);
         let edge_indices = connecting_edge_indices(nodeset_singleton(0), nodeset_singleton(1), &hg);
         join_algorithm_class(&edge_indices, &hg, ctx)
@@ -614,7 +614,7 @@ mod tests {
     #[test]
     fn dphyp_three_way_chain_produces_plan() {
         let (mut ctx, root) = three_way_chain();
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let hg = build_hypergraph(&ctx, &mut analyses, root);
         assert_eq!(hg.nodes.len(), 3);
 
@@ -629,7 +629,7 @@ mod tests {
     #[test]
     fn dphyp_materializes_winning_plan_in_arena() {
         let (mut ctx, root) = three_way_chain();
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let hg = build_hypergraph(&ctx, &mut analyses, root);
         let before = ctx.operator_count();
 
@@ -675,7 +675,7 @@ mod tests {
             inner: right,
         })
         .add(&mut ctx);
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let hg = build_hypergraph(&ctx, &mut analyses, root);
 
         let plan = {
@@ -749,7 +749,7 @@ mod tests {
         }
 
         let (mut ctx, root) = three_way_chain();
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let hg = build_hypergraph(&ctx, &mut analyses, root);
         let additions = Arc::new(AtomicUsize::new(0));
         let comparisons = Arc::new(AtomicUsize::new(0));
@@ -902,7 +902,7 @@ mod tests {
                 )
                 .unwrap();
         }
-        let mut analyses = AnalysisContext::with_catalog(Arc::new(catalog));
+        let mut analyses = AnalysisContext::new(Arc::new(catalog));
         let hg = build_hypergraph(&ctx, &mut analyses, root);
         let mut solver = DPhyp::new(&mut ctx, &mut analyses, &hg, &DefaultCostModel);
 
@@ -968,7 +968,7 @@ mod tests {
             nodes,
             edges: vec![],
         };
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let mut solver = DPhyp::new(&mut ctx, &mut analyses, &hg, &DefaultCostModel);
 
         assert_eq!(all_nodes_mask(64), NodeSet::MAX);
@@ -995,7 +995,7 @@ mod tests {
             nodes,
             edges: vec![],
         };
-        let mut analyses = AnalysisContext::new();
+        let mut analyses = crate::test_analyses(&ctx);
         let mut solver = DPhyp::new(&mut ctx, &mut analyses, &hg, &DefaultCostModel);
 
         assert!(matches!(
@@ -1010,7 +1010,7 @@ mod tests {
     #[test]
     fn join_ordering_reports_changed_so_pass_manager_updates_root() {
         let (ctx, root) = three_way_chain();
-        let mut opt = OptimizerContext::new(ctx);
+        let mut opt = crate::test_optimizer_context(ctx);
         let mut pm = PassManager::new();
         pm.add_pass(JoinOrdering::new());
 
@@ -1024,7 +1024,7 @@ mod tests {
         let (mut ctx, join_root) = three_way_chain();
         let output = OperatorData::Output(Output { input: join_root }).add(&mut ctx);
         ctx.set_root(output);
-        let mut opt = OptimizerContext::new(ctx);
+        let mut opt = crate::test_optimizer_context(ctx);
         let mut pm = PassManager::new();
         pm.add_pass(JoinOrdering::new());
 
@@ -1042,8 +1042,8 @@ mod tests {
     fn join_ordering_pass_manager_can_be_reused_for_another_context() {
         let (ctx1, root1) = three_way_chain();
         let (ctx2, root2) = three_way_chain();
-        let mut opt1 = OptimizerContext::new(ctx1);
-        let mut opt2 = OptimizerContext::new(ctx2);
+        let mut opt1 = crate::test_optimizer_context(ctx1);
+        let mut opt2 = crate::test_optimizer_context(ctx2);
         let mut pm = PassManager::new();
         pm.add_pass(JoinOrdering::new());
 
@@ -1118,7 +1118,7 @@ mod tests {
         .add(&mut ctx);
         ctx.set_root(seed);
         let created_join = Rc::new(RefCell::new(None));
-        let mut opt = OptimizerContext::new(ctx);
+        let mut opt = crate::test_optimizer_context(ctx);
         let mut pm = PassManager::new();
         pm.add_pass(JoinOrdering::new());
         pm.add_pass(CreateJoinAfterFirstPass {

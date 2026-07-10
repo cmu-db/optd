@@ -56,7 +56,7 @@ impl OperatorRewrite for PredicatePushdown {
         let mut keep: Vec<Expr> = Vec::new();
 
         for c in conjuncts {
-            let used = expr_used_columns(&ctx.query, c).unwrap_or_default();
+            let used = expr_used_columns(&ctx.query, &mut ctx.analyses, c).unwrap_or_default();
             let refs_outer = used.iter().all(|col| outer_cols.contains(col));
             let refs_inner = used.iter().all(|col| inner_cols.contains(col));
             let refs_join_inputs = used
@@ -219,7 +219,7 @@ mod tests {
         .add(&mut query);
         query.set_root(root);
 
-        let mut opt = OptimizerContext::new(query);
+        let mut opt = crate::test_optimizer_context(query);
         let mut pm = PassManager::new();
         pm.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
         pm.run(&mut opt).expect("predicate pushdown should succeed");
