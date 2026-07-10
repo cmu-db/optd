@@ -1,9 +1,9 @@
 //! Session setup for local benchmark Parquet data.
 //!
-//! Generate the data with:
+//! Download the pinned data with:
 //!
 //! ```text
-//! ./scripts/generate_tpch.sh
+//! ./scripts/download_tpch_hf.sh
 //! ```
 
 use std::path::PathBuf;
@@ -56,7 +56,7 @@ pub async fn register_tpch_tables(ctx: &SessionContext) -> DFResult<()> {
         TPCH_TABLES,
         TPCH_DATA_DIR,
         "TPC-H",
-        "./scripts/generate_tpch.sh",
+        "./scripts/download_tpch_hf.sh",
     )
     .await
 }
@@ -75,7 +75,7 @@ pub async fn register_job_tables(ctx: &SessionContext) -> DFResult<()> {
         JOB_TABLES,
         JOB_DATA_DIR,
         "JOB",
-        "./scripts/generate_job_parquet.sh",
+        "./scripts/download_job_hf.sh",
     )
     .await
 }

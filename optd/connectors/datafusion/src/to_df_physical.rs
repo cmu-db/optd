@@ -1210,10 +1210,9 @@ fn is_true_expr(expr: optd_core::Expr, ctx: &QueryContext) -> bool {
 
 fn is_at_most_one_row(op: Operator, ctx: &QueryContext) -> ToPhysicalResult<bool> {
     let mut analyses = optd_core::AnalysisContext::new();
-    let profile = analyses
-        .get::<optd_core::CardinalityEstimationV1>(ctx, op)
-        .map_err(|e| ToPhysicalError::Unsupported(e.to_string()))?;
-    Ok(profile.rows.upper.is_some_and(|upper| upper <= 1.0))
+    analyses
+        .get::<optd_core::AtMostOneRow>(ctx, op)
+        .map_err(|e| ToPhysicalError::Unsupported(e.to_string()))
 }
 
 fn reject_subquery_exprs(expr: optd_core::Expr, ctx: &QueryContext) -> ToPhysicalResult<()> {

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 output_dir="${1:-optd/connectors/datafusion/data/tpch/sf-0.1}"
-revision="${TPCH_HF_REVISION:-main}"
+revision="3d3bbd2ad937afea3add733e7e179faaf085425f"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 base_url="https://huggingface.co/datasets/liangyc/tpch-sf-0_1/resolve/${revision}/data/sf-0_1"
 

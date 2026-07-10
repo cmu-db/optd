@@ -15,8 +15,8 @@ use datafusion_sqllogictest::{
     DFColumnType, DFSqlLogicTestError, convert_batches, convert_schema_to_types,
 };
 use optd_core::{
-    Catalog, ExprSimplify, HolisticUnnesting, JoinOrdering, JoinTreeNormalize, MarkJoinToSemiJoin,
-    OperatorRewriteAdaptor, OptimizerContext, PassManager, PredicatePushdown,
+    ExprSimplify, HolisticUnnesting, JoinOrdering, JoinTreeNormalize, MarkJoinToSemiJoin,
+    OperatorRewriteAdaptor, OptimizerContext, PassManager, PlannedQuery, PredicatePushdown,
     ProjectionElimination, QueryContext, QueryFormatConfig, SubqueryToJoin,
 };
 use sqllogictest::{AsyncDB, DBOutput};
@@ -30,21 +30,14 @@ use crate::runtime_statistics::RuntimeStatisticsCatalogBuilder;
 use crate::to_df_logical::to_logical_plan;
 use crate::to_df_physical::{ToPhysicalError, to_physical_plan};
 
-fn optimize(
-    ctx: QueryContext,
-    catalog: Option<Arc<dyn Catalog>>,
-) -> Result<QueryContext, optd_core::OptimizeError> {
-    let mut opt = match catalog {
-        Some(catalog) => OptimizerContext::with_catalog(ctx, catalog),
-        None => OptimizerContext::new(ctx),
-    };
+fn optimize(mut opt: OptimizerContext) -> Result<PlannedQuery, optd_core::OptimizeError> {
     let mut pm = default_pass_manager();
     pm.run(&mut opt)?;
     if let Some(root) = opt.query.root() {
         let resolved = opt.rewrites.resolve(root);
         opt.query.set_root(resolved);
     }
-    Ok(opt.into_query())
+    Ok(opt.into_planned_query())
 }
 
 pub(crate) async fn optimizer_context_from_logical_plan(
@@ -243,7 +236,7 @@ impl OptdRunner {
                     err.to_string(),
                 ))
             })?;
-        let physical = to_physical_plan(&plan, &self.session)
+        let physical = to_physical_plan(&plan.query, &self.session)
             .await
             .map_err(|err| {
                 DFSqlLogicTestError::DataFusion(datafusion::error::DataFusionError::Plan(
@@ -270,11 +263,13 @@ impl OptdRunner {
                     err.to_string(),
                 ))
             })?;
-        let plan = to_logical_plan(&ctx, &self.session).await.map_err(|err| {
-            DFSqlLogicTestError::DataFusion(datafusion::error::DataFusionError::Plan(
-                err.to_string(),
-            ))
-        })?;
+        let plan = to_logical_plan(&ctx.query, &self.session)
+            .await
+            .map_err(|err| {
+                DFSqlLogicTestError::DataFusion(datafusion::error::DataFusionError::Plan(
+                    err.to_string(),
+                ))
+            })?;
         let physical = self
             .session
             .state()
@@ -351,18 +346,18 @@ impl OptdRunner {
     async fn optimized_ir_from_logical_plan(
         &self,
         plan: &LogicalPlan,
-    ) -> Result<QueryContext, TryViaIrError> {
+    ) -> Result<PlannedQuery, TryViaIrError> {
         let opt =
             optimizer_context_from_logical_plan(&self.session, &self.runtime_stats, plan).await?;
-        optimize(opt.query, opt.analyses.catalog).map_err(|e| TryViaIrError::Failed(e.to_string()))
+        optimize(opt).map_err(|e| TryViaIrError::Failed(e.to_string()))
     }
 
     async fn execute_optimized_ir(
         &self,
-        ctx: &QueryContext,
+        opt: &PlannedQuery,
     ) -> Result<(SchemaRef, Vec<RecordBatch>, IrExecutionPath), TryViaIrError> {
         if self.physical_planning_enabled() {
-            match self.execute_physical_ir(ctx).await {
+            match self.execute_physical_ir(&opt.query).await {
                 Ok((schema, batches)) => {
                     return Ok((schema, batches, IrExecutionPath::Physical));
                 }
@@ -370,14 +365,14 @@ impl OptdRunner {
                     // Unsupported direct physical shapes use the stable
                     // logical-conversion path. Build/execution errors are
                     // converter bugs and intentionally do not fall back.
-                    let (schema, batches) = self.execute_logical_ir(ctx).await?;
+                    let (schema, batches) = self.execute_logical_ir(&opt.query).await?;
                     return Ok((schema, batches, IrExecutionPath::PhysicalUnsupported(msg)));
                 }
                 Err(err) => return Err(TryViaIrError::Failed(err.to_string())),
             }
         }
 
-        let (schema, batches) = self.execute_logical_ir(ctx).await?;
+        let (schema, batches) = self.execute_logical_ir(&opt.query).await?;
         Ok((schema, batches, IrExecutionPath::Logical))
     }
 

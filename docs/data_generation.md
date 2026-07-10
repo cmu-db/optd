@@ -1,42 +1,34 @@
 # Data Generation
 
-This repository keeps benchmark data out of git. Generate local Parquet files under
+This repository keeps benchmark data out of git. Prepare local Parquet files under
 `optd/connectors/datafusion/data/` before running SQLLogicTest suites or local benchmark
 experiments that read real tables.
 
 ## TPC-H
 
-TPC-H data is generated directly as Parquet using `tpchgen-cli`.
+TPC-H SF 0.1 is downloaded as pinned Parquet files from the same dataset revision used by CI.
 
 ```sh
-./scripts/generate_tpch.sh
+./scripts/download_tpch_hf.sh
 ```
 
-The default scale factor is `0.1`, and files are written to:
+Files are written to:
 
 ```text
 optd/connectors/datafusion/data/tpch/sf-0.1/
 ```
 
-To generate another scale factor or output directory:
-
-```sh
-./scripts/generate_tpch.sh 1 optd/connectors/datafusion/data/tpch/sf-1
-```
-
-The connector currently registers SF 0.1 from `optd/connectors/datafusion/data/tpch/sf-0.1`.
-Use that default location for the existing TPC-H SLT tests.
+The connector and existing TPC-H SLTs use this location directly. The download script owns the
+pinned dataset revision, and CI keys its data cache from the script so changing the revision also
+invalidates the cache.
 
 ## Join Order Benchmark
 
-The Join Order Benchmark (JOB) data is derived from the IMDB dataset used by the
-[CedarDB JOB example](https://cedardb.com/docs/example_datasets/job/). CedarDB documents that the
-archive is about 1.2 GB compressed and about 3.7 GB after extraction. The script below downloads
-that archive, imports the CSV files into a local DuckDB database, and exports one Parquet file per
-JOB table.
+The Join Order Benchmark (JOB) data is downloaded as pinned Parquet files from the same dataset
+revision used by scheduled CI.
 
 ```sh
-./scripts/generate_job_parquet.sh
+./scripts/download_job_hf.sh
 ```
 
 The default output directory is:
@@ -45,27 +37,26 @@ The default output directory is:
 optd/connectors/datafusion/data/job/
 ```
 
-The default staging directory is:
+The connector and JOB SLTs use this location directly. Scheduled CI keys its data cache from the
+download script, so changing the pinned revision also invalidates the cache.
 
-```text
-optd/connectors/datafusion/data/job-source/
-```
+## Reference Generators
 
-To choose explicit locations:
+The repository keeps the original local generation tools as references for rebuilding or
+republishing datasets. They are not the canonical test-data setup and may not reproduce the exact
+bytes pinned by CI.
 
 ```sh
-./scripts/generate_job_parquet.sh \
-  optd/connectors/datafusion/data/job \
-  optd/connectors/datafusion/data/job-source
+./scripts/generate_tpch.sh
+./scripts/generate_job_parquet.sh
 ```
 
-The script uses `scripts/job_schema_duckdb.sql`, a DuckDB-compatible version of the JOB schema.
-It expects the extracted CSV files to use the CedarDB/JOB filenames, for example `title.csv`,
-`cast_info.csv`, and `movie_info.csv`.
+The TPC-H generator requires `tpchgen-cli`. The JOB generator requires DuckDB and uses
+`scripts/job_schema_duckdb.sql` to convert the CedarDB/JOB CSV archive to Parquet.
 
 ## Running TPC-H SLT
 
-After generating the default TPC-H dataset:
+After downloading the TPC-H dataset:
 
 ```sh
 cargo nextest run --release -p optd-datafusion --test slt tpch

@@ -142,14 +142,10 @@ impl CostModel for DefaultCostModel {
 }
 
 impl Operator {
-    /// Computes this operator's local cost with the default cost model.
-    pub fn operator_cost(self, ctx: &QueryContext) -> OptimizeResult<f64> {
-        let mut analyses = ctx.analyze();
-        self.operator_cost_with_analyses(ctx, &mut analyses)
-    }
-
     /// Computes this operator's local cost with caller-provided analyses.
-    pub fn operator_cost_with_analyses(
+    ///
+    /// Requiring the analysis context keeps catalog choice explicit.
+    pub fn operator_cost(
         self,
         ctx: &QueryContext,
         analyses: &mut AnalysisContext,
@@ -157,14 +153,10 @@ impl Operator {
         DefaultCostModel.operator_cost(self, ctx, analyses)
     }
 
-    /// Computes this operator subtree's total cost with the default cost model.
-    pub fn total_cost(self, ctx: &QueryContext) -> OptimizeResult<f64> {
-        let mut analyses = ctx.analyze();
-        self.total_cost_with_analyses(ctx, &mut analyses)
-    }
-
     /// Computes this operator subtree's total cost with caller-provided analyses.
-    pub fn total_cost_with_analyses(
+    ///
+    /// Requiring the analysis context keeps catalog choice explicit.
+    pub fn total_cost(
         self,
         ctx: &QueryContext,
         analyses: &mut AnalysisContext,
@@ -443,8 +435,9 @@ mod tests {
         })
         .add(&mut ctx);
 
-        assert_eq!(scan.operator_cost(&ctx).unwrap(), 1000.0);
-        assert_eq!(selection.total_cost(&ctx).unwrap(), 1250.0);
+        let mut analyses = AnalysisContext::new();
+        assert_eq!(scan.operator_cost(&ctx, &mut analyses).unwrap(), 1000.0);
+        assert_eq!(selection.total_cost(&ctx, &mut analyses).unwrap(), 1250.0);
     }
 
     #[test]

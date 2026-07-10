@@ -5,12 +5,12 @@
 
 use std::collections::HashMap;
 
-use crate::analysis::{CardinalityEstimationV1, connecting_edge_indices};
+use crate::analysis::connecting_edge_indices;
 use crate::cost::{CostModel, DefaultCostModel};
 use crate::hypergraph::{NodeSet, QueryHypergraph, nodeset_min, nodeset_singleton};
 use crate::{
-    AnalysisContext, CardinalityProfile, CrossProduct, Expr, ExprData, Join, JoinType, NaryOp,
-    Operator, OperatorData, QueryContext, ScalarValue, build_hypergraph,
+    AnalysisContext, CrossProduct, Expr, ExprData, Join, JoinType, NaryOp, Operator, OperatorData,
+    QueryContext, ScalarValue, build_hypergraph,
 };
 
 use super::{OptimizeError, OptimizeResult, Pass, PassResult, QueryPass};
@@ -114,7 +114,6 @@ impl<'a, M: CostModel> DPhyp<'a, M> {
         for i in 0..n {
             let s = nodeset_singleton(i);
             let root = self.hg.nodes[i].root;
-            cardinality_profile(self.ctx, self.analyses, root)?;
             let cost = self.cost_model.total_cost(root, self.ctx, self.analyses)?;
             self.dp.insert(
                 s,
@@ -210,7 +209,6 @@ impl<'a, M: CostModel> DPhyp<'a, M> {
             self.hg,
             self.ctx,
         );
-        cardinality_profile(self.ctx, self.analyses, candidate)?;
         let child_costs = [left.cost.clone(), right.cost.clone()];
         let new_cost = self.cost_model.total_cost_from_children(
             candidate,
@@ -289,19 +287,6 @@ fn all_nodes_mask(n: usize) -> NodeSet {
     } else {
         (1u64 << n) - 1
     }
-}
-
-fn cardinality_profile(
-    ctx: &QueryContext,
-    analyses: &mut AnalysisContext,
-    op: Operator,
-) -> OptimizeResult<CardinalityProfile> {
-    analyses
-        .get::<CardinalityEstimationV1>(ctx, op)
-        .map_err(|err| OptimizeError::PassError {
-            pass: "JoinOrdering",
-            message: err.to_string(),
-        })
 }
 
 // ---------------------------------------------------------------------------
@@ -753,18 +738,12 @@ mod tests {
                 &self,
                 op: Operator,
                 ctx: &QueryContext,
-                analyses: &mut AnalysisContext,
+                _analyses: &mut AnalysisContext,
             ) -> OptimizeResult<Self::Cost> {
                 let units = match op.get(ctx) {
                     OperatorData::Join(_) | OperatorData::CrossProduct(_) => 10,
                     _ => 1,
                 };
-                let _ = analyses
-                    .get::<CardinalityEstimationV1>(ctx, op)
-                    .map_err(|err| OptimizeError::PassError {
-                        pass: "StructuredCostModel",
-                        message: err.to_string(),
-                    })?;
                 Ok(StructuredCost { units })
             }
         }

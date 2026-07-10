@@ -13,9 +13,10 @@ pub mod substrait;
 pub mod tpch;
 
 pub use analysis::{
-    Analysis, AnalysisContext, AnalysisError, AnalysisResult, Analyzable, AvailableColumns,
-    CardinalityEstimationV1, CardinalityProfile, ColumnNullability, ColumnProfile, CreatedColumns,
-    Estimate, EstimateSource, FreeColumns, ParentIndex, ParentsOf, UsedColumns, expr_used_columns,
+    Analysis, AnalysisContext, AnalysisError, AnalysisResult, Analyzable, AtMostOneRow,
+    AvailableColumns, CardinalityEstimationV1, CardinalityProfile, ColumnNullability,
+    ColumnProfile, CreatedColumns, Estimate, EstimateSource, FreeColumns, ParentIndex, ParentsOf,
+    UsedColumns, expr_used_columns,
 };
 pub use catalog::{
     Catalog, CatalogError, CatalogResult, ColumnStatistics, MemoryCatalog, ResolvedTableRef,
@@ -769,6 +770,31 @@ pub struct OptimizerContext {
     pub(crate) optimizer_run_id: u64,
 }
 
+/// An optimized query paired with the catalog that informed planning.
+///
+/// Analysis caches remain optimizer-local, while this lightweight context is
+/// safe to carry through asynchronous formatting and execution boundaries.
+pub struct PlannedQuery {
+    pub query: QueryContext,
+    pub catalog: Option<Arc<dyn Catalog>>,
+}
+
+impl PlannedQuery {
+    /// Creates fresh analysis state backed by this plan's catalog.
+    pub fn analyze(&self) -> AnalysisContext {
+        self.catalog
+            .as_ref()
+            .map_or_else(AnalysisContext::new, |catalog| {
+                AnalysisContext::with_catalog(catalog.clone())
+            })
+    }
+
+    /// Consumes the planning context and returns its query IR.
+    pub fn into_query(self) -> QueryContext {
+        self.query
+    }
+}
+
 impl OptimizerContext {
     /// Creates an optimizer context for `query`.
     pub fn new(query: QueryContext) -> Self {
@@ -793,6 +819,14 @@ impl OptimizerContext {
     /// Consumes this optimizer context and returns the optimized query.
     pub fn into_query(self) -> QueryContext {
         self.query
+    }
+
+    /// Drops optimizer-local caches while preserving the planning catalog.
+    pub fn into_planned_query(self) -> PlannedQuery {
+        PlannedQuery {
+            query: self.query,
+            catalog: self.analyses.catalog,
+        }
     }
 }
 
@@ -868,9 +902,18 @@ impl QueryContext {
         self.root
     }
 
-    /// Creates an empty analysis context for demand-driven query analysis.
+    /// Creates a catalog-free analysis context.
+    ///
+    /// This is sufficient for structural analyses. Cardinality and costing use
+    /// heuristic fallback statistics; production planning should call
+    /// [`Self::analyze_with_catalog`] or preserve an [`OptimizerContext`].
     pub fn analyze(&self) -> AnalysisContext {
         AnalysisContext::new()
+    }
+
+    /// Creates a catalog-aware analysis context for this query.
+    pub fn analyze_with_catalog(&self, catalog: Arc<dyn Catalog>) -> AnalysisContext {
+        AnalysisContext::with_catalog(catalog)
     }
 
     /// Returns the number of operators in the operator arena.
@@ -956,9 +999,20 @@ impl QueryContext {
         &self,
         pass_name: impl Into<String>,
     ) -> OptimizerVisualizerPass {
-        let node = QueryFormatter::with_config(
+        self.optimizer_visualizer_pass_with_analyses(pass_name, AnalysisContext::new())
+    }
+
+    /// Formats a visualizer pass using an explicit analysis context.
+    #[cfg(feature = "serde")]
+    pub fn optimizer_visualizer_pass_with_analyses(
+        &self,
+        pass_name: impl Into<String>,
+        analyses: AnalysisContext,
+    ) -> OptimizerVisualizerPass {
+        let node = QueryFormatter::with_config_and_analyses(
             self,
             QueryFormatConfig::new().with_analysis::<CardinalityEstimationV1>(),
+            analyses,
         )
         .format();
         OptimizerVisualizerPass::new(pass_name, OptimizerVisualizerNode::from_display_node(&node))
@@ -967,21 +1021,54 @@ impl QueryContext {
     /// Formats the reachable query plan as optd optimizer visualizer JSON.
     #[cfg(feature = "serde")]
     pub fn optimizer_visualizer_json(&self, pass_name: impl Into<String>) -> String {
-        serde_json::to_string_pretty(&vec![self.optimizer_visualizer_pass(pass_name)])
-            .expect("optimizer visualizer serialization should not fail")
+        self.optimizer_visualizer_json_with_analyses(pass_name, AnalysisContext::new())
+    }
+
+    /// Formats visualizer JSON using an explicit analysis context.
+    #[cfg(feature = "serde")]
+    pub fn optimizer_visualizer_json_with_analyses(
+        &self,
+        pass_name: impl Into<String>,
+        analyses: AnalysisContext,
+    ) -> String {
+        serde_json::to_string_pretty(&vec![
+            self.optimizer_visualizer_pass_with_analyses(pass_name, analyses),
+        ])
+        .expect("optimizer visualizer serialization should not fail")
     }
 }
 
 /// Formats an optimizer trace as optd optimizer visualizer JSON.
 #[cfg(feature = "serde")]
 pub fn optimizer_visualizer_trace_json(initial: &QueryContext, traces: &[PassTrace]) -> String {
+    optimizer_visualizer_trace_json_with_analyses(initial, traces, AnalysisContext::new)
+}
+
+/// Formats an optimizer trace with fresh analysis caches backed by `catalog`.
+#[cfg(feature = "serde")]
+pub fn optimizer_visualizer_trace_json_with_catalog(
+    initial: &QueryContext,
+    traces: &[PassTrace],
+    catalog: Arc<dyn Catalog>,
+) -> String {
+    optimizer_visualizer_trace_json_with_analyses(initial, traces, || {
+        AnalysisContext::with_catalog(catalog.clone())
+    })
+}
+
+#[cfg(feature = "serde")]
+fn optimizer_visualizer_trace_json_with_analyses(
+    initial: &QueryContext,
+    traces: &[PassTrace],
+    mut analyses: impl FnMut() -> AnalysisContext,
+) -> String {
     let mut passes = Vec::with_capacity(traces.len() + 1);
-    passes.push(initial.optimizer_visualizer_pass("Initial"));
+    passes.push(initial.optimizer_visualizer_pass_with_analyses("Initial", analyses()));
     passes.extend(traces.iter().map(|trace| {
         let profile = &trace.profile;
         trace
             .query
-            .optimizer_visualizer_pass(profile.pass)
+            .optimizer_visualizer_pass_with_analyses(profile.pass, analyses())
             .with_profile(
                 profile.iteration,
                 profile.pass_index,
@@ -1152,10 +1239,28 @@ impl<'a> QueryFormatter<'a> {
 
     /// Creates a query formatter with the provided config.
     pub fn with_config(ctx: &'a QueryContext, config: QueryFormatConfig) -> Self {
+        Self::with_config_and_analyses(ctx, config, AnalysisContext::new())
+    }
+
+    /// Creates a query formatter whose analyses consult `catalog`.
+    pub fn with_config_and_catalog(
+        ctx: &'a QueryContext,
+        config: QueryFormatConfig,
+        catalog: Arc<dyn Catalog>,
+    ) -> Self {
+        Self::with_config_and_analyses(ctx, config, AnalysisContext::with_catalog(catalog))
+    }
+
+    /// Creates a query formatter with caller-selected analysis state.
+    pub fn with_config_and_analyses(
+        ctx: &'a QueryContext,
+        config: QueryFormatConfig,
+        analyses: AnalysisContext,
+    ) -> Self {
         Self {
             ctx,
             config,
-            analyses: RefCell::new(AnalysisContext::new()),
+            analyses: RefCell::new(analyses),
         }
     }
 

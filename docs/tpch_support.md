@@ -19,14 +19,14 @@ own sqllogictest coverage under `optd/connectors/datafusion/tests/`.
 ## Local TPC-H Data Setup
 
 The DataFusion sqllogictest TPC-H suite reads local Parquet files instead of generating tables at
-test time. Generate the files once with `tpchgen-cli`:
+test time. Download the same pinned Parquet files used by CI:
 
 ```sh
-./scripts/generate_tpch.sh
+./scripts/download_tpch_hf.sh
 ```
 
-The generated `optd/connectors/datafusion/data/` contents are ignored by git.
-See `docs/data_generation.md` for TPC-H and JOB data-generation details.
+The downloaded `optd/connectors/datafusion/data/` contents are ignored by git.
+See `docs/data_generation.md` for TPC-H and JOB data-setup details.
 
 Run the TPC-H SLT suite with either:
 

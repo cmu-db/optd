@@ -21,12 +21,13 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::SessionContext;
 use optd_core::{
-    OptimizerContext, PassProfile, PassResult, PassTrace, QueryContext, QueryFormatConfig,
-    optimizer_visualizer_trace_json,
+    AnalysisContext, BoxDrawingRenderer, Catalog, OptimizerContext, PassProfile, PassResult,
+    PassTrace, PlannedQuery, QueryContext, QueryFormatConfig, QueryFormatter,
+    optimizer_visualizer_trace_json_with_catalog,
 };
 
-use crate::from_df_logical::from_logical_plan;
-use crate::runner::default_pass_manager;
+use crate::runner::{default_pass_manager, optimizer_context_from_logical_plan};
+use crate::runtime_statistics::RuntimeStatisticsCatalogBuilder;
 
 /// Registers `explain_box`, `explain_json`, `explain_flat`, `explain_optimizer_json`, and
 /// `explain_steps` on `ctx`.
@@ -219,7 +220,7 @@ fn explain_sql(
         .map_err(|_| datafusion::error::DataFusionError::Plan("explain thread panicked".into()))?;
     }
 
-    let ctx = std::thread::spawn(move || {
+    let opt = std::thread::spawn(move || {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -229,7 +230,12 @@ fn explain_sql(
     .join()
     .map_err(|_| datafusion::error::DataFusionError::Plan("explain thread panicked".into()))??;
 
-    Ok(format_query(&ctx, format, QueryFormatConfig::default()))
+    Ok(format_query(
+        &opt.query,
+        opt.catalog.as_ref(),
+        format,
+        QueryFormatConfig::default(),
+    ))
 }
 
 fn explain_steps(
@@ -252,12 +258,23 @@ fn explain_steps(
     .map_err(|_| datafusion::error::DataFusionError::Plan("explain thread panicked".into()))?
 }
 
-fn format_query(ctx: &QueryContext, format: Format, config: QueryFormatConfig) -> String {
+fn format_query(
+    ctx: &QueryContext,
+    catalog: Option<&Arc<dyn Catalog>>,
+    format: Format,
+    config: QueryFormatConfig,
+) -> String {
+    let analyses = || {
+        catalog.map_or_else(AnalysisContext::new, |catalog| {
+            AnalysisContext::with_catalog(catalog.clone())
+        })
+    };
     let text = match format {
-        Format::Box => ctx.pretty_with_config(config),
+        Format::Box => BoxDrawingRenderer::default()
+            .render(&QueryFormatter::with_config_and_analyses(ctx, config, analyses()).format()),
         Format::Json => ctx.pretty_json(),
         Format::Flat => ctx.pretty_flat(),
-        Format::OptimizerJson => ctx.optimizer_visualizer_json("0. Plan"),
+        Format::OptimizerJson => ctx.optimizer_visualizer_json_with_analyses("0. Plan", analyses()),
     };
     trim_trailing_line_whitespace(&text)
 }
@@ -273,15 +290,10 @@ fn trim_trailing_line_whitespace(text: &str) -> String {
 async fn build_ir(
     sql: &str,
     state: &datafusion::execution::SessionState,
-) -> datafusion::error::Result<QueryContext> {
+) -> datafusion::error::Result<PlannedQuery> {
     let plan = state.create_logical_plan(sql).await?;
     let plan = explain_input_plan(&plan);
-    let mut ctx = QueryContext::new();
-    let root =
-        from_logical_plan(plan, &mut ctx).map_err(|e| DataFusionError::Plan(e.to_string()))?;
-    ctx.set_root(root);
-
-    let mut opt = OptimizerContext::new(ctx);
+    let mut opt = optimizer_context_for_explain(state, plan).await?;
     let mut pm = default_pass_manager();
     pm.run(&mut opt)
         .map_err(|e| DataFusionError::Plan(e.to_string()))?;
@@ -289,7 +301,7 @@ async fn build_ir(
         let resolved = opt.rewrites.resolve(root);
         opt.query.set_root(resolved);
     }
-    Ok(opt.into_query())
+    Ok(opt.into_planned_query())
 }
 
 async fn build_ir_trace(
@@ -300,10 +312,8 @@ async fn build_ir_trace(
 ) -> datafusion::error::Result<Vec<ExplainStep>> {
     let plan = state.create_logical_plan(sql).await?;
     let plan = explain_input_plan(&plan);
-    let mut ctx = QueryContext::new();
-    let root =
-        from_logical_plan(plan, &mut ctx).map_err(|e| DataFusionError::Plan(e.to_string()))?;
-    ctx.set_root(root);
+    let mut opt = optimizer_context_for_explain(state, plan).await?;
+    let catalog = opt.analyses.catalog.clone();
 
     let mut steps = vec![ExplainStep {
         step: 0,
@@ -312,10 +322,9 @@ async fn build_ir_trace(
         pass: "initial".to_string(),
         result: "initial".to_string(),
         duration_ms: None,
-        plan: format_query(&ctx, format, config.clone()),
+        plan: format_query(&opt.query, catalog.as_ref(), format, config.clone()),
     }];
 
-    let mut opt = OptimizerContext::new(ctx);
     let mut pm = default_pass_manager();
     let trace = pm
         .run_with_trace(&mut opt)
@@ -330,7 +339,7 @@ async fn build_ir_trace(
             pass: profile.pass.to_string(),
             result: pass_result(profile.result),
             duration_ms: Some(profile.duration_ms),
-            plan: format_query(&trace.query, format, config.clone()),
+            plan: format_query(&trace.query, catalog.as_ref(), format, config.clone()),
         }
     }));
 
@@ -343,24 +352,35 @@ async fn build_optimizer_visualizer_trace(
 ) -> datafusion::error::Result<String> {
     let plan = state.create_logical_plan(sql).await?;
     let plan = explain_input_plan(&plan);
-    let mut ctx = QueryContext::new();
-    let root =
-        from_logical_plan(plan, &mut ctx).map_err(|e| DataFusionError::Plan(e.to_string()))?;
-    ctx.set_root(root);
-    let initial = ctx.clone();
-
-    let mut opt = OptimizerContext::new(ctx);
+    let mut opt = optimizer_context_for_explain(state, plan).await?;
+    let initial = opt.query.clone();
+    let catalog = opt
+        .analyses
+        .catalog
+        .clone()
+        .expect("explain planning always constructs a runtime catalog");
     let mut pm = default_pass_manager();
     let trace = pm
         .run_with_trace(&mut opt)
         .map_err(|e| DataFusionError::Plan(e.to_string()))?;
     let trace = aggregate_trace_by_pass(trace);
 
-    let passes = optimizer_visualizer_trace_json(&initial, &trace);
+    let passes = optimizer_visualizer_trace_json_with_catalog(&initial, &trace, catalog);
     Ok(format!(
         "{{\n  \"passes\": {},\n  \"query\": {:?}\n}}",
         passes, sql
     ))
+}
+
+async fn optimizer_context_for_explain(
+    state: &datafusion::execution::SessionState,
+    plan: &LogicalPlan,
+) -> datafusion::error::Result<OptimizerContext> {
+    let session = SessionContext::from(state.clone());
+    let runtime_stats = RuntimeStatisticsCatalogBuilder::new(session.clone());
+    optimizer_context_from_logical_plan(&session, &runtime_stats, plan)
+        .await
+        .map_err(|error| DataFusionError::Plan(error.to_string()))
 }
 
 fn explain_input_plan(plan: &LogicalPlan) -> &LogicalPlan {
@@ -479,10 +499,44 @@ fn steps_to_table(steps: Vec<ExplainStep>) -> DFResult<Arc<dyn TableProvider>> {
 mod tests {
     use std::sync::Arc;
 
+    use datafusion::arrow::array::Int64Array;
+    use datafusion::arrow::datatypes::{DataType, Field, Schema};
+    use datafusion::arrow::record_batch::RecordBatch;
+    use datafusion::datasource::MemTable;
+    use datafusion::prelude::SessionContext;
     use optd_core::optimize::unnesting::correlated_subquery_joins;
+    use optd_core::{CardinalityEstimationV1, EstimateSource};
 
     use super::build_ir;
     use crate::setup::setup_tpch_session;
+
+    #[tokio::test]
+    async fn explain_planning_preserves_runtime_catalog_statistics() {
+        let session = SessionContext::new();
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "value",
+            DataType::Int64,
+            false,
+        )]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(Int64Array::from(vec![1, 2, 3]))],
+        )
+        .unwrap();
+        let table = MemTable::try_new(schema, vec![vec![batch]]).unwrap();
+        session.register_table("t", Arc::new(table)).unwrap();
+        let state = session.state();
+
+        let planned = build_ir("select value from t", &state).await.unwrap();
+        let root = planned.query.root().unwrap();
+        let mut analyses = planned.analyze();
+        let profile = analyses
+            .get::<CardinalityEstimationV1>(&planned.query, root)
+            .unwrap();
+
+        assert_eq!(profile.rows.value, 3.0);
+        assert_eq!(profile.rows.source, EstimateSource::Catalog);
+    }
 
     #[tokio::test]
     async fn tpch_queries_have_no_correlated_subquery_join_inputs_after_unnesting() {
@@ -499,10 +553,10 @@ mod tests {
 
             let sql = first_query_sql(&path);
             let query = build_ir(&sql, &state).await.unwrap();
-            let Some(root) = query.root() else {
+            let Some(root) = query.query.root() else {
                 continue;
             };
-            let correlated = correlated_subquery_joins(&query, root).unwrap();
+            let correlated = correlated_subquery_joins(&query.query, root).unwrap();
             if !correlated.is_empty() {
                 failures.push(format!(
                     "{}: {:?}",

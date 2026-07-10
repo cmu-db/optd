@@ -26,6 +26,8 @@ pub enum AnalysisError {
     },
     /// A registered analysis had an unexpected concrete type.
     AnalysisTypeMismatch(&'static str),
+    /// A catalog-aware analysis could not resolve a referenced table.
+    Catalog(String),
 }
 
 impl fmt::Display for AnalysisError {
@@ -41,6 +43,7 @@ impl fmt::Display for AnalysisError {
             Self::AnalysisTypeMismatch(analysis) => {
                 write!(f, "registered analysis had the wrong type for {analysis}")
             }
+            Self::Catalog(error) => write!(f, "catalog analysis failed: {error}"),
         }
     }
 }
@@ -428,6 +431,15 @@ pub struct CardinalityEstimationV1 {
     state: OperatorAnalysisState<CardinalityProfile>,
 }
 
+/// Exact logical proof that an operator can produce at most one row.
+///
+/// Unlike cardinality estimation, this property never relies on catalog
+/// statistics or heuristic selectivity.
+#[derive(Default)]
+pub struct AtMostOneRow {
+    state: OperatorAnalysisState<bool>,
+}
+
 /// Registry of lazily-created analysis instances.
 #[derive(Default)]
 pub struct AnalysisContext {
@@ -446,6 +458,14 @@ impl AnalysisContext {
         Self {
             analyses: AnalysisRegistry::new(),
             catalog: Some(catalog),
+        }
+    }
+
+    /// Creates a fresh cache that uses the same catalog as this context.
+    pub fn fork(&self) -> Self {
+        Self {
+            analyses: AnalysisRegistry::new(),
+            catalog: self.catalog.clone(),
         }
     }
 
@@ -1114,6 +1134,77 @@ fn scan_column_nullability(scan: &Scan, analyses: &AnalysisContext) -> Vec<(Colu
         .collect()
 }
 
+impl CachedAnalysis for AtMostOneRow {
+    type Output = bool;
+
+    fn state(&self) -> &OperatorAnalysisState<Self::Output> {
+        &self.state
+    }
+
+    fn compute(
+        &self,
+        ctx: &QueryContext,
+        analyses: &mut AnalysisContext,
+        operator: Operator,
+    ) -> AnalysisResult<Self::Output> {
+        let at_most_one = match operator.get(ctx) {
+            OperatorData::Scan(_) | OperatorData::TableFunction(_) => false,
+            OperatorData::ConstScan(data) => data.rows.len() <= 1,
+            OperatorData::Selection(data) => analyses.get::<Self>(ctx, data.input)?,
+            OperatorData::Projection(data) => analyses.get::<Self>(ctx, data.input)?,
+            OperatorData::Output(data) => analyses.get::<Self>(ctx, data.input)?,
+            OperatorData::Sort(data) => analyses.get::<Self>(ctx, data.input)?,
+            OperatorData::Limit(data) => {
+                data.fetch.is_some_and(|fetch| fetch <= 1)
+                    || analyses.get::<Self>(ctx, data.input)?
+            }
+            OperatorData::Rename(data) => analyses.get::<Self>(ctx, data.input)?,
+            OperatorData::Map(data) => analyses.get::<Self>(ctx, data.input)?,
+            OperatorData::Aggregation(data) => {
+                data.keys.is_empty() || analyses.get::<Self>(ctx, data.input)?
+            }
+            OperatorData::CrossProduct(data) => {
+                analyses.get::<Self>(ctx, data.outer)? && analyses.get::<Self>(ctx, data.inner)?
+            }
+            OperatorData::Join(data) => match data.join_type {
+                JoinType::LeftSemi
+                | JoinType::LeftAnti
+                | JoinType::LeftMark { .. }
+                | JoinType::Single => analyses.get::<Self>(ctx, data.outer)?,
+                JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter => {
+                    analyses.get::<Self>(ctx, data.outer)?
+                        && analyses.get::<Self>(ctx, data.inner)?
+                }
+                JoinType::FullOuter => false,
+            },
+        };
+        Ok(at_most_one)
+    }
+}
+
+impl Analysis for AtMostOneRow {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn clear(&self) {
+        self.clear_cache();
+    }
+}
+
+impl Analyzable for AtMostOneRow {
+    type Value = bool;
+
+    fn get(
+        ctx: &QueryContext,
+        analyses: &mut AnalysisContext,
+        op: Operator,
+    ) -> AnalysisResult<Self::Value> {
+        let analysis = analyses.registry_entry::<Self>();
+        typed_analysis::<Self>(&analysis)?.get_cached(ctx, analyses, op)
+    }
+}
+
 impl CachedAnalysis for CardinalityEstimationV1 {
     type Output = CardinalityProfile;
 
@@ -1160,7 +1251,7 @@ fn cardinality_profile(
     analyses: &mut AnalysisContext,
 ) -> AnalysisResult<CardinalityProfile> {
     match operator.get(ctx) {
-        OperatorData::Scan(scan) => Ok(scan_profile(scan, ctx, analyses)),
+        OperatorData::Scan(scan) => scan_profile(scan, ctx, analyses),
         OperatorData::ConstScan(data) => Ok(const_scan_profile(data, ctx)),
         OperatorData::TableFunction(data) => Ok(CardinalityProfile::unknown_for_columns(
             1000.0,
@@ -1216,13 +1307,30 @@ fn cardinality_profile(
     }
 }
 
-fn scan_profile(scan: &Scan, ctx: &QueryContext, analyses: &AnalysisContext) -> CardinalityProfile {
+fn scan_profile(
+    scan: &Scan,
+    ctx: &QueryContext,
+    analyses: &AnalysisContext,
+) -> AnalysisResult<CardinalityProfile> {
     let catalog_stats = analyses
         .catalog
         .as_ref()
-        .and_then(|catalog| catalog.table_by_ref(&scan.table).ok())
-        .and_then(|metadata| metadata.statistics);
-    let mock_stats = mock_table_statistics(scan.table.table());
+        .map(|catalog| {
+            catalog
+                .table_by_ref(&scan.table)
+                .map_err(|error| AnalysisError::Catalog(error.to_string()))
+                .map(|metadata| metadata.statistics)
+        })
+        .transpose()?
+        .flatten();
+    // Hard-coded benchmark statistics are only a catalog-free fallback. Once
+    // a catalog is supplied it is authoritative, including when its table has
+    // no statistics.
+    let mock_stats = analyses
+        .catalog
+        .is_none()
+        .then(|| mock_table_statistics(scan.table.table()))
+        .flatten();
 
     let row_estimate = catalog_stats
         .as_ref()
@@ -1256,7 +1364,7 @@ fn scan_profile(scan: &Scan, ctx: &QueryContext, analyses: &AnalysisContext) -> 
         columns.insert(*column, profile);
     }
 
-    CardinalityProfile::new(row_estimate, columns)
+    Ok(CardinalityProfile::new(row_estimate, columns))
 }
 
 fn column_profile_from_stats(
@@ -2690,8 +2798,8 @@ mod tests {
     use super::*;
     use crate::{
         AggregateExpr, AggregateFunction, Aggregation, BinaryOp, Catalog, ColumnData, ExprData,
-        Join, JoinType, Map, MemoryCatalog, OperatorData, Output, Projection, ScalarValue, Scan,
-        Selection, TableFunction, TableFunctionDef, TableRef,
+        Join, JoinType, Limit, Map, MemoryCatalog, OperatorData, Output, Projection, ScalarValue,
+        Scan, Selection, TableFunction, TableFunctionDef, TableRef,
     };
     use arrow_schema::{DataType, Field, Schema};
     use std::sync::Arc;
@@ -4053,6 +4161,58 @@ mod tests {
             right,
         }
         .add(ctx)
+    }
+
+    #[test]
+    fn at_most_one_row_is_an_exact_structural_property() {
+        let mut ctx = QueryContext::new();
+        let column = ColumnData::new("value", DataType::Int64).add(&mut ctx);
+        let one = ExprData::Literal(ScalarValue::Int64(1)).add(&mut ctx);
+        let two = ExprData::Literal(ScalarValue::Int64(2)).add(&mut ctx);
+        let input = OperatorData::ConstScan(crate::ConstScan {
+            columns: vec![column],
+            rows: vec![vec![one], vec![two]],
+        })
+        .add(&mut ctx);
+        let false_predicate = ExprData::Literal(ScalarValue::Boolean(false)).add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
+            predicate: false_predicate,
+            input,
+        })
+        .add(&mut ctx);
+        let limit = OperatorData::Limit(Limit {
+            offset: 0,
+            fetch: Some(1),
+            input,
+        })
+        .add(&mut ctx);
+
+        let mut analyses = AnalysisContext::new();
+        let estimated = analyses
+            .get::<CardinalityEstimationV1>(&ctx, selection)
+            .unwrap();
+        assert_eq!(estimated.rows.upper, Some(0.0));
+        assert!(!analyses.get::<AtMostOneRow>(&ctx, selection).unwrap());
+        assert!(analyses.get::<AtMostOneRow>(&ctx, limit).unwrap());
+    }
+
+    #[test]
+    fn catalog_aware_cardinality_does_not_silently_fall_back() {
+        let mut ctx = QueryContext::new();
+        let column = ColumnData::new("value", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("missing"),
+            columns: vec![column],
+        })
+        .add(&mut ctx);
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        let mut analyses = AnalysisContext::with_catalog(catalog);
+
+        let error = analyses
+            .get::<CardinalityEstimationV1>(&ctx, scan)
+            .unwrap_err();
+
+        assert!(matches!(error, AnalysisError::Catalog(_)));
     }
 
     fn schema() -> Arc<Schema> {
