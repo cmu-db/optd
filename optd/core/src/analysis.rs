@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use crate::{
     AggregateExpr, AggregateFunction, BinaryOp, Catalog, Column, ColumnStatistics, Expr, ExprData,
-    HypergraphOf, JoinType, NaryOp, NodeSet, Operator, OperatorData, QueryContext, QueryHypergraph,
-    Relation, ScalarValue, Scan, TableStatistics, UnaryOp,
+    JoinType, NaryOp, NodeSet, Operator, OperatorData, QueryContext, QueryHypergraph, Relation,
+    ScalarValue, Scan, TableStatistics, UnaryOp,
 };
 
 /// Result type used by query analyses.
@@ -420,12 +420,6 @@ fn merge_equivalence_class_lists(
     let mut merged = left.to_vec();
     merged.extend_from_slice(right);
     merged
-}
-
-/// Input profiles supplied when estimating a virtual join-ordering DP state.
-pub struct JoinInputProfiles<'a> {
-    pub left: &'a CardinalityProfile,
-    pub right: &'a CardinalityProfile,
 }
 
 /// Cardinality and column-profile analysis for one operator.
@@ -1210,17 +1204,7 @@ fn cardinality_profile(
         OperatorData::Join(data) => {
             let left = analyses.get::<CardinalityEstimationV1>(ctx, data.outer)?;
             let right = analyses.get::<CardinalityEstimationV1>(ctx, data.inner)?;
-            let predicates = analyses
-                .get::<HypergraphOf>(ctx, operator)?
-                .map(|hg| {
-                    hg.edges
-                        .iter()
-                        .filter(|edge| edge.source == operator)
-                        .filter_map(|edge| edge.predicate)
-                        .collect::<Vec<_>>()
-                })
-                .filter(|predicates| !predicates.is_empty())
-                .unwrap_or_else(|| vec![data.on]);
+            let predicates = conjuncts(data.on, ctx);
             Ok(join_profile_from_predicates(
                 &left,
                 &right,
@@ -1575,30 +1559,6 @@ fn join_profile_from_predicates(
     join_profile_with_selectivity_and_classes(left, right, join_type, estimate)
 }
 
-pub(crate) fn join_profile_with_selectivity(
-    left: &CardinalityProfile,
-    right: &CardinalityProfile,
-    join_type: JoinType,
-    selectivity: Estimate,
-) -> CardinalityProfile {
-    let equivalence_classes =
-        merge_equivalence_class_lists(&left.equivalence_classes, &right.equivalence_classes);
-    join_profile_with_selectivity_and_classes(
-        left,
-        right,
-        join_type,
-        JoinSelectivityEstimate {
-            match_probability: Estimate::derived(
-                (right.rows.value * selectivity.value).clamp(0.0, 1.0),
-                Some(0.0),
-                Some(1.0),
-            ),
-            selectivity,
-            equivalence_classes,
-        },
-    )
-}
-
 fn join_profile_with_selectivity_and_classes(
     left: &CardinalityProfile,
     right: &CardinalityProfile,
@@ -1707,7 +1667,8 @@ fn combine_join_columns(
     }
 }
 
-pub(crate) fn join_selectivity(
+#[cfg(test)]
+fn join_selectivity(
     left: &CardinalityProfile,
     right: &CardinalityProfile,
     predicates: &[Expr],
@@ -4023,6 +3984,64 @@ mod tests {
 
         assert_eq!(profile.rows.value, 100.0);
         assert_eq!(profile.rows.lower, Some(100.0));
+    }
+
+    #[test]
+    fn cardinality_estimation_for_non_root_join_uses_only_its_predicates() {
+        let mut ctx = QueryContext::new();
+        let a = ColumnData::new("a", DataType::Int64).add(&mut ctx);
+        let b = ColumnData::new("b", DataType::Int64).add(&mut ctx);
+        let c = ColumnData::new("c", DataType::Int64).add(&mut ctx);
+        let scan_a = OperatorData::Scan(Scan {
+            table: TableRef::bare("a_table"),
+            columns: vec![a],
+        })
+        .add(&mut ctx);
+        let scan_b = OperatorData::Scan(Scan {
+            table: TableRef::bare("b_table"),
+            columns: vec![b],
+        })
+        .add(&mut ctx);
+        let scan_c = OperatorData::Scan(Scan {
+            table: TableRef::bare("c_table"),
+            columns: vec![c],
+        })
+        .add(&mut ctx);
+        let ab_predicate = equality_expr(&mut ctx, a, b);
+        let ab = OperatorData::Join(Join {
+            join_type: JoinType::Inner,
+            on: ab_predicate,
+            outer: scan_a,
+            inner: scan_b,
+        })
+        .add(&mut ctx);
+        let ac_predicate = equality_expr(&mut ctx, a, c);
+        let root = OperatorData::Join(Join {
+            join_type: JoinType::Inner,
+            on: ac_predicate,
+            outer: ab,
+            inner: scan_c,
+        })
+        .add(&mut ctx);
+        ctx.set_root(root);
+
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        for (table, column) in [("a_table", "a"), ("b_table", "b"), ("c_table", "c")] {
+            catalog
+                .create_table(TableRef::bare(table), schema(), None)
+                .unwrap();
+            catalog
+                .set_table_statistics(
+                    TableRef::bare(table),
+                    table_stats_for_column(column, 100, 100),
+                )
+                .unwrap();
+        }
+        let mut analyses = AnalysisContext::with_catalog(catalog);
+
+        let profile = analyses.get::<CardinalityEstimationV1>(&ctx, ab).unwrap();
+
+        assert_eq!(profile.rows.value, 100.0);
     }
 
     fn equality_expr(ctx: &mut QueryContext, left: Column, right: Column) -> Expr {

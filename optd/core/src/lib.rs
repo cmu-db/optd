@@ -15,8 +15,7 @@ pub mod tpch;
 pub use analysis::{
     Analysis, AnalysisContext, AnalysisError, AnalysisResult, Analyzable, AvailableColumns,
     CardinalityEstimationV1, CardinalityProfile, ColumnNullability, ColumnProfile, CreatedColumns,
-    Estimate, EstimateSource, FreeColumns, JoinInputProfiles, ParentIndex, ParentsOf, UsedColumns,
-    expr_used_columns,
+    Estimate, EstimateSource, FreeColumns, ParentIndex, ParentsOf, UsedColumns, expr_used_columns,
 };
 pub use catalog::{
     Catalog, CatalogError, CatalogResult, ColumnStatistics, MemoryCatalog, ResolvedTableRef,

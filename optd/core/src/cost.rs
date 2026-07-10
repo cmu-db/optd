@@ -1,6 +1,7 @@
 //! Cost model interfaces.
 
 use crate::analysis::CardinalityEstimationV1;
+#[cfg(test)]
 use crate::hypergraph::QueryHypergraph;
 use crate::optimize::{OptimizeError, OptimizeResult};
 use crate::{
@@ -10,11 +11,16 @@ use crate::{
 
 /// Estimates operator costs for an optd query tree.
 pub trait CostModel: Send + Sync + 'static {
-    type Cost: Clone + PartialOrd;
+    type Cost: Clone;
 
+    /// Returns the identity value for [`Self::add`].
     fn zero(&self) -> Self::Cost;
 
+    /// Combines two cost components.
     fn add(&self, left: Self::Cost, right: Self::Cost) -> Self::Cost;
+
+    /// Returns true when `candidate` is preferable to `existing`.
+    fn is_better(&self, candidate: &Self::Cost, existing: &Self::Cost) -> bool;
 
     /// Computes this operator's local cost, excluding input costs.
     fn operator_cost(
@@ -61,7 +67,9 @@ pub trait CostModel: Send + Sync + 'static {
         Ok(child_costs
             .iter()
             .cloned()
-            .fold(operator_cost, |acc, cost| self.add(acc, cost)))
+            .fold(self.add(self.zero(), operator_cost), |acc, cost| {
+                self.add(acc, cost)
+            }))
     }
 
     /// Recursively computes total cost for the operator subtree.
@@ -89,6 +97,10 @@ impl CostModel for DefaultCostModel {
 
     fn add(&self, left: Self::Cost, right: Self::Cost) -> Self::Cost {
         left + right
+    }
+
+    fn is_better(&self, candidate: &Self::Cost, existing: &Self::Cost) -> bool {
+        candidate.total_cmp(existing).is_lt()
     }
 
     fn operator_cost(
@@ -210,6 +222,7 @@ pub(crate) fn join_algorithm_cost_for_profiles(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn join_algorithm_class(
     edge_indices: &[usize],
     hg: &QueryHypergraph,
