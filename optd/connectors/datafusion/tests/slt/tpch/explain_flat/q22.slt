@@ -60,7 +60,7 @@ order by
 20)------"id": 54,
 21)------"kind": "selection",
 22)------"title": "σ Selection",
-23)------"predicate": "((substr(c_phone(#4), 1, 2) = \"13\") OR (substr(c_phone(#4), 1, 2) = \"31\") OR (substr(c_phone(#4), 1, 2) = \"23\") OR (substr(c_phone(#4), 1, 2) = \"29\") OR (substr(c_phone(#4), 1, 2) = \"30\") OR (substr(c_phone(#4), 1, 2) = \"18\") OR (substr(c_phone(#4), 1, 2) = \"17\"))",
+23)------"predicate": "((substr(c_phone(#4), 1, 2) = CAST(\"13\" AS Utf8View)) OR (substr(c_phone(#4), 1, 2) = CAST(\"31\" AS Utf8View)) OR (substr(c_phone(#4), 1, 2) = CAST(\"23\" AS Utf8View)) OR (substr(c_phone(#4), 1, 2) = CAST(\"29\" AS Utf8View)) OR (substr(c_phone(#4), 1, 2) = CAST(\"30\" AS Utf8View)) OR (substr(c_phone(#4), 1, 2) = CAST(\"18\" AS Utf8View)) OR (substr(c_phone(#4), 1, 2) = CAST(\"17\" AS Utf8View)))",
 24)------"input": 0
 25)----},
 26)----{
@@ -83,7 +83,7 @@ order by
 43)------"id": 2,
 44)------"kind": "selection",
 45)------"title": "σ Selection",
-46)------"predicate": "((c_acctbal(#13) > 0) AND ((substr(c_phone(#12), 1, 2) = \"13\") OR (substr(c_phone(#12), 1, 2) = \"31\") OR (substr(c_phone(#12), 1, 2) = \"23\") OR (substr(c_phone(#12), 1, 2) = \"29\") OR (substr(c_phone(#12), 1, 2) = \"30\") OR (substr(c_phone(#12), 1, 2) = \"18\") OR (substr(c_phone(#12), 1, 2) = \"17\")))",
+46)------"predicate": "((CAST(c_acctbal(#13) AS Decimal128(30, 15)) > CAST(0 AS Decimal128(30, 15))) AND ((substr(c_phone(#12), 1, 2) = CAST(\"13\" AS Utf8View)) OR (substr(c_phone(#12), 1, 2) = CAST(\"31\" AS Utf8View)) OR (substr(c_phone(#12), 1, 2) = CAST(\"23\" AS Utf8View)) OR (substr(c_phone(#12), 1, 2) = CAST(\"29\" AS Utf8View)) OR (substr(c_phone(#12), 1, 2) = CAST(\"30\" AS Utf8View)) OR (substr(c_phone(#12), 1, 2) = CAST(\"18\" AS Utf8View)) OR (substr(c_phone(#12), 1, 2) = CAST(\"17\" AS Utf8View))))",
 47)------"input": 1
 48)----},
 49)----{
@@ -109,7 +109,7 @@ order by
 69)------"id": 87,
 70)------"kind": "selection",
 71)------"title": "σ Selection",
-72)------"predicate": "(c_acctbal(#5) > avg(customer.c_acctbal)(#16))",
+72)------"predicate": "(CAST(c_acctbal(#5) AS Decimal128(19, 6)) > avg(customer.c_acctbal)(#16))",
 73)------"input": 85
 74)----},
 75)----{

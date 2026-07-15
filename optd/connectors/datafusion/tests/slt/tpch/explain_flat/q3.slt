@@ -77,7 +77,7 @@ order by
 51)------"id": 19,
 52)------"kind": "selection",
 53)------"title": "σ Selection",
-54)------"predicate": "(c_mktsegment(#6) = \"BUILDING\")",
+54)------"predicate": "(c_mktsegment(#6) = CAST(\"BUILDING\" AS Utf8View))",
 55)------"input": 0
 56)----},
 57)----{
@@ -114,7 +114,7 @@ order by
 88)------"inner": 20
 89)----},
 90)----{
-91)------"id": 36,
+91)------"id": 37,
 92)------"kind": "join",
 93)------"title": "⋈ InnerJoin",
 94)------"join_type": "Inner",
@@ -123,17 +123,17 @@ order by
 97)------"inner": 35
 98)----},
 99)----{
-100)------"id": 37,
+100)------"id": 39,
 101)------"kind": "aggregation",
 102)------"title": "γ Aggregation",
 103)------"keys": "l_orderkey(#17), o_orderdate(#12), o_shippriority(#15)",
 104)------"aggregates": [
-105)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#33) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
+105)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#33) := sum((l_extendedprice(#22) * (CAST(1 AS Decimal128(20, 0)) - l_discount(#23))))"
 106)------],
-107)------"input": 36
+107)------"input": 37
 108)----},
 109)----{
-110)------"id": 38,
+110)------"id": 40,
 111)------"kind": "projection",
 112)------"title": "π Projection",
 113)------"columns": [
@@ -142,31 +142,31 @@ order by
 116)--------"o_orderdate(#12)",
 117)--------"o_shippriority(#15)"
 118)------],
-119)------"input": 37
+119)------"input": 39
 120)----},
 121)----{
-122)------"id": 39,
+122)------"id": 41,
 123)------"kind": "sort",
 124)------"title": "⇞ Sort",
 125)------"keys": [
 126)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#33) Desc NullsFirst",
 127)--------"o_orderdate(#12) Asc NullsLast"
 128)------],
-129)------"input": 38
+129)------"input": 40
 130)----},
 131)----{
-132)------"id": 40,
+132)------"id": 42,
 133)------"kind": "limit",
 134)------"title": "τ Limit",
 135)------"fetch": "10",
 136)------"offset": "0",
-137)------"input": 39
+137)------"input": 41
 138)----},
 139)----{
-140)------"id": 41,
+140)------"id": 43,
 141)------"kind": "output",
 142)------"title": "= Output",
-143)------"input": 40
+143)------"input": 42
 144)----}
 145)--]
 146)}

@@ -45,156 +45,156 @@ SELECT explain_flat('SELECT MIN(mc.note) AS production_note, MIN(t.title) AS mov
 41)------"input": 11
 42)----},
 43)----{
-44)------"id": 2,
+44)------"id": 0,
 45)------"kind": "scan",
 46)------"title": "⊞ Scan",
-47)------"table_name": "info_type",
+47)------"table_name": "company_type",
 48)------"columns": [
-49)--------"id(#4)",
-50)--------"info(#5)"
+49)--------"id(#0)",
+50)--------"kind(#1)"
 51)------]
 52)----},
 53)----{
-54)------"id": 3,
+54)------"id": 1,
 55)------"kind": "rename",
-56)------"title": "ρ Rename(it)",
+56)------"title": "ρ Rename(ct)",
 57)------"defs": [
-58)--------"id(#6) <- id(#4)",
-59)--------"info(#7) <- info(#5)"
+58)--------"id(#2) <- id(#0)",
+59)--------"kind(#3) <- kind(#1)"
 60)------],
-61)------"input": 2
+61)------"input": 0
 62)----},
 63)----{
-64)------"id": 38,
+64)------"id": 37,
 65)------"kind": "selection",
 66)------"title": "σ Selection",
-67)------"predicate": "(info(#7) = \"top 250 rank\")",
-68)------"input": 3
+67)------"predicate": "(kind(#3) = CAST(\"production companies\" AS Utf8View))",
+68)------"input": 1
 69)----},
 70)----{
-71)------"id": 8,
+71)------"id": 5,
 72)------"kind": "scan",
 73)------"title": "⊞ Scan",
-74)------"table_name": "movie_info_idx",
+74)------"table_name": "movie_companies",
 75)------"columns": [
-76)--------"id(#18)",
-77)--------"movie_id(#19)",
-78)--------"info_type_id(#20)",
-79)--------"info(#21)",
-80)--------"note(#22)"
+76)--------"id(#8)",
+77)--------"movie_id(#9)",
+78)--------"company_id(#10)",
+79)--------"company_type_id(#11)",
+80)--------"note(#12)"
 81)------]
 82)----},
 83)----{
-84)------"id": 9,
+84)------"id": 6,
 85)------"kind": "rename",
-86)------"title": "ρ Rename(mi_idx)",
+86)------"title": "ρ Rename(mc)",
 87)------"defs": [
-88)--------"id(#23) <- id(#18)",
-89)--------"movie_id(#24) <- movie_id(#19)",
-90)--------"info_type_id(#25) <- info_type_id(#20)",
-91)--------"info(#26) <- info(#21)",
-92)--------"note(#27) <- note(#22)"
+88)--------"id(#13) <- id(#8)",
+89)--------"movie_id(#14) <- movie_id(#9)",
+90)--------"company_id(#15) <- company_id(#10)",
+91)--------"company_type_id(#16) <- company_type_id(#11)",
+92)--------"note(#17) <- note(#12)"
 93)------],
-94)------"input": 8
+94)------"input": 5
 95)----},
 96)----{
-97)------"id": 54,
-98)------"kind": "join",
-99)------"title": "⋈ InnerJoin",
-100)------"join_type": "Inner",
-101)------"condition": "(id(#6) = info_type_id(#25))",
-102)------"outer": 38,
-103)------"inner": 9
-104)----},
-105)----{
-106)------"id": 0,
-107)------"kind": "scan",
-108)------"title": "⊞ Scan",
-109)------"table_name": "company_type",
-110)------"columns": [
-111)--------"id(#0)",
-112)--------"kind(#1)"
-113)------]
-114)----},
-115)----{
-116)------"id": 1,
-117)------"kind": "rename",
-118)------"title": "ρ Rename(ct)",
-119)------"defs": [
-120)--------"id(#2) <- id(#0)",
-121)--------"kind(#3) <- kind(#1)"
-122)------],
-123)------"input": 0
-124)----},
-125)----{
-126)------"id": 37,
-127)------"kind": "selection",
-128)------"title": "σ Selection",
-129)------"predicate": "(kind(#3) = \"production companies\")",
-130)------"input": 1
-131)----},
-132)----{
-133)------"id": 5,
-134)------"kind": "scan",
-135)------"title": "⊞ Scan",
-136)------"table_name": "movie_companies",
-137)------"columns": [
-138)--------"id(#8)",
-139)--------"movie_id(#9)",
-140)--------"company_id(#10)",
-141)--------"company_type_id(#11)",
-142)--------"note(#12)"
-143)------]
-144)----},
-145)----{
-146)------"id": 6,
-147)------"kind": "rename",
-148)------"title": "ρ Rename(mc)",
-149)------"defs": [
-150)--------"id(#13) <- id(#8)",
-151)--------"movie_id(#14) <- movie_id(#9)",
-152)--------"company_id(#15) <- company_id(#10)",
-153)--------"company_type_id(#16) <- company_type_id(#11)",
-154)--------"note(#17) <- note(#12)"
-155)------],
-156)------"input": 5
-157)----},
-158)----{
-159)------"id": 30,
-160)------"kind": "selection",
-161)------"title": "σ Selection",
-162)------"predicate": "((note(#17) NOT LIKE \"%(as Metro-Goldwyn-Mayer Pictures)%\") AND ((note(#17) LIKE \"%(co-production)%\") OR (note(#17) LIKE \"%(presents)%\")))",
-163)------"input": 6
-164)----},
-165)----{
-166)------"id": 55,
-167)------"kind": "join",
-168)------"title": "⋈ InnerJoin",
-169)------"join_type": "Inner",
-170)------"condition": "(id(#2) = company_type_id(#16))",
-171)------"outer": 37,
-172)------"inner": 30
-173)----},
-174)----{
-175)------"id": 56,
-176)------"kind": "join",
-177)------"title": "⋈ InnerJoin",
-178)------"join_type": "Inner",
-179)------"condition": "(movie_id(#14) = movie_id(#24))",
-180)------"outer": 54,
-181)------"inner": 55
+97)------"id": 30,
+98)------"kind": "selection",
+99)------"title": "σ Selection",
+100)------"predicate": "((note(#17) NOT LIKE CAST(\"%(as Metro-Goldwyn-Mayer Pictures)%\" AS Utf8View)) AND ((note(#17) LIKE CAST(\"%(co-production)%\" AS Utf8View)) OR (note(#17) LIKE CAST(\"%(presents)%\" AS Utf8View))))",
+101)------"input": 6
+102)----},
+103)----{
+104)------"id": 54,
+105)------"kind": "join",
+106)------"title": "⋈ InnerJoin",
+107)------"join_type": "Inner",
+108)------"condition": "(id(#2) = company_type_id(#16))",
+109)------"outer": 37,
+110)------"inner": 30
+111)----},
+112)----{
+113)------"id": 66,
+114)------"kind": "join",
+115)------"title": "⋈ InnerJoin",
+116)------"join_type": "Inner",
+117)------"condition": "(id(#40) = movie_id(#14))",
+118)------"outer": 12,
+119)------"inner": 54
+120)----},
+121)----{
+122)------"id": 8,
+123)------"kind": "scan",
+124)------"title": "⊞ Scan",
+125)------"table_name": "movie_info_idx",
+126)------"columns": [
+127)--------"id(#18)",
+128)--------"movie_id(#19)",
+129)--------"info_type_id(#20)",
+130)--------"info(#21)",
+131)--------"note(#22)"
+132)------]
+133)----},
+134)----{
+135)------"id": 9,
+136)------"kind": "rename",
+137)------"title": "ρ Rename(mi_idx)",
+138)------"defs": [
+139)--------"id(#23) <- id(#18)",
+140)--------"movie_id(#24) <- movie_id(#19)",
+141)--------"info_type_id(#25) <- info_type_id(#20)",
+142)--------"info(#26) <- info(#21)",
+143)--------"note(#27) <- note(#22)"
+144)------],
+145)------"input": 8
+146)----},
+147)----{
+148)------"id": 86,
+149)------"kind": "join",
+150)------"title": "⋈ InnerJoin",
+151)------"join_type": "Inner",
+152)------"condition": "((movie_id(#14) = movie_id(#24)) AND (id(#40) = movie_id(#24)))",
+153)------"outer": 66,
+154)------"inner": 9
+155)----},
+156)----{
+157)------"id": 2,
+158)------"kind": "scan",
+159)------"title": "⊞ Scan",
+160)------"table_name": "info_type",
+161)------"columns": [
+162)--------"id(#4)",
+163)--------"info(#5)"
+164)------]
+165)----},
+166)----{
+167)------"id": 3,
+168)------"kind": "rename",
+169)------"title": "ρ Rename(it)",
+170)------"defs": [
+171)--------"id(#6) <- id(#4)",
+172)--------"info(#7) <- info(#5)"
+173)------],
+174)------"input": 2
+175)----},
+176)----{
+177)------"id": 38,
+178)------"kind": "selection",
+179)------"title": "σ Selection",
+180)------"predicate": "(info(#7) = CAST(\"top 250 rank\" AS Utf8View))",
+181)------"input": 3
 182)----},
 183)----{
-184)------"id": 57,
+184)------"id": 89,
 185)------"kind": "join",
 186)------"title": "⋈ InnerJoin",
 187)------"join_type": "Inner",
-188)------"condition": "((id(#40) = movie_id(#14)) AND (id(#40) = movie_id(#24)))",
-189)------"outer": 12,
-190)------"inner": 56
+188)------"condition": "(id(#6) = info_type_id(#25))",
+189)------"outer": 86,
+190)------"inner": 38
 191)----},
 192)----{
-193)------"id": 58,
+193)------"id": 90,
 194)------"kind": "aggregation",
 195)------"title": "γ Aggregation",
 196)------"keys": "",
@@ -203,13 +203,13 @@ SELECT explain_flat('SELECT MIN(mc.note) AS production_note, MIN(t.title) AS mov
 199)--------"min(t.title)(#53) := min(title(#41))",
 200)--------"min(t.production_year)(#54) := min(production_year(#44))"
 201)------],
-202)------"input": 57
+202)------"input": 89
 203)----},
 204)----{
-205)------"id": 59,
+205)------"id": 91,
 206)------"kind": "output",
 207)------"title": "= Output",
-208)------"input": 58
+208)------"input": 90
 209)----}
 210)--]
 211)}

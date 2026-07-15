@@ -67,167 +67,167 @@ order by
 25)------"input": 10
 26)----},
 27)----{
-28)------"id": 7,
+28)------"id": 5,
 29)------"kind": "scan",
 30)------"title": "⊞ Scan",
-31)------"table_name": "nation",
+31)------"table_name": "customer",
 32)------"columns": [
-33)--------"n_nationkey(#40)",
-34)--------"n_name(#41)",
-35)--------"n_regionkey(#42)",
-36)--------"n_comment(#43)"
-37)------]
-38)----},
-39)----{
-40)------"id": 8,
-41)------"kind": "rename",
-42)------"title": "ρ Rename(n1)",
-43)------"defs": [
-44)--------"n_nationkey(#44) <- n_nationkey(#40)",
-45)--------"n_name(#45) <- n_name(#41)",
-46)--------"n_regionkey(#46) <- n_regionkey(#42)",
-47)--------"n_comment(#47) <- n_comment(#43)"
-48)------],
-49)------"input": 7
-50)----},
-51)----{
-52)------"id": 90,
-53)------"kind": "join",
-54)------"title": "⋈ InnerJoin",
-55)------"join_type": "Inner",
-56)------"condition": "(((n_name(#45) = \"FRANCE\") AND (n_name(#53) = \"GERMANY\")) OR ((n_name(#45) = \"GERMANY\") AND (n_name(#53) = \"FRANCE\")))",
-57)------"outer": 11,
-58)------"inner": 8
-59)----},
-60)----{
-61)------"id": 0,
-62)------"kind": "scan",
-63)------"title": "⊞ Scan",
-64)------"table_name": "supplier",
-65)------"columns": [
-66)--------"s_suppkey(#0)",
-67)--------"s_name(#1)",
-68)--------"s_address(#2)",
-69)--------"s_nationkey(#3)",
-70)--------"s_phone(#4)",
-71)--------"s_acctbal(#5)",
-72)--------"s_comment(#6)"
-73)------]
-74)----},
-75)----{
-76)------"id": 91,
-77)------"kind": "join",
-78)------"title": "⋈ InnerJoin",
-79)------"join_type": "Inner",
-80)------"condition": "(s_nationkey(#3) = n_nationkey(#44))",
-81)------"outer": 90,
-82)------"inner": 0
-83)----},
-84)----{
-85)------"id": 1,
-86)------"kind": "scan",
-87)------"title": "⊞ Scan",
-88)------"table_name": "lineitem",
-89)------"columns": [
-90)--------"l_orderkey(#7)",
-91)--------"l_partkey(#8)",
-92)--------"l_suppkey(#9)",
-93)--------"l_linenumber(#10)",
-94)--------"l_quantity(#11)",
-95)--------"l_extendedprice(#12)",
-96)--------"l_discount(#13)",
-97)--------"l_tax(#14)",
-98)--------"l_returnflag(#15)",
-99)--------"l_linestatus(#16)",
-100)--------"l_shipdate(#17)",
-101)--------"l_commitdate(#18)",
-102)--------"l_receiptdate(#19)",
-103)--------"l_shipinstruct(#20)",
-104)--------"l_shipmode(#21)",
-105)--------"l_comment(#22)"
-106)------]
-107)----},
-108)----{
-109)------"id": 63,
-110)------"kind": "selection",
-111)------"title": "σ Selection",
-112)------"predicate": "((l_shipdate(#17) >= CAST(\"1995-01-01\" AS Date32)) AND (l_shipdate(#17) <= CAST(\"1996-12-31\" AS Date32)))",
-113)------"input": 1
-114)----},
-115)----{
-116)------"id": 92,
-117)------"kind": "join",
-118)------"title": "⋈ InnerJoin",
-119)------"join_type": "Inner",
-120)------"condition": "(s_suppkey(#0) = l_suppkey(#9))",
-121)------"outer": 91,
-122)------"inner": 63
-123)----},
-124)----{
-125)------"id": 3,
-126)------"kind": "scan",
-127)------"title": "⊞ Scan",
-128)------"table_name": "orders",
-129)------"columns": [
-130)--------"o_orderkey(#23)",
-131)--------"o_custkey(#24)",
-132)--------"o_orderstatus(#25)",
-133)--------"o_totalprice(#26)",
-134)--------"o_orderdate(#27)",
-135)--------"o_orderpriority(#28)",
-136)--------"o_clerk(#29)",
-137)--------"o_shippriority(#30)",
-138)--------"o_comment(#31)"
+33)--------"c_custkey(#32)",
+34)--------"c_name(#33)",
+35)--------"c_address(#34)",
+36)--------"c_nationkey(#35)",
+37)--------"c_phone(#36)",
+38)--------"c_acctbal(#37)",
+39)--------"c_mktsegment(#38)",
+40)--------"c_comment(#39)"
+41)------]
+42)----},
+43)----{
+44)------"id": 110,
+45)------"kind": "join",
+46)------"title": "⋈ InnerJoin",
+47)------"join_type": "Inner",
+48)------"condition": "(c_nationkey(#35) = n_nationkey(#52))",
+49)------"outer": 11,
+50)------"inner": 5
+51)----},
+52)----{
+53)------"id": 7,
+54)------"kind": "scan",
+55)------"title": "⊞ Scan",
+56)------"table_name": "nation",
+57)------"columns": [
+58)--------"n_nationkey(#40)",
+59)--------"n_name(#41)",
+60)--------"n_regionkey(#42)",
+61)--------"n_comment(#43)"
+62)------]
+63)----},
+64)----{
+65)------"id": 8,
+66)------"kind": "rename",
+67)------"title": "ρ Rename(n1)",
+68)------"defs": [
+69)--------"n_nationkey(#44) <- n_nationkey(#40)",
+70)--------"n_name(#45) <- n_name(#41)",
+71)--------"n_regionkey(#46) <- n_regionkey(#42)",
+72)--------"n_comment(#47) <- n_comment(#43)"
+73)------],
+74)------"input": 7
+75)----},
+76)----{
+77)------"id": 0,
+78)------"kind": "scan",
+79)------"title": "⊞ Scan",
+80)------"table_name": "supplier",
+81)------"columns": [
+82)--------"s_suppkey(#0)",
+83)--------"s_name(#1)",
+84)--------"s_address(#2)",
+85)--------"s_nationkey(#3)",
+86)--------"s_phone(#4)",
+87)--------"s_acctbal(#5)",
+88)--------"s_comment(#6)"
+89)------]
+90)----},
+91)----{
+92)------"id": 100,
+93)------"kind": "join",
+94)------"title": "⋈ InnerJoin",
+95)------"join_type": "Inner",
+96)------"condition": "(s_nationkey(#3) = n_nationkey(#44))",
+97)------"outer": 8,
+98)------"inner": 0
+99)----},
+100)----{
+101)------"id": 3,
+102)------"kind": "scan",
+103)------"title": "⊞ Scan",
+104)------"table_name": "orders",
+105)------"columns": [
+106)--------"o_orderkey(#23)",
+107)--------"o_custkey(#24)",
+108)--------"o_orderstatus(#25)",
+109)--------"o_totalprice(#26)",
+110)--------"o_orderdate(#27)",
+111)--------"o_orderpriority(#28)",
+112)--------"o_clerk(#29)",
+113)--------"o_shippriority(#30)",
+114)--------"o_comment(#31)"
+115)------]
+116)----},
+117)----{
+118)------"id": 1,
+119)------"kind": "scan",
+120)------"title": "⊞ Scan",
+121)------"table_name": "lineitem",
+122)------"columns": [
+123)--------"l_orderkey(#7)",
+124)--------"l_partkey(#8)",
+125)--------"l_suppkey(#9)",
+126)--------"l_linenumber(#10)",
+127)--------"l_quantity(#11)",
+128)--------"l_extendedprice(#12)",
+129)--------"l_discount(#13)",
+130)--------"l_tax(#14)",
+131)--------"l_returnflag(#15)",
+132)--------"l_linestatus(#16)",
+133)--------"l_shipdate(#17)",
+134)--------"l_commitdate(#18)",
+135)--------"l_receiptdate(#19)",
+136)--------"l_shipinstruct(#20)",
+137)--------"l_shipmode(#21)",
+138)--------"l_comment(#22)"
 139)------]
 140)----},
 141)----{
-142)------"id": 93,
-143)------"kind": "join",
-144)------"title": "⋈ InnerJoin",
-145)------"join_type": "Inner",
-146)------"condition": "(o_orderkey(#23) = l_orderkey(#7))",
-147)------"outer": 92,
-148)------"inner": 3
-149)----},
-150)----{
-151)------"id": 5,
-152)------"kind": "scan",
-153)------"title": "⊞ Scan",
-154)------"table_name": "customer",
-155)------"columns": [
-156)--------"c_custkey(#32)",
-157)--------"c_name(#33)",
-158)--------"c_address(#34)",
-159)--------"c_nationkey(#35)",
-160)--------"c_phone(#36)",
-161)--------"c_acctbal(#37)",
-162)--------"c_mktsegment(#38)",
-163)--------"c_comment(#39)"
-164)------]
+142)------"id": 63,
+143)------"kind": "selection",
+144)------"title": "σ Selection",
+145)------"predicate": "((l_shipdate(#17) >= CAST(\"1995-01-01\" AS Date32)) AND (l_shipdate(#17) <= CAST(\"1996-12-31\" AS Date32)))",
+146)------"input": 1
+147)----},
+148)----{
+149)------"id": 91,
+150)------"kind": "join",
+151)------"title": "⋈ InnerJoin",
+152)------"join_type": "Inner",
+153)------"condition": "(o_orderkey(#23) = l_orderkey(#7))",
+154)------"outer": 3,
+155)------"inner": 63
+156)----},
+157)----{
+158)------"id": 105,
+159)------"kind": "join",
+160)------"title": "⋈ InnerJoin",
+161)------"join_type": "Inner",
+162)------"condition": "(s_suppkey(#0) = l_suppkey(#9))",
+163)------"outer": 100,
+164)------"inner": 91
 165)----},
 166)----{
-167)------"id": 94,
+167)------"id": 131,
 168)------"kind": "join",
 169)------"title": "⋈ InnerJoin",
 170)------"join_type": "Inner",
-171)------"condition": "((c_custkey(#32) = o_custkey(#24)) AND (c_nationkey(#35) = n_nationkey(#52)))",
-172)------"outer": 93,
-173)------"inner": 5
+171)------"condition": "((c_custkey(#32) = o_custkey(#24)) AND (((n_name(#45) = CAST(\"FRANCE\" AS Utf8View)) AND (n_name(#53) = CAST(\"GERMANY\" AS Utf8View))) OR ((n_name(#45) = CAST(\"GERMANY\" AS Utf8View)) AND (n_name(#53) = CAST(\"FRANCE\" AS Utf8View)))))",
+172)------"outer": 110,
+173)------"inner": 105
 174)----},
 175)----{
-176)------"id": 95,
+176)------"id": 175,
 177)------"kind": "map",
 178)------"title": "χ Map",
 179)------"computations": [
 180)--------"supp_nation(#56) := n_name(#45)",
 181)--------"cust_nation(#57) := n_name(#53)",
 182)--------"l_year(#58) := date_part(\"YEAR\", l_shipdate(#17))",
-183)--------"volume(#59) := (l_extendedprice(#12) * (1 - l_discount(#13)))"
+183)--------"volume(#59) := (l_extendedprice(#12) * (CAST(1 AS Decimal128(20, 0)) - l_discount(#13)))"
 184)------],
-185)------"input": 94
+185)------"input": 131
 186)----},
 187)----{
-188)------"id": 96,
+188)------"id": 176,
 189)------"kind": "projection",
 190)------"title": "π Projection",
 191)------"columns": [
@@ -236,10 +236,10 @@ order by
 194)--------"l_year(#58)",
 195)--------"volume(#59)"
 196)------],
-197)------"input": 95
+197)------"input": 175
 198)----},
 199)----{
-200)------"id": 97,
+200)------"id": 177,
 201)------"kind": "rename",
 202)------"title": "ρ Rename(shipping)",
 203)------"defs": [
@@ -248,20 +248,20 @@ order by
 206)--------"l_year(#62) <- l_year(#58)",
 207)--------"volume(#63) <- volume(#59)"
 208)------],
-209)------"input": 96
+209)------"input": 176
 210)----},
 211)----{
-212)------"id": 98,
+212)------"id": 178,
 213)------"kind": "aggregation",
 214)------"title": "γ Aggregation",
 215)------"keys": "supp_nation(#60), cust_nation(#61), l_year(#62)",
 216)------"aggregates": [
 217)--------"sum(shipping.volume)(#64) := sum(volume(#63))"
 218)------],
-219)------"input": 97
+219)------"input": 177
 220)----},
 221)----{
-222)------"id": 99,
+222)------"id": 179,
 223)------"kind": "sort",
 224)------"title": "⇞ Sort",
 225)------"keys": [
@@ -269,13 +269,13 @@ order by
 227)--------"cust_nation(#61) Asc NullsLast",
 228)--------"l_year(#62) Asc NullsLast"
 229)------],
-230)------"input": 98
+230)------"input": 178
 231)----},
 232)----{
-233)------"id": 100,
+233)------"id": 180,
 234)------"kind": "output",
 235)------"title": "= Output",
-236)------"input": 99
+236)------"input": 179
 237)----}
 238)--]
 239)}

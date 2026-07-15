@@ -48,274 +48,274 @@ SELECT explain_flat('SELECT MIN(cn.name) AS company_name, MIN(lt.link) AS link_t
 44)------"id": 31,
 45)------"kind": "selection",
 46)------"title": "σ Selection",
-47)------"predicate": "((production_year(#78) >= 1950) AND (production_year(#78) <= 2010))",
+47)------"predicate": "((CAST(production_year(#78) AS Int64) >= 1950) AND (CAST(production_year(#78) AS Int64) <= 2010))",
 48)------"input": 24
 49)----},
 50)----{
-51)------"id": 14,
+51)------"id": 0,
 52)------"kind": "scan",
 53)------"title": "⊞ Scan",
-54)------"table_name": "movie_info",
+54)------"table_name": "company_name",
 55)------"columns": [
-56)--------"id(#38)",
-57)--------"movie_id(#39)",
-58)--------"info_type_id(#40)",
-59)--------"info(#41)",
-60)--------"note(#42)"
-61)------]
-62)----},
-63)----{
-64)------"id": 15,
-65)------"kind": "rename",
-66)------"title": "ρ Rename(mi)",
-67)------"defs": [
-68)--------"id(#43) <- id(#38)",
-69)--------"movie_id(#44) <- movie_id(#39)",
-70)--------"info_type_id(#45) <- info_type_id(#40)",
-71)--------"info(#46) <- info(#41)",
-72)--------"note(#47) <- note(#42)"
-73)------],
-74)------"input": 14
-75)----},
-76)----{
-77)------"id": 50,
-78)------"kind": "selection",
-79)------"title": "σ Selection",
-80)------"predicate": "((info(#46) = \"Sweden\") OR (info(#46) = \"Norway\") OR (info(#46) = \"Germany\") OR (info(#46) = \"Denmark\") OR (info(#46) = \"Swedish\") OR (info(#46) = \"Denish\") OR (info(#46) = \"Norwegian\") OR (info(#46) = \"German\") OR (info(#46) = \"English\"))",
-81)------"input": 15
-82)----},
-83)----{
-84)------"id": 0,
-85)------"kind": "scan",
-86)------"title": "⊞ Scan",
-87)------"table_name": "company_name",
-88)------"columns": [
-89)--------"id(#0)",
-90)--------"name(#1)",
-91)--------"country_code(#2)",
-92)--------"imdb_id(#3)",
-93)--------"name_pcode_nf(#4)",
-94)--------"name_pcode_sf(#5)",
-95)--------"md5sum(#6)"
-96)------]
-97)----},
-98)----{
-99)------"id": 1,
-100)------"kind": "rename",
-101)------"title": "ρ Rename(cn)",
-102)------"defs": [
-103)--------"id(#7) <- id(#0)",
-104)--------"name(#8) <- name(#1)",
-105)--------"country_code(#9) <- country_code(#2)",
-106)--------"imdb_id(#10) <- imdb_id(#3)",
-107)--------"name_pcode_nf(#11) <- name_pcode_nf(#4)",
-108)--------"name_pcode_sf(#12) <- name_pcode_sf(#5)",
-109)--------"md5sum(#13) <- md5sum(#6)"
-110)------],
-111)------"input": 0
-112)----},
-113)----{
-114)------"id": 91,
-115)------"kind": "selection",
-116)------"title": "σ Selection",
-117)------"predicate": "((country_code(#9) != \"[pl]\") AND ((name(#8) LIKE \"%Film%\") OR (name(#8) LIKE \"%Warner%\")))",
-118)------"input": 1
-119)----},
-120)----{
-121)------"id": 2,
-122)------"kind": "scan",
-123)------"title": "⊞ Scan",
-124)------"table_name": "company_type",
-125)------"columns": [
-126)--------"id(#14)",
-127)--------"kind(#15)"
-128)------]
-129)----},
-130)----{
-131)------"id": 3,
-132)------"kind": "rename",
-133)------"title": "ρ Rename(ct)",
-134)------"defs": [
-135)--------"id(#16) <- id(#14)",
-136)--------"kind(#17) <- kind(#15)"
+56)--------"id(#0)",
+57)--------"name(#1)",
+58)--------"country_code(#2)",
+59)--------"imdb_id(#3)",
+60)--------"name_pcode_nf(#4)",
+61)--------"name_pcode_sf(#5)",
+62)--------"md5sum(#6)"
+63)------]
+64)----},
+65)----{
+66)------"id": 1,
+67)------"kind": "rename",
+68)------"title": "ρ Rename(cn)",
+69)------"defs": [
+70)--------"id(#7) <- id(#0)",
+71)--------"name(#8) <- name(#1)",
+72)--------"country_code(#9) <- country_code(#2)",
+73)--------"imdb_id(#10) <- imdb_id(#3)",
+74)--------"name_pcode_nf(#11) <- name_pcode_nf(#4)",
+75)--------"name_pcode_sf(#12) <- name_pcode_sf(#5)",
+76)--------"md5sum(#13) <- md5sum(#6)"
+77)------],
+78)------"input": 0
+79)----},
+80)----{
+81)------"id": 91,
+82)------"kind": "selection",
+83)------"title": "σ Selection",
+84)------"predicate": "((country_code(#9) != CAST(\"[pl]\" AS Utf8View)) AND ((name(#8) LIKE CAST(\"%Film%\" AS Utf8View)) OR (name(#8) LIKE CAST(\"%Warner%\" AS Utf8View))))",
+85)------"input": 1
+86)----},
+87)----{
+88)------"id": 2,
+89)------"kind": "scan",
+90)------"title": "⊞ Scan",
+91)------"table_name": "company_type",
+92)------"columns": [
+93)--------"id(#14)",
+94)--------"kind(#15)"
+95)------]
+96)----},
+97)----{
+98)------"id": 3,
+99)------"kind": "rename",
+100)------"title": "ρ Rename(ct)",
+101)------"defs": [
+102)--------"id(#16) <- id(#14)",
+103)--------"kind(#17) <- kind(#15)"
+104)------],
+105)------"input": 2
+106)----},
+107)----{
+108)------"id": 92,
+109)------"kind": "selection",
+110)------"title": "σ Selection",
+111)------"predicate": "(kind(#17) = CAST(\"production companies\" AS Utf8View))",
+112)------"input": 3
+113)----},
+114)----{
+115)------"id": 11,
+116)------"kind": "scan",
+117)------"title": "⊞ Scan",
+118)------"table_name": "movie_companies",
+119)------"columns": [
+120)--------"id(#28)",
+121)--------"movie_id(#29)",
+122)--------"company_id(#30)",
+123)--------"company_type_id(#31)",
+124)--------"note(#32)"
+125)------]
+126)----},
+127)----{
+128)------"id": 12,
+129)------"kind": "rename",
+130)------"title": "ρ Rename(mc)",
+131)------"defs": [
+132)--------"id(#33) <- id(#28)",
+133)--------"movie_id(#34) <- movie_id(#29)",
+134)--------"company_id(#35) <- company_id(#30)",
+135)--------"company_type_id(#36) <- company_type_id(#31)",
+136)--------"note(#37) <- note(#32)"
 137)------],
-138)------"input": 2
+138)------"input": 11
 139)----},
 140)----{
-141)------"id": 92,
+141)------"id": 59,
 142)------"kind": "selection",
 143)------"title": "σ Selection",
-144)------"predicate": "(kind(#17) = \"production companies\")",
-145)------"input": 3
+144)------"predicate": "IS_NULL(note(#37))",
+145)------"input": 12
 146)----},
 147)----{
-148)------"id": 11,
-149)------"kind": "scan",
-150)------"title": "⊞ Scan",
-151)------"table_name": "movie_companies",
-152)------"columns": [
-153)--------"id(#28)",
-154)--------"movie_id(#29)",
-155)--------"company_id(#30)",
-156)--------"company_type_id(#31)",
-157)--------"note(#32)"
-158)------]
-159)----},
-160)----{
-161)------"id": 12,
-162)------"kind": "rename",
-163)------"title": "ρ Rename(mc)",
-164)------"defs": [
-165)--------"id(#33) <- id(#28)",
-166)--------"movie_id(#34) <- movie_id(#29)",
-167)--------"company_id(#35) <- company_id(#30)",
-168)--------"company_type_id(#36) <- company_type_id(#31)",
-169)--------"note(#37) <- note(#32)"
-170)------],
-171)------"input": 11
-172)----},
-173)----{
-174)------"id": 59,
-175)------"kind": "selection",
-176)------"title": "σ Selection",
-177)------"predicate": "IS_NULL(note(#37))",
-178)------"input": 12
-179)----},
-180)----{
-181)------"id": 20,
-182)------"kind": "scan",
-183)------"title": "⊞ Scan",
-184)------"table_name": "movie_link",
-185)------"columns": [
-186)--------"id(#54)",
-187)--------"movie_id(#55)",
-188)--------"linked_movie_id(#56)",
-189)--------"link_type_id(#57)"
-190)------]
-191)----},
-192)----{
-193)------"id": 21,
-194)------"kind": "rename",
-195)------"title": "ρ Rename(ml)",
-196)------"defs": [
-197)--------"id(#58) <- id(#54)",
-198)--------"movie_id(#59) <- movie_id(#55)",
-199)--------"linked_movie_id(#60) <- linked_movie_id(#56)",
-200)--------"link_type_id(#61) <- link_type_id(#57)"
-201)------],
-202)------"input": 20
-203)----},
-204)----{
-205)------"id": 116,
-206)------"kind": "join",
-207)------"title": "⋈ InnerJoin",
-208)------"join_type": "Inner",
-209)------"condition": "(movie_id(#59) = movie_id(#34))",
-210)------"outer": 59,
-211)------"inner": 21
-212)----},
-213)----{
-214)------"id": 8,
-215)------"kind": "scan",
-216)------"title": "⊞ Scan",
-217)------"table_name": "link_type",
-218)------"columns": [
-219)--------"id(#24)",
-220)--------"link(#25)"
-221)------]
-222)----},
-223)----{
-224)------"id": 9,
-225)------"kind": "rename",
-226)------"title": "ρ Rename(lt)",
-227)------"defs": [
-228)--------"id(#26) <- id(#24)",
-229)--------"link(#27) <- link(#25)"
-230)------],
-231)------"input": 8
-232)----},
-233)----{
-234)------"id": 69,
-235)------"kind": "selection",
-236)------"title": "σ Selection",
-237)------"predicate": "(link(#27) LIKE \"%follow%\")",
-238)------"input": 9
-239)----},
-240)----{
-241)------"id": 117,
-242)------"kind": "join",
-243)------"title": "⋈ InnerJoin",
-244)------"join_type": "Inner",
-245)------"condition": "(id(#26) = link_type_id(#61))",
-246)------"outer": 116,
-247)------"inner": 69
-248)----},
-249)----{
-250)------"id": 17,
-251)------"kind": "scan",
-252)------"title": "⊞ Scan",
-253)------"table_name": "movie_keyword",
-254)------"columns": [
-255)--------"id(#48)",
-256)--------"movie_id(#49)",
-257)--------"keyword_id(#50)"
-258)------]
-259)----},
-260)----{
-261)------"id": 18,
-262)------"kind": "rename",
-263)------"title": "ρ Rename(mk)",
-264)------"defs": [
-265)--------"id(#51) <- id(#48)",
-266)--------"movie_id(#52) <- movie_id(#49)",
-267)--------"keyword_id(#53) <- keyword_id(#50)"
-268)------],
-269)------"input": 17
-270)----},
-271)----{
-272)------"id": 118,
-273)------"kind": "join",
-274)------"title": "⋈ InnerJoin",
-275)------"join_type": "Inner",
-276)------"condition": "((movie_id(#52) = movie_id(#34)) AND (movie_id(#59) = movie_id(#52)))",
-277)------"outer": 117,
-278)------"inner": 18
-279)----},
-280)----{
-281)------"id": 119,
-282)------"kind": "join",
-283)------"title": "⋈ InnerJoin",
-284)------"join_type": "Inner",
-285)------"condition": "(company_type_id(#36) = id(#16))",
-286)------"outer": 92,
-287)------"inner": 118
-288)----},
-289)----{
-290)------"id": 120,
-291)------"kind": "join",
-292)------"title": "⋈ InnerJoin",
-293)------"join_type": "Inner",
-294)------"condition": "(company_id(#35) = id(#7))",
-295)------"outer": 91,
-296)------"inner": 119
-297)----},
-298)----{
-299)------"id": 121,
-300)------"kind": "join",
-301)------"title": "⋈ InnerJoin",
-302)------"join_type": "Inner",
-303)------"condition": "((movie_id(#34) = movie_id(#44)) AND (movie_id(#52) = movie_id(#44)) AND (movie_id(#59) = movie_id(#44)))",
-304)------"outer": 50,
-305)------"inner": 120
+148)------"id": 152,
+149)------"kind": "join",
+150)------"title": "⋈ InnerJoin",
+151)------"join_type": "Inner",
+152)------"condition": "(company_type_id(#36) = id(#16))",
+153)------"outer": 92,
+154)------"inner": 59
+155)----},
+156)----{
+157)------"id": 8,
+158)------"kind": "scan",
+159)------"title": "⊞ Scan",
+160)------"table_name": "link_type",
+161)------"columns": [
+162)--------"id(#24)",
+163)--------"link(#25)"
+164)------]
+165)----},
+166)----{
+167)------"id": 9,
+168)------"kind": "rename",
+169)------"title": "ρ Rename(lt)",
+170)------"defs": [
+171)--------"id(#26) <- id(#24)",
+172)--------"link(#27) <- link(#25)"
+173)------],
+174)------"input": 8
+175)----},
+176)----{
+177)------"id": 69,
+178)------"kind": "selection",
+179)------"title": "σ Selection",
+180)------"predicate": "(link(#27) LIKE CAST(\"%follow%\" AS Utf8View))",
+181)------"input": 9
+182)----},
+183)----{
+184)------"id": 20,
+185)------"kind": "scan",
+186)------"title": "⊞ Scan",
+187)------"table_name": "movie_link",
+188)------"columns": [
+189)--------"id(#54)",
+190)--------"movie_id(#55)",
+191)--------"linked_movie_id(#56)",
+192)--------"link_type_id(#57)"
+193)------]
+194)----},
+195)----{
+196)------"id": 21,
+197)------"kind": "rename",
+198)------"title": "ρ Rename(ml)",
+199)------"defs": [
+200)--------"id(#58) <- id(#54)",
+201)--------"movie_id(#59) <- movie_id(#55)",
+202)--------"linked_movie_id(#60) <- linked_movie_id(#56)",
+203)--------"link_type_id(#61) <- link_type_id(#57)"
+204)------],
+205)------"input": 20
+206)----},
+207)----{
+208)------"id": 116,
+209)------"kind": "join",
+210)------"title": "⋈ InnerJoin",
+211)------"join_type": "Inner",
+212)------"condition": "(id(#26) = link_type_id(#61))",
+213)------"outer": 69,
+214)------"inner": 21
+215)----},
+216)----{
+217)------"id": 163,
+218)------"kind": "join",
+219)------"title": "⋈ InnerJoin",
+220)------"join_type": "Inner",
+221)------"condition": "(movie_id(#59) = movie_id(#34))",
+222)------"outer": 152,
+223)------"inner": 116
+224)----},
+225)----{
+226)------"id": 198,
+227)------"kind": "join",
+228)------"title": "⋈ InnerJoin",
+229)------"join_type": "Inner",
+230)------"condition": "(company_id(#35) = id(#7))",
+231)------"outer": 91,
+232)------"inner": 163
+233)----},
+234)----{
+235)------"id": 652,
+236)------"kind": "join",
+237)------"title": "⋈ InnerJoin",
+238)------"join_type": "Inner",
+239)------"condition": "((movie_id(#59) = id(#74)) AND (id(#74) = movie_id(#34)))",
+240)------"outer": 31,
+241)------"inner": 198
+242)----},
+243)----{
+244)------"id": 14,
+245)------"kind": "scan",
+246)------"title": "⊞ Scan",
+247)------"table_name": "movie_info",
+248)------"columns": [
+249)--------"id(#38)",
+250)--------"movie_id(#39)",
+251)--------"info_type_id(#40)",
+252)--------"info(#41)",
+253)--------"note(#42)"
+254)------]
+255)----},
+256)----{
+257)------"id": 15,
+258)------"kind": "rename",
+259)------"title": "ρ Rename(mi)",
+260)------"defs": [
+261)--------"id(#43) <- id(#38)",
+262)--------"movie_id(#44) <- movie_id(#39)",
+263)--------"info_type_id(#45) <- info_type_id(#40)",
+264)--------"info(#46) <- info(#41)",
+265)--------"note(#47) <- note(#42)"
+266)------],
+267)------"input": 14
+268)----},
+269)----{
+270)------"id": 50,
+271)------"kind": "selection",
+272)------"title": "σ Selection",
+273)------"predicate": "((info(#46) = CAST(\"Sweden\" AS Utf8View)) OR (info(#46) = CAST(\"Norway\" AS Utf8View)) OR (info(#46) = CAST(\"Germany\" AS Utf8View)) OR (info(#46) = CAST(\"Denmark\" AS Utf8View)) OR (info(#46) = CAST(\"Swedish\" AS Utf8View)) OR (info(#46) = CAST(\"Denish\" AS Utf8View)) OR (info(#46) = CAST(\"Norwegian\" AS Utf8View)) OR (info(#46) = CAST(\"German\" AS Utf8View)) OR (info(#46) = CAST(\"English\" AS Utf8View)))",
+274)------"input": 15
+275)----},
+276)----{
+277)------"id": 1657,
+278)------"kind": "join",
+279)------"title": "⋈ InnerJoin",
+280)------"join_type": "Inner",
+281)------"condition": "((movie_id(#34) = movie_id(#44)) AND (movie_id(#59) = movie_id(#44)) AND (movie_id(#44) = id(#74)))",
+282)------"outer": 652,
+283)------"inner": 50
+284)----},
+285)----{
+286)------"id": 17,
+287)------"kind": "scan",
+288)------"title": "⊞ Scan",
+289)------"table_name": "movie_keyword",
+290)------"columns": [
+291)--------"id(#48)",
+292)--------"movie_id(#49)",
+293)--------"keyword_id(#50)"
+294)------]
+295)----},
+296)----{
+297)------"id": 18,
+298)------"kind": "rename",
+299)------"title": "ρ Rename(mk)",
+300)------"defs": [
+301)--------"id(#51) <- id(#48)",
+302)--------"movie_id(#52) <- movie_id(#49)",
+303)--------"keyword_id(#53) <- keyword_id(#50)"
+304)------],
+305)------"input": 17
 306)----},
 307)----{
-308)------"id": 122,
+308)------"id": 1681,
 309)------"kind": "join",
 310)------"title": "⋈ InnerJoin",
 311)------"join_type": "Inner",
-312)------"condition": "((movie_id(#59) = id(#74)) AND (id(#74) = movie_id(#52)) AND (id(#74) = movie_id(#34)) AND (movie_id(#44) = id(#74)))",
-313)------"outer": 31,
-314)------"inner": 121
+312)------"condition": "((movie_id(#52) = movie_id(#34)) AND (movie_id(#52) = movie_id(#44)) AND (movie_id(#59) = movie_id(#52)) AND (id(#74) = movie_id(#52)))",
+313)------"outer": 1657,
+314)------"inner": 18
 315)----},
 316)----{
 317)------"id": 5,
@@ -343,20 +343,20 @@ SELECT explain_flat('SELECT MIN(cn.name) AS company_name, MIN(lt.link) AS link_t
 339)------"id": 80,
 340)------"kind": "selection",
 341)------"title": "σ Selection",
-342)------"predicate": "(keyword(#22) = \"sequel\")",
+342)------"predicate": "(keyword(#22) = CAST(\"sequel\" AS Utf8View))",
 343)------"input": 6
 344)----},
 345)----{
-346)------"id": 123,
+346)------"id": 1804,
 347)------"kind": "join",
 348)------"title": "⋈ InnerJoin",
 349)------"join_type": "Inner",
 350)------"condition": "(keyword_id(#53) = id(#21))",
-351)------"outer": 122,
+351)------"outer": 1681,
 352)------"inner": 80
 353)----},
 354)----{
-355)------"id": 124,
+355)------"id": 1809,
 356)------"kind": "aggregation",
 357)------"title": "γ Aggregation",
 358)------"keys": "",
@@ -365,13 +365,13 @@ SELECT explain_flat('SELECT MIN(cn.name) AS company_name, MIN(lt.link) AS link_t
 361)--------"min(lt.link)(#87) := min(link(#27))",
 362)--------"min(t.title)(#88) := min(title(#75))"
 363)------],
-364)------"input": 123
+364)------"input": 1804
 365)----},
 366)----{
-367)------"id": 125,
+367)------"id": 1810,
 368)------"kind": "output",
 369)------"title": "= Output",
-370)------"input": 124
+370)------"input": 1809
 371)----}
 372)--]
 373)}

@@ -40,7 +40,7 @@ where
 28)------"id": 1,
 29)------"kind": "selection",
 30)------"title": "σ Selection",
-31)------"predicate": "((((l_shipdate(#10) >= CAST(\"1994-01-01\" AS Date32)) AND (l_shipdate(#10) < CAST(\"1995-01-01\" AS Date32))) AND ((l_discount(#6) >= (0.06 - 0.01)) AND (l_discount(#6) <= (0.06 + 0.01)))) AND (l_quantity(#4) < 24))",
+31)------"predicate": "((((l_shipdate(#10) >= CAST(\"1994-01-01\" AS Date32)) AND (l_shipdate(#10) < CAST(\"1995-01-01\" AS Date32))) AND ((CAST(l_discount(#6) AS Decimal128(30, 15)) >= CAST((0.06 - 0.01) AS Decimal128(30, 15))) AND (CAST(l_discount(#6) AS Decimal128(30, 15)) <= CAST((0.06 + 0.01) AS Decimal128(30, 15))))) AND (CAST(l_quantity(#4) AS Decimal128(22, 2)) < CAST(24 AS Decimal128(22, 2))))",
 32)------"input": 0
 33)----},
 34)----{

@@ -45,7 +45,7 @@ order by
 21)------"id": 29,
 22)------"kind": "selection",
 23)------"title": "σ Selection",
-24)------"predicate": "((o_orderdate(#4) >= \"1993-07-01\") AND (o_orderdate(#4) < (CAST(\"1993-07-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))",
+24)------"predicate": "((o_orderdate(#4) >= CAST(\"1993-07-01\" AS Date32)) AND (o_orderdate(#4) < (CAST(\"1993-07-01\" AS Date32) + INTERVAL(3mo 0d 0ns))))",
 25)------"input": 0
 26)----},
 27)----{

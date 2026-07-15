@@ -65,7 +65,7 @@ where
 45)------"id": 35,
 46)------"kind": "selection",
 47)------"title": "σ Selection",
-48)------"predicate": "((p_brand(#19) = \"Brand#23\") AND (p_container(#22) = \"MED BOX\"))",
+48)------"predicate": "((p_brand(#19) = CAST(\"Brand#23\" AS Utf8View)) AND (p_container(#22) = CAST(\"MED BOX\" AS Utf8View)))",
 49)------"input": 1
 50)----},
 51)----{
@@ -107,7 +107,7 @@ where
 87)------"kind": "map",
 88)------"title": "χ Map",
 89)------"computations": [
-90)--------"Float64(0.2) * avg(lineitem.l_quantity)(#42) := (0.2 * avg(lineitem.l_quantity)(#41))"
+90)--------"Float64(0.2) * avg(lineitem.l_quantity)(#42) := CAST((0.2 * CAST(avg(lineitem.l_quantity)(#41) AS Float64)) AS Decimal128(30, 15))"
 91)------],
 92)------"input": 19
 93)----},
@@ -131,7 +131,7 @@ where
 111)------"inner": 21
 112)----},
 113)----{
-114)------"id": 44,
+114)------"id": 45,
 115)------"kind": "join",
 116)------"title": "⋈ InnerJoin",
 117)------"join_type": "Inner",
@@ -140,45 +140,45 @@ where
 120)------"inner": 43
 121)----},
 122)----{
-123)------"id": 45,
+123)------"id": 47,
 124)------"kind": "selection",
 125)------"title": "σ Selection",
-126)------"predicate": "(l_quantity(#4) < Float64(0.2) * avg(lineitem.l_quantity)(#42))",
-127)------"input": 44
+126)------"predicate": "(CAST(l_quantity(#4) AS Decimal128(30, 15)) < Float64(0.2) * avg(lineitem.l_quantity)(#42))",
+127)------"input": 45
 128)----},
 129)----{
-130)------"id": 46,
+130)------"id": 48,
 131)------"kind": "aggregation",
 132)------"title": "γ Aggregation",
 133)------"keys": "",
 134)------"aggregates": [
 135)--------"sum(lineitem.l_extendedprice)(#43) := sum(l_extendedprice(#5))"
 136)------],
-137)------"input": 45
+137)------"input": 47
 138)----},
 139)----{
-140)------"id": 47,
+140)------"id": 49,
 141)------"kind": "map",
 142)------"title": "χ Map",
 143)------"computations": [
-144)--------"avg_yearly(#44) := (sum(lineitem.l_extendedprice)(#43) / 7)"
+144)--------"avg_yearly(#44) := (CAST(sum(lineitem.l_extendedprice)(#43) AS Float64) / 7)"
 145)------],
-146)------"input": 46
+146)------"input": 48
 147)----},
 148)----{
-149)------"id": 48,
+149)------"id": 50,
 150)------"kind": "projection",
 151)------"title": "π Projection",
 152)------"columns": [
 153)--------"avg_yearly(#44)"
 154)------],
-155)------"input": 47
+155)------"input": 49
 156)----},
 157)----{
-158)------"id": 49,
+158)------"id": 51,
 159)------"kind": "output",
 160)------"title": "= Output",
-161)------"input": 48
+161)------"input": 50
 162)----}
 163)--]
 164)}

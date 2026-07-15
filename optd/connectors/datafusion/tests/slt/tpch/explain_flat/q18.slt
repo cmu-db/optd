@@ -106,7 +106,7 @@ order by
 71)------"id": 7,
 72)------"kind": "selection",
 73)------"title": "σ Selection",
-74)------"predicate": "(sum(lineitem.l_quantity)(#49) > 300)",
+74)------"predicate": "(sum(lineitem.l_quantity)(#49) > CAST(300 AS Decimal128(25, 2)))",
 75)------"input": 6
 76)----},
 77)----{
@@ -130,90 +130,90 @@ order by
 95)------"inner": 8
 96)----},
 97)----{
-98)------"id": 57,
+98)------"id": 65,
 99)------"kind": "join",
-100)------"title": "⟕ᵐ LeftMarkJoin",
-101)------"join_type": "LeftMark",
-102)------"condition": "(IS_NULL(o_orderkey(#8)) OR IS_NULL(l_orderkey(#33)))",
-103)------"marker": "in_unknown_mark(#52)",
-104)------"marker_nullable": "false",
-105)------"outer": 56,
-106)------"inner": 8
-107)----},
-108)----{
-109)------"id": 3,
-110)------"kind": "scan",
-111)------"title": "⊞ Scan",
-112)------"table_name": "lineitem",
-113)------"columns": [
-114)--------"l_orderkey(#17)",
-115)--------"l_partkey(#18)",
-116)--------"l_suppkey(#19)",
-117)--------"l_linenumber(#20)",
-118)--------"l_quantity(#21)",
-119)--------"l_extendedprice(#22)",
-120)--------"l_discount(#23)",
-121)--------"l_tax(#24)",
-122)--------"l_returnflag(#25)",
-123)--------"l_linestatus(#26)",
-124)--------"l_shipdate(#27)",
-125)--------"l_commitdate(#28)",
-126)--------"l_receiptdate(#29)",
-127)--------"l_shipinstruct(#30)",
-128)--------"l_shipmode(#31)",
-129)--------"l_comment(#32)"
-130)------]
-131)----},
-132)----{
-133)------"id": 58,
-134)------"kind": "join",
-135)------"title": "⋈ InnerJoin",
-136)------"join_type": "Inner",
-137)------"condition": "(o_orderkey(#8) = l_orderkey(#17))",
-138)------"outer": 57,
-139)------"inner": 3
+100)------"title": "⋈ InnerJoin",
+101)------"join_type": "Inner",
+102)------"condition": "(c_custkey(#0) = o_custkey(#9))",
+103)------"outer": 0,
+104)------"inner": 56
+105)----},
+106)----{
+107)------"id": 72,
+108)------"kind": "join",
+109)------"title": "⟕ᵐ LeftMarkJoin",
+110)------"join_type": "LeftMark",
+111)------"condition": "(IS_NULL(o_orderkey(#8)) OR IS_NULL(l_orderkey(#33)))",
+112)------"marker": "in_unknown_mark(#52)",
+113)------"marker_nullable": "false",
+114)------"outer": 65,
+115)------"inner": 8
+116)----},
+117)----{
+118)------"id": 3,
+119)------"kind": "scan",
+120)------"title": "⊞ Scan",
+121)------"table_name": "lineitem",
+122)------"columns": [
+123)--------"l_orderkey(#17)",
+124)--------"l_partkey(#18)",
+125)--------"l_suppkey(#19)",
+126)--------"l_linenumber(#20)",
+127)--------"l_quantity(#21)",
+128)--------"l_extendedprice(#22)",
+129)--------"l_discount(#23)",
+130)--------"l_tax(#24)",
+131)--------"l_returnflag(#25)",
+132)--------"l_linestatus(#26)",
+133)--------"l_shipdate(#27)",
+134)--------"l_commitdate(#28)",
+135)--------"l_receiptdate(#29)",
+136)--------"l_shipinstruct(#30)",
+137)--------"l_shipmode(#31)",
+138)--------"l_comment(#32)"
+139)------]
 140)----},
 141)----{
-142)------"id": 59,
+142)------"id": 75,
 143)------"kind": "join",
 144)------"title": "⋈ InnerJoin",
 145)------"join_type": "Inner",
-146)------"condition": "(c_custkey(#0) = o_custkey(#9))",
-147)------"outer": 0,
-148)------"inner": 58
+146)------"condition": "(o_orderkey(#8) = l_orderkey(#17))",
+147)------"outer": 72,
+148)------"inner": 3
 149)----},
 150)----{
-151)------"id": 60,
+151)------"id": 76,
 152)------"kind": "selection",
 153)------"title": "σ Selection",
 154)------"predicate": "CASE WHEN in_match_mark(#51) THEN true WHEN in_unknown_mark(#52) THEN NULL::Boolean ELSE false END",
-155)------"input": 59
+155)------"input": 75
 156)----},
 157)----{
-158)------"id": 61,
+158)------"id": 77,
 159)------"kind": "aggregation",
 160)------"title": "γ Aggregation",
 161)------"keys": "c_name(#1), c_custkey(#0), o_orderkey(#8), o_orderdate(#12), o_totalprice(#11)",
 162)------"aggregates": [
 163)--------"sum(lineitem.l_quantity)(#50) := sum(l_quantity(#21))"
 164)------],
-165)------"input": 60
+165)------"input": 76
 166)----},
 167)----{
-168)------"id": 62,
+168)------"id": 78,
 169)------"kind": "sort",
 170)------"title": "⇞ Sort",
 171)------"keys": [
 172)--------"o_totalprice(#11) Desc NullsFirst",
 173)--------"o_orderdate(#12) Asc NullsLast"
 174)------],
-175)------"input": 61
+175)------"input": 77
 176)----},
 177)----{
-178)------"id": 63,
+178)------"id": 79,
 179)------"kind": "output",
 180)------"title": "= Output",
-181)------"input": 62
+181)------"input": 78
 182)----}
 183)--]
 184)}

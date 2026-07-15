@@ -63,8 +63,8 @@ order by
 39)------"aggregates": [
 40)--------"sum(lineitem.l_quantity)(#16) := sum(l_quantity(#4))",
 41)--------"sum(lineitem.l_extendedprice)(#17) := sum(l_extendedprice(#5))",
-42)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#18) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))",
-43)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount * Int64(1) + lineitem.l_tax)(#19) := sum(((l_extendedprice(#5) * (1 - l_discount(#6))) * (1 + l_tax(#7))))",
+42)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#18) := sum((l_extendedprice(#5) * (CAST(1 AS Decimal128(20, 0)) - l_discount(#6))))",
+43)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount * Int64(1) + lineitem.l_tax)(#19) := sum(((l_extendedprice(#5) * (CAST(1 AS Decimal128(20, 0)) - l_discount(#6))) * (CAST(1 AS Decimal128(20, 0)) + l_tax(#7))))",
 44)--------"avg(lineitem.l_quantity)(#20) := avg(l_quantity(#4))",
 45)--------"avg(lineitem.l_extendedprice)(#21) := avg(l_extendedprice(#5))",
 46)--------"avg(lineitem.l_discount)(#22) := avg(l_discount(#6))",

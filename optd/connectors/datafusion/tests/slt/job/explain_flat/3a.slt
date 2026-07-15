@@ -48,7 +48,7 @@ SELECT explain_flat('SELECT MIN(t.title) AS movie_title FROM keyword AS k, movie
 44)------"id": 16,
 45)------"kind": "selection",
 46)------"title": "σ Selection",
-47)------"predicate": "(production_year(#38) > 2005)",
+47)------"predicate": "(CAST(production_year(#38) AS Int64) > 2005)",
 48)------"input": 9
 49)----},
 50)----{
@@ -77,7 +77,7 @@ SELECT explain_flat('SELECT MIN(t.title) AS movie_title FROM keyword AS k, movie
 73)------"id": 27,
 74)------"kind": "selection",
 75)------"title": "σ Selection",
-76)------"predicate": "(keyword(#4) LIKE \"%sequel%\")",
+76)------"predicate": "(keyword(#4) LIKE CAST(\"%sequel%\" AS Utf8View))",
 77)------"input": 1
 78)----},
 79)----{
@@ -103,7 +103,7 @@ SELECT explain_flat('SELECT MIN(t.title) AS movie_title FROM keyword AS k, movie
 99)------"input": 5
 100)----},
 101)----{
-102)------"id": 42,
+102)------"id": 43,
 103)------"kind": "join",
 104)------"title": "⋈ InnerJoin",
 105)------"join_type": "Inner",
@@ -112,71 +112,71 @@ SELECT explain_flat('SELECT MIN(t.title) AS movie_title FROM keyword AS k, movie
 108)------"inner": 6
 109)----},
 110)----{
-111)------"id": 2,
-112)------"kind": "scan",
-113)------"title": "⊞ Scan",
-114)------"table_name": "movie_info",
-115)------"columns": [
-116)--------"id(#6)",
-117)--------"movie_id(#7)",
-118)--------"info_type_id(#8)",
-119)--------"info(#9)",
-120)--------"note(#10)"
-121)------]
-122)----},
-123)----{
-124)------"id": 3,
-125)------"kind": "rename",
-126)------"title": "ρ Rename(mi)",
-127)------"defs": [
-128)--------"id(#11) <- id(#6)",
-129)--------"movie_id(#12) <- movie_id(#7)",
-130)--------"info_type_id(#13) <- info_type_id(#8)",
-131)--------"info(#14) <- info(#9)",
-132)--------"note(#15) <- note(#10)"
-133)------],
-134)------"input": 2
-135)----},
-136)----{
-137)------"id": 28,
-138)------"kind": "selection",
-139)------"title": "σ Selection",
-140)------"predicate": "((info(#14) = \"Sweden\") OR (info(#14) = \"Norway\") OR (info(#14) = \"Germany\") OR (info(#14) = \"Denmark\") OR (info(#14) = \"Swedish\") OR (info(#14) = \"Denish\") OR (info(#14) = \"Norwegian\") OR (info(#14) = \"German\"))",
-141)------"input": 3
-142)----},
-143)----{
-144)------"id": 43,
-145)------"kind": "join",
-146)------"title": "⋈ InnerJoin",
-147)------"join_type": "Inner",
-148)------"condition": "(movie_id(#20) = movie_id(#12))",
-149)------"outer": 42,
-150)------"inner": 28
+111)------"id": 47,
+112)------"kind": "join",
+113)------"title": "⋈ InnerJoin",
+114)------"join_type": "Inner",
+115)------"condition": "(id(#34) = movie_id(#20))",
+116)------"outer": 16,
+117)------"inner": 43
+118)----},
+119)----{
+120)------"id": 2,
+121)------"kind": "scan",
+122)------"title": "⊞ Scan",
+123)------"table_name": "movie_info",
+124)------"columns": [
+125)--------"id(#6)",
+126)--------"movie_id(#7)",
+127)--------"info_type_id(#8)",
+128)--------"info(#9)",
+129)--------"note(#10)"
+130)------]
+131)----},
+132)----{
+133)------"id": 3,
+134)------"kind": "rename",
+135)------"title": "ρ Rename(mi)",
+136)------"defs": [
+137)--------"id(#11) <- id(#6)",
+138)--------"movie_id(#12) <- movie_id(#7)",
+139)--------"info_type_id(#13) <- info_type_id(#8)",
+140)--------"info(#14) <- info(#9)",
+141)--------"note(#15) <- note(#10)"
+142)------],
+143)------"input": 2
+144)----},
+145)----{
+146)------"id": 28,
+147)------"kind": "selection",
+148)------"title": "σ Selection",
+149)------"predicate": "((info(#14) = CAST(\"Sweden\" AS Utf8View)) OR (info(#14) = CAST(\"Norway\" AS Utf8View)) OR (info(#14) = CAST(\"Germany\" AS Utf8View)) OR (info(#14) = CAST(\"Denmark\" AS Utf8View)) OR (info(#14) = CAST(\"Swedish\" AS Utf8View)) OR (info(#14) = CAST(\"Denish\" AS Utf8View)) OR (info(#14) = CAST(\"Norwegian\" AS Utf8View)) OR (info(#14) = CAST(\"German\" AS Utf8View)))",
+150)------"input": 3
 151)----},
 152)----{
-153)------"id": 44,
+153)------"id": 58,
 154)------"kind": "join",
 155)------"title": "⋈ InnerJoin",
 156)------"join_type": "Inner",
-157)------"condition": "((id(#34) = movie_id(#12)) AND (id(#34) = movie_id(#20)))",
-158)------"outer": 16,
-159)------"inner": 43
+157)------"condition": "((movie_id(#20) = movie_id(#12)) AND (id(#34) = movie_id(#12)))",
+158)------"outer": 47,
+159)------"inner": 28
 160)----},
 161)----{
-162)------"id": 45,
+162)------"id": 59,
 163)------"kind": "aggregation",
 164)------"title": "γ Aggregation",
 165)------"keys": "",
 166)------"aggregates": [
 167)--------"min(t.title)(#46) := min(title(#35))"
 168)------],
-169)------"input": 44
+169)------"input": 58
 170)----},
 171)----{
-172)------"id": 46,
+172)------"id": 60,
 173)------"kind": "output",
 174)------"title": "= Output",
-175)------"input": 45
+175)------"input": 59
 176)----}
 177)--]
 178)}

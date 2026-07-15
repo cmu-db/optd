@@ -61,7 +61,7 @@ order by
 28)------"id": 8,
 29)------"kind": "selection",
 30)------"title": "σ Selection",
-31)------"predicate": "(((l_shipmode(#14) = \"MAIL\") OR (l_shipmode(#14) = \"SHIP\")) AND (l_commitdate(#11) < l_receiptdate(#12)) AND (l_shipdate(#10) < l_commitdate(#11)) AND (l_receiptdate(#12) >= CAST(\"1994-01-01\" AS Date32)) AND (l_receiptdate(#12) < CAST(\"1995-01-01\" AS Date32)))",
+31)------"predicate": "(((l_shipmode(#14) = CAST(\"MAIL\" AS Utf8View)) OR (l_shipmode(#14) = CAST(\"SHIP\" AS Utf8View))) AND (l_commitdate(#11) < l_receiptdate(#12)) AND (l_shipdate(#10) < l_commitdate(#11)) AND (l_receiptdate(#12) >= CAST(\"1994-01-01\" AS Date32)) AND (l_receiptdate(#12) < CAST(\"1995-01-01\" AS Date32)))",
 32)------"input": 0
 33)----},
 34)----{
@@ -96,8 +96,8 @@ order by
 63)------"title": "γ Aggregation",
 64)------"keys": "l_shipmode(#14)",
 65)------"aggregates": [
-66)--------"sum(CASE WHEN orders.o_orderpriority = Utf8(\"1-URGENT\") OR orders.o_orderpriority = Utf8(\"2-HIGH\") THEN Int64(1) ELSE Int64(0) END)(#25) := sum(CASE WHEN ((o_orderpriority(#21) = \"1-URGENT\") OR (o_orderpriority(#21) = \"2-HIGH\")) THEN 1 ELSE 0 END)",
-67)--------"sum(CASE WHEN orders.o_orderpriority != Utf8(\"1-URGENT\") AND orders.o_orderpriority != Utf8(\"2-HIGH\") THEN Int64(1) ELSE Int64(0) END)(#26) := sum(CASE WHEN ((o_orderpriority(#21) != \"1-URGENT\") AND (o_orderpriority(#21) != \"2-HIGH\")) THEN 1 ELSE 0 END)"
+66)--------"sum(CASE WHEN orders.o_orderpriority = Utf8(\"1-URGENT\") OR orders.o_orderpriority = Utf8(\"2-HIGH\") THEN Int64(1) ELSE Int64(0) END)(#25) := sum(CASE WHEN ((o_orderpriority(#21) = CAST(\"1-URGENT\" AS Utf8View)) OR (o_orderpriority(#21) = CAST(\"2-HIGH\" AS Utf8View))) THEN 1 ELSE 0 END)",
+67)--------"sum(CASE WHEN orders.o_orderpriority != Utf8(\"1-URGENT\") AND orders.o_orderpriority != Utf8(\"2-HIGH\") THEN Int64(1) ELSE Int64(0) END)(#26) := sum(CASE WHEN ((o_orderpriority(#21) != CAST(\"1-URGENT\" AS Utf8View)) AND (o_orderpriority(#21) != CAST(\"2-HIGH\" AS Utf8View))) THEN 1 ELSE 0 END)"
 68)------],
 69)------"input": 21
 70)----},

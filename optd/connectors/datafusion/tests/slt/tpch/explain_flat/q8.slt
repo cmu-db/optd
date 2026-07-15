@@ -55,7 +55,7 @@ order by
 15)------"id": 27,
 16)------"kind": "selection",
 17)------"title": "σ Selection",
-18)------"predicate": "(r_name(#66) = \"AMERICA\")",
+18)------"predicate": "(r_name(#66) = CAST(\"AMERICA\" AS Utf8View))",
 19)------"input": 15
 20)----},
 21)----{
@@ -83,7 +83,7 @@ order by
 43)------"input": 9
 44)----},
 45)----{
-46)------"id": 134,
+46)------"id": 211,
 47)------"kind": "join",
 48)------"title": "⋈ InnerJoin",
 49)------"join_type": "Inner",
@@ -108,12 +108,12 @@ order by
 68)------]
 69)----},
 70)----{
-71)------"id": 135,
+71)------"id": 220,
 72)------"kind": "join",
 73)------"title": "⋈ InnerJoin",
 74)------"join_type": "Inner",
 75)------"condition": "(c_nationkey(#44) = n_nationkey(#53))",
-76)------"outer": 134,
+76)------"outer": 211,
 77)------"inner": 7
 78)----},
 79)----{
@@ -141,79 +141,79 @@ order by
 101)------"input": 5
 102)----},
 103)----{
-104)------"id": 136,
+104)------"id": 228,
 105)------"kind": "join",
 106)------"title": "⋈ InnerJoin",
 107)------"join_type": "Inner",
 108)------"condition": "(o_custkey(#33) = c_custkey(#41))",
-109)------"outer": 135,
+109)------"outer": 220,
 110)------"inner": 74
 111)----},
 112)----{
-113)------"id": 0,
+113)------"id": 3,
 114)------"kind": "scan",
 115)------"title": "⊞ Scan",
-116)------"table_name": "part",
+116)------"table_name": "lineitem",
 117)------"columns": [
-118)--------"p_partkey(#0)",
-119)--------"p_name(#1)",
-120)--------"p_mfgr(#2)",
-121)--------"p_brand(#3)",
-122)--------"p_type(#4)",
-123)--------"p_size(#5)",
-124)--------"p_container(#6)",
-125)--------"p_retailprice(#7)",
-126)--------"p_comment(#8)"
-127)------]
-128)----},
-129)----{
-130)------"id": 103,
-131)------"kind": "selection",
-132)------"title": "σ Selection",
-133)------"predicate": "(p_type(#4) = \"ECONOMY ANODIZED STEEL\")",
-134)------"input": 0
+118)--------"l_orderkey(#16)",
+119)--------"l_partkey(#17)",
+120)--------"l_suppkey(#18)",
+121)--------"l_linenumber(#19)",
+122)--------"l_quantity(#20)",
+123)--------"l_extendedprice(#21)",
+124)--------"l_discount(#22)",
+125)--------"l_tax(#23)",
+126)--------"l_returnflag(#24)",
+127)--------"l_linestatus(#25)",
+128)--------"l_shipdate(#26)",
+129)--------"l_commitdate(#27)",
+130)--------"l_receiptdate(#28)",
+131)--------"l_shipinstruct(#29)",
+132)--------"l_shipmode(#30)",
+133)--------"l_comment(#31)"
+134)------]
 135)----},
 136)----{
-137)------"id": 3,
-138)------"kind": "scan",
-139)------"title": "⊞ Scan",
-140)------"table_name": "lineitem",
-141)------"columns": [
-142)--------"l_orderkey(#16)",
-143)--------"l_partkey(#17)",
-144)--------"l_suppkey(#18)",
-145)--------"l_linenumber(#19)",
-146)--------"l_quantity(#20)",
-147)--------"l_extendedprice(#21)",
-148)--------"l_discount(#22)",
-149)--------"l_tax(#23)",
-150)--------"l_returnflag(#24)",
-151)--------"l_linestatus(#25)",
-152)--------"l_shipdate(#26)",
-153)--------"l_commitdate(#27)",
-154)--------"l_receiptdate(#28)",
-155)--------"l_shipinstruct(#29)",
-156)--------"l_shipmode(#30)",
-157)--------"l_comment(#31)"
-158)------]
-159)----},
-160)----{
-161)------"id": 137,
-162)------"kind": "join",
-163)------"title": "⋈ InnerJoin",
-164)------"join_type": "Inner",
-165)------"condition": "(p_partkey(#0) = l_partkey(#17))",
-166)------"outer": 103,
-167)------"inner": 3
+137)------"id": 235,
+138)------"kind": "join",
+139)------"title": "⋈ InnerJoin",
+140)------"join_type": "Inner",
+141)------"condition": "(l_orderkey(#16) = o_orderkey(#32))",
+142)------"outer": 228,
+143)------"inner": 3
+144)----},
+145)----{
+146)------"id": 0,
+147)------"kind": "scan",
+148)------"title": "⊞ Scan",
+149)------"table_name": "part",
+150)------"columns": [
+151)--------"p_partkey(#0)",
+152)--------"p_name(#1)",
+153)--------"p_mfgr(#2)",
+154)--------"p_brand(#3)",
+155)--------"p_type(#4)",
+156)--------"p_size(#5)",
+157)--------"p_container(#6)",
+158)--------"p_retailprice(#7)",
+159)--------"p_comment(#8)"
+160)------]
+161)----},
+162)----{
+163)------"id": 103,
+164)------"kind": "selection",
+165)------"title": "σ Selection",
+166)------"predicate": "(p_type(#4) = CAST(\"ECONOMY ANODIZED STEEL\" AS Utf8View))",
+167)------"input": 0
 168)----},
 169)----{
-170)------"id": 138,
+170)------"id": 241,
 171)------"kind": "join",
 172)------"title": "⋈ InnerJoin",
 173)------"join_type": "Inner",
-174)------"condition": "(l_orderkey(#16) = o_orderkey(#32))",
-175)------"outer": 136,
-176)------"inner": 137
+174)------"condition": "(p_partkey(#0) = l_partkey(#17))",
+175)------"outer": 235,
+176)------"inner": 103
 177)----},
 178)----{
 179)------"id": 12,
@@ -255,7 +255,7 @@ order by
 215)------]
 216)----},
 217)----{
-218)------"id": 139,
+218)------"id": 178,
 219)------"kind": "join",
 220)------"title": "⋈ InnerJoin",
 221)------"join_type": "Inner",
@@ -264,27 +264,27 @@ order by
 224)------"inner": 1
 225)----},
 226)----{
-227)------"id": 140,
+227)------"id": 247,
 228)------"kind": "join",
 229)------"title": "⋈ InnerJoin",
 230)------"join_type": "Inner",
 231)------"condition": "(s_suppkey(#9) = l_suppkey(#18))",
-232)------"outer": 138,
-233)------"inner": 139
+232)------"outer": 241,
+233)------"inner": 178
 234)----},
 235)----{
-236)------"id": 141,
+236)------"id": 250,
 237)------"kind": "map",
 238)------"title": "χ Map",
 239)------"computations": [
 240)--------"o_year(#68) := date_part(\"YEAR\", o_orderdate(#36))",
-241)--------"volume(#69) := (l_extendedprice(#21) * (1 - l_discount(#22)))",
+241)--------"volume(#69) := (l_extendedprice(#21) * (CAST(1 AS Decimal128(20, 0)) - l_discount(#22)))",
 242)--------"nation(#70) := n_name(#62)"
 243)------],
-244)------"input": 140
+244)------"input": 247
 245)----},
 246)----{
-247)------"id": 142,
+247)------"id": 251,
 248)------"kind": "projection",
 249)------"title": "π Projection",
 250)------"columns": [
@@ -292,10 +292,10 @@ order by
 252)--------"volume(#69)",
 253)--------"nation(#70)"
 254)------],
-255)------"input": 141
+255)------"input": 250
 256)----},
 257)----{
-258)------"id": 143,
+258)------"id": 252,
 259)------"kind": "rename",
 260)------"title": "ρ Rename(all_nations)",
 261)------"defs": [
@@ -303,52 +303,52 @@ order by
 263)--------"volume(#72) <- volume(#69)",
 264)--------"nation(#73) <- nation(#70)"
 265)------],
-266)------"input": 142
+266)------"input": 251
 267)----},
 268)----{
-269)------"id": 144,
+269)------"id": 253,
 270)------"kind": "aggregation",
 271)------"title": "γ Aggregation",
 272)------"keys": "o_year(#71)",
 273)------"aggregates": [
-274)--------"sum(CASE WHEN all_nations.nation = Utf8(\"BRAZIL\") THEN all_nations.volume ELSE Int64(0) END)(#74) := sum(CASE WHEN (nation(#73) = \"BRAZIL\") THEN volume(#72) ELSE 0 END)",
+274)--------"sum(CASE WHEN all_nations.nation = Utf8(\"BRAZIL\") THEN all_nations.volume ELSE Int64(0) END)(#74) := sum(CASE WHEN (nation(#73) = CAST(\"BRAZIL\" AS Utf8View)) THEN volume(#72) ELSE CAST(0 AS Decimal128(38, 4)) END)",
 275)--------"sum(all_nations.volume)(#75) := sum(volume(#72))"
 276)------],
-277)------"input": 143
+277)------"input": 252
 278)----},
 279)----{
-280)------"id": 145,
+280)------"id": 254,
 281)------"kind": "map",
 282)------"title": "χ Map",
 283)------"computations": [
 284)--------"mkt_share(#76) := CAST((CAST(sum(CASE WHEN all_nations.nation = Utf8(\"BRAZIL\") THEN all_nations.volume ELSE Int64(0) END)(#74) AS Decimal128(12, 2)) / CAST(sum(all_nations.volume)(#75) AS Decimal128(12, 2))) AS Decimal128(15, 2))"
 285)------],
-286)------"input": 144
+286)------"input": 253
 287)----},
 288)----{
-289)------"id": 146,
+289)------"id": 255,
 290)------"kind": "projection",
 291)------"title": "π Projection",
 292)------"columns": [
 293)--------"o_year(#71)",
 294)--------"mkt_share(#76)"
 295)------],
-296)------"input": 145
+296)------"input": 254
 297)----},
 298)----{
-299)------"id": 147,
+299)------"id": 256,
 300)------"kind": "sort",
 301)------"title": "⇞ Sort",
 302)------"keys": [
 303)--------"o_year(#71) Asc NullsLast"
 304)------],
-305)------"input": 146
+305)------"input": 255
 306)----},
 307)----{
-308)------"id": 148,
+308)------"id": 257,
 309)------"kind": "output",
 310)------"title": "= Output",
-311)------"input": 147
+311)------"input": 256
 312)----}
 313)--]
 314)}
