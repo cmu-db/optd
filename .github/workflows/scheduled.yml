@@ -18,8 +18,6 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_TEST_DEBUG: 0
   CARGO_TERM_COLOR: always
-  TPCH_HF_REVISION: 3d3bbd2ad937afea3add733e7e179faaf085425f
-  JOB_HF_REVISION: 51a5d2387a6a63ebbf80fde95d2db597edf345e5
 
 jobs:
   nightly:
@@ -42,7 +40,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: optd/connectors/datafusion/data/tpch/sf-0.1
-          key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ env.TPCH_HF_REVISION }}
+          key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ hashFiles('scripts/download_tpch_hf.sh') }}
       - name: Download TPC-H data
         if: steps.cache-tpch.outputs.cache-hit != 'true'
         run: bash ./scripts/download_tpch_hf.sh
@@ -71,7 +69,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: optd/connectors/datafusion/data/tpch/sf-0.1
-          key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ env.TPCH_HF_REVISION }}
+          key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ hashFiles('scripts/download_tpch_hf.sh') }}
       - name: Download TPC-H data
         if: steps.cache-tpch.outputs.cache-hit != 'true'
         run: bash ./scripts/download_tpch_hf.sh
@@ -105,7 +103,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: optd/connectors/datafusion/data/tpch/sf-0.1
-          key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ env.TPCH_HF_REVISION }}
+          key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ hashFiles('scripts/download_tpch_hf.sh') }}
       - name: Download TPC-H data
         if: steps.cache-tpch.outputs.cache-hit != 'true'
         run: bash ./scripts/download_tpch_hf.sh
@@ -114,7 +112,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: optd/connectors/datafusion/data/job
-          key: ${{ runner.os }}-hf-job-${{ env.JOB_HF_REVISION }}
+          key: ${{ runner.os }}-hf-job-${{ hashFiles('scripts/download_job_hf.sh') }}
       - name: Download JOB data
         if: steps.cache-job.outputs.cache-hit != 'true'
         run: bash ./scripts/download_job_hf.sh

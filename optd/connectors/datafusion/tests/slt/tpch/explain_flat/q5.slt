@@ -42,7 +42,7 @@ order by
 15)------"id": 17,
 16)------"kind": "selection",
 17)------"title": "σ Selection",
-18)------"predicate": "(r_name(#45) = \"ASIA\")",
+18)------"predicate": "(r_name(#45) = CAST(\"ASIA\" AS Utf8View))",
 19)------"input": 9
 20)----},
 21)----{
@@ -58,7 +58,7 @@ order by
 31)------]
 32)----},
 33)----{
-34)------"id": 68,
+34)------"id": 113,
 35)------"kind": "join",
 36)------"title": "⋈ InnerJoin",
 37)------"join_type": "Inner",
@@ -82,12 +82,12 @@ order by
 55)------]
 56)----},
 57)----{
-58)------"id": 69,
+58)------"id": 121,
 59)------"kind": "join",
 60)------"title": "⋈ InnerJoin",
 61)------"join_type": "Inner",
 62)------"condition": "(s_nationkey(#36) = n_nationkey(#40))",
-63)------"outer": 68,
+63)------"outer": 113,
 64)------"inner": 5
 65)----},
 66)----{
@@ -115,12 +115,12 @@ order by
 88)------]
 89)----},
 90)----{
-91)------"id": 70,
+91)------"id": 131,
 92)------"kind": "join",
 93)------"title": "⋈ InnerJoin",
 94)------"join_type": "Inner",
 95)------"condition": "(l_suppkey(#19) = s_suppkey(#33))",
-96)------"outer": 69,
+96)------"outer": 121,
 97)------"inner": 3
 98)----},
 99)----{
@@ -164,7 +164,7 @@ order by
 137)------"input": 1
 138)----},
 139)----{
-140)------"id": 71,
+140)------"id": 68,
 141)------"kind": "join",
 142)------"title": "⋈ InnerJoin",
 143)------"join_type": "Inner",
@@ -173,38 +173,38 @@ order by
 146)------"inner": 47
 147)----},
 148)----{
-149)------"id": 72,
+149)------"id": 135,
 150)------"kind": "join",
 151)------"title": "⋈ InnerJoin",
 152)------"join_type": "Inner",
 153)------"condition": "((l_orderkey(#17) = o_orderkey(#8)) AND (c_nationkey(#3) = s_nationkey(#36)))",
-154)------"outer": 70,
-155)------"inner": 71
+154)------"outer": 131,
+155)------"inner": 68
 156)----},
 157)----{
-158)------"id": 73,
+158)------"id": 145,
 159)------"kind": "aggregation",
 160)------"title": "γ Aggregation",
 161)------"keys": "n_name(#41)",
 162)------"aggregates": [
-163)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) := sum((l_extendedprice(#22) * (1 - l_discount(#23))))"
+163)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) := sum((l_extendedprice(#22) * (CAST(1 AS Decimal128(20, 0)) - l_discount(#23))))"
 164)------],
-165)------"input": 72
+165)------"input": 135
 166)----},
 167)----{
-168)------"id": 74,
+168)------"id": 146,
 169)------"kind": "sort",
 170)------"title": "⇞ Sort",
 171)------"keys": [
 172)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#47) Desc NullsFirst"
 173)------],
-174)------"input": 73
+174)------"input": 145
 175)----},
 176)----{
-177)------"id": 75,
+177)------"id": 147,
 178)------"kind": "output",
 179)------"title": "= Output",
-180)------"input": 74
+180)------"input": 146
 181)----}
 182)--]
 183)}

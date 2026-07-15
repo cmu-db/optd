@@ -15,8 +15,8 @@ use datafusion_sqllogictest::{
     DFColumnType, DFSqlLogicTestError, convert_batches, convert_schema_to_types,
 };
 use optd_core::{
-    Catalog, ExprSimplify, HolisticUnnesting, JoinOrdering, JoinTreeNormalize, MarkJoinToSemiJoin,
-    OperatorRewriteAdaptor, OptimizerContext, PassManager, PredicatePushdown,
+    ExprSimplify, HolisticUnnesting, JoinOrdering, JoinTreeNormalize, MarkJoinToSemiJoin,
+    OperatorRewriteAdaptor, OptimizerContext, PassManager, PlannedQuery, PredicatePushdown,
     ProjectionElimination, QueryContext, QueryFormatConfig, SubqueryToJoin,
 };
 use sqllogictest::{AsyncDB, DBOutput};
@@ -30,21 +30,41 @@ use crate::runtime_statistics::RuntimeStatisticsCatalogBuilder;
 use crate::to_df_logical::to_logical_plan;
 use crate::to_df_physical::{ToPhysicalError, to_physical_plan};
 
-fn optimize(
-    ctx: QueryContext,
-    catalog: Option<Arc<dyn Catalog>>,
-) -> Result<QueryContext, optd_core::OptimizeError> {
-    let mut opt = match catalog {
-        Some(catalog) => OptimizerContext::with_catalog(ctx, catalog),
-        None => OptimizerContext::new(ctx),
-    };
+fn optimize(mut opt: OptimizerContext) -> Result<PlannedQuery, optd_core::OptimizeError> {
     let mut pm = default_pass_manager();
     pm.run(&mut opt)?;
     if let Some(root) = opt.query.root() {
         let resolved = opt.rewrites.resolve(root);
         opt.query.set_root(resolved);
     }
-    Ok(opt.into_query())
+    Ok(opt.into_planned_query())
+}
+
+pub(crate) async fn optimizer_context_from_logical_plan(
+    session: &SessionContext,
+    runtime_stats: &RuntimeStatisticsCatalogBuilder,
+    plan: &LogicalPlan,
+) -> Result<OptimizerContext, TryViaIrError> {
+    if !is_supported_relational_plan(plan) {
+        return Err(TryViaIrError::Unsupported("non-query plan".into()));
+    }
+
+    let plan =
+        apply_type_coercion(plan.clone()).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
+
+    reject_non_catalog_scans(&plan, session).await?;
+
+    let catalog = runtime_stats
+        .build_for_plan(&plan)
+        .await
+        .map_err(TryViaIrError::Failed)?;
+
+    let mut ctx = QueryContext::new();
+    let root =
+        from_logical_plan(&plan, &mut ctx).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
+    ctx.set_root(root);
+
+    Ok(OptimizerContext::new(ctx, catalog))
 }
 
 /// Returns the canonical optimizer pass pipeline used across all execution paths.
@@ -67,7 +87,7 @@ pub struct OptdRunner {
 }
 
 #[derive(Debug)]
-enum TryViaIrError {
+pub(crate) enum TryViaIrError {
     Unsupported(String),
     Failed(String),
 }
@@ -324,36 +344,18 @@ impl OptdRunner {
     async fn optimized_ir_from_logical_plan(
         &self,
         plan: &LogicalPlan,
-    ) -> Result<QueryContext, TryViaIrError> {
-        if !is_supported_relational_plan(plan) {
-            return Err(TryViaIrError::Unsupported("non-query plan".into()));
-        }
-
-        let plan =
-            apply_type_coercion(plan.clone()).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
-
-        reject_non_catalog_scans(&plan, &self.session).await?;
-
-        let catalog = self
-            .runtime_stats
-            .build_for_plan(&plan)
-            .await
-            .map_err(TryViaIrError::Failed)?;
-
-        let mut ctx = QueryContext::new();
-        let root =
-            from_logical_plan(&plan, &mut ctx).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
-        ctx.set_root(root);
-
-        optimize(ctx, Some(catalog)).map_err(|e| TryViaIrError::Failed(e.to_string()))
+    ) -> Result<PlannedQuery, TryViaIrError> {
+        let opt =
+            optimizer_context_from_logical_plan(&self.session, &self.runtime_stats, plan).await?;
+        optimize(opt).map_err(|e| TryViaIrError::Failed(e.to_string()))
     }
 
     async fn execute_optimized_ir(
         &self,
-        ctx: &QueryContext,
+        opt: &PlannedQuery,
     ) -> Result<(SchemaRef, Vec<RecordBatch>, IrExecutionPath), TryViaIrError> {
         if self.physical_planning_enabled() {
-            match self.execute_physical_ir(ctx).await {
+            match self.execute_physical_ir(opt).await {
                 Ok((schema, batches)) => {
                     return Ok((schema, batches, IrExecutionPath::Physical));
                 }
@@ -361,22 +363,22 @@ impl OptdRunner {
                     // Unsupported direct physical shapes use the stable
                     // logical-conversion path. Build/execution errors are
                     // converter bugs and intentionally do not fall back.
-                    let (schema, batches) = self.execute_logical_ir(ctx).await?;
+                    let (schema, batches) = self.execute_logical_ir(opt).await?;
                     return Ok((schema, batches, IrExecutionPath::PhysicalUnsupported(msg)));
                 }
                 Err(err) => return Err(TryViaIrError::Failed(err.to_string())),
             }
         }
 
-        let (schema, batches) = self.execute_logical_ir(ctx).await?;
+        let (schema, batches) = self.execute_logical_ir(opt).await?;
         Ok((schema, batches, IrExecutionPath::Logical))
     }
 
     async fn execute_logical_ir(
         &self,
-        ctx: &QueryContext,
+        planned: &PlannedQuery,
     ) -> Result<(SchemaRef, Vec<RecordBatch>), TryViaIrError> {
-        let plan = to_logical_plan(ctx, &self.session)
+        let plan = to_logical_plan(planned, &self.session)
             .await
             .map_err(|e| TryViaIrError::Failed(e.to_string()))?;
         let df = self
@@ -395,9 +397,9 @@ impl OptdRunner {
 
     async fn execute_physical_ir(
         &self,
-        ctx: &QueryContext,
+        planned: &PlannedQuery,
     ) -> Result<(SchemaRef, Vec<RecordBatch>), ToPhysicalError> {
-        let plan = to_physical_plan(ctx, &self.session).await?;
+        let plan = to_physical_plan(planned, &self.session).await?;
         let schema = plan.schema();
         let batches = collect(plan, self.session.state().task_ctx())
             .await
@@ -536,7 +538,8 @@ mod tests {
 
     #[test]
     fn default_pass_manager_runs_holistic_unnesting_after_expr_simplify() {
-        let mut opt = optd_core::OptimizerContext::new(optd_core::QueryContext::new());
+        let catalog = std::sync::Arc::new(optd_core::MemoryCatalog::new("memory", "public"));
+        let mut opt = optd_core::OptimizerContext::new(optd_core::QueryContext::new(), catalog);
         let mut pm = super::default_pass_manager();
         pm.run(&mut opt).unwrap();
 

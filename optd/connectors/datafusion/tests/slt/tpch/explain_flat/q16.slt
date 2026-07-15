@@ -48,110 +48,110 @@ limit 10;');
 14)------]
 15)----},
 16)----{
-17)------"id": 3,
+17)------"id": 1,
 18)------"kind": "scan",
 19)------"title": "⊞ Scan",
-20)------"table_name": "supplier",
+20)------"table_name": "part",
 21)------"columns": [
-22)--------"s_suppkey(#14)",
-23)--------"s_name(#15)",
-24)--------"s_address(#16)",
-25)--------"s_nationkey(#17)",
-26)--------"s_phone(#18)",
-27)--------"s_acctbal(#19)",
-28)--------"s_comment(#20)"
-29)------]
-30)----},
-31)----{
-32)------"id": 4,
-33)------"kind": "selection",
-34)------"title": "σ Selection",
-35)------"predicate": "(s_comment(#20) LIKE \"%Customer%Complaints%\")",
-36)------"input": 3
-37)----},
-38)----{
-39)------"id": 5,
-40)------"kind": "projection",
-41)------"title": "π Projection",
-42)------"columns": [
-43)--------"s_suppkey(#14)"
-44)------],
-45)------"input": 4
-46)----},
-47)----{
-48)------"id": 50,
-49)------"kind": "join",
-50)------"title": "⟕ᵐ LeftMarkJoin",
-51)------"join_type": "LeftMark",
-52)------"condition": "(ps_suppkey(#1) = s_suppkey(#14))",
-53)------"marker": "in_match_mark(#22)",
-54)------"marker_nullable": "false",
-55)------"outer": 0,
-56)------"inner": 5
-57)----},
-58)----{
-59)------"id": 1,
-60)------"kind": "scan",
-61)------"title": "⊞ Scan",
-62)------"table_name": "part",
-63)------"columns": [
-64)--------"p_partkey(#5)",
-65)--------"p_name(#6)",
-66)--------"p_mfgr(#7)",
-67)--------"p_brand(#8)",
-68)--------"p_type(#9)",
-69)--------"p_size(#10)",
-70)--------"p_container(#11)",
-71)--------"p_retailprice(#12)",
-72)--------"p_comment(#13)"
-73)------]
-74)----},
-75)----{
-76)------"id": 37,
-77)------"kind": "selection",
-78)------"title": "σ Selection",
-79)------"predicate": "((p_brand(#8) != \"Brand#45\") AND (p_type(#9) NOT LIKE \"MEDIUM POLISHED%\") AND ((p_size(#10) = 49) OR (p_size(#10) = 14) OR (p_size(#10) = 23) OR (p_size(#10) = 45) OR (p_size(#10) = 19) OR (p_size(#10) = 3) OR (p_size(#10) = 36) OR (p_size(#10) = 9)))",
-80)------"input": 1
-81)----},
-82)----{
-83)------"id": 51,
-84)------"kind": "join",
-85)------"title": "⋈ InnerJoin",
-86)------"join_type": "Inner",
-87)------"condition": "(p_partkey(#5) = ps_partkey(#0))",
-88)------"outer": 50,
-89)------"inner": 37
+22)--------"p_partkey(#5)",
+23)--------"p_name(#6)",
+24)--------"p_mfgr(#7)",
+25)--------"p_brand(#8)",
+26)--------"p_type(#9)",
+27)--------"p_size(#10)",
+28)--------"p_container(#11)",
+29)--------"p_retailprice(#12)",
+30)--------"p_comment(#13)"
+31)------]
+32)----},
+33)----{
+34)------"id": 37,
+35)------"kind": "selection",
+36)------"title": "σ Selection",
+37)------"predicate": "((p_brand(#8) != CAST(\"Brand#45\" AS Utf8View)) AND (p_type(#9) NOT LIKE CAST(\"MEDIUM POLISHED%\" AS Utf8View)) AND ((CAST(p_size(#10) AS Int64) = 49) OR (CAST(p_size(#10) AS Int64) = 14) OR (CAST(p_size(#10) AS Int64) = 23) OR (CAST(p_size(#10) AS Int64) = 45) OR (CAST(p_size(#10) AS Int64) = 19) OR (CAST(p_size(#10) AS Int64) = 3) OR (CAST(p_size(#10) AS Int64) = 36) OR (CAST(p_size(#10) AS Int64) = 9)))",
+38)------"input": 1
+39)----},
+40)----{
+41)------"id": 51,
+42)------"kind": "join",
+43)------"title": "⋈ InnerJoin",
+44)------"join_type": "Inner",
+45)------"condition": "(p_partkey(#5) = ps_partkey(#0))",
+46)------"outer": 0,
+47)------"inner": 37
+48)----},
+49)----{
+50)------"id": 3,
+51)------"kind": "scan",
+52)------"title": "⊞ Scan",
+53)------"table_name": "supplier",
+54)------"columns": [
+55)--------"s_suppkey(#14)",
+56)--------"s_name(#15)",
+57)--------"s_address(#16)",
+58)--------"s_nationkey(#17)",
+59)--------"s_phone(#18)",
+60)--------"s_acctbal(#19)",
+61)--------"s_comment(#20)"
+62)------]
+63)----},
+64)----{
+65)------"id": 4,
+66)------"kind": "selection",
+67)------"title": "σ Selection",
+68)------"predicate": "(s_comment(#20) LIKE CAST(\"%Customer%Complaints%\" AS Utf8View))",
+69)------"input": 3
+70)----},
+71)----{
+72)------"id": 5,
+73)------"kind": "projection",
+74)------"title": "π Projection",
+75)------"columns": [
+76)--------"s_suppkey(#14)"
+77)------],
+78)------"input": 4
+79)----},
+80)----{
+81)------"id": 52,
+82)------"kind": "join",
+83)------"title": "⟕ᵐ LeftMarkJoin",
+84)------"join_type": "LeftMark",
+85)------"condition": "(ps_suppkey(#1) = s_suppkey(#14))",
+86)------"marker": "in_match_mark(#22)",
+87)------"marker_nullable": "false",
+88)------"outer": 51,
+89)------"inner": 5
 90)----},
 91)----{
-92)------"id": 52,
+92)------"id": 55,
 93)------"kind": "join",
 94)------"title": "⟕ᵐ LeftMarkJoin",
 95)------"join_type": "LeftMark",
 96)------"condition": "(IS_NULL(ps_suppkey(#1)) OR IS_NULL(s_suppkey(#14)))",
 97)------"marker": "in_unknown_mark(#23)",
 98)------"marker_nullable": "false",
-99)------"outer": 51,
+99)------"outer": 52,
 100)------"inner": 5
 101)----},
 102)----{
-103)------"id": 53,
+103)------"id": 57,
 104)------"kind": "selection",
 105)------"title": "σ Selection",
 106)------"predicate": "NOT(CASE WHEN in_match_mark(#22) THEN true WHEN in_unknown_mark(#23) THEN NULL::Boolean ELSE false END)",
-107)------"input": 52
+107)------"input": 55
 108)----},
 109)----{
-110)------"id": 54,
+110)------"id": 58,
 111)------"kind": "aggregation",
 112)------"title": "γ Aggregation",
 113)------"keys": "p_brand(#8), p_type(#9), p_size(#10)",
 114)------"aggregates": [
 115)--------"count(DISTINCT partsupp.ps_suppkey)(#21) := count(DISTINCT ps_suppkey(#1))"
 116)------],
-117)------"input": 53
+117)------"input": 57
 118)----},
 119)----{
-120)------"id": 55,
+120)------"id": 59,
 121)------"kind": "sort",
 122)------"title": "⇞ Sort",
 123)------"keys": [
@@ -160,21 +160,21 @@ limit 10;');
 126)--------"p_type(#9) Asc NullsLast",
 127)--------"p_size(#10) Asc NullsLast"
 128)------],
-129)------"input": 54
+129)------"input": 58
 130)----},
 131)----{
-132)------"id": 56,
+132)------"id": 60,
 133)------"kind": "limit",
 134)------"title": "τ Limit",
 135)------"fetch": "10",
 136)------"offset": "0",
-137)------"input": 55
+137)------"input": 59
 138)----},
 139)----{
-140)------"id": 57,
+140)------"id": 61,
 141)------"kind": "output",
 142)------"title": "= Output",
-143)------"input": 56
+143)------"input": 60
 144)----}
 145)--]
 146)}

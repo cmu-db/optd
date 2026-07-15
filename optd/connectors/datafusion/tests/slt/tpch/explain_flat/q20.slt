@@ -71,11 +71,11 @@ order by
 31)------"id": 93,
 32)------"kind": "selection",
 33)------"title": "σ Selection",
-34)------"predicate": "(n_name(#8) = \"CANADA\")",
+34)------"predicate": "(n_name(#8) = CAST(\"CANADA\" AS Utf8View))",
 35)------"input": 1
 36)----},
 37)----{
-38)------"id": 107,
+38)------"id": 108,
 39)------"kind": "join",
 40)------"title": "⋈ InnerJoin",
 41)------"join_type": "Inner",
@@ -117,7 +117,7 @@ order by
 77)------"id": 5,
 78)------"kind": "selection",
 79)------"title": "σ Selection",
-80)------"predicate": "(p_name(#17) LIKE \"forest%\")",
+80)------"predicate": "(p_name(#17) LIKE CAST(\"forest%\" AS Utf8View))",
 81)------"input": 4
 82)----},
 83)----{
@@ -152,7 +152,7 @@ order by
 112)------"inner": 6
 113)----},
 114)----{
-115)------"id": 110,
+115)------"id": 114,
 116)------"kind": "selection",
 117)------"title": "σ Selection",
 118)------"predicate": "CASE WHEN in_match_mark(#45) THEN true WHEN in_unknown_mark(#46) THEN NULL::Boolean ELSE false END",
@@ -204,7 +204,7 @@ order by
 164)------"kind": "map",
 165)------"title": "χ Map",
 166)------"computations": [
-167)--------"Float64(0.5) * sum(lineitem.l_quantity)(#42) := (0.5 * sum(lineitem.l_quantity)(#41))"
+167)--------"Float64(0.5) * sum(lineitem.l_quantity)(#42) := (0.5 * CAST(sum(lineitem.l_quantity)(#41) AS Float64))"
 168)------],
 169)------"input": 36
 170)----},
@@ -220,43 +220,43 @@ order by
 180)------"input": 37
 181)----},
 182)----{
-183)------"id": 111,
+183)------"id": 115,
 184)------"kind": "join",
 185)------"title": "⟕ LeftOuterJoin",
 186)------"join_type": "LeftOuter",
 187)------"condition": "((l_partkey(#26) = ps_partkey(#11)) AND (l_suppkey(#27) = ps_suppkey(#12)))",
-188)------"outer": 110,
+188)------"outer": 114,
 189)------"inner": 38
 190)----},
 191)----{
-192)------"id": 112,
+192)------"id": 116,
 193)------"kind": "selection",
 194)------"title": "σ Selection",
-195)------"predicate": "(ps_availqty(#13) > Float64(0.5) * sum(lineitem.l_quantity)(#42))",
-196)------"input": 111
+195)------"predicate": "(CAST(ps_availqty(#13) AS Float64) > Float64(0.5) * sum(lineitem.l_quantity)(#42))",
+196)------"input": 115
 197)----},
 198)----{
-199)------"id": 113,
+199)------"id": 117,
 200)------"kind": "projection",
 201)------"title": "π Projection",
 202)------"columns": [
 203)--------"ps_suppkey(#12)"
 204)------],
-205)------"input": 112
+205)------"input": 116
 206)----},
 207)----{
-208)------"id": 114,
+208)------"id": 118,
 209)------"kind": "join",
 210)------"title": "⟕ᵐ LeftMarkJoin",
 211)------"join_type": "LeftMark",
 212)------"condition": "(s_suppkey(#0) = ps_suppkey(#12))",
 213)------"marker": "in_match_mark(#43)",
 214)------"marker_nullable": "false",
-215)------"outer": 107,
-216)------"inner": 113
+215)------"outer": 108,
+216)------"inner": 117
 217)----},
 218)----{
-219)------"id": 115,
+219)------"id": 119,
 220)------"kind": "selection",
 221)------"title": "σ Selection",
 222)------"predicate": "CASE WHEN in_match_mark(#45) THEN true WHEN in_unknown_mark(#46) THEN NULL::Boolean ELSE false END",
@@ -284,7 +284,7 @@ order by
 244)------"kind": "map",
 245)------"title": "χ Map",
 246)------"computations": [
-247)--------"Float64(0.5) * sum(lineitem.l_quantity)(#42) := (0.5 * sum(lineitem.l_quantity)(#41))"
+247)--------"Float64(0.5) * sum(lineitem.l_quantity)(#42) := (0.5 * CAST(sum(lineitem.l_quantity)(#41) AS Float64))"
 248)------],
 249)------"input": 49
 250)----},
@@ -300,72 +300,72 @@ order by
 260)------"input": 50
 261)----},
 262)----{
-263)------"id": 116,
+263)------"id": 120,
 264)------"kind": "join",
 265)------"title": "⟕ LeftOuterJoin",
 266)------"join_type": "LeftOuter",
 267)------"condition": "((l_partkey(#26) = ps_partkey(#11)) AND (l_suppkey(#27) = ps_suppkey(#12)))",
-268)------"outer": 115,
+268)------"outer": 119,
 269)------"inner": 51
 270)----},
 271)----{
-272)------"id": 117,
+272)------"id": 121,
 273)------"kind": "selection",
 274)------"title": "σ Selection",
-275)------"predicate": "(ps_availqty(#13) > Float64(0.5) * sum(lineitem.l_quantity)(#42))",
-276)------"input": 116
+275)------"predicate": "(CAST(ps_availqty(#13) AS Float64) > Float64(0.5) * sum(lineitem.l_quantity)(#42))",
+276)------"input": 120
 277)----},
 278)----{
-279)------"id": 118,
+279)------"id": 122,
 280)------"kind": "projection",
 281)------"title": "π Projection",
 282)------"columns": [
 283)--------"ps_suppkey(#12)"
 284)------],
-285)------"input": 117
+285)------"input": 121
 286)----},
 287)----{
-288)------"id": 119,
+288)------"id": 123,
 289)------"kind": "join",
 290)------"title": "⟕ᵐ LeftMarkJoin",
 291)------"join_type": "LeftMark",
 292)------"condition": "(IS_NULL(s_suppkey(#0)) OR IS_NULL(ps_suppkey(#12)))",
 293)------"marker": "in_unknown_mark(#44)",
 294)------"marker_nullable": "false",
-295)------"outer": 114,
-296)------"inner": 118
+295)------"outer": 118,
+296)------"inner": 122
 297)----},
 298)----{
-299)------"id": 120,
+299)------"id": 124,
 300)------"kind": "selection",
 301)------"title": "σ Selection",
 302)------"predicate": "CASE WHEN in_match_mark(#43) THEN true WHEN in_unknown_mark(#44) THEN NULL::Boolean ELSE false END",
-303)------"input": 119
+303)------"input": 123
 304)----},
 305)----{
-306)------"id": 121,
+306)------"id": 125,
 307)------"kind": "projection",
 308)------"title": "π Projection",
 309)------"columns": [
 310)--------"s_name(#1)",
 311)--------"s_address(#2)"
 312)------],
-313)------"input": 120
+313)------"input": 124
 314)----},
 315)----{
-316)------"id": 122,
+316)------"id": 126,
 317)------"kind": "sort",
 318)------"title": "⇞ Sort",
 319)------"keys": [
 320)--------"s_name(#1) Asc NullsLast"
 321)------],
-322)------"input": 121
+322)------"input": 125
 323)----},
 324)----{
-325)------"id": 123,
+325)------"id": 127,
 326)------"kind": "output",
 327)------"title": "= Output",
-328)------"input": 122
+328)------"input": 126
 329)----}
 330)--]
 331)}

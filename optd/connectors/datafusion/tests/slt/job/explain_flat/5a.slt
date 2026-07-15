@@ -48,128 +48,128 @@ SELECT explain_flat('SELECT MIN(t.title) AS typical_european_movie FROM company_
 44)------"id": 19,
 45)------"kind": "selection",
 46)------"title": "σ Selection",
-47)------"predicate": "(production_year(#44) > 2005)",
+47)------"predicate": "(CAST(production_year(#44) AS Int64) > 2005)",
 48)------"input": 12
 49)----},
 50)----{
-51)------"id": 8,
+51)------"id": 0,
 52)------"kind": "scan",
 53)------"title": "⊞ Scan",
-54)------"table_name": "movie_info",
+54)------"table_name": "company_type",
 55)------"columns": [
-56)--------"id(#18)",
-57)--------"movie_id(#19)",
-58)--------"info_type_id(#20)",
-59)--------"info(#21)",
-60)--------"note(#22)"
-61)------]
-62)----},
-63)----{
-64)------"id": 9,
-65)------"kind": "rename",
-66)------"title": "ρ Rename(mi)",
-67)------"defs": [
-68)--------"id(#23) <- id(#18)",
-69)--------"movie_id(#24) <- movie_id(#19)",
-70)--------"info_type_id(#25) <- info_type_id(#20)",
-71)--------"info(#26) <- info(#21)",
-72)--------"note(#27) <- note(#22)"
-73)------],
-74)------"input": 8
-75)----},
-76)----{
-77)------"id": 25,
-78)------"kind": "selection",
-79)------"title": "σ Selection",
-80)------"predicate": "((info(#26) = \"Sweden\") OR (info(#26) = \"Norway\") OR (info(#26) = \"Germany\") OR (info(#26) = \"Denmark\") OR (info(#26) = \"Swedish\") OR (info(#26) = \"Denish\") OR (info(#26) = \"Norwegian\") OR (info(#26) = \"German\"))",
-81)------"input": 9
-82)----},
-83)----{
-84)------"id": 0,
-85)------"kind": "scan",
-86)------"title": "⊞ Scan",
-87)------"table_name": "company_type",
-88)------"columns": [
-89)--------"id(#0)",
-90)--------"kind(#1)"
-91)------]
-92)----},
-93)----{
-94)------"id": 1,
-95)------"kind": "rename",
-96)------"title": "ρ Rename(ct)",
-97)------"defs": [
-98)--------"id(#2) <- id(#0)",
-99)--------"kind(#3) <- kind(#1)"
+56)--------"id(#0)",
+57)--------"kind(#1)"
+58)------]
+59)----},
+60)----{
+61)------"id": 1,
+62)------"kind": "rename",
+63)------"title": "ρ Rename(ct)",
+64)------"defs": [
+65)--------"id(#2) <- id(#0)",
+66)--------"kind(#3) <- kind(#1)"
+67)------],
+68)------"input": 0
+69)----},
+70)----{
+71)------"id": 39,
+72)------"kind": "selection",
+73)------"title": "σ Selection",
+74)------"predicate": "(kind(#3) = CAST(\"production companies\" AS Utf8View))",
+75)------"input": 1
+76)----},
+77)----{
+78)------"id": 5,
+79)------"kind": "scan",
+80)------"title": "⊞ Scan",
+81)------"table_name": "movie_companies",
+82)------"columns": [
+83)--------"id(#8)",
+84)--------"movie_id(#9)",
+85)--------"company_id(#10)",
+86)--------"company_type_id(#11)",
+87)--------"note(#12)"
+88)------]
+89)----},
+90)----{
+91)------"id": 6,
+92)------"kind": "rename",
+93)------"title": "ρ Rename(mc)",
+94)------"defs": [
+95)--------"id(#13) <- id(#8)",
+96)--------"movie_id(#14) <- movie_id(#9)",
+97)--------"company_id(#15) <- company_id(#10)",
+98)--------"company_type_id(#16) <- company_type_id(#11)",
+99)--------"note(#17) <- note(#12)"
 100)------],
-101)------"input": 0
+101)------"input": 5
 102)----},
 103)----{
-104)------"id": 39,
+104)------"id": 32,
 105)------"kind": "selection",
 106)------"title": "σ Selection",
-107)------"predicate": "(kind(#3) = \"production companies\")",
-108)------"input": 1
+107)------"predicate": "((note(#17) LIKE CAST(\"%(theatrical)%\" AS Utf8View)) AND (note(#17) LIKE CAST(\"%(France)%\" AS Utf8View)))",
+108)------"input": 6
 109)----},
 110)----{
-111)------"id": 5,
-112)------"kind": "scan",
-113)------"title": "⊞ Scan",
-114)------"table_name": "movie_companies",
-115)------"columns": [
-116)--------"id(#8)",
-117)--------"movie_id(#9)",
-118)--------"company_id(#10)",
-119)--------"company_type_id(#11)",
-120)--------"note(#12)"
-121)------]
-122)----},
-123)----{
-124)------"id": 6,
-125)------"kind": "rename",
-126)------"title": "ρ Rename(mc)",
-127)------"defs": [
-128)--------"id(#13) <- id(#8)",
-129)--------"movie_id(#14) <- movie_id(#9)",
-130)--------"company_id(#15) <- company_id(#10)",
-131)--------"company_type_id(#16) <- company_type_id(#11)",
-132)--------"note(#17) <- note(#12)"
-133)------],
-134)------"input": 5
-135)----},
-136)----{
-137)------"id": 32,
-138)------"kind": "selection",
-139)------"title": "σ Selection",
-140)------"predicate": "((note(#17) LIKE \"%(theatrical)%\") AND (note(#17) LIKE \"%(France)%\"))",
-141)------"input": 6
-142)----},
-143)----{
-144)------"id": 55,
-145)------"kind": "join",
-146)------"title": "⋈ InnerJoin",
-147)------"join_type": "Inner",
-148)------"condition": "(id(#2) = company_type_id(#16))",
-149)------"outer": 39,
-150)------"inner": 32
-151)----},
-152)----{
-153)------"id": 56,
-154)------"kind": "join",
-155)------"title": "⋈ InnerJoin",
-156)------"join_type": "Inner",
-157)------"condition": "(movie_id(#14) = movie_id(#24))",
-158)------"outer": 25,
-159)------"inner": 55
+111)------"id": 55,
+112)------"kind": "join",
+113)------"title": "⋈ InnerJoin",
+114)------"join_type": "Inner",
+115)------"condition": "(id(#2) = company_type_id(#16))",
+116)------"outer": 39,
+117)------"inner": 32
+118)----},
+119)----{
+120)------"id": 67,
+121)------"kind": "join",
+122)------"title": "⋈ InnerJoin",
+123)------"join_type": "Inner",
+124)------"condition": "(id(#40) = movie_id(#14))",
+125)------"outer": 19,
+126)------"inner": 55
+127)----},
+128)----{
+129)------"id": 8,
+130)------"kind": "scan",
+131)------"title": "⊞ Scan",
+132)------"table_name": "movie_info",
+133)------"columns": [
+134)--------"id(#18)",
+135)--------"movie_id(#19)",
+136)--------"info_type_id(#20)",
+137)--------"info(#21)",
+138)--------"note(#22)"
+139)------]
+140)----},
+141)----{
+142)------"id": 9,
+143)------"kind": "rename",
+144)------"title": "ρ Rename(mi)",
+145)------"defs": [
+146)--------"id(#23) <- id(#18)",
+147)--------"movie_id(#24) <- movie_id(#19)",
+148)--------"info_type_id(#25) <- info_type_id(#20)",
+149)--------"info(#26) <- info(#21)",
+150)--------"note(#27) <- note(#22)"
+151)------],
+152)------"input": 8
+153)----},
+154)----{
+155)------"id": 25,
+156)------"kind": "selection",
+157)------"title": "σ Selection",
+158)------"predicate": "((info(#26) = CAST(\"Sweden\" AS Utf8View)) OR (info(#26) = CAST(\"Norway\" AS Utf8View)) OR (info(#26) = CAST(\"Germany\" AS Utf8View)) OR (info(#26) = CAST(\"Denmark\" AS Utf8View)) OR (info(#26) = CAST(\"Swedish\" AS Utf8View)) OR (info(#26) = CAST(\"Denish\" AS Utf8View)) OR (info(#26) = CAST(\"Norwegian\" AS Utf8View)) OR (info(#26) = CAST(\"German\" AS Utf8View)))",
+159)------"input": 9
 160)----},
 161)----{
-162)------"id": 57,
+162)------"id": 87,
 163)------"kind": "join",
 164)------"title": "⋈ InnerJoin",
 165)------"join_type": "Inner",
-166)------"condition": "((id(#40) = movie_id(#24)) AND (id(#40) = movie_id(#14)))",
-167)------"outer": 19,
-168)------"inner": 56
+166)------"condition": "((movie_id(#14) = movie_id(#24)) AND (id(#40) = movie_id(#24)))",
+167)------"outer": 67,
+168)------"inner": 25
 169)----},
 170)----{
 171)------"id": 2,
@@ -192,29 +192,29 @@ SELECT explain_flat('SELECT MIN(t.title) AS typical_european_movie FROM company_
 188)------"input": 2
 189)----},
 190)----{
-191)------"id": 58,
+191)------"id": 90,
 192)------"kind": "join",
 193)------"title": "⋈ InnerJoin",
 194)------"join_type": "Inner",
 195)------"condition": "(id(#6) = info_type_id(#25))",
-196)------"outer": 57,
+196)------"outer": 87,
 197)------"inner": 3
 198)----},
 199)----{
-200)------"id": 59,
+200)------"id": 91,
 201)------"kind": "aggregation",
 202)------"title": "γ Aggregation",
 203)------"keys": "",
 204)------"aggregates": [
 205)--------"min(t.title)(#52) := min(title(#41))"
 206)------],
-207)------"input": 58
+207)------"input": 90
 208)----},
 209)----{
-210)------"id": 60,
+210)------"id": 92,
 211)------"kind": "output",
 212)------"title": "= Output",
-213)------"input": 59
+213)------"input": 91
 214)----}
 215)--]
 216)}

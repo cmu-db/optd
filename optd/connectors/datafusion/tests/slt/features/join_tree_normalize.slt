@@ -53,7 +53,7 @@ SELECT explain_flat('SELECT a.a_id, b.b_id, c.a_id, c.b_id FROM a, b, c WHERE a.
 38)------"inner": 3
 39)----},
 40)----{
-41)------"id": 16,
+41)------"id": 17,
 42)------"kind": "join",
 43)------"title": "⋈ InnerJoin",
 44)------"join_type": "Inner",
@@ -62,7 +62,7 @@ SELECT explain_flat('SELECT a.a_id, b.b_id, c.a_id, c.b_id FROM a, b, c WHERE a.
 47)------"inner": 15
 48)----},
 49)----{
-50)------"id": 17,
+50)------"id": 19,
 51)------"kind": "projection",
 52)------"title": "π Projection",
 53)------"columns": [
@@ -71,13 +71,13 @@ SELECT explain_flat('SELECT a.a_id, b.b_id, c.a_id, c.b_id FROM a, b, c WHERE a.
 56)--------"a_id(#2)",
 57)--------"b_id(#3)"
 58)------],
-59)------"input": 16
+59)------"input": 17
 60)----},
 61)----{
-62)------"id": 18,
+62)------"id": 20,
 63)------"kind": "output",
 64)------"title": "= Output",
-65)------"input": 17
+65)------"input": 19
 66)----}
 67)--]
 68)}
@@ -134,7 +134,7 @@ SELECT explain_flat('SELECT ta.x, tb.x, tc.x FROM ta, tb, tc WHERE ta.x = tb.x A
 37)------"inner": 1
 38)----},
 39)----{
-40)------"id": 21,
+40)------"id": 22,
 41)------"kind": "join",
 42)------"title": "⋈ InnerJoin",
 43)------"join_type": "Inner",
@@ -143,7 +143,7 @@ SELECT explain_flat('SELECT ta.x, tb.x, tc.x FROM ta, tb, tc WHERE ta.x = tb.x A
 46)------"inner": 20
 47)----},
 48)----{
-49)------"id": 22,
+49)------"id": 27,
 50)------"kind": "projection",
 51)------"title": "π Projection",
 52)------"columns": [
@@ -151,13 +151,13 @@ SELECT explain_flat('SELECT ta.x, tb.x, tc.x FROM ta, tb, tc WHERE ta.x = tb.x A
 54)--------"x(#1)",
 55)--------"x(#2)"
 56)------],
-57)------"input": 21
+57)------"input": 22
 58)----},
 59)----{
-60)------"id": 23,
+60)------"id": 28,
 61)------"kind": "output",
 62)------"title": "= Output",
-63)------"input": 22
+63)------"input": 27
 64)----}
 65)--]
 66)}

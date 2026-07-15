@@ -79,8 +79,8 @@ where
 63)------"title": "γ Aggregation",
 64)------"keys": "",
 65)------"aggregates": [
-66)--------"sum(CASE WHEN part.p_type LIKE Utf8(\"PROMO%\") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#25) := sum(CASE WHEN (p_type(#20) LIKE \"PROMO%\") THEN (l_extendedprice(#5) * (1 - l_discount(#6))) ELSE 0 END)",
-67)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#26) := sum((l_extendedprice(#5) * (1 - l_discount(#6))))"
+66)--------"sum(CASE WHEN part.p_type LIKE Utf8(\"PROMO%\") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#25) := sum(CASE WHEN (p_type(#20) LIKE CAST(\"PROMO%\" AS Utf8View)) THEN (l_extendedprice(#5) * (CAST(1 AS Decimal128(20, 0)) - l_discount(#6))) ELSE CAST(0 AS Decimal128(38, 4)) END)",
+67)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#26) := sum((l_extendedprice(#5) * (CAST(1 AS Decimal128(20, 0)) - l_discount(#6))))"
 68)------],
 69)------"input": 19
 70)----},
@@ -89,7 +89,7 @@ where
 73)------"kind": "map",
 74)------"title": "χ Map",
 75)------"computations": [
-76)--------"promo_revenue(#27) := ((100 * sum(CASE WHEN part.p_type LIKE Utf8(\"PROMO%\") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#25)) / sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#26))"
+76)--------"promo_revenue(#27) := ((100 * CAST(sum(CASE WHEN part.p_type LIKE Utf8(\"PROMO%\") THEN lineitem.l_extendedprice * Int64(1) - lineitem.l_discount ELSE Int64(0) END)(#25) AS Float64)) / CAST(sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#26) AS Float64))"
 77)------],
 78)------"input": 20
 79)----},

@@ -10,14 +10,11 @@ use datafusion::{
     datasource::MemTable,
     prelude::SessionContext,
 };
-use optd_core::{
-    ExprSimplify, HolisticUnnesting, JoinOrdering, JoinTreeNormalize, MarkJoinToSemiJoin,
-    OperatorRewriteAdaptor, OptimizerContext, PassManager, PassProfile, PredicatePushdown,
-    ProjectionElimination, QueryContext, SubqueryToJoin,
-};
-use optd_core::{Operator, OperatorData, optimize::join_ordering::collect_join_group_roots};
+use optd_core::PassProfile;
 
-use crate::from_df_logical::{FromDFError, from_logical_plan};
+use crate::from_df_logical::FromDFError;
+use crate::runner::{default_pass_manager, optimizer_context_from_logical_plan};
+use crate::runtime_statistics::RuntimeStatisticsCatalogBuilder;
 
 /// Error produced while building or profiling a optd optimizer input.
 #[derive(Debug)]
@@ -166,7 +163,6 @@ pub fn predicate_pushdown_queries() -> Vec<ProfileQuery> {
         },
     ];
     queries.push(sixty_four_join_sixty_four_predicates_query());
-    queries.push(hundred_join_hundred_predicates_query());
     queries
 }
 
@@ -175,14 +171,6 @@ fn sixty_four_join_sixty_four_predicates_query() -> ProfileQuery {
         64,
         "sixty_four_join_sixty_four_predicates",
         "SELECT t1.a, t2.b, t3.c, t4.d, t5.e, t6.a, t7.b, t8.c FROM t1",
-    )
-}
-
-fn hundred_join_hundred_predicates_query() -> ProfileQuery {
-    n_join_n_predicates_query(
-        100,
-        "hundred_join_hundred_predicates",
-        "SELECT t1.a FROM t1",
     )
 }
 
@@ -222,48 +210,20 @@ pub async fn profile_passes_sql(
     sql: &str,
 ) -> ProfilingResult<Vec<PassProfile>> {
     let plan = session.state().create_logical_plan(sql).await?;
+    let runtime_stats = RuntimeStatisticsCatalogBuilder::new(session.clone());
+    let mut opt = optimizer_context_from_logical_plan(session, &runtime_stats, &plan)
+        .await
+        .map_err(|err| {
+            ProfilingError::Optimize(optd_core::OptimizeError::PassError {
+                pass: "profile_passes",
+                message: err.to_string(),
+            })
+        })?;
 
-    let mut query = QueryContext::new();
-    let root = from_logical_plan(&plan, &mut query)?;
-    query.set_root(root);
-
-    let mut opt = OptimizerContext::new(query);
-    let mut pass_manager = PassManager::new();
-    pass_manager.add_pass(SubqueryToJoin);
-    pass_manager.add_pass(OperatorRewriteAdaptor::new(ExprSimplify));
-    pass_manager.add_pass(HolisticUnnesting);
-    pass_manager.add_pass(OperatorRewriteAdaptor::new(MarkJoinToSemiJoin));
-    pass_manager.add_pass(OperatorRewriteAdaptor::new(PredicatePushdown));
-    pass_manager.add_pass(JoinTreeNormalize::new());
-    pass_manager.add_pass(OperatorRewriteAdaptor::new(ProjectionElimination));
-    if supports_join_ordering(&opt.query) {
-        pass_manager.add_pass(JoinOrdering::new());
-    }
+    let mut pass_manager = default_pass_manager();
     pass_manager.run(&mut opt)?;
 
     Ok(pass_manager.profiles().to_vec())
-}
-
-fn supports_join_ordering(query: &QueryContext) -> bool {
-    let Some(root) = query.root() else {
-        return true;
-    };
-    collect_join_group_roots(query, root)
-        .into_iter()
-        .map(|group_root| join_group_terminal_count(query, group_root))
-        .all(|count| count <= 64)
-}
-
-fn join_group_terminal_count(query: &QueryContext, op: Operator) -> usize {
-    match query.operator(op) {
-        OperatorData::Join(j) => {
-            join_group_terminal_count(query, j.outer) + join_group_terminal_count(query, j.inner)
-        }
-        OperatorData::CrossProduct(cp) => {
-            join_group_terminal_count(query, cp.outer) + join_group_terminal_count(query, cp.inner)
-        }
-        _ => 1,
-    }
 }
 
 fn synthetic_schema() -> SchemaRef {

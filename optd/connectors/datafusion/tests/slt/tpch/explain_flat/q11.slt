@@ -47,7 +47,7 @@ limit 10;');
 16)------"id": 28,
 17)------"kind": "selection",
 18)------"title": "σ Selection",
-19)------"predicate": "(n_name(#13) = \"GERMANY\")",
+19)------"predicate": "(n_name(#13) = CAST(\"GERMANY\" AS Utf8View))",
 20)------"input": 3
 21)----},
 22)----{
@@ -66,7 +66,7 @@ limit 10;');
 35)------]
 36)----},
 37)----{
-38)------"id": 83,
+38)------"id": 84,
 39)------"kind": "join",
 40)------"title": "⋈ InnerJoin",
 41)------"join_type": "Inner",
@@ -88,23 +88,23 @@ limit 10;');
 57)------]
 58)----},
 59)----{
-60)------"id": 84,
+60)------"id": 86,
 61)------"kind": "join",
 62)------"title": "⋈ InnerJoin",
 63)------"join_type": "Inner",
 64)------"condition": "(ps_suppkey(#1) = s_suppkey(#5))",
-65)------"outer": 83,
+65)------"outer": 84,
 66)------"inner": 0
 67)----},
 68)----{
-69)------"id": 88,
+69)------"id": 92,
 70)------"kind": "aggregation",
 71)------"title": "γ Aggregation",
 72)------"keys": "ps_partkey(#0)",
 73)------"aggregates": [
-74)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#16) := sum((ps_supplycost(#3) * ps_availqty(#2)))"
+74)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#16) := sum((ps_supplycost(#3) * CAST(ps_availqty(#2) AS Decimal128(20, 0))))"
 75)------],
-76)------"input": 84
+76)------"input": 86
 77)----},
 78)----{
 79)------"id": 10,
@@ -122,7 +122,7 @@ limit 10;');
 91)------"id": 38,
 92)------"kind": "selection",
 93)------"title": "σ Selection",
-94)------"predicate": "(n_name(#30) = \"GERMANY\")",
+94)------"predicate": "(n_name(#30) = CAST(\"GERMANY\" AS Utf8View))",
 95)------"input": 10
 96)----},
 97)----{
@@ -141,7 +141,7 @@ limit 10;');
 110)------]
 111)----},
 112)----{
-113)------"id": 85,
+113)------"id": 88,
 114)------"kind": "join",
 115)------"title": "⋈ InnerJoin",
 116)------"join_type": "Inner",
@@ -163,90 +163,90 @@ limit 10;');
 132)------]
 133)----},
 134)----{
-135)------"id": 86,
+135)------"id": 90,
 136)------"kind": "join",
 137)------"title": "⋈ InnerJoin",
 138)------"join_type": "Inner",
 139)------"condition": "(ps_suppkey(#18) = s_suppkey(#22))",
-140)------"outer": 85,
+140)------"outer": 88,
 141)------"inner": 7
 142)----},
 143)----{
-144)------"id": 89,
+144)------"id": 93,
 145)------"kind": "aggregation",
 146)------"title": "γ Aggregation",
 147)------"keys": "",
 148)------"aggregates": [
-149)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#33) := sum((ps_supplycost(#20) * ps_availqty(#19)))"
+149)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#33) := sum((ps_supplycost(#20) * CAST(ps_availqty(#19) AS Decimal128(20, 0))))"
 150)------],
-151)------"input": 86
+151)------"input": 90
 152)----},
 153)----{
-154)------"id": 90,
+154)------"id": 94,
 155)------"kind": "map",
 156)------"title": "χ Map",
 157)------"computations": [
-158)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty) * Float64(0.0001)(#34) := (sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#33) * 0.0001)"
+158)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty) * Float64(0.0001)(#34) := CAST((CAST(sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#33) AS Float64) * 0.0001) AS Decimal128(38, 15))"
 159)------],
-160)------"input": 89
+160)------"input": 93
 161)----},
 162)----{
-163)------"id": 91,
+163)------"id": 95,
 164)------"kind": "projection",
 165)------"title": "π Projection",
 166)------"columns": [
 167)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty) * Float64(0.0001)(#34)"
 168)------],
-169)------"input": 90
+169)------"input": 94
 170)----},
 171)----{
-172)------"id": 92,
+172)------"id": 96,
 173)------"kind": "join",
 174)------"title": "⟕₁ SingleJoin",
 175)------"join_type": "Single",
 176)------"condition": "true",
-177)------"outer": 88,
-178)------"inner": 91
+177)------"outer": 92,
+178)------"inner": 95
 179)----},
 180)----{
-181)------"id": 93,
+181)------"id": 97,
 182)------"kind": "selection",
 183)------"title": "σ Selection",
-184)------"predicate": "(sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#16) > sum(partsupp.ps_supplycost * partsupp.ps_availqty) * Float64(0.0001)(#34))",
-185)------"input": 92
+184)------"predicate": "(CAST(sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#16) AS Decimal128(38, 15)) > sum(partsupp.ps_supplycost * partsupp.ps_availqty) * Float64(0.0001)(#34))",
+185)------"input": 96
 186)----},
 187)----{
-188)------"id": 94,
+188)------"id": 98,
 189)------"kind": "projection",
 190)------"title": "π Projection",
 191)------"columns": [
 192)--------"ps_partkey(#0)",
 193)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#16)"
 194)------],
-195)------"input": 93
+195)------"input": 97
 196)----},
 197)----{
-198)------"id": 95,
+198)------"id": 99,
 199)------"kind": "sort",
 200)------"title": "⇞ Sort",
 201)------"keys": [
 202)--------"sum(partsupp.ps_supplycost * partsupp.ps_availqty)(#16) Desc NullsFirst"
 203)------],
-204)------"input": 94
+204)------"input": 98
 205)----},
 206)----{
-207)------"id": 96,
+207)------"id": 100,
 208)------"kind": "limit",
 209)------"title": "τ Limit",
 210)------"fetch": "10",
 211)------"offset": "0",
-212)------"input": 95
+212)------"input": 99
 213)----},
 214)----{
-215)------"id": 97,
+215)------"id": 101,
 216)------"kind": "output",
 217)------"title": "= Output",
-218)------"input": 96
+218)------"input": 100
 219)----}
 220)--]
 221)}

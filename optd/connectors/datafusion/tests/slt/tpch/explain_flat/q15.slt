@@ -86,7 +86,7 @@ order by
 52)------"title": "γ Aggregation",
 53)------"keys": "l_suppkey(#9)",
 54)------"aggregates": [
-55)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23) := sum((l_extendedprice(#12) * (1 - l_discount(#13))))"
+55)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#23) := sum((l_extendedprice(#12) * (CAST(1 AS Decimal128(20, 0)) - l_discount(#13))))"
 56)------],
 57)------"input": 2
 58)----},
@@ -146,7 +146,7 @@ order by
 112)------"title": "γ Aggregation",
 113)------"keys": "l_suppkey(#28)",
 114)------"aggregates": [
-115)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42) := sum((l_extendedprice(#31) * (1 - l_discount(#32))))"
+115)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#42) := sum((l_extendedprice(#31) * (CAST(1 AS Decimal128(20, 0)) - l_discount(#32))))"
 116)------],
 117)------"input": 9
 118)----},

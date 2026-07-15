@@ -89,7 +89,7 @@ SELECT explain_flat('SELECT MIN(lt.link) AS link_type, MIN(t1.title) AS first_mo
 85)------"input": 8
 86)----},
 87)----{
-88)------"id": 65,
+88)------"id": 75,
 89)------"kind": "join",
 90)------"title": "⋈ InnerJoin",
 91)------"join_type": "Inner",
@@ -138,94 +138,94 @@ SELECT explain_flat('SELECT MIN(lt.link) AS link_type, MIN(t1.title) AS first_mo
 134)------"input": 11
 135)----},
 136)----{
-137)------"id": 66,
+137)------"id": 79,
 138)------"kind": "join",
 139)------"title": "⋈ InnerJoin",
 140)------"join_type": "Inner",
 141)------"condition": "(movie_id(#21) = id(#36))",
-142)------"outer": 65,
+142)------"outer": 75,
 143)------"inner": 12
 144)----},
 145)----{
-146)------"id": 0,
-147)------"kind": "scan",
-148)------"title": "⊞ Scan",
-149)------"table_name": "keyword",
-150)------"columns": [
-151)--------"id(#0)",
-152)--------"keyword(#1)",
-153)--------"phonetic_code(#2)"
-154)------]
-155)----},
-156)----{
-157)------"id": 1,
-158)------"kind": "rename",
-159)------"title": "ρ Rename(k)",
-160)------"defs": [
-161)--------"id(#3) <- id(#0)",
-162)--------"keyword(#4) <- keyword(#1)",
-163)--------"phonetic_code(#5) <- phonetic_code(#2)"
-164)------],
-165)------"input": 0
-166)----},
-167)----{
-168)------"id": 47,
-169)------"kind": "selection",
-170)------"title": "σ Selection",
-171)------"predicate": "(keyword(#4) = \"10,000-mile-club\")",
-172)------"input": 1
-173)----},
-174)----{
-175)------"id": 5,
-176)------"kind": "scan",
-177)------"title": "⊞ Scan",
-178)------"table_name": "movie_keyword",
-179)------"columns": [
-180)--------"id(#10)",
-181)--------"movie_id(#11)",
-182)--------"keyword_id(#12)"
-183)------]
+146)------"id": 88,
+147)------"kind": "join",
+148)------"title": "⋈ InnerJoin",
+149)------"join_type": "Inner",
+150)------"condition": "(linked_movie_id(#22) = id(#60))",
+151)------"outer": 15,
+152)------"inner": 79
+153)----},
+154)----{
+155)------"id": 5,
+156)------"kind": "scan",
+157)------"title": "⊞ Scan",
+158)------"table_name": "movie_keyword",
+159)------"columns": [
+160)--------"id(#10)",
+161)--------"movie_id(#11)",
+162)--------"keyword_id(#12)"
+163)------]
+164)----},
+165)----{
+166)------"id": 6,
+167)------"kind": "rename",
+168)------"title": "ρ Rename(mk)",
+169)------"defs": [
+170)--------"id(#13) <- id(#10)",
+171)--------"movie_id(#14) <- movie_id(#11)",
+172)--------"keyword_id(#15) <- keyword_id(#12)"
+173)------],
+174)------"input": 5
+175)----},
+176)----{
+177)------"id": 103,
+178)------"kind": "join",
+179)------"title": "⋈ InnerJoin",
+180)------"join_type": "Inner",
+181)------"condition": "((id(#36) = movie_id(#14)) AND (movie_id(#14) = id(#36)))",
+182)------"outer": 88,
+183)------"inner": 6
 184)----},
 185)----{
-186)------"id": 6,
-187)------"kind": "rename",
-188)------"title": "ρ Rename(mk)",
-189)------"defs": [
-190)--------"id(#13) <- id(#10)",
-191)--------"movie_id(#14) <- movie_id(#11)",
-192)--------"keyword_id(#15) <- keyword_id(#12)"
-193)------],
-194)------"input": 5
+186)------"id": 0,
+187)------"kind": "scan",
+188)------"title": "⊞ Scan",
+189)------"table_name": "keyword",
+190)------"columns": [
+191)--------"id(#0)",
+192)--------"keyword(#1)",
+193)--------"phonetic_code(#2)"
+194)------]
 195)----},
 196)----{
-197)------"id": 67,
-198)------"kind": "join",
-199)------"title": "⋈ InnerJoin",
-200)------"join_type": "Inner",
-201)------"condition": "(keyword_id(#15) = id(#3))",
-202)------"outer": 47,
-203)------"inner": 6
-204)----},
-205)----{
-206)------"id": 68,
-207)------"kind": "join",
-208)------"title": "⋈ InnerJoin",
-209)------"join_type": "Inner",
-210)------"condition": "((id(#36) = movie_id(#14)) AND (movie_id(#14) = id(#36)))",
-211)------"outer": 66,
-212)------"inner": 67
+197)------"id": 1,
+198)------"kind": "rename",
+199)------"title": "ρ Rename(k)",
+200)------"defs": [
+201)--------"id(#3) <- id(#0)",
+202)--------"keyword(#4) <- keyword(#1)",
+203)--------"phonetic_code(#5) <- phonetic_code(#2)"
+204)------],
+205)------"input": 0
+206)----},
+207)----{
+208)------"id": 47,
+209)------"kind": "selection",
+210)------"title": "σ Selection",
+211)------"predicate": "(keyword(#4) = CAST(\"10,000-mile-club\" AS Utf8View))",
+212)------"input": 1
 213)----},
 214)----{
-215)------"id": 69,
+215)------"id": 108,
 216)------"kind": "join",
 217)------"title": "⋈ InnerJoin",
 218)------"join_type": "Inner",
-219)------"condition": "(linked_movie_id(#22) = id(#60))",
-220)------"outer": 15,
-221)------"inner": 68
+219)------"condition": "(keyword_id(#15) = id(#3))",
+220)------"outer": 103,
+221)------"inner": 47
 222)----},
 223)----{
-224)------"id": 70,
+224)------"id": 109,
 225)------"kind": "aggregation",
 226)------"title": "γ Aggregation",
 227)------"keys": "",
@@ -234,13 +234,13 @@ SELECT explain_flat('SELECT MIN(lt.link) AS link_type, MIN(t1.title) AS first_mo
 230)--------"min(t1.title)(#73) := min(title(#37))",
 231)--------"min(t2.title)(#74) := min(title(#61))"
 232)------],
-233)------"input": 69
+233)------"input": 108
 234)----},
 235)----{
-236)------"id": 71,
+236)------"id": 110,
 237)------"kind": "output",
 238)------"title": "= Output",
-239)------"input": 70
+239)------"input": 109
 240)----}
 241)--]
 242)}

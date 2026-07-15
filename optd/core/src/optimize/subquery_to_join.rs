@@ -578,14 +578,14 @@ fn column_proven_non_null(column: Column, input: Operator, ctx: &mut OptimizerCo
 mod tests {
     use super::*;
     use crate::{
-        BinaryOp, ColumnData, ExprData, JoinType, OperatorData, OptimizerContext, Output,
-        Projection, QueryContext, Scan, Selection, TableRef,
+        BinaryOp, ColumnData, ExprData, JoinType, OperatorData, Output, Projection, QueryContext,
+        Scan, Selection, TableRef,
         optimize::{PassManager, PassResult, QueryPass},
     };
     use arrow_schema::DataType;
 
     fn run_pass(ctx: QueryContext) -> QueryContext {
-        let mut opt = OptimizerContext::new(ctx);
+        let mut opt = crate::test_optimizer_context(ctx);
         let mut pm = PassManager::new();
         pm.add_pass(SubqueryToJoin);
         pm.run(&mut opt).unwrap();
@@ -1028,7 +1028,7 @@ mod tests {
         .add(&mut ctx);
         ctx.set_root(scan);
 
-        let mut opt = OptimizerContext::new(ctx.clone());
+        let mut opt = crate::test_optimizer_context(ctx.clone());
         let result = SubqueryToJoin.run(&mut opt).unwrap();
         assert_eq!(result, PassResult::Unchanged);
     }

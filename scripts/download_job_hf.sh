@@ -2,7 +2,7 @@
 set -euo pipefail
 
 output_dir="${1:-optd/connectors/datafusion/data/job}"
-revision="${JOB_HF_REVISION:-main}"
+revision="51a5d2387a6a63ebbf80fde95d2db597edf345e5"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 base_url="https://huggingface.co/datasets/liangyc/job/resolve/${revision}/data"
 

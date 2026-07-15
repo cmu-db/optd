@@ -62,7 +62,7 @@ limit 10;');
 38)------"kind": "join",
 39)------"title": "⟕ LeftOuterJoin",
 40)------"join_type": "LeftOuter",
-41)------"condition": "((c_custkey(#0) = o_custkey(#9)) AND (o_comment(#16) NOT LIKE \"%special%requests%\"))",
+41)------"condition": "((c_custkey(#0) = o_custkey(#9)) AND (o_comment(#16) NOT LIKE CAST(\"%special%requests%\" AS Utf8View)))",
 42)------"outer": 0,
 43)------"inner": 1
 44)----},

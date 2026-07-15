@@ -1,9 +1,9 @@
 //! Session setup for local benchmark Parquet data.
 //!
-//! Generate the data with:
+//! Download the pinned data with:
 //!
 //! ```text
-//! ./scripts/generate_tpch.sh
+//! ./scripts/download_tpch_hf.sh
 //! ```
 
 use std::path::PathBuf;
@@ -56,7 +56,7 @@ pub async fn register_tpch_tables(ctx: &SessionContext) -> DFResult<()> {
         TPCH_TABLES,
         TPCH_DATA_DIR,
         "TPC-H",
-        "./scripts/generate_tpch.sh",
+        "./scripts/download_tpch_hf.sh",
     )
     .await
 }
@@ -75,7 +75,7 @@ pub async fn register_job_tables(ctx: &SessionContext) -> DFResult<()> {
         JOB_TABLES,
         JOB_DATA_DIR,
         "JOB",
-        "./scripts/generate_job_parquet.sh",
+        "./scripts/download_job_hf.sh",
     )
     .await
 }
@@ -159,7 +159,7 @@ mod tests {
     async fn to_logical_plan_round_trip_nation() {
         use crate::from_df_logical::from_logical_plan;
         use crate::to_df_logical::to_logical_plan;
-        use optd_core::{OptimizerContext, QueryContext};
+        use optd_core::{PlannedQuery, QueryContext};
 
         let session = setup_tpch_session().await.unwrap();
         let plan = session
@@ -171,9 +171,13 @@ mod tests {
         let mut ctx = QueryContext::new();
         let root = from_logical_plan(&plan, &mut ctx).unwrap();
         ctx.set_root(root);
-        let opt_ctx = OptimizerContext::new(ctx);
-        let ctx = opt_ctx.into_query();
-        let df_plan = to_logical_plan(&ctx, &session).await.unwrap();
+        let catalog =
+            crate::runtime_statistics::RuntimeStatisticsCatalogBuilder::new(session.clone())
+                .build_for_plan(&plan)
+                .await
+                .unwrap();
+        let planned = PlannedQuery::new(ctx, catalog);
+        let df_plan = to_logical_plan(&planned, &session).await.unwrap();
         let df = session.execute_logical_plan(df_plan).await.unwrap();
         let batches = df.collect().await.unwrap();
         let count = batches[0]
@@ -199,10 +203,16 @@ mod tests {
         let mut ctx = QueryContext::new();
         let root = from_logical_plan(&plan, &mut ctx).unwrap();
         ctx.set_root(root);
+        let catalog =
+            crate::runtime_statistics::RuntimeStatisticsCatalogBuilder::new(session.clone())
+                .build_for_plan(&plan)
+                .await
+                .unwrap();
         println!(
             "=== optd IR ===\n{}",
             ctx.pretty_with_config(
-                optd_core::QueryFormatConfig::new().with_analysis::<optd_core::AvailableColumns>()
+                optd_core::QueryFormatConfig::new().with_analysis::<optd_core::AvailableColumns>(),
+                optd_core::AnalysisContext::new(catalog),
             )
         );
     }

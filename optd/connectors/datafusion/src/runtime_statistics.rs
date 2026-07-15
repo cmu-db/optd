@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use datafusion::catalog::TableProvider;
 use datafusion::common::TableReference;
+use datafusion::common::tree_node::TreeNodeRecursion;
 use datafusion::logical_expr::LogicalPlan;
 use datafusion::prelude::SessionContext;
 use optd_core::{Catalog, MemoryCatalog, TableRef, TableStatistics};
@@ -111,11 +112,15 @@ impl RuntimeStatisticsCatalogBuilder {
 
 fn referenced_scan_columns(plan: &LogicalPlan) -> Vec<ReferencedScan> {
     let mut scans = BTreeMap::<String, ReferencedScan>::new();
-    collect_referenced_scan_columns(plan, &mut scans);
+    plan.apply_with_subqueries(|plan| {
+        collect_referenced_scan(plan, &mut scans);
+        Ok(TreeNodeRecursion::Continue)
+    })
+    .expect("collecting table scans cannot fail");
     scans.into_values().collect()
 }
 
-fn collect_referenced_scan_columns(plan: &LogicalPlan, out: &mut BTreeMap<String, ReferencedScan>) {
+fn collect_referenced_scan(plan: &LogicalPlan, out: &mut BTreeMap<String, ReferencedScan>) {
     if let LogicalPlan::TableScan(scan) = plan {
         let key = scan.table_name.to_string();
         let entry = out.entry(key).or_insert_with(|| ReferencedScan {
@@ -125,9 +130,6 @@ fn collect_referenced_scan_columns(plan: &LogicalPlan, out: &mut BTreeMap<String
         for field in scan.projected_schema.fields() {
             entry.columns.insert(field.name().clone());
         }
-    }
-    for input in plan.inputs() {
-        collect_referenced_scan_columns(input, out);
     }
 }
 
@@ -236,5 +238,37 @@ mod tests {
 
         assert_eq!(stats.row_count, Some(3));
         assert_eq!(stats.column_statistics["id"].distinct, Some(2));
+    }
+
+    #[tokio::test]
+    async fn runtime_statistics_catalog_includes_scans_inside_subqueries() {
+        let session = SessionContext::new();
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(Int64Array::from(vec![1, 2, 3]))],
+        )
+        .unwrap();
+        let table = Arc::new(MemTable::try_new(schema, vec![vec![batch]]).unwrap());
+        for name in ["outer_t", "middle_t", "inner_t"] {
+            session.register_table(name, table.clone()).unwrap();
+        }
+        let plan = session
+            .state()
+            .create_logical_plan(
+                "SELECT id FROM outer_t WHERE id IN (\
+                 SELECT id FROM middle_t WHERE id > (SELECT max(id) FROM inner_t)\
+                 )",
+            )
+            .await
+            .unwrap();
+        let builder = RuntimeStatisticsCatalogBuilder::new(session);
+
+        let catalog = builder.build_for_plan(&plan).await.unwrap();
+
+        for name in ["outer_t", "middle_t", "inner_t"] {
+            assert!(catalog.table_by_ref(&TableRef::bare(name)).is_ok());
+        }
+        assert_eq!(builder.cache_len().await, 3);
     }
 }

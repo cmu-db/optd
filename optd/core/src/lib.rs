@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 pub mod analysis;
 pub mod catalog;
+pub mod cost;
 mod display;
 pub mod hypergraph;
 pub mod optimize;
@@ -12,15 +13,16 @@ pub mod substrait;
 pub mod tpch;
 
 pub use analysis::{
-    Analysis, AnalysisContext, AnalysisError, AnalysisResult, Analyzable, AvailableColumns,
-    CardinalityEstimationV1, CardinalityProfile, ColumnNullability, ColumnProfile, CreatedColumns,
-    Estimate, EstimateSource, FreeColumns, JoinInputProfiles, ParentIndex, ParentsOf, UsedColumns,
-    expr_used_columns,
+    Analysis, AnalysisContext, AnalysisError, AnalysisResult, Analyzable, AtMostOneRow,
+    AvailableColumns, CardinalityEstimationV1, CardinalityProfile, ColumnNullability,
+    ColumnProfile, CreatedColumns, Estimate, EstimateSource, FreeColumns, ParentIndex, ParentsOf,
+    UsedColumns, expr_used_columns,
 };
 pub use catalog::{
     Catalog, CatalogError, CatalogResult, ColumnStatistics, MemoryCatalog, ResolvedTableRef,
     TableId, TableMetadata, TableRef, TableStatistics,
 };
+pub use cost::{CostModel, DefaultCostModel, JoinAlgorithmClass, join_algorithm_cost};
 pub use display::{
     BoxDrawingRenderer, BoxRendererConfig, BoxRendererTheme, ColorMode, DisplayField, DisplayInput,
     DisplayNode, DisplayNodeRecord, DisplayPlan, DisplayProperties, DisplayValue,
@@ -768,22 +770,38 @@ pub struct OptimizerContext {
     pub(crate) optimizer_run_id: u64,
 }
 
-impl OptimizerContext {
-    /// Creates an optimizer context for `query`.
-    pub fn new(query: QueryContext) -> Self {
-        Self {
-            query,
-            analyses: AnalysisContext::new(),
-            rewrites: optimize::RewriteMap::new(),
-            optimizer_run_id: 0,
-        }
+/// An optimized query paired with the catalog that informed planning.
+///
+/// Analysis caches remain optimizer-local, while this lightweight context is
+/// safe to carry through asynchronous formatting and execution boundaries.
+pub struct PlannedQuery {
+    pub query: QueryContext,
+    pub catalog: Arc<dyn Catalog>,
+}
+
+impl PlannedQuery {
+    /// Creates a planned query backed by `catalog`.
+    pub fn new(query: QueryContext, catalog: Arc<dyn Catalog>) -> Self {
+        Self { query, catalog }
     }
 
-    /// Creates an optimizer context whose analyses can consult `catalog`.
-    pub fn with_catalog(query: QueryContext, catalog: Arc<dyn Catalog>) -> Self {
+    /// Creates fresh analysis state backed by this plan's catalog.
+    pub fn analyze(&self) -> AnalysisContext {
+        AnalysisContext::new(Arc::clone(&self.catalog))
+    }
+
+    /// Consumes the planning context and returns its query IR.
+    pub fn into_query(self) -> QueryContext {
+        self.query
+    }
+}
+
+impl OptimizerContext {
+    /// Creates an optimizer context for `query`.
+    pub fn new(query: QueryContext, catalog: Arc<dyn Catalog>) -> Self {
         Self {
             query,
-            analyses: AnalysisContext::with_catalog(catalog),
+            analyses: AnalysisContext::new(catalog),
             rewrites: optimize::RewriteMap::new(),
             optimizer_run_id: 0,
         }
@@ -792,6 +810,14 @@ impl OptimizerContext {
     /// Consumes this optimizer context and returns the optimized query.
     pub fn into_query(self) -> QueryContext {
         self.query
+    }
+
+    /// Drops optimizer-local caches while preserving the planning catalog.
+    pub fn into_planned_query(self) -> PlannedQuery {
+        PlannedQuery {
+            query: self.query,
+            catalog: Arc::clone(self.analyses.catalog()),
+        }
     }
 }
 
@@ -867,14 +893,22 @@ impl QueryContext {
         self.root
     }
 
-    /// Creates an empty analysis context for demand-driven query analysis.
-    pub fn analyze(&self) -> AnalysisContext {
-        AnalysisContext::new()
+    /// Creates analysis state backed by `catalog`.
+    pub fn analyze(&self, catalog: Arc<dyn Catalog>) -> AnalysisContext {
+        AnalysisContext::new(catalog)
     }
 
     /// Returns the number of operators in the operator arena.
     pub fn operator_count(&self) -> usize {
         self.operators.len()
+    }
+
+    /// Returns the scans stored in the query arena.
+    pub fn scans(&self) -> impl Iterator<Item = &Scan> {
+        self.operators.iter().filter_map(|operator| match operator {
+            OperatorData::Scan(scan) => Some(scan),
+            _ => None,
+        })
     }
 
     /// Returns the number of expressions in the expression arena.
@@ -914,38 +948,53 @@ impl QueryContext {
 
     /// Formats the reachable query plan using the default query formatter.
     pub fn pretty(&self) -> String {
-        self.pretty_with_config(QueryFormatConfig::default())
+        let node = QueryFormatter::new(self).format();
+        BoxDrawingRenderer::default().render(&node)
     }
 
-    /// Formats the reachable query plan using the provided query formatter config.
-    pub fn pretty_with_config(&self, config: QueryFormatConfig) -> String {
-        let node = QueryFormatter::with_config(self, config).format();
+    /// Formats the query using catalog-backed analysis properties from `config`.
+    pub fn pretty_with_config(
+        &self,
+        config: QueryFormatConfig,
+        analyses: AnalysisContext,
+    ) -> String {
+        let node = QueryFormatter::with_config_and_analyses(self, config, analyses).format();
         BoxDrawingRenderer::default().render(&node)
     }
 
     /// Formats the reachable query plan as recursive JSON for inspecting the tree shape.
     #[cfg(feature = "serde")]
     pub fn pretty_json(&self) -> String {
-        self.pretty_json_with_config(QueryFormatConfig::default())
+        let node = QueryFormatter::new(self).format();
+        serde_json::to_string_pretty(&node).expect("display tree serialization should not fail")
     }
 
     /// Formats the reachable query plan as recursive JSON with the provided config.
     #[cfg(feature = "serde")]
-    pub fn pretty_json_with_config(&self, config: QueryFormatConfig) -> String {
-        let node = QueryFormatter::with_config(self, config).format();
+    pub fn pretty_json_with_config(
+        &self,
+        config: QueryFormatConfig,
+        analyses: AnalysisContext,
+    ) -> String {
+        let node = QueryFormatter::with_config_and_analyses(self, config, analyses).format();
         serde_json::to_string_pretty(&node).expect("display tree serialization should not fail")
     }
 
     /// Formats the reachable query plan as flat DFS post-order JSON for file diffs.
     #[cfg(feature = "serde")]
     pub fn pretty_flat(&self) -> String {
-        self.pretty_flat_with_config(QueryFormatConfig::default())
+        let plan = QueryFormatter::new(self).format_plan();
+        serde_json::to_string_pretty(&plan).expect("display plan serialization should not fail")
     }
 
     /// Formats the reachable query plan as flat DFS post-order JSON with the provided config.
     #[cfg(feature = "serde")]
-    pub fn pretty_flat_with_config(&self, config: QueryFormatConfig) -> String {
-        let plan = QueryFormatter::with_config(self, config).format_plan();
+    pub fn pretty_flat_with_config(
+        &self,
+        config: QueryFormatConfig,
+        analyses: AnalysisContext,
+    ) -> String {
+        let plan = QueryFormatter::with_config_and_analyses(self, config, analyses).format_plan();
         serde_json::to_string_pretty(&plan).expect("display plan serialization should not fail")
     }
 
@@ -954,10 +1003,12 @@ impl QueryContext {
     pub fn optimizer_visualizer_pass(
         &self,
         pass_name: impl Into<String>,
+        analyses: AnalysisContext,
     ) -> OptimizerVisualizerPass {
-        let node = QueryFormatter::with_config(
+        let node = QueryFormatter::with_config_and_analyses(
             self,
             QueryFormatConfig::new().with_analysis::<CardinalityEstimationV1>(),
+            analyses,
         )
         .format();
         OptimizerVisualizerPass::new(pass_name, OptimizerVisualizerNode::from_display_node(&node))
@@ -965,22 +1016,79 @@ impl QueryContext {
 
     /// Formats the reachable query plan as optd optimizer visualizer JSON.
     #[cfg(feature = "serde")]
-    pub fn optimizer_visualizer_json(&self, pass_name: impl Into<String>) -> String {
-        serde_json::to_string_pretty(&vec![self.optimizer_visualizer_pass(pass_name)])
+    pub fn optimizer_visualizer_json(
+        &self,
+        pass_name: impl Into<String>,
+        analyses: AnalysisContext,
+    ) -> String {
+        serde_json::to_string_pretty(&vec![self.optimizer_visualizer_pass(pass_name, analyses)])
             .expect("optimizer visualizer serialization should not fail")
     }
 }
 
+#[cfg(test)]
+pub(crate) fn test_catalog(query: &QueryContext) -> Arc<dyn Catalog> {
+    use arrow_schema::{Field, Schema};
+
+    let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+    for operator in &query.operators {
+        let OperatorData::Scan(scan) = operator else {
+            continue;
+        };
+        if catalog.table_by_ref(&scan.table).is_ok() {
+            continue;
+        }
+        let fields = scan
+            .columns
+            .iter()
+            .map(|column| {
+                let column = query.column(*column);
+                Field::new(&column.name, column.ty.clone(), true)
+            })
+            .collect::<Vec<_>>();
+        catalog
+            .create_table(scan.table.clone(), Arc::new(Schema::new(fields)), None)
+            .expect("synthetic scan table should register once");
+    }
+    catalog
+}
+
+#[cfg(test)]
+pub(crate) fn test_analyses(query: &QueryContext) -> AnalysisContext {
+    AnalysisContext::new(test_catalog(query))
+}
+
+#[cfg(test)]
+pub(crate) fn test_optimizer_context(query: QueryContext) -> OptimizerContext {
+    let catalog = test_catalog(&query);
+    OptimizerContext::new(query, catalog)
+}
+
 /// Formats an optimizer trace as optd optimizer visualizer JSON.
 #[cfg(feature = "serde")]
-pub fn optimizer_visualizer_trace_json(initial: &QueryContext, traces: &[PassTrace]) -> String {
+pub fn optimizer_visualizer_trace_json(
+    initial: &QueryContext,
+    traces: &[PassTrace],
+    catalog: Arc<dyn Catalog>,
+) -> String {
+    optimizer_visualizer_trace_json_with_analyses(initial, traces, || {
+        AnalysisContext::new(catalog.clone())
+    })
+}
+
+#[cfg(feature = "serde")]
+fn optimizer_visualizer_trace_json_with_analyses(
+    initial: &QueryContext,
+    traces: &[PassTrace],
+    mut analyses: impl FnMut() -> AnalysisContext,
+) -> String {
     let mut passes = Vec::with_capacity(traces.len() + 1);
-    passes.push(initial.optimizer_visualizer_pass("Initial"));
+    passes.push(initial.optimizer_visualizer_pass("Initial", analyses()));
     passes.extend(traces.iter().map(|trace| {
         let profile = &trace.profile;
         trace
             .query
-            .optimizer_visualizer_pass(profile.pass)
+            .optimizer_visualizer_pass(profile.pass, analyses())
             .with_profile(
                 profile.iteration,
                 profile.pass_index,
@@ -1140,21 +1248,29 @@ impl std::fmt::Debug for AnalysisDisplayProperty {
 pub struct QueryFormatter<'a> {
     ctx: &'a QueryContext,
     config: QueryFormatConfig,
-    analyses: RefCell<AnalysisContext>,
+    analyses: Option<RefCell<AnalysisContext>>,
 }
 
 impl<'a> QueryFormatter<'a> {
     /// Creates a query formatter.
     pub fn new(ctx: &'a QueryContext) -> Self {
-        Self::with_config(ctx, QueryFormatConfig::default())
+        Self {
+            ctx,
+            config: QueryFormatConfig::default(),
+            analyses: None,
+        }
     }
 
-    /// Creates a query formatter with the provided config.
-    pub fn with_config(ctx: &'a QueryContext, config: QueryFormatConfig) -> Self {
+    /// Creates a query formatter with caller-selected analysis state.
+    pub fn with_config_and_analyses(
+        ctx: &'a QueryContext,
+        config: QueryFormatConfig,
+        analyses: AnalysisContext,
+    ) -> Self {
         Self {
             ctx,
             config,
-            analyses: RefCell::new(AnalysisContext::new()),
+            analyses: Some(RefCell::new(analyses)),
         }
     }
 
@@ -1641,11 +1757,11 @@ fn format_displayable_analysis<A>(
 where
     A: DisplayableOperatorAnalysis,
 {
-    match formatter
+    let analyses = formatter
         .analyses
-        .borrow_mut()
-        .get::<A>(formatter.ctx, operator)
-    {
+        .as_ref()
+        .expect("analysis properties require QueryFormatter::with_config_and_analyses");
+    match analyses.borrow_mut().get::<A>(formatter.ctx, operator) {
         Ok(output) => A::format_output(formatter, output),
         Err(error) => DisplayValue::Atom(format!("error: {error}")),
     }
@@ -2230,7 +2346,7 @@ mod tests {
         let output = OperatorData::Output(Output { input: selection }).add(&mut ctx);
         ctx.set_root(output);
 
-        let json = ctx.optimizer_visualizer_json("0. Initial");
+        let json = ctx.optimizer_visualizer_json("0. Initial", crate::test_analyses(&ctx));
         let passes: serde_json::Value = serde_json::from_str(&json).unwrap();
 
         assert_eq!(passes[0]["passName"], "0. Initial");
@@ -2287,7 +2403,7 @@ mod tests {
             query: ctx.clone(),
         }];
 
-        let json = optimizer_visualizer_trace_json(&ctx, &trace);
+        let json = optimizer_visualizer_trace_json(&ctx, &trace, crate::test_catalog(&ctx));
         let passes: serde_json::Value = serde_json::from_str(&json).unwrap();
 
         assert_eq!(passes[0]["passName"], "Initial");
@@ -2343,8 +2459,10 @@ mod tests {
 
         assert!(!ctx.pretty().contains("analysis::available_columns"));
 
-        let pretty =
-            ctx.pretty_with_config(QueryFormatConfig::new().with_analysis::<AvailableColumns>());
+        let pretty = ctx.pretty_with_config(
+            QueryFormatConfig::new().with_analysis::<AvailableColumns>(),
+            crate::test_analyses(&ctx),
+        );
 
         assert!(pretty.contains("│ analysis::available_columns:"));
         assert!(pretty.contains("│   id(#0)"));
@@ -2364,13 +2482,16 @@ mod tests {
         ctx.set_root(output);
         let config = QueryFormatConfig::new().with_analysis::<AvailableColumns>();
 
-        let tree: serde_json::Value =
-            serde_json::from_str(&ctx.pretty_json_with_config(config.clone())).unwrap();
+        let tree: serde_json::Value = serde_json::from_str(
+            &ctx.pretty_json_with_config(config.clone(), crate::test_analyses(&ctx)),
+        )
+        .unwrap();
         assert_eq!(tree["analysis::available_columns"][0], "id(#0)");
         assert_eq!(tree["input"]["analysis::available_columns"][0], "id(#0)");
 
         let plan: serde_json::Value =
-            serde_json::from_str(&ctx.pretty_flat_with_config(config)).unwrap();
+            serde_json::from_str(&ctx.pretty_flat_with_config(config, crate::test_analyses(&ctx)))
+                .unwrap();
         let nodes = plan["nodes"].as_array().unwrap();
         assert_eq!(nodes[0]["analysis::available_columns"][0], "id(#0)");
         assert_eq!(nodes[1]["analysis::available_columns"][0], "id(#0)");
@@ -2624,7 +2745,7 @@ mod tests {
         assert!(pretty.contains("│ ⇞ Sort"));
         assert!(pretty.contains("│   age(#1) Desc NullsLast"));
 
-        let mut analyses = ctx.analyze();
+        let mut analyses = crate::test_analyses(&ctx);
         assert_eq!(analyses.get::<UsedColumns>(&ctx, sort).unwrap(), vec![age]);
         assert_eq!(
             analyses.get::<AvailableColumns>(&ctx, limit).unwrap(),

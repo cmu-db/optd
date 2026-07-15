@@ -32,7 +32,8 @@ use datafusion_optimizer::simplify_expressions::ExprSimplifier;
 use datafusion_physical_expr::expressions::Column as PhysicalColumn;
 use datafusion_physical_expr::{LexOrdering, PhysicalExpr, PhysicalSortExpr};
 use optd_core::{
-    BinaryOp, ExprData, JoinType, NaryOp, Operator, OperatorData, QueryContext, TableRef,
+    BinaryOp, Catalog, ExprData, JoinType, NaryOp, Operator, OperatorData, PlannedQuery,
+    QueryContext, TableRef,
 };
 
 use crate::to_df_logical::{
@@ -86,15 +87,16 @@ struct PhysicalPlanNode {
 
 /// Converts a optd `QueryContext` root directly into a DataFusion physical plan.
 pub async fn to_physical_plan(
-    ctx: &QueryContext,
+    planned: &PlannedQuery,
     session: &SessionContext,
 ) -> ToPhysicalResult<Arc<dyn ExecutionPlan>> {
+    let ctx = &planned.query;
     let root = ctx
         .root()
         .ok_or_else(|| ToPhysicalError::Unsupported("query has no root".into()))?;
-    let required = output_columns(root, ctx)?;
-    let planned = convert_operator(root, &required, ctx, session).await?;
-    Ok(planned.exec)
+    let required = output_columns(root, ctx, &planned.catalog)?;
+    let node = convert_operator(root, &required, ctx, &planned.catalog, session).await?;
+    Ok(node.exec)
 }
 
 // ---------------------------------------------------------------------------
@@ -109,26 +111,30 @@ async fn convert_operator(
     op: Operator,
     required: &[optd_core::Column],
     ctx: &QueryContext,
+    catalog: &Arc<dyn Catalog>,
     session: &SessionContext,
 ) -> ToPhysicalResult<PhysicalPlanNode> {
     match op.get(ctx) {
-        OperatorData::Scan(scan) => convert_scan(scan, required, &[], ctx, session).await,
+        OperatorData::Scan(scan) => convert_scan(scan, required, &[], ctx, catalog, session).await,
 
         OperatorData::Selection(sel) => {
             reject_subquery_exprs(sel.predicate, ctx)?;
             if let OperatorData::Scan(scan) = sel.input.get(ctx) {
-                let input_required = merge_columns(required, &expr_columns(sel.predicate, ctx)?);
+                let input_required =
+                    merge_columns(required, &expr_columns(sel.predicate, ctx, catalog)?);
                 let input = Box::pin(convert_scan(
                     scan,
                     &input_required,
                     &[sel.predicate],
                     ctx,
+                    catalog,
                     session,
                 ))
                 .await?;
                 let predicate = physical_expr(
                     sel.predicate,
                     ctx,
+                    catalog,
                     session,
                     input.df_schema.as_ref(),
                     input.exec.schema().as_ref(),
@@ -148,12 +154,20 @@ async fn convert_operator(
                 );
             }
 
-            let input_required = merge_columns(required, &expr_columns(sel.predicate, ctx)?);
-            let input =
-                Box::pin(convert_operator(sel.input, &input_required, ctx, session)).await?;
+            let input_required =
+                merge_columns(required, &expr_columns(sel.predicate, ctx, catalog)?);
+            let input = Box::pin(convert_operator(
+                sel.input,
+                &input_required,
+                ctx,
+                catalog,
+                session,
+            ))
+            .await?;
             let predicate = physical_expr(
                 sel.predicate,
                 ctx,
+                catalog,
                 session,
                 input.df_schema.as_ref(),
                 input.exec.schema().as_ref(),
@@ -175,8 +189,14 @@ async fn convert_operator(
 
         OperatorData::Projection(proj) => {
             let input_required = filter_columns(&proj.columns, required);
-            let input =
-                Box::pin(convert_operator(proj.input, &input_required, ctx, session)).await?;
+            let input = Box::pin(convert_operator(
+                proj.input,
+                &input_required,
+                ctx,
+                catalog,
+                session,
+            ))
+            .await?;
             project_columns(required, input, ctx, session)
         }
 
@@ -184,7 +204,7 @@ async fn convert_operator(
             for (_, expr) in &map.computations {
                 reject_subquery_exprs(*expr, ctx)?;
             }
-            let input_available = available_columns(map.input, ctx)?;
+            let input_available = available_columns(map.input, ctx, catalog)?;
             let mut input_required = Vec::new();
             for column in required {
                 if input_available.contains(column) {
@@ -194,11 +214,18 @@ async fn convert_operator(
                     .iter()
                     .find(|(computed, _)| computed == column)
                 {
-                    input_required = merge_columns(&input_required, &expr_columns(*expr, ctx)?);
+                    input_required =
+                        merge_columns(&input_required, &expr_columns(*expr, ctx, catalog)?);
                 }
             }
-            let input =
-                Box::pin(convert_operator(map.input, &input_required, ctx, session)).await?;
+            let input = Box::pin(convert_operator(
+                map.input,
+                &input_required,
+                ctx,
+                catalog,
+                session,
+            ))
+            .await?;
             let available = input.columns.clone();
             let mut exprs = projection_exprs_for_columns(
                 &available,
@@ -213,6 +240,7 @@ async fn convert_operator(
                 let physical = physical_expr(
                     *expr,
                     ctx,
+                    catalog,
                     session,
                     input.df_schema.as_ref(),
                     input.exec.schema().as_ref(),
@@ -253,18 +281,25 @@ async fn convert_operator(
             }
             let mut input_required = Vec::new();
             for key in &agg.keys {
-                input_required = merge_columns(&input_required, &expr_columns(*key, ctx)?);
+                input_required = merge_columns(&input_required, &expr_columns(*key, ctx, catalog)?);
             }
             for (_, agg_expr) in &agg.aggregates {
                 if let optd_core::AggregateExpr::Func { arg, .. } = agg_expr {
-                    input_required = merge_columns(&input_required, &expr_columns(*arg, ctx)?);
+                    input_required =
+                        merge_columns(&input_required, &expr_columns(*arg, ctx, catalog)?);
                 }
             }
-            let input =
-                Box::pin(convert_operator(agg.input, &input_required, ctx, session)).await?;
+            let input = Box::pin(convert_operator(
+                agg.input,
+                &input_required,
+                ctx,
+                catalog,
+                session,
+            ))
+            .await?;
             let input_schema = input.exec.schema();
             let empty_tables = TableMap::new();
-            let mut expr_ctx = ToDfContext::new(ctx, &empty_tables, session);
+            let mut expr_ctx = ToDfContext::new(ctx, Arc::clone(catalog), &empty_tables, session);
             let group_exprs = agg
                 .keys
                 .iter()
@@ -272,6 +307,7 @@ async fn convert_operator(
                     let physical = physical_expr(
                         *expr,
                         ctx,
+                        catalog,
                         session,
                         input.df_schema.as_ref(),
                         input.exec.schema().as_ref(),
@@ -329,7 +365,7 @@ async fn convert_operator(
                 partial,
                 input_schema,
             )?);
-            let columns = output_columns(op, ctx)?;
+            let columns = output_columns(op, ctx, catalog)?;
             project_columns(
                 required,
                 PhysicalPlanNode {
@@ -348,10 +384,17 @@ async fn convert_operator(
             }
             let mut input_required = required.to_vec();
             for key in &sort.keys {
-                input_required = merge_columns(&input_required, &expr_columns(key.expr, ctx)?);
+                input_required =
+                    merge_columns(&input_required, &expr_columns(key.expr, ctx, catalog)?);
             }
-            let input =
-                Box::pin(convert_operator(sort.input, &input_required, ctx, session)).await?;
+            let input = Box::pin(convert_operator(
+                sort.input,
+                &input_required,
+                ctx,
+                catalog,
+                session,
+            ))
+            .await?;
             let sort_exprs = sort
                 .keys
                 .iter()
@@ -359,6 +402,7 @@ async fn convert_operator(
                     let expr = physical_expr(
                         key.expr,
                         ctx,
+                        catalog,
                         session,
                         input.df_schema.as_ref(),
                         input.exec.schema().as_ref(),
@@ -388,7 +432,14 @@ async fn convert_operator(
         }
 
         OperatorData::Limit(limit) => {
-            let input = Box::pin(convert_operator(limit.input, required, ctx, session)).await?;
+            let input = Box::pin(convert_operator(
+                limit.input,
+                required,
+                ctx,
+                catalog,
+                session,
+            ))
+            .await?;
             let mut input_exec = input.exec;
             if input_exec.output_partitioning().partition_count() > 1 {
                 if let Some(fetch) = limit.fetch {
@@ -403,17 +454,29 @@ async fn convert_operator(
             })
         }
 
-        OperatorData::Join(join) => convert_join(join, required, ctx, session).await,
+        OperatorData::Join(join) => convert_join(join, required, ctx, catalog, session).await,
 
         OperatorData::CrossProduct(cross) => {
-            let left_available = available_columns(cross.outer, ctx)?;
-            let right_available = available_columns(cross.inner, ctx)?;
+            let left_available = available_columns(cross.outer, ctx, catalog)?;
+            let right_available = available_columns(cross.inner, ctx, catalog)?;
             let left_required = filter_columns(&left_available, required);
             let right_required = filter_columns(&right_available, required);
-            let left =
-                Box::pin(convert_operator(cross.outer, &left_required, ctx, session)).await?;
-            let right =
-                Box::pin(convert_operator(cross.inner, &right_required, ctx, session)).await?;
+            let left = Box::pin(convert_operator(
+                cross.outer,
+                &left_required,
+                ctx,
+                catalog,
+                session,
+            ))
+            .await?;
+            let right = Box::pin(convert_operator(
+                cross.inner,
+                &right_required,
+                ctx,
+                catalog,
+                session,
+            ))
+            .await?;
             project_columns(
                 required,
                 join_node(
@@ -427,7 +490,7 @@ async fn convert_operator(
         }
 
         OperatorData::Output(out) => {
-            Box::pin(convert_operator(out.input, required, ctx, session)).await
+            Box::pin(convert_operator(out.input, required, ctx, catalog, session)).await
         }
 
         OperatorData::Rename(rename) => {
@@ -450,6 +513,7 @@ async fn convert_operator(
                 rename.input,
                 &original_required,
                 ctx,
+                catalog,
                 session,
             ))
             .await?;
@@ -518,7 +582,9 @@ async fn convert_operator(
                     .iter()
                     .map(|row| {
                         row.iter()
-                            .map(|expr| physical_expr(*expr, ctx, session, &df_schema, &schema))
+                            .map(|expr| {
+                                physical_expr(*expr, ctx, catalog, session, &df_schema, &schema)
+                            })
                             .collect::<ToPhysicalResult<Vec<_>>>()
                     })
                     .collect::<ToPhysicalResult<Vec<_>>>()?;
@@ -539,6 +605,7 @@ async fn convert_scan(
     required: &[optd_core::Column],
     filters: &[optd_core::Expr],
     ctx: &QueryContext,
+    catalog: &Arc<dyn Catalog>,
     session: &SessionContext,
 ) -> ToPhysicalResult<PhysicalPlanNode> {
     let provider = session
@@ -548,7 +615,7 @@ async fn convert_scan(
     let provider_schema = provider.schema();
     let mut columns = filter_columns(&scan.columns, required);
     for filter in filters {
-        columns = merge_columns(&columns, &expr_columns(*filter, ctx)?);
+        columns = merge_columns(&columns, &expr_columns(*filter, ctx, catalog)?);
     }
     let projection = columns
         .iter()
@@ -561,7 +628,7 @@ async fn convert_scan(
         .collect::<Result<Vec<_>, _>>()?;
     let logical_filters = filters
         .iter()
-        .map(|filter| scan_filter_expr(*filter, ctx, session))
+        .map(|filter| scan_filter_expr(*filter, ctx, catalog, session))
         .collect::<ToPhysicalResult<Vec<_>>>()?;
     let mut args = ScanArgs::default().with_projection(Some(&projection));
     if !logical_filters.is_empty() {
@@ -583,20 +650,22 @@ async fn convert_join(
     join: &optd_core::Join,
     required: &[optd_core::Column],
     ctx: &QueryContext,
+    catalog: &Arc<dyn Catalog>,
     session: &SessionContext,
 ) -> ToPhysicalResult<PhysicalPlanNode> {
-    if !free_columns_for(join.inner, ctx)?.is_empty() {
+    if !free_columns_for(join.inner, ctx, catalog)?.is_empty() {
         return Err(ToPhysicalError::Unsupported("correlated join input".into()));
     }
-    if matches!(join.join_type, JoinType::Single) && !is_at_most_one_row(join.inner, ctx)? {
+    if matches!(join.join_type, JoinType::Single) && !is_at_most_one_row(join.inner, ctx, catalog)?
+    {
         return Err(ToPhysicalError::Unsupported(
             "Single join without proven single-row inner input".into(),
         ));
     }
     reject_subquery_exprs(join.on, ctx)?;
-    let left_available = available_columns(join.outer, ctx)?;
-    let right_available = available_columns(join.inner, ctx)?;
-    let predicate_columns = expr_columns(join.on, ctx)?;
+    let left_available = available_columns(join.outer, ctx, catalog)?;
+    let right_available = available_columns(join.inner, ctx, catalog)?;
+    let predicate_columns = expr_columns(join.on, ctx, catalog)?;
     let left_required = merge_columns(
         &filter_columns(&left_available, required),
         &filter_columns(&left_available, &predicate_columns),
@@ -605,8 +674,22 @@ async fn convert_join(
         &filter_columns(&right_available, required),
         &filter_columns(&right_available, &predicate_columns),
     );
-    let left = Box::pin(convert_operator(join.outer, &left_required, ctx, session)).await?;
-    let right = Box::pin(convert_operator(join.inner, &right_required, ctx, session)).await?;
+    let left = Box::pin(convert_operator(
+        join.outer,
+        &left_required,
+        ctx,
+        catalog,
+        session,
+    ))
+    .await?;
+    let right = Box::pin(convert_operator(
+        join.inner,
+        &right_required,
+        ctx,
+        catalog,
+        session,
+    ))
+    .await?;
     let df_join_type = convert_join_type(&join.join_type)?;
     if is_true_expr(join.on, ctx) {
         if matches!(join.join_type, JoinType::Inner) {
@@ -632,14 +715,14 @@ async fn convert_join(
         );
     }
 
-    let split = split_join_predicate(join.on, join.outer, join.inner, ctx, session, &left, &right)?;
+    let split = split_join_predicate(join, ctx, catalog, session, &left, &right)?;
     if !split.on.is_empty() {
         // Mixed equi/residual predicates should still use hash joins: the equi
         // keys drive partition/build/probe work and DataFusion evaluates the
         // remaining predicate as a JoinFilter.
         let filter = split
             .residual
-            .map(|expr| join_filter(expr, ctx, session, &left, &right))
+            .map(|expr| join_filter(expr, ctx, catalog, session, &left, &right))
             .transpose()?;
         let output_columns = join_output_columns_from_nodes(&join.join_type, &left, &right);
         let exec = HashJoinExec::try_new(
@@ -661,7 +744,7 @@ async fn convert_join(
         );
     }
 
-    let filter = join_filter(join.on, ctx, session, &left, &right)?;
+    let filter = join_filter(join.on, ctx, catalog, session, &left, &right)?;
     let output_columns = join_output_columns_from_nodes(&join.join_type, &left, &right);
     let exec =
         NestedLoopJoinExec::try_new(left.exec, right.exec, Some(filter), &df_join_type, None)?;
@@ -754,8 +837,11 @@ fn merge_columns(
 fn expr_columns(
     expr: optd_core::Expr,
     ctx: &QueryContext,
+    catalog: &Arc<dyn Catalog>,
 ) -> ToPhysicalResult<Vec<optd_core::Column>> {
-    optd_core::expr_used_columns(ctx, expr).map_err(|e| ToPhysicalError::Unsupported(e.to_string()))
+    let mut analyses = optd_core::AnalysisContext::new(Arc::clone(catalog));
+    optd_core::expr_used_columns(ctx, &mut analyses, expr)
+        .map_err(|e| ToPhysicalError::Unsupported(e.to_string()))
 }
 
 fn logical_column_expr(
@@ -773,10 +859,11 @@ fn logical_column_expr(
 fn scan_filter_expr(
     expr: optd_core::Expr,
     ctx: &QueryContext,
+    catalog: &Arc<dyn Catalog>,
     session: &SessionContext,
 ) -> ToPhysicalResult<datafusion::logical_expr::Expr> {
     let empty_tables = TableMap::new();
-    let mut expr_ctx = ToDfContext::new(ctx, &empty_tables, session);
+    let mut expr_ctx = ToDfContext::new(ctx, Arc::clone(catalog), &empty_tables, session);
     let logical = convert_expr(
         expr,
         &mut expr_ctx,
@@ -805,12 +892,13 @@ fn unnormalize_logical_columns(
 fn physical_expr(
     expr: optd_core::Expr,
     ctx: &QueryContext,
+    catalog: &Arc<dyn Catalog>,
     session: &SessionContext,
     input_schema: &DFSchema,
     physical_schema: &Schema,
 ) -> ToPhysicalResult<Arc<dyn PhysicalExpr>> {
     let empty_tables = TableMap::new();
-    let mut expr_ctx = ToDfContext::new(ctx, &empty_tables, session);
+    let mut expr_ctx = ToDfContext::new(ctx, Arc::clone(catalog), &empty_tables, session);
     let logical = convert_expr(
         expr,
         &mut expr_ctx,
@@ -876,17 +964,17 @@ struct JoinKeyCandidate {
 }
 
 fn split_join_predicate(
-    expr: optd_core::Expr,
-    outer: Operator,
-    inner: Operator,
+    join: &optd_core::Join,
     ctx: &QueryContext,
+    catalog: &Arc<dyn Catalog>,
     session: &SessionContext,
     left: &PhysicalPlanNode,
     right: &PhysicalPlanNode,
 ) -> ToPhysicalResult<SplitJoinPredicate> {
+    let expr = join.on;
     let conjuncts = split_conjuncts(expr, ctx);
-    let outer_cols = available_columns_set(ctx, outer)?;
-    let inner_cols = available_columns_set(ctx, inner)?;
+    let outer_cols = available_columns_set(ctx, join.outer, catalog)?;
+    let inner_cols = available_columns_set(ctx, join.inner, catalog)?;
     let mut candidates = Vec::new();
     let mut all_conjuncts_are_keys = true;
     for conjunct in &conjuncts {
@@ -902,7 +990,7 @@ fn split_join_predicate(
         all_conjuncts_are_keys = false;
     }
 
-    let (on, null_equality) = physical_join_keys(&candidates, ctx, session, left, right)?;
+    let (on, null_equality) = physical_join_keys(&candidates, ctx, catalog, session, left, right)?;
     Ok(SplitJoinPredicate {
         on,
         residual: (!candidates.is_empty() && !all_conjuncts_are_keys).then_some(expr),
@@ -913,6 +1001,7 @@ fn split_join_predicate(
 fn physical_join_keys(
     candidates: &[JoinKeyCandidate],
     ctx: &QueryContext,
+    catalog: &Arc<dyn Catalog>,
     session: &SessionContext,
     left: &PhysicalPlanNode,
     right: &PhysicalPlanNode,
@@ -932,6 +1021,7 @@ fn physical_join_keys(
             physical_expr(
                 candidate.left_expr,
                 ctx,
+                catalog,
                 session,
                 left.df_schema.as_ref(),
                 left.exec.schema().as_ref(),
@@ -939,6 +1029,7 @@ fn physical_join_keys(
             physical_expr(
                 candidate.right_expr,
                 ctx,
+                catalog,
                 session,
                 right.df_schema.as_ref(),
                 right.exec.schema().as_ref(),
@@ -1034,6 +1125,7 @@ fn common_or_join_key_candidates(
 fn join_filter(
     expr: optd_core::Expr,
     ctx: &QueryContext,
+    catalog: &Arc<dyn Catalog>,
     session: &SessionContext,
     left: &PhysicalPlanNode,
     right: &PhysicalPlanNode,
@@ -1054,7 +1146,7 @@ fn join_filter(
     }
     let df_schema = DFSchema::new_with_metadata(qualified, Default::default())?;
     let schema = Arc::new(Schema::new(fields));
-    let expression = physical_expr(expr, ctx, session, &df_schema, &schema)?;
+    let expression = physical_expr(expr, ctx, catalog, session, &df_schema, &schema)?;
     let column_indices = left_indices
         .into_iter()
         .map(
@@ -1102,12 +1194,20 @@ fn join_output_columns_from_nodes(
     columns
 }
 
-fn output_columns(op: Operator, ctx: &QueryContext) -> ToPhysicalResult<Vec<optd_core::Column>> {
-    available_columns(op, ctx)
+fn output_columns(
+    op: Operator,
+    ctx: &QueryContext,
+    catalog: &Arc<dyn Catalog>,
+) -> ToPhysicalResult<Vec<optd_core::Column>> {
+    available_columns(op, ctx, catalog)
 }
 
-fn available_columns(op: Operator, ctx: &QueryContext) -> ToPhysicalResult<Vec<optd_core::Column>> {
-    let mut analyses = optd_core::AnalysisContext::new();
+fn available_columns(
+    op: Operator,
+    ctx: &QueryContext,
+    catalog: &Arc<dyn Catalog>,
+) -> ToPhysicalResult<Vec<optd_core::Column>> {
+    let mut analyses = optd_core::AnalysisContext::new(Arc::clone(catalog));
     analyses
         .get::<optd_core::AvailableColumns>(ctx, op)
         .map_err(|e| ToPhysicalError::Unsupported(e.to_string()))
@@ -1116,15 +1216,17 @@ fn available_columns(op: Operator, ctx: &QueryContext) -> ToPhysicalResult<Vec<o
 fn available_columns_set(
     ctx: &QueryContext,
     op: Operator,
+    catalog: &Arc<dyn Catalog>,
 ) -> ToPhysicalResult<HashSet<optd_core::Column>> {
-    Ok(available_columns(op, ctx)?.into_iter().collect())
+    Ok(available_columns(op, ctx, catalog)?.into_iter().collect())
 }
 
 fn free_columns_for(
     op: Operator,
     ctx: &QueryContext,
+    catalog: &Arc<dyn Catalog>,
 ) -> ToPhysicalResult<HashSet<optd_core::Column>> {
-    let mut analyses = optd_core::AnalysisContext::new();
+    let mut analyses = optd_core::AnalysisContext::new(Arc::clone(catalog));
     Ok(analyses
         .get::<optd_core::FreeColumns>(ctx, op)
         .map_err(|e| ToPhysicalError::Unsupported(e.to_string()))?
@@ -1208,12 +1310,15 @@ fn is_true_expr(expr: optd_core::Expr, ctx: &QueryContext) -> bool {
     )
 }
 
-fn is_at_most_one_row(op: Operator, ctx: &QueryContext) -> ToPhysicalResult<bool> {
-    let mut analyses = optd_core::AnalysisContext::new();
-    let profile = analyses
-        .get::<optd_core::CardinalityEstimationV1>(ctx, op)
-        .map_err(|e| ToPhysicalError::Unsupported(e.to_string()))?;
-    Ok(profile.rows.upper.is_some_and(|upper| upper <= 1.0))
+fn is_at_most_one_row(
+    op: Operator,
+    ctx: &QueryContext,
+    catalog: &Arc<dyn Catalog>,
+) -> ToPhysicalResult<bool> {
+    let mut analyses = optd_core::AnalysisContext::new(Arc::clone(catalog));
+    analyses
+        .get::<optd_core::AtMostOneRow>(ctx, op)
+        .map_err(|e| ToPhysicalError::Unsupported(e.to_string()))
 }
 
 fn reject_subquery_exprs(expr: optd_core::Expr, ctx: &QueryContext) -> ToPhysicalResult<()> {
@@ -1265,14 +1370,21 @@ fn ensure_single_partition(input: Arc<dyn ExecutionPlan>) -> Arc<dyn ExecutionPl
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::{ToPhysicalError, to_physical_plan};
     use datafusion::arrow::array::Int32Array;
     use datafusion::arrow::datatypes::DataType;
     use datafusion::physical_plan::collect;
     use datafusion::prelude::SessionContext;
     use optd_core::{
-        ColumnData, ConstScan, ExprData, Join, JoinType, OperatorData, QueryContext, ScalarValue,
+        ColumnData, ConstScan, ExprData, Join, JoinType, MemoryCatalog, OperatorData, PlannedQuery,
+        QueryContext, ScalarValue,
     };
+
+    fn planned(query: QueryContext) -> PlannedQuery {
+        PlannedQuery::new(query, Arc::new(MemoryCatalog::new("memory", "public")))
+    }
 
     #[tokio::test]
     async fn converts_literal_const_scan_values() {
@@ -1287,7 +1399,7 @@ mod tests {
         .add(&mut ctx);
         ctx.set_root(root);
 
-        let plan = to_physical_plan(&ctx, &session).await.unwrap();
+        let plan = to_physical_plan(&planned(ctx), &session).await.unwrap();
         let batches = collect(plan, session.state().task_ctx()).await.unwrap();
         let values = batches[0]
             .column(0)
@@ -1325,7 +1437,7 @@ mod tests {
         .add(&mut ctx);
         ctx.set_root(root);
 
-        let err = to_physical_plan(&ctx, &session).await.unwrap_err();
+        let err = to_physical_plan(&planned(ctx), &session).await.unwrap_err();
         assert!(matches!(err, ToPhysicalError::Unsupported(msg) if msg.contains("Single join")));
     }
 }

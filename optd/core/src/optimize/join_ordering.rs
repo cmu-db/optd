@@ -5,210 +5,36 @@
 
 use std::collections::HashMap;
 
-use crate::analysis::{
-    CardinalityEstimationV1, connecting_edge_indices, join_profile_with_selectivity,
-    join_selectivity,
-};
+use crate::analysis::connecting_edge_indices;
+use crate::cost::{CostModel, DefaultCostModel};
 use crate::hypergraph::{NodeSet, QueryHypergraph, nodeset_min, nodeset_singleton};
 use crate::{
-    CardinalityProfile, Estimate, ExprData, Join, JoinInputProfiles, JoinType, NaryOp, Operator,
-    OperatorData, QueryContext, build_hypergraph,
+    AnalysisContext, CrossProduct, Expr, ExprData, Join, JoinType, NaryOp, Operator, OperatorData,
+    QueryContext, ScalarValue, build_hypergraph,
 };
 
 use super::{OptimizeError, OptimizeResult, Pass, PassResult, QueryPass};
 use crate::OptimizerContext;
 
-// ---------------------------------------------------------------------------
-// Statistics trait
-// ---------------------------------------------------------------------------
-
-/// Provides cardinality and selectivity estimates for cost computation.
-pub trait Statistics: Send + Sync {
-    fn base_profile(&self, node_idx: usize, hg: &QueryHypergraph) -> CardinalityProfile;
-
-    fn join_selectivity(
-        &self,
-        left: NodeSet,
-        right: NodeSet,
-        hg: &QueryHypergraph,
-        inputs: JoinInputProfiles<'_>,
-    ) -> Estimate;
-}
-
-/// Uniform statistics: 1000 rows per relation, 0.1 selectivity per join.
-pub struct UniformStatistics;
-
-impl Statistics for UniformStatistics {
-    fn base_profile(&self, node_idx: usize, hg: &QueryHypergraph) -> CardinalityProfile {
-        CardinalityProfile::unknown_for_columns(1000.0, hg.nodes[node_idx].available.clone())
-    }
-
-    fn join_selectivity(
-        &self,
-        left: NodeSet,
-        right: NodeSet,
-        hg: &QueryHypergraph,
-        _inputs: JoinInputProfiles<'_>,
-    ) -> Estimate {
-        let has_real_predicate = connecting_edge_indices(left, right, hg)
-            .iter()
-            .any(|idx| hg.edges[*idx].predicate.is_some());
-        if has_real_predicate {
-            Estimate::derived(0.1, Some(0.0), Some(1.0))
-        } else {
-            Estimate::exact(1.0)
-        }
-    }
-}
-
-mod cost_model {
-    use crate::QueryHypergraph;
-    use crate::{BinaryOp, ExprData, NaryOp, QueryContext};
-
-    /// How expensive a join is to execute once cardinality estimation has
-    /// predicted its output rows. Hash-like joins process inputs plus output;
-    /// nested-loop-like joins still pay pairwise comparison work.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub(super) enum JoinCostClass {
-        HashLike,
-        NestedLoopLike,
-    }
-
-    /// Estimates execution work for a candidate join.
-    ///
-    /// `*_width` is currently a column-count proxy for row materialization
-    /// cost. Cardinality estimation decides how many rows are produced; this
-    /// function decides whether producing them looks hash-like or pairwise.
-    pub(super) fn join_work_cost(
-        left_rows: f64,
-        left_width: usize,
-        right_rows: f64,
-        right_width: usize,
-        output_rows: f64,
-        output_width: usize,
-        class: JoinCostClass,
-    ) -> f64 {
-        match class {
-            JoinCostClass::HashLike => {
-                let left_bytes = left_rows * left_width.max(1) as f64;
-                let right_bytes = right_rows * right_width.max(1) as f64;
-                let output_bytes = output_rows * output_width.max(1) as f64;
-                left_bytes + right_bytes + (left_rows * right_rows).powf(0.75) + output_bytes
-            }
-            JoinCostClass::NestedLoopLike => left_rows * right_rows + output_rows,
-        }
-    }
-
-    pub(super) fn join_cost_class(
-        edge_indices: &[usize],
-        hg: &QueryHypergraph,
-        ctx: &QueryContext,
-    ) -> JoinCostClass {
-        if edge_indices.iter().any(|idx| {
-            hg.edges[*idx]
-                .predicate
-                .is_some_and(|predicate| contains_hash_join_key(predicate, ctx))
-        }) {
-            JoinCostClass::HashLike
-        } else {
-            JoinCostClass::NestedLoopLike
-        }
-    }
-
-    fn contains_hash_join_key(expr: crate::Expr, ctx: &QueryContext) -> bool {
-        match expr.get(ctx) {
-            ExprData::Binary {
-                op: BinaryOp::Eq | BinaryOp::IsNotDistinctFrom,
-                left,
-                right,
-            } => {
-                matches!(
-                    (left.get(ctx), right.get(ctx)),
-                    (ExprData::ColumnRef(_), ExprData::ColumnRef(_))
-                )
-            }
-            ExprData::Nary {
-                op: NaryOp::And,
-                exprs,
-            } => exprs.iter().any(|expr| contains_hash_join_key(*expr, ctx)),
-            _ => false,
-        }
-    }
-}
-
 #[cfg(test)]
-use cost_model::JoinCostClass;
-use cost_model::{join_cost_class, join_work_cost};
-
-/// Cardinality-analysis backed statistics for one join hypergraph.
-struct CardinalityStatistics<'a> {
-    ctx: &'a QueryContext,
-    base_profiles: Vec<CardinalityProfile>,
-}
-
-impl<'a> CardinalityStatistics<'a> {
-    fn new(
-        ctx: &'a QueryContext,
-        analyses: &mut crate::AnalysisContext,
-        hg: &QueryHypergraph,
-    ) -> OptimizeResult<Self> {
-        let base_profiles = hg
-            .nodes
-            .iter()
-            .map(|node| {
-                analyses
-                    .get::<CardinalityEstimationV1>(ctx, node.root)
-                    .map_err(|err| OptimizeError::PassError {
-                        pass: "JoinOrdering",
-                        message: err.to_string(),
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self { ctx, base_profiles })
-    }
-}
-
-impl Statistics for CardinalityStatistics<'_> {
-    fn base_profile(&self, node_idx: usize, _hg: &QueryHypergraph) -> CardinalityProfile {
-        self.base_profiles[node_idx].clone()
-    }
-
-    fn join_selectivity(
-        &self,
-        left: NodeSet,
-        right: NodeSet,
-        hg: &QueryHypergraph,
-        inputs: JoinInputProfiles<'_>,
-    ) -> Estimate {
-        let predicates = connecting_edge_indices(left, right, hg)
-            .into_iter()
-            .filter_map(|idx| hg.edges[idx].predicate)
-            .collect::<Vec<_>>();
-        if predicates.is_empty() {
-            Estimate::exact(1.0)
-        } else {
-            join_selectivity(inputs.left, inputs.right, &predicates, self.ctx)
-        }
-    }
-}
+use crate::cost::{JoinAlgorithmClass, join_algorithm_class, join_algorithm_cost};
 
 // ---------------------------------------------------------------------------
 // JoinTree: the output of DPhyp
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
 #[derive(Clone)]
 enum JoinTree {
     Leaf(usize), // node index
     Join {
         left: Box<JoinTree>,
         right: Box<JoinTree>,
-        /// Predicates from connecting hyperedges (indices into hg.edges).
-        edge_indices: Vec<usize>,
     },
 }
 
+#[cfg(test)]
 impl JoinTree {
-    #[cfg(test)]
     fn leaf_count(&self) -> usize {
         match self {
             JoinTree::Leaf(_) => 1,
@@ -216,7 +42,6 @@ impl JoinTree {
         }
     }
 
-    #[cfg(test)]
     fn leaf_set(&self) -> NodeSet {
         match self {
             JoinTree::Leaf(nid) => nodeset_singleton(*nid),
@@ -224,7 +49,6 @@ impl JoinTree {
         }
     }
 
-    #[cfg(test)]
     fn has_join_with_leaves(&self, leaves: NodeSet) -> bool {
         match self {
             JoinTree::Leaf(_) => false,
@@ -241,32 +65,40 @@ impl JoinTree {
 // DPhyp
 // ---------------------------------------------------------------------------
 
-struct DPhyp<'a> {
-    ctx: &'a QueryContext,
+struct DPhyp<'a, M: CostModel> {
+    ctx: &'a mut QueryContext,
+    analyses: &'a mut AnalysisContext,
     hg: &'a QueryHypergraph,
-    stats: &'a dyn Statistics,
+    cost_model: &'a M,
     /// DP table: NodeSet → best known plan for that subset.
-    dp: HashMap<NodeSet, PlanState>,
+    dp: HashMap<NodeSet, PlanState<M::Cost>>,
 }
 
 #[derive(Clone)]
-struct PlanState {
-    cost: f64,
-    profile: CardinalityProfile,
+struct PlanState<C> {
+    root: Operator,
+    cost: C,
+    #[cfg(test)]
     tree: JoinTree,
 }
 
-impl<'a> DPhyp<'a> {
-    fn new(ctx: &'a QueryContext, hg: &'a QueryHypergraph, stats: &'a dyn Statistics) -> Self {
+impl<'a, M: CostModel> DPhyp<'a, M> {
+    fn new(
+        ctx: &'a mut QueryContext,
+        analyses: &'a mut AnalysisContext,
+        hg: &'a QueryHypergraph,
+        cost_model: &'a M,
+    ) -> Self {
         Self {
             ctx,
+            analyses,
             hg,
-            stats,
+            cost_model,
             dp: HashMap::new(),
         }
     }
 
-    fn solve(&mut self) -> OptimizeResult<Option<JoinTree>> {
+    fn solve(&mut self) -> OptimizeResult<Option<PlanState<M::Cost>>> {
         let n = self.hg.nodes.len();
         if n == 0 {
             return Ok(None);
@@ -281,12 +113,14 @@ impl<'a> DPhyp<'a> {
         // Initialise singletons.
         for i in 0..n {
             let s = nodeset_singleton(i);
-            let profile = self.stats.base_profile(i, self.hg);
+            let root = self.hg.nodes[i].root;
+            let cost = self.cost_model.total_cost(root, self.ctx, self.analyses)?;
             self.dp.insert(
                 s,
                 PlanState {
-                    cost: profile.rows.value,
-                    profile,
+                    root,
+                    cost,
+                    #[cfg(test)]
                     tree: JoinTree::Leaf(i),
                 },
             );
@@ -295,18 +129,15 @@ impl<'a> DPhyp<'a> {
         // Process nodes in descending order (largest index first).
         for v in (0..n).rev() {
             let sv = nodeset_singleton(v);
-            self.emit_csg(sv);
+            self.emit_csg(sv)?;
             let bv: NodeSet = (1u64 << v).wrapping_sub(1) | sv; // all nodes ≤ v
-            self.enumerate_csg_rec(sv, bv);
+            self.enumerate_csg_rec(sv, bv)?;
         }
 
-        Ok(self
-            .dp
-            .get(&all_nodes_mask(n))
-            .map(|state| state.tree.clone()))
+        Ok(self.dp.get(&all_nodes_mask(n)).cloned())
     }
 
-    fn enumerate_csg_rec(&mut self, s1: NodeSet, x: NodeSet) {
+    fn enumerate_csg_rec(&mut self, s1: NodeSet, x: NodeSet) -> OptimizeResult<()> {
         let nbrs = self.neighborhood(s1, x);
         // Collect non-empty subsets of nbrs.
         let subsets = non_empty_subsets(nbrs);
@@ -314,16 +145,17 @@ impl<'a> DPhyp<'a> {
         for &n_sub in &subsets {
             let candidate = s1 | n_sub;
             if self.dp.contains_key(&candidate) {
-                self.emit_csg(candidate);
+                self.emit_csg(candidate)?;
             }
         }
         // Second pass: recurse.
         for &n_sub in &subsets {
-            self.enumerate_csg_rec(s1 | n_sub, x | nbrs);
+            self.enumerate_csg_rec(s1 | n_sub, x | nbrs)?;
         }
+        Ok(())
     }
 
-    fn emit_csg(&mut self, s1: NodeSet) {
+    fn emit_csg(&mut self, s1: NodeSet) -> OptimizeResult<()> {
         let x = s1 | self.b_min(s1);
         let nbrs = self.neighborhood(s1, x);
         // Iterate neighbors in descending order.
@@ -333,85 +165,79 @@ impl<'a> DPhyp<'a> {
             v &= !bit;
             let s2 = bit;
             if self.has_edge(s1, s2) {
-                self.emit_csg_cmp(s1, s2);
+                self.emit_csg_cmp(s1, s2)?;
             }
-            self.enumerate_cmp_rec(s1, s2, x);
+            self.enumerate_cmp_rec(s1, s2, x)?;
         }
+        Ok(())
     }
 
-    fn enumerate_cmp_rec(&mut self, s1: NodeSet, s2: NodeSet, x: NodeSet) {
+    fn enumerate_cmp_rec(&mut self, s1: NodeSet, s2: NodeSet, x: NodeSet) -> OptimizeResult<()> {
         let nbrs = self.neighborhood(s2, x);
         let subsets = non_empty_subsets(nbrs);
         for &n_sub in &subsets {
             let candidate = s2 | n_sub;
             if self.dp.contains_key(&candidate) && self.has_edge(s1, candidate) {
-                self.emit_csg_cmp(s1, candidate);
+                self.emit_csg_cmp(s1, candidate)?;
             }
         }
         for &n_sub in &subsets {
-            self.enumerate_cmp_rec(s1, s2 | n_sub, x | nbrs);
+            self.enumerate_cmp_rec(s1, s2 | n_sub, x | nbrs)?;
         }
+        Ok(())
     }
 
-    fn emit_csg_cmp(&mut self, s1: NodeSet, s2: NodeSet) {
+    fn emit_csg_cmp(&mut self, s1: NodeSet, s2: NodeSet) -> OptimizeResult<()> {
         let Some(left) = self.dp.get(&s1).cloned() else {
-            return;
+            return Ok(());
         };
         let Some(right) = self.dp.get(&s2).cloned() else {
-            return;
+            return Ok(());
         };
 
         let edge_indices = connecting_edge_indices(s1, s2, self.hg);
         if edge_indices.is_empty() {
-            return;
+            return Ok(());
         }
 
-        let sel = self.stats.join_selectivity(
-            s1,
-            s2,
+        let join_type = candidate_join_type(&edge_indices, self.hg, self.ctx);
+        let candidate = materialize_candidate_join(
+            left.root,
+            right.root,
+            join_type,
+            &edge_indices,
             self.hg,
-            JoinInputProfiles {
-                left: &left.profile,
-                right: &right.profile,
-            },
+            self.ctx,
         );
-        let join_type = edge_indices
-            .first()
-            .map(|idx| self.hg.edges[*idx].join_type.to_ir_join_type())
-            .unwrap_or(JoinType::Inner);
-        let profile = join_profile_with_selectivity(&left.profile, &right.profile, join_type, sel);
-        let class = join_cost_class(&edge_indices, self.hg, self.ctx);
-        let work_cost = join_work_cost(
-            left.profile.rows.value,
-            left.profile.columns.len(),
-            right.profile.rows.value,
-            right.profile.columns.len(),
-            profile.rows.value,
-            profile.columns.len(),
-            class,
-        );
-        let new_cost = left.cost + right.cost + work_cost;
+        let child_costs = [left.cost.clone(), right.cost.clone()];
+        let new_cost = self.cost_model.total_cost_from_children(
+            candidate,
+            &child_costs,
+            self.ctx,
+            self.analyses,
+        )?;
         let combined = s1 | s2;
 
         let better = self
             .dp
             .get(&combined)
-            .is_none_or(|existing| new_cost < existing.cost);
+            .is_none_or(|existing| self.cost_model.is_better(&new_cost, &existing.cost));
 
         if better {
             self.dp.insert(
                 combined,
                 PlanState {
+                    root: candidate,
                     cost: new_cost,
-                    profile,
+                    #[cfg(test)]
                     tree: JoinTree::Join {
                         left: Box::new(left.tree),
                         right: Box::new(right.tree),
-                        edge_indices,
                     },
                 },
             );
         }
+        Ok(())
     }
 
     /// Neighborhood of `s` excluding nodes in `x`.
@@ -464,77 +290,58 @@ fn all_nodes_mask(n: usize) -> NodeSet {
 }
 
 // ---------------------------------------------------------------------------
-// Plan reconstruction
+// Candidate materialization
 // ---------------------------------------------------------------------------
 
-fn join_tree_to_ir(tree: &JoinTree, hg: &QueryHypergraph, ctx: &mut QueryContext) -> Operator {
-    match tree {
-        JoinTree::Leaf(nid) => hg.nodes[*nid].root,
-        JoinTree::Join {
-            left,
-            right,
-            edge_indices,
-            ..
-        } => {
-            let outer = join_tree_to_ir(left, hg, ctx);
-            let inner = join_tree_to_ir(right, hg, ctx);
+fn materialize_candidate_join(
+    outer: Operator,
+    inner: Operator,
+    join_type: JoinType,
+    edge_indices: &[usize],
+    hg: &QueryHypergraph,
+    ctx: &mut QueryContext,
+) -> Operator {
+    let mut predicates: Vec<Expr> = edge_indices
+        .iter()
+        .filter_map(|&idx| hg.edges[idx].predicate)
+        .collect();
 
-            // Collect predicates from connecting edges.
-            let mut preds: Vec<crate::Expr> = edge_indices
-                .iter()
-                .filter_map(|&i| hg.edges[i].predicate)
-                .collect();
-
-            // If no predicates and join type is inner, use CrossProduct.
-            if preds.is_empty() {
-                let join_type = edge_indices
-                    .first()
-                    .and_then(|&i| {
-                        if let OperatorData::Join(j) = ctx.operator(hg.edges[i].source) {
-                            Some(j.join_type.clone())
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(JoinType::Inner);
-
-                if join_type == JoinType::Inner {
-                    return OperatorData::CrossProduct(crate::CrossProduct { outer, inner })
-                        .add(ctx);
-                }
-            }
-
-            let on = match preds.len() {
-                0 => ExprData::Literal(crate::ScalarValue::Boolean(true)).add(ctx),
-                1 => preds.remove(0),
-                _ => ExprData::Nary {
-                    op: NaryOp::And,
-                    exprs: preds,
-                }
-                .add(ctx),
-            };
-
-            // Use the join type from the source operator of the first connecting edge.
-            let join_type = edge_indices
-                .first()
-                .and_then(|&i| {
-                    if let OperatorData::Join(j) = ctx.operator(hg.edges[i].source) {
-                        Some(j.join_type.clone())
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or(JoinType::Inner);
-
-            OperatorData::Join(Join {
-                join_type,
-                on,
-                outer,
-                inner,
-            })
-            .add(ctx)
-        }
+    if predicates.is_empty() && join_type == JoinType::Inner {
+        return OperatorData::CrossProduct(CrossProduct { outer, inner }).add(ctx);
     }
+
+    let on = match predicates.len() {
+        0 => ExprData::Literal(ScalarValue::Boolean(true)).add(ctx),
+        1 => predicates.remove(0),
+        _ => ExprData::Nary {
+            op: NaryOp::And,
+            exprs: predicates,
+        }
+        .add(ctx),
+    };
+
+    OperatorData::Join(Join {
+        join_type,
+        on,
+        outer,
+        inner,
+    })
+    .add(ctx)
+}
+
+fn candidate_join_type(
+    edge_indices: &[usize],
+    hg: &QueryHypergraph,
+    ctx: &QueryContext,
+) -> JoinType {
+    edge_indices
+        .first()
+        .and_then(|&idx| match hg.edges[idx].source.get(ctx) {
+            OperatorData::Join(join) => Some(join.join_type.clone()),
+            OperatorData::CrossProduct(_) => Some(JoinType::Inner),
+            _ => None,
+        })
+        .unwrap_or(JoinType::Inner)
 }
 
 // ---------------------------------------------------------------------------
@@ -593,49 +400,40 @@ fn collect_roots_rec(
 // JoinOrdering pass
 // ---------------------------------------------------------------------------
 
-pub struct JoinOrdering {
-    stats: JoinOrderingStatistics,
+pub struct JoinOrdering<M = DefaultCostModel> {
+    cost_model: M,
     last_run: Option<(usize, u64)>,
 }
 
-enum JoinOrderingStatistics {
-    Cardinality,
-    Custom(Box<dyn Statistics>),
-}
-
-impl JoinOrdering {
+impl JoinOrdering<DefaultCostModel> {
     pub fn new() -> Self {
         Self {
-            stats: JoinOrderingStatistics::Cardinality,
+            cost_model: DefaultCostModel,
             last_run: None,
         }
     }
 
-    pub fn with_stats(stats: Box<dyn Statistics>) -> Self {
-        Self {
-            stats: JoinOrderingStatistics::Custom(stats),
+    pub fn with_cost_model<M: CostModel>(cost_model: M) -> JoinOrdering<M> {
+        JoinOrdering {
+            cost_model,
             last_run: None,
         }
-    }
-
-    pub fn uniform() -> Self {
-        Self::with_stats(Box::new(UniformStatistics))
     }
 }
 
-impl Default for JoinOrdering {
+impl Default for JoinOrdering<DefaultCostModel> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Pass for JoinOrdering {
+impl<M: CostModel> Pass for JoinOrdering<M> {
     fn name(&self) -> &'static str {
         "JoinOrdering"
     }
 }
 
-impl QueryPass for JoinOrdering {
+impl<M: CostModel> QueryPass for JoinOrdering<M> {
     fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<PassResult> {
         let run_key = (
             (&ctx.query as *const QueryContext) as usize,
@@ -673,21 +471,11 @@ impl QueryPass for JoinOrdering {
             groups
                 .iter()
                 .try_fold(Vec::new(), |mut replacements, (group_root, hg)| {
-                    let tree = match &self.stats {
-                        JoinOrderingStatistics::Cardinality => {
-                            let stats =
-                                CardinalityStatistics::new(&ctx.query, &mut ctx.analyses, hg)?;
-                            let mut solver = DPhyp::new(&ctx.query, hg, &stats);
-                            solver.solve()?
-                        }
-                        JoinOrderingStatistics::Custom(stats) => {
-                            let mut solver = DPhyp::new(&ctx.query, hg, stats.as_ref());
-                            solver.solve()?
-                        }
-                    };
-                    if let Some(tree) = tree {
-                        replacements
-                            .push((*group_root, join_tree_to_ir(&tree, hg, &mut ctx.query)));
+                    let mut solver =
+                        DPhyp::new(&mut ctx.query, &mut ctx.analyses, hg, &self.cost_model);
+                    let plan = solver.solve()?;
+                    if let Some(plan) = plan {
+                        replacements.push((*group_root, plan.root));
                     }
                     Ok::<_, OptimizeError>(replacements)
                 })?;
@@ -816,26 +604,166 @@ mod tests {
         .add(ctx)
     }
 
-    fn join_cost_class_for_root(ctx: &QueryContext, root: Operator) -> JoinCostClass {
-        let mut analyses = AnalysisContext::new();
+    fn join_algorithm_class_for_root(ctx: &QueryContext, root: Operator) -> JoinAlgorithmClass {
+        let mut analyses = crate::test_analyses(ctx);
         let hg = build_hypergraph(ctx, &mut analyses, root);
         let edge_indices = connecting_edge_indices(nodeset_singleton(0), nodeset_singleton(1), &hg);
-        join_cost_class(&edge_indices, &hg, ctx)
+        join_algorithm_class(&edge_indices, &hg, ctx)
     }
 
     #[test]
     fn dphyp_three_way_chain_produces_plan() {
-        let (ctx, root) = three_way_chain();
-        let mut analyses = AnalysisContext::new();
+        let (mut ctx, root) = three_way_chain();
+        let mut analyses = crate::test_analyses(&ctx);
         let hg = build_hypergraph(&ctx, &mut analyses, root);
         assert_eq!(hg.nodes.len(), 3);
 
-        let mut solver = DPhyp::new(&ctx, &hg, &UniformStatistics);
-        let tree = solver
+        let mut solver = DPhyp::new(&mut ctx, &mut analyses, &hg, &DefaultCostModel);
+        let plan = solver
             .solve()
             .expect("solver should not error")
             .expect("DPhyp should find a plan");
-        assert_eq!(tree.leaf_count(), 3);
+        assert_eq!(plan.tree.leaf_count(), 3);
+    }
+
+    #[test]
+    fn dphyp_materializes_winning_plan_in_arena() {
+        let (mut ctx, root) = three_way_chain();
+        let mut analyses = crate::test_analyses(&ctx);
+        let hg = build_hypergraph(&ctx, &mut analyses, root);
+        let before = ctx.operator_count();
+
+        let plan = {
+            let mut solver = DPhyp::new(&mut ctx, &mut analyses, &hg, &DefaultCostModel);
+            solver
+                .solve()
+                .expect("solver should not error")
+                .expect("DPhyp should find a plan")
+        };
+
+        assert!(ctx.operator_count() > before);
+        assert!(matches!(
+            plan.root.get(&ctx),
+            OperatorData::Join(_) | OperatorData::CrossProduct(_)
+        ));
+    }
+
+    #[test]
+    fn dphyp_preserves_source_left_mark_join_type() {
+        let mut ctx = QueryContext::new();
+        let a = ColumnData::new("a", DataType::Int64).add(&mut ctx);
+        let b = ColumnData::new("b", DataType::Int64).add(&mut ctx);
+        let marker = ColumnData::new("exists_mark", DataType::Boolean).add(&mut ctx);
+        let left = OperatorData::Scan(Scan {
+            table: TableRef::bare("A"),
+            columns: vec![a],
+        })
+        .add(&mut ctx);
+        let right = OperatorData::Scan(Scan {
+            table: TableRef::bare("B"),
+            columns: vec![b],
+        })
+        .add(&mut ctx);
+        let on = binary_predicate(&mut ctx, BinaryOp::Eq, a, b);
+        let root = OperatorData::Join(Join {
+            join_type: JoinType::LeftMark {
+                marker,
+                nullable: false,
+            },
+            on,
+            outer: left,
+            inner: right,
+        })
+        .add(&mut ctx);
+        let mut analyses = crate::test_analyses(&ctx);
+        let hg = build_hypergraph(&ctx, &mut analyses, root);
+
+        let plan = {
+            let mut solver = DPhyp::new(&mut ctx, &mut analyses, &hg, &DefaultCostModel);
+            solver
+                .solve()
+                .expect("solver should not error")
+                .expect("DPhyp should find a plan")
+        };
+
+        let OperatorData::Join(join) = plan.root.get(&ctx) else {
+            panic!("winning plan should be a join");
+        };
+        assert!(matches!(
+            join.join_type,
+            JoinType::LeftMark {
+                marker: actual,
+                nullable: false,
+            } if actual == marker
+        ));
+    }
+
+    #[test]
+    fn dphyp_uses_generic_cost_model_composition_and_comparison() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        struct StructuredCost {
+            units: usize,
+        }
+
+        struct StructuredCostModel {
+            additions: Arc<AtomicUsize>,
+            comparisons: Arc<AtomicUsize>,
+        }
+
+        impl CostModel for StructuredCostModel {
+            type Cost = StructuredCost;
+
+            fn zero(&self) -> Self::Cost {
+                StructuredCost { units: 0 }
+            }
+
+            fn add(&self, left: Self::Cost, right: Self::Cost) -> Self::Cost {
+                self.additions.fetch_add(1, Ordering::Relaxed);
+                StructuredCost {
+                    units: left.units + right.units,
+                }
+            }
+
+            fn is_better(&self, candidate: &Self::Cost, existing: &Self::Cost) -> bool {
+                self.comparisons.fetch_add(1, Ordering::Relaxed);
+                candidate.units < existing.units
+            }
+
+            fn operator_cost(
+                &self,
+                op: Operator,
+                ctx: &QueryContext,
+                _analyses: &mut AnalysisContext,
+            ) -> OptimizeResult<Self::Cost> {
+                let units = match op.get(ctx) {
+                    OperatorData::Join(_) | OperatorData::CrossProduct(_) => 10,
+                    _ => 1,
+                };
+                Ok(StructuredCost { units })
+            }
+        }
+
+        let (mut ctx, root) = three_way_chain();
+        let mut analyses = crate::test_analyses(&ctx);
+        let hg = build_hypergraph(&ctx, &mut analyses, root);
+        let additions = Arc::new(AtomicUsize::new(0));
+        let comparisons = Arc::new(AtomicUsize::new(0));
+        let model = StructuredCostModel {
+            additions: additions.clone(),
+            comparisons: comparisons.clone(),
+        };
+        let mut solver = DPhyp::new(&mut ctx, &mut analyses, &hg, &model);
+
+        let plan = solver.solve().unwrap().unwrap();
+
+        assert_eq!(plan.cost, StructuredCost { units: 23 });
+        assert!(additions.load(Ordering::Relaxed) > 0);
+        assert!(comparisons.load(Ordering::Relaxed) > 0);
     }
 
     #[test]
@@ -876,51 +804,13 @@ mod tests {
     }
 
     #[test]
-    fn dphyp_uses_child_cardinalities_for_join_cardinality() {
-        struct SkewStats;
-
-        impl Statistics for SkewStats {
-            fn base_profile(&self, node_idx: usize, hg: &QueryHypergraph) -> CardinalityProfile {
-                let rows = match node_idx {
-                    0 => 1000.0,
-                    1 | 2 => 10.0,
-                    _ => unreachable!("test graph has three nodes"),
-                };
-                CardinalityProfile::unknown_for_columns(rows, hg.nodes[node_idx].available.clone())
-            }
-
-            fn join_selectivity(
-                &self,
-                _left: NodeSet,
-                _right: NodeSet,
-                _hg: &QueryHypergraph,
-                _inputs: JoinInputProfiles<'_>,
-            ) -> Estimate {
-                Estimate::derived(0.1, Some(0.0), Some(1.0))
-            }
-        }
-
-        let (ctx, root) = three_way_chain();
-        let mut analyses = AnalysisContext::new();
-        let hg = build_hypergraph(&ctx, &mut analyses, root);
-        let mut solver = DPhyp::new(&ctx, &hg, &SkewStats);
-
-        let tree = solver
-            .solve()
-            .expect("solver should not error")
-            .expect("DPhyp should find a plan");
-
-        assert!(tree.has_join_with_leaves(nodeset_singleton(1) | nodeset_singleton(2)));
-    }
-
-    #[test]
     fn equi_join_is_hash_like_for_costing() {
         let (ctx, root) =
             two_way_join_with_predicate(|ctx, a, b| binary_predicate(ctx, BinaryOp::Eq, a, b));
 
         assert_eq!(
-            join_cost_class_for_root(&ctx, root),
-            JoinCostClass::HashLike
+            join_algorithm_class_for_root(&ctx, root),
+            JoinAlgorithmClass::HashLike
         );
     }
 
@@ -931,8 +821,8 @@ mod tests {
         });
 
         assert_eq!(
-            join_cost_class_for_root(&ctx, root),
-            JoinCostClass::HashLike
+            join_algorithm_class_for_root(&ctx, root),
+            JoinAlgorithmClass::HashLike
         );
     }
 
@@ -949,8 +839,8 @@ mod tests {
         });
 
         assert_eq!(
-            join_cost_class_for_root(&ctx, root),
-            JoinCostClass::HashLike
+            join_algorithm_class_for_root(&ctx, root),
+            JoinAlgorithmClass::HashLike
         );
     }
 
@@ -960,60 +850,48 @@ mod tests {
             two_way_join_with_predicate(|ctx, a, b| binary_predicate(ctx, BinaryOp::Gt, a, b));
 
         assert_eq!(
-            join_cost_class_for_root(&ctx, root),
-            JoinCostClass::NestedLoopLike
+            join_algorithm_class_for_root(&ctx, root),
+            JoinAlgorithmClass::NestedLoopLike
         );
     }
 
     #[test]
     fn hash_like_cost_does_not_use_pairwise_input_product() {
         assert_eq!(
-            join_work_cost(
+            join_algorithm_cost(
                 1_000_000.0,
                 1,
                 1_000_000.0,
                 1,
                 10.0,
                 1,
-                JoinCostClass::HashLike
+                JoinAlgorithmClass::HashLike
             ),
             1_002_000_010.0
         );
         assert_eq!(
-            join_work_cost(
+            join_algorithm_cost(
                 1_000_000.0,
                 1,
                 1_000_000.0,
                 1,
                 10.0,
                 1,
-                JoinCostClass::NestedLoopLike
+                JoinAlgorithmClass::NestedLoopLike
             ),
             1_000_000_000_010.0
         );
         assert_eq!(
-            join_work_cost(10.0, 3, 20.0, 4, 5.0, 7, JoinCostClass::HashLike),
+            join_algorithm_cost(10.0, 3, 20.0, 4, 5.0, 7, JoinAlgorithmClass::HashLike),
             30.0 + 80.0 + f64::powf(200.0, 0.75) + 35.0
         );
     }
 
     #[test]
-    fn join_ordering_new_uses_cardinality_statistics_by_default() {
-        assert!(matches!(
-            JoinOrdering::new().stats,
-            JoinOrderingStatistics::Cardinality
-        ));
-    }
-
-    #[test]
-    fn cardinality_statistics_choose_small_filtered_branch() {
-        let (ctx, root) = three_way_chain();
+    fn cached_cardinality_analysis_guides_candidate_costing() {
+        let (mut ctx, root) = three_way_chain();
         let catalog = MemoryCatalog::new("memory", "public");
-        for (table, rows, distinct) in [
-            ("A", 1_000_000, 1_000_000),
-            ("B", 1_000, 1_000),
-            ("C", 10, 10),
-        ] {
+        for (table, rows, distinct) in [("A", 10, 10), ("B", 10, 10), ("C", 1_000_000, 1)] {
             catalog
                 .create_table(TableRef::bare(table), single_i64_schema(), None)
                 .unwrap();
@@ -1024,17 +902,19 @@ mod tests {
                 )
                 .unwrap();
         }
-        let mut analyses = AnalysisContext::with_catalog(Arc::new(catalog));
+        let mut analyses = AnalysisContext::new(Arc::new(catalog));
         let hg = build_hypergraph(&ctx, &mut analyses, root);
-        let stats = CardinalityStatistics::new(&ctx, &mut analyses, &hg).unwrap();
-        let mut solver = DPhyp::new(&ctx, &hg, &stats);
+        let mut solver = DPhyp::new(&mut ctx, &mut analyses, &hg, &DefaultCostModel);
 
-        let tree = solver
+        let plan = solver
             .solve()
             .expect("solver should not error")
             .expect("DPhyp should find a plan");
 
-        assert!(tree.has_join_with_leaves(nodeset_singleton(1) | nodeset_singleton(2)));
+        assert!(
+            plan.tree
+                .has_join_with_leaves(nodeset_singleton(0) | nodeset_singleton(1))
+        );
     }
 
     fn single_i64_schema() -> Arc<Schema> {
@@ -1088,7 +968,8 @@ mod tests {
             nodes,
             edges: vec![],
         };
-        let mut solver = DPhyp::new(&ctx, &hg, &UniformStatistics);
+        let mut analyses = crate::test_analyses(&ctx);
+        let mut solver = DPhyp::new(&mut ctx, &mut analyses, &hg, &DefaultCostModel);
 
         assert_eq!(all_nodes_mask(64), NodeSet::MAX);
         assert!(matches!(solver.solve(), Ok(None)));
@@ -1114,7 +995,8 @@ mod tests {
             nodes,
             edges: vec![],
         };
-        let mut solver = DPhyp::new(&ctx, &hg, &UniformStatistics);
+        let mut analyses = crate::test_analyses(&ctx);
+        let mut solver = DPhyp::new(&mut ctx, &mut analyses, &hg, &DefaultCostModel);
 
         assert!(matches!(
             solver.solve(),
@@ -1128,7 +1010,7 @@ mod tests {
     #[test]
     fn join_ordering_reports_changed_so_pass_manager_updates_root() {
         let (ctx, root) = three_way_chain();
-        let mut opt = OptimizerContext::new(ctx);
+        let mut opt = crate::test_optimizer_context(ctx);
         let mut pm = PassManager::new();
         pm.add_pass(JoinOrdering::new());
 
@@ -1142,7 +1024,7 @@ mod tests {
         let (mut ctx, join_root) = three_way_chain();
         let output = OperatorData::Output(Output { input: join_root }).add(&mut ctx);
         ctx.set_root(output);
-        let mut opt = OptimizerContext::new(ctx);
+        let mut opt = crate::test_optimizer_context(ctx);
         let mut pm = PassManager::new();
         pm.add_pass(JoinOrdering::new());
 
@@ -1160,8 +1042,8 @@ mod tests {
     fn join_ordering_pass_manager_can_be_reused_for_another_context() {
         let (ctx1, root1) = three_way_chain();
         let (ctx2, root2) = three_way_chain();
-        let mut opt1 = OptimizerContext::new(ctx1);
-        let mut opt2 = OptimizerContext::new(ctx2);
+        let mut opt1 = crate::test_optimizer_context(ctx1);
+        let mut opt2 = crate::test_optimizer_context(ctx2);
         let mut pm = PassManager::new();
         pm.add_pass(JoinOrdering::new());
 
@@ -1236,7 +1118,7 @@ mod tests {
         .add(&mut ctx);
         ctx.set_root(seed);
         let created_join = Rc::new(RefCell::new(None));
-        let mut opt = OptimizerContext::new(ctx);
+        let mut opt = crate::test_optimizer_context(ctx);
         let mut pm = PassManager::new();
         pm.add_pass(JoinOrdering::new());
         pm.add_pass(CreateJoinAfterFirstPass {

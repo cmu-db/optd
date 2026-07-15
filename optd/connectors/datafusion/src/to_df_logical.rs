@@ -21,7 +21,7 @@ use datafusion::logical_expr::{
 use datafusion::prelude::SessionContext;
 use optd_core::{
     AggregateExpr, AggregateFunction, BinaryOp, ExprData, NaryOp, Operator, OperatorData,
-    QueryContext, Relation, ScalarValue, TableRef, UnaryOp,
+    PlannedQuery, QueryContext, Relation, ScalarValue, TableRef, UnaryOp,
 };
 
 /// Error type for the optd → DataFusion converter.
@@ -65,12 +65,13 @@ pub(crate) struct ToDfContext<'a> {
 impl<'a> ToDfContext<'a> {
     pub(crate) fn new(
         query: &'a QueryContext,
+        catalog: Arc<dyn optd_core::Catalog>,
         tables: &'a TableMap,
         session: &'a SessionContext,
     ) -> Self {
         Self {
             query,
-            analyses: optd_core::AnalysisContext::new(),
+            analyses: optd_core::AnalysisContext::new(catalog),
             tables,
             session,
         }
@@ -101,9 +102,10 @@ pub(crate) fn optd_table_ref_to_df(table: &TableRef) -> TableReference {
 
 /// Converts a optd `QueryContext` root into a DataFusion `LogicalPlan`.
 pub async fn to_logical_plan(
-    ctx: &QueryContext,
+    planned: &PlannedQuery,
     session: &SessionContext,
 ) -> ToDFResult<LogicalPlan> {
+    let ctx = &planned.query;
     let root = ctx
         .root()
         .ok_or_else(|| ToDFError::Unsupported("query has no root".into()))?;
@@ -111,7 +113,7 @@ pub async fn to_logical_plan(
     // Collect all table sources referenced in the plan (async, done once).
     let tables = collect_tables(root, ctx, session).await?;
 
-    convert_operator(root, ctx, &tables, session)
+    convert_operator(root, ctx, Arc::clone(&planned.catalog), &tables, session)
 }
 
 /// Walks the plan and collects a `TableSource` for every `Scan`.
@@ -211,10 +213,11 @@ fn collect_expr_subqueries(expr: optd_core::Expr, ctx: &QueryContext, out: &mut 
 fn convert_operator(
     op: Operator,
     ctx: &QueryContext,
+    catalog: Arc<dyn optd_core::Catalog>,
     tables: &TableMap,
     session: &SessionContext,
 ) -> ToDFResult<LogicalPlan> {
-    let mut ctx = ToDfContext::new(ctx, tables, session);
+    let mut ctx = ToDfContext::new(ctx, catalog, tables, session);
     convert_operator_inner(
         op,
         &mut ctx,
@@ -883,7 +886,7 @@ fn correlated_subquery_outer_refs(
         .unwrap_or_default()
         .into_iter()
         .collect();
-    if let Ok(used) = optd_core::expr_used_columns(ctx, on) {
+    if let Ok(used) = optd_core::expr_used_columns(ctx.query, &mut ctx.analyses, on) {
         outer_refs.extend(used.into_iter().filter(|col| !inner_cols.contains(col)));
     }
     outer_refs
@@ -1245,7 +1248,7 @@ fn correlated_semi_anti_outer_refs(
         .unwrap_or_default()
         .into_iter()
         .collect();
-    if let Ok(used) = optd_core::expr_used_columns(ctx, join.on) {
+    if let Ok(used) = optd_core::expr_used_columns(ctx.query, &mut ctx.analyses, join.on) {
         outer_refs.extend(used.into_iter().filter(|col| !inner_cols.contains(col)));
     }
     outer_refs
@@ -1441,11 +1444,20 @@ pub(crate) fn convert_join_type(jt: &optd_core::JoinType) -> ToDFResult<DFJoinTy
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::{ToDFError, to_logical_plan};
     use datafusion::arrow::datatypes::DataType;
     use datafusion::logical_expr::LogicalPlan;
     use datafusion::prelude::SessionContext;
-    use optd_core::{ColumnData, ConstScan, ExprData, OperatorData, QueryContext, ScalarValue};
+    use optd_core::{
+        ColumnData, ConstScan, ExprData, MemoryCatalog, OperatorData, PlannedQuery, QueryContext,
+        ScalarValue,
+    };
+
+    fn planned(query: QueryContext) -> PlannedQuery {
+        PlannedQuery::new(query, Arc::new(MemoryCatalog::new("memory", "public")))
+    }
 
     #[tokio::test]
     async fn exports_zero_row_const_scan_as_empty_relation() {
@@ -1458,7 +1470,7 @@ mod tests {
         .add(&mut ctx);
         ctx.set_root(root);
 
-        let plan = to_logical_plan(&ctx, &session).await.unwrap();
+        let plan = to_logical_plan(&planned(ctx), &session).await.unwrap();
         match plan {
             LogicalPlan::EmptyRelation(empty) => assert!(!empty.produce_one_row),
             other => panic!("expected EmptyRelation, got {other:?}"),
@@ -1476,7 +1488,7 @@ mod tests {
         .add(&mut ctx);
         ctx.set_root(root);
 
-        let plan = to_logical_plan(&ctx, &session).await.unwrap();
+        let plan = to_logical_plan(&planned(ctx), &session).await.unwrap();
         match plan {
             LogicalPlan::EmptyRelation(empty) => assert!(empty.produce_one_row),
             other => panic!("expected EmptyRelation, got {other:?}"),
@@ -1496,7 +1508,7 @@ mod tests {
         .add(&mut ctx);
         ctx.set_root(root);
 
-        let plan = to_logical_plan(&ctx, &session).await.unwrap();
+        let plan = to_logical_plan(&planned(ctx), &session).await.unwrap();
         match plan {
             LogicalPlan::Values(values) => {
                 assert_eq!(values.values.len(), 1);
@@ -1519,7 +1531,7 @@ mod tests {
         .add(&mut ctx);
         ctx.set_root(root);
 
-        let error = to_logical_plan(&ctx, &session).await.unwrap_err();
+        let error = to_logical_plan(&planned(ctx), &session).await.unwrap_err();
         match error {
             ToDFError::Unsupported(message) => {
                 assert!(message.contains("row width must match number of columns"))
@@ -1540,7 +1552,7 @@ mod tests {
         .add(&mut ctx);
         ctx.set_root(root);
 
-        let plan = to_logical_plan(&ctx, &session).await.unwrap();
+        let plan = to_logical_plan(&planned(ctx), &session).await.unwrap();
         match plan {
             LogicalPlan::EmptyRelation(empty) => {
                 assert_eq!(empty.schema.fields().len(), 1);

@@ -411,7 +411,7 @@ mod tests {
         .add(&mut query);
         query.set_root(root);
 
-        let mut opt = OptimizerContext::new(query);
+        let mut opt = crate::test_optimizer_context(query);
         let mut pm = PassManager::new();
         pm.add_pass(JoinTreeNormalize::new());
         pm.run(&mut opt)
@@ -470,7 +470,7 @@ mod tests {
         .add(&mut query);
         query.set_root(root);
 
-        let mut opt = OptimizerContext::new(query);
+        let mut opt = crate::test_optimizer_context(query);
         let mut pm = PassManager::new();
         pm.add_pass(JoinTreeNormalize::new());
         pm.run(&mut opt)
