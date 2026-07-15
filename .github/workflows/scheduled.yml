@@ -37,7 +37,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Cache TPC-H data
         id: cache-tpch
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: optd/connectors/datafusion/data/tpch/sf-0.1
           key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ hashFiles('scripts/download_tpch_hf.sh') }}
@@ -66,7 +66,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Cache TPC-H data
         id: cache-tpch
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: optd/connectors/datafusion/data/tpch/sf-0.1
           key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ hashFiles('scripts/download_tpch_hf.sh') }}
@@ -100,7 +100,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Cache TPC-H data
         id: cache-tpch
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: optd/connectors/datafusion/data/tpch/sf-0.1
           key: ${{ runner.os }}-hf-tpch-sf-0.1-${{ hashFiles('scripts/download_tpch_hf.sh') }}
@@ -109,7 +109,7 @@ jobs:
         run: bash ./scripts/download_tpch_hf.sh
       - name: Cache JOB Parquet data
         id: cache-job
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: optd/connectors/datafusion/data/job
           key: ${{ runner.os }}-hf-job-${{ hashFiles('scripts/download_job_hf.sh') }}
