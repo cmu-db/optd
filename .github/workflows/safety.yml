@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     name: ubuntu / nightly / sanitizers / optd-core
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install nightly
         uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     name: ubuntu / nightly / miri / optd-core
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install nightly with Miri
         uses: dtolnay/rust-toolchain@nightly
         with:

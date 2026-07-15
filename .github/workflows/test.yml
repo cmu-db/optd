@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     name: ubuntu / rust-toolchain / workspace
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Read Rust toolchain
         id: rust-toolchain
         run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     name: ubuntu / rust-toolchain / no-default-features
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Read Rust toolchain
         id: rust-toolchain
         run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
@@ -75,7 +75,7 @@ jobs:
     runs-on: ubuntu-latest
     name: ubuntu / rust-toolchain / slt
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Read Rust toolchain
         id: rust-toolchain
         run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
@@ -109,7 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     name: ubuntu / rust-toolchain / coverage
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Read Rust toolchain
         id: rust-toolchain
         run: echo "toolchain=$(rustup show active-toolchain | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
