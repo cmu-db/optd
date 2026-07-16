@@ -13,17 +13,20 @@ use crate::{
 };
 
 use super::{
-    OptimizeError, OptimizeResult, Pass, PassResult, QueryPass,
+    OptimizeError, OptimizeResult, Pass, PassMode, PassResult, QueryPass,
     join_ordering::collect_join_group_roots,
 };
 
-pub struct JoinTreeNormalize {
-    last_run: Option<(usize, u64)>,
-}
+/// Builds one deterministic, predicate-aware join tree for each maximal join group.
+///
+/// The pass uses [`PassMode::Once`] because the normalized tree is the starting point for the
+/// subsequent cost-based join-ordering pass, not an intermediate shape that should be normalized
+/// repeatedly to a fixpoint.
+pub struct JoinTreeNormalize;
 
 impl JoinTreeNormalize {
     pub fn new() -> Self {
-        Self { last_run: None }
+        Self
     }
 }
 
@@ -40,15 +43,11 @@ impl Pass for JoinTreeNormalize {
 }
 
 impl QueryPass for JoinTreeNormalize {
-    fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<PassResult> {
-        let run_key = (
-            (&ctx.query as *const QueryContext) as usize,
-            ctx.optimizer_run_id,
-        );
-        if self.last_run == Some(run_key) {
-            return Ok(PassResult::Unchanged);
-        }
+    fn mode(&self) -> PassMode {
+        PassMode::Once
+    }
 
+    fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<PassResult> {
         let Some(root) = ctx.query.root() else {
             return Ok(PassResult::Unchanged);
         };
@@ -57,8 +56,6 @@ impl QueryPass for JoinTreeNormalize {
         if group_roots.is_empty() {
             return Ok(PassResult::Unchanged);
         }
-
-        self.last_run = Some(run_key);
 
         let replacements =
             group_roots

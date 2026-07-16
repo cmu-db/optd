@@ -782,14 +782,18 @@ fn join_ordering_pass_manager_can_be_reused_for_another_context() {
     pm.add_pass(JoinOrdering::new());
 
     pm.run(&mut opt1).unwrap();
+    assert_eq!(pm.profiles().len(), 1);
+    assert_eq!(pm.profiles()[0].result, Some(PassResult::Changed));
     pm.run(&mut opt2).unwrap();
 
     assert_ne!(opt1.query.root(), Some(root1));
     assert_ne!(opt2.query.root(), Some(root2));
+    assert_eq!(pm.profiles().len(), 1);
+    assert_eq!(pm.profiles()[0].result, Some(PassResult::Changed));
 }
 
 #[test]
-fn join_ordering_noop_before_join_exists_does_not_consume_pass() {
+fn join_ordering_once_mode_does_not_revisit_after_a_later_pass_creates_a_join() {
     struct CreateJoinAfterFirstPass {
         fired: bool,
         created_join: Rc<RefCell<Option<Operator>>>,

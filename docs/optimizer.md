@@ -33,7 +33,16 @@ pub trait Pass {
     fn name(&self) -> &'static str;
 }
 
+pub enum PassMode {
+    Once,
+    ToFixpoint,
+}
+
 pub trait QueryPass: Pass {
+    fn mode(&self) -> PassMode {
+        PassMode::ToFixpoint
+    }
+
     fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<PassResult>;
 }
 
@@ -44,8 +53,12 @@ pub enum PassResult {
 }
 ```
 
-`QueryPass` is the primitive pass type stored by the pass manager. Smaller pass types can be adapted
-into query passes:
+`QueryPass` is the primitive pass type stored by the pass manager. `ToFixpoint` is the default and
+preserves the expected behavior for local cleanup rules. Whole-query construction or enumeration
+passes can return `Once`; the manager then invokes them exactly once at their pipeline position,
+even when they report `Changed`.
+
+Smaller pass types can be adapted into query passes:
 
 - `OperatorRewrite`: local relational rewrite over one operator and its rewritten inputs.
 - `ExprRewrite`: local scalar-expression rewrite over one expression tree.
@@ -124,30 +137,34 @@ impl RewriteMap {
 
 ## Pass Manager
 
-The pass manager runs query passes in order and repeats while passes keep changing the plan.
+The pass manager runs query passes in registration order according to each pass's `PassMode`.
 
 ```rust
 pub struct PassManager {
     passes: Vec<Box<dyn QueryPass>>,
-    max_iterations: usize,
+    max_iterations: Option<usize>,
+    profiles: Vec<PassProfile>,
 }
 ```
 
-Initial behavior:
+Behavior:
 
 - Read `ctx.query.root()`.
 - Run each pass in registration order.
 - Let passes or adaptors update the root when they replace it.
-- Stop when a full iteration reports no changes.
-- Return an error if `max_iterations` is reached.
+- Invoke `Once` passes once, whether they report `Changed` or `Unchanged`.
+- Repeat `ToFixpoint` passes until they report `Unchanged`.
+- Return an error if a fixpoint pass reaches `max_iterations`.
 
 No analysis invalidation is needed under the append-only invariant.
 
 ## Run Tracking and Scheduling
 
 Append-only rewrites avoid stale analysis caches, but they do not automatically avoid repeated rule
-work. A fixpoint pass manager can keep seeing equivalent replacement shapes unless the adaptor tracks
-what has already been attempted.
+work. A fixpoint pass can keep seeing equivalent replacement shapes unless the adaptor tracks what
+has already been attempted. Passes whose work is intentionally final at their pipeline position can
+instead declare `PassMode::Once`; this scheduling policy belongs in the manager rather than in
+pointer identities or mutable run bookkeeping inside individual passes.
 
 The first implementation can be conservative and simple:
 

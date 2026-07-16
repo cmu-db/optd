@@ -108,15 +108,33 @@ pub enum PassResult {
     Changed,
 }
 
+/// How [`PassManager`] schedules a query pass within one optimizer run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PassMode {
+    /// Invoke the pass once, regardless of whether it reports a change.
+    ///
+    /// Use this for whole-query construction passes whose output is final for the
+    /// current pipeline position, or whose candidate generation is intentionally
+    /// append-only.
+    Once,
+    /// Reinvoke the pass until it reports [`PassResult::Unchanged`].
+    ToFixpoint,
+}
+
 /// A pass that rewrites a full query.
 pub trait QueryPass: Pass {
+    /// Returns the scheduling policy for this pass.
+    fn mode(&self) -> PassMode {
+        PassMode::ToFixpoint
+    }
+
     fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<PassResult>;
 }
 
 /// Timing information for one pass invocation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PassProfile {
-    /// 1-based fixpoint iteration number.
+    /// 1-based invocation number for this pass.
     pub iteration: usize,
     /// 0-based registration index of the pass in the manager.
     pub pass_index: usize,
@@ -336,11 +354,10 @@ fn pre_order(
     }
 }
 
-/// Runs query passes in registration order until no pass reports changes.
+/// Runs query passes in registration order according to each pass's [`PassMode`].
 pub struct PassManager {
     passes: Vec<Box<dyn QueryPass>>,
     max_iterations: Option<usize>,
-    next_run_id: u64,
     profiles: Vec<PassProfile>,
 }
 
@@ -350,17 +367,15 @@ impl PassManager {
         Self {
             passes: Vec::new(),
             max_iterations: None,
-            next_run_id: 1,
             profiles: Vec::new(),
         }
     }
 
-    /// Creates a pass manager with a per-pass iteration limit.
+    /// Creates a pass manager with a per-fixpoint-pass iteration limit.
     pub fn with_max_iterations(max_iterations: usize) -> Self {
         Self {
             passes: Vec::new(),
             max_iterations: Some(max_iterations),
-            next_run_id: 1,
             profiles: Vec::new(),
         }
     }
@@ -375,12 +390,14 @@ impl PassManager {
         &self.profiles
     }
 
-    /// Runs each pass to fixpoint in registration order, up to `max_iterations` per pass.
+    /// Runs each pass in registration order according to its [`PassMode`].
+    ///
+    /// Fixpoint passes are limited to `max_iterations` invocations when configured.
     pub fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<()> {
         self.run_inner(ctx, None)
     }
 
-    /// Runs each pass to fixpoint in registration order and captures a query snapshot after each invocation.
+    /// Runs each pass according to its [`PassMode`] and captures a query snapshot after each invocation.
     pub fn run_with_trace(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<Vec<PassTrace>> {
         let mut trace = Vec::new();
         self.run_inner(ctx, Some(&mut trace))?;
@@ -393,15 +410,15 @@ impl PassManager {
         mut trace: Option<&mut Vec<PassTrace>>,
     ) -> OptimizeResult<()> {
         self.profiles.clear();
-        ctx.optimizer_run_id = self.next_run_id;
-        self.next_run_id += 1;
 
         for (pass_index, pass) in self.passes.iter_mut().enumerate() {
-            let mut converged = false;
+            let mode = pass.mode();
+            let mut completed = false;
             let mut iteration = 0usize;
             loop {
                 iteration += 1;
-                if let Some(max) = self.max_iterations
+                if mode == PassMode::ToFixpoint
+                    && let Some(max) = self.max_iterations
                     && iteration > max
                 {
                     break;
@@ -457,13 +474,13 @@ impl PassManager {
                     });
                 }
 
-                if !changed {
-                    converged = true;
+                if mode == PassMode::Once || !changed {
+                    completed = true;
                     break;
                 }
             }
 
-            if !converged {
+            if !completed {
                 return Err(OptimizeError::MaxIterationsReached { pass: pass.name() });
             }
         }
@@ -854,6 +871,27 @@ mod tests {
         }
     }
 
+    struct OncePass {
+        calls: std::rc::Rc<std::cell::Cell<usize>>,
+    }
+
+    impl Pass for OncePass {
+        fn name(&self) -> &'static str {
+            "once"
+        }
+    }
+
+    impl QueryPass for OncePass {
+        fn mode(&self) -> PassMode {
+            PassMode::Once
+        }
+
+        fn run(&mut self, _ctx: &mut OptimizerContext) -> OptimizeResult<PassResult> {
+            self.calls.set(self.calls.get() + 1);
+            Ok(PassResult::Changed)
+        }
+    }
+
     #[test]
     fn noop_pass_converges_in_one_iteration() {
         let mut pm = PassManager::new();
@@ -879,6 +917,27 @@ mod tests {
             pm.run(&mut ctx),
             Err(OptimizeError::MaxIterationsReached { .. })
         ));
+    }
+
+    #[test]
+    fn once_pass_runs_once_per_manager_run_even_when_changed() {
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let mut pm = PassManager::with_max_iterations(0);
+        pm.add_pass(OncePass {
+            calls: std::rc::Rc::clone(&calls),
+        });
+        let mut first = crate::test_optimizer_context(QueryContext::new());
+        let mut second = crate::test_optimizer_context(QueryContext::new());
+
+        pm.run(&mut first).unwrap();
+        assert_eq!(calls.get(), 1);
+        assert_eq!(pm.profiles().len(), 1);
+        assert_eq!(pm.profiles()[0].result, Some(PassResult::Changed));
+
+        pm.run(&mut second).unwrap();
+        assert_eq!(calls.get(), 2);
+        assert_eq!(pm.profiles().len(), 1);
+        assert_eq!(pm.profiles()[0].iteration, 1);
     }
 
     #[test]

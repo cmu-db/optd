@@ -44,7 +44,7 @@
 //!
 //! # Arena allocation
 //!
-//! Candidate operators are appended to [`QueryContext`] while alternatives are costed. Losing
+//! Candidate operators are appended to [`crate::QueryContext`] while alternatives are costed. Losing
 //! candidates can therefore remain unreachable in the arena; only the winning root is installed
 //! in the rewrite map. Analyses are explicitly cleared before group construction because plan
 //! costing is demand-driven and candidates add new operator handles.
@@ -64,9 +64,9 @@ pub use groups::collect_join_group_roots;
 pub use policy::{AdaptiveJoinOrderingConfig, AlgorithmDecision, JoinOrderAlgorithm};
 
 use crate::cost::{CostModel, DefaultCostModel};
-use crate::{OptimizerContext, QueryContext, build_hypergraph};
+use crate::{OptimizerContext, build_hypergraph};
 
-use super::{OptimizeResult, Pass, PassResult, QueryPass};
+use super::{OptimizeResult, Pass, PassMode, PassResult, QueryPass};
 use dphyp::DPhyp;
 use policy::choose_algorithm;
 
@@ -86,9 +86,9 @@ use policy::choose_algorithm;
 /// The default type parameter uses [`DefaultCostModel`]. Supply another [`CostModel`] with
 /// [`JoinOrdering::with_cost_model`] when plan comparison needs a different cost algebra.
 ///
-/// A pass instance is idempotent within one optimizer run. The `(QueryContext address,
-/// optimizer_run_id)` pair prevents a fixed-point manager from enumerating the same arena twice,
-/// while still allowing the instance to be reused for a new context or run.
+/// Join ordering declares [`PassMode::Once`]: enumeration is final for this pipeline position and
+/// appends candidate operators to the query arena, so a fixed-point reinvocation would repeat work
+/// without exposing a new optimization opportunity.
 pub struct JoinOrdering<M = DefaultCostModel> {
     /// Cost model shared by all enumerators.
     cost_model: M,
@@ -96,8 +96,6 @@ pub struct JoinOrdering<M = DefaultCostModel> {
     config: AdaptiveJoinOrderingConfig,
     /// Per-group decisions from the most recent attempted run.
     last_decisions: Vec<AlgorithmDecision>,
-    /// Identity of the last completed enumeration run.
-    last_run: Option<(usize, u64)>,
 }
 
 impl JoinOrdering<DefaultCostModel> {
@@ -107,7 +105,6 @@ impl JoinOrdering<DefaultCostModel> {
             cost_model: DefaultCostModel,
             config: AdaptiveJoinOrderingConfig::default(),
             last_decisions: Vec::new(),
-            last_run: None,
         }
     }
 
@@ -128,7 +125,6 @@ impl JoinOrdering<DefaultCostModel> {
             cost_model,
             config: AdaptiveJoinOrderingConfig::default(),
             last_decisions: Vec::new(),
-            last_run: None,
         }
     }
 }
@@ -146,8 +142,7 @@ impl<M> JoinOrdering<M> {
     /// Returns decisions made for join groups in the most recent attempted optimizer run.
     ///
     /// Entries follow [`collect_join_group_roots`] order. The slice is empty when the query had no
-    /// optimizable join group. Re-entering the pass with the same optimizer run id is a no-op and
-    /// preserves the decisions from that run.
+    /// optimizable join group.
     pub fn last_decisions(&self) -> &[AlgorithmDecision] {
         &self.last_decisions
     }
@@ -166,16 +161,11 @@ impl<M: CostModel> Pass for JoinOrdering<M> {
 }
 
 impl<M: CostModel> QueryPass for JoinOrdering<M> {
+    fn mode(&self) -> PassMode {
+        PassMode::Once
+    }
+
     fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<PassResult> {
-        // PassManager can iterate after another pass changes the query. Join ordering is designed
-        // to run once per arena/run id because its candidate operators are append-only.
-        let run_key = (
-            (&ctx.query as *const QueryContext) as usize,
-            ctx.optimizer_run_id,
-        );
-        if self.last_run == Some(run_key) {
-            return Ok(PassResult::Unchanged);
-        }
         self.last_decisions.clear();
 
         let Some(root) = ctx.query.root() else {
@@ -202,8 +192,6 @@ impl<M: CostModel> QueryPass for JoinOrdering<M> {
         if groups.is_empty() {
             return Ok(PassResult::Unchanged);
         }
-
-        self.last_run = Some(run_key);
 
         // Enumeration appends candidate operators, but only winning roots enter replacements.
         let mut replacements = Vec::new();

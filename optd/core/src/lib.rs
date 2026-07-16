@@ -36,9 +36,9 @@ pub use hypergraph::{
 pub use optimize::{
     AdaptiveJoinOrderingConfig, AlgorithmDecision, Direction, ExprSimplify, HolisticUnnesting,
     JoinOrderAlgorithm, JoinOrdering, JoinTreeNormalize, MarkJoinToSemiJoin, OperatorRewrite,
-    OperatorRewriteAdaptor, OptimizeError, OptimizeResult, Pass, PassManager, PassProfile,
-    PassResult, PassTrace, PredicatePushdown, ProjectionElimination, QueryPass, Rewrite,
-    RewriteMap, SubqueryToJoin, Unnesting,
+    OperatorRewriteAdaptor, OptimizeError, OptimizeResult, Pass, PassManager, PassMode,
+    PassProfile, PassResult, PassTrace, PredicatePushdown, ProjectionElimination, QueryPass,
+    Rewrite, RewriteMap, SubqueryToJoin, Unnesting,
 };
 pub use relation_set::RelationSet;
 
@@ -770,7 +770,6 @@ pub struct OptimizerContext {
     pub query: QueryContext,
     pub analyses: AnalysisContext,
     pub rewrites: optimize::RewriteMap,
-    pub(crate) optimizer_run_id: u64,
 }
 
 /// An optimized query paired with the catalog that informed planning.
@@ -806,7 +805,6 @@ impl OptimizerContext {
             query,
             analyses: AnalysisContext::new(catalog),
             rewrites: optimize::RewriteMap::new(),
-            optimizer_run_id: 0,
         }
     }
 

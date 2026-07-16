@@ -381,6 +381,10 @@ impl Pass for JoinOrdering {
 }
 
 impl QueryPass for JoinOrdering {
+    fn mode(&self) -> PassMode {
+        PassMode::Once
+    }
+
     fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<PassResult> {
         let Some(root) = ctx.query.root() else {
             return Ok(PassResult::Unchanged);
@@ -409,8 +413,10 @@ impl QueryPass for JoinOrdering {
 }
 ```
 
-The pass runs once (not in a fixed-point loop). `PassManager` resolves the rewrite map
-after the pass completes.
+The pass declares `PassMode::Once`, making its lifecycle explicit in the optimizer framework.
+`PassManager` therefore invokes it once per manager run and resolves the rewrite map after the
+invocation. This avoids repeating append-only candidate enumeration without storing query pointers
+or synthetic run identifiers in the pass.
 
 ---
 
