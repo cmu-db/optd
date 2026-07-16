@@ -418,15 +418,19 @@ after the pass completes.
 
 ```
 optd/core/src/relation_set.rs                  # canonical inline/dynamic relation bitset
-optd/core/src/optimize/join_ordering.rs        # pass integration, DPhyp, reconstruction
+optd/core/src/optimize/join_ordering/mod.rs    # public API and pass orchestration
+optd/core/src/optimize/join_ordering/dphyp.rs  # exact csg-cmp enumeration and DP states
+optd/core/src/optimize/join_ordering/candidate.rs # orientation, costing, reconstruction
+optd/core/src/optimize/join_ordering/groups.rs # maximal join-group discovery
 optd/core/src/optimize/join_ordering/graph.rs  # topology queries and bounded csg counting
 optd/core/src/optimize/join_ordering/policy.rs # configurable adaptive algorithm selection
 optd/core/src/optimize/join_ordering/linearized.rs # connected ordering and interval DP
 optd/core/src/optimize/join_ordering/goo.rs    # GOO construction and bounded exact repair
+optd/core/src/optimize/join_ordering/tests.rs  # cross-module correctness tests
 optd/core/src/optimize/mod.rs                  # public re-exports
 ```
 
-The `collect_join_group_roots` helper lives in `join_ordering.rs` (not in `hypergraph.rs`,
+The `collect_join_group_roots` helper lives in `join_ordering/groups.rs` (not in `hypergraph.rs`,
 since it is a pass concern, not a hypergraph concern).
 
 ---
@@ -469,12 +473,12 @@ trivial). For larger groups the ordering matters for cardinality estimates.
 3. `optd/core/src/hypergraph.rs`: Compatibility tables (`assoc`, `l_asscom`, `r_asscom`) corrected to match Tables 1–3 from Birler & Neumann 2025.
 4. `optd/core/src/hypergraph.rs`: Builder upgraded to CD-E (Algorithm 3): uses `TES(◦_a)` instead of full subtree, gates extensions on connectivity check (Algorithm 5, union-find).
 5. `optd/core/src/hypergraph.rs`: `HyperedgeJoinType::to_ir_join_type()` for plan reconstruction.
-6. `optd/core/src/optimize/join_ordering.rs`: `DPhyp` — full implementation of `Solve`/`EmitCsg`/`EnumerateCsgRec`/`EmitCsg`/`EnumerateCmpRec`/`EmitCsgCmp`.
+6. `optd/core/src/optimize/join_ordering/dphyp.rs`: `DPhyp` — full implementation of `Solve`/`EmitCsg`/`EnumerateCsgRec`/`EmitCsg`/`EnumerateCmpRec`/`EmitCsgCmp`.
 7. `optd/core/src/optimize/join_ordering/`: bounded csg counting, adaptive policy,
    linearized interval DP, and GOO with exact bounded-subtree improvement.
 8. `optd/core/src/cost.rs`: catalog-aware cost integration and an explicit capability hook for
    orientation-sensitive physical costs.
-9. `optd/core/src/optimize/join_ordering.rs`: direction-correct plan reconstruction,
+9. `optd/core/src/optimize/join_ordering/`: direction-correct candidate reconstruction,
    bottom-up multi-group collection, public decisions, and `QueryPass` integration.
 10. Unit, exhaustive-oracle, SQL feature, benchmark, and same-machine release-profiler evidence
     cover exactness, algorithm selection, more than 64 relations, and regression bounds.

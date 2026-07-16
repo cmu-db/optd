@@ -1,10 +1,15 @@
 //! Greedy Operator Ordering with exact DP improvement of bounded subtrees.
 
-use super::{DPhyp, PlanState, best_join_candidate};
+#[cfg(test)]
+use super::dphyp::JoinTree;
+use super::{
+    candidate::best_join_candidate,
+    dphyp::{DPhyp, PlanState},
+};
 use crate::analysis::connecting_edge_indices;
 use crate::cost::CostModel;
 use crate::hypergraph::{NodeSet, QueryHypergraph, nodeset_singleton};
-use crate::{AnalysisContext, QueryContext};
+use crate::{AnalysisContext, OptimizeError, QueryContext};
 
 use super::OptimizeResult;
 use super::graph::JoinGraph;
@@ -44,7 +49,7 @@ pub(super) fn solve<M: CostModel>(
                 root: node.root,
                 cost: cost_model.total_cost(node.root, ctx, analyses)?,
                 #[cfg(test)]
-                tree: super::JoinTree::Leaf(node_id),
+                tree: JoinTree::Leaf(node_id),
             };
             Ok(GooTree {
                 nodes: nodeset_singleton(node_id),
@@ -166,7 +171,7 @@ fn improve_subtrees<M: CostModel>(
         &right,
         &edge_indices,
     )?
-    .ok_or_else(|| super::OptimizeError::PassError {
+    .ok_or_else(|| OptimizeError::PassError {
         pass: "JoinOrdering",
         message: "GOO subtree lost its connecting edge during DP improvement".to_string(),
     })

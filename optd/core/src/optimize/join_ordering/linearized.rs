@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 #[cfg(test)]
-use super::JoinTree;
-use super::{PlanState, best_join_candidate};
+use super::dphyp::JoinTree;
+use super::{candidate::best_join_candidate, dphyp::PlanState};
 use crate::analysis::connecting_edge_indices;
 use crate::cost::CostModel;
 use crate::hypergraph::{NodeSet, QueryHypergraph, nodeset_singleton};
