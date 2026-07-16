@@ -13,40 +13,33 @@ use crate::analysis::Analysis;
 use crate::{
     AnalysisContext, AnalysisError, AnalysisResult, Analyzable, AvailableColumns, BinaryOp, Column,
     Expr, ExprData, JoinType, NaryOp, Operator, OperatorData, QueryContext, QueryFormatter,
-    expr_used_columns,
+    RelationSet, expr_used_columns,
 };
 
 /// Index into [`QueryHypergraph::nodes`].
 pub type NodeId = usize;
 
-/// A bitmask over node indices for groups of up to 64 relations.
+/// A set of hypergraph node identifiers.
 ///
-/// Bit `i` is set iff node `i` is in the set. Used by DPhyp for O(1) set operations.
-pub type NodeSet = u64;
+/// This compatibility alias is inline for identifiers below 64 and transparently expands for
+/// larger join groups.
+pub type NodeSet = RelationSet;
 
 /// Returns a `NodeSet` containing only node `id`.
 #[inline]
 pub fn nodeset_singleton(id: NodeId) -> NodeSet {
-    1u64 << id
+    NodeSet::singleton(id)
 }
 
 /// Returns the lowest set bit index (canonical representative of a hypernode).
 #[inline]
-pub fn nodeset_min(s: NodeSet) -> NodeId {
-    s.trailing_zeros() as NodeId
+pub fn nodeset_min(s: &NodeSet) -> NodeId {
+    s.min().expect("a hypergraph node set must be non-empty")
 }
 
 /// Iterates over set bits in `s`, yielding each `NodeId`.
-pub fn nodeset_iter(mut s: NodeSet) -> impl Iterator<Item = NodeId> {
-    std::iter::from_fn(move || {
-        if s == 0 {
-            None
-        } else {
-            let bit = s.trailing_zeros() as NodeId;
-            s &= s - 1;
-            Some(bit)
-        }
-    })
+pub fn nodeset_iter(s: &NodeSet) -> impl Iterator<Item = NodeId> {
+    s.iter()
 }
 
 /// A base-relation node in the hypergraph.
@@ -310,13 +303,13 @@ impl<'a> HypergraphBuilder<'a> {
                 // `A`, `B`, and `C`.
                 let predicates = conjuncts(on, self.ctx);
                 let (record_tes_left, record_tes_right) =
-                    self.cd_e_for_predicate(on, jt, left_nodes, right_nodes);
+                    self.cd_e_for_predicate(on, jt, &left_nodes, &right_nodes);
 
                 for predicate in predicates {
                     let (tes_left, tes_right) = if jt == HyperedgeJoinType::Inner {
-                        self.cd_e_for_predicate(predicate, jt, left_nodes, right_nodes)
+                        self.cd_e_for_predicate(predicate, jt, &left_nodes, &right_nodes)
                     } else {
-                        (record_tes_left, record_tes_right)
+                        (record_tes_left.clone(), record_tes_right.clone())
                     };
                     self.edges.push(Hyperedge {
                         predicate: Some(predicate),
@@ -329,13 +322,13 @@ impl<'a> HypergraphBuilder<'a> {
 
                 self.join_stack.push(JoinRecord {
                     join_type: jt,
-                    left_nodes,
-                    right_nodes,
-                    tes_left: record_tes_left,
-                    tes_right: record_tes_right,
+                    left_nodes: left_nodes.clone(),
+                    right_nodes: right_nodes.clone(),
+                    tes_left: record_tes_left.clone(),
+                    tes_right: record_tes_right.clone(),
                 });
 
-                left_nodes | right_nodes
+                &left_nodes | &right_nodes
             }
 
             OperatorData::CrossProduct(cp) => {
@@ -345,31 +338,30 @@ impl<'a> HypergraphBuilder<'a> {
                 let right_nodes = self.collect(inner);
 
                 // Cross product: dummy always-true edge to keep graph connected (§2.6).
-                let l = nodeset_singleton(nodeset_min(left_nodes));
-                let r = nodeset_singleton(nodeset_min(right_nodes));
+                let l = nodeset_singleton(nodeset_min(&left_nodes));
+                let r = nodeset_singleton(nodeset_min(&right_nodes));
                 self.edges.push(Hyperedge {
                     predicate: None,
-                    left: l,
-                    right: r,
+                    left: l.clone(),
+                    right: r.clone(),
                     source: op,
                     join_type: HyperedgeJoinType::Inner,
                 });
 
                 self.join_stack.push(JoinRecord {
                     join_type: HyperedgeJoinType::Inner,
-                    left_nodes,
-                    right_nodes,
+                    left_nodes: left_nodes.clone(),
+                    right_nodes: right_nodes.clone(),
                     tes_left: l,
                     tes_right: r,
                 });
 
-                left_nodes | right_nodes
+                &left_nodes | &right_nodes
             }
 
             // Leaf and transparent-unary operators become nodes (§2.7).
             _ => {
                 let node_id = self.nodes.len();
-                assert!(node_id < 64, "hypergraph supports at most 64 nodes");
                 let available = self
                     .analyses
                     .get::<AvailableColumns>(self.ctx, op)
@@ -394,44 +386,38 @@ impl<'a> HypergraphBuilder<'a> {
         &mut self,
         predicate: Expr,
         join_type: HyperedgeJoinType,
-        left_nodes: NodeSet,
-        right_nodes: NodeSet,
+        left_nodes: &NodeSet,
+        right_nodes: &NodeSet,
     ) -> (NodeSet, NodeSet) {
         let (mut tes_left, mut tes_right) =
             self.ses_for_predicate(predicate, left_nodes, right_nodes);
 
         for rec in &self.join_stack {
-            let in_left = (rec.left_nodes | rec.right_nodes) & !left_nodes == 0
-                && (rec.left_nodes | rec.right_nodes) & left_nodes != 0;
-            let in_right = (rec.left_nodes | rec.right_nodes) & !right_nodes == 0
-                && (rec.left_nodes | rec.right_nodes) & right_nodes != 0;
+            let record_nodes = &rec.left_nodes | &rec.right_nodes;
+            let in_left = record_nodes.is_subset(left_nodes) && !record_nodes.is_empty();
+            let in_right = record_nodes.is_subset(right_nodes) && !record_nodes.is_empty();
+            let excluded_tes = &rec.tes_left | &rec.tes_right;
 
             if in_left {
                 let oa = rec.join_type;
                 let ob = join_type;
                 // CD-E: only extend if connected(right(◦_a), right(◦_b), ◦_a)
-                if !assoc(oa, ob)
-                    && self.connected(rec.right_nodes, right_nodes, rec.tes_left | rec.tes_right)
-                {
-                    tes_left |= rec.tes_left;
+                if !assoc(oa, ob) && self.connected(&rec.right_nodes, right_nodes, &excluded_tes) {
+                    tes_left |= &rec.tes_left;
                 }
-                if !l_asscom(oa, ob)
-                    && self.connected(rec.left_nodes, right_nodes, rec.tes_left | rec.tes_right)
+                if !l_asscom(oa, ob) && self.connected(&rec.left_nodes, right_nodes, &excluded_tes)
                 {
-                    tes_left |= rec.tes_right;
+                    tes_left |= &rec.tes_right;
                 }
             } else if in_right {
                 let oa = rec.join_type;
                 let ob = join_type;
-                if !assoc(oa, ob)
-                    && self.connected(rec.left_nodes, left_nodes, rec.tes_left | rec.tes_right)
-                {
-                    tes_right |= rec.tes_right;
+                if !assoc(oa, ob) && self.connected(&rec.left_nodes, left_nodes, &excluded_tes) {
+                    tes_right |= &rec.tes_right;
                 }
-                if !r_asscom(oa, ob)
-                    && self.connected(rec.right_nodes, left_nodes, rec.tes_left | rec.tes_right)
+                if !r_asscom(oa, ob) && self.connected(&rec.right_nodes, left_nodes, &excluded_tes)
                 {
-                    tes_right |= rec.tes_left;
+                    tes_right |= &rec.tes_left;
                 }
             }
         }
@@ -444,8 +430,8 @@ impl<'a> HypergraphBuilder<'a> {
     /// Returns true if `r1` and `r2` are connected in the hypergraph when the
     /// edge represented by `excluded_tes` (= tes_left | tes_right of ◦_a) is removed.
     /// Uses union-find over the remaining edges.
-    fn connected(&self, r1: NodeSet, r2: NodeSet, excluded_tes: NodeSet) -> bool {
-        if r1 == 0 || r2 == 0 {
+    fn connected(&self, r1: &NodeSet, r2: &NodeSet, excluded_tes: &NodeSet) -> bool {
+        if r1.is_empty() || r2.is_empty() {
             return false;
         }
         // Union-find: parent[i] = i initially.
@@ -482,15 +468,15 @@ impl<'a> HypergraphBuilder<'a> {
             changed = false;
             for edge in &self.edges {
                 // Skip the excluded edge (identified by its TES matching excluded_tes).
-                if (edge.left | edge.right) == excluded_tes {
+                if (&edge.left | &edge.right) == *excluded_tes {
                     continue;
                 }
                 // Edge is applicable if both sides are internally connected.
-                let l_rep = nodeset_min(edge.left);
-                let r_rep = nodeset_min(edge.right);
-                let all_l_same = nodeset_iter(edge.left)
+                let l_rep = nodeset_min(&edge.left);
+                let r_rep = nodeset_min(&edge.right);
+                let all_l_same = nodeset_iter(&edge.left)
                     .all(|n| find(&mut parent, n) == find(&mut parent, l_rep));
-                let all_r_same = nodeset_iter(edge.right)
+                let all_r_same = nodeset_iter(&edge.right)
                     .all(|n| find(&mut parent, n) == find(&mut parent, r_rep));
                 if all_l_same && all_r_same {
                     let before = find(&mut parent, l_rep);
@@ -513,34 +499,34 @@ impl<'a> HypergraphBuilder<'a> {
     fn ses_for_predicate(
         &mut self,
         predicate: Expr,
-        left_nodes: NodeSet,
-        right_nodes: NodeSet,
+        left_nodes: &NodeSet,
+        right_nodes: &NodeSet,
     ) -> (NodeSet, NodeSet) {
         let used = expr_used_columns(self.ctx, self.analyses, predicate).unwrap_or_default();
-        let mut ses_left: NodeSet = 0;
-        let mut ses_right: NodeSet = 0;
+        let mut ses_left = NodeSet::EMPTY;
+        let mut ses_right = NodeSet::EMPTY;
 
         for col in used {
             for nid in nodeset_iter(left_nodes) {
                 if self.nodes[nid].available.contains(&col) {
-                    ses_left |= nodeset_singleton(nid);
+                    ses_left |= &nodeset_singleton(nid);
                     break;
                 }
             }
             for nid in nodeset_iter(right_nodes) {
                 if self.nodes[nid].available.contains(&col) {
-                    ses_right |= nodeset_singleton(nid);
+                    ses_right |= &nodeset_singleton(nid);
                     break;
                 }
             }
         }
 
         // Fallback: degenerate predicate — include all nodes on each side.
-        if ses_left == 0 {
-            ses_left = left_nodes;
+        if ses_left.is_empty() {
+            ses_left = left_nodes.clone();
         }
-        if ses_right == 0 {
-            ses_right = right_nodes;
+        if ses_right.is_empty() {
+            ses_right = right_nodes.clone();
         }
 
         (ses_left, ses_right)
@@ -613,8 +599,8 @@ impl QueryHypergraph {
 
         out.push_str("\nEdges:\n");
         for (i, edge) in self.edges.iter().enumerate() {
-            let left: Vec<String> = nodeset_iter(edge.left).map(|n| n.to_string()).collect();
-            let right: Vec<String> = nodeset_iter(edge.right).map(|n| n.to_string()).collect();
+            let left: Vec<String> = nodeset_iter(&edge.left).map(|n| n.to_string()).collect();
+            let right: Vec<String> = nodeset_iter(&edge.right).map(|n| n.to_string()).collect();
             let pred = match edge.predicate {
                 Some(p) => formatter.format_expr_pub(p),
                 None => "true".to_string(),
@@ -991,7 +977,7 @@ mod tests {
             .edges
             .iter()
             .filter(|edge| edge.predicate.is_some())
-            .map(|edge| (edge.left, edge.right))
+            .map(|edge| (edge.left.clone(), edge.right.clone()))
             .collect::<Vec<_>>();
         assert!(real_edges.contains(&(nodeset_singleton(0), nodeset_singleton(2))));
         assert!(real_edges.contains(&(nodeset_singleton(1), nodeset_singleton(2))));

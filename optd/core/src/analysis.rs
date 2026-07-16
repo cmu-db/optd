@@ -1824,17 +1824,16 @@ fn join_selectivity_with_classes(
 }
 
 pub(crate) fn connecting_edge_indices(
-    left_nodes: NodeSet,
-    right_nodes: NodeSet,
+    left_nodes: &NodeSet,
+    right_nodes: &NodeSet,
     hg: &QueryHypergraph,
 ) -> Vec<usize> {
     hg.edges
         .iter()
         .enumerate()
         .filter(|(_, edge)| {
-            ((edge.left & left_nodes == edge.left) && (edge.right & right_nodes == edge.right))
-                || ((edge.left & right_nodes == edge.left)
-                    && (edge.right & left_nodes == edge.right))
+            (edge.left.is_subset(left_nodes) && edge.right.is_subset(right_nodes))
+                || (edge.left.is_subset(right_nodes) && edge.right.is_subset(left_nodes))
         })
         .map(|(idx, _)| idx)
         .collect()

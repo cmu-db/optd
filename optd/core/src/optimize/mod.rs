@@ -9,7 +9,9 @@ pub mod subquery_to_join;
 pub mod unnesting;
 pub use expr_simplify::ExprSimplify;
 pub use holistic_unnesting::HolisticUnnesting;
-pub use join_ordering::JoinOrdering;
+pub use join_ordering::{
+    AdaptiveJoinOrderingConfig, AlgorithmDecision, JoinOrderAlgorithm, JoinOrdering,
+};
 pub use join_tree_normalize::JoinTreeNormalize;
 pub use mark_join_to_semi_join::MarkJoinToSemiJoin;
 pub use predicate_pushdown::PredicatePushdown;

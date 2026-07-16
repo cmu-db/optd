@@ -17,6 +17,93 @@ each join group's operator tree with a cost-optimal (or near-optimal) bushy join
 The pass operates on the `QueryHypergraph` already built by `build_hypergraph` / `HypergraphOf`.
 It does not re-derive the hypergraph; it consumes it.
 
+## 2026 Adaptive Redesign
+
+The implementation is split into four independent layers:
+
+1. **Relation sets** — an immutable `RelationSet` value uses an inline `u64` for up to 64
+   relation identifiers and canonical heap words only when a set contains a larger identifier.
+   `NodeSet` remains a compatibility alias at the public hypergraph boundary. Empty words are
+   trimmed so equality and hashing are representation-independent.
+2. **Join graph view** — neighborhood, connectivity, connecting-edge lookup, connected-subgraph
+   counting, and hyperedge detection are pure operations over a borrowed `QueryHypergraph`.
+3. **Enumerators** — exact DPhyp and interval DP generate csg-cmp pairs or interval splits;
+   candidate materialization/cost comparison is shared. Search-space size is measured separately
+   before exact enumeration so policy can enforce a deterministic budget.
+4. **Adaptive policy** — algorithm choice depends on relation count, hyperedges, and a bounded
+   connected-subgraph count. Policy is configurable and its decision is observable in tests.
+
+### Invariants
+
+- Every DP state is a connected relation set and every emitted pair is disjoint and connected by
+  at least one eligible hyperedge.
+- Exact DPhyp emits each canonical csg-cmp pair once; both child states exist before costing it.
+- All predicates whose TES endpoints become available at a split are attached exactly once.
+- Non-commutative join orientation is preserved by the TES edge orientation.
+- Exact solving is selected only after the bounded connected-subgraph counter proves that its
+  state table fits policy, except for the unconditional small-query path.
+- Algorithm changes affect plan quality, never relational semantics; feature tests compare query
+  results and unit/property tests compare exact costs with exhaustive enumeration on small graphs.
+
+### Adaptive policy
+
+The defaults follow Neumann and Radke (SIGMOD 2018), with budgets exposed for deterministic tests:
+
+- fewer than 14 relations: exact DPhyp;
+- otherwise count connected subgraphs, stopping at 10,001;
+- at most 10,000 connected subgraphs: exact DPhyp, including long chains beyond 64 relations;
+- medium ordinary graphs (at most 100 relations): greedy linearization followed by O(n^3)
+  interval DP;
+- larger graphs or graphs with true hyperedges: GOO constructs a bushy seed and exact DPhyp
+  improves maximal subtrees of at most 10 relations (IDP-2 style).
+
+The first production version uses a deterministic connectivity-preserving order in place of the
+full IKKBZ rank normalization. This is deliberately isolated behind the linearizer interface so
+IKKBZ or a cardinality-guided minimum-spanning-tree order can be added without changing interval
+DP or policy.
+
+### Candidate orientation
+
+CD-E's directed TES endpoints determine orientation for non-commutative joins; the enumerator
+never swaps these inputs. Inner joins are commutative. Because optd's default cost formulas are
+symmetric, they cost one canonical orientation. A physical cost model can opt into orientation
+sensitivity through `CostModel::is_join_orientation_cost_sensitive`, in which case both inner
+orientations are costed and the cheaper one is retained.
+
+### Verification and measured performance
+
+Correctness is checked at three levels:
+
+- relation-set boundary and subset-iteration unit tests, including identifiers 64 and 129;
+- connected-subgraph counts against closed forms (6-chain = 21, 6-clique = 63) and exact DPhyp
+  cost against exhaustive bushy enumeration on a 5-clique;
+- DataFusion SLT executes 5-relation exact and 15-relation star/linearized result queries. Dense
+  15-relation and wide 65-/101-relation stress shapes are explicitly skipped because unrelated
+  SQL preprocessing/execution exceeds the SLT timeout; optimizer-level tests and the benchmark
+  execute the equivalent algorithms directly.
+
+The dependency-free `cargo bench -p optd-core --bench join_ordering -- 3` benchmark measures the
+full JoinOrdering pass with an enumeration-only cost model. On the development machine after the
+orientation hot-path refinement:
+
+| Shape | Selected algorithm | Mean per pass |
+|---|---:|---:|
+| 10-relation clique | DPhyp | 105.47 ms |
+| 18-relation clique | Linearized DP | 14.78 ms |
+| 65-relation chain | DPhyp (dynamic set) | 50.24 ms |
+| 128-relation chain | GOO/DP | 135.27 ms |
+| 128-relation chain | forced DPhyp | 948.68 ms |
+
+Absolute values include hypergraph construction and vary by machine; the benchmark primarily
+exists for repeatable before/after comparisons and algorithm-selection regressions. On the
+128-relation chain the adaptive large-query path is 7.0× faster than forced exact DPhyp.
+
+The existing DataFusion `profile_passes` workload was also run from both the untouched
+`54c9bdf` commit and this tree with two measured runs. The changing JoinOrdering invocation on
+`sixty_four_join_sixty_four_predicates` was 4,868.10 ms baseline versus 4,896.65 ms after the
+change (+0.59%); this is within the intended low-regression envelope. Smaller shapes remained
+sub-2 ms.
+
 ---
 
 ## Multi-Group Queries
@@ -88,8 +175,8 @@ fn optimize_group(hg: &QueryHypergraph, stats: &Statistics) -> JoinTree {
 }
 ```
 
-For the initial implementation, only `dphyp` is needed. `linearized_dp` and `goo_dp`
-are follow-ups for large queries.
+The implementation follows this policy, with a deterministic connected ordering in the
+linearized branch and GOO followed by exact DPhyp improvement of bounded maximal subtrees.
 
 ---
 
@@ -100,9 +187,9 @@ DPhyp enumerates all csg-cmp-pairs of the hypergraph and fills a DP table.
 ### Data Structures
 
 ```rust
-/// A set of node indices, represented as a sorted Vec<NodeId> for small groups
-/// or a u64 bitmask for groups up to 64 nodes.
-type NodeSet = u64; // bit i set ↔ node i is in the set
+/// An immutable, canonical relation set. One word is stored inline; larger sets use
+/// a heap-allocated word slice whose trailing zero words are removed.
+type NodeSet = RelationSet;
 
 /// One entry in the DP table: the best plan found for a given node set.
 struct DPEntry {
@@ -114,8 +201,9 @@ struct DPEntry {
 type DPTable = HashMap<NodeSet, DPEntry>;
 ```
 
-For groups larger than 64 nodes, `NodeSet` becomes a `Vec<u64>` (bitset of words).
-The initial implementation uses `u64` only, covering groups up to 64 relations.
+`RelationSet` transparently switches from its inline word to a dense dynamic word slice.
+Equality and hashing operate on the canonical representation, and set operations remain
+immutable at API boundaries. There is no 64-relation correctness limit.
 
 ### JoinTree
 
@@ -329,8 +417,13 @@ after the pass completes.
 ## File Layout
 
 ```
-optd/core/src/optimize/join_ordering.rs    # JoinOrdering pass, DPhyp, JoinTree, Statistics trait
-optd/core/src/optimize/mod.rs              # pub use join_ordering::JoinOrdering
+optd/core/src/relation_set.rs                  # canonical inline/dynamic relation bitset
+optd/core/src/optimize/join_ordering.rs        # pass integration, DPhyp, reconstruction
+optd/core/src/optimize/join_ordering/graph.rs  # topology queries and bounded csg counting
+optd/core/src/optimize/join_ordering/policy.rs # configurable adaptive algorithm selection
+optd/core/src/optimize/join_ordering/linearized.rs # connected ordering and interval DP
+optd/core/src/optimize/join_ordering/goo.rs    # GOO construction and bounded exact repair
+optd/core/src/optimize/mod.rs                  # public re-exports
 ```
 
 The `collect_join_group_roots` helper lives in `join_ordering.rs` (not in `hypergraph.rs`,
@@ -369,21 +462,31 @@ trivial). For larger groups the ordering matters for cardinality estimates.
 ## Implementation Tasks
 
 ### Done
-1. `optd/core/src/hypergraph.rs`: `NodeSet = u64` type alias + `nodeset_singleton`, `nodeset_min`, `nodeset_iter` helpers.
-2. `optd/core/src/hypergraph.rs`: `Hyperedge.left`/`.right` changed from `Vec<NodeId>` to `NodeSet`.
+1. `optd/core/src/relation_set.rs`: canonical, immutable inline/dynamic `RelationSet`, set algebra,
+   arbitrary-size subset iteration, and boundary tests beyond one machine word.
+2. `optd/core/src/hypergraph.rs`: `NodeSet = RelationSet`; hypergraph, connectivity, and CD-E
+   analyses no longer impose a 64-relation limit.
 3. `optd/core/src/hypergraph.rs`: Compatibility tables (`assoc`, `l_asscom`, `r_asscom`) corrected to match Tables 1–3 from Birler & Neumann 2025.
 4. `optd/core/src/hypergraph.rs`: Builder upgraded to CD-E (Algorithm 3): uses `TES(◦_a)` instead of full subtree, gates extensions on connectivity check (Algorithm 5, union-find).
 5. `optd/core/src/hypergraph.rs`: `HyperedgeJoinType::to_ir_join_type()` for plan reconstruction.
 6. `optd/core/src/optimize/join_ordering.rs`: `DPhyp` — full implementation of `Solve`/`EmitCsg`/`EnumerateCsgRec`/`EmitCsg`/`EnumerateCmpRec`/`EmitCsgCmp`.
-7. `optd/core/src/optimize/join_ordering.rs`: `Statistics` trait + `UniformStatistics` placeholder.
-8. `optd/core/src/optimize/join_ordering.rs`: `join_tree_to_ir` — converts `JoinTree` back to optd IR.
-9. `optd/core/src/optimize/join_ordering.rs`: `collect_join_group_roots` — finds all join group roots bottom-up.
-10. `optd/core/src/optimize/join_ordering.rs`: `JoinOrdering` pass implementing `QueryPass`.
+7. `optd/core/src/optimize/join_ordering/`: bounded csg counting, adaptive policy,
+   linearized interval DP, and GOO with exact bounded-subtree improvement.
+8. `optd/core/src/cost.rs`: catalog-aware cost integration and an explicit capability hook for
+   orientation-sensitive physical costs.
+9. `optd/core/src/optimize/join_ordering.rs`: direction-correct plan reconstruction,
+   bottom-up multi-group collection, public decisions, and `QueryPass` integration.
+10. Unit, exhaustive-oracle, SQL feature, benchmark, and same-machine release-profiler evidence
+    cover exactness, algorithm selection, more than 64 relations, and regression bounds.
 
 ### Open / Follow-ups
-- **Linearized DP** (Neumann & Radke §4.2): IKKBZ ordering + O(n³) DP for 15–100 node groups without hyperedges.
-- **GOO-DP** (Neumann & Radke §4.3): greedy seed + DP on subtrees of size k for >100 nodes.
-- **NodeSet >64 nodes**: extend to `Vec<u64>` or sparse representation for very large groups.
-- **Real statistics**: replace `UniformStatistics` with catalog-backed cardinality/selectivity.
+- **IKKBZ linearization** (Neumann & Radke §4.2): replace the deterministic connected order with
+  rank-normalized IKKBZ over a selectivity-weighted minimum spanning tree.
+- **GOO/DP global budget** (Neumann & Radke §4.3): choose maximal subproblems by benefit and charge
+  their actual DP-table size against a global improvement budget.
+- **Sparse relation sets**: add a sorted sparse representation above roughly 1024 relations if
+  workloads at that scale show dense word vectors to be material.
+- **Enumeration telemetry**: expose csg-cmp pair and winning-state counts alongside algorithm
+  decisions for production profiling.
 - **Null-rejecting predicate detection**: classify `'E`/`'K` variants using `ColumnNullability` analysis.
 - **Predicate pushdown prerequisite**: WHERE-clause predicates must be pushed into join conditions before `JoinOrdering` runs.

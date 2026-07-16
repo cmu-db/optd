@@ -9,6 +9,7 @@ pub mod cost;
 mod display;
 pub mod hypergraph;
 pub mod optimize;
+pub mod relation_set;
 pub mod substrait;
 pub mod tpch;
 
@@ -33,11 +34,13 @@ pub use hypergraph::{
     QueryHypergraph, build_hypergraph, nodeset_iter, nodeset_min, nodeset_singleton,
 };
 pub use optimize::{
-    Direction, ExprSimplify, HolisticUnnesting, JoinOrdering, JoinTreeNormalize,
-    MarkJoinToSemiJoin, OperatorRewrite, OperatorRewriteAdaptor, OptimizeError, OptimizeResult,
-    Pass, PassManager, PassProfile, PassResult, PassTrace, PredicatePushdown,
-    ProjectionElimination, QueryPass, Rewrite, RewriteMap, SubqueryToJoin, Unnesting,
+    AdaptiveJoinOrderingConfig, AlgorithmDecision, Direction, ExprSimplify, HolisticUnnesting,
+    JoinOrderAlgorithm, JoinOrdering, JoinTreeNormalize, MarkJoinToSemiJoin, OperatorRewrite,
+    OperatorRewriteAdaptor, OptimizeError, OptimizeResult, Pass, PassManager, PassProfile,
+    PassResult, PassTrace, PredicatePushdown, ProjectionElimination, QueryPass, Rewrite,
+    RewriteMap, SubqueryToJoin, Unnesting,
 };
+pub use relation_set::RelationSet;
 
 /// An opaque reference to a relational operator in a [`QueryContext`].
 ///

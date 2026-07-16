@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use crate::hypergraph::{HyperedgeJoinType, NodeSet, QueryHypergraph};
+use crate::hypergraph::{HyperedgeJoinType, NodeSet, QueryHypergraph, nodeset_singleton};
 use crate::{
     BinaryOp, Column, Expr, ExprData, Join, NaryOp, Operator, OperatorData, OptimizerContext,
     QueryContext, ScalarValue, build_hypergraph,
@@ -158,7 +158,7 @@ fn normalize_group(
         .iter()
         .enumerate()
         .map(|(idx, node)| Component {
-            nodes: 1u64 << idx,
+            nodes: nodeset_singleton(idx),
             op: node.root,
             equalities: EqualityClasses::default(),
         })
@@ -185,7 +185,7 @@ fn normalize_group(
         let right = components[right_idx].clone();
         let (op, equalities) = build_join_input(hg, &edge_indices, &left, &right, ctx);
         let merged = Component {
-            nodes: left.nodes | right.nodes,
+            nodes: &left.nodes | &right.nodes,
             op,
             equalities,
         };
@@ -237,10 +237,10 @@ fn choose_component_pair_with(
                     continue;
                 }
                 if connects(
-                    edge.left,
-                    edge.right,
-                    components[left_idx].nodes,
-                    components[right_idx].nodes,
+                    &edge.left,
+                    &edge.right,
+                    &components[left_idx].nodes,
+                    &components[right_idx].nodes,
                 ) {
                     return Some((left_idx, right_idx));
                 }
@@ -257,21 +257,21 @@ fn collect_connecting_edges(
     left_idx: usize,
     right_idx: usize,
 ) -> Vec<usize> {
-    let left_nodes = components[left_idx].nodes;
-    let right_nodes = components[right_idx].nodes;
+    let left_nodes = &components[left_idx].nodes;
+    let right_nodes = &components[right_idx].nodes;
     hg.edges
         .iter()
         .enumerate()
         .filter(|(idx, edge)| {
-            !used_edges[*idx] && connects(edge.left, edge.right, left_nodes, right_nodes)
+            !used_edges[*idx] && connects(&edge.left, &edge.right, left_nodes, right_nodes)
         })
         .map(|(idx, _)| idx)
         .collect()
 }
 
-fn connects(edge_left: NodeSet, edge_right: NodeSet, left: NodeSet, right: NodeSet) -> bool {
-    ((edge_left & left == edge_left) && (edge_right & right == edge_right))
-        || ((edge_left & right == edge_left) && (edge_right & left == edge_right))
+fn connects(edge_left: &NodeSet, edge_right: &NodeSet, left: &NodeSet, right: &NodeSet) -> bool {
+    (edge_left.is_subset(left) && edge_right.is_subset(right))
+        || (edge_left.is_subset(right) && edge_right.is_subset(left))
 }
 
 fn build_join_input(

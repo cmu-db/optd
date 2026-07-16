@@ -354,7 +354,8 @@ pub use hypergraph::{
 ## Implementation Status
 
 - `optd/core/src/hypergraph.rs` is implemented and re-exported from `optd/core/src/lib.rs`.
-- `NodeSet = u64` helpers (`nodeset_singleton`, `nodeset_min`, `nodeset_iter`) are in use.
+- `NodeSet = RelationSet` keeps one word inline and expands to canonical dynamic words for
+  relation identifiers beyond 63; the compatibility helpers remain in use.
 - Hyperedges use `(left: NodeSet, right: NodeSet)` and optional predicates.
 - TES construction uses CD-E and compatibility-table checks.
 - Unit tests cover node/edge construction, predicate splitting, compatibility behavior, and pretty printing.
@@ -371,5 +372,5 @@ pub use hypergraph::{
   plans with decomposable predicates vs 81.3% for CD-A (Table 5).
 - **Group-by as node**: The paper cites [Fent, Birler, Neumann 2022] for integrating
   group-by into the query graph but explicitly excludes it from this work. Defer.
-- **Multi-group queries**: One `build_hypergraph` call covers one join group. A forest
-  builder that identifies all join groups in a query is a follow-up.
+- **Multi-group queries**: One `build_hypergraph` call still covers one join group;
+  `JoinOrdering` now discovers group roots bottom-up and builds each graph independently.

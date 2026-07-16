@@ -22,6 +22,14 @@ pub trait CostModel: Send + Sync + 'static {
     /// Returns true when `candidate` is preferable to `existing`.
     fn is_better(&self, candidate: &Self::Cost, existing: &Self::Cost) -> bool;
 
+    /// Whether swapping the two inputs of an inner join can change its cost.
+    ///
+    /// The default optd formulas are symmetric. Physical cost models with build/probe or other
+    /// directional effects can opt in; join enumeration will then cost both orientations.
+    fn is_join_orientation_cost_sensitive(&self) -> bool {
+        false
+    }
+
     /// Computes this operator's local cost, excluding input costs.
     fn operator_cost(
         &self,
@@ -358,7 +366,8 @@ mod tests {
     fn join_algorithm_class_for_root(ctx: &QueryContext, root: Operator) -> JoinAlgorithmClass {
         let mut analyses = crate::test_analyses(ctx);
         let hg = build_hypergraph(ctx, &mut analyses, root);
-        let edge_indices = connecting_edge_indices(nodeset_singleton(0), nodeset_singleton(1), &hg);
+        let edge_indices =
+            connecting_edge_indices(&nodeset_singleton(0), &nodeset_singleton(1), &hg);
         join_algorithm_class(&edge_indices, &hg, ctx)
     }
 
