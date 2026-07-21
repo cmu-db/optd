@@ -300,6 +300,10 @@ impl ColumnProfile {
 pub struct CardinalityProfile {
     pub rows: Estimate,
     pub columns: BTreeMap<Column, ColumnProfile>,
+    /// Nontrivial equality classes whose columns all occur in [`Self::columns`].
+    ///
+    /// Singleton classes are intentionally omitted: a single column's NDV is already stored in
+    /// its [`ColumnProfile`]. Every stored class therefore contains at least two columns.
     pub equivalence_classes: Vec<ColumnEquivalenceClass>,
 }
 
@@ -322,11 +326,10 @@ impl CardinalityProfile {
     }
 
     pub fn new(rows: Estimate, columns: BTreeMap<Column, ColumnProfile>) -> Self {
-        let equivalence_classes = singleton_equivalence_classes(&columns);
         Self {
             rows,
             columns,
-            equivalence_classes,
+            equivalence_classes: Vec::new(),
         }
     }
 
@@ -345,18 +348,6 @@ impl CardinalityProfile {
     }
 }
 
-fn singleton_equivalence_classes(
-    columns: &BTreeMap<Column, ColumnProfile>,
-) -> Vec<ColumnEquivalenceClass> {
-    columns
-        .iter()
-        .map(|(&column, profile)| ColumnEquivalenceClass {
-            columns: BTreeSet::from([column]),
-            distinct: profile.distinct.clone(),
-        })
-        .collect()
-}
-
 fn filter_equivalence_classes(
     classes: &[ColumnEquivalenceClass],
     columns: &BTreeMap<Column, ColumnProfile>,
@@ -369,7 +360,7 @@ fn filter_equivalence_classes(
             .copied()
             .filter(|column| columns.contains_key(column))
             .collect::<BTreeSet<_>>();
-        if kept.is_empty() {
+        if kept.len() < 2 {
             continue;
         }
         let distinct = kept
@@ -398,7 +389,7 @@ fn rename_equivalence_classes(
                 .iter()
                 .filter_map(|column| rename_map.get(column).copied())
                 .collect::<BTreeSet<_>>();
-            (!columns.is_empty()).then(|| ColumnEquivalenceClass {
+            (columns.len() >= 2).then(|| ColumnEquivalenceClass {
                 columns,
                 distinct: class.distinct.clone(),
             })
@@ -2183,13 +2174,15 @@ impl EquivalenceClassState {
         }
         grouped
             .into_iter()
-            .map(|(root, columns)| ColumnEquivalenceClass {
-                columns,
-                distinct: self
-                    .distinct
-                    .get(&root)
-                    .cloned()
-                    .unwrap_or_else(|| Estimate::default(100.0)),
+            .filter_map(|(root, columns)| {
+                (columns.len() >= 2).then(|| ColumnEquivalenceClass {
+                    columns,
+                    distinct: self
+                        .distinct
+                        .get(&root)
+                        .cloned()
+                        .unwrap_or_else(|| Estimate::default(100.0)),
+                })
             })
             .collect()
     }
@@ -3418,6 +3411,153 @@ mod tests {
         let after = CardinalityEstimationV1::get_shared(&ctx, &mut analyses, scan).unwrap();
         assert_eq!(before.as_ref(), after.as_ref());
         assert!(!Arc::ptr_eq(&before, &after));
+    }
+
+    #[test]
+    fn cardinality_profile_omits_singleton_equivalence_classes() {
+        let mut ctx = QueryContext::new();
+        let a = ColumnData::new("a", DataType::Int64).add(&mut ctx);
+        let b = ColumnData::new("b", DataType::Int64).add(&mut ctx);
+        let rows = Estimate::exact(100.0);
+        let profile = CardinalityProfile::new(
+            rows,
+            [
+                (a, test_column_profile(100.0, 100.0)),
+                (b, test_column_profile(100.0, 50.0)),
+            ]
+            .into_iter()
+            .collect(),
+        );
+
+        assert!(profile.equivalence_classes.is_empty());
+    }
+
+    #[test]
+    fn inner_join_records_only_nontrivial_equivalence_classes() {
+        let mut ctx = QueryContext::new();
+        let a = ColumnData::new("a", DataType::Int64).add(&mut ctx);
+        let left_payload = ColumnData::new("left_payload", DataType::Int64).add(&mut ctx);
+        let b = ColumnData::new("b", DataType::Int64).add(&mut ctx);
+        let right_payload = ColumnData::new("right_payload", DataType::Int64).add(&mut ctx);
+        let left = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [
+                (a, test_column_profile(100.0, 100.0)),
+                (left_payload, test_column_profile(100.0, 25.0)),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let right = CardinalityProfile::new(
+            Estimate::exact(50.0),
+            [
+                (b, test_column_profile(50.0, 50.0)),
+                (right_payload, test_column_profile(50.0, 10.0)),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let predicate = equality_expr(&mut ctx, a, b);
+
+        let output =
+            join_profile_from_predicates(&left, &right, JoinType::Inner, &[predicate], &ctx);
+
+        assert_eq!(output.equivalence_classes.len(), 1);
+        assert_eq!(
+            output.equivalence_classes[0].columns,
+            BTreeSet::from([a, b])
+        );
+    }
+
+    #[test]
+    fn projection_drops_equivalence_classes_reduced_to_one_column() {
+        let mut ctx = QueryContext::new();
+        let a = ColumnData::new("a", DataType::Int64).add(&mut ctx);
+        let b = ColumnData::new("b", DataType::Int64).add(&mut ctx);
+        let c = ColumnData::new("c", DataType::Int64).add(&mut ctx);
+        let mut input = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [a, b, c]
+                .into_iter()
+                .map(|column| (column, test_column_profile(100.0, 50.0)))
+                .collect(),
+        );
+        input.equivalence_classes = vec![ColumnEquivalenceClass {
+            columns: BTreeSet::from([a, b, c]),
+            distinct: Estimate::exact(50.0),
+        }];
+
+        let pair = project_profile(&input, &[a, b]);
+        let singleton = project_profile(&input, &[a]);
+
+        assert_eq!(pair.equivalence_classes.len(), 1);
+        assert_eq!(pair.equivalence_classes[0].columns, BTreeSet::from([a, b]));
+        assert!(singleton.equivalence_classes.is_empty());
+    }
+
+    #[test]
+    fn rename_preserves_only_nontrivial_equivalence_classes() {
+        let mut ctx = QueryContext::new();
+        let a = ColumnData::new("a", DataType::Int64).add(&mut ctx);
+        let b = ColumnData::new("b", DataType::Int64).add(&mut ctx);
+        let renamed_a = ColumnData::new("renamed_a", DataType::Int64).add(&mut ctx);
+        let renamed_b = ColumnData::new("renamed_b", DataType::Int64).add(&mut ctx);
+        let mut input = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [a, b]
+                .into_iter()
+                .map(|column| (column, test_column_profile(100.0, 50.0)))
+                .collect(),
+        );
+        input.equivalence_classes = vec![ColumnEquivalenceClass {
+            columns: BTreeSet::from([a, b]),
+            distinct: Estimate::exact(50.0),
+        }];
+
+        let pair = rename_profile(&input, &[(renamed_a, a), (renamed_b, b)]);
+        let singleton = rename_profile(&input, &[(renamed_a, a)]);
+
+        assert_eq!(pair.equivalence_classes.len(), 1);
+        assert_eq!(
+            pair.equivalence_classes[0].columns,
+            BTreeSet::from([renamed_a, renamed_b])
+        );
+        assert!(singleton.equivalence_classes.is_empty());
+    }
+
+    #[test]
+    fn sparse_equivalence_classes_preserve_transitive_join_estimates() {
+        let mut ctx = QueryContext::new();
+        let a = ColumnData::new("a", DataType::Int64).add(&mut ctx);
+        let b = ColumnData::new("b", DataType::Int64).add(&mut ctx);
+        let unrelated = ColumnData::new("unrelated", DataType::Int64).add(&mut ctx);
+        let c = ColumnData::new("c", DataType::Int64).add(&mut ctx);
+        let rows = Estimate::exact(100.0);
+        let left = CardinalityProfile::new(
+            rows.clone(),
+            [a, b, unrelated]
+                .into_iter()
+                .map(|column| (column, test_column_profile(100.0, 100.0)))
+                .collect(),
+        );
+        let right = CardinalityProfile::new(
+            rows,
+            [(c, test_column_profile(100.0, 100.0))]
+                .into_iter()
+                .collect(),
+        );
+        let ab = equality_expr(&mut ctx, a, b);
+        let bc = equality_expr(&mut ctx, b, c);
+        let ac = equality_expr(&mut ctx, a, c);
+
+        let estimate = join_selectivity_with_classes(&left, &right, &[ab, bc, ac], &ctx);
+
+        assert_eq!(estimate.selectivity.value, 0.01);
+        assert_eq!(estimate.equivalence_classes.len(), 1);
+        assert_eq!(
+            estimate.equivalence_classes[0].columns,
+            BTreeSet::from([a, b, c])
+        );
     }
 
     #[test]

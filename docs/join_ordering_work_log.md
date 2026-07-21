@@ -17,6 +17,7 @@ token counts.
 | 2026-07-16 16:14 | 2026-07-16 16:22 | Explicit pass scheduling | Added `PassMode::{Once, ToFixpoint}`, migrated `JoinOrdering` and `JoinTreeNormalize`, removed pointer/run-id lifecycle state, and added manager-reuse and one-shot scheduling tests. | Post-goal; tracker unavailable |
 | 2026-07-16 16:43 | 2026-07-16 16:55 | Paper-style scalability artifacts | Added a reproducible random-tree/topology/RelationSet benchmark, collected 391 release measurements, and generated five inspected PNG/SVG figures plus raw and summary CSV/Markdown tables under `artifacts/join_ordering_scalability/`. | Post-goal; tracker unavailable |
 | 2026-07-21 20:26 | 2026-07-21 20:36 | Shared cardinality profiles | Switched the internal cardinality cache and cost-model lookups to `Arc<CardinalityProfile>` while preserving the public owned API; added cache-identity and invalidation tests. JOB 15c `JoinOrdering` median fell from 46.95 ms to 31.62 ms across five release runs. | 98,855 / 618 s |
+| 2026-07-21 20:53 | 2026-07-21 20:57 | Sparse equivalence metadata | Removed redundant singleton equality classes, documented the sparse invariant, and added constructor, projection, rename, inner-join, and transitive-selectivity tests. JOB 15c fell further to 22.57 ms median. | 135,534 / 1,890 s |
 
 ## Evidence Baseline
 
@@ -46,6 +47,8 @@ token counts.
   4,896.65 ms (+0.59%).
 - JOB 15c pass-only timing after shared cardinality profiles: 31.62 ms median across five release
   runs (30.71--53.70 ms), versus the 46.95 ms pre-change median, a 32.7% reduction.
+- JOB 15c after sparse equivalence metadata: 22.57 ms median across five release runs
+  (21.93--25.13 ms), 28.6% below the Arc-only median and 51.9% below the original baseline.
 
 The unfiltered workspace run is not currently a clean regression signal: the checked-in JOB
 expectations disagree with the repository's pinned parquet revision. Two representative failures
