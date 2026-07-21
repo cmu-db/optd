@@ -1690,21 +1690,24 @@ fn join_profile_with_selectivity_and_classes(
             right,
             inner_rows,
             Some(left.rows.value),
-            estimate.equivalence_classes,
+            // ON equalities hold only for matched rows. Null extension therefore preserves
+            // equality knowledge from the non-null-supplying input, but not from the right input
+            // or across the join boundary.
+            left.equivalence_classes.clone(),
         ),
         JoinType::RightOuter => combine_join_columns(
             left,
             right,
             inner_rows,
             Some(right.rows.value),
-            estimate.equivalence_classes,
+            right.equivalence_classes.clone(),
         ),
         JoinType::FullOuter => combine_join_columns(
             left,
             right,
             inner_rows,
             Some(left.rows.value.max(right.rows.value)),
-            estimate.equivalence_classes,
+            Vec::new(),
         ),
         JoinType::LeftMark {
             marker: column,
@@ -3640,6 +3643,131 @@ mod tests {
     }
 
     #[test]
+    fn join_types_propagate_only_sound_equivalence_classes() {
+        let mut ctx = QueryContext::new();
+        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
+        let left_equal = ColumnData::new("left_equal", DataType::Int64).add(&mut ctx);
+        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
+        let right_equal = ColumnData::new("right_equal", DataType::Int64).add(&mut ctx);
+        let marker = ColumnData::new("marker", DataType::Boolean).add(&mut ctx);
+        let left = test_equivalent_profile(100.0, [left_key, left_equal]);
+        let right = test_equivalent_profile(100.0, [right_key, right_equal]);
+        let predicate = equality_expr(&mut ctx, left_key, right_key);
+        let left_class = BTreeSet::from([left_key, left_equal]);
+        let right_class = BTreeSet::from([right_key, right_equal]);
+        let merged_class = BTreeSet::from([left_key, left_equal, right_key, right_equal]);
+        let left_columns = left_class.clone();
+        let both_columns = merged_class.clone();
+        let mut mark_columns = left_class.clone();
+        mark_columns.insert(marker);
+
+        let cases = [
+            (
+                JoinType::Inner,
+                vec![merged_class],
+                both_columns.clone(),
+                100.0,
+            ),
+            (
+                JoinType::LeftOuter,
+                vec![left_class.clone()],
+                both_columns.clone(),
+                100.0,
+            ),
+            (
+                JoinType::RightOuter,
+                vec![right_class],
+                both_columns.clone(),
+                100.0,
+            ),
+            (JoinType::FullOuter, Vec::new(), both_columns, 100.0),
+            (
+                JoinType::LeftSemi,
+                vec![left_class.clone()],
+                left_columns.clone(),
+                100.0,
+            ),
+            (
+                JoinType::LeftAnti,
+                vec![left_class.clone()],
+                left_columns.clone(),
+                0.0,
+            ),
+            (
+                JoinType::Single,
+                vec![left_class.clone()],
+                left_columns.clone(),
+                100.0,
+            ),
+            (
+                JoinType::LeftMark {
+                    marker,
+                    nullable: false,
+                },
+                vec![left_class],
+                mark_columns,
+                100.0,
+            ),
+        ];
+
+        for (join_type, expected_classes, expected_columns, expected_rows) in cases {
+            let output =
+                join_profile_from_conjuncts(&left, &right, join_type.clone(), &[predicate], &ctx);
+            let actual_classes = output
+                .equivalence_classes
+                .iter()
+                .map(|class| class.columns.clone())
+                .collect::<Vec<_>>();
+            let actual_columns = output.columns.keys().copied().collect::<BTreeSet<_>>();
+
+            assert_eq!(actual_classes, expected_classes, "{join_type:?}");
+            assert_eq!(actual_columns, expected_columns, "{join_type:?}");
+            assert_eq!(output.rows.value, expected_rows, "{join_type:?}");
+        }
+    }
+
+    #[test]
+    fn outer_join_equality_is_not_redundant_in_a_downstream_join() {
+        let mut ctx = QueryContext::new();
+        let a = ColumnData::new("a", DataType::Int64).add(&mut ctx);
+        let b = ColumnData::new("b", DataType::Int64).add(&mut ctx);
+        let c = ColumnData::new("c", DataType::Int64).add(&mut ctx);
+        let left = CardinalityProfile::new(
+            Estimate::default(100.0),
+            [(a, test_column_profile(100.0, 100.0))]
+                .into_iter()
+                .collect(),
+        );
+        let right = CardinalityProfile::new(
+            Estimate::default(10.0),
+            [(b, test_column_profile(10.0, 10.0))].into_iter().collect(),
+        );
+        let third = CardinalityProfile::new(
+            Estimate::default(100.0),
+            [(c, test_column_profile(100.0, 100.0))]
+                .into_iter()
+                .collect(),
+        );
+        let ab = equality_expr(&mut ctx, a, b);
+        let outer = join_profile_from_conjuncts(&left, &right, JoinType::LeftOuter, &[ab], &ctx);
+        let ac = equality_expr(&mut ctx, a, c);
+        let bc = equality_expr(&mut ctx, b, c);
+        let downstream_selectivity =
+            join_selectivity_from_conjuncts(&outer, &third, &[ac, bc], &ctx).selectivity;
+
+        let downstream =
+            join_profile_from_conjuncts(&outer, &third, JoinType::Inner, &[ac, bc], &ctx);
+
+        assert_eq!(outer.rows.value, 100.0);
+        assert_eq!(third.rows.value, 100.0);
+        assert!(outer.equivalence_classes.is_empty());
+        assert_eq!(outer.columns[&a].distinct.value, 100.0);
+        assert_eq!(outer.columns[&b].distinct.value, 10.0);
+        assert_eq!(downstream_selectivity.value, 0.0001);
+        assert_eq!(downstream.rows.value, 1.0);
+    }
+
+    #[test]
     fn cardinality_estimation_uses_catalog_column_statistics() {
         let mut ctx = QueryContext::new();
         let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
@@ -4418,6 +4546,21 @@ mod tests {
             .into_iter()
             .collect(),
         }
+    }
+
+    fn test_equivalent_profile(rows: f64, columns: [Column; 2]) -> CardinalityProfile {
+        let mut profile = CardinalityProfile::new(
+            Estimate::exact(rows),
+            columns
+                .into_iter()
+                .map(|column| (column, test_column_profile(rows, rows)))
+                .collect(),
+        );
+        profile.equivalence_classes = vec![ColumnEquivalenceClass {
+            columns: BTreeSet::from(columns),
+            distinct: Estimate::exact(rows),
+        }];
+        profile
     }
 
     fn test_column_profile(rows: f64, distinct: f64) -> ColumnProfile {

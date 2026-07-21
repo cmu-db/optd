@@ -20,6 +20,7 @@ token counts.
 | 2026-07-21 20:53 | 2026-07-21 20:57 | Sparse equivalence metadata | Removed redundant singleton equality classes, documented the sparse invariant, and added constructor, projection, rename, inner-join, and transitive-selectivity tests. JOB 15c fell further to 22.57 ms median. | 135,534 / 1,890 s |
 | 2026-07-21 20:59 | 2026-07-21 21:03 | Single-pass join conjuncts | Split cardinality estimation into expression and pre-flattened-conjunct entry points, removed repeated nested-`AND` traversal, and added semantic-parity coverage. JOB 15c measured 22.08 ms median. | 180,185 / 2,234 s |
 | 2026-07-21 21:03 | 2026-07-21 21:11 | Dynamic `RelationSet` mutation and construction | Implemented allocation-free owned union when capacity suffices and one-pass `FromIterator`; added representation/hash/boundary tests and direct old-formulation benchmark comparisons. At 256 relations in-place `|=` is 4.1x faster; at 1,024 relations one-pass collection is 53.8x faster. | 212,463 / 2,697 s |
+| 2026-07-21 23:01 | 2026-07-21 23:10 | Outer-join equality correctness | Prevented null-producing join sides and `ON` equalities from becoming globally valid equivalence classes; added all-join-type and chained-join tests demonstrating that downstream equalities are not incorrectly treated as redundant. | 306,292 / 3,252 s |
 
 ## Evidence Baseline
 
