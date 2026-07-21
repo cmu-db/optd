@@ -1294,12 +1294,11 @@ fn cardinality_profile(
         OperatorData::Join(data) => {
             let left = CardinalityEstimationV1::get_shared(ctx, analyses, data.outer)?;
             let right = CardinalityEstimationV1::get_shared(ctx, analyses, data.inner)?;
-            let predicates = conjuncts(data.on, ctx);
-            Ok(Arc::new(join_profile_from_predicates(
+            Ok(Arc::new(join_profile_from_predicate(
                 &left,
                 &right,
                 data.join_type.clone(),
-                &predicates,
+                data.on,
                 ctx,
             )))
         }
@@ -1630,14 +1629,43 @@ fn cross_product_profile(
     }
 }
 
-fn join_profile_from_predicates(
+/// Estimates a join profile from an arbitrary predicate expression.
+///
+/// This is the expression-tree entry point: it flattens nested conjunctions exactly once before
+/// delegating to [`join_profile_from_conjuncts`].
+fn join_profile_from_predicate(
     left: &CardinalityProfile,
     right: &CardinalityProfile,
     join_type: JoinType,
-    predicates: &[Expr],
+    predicate: Expr,
     ctx: &QueryContext,
 ) -> CardinalityProfile {
-    let estimate = join_selectivity_with_classes(left, right, predicates, ctx);
+    let conjuncts = conjuncts(predicate, ctx);
+    join_profile_from_conjuncts(left, right, join_type, &conjuncts, ctx)
+}
+
+/// Estimates a join profile from predicates that are already flattened into atomic conjuncts.
+///
+/// Join enumeration can use this entry point when hypergraph edges already carry individual
+/// conjuncts, avoiding expression reconstruction and another flattening pass.
+pub(crate) fn join_profile_from_conjuncts(
+    left: &CardinalityProfile,
+    right: &CardinalityProfile,
+    join_type: JoinType,
+    conjuncts: &[Expr],
+    ctx: &QueryContext,
+) -> CardinalityProfile {
+    debug_assert!(
+        conjuncts.iter().all(|predicate| !matches!(
+            predicate.get(ctx),
+            ExprData::Nary {
+                op: NaryOp::And,
+                ..
+            }
+        )),
+        "join_profile_from_conjuncts requires atomic conjuncts"
+    );
+    let estimate = join_selectivity_from_conjuncts(left, right, conjuncts, ctx);
     join_profile_with_selectivity_and_classes(left, right, join_type, estimate)
 }
 
@@ -1753,10 +1781,10 @@ fn combine_join_columns(
 fn join_selectivity(
     left: &CardinalityProfile,
     right: &CardinalityProfile,
-    predicates: &[Expr],
+    conjuncts: &[Expr],
     ctx: &QueryContext,
 ) -> Estimate {
-    join_selectivity_with_classes(left, right, predicates, ctx).selectivity
+    join_selectivity_from_conjuncts(left, right, conjuncts, ctx).selectivity
 }
 
 // ---------------------------------------------------------------------------
@@ -1769,19 +1797,16 @@ struct JoinSelectivityEstimate {
     match_probability: Estimate,
 }
 
-fn join_selectivity_with_classes(
+fn join_selectivity_from_conjuncts(
     left: &CardinalityProfile,
     right: &CardinalityProfile,
-    predicates: &[Expr],
+    conjuncts: &[Expr],
     ctx: &QueryContext,
 ) -> JoinSelectivityEstimate {
     let mut classes = EquivalenceClassState::from_profiles(left, right);
     let mut equality_edges = Vec::new();
     let mut residual_selectivity = 1.0;
-    for predicate in predicates
-        .iter()
-        .flat_map(|predicate| conjuncts(*predicate, ctx))
-    {
+    for &predicate in conjuncts {
         if let Some((left_col, right_col)) = column_equality(predicate, ctx) {
             equality_edges.push(EqualityEdge {
                 left: left_col,
@@ -3460,7 +3485,7 @@ mod tests {
         let predicate = equality_expr(&mut ctx, a, b);
 
         let output =
-            join_profile_from_predicates(&left, &right, JoinType::Inner, &[predicate], &ctx);
+            join_profile_from_conjuncts(&left, &right, JoinType::Inner, &[predicate], &ctx);
 
         assert_eq!(output.equivalence_classes.len(), 1);
         assert_eq!(
@@ -3550,13 +3575,67 @@ mod tests {
         let bc = equality_expr(&mut ctx, b, c);
         let ac = equality_expr(&mut ctx, a, c);
 
-        let estimate = join_selectivity_with_classes(&left, &right, &[ab, bc, ac], &ctx);
+        let estimate = join_selectivity_from_conjuncts(&left, &right, &[ab, bc, ac], &ctx);
 
         assert_eq!(estimate.selectivity.value, 0.01);
         assert_eq!(estimate.equivalence_classes.len(), 1);
         assert_eq!(
             estimate.equivalence_classes[0].columns,
             BTreeSet::from([a, b, c])
+        );
+    }
+
+    #[test]
+    fn nested_and_join_profile_matches_preflattened_conjuncts() {
+        let mut ctx = QueryContext::new();
+        let a = ColumnData::new("a", DataType::Int64).add(&mut ctx);
+        let b = ColumnData::new("b", DataType::Int64).add(&mut ctx);
+        let left = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [(a, test_column_profile(100.0, 100.0))]
+                .into_iter()
+                .collect(),
+        );
+        let right = CardinalityProfile::new(
+            Estimate::exact(50.0),
+            [(b, test_column_profile(50.0, 50.0))].into_iter().collect(),
+        );
+        let equality = equality_expr(&mut ctx, a, b);
+        let a_ref = ExprData::ColumnRef(a).add(&mut ctx);
+        let ten = ExprData::Literal(ScalarValue::Int64(10)).add(&mut ctx);
+        let range = ExprData::Binary {
+            op: BinaryOp::Gt,
+            left: a_ref,
+            right: ten,
+        }
+        .add(&mut ctx);
+        let always_true = ExprData::Literal(ScalarValue::Boolean(true)).add(&mut ctx);
+        let inner_and = ExprData::Nary {
+            op: NaryOp::And,
+            exprs: vec![equality, range],
+        }
+        .add(&mut ctx);
+        let nested_and = ExprData::Nary {
+            op: NaryOp::And,
+            exprs: vec![inner_and, always_true],
+        }
+        .add(&mut ctx);
+
+        let from_expression =
+            join_profile_from_predicate(&left, &right, JoinType::Inner, nested_and, &ctx);
+        let from_conjuncts = join_profile_from_conjuncts(
+            &left,
+            &right,
+            JoinType::Inner,
+            &[equality, range, always_true],
+            &ctx,
+        );
+
+        assert_eq!(from_expression, from_conjuncts);
+        assert_eq!(from_expression.equivalence_classes.len(), 1);
+        assert_eq!(
+            from_expression.equivalence_classes[0].columns,
+            BTreeSet::from([a, b])
         );
     }
 
