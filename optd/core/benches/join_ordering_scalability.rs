@@ -249,8 +249,12 @@ fn measure_relation_set_boundaries(
     output: &mut impl Write,
     repetitions: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    const OPERATIONS: usize = 20_000;
+    const SET_OPERATIONS: usize = 20_000;
+    const BUILD_OPERATIONS: usize = 500;
     for &relations in BOUNDARY_SIZES {
+        let members = (0..relations)
+            .filter(|relation| relation % 2 == 0)
+            .collect::<Vec<_>>();
         let evens: RelationSet = (0..relations)
             .filter(|relation| relation % 2 == 0)
             .collect();
@@ -261,26 +265,118 @@ fn measure_relation_set_boundaries(
         for repetition in 0..repetitions {
             let started = Instant::now();
             let mut value = RelationSet::EMPTY;
-            for _ in 0..OPERATIONS {
+            for _ in 0..SET_OPERATIONS {
                 value = black_box(&evens | &thirds);
                 black_box(value.is_subset(&all));
                 black_box(value.is_disjoint(&RelationSet::EMPTY));
             }
-            let duration = started.elapsed();
             black_box(value);
-            writeln!(
+            write_relation_set_measurement(
                 output,
-                "relation_set,mixed_set_ops,{relations},auto,{},0,{repetition},{OPERATIONS},{},0",
-                if relations <= 64 {
-                    "Inline64"
-                } else {
-                    "Dynamic"
-                },
-                duration.as_nanos(),
+                "mixed_set_ops",
+                "borrowed_union",
+                relations,
+                repetition,
+                SET_OPERATIONS,
+                started.elapsed(),
+            )?;
+
+            // Models the old `BitOrAssign` implementation: construct a fresh union and replace
+            // the owned value on every iteration.
+            let mut allocating = evens.clone();
+            let started = Instant::now();
+            for _ in 0..SET_OPERATIONS {
+                allocating = black_box(allocating.union(&thirds));
+                black_box(allocating.is_subset(&all));
+                black_box(allocating.is_disjoint(&RelationSet::EMPTY));
+            }
+            black_box(allocating);
+            write_relation_set_measurement(
+                output,
+                "mixed_set_ops",
+                "allocating_assign",
+                relations,
+                repetition,
+                SET_OPERATIONS,
+                started.elapsed(),
+            )?;
+
+            let mut in_place = evens.clone();
+            let started = Instant::now();
+            for _ in 0..SET_OPERATIONS {
+                in_place |= black_box(&thirds);
+                black_box(in_place.is_subset(&all));
+                black_box(in_place.is_disjoint(&RelationSet::EMPTY));
+            }
+            black_box(in_place);
+            write_relation_set_measurement(
+                output,
+                "mixed_set_ops",
+                "in_place_assign",
+                relations,
+                repetition,
+                SET_OPERATIONS,
+                started.elapsed(),
+            )?;
+
+            // Models the old `FromIterator`: repeatedly insert by constructing a singleton and
+            // allocating a new union. The optimized implementation builds one word vector.
+            let started = Instant::now();
+            for _ in 0..BUILD_OPERATIONS {
+                let set = members
+                    .iter()
+                    .copied()
+                    .fold(RelationSet::EMPTY, |set, relation| set.with(relation));
+                black_box(set);
+            }
+            write_relation_set_measurement(
+                output,
+                "set_build",
+                "incremental_with",
+                relations,
+                repetition,
+                BUILD_OPERATIONS,
+                started.elapsed(),
+            )?;
+
+            let started = Instant::now();
+            for _ in 0..BUILD_OPERATIONS {
+                black_box(members.iter().copied().collect::<RelationSet>());
+            }
+            write_relation_set_measurement(
+                output,
+                "set_build",
+                "from_iter",
+                relations,
+                repetition,
+                BUILD_OPERATIONS,
+                started.elapsed(),
             )?;
         }
     }
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_relation_set_measurement(
+    output: &mut impl Write,
+    shape: &str,
+    variant: &str,
+    relations: usize,
+    repetition: usize,
+    operations: usize,
+    duration: std::time::Duration,
+) -> std::io::Result<()> {
+    let representation = if relations <= 64 {
+        "Inline64"
+    } else {
+        "Dynamic"
+    };
+    writeln!(
+        output,
+        "relation_set,{shape},{relations},{variant},{representation},0,{repetition},{operations},{},0",
+        duration.as_nanos(),
+    )
 }
 
 fn random_tree_query(relation_count: usize, seed: u64) -> QueryContext {

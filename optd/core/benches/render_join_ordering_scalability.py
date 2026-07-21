@@ -31,6 +31,9 @@ COLORS = {
     "chain": "#0072B2",
     "star": "#009E73",
     "clique": "#D55E00",
+    "borrowed_union": "#0072B2",
+    "allocating_assign": "#D55E00",
+    "in_place_assign": "#009E73",
 }
 
 
@@ -308,38 +311,58 @@ def figure_work_scaling(aggregate, destination: Path):
 
 def figure_relation_set(rows, destination: Path):
     title = "RelationSet cost at the 64-relation representation boundary"
-    subtitle = "Median mixed union/subset/disjoint workload; 20,000 iterations per measurement"
+    subtitle = "Median union/subset/disjoint workload; old allocating assignment vs in-place |="
     svg = Svg(title, subtitle)
     chart_header(svg, title, subtitle)
     groups = defaultdict(list)
     for row in rows:
-        if row["suite"] == "relation_set":
-            groups[row["relations"]].append(row["duration_ns"] / row["operations"])
-    sizes = sorted(groups)
-    medians = [statistics.median(groups[size]) for size in sizes]
+        if row["suite"] == "relation_set" and row["shape"] == "mixed_set_ops":
+            groups[(row["variant"], row["relations"])].append(
+                row["duration_ns"] / row["operations"]
+            )
+    sizes = sorted({size for _, size in groups})
+    medians = {
+        key: statistics.median(values)
+        for key, values in groups.items()
+    }
     left, right = MARGIN["left"], WIDTH - MARGIN["right"]
     top, bottom = MARGIN["top"], HEIGHT - MARGIN["bottom"]
-    y_max = math.ceil(max(medians) / 10) * 10
+    y_max = max(10, math.ceil(max(medians.values()) / 10) * 10)
     svg.line(left, top, left, bottom, stroke="#5f6368", width=1.2)
     svg.line(left, bottom, right, bottom, stroke="#5f6368", width=1.2)
     for tick in range(0, y_max + 1, 10):
         y = linear_scale(tick, 0, y_max, bottom, top)
         svg.line(left, y, right, y, stroke="#dadce0")
         svg.text(left - 12, y + 5, tick, anchor="end")
-    points = []
-    for index, (size, median) in enumerate(zip(sizes, medians)):
+    x_positions = {}
+    for index, size in enumerate(sizes):
         x = linear_scale(index, 0, len(sizes) - 1, left, right)
-        y = linear_scale(median, 0, y_max, bottom, top)
-        points.append((x, y))
+        x_positions[size] = x
         svg.text(x, bottom + 25, size)
-        svg.circle(x, y, 6, "#0072B2" if size <= 64 else "#CC79A7")
-        svg.text(x, y - 12, f"{median:.1f}", "annotation")
-    svg.polyline(points, "#5f6368", width=2)
-    boundary_x = (points[2][0] + points[3][0]) / 2
+    variants = [
+        ("borrowed_union", "Borrowed union"),
+        ("allocating_assign", "Allocating assignment (old)"),
+        ("in_place_assign", "In-place assignment"),
+    ]
+    for variant_index, (variant, label) in enumerate(variants):
+        points = [
+            (
+                x_positions[size],
+                linear_scale(medians[(variant, size)], 0, y_max, bottom, top),
+            )
+            for size in sizes
+        ]
+        svg.polyline(points, COLORS[variant], width=2.5)
+        for x, y in points:
+            svg.circle(x, y, 5, COLORS[variant])
+        legend_x = left + variant_index * 285
+        svg.line(legend_x, top + 18, legend_x + 28, top + 18, COLORS[variant], width=3)
+        svg.text(legend_x + 38, top + 23, label, "legend", "start")
+    boundary_x = (x_positions[64] + x_positions[65]) / 2
     svg.line(boundary_x, top, boundary_x, bottom, stroke="#D55E00", width=2, dash="7 5")
-    svg.text(boundary_x + 8, top + 22, "Inline64 -> dynamic", "annotation", "start")
+    svg.text(boundary_x + 8, top + 48, "Inline64 -> dynamic", "annotation", "start")
     svg.text((left + right) / 2, HEIGHT - 32, "Relation count", "label")
-    svg.text(28, (top + bottom) / 2, "Nanoseconds per mixed operation", "label", rotate=-90)
+    svg.text(28, (top + bottom) / 2, "Nanoseconds per workload iteration", "label", rotate=-90)
     destination.write_text(svg.finish())
 
 
@@ -429,6 +452,50 @@ def write_tables(rows, aggregate, output_dir: Path):
         )
     (output_dir / "adaptive_summary.md").write_text("\n".join(lines) + "\n")
 
+    relation_groups = defaultdict(list)
+    for row in rows:
+        if row["suite"] == "relation_set":
+            relation_groups[(row["shape"], row["variant"], row["relations"])].append(
+                row["duration_ns"] / row["operations"]
+            )
+    relation_rows = []
+    for (shape, variant, relations), values in sorted(relation_groups.items()):
+        values_summary = summary(values)
+        relation_rows.append({
+            "shape": shape,
+            "variant": variant,
+            "relations": relations,
+            "samples": len(values),
+            "min_ns": values_summary["min"],
+            "p10_ns": values_summary["p10"],
+            "median_ns": values_summary["median"],
+            "p90_ns": values_summary["p90"],
+            "max_ns": values_summary["max"],
+        })
+    with (output_dir / "relation_set_summary.csv").open("w", newline="") as target:
+        writer = csv.DictWriter(target, fieldnames=relation_rows[0].keys())
+        writer.writeheader()
+        writer.writerows(relation_rows)
+
+    relation_lines = [
+        "# RelationSet timing summary",
+        "",
+        "Times are nanoseconds per workload iteration; rows show selected representation boundaries.",
+        "",
+        "| Workload | Variant | Relations | Median | P10 | P90 |",
+        "|:---|:---|---:|---:|---:|---:|",
+    ]
+    for row in relation_rows:
+        if row["relations"] not in {64, 65, 256, 1_024}:
+            continue
+        relation_lines.append(
+            f"| {row['shape']} | {row['variant']} | {row['relations']} | "
+            f"{row['median_ns']:.1f} | {row['p10_ns']:.1f} | {row['p90_ns']:.1f} |"
+        )
+    (output_dir / "relation_set_summary.md").write_text(
+        "\n".join(relation_lines) + "\n"
+    )
+
 
 def command_output(command):
     try:
@@ -446,8 +513,22 @@ def write_readme(rows, aggregate, output_dir: Path):
     relset = defaultdict(list)
     for row in rows:
         if row["suite"] == "relation_set":
-            relset[row["relations"]].append(row["duration_ns"] / row["operations"])
-    boundary = statistics.median(relset[65]) / statistics.median(relset[64])
+            relset[(row["shape"], row["variant"], row["relations"])].append(
+                row["duration_ns"] / row["operations"]
+            )
+    median_relset = {key: statistics.median(values) for key, values in relset.items()}
+    boundary = (
+        median_relset[("mixed_set_ops", "borrowed_union", 65)]
+        / median_relset[("mixed_set_ops", "borrowed_union", 64)]
+    )
+    assign_speedup = (
+        median_relset[("mixed_set_ops", "allocating_assign", 256)]
+        / median_relset[("mixed_set_ops", "in_place_assign", 256)]
+    )
+    build_speedup = (
+        median_relset[("set_build", "incremental_with", 1_024)]
+        / median_relset[("set_build", "from_iter", 1_024)]
+    )
     generated_at = datetime.now(timezone.utc).date().isoformat()
     query_count = len({
         row["query_id"]
@@ -474,6 +555,10 @@ Generated on {generated_at} from commit `{command_output(['git', 'rev-parse', 'H
   DP from 30 through 100, and switches to GOO/DP at 128 relations.
 - Crossing from the inline 64-bit `RelationSet` representation to the dynamic representation
   increases the mixed set-operation microbenchmark by **{boundary:.1f}x** at 64 -> 65 relations.
+- At 256 relations, in-place `|=` is **{assign_speedup:.1f}x faster** than the previous
+  allocate-and-replace formulation.
+- At 1,024 relations, one-pass `FromIterator` is **{build_speedup:.1f}x faster** than repeated
+  singleton insertion and union.
 
 ## Relationship to Neumann and Radke (SIGMOD 2018)
 
@@ -517,6 +602,7 @@ python3 optd/core/benches/render_join_ordering_scalability.py \\
 - `raw_measurements.csv`: every measurement.
 - `adaptive_summary.csv` / `.md`: paper-style adaptive distribution table.
 - `algorithm_summary.csv`: all algorithm distributions.
+- `relation_set_summary.csv` / `.md`: dynamic-set operation and construction distributions.
 - `figure_1_algorithm_scaling.*`: paper-style optimization-time curves.
 - `figure_2_adaptive_policy.*`: policy choices and transition costs.
 - `figure_3_work_scaling.*`: elapsed time versus materialized candidates.

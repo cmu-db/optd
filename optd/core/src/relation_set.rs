@@ -228,9 +228,15 @@ impl Default for RelationSet {
 
 impl FromIterator<usize> for RelationSet {
     fn from_iter<T: IntoIterator<Item = usize>>(relations: T) -> Self {
-        relations
-            .into_iter()
-            .fold(Self::EMPTY, |set, relation| set.with(relation))
+        let mut words = Vec::new();
+        for relation in relations {
+            let word_index = relation / WORD_BITS;
+            if word_index >= words.len() {
+                words.resize(word_index + 1, 0);
+            }
+            words[word_index] |= 1 << (relation % WORD_BITS);
+        }
+        Self::from_words(words)
     }
 }
 
@@ -250,7 +256,39 @@ impl BitOr for &RelationSet {
 
 impl BitOrAssign<&RelationSet> for RelationSet {
     fn bitor_assign(&mut self, rhs: &RelationSet) {
-        *self = self.union(rhs);
+        let replacement = match (&mut self.repr, &rhs.repr) {
+            (Repr::Inline(left), Repr::Inline(right)) => {
+                *left |= right;
+                None
+            }
+            (Repr::Heap(left), Repr::Inline(right)) => {
+                left[0] |= right;
+                None
+            }
+            (Repr::Inline(left), Repr::Heap(right)) => {
+                let mut words = right.to_vec();
+                words[0] |= *left;
+                Some(Repr::Heap(words.into_boxed_slice()))
+            }
+            (Repr::Heap(left), Repr::Heap(right)) if left.len() >= right.len() => {
+                for (left, right) in left.iter_mut().zip(right.iter()) {
+                    *left |= right;
+                }
+                None
+            }
+            (Repr::Heap(left), Repr::Heap(right)) => {
+                let mut words = right.to_vec();
+                for (word, left) in words.iter_mut().zip(left.iter()) {
+                    *word |= left;
+                }
+                *left = words.into_boxed_slice();
+                None
+            }
+        };
+
+        if let Some(repr) = replacement {
+            self.repr = repr;
+        }
     }
 }
 
@@ -345,7 +383,23 @@ impl Iterator for NonEmptySubsets {
 
 #[cfg(test)]
 mod tests {
-    use super::RelationSet;
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    use super::{RelationSet, Repr};
+
+    fn fingerprint(set: &RelationSet) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        set.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    fn heap_storage(set: &RelationSet) -> (*const u64, usize) {
+        match &set.repr {
+            Repr::Heap(words) => (words.as_ptr(), words.len()),
+            Repr::Inline(_) => panic!("expected dynamic relation-set storage"),
+        }
+    }
 
     #[test]
     fn inline_and_dynamic_sets_share_functional_operations() {
@@ -370,6 +424,52 @@ mod tests {
         assert_eq!(RelationSet::all(64).len(), 64);
         assert_eq!(RelationSet::all(65).iter().last(), Some(64));
         assert_eq!(RelationSet::prefix_inclusive(128).len(), 129);
+    }
+
+    #[test]
+    fn owned_union_reuses_dynamic_storage_when_it_already_fits() {
+        let mut set = [0, 64, 129].into_iter().collect::<RelationSet>();
+        let before = heap_storage(&set);
+
+        set |= &[1, 63, 65, 128].into_iter().collect();
+
+        assert_eq!(heap_storage(&set), before);
+        assert_eq!(set.iter().collect::<Vec<_>>(), [0, 1, 63, 64, 65, 128, 129]);
+    }
+
+    #[test]
+    fn owned_union_expands_at_word_boundaries_and_remains_canonical() {
+        let mut set = RelationSet::singleton(63);
+        set |= &RelationSet::singleton(64);
+        assert!(matches!(&set.repr, Repr::Heap(words) if words.len() == 2));
+
+        set |= &RelationSet::singleton(128);
+        assert!(matches!(&set.repr, Repr::Heap(words) if words.len() == 3));
+        assert_eq!(set.iter().collect::<Vec<_>>(), [63, 64, 128]);
+
+        let reduced = set.difference(&[64, 128].into_iter().collect());
+        assert!(matches!(reduced.repr, Repr::Inline(_)));
+        assert_eq!(reduced, RelationSet::singleton(63));
+    }
+
+    #[test]
+    fn from_iterator_builds_canonical_sets_across_boundaries() {
+        let empty = std::iter::empty().collect::<RelationSet>();
+        let inline = [63, 0, 63].into_iter().collect::<RelationSet>();
+        let dynamic = [10_000, 64, 0, 128, 10_000]
+            .into_iter()
+            .collect::<RelationSet>();
+
+        assert!(matches!(empty.repr, Repr::Inline(0)));
+        assert!(matches!(inline.repr, Repr::Inline(_)));
+        assert!(
+            matches!(&dynamic.repr, Repr::Heap(words) if words.last().is_some_and(|word| *word != 0))
+        );
+        assert_eq!(dynamic.iter().collect::<Vec<_>>(), [0, 64, 128, 10_000]);
+
+        let same = [128, 0, 10_000, 64].into_iter().collect::<RelationSet>();
+        assert_eq!(dynamic, same);
+        assert_eq!(fingerprint(&dynamic), fingerprint(&same));
     }
 
     #[test]

@@ -19,6 +19,7 @@ token counts.
 | 2026-07-21 20:26 | 2026-07-21 20:36 | Shared cardinality profiles | Switched the internal cardinality cache and cost-model lookups to `Arc<CardinalityProfile>` while preserving the public owned API; added cache-identity and invalidation tests. JOB 15c `JoinOrdering` median fell from 46.95 ms to 31.62 ms across five release runs. | 98,855 / 618 s |
 | 2026-07-21 20:53 | 2026-07-21 20:57 | Sparse equivalence metadata | Removed redundant singleton equality classes, documented the sparse invariant, and added constructor, projection, rename, inner-join, and transitive-selectivity tests. JOB 15c fell further to 22.57 ms median. | 135,534 / 1,890 s |
 | 2026-07-21 20:59 | 2026-07-21 21:03 | Single-pass join conjuncts | Split cardinality estimation into expression and pre-flattened-conjunct entry points, removed repeated nested-`AND` traversal, and added semantic-parity coverage. JOB 15c measured 22.08 ms median. | 180,185 / 2,234 s |
+| 2026-07-21 21:03 | 2026-07-21 21:11 | Dynamic `RelationSet` mutation and construction | Implemented allocation-free owned union when capacity suffices and one-pass `FromIterator`; added representation/hash/boundary tests and direct old-formulation benchmark comparisons. At 256 relations in-place `|=` is 4.1x faster; at 1,024 relations one-pass collection is 53.8x faster. | 212,463 / 2,697 s |
 
 ## Evidence Baseline
 
@@ -52,6 +53,10 @@ token counts.
   (21.93--25.13 ms), 28.6% below the Arc-only median and 51.9% below the original baseline.
 - JOB 15c after single-pass conjunct handling: 22.08 ms median across five release runs
   (21.99--23.29 ms), 53.0% below the original baseline.
+- Dynamic `RelationSet` direct comparisons: in-place `|=` is 4.1x faster than allocate-and-replace
+  at 256 relations; one-pass `FromIterator` is 53.8x faster than repeated singleton union at
+  1,024 relations. Raw distributions and the revised boundary chart are under
+  `artifacts/join_ordering_scalability/`.
 
 The unfiltered workspace run is not currently a clean regression signal: the checked-in JOB
 expectations disagree with the repository's pinned parquet revision. Two representative failures
