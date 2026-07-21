@@ -15,6 +15,7 @@ token counts.
 | 2026-07-16 02:32 | 2026-07-16 02:58 | Fixture-backed workspace validation | Provisioned pinned TPC-H/JOB fixtures, isolated pre-existing JOB expectation drift against the untouched parent and DuckDB, replaced impractical wide SQL execution with direct optimizer tests, and completed all non-JOB, no-default, lint, format, and workflow gates. | 685,188 / 3,392 s final goal usage |
 | Not recorded | 2026-07-16 16:14 | Join-ordering module documentation and layout | Moved the pass into `join_ordering/mod.rs`; extracted exact DP, candidate handling, group discovery, and tests into focused modules; expanded module and design documentation. Committed as `14ee750`. | Post-goal; tracker unavailable |
 | 2026-07-16 16:14 | 2026-07-16 16:22 | Explicit pass scheduling | Added `PassMode::{Once, ToFixpoint}`, migrated `JoinOrdering` and `JoinTreeNormalize`, removed pointer/run-id lifecycle state, and added manager-reuse and one-shot scheduling tests. | Post-goal; tracker unavailable |
+| 2026-07-16 16:43 | 2026-07-16 16:55 | Paper-style scalability artifacts | Added a reproducible random-tree/topology/RelationSet benchmark, collected 391 release measurements, and generated five inspected PNG/SVG figures plus raw and summary CSV/Markdown tables under `artifacts/join_ordering_scalability/`. | Post-goal; tracker unavailable |
 
 ## Evidence Baseline
 
@@ -29,7 +30,8 @@ token counts.
 
 - `cargo test -p optd-core`: 189 tests passed, plus doc tests.
 - `cargo nextest run --release -p optd-datafusion --test slt -- adaptive_join_ordering`:
-  1 passed in 0.696 s (287 skipped by the filter); it executes exact and linearized result cases.
+  1 passed in 1.135 s (287 skipped by the filter); it executes exact, linearized, dynamic-bitset,
+  and GOO result cases through the complete SQL optimization pipeline.
 - `cargo nextest run --release --workspace -E 'not test(/tests\\/slt\\/job/)' --no-fail-fast`:
   306 passed in 5.108 s (225 JOB tests excluded).
 - `cargo test -p optd-core --no-default-features`: 182 passed, plus doc tests.

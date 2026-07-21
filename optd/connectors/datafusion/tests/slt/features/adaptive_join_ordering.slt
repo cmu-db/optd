@@ -14,10 +14,8 @@ JOIN (VALUES (1)) AS t4(x) ON t3.x = t4.x
 ----
 1
 
-# Dense medium graph exceeds the state budget and uses linearized DP. The 105-predicate SQL
-# preprocessing path exceeds the SLT timeout; the policy and enumerator are executed directly
-# by core tests and the benchmark.
-skipif optd
+# Dense medium graph exceeds the state budget and exercises linearized DP through the complete SQL
+# optimization pipeline.
 query T
 SELECT length(explain_flat('SELECT count(*)
 FROM (VALUES (1)) AS t0(x)
@@ -60,10 +58,8 @@ JOIN (VALUES (1)) AS s14(x) ON s0.x = s14.x
 ----
 1
 
-# Sparse dynamic-bitset graph remains cheap enough for exact DPhyp. Core unit and benchmark
-# coverage execute this shape; the complete SQL optimization pipeline exceeds the SLT timeout
-# before the JoinOrdering pass, so retain the integration shape as an explicitly skipped case.
-skipif optd
+# Sparse dynamic-bitset graph remains cheap enough for exact DPhyp and exercises the complete SQL
+# optimization pipeline with more than 64 relations.
 query T
 SELECT length(explain_flat('SELECT count(*)
 FROM (VALUES (1)) AS t0(x)
@@ -134,9 +130,8 @@ JOIN (VALUES (1)) AS t64(x) ON t63.x = t64.x')) > 0
 ----
 true
 
-# Very large graph uses GOO with bounded exact subtree improvement. Core unit and benchmark
-# coverage execute this shape; as above, the complete SQL pipeline exceeds the SLT timeout.
-skipif optd
+# Very large graph exercises GOO with bounded exact subtree improvement through the complete SQL
+# optimization pipeline.
 query T
 SELECT length(explain_flat('SELECT count(*)
 FROM (VALUES (1)) AS t0(x)

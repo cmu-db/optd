@@ -18,3 +18,7 @@ substrait = "0.63.0"
 [[bench]]
 name = "join_ordering"
 harness = false
+
+[[bench]]
+name = "join_ordering_scalability"
+harness = false
