@@ -1,5 +1,7 @@
 //! Cost model interfaces.
 
+use std::sync::Arc;
+
 use crate::analysis::CardinalityEstimationV1;
 #[cfg(test)]
 use crate::hypergraph::QueryHypergraph;
@@ -254,13 +256,11 @@ fn cardinality_profile(
     ctx: &QueryContext,
     analyses: &mut AnalysisContext,
     op: Operator,
-) -> OptimizeResult<CardinalityProfile> {
-    analyses
-        .get::<CardinalityEstimationV1>(ctx, op)
-        .map_err(|err| OptimizeError::PassError {
-            pass: "CostModel",
-            message: err.to_string(),
-        })
+) -> OptimizeResult<Arc<CardinalityProfile>> {
+    CardinalityEstimationV1::get_shared(ctx, analyses, op).map_err(|err| OptimizeError::PassError {
+        pass: "CostModel",
+        message: err.to_string(),
+    })
 }
 
 fn row_materialization_cost(profile: &CardinalityProfile) -> f64 {

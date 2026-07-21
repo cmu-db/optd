@@ -418,7 +418,7 @@ fn merge_equivalence_class_lists(
 /// Cardinality and column-profile analysis for one operator.
 #[derive(Default)]
 pub struct CardinalityEstimationV1 {
-    state: OperatorAnalysisState<CardinalityProfile>,
+    state: OperatorAnalysisState<Arc<CardinalityProfile>>,
 }
 
 /// Exact logical proof that an operator can produce at most one row.
@@ -1193,7 +1193,7 @@ impl Analyzable for AtMostOneRow {
 }
 
 impl CachedAnalysis for CardinalityEstimationV1 {
-    type Output = CardinalityProfile;
+    type Output = Arc<CardinalityProfile>;
 
     fn state(&self) -> &OperatorAnalysisState<Self::Output> {
         &self.state
@@ -1227,6 +1227,21 @@ impl Analyzable for CardinalityEstimationV1 {
         analyses: &mut AnalysisContext,
         op: Operator,
     ) -> AnalysisResult<Self::Value> {
+        Ok(Self::get_shared(ctx, analyses, op)?.as_ref().clone())
+    }
+}
+
+impl CardinalityEstimationV1 {
+    /// Returns a shared cardinality profile for internal consumers that only need to inspect it.
+    ///
+    /// [`Analyzable::get`] deliberately preserves the public owned-value API. Costing and
+    /// recursive cardinality estimation use this path to avoid cloning every column profile on a
+    /// cache hit.
+    pub(crate) fn get_shared(
+        ctx: &QueryContext,
+        analyses: &mut AnalysisContext,
+        op: Operator,
+    ) -> AnalysisResult<Arc<CardinalityProfile>> {
         let analysis = analyses.registry_entry::<Self>();
         typed_analysis::<Self>(&analysis)?.get_cached(ctx, analyses, op)
     }
@@ -1236,60 +1251,66 @@ fn cardinality_profile(
     operator: Operator,
     ctx: &QueryContext,
     analyses: &mut AnalysisContext,
-) -> AnalysisResult<CardinalityProfile> {
+) -> AnalysisResult<Arc<CardinalityProfile>> {
     match operator.get(ctx) {
-        OperatorData::Scan(scan) => scan_profile(scan, ctx, analyses),
-        OperatorData::ConstScan(data) => Ok(const_scan_profile(data, ctx)),
-        OperatorData::TableFunction(data) => Ok(CardinalityProfile::unknown_for_columns(
+        OperatorData::Scan(scan) => scan_profile(scan, ctx, analyses).map(Arc::new),
+        OperatorData::ConstScan(data) => Ok(Arc::new(const_scan_profile(data, ctx))),
+        OperatorData::TableFunction(data) => Ok(Arc::new(CardinalityProfile::unknown_for_columns(
             1000.0,
             data.columns.clone(),
-        )),
+        ))),
         OperatorData::Selection(data) => {
-            let input = analyses.get::<CardinalityEstimationV1>(ctx, data.input)?;
-            Ok(apply_selection_profile(input, data.predicate, ctx))
+            let input = CardinalityEstimationV1::get_shared(ctx, analyses, data.input)?;
+            Ok(Arc::new(apply_selection_profile(
+                input.as_ref().clone(),
+                data.predicate,
+                ctx,
+            )))
         }
         OperatorData::Projection(data) => {
-            let input = analyses.get::<CardinalityEstimationV1>(ctx, data.input)?;
-            Ok(project_profile(&input, &data.columns))
+            let input = CardinalityEstimationV1::get_shared(ctx, analyses, data.input)?;
+            Ok(Arc::new(project_profile(&input, &data.columns)))
         }
-        OperatorData::Output(data) => analyses.get::<CardinalityEstimationV1>(ctx, data.input),
-        OperatorData::Sort(data) => analyses.get::<CardinalityEstimationV1>(ctx, data.input),
+        OperatorData::Output(data) => {
+            CardinalityEstimationV1::get_shared(ctx, analyses, data.input)
+        }
+        OperatorData::Sort(data) => CardinalityEstimationV1::get_shared(ctx, analyses, data.input),
         OperatorData::Limit(data) => {
-            let input = analyses.get::<CardinalityEstimationV1>(ctx, data.input)?;
+            let input = CardinalityEstimationV1::get_shared(ctx, analyses, data.input)?;
             let rows = match data.fetch {
                 Some(fetch) => input.rows.cap(fetch as f64, EstimateSource::Derived),
                 None => input.rows.clone(),
             };
-            Ok(input.cap_by_rows(rows))
+            Ok(Arc::new(input.cap_by_rows(rows)))
         }
         OperatorData::Rename(data) => {
-            let input = analyses.get::<CardinalityEstimationV1>(ctx, data.input)?;
-            Ok(rename_profile(&input, &data.defs))
+            let input = CardinalityEstimationV1::get_shared(ctx, analyses, data.input)?;
+            Ok(Arc::new(rename_profile(&input, &data.defs)))
         }
         OperatorData::Map(data) => {
-            let input = analyses.get::<CardinalityEstimationV1>(ctx, data.input)?;
-            Ok(map_profile(&input, &data.computations, ctx))
+            let input = CardinalityEstimationV1::get_shared(ctx, analyses, data.input)?;
+            Ok(Arc::new(map_profile(&input, &data.computations, ctx)))
         }
         OperatorData::Aggregation(data) => {
-            let input = analyses.get::<CardinalityEstimationV1>(ctx, data.input)?;
-            Ok(aggregation_profile(&input, data, ctx))
+            let input = CardinalityEstimationV1::get_shared(ctx, analyses, data.input)?;
+            Ok(Arc::new(aggregation_profile(&input, data, ctx)))
         }
         OperatorData::CrossProduct(data) => {
-            let left = analyses.get::<CardinalityEstimationV1>(ctx, data.outer)?;
-            let right = analyses.get::<CardinalityEstimationV1>(ctx, data.inner)?;
-            Ok(cross_product_profile(&left, &right))
+            let left = CardinalityEstimationV1::get_shared(ctx, analyses, data.outer)?;
+            let right = CardinalityEstimationV1::get_shared(ctx, analyses, data.inner)?;
+            Ok(Arc::new(cross_product_profile(&left, &right)))
         }
         OperatorData::Join(data) => {
-            let left = analyses.get::<CardinalityEstimationV1>(ctx, data.outer)?;
-            let right = analyses.get::<CardinalityEstimationV1>(ctx, data.inner)?;
+            let left = CardinalityEstimationV1::get_shared(ctx, analyses, data.outer)?;
+            let right = CardinalityEstimationV1::get_shared(ctx, analyses, data.inner)?;
             let predicates = conjuncts(data.on, ctx);
-            Ok(join_profile_from_predicates(
+            Ok(Arc::new(join_profile_from_predicates(
                 &left,
                 &right,
                 data.join_type.clone(),
                 &predicates,
                 ctx,
-            ))
+            )))
         }
     }
 }
@@ -3361,6 +3382,45 @@ mod tests {
     }
 
     #[test]
+    fn cardinality_shared_lookup_reuses_cached_profile() {
+        let (ctx, scan) = single_column_scan();
+        let mut analyses = crate::test_analyses(&ctx);
+
+        let first = CardinalityEstimationV1::get_shared(&ctx, &mut analyses, scan).unwrap();
+        let second = CardinalityEstimationV1::get_shared(&ctx, &mut analyses, scan).unwrap();
+
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn cardinality_passthrough_operator_reuses_input_profile() {
+        let (mut ctx, scan) = single_column_scan();
+        let output = OperatorData::Output(Output { input: scan }).add(&mut ctx);
+        let mut analyses = crate::test_analyses(&ctx);
+
+        let input = CardinalityEstimationV1::get_shared(&ctx, &mut analyses, scan).unwrap();
+        let passthrough = CardinalityEstimationV1::get_shared(&ctx, &mut analyses, output).unwrap();
+
+        assert!(Arc::ptr_eq(&input, &passthrough));
+    }
+
+    #[test]
+    fn cardinality_public_lookup_stays_owned_and_clear_recomputes() {
+        let (ctx, scan) = single_column_scan();
+        let mut analyses = crate::test_analyses(&ctx);
+        let before = CardinalityEstimationV1::get_shared(&ctx, &mut analyses, scan).unwrap();
+
+        let owned: CardinalityProfile =
+            analyses.get::<CardinalityEstimationV1>(&ctx, scan).unwrap();
+        assert_eq!(&owned, before.as_ref());
+
+        analyses.clear();
+        let after = CardinalityEstimationV1::get_shared(&ctx, &mut analyses, scan).unwrap();
+        assert_eq!(before.as_ref(), after.as_ref());
+        assert!(!Arc::ptr_eq(&before, &after));
+    }
+
+    #[test]
     fn cardinality_estimation_uses_catalog_column_statistics() {
         let mut ctx = QueryContext::new();
         let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
@@ -4110,6 +4170,17 @@ mod tests {
             Field::new("id", DataType::Int64, false),
             Field::new("value", DataType::Int64, true),
         ]))
+    }
+
+    fn single_column_scan() -> (QueryContext, Operator) {
+        let mut ctx = QueryContext::new();
+        let column = ColumnData::new("value", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("t"),
+            columns: vec![column],
+        })
+        .add(&mut ctx);
+        (ctx, scan)
     }
 
     fn table_stats_for_column(column: &str, rows: usize, distinct: usize) -> TableStatistics {

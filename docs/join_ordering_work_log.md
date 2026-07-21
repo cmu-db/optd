@@ -16,6 +16,7 @@ token counts.
 | Not recorded | 2026-07-16 16:14 | Join-ordering module documentation and layout | Moved the pass into `join_ordering/mod.rs`; extracted exact DP, candidate handling, group discovery, and tests into focused modules; expanded module and design documentation. Committed as `14ee750`. | Post-goal; tracker unavailable |
 | 2026-07-16 16:14 | 2026-07-16 16:22 | Explicit pass scheduling | Added `PassMode::{Once, ToFixpoint}`, migrated `JoinOrdering` and `JoinTreeNormalize`, removed pointer/run-id lifecycle state, and added manager-reuse and one-shot scheduling tests. | Post-goal; tracker unavailable |
 | 2026-07-16 16:43 | 2026-07-16 16:55 | Paper-style scalability artifacts | Added a reproducible random-tree/topology/RelationSet benchmark, collected 391 release measurements, and generated five inspected PNG/SVG figures plus raw and summary CSV/Markdown tables under `artifacts/join_ordering_scalability/`. | Post-goal; tracker unavailable |
+| 2026-07-21 20:26 | 2026-07-21 20:36 | Shared cardinality profiles | Switched the internal cardinality cache and cost-model lookups to `Arc<CardinalityProfile>` while preserving the public owned API; added cache-identity and invalidation tests. JOB 15c `JoinOrdering` median fell from 46.95 ms to 31.62 ms across five release runs. | 98,855 / 618 s |
 
 ## Evidence Baseline
 
@@ -43,6 +44,8 @@ token counts.
   50.24 ms; GOO/DP chain-128 135.27 ms; forced DPhyp chain-128 948.68 ms.
 - `profile_passes` (two runs): unchanged parent 64-relation max 4,868.10 ms; new tree
   4,896.65 ms (+0.59%).
+- JOB 15c pass-only timing after shared cardinality profiles: 31.62 ms median across five release
+  runs (30.71--53.70 ms), versus the 46.95 ms pre-change median, a 32.7% reduction.
 
 The unfiltered workspace run is not currently a clean regression signal: the checked-in JOB
 expectations disagree with the repository's pinned parquet revision. Two representative failures
