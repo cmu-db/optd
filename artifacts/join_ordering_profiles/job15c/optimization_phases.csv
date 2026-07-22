@@ -1,0 +1,8 @@
+phase,median_ms,improvement_from_original_percent
+Original materializing evaluator,46.95,0.0
+Shared Arc cardinality profiles,31.62,32.7
+Sparse equivalence metadata,22.57,51.9
+Pre-flattened join conjuncts,22.08,53.0
+Compact recipe scaffold,22.06,53.0
+Deferred default-cost evaluation,22.26,52.6
+Equality-participation-only compact DSU,8.05,82.8

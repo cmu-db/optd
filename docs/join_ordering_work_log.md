@@ -25,6 +25,9 @@ token counts.
 | 2026-07-21 23:16 | 2026-07-22 02:58 | Checkpoint approval and tool wait | The scaffold was already reviewed, tested, and staged at 23:16; commit `b8dc8d7` completed after the approval/tool call returned. This interval is recorded separately from implementation time. | 489,920 / 16,952 s |
 | 2026-07-22 02:58 | 2026-07-22 03:02 | Outer-join cardinality bounds | Raised a finite row-count upper bound alongside the null-extension minimum, preserving `lower <= value <= upper`; added exact-profile coverage for left, right, and full outer joins. Commit approval/tool wait accounts for most of this interval. | milestone included in the next usage snapshot |
 | 2026-07-22 03:02 | 2026-07-22 03:18 | Deferred default-cost evaluation | Added `PlanProperties` with `Arc<CardinalityProfile>`, profile-only join costing for `DefaultCostModel`, explicit compatibility selection for custom models, and bit-exact differential coverage for all join types and all three enumerators. Deferred search appends exactly `n-1` winning joins. JOB 15c measured 22.26 ms median, statistically flat versus 22.06 ms; Samply confirms profile construction is now 89.5% inclusive. | 593,554 / 18,100 s |
+| 2026-07-22 03:18 | 2026-07-22 03:27 | Deferred-evaluator commit approval | The implementation and Stage-2 validation were complete at 03:18; the repository commit call returned as `e48711c` at 03:26. The wait is separated from implementation time. | milestone included below |
+| 2026-07-22 03:27 | 2026-07-22 03:49 | Equality-participation-only cardinality DSU | Replaced full-column hash state with a sorted compact DSU over inherited class members and equality endpoints, using logarithmic lookup and iterative path compression. Added residual-wide, inherited/overlapping-class, NDV precedence, deterministic-order, 512-column, and adversarial 16,384-deep-chain tests. JOB 15c fell to 8.05 ms median; phase-3 Samply contains 214 matching samples versus 544 in phase 2. | 843,025 / 19,932 s |
+| 2026-07-22 03:49 | 2026-07-22 03:58 | Durable benchmarks, snapshots, and final validation | Added a fair six-run deferred/materializing DPhyp benchmark with raw TSV, corrected its dynamic-set case to 65 relations, preserved the profiling SQL, refreshed 14 explain snapshots after proving every change is a bijective operator-ID renumbering, and completed all validation gates. Commits: `f09d420`, `d109c8f`. | 920,638 / 20,537 s |
 
 ## Evidence Baseline
 
@@ -37,13 +40,13 @@ token counts.
 
 ## New Evidence
 
-- `cargo test -p optd-core`: 189 tests passed, plus doc tests.
+- `cargo test -p optd-core`: 224 tests passed, plus doc tests.
 - `cargo nextest run --release -p optd-datafusion --test slt -- adaptive_join_ordering`:
-  1 passed in 1.135 s (287 skipped by the filter); it executes exact, linearized, dynamic-bitset,
+  1 passed in 0.464 s (287 skipped by the filter); it executes exact, linearized, dynamic-bitset,
   and GOO result cases through the complete SQL optimization pipeline.
 - `cargo nextest run --release --workspace -E 'not test(/tests\\/slt\\/job/)' --no-fail-fast`:
-  306 passed in 5.108 s (225 JOB tests excluded).
-- `cargo test -p optd-core --no-default-features`: 182 passed, plus doc tests.
+  342 passed in 6.018 s (225 JOB tests excluded).
+- `cargo test -p optd-core --no-default-features`: 217 passed, plus doc tests.
 - `cargo test -p optd-datafusion --lib`: 52 passed.
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed.
 - `cargo fmt --all --check`, `git diff --check`, and `actionlint`: passed.
@@ -66,6 +69,19 @@ token counts.
   materializes only the winning `n-1` joins; the compatibility evaluator remains available for
   arbitrary models. A 10 kHz Samply capture reported 544 matching samples, with
   `join_profile_from_conjuncts` at 89.5% inclusive and allocator/hash work dominating self time.
+- JOB 15c with the compact equality DSU: 8.05 ms median across five release runs
+  (8.03--9.35 ms), 63.8% below deferred phase 2 and 82.8% below the original baseline. The
+  equivalent Samply capture fell to 214 matching samples; SipHash self samples dropped from 61 to
+  2 and DSU lookup self samples from 26 to 3. `combine_join_columns`/B-tree insertion is now the
+  largest profile-construction bucket.
+- `cargo bench -p optd-core --bench join_ordering_candidate_evaluation -- 6`: deferred evaluation
+  was 2.4%--22.9% faster over five exact-DPhyp chain/clique cases. It appended only `n-1` joins,
+  versus 286 candidates for a 12-chain, 45,760 for a 65-chain, and 24,604 for a 9-clique. The
+  benchmark uses symmetric untimed warmups, alternating order, fresh contexts, and identical
+  catalog statistics; raw TSV and medians are preserved with the artifacts.
+- The 14 explain snapshots affected by deferred materialization were regenerated. A separate audit
+  verified a bijective old-to-new operator-ID mapping for every node and reference; masking
+  `id`/`input`/`outer`/`inner` integers makes every plan byte-identical.
 - Dynamic `RelationSet` direct comparisons: in-place `|=` is 4.1x faster than allocate-and-replace
   at 256 relations; one-pass `FromIterator` is 53.8x faster than repeated singleton union at
   1,024 relations. Raw distributions and the revised boundary chart are under

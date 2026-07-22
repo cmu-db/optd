@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+<title id="title">Adaptive runtime is highly topology-sensitive</title>
+<desc id="desc">One deterministic query per topology; log-log axes</desc>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<style>text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;fill:#202124}.title{font-size:28px;font-weight:600}.subtitle{font-size:15px;fill:#5f6368}.axis{stroke:#5f6368;stroke-width:1.2}.grid{stroke:#dadce0;stroke-width:1}.tick{font-size:13px;fill:#5f6368}.label{font-size:16px;font-weight:500}.legend{font-size:14px}.annotation{font-size:13px;font-weight:500}</style>
+<text x="105.00" y="38.00" class="title" text-anchor="start">Adaptive runtime is highly topology-sensitive</text>
+<text x="105.00" y="66.00" class="subtitle" text-anchor="start">One deterministic query per topology; log-log axes</text>
+<line x1="105.00" y1="85.00" x2="105.00" y2="670.00" stroke="#5f6368" stroke-width="1.2" opacity="1"/>
+<line x1="105.00" y1="670.00" x2="1160.00" y2="670.00" stroke="#5f6368" stroke-width="1.2" opacity="1"/>
+<line x1="105.00" y1="670.00" x2="1160.00" y2="670.00" stroke="#dadce0" stroke-width="1" opacity="1"/>
+<text x="93.00" y="675.00" class="tick" text-anchor="end">100 us</text>
+<line x1="105.00" y1="553.00" x2="1160.00" y2="553.00" stroke="#dadce0" stroke-width="1" opacity="1"/>
+<text x="93.00" y="558.00" class="tick" text-anchor="end">1 ms</text>
+<line x1="105.00" y1="436.00" x2="1160.00" y2="436.00" stroke="#dadce0" stroke-width="1" opacity="1"/>
+<text x="93.00" y="441.00" class="tick" text-anchor="end">10 ms</text>
+<line x1="105.00" y1="319.00" x2="1160.00" y2="319.00" stroke="#dadce0" stroke-width="1" opacity="1"/>
+<text x="93.00" y="324.00" class="tick" text-anchor="end">100 ms</text>
+<line x1="105.00" y1="202.00" x2="1160.00" y2="202.00" stroke="#dadce0" stroke-width="1" opacity="1"/>
+<text x="93.00" y="207.00" class="tick" text-anchor="end">1 s</text>
+<line x1="105.00" y1="85.00" x2="1160.00" y2="85.00" stroke="#dadce0" stroke-width="1" opacity="1"/>
+<text x="93.00" y="90.00" class="tick" text-anchor="end">10 s</text>
+<line x1="105.00" y1="670.00" x2="105.00" y2="676.00" stroke="#5f6368" stroke-width="1" opacity="1"/>
+<text x="105.00" y="695.00" class="tick" text-anchor="middle">10</text>
+<line x1="352.48" y1="670.00" x2="352.48" y2="676.00" stroke="#5f6368" stroke-width="1" opacity="1"/>
+<text x="352.48" y="695.00" class="tick" text-anchor="middle">20</text>
+<line x1="599.95" y1="670.00" x2="599.95" y2="676.00" stroke="#5f6368" stroke-width="1" opacity="1"/>
+<text x="599.95" y="695.00" class="tick" text-anchor="middle">40</text>
+<line x1="799.75" y1="670.00" x2="799.75" y2="676.00" stroke="#5f6368" stroke-width="1" opacity="1"/>
+<text x="799.75" y="695.00" class="tick" text-anchor="middle">70</text>
+<line x1="927.10" y1="670.00" x2="927.10" y2="676.00" stroke="#5f6368" stroke-width="1" opacity="1"/>
+<text x="927.10" y="695.00" class="tick" text-anchor="middle">100</text>
+<line x1="1015.24" y1="670.00" x2="1015.24" y2="676.00" stroke="#5f6368" stroke-width="1" opacity="1"/>
+<text x="1015.24" y="695.00" class="tick" text-anchor="middle">128</text>
+<line x1="1160.00" y1="670.00" x2="1160.00" y2="676.00" stroke="#5f6368" stroke-width="1" opacity="1"/>
+<text x="1160.00" y="695.00" class="tick" text-anchor="middle">192</text>
+<text x="632.50" y="728.00" class="label" text-anchor="middle">Relations</text>
+<text x="28.00" y="377.50" class="label" text-anchor="middle" transform="rotate(-90 28 377.5)">Adaptive optimization time</text>
+<polyline points="105.00,670.00 352.48,563.35 497.24,491.63 599.95,442.35 799.75,331.12 927.10,251.94 1015.24,302.28 1160.00,207.03" fill="none" stroke="#0072B2" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="105.00" cy="670.00" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="352.48" cy="563.35" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="497.24" cy="491.63" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="599.95" cy="442.35" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="799.75" cy="331.12" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="927.10" cy="251.94" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="1015.24" cy="302.28" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="1160.00" cy="207.03" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<line x1="105.00" y1="103.00" x2="133.00" y2="103.00" stroke="#0072B2" stroke-width="3" opacity="1"/>
+<text x="143.00" y="108.00" class="legend" text-anchor="start">Chain</text>
+<polyline points="105.00,525.29 352.48,516.08 497.24,503.69 599.95,487.39 799.75,444.58 927.10,422.75 1015.24,322.36 1160.00,243.33" fill="none" stroke="#009E73" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="105.00" cy="525.29" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="352.48" cy="516.08" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="497.24" cy="503.69" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="599.95" cy="487.39" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="799.75" cy="444.58" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="927.10" cy="422.75" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="1015.24" cy="322.36" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="1160.00" cy="243.33" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<line x1="325.00" y1="103.00" x2="353.00" y2="103.00" stroke="#009E73" stroke-width="3" opacity="1"/>
+<text x="363.00" y="108.00" class="legend" text-anchor="start">Star</text>
+<polyline points="105.00,316.46 352.48,403.40 497.24,357.15 599.95,317.52 799.75,209.32" fill="none" stroke="#D55E00" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="105.00" cy="316.46" r="5" fill="#D55E00" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="352.48" cy="403.40" r="5" fill="#D55E00" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="497.24" cy="357.15" r="5" fill="#D55E00" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="599.95" cy="317.52" r="5" fill="#D55E00" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="799.75" cy="209.32" r="5" fill="#D55E00" stroke="#ffffff" stroke-width="1.5"/>
+<line x1="545.00" y1="103.00" x2="573.00" y2="103.00" stroke="#D55E00" stroke-width="3" opacity="1"/>
+<text x="583.00" y="108.00" class="legend" text-anchor="start">Clique</text>
+</svg>

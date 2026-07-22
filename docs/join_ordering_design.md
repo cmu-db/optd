@@ -14,8 +14,9 @@
 A `JoinOrdering` optimizer pass that, given a query with one or more join groups, replaces
 each join group's operator tree with a cost-optimal (or near-optimal) bushy join tree.
 
-The pass operates on the `QueryHypergraph` already built by `build_hypergraph` / `HypergraphOf`.
-It does not re-derive the hypergraph; it consumes it.
+For each maximal contiguous join group, the pass builds a fresh `QueryHypergraph` from the current
+IR and cached analyses, chooses an enumerator, and records only the winning reconstructed root in
+the optimizer rewrite map.
 
 ## 2026 Adaptive Redesign
 
@@ -42,8 +43,9 @@ The implementation is split into four independent layers:
 - Exact DPhyp emits each canonical csg-cmp pair once; both child states exist before costing it.
 - All predicates whose TES endpoints become available at a split are attached exactly once.
 - Non-commutative join orientation is preserved by the TES edge orientation.
-- Exact solving is selected only after the bounded connected-subgraph counter proves that its
-  state table fits policy, except for the unconditional small-query path.
+- Whole-group exact solving is selected only after the bounded connected-subgraph counter proves
+  that its state table fits policy, except for the unconditional small-query path. GOO/DP may run
+  exact DPhyp inside an explicitly size-bounded repair subtree without a second count.
 - Algorithm changes affect plan quality, never relational semantics; feature tests compare query
   results and unit/property tests compare exact costs with exhaustive enumeration on small graphs.
 
@@ -52,15 +54,16 @@ The implementation is split into four independent layers:
 The defaults follow Neumann and Radke (SIGMOD 2018), with budgets exposed for deterministic tests:
 
 - fewer than 14 relations: exact DPhyp;
-- otherwise count connected subgraphs, stopping at 10,001;
-- at most 10,000 connected subgraphs: exact DPhyp, including long chains beyond 64 relations;
-- medium ordinary graphs (at most 100 relations): greedy linearization followed by O(n^3)
+- from 14 through 100 relations: count connected subgraphs, stopping at 10,001;
+- within that range, at most 10,000 connected subgraphs selects exact DPhyp, including a
+  65-relation chain that crosses the inline bitset boundary;
+- an over-budget ordinary graph in that range uses greedy linearization followed by O(n^3)
   interval DP;
-- larger graphs or graphs with true hyperedges: GOO constructs a bushy seed and exact DPhyp
-  improves maximal subtrees of at most 10 relations (IDP-2 style).
+- a graph above 100 relations, or an over-budget graph with true hyperedges, uses GOO to construct
+  a bushy seed followed by exact repair of maximal subtrees of at most 10 relations (IDP-2 style).
 
 The first production version uses a deterministic connectivity-preserving order in place of the
-full IKKBZ rank normalization. This is deliberately isolated behind the linearizer interface so
+full IKKBZ rank normalization. This is deliberately isolated in a private linearization helper so
 IKKBZ or a cardinality-guided minimum-spanning-tree order can be added without changing interval
 DP or policy.
 
@@ -79,10 +82,9 @@ Correctness is checked at three levels:
 - relation-set boundary and subset-iteration unit tests, including identifiers 64 and 129;
 - connected-subgraph counts against closed forms (6-chain = 21, 6-clique = 63) and exact DPhyp
   cost against exhaustive bushy enumeration on a 5-clique;
-- DataFusion SLT executes 5-relation exact and 15-relation star/linearized result queries. Dense
-  15-relation and wide 65-/101-relation stress shapes are explicitly skipped because unrelated
-  SQL preprocessing/execution exceeds the SLT timeout; optimizer-level tests and the benchmark
-  execute the equivalent algorithms directly.
+- DataFusion SLT executes the 5-relation exact result, 15-relation dense and star linearized paths,
+  the 65-relation dynamic-set exact path, and the 101-relation GOO/DP path through the complete SQL
+  optimization pipeline. None of these feature cases is skipped.
 
 The dependency-free `cargo bench -p optd-core --bench join_ordering -- 3` benchmark measures the
 full JoinOrdering pass with an enumeration-only cost model. On the development machine after the
@@ -100,33 +102,56 @@ Absolute values include hypergraph construction and vary by machine; the benchma
 exists for repeatable before/after comparisons and algorithm-selection regressions. On the
 128-relation chain the adaptive large-query path is 7.0× faster than forced exact DPhyp.
 
-The existing DataFusion `profile_passes` workload was also run from both the untouched
-`54c9bdf` commit and this tree with two measured runs. The changing JoinOrdering invocation on
+At the 2026-07-16 adaptive-enumerator milestone, the DataFusion `profile_passes` workload was run
+from both the untouched `54c9bdf` commit and the then-current adaptive tree with two measured runs.
+The changing JoinOrdering invocation on
 `sixty_four_join_sixty_four_predicates` was 4,868.10 ms baseline versus 4,896.65 ms after the
 change (+0.59%); this is within the intended low-regression envelope. Smaller shapes remained
 sub-2 ms.
+
+JOB query 15c exposes a different bottleneck: candidate cardinality profiles rather than graph
+enumeration. Five-run release medians on the same machine show the cumulative effect of the
+profile-side changes:
+
+| Implementation phase | JoinOrdering median | Change from original |
+|---|---:|---:|
+| Original materializing evaluator | 46.95 ms | — |
+| Shared `Arc<CardinalityProfile>` cache | 31.62 ms | -32.7% |
+| Sparse equivalence metadata | 22.57 ms | -51.9% |
+| Pre-flattened join conjuncts | 22.08 ms | -53.0% |
+| Compact plan recipes, before deferred costing | 22.06 ms | -53.0% |
+| Deferred default-cost evaluation | 22.26 ms | -52.6% |
+| Equality-participation-only compact DSU | 8.05 ms | -82.8% |
+
+The separate `join_ordering_candidate_evaluation` benchmark compares the deferred and
+materializing evaluators with identical catalog statistics, policy, fresh queries, and alternating
+execution order. Across chain and clique cases, deferred evaluation reduced median time by
+2.4%--22.9%. It appended only the winning `n - 1` join operators, versus 286 candidates for a
+12-chain, 45,760 for a 65-chain, and 24,604 for a 9-clique. Raw profiles and reproducible summaries
+live under `artifacts/join_ordering_profiles/job15c/`.
 
 ---
 
 ## Multi-Group Queries
 
-A single SQL query can contain multiple independent join groups separated by blocking
-operators (Aggregation, Sort, Limit, Projection). Each group is a maximal subtree of
-`Join` and `CrossProduct` operators. This design notes it as a follow-up; it is a
-prerequisite for the pass.
+A single SQL query can contain multiple independent join groups separated by non-join operators
+such as aggregation, sort, limit, projection, selection, map, or rename. Each group is a maximal
+contiguous region of `Join` and `CrossProduct` operators. `groups.rs` implements discovery;
+`mod.rs` owns search orchestration and rewrite publication.
 
 ### Identifying Join Groups
 
-Walk the operator tree top-down. Every time a `Join` or `CrossProduct` is encountered
-whose parent is *not* a `Join`/`CrossProduct`, that operator is the **join group root**.
-Collect all such roots.
+Walk the complete operator tree in post-order. A `Join` or `CrossProduct` whose parent is not
+join-like is a **join group root**. Traversal continues through unary boundaries so nested groups
+below aggregations or projections are still discovered, while join children inside the same
+contiguous region are not reported as separate roots.
 
 ```
 fn collect_join_group_roots(ctx: &QueryContext, root: Operator) -> Vec<Operator>
 ```
 
-This is a pre-order traversal that stops descending into a subtree once it finds a
-join group root (the root itself is collected; its join children are not separate groups).
+Children are visited before the current node, so the returned roots are already in bottom-up
+rewrite order.
 
 For a query like:
 
@@ -140,9 +165,12 @@ another. They are independent and optimized separately.
 
 ### Processing Order
 
-Process groups bottom-up: optimize inner groups before outer groups, so that the
-cardinality estimates for subquery outputs are available when the outer group is
-optimized.
+Group roots are retained in bottom-up order, but all immutable hypergraphs are built before any
+search starts. This matters for the materializing compatibility evaluator: candidate operators
+appended for one group cannot change the graph seen by another group. Winning replacements are
+installed only after every group solves successfully, then non-join ancestors are rebuilt once.
+Post-order determines group solve order and the order of `last_decisions`; ancestor rebuilding is
+correct because `materialize_reachable_rewrites` itself traverses the operator graph post-order.
 
 ---
 
@@ -150,35 +178,16 @@ optimized.
 
 The pass selects the algorithm based on the complexity of each join group's hypergraph:
 
-```
-fn optimize_group(hg: &QueryHypergraph, stats: &Statistics) -> JoinTree {
-    let n = hg.nodes.len();
+`choose_algorithm` first takes the unconditional small-group DPhyp path. For larger groups up to
+the linearized threshold, it counts connected subgraphs with early termination at the configured
+budget; an exact count within budget also selects DPhyp. A remaining ordinary graph within the
+threshold uses connectivity-preserving linearization plus interval DP. Groups above the threshold,
+and over-budget true hypergraphs, use GOO followed by exact DPhyp replacement of maximal bounded
+subtrees.
 
-    // Always exact for tiny groups.
-    if n < 14 {
-        return dphyp(hg, stats);
-    }
-
-    // Count connected subgraphs up to budget to predict DP cost.
-    let csg_count = count_csg(hg, budget: 10_000);
-    if csg_count <= 10_000 {
-        return dphyp(hg, stats);
-    }
-
-    // Linearize and run DP on the linearized order.
-    if !hg.has_hyperedges() && n <= 100 {
-        return linearized_dp(hg, stats);
-    }
-
-    // Large or hyperedge queries: GOO to seed, then DP on subtrees.
-    let inner_dp = if hg.has_hyperedges() { dphyp } else { linearized_dp };
-    let k = if hg.has_hyperedges() { 10 } else { 100 };
-    return goo_dp(hg, stats, inner_dp, k, budget: 10_000);
-}
-```
-
-The implementation follows this policy, with a deterministic connected ordering in the
-linearized branch and GOO followed by exact DPhyp improvement of bounded maximal subtrees.
+`AlgorithmDecision` records the selected algorithm and the exact connected-subgraph count when it
+was obtained. `JoinOrdering::last_decisions` exposes these per-group decisions for diagnostics and
+tests.
 
 ---
 
@@ -189,104 +198,84 @@ DPhyp enumerates all csg-cmp-pairs of the hypergraph and fills a DP table.
 ### Data Structures
 
 ```rust
-/// An immutable, canonical relation set. One word is stored inline; larger sets use
-/// a heap-allocated word slice whose trailing zero words are removed.
 type NodeSet = RelationSet;
 
-/// One entry in the DP table: the best plan found for a given node set.
-struct DPEntry {
-    cost: f64,
-    plan: JoinTree,
+struct PlanState<C> {
+    plan: PlanId,
+    cost: C,
+    properties: PlanProperties,
 }
 
-/// The DP table: maps NodeSet → DPEntry.
-type DPTable = HashMap<NodeSet, DPEntry>;
+type DPTable<C> = HashMap<NodeSet, PlanState<C>>;
 ```
 
 `RelationSet` transparently switches from its inline word to a dense dynamic word slice.
 Equality and hashing operate on the canonical representation, and set operations remain
-immutable at API boundaries. There is no 64-relation correctness limit.
+immutable at API boundaries; owned `|=` reuses dynamic storage when capacity permits. There is no
+64-relation correctness limit.
 
-### JoinTree
-
-```rust
-enum JoinTree {
-    /// A leaf: one hypergraph node.
-    Leaf(NodeId),
-    /// An inner node: two subtrees joined with a predicate.
-    Join {
-        left: Box<JoinTree>,
-        right: Box<JoinTree>,
-        /// Predicates from hyperedges connecting left and right.
-        predicates: Vec<Expr>,
-        /// Join type from the source hyperedge.
-        join_type: HyperedgeJoinType,
-        /// Estimated output cardinality.
-        cardinality: f64,
-    },
-}
-```
+`PlanId` addresses an immutable leaf/join recipe in the per-group `PlanArena`. `PlanProperties`
+currently carries an optional shared cardinality profile. The `JoinTree` type is retained only
+under `cfg(test)` as a lightweight witness for exhaustive and cross-evaluator assertions; it is not
+part of production DP state.
 
 ### Algorithm
 
 ```
-Solve(hg, stats):
+Solve(search):
     dp = {}
-    for each node v in hg.nodes (descending by node index):
-        dp[{v}] = DPEntry { cost: scan_cost(v, stats), plan: Leaf(v) }
+    for each node v in allowed nodes:
+        dp[{v}] = search.leaf(v)
 
-    for each node v in hg.nodes (descending by node index):
-        EmitCsg({v}, hg, dp, stats)
-        EnumerateCsgRec({v}, Bv, hg, dp, stats)
+    for each node v in allowed nodes (descending by node index):
+        EmitCsg({v})
+        EnumerateCsgRec({v}, Bv)
             // Bv = all nodes with index ≤ v (exclusion set to avoid duplicates)
 
-    return dp[all_nodes].plan
+    return dp[allowed]
 
 
-EnumerateCsgRec(S1, X, hg, dp, stats):
+EnumerateCsgRec(S1, X):
     N = neighborhood(S1, X, hg)   // nodes reachable from S1, not in X
     for each non-empty N' ⊆ N:
         if dp[S1 ∪ N'] is set:    // S1 ∪ N' is a known connected subgraph
-            EmitCsg(S1 ∪ N', hg, dp, stats)
+            EmitCsg(S1 ∪ N')
     for each non-empty N' ⊆ N:
-        EnumerateCsgRec(S1 ∪ N', X ∪ N, hg, dp, stats)
+        EnumerateCsgRec(S1 ∪ N', X ∪ N)
 
 
-EmitCsg(S1, hg, dp, stats):
+EmitCsg(S1):
     X = S1 ∪ B_min(S1)
     N = neighborhood(S1, X, hg)
     for each v in N (descending):
         S2 = {v}
         if ∃ hyperedge (u, v') with u ⊆ S1 and v' ⊆ S2:
-            EmitCsgCmp(S1, S2, hg, dp, stats)
-        EnumerateCmpRec(S1, S2, X, hg, dp, stats)
+            EmitCsgCmp(S1, S2)
+        EnumerateCmpRec(S1, S2, X)
 
 
-EnumerateCmpRec(S1, S2, X, hg, dp, stats):
+EnumerateCmpRec(S1, S2, X):
     N = neighborhood(S2, X, hg)
     for each non-empty N' ⊆ N:
         if dp[S2 ∪ N'] is set:
             if ∃ hyperedge connecting S1 to S2 ∪ N':
-                EmitCsgCmp(S1, S2 ∪ N', hg, dp, stats)
+                EmitCsgCmp(S1, S2 ∪ N')
     for each non-empty N' ⊆ N:
-        EnumerateCmpRec(S1, S2 ∪ N', X ∪ N, hg, dp, stats)
+        EnumerateCmpRec(S1, S2 ∪ N', X ∪ N)
 
 
-EmitCsgCmp(S1, S2, hg, dp, stats):
-    plan1 = dp[S1].plan
-    plan2 = dp[S2].plan
-    predicates = { P(e) | e ∈ hg.edges, e.left ⊆ S1, e.right ⊆ S2 }
-                ∪ { P(e) | e ∈ hg.edges, e.left ⊆ S2, e.right ⊆ S1 }
-    join_type = join_type_for(predicates, hg)
-
-    // Try both orderings (commutativity for inner joins).
-    for (left, right) in [(plan1, plan2), (plan2, plan1)]:
-        if join_type is not commutative and (left, right) = (plan2, plan1): skip
-        card = estimate_cardinality(left, right, predicates, stats)
-        cost = cost(left) + cost(right) + card   // Cout: minimize intermediate sizes
-        if dp[S1 ∪ S2] is empty or cost < dp[S1 ∪ S2].cost:
-            dp[S1 ∪ S2] = DPEntry { cost, plan: Join { left, right, predicates, join_type, cardinality: card } }
+EmitCsgCmp(S1, S2):
+    left = dp[S1]
+    right = dp[S2]
+    edges = connecting_edge_indices(S1, S2, hypergraph)
+    draft = search.best_join_candidate(S1, left, S2, right, edges)
+    if draft exists and (dp[S1 ∪ S2] is empty or draft.cost is better):
+        dp[S1 ∪ S2] = search.commit(draft)
 ```
+
+`best_join_candidate` recovers the logical join type from the connecting edges. Directed TES
+endpoints fix non-inner orientation. It costs one inner orientation for symmetric models and both
+orientations only when the model opts into orientation sensitivity.
 
 ### Neighborhood
 
@@ -308,34 +297,32 @@ for hyperedge traversal, per §2.3 of DPhyp).
 
 ## Cost Model
 
-Use **C_out** (minimize total intermediate result size), which has the ASI property
-needed by IKKBZ and is standard in the literature:
+`CostModel` supplies an arbitrary cloneable cost type plus `zero`, ordered cost accumulation,
+comparison, local operator cost, and optional orientation sensitivity. Its default
+`total_cost_from_children` validates input arity and folds local cost followed by child costs. A
+custom model can override that method; this is why `with_cost_model` retains materializing
+compatibility evaluation.
 
-```
-cost(Leaf(v))         = 0
-cost(Join{left,right,card,...}) = cost(left) + cost(right) + card
+`DefaultCostModel` uses `CardinalityEstimationV1`, whose internal cache stores
+`Arc<CardinalityProfile>`. A profile contains row estimates, per-column frequency/NDV/bounds, and
+sparse nontrivial equivalence classes. Equality-join selectivity is `1 / max(NDV_left, NDV_right)`;
+transitive or redundant equalities are recognized through equivalence classes and charged once.
+Residual predicates use statistics-aware or conservative fallback selectivities.
 
-cardinality(Leaf(v))  = stats.base_cardinality(v)
-cardinality(Join{left,right,predicates,...})
-    = cardinality(left) * cardinality(right) * product(selectivity(p) for p in predicates)
-```
+The local binary cost distinguishes hash-like joins (a column-to-column equality is present) from
+nested-loop-like joins:
 
-Selectivity defaults: equality predicate = 1/max(NDV_left, NDV_right); no predicate = 1.0.
-
-The `Statistics` trait abstracts cardinality and selectivity lookups:
-
-```rust
-trait Statistics {
-    fn cardinality(&self, node: NodeId, hg: &QueryHypergraph) -> f64;
-    fn selectivity(&self, edge: &Hyperedge, hg: &QueryHypergraph) -> f64;
-}
-
-/// Uniform statistics: all base relations have cardinality 1000,
-/// all equality predicates have selectivity 0.01.
-struct UniformStatistics;
+```text
+hash = left_bytes + right_bytes + (left_rows * right_rows)^0.75 + output_bytes
+nested_loop = left_rows * right_rows + output_rows
+total = local + outer_total + inner_total
 ```
 
-The pass accepts a `Box<dyn Statistics>`. The default is `UniformStatistics`.
+During join search, `CardinalityEvaluator` computes the same output profile directly from child
+profiles and pre-flattened edge conjuncts. Predicate-free inner joins use the dedicated cross-product
+profile so per-column frequencies scale correctly. Equality tracking uses a sorted compact DSU over
+only inherited equivalence members and equality endpoints—not every output column. Column lookup is
+`O(log K)` after one sort/dedup pass, where `K` is the number of equality-participating columns.
 
 ---
 
@@ -369,51 +356,67 @@ six-relation plan appends exactly five binary operators and that repeat material
 ## Pass Integration
 
 ```rust
-pub struct JoinOrdering {
-    stats: Box<dyn Statistics>,
+// Abridged orchestration; `solve_with` is the three-way algorithm dispatch.
+pub struct JoinOrdering<M: CostModel = DefaultCostModel> {
+    cost_model: M,
+    config: AdaptiveJoinOrderingConfig,
+    evaluator: Box<dyn CandidateEvaluator<M>>,
+    last_decisions: Vec<AlgorithmDecision>,
 }
 
-impl Pass for JoinOrdering {
-    fn name(&self) -> &'static str { "join_ordering" }
-}
-
-impl QueryPass for JoinOrdering {
+impl<M: CostModel> QueryPass for JoinOrdering<M> {
     fn mode(&self) -> PassMode {
         PassMode::Once
     }
 
     fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<PassResult> {
+        self.last_decisions.clear();
         let Some(root) = ctx.query.root() else {
             return Ok(PassResult::Unchanged);
         };
 
-        // Collect all join group roots, bottom-up order.
-        let group_roots = collect_join_group_roots(&ctx.query, root);
-        if group_roots.is_empty() {
+        ctx.analyses.clear();
+        let groups = collect_join_group_roots(&ctx.query, root)
+            .into_iter()
+            .filter_map(|group_root| {
+                let hg = build_hypergraph(&ctx.query, &mut ctx.analyses, group_root);
+                (hg.nodes.len() >= 2).then_some((group_root, hg))
+            })
+            .collect::<Vec<_>>();
+        if groups.is_empty() {
             return Ok(PassResult::Unchanged);
         }
 
-        let mut changed = false;
-        for group_root in group_roots {
-            let hg = build_hypergraph(&ctx.query, &mut ctx.analyses, group_root);
-            if hg.nodes.len() < 2 {
-                continue; // nothing to reorder
+        let mut replacements = Vec::new();
+        for (group_root, hg) in &groups {
+            let decision = choose_algorithm(hg, self.config);
+            self.last_decisions.push(decision);
+            let mut search = JoinSearch::new(/* query, analyses, hg, model, evaluator */);
+            let winner = solve_with(decision.algorithm, &mut search)?;
+            if let Some(winner) = winner {
+                replacements.push((*group_root, search.materialize(&winner)));
             }
-            let tree = optimize_group(&hg, &*self.stats);
-            let new_root = join_tree_to_ir(&tree, &hg, &mut ctx.query);
-            ctx.rewrites.replace(group_root, new_root);
-            changed = true;
+        }
+        if replacements.is_empty() {
+            return Ok(PassResult::Unchanged);
         }
 
-        Ok(if changed { PassResult::Changed } else { PassResult::Unchanged })
+        // Publish no rewrite until every group has solved successfully.
+        for (group_root, winner) in replacements {
+            ctx.rewrites.replace(group_root, winner);
+        }
+        materialize_reachable_rewrites(root, ctx);
+
+        Ok(PassResult::Changed)
     }
 }
 ```
 
-The pass declares `PassMode::Once`, making its lifecycle explicit in the optimizer framework.
-`PassManager` therefore invokes it once per manager run and resolves the rewrite map after the
-invocation. This avoids repeating append-only candidate enumeration without storing query pointers
-or synthetic run identifiers in the pass.
+The omitted `solve_with` branch dispatches to DPhyp, linearized DP, or GOO/DP. The pass declares
+`PassMode::Once`, so `PassManager` invokes it once per manager run. Delaying rewrite-map mutation
+makes group processing transactional: an error cannot expose a partially rewritten query. It also
+avoids the former query-pointer/run-key bookkeeping used to suppress accidental fixed-point
+reinvocation.
 
 ---
 
@@ -464,7 +467,9 @@ Projection
 
 `collect_join_group_roots` returns `[Join(a ⋈ b), Join(sub ⋈ c)]` in bottom-up order.
 The pass optimizes `Join(a ⋈ b)` first (trivial, 2 nodes), then `Join(sub ⋈ c)` (also
-trivial). For larger groups the ordering matters for cardinality estimates.
+trivial). Their hypergraphs are built from the same pre-search query snapshot; the bottom-up order
+determines solve and diagnostic order. One post-order reachable-rewrite traversal materializes all
+published mappings into the final operator graph.
 
 ---
 
@@ -487,7 +492,9 @@ trivial). For larger groups the ordering matters for cardinality estimates.
    bottom-up multi-group collection, public decisions, and `QueryPass` integration.
 10. `optd/core/src/optimize/join_ordering/evaluator.rs`: shared `Arc<CardinalityProfile>` plan
     properties and deferred default-cost evaluation, while retaining exact custom-model behavior.
-11. Unit, exhaustive-oracle, SQL feature, benchmark, and same-machine release-profiler evidence
+11. `optd/core/src/analysis.rs`: sparse nontrivial equivalence metadata and a compact sorted DSU
+    populated only by inherited class members and equality endpoints.
+12. Unit, exhaustive-oracle, SQL feature, benchmark, and same-machine release-profiler evidence
     cover exactness, algorithm selection, more than 64 relations, and regression bounds.
 
 ### Open / Follow-ups
@@ -499,5 +506,8 @@ trivial). For larger groups the ordering matters for cardinality estimates.
   workloads at that scale show dense word vectors to be material.
 - **Enumeration telemetry**: expose csg-cmp pair and winning-state counts alongside algorithm
   decisions for production profiling.
+- **Column-profile construction**: `combine_join_columns` and ordered-map insertion are the largest
+  remaining JOB 15c profile buckets; evaluate a persistent or append-friendly column map without
+  weakening deterministic profile ordering.
 - **Null-rejecting predicate detection**: classify `'E`/`'K` variants using `ColumnNullability` analysis.
 - **Predicate pushdown prerequisite**: WHERE-clause predicates must be pushed into join conditions before `JoinOrdering` runs.

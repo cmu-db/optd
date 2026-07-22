@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+<title id="title">Elapsed time versus materialized candidate operators</title>
+<desc id="desc">Random tree medians; labels are relation counts; log-log axes</desc>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<style>text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;fill:#202124}.title{font-size:28px;font-weight:600}.subtitle{font-size:15px;fill:#5f6368}.axis{stroke:#5f6368;stroke-width:1.2}.grid{stroke:#dadce0;stroke-width:1}.tick{font-size:13px;fill:#5f6368}.label{font-size:16px;font-weight:500}.legend{font-size:14px}.annotation{font-size:13px;font-weight:500}</style>
+<text x="105.00" y="38.00" class="title" text-anchor="start">Elapsed time versus materialized candidate operators</text>
+<text x="105.00" y="66.00" class="subtitle" text-anchor="start">Random tree medians; labels are relation counts; log-log axes</text>
+<line x1="105.00" y1="85.00" x2="105.00" y2="670.00" stroke="#5f6368" stroke-width="1.2" opacity="1"/>
+<line x1="105.00" y1="670.00" x2="1160.00" y2="670.00" stroke="#5f6368" stroke-width="1.2" opacity="1"/>
+<line x1="105.00" y1="670.00" x2="1160.00" y2="670.00" stroke="#dadce0" stroke-width="1" opacity="1"/>
+<text x="93.00" y="675.00" class="tick" text-anchor="end">10 us</text>
+<line x1="105.00" y1="572.50" x2="1160.00" y2="572.50" stroke="#dadce0" stroke-width="1" opacity="1"/>
+<text x="93.00" y="577.50" class="tick" text-anchor="end">100 us</text>
+<line x1="105.00" y1="475.00" x2="1160.00" y2="475.00" stroke="#dadce0" stroke-width="1" opacity="1"/>
+<text x="93.00" y="480.00" class="tick" text-anchor="end">1 ms</text>
+<line x1="105.00" y1="377.50" x2="1160.00" y2="377.50" stroke="#dadce0" stroke-width="1" opacity="1"/>
+<text x="93.00" y="382.50" class="tick" text-anchor="end">10 ms</text>
+<line x1="105.00" y1="280.00" x2="1160.00" y2="280.00" stroke="#dadce0" stroke-width="1" opacity="1"/>
+<text x="93.00" y="285.00" class="tick" text-anchor="end">100 ms</text>
+<line x1="105.00" y1="182.50" x2="1160.00" y2="182.50" stroke="#dadce0" stroke-width="1" opacity="1"/>
+<text x="93.00" y="187.50" class="tick" text-anchor="end">1 s</text>
+<line x1="105.00" y1="85.00" x2="1160.00" y2="85.00" stroke="#dadce0" stroke-width="1" opacity="1"/>
+<text x="93.00" y="90.00" class="tick" text-anchor="end">10 s</text>
+<line x1="105.00" y1="670.00" x2="105.00" y2="676.00" stroke="#5f6368" stroke-width="1" opacity="1"/>
+<text x="105.00" y="695.00" class="tick" text-anchor="middle">10</text>
+<line x1="368.75" y1="670.00" x2="368.75" y2="676.00" stroke="#5f6368" stroke-width="1" opacity="1"/>
+<text x="368.75" y="695.00" class="tick" text-anchor="middle">100</text>
+<line x1="632.50" y1="670.00" x2="632.50" y2="676.00" stroke="#5f6368" stroke-width="1" opacity="1"/>
+<text x="632.50" y="695.00" class="tick" text-anchor="middle">1000</text>
+<line x1="896.25" y1="670.00" x2="896.25" y2="676.00" stroke="#5f6368" stroke-width="1" opacity="1"/>
+<text x="896.25" y="695.00" class="tick" text-anchor="middle">10000</text>
+<line x1="1160.00" y1="670.00" x2="1160.00" y2="676.00" stroke="#5f6368" stroke-width="1" opacity="1"/>
+<text x="1160.00" y="695.00" class="tick" text-anchor="middle">100000</text>
+<text x="632.50" y="728.00" class="label" text-anchor="middle">Candidate operators</text>
+<text x="28.00" y="377.50" class="label" text-anchor="middle" transform="rotate(-90 28 377.5)">Optimization time</text>
+<polyline points="539.75,522.10 1075.55,334.03 293.85,431.12 313.99,419.79 362.87,386.79 394.31,364.83 904.83,274.50 990.85,201.47 1050.87,146.51" fill="none" stroke="#0072B2" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="539.75" cy="522.10" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<text x="547.75" y="539.10" class="tick" text-anchor="start">10</text>
+<circle cx="1075.55" cy="334.03" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<text x="1083.55" y="351.03" class="tick" text-anchor="start">20</text>
+<circle cx="293.85" cy="431.12" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<text x="301.85" y="448.12" class="tick" text-anchor="start">30</text>
+<circle cx="313.99" cy="419.79" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<text x="321.99" y="436.79" class="tick" text-anchor="start">40</text>
+<circle cx="362.87" cy="386.79" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<text x="370.87" y="403.79" class="tick" text-anchor="start">70</text>
+<circle cx="394.31" cy="364.83" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<text x="402.31" y="381.83" class="tick" text-anchor="start">100</text>
+<circle cx="904.83" cy="274.50" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<text x="912.83" y="291.50" class="tick" text-anchor="start">128</text>
+<circle cx="990.85" cy="201.47" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<text x="998.85" y="218.47" class="tick" text-anchor="start">192</text>
+<circle cx="1050.87" cy="146.51" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<text x="1058.87" y="163.51" class="tick" text-anchor="start">256</text>
+<circle cx="105.00" cy="103.00" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<text x="117.00" y="108.00" class="legend" text-anchor="start">Adaptive</text>
+<polyline points="214.45,616.68 266.62,588.70 293.85,562.59 313.99,539.18 362.87,481.32 394.31,437.68 418.21,407.58 458.02,358.16 487.50,322.46" fill="none" stroke="#009E73" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="214.45" cy="616.68" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<text x="222.45" y="608.68" class="tick" text-anchor="start">10</text>
+<circle cx="266.62" cy="588.70" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<text x="274.62" y="580.70" class="tick" text-anchor="start">20</text>
+<circle cx="293.85" cy="562.59" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<text x="301.85" y="554.59" class="tick" text-anchor="start">30</text>
+<circle cx="313.99" cy="539.18" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<text x="321.99" y="531.18" class="tick" text-anchor="start">40</text>
+<circle cx="362.87" cy="481.32" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<text x="370.87" y="473.32" class="tick" text-anchor="start">70</text>
+<circle cx="394.31" cy="437.68" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<text x="402.31" y="429.68" class="tick" text-anchor="start">100</text>
+<circle cx="418.21" cy="407.58" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<text x="426.21" y="399.58" class="tick" text-anchor="start">128</text>
+<circle cx="458.02" cy="358.16" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<text x="466.02" y="350.16" class="tick" text-anchor="start">192</text>
+<circle cx="487.50" cy="322.46" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<text x="495.50" y="314.46" class="tick" text-anchor="start">256</text>
+<circle cx="355.00" cy="103.00" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<text x="367.00" y="108.00" class="legend" text-anchor="start">Linearized DP</text>
+<polyline points="550.79,520.66 581.47,512.65 656.07,476.17 687.30,448.42 789.77,372.74 863.05,314.79 904.83,274.52 990.85,201.68 1050.87,146.62" fill="none" stroke="#CC79A7" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="550.79" cy="520.66" r="5" fill="#CC79A7" stroke="#ffffff" stroke-width="1.5"/>
+<text x="558.79" y="512.66" class="tick" text-anchor="start">10</text>
+<circle cx="581.47" cy="512.65" r="5" fill="#CC79A7" stroke="#ffffff" stroke-width="1.5"/>
+<text x="589.47" y="504.65" class="tick" text-anchor="start">20</text>
+<circle cx="656.07" cy="476.17" r="5" fill="#CC79A7" stroke="#ffffff" stroke-width="1.5"/>
+<text x="664.07" y="468.17" class="tick" text-anchor="start">30</text>
+<circle cx="687.30" cy="448.42" r="5" fill="#CC79A7" stroke="#ffffff" stroke-width="1.5"/>
+<text x="695.30" y="440.42" class="tick" text-anchor="start">40</text>
+<circle cx="789.77" cy="372.74" r="5" fill="#CC79A7" stroke="#ffffff" stroke-width="1.5"/>
+<text x="797.77" y="364.74" class="tick" text-anchor="start">70</text>
+<circle cx="863.05" cy="314.79" r="5" fill="#CC79A7" stroke="#ffffff" stroke-width="1.5"/>
+<text x="871.05" y="306.79" class="tick" text-anchor="start">100</text>
+<circle cx="904.83" cy="274.52" r="5" fill="#CC79A7" stroke="#ffffff" stroke-width="1.5"/>
+<text x="912.83" y="266.52" class="tick" text-anchor="start">128</text>
+<circle cx="990.85" cy="201.68" r="5" fill="#CC79A7" stroke="#ffffff" stroke-width="1.5"/>
+<text x="998.85" y="193.68" class="tick" text-anchor="start">192</text>
+<circle cx="1050.87" cy="146.62" r="5" fill="#CC79A7" stroke="#ffffff" stroke-width="1.5"/>
+<text x="1058.87" y="138.62" class="tick" text-anchor="start">256</text>
+<circle cx="605.00" cy="103.00" r="5" fill="#CC79A7" stroke="#ffffff" stroke-width="1.5"/>
+<text x="617.00" y="108.00" class="legend" text-anchor="start">GOO/DP</text>
+</svg>

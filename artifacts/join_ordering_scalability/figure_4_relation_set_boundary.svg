@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+<title id="title">RelationSet cost at the 64-relation representation boundary</title>
+<desc id="desc">Median union/subset/disjoint workload; old allocating assignment vs in-place |=</desc>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<style>text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;fill:#202124}.title{font-size:28px;font-weight:600}.subtitle{font-size:15px;fill:#5f6368}.axis{stroke:#5f6368;stroke-width:1.2}.grid{stroke:#dadce0;stroke-width:1}.tick{font-size:13px;fill:#5f6368}.label{font-size:16px;font-weight:500}.legend{font-size:14px}.annotation{font-size:13px;font-weight:500}</style>
+<text x="105.00" y="38.00" class="title" text-anchor="start">RelationSet cost at the 64-relation representation boundary</text>
+<text x="105.00" y="66.00" class="subtitle" text-anchor="start">Median union/subset/disjoint workload; old allocating assignment vs in-place |=</text>
+<line x1="105.00" y1="85.00" x2="105.00" y2="670.00" stroke="#5f6368" stroke-width="1.2" opacity="1"/>
+<line x1="105.00" y1="670.00" x2="1160.00" y2="670.00" stroke="#5f6368" stroke-width="1.2" opacity="1"/>
+<line x1="105.00" y1="670.00" x2="1160.00" y2="670.00" stroke="#dadce0" stroke-width="1" opacity="1"/>
+<text x="93.00" y="675.00" class="tick" text-anchor="end">0</text>
+<line x1="105.00" y1="553.00" x2="1160.00" y2="553.00" stroke="#dadce0" stroke-width="1" opacity="1"/>
+<text x="93.00" y="558.00" class="tick" text-anchor="end">10</text>
+<line x1="105.00" y1="436.00" x2="1160.00" y2="436.00" stroke="#dadce0" stroke-width="1" opacity="1"/>
+<text x="93.00" y="441.00" class="tick" text-anchor="end">20</text>
+<line x1="105.00" y1="319.00" x2="1160.00" y2="319.00" stroke="#dadce0" stroke-width="1" opacity="1"/>
+<text x="93.00" y="324.00" class="tick" text-anchor="end">30</text>
+<line x1="105.00" y1="202.00" x2="1160.00" y2="202.00" stroke="#dadce0" stroke-width="1" opacity="1"/>
+<text x="93.00" y="207.00" class="tick" text-anchor="end">40</text>
+<line x1="105.00" y1="85.00" x2="1160.00" y2="85.00" stroke="#dadce0" stroke-width="1" opacity="1"/>
+<text x="93.00" y="90.00" class="tick" text-anchor="end">50</text>
+<text x="105.00" y="695.00" class="tick" text-anchor="middle">32</text>
+<text x="222.22" y="695.00" class="tick" text-anchor="middle">63</text>
+<text x="339.44" y="695.00" class="tick" text-anchor="middle">64</text>
+<text x="456.67" y="695.00" class="tick" text-anchor="middle">65</text>
+<text x="573.89" y="695.00" class="tick" text-anchor="middle">127</text>
+<text x="691.11" y="695.00" class="tick" text-anchor="middle">128</text>
+<text x="808.33" y="695.00" class="tick" text-anchor="middle">129</text>
+<text x="925.56" y="695.00" class="tick" text-anchor="middle">256</text>
+<text x="1042.78" y="695.00" class="tick" text-anchor="middle">512</text>
+<text x="1160.00" y="695.00" class="tick" text-anchor="middle">1024</text>
+<polyline points="105.00,641.19 222.22,641.14 339.44,641.16 456.67,391.52 573.89,373.89 691.11,376.33 808.33,352.95 925.56,337.84 1042.78,312.59 1160.00,169.78" fill="none" stroke="#0072B2" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="105.00" cy="641.19" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="222.22" cy="641.14" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="339.44" cy="641.16" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="456.67" cy="391.52" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="573.89" cy="373.89" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="691.11" cy="376.33" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="808.33" cy="352.95" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="925.56" cy="337.84" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="1042.78" cy="312.59" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="1160.00" cy="169.78" r="5" fill="#0072B2" stroke="#ffffff" stroke-width="1.5"/>
+<line x1="105.00" y1="103.00" x2="133.00" y2="103.00" stroke="#0072B2" stroke-width="3" opacity="1"/>
+<text x="143.00" y="108.00" class="legend" text-anchor="start">Borrowed union</text>
+<polyline points="105.00,606.82 222.22,606.82 339.44,606.75 456.67,396.63 573.89,391.86 691.11,381.13 808.33,371.60 925.56,352.91 1042.78,322.95 1160.00,218.40" fill="none" stroke="#D55E00" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="105.00" cy="606.82" r="5" fill="#D55E00" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="222.22" cy="606.82" r="5" fill="#D55E00" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="339.44" cy="606.75" r="5" fill="#D55E00" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="456.67" cy="396.63" r="5" fill="#D55E00" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="573.89" cy="391.86" r="5" fill="#D55E00" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="691.11" cy="381.13" r="5" fill="#D55E00" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="808.33" cy="371.60" r="5" fill="#D55E00" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="925.56" cy="352.91" r="5" fill="#D55E00" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="1042.78" cy="322.95" r="5" fill="#D55E00" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="1160.00" cy="218.40" r="5" fill="#D55E00" stroke="#ffffff" stroke-width="1.5"/>
+<line x1="390.00" y1="103.00" x2="418.00" y2="103.00" stroke="#D55E00" stroke-width="3" opacity="1"/>
+<text x="428.00" y="108.00" class="legend" text-anchor="start">Allocating assignment (old)</text>
+<polyline points="105.00,639.85 222.22,640.09 339.44,640.07 456.67,636.51 573.89,629.83 691.11,628.44 808.33,625.15 925.56,592.90 1042.78,593.27 1160.00,526.29" fill="none" stroke="#009E73" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="105.00" cy="639.85" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="222.22" cy="640.09" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="339.44" cy="640.07" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="456.67" cy="636.51" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="573.89" cy="629.83" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="691.11" cy="628.44" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="808.33" cy="625.15" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="925.56" cy="592.90" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="1042.78" cy="593.27" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="1160.00" cy="526.29" r="5" fill="#009E73" stroke="#ffffff" stroke-width="1.5"/>
+<line x1="675.00" y1="103.00" x2="703.00" y2="103.00" stroke="#009E73" stroke-width="3" opacity="1"/>
+<text x="713.00" y="108.00" class="legend" text-anchor="start">In-place assignment</text>
+<line x1="398.06" y1="85.00" x2="398.06" y2="670.00" stroke="#D55E00" stroke-width="2" opacity="1" stroke-dasharray="7 5"/>
+<text x="406.06" y="133.00" class="annotation" text-anchor="start">Inline64 -&gt; dynamic</text>
+<text x="632.50" y="728.00" class="label" text-anchor="middle">Relation count</text>
+<text x="28.00" y="377.50" class="label" text-anchor="middle" transform="rotate(-90 28 377.5)">Nanoseconds per workload iteration</text>
+</svg>

@@ -1,0 +1,6 @@
+shape,relations,width,algorithm,deferred_median_ms,materializing_median_ms,deferred_improvement_percent,deferred_appended_operators,materializing_appended_operators
+chain,12,16,DpHyp,2.883271,2.954896,2.4,11,286
+chain,12,64,DpHyp,9.248229,9.867646,6.3,11,286
+chain,65,1,DpHyp,314.382958,367.334021,14.4,64,45760
+clique,9,16,DpHyp,262.805792,340.013083,22.7,8,24604
+clique,9,64,DpHyp,739.594563,959.887229,22.9,8,24604

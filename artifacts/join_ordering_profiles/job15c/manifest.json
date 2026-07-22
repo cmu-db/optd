@@ -1,0 +1,26 @@
+{
+  "generated_at": "2026-07-22T03:58:00Z",
+  "base_commit": "e48711c",
+  "final_source_commit": "d109c8f",
+  "hash_algorithm": "sha256",
+  "files": {
+    "README.md": "240f65163455b9510773fa0a858845f87318232d4fbcf05c424119d3b8be2416",
+    "candidate_evaluator_raw.tsv": "3fcd3386f41fc97e6da8385bb965d71befeecf68fed16162a6f7c27ff1e9f995",
+    "candidate_evaluator_summary.csv": "5c994c001d1e749a0363ae624a56f7d46eba70449b516a7a47a4ed8bb634e2fe",
+    "candidate_evaluator_summary.md": "0db272a2488b0306b30d5aae341ffb23f68eca55065ffcd2bd22d8f85460d528",
+    "job15c-optimizer.json.gz": "74c6eabbe6ea35bc48921033b4183333b2571ec6341cafafdb4bbb3dfa6b60c3",
+    "job15c-optimizer.json.syms.json": "e45ec4341a66003b6c65a85cd7764fae30e9e5d026a64708857edb5362e48034",
+    "job15c-phase1-summary.md": "482943c2834559cc9d1ee12d49fdb3752b8f8d742838479e84ca6fc8eb0fb7ee",
+    "job15c-phase1.json.gz": "143b43d00236b8aa4c7548aece7df716a18d2ef8e29333d580cb0a302004593c",
+    "job15c-phase1.json.syms.json": "61aaf45a128ac8b9d29abd09390af7c5af476086ad323594ffc3adc9a5f746a4",
+    "job15c-phase2-summary.md": "ca802c7110cfb9230d61c2ab5e69ca9e4259d031f24911f09385b6f94e05dbbb",
+    "job15c-phase2.json.gz": "abb520b1694c861ceeec19d7259b3684c1d956c4d5026cf28b9d0e97776888cc",
+    "job15c-phase2.json.syms.json": "70fe574a3dd4eae2bdd71faef7ec1d01e9f36e851a50b46913d38eae818a0074",
+    "job15c-phase3-summary.md": "70f3f55997f46c2a22c89528f1dcd9be9f0abc47f109c280b1e0ec1e78e3af12",
+    "job15c-phase3.json.gz": "cd95c96d72d7093eea1682b0078571e7cd73a67cfb0ef6e131031355b2cb3dfb",
+    "job15c-phase3.json.syms.json": "45fb550eb88280c665107ad8e1646442a9670f588594296e6a2453465669e3d1",
+    "job15c_profile.sql": "f08a4ed190b4a04963b4d005c958bef91a55e3848cc956f159d09df165e03224",
+    "optimization_phases.csv": "a38f46b24812162518314e2811b24b2b8d0a18085304b0a82fc3b5e58952a074",
+    "optimization_phases.md": "a4ac4231b0aa2540bff5e43055e15ac0eb489a6a7957392adf5338c493a67c95"
+  }
+}

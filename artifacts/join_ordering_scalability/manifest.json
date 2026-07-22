@@ -1,0 +1,91 @@
+{
+  "generated_at": "2026-07-21",
+  "platform": "macOS-15.6.1-arm64-arm-64bit-Mach-O",
+  "files": [
+    {
+      "file": "README.md",
+      "bytes": 4244,
+      "sha256": "370df080e30787e124164bc7c1d6bc56a39ba87bfa9871e59af552b3c7a47ef9"
+    },
+    {
+      "file": "adaptive_summary.csv",
+      "bytes": 810,
+      "sha256": "66caad1b80c59a433229981352a88630c7d667adbd68ddf704965a65d4d06c7d"
+    },
+    {
+      "file": "adaptive_summary.md",
+      "bytes": 922,
+      "sha256": "2603f53b9e865d80932aaff27669db527a32637419db228514b3fad9ae6b70b1"
+    },
+    {
+      "file": "algorithm_summary.csv",
+      "bytes": 3179,
+      "sha256": "2f79d10a7a19923430c7333df9b1f12ae5ba39f121ee6e507b76b261080c9cb7"
+    },
+    {
+      "file": "figure_1_algorithm_scaling.png",
+      "bytes": 129318,
+      "sha256": "2337c1a2ce904c6cc70f51f30861f9da2e64f10f3f733250672826d0b874e1b7"
+    },
+    {
+      "file": "figure_1_algorithm_scaling.svg",
+      "bytes": 19052,
+      "sha256": "c84fedf4204dc4140830819e6e2a20d41b09f869843527f321e05f34d5acee6c"
+    },
+    {
+      "file": "figure_2_adaptive_policy.png",
+      "bytes": 99469,
+      "sha256": "4de1c8ef6edb90dd06e9943cdd44c14bd88cca046a845e35dc1072143f6b5f61"
+    },
+    {
+      "file": "figure_2_adaptive_policy.svg",
+      "bytes": 6458,
+      "sha256": "47b2da28d19c7d68dcf9dc245bd26699dd6c55feb1799b6bac42d0bb53baf6c3"
+    },
+    {
+      "file": "figure_3_work_scaling.png",
+      "bytes": 139935,
+      "sha256": "ac0975085e69d3b84840dbb49e64a97d614cdb1e16659ba71cd6e374ad564dff"
+    },
+    {
+      "file": "figure_3_work_scaling.svg",
+      "bytes": 9136,
+      "sha256": "272f9a5409d31e9b618e1fecef8f11627ad4523d2beb38a2500ffe2088e3ed4d"
+    },
+    {
+      "file": "figure_4_relation_set_boundary.png",
+      "bytes": 133525,
+      "sha256": "5835b29800bd968d7a8306aa8d311a83d9386e83d4ee6f2ef9a475291f0c1922"
+    },
+    {
+      "file": "figure_4_relation_set_boundary.svg",
+      "bytes": 7535,
+      "sha256": "24f730684920cca793af46127b7c6bdf72eba566b8ad08e48174dfc0e67bd194"
+    },
+    {
+      "file": "figure_5_topology_sensitivity.png",
+      "bytes": 113704,
+      "sha256": "fb461ea353da714569b62be4a00bc3c2518b281e409c5e26a9c8cf21e1343b17"
+    },
+    {
+      "file": "figure_5_topology_sensitivity.svg",
+      "bytes": 6730,
+      "sha256": "a3ae449b97341fea55c32e4110a8399effd55d04d137585bf61cd8a4f0efd554"
+    },
+    {
+      "file": "raw_measurements.csv",
+      "bytes": 43274,
+      "sha256": "0e811601ff2c9fb6c96a5e50cb5d352335229ebb4512a19f9ba8887b0b93b1b1"
+    },
+    {
+      "file": "relation_set_summary.csv",
+      "bytes": 4066,
+      "sha256": "14a31d015e5348b8349b28b604ccee2bf0aa424088579191f2e3169a65635313"
+    },
+    {
+      "file": "relation_set_summary.md",
+      "bytes": 1433,
+      "sha256": "079724fa3e6ae77c070d8a2d0ae7cd5149f55c8bab478405817b68a0eacc2eba"
+    }
+  ]
+}
