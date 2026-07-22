@@ -23,7 +23,8 @@ token counts.
 | 2026-07-21 23:01 | 2026-07-21 23:10 | Outer-join equality correctness | Prevented null-producing join sides and `ON` equalities from becoming globally valid equivalence classes; added all-join-type and chained-join tests demonstrating that downstream equalities are not incorrectly treated as redundant. | 306,292 / 3,252 s |
 | 2026-07-21 23:10 | 2026-07-21 23:16 | Candidate evaluation and plan-recipe scaffold | Routed DPhyp, linearized DP, and GOO through shared `JoinSearch`, evaluator, and accepted-plan arena abstractions. Added compatibility tests for custom cost composition and deferred recipe reconstruction. Across 103 deterministic benchmark rows, algorithm choice and candidate counts were identical; timing ratio was 0.993. JOB 15c remained neutral at 22.06 ms median over five runs. | 406,300 / 3,626 s |
 | 2026-07-21 23:16 | 2026-07-22 02:58 | Checkpoint approval and tool wait | The scaffold was already reviewed, tested, and staged at 23:16; commit `b8dc8d7` completed after the approval/tool call returned. This interval is recorded separately from implementation time. | 489,920 / 16,952 s |
-| 2026-07-22 02:58 | 2026-07-22 02:59 | Outer-join cardinality bounds | Raised a finite row-count upper bound alongside the null-extension minimum, preserving `lower <= value <= upper`; added exact-profile coverage for left, right, and full outer joins. | milestone included in the next usage snapshot |
+| 2026-07-22 02:58 | 2026-07-22 03:02 | Outer-join cardinality bounds | Raised a finite row-count upper bound alongside the null-extension minimum, preserving `lower <= value <= upper`; added exact-profile coverage for left, right, and full outer joins. Commit approval/tool wait accounts for most of this interval. | milestone included in the next usage snapshot |
+| 2026-07-22 03:02 | 2026-07-22 03:18 | Deferred default-cost evaluation | Added `PlanProperties` with `Arc<CardinalityProfile>`, profile-only join costing for `DefaultCostModel`, explicit compatibility selection for custom models, and bit-exact differential coverage for all join types and all three enumerators. Deferred search appends exactly `n-1` winning joins. JOB 15c measured 22.26 ms median, statistically flat versus 22.06 ms; Samply confirms profile construction is now 89.5% inclusive. | 593,554 / 18,100 s |
 
 ## Evidence Baseline
 
@@ -60,6 +61,11 @@ token counts.
 - JOB 15c after introducing shared evaluator/recipe infrastructure: 22.06 ms median across five
   release runs (21.87--22.67 ms); 103 deterministic scalability rows retained identical algorithm
   decisions and candidate counts, with a 0.993 median timing ratio.
+- JOB 15c with deferred profile-only candidate evaluation: 22.26 ms median across five release
+  runs (21.27--23.49 ms), a noise-level +0.9% versus the scaffold. The default evaluator now
+  materializes only the winning `n-1` joins; the compatibility evaluator remains available for
+  arbitrary models. A 10 kHz Samply capture reported 544 matching samples, with
+  `join_profile_from_conjuncts` at 89.5% inclusive and allocator/hash work dominating self time.
 - Dynamic `RelationSet` direct comparisons: in-place `|=` is 4.1x faster than allocate-and-replace
   at 256 relations; one-pass `FromIterator` is 53.8x faster than repeated singleton union at
   1,024 relations. Raw distributions and the revised boundary chart are under

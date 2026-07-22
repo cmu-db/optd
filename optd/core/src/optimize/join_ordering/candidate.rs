@@ -28,8 +28,8 @@ pub(super) struct JoinSearch<'a, M: CostModel> {
 /// Evaluated but not yet accepted join alternative.
 ///
 /// Delaying recipe commitment until the enumerator chooses this candidate keeps the recipe arena
-/// proportional to accepted DP states. The current evaluator has already materialized `root`, so
-/// dropping a draft preserves the historical unreachable-operator behavior.
+/// proportional to accepted DP states. The default evaluator can drop a draft without having
+/// appended any IR; compatibility evaluators preserve the historical eager-allocation behavior.
 pub(super) struct CandidateDraft<C> {
     recipe: PlanRecipe,
     evaluated: EvaluatedPlan<C>,
@@ -93,6 +93,7 @@ impl<'a, M: CostModel> JoinSearch<'a, M> {
         Ok(PlanState {
             plan,
             cost: evaluated.cost,
+            properties: evaluated.properties,
             #[cfg(test)]
             tree: JoinTree::Leaf(node),
         })
@@ -109,6 +110,7 @@ impl<'a, M: CostModel> JoinSearch<'a, M> {
         PlanState {
             plan,
             cost: candidate.evaluated.cost,
+            properties: candidate.evaluated.properties,
             #[cfg(test)]
             tree: candidate.tree,
         }
@@ -134,7 +136,7 @@ impl<'a, M: CostModel> JoinSearch<'a, M> {
         self.cost_model.operator_cost(root, self.ctx, self.analyses)
     }
 
-    /// Materializes an accepted plan. This is a cache hit for the Stage 1 evaluator.
+    /// Materializes an accepted plan, recursively reconstructing a deferred recipe when needed.
     pub(super) fn materialize(&mut self, plan: &PlanState<M::Cost>) -> Operator {
         self.plans.materialize(plan.plan, self.hypergraph, self.ctx)
     }
@@ -226,10 +228,12 @@ impl<'a, M: CostModel> JoinSearch<'a, M> {
             },
             CandidateInput {
                 cost: &outer.cost,
+                properties: &outer.properties,
                 materialized: outer_root,
             },
             CandidateInput {
                 cost: &inner.cost,
+                properties: &inner.properties,
                 materialized: inner_root,
             },
             self.ctx,

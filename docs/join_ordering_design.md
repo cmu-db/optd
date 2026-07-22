@@ -353,9 +353,16 @@ edge becomes `CrossProduct`; a predicate-free non-inner edge becomes a typed `Jo
 
 Candidate costing is behind a private `CandidateEvaluator` boundary. The compatibility evaluator
 materializes candidates before invoking an arbitrary `CostModel`, preserving custom
-`total_cost_from_children` behavior exactly. A deferred evaluator can omit candidate operators and
-let only the final recipe reach `QueryContext`; an end-to-end test exercises this path independently
-of the compatibility evaluator.
+`total_cost_from_children` behavior exactly. The default `CardinalityEvaluator` instead carries a
+`PlanProperties` bundle containing `Option<Arc<CardinalityProfile>>`. It derives each join's output
+profile and local cost from its two child profiles, composes cumulative cost in the same fold order
+as `CostModel`, and leaves the candidate root absent. Consequently only the final recipe reaches
+`QueryContext`. `JoinOrdering::new` and `with_config` select this path; `with_cost_model` deliberately
+selects compatibility evaluation, even when its argument happens to be `DefaultCostModel`.
+
+Differential tests compare the two evaluators bit-for-bit across every logical join type, a
+frequency-scaling cross product, DPhyp, linearized DP, and GOO/DP. They also verify that a deferred
+six-relation plan appends exactly five binary operators and that repeat materialization is memoized.
 
 ---
 
@@ -478,7 +485,9 @@ trivial). For larger groups the ordering matters for cardinality estimates.
    orientation-sensitive physical costs.
 9. `optd/core/src/optimize/join_ordering/`: direction-correct candidate reconstruction,
    bottom-up multi-group collection, public decisions, and `QueryPass` integration.
-10. Unit, exhaustive-oracle, SQL feature, benchmark, and same-machine release-profiler evidence
+10. `optd/core/src/optimize/join_ordering/evaluator.rs`: shared `Arc<CardinalityProfile>` plan
+    properties and deferred default-cost evaluation, while retaining exact custom-model behavior.
+11. Unit, exhaustive-oracle, SQL feature, benchmark, and same-machine release-profiler evidence
     cover exactness, algorithm selection, more than 64 relations, and regression bounds.
 
 ### Open / Follow-ups

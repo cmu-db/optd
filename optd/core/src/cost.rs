@@ -230,11 +230,25 @@ pub(crate) fn join_algorithm_class(
     hg: &QueryHypergraph,
     ctx: &QueryContext,
 ) -> JoinAlgorithmClass {
-    if edge_indices.iter().any(|idx| {
-        hg.edges[*idx]
-            .predicate
-            .is_some_and(|predicate| contains_hash_join_key(predicate, ctx))
-    }) {
+    let conjuncts = edge_indices
+        .iter()
+        .filter_map(|idx| hg.edges[*idx].predicate)
+        .collect::<Vec<_>>();
+    join_algorithm_class_for_conjuncts(&conjuncts, ctx)
+}
+
+/// Classifies a join from predicates that may already be split into conjuncts.
+///
+/// Callers may also supply an unsplit `AND` expression as an element; hash-key
+/// detection recursively examines nested conjunctions.
+pub(crate) fn join_algorithm_class_for_conjuncts(
+    conjuncts: &[Expr],
+    ctx: &QueryContext,
+) -> JoinAlgorithmClass {
+    if conjuncts
+        .iter()
+        .any(|predicate| contains_hash_join_key(*predicate, ctx))
+    {
         JoinAlgorithmClass::HashLike
     } else {
         JoinAlgorithmClass::NestedLoopLike
@@ -245,11 +259,7 @@ pub(crate) fn join_algorithm_class_for_predicate(
     predicate: Expr,
     ctx: &QueryContext,
 ) -> JoinAlgorithmClass {
-    if contains_hash_join_key(predicate, ctx) {
-        JoinAlgorithmClass::HashLike
-    } else {
-        JoinAlgorithmClass::NestedLoopLike
-    }
+    join_algorithm_class_for_conjuncts(&[predicate], ctx)
 }
 
 fn cardinality_profile(
@@ -609,6 +619,56 @@ mod tests {
         assert_eq!(
             join_algorithm_class_for_predicate(predicate, &ctx),
             JoinAlgorithmClass::NestedLoopLike
+        );
+    }
+
+    #[test]
+    fn empty_conjuncts_are_nested_loop_like() {
+        let ctx = QueryContext::new();
+
+        assert_eq!(
+            join_algorithm_class_for_conjuncts(&[], &ctx),
+            JoinAlgorithmClass::NestedLoopLike
+        );
+    }
+
+    #[test]
+    fn equality_conjunct_is_hash_like() {
+        let mut ctx = QueryContext::new();
+        let (_, left) = add_single_i64_column_scan(&mut ctx, "A", "a");
+        let (_, right) = add_single_i64_column_scan(&mut ctx, "B", "b");
+        let equality = binary_predicate(&mut ctx, BinaryOp::Eq, left, right);
+
+        assert_eq!(
+            join_algorithm_class_for_conjuncts(&[equality], &ctx),
+            JoinAlgorithmClass::HashLike
+        );
+    }
+
+    #[test]
+    fn residual_conjunct_is_nested_loop_like() {
+        let mut ctx = QueryContext::new();
+        let (_, left) = add_single_i64_column_scan(&mut ctx, "A", "a");
+        let (_, right) = add_single_i64_column_scan(&mut ctx, "B", "b");
+        let residual = binary_predicate(&mut ctx, BinaryOp::Gt, left, right);
+
+        assert_eq!(
+            join_algorithm_class_for_conjuncts(&[residual], &ctx),
+            JoinAlgorithmClass::NestedLoopLike
+        );
+    }
+
+    #[test]
+    fn mixed_conjuncts_are_hash_like() {
+        let mut ctx = QueryContext::new();
+        let (_, left) = add_single_i64_column_scan(&mut ctx, "A", "a");
+        let (_, right) = add_single_i64_column_scan(&mut ctx, "B", "b");
+        let residual = binary_predicate(&mut ctx, BinaryOp::Gt, left, right);
+        let equality = binary_predicate(&mut ctx, BinaryOp::IsNotDistinctFrom, left, right);
+
+        assert_eq!(
+            join_algorithm_class_for_conjuncts(&[residual, equality], &ctx),
+            JoinAlgorithmClass::HashLike
         );
     }
 }

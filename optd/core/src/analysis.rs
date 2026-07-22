@@ -1587,7 +1587,7 @@ fn scale_profile(profile: CardinalityProfile, factor: f64) -> CardinalityProfile
     }
 }
 
-fn cross_product_profile(
+pub(crate) fn cross_product_profile(
     left: &CardinalityProfile,
     right: &CardinalityProfile,
 ) -> CardinalityProfile {

@@ -6,11 +6,11 @@ use super::*;
 use crate::analysis::connecting_edge_indices;
 use crate::cost::{JoinAlgorithmClass, join_algorithm_class, join_algorithm_cost};
 use crate::{
-    AnalysisContext, BinaryOp, Catalog, Column, ColumnData, ColumnStatistics, CrossProduct,
-    ExprData, Hyperedge, HyperedgeJoinType, HypergraphNode, Join, JoinType, MemoryCatalog, NaryOp,
-    NodeSet, Operator, OperatorData, OptimizerContext, Output, PassManager, QueryContext,
-    QueryHypergraph, Relation, ScalarValue, Scan, Selection, TableRef, TableStatistics,
-    nodeset_singleton,
+    AnalysisContext, BinaryOp, CardinalityEstimationV1, Catalog, Column, ColumnData,
+    ColumnStatistics, CrossProduct, ExprData, Hyperedge, HyperedgeJoinType, HypergraphNode, Join,
+    JoinType, MemoryCatalog, NaryOp, NodeSet, Operator, OperatorData, OptimizerContext, Output,
+    PassManager, QueryContext, QueryHypergraph, Relation, ScalarValue, Scan, Selection, TableRef,
+    TableStatistics, nodeset_singleton,
 };
 use arrow_schema::{DataType, Field, Schema};
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
@@ -58,6 +58,7 @@ impl evaluator::CandidateEvaluator<UnitCost> for DeferredUnitEvaluator {
     ) -> OptimizeResult<evaluator::EvaluatedPlan<usize>> {
         Ok(evaluator::EvaluatedPlan {
             cost: 0,
+            properties: plan::PlanProperties::default(),
             materialized: None,
             immediate_cost: Some(0),
         })
@@ -80,6 +81,7 @@ impl evaluator::CandidateEvaluator<UnitCost> for DeferredUnitEvaluator {
         assert!(inner.materialized.is_none());
         Ok(evaluator::EvaluatedPlan {
             cost: outer.cost + inner.cost + 1,
+            properties: plan::PlanProperties::default(),
             materialized: None,
             immediate_cost: Some(1),
         })
@@ -435,6 +437,65 @@ fn solve_goo<M: CostModel>(
     Ok(Some((plan, root)))
 }
 
+#[derive(Debug, Clone, Copy)]
+enum TestSearchAlgorithm {
+    DpHyp,
+    Linearized,
+    GooDp,
+}
+
+fn run_default_algorithm(
+    algorithm: TestSearchAlgorithm,
+    deferred: bool,
+) -> (plan::JoinTree, f64, usize) {
+    let (mut ctx, hypergraph) = chain_graph(6);
+    let mut analyses = crate::test_analyses(&ctx);
+    let operators_before = ctx.operator_count();
+    let model = DefaultCostModel;
+    let cardinality_evaluator = evaluator::CardinalityEvaluator;
+    let materializing_evaluator = MaterializingEvaluator;
+    let selected: &dyn evaluator::CandidateEvaluator<DefaultCostModel> = if deferred {
+        &cardinality_evaluator
+    } else {
+        &materializing_evaluator
+    };
+
+    let (tree, cost, root, expected_profile) = {
+        let mut search = JoinSearch::new(&mut ctx, &mut analyses, &hypergraph, &model, selected);
+        let plan = match algorithm {
+            TestSearchAlgorithm::DpHyp => DPhyp::new(&mut search).solve(),
+            TestSearchAlgorithm::Linearized => linearized::solve(&mut search),
+            TestSearchAlgorithm::GooDp => goo::solve(&mut search, 3),
+        }
+        .unwrap()
+        .expect("a connected chain has a complete plan");
+        let tree = plan.tree.clone();
+        let cost = plan.cost;
+        let expected_profile = plan.properties.cardinality.clone();
+        let root = search.materialize(&plan);
+        assert_eq!(
+            search.materialize(&plan),
+            root,
+            "materialization is memoized"
+        );
+        (tree, cost, root, expected_profile)
+    };
+
+    if deferred {
+        let analyzed = CardinalityEstimationV1::get_shared(&ctx, &mut analyses, root).unwrap();
+        assert_eq!(
+            expected_profile
+                .as_deref()
+                .expect("deferred winning states carry cardinality"),
+            analyzed.as_ref(),
+        );
+    } else {
+        assert!(expected_profile.is_none());
+    }
+
+    (tree, cost, ctx.operator_count() - operators_before)
+}
+
 #[test]
 fn dphyp_three_way_chain_produces_plan() {
     let (mut ctx, root) = three_way_chain();
@@ -528,6 +589,58 @@ fn dphyp_reconstructs_deferred_non_commutative_join_with_all_predicates() {
     };
     assert_eq!(exprs, &vec![equality, residual]);
     assert_eq!(ctx.operator_count(), operators_before_search + 1);
+}
+
+#[test]
+fn cardinality_evaluator_matches_all_enumerators_and_materializes_only_the_winner() {
+    for algorithm in [
+        TestSearchAlgorithm::DpHyp,
+        TestSearchAlgorithm::Linearized,
+        TestSearchAlgorithm::GooDp,
+    ] {
+        let (deferred_tree, deferred_cost, deferred_operators) =
+            run_default_algorithm(algorithm, true);
+        let (materialized_tree, materialized_cost, materialized_operators) =
+            run_default_algorithm(algorithm, false);
+
+        assert_eq!(deferred_tree, materialized_tree, "{algorithm:?}");
+        assert_eq!(
+            deferred_cost.to_bits(),
+            materialized_cost.to_bits(),
+            "{algorithm:?}",
+        );
+        assert_eq!(
+            deferred_operators, 5,
+            "a six-relation winner has exactly five joins: {algorithm:?}",
+        );
+        assert!(
+            materialized_operators > deferred_operators,
+            "compatibility costing should expose rejected candidate IR: {algorithm:?}",
+        );
+    }
+}
+
+#[test]
+fn join_ordering_constructors_select_deferred_and_compatibility_evaluators() {
+    let (query, _) = three_way_chain();
+    let mut default_ctx = crate::test_optimizer_context(query);
+    let default_before = default_ctx.query.operator_count();
+    JoinOrdering::new().run(&mut default_ctx).unwrap();
+    let default_appended = default_ctx.query.operator_count() - default_before;
+
+    let (query, _) = three_way_chain();
+    let mut compatibility_ctx = crate::test_optimizer_context(query);
+    let compatibility_before = compatibility_ctx.query.operator_count();
+    JoinOrdering::with_cost_model(DefaultCostModel)
+        .run(&mut compatibility_ctx)
+        .unwrap();
+    let compatibility_appended = compatibility_ctx.query.operator_count() - compatibility_before;
+
+    assert_eq!(default_appended, 2, "only the two winning joins are new");
+    assert!(
+        compatibility_appended > default_appended,
+        "with_cost_model preserves eager compatibility semantics",
+    );
 }
 
 #[test]

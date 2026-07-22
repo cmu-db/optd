@@ -44,10 +44,12 @@
 //!
 //! # Arena allocation
 //!
-//! Candidate operators are appended to [`crate::QueryContext`] while alternatives are costed. Losing
-//! candidates can therefore remain unreachable in the arena; only the winning root is installed
-//! in the rewrite map. Analyses are explicitly cleared before group construction because plan
-//! costing is demand-driven and candidates add new operator handles.
+//! The default evaluator carries shared cardinality profiles through compact plan recipes, so
+//! rejected alternatives never append operators to [`crate::QueryContext`]. Once enumeration
+//! finishes, only the winning recipe is recursively materialized. Custom cost models retain the
+//! compatibility evaluator: it materializes candidates before costing because arbitrary models
+//! may inspect concrete operator handles. Analyses are explicitly cleared before group
+//! construction because both leaf costing and compatibility evaluation are demand-driven.
 
 mod candidate;
 mod dphyp;
@@ -71,7 +73,7 @@ use crate::{OptimizerContext, build_hypergraph};
 use super::{OptimizeResult, Pass, PassMode, PassResult, QueryPass};
 use candidate::JoinSearch;
 use dphyp::DPhyp;
-use evaluator::MaterializingEvaluator;
+use evaluator::{CandidateEvaluator, CardinalityEvaluator, MaterializingEvaluator};
 use policy::choose_algorithm;
 
 // ---------------------------------------------------------------------------
@@ -90,14 +92,15 @@ use policy::choose_algorithm;
 /// The default type parameter uses [`DefaultCostModel`]. Supply another [`CostModel`] with
 /// [`JoinOrdering::with_cost_model`] when plan comparison needs a different cost algebra.
 ///
-/// Join ordering declares [`PassMode::Once`]: enumeration is final for this pipeline position and
-/// appends candidate operators to the query arena, so a fixed-point reinvocation would repeat work
-/// without exposing a new optimization opportunity.
-pub struct JoinOrdering<M = DefaultCostModel> {
+/// Join ordering declares [`PassMode::Once`]: enumeration is final for this pipeline position, so
+/// a fixed-point reinvocation would repeat work without exposing a new optimization opportunity.
+pub struct JoinOrdering<M: CostModel = DefaultCostModel> {
     /// Cost model shared by all enumerators.
     cost_model: M,
     /// Thresholds controlling adaptive algorithm selection.
     config: AdaptiveJoinOrderingConfig,
+    /// Candidate representation and costing strategy selected with the cost model.
+    evaluator: Box<dyn CandidateEvaluator<M>>,
     /// Per-group decisions from the most recent attempted run.
     last_decisions: Vec<AlgorithmDecision>,
 }
@@ -108,6 +111,7 @@ impl JoinOrdering<DefaultCostModel> {
         Self {
             cost_model: DefaultCostModel,
             config: AdaptiveJoinOrderingConfig::default(),
+            evaluator: Box::new(CardinalityEvaluator),
             last_decisions: Vec::new(),
         }
     }
@@ -122,18 +126,23 @@ impl JoinOrdering<DefaultCostModel> {
 
     /// Creates a pass with a custom cost model and default adaptive thresholds.
     ///
+    /// This constructor selects the materializing compatibility evaluator because an arbitrary
+    /// model may inspect concrete operator handles or override `total_cost_from_children`. Use
+    /// [`JoinOrdering::new`] for deferred evaluation with the built-in model.
+    ///
     /// Use [`JoinOrdering::adaptive_config`] on the returned value when both the model and policy
     /// should be customized.
     pub fn with_cost_model<M: CostModel>(cost_model: M) -> JoinOrdering<M> {
         JoinOrdering {
             cost_model,
             config: AdaptiveJoinOrderingConfig::default(),
+            evaluator: Box::new(MaterializingEvaluator),
             last_decisions: Vec::new(),
         }
     }
 }
 
-impl<M> JoinOrdering<M> {
+impl<M: CostModel> JoinOrdering<M> {
     /// Overrides adaptive thresholds while preserving the configured cost model.
     ///
     /// This builder is useful after [`JoinOrdering::with_cost_model`]. It consumes and returns the
@@ -197,9 +206,9 @@ impl<M: CostModel> QueryPass for JoinOrdering<M> {
             return Ok(PassResult::Unchanged);
         }
 
-        // Enumeration appends candidate operators, but only winning roots enter replacements.
+        // Default-cost enumeration keeps candidates as recipes. Custom evaluators may append
+        // candidates for compatibility, but only winning roots enter replacements.
         let mut replacements = Vec::new();
-        let evaluator = MaterializingEvaluator;
         for (group_root, hg) in &groups {
             let decision = choose_algorithm(hg, self.config);
             self.last_decisions.push(decision);
@@ -208,7 +217,7 @@ impl<M: CostModel> QueryPass for JoinOrdering<M> {
                 &mut ctx.analyses,
                 hg,
                 &self.cost_model,
-                &evaluator,
+                self.evaluator.as_ref(),
             );
             let plan = match decision.algorithm {
                 JoinOrderAlgorithm::DpHyp => DPhyp::new(&mut search).solve()?,

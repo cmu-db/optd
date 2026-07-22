@@ -1,5 +1,8 @@
 //! Compact search-plan recipes and their materialization into the query arena.
 
+use std::sync::Arc;
+
+use crate::CardinalityProfile;
 use crate::hypergraph::QueryHypergraph;
 #[cfg(test)]
 use crate::hypergraph::{NodeSet, nodeset_singleton};
@@ -14,15 +17,25 @@ pub(super) struct PlanId(usize);
 
 /// Winning search state for one relation subset.
 ///
-/// The operator root lives in the plan arena rather than in every cloned DP state. Stage 1 still
-/// materializes all candidates eagerly, but this separation lets a later evaluator leave roots
-/// absent until the winning recipe is reconstructed.
+/// The operator root lives in the plan arena rather than in every cloned DP state. The default
+/// evaluator leaves join roots absent until the winning recipe is reconstructed; compatibility
+/// evaluators may cache eagerly materialized roots in the same arena.
 #[derive(Clone)]
 pub(super) struct PlanState<C> {
     pub(super) plan: PlanId,
     pub(super) cost: C,
+    pub(super) properties: PlanProperties,
     #[cfg(test)]
     pub(super) tree: JoinTree,
+}
+
+/// Derived properties carried by a search state without requiring a concrete IR operator.
+///
+/// Keeping this bundle separate from the cost makes it straightforward to add more properties
+/// needed by future evaluators while preserving the enumerators' compact state representation.
+#[derive(Clone, Default)]
+pub(super) struct PlanProperties {
+    pub(super) cardinality: Option<Arc<CardinalityProfile>>,
 }
 
 /// Immutable recipe for one leaf or oriented join.
@@ -46,8 +59,8 @@ struct PlanNode {
 
 /// Append-only storage for accepted search recipes.
 ///
-/// `materialized` is populated for every node by the compatibility evaluator. Keeping it optional
-/// establishes the deferred-materialization seam without changing current operator allocation.
+/// `materialized` remains empty for default-cost join nodes until final reconstruction. The
+/// compatibility evaluator populates it eagerly because arbitrary cost models may inspect IR.
 #[derive(Default)]
 pub(super) struct PlanArena {
     nodes: Vec<PlanNode>,
@@ -65,8 +78,7 @@ impl PlanArena {
 
     /// Recursively materializes a recipe and memoizes the resulting operator handle.
     ///
-    /// With the current materializing evaluator this is a cache hit. The recursive path is kept
-    /// complete so a profile-based evaluator can later omit losing-candidate IR construction.
+    /// This is a cache hit for compatibility-evaluated plans and after the first reconstruction.
     pub(super) fn materialize(
         &mut self,
         plan: PlanId,
@@ -137,7 +149,7 @@ pub(super) fn materialize_candidate_join(
 }
 
 #[cfg(test)]
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 /// Lightweight witness tree retained only in tests.
 pub(super) enum JoinTree {
     Leaf(usize),
