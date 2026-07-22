@@ -2,23 +2,19 @@
 
 use std::collections::HashMap;
 
-#[cfg(test)]
-use super::dphyp::JoinTree;
-use super::{candidate::best_join_candidate, dphyp::PlanState};
+use super::candidate::{CandidateDraft, JoinSearch};
+use super::plan::PlanState;
 use crate::analysis::connecting_edge_indices;
 use crate::cost::CostModel;
 use crate::hypergraph::{NodeSet, QueryHypergraph, nodeset_singleton};
-use crate::{AnalysisContext, QueryContext};
 
 use super::OptimizeResult;
 use super::graph::JoinGraph;
 
 pub(super) fn solve<M: CostModel>(
-    ctx: &mut QueryContext,
-    analyses: &mut AnalysisContext,
-    hypergraph: &QueryHypergraph,
-    cost_model: &M,
+    search: &mut JoinSearch<'_, M>,
 ) -> OptimizeResult<Option<PlanState<M::Cost>>> {
+    let hypergraph = search.hypergraph();
     if hypergraph.nodes.is_empty() {
         return Ok(None);
     }
@@ -28,22 +24,13 @@ pub(super) fn solve<M: CostModel>(
     let mut table = HashMap::with_capacity(order.len() * order.len());
 
     for (position, node_id) in order.iter().copied().enumerate() {
-        let root = hypergraph.nodes[node_id].root;
-        table.insert(
-            (position, position),
-            PlanState {
-                root,
-                cost: cost_model.total_cost(root, ctx, analyses)?,
-                #[cfg(test)]
-                tree: JoinTree::Leaf(node_id),
-            },
-        );
+        table.insert((position, position), search.leaf(node_id)?);
     }
 
     for width in 2..=order.len() {
         for start in 0..=order.len() - width {
             let end = start + width - 1;
-            let mut best: Option<PlanState<M::Cost>> = None;
+            let mut best: Option<CandidateDraft<M::Cost>> = None;
             for split in start..end {
                 let Some(left) = table.get(&(start, split)) else {
                     continue;
@@ -54,29 +41,25 @@ pub(super) fn solve<M: CostModel>(
                 let left_nodes = &interval_sets[start][split];
                 let right_nodes = &interval_sets[split + 1][end];
                 let edge_indices = connecting_edge_indices(left_nodes, right_nodes, hypergraph);
-                let Some(candidate) = best_join_candidate(
-                    ctx,
-                    analyses,
-                    hypergraph,
-                    cost_model,
+                let Some(candidate) = search.best_join_candidate(
                     left_nodes,
                     left,
                     right_nodes,
                     right,
-                    &edge_indices,
+                    edge_indices,
                 )?
                 else {
                     continue;
                 };
                 if best
                     .as_ref()
-                    .is_none_or(|current| cost_model.is_better(&candidate.cost, &current.cost))
+                    .is_none_or(|current| search.is_better(candidate.cost(), current.cost()))
                 {
                     best = Some(candidate);
                 }
             }
             if let Some(best) = best {
-                table.insert((start, end), best);
+                table.insert((start, end), search.commit(best));
             }
         }
     }

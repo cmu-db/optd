@@ -51,10 +51,12 @@
 
 mod candidate;
 mod dphyp;
+mod evaluator;
 mod goo;
 mod graph;
 mod groups;
 mod linearized;
+mod plan;
 mod policy;
 
 #[cfg(test)]
@@ -67,7 +69,9 @@ use crate::cost::{CostModel, DefaultCostModel};
 use crate::{OptimizerContext, build_hypergraph};
 
 use super::{OptimizeResult, Pass, PassMode, PassResult, QueryPass};
+use candidate::JoinSearch;
 use dphyp::DPhyp;
+use evaluator::MaterializingEvaluator;
 use policy::choose_algorithm;
 
 // ---------------------------------------------------------------------------
@@ -195,26 +199,27 @@ impl<M: CostModel> QueryPass for JoinOrdering<M> {
 
         // Enumeration appends candidate operators, but only winning roots enter replacements.
         let mut replacements = Vec::new();
+        let evaluator = MaterializingEvaluator;
         for (group_root, hg) in &groups {
             let decision = choose_algorithm(hg, self.config);
             self.last_decisions.push(decision);
+            let mut search = JoinSearch::new(
+                &mut ctx.query,
+                &mut ctx.analyses,
+                hg,
+                &self.cost_model,
+                &evaluator,
+            );
             let plan = match decision.algorithm {
-                JoinOrderAlgorithm::DpHyp => {
-                    DPhyp::new(&mut ctx.query, &mut ctx.analyses, hg, &self.cost_model).solve()?
+                JoinOrderAlgorithm::DpHyp => DPhyp::new(&mut search).solve()?,
+                JoinOrderAlgorithm::LinearizedDp => linearized::solve(&mut search)?,
+                JoinOrderAlgorithm::GooDp => {
+                    goo::solve(&mut search, self.config.goo_exact_subproblem_size)?
                 }
-                JoinOrderAlgorithm::LinearizedDp => {
-                    linearized::solve(&mut ctx.query, &mut ctx.analyses, hg, &self.cost_model)?
-                }
-                JoinOrderAlgorithm::GooDp => goo::solve(
-                    &mut ctx.query,
-                    &mut ctx.analyses,
-                    hg,
-                    &self.cost_model,
-                    self.config.goo_exact_subproblem_size,
-                )?,
             };
             if let Some(plan) = plan {
-                replacements.push((*group_root, plan.root));
+                let root = search.materialize(&plan);
+                replacements.push((*group_root, root));
             }
         }
         if replacements.is_empty() {

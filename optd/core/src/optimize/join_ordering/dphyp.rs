@@ -2,58 +2,13 @@
 
 use std::collections::HashMap;
 
-use super::{OptimizeResult, candidate::best_join_candidate, graph::JoinGraph};
+use super::OptimizeResult;
+use super::candidate::JoinSearch;
+use super::graph::JoinGraph;
+use super::plan::PlanState;
 use crate::analysis::connecting_edge_indices;
 use crate::cost::CostModel;
-use crate::hypergraph::{NodeSet, QueryHypergraph, nodeset_min, nodeset_singleton};
-use crate::{AnalysisContext, Operator, QueryContext};
-
-// ---------------------------------------------------------------------------
-// JoinTree: the output of DPhyp
-// ---------------------------------------------------------------------------
-
-#[cfg(test)]
-#[derive(Clone)]
-/// Lightweight witness tree retained only in tests.
-///
-/// Production states keep the winning operator root directly. Avoiding this parallel tree in
-/// release builds matters for large DP tables because cloning it would make candidate comparison
-/// proportional to subtree size.
-pub(super) enum JoinTree {
-    Leaf(usize), // node index
-    Join {
-        left: Box<JoinTree>,
-        right: Box<JoinTree>,
-    },
-}
-
-#[cfg(test)]
-impl JoinTree {
-    pub(super) fn leaf_count(&self) -> usize {
-        match self {
-            JoinTree::Leaf(_) => 1,
-            JoinTree::Join { left, right, .. } => left.leaf_count() + right.leaf_count(),
-        }
-    }
-
-    pub(super) fn leaf_set(&self) -> NodeSet {
-        match self {
-            JoinTree::Leaf(nid) => nodeset_singleton(*nid),
-            JoinTree::Join { left, right, .. } => &left.leaf_set() | &right.leaf_set(),
-        }
-    }
-
-    pub(super) fn has_join_with_leaves(&self, leaves: &NodeSet) -> bool {
-        match self {
-            JoinTree::Leaf(_) => false,
-            JoinTree::Join { left, right, .. } => {
-                self.leaf_set() == *leaves
-                    || left.has_join_with_leaves(leaves)
-                    || right.has_join_with_leaves(leaves)
-            }
-        }
-    }
-}
+use crate::hypergraph::{NodeSet, nodeset_min, nodeset_singleton};
 
 // ---------------------------------------------------------------------------
 // DPhyp
@@ -70,56 +25,30 @@ impl JoinTree {
 ///
 /// `allowed` restricts both phases to an induced subgraph. The GOO/DP implementation uses this to
 /// solve bounded subtrees exactly without copying or renumbering the original hypergraph.
-pub(super) struct DPhyp<'a, M: CostModel> {
-    /// Arena and IR payloads used to materialize candidate joins.
-    ctx: &'a mut QueryContext,
-    /// Demand-driven analyses used by the cost model.
-    analyses: &'a mut AnalysisContext,
-    /// Immutable join group being enumerated.
-    hg: &'a QueryHypergraph,
-    /// Cost algebra and operator-local costing implementation.
-    cost_model: &'a M,
+pub(super) struct DPhyp<'search, 'ctx, M: CostModel> {
+    /// Shared candidate evaluator, recipe arena, IR, and analyses for this join group.
+    search: &'search mut JoinSearch<'ctx, M>,
     /// DP table: NodeSet → best known plan for that subset.
     dp: HashMap<NodeSet, PlanState<M::Cost>>,
     /// Induced node set visible to the current solve.
     allowed: NodeSet,
 }
 
-#[derive(Clone)]
-/// Winning physical/logical candidate for one relation set.
-///
-/// Child costs are composed through [`CostModel::total_cost_from_children`], so replacing a DP
-/// entry does not require walking the already-costed subtrees again.
-pub(super) struct PlanState<C> {
-    /// Root operator of the materialized candidate.
-    pub(super) root: Operator,
-    /// Total cost of the complete subtree rooted at `root`.
-    pub(super) cost: C,
-    #[cfg(test)]
-    pub(super) tree: JoinTree,
-}
-
-impl<'a, M: CostModel> DPhyp<'a, M> {
+impl<'search, 'ctx, M: CostModel> DPhyp<'search, 'ctx, M> {
     /// Creates an exact solver over the complete hypergraph.
-    pub(super) fn new(
-        ctx: &'a mut QueryContext,
-        analyses: &'a mut AnalysisContext,
-        hg: &'a QueryHypergraph,
-        cost_model: &'a M,
-    ) -> Self {
+    pub(super) fn new(search: &'search mut JoinSearch<'ctx, M>) -> Self {
+        let relation_count = search.hypergraph().nodes.len();
         Self {
-            ctx,
-            analyses,
-            hg,
-            cost_model,
+            search,
             dp: HashMap::new(),
-            allowed: NodeSet::all(hg.nodes.len()),
+            allowed: NodeSet::all(relation_count),
         }
     }
 
     /// Solves the full join group and returns its cheapest complete plan.
     pub(super) fn solve(&mut self) -> OptimizeResult<Option<PlanState<M::Cost>>> {
-        self.solve_subset(&NodeSet::all(self.hg.nodes.len()))
+        let all = NodeSet::all(self.search.hypergraph().nodes.len());
+        self.solve_subset(&all)
     }
 
     /// Solves the subgraph induced by `allowed`.
@@ -140,17 +69,7 @@ impl<'a, M: CostModel> DPhyp<'a, M> {
         // Every base relation/non-join subtree is already a valid one-node plan.
         for i in allowed.iter() {
             let s = nodeset_singleton(i);
-            let root = self.hg.nodes[i].root;
-            let cost = self.cost_model.total_cost(root, self.ctx, self.analyses)?;
-            self.dp.insert(
-                s,
-                PlanState {
-                    root,
-                    cost,
-                    #[cfg(test)]
-                    tree: JoinTree::Leaf(i),
-                },
-            );
+            self.dp.insert(s, self.search.leaf(i)?);
         }
 
         // Descending seeds plus B_min form DPhyp's canonical enumeration order.
@@ -229,22 +148,14 @@ impl<'a, M: CostModel> DPhyp<'a, M> {
             return Ok(());
         };
 
-        let edge_indices = connecting_edge_indices(s1, s2, self.hg);
+        let edge_indices = connecting_edge_indices(s1, s2, self.search.hypergraph());
         if edge_indices.is_empty() {
             return Ok(());
         }
 
-        let Some(new_state) = best_join_candidate(
-            self.ctx,
-            self.analyses,
-            self.hg,
-            self.cost_model,
-            s1,
-            &left,
-            s2,
-            &right,
-            &edge_indices,
-        )?
+        let Some(candidate) =
+            self.search
+                .best_join_candidate(s1, &left, s2, &right, edge_indices)?
         else {
             return Ok(());
         };
@@ -253,22 +164,23 @@ impl<'a, M: CostModel> DPhyp<'a, M> {
         let better = self
             .dp
             .get(&combined)
-            .is_none_or(|existing| self.cost_model.is_better(&new_state.cost, &existing.cost));
+            .is_none_or(|existing| self.search.is_better(candidate.cost(), &existing.cost));
 
         if better {
-            self.dp.insert(combined, new_state);
+            let state = self.search.commit(candidate);
+            self.dp.insert(combined, state);
         }
         Ok(())
     }
 
     /// Returns DPhyp's neighborhood `N(s, x)` inside the current induced subgraph.
     fn neighborhood(&self, s: &NodeSet, x: &NodeSet) -> NodeSet {
-        JoinGraph::new(self.hg).neighborhood_within(s, x, &self.allowed)
+        JoinGraph::new(self.search.hypergraph()).neighborhood_within(s, x, &self.allowed)
     }
 
     /// Returns whether an applicable hyperedge connects `s1` and `s2`.
     fn has_edge(&self, s1: &NodeSet, s2: &NodeSet) -> bool {
-        JoinGraph::new(self.hg).connects(s1, s2)
+        JoinGraph::new(self.search.hypergraph()).connects(s1, s2)
     }
 
     /// Returns `B_min(s)`: all nodes with index ≤ `min(s)`.

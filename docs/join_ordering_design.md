@@ -27,9 +27,11 @@ The implementation is split into four independent layers:
    trimmed so equality and hashing are representation-independent.
 2. **Join graph view** — neighborhood, connectivity, connecting-edge lookup, connected-subgraph
    counting, and hyperedge detection are pure operations over a borrowed `QueryHypergraph`.
-3. **Enumerators** — exact DPhyp and interval DP generate csg-cmp pairs or interval splits;
-   candidate materialization/cost comparison is shared. Search-space size is measured separately
-   before exact enumeration so policy can enforce a deterministic budget.
+3. **Enumerators and plans** — exact DPhyp and interval DP generate csg-cmp pairs or interval
+   splits through one `JoinSearch`. Accepted states reference compact recipes in a `PlanArena`;
+   candidate evaluation, comparison, orientation, and final reconstruction are shared. Search-space
+   size is measured separately before exact enumeration so policy can enforce a deterministic
+   budget.
 4. **Adaptive policy** — algorithm choice depends on relation count, hyperedges, and a bounded
    connected-subgraph count. Policy is configurable and its decision is observable in tests.
 
@@ -339,33 +341,21 @@ The pass accepts a `Box<dyn Statistics>`. The default is `UniformStatistics`.
 
 ## Plan Reconstruction
 
-After DPhyp fills the DP table, `dp[all_nodes].plan` is a `JoinTree`. Convert it back
-to optd IR operators:
+Every winning DP state contains a `PlanId` into the per-group `PlanArena`, not an operator-tree
+copy. A recipe is either an existing leaf root or an oriented join of two earlier recipes plus its
+join type and connecting hyperedge indices. Enumerators create a `CandidateDraft`, compare its
+cost, and commit its recipe only if it becomes the current winner for that state.
 
-```rust
-fn join_tree_to_ir(
-    tree: &JoinTree,
-    hg: &QueryHypergraph,
-    ctx: &mut QueryContext,
-) -> Operator {
-    match tree {
-        JoinTree::Leaf(nid) => hg.nodes[*nid].root,
-        JoinTree::Join { left, right, predicates, join_type, .. } => {
-            let outer = join_tree_to_ir(left, hg, ctx);
-            let inner = join_tree_to_ir(right, hg, ctx);
-            let on = conjoin(predicates, ctx);
-            OperatorData::Join(Join {
-                join_type: join_type.to_ir_join_type(),
-                on,
-                outer,
-                inner,
-            }).add(ctx)
-        }
-    }
-}
-```
+`PlanArena::materialize` recursively reconstructs the selected recipe and memoizes each resulting
+operator. It conjoins all predicate-bearing connecting edges exactly once. A predicate-free inner
+edge becomes `CrossProduct`; a predicate-free non-inner edge becomes a typed `Join` with a literal
+`true` condition. Directed recipes preserve non-commutative outer/inner inputs.
 
-For cross-product dummy edges (predicate = `None`), `on` = `ExprData::Literal(true)`.
+Candidate costing is behind a private `CandidateEvaluator` boundary. The compatibility evaluator
+materializes candidates before invoking an arbitrary `CostModel`, preserving custom
+`total_cost_from_children` behavior exactly. A deferred evaluator can omit candidate operators and
+let only the final recipe reach `QueryContext`; an end-to-end test exercises this path independently
+of the compatibility evaluator.
 
 ---
 
@@ -426,7 +416,9 @@ or synthetic run identifiers in the pass.
 optd/core/src/relation_set.rs                  # canonical inline/dynamic relation bitset
 optd/core/src/optimize/join_ordering/mod.rs    # public API and pass orchestration
 optd/core/src/optimize/join_ordering/dphyp.rs  # exact csg-cmp enumeration and DP states
-optd/core/src/optimize/join_ordering/candidate.rs # orientation, costing, reconstruction
+optd/core/src/optimize/join_ordering/candidate.rs # shared search state and candidate commitment
+optd/core/src/optimize/join_ordering/evaluator.rs # pluggable candidate evaluation strategies
+optd/core/src/optimize/join_ordering/plan.rs   # compact accepted-plan recipes and reconstruction
 optd/core/src/optimize/join_ordering/groups.rs # maximal join-group discovery
 optd/core/src/optimize/join_ordering/graph.rs  # topology queries and bounded csg counting
 optd/core/src/optimize/join_ordering/policy.rs # configurable adaptive algorithm selection

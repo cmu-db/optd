@@ -45,6 +45,47 @@ impl CostModel for UnitCost {
     }
 }
 
+/// Test-only evaluator that exercises recipe reconstruction without appending candidate IR.
+struct DeferredUnitEvaluator;
+
+impl evaluator::CandidateEvaluator<UnitCost> for DeferredUnitEvaluator {
+    fn evaluate_leaf(
+        &self,
+        _cost_model: &UnitCost,
+        _root: Operator,
+        _ctx: &QueryContext,
+        _analyses: &mut AnalysisContext,
+    ) -> OptimizeResult<evaluator::EvaluatedPlan<usize>> {
+        Ok(evaluator::EvaluatedPlan {
+            cost: 0,
+            materialized: None,
+            immediate_cost: Some(0),
+        })
+    }
+
+    fn requires_materialized_inputs(&self) -> bool {
+        false
+    }
+
+    fn evaluate_join(
+        &self,
+        _cost_model: &UnitCost,
+        _spec: evaluator::JoinSpec<'_>,
+        outer: evaluator::CandidateInput<'_, usize>,
+        inner: evaluator::CandidateInput<'_, usize>,
+        _ctx: &mut QueryContext,
+        _analyses: &mut AnalysisContext,
+    ) -> OptimizeResult<evaluator::EvaluatedPlan<usize>> {
+        assert!(outer.materialized.is_none());
+        assert!(inner.materialized.is_none());
+        Ok(evaluator::EvaluatedPlan {
+            cost: outer.cost + inner.cost + 1,
+            materialized: None,
+            immediate_cost: Some(1),
+        })
+    }
+}
+
 struct OrientationCost;
 
 impl CostModel for OrientationCost {
@@ -348,6 +389,52 @@ fn join_algorithm_class_for_root(ctx: &QueryContext, root: Operator) -> JoinAlgo
     join_algorithm_class(&edge_indices, &hg, ctx)
 }
 
+fn solve_exact<M: CostModel>(
+    ctx: &mut QueryContext,
+    analyses: &mut AnalysisContext,
+    hypergraph: &QueryHypergraph,
+    cost_model: &M,
+) -> OptimizeResult<Option<(plan::PlanState<M::Cost>, Operator)>> {
+    let evaluator = MaterializingEvaluator;
+    let mut search = JoinSearch::new(ctx, analyses, hypergraph, cost_model, &evaluator);
+    let Some(plan) = DPhyp::new(&mut search).solve()? else {
+        return Ok(None);
+    };
+    let root = search.materialize(&plan);
+    Ok(Some((plan, root)))
+}
+
+fn solve_linearized<M: CostModel>(
+    ctx: &mut QueryContext,
+    analyses: &mut AnalysisContext,
+    hypergraph: &QueryHypergraph,
+    cost_model: &M,
+) -> OptimizeResult<Option<(plan::PlanState<M::Cost>, Operator)>> {
+    let evaluator = MaterializingEvaluator;
+    let mut search = JoinSearch::new(ctx, analyses, hypergraph, cost_model, &evaluator);
+    let Some(plan) = linearized::solve(&mut search)? else {
+        return Ok(None);
+    };
+    let root = search.materialize(&plan);
+    Ok(Some((plan, root)))
+}
+
+fn solve_goo<M: CostModel>(
+    ctx: &mut QueryContext,
+    analyses: &mut AnalysisContext,
+    hypergraph: &QueryHypergraph,
+    cost_model: &M,
+    exact_subproblem_size: usize,
+) -> OptimizeResult<Option<(plan::PlanState<M::Cost>, Operator)>> {
+    let evaluator = MaterializingEvaluator;
+    let mut search = JoinSearch::new(ctx, analyses, hypergraph, cost_model, &evaluator);
+    let Some(plan) = goo::solve(&mut search, exact_subproblem_size)? else {
+        return Ok(None);
+    };
+    let root = search.materialize(&plan);
+    Ok(Some((plan, root)))
+}
+
 #[test]
 fn dphyp_three_way_chain_produces_plan() {
     let (mut ctx, root) = three_way_chain();
@@ -355,9 +442,7 @@ fn dphyp_three_way_chain_produces_plan() {
     let hg = build_hypergraph(&ctx, &mut analyses, root);
     assert_eq!(hg.nodes.len(), 3);
 
-    let mut solver = DPhyp::new(&mut ctx, &mut analyses, &hg, &DefaultCostModel);
-    let plan = solver
-        .solve()
+    let (plan, _) = solve_exact(&mut ctx, &mut analyses, &hg, &DefaultCostModel)
         .expect("solver should not error")
         .expect("DPhyp should find a plan");
     assert_eq!(plan.tree.leaf_count(), 3);
@@ -370,19 +455,79 @@ fn dphyp_materializes_winning_plan_in_arena() {
     let hg = build_hypergraph(&ctx, &mut analyses, root);
     let before = ctx.operator_count();
 
-    let plan = {
-        let mut solver = DPhyp::new(&mut ctx, &mut analyses, &hg, &DefaultCostModel);
-        solver
-            .solve()
-            .expect("solver should not error")
-            .expect("DPhyp should find a plan")
-    };
+    let (_, plan_root) = solve_exact(&mut ctx, &mut analyses, &hg, &DefaultCostModel)
+        .expect("solver should not error")
+        .expect("DPhyp should find a plan");
 
     assert!(ctx.operator_count() > before);
     assert!(matches!(
-        plan.root.get(&ctx),
+        plan_root.get(&ctx),
         OperatorData::Join(_) | OperatorData::CrossProduct(_)
     ));
+}
+
+#[test]
+fn dphyp_reconstructs_deferred_non_commutative_join_with_all_predicates() {
+    let mut ctx = QueryContext::new();
+    let a1 = ColumnData::new("a1", DataType::Int64).add(&mut ctx);
+    let a2 = ColumnData::new("a2", DataType::Int64).add(&mut ctx);
+    let b1 = ColumnData::new("b1", DataType::Int64).add(&mut ctx);
+    let b2 = ColumnData::new("b2", DataType::Int64).add(&mut ctx);
+    let left = OperatorData::Scan(Scan {
+        table: TableRef::bare("A"),
+        columns: vec![a1, a2],
+    })
+    .add(&mut ctx);
+    let right = OperatorData::Scan(Scan {
+        table: TableRef::bare("B"),
+        columns: vec![b1, b2],
+    })
+    .add(&mut ctx);
+    let equality = binary_predicate(&mut ctx, BinaryOp::Eq, a1, b1);
+    let residual = binary_predicate(&mut ctx, BinaryOp::Gt, a2, b2);
+    let on = ExprData::Nary {
+        op: NaryOp::And,
+        exprs: vec![equality, residual],
+    }
+    .add(&mut ctx);
+    let root = OperatorData::Join(Join {
+        join_type: JoinType::LeftAnti,
+        on,
+        outer: left,
+        inner: right,
+    })
+    .add(&mut ctx);
+    let mut analyses = crate::test_analyses(&ctx);
+    let hypergraph = build_hypergraph(&ctx, &mut analyses, root);
+    assert_eq!(hypergraph.edges.len(), 2);
+    let operators_before_search = ctx.operator_count();
+
+    let plan_root = {
+        let evaluator = DeferredUnitEvaluator;
+        let mut search =
+            JoinSearch::new(&mut ctx, &mut analyses, &hypergraph, &UnitCost, &evaluator);
+        let plan = DPhyp::new(&mut search)
+            .solve()
+            .expect("solver should not error")
+            .expect("two connected relations have a plan");
+        assert_eq!(plan.cost, 1);
+        search.materialize(&plan)
+    };
+    let OperatorData::Join(join) = plan_root.get(&ctx) else {
+        panic!("deferred recipe should reconstruct a join");
+    };
+    assert_eq!(join.join_type, JoinType::LeftAnti);
+    assert_eq!(join.outer, left, "non-commutative outer input changed");
+    assert_eq!(join.inner, right, "non-commutative inner input changed");
+    let ExprData::Nary {
+        op: NaryOp::And,
+        exprs,
+    } = join.on.get(&ctx)
+    else {
+        panic!("all connecting predicates should be reconstructed");
+    };
+    assert_eq!(exprs, &vec![equality, residual]);
+    assert_eq!(ctx.operator_count(), operators_before_search + 1);
 }
 
 #[test]
@@ -415,15 +560,11 @@ fn dphyp_preserves_source_left_mark_join_type() {
     let mut analyses = crate::test_analyses(&ctx);
     let hg = build_hypergraph(&ctx, &mut analyses, root);
 
-    let plan = {
-        let mut solver = DPhyp::new(&mut ctx, &mut analyses, &hg, &DefaultCostModel);
-        solver
-            .solve()
-            .expect("solver should not error")
-            .expect("DPhyp should find a plan")
-    };
+    let (_, plan_root) = solve_exact(&mut ctx, &mut analyses, &hg, &DefaultCostModel)
+        .expect("solver should not error")
+        .expect("DPhyp should find a plan");
 
-    let OperatorData::Join(join) = plan.root.get(&ctx) else {
+    let OperatorData::Join(join) = plan_root.get(&ctx) else {
         panic!("winning plan should be a join");
     };
     assert!(matches!(
@@ -496,13 +637,86 @@ fn dphyp_uses_generic_cost_model_composition_and_comparison() {
         additions: additions.clone(),
         comparisons: comparisons.clone(),
     };
-    let mut solver = DPhyp::new(&mut ctx, &mut analyses, &hg, &model);
-
-    let plan = solver.solve().unwrap().unwrap();
+    let (plan, _) = solve_exact(&mut ctx, &mut analyses, &hg, &model)
+        .unwrap()
+        .unwrap();
 
     assert_eq!(plan.cost, StructuredCost { units: 23 });
     assert!(additions.load(Ordering::Relaxed) > 0);
     assert!(comparisons.load(Ordering::Relaxed) > 0);
+}
+
+#[test]
+fn materializing_evaluator_preserves_total_cost_from_children_override() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    struct OverrideCostModel {
+        total_calls: Arc<AtomicUsize>,
+        operator_calls: Arc<AtomicUsize>,
+    }
+
+    impl CostModel for OverrideCostModel {
+        type Cost = usize;
+
+        fn zero(&self) -> Self::Cost {
+            0
+        }
+
+        fn add(&self, left: Self::Cost, right: Self::Cost) -> Self::Cost {
+            left + right
+        }
+
+        fn is_better(&self, candidate: &Self::Cost, existing: &Self::Cost) -> bool {
+            candidate < existing
+        }
+
+        fn operator_cost(
+            &self,
+            _op: Operator,
+            _ctx: &QueryContext,
+            _analyses: &mut AnalysisContext,
+        ) -> OptimizeResult<Self::Cost> {
+            self.operator_calls.fetch_add(1, Ordering::Relaxed);
+            Ok(10_000)
+        }
+
+        fn total_cost_from_children(
+            &self,
+            op: Operator,
+            child_costs: &[Self::Cost],
+            ctx: &QueryContext,
+            _analyses: &mut AnalysisContext,
+        ) -> OptimizeResult<Self::Cost> {
+            self.total_calls.fetch_add(1, Ordering::Relaxed);
+            Ok(match op.get(ctx) {
+                OperatorData::Join(_) | OperatorData::CrossProduct(_) => {
+                    100 + child_costs.iter().sum::<usize>()
+                }
+                _ => 7,
+            })
+        }
+    }
+
+    let (mut ctx, root) = three_way_chain();
+    let mut analyses = crate::test_analyses(&ctx);
+    let hypergraph = build_hypergraph(&ctx, &mut analyses, root);
+    let total_calls = Arc::new(AtomicUsize::new(0));
+    let operator_calls = Arc::new(AtomicUsize::new(0));
+    let model = OverrideCostModel {
+        total_calls: Arc::clone(&total_calls),
+        operator_calls: Arc::clone(&operator_calls),
+    };
+
+    let (plan, _) = solve_exact(&mut ctx, &mut analyses, &hypergraph, &model)
+        .unwrap()
+        .expect("the chain is connected");
+
+    assert_eq!(plan.cost, 221);
+    assert!(total_calls.load(Ordering::Relaxed) > 3);
+    assert_eq!(operator_calls.load(Ordering::Relaxed), 0);
 }
 
 #[test]
@@ -643,10 +857,7 @@ fn cached_cardinality_analysis_guides_candidate_costing() {
     }
     let mut analyses = AnalysisContext::new(Arc::new(catalog));
     let hg = build_hypergraph(&ctx, &mut analyses, root);
-    let mut solver = DPhyp::new(&mut ctx, &mut analyses, &hg, &DefaultCostModel);
-
-    let plan = solver
-        .solve()
+    let (plan, _) = solve_exact(&mut ctx, &mut analyses, &hg, &DefaultCostModel)
         .expect("solver should not error")
         .expect("DPhyp should find a plan");
 
@@ -708,10 +919,12 @@ fn dphyp_solve_handles_64_node_all_mask() {
         edges: vec![],
     };
     let mut analyses = crate::test_analyses(&ctx);
-    let mut solver = DPhyp::new(&mut ctx, &mut analyses, &hg, &DefaultCostModel);
 
     assert_eq!(all_nodes_mask(64), NodeSet::all(64));
-    assert!(matches!(solver.solve(), Ok(None)));
+    assert!(matches!(
+        solve_exact(&mut ctx, &mut analyses, &hg, &DefaultCostModel),
+        Ok(None)
+    ));
 }
 
 #[test]
@@ -735,9 +948,11 @@ fn dphyp_accepts_relation_ids_beyond_one_machine_word() {
         edges: vec![],
     };
     let mut analyses = crate::test_analyses(&ctx);
-    let mut solver = DPhyp::new(&mut ctx, &mut analyses, &hg, &DefaultCostModel);
 
-    assert!(matches!(solver.solve(), Ok(None)));
+    assert!(matches!(
+        solve_exact(&mut ctx, &mut analyses, &hg, &DefaultCostModel),
+        Ok(None)
+    ));
     assert!(all_nodes_mask(65).contains(64));
 }
 
@@ -897,8 +1112,7 @@ fn dphyp_matches_exhaustive_bushy_enumeration_on_small_clique() {
     let model = SubsetCostModel {
         weights: weights.clone(),
     };
-    let plan = DPhyp::new(&mut ctx, &mut analyses, &clique, &model)
-        .solve()
+    let (plan, _) = solve_exact(&mut ctx, &mut analyses, &clique, &model)
         .unwrap()
         .expect("a clique is connected");
     let expected = exhaustive_clique_cost((1 << weights.len()) - 1, &weights, &mut HashMap::new());
@@ -912,11 +1126,10 @@ fn dphyp_costs_both_inner_orientations_when_model_opts_in() {
     let (mut ctx, graph) = clique_graph(2);
     let preferred_outer = graph.nodes[1].root;
     let mut analyses = crate::test_analyses(&ctx);
-    let plan = DPhyp::new(&mut ctx, &mut analyses, &graph, &OrientationCost)
-        .solve()
+    let (plan, plan_root) = solve_exact(&mut ctx, &mut analyses, &graph, &OrientationCost)
         .unwrap()
         .expect("two connected relations have a plan");
-    let OperatorData::CrossProduct(cross) = plan.root.get(&ctx) else {
+    let OperatorData::CrossProduct(cross) = plan_root.get(&ctx) else {
         panic!("a dummy edge should materialize as a cross product");
     };
 
@@ -974,8 +1187,7 @@ fn exact_policy_accepts_chain_with_more_than_64_relations() {
 fn dphyp_solves_connected_chain_beyond_one_machine_word() {
     let (mut ctx, chain) = chain_graph(65);
     let mut analyses = crate::test_analyses(&ctx);
-    let plan = DPhyp::new(&mut ctx, &mut analyses, &chain, &UnitCost)
-        .solve()
+    let (plan, _) = solve_exact(&mut ctx, &mut analyses, &chain, &UnitCost)
         .expect("DPhyp should support dynamic relation sets")
         .expect("a chain is connected");
 
@@ -987,14 +1199,15 @@ fn dphyp_solves_connected_chain_beyond_one_machine_word() {
 fn linearized_dp_and_goo_dp_each_produce_complete_plans() {
     let (mut linear_ctx, clique) = clique_graph(9);
     let mut linear_analyses = crate::test_analyses(&linear_ctx);
-    let linear_plan = linearized::solve(&mut linear_ctx, &mut linear_analyses, &clique, &UnitCost)
-        .unwrap()
-        .expect("linearized DP should solve an ordinary graph");
+    let (linear_plan, _) =
+        solve_linearized(&mut linear_ctx, &mut linear_analyses, &clique, &UnitCost)
+            .unwrap()
+            .expect("linearized DP should solve an ordinary graph");
     assert_eq!(linear_plan.tree.leaf_set(), NodeSet::all(9));
 
     let (mut goo_ctx, chain) = chain_graph(20);
     let mut goo_analyses = crate::test_analyses(&goo_ctx);
-    let goo_plan = goo::solve(&mut goo_ctx, &mut goo_analyses, &chain, &UnitCost, 4)
+    let (goo_plan, _) = solve_goo(&mut goo_ctx, &mut goo_analyses, &chain, &UnitCost, 4)
         .unwrap()
         .expect("GOO/DP should solve a large connected graph");
     assert_eq!(goo_plan.tree.leaf_set(), NodeSet::all(20));

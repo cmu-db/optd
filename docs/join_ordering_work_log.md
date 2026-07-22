@@ -21,6 +21,7 @@ token counts.
 | 2026-07-21 20:59 | 2026-07-21 21:03 | Single-pass join conjuncts | Split cardinality estimation into expression and pre-flattened-conjunct entry points, removed repeated nested-`AND` traversal, and added semantic-parity coverage. JOB 15c measured 22.08 ms median. | 180,185 / 2,234 s |
 | 2026-07-21 21:03 | 2026-07-21 21:11 | Dynamic `RelationSet` mutation and construction | Implemented allocation-free owned union when capacity suffices and one-pass `FromIterator`; added representation/hash/boundary tests and direct old-formulation benchmark comparisons. At 256 relations in-place `|=` is 4.1x faster; at 1,024 relations one-pass collection is 53.8x faster. | 212,463 / 2,697 s |
 | 2026-07-21 23:01 | 2026-07-21 23:10 | Outer-join equality correctness | Prevented null-producing join sides and `ON` equalities from becoming globally valid equivalence classes; added all-join-type and chained-join tests demonstrating that downstream equalities are not incorrectly treated as redundant. | 306,292 / 3,252 s |
+| 2026-07-21 23:10 | 2026-07-21 23:16 | Candidate evaluation and plan-recipe scaffold | Routed DPhyp, linearized DP, and GOO through shared `JoinSearch`, evaluator, and accepted-plan arena abstractions. Added compatibility tests for custom cost composition and deferred recipe reconstruction. Across 103 deterministic benchmark rows, algorithm choice and candidate counts were identical; timing ratio was 0.993. JOB 15c remained neutral at 22.06 ms median over five runs. | 406,300 / 3,626 s |
 
 ## Evidence Baseline
 
@@ -54,6 +55,9 @@ token counts.
   (21.93--25.13 ms), 28.6% below the Arc-only median and 51.9% below the original baseline.
 - JOB 15c after single-pass conjunct handling: 22.08 ms median across five release runs
   (21.99--23.29 ms), 53.0% below the original baseline.
+- JOB 15c after introducing shared evaluator/recipe infrastructure: 22.06 ms median across five
+  release runs (21.87--22.67 ms); 103 deterministic scalability rows retained identical algorithm
+  decisions and candidate counts, with a 0.993 median timing ratio.
 - Dynamic `RelationSet` direct comparisons: in-place `|=` is 4.1x faster than allocate-and-replace
   at 256 relations; one-pass `FromIterator` is 53.8x faster than repeated singleton union at
   1,024 relations. Raw distributions and the revised boundary chart are under
