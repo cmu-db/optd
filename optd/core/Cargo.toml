@@ -22,3 +22,7 @@ harness = false
 [[bench]]
 name = "join_ordering_scalability"
 harness = false
+
+[[bench]]
+name = "join_ordering_candidate_evaluation"
+harness = false
