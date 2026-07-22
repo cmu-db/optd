@@ -1764,6 +1764,7 @@ fn combine_join_columns(
     if let Some(min_rows) = lower_bound {
         rows.value = rows.value.max(min_rows);
         rows.lower = Some(rows.lower.unwrap_or(0.0).max(min_rows));
+        rows.upper = rows.upper.map(|upper| upper.max(min_rows));
     }
     let mut columns = BTreeMap::new();
     for (&column, profile) in &left.columns {
@@ -3723,6 +3724,45 @@ mod tests {
             assert_eq!(actual_classes, expected_classes, "{join_type:?}");
             assert_eq!(actual_columns, expected_columns, "{join_type:?}");
             assert_eq!(output.rows.value, expected_rows, "{join_type:?}");
+        }
+    }
+
+    #[test]
+    fn outer_join_row_bounds_include_null_extended_rows() {
+        let mut ctx = QueryContext::new();
+        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
+        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
+        let predicate = equality_expr(&mut ctx, left_key, right_key);
+        let cases = [
+            (JoinType::LeftOuter, 100.0, 10.0, 100.0),
+            (JoinType::RightOuter, 10.0, 100.0, 100.0),
+            (JoinType::FullOuter, 100.0, 10.0, 100.0),
+        ];
+
+        for (join_type, left_rows, right_rows, expected_minimum) in cases {
+            let left = CardinalityProfile::new(
+                Estimate::exact(left_rows),
+                [(left_key, test_column_profile(left_rows, left_rows))]
+                    .into_iter()
+                    .collect(),
+            );
+            let right = CardinalityProfile::new(
+                Estimate::exact(right_rows),
+                [(right_key, test_column_profile(right_rows, right_rows))]
+                    .into_iter()
+                    .collect(),
+            );
+
+            let output =
+                join_profile_from_conjuncts(&left, &right, join_type.clone(), &[predicate], &ctx);
+            let lower = output.rows.lower.expect("exact inputs have a lower bound");
+            let upper = output.rows.upper.expect("exact inputs have an upper bound");
+
+            assert_eq!(lower, expected_minimum, "{join_type:?}");
+            assert_eq!(output.rows.value, expected_minimum, "{join_type:?}");
+            assert_eq!(upper, expected_minimum, "{join_type:?}");
+            assert!(lower <= output.rows.value, "{join_type:?}");
+            assert!(output.rows.value <= upper, "{join_type:?}");
         }
     }
 
