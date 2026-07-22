@@ -75,7 +75,7 @@ order by
 35)------"input": 1
 36)----},
 37)----{
-38)------"id": 108,
+38)------"id": 107,
 39)------"kind": "join",
 40)------"title": "⋈ InnerJoin",
 41)------"join_type": "Inner",
@@ -152,7 +152,7 @@ order by
 112)------"inner": 6
 113)----},
 114)----{
-115)------"id": 114,
+115)------"id": 110,
 116)------"kind": "selection",
 117)------"title": "σ Selection",
 118)------"predicate": "CASE WHEN in_match_mark(#45) THEN true WHEN in_unknown_mark(#46) THEN NULL::Boolean ELSE false END",
@@ -220,43 +220,43 @@ order by
 180)------"input": 37
 181)----},
 182)----{
-183)------"id": 115,
+183)------"id": 111,
 184)------"kind": "join",
 185)------"title": "⟕ LeftOuterJoin",
 186)------"join_type": "LeftOuter",
 187)------"condition": "((l_partkey(#26) = ps_partkey(#11)) AND (l_suppkey(#27) = ps_suppkey(#12)))",
-188)------"outer": 114,
+188)------"outer": 110,
 189)------"inner": 38
 190)----},
 191)----{
-192)------"id": 116,
+192)------"id": 112,
 193)------"kind": "selection",
 194)------"title": "σ Selection",
 195)------"predicate": "(CAST(ps_availqty(#13) AS Float64) > Float64(0.5) * sum(lineitem.l_quantity)(#42))",
-196)------"input": 115
+196)------"input": 111
 197)----},
 198)----{
-199)------"id": 117,
+199)------"id": 113,
 200)------"kind": "projection",
 201)------"title": "π Projection",
 202)------"columns": [
 203)--------"ps_suppkey(#12)"
 204)------],
-205)------"input": 116
+205)------"input": 112
 206)----},
 207)----{
-208)------"id": 118,
+208)------"id": 114,
 209)------"kind": "join",
 210)------"title": "⟕ᵐ LeftMarkJoin",
 211)------"join_type": "LeftMark",
 212)------"condition": "(s_suppkey(#0) = ps_suppkey(#12))",
 213)------"marker": "in_match_mark(#43)",
 214)------"marker_nullable": "false",
-215)------"outer": 108,
-216)------"inner": 117
+215)------"outer": 107,
+216)------"inner": 113
 217)----},
 218)----{
-219)------"id": 119,
+219)------"id": 115,
 220)------"kind": "selection",
 221)------"title": "σ Selection",
 222)------"predicate": "CASE WHEN in_match_mark(#45) THEN true WHEN in_unknown_mark(#46) THEN NULL::Boolean ELSE false END",
@@ -300,72 +300,72 @@ order by
 260)------"input": 50
 261)----},
 262)----{
-263)------"id": 120,
+263)------"id": 116,
 264)------"kind": "join",
 265)------"title": "⟕ LeftOuterJoin",
 266)------"join_type": "LeftOuter",
 267)------"condition": "((l_partkey(#26) = ps_partkey(#11)) AND (l_suppkey(#27) = ps_suppkey(#12)))",
-268)------"outer": 119,
+268)------"outer": 115,
 269)------"inner": 51
 270)----},
 271)----{
-272)------"id": 121,
+272)------"id": 117,
 273)------"kind": "selection",
 274)------"title": "σ Selection",
 275)------"predicate": "(CAST(ps_availqty(#13) AS Float64) > Float64(0.5) * sum(lineitem.l_quantity)(#42))",
-276)------"input": 120
+276)------"input": 116
 277)----},
 278)----{
-279)------"id": 122,
+279)------"id": 118,
 280)------"kind": "projection",
 281)------"title": "π Projection",
 282)------"columns": [
 283)--------"ps_suppkey(#12)"
 284)------],
-285)------"input": 121
+285)------"input": 117
 286)----},
 287)----{
-288)------"id": 123,
+288)------"id": 119,
 289)------"kind": "join",
 290)------"title": "⟕ᵐ LeftMarkJoin",
 291)------"join_type": "LeftMark",
 292)------"condition": "(IS_NULL(s_suppkey(#0)) OR IS_NULL(ps_suppkey(#12)))",
 293)------"marker": "in_unknown_mark(#44)",
 294)------"marker_nullable": "false",
-295)------"outer": 118,
-296)------"inner": 122
+295)------"outer": 114,
+296)------"inner": 118
 297)----},
 298)----{
-299)------"id": 124,
+299)------"id": 120,
 300)------"kind": "selection",
 301)------"title": "σ Selection",
 302)------"predicate": "CASE WHEN in_match_mark(#43) THEN true WHEN in_unknown_mark(#44) THEN NULL::Boolean ELSE false END",
-303)------"input": 123
+303)------"input": 119
 304)----},
 305)----{
-306)------"id": 125,
+306)------"id": 121,
 307)------"kind": "projection",
 308)------"title": "π Projection",
 309)------"columns": [
 310)--------"s_name(#1)",
 311)--------"s_address(#2)"
 312)------],
-313)------"input": 124
+313)------"input": 120
 314)----},
 315)----{
-316)------"id": 126,
+316)------"id": 122,
 317)------"kind": "sort",
 318)------"title": "⇞ Sort",
 319)------"keys": [
 320)--------"s_name(#1) Asc NullsLast"
 321)------],
-322)------"input": 125
+322)------"input": 121
 323)----},
 324)----{
-325)------"id": 127,
+325)------"id": 123,
 326)------"kind": "output",
 327)------"title": "= Output",
-328)------"input": 126
+328)------"input": 122
 329)----}
 330)--]
 331)}

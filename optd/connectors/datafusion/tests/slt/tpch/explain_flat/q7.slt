@@ -83,7 +83,7 @@ order by
 41)------]
 42)----},
 43)----{
-44)------"id": 110,
+44)------"id": 90,
 45)------"kind": "join",
 46)------"title": "⋈ InnerJoin",
 47)------"join_type": "Inner",
@@ -131,7 +131,7 @@ order by
 89)------]
 90)----},
 91)----{
-92)------"id": 100,
+92)------"id": 91,
 93)------"kind": "join",
 94)------"title": "⋈ InnerJoin",
 95)------"join_type": "Inner",
@@ -188,7 +188,7 @@ order by
 146)------"input": 1
 147)----},
 148)----{
-149)------"id": 91,
+149)------"id": 92,
 150)------"kind": "join",
 151)------"title": "⋈ InnerJoin",
 152)------"join_type": "Inner",
@@ -197,25 +197,25 @@ order by
 155)------"inner": 63
 156)----},
 157)----{
-158)------"id": 105,
+158)------"id": 93,
 159)------"kind": "join",
 160)------"title": "⋈ InnerJoin",
 161)------"join_type": "Inner",
 162)------"condition": "(s_suppkey(#0) = l_suppkey(#9))",
-163)------"outer": 100,
-164)------"inner": 91
+163)------"outer": 91,
+164)------"inner": 92
 165)----},
 166)----{
-167)------"id": 131,
+167)------"id": 94,
 168)------"kind": "join",
 169)------"title": "⋈ InnerJoin",
 170)------"join_type": "Inner",
 171)------"condition": "((c_custkey(#32) = o_custkey(#24)) AND (((n_name(#45) = CAST(\"FRANCE\" AS Utf8View)) AND (n_name(#53) = CAST(\"GERMANY\" AS Utf8View))) OR ((n_name(#45) = CAST(\"GERMANY\" AS Utf8View)) AND (n_name(#53) = CAST(\"FRANCE\" AS Utf8View)))))",
-172)------"outer": 110,
-173)------"inner": 105
+172)------"outer": 90,
+173)------"inner": 93
 174)----},
 175)----{
-176)------"id": 175,
+176)------"id": 95,
 177)------"kind": "map",
 178)------"title": "χ Map",
 179)------"computations": [
@@ -224,10 +224,10 @@ order by
 182)--------"l_year(#58) := date_part(\"YEAR\", l_shipdate(#17))",
 183)--------"volume(#59) := (l_extendedprice(#12) * (CAST(1 AS Decimal128(20, 0)) - l_discount(#13)))"
 184)------],
-185)------"input": 131
+185)------"input": 94
 186)----},
 187)----{
-188)------"id": 176,
+188)------"id": 96,
 189)------"kind": "projection",
 190)------"title": "π Projection",
 191)------"columns": [
@@ -236,10 +236,10 @@ order by
 194)--------"l_year(#58)",
 195)--------"volume(#59)"
 196)------],
-197)------"input": 175
+197)------"input": 95
 198)----},
 199)----{
-200)------"id": 177,
+200)------"id": 97,
 201)------"kind": "rename",
 202)------"title": "ρ Rename(shipping)",
 203)------"defs": [
@@ -248,20 +248,20 @@ order by
 206)--------"l_year(#62) <- l_year(#58)",
 207)--------"volume(#63) <- volume(#59)"
 208)------],
-209)------"input": 176
+209)------"input": 96
 210)----},
 211)----{
-212)------"id": 178,
+212)------"id": 98,
 213)------"kind": "aggregation",
 214)------"title": "γ Aggregation",
 215)------"keys": "supp_nation(#60), cust_nation(#61), l_year(#62)",
 216)------"aggregates": [
 217)--------"sum(shipping.volume)(#64) := sum(volume(#63))"
 218)------],
-219)------"input": 177
+219)------"input": 97
 220)----},
 221)----{
-222)------"id": 179,
+222)------"id": 99,
 223)------"kind": "sort",
 224)------"title": "⇞ Sort",
 225)------"keys": [
@@ -269,13 +269,13 @@ order by
 227)--------"cust_nation(#61) Asc NullsLast",
 228)--------"l_year(#62) Asc NullsLast"
 229)------],
-230)------"input": 178
+230)------"input": 98
 231)----},
 232)----{
-233)------"id": 180,
+233)------"id": 100,
 234)------"kind": "output",
 235)------"title": "= Output",
-236)------"input": 179
+236)------"input": 99
 237)----}
 238)--]
 239)}

@@ -131,7 +131,7 @@ where
 111)------"inner": 21
 112)----},
 113)----{
-114)------"id": 45,
+114)------"id": 44,
 115)------"kind": "join",
 116)------"title": "⋈ InnerJoin",
 117)------"join_type": "Inner",
@@ -140,45 +140,45 @@ where
 120)------"inner": 43
 121)----},
 122)----{
-123)------"id": 47,
+123)------"id": 45,
 124)------"kind": "selection",
 125)------"title": "σ Selection",
 126)------"predicate": "(CAST(l_quantity(#4) AS Decimal128(30, 15)) < Float64(0.2) * avg(lineitem.l_quantity)(#42))",
-127)------"input": 45
+127)------"input": 44
 128)----},
 129)----{
-130)------"id": 48,
+130)------"id": 46,
 131)------"kind": "aggregation",
 132)------"title": "γ Aggregation",
 133)------"keys": "",
 134)------"aggregates": [
 135)--------"sum(lineitem.l_extendedprice)(#43) := sum(l_extendedprice(#5))"
 136)------],
-137)------"input": 47
+137)------"input": 45
 138)----},
 139)----{
-140)------"id": 49,
+140)------"id": 47,
 141)------"kind": "map",
 142)------"title": "χ Map",
 143)------"computations": [
 144)--------"avg_yearly(#44) := (CAST(sum(lineitem.l_extendedprice)(#43) AS Float64) / 7)"
 145)------],
-146)------"input": 48
+146)------"input": 46
 147)----},
 148)----{
-149)------"id": 50,
+149)------"id": 48,
 150)------"kind": "projection",
 151)------"title": "π Projection",
 152)------"columns": [
 153)--------"avg_yearly(#44)"
 154)------],
-155)------"input": 49
+155)------"input": 47
 156)----},
 157)----{
-158)------"id": 51,
+158)------"id": 49,
 159)------"kind": "output",
 160)------"title": "= Output",
-161)------"input": 50
+161)------"input": 48
 162)----}
 163)--]
 164)}

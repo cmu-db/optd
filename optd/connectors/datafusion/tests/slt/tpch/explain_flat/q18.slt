@@ -130,7 +130,7 @@ order by
 95)------"inner": 8
 96)----},
 97)----{
-98)------"id": 65,
+98)------"id": 57,
 99)------"kind": "join",
 100)------"title": "⋈ InnerJoin",
 101)------"join_type": "Inner",
@@ -139,14 +139,14 @@ order by
 104)------"inner": 56
 105)----},
 106)----{
-107)------"id": 72,
+107)------"id": 58,
 108)------"kind": "join",
 109)------"title": "⟕ᵐ LeftMarkJoin",
 110)------"join_type": "LeftMark",
 111)------"condition": "(IS_NULL(o_orderkey(#8)) OR IS_NULL(l_orderkey(#33)))",
 112)------"marker": "in_unknown_mark(#52)",
 113)------"marker_nullable": "false",
-114)------"outer": 65,
+114)------"outer": 57,
 115)------"inner": 8
 116)----},
 117)----{
@@ -174,46 +174,46 @@ order by
 139)------]
 140)----},
 141)----{
-142)------"id": 75,
+142)------"id": 59,
 143)------"kind": "join",
 144)------"title": "⋈ InnerJoin",
 145)------"join_type": "Inner",
 146)------"condition": "(o_orderkey(#8) = l_orderkey(#17))",
-147)------"outer": 72,
+147)------"outer": 58,
 148)------"inner": 3
 149)----},
 150)----{
-151)------"id": 76,
+151)------"id": 60,
 152)------"kind": "selection",
 153)------"title": "σ Selection",
 154)------"predicate": "CASE WHEN in_match_mark(#51) THEN true WHEN in_unknown_mark(#52) THEN NULL::Boolean ELSE false END",
-155)------"input": 75
+155)------"input": 59
 156)----},
 157)----{
-158)------"id": 77,
+158)------"id": 61,
 159)------"kind": "aggregation",
 160)------"title": "γ Aggregation",
 161)------"keys": "c_name(#1), c_custkey(#0), o_orderkey(#8), o_orderdate(#12), o_totalprice(#11)",
 162)------"aggregates": [
 163)--------"sum(lineitem.l_quantity)(#50) := sum(l_quantity(#21))"
 164)------],
-165)------"input": 76
+165)------"input": 60
 166)----},
 167)----{
-168)------"id": 78,
+168)------"id": 62,
 169)------"kind": "sort",
 170)------"title": "⇞ Sort",
 171)------"keys": [
 172)--------"o_totalprice(#11) Desc NullsFirst",
 173)--------"o_orderdate(#12) Asc NullsLast"
 174)------],
-175)------"input": 77
+175)------"input": 61
 176)----},
 177)----{
-178)------"id": 79,
+178)------"id": 63,
 179)------"kind": "output",
 180)------"title": "= Output",
-181)------"input": 78
+181)------"input": 62
 182)----}
 183)--]
 184)}

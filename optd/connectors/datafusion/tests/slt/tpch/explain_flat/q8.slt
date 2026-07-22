@@ -83,7 +83,7 @@ order by
 43)------"input": 9
 44)----},
 45)----{
-46)------"id": 211,
+46)------"id": 134,
 47)------"kind": "join",
 48)------"title": "⋈ InnerJoin",
 49)------"join_type": "Inner",
@@ -108,12 +108,12 @@ order by
 68)------]
 69)----},
 70)----{
-71)------"id": 220,
+71)------"id": 135,
 72)------"kind": "join",
 73)------"title": "⋈ InnerJoin",
 74)------"join_type": "Inner",
 75)------"condition": "(c_nationkey(#44) = n_nationkey(#53))",
-76)------"outer": 211,
+76)------"outer": 134,
 77)------"inner": 7
 78)----},
 79)----{
@@ -141,12 +141,12 @@ order by
 101)------"input": 5
 102)----},
 103)----{
-104)------"id": 228,
+104)------"id": 136,
 105)------"kind": "join",
 106)------"title": "⋈ InnerJoin",
 107)------"join_type": "Inner",
 108)------"condition": "(o_custkey(#33) = c_custkey(#41))",
-109)------"outer": 220,
+109)------"outer": 135,
 110)------"inner": 74
 111)----},
 112)----{
@@ -174,12 +174,12 @@ order by
 134)------]
 135)----},
 136)----{
-137)------"id": 235,
+137)------"id": 137,
 138)------"kind": "join",
 139)------"title": "⋈ InnerJoin",
 140)------"join_type": "Inner",
 141)------"condition": "(l_orderkey(#16) = o_orderkey(#32))",
-142)------"outer": 228,
+142)------"outer": 136,
 143)------"inner": 3
 144)----},
 145)----{
@@ -207,12 +207,12 @@ order by
 167)------"input": 0
 168)----},
 169)----{
-170)------"id": 241,
+170)------"id": 138,
 171)------"kind": "join",
 172)------"title": "⋈ InnerJoin",
 173)------"join_type": "Inner",
 174)------"condition": "(p_partkey(#0) = l_partkey(#17))",
-175)------"outer": 235,
+175)------"outer": 137,
 176)------"inner": 103
 177)----},
 178)----{
@@ -255,7 +255,7 @@ order by
 215)------]
 216)----},
 217)----{
-218)------"id": 178,
+218)------"id": 139,
 219)------"kind": "join",
 220)------"title": "⋈ InnerJoin",
 221)------"join_type": "Inner",
@@ -264,16 +264,16 @@ order by
 224)------"inner": 1
 225)----},
 226)----{
-227)------"id": 247,
+227)------"id": 140,
 228)------"kind": "join",
 229)------"title": "⋈ InnerJoin",
 230)------"join_type": "Inner",
 231)------"condition": "(s_suppkey(#9) = l_suppkey(#18))",
-232)------"outer": 241,
-233)------"inner": 178
+232)------"outer": 138,
+233)------"inner": 139
 234)----},
 235)----{
-236)------"id": 250,
+236)------"id": 141,
 237)------"kind": "map",
 238)------"title": "χ Map",
 239)------"computations": [
@@ -281,10 +281,10 @@ order by
 241)--------"volume(#69) := (l_extendedprice(#21) * (CAST(1 AS Decimal128(20, 0)) - l_discount(#22)))",
 242)--------"nation(#70) := n_name(#62)"
 243)------],
-244)------"input": 247
+244)------"input": 140
 245)----},
 246)----{
-247)------"id": 251,
+247)------"id": 142,
 248)------"kind": "projection",
 249)------"title": "π Projection",
 250)------"columns": [
@@ -292,10 +292,10 @@ order by
 252)--------"volume(#69)",
 253)--------"nation(#70)"
 254)------],
-255)------"input": 250
+255)------"input": 141
 256)----},
 257)----{
-258)------"id": 252,
+258)------"id": 143,
 259)------"kind": "rename",
 260)------"title": "ρ Rename(all_nations)",
 261)------"defs": [
@@ -303,10 +303,10 @@ order by
 263)--------"volume(#72) <- volume(#69)",
 264)--------"nation(#73) <- nation(#70)"
 265)------],
-266)------"input": 251
+266)------"input": 142
 267)----},
 268)----{
-269)------"id": 253,
+269)------"id": 144,
 270)------"kind": "aggregation",
 271)------"title": "γ Aggregation",
 272)------"keys": "o_year(#71)",
@@ -314,41 +314,41 @@ order by
 274)--------"sum(CASE WHEN all_nations.nation = Utf8(\"BRAZIL\") THEN all_nations.volume ELSE Int64(0) END)(#74) := sum(CASE WHEN (nation(#73) = CAST(\"BRAZIL\" AS Utf8View)) THEN volume(#72) ELSE CAST(0 AS Decimal128(38, 4)) END)",
 275)--------"sum(all_nations.volume)(#75) := sum(volume(#72))"
 276)------],
-277)------"input": 252
+277)------"input": 143
 278)----},
 279)----{
-280)------"id": 254,
+280)------"id": 145,
 281)------"kind": "map",
 282)------"title": "χ Map",
 283)------"computations": [
 284)--------"mkt_share(#76) := CAST((CAST(sum(CASE WHEN all_nations.nation = Utf8(\"BRAZIL\") THEN all_nations.volume ELSE Int64(0) END)(#74) AS Decimal128(12, 2)) / CAST(sum(all_nations.volume)(#75) AS Decimal128(12, 2))) AS Decimal128(15, 2))"
 285)------],
-286)------"input": 253
+286)------"input": 144
 287)----},
 288)----{
-289)------"id": 255,
+289)------"id": 146,
 290)------"kind": "projection",
 291)------"title": "π Projection",
 292)------"columns": [
 293)--------"o_year(#71)",
 294)--------"mkt_share(#76)"
 295)------],
-296)------"input": 254
+296)------"input": 145
 297)----},
 298)----{
-299)------"id": 256,
+299)------"id": 147,
 300)------"kind": "sort",
 301)------"title": "⇞ Sort",
 302)------"keys": [
 303)--------"o_year(#71) Asc NullsLast"
 304)------],
-305)------"input": 255
+305)------"input": 146
 306)----},
 307)----{
-308)------"id": 257,
+308)------"id": 148,
 309)------"kind": "output",
 310)------"title": "= Output",
-311)------"input": 256
+311)------"input": 147
 312)----}
 313)--]
 314)}

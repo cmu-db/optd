@@ -97,7 +97,7 @@ limit 10;');
 62)------"inner": 29
 63)----},
 64)----{
-65)------"id": 51,
+65)------"id": 47,
 66)------"kind": "join",
 67)------"title": "⋈ InnerJoin",
 68)------"join_type": "Inner",
@@ -137,26 +137,26 @@ limit 10;');
 102)------"input": 3
 103)----},
 104)----{
-105)------"id": 55,
+105)------"id": 48,
 106)------"kind": "join",
 107)------"title": "⋈ InnerJoin",
 108)------"join_type": "Inner",
 109)------"condition": "(l_orderkey(#17) = o_orderkey(#8))",
-110)------"outer": 51,
+110)------"outer": 47,
 111)------"inner": 21
 112)----},
 113)----{
-114)------"id": 56,
+114)------"id": 49,
 115)------"kind": "aggregation",
 116)------"title": "γ Aggregation",
 117)------"keys": "c_custkey(#0), c_name(#1), c_acctbal(#5), c_phone(#4), n_name(#34), c_address(#2), c_comment(#7)",
 118)------"aggregates": [
 119)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#37) := sum((l_extendedprice(#22) * (CAST(1 AS Decimal128(20, 0)) - l_discount(#23))))"
 120)------],
-121)------"input": 55
+121)------"input": 48
 122)----},
 123)----{
-124)------"id": 57,
+124)------"id": 50,
 125)------"kind": "projection",
 126)------"title": "π Projection",
 127)------"columns": [
@@ -169,30 +169,30 @@ limit 10;');
 134)--------"c_phone(#4)",
 135)--------"c_comment(#7)"
 136)------],
-137)------"input": 56
+137)------"input": 49
 138)----},
 139)----{
-140)------"id": 58,
+140)------"id": 51,
 141)------"kind": "sort",
 142)------"title": "⇞ Sort",
 143)------"keys": [
 144)--------"sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)(#37) Desc NullsFirst"
 145)------],
-146)------"input": 57
+146)------"input": 50
 147)----},
 148)----{
-149)------"id": 59,
+149)------"id": 52,
 150)------"kind": "limit",
 151)------"title": "τ Limit",
 152)------"fetch": "10",
 153)------"offset": "0",
-154)------"input": 58
+154)------"input": 51
 155)----},
 156)----{
-157)------"id": 60,
+157)------"id": 53,
 158)------"kind": "output",
 159)------"title": "= Output",
-160)------"input": 59
+160)------"input": 52
 161)----}
 162)--]
 163)}

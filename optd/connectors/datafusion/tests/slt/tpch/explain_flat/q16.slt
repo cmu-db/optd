@@ -72,7 +72,7 @@ limit 10;');
 38)------"input": 1
 39)----},
 40)----{
-41)------"id": 51,
+41)------"id": 50,
 42)------"kind": "join",
 43)------"title": "⋈ InnerJoin",
 44)------"join_type": "Inner",
@@ -112,46 +112,46 @@ limit 10;');
 78)------"input": 4
 79)----},
 80)----{
-81)------"id": 52,
+81)------"id": 51,
 82)------"kind": "join",
 83)------"title": "⟕ᵐ LeftMarkJoin",
 84)------"join_type": "LeftMark",
 85)------"condition": "(ps_suppkey(#1) = s_suppkey(#14))",
 86)------"marker": "in_match_mark(#22)",
 87)------"marker_nullable": "false",
-88)------"outer": 51,
+88)------"outer": 50,
 89)------"inner": 5
 90)----},
 91)----{
-92)------"id": 55,
+92)------"id": 52,
 93)------"kind": "join",
 94)------"title": "⟕ᵐ LeftMarkJoin",
 95)------"join_type": "LeftMark",
 96)------"condition": "(IS_NULL(ps_suppkey(#1)) OR IS_NULL(s_suppkey(#14)))",
 97)------"marker": "in_unknown_mark(#23)",
 98)------"marker_nullable": "false",
-99)------"outer": 52,
+99)------"outer": 51,
 100)------"inner": 5
 101)----},
 102)----{
-103)------"id": 57,
+103)------"id": 53,
 104)------"kind": "selection",
 105)------"title": "σ Selection",
 106)------"predicate": "NOT(CASE WHEN in_match_mark(#22) THEN true WHEN in_unknown_mark(#23) THEN NULL::Boolean ELSE false END)",
-107)------"input": 55
+107)------"input": 52
 108)----},
 109)----{
-110)------"id": 58,
+110)------"id": 54,
 111)------"kind": "aggregation",
 112)------"title": "γ Aggregation",
 113)------"keys": "p_brand(#8), p_type(#9), p_size(#10)",
 114)------"aggregates": [
 115)--------"count(DISTINCT partsupp.ps_suppkey)(#21) := count(DISTINCT ps_suppkey(#1))"
 116)------],
-117)------"input": 57
+117)------"input": 53
 118)----},
 119)----{
-120)------"id": 59,
+120)------"id": 55,
 121)------"kind": "sort",
 122)------"title": "⇞ Sort",
 123)------"keys": [
@@ -160,21 +160,21 @@ limit 10;');
 126)--------"p_type(#9) Asc NullsLast",
 127)--------"p_size(#10) Asc NullsLast"
 128)------],
-129)------"input": 58
+129)------"input": 54
 130)----},
 131)----{
-132)------"id": 60,
+132)------"id": 56,
 133)------"kind": "limit",
 134)------"title": "τ Limit",
 135)------"fetch": "10",
 136)------"offset": "0",
-137)------"input": 59
+137)------"input": 55
 138)----},
 139)----{
-140)------"id": 61,
+140)------"id": 57,
 141)------"kind": "output",
 142)------"title": "= Output",
-143)------"input": 60
+143)------"input": 56
 144)----}
 145)--]
 146)}
