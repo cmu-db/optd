@@ -1,0 +1,36 @@
+diff --git a/optd/core/benches/join_ordering_scalability.rs b/optd/core/benches/join_ordering_scalability.rs
+index f42cef5..f0c5d68 100644
+--- a/optd/core/benches/join_ordering_scalability.rs
++++ b/optd/core/benches/join_ordering_scalability.rs
+@@ -14 +14 @@ use std::time::Instant;
+-use arrow_schema::DataType;
++use arrow_schema::{DataType, Field, Schema};
+@@ -16,3 +16,3 @@ use optd_core::{
+-    AdaptiveJoinOrderingConfig, AnalysisContext, BinaryOp, ColumnData, CostModel, ExprData, Join,
+-    JoinOrdering, JoinType, MemoryCatalog, NaryOp, Operator, OperatorData, OptimizeResult,
+-    OptimizerContext, QueryContext, QueryPass, RelationSet, Scan, TableRef,
++    AdaptiveJoinOrderingConfig, AnalysisContext, BinaryOp, Catalog, ColumnData, CostModel,
++    ExprData, Join, JoinOrdering, JoinType, MemoryCatalog, NaryOp, Operator, OperatorData,
++    OptimizeResult, OptimizerContext, QueryContext, QueryPass, RelationSet, Scan, TableRef,
+@@ -228 +228 @@ fn measure_join_ordering(
+-        let catalog = Arc::new(MemoryCatalog::new("bench", "public"));
++        let catalog = benchmark_catalog(relations)?;
+@@ -247,0 +248,18 @@ fn measure_join_ordering(
++fn benchmark_catalog(
++    relation_count: usize,
++) -> Result<Arc<MemoryCatalog>, Box<dyn std::error::Error>> {
++    let catalog = Arc::new(MemoryCatalog::new("bench", "public"));
++    for relation in 0..relation_count {
++        catalog.create_table(
++            TableRef::bare(format!("t{relation}")),
++            Arc::new(Schema::new(vec![Field::new(
++                format!("c{relation}"),
++                DataType::Int64,
++                false,
++            )])),
++            None,
++        )?;
++    }
++    Ok(catalog)
++}
++

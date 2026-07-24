@@ -1,0 +1,111 @@
+{
+  "generated_at": "2026-07-24",
+  "platform": "macOS-15.6.1-arm64-arm-64bit-Mach-O",
+  "files": [
+    {
+      "file": "README.md",
+      "bytes": 5175,
+      "sha256": "09977aa6296d5862790b31be2d77bef2713f1fccfed4aea45358f66b5ad31d42"
+    },
+    {
+      "file": "adaptive_summary.csv",
+      "bytes": 1313,
+      "sha256": "1e6e77d3692b8b2e1ab080ce71a6a6cc249d557a623e04539a1074470da1d4eb"
+    },
+    {
+      "file": "adaptive_summary.md",
+      "bytes": 1402,
+      "sha256": "8952cf47efb4935e092217a27fed4f039ad26611833d878845ea3c27ac5c3d84"
+    },
+    {
+      "file": "algorithm_summary.csv",
+      "bytes": 4574,
+      "sha256": "8ca6501fc50a54ce3af991e1fa770bc9d8df178a202ef8683f66862f89b862f0"
+    },
+    {
+      "file": "baseline_7a98797_catalog_fixed.csv",
+      "bytes": 43664,
+      "sha256": "bc4c4cb1d00db76ab9719db4746a545240a8a630e837aaaeec199de695d93c72"
+    },
+    {
+      "file": "baseline_catalog_fixture.patch",
+      "bytes": 1690,
+      "sha256": "a190a620199a6a66fd8cef62cd1b579e827fb74210c035e7ca6379ab076faf0e"
+    },
+    {
+      "file": "baseline_comparison.csv",
+      "bytes": 2306,
+      "sha256": "af1783d8a92ca56fe4f41fa6f0e0bc1b378e421beca5c4d7be5e8ee0dbe0ed36"
+    },
+    {
+      "file": "baseline_comparison.md",
+      "bytes": 861,
+      "sha256": "16b25cc27c2c7f78aeae5842f6ad41ca8386f7100cae5c85b9a0f7339458afd2"
+    },
+    {
+      "file": "figure_1_algorithm_scaling.png",
+      "bytes": 132322,
+      "sha256": "9b43d9ff8cbe0dd1a564f5ebf7e42e58468d31c21bb07714182396ce0ccb0535"
+    },
+    {
+      "file": "figure_1_algorithm_scaling.svg",
+      "bytes": 22902,
+      "sha256": "93e8227fe36eb9ed00342d172a3431166378444980ef36971a90f9eb6e024ffe"
+    },
+    {
+      "file": "figure_2_adaptive_policy.png",
+      "bytes": 95854,
+      "sha256": "42ff23b4aa3a706f414f81660cd539692fa9f68a568b3922a1e7074ff024b9f0"
+    },
+    {
+      "file": "figure_2_adaptive_policy.svg",
+      "bytes": 7706,
+      "sha256": "a5235ea62a93ab3ed16c3bb2403655dce0592f74ea9a18ef0d14b69a4d7997ae"
+    },
+    {
+      "file": "figure_3_work_scaling.png",
+      "bytes": 148362,
+      "sha256": "1dbf68e60bcacb74094cb63242b21fde7c99ac19a2f79de49bdf723732cf9f9f"
+    },
+    {
+      "file": "figure_3_work_scaling.svg",
+      "bytes": 10558,
+      "sha256": "fe00334baa76e6e102c7fc6e2fa040a4f1d9f6e5bee7933b078c043c5b1b42ad"
+    },
+    {
+      "file": "figure_4_relation_set_boundary.png",
+      "bytes": 141288,
+      "sha256": "d9f5ccddc0405945b61b8d3941b7c4d9ca1a893cbe652a3337aed188a57e7e43"
+    },
+    {
+      "file": "figure_4_relation_set_boundary.svg",
+      "bytes": 7745,
+      "sha256": "3575a298e0fd4d02d4e739347dda97694aa948b5dc39b050afb58c798d23afb1"
+    },
+    {
+      "file": "figure_5_topology_sensitivity.png",
+      "bytes": 113093,
+      "sha256": "a5f1262633182e67c58866db04d87f6b73169e4733b641c9d64cfd12d1e287b9"
+    },
+    {
+      "file": "figure_5_topology_sensitivity.svg",
+      "bytes": 6730,
+      "sha256": "434c86e76d5a242425d0e09599493370b12b423c1a6112c32ab8d5b6e31f2556"
+    },
+    {
+      "file": "raw_measurements.csv",
+      "bytes": 59458,
+      "sha256": "1a681b50a4501bcb8bb6fdc408389f09385e43700819e40ec978773a633b449f"
+    },
+    {
+      "file": "relation_set_summary.csv",
+      "bytes": 5285,
+      "sha256": "39909cb707d4bc0f71041b2766c9d02a9746ef17f3446075eb6a9c15ecbf33f5"
+    },
+    {
+      "file": "relation_set_summary.md",
+      "bytes": 2584,
+      "sha256": "4ae44b48de9338d1311e8056652aa1f2ec73be23d637bd6475e08a95d2e94650"
+    }
+  ]
+}

@@ -152,6 +152,37 @@ Absolute values include hypergraph construction and vary by machine; the benchma
 exists for repeatable before/after comparisons and algorithm-selection regressions. On the
 128-relation chain the adaptive large-query path is 7.0× faster than forced exact DPhyp.
 
+### Current paper-faithful scalability measurements
+
+The 2026-07-24 release matrix measures commit `e604ff5` with three deterministic random trees and
+three timed repetitions per tree. The control is commit `7a98797` with only the benchmark's empty
+catalog fixture populated; no old optimizer code was changed. Both sides therefore analyze the
+same query shapes with the same table schemas and enumeration-only cost model:
+
+| Relations | Catalog-corrected control | Paper-faithful adaptive | Current / control |
+|---:|---:|---:|---:|
+| 10 | 0.266 ms | 0.274 ms | 1.029× |
+| 20 | 17.630 ms | 20.889 ms | 1.185× |
+| 30 | 2.592 ms | 8.985 ms | 3.466× |
+| 40 | 3.424 ms | 9.149 ms | 2.672× |
+| 70 | 7.923 ms | 13.116 ms | 1.655× |
+| 100 | 13.161 ms | 18.919 ms | 1.437× |
+| 128 | 111.691 ms | 19.513 ms | 0.175× |
+| 192 | 610.952 ms | 27.135 ms | 0.044× |
+| 256 | 2,223.087 ms | 40.373 ms | 0.018× |
+
+The paper-faithful MST/IKKBZ work adds at most 6.4 ms absolute median time in this sub-100
+workload, even where the relative ratio is large. The policy crossover then dominates: adaptive
+planning is 5.7× faster at 128 relations, 22.5× at 192, and 55.1× at 256. Forced whole-query
+linearized DP takes 86.015 ms at 256, versus 40.373 ms for GOO with bounded repair.
+
+The same adaptive path reaches 512, 1,024, 2,000, and 5,000 relations in 77.020 ms, 157.357 ms,
+466.027 ms, and 2.038 s median respectively. At 5,000 it contracts 66 subproblems and creates
+10,057 inner-DP states. The slight overshoot is expected: the scheduler starts repairs only while
+budget remains, but learns an invocation's actual table size after it completes. Raw measurements,
+summary CSV/Markdown, five SVG/PNG figures, the corrected baseline, and a SHA-256 manifest live in
+`artifacts/join_ordering_paper_faithful/`.
+
 At the same 2026-07-16 adaptive-enumerator milestone, the DataFusion `profile_passes` workload was run
 from both the untouched `54c9bdf` commit and the then-current adaptive tree with two measured runs.
 The changing JoinOrdering invocation on
@@ -617,11 +648,20 @@ published mappings into the final operator graph.
 15. Unit, exhaustive-oracle, SQL feature, benchmark, and same-machine release-profiler evidence
     cover exactness, directed multi-node TES repair, algorithm selection, stack safety, more than
     64 relations, and regression bounds.
+16. `artifacts/join_ordering_paper_faithful/`: three-query/three-repetition measurements through
+    5,000 relations, a catalog-corrected `7a98797` comparison, summary tables, five inspected
+    figures, and a SHA-256 manifest.
 
 ### Open / Follow-ups
-- **Current-paper benchmark refresh**: rerun the scalability matrix after the IKKBZ and global
-  GOO/DP changes; keep the 2026-07-16 measurements above as a historical baseline rather than
-  silently relabeling them.
+- **Directed-edge invariant defense**: CD-E guarantees simultaneously applicable directed edges
+  have compatible join semantics. Add a defensive assertion/error for manually constructed public
+  hypergraphs whose connecting edges disagree on join type or orientation.
+- **Composite repair coverage**: combine a directed multi-node TES with several prior opaque
+  contractions, and add an exact finite-budget boundary spanning several repairs.
+- **Large GOO execution coverage**: the enabled 101-way SQL case verifies physical-plan
+  construction; add a bounded-result executable case for end-to-end semantic comparison.
+- **Greedy estimate hardening**: built-in cardinality estimates are nonnegative and non-NaN, but
+  normalize invalid custom estimates before constructing the total-order GOO key.
 - **Extended enumeration telemetry**: the pass now reports unique DP states and GOO repairs;
   candidate attempts and emitted csg-cmp-pair counts would provide finer production attribution.
 - **Column-profile construction**: `combine_join_columns` and ordered-map insertion are the largest

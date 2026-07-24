@@ -550,7 +550,9 @@ def write_tables(rows, aggregate, output_dir: Path, baseline_aggregate=None):
             "median_repaired_subproblems": value["median_repairs"],
         })
     with (output_dir / "adaptive_summary.csv").open("w", newline="") as target:
-        writer = csv.DictWriter(target, fieldnames=adaptive_rows[0].keys())
+        writer = csv.DictWriter(
+            target, fieldnames=adaptive_rows[0].keys(), lineterminator="\n"
+        )
         writer.writeheader()
         writer.writerows(adaptive_rows)
 
@@ -576,7 +578,9 @@ def write_tables(rows, aggregate, output_dir: Path, baseline_aggregate=None):
             "median_repaired_subproblems": value["median_repairs"],
         })
     with (output_dir / "algorithm_summary.csv").open("w", newline="") as target:
-        writer = csv.DictWriter(target, fieldnames=all_rows[0].keys())
+        writer = csv.DictWriter(
+            target, fieldnames=all_rows[0].keys(), lineterminator="\n"
+        )
         writer.writeheader()
         writer.writerows(all_rows)
 
@@ -628,7 +632,9 @@ def write_tables(rows, aggregate, output_dir: Path, baseline_aggregate=None):
             "max_ns": values_summary["max"],
         })
     with (output_dir / "relation_set_summary.csv").open("w", newline="") as target:
-        writer = csv.DictWriter(target, fieldnames=relation_rows[0].keys())
+        writer = csv.DictWriter(
+            target, fieldnames=relation_rows[0].keys(), lineterminator="\n"
+        )
         writer.writeheader()
         writer.writerows(relation_rows)
 
@@ -673,15 +679,17 @@ def write_baseline_comparison(current, baseline, output_dir: Path):
         )
 
     with (output_dir / "baseline_comparison.csv").open("w", newline="") as target:
-        writer = csv.DictWriter(target, fieldnames=comparison_rows[0].keys())
+        writer = csv.DictWriter(
+            target, fieldnames=comparison_rows[0].keys(), lineterminator="\n"
+        )
         writer.writeheader()
         writer.writerows(comparison_rows)
 
     lines = [
         "# Catalog-corrected comparison with pre-paper implementation",
         "",
-        "Both sides use three identical deterministic random trees, one release-mode timed pass,",
-        "and populated benchmark catalog entries. The baseline is commit `7a98797` with only the",
+        "Both sides use identical deterministic random trees, release-mode timed repetitions, and",
+        "populated benchmark catalog entries. The baseline is commit `7a98797` with only the",
         "catalog-fixture correction applied; no baseline optimizer code was changed.",
         "",
         "| Relations | Baseline median | Current median | Current / baseline | Change |",
@@ -788,7 +796,7 @@ Generated on {generated_at} from commit `{command_output(['git', 'rev-parse', 'H
 
 ## Headline results
 
-- Adaptive median planning time grows from **{adaptive_10:.3f} ms at 10 relations** to
+- Adaptive median planning time is **{adaptive_10:.3f} ms at 10 relations**,
   **{adaptive_100:.3f} ms at 100**, **{adaptive_256:.3f} ms at 256**, and
   **{largest['median'] / 1_000:.3f} s at {largest_size:,}**.
 - The {largest_size:,}-relation adaptive runs selected **{largest_mix}**, built a median
@@ -797,8 +805,8 @@ Generated on {generated_at} from commit `{command_output(['git', 'rev-parse', 'H
 - At 256 relations, forced whole-query linearized DP takes **{linear_256:.3f} ms**; the adaptive
   to forced-linearized timing ratio is **{adaptive_to_linear_256:.2f}x**.
 {baseline_headline}
-- Crossing from the inline 64-bit `RelationSet` tier to `Inline128` changes the mixed
-  set-operation microbenchmark by **{boundary:.2f}x** at 64 -> 65 relations.
+- Crossing from the inline 64-bit `RelationSet` tier to `Inline128` changes borrowed-union time
+  by **{boundary:.2f}x** at 64 -> 65 relations.
 - At 256 relations, in-place `|=` is **{assign_speedup:.1f}x faster** than the previous
   allocate-and-replace formulation.
 - At 1,024 relations, bulk `FromIterator` is **{build_speedup:.1f}x faster** than repeated
@@ -836,7 +844,7 @@ Reproduce from the repository root:
 
 ```bash
 cargo bench -p optd-core --bench join_ordering_scalability -- \\
-  "$PWD/artifacts/join_ordering_paper_faithful/raw_measurements.csv" 3 1
+  "$PWD/artifacts/join_ordering_paper_faithful/raw_measurements.csv" {query_count} {repetitions}
 python3 optd/core/benches/render_join_ordering_scalability.py \\
   artifacts/join_ordering_paper_faithful/raw_measurements.csv \\
   artifacts/join_ordering_paper_faithful \\
@@ -848,7 +856,8 @@ python3 optd/core/benches/render_join_ordering_scalability.py \\
 - `raw_measurements.csv`: every measurement.
 - `adaptive_summary.csv` / `.md`: paper-style adaptive distribution table.
 - `algorithm_summary.csv`: all algorithm distributions.
-- `baseline_7a98797_catalog_fixed.csv` / `baseline_comparison.*`: fair pre-paper comparison.
+- `baseline_7a98797_catalog_fixed.csv`, `baseline_catalog_fixture.patch`, and
+  `baseline_comparison.*`: fair pre-paper comparison and the complete fixture-only baseline diff.
 - `relation_set_summary.csv` / `.md`: four-tier RelationSet operation and construction distributions.
 - `figure_1_algorithm_scaling.*`: paper-style optimization-time curves.
 - `figure_2_adaptive_policy.*`: policy choices and transition costs.
@@ -864,11 +873,16 @@ python3 optd/core/benches/render_join_ordering_scalability.py \\
   production cardinality-costing overhead.
 - The pre-paper comparison changes only its previously empty benchmark catalog fixture; it does
   not backport any optimizer change.
+- `baseline_catalog_fixture.patch` is zero-context output so it carries no whitespace-only context;
+  verify or apply it at `7a98797` with `git apply --unidiff-zero`.
 - The random-graph quantiles are a workload distribution, as in the paper. Repetitions improve
   timing stability but are not independent query shapes.
 - Candidate counts are appended IR operators for the compatibility evaluator. DP-state and repair
   columns are the algorithm's direct execution telemetry and are a better cross-representation
   work measure.
+- The scheduler stops launching repairs once its 10,000-state budget is spent. One already-started
+  repair can finish slightly above that number because its actual state count is known only after
+  enumeration.
 """
     (output_dir / "README.md").write_text(text)
 
