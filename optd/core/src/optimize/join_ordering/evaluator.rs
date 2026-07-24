@@ -36,6 +36,7 @@ pub(super) struct JoinSpec<'a> {
     pub(super) join_type: &'a JoinType,
     pub(super) edge_indices: &'a [usize],
     pub(super) hypergraph: &'a QueryHypergraph,
+    pub(super) cardinality_required: bool,
 }
 
 pub(super) trait CandidateEvaluator<M: CostModel>: Send + Sync {
@@ -45,6 +46,7 @@ pub(super) trait CandidateEvaluator<M: CostModel>: Send + Sync {
         root: Operator,
         ctx: &QueryContext,
         analyses: &mut AnalysisContext,
+        cardinality_required: bool,
     ) -> OptimizeResult<EvaluatedPlan<M::Cost>>;
 
     /// Whether candidate evaluation must first recover concrete child operators.
@@ -75,6 +77,7 @@ impl CandidateEvaluator<DefaultCostModel> for CardinalityEvaluator {
         root: Operator,
         ctx: &QueryContext,
         analyses: &mut AnalysisContext,
+        _cardinality_required: bool,
     ) -> OptimizeResult<EvaluatedPlan<f64>> {
         let cost = cost_model.total_cost(root, ctx, analyses)?;
         let cardinality =
@@ -164,7 +167,11 @@ fn cardinality_error(error: crate::AnalysisError) -> OptimizeError {
     }
 }
 
-/// Compatibility evaluator that preserves the original materialize-then-cost behavior.
+/// Compatibility evaluator that preserves materialize-then-cost semantics for custom models.
+///
+/// Cardinality profiles are computed lazily when the selected enumerator ranks candidates with
+/// them. Exact DPhyp can therefore use an independent custom cost model without paying for—or
+/// requiring catalog metadata for—an otherwise unused property.
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct MaterializingEvaluator;
 
@@ -175,15 +182,16 @@ impl<M: CostModel> CandidateEvaluator<M> for MaterializingEvaluator {
         root: Operator,
         ctx: &QueryContext,
         analyses: &mut AnalysisContext,
+        cardinality_required: bool,
     ) -> OptimizeResult<EvaluatedPlan<M::Cost>> {
         let cost = cost_model.total_cost(root, ctx, analyses)?;
-        let cardinality =
-            CardinalityEstimationV1::get_shared(ctx, analyses, root).map_err(cardinality_error)?;
+        let cardinality = cardinality_required
+            .then(|| CardinalityEstimationV1::get_shared(ctx, analyses, root))
+            .transpose()
+            .map_err(cardinality_error)?;
         Ok(EvaluatedPlan {
             cost,
-            properties: PlanProperties {
-                cardinality: Some(cardinality),
-            },
+            properties: PlanProperties { cardinality },
             materialized: Some(root),
         })
     }
@@ -221,13 +229,14 @@ impl<M: CostModel> CandidateEvaluator<M> for MaterializingEvaluator {
             ctx,
             analyses,
         )?;
-        let cardinality =
-            CardinalityEstimationV1::get_shared(ctx, analyses, root).map_err(cardinality_error)?;
+        let cardinality = spec
+            .cardinality_required
+            .then(|| CardinalityEstimationV1::get_shared(ctx, analyses, root))
+            .transpose()
+            .map_err(cardinality_error)?;
         Ok(EvaluatedPlan {
             cost,
-            properties: PlanProperties {
-                cardinality: Some(cardinality),
-            },
+            properties: PlanProperties { cardinality },
             materialized: Some(root),
         })
     }
@@ -340,10 +349,10 @@ mod tests {
         let model = DefaultCostModel;
         let deferred = CardinalityEvaluator;
         let deferred_outer = deferred
-            .evaluate_leaf(&model, outer, ctx, analyses)
+            .evaluate_leaf(&model, outer, ctx, analyses, true)
             .unwrap();
         let deferred_inner = deferred
-            .evaluate_leaf(&model, inner, ctx, analyses)
+            .evaluate_leaf(&model, inner, ctx, analyses, true)
             .unwrap();
         let cached_outer = CardinalityEstimationV1::get_shared(ctx, analyses, outer).unwrap();
         assert!(Arc::ptr_eq(
@@ -361,6 +370,7 @@ mod tests {
                     join_type: &join_type,
                     edge_indices: &edge_indices,
                     hypergraph: &hypergraph,
+                    cardinality_required: true,
                 },
                 CandidateInput {
                     cost: &deferred_outer.cost,
@@ -379,10 +389,10 @@ mod tests {
 
         let materializing = MaterializingEvaluator;
         let materialized_outer = materializing
-            .evaluate_leaf(&model, outer, ctx, analyses)
+            .evaluate_leaf(&model, outer, ctx, analyses, true)
             .unwrap();
         let materialized_inner = materializing
-            .evaluate_leaf(&model, inner, ctx, analyses)
+            .evaluate_leaf(&model, inner, ctx, analyses, true)
             .unwrap();
         let materialized_result = materializing
             .evaluate_join(
@@ -391,6 +401,7 @@ mod tests {
                     join_type: &join_type,
                     edge_indices: &edge_indices,
                     hypergraph: &hypergraph,
+                    cardinality_required: true,
                 },
                 CandidateInput {
                     cost: &materialized_outer.cost,

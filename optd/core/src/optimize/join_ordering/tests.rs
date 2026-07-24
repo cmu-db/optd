@@ -55,6 +55,7 @@ impl evaluator::CandidateEvaluator<UnitCost> for DeferredUnitEvaluator {
         _root: Operator,
         _ctx: &QueryContext,
         _analyses: &mut AnalysisContext,
+        _cardinality_required: bool,
     ) -> OptimizeResult<evaluator::EvaluatedPlan<usize>> {
         Ok(evaluator::EvaluatedPlan {
             cost: 0,
@@ -785,6 +786,63 @@ fn join_ordering_constructors_select_deferred_and_compatibility_evaluators() {
         compatibility_appended > default_appended,
         "with_cost_model preserves eager compatibility semantics",
     );
+}
+
+#[test]
+fn exact_custom_costing_does_not_build_unused_cardinality_profiles() {
+    let (query, _) = three_way_chain();
+    let catalog = Arc::new(MemoryCatalog::new("bench", "public"));
+    let mut optimizer = OptimizerContext::new(query, catalog);
+    let mut pass = JoinOrdering::with_cost_model(UnitCost);
+
+    assert_eq!(pass.run(&mut optimizer).unwrap(), PassResult::Changed);
+    assert_eq!(
+        pass.last_decisions()[0].algorithm,
+        JoinOrderAlgorithm::DpHyp
+    );
+}
+
+#[test]
+fn custom_costing_builds_profiles_for_linearized_and_goo_search() {
+    let cases = [
+        (
+            "linearized DP",
+            JoinOrderAlgorithm::LinearizedDp,
+            AdaptiveJoinOrderingConfig {
+                exact_relation_threshold: 0,
+                connected_subgraph_budget: 0,
+                linearized_relation_threshold: 3,
+                goo_linearized_subproblem_size: 2,
+                goo_dphyp_subproblem_size: 2,
+                goo_dp_state_budget: 10,
+            },
+        ),
+        (
+            "GOO/DP",
+            JoinOrderAlgorithm::GooDp(GooDpConfig {
+                inner: GooInnerSolver::LinearizedDp,
+                max_subproblem_relations: 2,
+                dp_state_budget: 10,
+            }),
+            AdaptiveJoinOrderingConfig {
+                exact_relation_threshold: 0,
+                connected_subgraph_budget: 0,
+                linearized_relation_threshold: 0,
+                goo_linearized_subproblem_size: 2,
+                goo_dphyp_subproblem_size: 2,
+                goo_dp_state_budget: 10,
+            },
+        ),
+    ];
+
+    for (case, expected, config) in cases {
+        let (query, _) = three_way_chain();
+        let mut optimizer = crate::test_optimizer_context(query);
+        let mut pass = JoinOrdering::with_cost_model(UnitCost).adaptive_config(config);
+
+        assert_eq!(pass.run(&mut optimizer).unwrap(), PassResult::Changed);
+        assert_eq!(pass.last_decisions()[0].algorithm, expected, "{case}");
+    }
 }
 
 #[test]

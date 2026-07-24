@@ -336,10 +336,24 @@ def figure_adaptive_policy(rows, aggregate, destination: Path):
                 segment = (bottom - y) * fraction
                 svg.rect(x - bar_width / 2, bottom - offset - segment, bar_width, segment, COLORS[algorithm])
                 offset += segment
+        abbreviations = {
+            "dphyp": "D",
+            "linearized_dp": "L",
+            "goo_linearized_dp": "G-L",
+            "goo_dphyp": "G-D",
+        }
         mix = "/".join(
-            f"{name}:{selection[name]}" for name in algorithms if selection[name]
+            f"{abbreviations[name]}:{selection[name]}"
+            for name in algorithms
+            if selection[name]
         )
-        svg.text(x, y - 9, mix, "annotation")
+        svg.text(
+            x - 5 if size == max(sizes) else x,
+            y - 9,
+            mix,
+            "annotation",
+            "end" if size == max(sizes) else "middle",
+        )
     for index, (algorithm, label) in enumerate([
         ("dphyp", "DPhyp"),
         ("linearized_dp", "Linearized DP"),
@@ -516,7 +530,7 @@ def figure_topologies(rows, destination: Path):
     destination.write_text(svg.finish())
 
 
-def write_tables(rows, aggregate, output_dir: Path):
+def write_tables(rows, aggregate, output_dir: Path, baseline_aggregate=None):
     adaptive_rows = []
     for (relations, variant), value in sorted(aggregate.items()):
         if variant != "adaptive":
@@ -638,6 +652,51 @@ def write_tables(rows, aggregate, output_dir: Path):
         "\n".join(relation_lines) + "\n"
     )
 
+    if baseline_aggregate is not None:
+        write_baseline_comparison(aggregate, baseline_aggregate, output_dir)
+
+
+def write_baseline_comparison(current, baseline, output_dir: Path):
+    comparison_rows = []
+    for relations, variant in sorted(set(current) & set(baseline)):
+        previous = baseline[(relations, variant)]["median"]
+        latest = current[(relations, variant)]["median"]
+        comparison_rows.append(
+            {
+                "relations": relations,
+                "variant": variant,
+                "baseline_median_ms": previous,
+                "current_median_ms": latest,
+                "current_over_baseline": latest / previous,
+                "percent_change": (latest / previous - 1) * 100,
+            }
+        )
+
+    with (output_dir / "baseline_comparison.csv").open("w", newline="") as target:
+        writer = csv.DictWriter(target, fieldnames=comparison_rows[0].keys())
+        writer.writeheader()
+        writer.writerows(comparison_rows)
+
+    lines = [
+        "# Catalog-corrected comparison with pre-paper implementation",
+        "",
+        "Both sides use three identical deterministic random trees, one release-mode timed pass,",
+        "and populated benchmark catalog entries. The baseline is commit `7a98797` with only the",
+        "catalog-fixture correction applied; no baseline optimizer code was changed.",
+        "",
+        "| Relations | Baseline median | Current median | Current / baseline | Change |",
+        "|---:|---:|---:|---:|---:|",
+    ]
+    for row in comparison_rows:
+        if row["variant"] != "adaptive":
+            continue
+        lines.append(
+            f"| {row['relations']} | {row['baseline_median_ms']:.3f} ms | "
+            f"{row['current_median_ms']:.3f} ms | "
+            f"{row['current_over_baseline']:.3f}x | {row['percent_change']:+.1f}% |"
+        )
+    (output_dir / "baseline_comparison.md").write_text("\n".join(lines) + "\n")
+
 
 def command_output(command):
     try:
@@ -646,7 +705,7 @@ def command_output(command):
         return "unavailable"
 
 
-def write_readme(rows, aggregate, output_dir: Path):
+def write_readme(rows, aggregate, output_dir: Path, baseline_aggregate=None):
     adaptive_10 = aggregate[(10, "adaptive")]["median"]
     adaptive_100 = aggregate[(100, "adaptive")]["median"]
     adaptive_256 = aggregate[(256, "adaptive")]["median"]
@@ -710,6 +769,15 @@ def write_readme(rows, aggregate, output_dir: Path):
         and row["relations"] == 10
         and row["query_id"] == 0
     })
+    repetition_word = "repetition" if repetitions == 1 else "repetitions"
+    baseline_headline = ""
+    if baseline_aggregate is not None:
+        previous_256 = baseline_aggregate[(256, "adaptive")]["median"]
+        baseline_headline = (
+            f"- Against the catalog-corrected pre-paper baseline at 256 relations, adaptive "
+            f"planning is **{previous_256 / adaptive_256:.1f}x faster** "
+            f"({previous_256:.3f} ms -> {adaptive_256:.3f} ms)."
+        )
     cpu = command_output(["sysctl", "-n", "machdep.cpu.brand_string"])
     if cpu == "unavailable":
         cpu = platform.processor() or platform.machine()
@@ -728,13 +796,14 @@ Generated on {generated_at} from commit `{command_output(['git', 'rev-parse', 'H
   **{largest['median_repairs']:.0f} subproblems**.
 - At 256 relations, forced whole-query linearized DP takes **{linear_256:.3f} ms**; the adaptive
   to forced-linearized timing ratio is **{adaptive_to_linear_256:.2f}x**.
+{baseline_headline}
 - Crossing from the inline 64-bit `RelationSet` tier to `Inline128` changes the mixed
   set-operation microbenchmark by **{boundary:.2f}x** at 64 -> 65 relations.
 - At 256 relations, in-place `|=` is **{assign_speedup:.1f}x faster** than the previous
   allocate-and-replace formulation.
 - At 1,024 relations, bulk `FromIterator` is **{build_speedup:.1f}x faster** than repeated
   singleton insertion and union.
-{f"- In the sparse 16,385-slot case, in-place `|=` is **{sparse_speedup:.1f}x faster** than allocate-and-replace." if sparse_speedup is not None else ""}
+{f"- The sparse 16,385-slot allocate-and-replace/in-place timing ratio is **{sparse_speedup:.2f}x**." if sparse_speedup is not None else ""}
 
 ## Relationship to Neumann and Radke (SIGMOD 2018)
 
@@ -757,7 +826,7 @@ search, cardinality ranking, hypergraph construction, and data-structure overhea
 - Hardware/platform: {cpu}; `{platform.platform()}`.
 - Toolchain: `{command_output(['rustc', '--version'])}`.
 - Workload: {query_count} deterministic random recursive trees per ordinary size and
-  {large_query_count} per mega-query size; {repetitions} timed repetition(s) per query.
+  {large_query_count} per mega-query size; {repetitions} timed {repetition_word} per query.
 - Timed region: `JoinOrdering::run`, excluding query construction, cloning, and CSV output.
 - Sizes: {", ".join(f"{size:,}" for size in adaptive_sizes)} relations.
 - Forced DPhyp is limited to 10-18 relations to avoid unbounded exponential runs.
@@ -770,7 +839,8 @@ cargo bench -p optd-core --bench join_ordering_scalability -- \\
   "$PWD/artifacts/join_ordering_paper_faithful/raw_measurements.csv" 3 1
 python3 optd/core/benches/render_join_ordering_scalability.py \\
   artifacts/join_ordering_paper_faithful/raw_measurements.csv \\
-  artifacts/join_ordering_paper_faithful
+  artifacts/join_ordering_paper_faithful \\
+  artifacts/join_ordering_paper_faithful/baseline_7a98797_catalog_fixed.csv
 ```
 
 ## Files
@@ -778,6 +848,7 @@ python3 optd/core/benches/render_join_ordering_scalability.py \\
 - `raw_measurements.csv`: every measurement.
 - `adaptive_summary.csv` / `.md`: paper-style adaptive distribution table.
 - `algorithm_summary.csv`: all algorithm distributions.
+- `baseline_7a98797_catalog_fixed.csv` / `baseline_comparison.*`: fair pre-paper comparison.
 - `relation_set_summary.csv` / `.md`: four-tier RelationSet operation and construction distributions.
 - `figure_1_algorithm_scaling.*`: paper-style optimization-time curves.
 - `figure_2_adaptive_policy.*`: policy choices and transition costs.
@@ -791,6 +862,8 @@ python3 optd/core/benches/render_join_ordering_scalability.py \\
 - These are optimizer-kernel timings, not SQL parsing, execution, or end-to-end query latency.
 - A constant-time cost model makes algorithmic/data-structure effects visible but understates the
   production cardinality-costing overhead.
+- The pre-paper comparison changes only its previously empty benchmark catalog fixture; it does
+  not backport any optimizer change.
 - The random-graph quantiles are a workload distribution, as in the paper. Repetitions improve
   timing stability but are not independent query shapes.
 - Candidate counts are appended IR operators for the compatibility evaluator. DP-state and repair
@@ -830,20 +903,28 @@ def write_manifest(output_dir: Path):
 
 
 def main():
-    if len(sys.argv) != 3:
-        raise SystemExit("usage: render_join_ordering_scalability.py RAW.csv OUTPUT_DIR")
+    if len(sys.argv) not in {3, 4}:
+        raise SystemExit(
+            "usage: render_join_ordering_scalability.py RAW.csv OUTPUT_DIR [BASELINE.csv]"
+        )
     source = Path(sys.argv[1]).resolve()
     output_dir = Path(sys.argv[2]).resolve()
+    baseline_source = Path(sys.argv[3]).resolve() if len(sys.argv) == 4 else None
     output_dir.mkdir(parents=True, exist_ok=True)
     rows = load_rows(source)
     aggregate = aggregate_random(rows)
+    baseline_aggregate = (
+        aggregate_random(load_rows(baseline_source))
+        if baseline_source is not None
+        else None
+    )
     figure_algorithm_scaling(aggregate, output_dir / "figure_1_algorithm_scaling.svg")
     figure_adaptive_policy(rows, aggregate, output_dir / "figure_2_adaptive_policy.svg")
     figure_work_scaling(aggregate, output_dir / "figure_3_work_scaling.svg")
     figure_relation_set(rows, output_dir / "figure_4_relation_set_boundary.svg")
     figure_topologies(rows, output_dir / "figure_5_topology_sensitivity.svg")
-    write_tables(rows, aggregate, output_dir)
-    write_readme(rows, aggregate, output_dir)
+    write_tables(rows, aggregate, output_dir, baseline_aggregate)
+    write_readme(rows, aggregate, output_dir, baseline_aggregate)
     render_pngs(output_dir)
     write_manifest(output_dir)
 

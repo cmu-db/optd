@@ -433,16 +433,28 @@ invariant used by the 5,000-relation benchmark.
 
 Candidate costing is behind a private `CandidateEvaluator` boundary. The compatibility evaluator
 materializes candidates before invoking an arbitrary `CostModel`, preserving custom
-`total_cost_from_children` behavior exactly. The default `CardinalityEvaluator` instead carries a
-`PlanProperties` bundle containing `Option<Arc<CardinalityProfile>>`. It derives each join's output
-profile and local cost from its two child profiles, composes cumulative cost in the same fold order
-as `CostModel`, and leaves the candidate root absent. Consequently only the final recipe reaches
-`QueryContext`. `JoinOrdering::new` and `with_config` select this path; `with_cost_model` deliberately
-selects compatibility evaluation, even when its argument happens to be `DefaultCostModel`.
+`total_cost_from_children` behavior exactly. Property production follows the enumerator's
+requirements: linearized DP and GOO request a profile for each leaf and join because their
+linearization and greedy keys use output cardinality; exact DPhyp requests none because it compares
+only the configured `CostModel::Cost`. The model remains free to invoke cardinality analysis from
+its own cost methods. This avoids coupling an independent exact-DP cost model to catalog
+statistics merely to populate an unused property.
+
+The default `CardinalityEvaluator` instead carries a `PlanProperties` bundle containing
+`Option<Arc<CardinalityProfile>>`. It derives each join's output profile and local cost from its
+two child profiles, composes cumulative cost in the same fold order as `CostModel`, and leaves the
+candidate root absent. Because its own built-in cost needs cardinality, it always supplies that
+profile even when exact DPhyp does not independently request one. Consequently only the final
+recipe reaches `QueryContext`. `JoinOrdering::new` and `with_config` select this path;
+`with_cost_model` deliberately selects compatibility evaluation, even when its argument happens
+to be `DefaultCostModel`.
 
 Differential tests compare the two evaluators bit-for-bit across every logical join type, a
 frequency-scaling cross product, DPhyp, linearized DP, and GOO/DP. They also verify that a deferred
-six-relation plan appends exactly five binary operators and that repeat materialization is memoized.
+six-relation plan appends exactly five binary operators and that repeat materialization is
+memoized. Empty-catalog custom-cost coverage proves that exact DPhyp does not request unused
+profiles; forced linearized-DP and GOO integration cases prove that both cardinality-dependent
+paths do request them.
 
 ---
 

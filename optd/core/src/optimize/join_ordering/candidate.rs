@@ -21,6 +21,7 @@ pub(super) struct JoinSearch<'a, M: CostModel> {
     hypergraph: &'a QueryHypergraph,
     cost_model: &'a M,
     evaluator: &'a dyn CandidateEvaluator<M>,
+    cardinality_required: bool,
     plans: PlanArena,
     leaf_plans: Vec<Option<PlanId>>,
 }
@@ -70,6 +71,7 @@ impl<C> CandidateDraft<C> {
 }
 
 impl<'a, M: CostModel> JoinSearch<'a, M> {
+    #[cfg(test)]
     pub(super) fn new(
         ctx: &'a mut QueryContext,
         analyses: &'a mut AnalysisContext,
@@ -77,12 +79,29 @@ impl<'a, M: CostModel> JoinSearch<'a, M> {
         cost_model: &'a M,
         evaluator: &'a dyn CandidateEvaluator<M>,
     ) -> Self {
+        Self::with_cardinality_requirement(ctx, analyses, hypergraph, cost_model, evaluator, true)
+    }
+
+    /// Creates a search with the property requirements of its selected enumerator.
+    ///
+    /// Exact DPhyp does not inspect output cardinality unless the cost evaluator itself needs it.
+    /// Linearization and GOO do, so their custom-model compatibility path requests profiles for
+    /// every candidate.
+    pub(super) fn with_cardinality_requirement(
+        ctx: &'a mut QueryContext,
+        analyses: &'a mut AnalysisContext,
+        hypergraph: &'a QueryHypergraph,
+        cost_model: &'a M,
+        evaluator: &'a dyn CandidateEvaluator<M>,
+        cardinality_required: bool,
+    ) -> Self {
         Self {
             ctx,
             analyses,
             hypergraph,
             cost_model,
             evaluator,
+            cardinality_required,
             plans: PlanArena::default(),
             leaf_plans: vec![None; hypergraph.nodes.len()],
         }
@@ -94,9 +113,13 @@ impl<'a, M: CostModel> JoinSearch<'a, M> {
 
     pub(super) fn leaf(&mut self, node: usize) -> OptimizeResult<PlanState<M::Cost>> {
         let root = self.hypergraph.nodes[node].root;
-        let evaluated =
-            self.evaluator
-                .evaluate_leaf(self.cost_model, root, self.ctx, self.analyses)?;
+        let evaluated = self.evaluator.evaluate_leaf(
+            self.cost_model,
+            root,
+            self.ctx,
+            self.analyses,
+            self.cardinality_required,
+        )?;
         let plan = match self.leaf_plans[node] {
             Some(plan) => plan,
             None => {
@@ -222,6 +245,7 @@ impl<'a, M: CostModel> JoinSearch<'a, M> {
                 join_type: &join_type,
                 edge_indices,
                 hypergraph: self.hypergraph,
+                cardinality_required: self.cardinality_required,
             },
             CandidateInput {
                 cost: &outer.cost,

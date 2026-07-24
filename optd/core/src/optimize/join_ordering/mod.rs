@@ -51,8 +51,11 @@
 //! rejected alternatives never append operators to [`crate::QueryContext`]. Once enumeration
 //! finishes, only the winning recipe is materialized in iterative post-order. Custom cost models
 //! retain the compatibility evaluator: it materializes candidates before costing because
-//! arbitrary models may inspect concrete operator handles. Analyses are explicitly cleared before
-//! group construction because both leaf costing and compatibility evaluation are demand-driven.
+//! arbitrary models may inspect concrete operator handles. That evaluator builds cardinality
+//! profiles only when the selected enumerator needs them: linearized DP and GOO rank candidates by
+//! output cardinality, while exact DPhyp needs only the configured plan cost. Analyses are
+//! explicitly cleared before group construction because both leaf costing and compatibility
+//! evaluation are demand-driven.
 
 mod candidate;
 mod dphyp;
@@ -215,12 +218,14 @@ impl<M: CostModel> QueryPass for JoinOrdering<M> {
         let mut replacements = Vec::new();
         for (group_root, hg) in &groups {
             let decision = choose_algorithm(hg, self.config);
-            let mut search = JoinSearch::new(
+            let cardinality_required = !matches!(decision.algorithm, JoinOrderAlgorithm::DpHyp);
+            let mut search = JoinSearch::with_cardinality_requirement(
                 &mut ctx.query,
                 &mut ctx.analyses,
                 hg,
                 &self.cost_model,
                 self.evaluator.as_ref(),
+                cardinality_required,
             );
             let (plan, dp_states_created, repaired_subproblems) = match decision.algorithm {
                 JoinOrderAlgorithm::DpHyp => {
