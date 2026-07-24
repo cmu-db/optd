@@ -1,6 +1,6 @@
 # Adaptive join-ordering feature coverage.
 #
-# Before the dynamic RelationSet change, the 65- and 101-relation cases failed during
+# Before the scalable RelationSet change, the 65- and 101-relation cases failed during
 # hypergraph construction at the hard 64-node assertion.
 
 # Small exact DPhyp.
@@ -58,8 +58,8 @@ JOIN (VALUES (1)) AS s14(x) ON s0.x = s14.x
 ----
 1
 
-# Sparse dynamic-bitset graph remains cheap enough for exact DPhyp and exercises the complete SQL
-# optimization pipeline with more than 64 relations.
+# A chain remains cheap enough for exact DPhyp and exercises the Inline128 set tier through the
+# complete SQL optimization pipeline with more than 64 relations.
 query T
 SELECT length(explain_flat('SELECT count(*)
 FROM (VALUES (1)) AS t0(x)
@@ -130,110 +130,111 @@ JOIN (VALUES (1)) AS t64(x) ON t63.x = t64.x')) > 0
 ----
 true
 
-# Very large graph exercises GOO with bounded exact subtree improvement through the complete SQL
+# A 101-way star exceeds the connected-subgraph budget and the direct linearized-DP threshold. It
+# exercises canonical GOO plus globally budgeted linearized-DP repair through the complete SQL
 # optimization pipeline.
 query T
 SELECT length(explain_flat('SELECT count(*)
 FROM (VALUES (1)) AS t0(x)
 JOIN (VALUES (1)) AS t1(x) ON t0.x = t1.x
-JOIN (VALUES (1)) AS t2(x) ON t1.x = t2.x
-JOIN (VALUES (1)) AS t3(x) ON t2.x = t3.x
-JOIN (VALUES (1)) AS t4(x) ON t3.x = t4.x
-JOIN (VALUES (1)) AS t5(x) ON t4.x = t5.x
-JOIN (VALUES (1)) AS t6(x) ON t5.x = t6.x
-JOIN (VALUES (1)) AS t7(x) ON t6.x = t7.x
-JOIN (VALUES (1)) AS t8(x) ON t7.x = t8.x
-JOIN (VALUES (1)) AS t9(x) ON t8.x = t9.x
-JOIN (VALUES (1)) AS t10(x) ON t9.x = t10.x
-JOIN (VALUES (1)) AS t11(x) ON t10.x = t11.x
-JOIN (VALUES (1)) AS t12(x) ON t11.x = t12.x
-JOIN (VALUES (1)) AS t13(x) ON t12.x = t13.x
-JOIN (VALUES (1)) AS t14(x) ON t13.x = t14.x
-JOIN (VALUES (1)) AS t15(x) ON t14.x = t15.x
-JOIN (VALUES (1)) AS t16(x) ON t15.x = t16.x
-JOIN (VALUES (1)) AS t17(x) ON t16.x = t17.x
-JOIN (VALUES (1)) AS t18(x) ON t17.x = t18.x
-JOIN (VALUES (1)) AS t19(x) ON t18.x = t19.x
-JOIN (VALUES (1)) AS t20(x) ON t19.x = t20.x
-JOIN (VALUES (1)) AS t21(x) ON t20.x = t21.x
-JOIN (VALUES (1)) AS t22(x) ON t21.x = t22.x
-JOIN (VALUES (1)) AS t23(x) ON t22.x = t23.x
-JOIN (VALUES (1)) AS t24(x) ON t23.x = t24.x
-JOIN (VALUES (1)) AS t25(x) ON t24.x = t25.x
-JOIN (VALUES (1)) AS t26(x) ON t25.x = t26.x
-JOIN (VALUES (1)) AS t27(x) ON t26.x = t27.x
-JOIN (VALUES (1)) AS t28(x) ON t27.x = t28.x
-JOIN (VALUES (1)) AS t29(x) ON t28.x = t29.x
-JOIN (VALUES (1)) AS t30(x) ON t29.x = t30.x
-JOIN (VALUES (1)) AS t31(x) ON t30.x = t31.x
-JOIN (VALUES (1)) AS t32(x) ON t31.x = t32.x
-JOIN (VALUES (1)) AS t33(x) ON t32.x = t33.x
-JOIN (VALUES (1)) AS t34(x) ON t33.x = t34.x
-JOIN (VALUES (1)) AS t35(x) ON t34.x = t35.x
-JOIN (VALUES (1)) AS t36(x) ON t35.x = t36.x
-JOIN (VALUES (1)) AS t37(x) ON t36.x = t37.x
-JOIN (VALUES (1)) AS t38(x) ON t37.x = t38.x
-JOIN (VALUES (1)) AS t39(x) ON t38.x = t39.x
-JOIN (VALUES (1)) AS t40(x) ON t39.x = t40.x
-JOIN (VALUES (1)) AS t41(x) ON t40.x = t41.x
-JOIN (VALUES (1)) AS t42(x) ON t41.x = t42.x
-JOIN (VALUES (1)) AS t43(x) ON t42.x = t43.x
-JOIN (VALUES (1)) AS t44(x) ON t43.x = t44.x
-JOIN (VALUES (1)) AS t45(x) ON t44.x = t45.x
-JOIN (VALUES (1)) AS t46(x) ON t45.x = t46.x
-JOIN (VALUES (1)) AS t47(x) ON t46.x = t47.x
-JOIN (VALUES (1)) AS t48(x) ON t47.x = t48.x
-JOIN (VALUES (1)) AS t49(x) ON t48.x = t49.x
-JOIN (VALUES (1)) AS t50(x) ON t49.x = t50.x
-JOIN (VALUES (1)) AS t51(x) ON t50.x = t51.x
-JOIN (VALUES (1)) AS t52(x) ON t51.x = t52.x
-JOIN (VALUES (1)) AS t53(x) ON t52.x = t53.x
-JOIN (VALUES (1)) AS t54(x) ON t53.x = t54.x
-JOIN (VALUES (1)) AS t55(x) ON t54.x = t55.x
-JOIN (VALUES (1)) AS t56(x) ON t55.x = t56.x
-JOIN (VALUES (1)) AS t57(x) ON t56.x = t57.x
-JOIN (VALUES (1)) AS t58(x) ON t57.x = t58.x
-JOIN (VALUES (1)) AS t59(x) ON t58.x = t59.x
-JOIN (VALUES (1)) AS t60(x) ON t59.x = t60.x
-JOIN (VALUES (1)) AS t61(x) ON t60.x = t61.x
-JOIN (VALUES (1)) AS t62(x) ON t61.x = t62.x
-JOIN (VALUES (1)) AS t63(x) ON t62.x = t63.x
-JOIN (VALUES (1)) AS t64(x) ON t63.x = t64.x
-JOIN (VALUES (1)) AS t65(x) ON t64.x = t65.x
-JOIN (VALUES (1)) AS t66(x) ON t65.x = t66.x
-JOIN (VALUES (1)) AS t67(x) ON t66.x = t67.x
-JOIN (VALUES (1)) AS t68(x) ON t67.x = t68.x
-JOIN (VALUES (1)) AS t69(x) ON t68.x = t69.x
-JOIN (VALUES (1)) AS t70(x) ON t69.x = t70.x
-JOIN (VALUES (1)) AS t71(x) ON t70.x = t71.x
-JOIN (VALUES (1)) AS t72(x) ON t71.x = t72.x
-JOIN (VALUES (1)) AS t73(x) ON t72.x = t73.x
-JOIN (VALUES (1)) AS t74(x) ON t73.x = t74.x
-JOIN (VALUES (1)) AS t75(x) ON t74.x = t75.x
-JOIN (VALUES (1)) AS t76(x) ON t75.x = t76.x
-JOIN (VALUES (1)) AS t77(x) ON t76.x = t77.x
-JOIN (VALUES (1)) AS t78(x) ON t77.x = t78.x
-JOIN (VALUES (1)) AS t79(x) ON t78.x = t79.x
-JOIN (VALUES (1)) AS t80(x) ON t79.x = t80.x
-JOIN (VALUES (1)) AS t81(x) ON t80.x = t81.x
-JOIN (VALUES (1)) AS t82(x) ON t81.x = t82.x
-JOIN (VALUES (1)) AS t83(x) ON t82.x = t83.x
-JOIN (VALUES (1)) AS t84(x) ON t83.x = t84.x
-JOIN (VALUES (1)) AS t85(x) ON t84.x = t85.x
-JOIN (VALUES (1)) AS t86(x) ON t85.x = t86.x
-JOIN (VALUES (1)) AS t87(x) ON t86.x = t87.x
-JOIN (VALUES (1)) AS t88(x) ON t87.x = t88.x
-JOIN (VALUES (1)) AS t89(x) ON t88.x = t89.x
-JOIN (VALUES (1)) AS t90(x) ON t89.x = t90.x
-JOIN (VALUES (1)) AS t91(x) ON t90.x = t91.x
-JOIN (VALUES (1)) AS t92(x) ON t91.x = t92.x
-JOIN (VALUES (1)) AS t93(x) ON t92.x = t93.x
-JOIN (VALUES (1)) AS t94(x) ON t93.x = t94.x
-JOIN (VALUES (1)) AS t95(x) ON t94.x = t95.x
-JOIN (VALUES (1)) AS t96(x) ON t95.x = t96.x
-JOIN (VALUES (1)) AS t97(x) ON t96.x = t97.x
-JOIN (VALUES (1)) AS t98(x) ON t97.x = t98.x
-JOIN (VALUES (1)) AS t99(x) ON t98.x = t99.x
-JOIN (VALUES (1)) AS t100(x) ON t99.x = t100.x')) > 0
+JOIN (VALUES (1)) AS t2(x) ON t0.x = t2.x
+JOIN (VALUES (1)) AS t3(x) ON t0.x = t3.x
+JOIN (VALUES (1)) AS t4(x) ON t0.x = t4.x
+JOIN (VALUES (1)) AS t5(x) ON t0.x = t5.x
+JOIN (VALUES (1)) AS t6(x) ON t0.x = t6.x
+JOIN (VALUES (1)) AS t7(x) ON t0.x = t7.x
+JOIN (VALUES (1)) AS t8(x) ON t0.x = t8.x
+JOIN (VALUES (1)) AS t9(x) ON t0.x = t9.x
+JOIN (VALUES (1)) AS t10(x) ON t0.x = t10.x
+JOIN (VALUES (1)) AS t11(x) ON t0.x = t11.x
+JOIN (VALUES (1)) AS t12(x) ON t0.x = t12.x
+JOIN (VALUES (1)) AS t13(x) ON t0.x = t13.x
+JOIN (VALUES (1)) AS t14(x) ON t0.x = t14.x
+JOIN (VALUES (1)) AS t15(x) ON t0.x = t15.x
+JOIN (VALUES (1)) AS t16(x) ON t0.x = t16.x
+JOIN (VALUES (1)) AS t17(x) ON t0.x = t17.x
+JOIN (VALUES (1)) AS t18(x) ON t0.x = t18.x
+JOIN (VALUES (1)) AS t19(x) ON t0.x = t19.x
+JOIN (VALUES (1)) AS t20(x) ON t0.x = t20.x
+JOIN (VALUES (1)) AS t21(x) ON t0.x = t21.x
+JOIN (VALUES (1)) AS t22(x) ON t0.x = t22.x
+JOIN (VALUES (1)) AS t23(x) ON t0.x = t23.x
+JOIN (VALUES (1)) AS t24(x) ON t0.x = t24.x
+JOIN (VALUES (1)) AS t25(x) ON t0.x = t25.x
+JOIN (VALUES (1)) AS t26(x) ON t0.x = t26.x
+JOIN (VALUES (1)) AS t27(x) ON t0.x = t27.x
+JOIN (VALUES (1)) AS t28(x) ON t0.x = t28.x
+JOIN (VALUES (1)) AS t29(x) ON t0.x = t29.x
+JOIN (VALUES (1)) AS t30(x) ON t0.x = t30.x
+JOIN (VALUES (1)) AS t31(x) ON t0.x = t31.x
+JOIN (VALUES (1)) AS t32(x) ON t0.x = t32.x
+JOIN (VALUES (1)) AS t33(x) ON t0.x = t33.x
+JOIN (VALUES (1)) AS t34(x) ON t0.x = t34.x
+JOIN (VALUES (1)) AS t35(x) ON t0.x = t35.x
+JOIN (VALUES (1)) AS t36(x) ON t0.x = t36.x
+JOIN (VALUES (1)) AS t37(x) ON t0.x = t37.x
+JOIN (VALUES (1)) AS t38(x) ON t0.x = t38.x
+JOIN (VALUES (1)) AS t39(x) ON t0.x = t39.x
+JOIN (VALUES (1)) AS t40(x) ON t0.x = t40.x
+JOIN (VALUES (1)) AS t41(x) ON t0.x = t41.x
+JOIN (VALUES (1)) AS t42(x) ON t0.x = t42.x
+JOIN (VALUES (1)) AS t43(x) ON t0.x = t43.x
+JOIN (VALUES (1)) AS t44(x) ON t0.x = t44.x
+JOIN (VALUES (1)) AS t45(x) ON t0.x = t45.x
+JOIN (VALUES (1)) AS t46(x) ON t0.x = t46.x
+JOIN (VALUES (1)) AS t47(x) ON t0.x = t47.x
+JOIN (VALUES (1)) AS t48(x) ON t0.x = t48.x
+JOIN (VALUES (1)) AS t49(x) ON t0.x = t49.x
+JOIN (VALUES (1)) AS t50(x) ON t0.x = t50.x
+JOIN (VALUES (1)) AS t51(x) ON t0.x = t51.x
+JOIN (VALUES (1)) AS t52(x) ON t0.x = t52.x
+JOIN (VALUES (1)) AS t53(x) ON t0.x = t53.x
+JOIN (VALUES (1)) AS t54(x) ON t0.x = t54.x
+JOIN (VALUES (1)) AS t55(x) ON t0.x = t55.x
+JOIN (VALUES (1)) AS t56(x) ON t0.x = t56.x
+JOIN (VALUES (1)) AS t57(x) ON t0.x = t57.x
+JOIN (VALUES (1)) AS t58(x) ON t0.x = t58.x
+JOIN (VALUES (1)) AS t59(x) ON t0.x = t59.x
+JOIN (VALUES (1)) AS t60(x) ON t0.x = t60.x
+JOIN (VALUES (1)) AS t61(x) ON t0.x = t61.x
+JOIN (VALUES (1)) AS t62(x) ON t0.x = t62.x
+JOIN (VALUES (1)) AS t63(x) ON t0.x = t63.x
+JOIN (VALUES (1)) AS t64(x) ON t0.x = t64.x
+JOIN (VALUES (1)) AS t65(x) ON t0.x = t65.x
+JOIN (VALUES (1)) AS t66(x) ON t0.x = t66.x
+JOIN (VALUES (1)) AS t67(x) ON t0.x = t67.x
+JOIN (VALUES (1)) AS t68(x) ON t0.x = t68.x
+JOIN (VALUES (1)) AS t69(x) ON t0.x = t69.x
+JOIN (VALUES (1)) AS t70(x) ON t0.x = t70.x
+JOIN (VALUES (1)) AS t71(x) ON t0.x = t71.x
+JOIN (VALUES (1)) AS t72(x) ON t0.x = t72.x
+JOIN (VALUES (1)) AS t73(x) ON t0.x = t73.x
+JOIN (VALUES (1)) AS t74(x) ON t0.x = t74.x
+JOIN (VALUES (1)) AS t75(x) ON t0.x = t75.x
+JOIN (VALUES (1)) AS t76(x) ON t0.x = t76.x
+JOIN (VALUES (1)) AS t77(x) ON t0.x = t77.x
+JOIN (VALUES (1)) AS t78(x) ON t0.x = t78.x
+JOIN (VALUES (1)) AS t79(x) ON t0.x = t79.x
+JOIN (VALUES (1)) AS t80(x) ON t0.x = t80.x
+JOIN (VALUES (1)) AS t81(x) ON t0.x = t81.x
+JOIN (VALUES (1)) AS t82(x) ON t0.x = t82.x
+JOIN (VALUES (1)) AS t83(x) ON t0.x = t83.x
+JOIN (VALUES (1)) AS t84(x) ON t0.x = t84.x
+JOIN (VALUES (1)) AS t85(x) ON t0.x = t85.x
+JOIN (VALUES (1)) AS t86(x) ON t0.x = t86.x
+JOIN (VALUES (1)) AS t87(x) ON t0.x = t87.x
+JOIN (VALUES (1)) AS t88(x) ON t0.x = t88.x
+JOIN (VALUES (1)) AS t89(x) ON t0.x = t89.x
+JOIN (VALUES (1)) AS t90(x) ON t0.x = t90.x
+JOIN (VALUES (1)) AS t91(x) ON t0.x = t91.x
+JOIN (VALUES (1)) AS t92(x) ON t0.x = t92.x
+JOIN (VALUES (1)) AS t93(x) ON t0.x = t93.x
+JOIN (VALUES (1)) AS t94(x) ON t0.x = t94.x
+JOIN (VALUES (1)) AS t95(x) ON t0.x = t95.x
+JOIN (VALUES (1)) AS t96(x) ON t0.x = t96.x
+JOIN (VALUES (1)) AS t97(x) ON t0.x = t97.x
+JOIN (VALUES (1)) AS t98(x) ON t0.x = t98.x
+JOIN (VALUES (1)) AS t99(x) ON t0.x = t99.x
+JOIN (VALUES (1)) AS t100(x) ON t0.x = t100.x')) > 0
 ----
 true

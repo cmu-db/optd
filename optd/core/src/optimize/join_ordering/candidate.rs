@@ -50,6 +50,23 @@ impl<C> CandidateDraft<C> {
     pub(super) fn cost(&self) -> &C {
         &self.evaluated.cost
     }
+
+    /// Estimated rows produced by this candidate.
+    ///
+    /// Cardinality is deliberately independent of `C`: IKKBZ and canonical GOO use the
+    /// paper-defined output-cardinality objective even when interval DP ultimately compares plans
+    /// with an arbitrary execution-cost model.
+    pub(super) fn output_rows(&self) -> OptimizeResult<f64> {
+        self.evaluated
+            .properties
+            .cardinality
+            .as_ref()
+            .map(|profile| profile.rows.value)
+            .ok_or_else(|| OptimizeError::PassError {
+                pass: "JoinOrdering",
+                message: "join candidate is missing its cardinality profile".to_string(),
+            })
+    }
 }
 
 impl<'a, M: CostModel> JoinSearch<'a, M> {
@@ -116,27 +133,7 @@ impl<'a, M: CostModel> JoinSearch<'a, M> {
         }
     }
 
-    /// Returns the local operator cost used by GOO's greedy comparison.
-    pub(super) fn immediate_cost(
-        &mut self,
-        candidate: &CandidateDraft<M::Cost>,
-    ) -> OptimizeResult<M::Cost> {
-        if let Some(cost) = &candidate.evaluated.immediate_cost {
-            return Ok(cost.clone());
-        }
-        let root = candidate
-            .evaluated
-            .materialized
-            .ok_or_else(|| OptimizeError::PassError {
-                pass: "JoinOrdering",
-                message:
-                    "candidate evaluator returned neither an immediate cost nor a materialized root"
-                        .to_string(),
-            })?;
-        self.cost_model.operator_cost(root, self.ctx, self.analyses)
-    }
-
-    /// Materializes an accepted plan, recursively reconstructing a deferred recipe when needed.
+    /// Materializes an accepted plan, reconstructing a deferred recipe in iterative post-order.
     pub(super) fn materialize(&mut self, plan: &PlanState<M::Cost>) -> Operator {
         self.plans.materialize(plan.plan, self.hypergraph, self.ctx)
     }

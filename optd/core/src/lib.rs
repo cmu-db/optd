@@ -34,11 +34,11 @@ pub use hypergraph::{
     QueryHypergraph, build_hypergraph, nodeset_iter, nodeset_min, nodeset_singleton,
 };
 pub use optimize::{
-    AdaptiveJoinOrderingConfig, AlgorithmDecision, Direction, ExprSimplify, HolisticUnnesting,
-    JoinOrderAlgorithm, JoinOrdering, JoinTreeNormalize, MarkJoinToSemiJoin, OperatorRewrite,
-    OperatorRewriteAdaptor, OptimizeError, OptimizeResult, Pass, PassManager, PassMode,
-    PassProfile, PassResult, PassTrace, PredicatePushdown, ProjectionElimination, QueryPass,
-    Rewrite, RewriteMap, SubqueryToJoin, Unnesting,
+    AdaptiveJoinOrderingConfig, AlgorithmDecision, Direction, ExprSimplify, GooDpConfig,
+    GooInnerSolver, HolisticUnnesting, JoinOrderAlgorithm, JoinOrdering, JoinTreeNormalize,
+    MarkJoinToSemiJoin, OperatorRewrite, OperatorRewriteAdaptor, OptimizeError, OptimizeResult,
+    Pass, PassManager, PassMode, PassProfile, PassResult, PassTrace, PredicatePushdown,
+    ProjectionElimination, QueryPass, Rewrite, RewriteMap, SubqueryToJoin, Unnesting,
 };
 pub use relation_set::RelationSet;
 

@@ -5,9 +5,10 @@
 //!
 //! - `DPhyp` performs complete csg-cmp enumeration and produces an optimal bushy tree for the
 //!   configured cost model.
-//! - `linearized` derives a connectivity-preserving relation order and runs polynomial-time
-//!   interval DP over that order.
-//! - `goo` builds a bushy tree greedily, then improves bounded subtrees with exact DPhyp.
+//! - `linearized` builds a selectivity-minimum spanning tree, derives an ASI-compatible `C_out`
+//!   order with IKKBZ, and runs polynomial-time interval DP using the configured cost model.
+//! - `goo` builds the canonical minimum-output-cardinality bushy tree, then spends one global
+//!   DP-state budget repairing and contracting bounded frontiers.
 //!
 //! [`JoinOrdering`] discovers every maximal contiguous join group, builds one
 //! [`crate::QueryHypergraph`] per group, asks the `policy` module to choose an enumerator, and
@@ -25,7 +26,8 @@
 //! DPhyp's exclusion sets provide canonical enumeration: `B_min(S)` prevents an equivalent
 //! connected-subgraph/complement pair from being reached through a different seed. The
 //! [`crate::RelationSet`] backing [`crate::hypergraph::NodeSet`] has no machine-word relation
-//! limit, so the same algorithm is used for both inline and dynamically sized sets.
+//! limit. It canonicalizes equal values across inline-64, inline-128, dense, and sparse storage,
+//! so the same algorithms apply from ordinary queries through thousand-way joins.
 //!
 //! # Join orientation
 //!
@@ -37,19 +39,20 @@
 //! # Adaptive policy
 //!
 //! [`AdaptiveJoinOrderingConfig`] controls the exact-state budget and relation-count thresholds.
-//! The default policy uses exact DPhyp for small or topologically cheap groups, linearized DP for
-//! medium ordinary graphs, and GOO with bounded exact repair for very large graphs or true
-//! hypergraphs. [`JoinOrdering::last_decisions`] exposes the choices made by the most recent run
-//! for diagnostics and tests.
+//! Matching Figure 8 of Neumann and Radke, the default policy uses exact DPhyp for fewer than 14
+//! relations or at most 10,000 connected subgraphs. Other ordinary graphs use direct linearized
+//! DP through 100 relations and GOO with linearized-DP repair above that; hypergraphs use GOO with
+//! exact DPhyp repair. [`JoinOrdering::last_decisions`] exposes both the choice and actual DP-state
+//! and repair counts from the most recent run.
 //!
 //! # Arena allocation
 //!
 //! The default evaluator carries shared cardinality profiles through compact plan recipes, so
 //! rejected alternatives never append operators to [`crate::QueryContext`]. Once enumeration
-//! finishes, only the winning recipe is recursively materialized. Custom cost models retain the
-//! compatibility evaluator: it materializes candidates before costing because arbitrary models
-//! may inspect concrete operator handles. Analyses are explicitly cleared before group
-//! construction because both leaf costing and compatibility evaluation are demand-driven.
+//! finishes, only the winning recipe is materialized in iterative post-order. Custom cost models
+//! retain the compatibility evaluator: it materializes candidates before costing because
+//! arbitrary models may inspect concrete operator handles. Analyses are explicitly cleared before
+//! group construction because both leaf costing and compatibility evaluation are demand-driven.
 
 mod candidate;
 mod dphyp;
@@ -64,6 +67,7 @@ mod policy;
 #[cfg(test)]
 mod tests;
 
+pub use goo::{GooDpConfig, GooInnerSolver};
 pub use groups::collect_join_group_roots;
 pub use policy::{AdaptiveJoinOrderingConfig, AlgorithmDecision, JoinOrderAlgorithm};
 
@@ -211,7 +215,6 @@ impl<M: CostModel> QueryPass for JoinOrdering<M> {
         let mut replacements = Vec::new();
         for (group_root, hg) in &groups {
             let decision = choose_algorithm(hg, self.config);
-            self.last_decisions.push(decision);
             let mut search = JoinSearch::new(
                 &mut ctx.query,
                 &mut ctx.analyses,
@@ -219,13 +222,26 @@ impl<M: CostModel> QueryPass for JoinOrdering<M> {
                 &self.cost_model,
                 self.evaluator.as_ref(),
             );
-            let plan = match decision.algorithm {
-                JoinOrderAlgorithm::DpHyp => DPhyp::new(&mut search).solve()?,
-                JoinOrderAlgorithm::LinearizedDp => linearized::solve(&mut search)?,
-                JoinOrderAlgorithm::GooDp => {
-                    goo::solve(&mut search, self.config.goo_exact_subproblem_size)?
+            let (plan, dp_states_created, repaired_subproblems) = match decision.algorithm {
+                JoinOrderAlgorithm::DpHyp => {
+                    let outcome = DPhyp::new(&mut search).solve_with_stats()?;
+                    (outcome.plan, outcome.dp_states_created, 0)
+                }
+                JoinOrderAlgorithm::LinearizedDp => {
+                    let outcome = linearized::solve_with_stats(&mut search)?;
+                    (outcome.plan, outcome.dp_states_created, 0)
+                }
+                JoinOrderAlgorithm::GooDp(config) => {
+                    let outcome = goo::solve(&mut search, config)?;
+                    (
+                        outcome.plan,
+                        outcome.dp_states_created,
+                        outcome.repaired_subproblems,
+                    )
                 }
             };
+            self.last_decisions
+                .push(decision.record_execution(dp_states_created, repaired_subproblems));
             if let Some(plan) = plan {
                 let root = search.materialize(&plan);
                 replacements.push((*group_root, root));

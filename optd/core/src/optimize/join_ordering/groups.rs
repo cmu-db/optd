@@ -1,6 +1,6 @@
 //! Discovery of maximal contiguous join groups.
 
-use crate::{Operator, OperatorData, QueryContext};
+use crate::{Operator, OperatorData, QueryContext, Relation};
 
 // ---------------------------------------------------------------------------
 // Multi-group root collection
@@ -19,44 +19,64 @@ use crate::{Operator, OperatorData, QueryContext};
 /// This helper is public primarily for optimizer composition and diagnostics; it does not build
 /// hypergraphs or mutate `ctx`.
 pub fn collect_join_group_roots(ctx: &QueryContext, root: Operator) -> Vec<Operator> {
+    enum Work {
+        Visit { op: Operator, parent_is_join: bool },
+        Emit(Operator),
+    }
+
     let mut roots = Vec::new();
-    collect_roots_rec(ctx, root, false, &mut roots);
+    let mut work = vec![Work::Visit {
+        op: root,
+        parent_is_join: false,
+    }];
+
+    while let Some(next) = work.pop() {
+        match next {
+            Work::Visit { op, parent_is_join } => {
+                let is_join = matches!(
+                    ctx.operator(op),
+                    OperatorData::Join(_) | OperatorData::CrossProduct(_)
+                );
+                if is_join && !parent_is_join {
+                    work.push(Work::Emit(op));
+                }
+                work.extend(
+                    ctx.operator(op)
+                        .inputs()
+                        .into_iter()
+                        .rev()
+                        .map(|child| Work::Visit {
+                            op: child,
+                            parent_is_join: is_join,
+                        }),
+                );
+            }
+            Work::Emit(op) => roots.push(op),
+        }
+    }
+
     roots
 }
 
-fn collect_roots_rec(
-    ctx: &QueryContext,
-    op: Operator,
-    parent_is_join: bool,
-    out: &mut Vec<Operator>,
-) {
-    let is_join = matches!(
-        ctx.operator(op),
-        OperatorData::Join(_) | OperatorData::CrossProduct(_)
-    );
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{CrossProduct, Scan, TableRef};
 
-    // Recurse into children.
-    match ctx.operator(op) {
-        OperatorData::Join(j) => {
-            collect_roots_rec(ctx, j.outer, true, out);
-            collect_roots_rec(ctx, j.inner, true, out);
-        }
-        OperatorData::CrossProduct(cp) => {
-            collect_roots_rec(ctx, cp.outer, true, out);
-            collect_roots_rec(ctx, cp.inner, true, out);
-        }
-        OperatorData::Output(o) => collect_roots_rec(ctx, o.input, false, out),
-        OperatorData::Projection(p) => collect_roots_rec(ctx, p.input, false, out),
-        OperatorData::Selection(s) => collect_roots_rec(ctx, s.input, false, out),
-        OperatorData::Sort(s) => collect_roots_rec(ctx, s.input, false, out),
-        OperatorData::Limit(l) => collect_roots_rec(ctx, l.input, false, out),
-        OperatorData::Map(m) => collect_roots_rec(ctx, m.input, false, out),
-        OperatorData::Rename(r) => collect_roots_rec(ctx, r.input, false, out),
-        OperatorData::Aggregation(a) => collect_roots_rec(ctx, a.input, false, out),
-        _ => {}
-    }
+    #[test]
+    fn root_collection_is_stack_safe_for_a_deep_join_group() {
+        const DEPTH: usize = 20_000;
 
-    if is_join && !parent_is_join {
-        out.push(op);
+        let mut ctx = QueryContext::new();
+        let leaf = OperatorData::Scan(Scan {
+            table: TableRef::bare("leaf"),
+            columns: vec![],
+        })
+        .add(&mut ctx);
+        let root = (0..DEPTH).fold(leaf, |outer, _| {
+            OperatorData::CrossProduct(CrossProduct { outer, inner: leaf }).add(&mut ctx)
+        });
+
+        assert_eq!(collect_join_group_roots(&ctx, root), vec![root]);
     }
 }

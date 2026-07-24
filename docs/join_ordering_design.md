@@ -22,19 +22,21 @@ the optimizer rewrite map.
 
 The implementation is split into four independent layers:
 
-1. **Relation sets** — an immutable `RelationSet` value uses an inline `u64` for up to 64
-   relation identifiers and canonical heap words only when a set contains a larger identifier.
-   `NodeSet` remains a compatibility alias at the public hypergraph boundary. Empty words are
-   trimmed so equality and hashing are representation-independent.
-2. **Join graph view** — neighborhood, connectivity, connecting-edge lookup, connected-subgraph
-   counting, and hyperedge detection are pure operations over a borrowed `QueryHypergraph`.
+1. **Relation sets** — an immutable `RelationSet` has four canonical storage tiers:
+   `Inline64`, `Inline128`, dense heap words, and sorted sparse members. `NodeSet` remains a
+   compatibility alias at the public hypergraph boundary. Representation selection depends only
+   on set contents, so equal sets always compare and hash identically.
+2. **Join graph view** — a relation-to-incident-edge index supports neighborhood, connectivity,
+   connecting-edge lookup, GOO component boundaries, exact budgeted DPhyp-state counting, and
+   ordinary-inner-graph detection over a borrowed `QueryHypergraph`.
 3. **Enumerators and plans** — exact DPhyp and interval DP generate csg-cmp pairs or interval
    splits through one `JoinSearch`. Accepted states reference compact recipes in a `PlanArena`;
    candidate evaluation, comparison, orientation, and final reconstruction are shared. Search-space
-   size is measured separately before exact enumeration so policy can enforce a deterministic
-   budget.
+   size is measured separately before whole-group exact enumeration, while GOO/DP charges the
+   unique states actually built by each inner DP invocation.
 4. **Adaptive policy** — algorithm choice depends on relation count, hyperedges, and a bounded
-   connected-subgraph count. Policy is configurable and its decision is observable in tests.
+   connected-subgraph count. Policy is configurable, and both its choice and execution telemetry
+   are observable through `AlgorithmDecision`.
 
 ### Invariants
 
@@ -44,28 +46,61 @@ The implementation is split into four independent layers:
 - All predicates whose TES endpoints become available at a split are attached exactly once.
 - Non-commutative join orientation is preserved by the TES edge orientation.
 - Whole-group exact solving is selected only after the bounded connected-subgraph counter proves
-  that its state table fits policy, except for the unconditional small-query path. GOO/DP may run
-  exact DPhyp inside an explicitly size-bounded repair subtree without a second count.
+  that its state table fits policy, except for the unconditional small-query path.
+- Every GOO/DP repair sees a frontier of disjoint, opaque `PlanAtom`s. Once a repaired subtree is
+  contracted, later repairs can combine it but cannot reopen its internal relations.
+- GOO/DP accounts for the number of unique states actually inserted by its inner solver and stops
+  scheduling repairs when the global state budget is exhausted.
 - Algorithm changes affect plan quality, never relational semantics; feature tests compare query
   results and unit/property tests compare exact costs with exhaustive enumeration on small graphs.
 
 ### Adaptive policy
 
-The defaults follow Neumann and Radke (SIGMOD 2018), with budgets exposed for deterministic tests:
+The defaults follow Figure 8 of Neumann and Radke (SIGMOD 2018), with every threshold exposed for
+deterministic tests:
 
-- fewer than 14 relations: exact DPhyp;
-- from 14 through 100 relations: count connected subgraphs, stopping at 10,001;
-- within that range, at most 10,000 connected subgraphs selects exact DPhyp, including a
-  65-relation chain that crosses the inline bitset boundary;
-- an over-budget ordinary graph in that range uses greedy linearization followed by O(n^3)
-  interval DP;
-- a graph above 100 relations, or an over-budget graph with true hyperedges, uses GOO to construct
-  a bushy seed followed by exact repair of maximal subtrees of at most 10 relations (IDP-2 style).
+- fewer than 14 relations use exact DPhyp unconditionally;
+- every larger group first counts connected subgraphs, stopping as soon as the count exceeds
+  10,000; a count within that budget also selects exact DPhyp, regardless of relation count;
+- an over-budget ordinary inner-join graph of at most 100 relations uses selectivity-MST + IKKBZ
+  linearization followed by O(n³) interval DP;
+- an over-budget ordinary inner-join graph above 100 relations uses GOO/DP with linearized DP,
+  `k = 100`, and a global budget of 10,000 inner-DP states;
+- an over-budget graph with a true hyperedge or a non-inner join uses GOO/DP with DPhyp, `k = 10`,
+  and the same 10,000-state global budget.
 
-The first production version uses a deterministic connectivity-preserving order in place of the
-full IKKBZ rank normalization. This is deliberately isolated in a private linearization helper so
-IKKBZ or a cardinality-guided minimum-spanning-tree order can be added without changing interval
-DP or policy.
+“Ordinary” is deliberately stricter than “singleton TES endpoints”: every edge must be an inner
+join with one relation on each side. Outer, semi, anti, mark, and single joins are outside the
+ASI/IKKBZ proof and therefore take the hypergraph-safe DPhyp repair path.
+
+### Paper linearization and the ASI boundary
+
+For a rooted selectivity tree, the IKKBZ ranker uses the paper's `C_out` surrogate. A sequence has
+summary `(C, T)` and composition
+
+```text
+C(UV) = C(U) + T(U) C(V)
+T(UV) = T(U) T(V)
+```
+
+where the chosen root has `C = 0` and `T = |R|`, while a non-root relation reached through an edge
+of selectivity `s` has `C = T = |R|s`. Comparing `C(UV)` with `C(VU)` is equivalent to comparing
+the ASI rank `(T - 1) / C`, but avoids division and handles a zero-cardinality sequence
+deterministically. The implementation tests composition associativity and verifies that the
+adjacent-swap preference is unchanged by arbitrary prefix and suffix summaries.
+
+For a cyclic ordinary graph, pair output cardinalities determine edge selectivities and Kruskal's
+algorithm chooses a selectivity-minimum spanning tree. IKKBZ tries every root, normalizes
+rank-inverted precedence chains into compounds, merges independent chains by ascending rank, and
+chooses the minimum-`C_out` rooted order with deterministic tie-breaking.
+
+The proof is intentionally narrow: `C_out` is ASI-compatible for the multiplicative ordinary
+inner-join tree, but an arbitrary optd `CostModel` need not be. Consequently IKKBZ decides only the
+linear order. Interval DP evaluates every valid split of every interval with the configured
+`CostModel`, including orientation-sensitive costing where applicable. Hypergraphs and
+non-commutative joins never rely on the IKKBZ proof. Invalid negative/NaN estimates are mapped to
+the neutral multiplicative value; exact zero and positive infinity retain cardinality semantics,
+including a guarded `0 × ∞ = 0`.
 
 ### Candidate orientation
 
@@ -75,20 +110,35 @@ symmetric, they cost one canonical orientation. A physical cost model can opt in
 sensitivity through `CostModel::is_join_orientation_cost_sensitive`, in which case both inner
 orientations are costed and the cheaper one is retained.
 
-### Verification and measured performance
+### Verification strategy and historical measurements
 
-Correctness is checked at three levels:
+Correctness is checked at complementary levels:
 
-- relation-set boundary and subset-iteration unit tests, including identifiers 64 and 129;
-- connected-subgraph counts against closed forms (6-chain = 21, 6-clique = 63) and exact DPhyp
-  cost against exhaustive bushy enumeration on a 5-clique;
+- relation-set boundary, canonical-hash, set-algebra-oracle, promotion/demotion, and
+  subset-iteration tests across all four representations;
+- connected-subgraph counts against closed forms (6-chain = 21, 6-clique = 63), every one of the
+  1,024 ordinary five-node graphs, every three-node hypergraph, and 256 deterministic randomized
+  five-node hypergraphs, with exact budget-boundary assertions;
+- exact DPhyp cost against exhaustive bushy enumeration on a 5-clique, plus a genuine
+  `{0,1,2} LEFT ANTI {3,4}` GOO/DPhyp repair whose cost and orientation match an independent
+  exhaustive constrained-hypergraph oracle;
+- an indexed-connectivity oracle that compares incident-edge lookup with a complete edge scan,
+  including regular edges and true hyperedges;
+- `C_out` algebra tests and exhaustive left-deep oracles, including every labeled five-node tree,
+  plus interval-DP and contracted-frontier tests that prove repaired atoms remain opaque;
+- canonical GOO choice, contraction sequencing, and actual-state budget-accounting tests;
 - DataFusion SLT executes the 5-relation exact result, 15-relation dense and star linearized paths,
-  the 65-relation dynamic-set exact path, and the 101-relation GOO/DP path through the complete SQL
+  the 65-relation `Inline128` exact path, and the 101-relation GOO/DP path through the complete SQL
   optimization pipeline. None of these feature cases is skipped.
 
+The performance numbers below are historical measurements from the 2026-07-16 implementation,
+before selectivity-MST/IKKBZ and Figure-7 global GOO/DP were added. In particular, the `GOO/DP`
+labels in these tables refer to the former per-subtree repair implementation; they are retained as
+a regression baseline and must not be read as measurements of the current scheduler.
+
 The dependency-free `cargo bench -p optd-core --bench join_ordering -- 3` benchmark measures the
-full JoinOrdering pass with an enumeration-only cost model. On the development machine after the
-orientation hot-path refinement:
+full JoinOrdering pass with an enumeration-only cost model. On the development machine at that
+historical milestone, after the orientation hot-path refinement:
 
 | Shape | Selected algorithm | Mean per pass |
 |---|---:|---:|
@@ -102,7 +152,7 @@ Absolute values include hypergraph construction and vary by machine; the benchma
 exists for repeatable before/after comparisons and algorithm-selection regressions. On the
 128-relation chain the adaptive large-query path is 7.0× faster than forced exact DPhyp.
 
-At the 2026-07-16 adaptive-enumerator milestone, the DataFusion `profile_passes` workload was run
+At the same 2026-07-16 adaptive-enumerator milestone, the DataFusion `profile_passes` workload was run
 from both the untouched `54c9bdf` commit and the then-current adaptive tree with two measured runs.
 The changing JoinOrdering invocation on
 `sixty_four_join_sixty_four_predicates` was 4,868.10 ms baseline versus 4,896.65 ms after the
@@ -178,16 +228,49 @@ correct because `materialize_reachable_rewrites` itself traverses the operator g
 
 The pass selects the algorithm based on the complexity of each join group's hypergraph:
 
-`choose_algorithm` first takes the unconditional small-group DPhyp path. For larger groups up to
-the linearized threshold, it counts connected subgraphs with early termination at the configured
-budget; an exact count within budget also selects DPhyp. A remaining ordinary graph within the
-threshold uses connectivity-preserving linearization plus interval DP. Groups above the threshold,
-and over-budget true hypergraphs, use GOO followed by exact DPhyp replacement of maximal bounded
-subtrees.
+`choose_algorithm` first takes the unconditional small-group DPhyp path. For every larger group it
+counts connected subgraphs with early termination at the configured budget. An exact count within
+budget selects DPhyp at any size. For an over-budget ordinary inner-join graph, the relation
+threshold chooses either whole-group linearized DP or GOO with linearized-DP repair. An
+over-budget graph containing a true hyperedge or any non-inner edge uses GOO with DPhyp repair.
 
-`AlgorithmDecision` records the selected algorithm and the exact connected-subgraph count when it
-was obtained. `JoinOrdering::last_decisions` exposes these per-group decisions for diagnostics and
-tests.
+For ordinary graphs, the connected-subgraph counter is the iterative, explicit-stack form of
+Figure 3. It preserves the paper's DFS expansion and early exit without risking Rust stack
+overflow on a chain with thousands of relations. Genuine hyperedges require a stricter recurrence:
+adding the canonical representative of an incomplete TES side does not itself create a valid DP
+state. The hypergraph path therefore starts with singleton states and iteratively closes them under
+applicable disjoint csg-cmp joins. This counts exactly the states DPhyp can build, rather than a
+conservative expansion upper bound, and stops on insertion of state `budget + 1`.
+
+`AlgorithmDecision` records the selected algorithm, the exact connected-subgraph count when it was
+obtained, the number of unique DP states created during execution, and the number of GOO
+subproblems optimized and contracted. For GOO this state count covers the repair solvers; the
+greedy tree itself is not a DP table. `JoinOrdering::last_decisions` exposes these per-group
+decisions after each pass run for diagnostics, correctness assertions, and benchmark attribution.
+
+### GOO and globally budgeted DP
+
+The GOO seed follows the paper's canonical rule: repeatedly join the applicable component pair
+with the smallest estimated output cardinality. An indexed component frontier discovers candidate
+pairs from crossing hyperedges, while a priority queue retains evaluated candidates and discards
+stale entries through stable component identities. Cardinality—not the configured plan cost—is
+the greedy key; relation representatives provide deterministic tie-breaking.
+
+The improvement phase implements Figure 7 over an explicit GOO tree:
+
+1. Select the most expensive maximal visible subtree whose frontier has at most `k` inputs. Its
+   parent, if any, must have more than `k` visible inputs.
+2. Pass those inputs to DPhyp or linearized DP as disjoint `PlanAtom`s. An atom may cover many
+   original relations, but the inner solver can only combine atoms, never split them.
+3. Charge the inner solver's actual number of unique DP-table states against one global budget.
+   A repair starts only while budget remains; the final invocation may consume the remainder
+   because its state count is known only after enumeration.
+4. Retain the cheaper of the previous subtree and the repaired plan, then contract the subtree to
+   one opaque input. Recompute ancestor costs and visible sizes before choosing the next maximal
+   subtree.
+
+True contraction is what permits a later ancestor containing more than `k` original relations to
+become eligible once its already-optimized descendants count as single visible inputs.
 
 ---
 
@@ -209,10 +292,14 @@ struct PlanState<C> {
 type DPTable<C> = HashMap<NodeSet, PlanState<C>>;
 ```
 
-`RelationSet` transparently switches from its inline word to a dense dynamic word slice.
-Equality and hashing operate on the canonical representation, and set operations remain
-immutable at API boundaries; owned `|=` reuses dynamic storage when capacity permits. There is no
-64-relation correctness limit.
+`RelationSet` uses `Inline64` for identifiers below 64, `Inline128` for identifiers below 128,
+dense boxed words for larger sufficiently dense sets, and sorted sparse members for very large
+sparse sets. Because the value intentionally carries no query-universe metadata, the paper's
+query-size sparse cutoff is adapted to a content-canonical rule: sparse storage is considered when
+the highest member reaches 1024 and selected only when its payload is smaller than the dense word
+array. Constructors and every set operation canonicalize the result, so equal sets have the same
+derived equality and hash regardless of construction history. Owned `|=` still reuses dense
+storage when safe. There is no 64-relation correctness limit.
 
 `PlanId` addresses an immutable leaf/join recipe in the per-group `PlanArena`. `PlanProperties`
 currently carries an optional shared cardinality profile. The `JoinTree` type is retained only
@@ -291,7 +378,10 @@ neighborhood(S, X, hg) -> NodeSet:
 ```
 
 `min(hypernode)` is the lowest-indexed node in the hypernode (canonical representative
-for hyperedge traversal, per §2.3 of DPhyp).
+for hyperedge traversal, per §2.3 of DPhyp). The pseudocode expresses the semantics; production
+`JoinGraph` first unions the incident-edge lists of the relations in `S`, then filters only those
+indexed edges. The same index backs `connects`, sorted/deduplicated connecting-edge lookup, and
+GOO boundary maintenance.
 
 ---
 
@@ -333,10 +423,13 @@ copy. A recipe is either an existing leaf root or an oriented join of two earlie
 join type and connecting hyperedge indices. Enumerators create a `CandidateDraft`, compare its
 cost, and commit its recipe only if it becomes the current winner for that state.
 
-`PlanArena::materialize` recursively reconstructs the selected recipe and memoizes each resulting
-operator. It conjoins all predicate-bearing connecting edges exactly once. A predicate-free inner
-edge becomes `CrossProduct`; a predicate-free non-inner edge becomes a typed `Join` with a literal
-`true` condition. Directed recipes preserve non-commutative outer/inner inputs.
+`PlanArena::materialize` reconstructs the selected recipe with an explicit post-order stack and
+memoizes each resulting operator. It conjoins all predicate-bearing connecting edges exactly once.
+A predicate-free inner edge becomes `CrossProduct`; a predicate-free non-inner edge becomes a
+typed `Join` with a literal `true` condition. Directed recipes preserve non-commutative outer/inner
+inputs. Group discovery, general optimizer traversal, hypergraph construction, and deferred plan
+reconstruction are all iterative; 10,000- or 20,000-deep unit fixtures protect the stack-safety
+invariant used by the 5,000-relation benchmark.
 
 Candidate costing is behind a private `CandidateEvaluator` boundary. The compatibility evaluator
 materializes candidates before invoking an arbitrary `CostModel`, preserving custom
@@ -356,7 +449,7 @@ six-relation plan appends exactly five binary operators and that repeat material
 ## Pass Integration
 
 ```rust
-// Abridged orchestration; `solve_with` is the three-way algorithm dispatch.
+// Abridged orchestration; `solve_with_stats` dispatches to the selected algorithm.
 pub struct JoinOrdering<M: CostModel = DefaultCostModel> {
     cost_model: M,
     config: AdaptiveJoinOrderingConfig,
@@ -390,10 +483,13 @@ impl<M: CostModel> QueryPass for JoinOrdering<M> {
         let mut replacements = Vec::new();
         for (group_root, hg) in &groups {
             let decision = choose_algorithm(hg, self.config);
-            self.last_decisions.push(decision);
             let mut search = JoinSearch::new(/* query, analyses, hg, model, evaluator */);
-            let winner = solve_with(decision.algorithm, &mut search)?;
-            if let Some(winner) = winner {
+            let outcome = solve_with_stats(decision.algorithm, &mut search)?;
+            self.last_decisions.push(decision.record_execution(
+                outcome.dp_states_created,
+                outcome.repaired_subproblems,
+            ));
+            if let Some(winner) = outcome.plan {
                 replacements.push((*group_root, search.materialize(&winner)));
             }
         }
@@ -412,28 +508,30 @@ impl<M: CostModel> QueryPass for JoinOrdering<M> {
 }
 ```
 
-The omitted `solve_with` branch dispatches to DPhyp, linearized DP, or GOO/DP. The pass declares
-`PassMode::Once`, so `PassManager` invokes it once per manager run. Delaying rewrite-map mutation
-makes group processing transactional: an error cannot expose a partially rewritten query. It also
-avoids the former query-pointer/run-key bookkeeping used to suppress accidental fixed-point
-reinvocation.
+The omitted dispatch calls `DPhyp::solve_with_stats`, `linearized::solve_with_stats`, or
+`goo::solve`. The pass declares `PassMode::Once`, so `PassManager` invokes it once per manager run.
+Delaying rewrite-map mutation makes group processing transactional: an error cannot expose a
+partially rewritten query. It also avoids the former query-pointer/run-key bookkeeping used to
+suppress accidental fixed-point reinvocation.
 
 ---
 
 ## File Layout
 
 ```
-optd/core/src/relation_set.rs                  # canonical inline/dynamic relation bitset
+optd/core/src/relation_set.rs                  # canonical inline64/inline128/dense/sparse sets
 optd/core/src/optimize/join_ordering/mod.rs    # public API and pass orchestration
 optd/core/src/optimize/join_ordering/dphyp.rs  # exact csg-cmp enumeration and DP states
 optd/core/src/optimize/join_ordering/candidate.rs # shared search state and candidate commitment
 optd/core/src/optimize/join_ordering/evaluator.rs # pluggable candidate evaluation strategies
 optd/core/src/optimize/join_ordering/plan.rs   # compact accepted-plan recipes and reconstruction
 optd/core/src/optimize/join_ordering/groups.rs # maximal join-group discovery
-optd/core/src/optimize/join_ordering/graph.rs  # topology queries and bounded csg counting
+optd/core/src/optimize/join_ordering/graph.rs  # indexed topology and exact budgeted state counting
 optd/core/src/optimize/join_ordering/policy.rs # configurable adaptive algorithm selection
-optd/core/src/optimize/join_ordering/linearized.rs # connected ordering and interval DP
-optd/core/src/optimize/join_ordering/goo.rs    # GOO construction and bounded exact repair
+optd/core/src/optimize/join_ordering/linearized.rs # paper linearization and interval DP
+optd/core/src/optimize/join_ordering/linearized/asi.rs # C_out composition and ASI rank
+optd/core/src/optimize/join_ordering/linearized/ikkbz.rs # selectivity MST and IKKBZ
+optd/core/src/optimize/join_ordering/goo.rs    # canonical GOO and global-budget DP repair
 optd/core/src/optimize/join_ordering/tests.rs  # cross-module correctness tests
 optd/core/src/optimize/mod.rs                  # public re-exports
 ```
@@ -476,36 +574,44 @@ published mappings into the final operator graph.
 ## Implementation Tasks
 
 ### Done
-1. `optd/core/src/relation_set.rs`: canonical, immutable inline/dynamic `RelationSet`, set algebra,
-   arbitrary-size subset iteration, and boundary tests beyond one machine word.
+1. `optd/core/src/relation_set.rs`: canonical, immutable
+   `Inline64`/`Inline128`/dense/sparse `RelationSet`, mixed-representation set algebra,
+   arbitrary-size subset iteration, and boundary/property tests beyond one machine word.
 2. `optd/core/src/hypergraph.rs`: `NodeSet = RelationSet`; hypergraph, connectivity, and CD-E
    analyses no longer impose a 64-relation limit.
 3. `optd/core/src/hypergraph.rs`: Compatibility tables (`assoc`, `l_asscom`, `r_asscom`) corrected to match Tables 1–3 from Birler & Neumann 2025.
 4. `optd/core/src/hypergraph.rs`: Builder upgraded to CD-E (Algorithm 3): uses `TES(◦_a)` instead of full subtree, gates extensions on connectivity check (Algorithm 5, union-find).
 5. `optd/core/src/hypergraph.rs`: `HyperedgeJoinType::to_ir_join_type()` for plan reconstruction.
 6. `optd/core/src/optimize/join_ordering/dphyp.rs`: `DPhyp` — full implementation of `Solve`/`EmitCsg`/`EnumerateCsgRec`/`EmitCsg`/`EnumerateCmpRec`/`EmitCsgCmp`.
-7. `optd/core/src/optimize/join_ordering/`: bounded csg counting, adaptive policy,
-   linearized interval DP, and GOO with exact bounded-subtree improvement.
-8. `optd/core/src/cost.rs`: catalog-aware cost integration and an explicit capability hook for
+7. `optd/core/src/optimize/join_ordering/graph.rs`: incident-edge indexing, iterative exact
+   budgeted DPhyp-state counting for ordinary graphs and genuine hypergraphs, indexed component
+   boundaries, and ordinary-inner-graph classification.
+8. `optd/core/src/optimize/join_ordering/linearized/`: selectivity-minimum spanning tree,
+   ASI-compatible `C_out` ranking, IKKBZ compound normalization, and interval DP costed by the
+   configured model.
+9. `optd/core/src/optimize/join_ordering/goo.rs`: output-cardinality GOO plus Figure-7
+   most-expensive-maximal scheduling, opaque frontier contraction, and global actual-state
+   budgeting with either DPhyp or linearized DP.
+10. `optd/core/src/cost.rs`: catalog-aware cost integration and an explicit capability hook for
    orientation-sensitive physical costs.
-9. `optd/core/src/optimize/join_ordering/`: direction-correct candidate reconstruction,
+11. `optd/core/src/optimize/join_ordering/`: direction-correct candidate reconstruction,
    bottom-up multi-group collection, public decisions, and `QueryPass` integration.
-10. `optd/core/src/optimize/join_ordering/evaluator.rs`: shared `Arc<CardinalityProfile>` plan
+12. `optd/core/src/optimize/join_ordering/evaluator.rs`: shared `Arc<CardinalityProfile>` plan
     properties and deferred default-cost evaluation, while retaining exact custom-model behavior.
-11. `optd/core/src/analysis.rs`: sparse nontrivial equivalence metadata and a compact sorted DSU
+13. `optd/core/src/analysis.rs`: sparse nontrivial equivalence metadata and a compact sorted DSU
     populated only by inherited class members and equality endpoints.
-12. Unit, exhaustive-oracle, SQL feature, benchmark, and same-machine release-profiler evidence
-    cover exactness, algorithm selection, more than 64 relations, and regression bounds.
+14. `AlgorithmDecision`: selected algorithm, bounded connected-subgraph count, unique DP states,
+    and contracted GOO-subproblem telemetry.
+15. Unit, exhaustive-oracle, SQL feature, benchmark, and same-machine release-profiler evidence
+    cover exactness, directed multi-node TES repair, algorithm selection, stack safety, more than
+    64 relations, and regression bounds.
 
 ### Open / Follow-ups
-- **IKKBZ linearization** (Neumann & Radke §4.2): replace the deterministic connected order with
-  rank-normalized IKKBZ over a selectivity-weighted minimum spanning tree.
-- **GOO/DP global budget** (Neumann & Radke §4.3): choose maximal subproblems by benefit and charge
-  their actual DP-table size against a global improvement budget.
-- **Sparse relation sets**: add a sorted sparse representation above roughly 1024 relations if
-  workloads at that scale show dense word vectors to be material.
-- **Enumeration telemetry**: expose csg-cmp pair and winning-state counts alongside algorithm
-  decisions for production profiling.
+- **Current-paper benchmark refresh**: rerun the scalability matrix after the IKKBZ and global
+  GOO/DP changes; keep the 2026-07-16 measurements above as a historical baseline rather than
+  silently relabeling them.
+- **Extended enumeration telemetry**: the pass now reports unique DP states and GOO repairs;
+  candidate attempts and emitted csg-cmp-pair counts would provide finer production attribution.
 - **Column-profile construction**: `combine_join_columns` and ordered-map insertion are the largest
   remaining JOB 15c profile buckets; evaluate a persistent or append-friendly column map without
   weakening deterministic profile ordering.

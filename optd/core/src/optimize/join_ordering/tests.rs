@@ -60,7 +60,6 @@ impl evaluator::CandidateEvaluator<UnitCost> for DeferredUnitEvaluator {
             cost: 0,
             properties: plan::PlanProperties::default(),
             materialized: None,
-            immediate_cost: Some(0),
         })
     }
 
@@ -83,7 +82,6 @@ impl evaluator::CandidateEvaluator<UnitCost> for DeferredUnitEvaluator {
             cost: outer.cost + inner.cost + 1,
             properties: plan::PlanProperties::default(),
             materialized: None,
-            immediate_cost: Some(1),
         })
     }
 }
@@ -245,6 +243,41 @@ fn synthetic_graph(
     (ctx, QueryHypergraph { nodes, edges })
 }
 
+fn synthetic_hypergraph(
+    relation_count: usize,
+    edge_masks: &[(u64, u64)],
+) -> (QueryContext, QueryHypergraph) {
+    let (mut ctx, mut hypergraph) = synthetic_graph(relation_count, []);
+    let roots = hypergraph
+        .nodes
+        .iter()
+        .map(|node| node.root)
+        .collect::<Vec<_>>();
+    hypergraph.edges = edge_masks
+        .iter()
+        .map(|&(left, right)| {
+            let left_node = left.trailing_zeros() as usize;
+            let right_node = right.trailing_zeros() as usize;
+            Hyperedge {
+                predicate: None,
+                left: (0..relation_count)
+                    .filter(|node| left & (1_u64 << node) != 0)
+                    .collect(),
+                right: (0..relation_count)
+                    .filter(|node| right & (1_u64 << node) != 0)
+                    .collect(),
+                source: OperatorData::CrossProduct(CrossProduct {
+                    outer: roots[left_node],
+                    inner: roots[right_node],
+                })
+                .add(&mut ctx),
+                join_type: HyperedgeJoinType::Inner,
+            }
+        })
+        .collect();
+    (ctx, hypergraph)
+}
+
 fn chain_graph(relation_count: usize) -> (QueryContext, QueryHypergraph) {
     synthetic_graph(
         relation_count,
@@ -258,6 +291,104 @@ fn clique_graph(relation_count: usize) -> (QueryContext, QueryHypergraph) {
         (0..relation_count)
             .flat_map(|left| (left + 1..relation_count).map(move |right| (left, right))),
     )
+}
+
+fn connected_subgraph_count_oracle(relation_count: usize, edges: &[(usize, usize)]) -> usize {
+    (1_u64..1_u64 << relation_count)
+        .filter(|subset| {
+            let mut reached = 1_u64 << subset.trailing_zeros();
+            loop {
+                let expanded = edges.iter().fold(reached, |expanded, &(left, right)| {
+                    let left_bit = 1_u64 << left;
+                    let right_bit = 1_u64 << right;
+                    if subset & left_bit != 0
+                        && subset & right_bit != 0
+                        && reached & (left_bit | right_bit) != 0
+                    {
+                        expanded | left_bit | right_bit
+                    } else {
+                        expanded
+                    }
+                });
+                if expanded == reached {
+                    return reached == *subset;
+                }
+                reached = expanded;
+            }
+        })
+        .count()
+}
+
+fn dphyp_state_count_oracle(relation_count: usize, edges: &[(u64, u64)]) -> usize {
+    let limit = 1_u64 << relation_count;
+    let mut buildable = vec![false; limit as usize];
+    for relation in 0..relation_count {
+        buildable[1 << relation] = true;
+    }
+
+    for size in 2..=relation_count {
+        for subset in 1_u64..limit {
+            if subset.count_ones() as usize != size {
+                continue;
+            }
+            let canonical = subset & subset.wrapping_neg();
+            let mut left = subset.wrapping_sub(1) & subset;
+            while left != 0 {
+                let right = subset ^ left;
+                if left & canonical != 0
+                    && buildable[left as usize]
+                    && buildable[right as usize]
+                    && edges.iter().any(|&(edge_left, edge_right)| {
+                        (edge_left & left == edge_left && edge_right & right == edge_right)
+                            || (edge_left & right == edge_left && edge_right & left == edge_right)
+                    })
+                {
+                    buildable[subset as usize] = true;
+                    break;
+                }
+                left = left.wrapping_sub(1) & subset;
+            }
+        }
+    }
+
+    buildable.into_iter().filter(|state| *state).count()
+}
+
+fn possible_hyperedges(relation_count: usize) -> Vec<(u64, u64)> {
+    let mut result = Vec::new();
+    for mut assignment in 0..3_usize.pow(relation_count as u32) {
+        let mut left = 0_u64;
+        let mut right = 0_u64;
+        for relation in 0..relation_count {
+            match assignment % 3 {
+                1 => left |= 1 << relation,
+                2 => right |= 1 << relation,
+                _ => {}
+            }
+            assignment /= 3;
+        }
+        if left != 0 && right != 0 && left < right {
+            result.push((left, right));
+        }
+    }
+    result
+}
+
+fn assert_hypergraph_count_matches_oracle(relation_count: usize, edges: &[(u64, u64)]) {
+    let expected = dphyp_state_count_oracle(relation_count, edges);
+    let (_, hypergraph) = synthetic_hypergraph(relation_count, edges);
+    let graph = JoinGraph::new(&hypergraph);
+
+    assert_eq!(
+        graph.count_connected_subgraphs(expected),
+        graph::BoundedCount::Within(expected),
+        "edges {edges:?}",
+    );
+    assert_eq!(
+        graph.count_connected_subgraphs(expected - 1),
+        graph::BoundedCount::Exceeded,
+        "budget boundary for edges {edges:?}",
+    );
 }
 
 fn exhaustive_clique_cost(subset: u64, weights: &[u64], memo: &mut HashMap<u64, u64>) -> u64 {
@@ -430,7 +561,16 @@ fn solve_goo<M: CostModel>(
 ) -> OptimizeResult<Option<(plan::PlanState<M::Cost>, Operator)>> {
     let evaluator = MaterializingEvaluator;
     let mut search = JoinSearch::new(ctx, analyses, hypergraph, cost_model, &evaluator);
-    let Some(plan) = goo::solve(&mut search, exact_subproblem_size)? else {
+    let Some(plan) = goo::solve(
+        &mut search,
+        GooDpConfig {
+            inner: GooInnerSolver::DpHyp,
+            max_subproblem_relations: exact_subproblem_size,
+            dp_state_budget: usize::MAX,
+        },
+    )?
+    .plan
+    else {
         return Ok(None);
     };
     let root = search.materialize(&plan);
@@ -465,7 +605,15 @@ fn run_default_algorithm(
         let plan = match algorithm {
             TestSearchAlgorithm::DpHyp => DPhyp::new(&mut search).solve(),
             TestSearchAlgorithm::Linearized => linearized::solve(&mut search),
-            TestSearchAlgorithm::GooDp => goo::solve(&mut search, 3),
+            TestSearchAlgorithm::GooDp => goo::solve(
+                &mut search,
+                GooDpConfig {
+                    inner: GooInnerSolver::DpHyp,
+                    max_subproblem_relations: 3,
+                    dp_state_budget: usize::MAX,
+                },
+            )
+            .map(|outcome| outcome.plan),
         }
         .unwrap()
         .expect("a connected chain has a complete plan");
@@ -481,17 +629,13 @@ fn run_default_algorithm(
         (tree, cost, root, expected_profile)
     };
 
-    if deferred {
-        let analyzed = CardinalityEstimationV1::get_shared(&ctx, &mut analyses, root).unwrap();
-        assert_eq!(
-            expected_profile
-                .as_deref()
-                .expect("deferred winning states carry cardinality"),
-            analyzed.as_ref(),
-        );
-    } else {
-        assert!(expected_profile.is_none());
-    }
+    let analyzed = CardinalityEstimationV1::get_shared(&ctx, &mut analyses, root).unwrap();
+    assert_eq!(
+        expected_profile
+            .as_deref()
+            .expect("every built-in evaluator carries cardinality"),
+        analyzed.as_ref(),
+    );
 
     (tree, cost, ctx.operator_count() - operators_before)
 }
@@ -1218,6 +1362,112 @@ fn connected_subgraph_counter_matches_chain_and_clique_search_spaces() {
 }
 
 #[test]
+fn connected_subgraph_counter_matches_oracle_for_every_five_node_graph() {
+    const RELATIONS: usize = 5;
+    let possible_edges = (0..RELATIONS)
+        .flat_map(|left| (left + 1..RELATIONS).map(move |right| (left, right)))
+        .collect::<Vec<_>>();
+
+    for graph_bits in 0_u64..1_u64 << possible_edges.len() {
+        let edges = possible_edges
+            .iter()
+            .enumerate()
+            .filter_map(|(edge, endpoints)| {
+                (graph_bits & (1_u64 << edge) != 0).then_some(*endpoints)
+            })
+            .collect::<Vec<_>>();
+        let expected = connected_subgraph_count_oracle(RELATIONS, &edges);
+        let (_, hypergraph) = synthetic_graph(RELATIONS, edges);
+        let graph = JoinGraph::new(&hypergraph);
+
+        assert_eq!(
+            graph.count_connected_subgraphs(expected),
+            graph::BoundedCount::Within(expected),
+            "graph bits {graph_bits:#014b}",
+        );
+        assert_eq!(
+            graph.count_connected_subgraphs(expected - 1),
+            graph::BoundedCount::Exceeded,
+            "budget boundary for graph bits {graph_bits:#014b}",
+        );
+    }
+}
+
+#[test]
+fn connected_subgraph_counter_does_not_count_partial_hyperedge_sides() {
+    // `{0,1}` is reachable by the representative-based graph traversal through
+    // `{0}<->{1,2}`, but it has no valid final join and therefore is not a DPhyp state.
+    let edges = [(0b010, 0b100), (0b011, 0b100), (0b001, 0b110)];
+
+    assert_eq!(dphyp_state_count_oracle(3, &edges), 5);
+    assert_hypergraph_count_matches_oracle(3, &edges);
+}
+
+#[test]
+fn connected_subgraph_counter_matches_every_three_node_hypergraph() {
+    const RELATIONS: usize = 3;
+    let possible_edges = possible_hyperedges(RELATIONS);
+    assert_eq!(possible_edges.len(), 6);
+
+    for graph_bits in 0_u64..1_u64 << possible_edges.len() {
+        let edges = possible_edges
+            .iter()
+            .enumerate()
+            .filter_map(|(edge, endpoints)| {
+                (graph_bits & (1_u64 << edge) != 0).then_some(*endpoints)
+            })
+            .collect::<Vec<_>>();
+        assert_hypergraph_count_matches_oracle(RELATIONS, &edges);
+    }
+}
+
+#[test]
+fn connected_subgraph_counter_matches_randomized_five_node_hypergraphs() {
+    const RELATIONS: usize = 5;
+    let possible_edges = possible_hyperedges(RELATIONS);
+    let chain = (1..RELATIONS)
+        .map(|right| (1_u64 << (right - 1), 1_u64 << right))
+        .collect::<Vec<_>>();
+    let mut random = 0x9e37_79b9_7f4a_7c15_u64;
+
+    for _ in 0..256 {
+        let mut edges = chain.clone();
+        // Force the exact hypergraph path even when this sample selects no other multi-node edge.
+        edges.push((0b00011, 0b00100));
+        for &edge in &possible_edges {
+            random ^= random << 13;
+            random ^= random >> 7;
+            random ^= random << 17;
+            if random.is_multiple_of(13) {
+                edges.push(edge);
+            }
+        }
+        assert_hypergraph_count_matches_oracle(RELATIONS, &edges);
+    }
+}
+
+#[test]
+fn indexed_connectivity_matches_edge_scan_for_regular_and_hyperedges() {
+    let (_, mut hypergraph) = clique_graph(5);
+    hypergraph.edges[0].left = &nodeset_singleton(0) | &nodeset_singleton(1);
+    hypergraph.edges[0].right = nodeset_singleton(2);
+    let graph = JoinGraph::new(&hypergraph);
+    let subsets = NodeSet::all(5).non_empty_subsets().collect::<Vec<_>>();
+
+    for left in &subsets {
+        for right in subsets.iter().filter(|right| left.is_disjoint(right)) {
+            let expected = connecting_edge_indices(left, right, &hypergraph);
+            assert_eq!(
+                graph.connecting_edge_indices(left, right),
+                expected,
+                "left={left:?}, right={right:?}",
+            );
+            assert_eq!(graph.connects(left, right), !expected.is_empty());
+        }
+    }
+}
+
+#[test]
 fn dphyp_matches_exhaustive_bushy_enumeration_on_small_clique() {
     let weights = vec![2, 3, 5, 7, 11];
     let (mut ctx, clique) = clique_graph(weights.len());
@@ -1256,7 +1506,9 @@ fn adaptive_policy_uses_graph_complexity_and_hyperedges() {
         exact_relation_threshold: 4,
         connected_subgraph_budget: 100,
         linearized_relation_threshold: 20,
-        goo_exact_subproblem_size: 4,
+        goo_linearized_subproblem_size: 8,
+        goo_dphyp_subproblem_size: 4,
+        goo_dp_state_budget: 100,
     };
     let (_, chain) = chain_graph(15);
     let (_, clique) = clique_graph(15);
@@ -1267,6 +1519,8 @@ fn adaptive_policy_uses_graph_complexity_and_hyperedges() {
         AlgorithmDecision {
             algorithm: JoinOrderAlgorithm::LinearizedDp,
             connected_subgraphs: None,
+            dp_states_created: 0,
+            repaired_subproblems: 0,
         }
     );
     assert_eq!(
@@ -1275,7 +1529,11 @@ fn adaptive_policy_uses_graph_complexity_and_hyperedges() {
     );
     assert_eq!(
         choose_algorithm(&very_large, config).algorithm,
-        JoinOrderAlgorithm::GooDp
+        JoinOrderAlgorithm::GooDp(GooDpConfig {
+            inner: GooInnerSolver::LinearizedDp,
+            max_subproblem_relations: 8,
+            dp_state_budget: 100,
+        })
     );
 
     let (_, mut hypergraph) = clique_graph(15);
@@ -1283,8 +1541,86 @@ fn adaptive_policy_uses_graph_complexity_and_hyperedges() {
     hypergraph.edges[0].right = nodeset_singleton(2);
     assert_eq!(
         choose_algorithm(&hypergraph, config).algorithm,
-        JoinOrderAlgorithm::GooDp
+        JoinOrderAlgorithm::GooDp(GooDpConfig {
+            inner: GooInnerSolver::DpHyp,
+            max_subproblem_relations: 4,
+            dp_state_budget: 100,
+        })
     );
+}
+
+#[test]
+fn default_policy_matches_the_paper_boundaries_and_solver_pairing() {
+    let config = AdaptiveJoinOrderingConfig::default();
+    let (_, cheap_large_chain) = chain_graph(140);
+    let (_, expensive_large_chain) = chain_graph(141);
+    let cheap_decision = choose_algorithm(&cheap_large_chain, config);
+    let expensive_decision = choose_algorithm(&expensive_large_chain, config);
+
+    assert_eq!(cheap_decision.algorithm, JoinOrderAlgorithm::DpHyp);
+    assert_eq!(cheap_decision.connected_subgraphs, Some(9_870));
+    assert_eq!(
+        expensive_decision.algorithm,
+        JoinOrderAlgorithm::GooDp(GooDpConfig {
+            inner: GooInnerSolver::LinearizedDp,
+            max_subproblem_relations: 100,
+            dp_state_budget: 10_000,
+        })
+    );
+
+    let (_, mut hypergraph) = clique_graph(15);
+    hypergraph.edges[0].left = &nodeset_singleton(0) | &nodeset_singleton(1);
+    hypergraph.edges[0].right = nodeset_singleton(2);
+    assert_eq!(
+        choose_algorithm(&hypergraph, config).algorithm,
+        JoinOrderAlgorithm::GooDp(GooDpConfig {
+            inner: GooInnerSolver::DpHyp,
+            max_subproblem_relations: 10,
+            dp_state_budget: 10_000,
+        })
+    );
+
+    let (_, mut non_inner) = clique_graph(15);
+    non_inner.edges[0].join_type = HyperedgeJoinType::LeftSemi;
+    assert_eq!(
+        choose_algorithm(&non_inner, config).algorithm,
+        JoinOrderAlgorithm::GooDp(GooDpConfig {
+            inner: GooInnerSolver::DpHyp,
+            max_subproblem_relations: 10,
+            dp_state_budget: 10_000,
+        })
+    );
+}
+
+#[test]
+fn join_ordering_reports_actual_dp_work_in_its_decision() {
+    let (ctx, _) = three_way_chain();
+    let mut optimizer = crate::test_optimizer_context(ctx);
+    let config = AdaptiveJoinOrderingConfig {
+        exact_relation_threshold: 0,
+        connected_subgraph_budget: 0,
+        linearized_relation_threshold: 0,
+        goo_linearized_subproblem_size: 2,
+        goo_dphyp_subproblem_size: 2,
+        goo_dp_state_budget: 3,
+    };
+    let mut pass = JoinOrdering::with_config(config);
+
+    assert_eq!(pass.run(&mut optimizer).unwrap(), PassResult::Changed);
+    let [decision] = pass.last_decisions() else {
+        panic!("one join group should produce one decision");
+    };
+    assert_eq!(
+        decision.algorithm,
+        JoinOrderAlgorithm::GooDp(GooDpConfig {
+            inner: GooInnerSolver::LinearizedDp,
+            max_subproblem_relations: 2,
+            dp_state_budget: 3,
+        })
+    );
+    assert_eq!(decision.connected_subgraphs, None);
+    assert_eq!(decision.dp_states_created, 3);
+    assert_eq!(decision.repaired_subproblems, 1);
 }
 
 #[test]
@@ -1306,6 +1642,37 @@ fn dphyp_solves_connected_chain_beyond_one_machine_word() {
 
     assert_eq!(plan.tree.leaf_count(), 65);
     assert_eq!(plan.tree.leaf_set(), NodeSet::all(65));
+}
+
+#[test]
+fn contracted_dphyp_keeps_atoms_opaque_and_counts_frontier_states() {
+    let (mut ctx, chain) = chain_graph(6);
+    let mut analyses = crate::test_analyses(&ctx);
+    let evaluator = MaterializingEvaluator;
+    let mut search = JoinSearch::new(&mut ctx, &mut analyses, &chain, &UnitCost, &evaluator);
+    let atom_nodes = NodeSet::all(3);
+    let atom_state = DPhyp::new(&mut search)
+        .solve_subset(&atom_nodes)
+        .unwrap()
+        .expect("the first three chain nodes form an exact atom");
+    let mut atoms = vec![plan::PlanAtom {
+        nodes: atom_nodes.clone(),
+        state: atom_state,
+    }];
+    for node in 3..6 {
+        atoms.push(plan::PlanAtom {
+            nodes: nodeset_singleton(node),
+            state: search.leaf(node).unwrap(),
+        });
+    }
+
+    let outcome = dphyp::solve_frontier_with_stats(&mut search, &atoms).unwrap();
+    let plan = outcome.plan.expect("the contracted chain is connected");
+
+    assert_eq!(outcome.dp_states_created, 10);
+    assert_eq!(plan.cost, 5);
+    assert_eq!(plan.tree.leaf_set(), NodeSet::all(6));
+    assert!(plan.tree.has_join_with_leaves(&atom_nodes));
 }
 
 #[test]

@@ -29,6 +29,7 @@ token counts.
 | 2026-07-22 03:27 | 2026-07-22 03:49 | Equality-participation-only cardinality DSU | Replaced full-column hash state with a sorted compact DSU over inherited class members and equality endpoints, using logarithmic lookup and iterative path compression. Added residual-wide, inherited/overlapping-class, NDV precedence, deterministic-order, 512-column, and adversarial 16,384-deep-chain tests. JOB 15c fell to 8.05 ms median; phase-3 Samply contains 214 matching samples versus 544 in phase 2. | 843,025 / 19,932 s |
 | 2026-07-22 03:49 | 2026-07-22 03:58 | Durable benchmarks, snapshots, and final validation | Added a fair six-run deferred/materializing DPhyp benchmark with raw TSV, corrected its dynamic-set case to 65 relations, preserved the profiling SQL, refreshed 14 explain snapshots after proving every change is a bijective operator-ID renumbering, and completed all validation gates. Commits: `f09d420`, `d109c8f`. | 920,638 / 20,537 s |
 | 2026-07-22 03:58 | 2026-07-22 04:15 | Artifact integrity and commit approval | Force-added the requested charts and raw/profile evidence despite the repository-wide artifact ignore, normalized generated CSV line endings, verified both SHA-256 manifests and all gzip/JSON payloads, and committed the evidence as `dc8b387`. Most elapsed time was repository approval/tool wait. | 981,289 / 21,523 s |
+| 2026-07-24 21:24 | In progress | Paper-faithful adaptive algorithms | Added `C_out` ASI ranking, selectivity-MST + IKKBZ linearization, canonical output-cardinality GOO, Figure-7 globally budgeted DP with actual-state accounting and opaque contraction, regular-versus-hypergraph policy routing, execution telemetry, indexed graph operations, iterative connected-subgraph counting, and canonical `Inline64`/`Inline128`/dense/sparse relation sets. Correctness and performance validation are in progress; no new benchmark result is claimed by this row. | Post-goal; tracker unavailable |
 
 ## Evidence Baseline
 
@@ -39,7 +40,11 @@ token counts.
   absolute timings. Therefore the meaningful regression baseline is the untouched parent commit
   built and measured on the same machine and target profile.
 
-## New Evidence
+## Historical Evidence (through the 2026-07-22 milestone)
+
+The results below predate the 2026-07-24 paper-faithful IKKBZ and global-budget GOO/DP work. They
+remain the regression baseline; current-algorithm results belong in a later milestone after its
+validation completes.
 
 - `cargo test -p optd-core`: 224 tests passed, plus doc tests.
 - `cargo nextest run --release -p optd-datafusion --test slt -- adaptive_join_ordering`:

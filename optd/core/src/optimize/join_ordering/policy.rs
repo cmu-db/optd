@@ -1,5 +1,6 @@
 //! Adaptive algorithm selection for small, medium, and very large join groups.
 
+use super::goo::{GooDpConfig, GooInnerSolver};
 use super::graph::{BoundedCount, JoinGraph};
 use crate::QueryHypergraph;
 
@@ -8,10 +9,28 @@ use crate::QueryHypergraph;
 pub enum JoinOrderAlgorithm {
     /// Complete DPhyp enumeration.
     DpHyp,
-    /// O(n³) interval DP over a connectivity-preserving linearization.
+    /// O(n³) interval DP over an IKKBZ linearization.
     LinearizedDp,
-    /// Greedy Operator Ordering with exact DP inside bounded subtrees.
-    GooDp,
+    /// Greedy Operator Ordering with globally budgeted DP repair.
+    GooDp(GooDpConfig),
+}
+
+impl JoinOrderAlgorithm {
+    /// Stable, delimiter-free label for diagnostics and benchmark output.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::DpHyp => "dphyp",
+            Self::LinearizedDp => "linearized_dp",
+            Self::GooDp(GooDpConfig {
+                inner: GooInnerSolver::DpHyp,
+                ..
+            }) => "goo_dphyp",
+            Self::GooDp(GooDpConfig {
+                inner: GooInnerSolver::LinearizedDp,
+                ..
+            }) => "goo_linearized_dp",
+        }
+    }
 }
 
 /// Tunable limits for adaptive join enumeration.
@@ -23,8 +42,12 @@ pub struct AdaptiveJoinOrderingConfig {
     pub connected_subgraph_budget: usize,
     /// Largest group for O(n³) linearized DP.
     pub linearized_relation_threshold: usize,
-    /// Largest greedy subtree replaced by an exact DPhyp solution.
-    pub goo_exact_subproblem_size: usize,
+    /// Largest contracted regular-graph frontier optimized by linearized DP.
+    pub goo_linearized_subproblem_size: usize,
+    /// Largest contracted hypergraph frontier optimized exactly.
+    pub goo_dphyp_subproblem_size: usize,
+    /// Global number of inner-DP table entries available to GOO/DP.
+    pub goo_dp_state_budget: usize,
 }
 
 impl Default for AdaptiveJoinOrderingConfig {
@@ -33,7 +56,9 @@ impl Default for AdaptiveJoinOrderingConfig {
             exact_relation_threshold: 14,
             connected_subgraph_budget: 10_000,
             linearized_relation_threshold: 100,
-            goo_exact_subproblem_size: 10,
+            goo_linearized_subproblem_size: 100,
+            goo_dphyp_subproblem_size: 10,
+            goo_dp_state_budget: 10_000,
         }
     }
 }
@@ -43,8 +68,24 @@ impl Default for AdaptiveJoinOrderingConfig {
 pub struct AlgorithmDecision {
     pub algorithm: JoinOrderAlgorithm,
     /// Exact count when it stayed within budget; `None` means counting exceeded the budget or
-    /// was deliberately skipped for a very large group.
+    /// was skipped by the unconditional small-query path.
     pub connected_subgraphs: Option<usize>,
+    /// Unique DP-table states built by the selected algorithm.
+    pub dp_states_created: usize,
+    /// GOO subproblems optimized and contracted; zero for non-GOO algorithms.
+    pub repaired_subproblems: usize,
+}
+
+impl AlgorithmDecision {
+    pub(super) fn record_execution(
+        mut self,
+        dp_states_created: usize,
+        repaired_subproblems: usize,
+    ) -> Self {
+        self.dp_states_created = dp_states_created;
+        self.repaired_subproblems = repaired_subproblems;
+        self
+    }
 }
 
 pub(super) fn choose_algorithm(
@@ -56,31 +97,46 @@ pub(super) fn choose_algorithm(
         return AlgorithmDecision {
             algorithm: JoinOrderAlgorithm::DpHyp,
             connected_subgraphs: None,
+            dp_states_created: 0,
+            repaired_subproblems: 0,
         };
     }
 
-    if relation_count <= config.linearized_relation_threshold {
-        match JoinGraph::new(hypergraph).count_connected_subgraphs(config.connected_subgraph_budget)
-        {
-            BoundedCount::Within(count) => {
-                return AlgorithmDecision {
-                    algorithm: JoinOrderAlgorithm::DpHyp,
-                    connected_subgraphs: Some(count),
-                };
-            }
-            BoundedCount::Exceeded => {}
+    let graph = JoinGraph::new(hypergraph);
+    match graph.count_connected_subgraphs(config.connected_subgraph_budget) {
+        BoundedCount::Within(count) => {
+            return AlgorithmDecision {
+                algorithm: JoinOrderAlgorithm::DpHyp,
+                connected_subgraphs: Some(count),
+                dp_states_created: 0,
+                repaired_subproblems: 0,
+            };
         }
+        BoundedCount::Exceeded => {}
     }
 
-    let graph = JoinGraph::new(hypergraph);
-    AlgorithmDecision {
-        algorithm: if relation_count <= config.linearized_relation_threshold
-            && !graph.has_hyperedges()
-        {
+    let algorithm = if graph.supports_ikkbz_linearization() {
+        if relation_count <= config.linearized_relation_threshold {
             JoinOrderAlgorithm::LinearizedDp
         } else {
-            JoinOrderAlgorithm::GooDp
-        },
+            JoinOrderAlgorithm::GooDp(GooDpConfig {
+                inner: GooInnerSolver::LinearizedDp,
+                max_subproblem_relations: config.goo_linearized_subproblem_size,
+                dp_state_budget: config.goo_dp_state_budget,
+            })
+        }
+    } else {
+        JoinOrderAlgorithm::GooDp(GooDpConfig {
+            inner: GooInnerSolver::DpHyp,
+            max_subproblem_relations: config.goo_dphyp_subproblem_size,
+            dp_state_budget: config.goo_dp_state_budget,
+        })
+    };
+
+    AlgorithmDecision {
+        algorithm,
         connected_subgraphs: None,
+        dp_states_created: 0,
+        repaired_subproblems: 0,
     }
 }

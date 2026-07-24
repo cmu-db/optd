@@ -255,8 +255,11 @@ struct HypergraphBuilder<'a> {
     analyses: &'a mut AnalysisContext,
     nodes: Vec<HypergraphNode>,
     edges: Vec<Hyperedge>,
-    /// Maps each operator handle to its NodeId (for leaf/unary operators).
-    node_map: HashMap<Operator, NodeId>,
+    /// Leaf nodes that make each column available.
+    ///
+    /// Most columns belong to one node, but a vector preserves the historical behavior for plans
+    /// that deliberately expose the same column handle from multiple inputs.
+    column_nodes: HashMap<Column, Vec<NodeId>>,
     /// Records join operators bottom-up for CD-E TES computation.
     join_stack: Vec<JoinRecord>,
 }
@@ -280,101 +283,143 @@ impl<'a> HypergraphBuilder<'a> {
             analyses,
             nodes: Vec::new(),
             edges: Vec::new(),
-            node_map: HashMap::new(),
+            column_nodes: HashMap::new(),
             join_stack: Vec::new(),
         }
     }
 
-    /// Recursively collect nodes and edges. Returns the NodeSet of nodes in this subtree.
+    /// Collects nodes and edges in post-order without using the call stack.
+    ///
+    /// Join groups can contain thousands of relations. Keeping traversal state explicitly makes
+    /// hypergraph construction independent of the shape and depth of the input join tree while
+    /// preserving the recursive implementation's outer-before-inner visitation order.
     fn collect(&mut self, op: Operator) -> NodeSet {
-        match self.ctx.operator(op) {
-            OperatorData::Join(j) => {
-                let jt = HyperedgeJoinType::from_join_type(&j.join_type.clone());
-                let on = j.on;
-                let outer = j.outer;
-                let inner = j.inner;
+        enum Frame {
+            Visit(Operator),
+            FinishJoin {
+                source: Operator,
+                predicate: Expr,
+                join_type: HyperedgeJoinType,
+            },
+            FinishCrossProduct {
+                source: Operator,
+            },
+        }
 
-                let left_nodes = self.collect(outer);
-                let right_nodes = self.collect(inner);
+        let mut frames = vec![Frame::Visit(op)];
+        let mut subtrees = Vec::new();
+        while let Some(frame) = frames.pop() {
+            match frame {
+                Frame::Visit(op) => match self.ctx.operator(op) {
+                    OperatorData::Join(join) => {
+                        frames.push(Frame::FinishJoin {
+                            source: op,
+                            predicate: join.on,
+                            join_type: HyperedgeJoinType::from_join_type(&join.join_type),
+                        });
+                        frames.push(Frame::Visit(join.inner));
+                        frames.push(Frame::Visit(join.outer));
+                    }
+                    OperatorData::CrossProduct(cross_product) => {
+                        frames.push(Frame::FinishCrossProduct { source: op });
+                        frames.push(Frame::Visit(cross_product.inner));
+                        frames.push(Frame::Visit(cross_product.outer));
+                    }
+                    // Leaf and transparent-unary operators become nodes (§2.7).
+                    _ => {
+                        let node_id = self.nodes.len();
+                        let available = self
+                            .analyses
+                            .get::<AvailableColumns>(self.ctx, op)
+                            .unwrap_or_default();
+                        for column in &available {
+                            self.column_nodes.entry(*column).or_default().push(node_id);
+                        }
+                        self.nodes.push(HypergraphNode {
+                            root: op,
+                            label: node_label(self.ctx, op),
+                            available,
+                        });
+                        subtrees.push(nodeset_singleton(node_id));
+                    }
+                },
+                Frame::FinishJoin {
+                    source,
+                    predicate,
+                    join_type,
+                } => {
+                    let right_nodes = subtrees
+                        .pop()
+                        .expect("a join's inner subtree was collected first");
+                    let left_nodes = subtrees
+                        .pop()
+                        .expect("a join's outer subtree was collected first");
 
-                // Split conjunctive predicates into individual edges (§4.5). Inner
-                // join conjuncts each get their own SES/TES so a predicate like
-                // `A.x = C.x AND B.y = C.y` does not force both edges to wait for
-                // `A`, `B`, and `C`.
-                let predicates = conjuncts(on, self.ctx);
-                let (record_tes_left, record_tes_right) =
-                    self.cd_e_for_predicate(on, jt, &left_nodes, &right_nodes);
+                    // Split conjunctive predicates into individual edges (§4.5). Inner join
+                    // conjuncts each get their own SES/TES so `A=C AND B=C` does not force both
+                    // edges to wait for all three relations.
+                    let predicates = conjuncts(predicate, self.ctx);
+                    let (record_tes_left, record_tes_right) =
+                        self.cd_e_for_predicate(predicate, join_type, &left_nodes, &right_nodes);
 
-                for predicate in predicates {
-                    let (tes_left, tes_right) = if jt == HyperedgeJoinType::Inner {
-                        self.cd_e_for_predicate(predicate, jt, &left_nodes, &right_nodes)
-                    } else {
-                        (record_tes_left.clone(), record_tes_right.clone())
-                    };
-                    self.edges.push(Hyperedge {
-                        predicate: Some(predicate),
-                        left: tes_left,
-                        right: tes_right,
-                        source: op,
-                        join_type: jt,
+                    for predicate in predicates {
+                        let (tes_left, tes_right) = if join_type == HyperedgeJoinType::Inner {
+                            self.cd_e_for_predicate(predicate, join_type, &left_nodes, &right_nodes)
+                        } else {
+                            (record_tes_left.clone(), record_tes_right.clone())
+                        };
+                        self.edges.push(Hyperedge {
+                            predicate: Some(predicate),
+                            left: tes_left,
+                            right: tes_right,
+                            source,
+                            join_type,
+                        });
+                    }
+
+                    self.join_stack.push(JoinRecord {
+                        join_type,
+                        left_nodes: left_nodes.clone(),
+                        right_nodes: right_nodes.clone(),
+                        tes_left: record_tes_left,
+                        tes_right: record_tes_right,
                     });
+                    subtrees.push(&left_nodes | &right_nodes);
                 }
+                Frame::FinishCrossProduct { source } => {
+                    let right_nodes = subtrees
+                        .pop()
+                        .expect("a cross product's inner subtree was collected first");
+                    let left_nodes = subtrees
+                        .pop()
+                        .expect("a cross product's outer subtree was collected first");
 
-                self.join_stack.push(JoinRecord {
-                    join_type: jt,
-                    left_nodes: left_nodes.clone(),
-                    right_nodes: right_nodes.clone(),
-                    tes_left: record_tes_left.clone(),
-                    tes_right: record_tes_right.clone(),
-                });
-
-                &left_nodes | &right_nodes
-            }
-
-            OperatorData::CrossProduct(cp) => {
-                let outer = cp.outer;
-                let inner = cp.inner;
-                let left_nodes = self.collect(outer);
-                let right_nodes = self.collect(inner);
-
-                // Cross product: dummy always-true edge to keep graph connected (§2.6).
-                let l = nodeset_singleton(nodeset_min(&left_nodes));
-                let r = nodeset_singleton(nodeset_min(&right_nodes));
-                self.edges.push(Hyperedge {
-                    predicate: None,
-                    left: l.clone(),
-                    right: r.clone(),
-                    source: op,
-                    join_type: HyperedgeJoinType::Inner,
-                });
-
-                self.join_stack.push(JoinRecord {
-                    join_type: HyperedgeJoinType::Inner,
-                    left_nodes: left_nodes.clone(),
-                    right_nodes: right_nodes.clone(),
-                    tes_left: l,
-                    tes_right: r,
-                });
-
-                &left_nodes | &right_nodes
-            }
-
-            // Leaf and transparent-unary operators become nodes (§2.7).
-            _ => {
-                let node_id = self.nodes.len();
-                let available = self
-                    .analyses
-                    .get::<AvailableColumns>(self.ctx, op)
-                    .unwrap_or_default();
-                self.nodes.push(HypergraphNode {
-                    root: op,
-                    label: node_label(self.ctx, op),
-                    available,
-                });
-                self.node_map.insert(op, node_id);
-                nodeset_singleton(node_id)
+                    // Dummy always-true edge keeps a cross product connected (§2.6).
+                    let left_endpoint = nodeset_singleton(nodeset_min(&left_nodes));
+                    let right_endpoint = nodeset_singleton(nodeset_min(&right_nodes));
+                    self.edges.push(Hyperedge {
+                        predicate: None,
+                        left: left_endpoint.clone(),
+                        right: right_endpoint.clone(),
+                        source,
+                        join_type: HyperedgeJoinType::Inner,
+                    });
+                    self.join_stack.push(JoinRecord {
+                        join_type: HyperedgeJoinType::Inner,
+                        left_nodes: left_nodes.clone(),
+                        right_nodes: right_nodes.clone(),
+                        tes_left: left_endpoint,
+                        tes_right: right_endpoint,
+                    });
+                    subtrees.push(&left_nodes | &right_nodes);
+                }
             }
         }
+
+        debug_assert_eq!(subtrees.len(), 1);
+        subtrees
+            .pop()
+            .expect("hypergraph collection produces one root subtree")
     }
 
     /// CD-E (Algorithm 3, Birler & Neumann 2025): compute (TES-left, TES-right).
@@ -393,14 +438,17 @@ impl<'a> HypergraphBuilder<'a> {
             self.ses_for_predicate(predicate, left_nodes, right_nodes);
 
         for rec in &self.join_stack {
+            let oa = rec.join_type;
+            let ob = join_type;
+            if assoc(oa, ob) && l_asscom(oa, ob) && r_asscom(oa, ob) {
+                continue;
+            }
             let record_nodes = &rec.left_nodes | &rec.right_nodes;
             let in_left = record_nodes.is_subset(left_nodes) && !record_nodes.is_empty();
             let in_right = record_nodes.is_subset(right_nodes) && !record_nodes.is_empty();
             let excluded_tes = &rec.tes_left | &rec.tes_right;
 
             if in_left {
-                let oa = rec.join_type;
-                let ob = join_type;
                 // CD-E: only extend if connected(right(◦_a), right(◦_b), ◦_a)
                 if !assoc(oa, ob) && self.connected(&rec.right_nodes, right_nodes, &excluded_tes) {
                     tes_left |= &rec.tes_left;
@@ -410,8 +458,6 @@ impl<'a> HypergraphBuilder<'a> {
                     tes_left |= &rec.tes_right;
                 }
             } else if in_right {
-                let oa = rec.join_type;
-                let ob = join_type;
                 if !assoc(oa, ob) && self.connected(&rec.left_nodes, left_nodes, &excluded_tes) {
                     tes_right |= &rec.tes_right;
                 }
@@ -507,17 +553,14 @@ impl<'a> HypergraphBuilder<'a> {
         let mut ses_right = NodeSet::EMPTY;
 
         for col in used {
-            for nid in nodeset_iter(left_nodes) {
-                if self.nodes[nid].available.contains(&col) {
-                    ses_left |= &nodeset_singleton(nid);
-                    break;
-                }
+            let Some(nodes) = self.column_nodes.get(&col) else {
+                continue;
+            };
+            if let Some(&node) = nodes.iter().find(|node| left_nodes.contains(**node)) {
+                ses_left |= &nodeset_singleton(node);
             }
-            for nid in nodeset_iter(right_nodes) {
-                if self.nodes[nid].available.contains(&col) {
-                    ses_right |= &nodeset_singleton(nid);
-                    break;
-                }
+            if let Some(&node) = nodes.iter().find(|node| right_nodes.contains(**node)) {
+                ses_right |= &nodeset_singleton(node);
             }
         }
 
@@ -1115,6 +1158,35 @@ mod tests {
         assert!(pretty.contains("[1]"));
         assert!(pretty.contains("e0"));
         assert!(pretty.contains("Inner"));
+    }
+
+    #[test]
+    fn hypergraph_construction_is_stack_safe_for_deep_join_trees() {
+        const RELATIONS: usize = 10_000;
+
+        let mut ctx = QueryContext::new();
+        let scans = (0..RELATIONS)
+            .map(|relation| {
+                OperatorData::Scan(Scan {
+                    table: TableRef::bare(format!("t{relation}")),
+                    columns: vec![],
+                })
+                .add(&mut ctx)
+            })
+            .collect::<Vec<_>>();
+        let root = scans
+            .iter()
+            .copied()
+            .skip(1)
+            .fold(scans[0], |outer, inner| {
+                OperatorData::CrossProduct(CrossProduct { outer, inner }).add(&mut ctx)
+            });
+        let mut analyses = crate::test_analyses(&ctx);
+
+        let hypergraph = build_hypergraph(&ctx, &mut analyses, root);
+
+        assert_eq!(hypergraph.nodes.len(), RELATIONS);
+        assert_eq!(hypergraph.edges.len(), RELATIONS - 1);
     }
 }
 

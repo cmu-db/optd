@@ -3,10 +3,9 @@
 use std::collections::HashMap;
 
 use super::OptimizeResult;
-use super::candidate::JoinSearch;
+use super::candidate::{CandidateDraft, JoinSearch};
 use super::graph::JoinGraph;
-use super::plan::PlanState;
-use crate::analysis::connecting_edge_indices;
+use super::plan::{PlanAtom, PlanState, SolveOutcome};
 use crate::cost::CostModel;
 use crate::hypergraph::{NodeSet, nodeset_min, nodeset_singleton};
 
@@ -28,27 +27,128 @@ use crate::hypergraph::{NodeSet, nodeset_min, nodeset_singleton};
 pub(super) struct DPhyp<'search, 'ctx, M: CostModel> {
     /// Shared candidate evaluator, recipe arena, IR, and analyses for this join group.
     search: &'search mut JoinSearch<'ctx, M>,
+    /// Relation-to-edge lookup reused by every enumeration step.
+    graph: JoinGraph<'ctx>,
     /// DP table: NodeSet → best known plan for that subset.
     dp: HashMap<NodeSet, PlanState<M::Cost>>,
     /// Induced node set visible to the current solve.
     allowed: NodeSet,
 }
 
+/// Exact bushy DP over a frontier of opaque GOO/DP atoms.
+///
+/// The regular DPhyp solver uses original hypergraph node IDs as its DP universe. Once GOO/DP
+/// contracts an optimized subtree, one atom can cover several of those IDs and must never be
+/// reopened. This contracted form therefore keys enumeration by atom subsets while translating
+/// every split back to its covered original [`NodeSet`] for TES applicability and candidate
+/// reconstruction. The hypergraph-aware result space is identical to exhaustive bushy DP over the
+/// frontier; GOO/DP bounds this path to ten atoms by default.
+pub(super) fn solve_frontier_with_stats<M: CostModel>(
+    search: &mut JoinSearch<'_, M>,
+    atoms: &[PlanAtom<M::Cost>],
+) -> OptimizeResult<SolveOutcome<M::Cost>> {
+    if atoms.is_empty() {
+        return Ok(SolveOutcome {
+            plan: None,
+            dp_states_created: 0,
+        });
+    }
+
+    debug_assert!(atoms.iter().all(|atom| !atom.nodes.is_empty()));
+    debug_assert!(atoms.iter().enumerate().all(|(index, atom)| {
+        atoms
+            .iter()
+            .skip(index + 1)
+            .all(|other| atom.nodes.is_disjoint(&other.nodes))
+    }));
+
+    let graph = JoinGraph::new(search.hypergraph());
+    let all_atoms = NodeSet::all(atoms.len());
+    let mut subsets = all_atoms.non_empty_subsets().collect::<Vec<_>>();
+    subsets.sort_by_key(NodeSet::len);
+
+    let covered_nodes = |atom_set: &NodeSet| {
+        atom_set.iter().fold(NodeSet::EMPTY, |covered, atom| {
+            &covered | &atoms[atom].nodes
+        })
+    };
+    let mut dp = HashMap::with_capacity(subsets.len());
+    for (atom, input) in atoms.iter().enumerate() {
+        dp.insert(nodeset_singleton(atom), input.state.clone());
+    }
+
+    for subset in subsets.iter().filter(|subset| subset.len() >= 2) {
+        let canonical_atom = nodeset_min(subset);
+        let mut best: Option<CandidateDraft<M::Cost>> = None;
+
+        for left_atoms in subset.non_empty_subsets() {
+            if left_atoms == *subset || nodeset_min(&left_atoms) != canonical_atom {
+                continue;
+            }
+            let right_atoms = subset.difference(&left_atoms);
+            let (Some(left), Some(right)) = (dp.get(&left_atoms), dp.get(&right_atoms)) else {
+                continue;
+            };
+            let left_nodes = covered_nodes(&left_atoms);
+            let right_nodes = covered_nodes(&right_atoms);
+            let edge_indices = graph.connecting_edge_indices(&left_nodes, &right_nodes);
+            let Some(candidate) =
+                search.best_join_candidate(&left_nodes, left, &right_nodes, right, edge_indices)?
+            else {
+                continue;
+            };
+            if best
+                .as_ref()
+                .is_none_or(|current| search.is_better(candidate.cost(), current.cost()))
+            {
+                best = Some(candidate);
+            }
+        }
+
+        if let Some(best) = best {
+            dp.insert(subset.clone(), search.commit(best));
+        }
+    }
+
+    let dp_states_created = dp.len();
+    Ok(SolveOutcome {
+        plan: dp.remove(&all_atoms),
+        dp_states_created,
+    })
+}
+
 impl<'search, 'ctx, M: CostModel> DPhyp<'search, 'ctx, M> {
     /// Creates an exact solver over the complete hypergraph.
     pub(super) fn new(search: &'search mut JoinSearch<'ctx, M>) -> Self {
         let relation_count = search.hypergraph().nodes.len();
+        let graph = JoinGraph::new(search.hypergraph());
         Self {
             search,
+            graph,
             dp: HashMap::new(),
             allowed: NodeSet::all(relation_count),
         }
     }
 
     /// Solves the full join group and returns its cheapest complete plan.
+    #[cfg(test)]
     pub(super) fn solve(&mut self) -> OptimizeResult<Option<PlanState<M::Cost>>> {
+        Ok(self.solve_with_stats()?.plan)
+    }
+
+    /// Solves the full join group and reports its unique DP-table size.
+    pub(super) fn solve_with_stats(&mut self) -> OptimizeResult<SolveOutcome<M::Cost>> {
         let all = NodeSet::all(self.search.hypergraph().nodes.len());
-        self.solve_subset(&all)
+        self.solve_subset_with_stats(&all)
+    }
+
+    /// Number of unique DP-table entries produced by the most recent solve.
+    ///
+    /// Neumann and Radke charge this quantity against GOO/DP's global improvement budget. It
+    /// includes singleton entries because they occupy the same table and are rebuilt for each
+    /// induced subproblem.
+    pub(super) fn states_created(&self) -> usize {
+        self.dp.len()
     }
 
     /// Solves the subgraph induced by `allowed`.
@@ -80,6 +180,18 @@ impl<'search, 'ctx, M: CostModel> DPhyp<'search, 'ctx, M> {
         }
 
         Ok(self.dp.get(allowed).cloned())
+    }
+
+    /// Solves an induced subgraph and reports its unique DP-table size.
+    pub(super) fn solve_subset_with_stats(
+        &mut self,
+        allowed: &NodeSet,
+    ) -> OptimizeResult<SolveOutcome<M::Cost>> {
+        let plan = self.solve_subset(allowed)?;
+        Ok(SolveOutcome {
+            plan,
+            dp_states_created: self.states_created(),
+        })
     }
 
     /// Recursively grows canonical connected subgraphs from `s1`.
@@ -148,7 +260,7 @@ impl<'search, 'ctx, M: CostModel> DPhyp<'search, 'ctx, M> {
             return Ok(());
         };
 
-        let edge_indices = connecting_edge_indices(s1, s2, self.search.hypergraph());
+        let edge_indices = self.graph.connecting_edge_indices(s1, s2);
         if edge_indices.is_empty() {
             return Ok(());
         }
@@ -175,12 +287,12 @@ impl<'search, 'ctx, M: CostModel> DPhyp<'search, 'ctx, M> {
 
     /// Returns DPhyp's neighborhood `N(s, x)` inside the current induced subgraph.
     fn neighborhood(&self, s: &NodeSet, x: &NodeSet) -> NodeSet {
-        JoinGraph::new(self.search.hypergraph()).neighborhood_within(s, x, &self.allowed)
+        self.graph.neighborhood_within(s, x, &self.allowed)
     }
 
     /// Returns whether an applicable hyperedge connects `s1` and `s2`.
     fn has_edge(&self, s1: &NodeSet, s2: &NodeSet) -> bool {
-        JoinGraph::new(self.search.hypergraph()).connects(s1, s2)
+        self.graph.connects(s1, s2)
     }
 
     /// Returns `B_min(s)`: all nodes with index ≤ `min(s)`.

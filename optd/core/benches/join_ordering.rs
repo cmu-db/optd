@@ -2,10 +2,10 @@ use std::hint::black_box;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use arrow_schema::DataType;
+use arrow_schema::{DataType, Field, Schema};
 use optd_core::{
-    AdaptiveJoinOrderingConfig, AnalysisContext, BinaryOp, Column, ColumnData, CostModel, Expr,
-    ExprData, Join, JoinOrdering, JoinType, MemoryCatalog, NaryOp, Operator, OperatorData,
+    AdaptiveJoinOrderingConfig, AnalysisContext, BinaryOp, Catalog, Column, ColumnData, CostModel,
+    Expr, ExprData, Join, JoinOrdering, JoinType, MemoryCatalog, NaryOp, Operator, OperatorData,
     OptimizeResult, OptimizerContext, QueryContext, QueryPass, Scan, TableRef,
 };
 
@@ -86,13 +86,13 @@ fn run_case_with_config(
     let mut algorithm = String::new();
     for _ in 0..iterations {
         let query = template.clone();
-        let catalog = Arc::new(MemoryCatalog::new("bench", "public"));
+        let catalog = benchmark_catalog(128)?;
         let mut optimizer = OptimizerContext::new(query, catalog);
         let mut pass = JoinOrdering::with_cost_model(EnumerationCost).adaptive_config(config);
         let started = Instant::now();
         black_box(pass.run(&mut optimizer)?);
         elapsed += started.elapsed();
-        algorithm = format!("{:?}", pass.last_decisions()[0].algorithm);
+        algorithm = pass.last_decisions()[0].algorithm.label().to_string();
         black_box(optimizer.query.root());
     }
 
@@ -102,6 +102,24 @@ fn run_case_with_config(
         elapsed.as_nanos() / iterations as u128,
     );
     Ok(())
+}
+
+fn benchmark_catalog(
+    relation_count: usize,
+) -> Result<Arc<MemoryCatalog>, Box<dyn std::error::Error>> {
+    let catalog = Arc::new(MemoryCatalog::new("bench", "public"));
+    for relation in 0..relation_count {
+        catalog.create_table(
+            TableRef::bare(format!("t{relation}")),
+            Arc::new(Schema::new(vec![Field::new(
+                format!("c{relation}"),
+                DataType::Int64,
+                false,
+            )])),
+            None,
+        )?;
+    }
+    Ok(catalog)
 }
 
 fn chain_query(relation_count: usize) -> QueryContext {

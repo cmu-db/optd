@@ -10,7 +10,8 @@ pub mod unnesting;
 pub use expr_simplify::ExprSimplify;
 pub use holistic_unnesting::HolisticUnnesting;
 pub use join_ordering::{
-    AdaptiveJoinOrderingConfig, AlgorithmDecision, JoinOrderAlgorithm, JoinOrdering,
+    AdaptiveJoinOrderingConfig, AlgorithmDecision, GooDpConfig, GooInnerSolver, JoinOrderAlgorithm,
+    JoinOrdering,
 };
 pub use join_tree_normalize::JoinTreeNormalize;
 pub use mark_join_to_semi_join::MarkJoinToSemiJoin;
@@ -307,51 +308,47 @@ fn operator_with_resolved_inputs(
 }
 
 fn collect_post_order(root: Operator, ctx: &QueryContext, rewrites: &RewriteMap) -> Vec<Operator> {
+    enum Work {
+        Visit(Operator),
+        Emit(Operator),
+    }
+
     let mut visited = HashSet::new();
     let mut result = Vec::new();
-    post_order(root, ctx, rewrites, &mut visited, &mut result);
-    result
-}
+    let mut work = vec![Work::Visit(root)];
 
-fn post_order(
-    op: Operator,
-    ctx: &QueryContext,
-    rewrites: &RewriteMap,
-    visited: &mut HashSet<Operator>,
-    result: &mut Vec<Operator>,
-) {
-    let op = rewrites.resolve(op);
-    if !visited.insert(op) {
-        return;
+    while let Some(next) = work.pop() {
+        match next {
+            Work::Visit(op) => {
+                let op = rewrites.resolve(op);
+                if !visited.insert(op) {
+                    continue;
+                }
+                work.push(Work::Emit(op));
+                work.extend(op.get(ctx).inputs().into_iter().rev().map(Work::Visit));
+            }
+            Work::Emit(op) => result.push(op),
+        }
     }
-    for child in op.get(ctx).inputs() {
-        post_order(child, ctx, rewrites, visited, result);
-    }
-    result.push(op);
+
+    result
 }
 
 fn collect_pre_order(root: Operator, ctx: &QueryContext, rewrites: &RewriteMap) -> Vec<Operator> {
     let mut visited = HashSet::new();
     let mut result = Vec::new();
-    pre_order(root, ctx, rewrites, &mut visited, &mut result);
-    result
-}
+    let mut work = vec![root];
 
-fn pre_order(
-    op: Operator,
-    ctx: &QueryContext,
-    rewrites: &RewriteMap,
-    visited: &mut HashSet<Operator>,
-    result: &mut Vec<Operator>,
-) {
-    let op = rewrites.resolve(op);
-    if !visited.insert(op) {
-        return;
+    while let Some(op) = work.pop() {
+        let op = rewrites.resolve(op);
+        if !visited.insert(op) {
+            continue;
+        }
+        result.push(op);
+        work.extend(op.get(ctx).inputs().into_iter().rev());
     }
-    result.push(op);
-    for child in op.get(ctx).inputs() {
-        pre_order(child, ctx, rewrites, visited, result);
-    }
+
+    result
 }
 
 /// Runs query passes in registration order according to each pass's [`PassMode`].
@@ -498,8 +495,8 @@ impl Default for PassManager {
 mod tests {
     use super::*;
     use crate::{
-        ColumnData, ExprData, Join, JoinType, OperatorData, Output, QueryContext, ScalarValue,
-        Scan, Selection, TableRef,
+        ColumnData, CrossProduct, ExprData, Join, JoinType, OperatorData, Output, QueryContext,
+        ScalarValue, Scan, Selection, TableRef,
     };
     use arrow_schema::DataType;
 
@@ -545,6 +542,62 @@ mod tests {
         assert_eq!(map.resolve(a), c);
         assert_eq!(map.resolve(b), c);
         assert_eq!(map.resolve(c), c);
+    }
+
+    #[test]
+    fn operator_traversals_are_stack_safe_for_a_deep_plan() {
+        const DEPTH: usize = 20_000;
+
+        let mut ctx = QueryContext::new();
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("leaf"),
+            columns: vec![],
+        })
+        .add(&mut ctx);
+        let mut path = Vec::with_capacity(DEPTH + 1);
+        path.push(scan);
+        let root = (0..DEPTH).fold(scan, |input, _| {
+            let output = OperatorData::Output(Output { input }).add(&mut ctx);
+            path.push(output);
+            output
+        });
+        let rewrites = RewriteMap::new();
+
+        let post_order = collect_post_order(root, &ctx, &rewrites);
+        assert_eq!(post_order.len(), path.len());
+        assert!(post_order.iter().copied().eq(path.iter().copied()));
+
+        let pre_order = collect_pre_order(root, &ctx, &rewrites);
+        assert_eq!(pre_order.len(), path.len());
+        assert!(pre_order.iter().copied().eq(path.iter().rev().copied()));
+    }
+
+    #[test]
+    fn operator_traversals_preserve_child_order_and_visit_shared_nodes_once() {
+        let mut ctx = QueryContext::new();
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("shared"),
+            columns: vec![],
+        })
+        .add(&mut ctx);
+        let outer = OperatorData::Output(Output { input: scan }).add(&mut ctx);
+        let predicate = ExprData::Literal(ScalarValue::Boolean(true)).add(&mut ctx);
+        let inner = OperatorData::Selection(Selection {
+            predicate,
+            input: scan,
+        })
+        .add(&mut ctx);
+        let root = OperatorData::CrossProduct(CrossProduct { outer, inner }).add(&mut ctx);
+        let rewrites = RewriteMap::new();
+
+        assert_eq!(
+            collect_post_order(root, &ctx, &rewrites),
+            vec![scan, outer, inner, root]
+        );
+        assert_eq!(
+            collect_pre_order(root, &ctx, &rewrites),
+            vec![root, outer, scan, inner]
+        );
     }
 
     #[test]

@@ -24,10 +24,6 @@ pub(super) struct EvaluatedPlan<C> {
     pub(super) cost: C,
     pub(super) properties: PlanProperties,
     pub(super) materialized: Option<Operator>,
-    /// GOO compares the local work of a candidate rather than its cumulative subtree cost. The
-    /// compatibility evaluator leaves this absent so GOO performs its historical second call to
-    /// `operator_cost`; a future evaluator can reuse a local cost it already computed.
-    pub(super) immediate_cost: Option<C>,
 }
 
 pub(super) struct CandidateInput<'a, C> {
@@ -89,7 +85,6 @@ impl CandidateEvaluator<DefaultCostModel> for CardinalityEvaluator {
                 cardinality: Some(cardinality),
             },
             materialized: Some(root),
-            immediate_cost: None,
         })
     }
 
@@ -145,7 +140,6 @@ impl CandidateEvaluator<DefaultCostModel> for CardinalityEvaluator {
                 cardinality: Some(Arc::new(output)),
             },
             materialized: None,
-            immediate_cost: Some(local_cost),
         })
     }
 }
@@ -182,11 +176,15 @@ impl<M: CostModel> CandidateEvaluator<M> for MaterializingEvaluator {
         ctx: &QueryContext,
         analyses: &mut AnalysisContext,
     ) -> OptimizeResult<EvaluatedPlan<M::Cost>> {
+        let cost = cost_model.total_cost(root, ctx, analyses)?;
+        let cardinality =
+            CardinalityEstimationV1::get_shared(ctx, analyses, root).map_err(cardinality_error)?;
         Ok(EvaluatedPlan {
-            cost: cost_model.total_cost(root, ctx, analyses)?,
-            properties: PlanProperties::default(),
+            cost,
+            properties: PlanProperties {
+                cardinality: Some(cardinality),
+            },
             materialized: Some(root),
-            immediate_cost: None,
         })
     }
 
@@ -223,11 +221,14 @@ impl<M: CostModel> CandidateEvaluator<M> for MaterializingEvaluator {
             ctx,
             analyses,
         )?;
+        let cardinality =
+            CardinalityEstimationV1::get_shared(ctx, analyses, root).map_err(cardinality_error)?;
         Ok(EvaluatedPlan {
             cost,
-            properties: PlanProperties::default(),
+            properties: PlanProperties {
+                cardinality: Some(cardinality),
+            },
             materialized: Some(root),
-            immediate_cost: None,
         })
     }
 }
@@ -430,16 +431,6 @@ mod tests {
             deferred.cost.to_bits(),
             materialized.cost.to_bits(),
             "{case:?}"
-        );
-
-        let materialized_local = DefaultCostModel.operator_cost(root, ctx, analyses).unwrap();
-        assert_eq!(
-            deferred
-                .immediate_cost
-                .expect("deferred joins carry their local cost")
-                .to_bits(),
-            materialized_local.to_bits(),
-            "{case:?}",
         );
     }
 

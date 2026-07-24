@@ -7,9 +7,10 @@ use std::sync::Arc;
 
 use crate::{
     AggregateExpr, AggregateFunction, BinaryOp, Catalog, Column, ColumnStatistics, Expr, ExprData,
-    JoinType, NaryOp, NodeSet, Operator, OperatorData, QueryContext, QueryHypergraph, Relation,
-    ScalarValue, Scan, UnaryOp,
+    JoinType, NaryOp, Operator, OperatorData, QueryContext, Relation, ScalarValue, Scan, UnaryOp,
 };
+#[cfg(test)]
+use crate::{NodeSet, QueryHypergraph};
 
 /// Result type used by query analyses.
 pub type AnalysisResult<T> = Result<T, AnalysisError>;
@@ -1876,6 +1877,7 @@ fn join_selectivity_from_conjuncts(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn connecting_edge_indices(
     left_nodes: &NodeSet,
     right_nodes: &NodeSet,

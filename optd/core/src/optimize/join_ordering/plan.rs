@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use crate::CardinalityProfile;
-use crate::hypergraph::QueryHypergraph;
 #[cfg(test)]
-use crate::hypergraph::{NodeSet, nodeset_singleton};
+use crate::hypergraph::nodeset_singleton;
+use crate::hypergraph::{NodeSet, QueryHypergraph};
 use crate::{
     CrossProduct, Expr, ExprData, Join, JoinType, NaryOp, Operator, OperatorData, QueryContext,
     ScalarValue,
@@ -27,6 +27,27 @@ pub(super) struct PlanState<C> {
     pub(super) properties: PlanProperties,
     #[cfg(test)]
     pub(super) tree: JoinTree,
+}
+
+/// One atomic input to a contracted GOO/DP repair problem.
+///
+/// `nodes` records the covered original hypergraph relations while `state` is the already
+/// optimized plan that must remain opaque to the inner solver. Atoms in one frontier are
+/// pairwise disjoint and partition the selected GOO subtree.
+#[derive(Clone)]
+pub(super) struct PlanAtom<C> {
+    pub(super) nodes: NodeSet,
+    pub(super) state: PlanState<C>,
+}
+
+/// Result of one dynamic-programming invocation.
+///
+/// GOO/DP uses the number of unique table entries as its global optimization-budget currency.
+/// Keeping that accounting beside the plan prevents individual solvers from inventing subtly
+/// different budget semantics.
+pub(super) struct SolveOutcome<C> {
+    pub(super) plan: Option<PlanState<C>>,
+    pub(super) dp_states_created: usize,
 }
 
 /// Derived properties carried by a search state without requiring a concrete IR operator.
@@ -76,9 +97,11 @@ impl PlanArena {
         id
     }
 
-    /// Recursively materializes a recipe and memoizes the resulting operator handle.
+    /// Materializes a recipe in post-order and memoizes the resulting operator handle.
     ///
     /// This is a cache hit for compatibility-evaluated plans and after the first reconstruction.
+    /// An explicit stack keeps deferred reconstruction safe for highly skewed plans containing
+    /// thousands of joins.
     pub(super) fn materialize(
         &mut self,
         plan: PlanId,
@@ -89,21 +112,54 @@ impl PlanArena {
             return root;
         }
 
-        let root = match self.nodes[plan.0].recipe.clone() {
-            PlanRecipe::Leaf { root } => root,
-            PlanRecipe::Join {
-                outer,
-                inner,
-                join_type,
-                edge_indices,
-            } => {
-                let outer = self.materialize(outer, hypergraph, ctx);
-                let inner = self.materialize(inner, hypergraph, ctx);
-                materialize_candidate_join(outer, inner, join_type, &edge_indices, hypergraph, ctx)
+        let mut pending = vec![(plan, false)];
+        while let Some((current, expanded)) = pending.pop() {
+            if self.nodes[current.0].materialized.is_some() {
+                continue;
             }
-        };
-        self.nodes[plan.0].materialized = Some(root);
-        root
+
+            if !expanded {
+                pending.push((current, true));
+                if let PlanRecipe::Join { outer, inner, .. } = self.nodes[current.0].recipe.clone()
+                {
+                    // The inner child is pushed first so the outer child is materialized first,
+                    // matching the former recursive traversal and arena append order.
+                    pending.push((inner, false));
+                    pending.push((outer, false));
+                }
+                continue;
+            }
+
+            let root = match self.nodes[current.0].recipe.clone() {
+                PlanRecipe::Leaf { root } => root,
+                PlanRecipe::Join {
+                    outer,
+                    inner,
+                    join_type,
+                    edge_indices,
+                } => {
+                    let outer = self.nodes[outer.0]
+                        .materialized
+                        .expect("a join's outer recipe is materialized first");
+                    let inner = self.nodes[inner.0]
+                        .materialized
+                        .expect("a join's inner recipe is materialized first");
+                    materialize_candidate_join(
+                        outer,
+                        inner,
+                        join_type,
+                        &edge_indices,
+                        hypergraph,
+                        ctx,
+                    )
+                }
+            };
+            self.nodes[current.0].materialized = Some(root);
+        }
+
+        self.nodes[plan.0]
+            .materialized
+            .expect("the requested recipe was materialized")
     }
 }
 
@@ -310,5 +366,64 @@ mod tests {
             panic!("a predicate-free inner recipe must be a cross product");
         };
         assert_eq!((cross_product.outer, cross_product.inner), (left, right));
+    }
+
+    #[test]
+    fn deferred_materialization_is_stack_safe_for_deep_plans() {
+        const RELATIONS: usize = 10_000;
+
+        let mut ctx = QueryContext::new();
+        let leaves = (0..RELATIONS)
+            .map(|relation| {
+                OperatorData::Scan(Scan {
+                    table: TableRef::bare(format!("t{relation}")),
+                    columns: vec![],
+                })
+                .add(&mut ctx)
+            })
+            .collect::<Vec<_>>();
+        let nodes = leaves
+            .iter()
+            .enumerate()
+            .map(|(relation, root)| HypergraphNode {
+                root: *root,
+                label: format!("t{relation}"),
+                available: vec![],
+            })
+            .collect::<Vec<_>>();
+        let edges = (1..RELATIONS)
+            .map(|relation| Hyperedge {
+                predicate: None,
+                left: nodeset_singleton(relation - 1),
+                right: nodeset_singleton(relation),
+                source: leaves[relation],
+                join_type: HyperedgeJoinType::Inner,
+            })
+            .collect::<Vec<_>>();
+        let hypergraph = QueryHypergraph { nodes, edges };
+
+        let mut plans = PlanArena::default();
+        let leaves = leaves
+            .into_iter()
+            .map(|root| plans.commit(PlanRecipe::Leaf { root }, None))
+            .collect::<Vec<_>>();
+        let root = leaves.iter().copied().enumerate().skip(1).fold(
+            leaves[0],
+            |outer, (relation, inner)| {
+                plans.commit(
+                    PlanRecipe::Join {
+                        outer,
+                        inner,
+                        join_type: JoinType::Inner,
+                        edge_indices: vec![relation - 1],
+                    },
+                    None,
+                )
+            },
+        );
+
+        let before = ctx.operator_count();
+        plans.materialize(root, &hypergraph, &mut ctx);
+        assert_eq!(ctx.operator_count() - before, RELATIONS - 1);
     }
 }

@@ -25,15 +25,20 @@ COLORS = {
     "dphyp": "#D55E00",
     "linearized_dp": "#009E73",
     "goo_dp": "#CC79A7",
-    "DpHyp": "#D55E00",
-    "LinearizedDp": "#009E73",
-    "GooDp": "#CC79A7",
+    "goo_linearized_dp": "#CC79A7",
+    "goo_dphyp": "#E69F00",
     "chain": "#0072B2",
     "star": "#009E73",
     "clique": "#D55E00",
     "borrowed_union": "#0072B2",
     "allocating_assign": "#D55E00",
     "in_place_assign": "#009E73",
+}
+
+ALGORITHM_LABELS = {
+    "DpHyp": "dphyp",
+    "LinearizedDp": "linearized_dp",
+    "GooDp": "goo_linearized_dp",
 }
 
 
@@ -130,6 +135,34 @@ def linear_scale(value, minimum, maximum, start, end):
     return start + (value - minimum) / (maximum - minimum) * (end - start)
 
 
+def log_bounds(values):
+    positive = [value for value in values if value > 0]
+    if not positive:
+        return 1.0, 10.0
+    minimum = 10 ** math.floor(math.log10(min(positive)))
+    maximum = 10 ** math.ceil(math.log10(max(positive)))
+    if minimum == maximum:
+        maximum *= 10
+    return minimum, maximum
+
+
+def decade_ticks(minimum, maximum):
+    return [
+        10**exponent
+        for exponent in range(
+            math.floor(math.log10(minimum)),
+            math.ceil(math.log10(maximum)) + 1,
+        )
+        if minimum <= 10**exponent <= maximum
+    ]
+
+
+def relation_ticks(sizes):
+    candidates = [10, 20, 40, 70, 100, 128, 256, 512, 1_024, 2_000, 5_000]
+    ticks = [value for value in candidates if min(sizes) <= value <= max(sizes)]
+    return sorted({min(sizes), *ticks, max(sizes)})
+
+
 def draw_log_axes(svg: Svg, x_values, y_min, y_max, x_label, y_label):
     left = MARGIN["left"]
     right = WIDTH - MARGIN["right"]
@@ -169,7 +202,17 @@ def load_rows(path: Path):
         row["repetition"] = int(row["repetition"])
         row["operations"] = int(row["operations"])
         row["duration_ns"] = int(row["duration_ns"])
-        row["candidate_operators"] = int(row["candidate_operators"])
+        row["candidate_operators"] = int(row.get("candidate_operators") or 0)
+        row["selected_algorithm"] = ALGORITHM_LABELS.get(
+            row["selected_algorithm"], row["selected_algorithm"]
+        )
+        row["connected_subgraphs"] = (
+            int(row["connected_subgraphs"])
+            if row.get("connected_subgraphs")
+            else None
+        )
+        row["dp_states_created"] = int(row.get("dp_states_created") or 0)
+        row["repaired_subproblems"] = int(row.get("repaired_subproblems") or 0)
         row["duration_ms"] = row["duration_ns"] / row["operations"] / 1_000_000
     return rows
 
@@ -183,10 +226,24 @@ def aggregate_random(rows):
     for key, group in grouped.items():
         timings = [row["duration_ms"] for row in group]
         candidates = [row["candidate_operators"] for row in group]
+        connected_subgraphs = [
+            row["connected_subgraphs"]
+            for row in group
+            if row["connected_subgraphs"] is not None
+        ]
+        dp_states = [row["dp_states_created"] for row in group]
+        repairs = [row["repaired_subproblems"] for row in group]
         result[key] = {
             **summary(timings),
             "count": len(group),
             "median_candidates": statistics.median(candidates),
+            "median_connected_subgraphs": (
+                statistics.median(connected_subgraphs)
+                if connected_subgraphs
+                else None
+            ),
+            "median_dp_states": statistics.median(dp_states),
+            "median_repairs": statistics.median(repairs),
             "selection": Counter(row["selected_algorithm"] for row in group),
         }
     return result
@@ -194,12 +251,22 @@ def aggregate_random(rows):
 
 def figure_algorithm_scaling(aggregate, destination: Path):
     title = "Join-ordering time across random tree queries"
-    subtitle = "Median with p10-p90 range; 10 deterministic queries per size; log-log axes"
+    subtitle = "Median with p10-p90 range; deterministic random trees; log-log axes"
     svg = Svg(title, subtitle)
     chart_header(svg, title, subtitle)
     all_sizes = sorted({key[0] for key in aggregate})
+    y_min, y_max = log_bounds(
+        value[quantile]
+        for value in aggregate.values()
+        for quantile in ("p10", "p90")
+    )
     left, right, top, bottom = draw_log_axes(
-        svg, [10, 20, 40, 70, 100, 128, 192, 256], 0.01, 10_000, "Relations", "Optimization time"
+        svg,
+        relation_ticks(all_sizes),
+        y_min,
+        y_max,
+        "Relations",
+        "Optimization time",
     )
     variants = ["adaptive", "dphyp", "linearized_dp", "goo_dp"]
     labels = {
@@ -213,9 +280,9 @@ def figure_algorithm_scaling(aggregate, destination: Path):
         entries = sorted((size, value) for (size, name), value in aggregate.items() if name == variant)
         for size, value in entries:
             x = log_scale(size, min(all_sizes), max(all_sizes), left, right)
-            y = log_scale(value["median"], 0.01, 10_000, bottom, top)
-            low = log_scale(value["p10"], 0.01, 10_000, bottom, top)
-            high = log_scale(value["p90"], 0.01, 10_000, bottom, top)
+            y = log_scale(value["median"], y_min, y_max, bottom, top)
+            low = log_scale(value["p10"], y_min, y_max, bottom, top)
+            high = log_scale(value["p90"], y_min, y_max, bottom, top)
             svg.line(x, high, x, low, COLORS[variant], width=1.5, opacity=0.7)
             svg.line(x - 4, high, x + 4, high, COLORS[variant], width=1.5)
             svg.line(x - 4, low, x + 4, low, COLORS[variant], width=1.5)
@@ -232,35 +299,54 @@ def figure_algorithm_scaling(aggregate, destination: Path):
 
 def figure_adaptive_policy(rows, aggregate, destination: Path):
     title = "Adaptive policy transitions and their cost"
-    subtitle = "Algorithm share across 10 random trees; bars show adaptive median time"
+    subtitle = "Algorithm share across deterministic random trees; bars show adaptive median time"
     svg = Svg(title, subtitle)
     chart_header(svg, title, subtitle)
     sizes = sorted({row["relations"] for row in rows if row["suite"] == "random_tree_algorithms" and row["variant"] == "adaptive"})
+    y_min, y_max = log_bounds(
+        aggregate[(size, "adaptive")][quantile]
+        for size in sizes
+        for quantile in ("p10", "p90")
+    )
     left, right, top, bottom = draw_log_axes(
-        svg, sizes, 0.1, 10_000, "Relations", "Adaptive optimization time"
+        svg,
+        relation_ticks(sizes),
+        y_min,
+        y_max,
+        "Relations",
+        "Adaptive optimization time",
     )
     bar_width = 24
     for size in sizes:
         value = aggregate[(size, "adaptive")]
         x = log_scale(size, min(sizes), max(sizes), left, right)
-        y = log_scale(value["median"], 0.1, 10_000, bottom, top)
+        y = log_scale(value["median"], y_min, y_max, bottom, top)
         selection = value["selection"]
         total = sum(selection.values())
         offset = 0.0
-        for algorithm in ["DpHyp", "LinearizedDp", "GooDp"]:
+        algorithms = [
+            "dphyp",
+            "linearized_dp",
+            "goo_linearized_dp",
+            "goo_dphyp",
+        ]
+        for algorithm in algorithms:
             fraction = selection[algorithm] / total
             if fraction:
                 segment = (bottom - y) * fraction
                 svg.rect(x - bar_width / 2, bottom - offset - segment, bar_width, segment, COLORS[algorithm])
                 offset += segment
-        mix = "/".join(f"{name}:{selection[name]}" for name in ["DpHyp", "LinearizedDp", "GooDp"] if selection[name])
+        mix = "/".join(
+            f"{name}:{selection[name]}" for name in algorithms if selection[name]
+        )
         svg.text(x, y - 9, mix, "annotation")
     for index, (algorithm, label) in enumerate([
-        ("DpHyp", "DPhyp"),
-        ("LinearizedDp", "Linearized DP"),
-        ("GooDp", "GOO/DP"),
+        ("dphyp", "DPhyp"),
+        ("linearized_dp", "Linearized DP"),
+        ("goo_linearized_dp", "GOO/linearized DP"),
+        ("goo_dphyp", "GOO/DPhyp"),
     ]):
-        x = left + index * 230
+        x = left + index * 245
         svg.rect(x, top + 7, 18, 18, COLORS[algorithm], radius=2)
         svg.text(x + 28, top + 21, label, "legend", "start")
     destination.write_text(svg.finish())
@@ -276,10 +362,21 @@ def figure_work_scaling(aggregate, destination: Path):
         for (size, variant), value in aggregate.items()
         if variant in {"adaptive", "linearized_dp", "goo_dp"}
     ]
-    x_min, x_max = 10, 100_000
-    y_min, y_max = 0.01, 10_000
+    x_min, x_max = log_bounds(
+        value["median_candidates"] for _, _, value in entries
+    )
+    y_min, y_max = log_bounds(
+        value[quantile]
+        for _, _, value in entries
+        for quantile in ("p10", "p90")
+    )
     left, right, top, bottom = draw_log_axes(
-        svg, [10, 100, 1_000, 10_000, 100_000], y_min, y_max, "Candidate operators", "Optimization time"
+        svg,
+        decade_ticks(x_min, x_max),
+        y_min,
+        y_max,
+        "Candidate operators",
+        "Optimization time",
     )
     for index, variant in enumerate(["adaptive", "linearized_dp", "goo_dp"]):
         points = []
@@ -310,8 +407,8 @@ def figure_work_scaling(aggregate, destination: Path):
 
 
 def figure_relation_set(rows, destination: Path):
-    title = "RelationSet cost at the 64-relation representation boundary"
-    subtitle = "Median union/subset/disjoint workload; old allocating assignment vs in-place |="
+    title = "RelationSet cost across inline and dense boundaries"
+    subtitle = "Median union/subset/disjoint workload; vertical lines mark representation changes"
     svg = Svg(title, subtitle)
     chart_header(svg, title, subtitle)
     groups = defaultdict(list)
@@ -360,7 +457,24 @@ def figure_relation_set(rows, destination: Path):
         svg.text(legend_x + 38, top + 23, label, "legend", "start")
     boundary_x = (x_positions[64] + x_positions[65]) / 2
     svg.line(boundary_x, top, boundary_x, bottom, stroke="#D55E00", width=2, dash="7 5")
-    svg.text(boundary_x + 8, top + 48, "Inline64 -> dynamic", "annotation", "start")
+    svg.text(boundary_x + 8, top + 48, "Inline64 -> Inline128", "annotation", "start")
+    dense_boundary_x = (x_positions[128] + x_positions[129]) / 2
+    svg.line(
+        dense_boundary_x,
+        top,
+        dense_boundary_x,
+        bottom,
+        stroke="#E69F00",
+        width=2,
+        dash="7 5",
+    )
+    svg.text(
+        dense_boundary_x + 8,
+        top + 70,
+        "Inline128 -> Dense",
+        "annotation",
+        "start",
+    )
     svg.text((left + right) / 2, HEIGHT - 32, "Relation count", "label")
     svg.text(28, (top + bottom) / 2, "Nanoseconds per workload iteration", "label", rotate=-90)
     destination.write_text(svg.finish())
@@ -376,8 +490,14 @@ def figure_topologies(rows, destination: Path):
         if row["suite"] == "adaptive_topologies":
             grouped[(row["shape"], row["relations"])].append(row["duration_ms"])
     all_sizes = sorted({size for _, size in grouped})
+    y_min, y_max = log_bounds(value for values in grouped.values() for value in values)
     left, right, top, bottom = draw_log_axes(
-        svg, [10, 20, 40, 70, 100, 128, 192], 0.1, 10_000, "Relations", "Adaptive optimization time"
+        svg,
+        relation_ticks(all_sizes),
+        y_min,
+        y_max,
+        "Relations",
+        "Adaptive optimization time",
     )
     for index, shape in enumerate(["chain", "star", "clique"]):
         points = []
@@ -385,7 +505,7 @@ def figure_topologies(rows, destination: Path):
             if name != shape:
                 continue
             x = log_scale(size, min(all_sizes), max(all_sizes), left, right)
-            y = log_scale(statistics.median(values), 0.1, 10_000, bottom, top)
+            y = log_scale(statistics.median(values), y_min, y_max, bottom, top)
             points.append((x, y))
         svg.polyline(points, COLORS[shape])
         for x, y in points:
@@ -411,6 +531,9 @@ def write_tables(rows, aggregate, output_dir: Path):
             "p90_ms": value["p90"],
             "max_ms": value["max"],
             "median_candidate_operators": value["median_candidates"],
+            "median_connected_subgraphs": value["median_connected_subgraphs"],
+            "median_dp_states": value["median_dp_states"],
+            "median_repaired_subproblems": value["median_repairs"],
         })
     with (output_dir / "adaptive_summary.csv").open("w", newline="") as target:
         writer = csv.DictWriter(target, fieldnames=adaptive_rows[0].keys())
@@ -419,9 +542,13 @@ def write_tables(rows, aggregate, output_dir: Path):
 
     all_rows = []
     for (relations, variant), value in sorted(aggregate.items()):
+        mix = "; ".join(
+            f"{name}={count}" for name, count in sorted(value["selection"].items())
+        )
         all_rows.append({
             "relations": relations,
             "variant": variant,
+            "selected_algorithm_mix": mix,
             "samples": value["count"],
             "min_ms": value["min"],
             "p10_ms": value["p10"],
@@ -430,6 +557,9 @@ def write_tables(rows, aggregate, output_dir: Path):
             "p95_ms": value["p95"],
             "max_ms": value["max"],
             "median_candidate_operators": value["median_candidates"],
+            "median_connected_subgraphs": value["median_connected_subgraphs"],
+            "median_dp_states": value["median_dp_states"],
+            "median_repaired_subproblems": value["median_repairs"],
         })
     with (output_dir / "algorithm_summary.csv").open("w", newline="") as target:
         writer = csv.DictWriter(target, fieldnames=all_rows[0].keys())
@@ -441,30 +571,41 @@ def write_tables(rows, aggregate, output_dir: Path):
         "",
         "Times are milliseconds for one complete `JoinOrdering::run` invocation.",
         "",
-        "| Relations | Selected algorithms (of 10) | Min | P10 | Median | P90 | Max | Median candidates |",
-        "|---:|:---|---:|---:|---:|---:|---:|---:|",
+        "| Relations | Selected algorithms | Min | P10 | Median | P90 | Max | Exact CSGs | DP states | Repairs |",
+        "|---:|:---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in adaptive_rows:
+        connected = row["median_connected_subgraphs"]
+        connected_text = "" if connected is None else f"{connected:.0f}"
         lines.append(
             f"| {row['relations']} | {row['algorithm_mix']} | {row['min_ms']:.3f} | "
             f"{row['p10_ms']:.3f} | {row['median_ms']:.3f} | {row['p90_ms']:.3f} | "
-            f"{row['max_ms']:.3f} | {row['median_candidate_operators']:.0f} |"
+            f"{row['max_ms']:.3f} | {connected_text} | {row['median_dp_states']:.0f} | "
+            f"{row['median_repaired_subproblems']:.0f} |"
         )
     (output_dir / "adaptive_summary.md").write_text("\n".join(lines) + "\n")
 
     relation_groups = defaultdict(list)
     for row in rows:
         if row["suite"] == "relation_set":
-            relation_groups[(row["shape"], row["variant"], row["relations"])].append(
-                row["duration_ns"] / row["operations"]
-            )
+            relation_groups[
+                (
+                    row["shape"],
+                    row["variant"],
+                    row["relations"],
+                    row["selected_algorithm"],
+                )
+            ].append(row["duration_ns"] / row["operations"])
     relation_rows = []
-    for (shape, variant, relations), values in sorted(relation_groups.items()):
+    for (shape, variant, relations, representation), values in sorted(
+        relation_groups.items()
+    ):
         values_summary = summary(values)
         relation_rows.append({
             "shape": shape,
             "variant": variant,
             "relations": relations,
+            "representation": representation,
             "samples": len(values),
             "min_ns": values_summary["min"],
             "p10_ns": values_summary["p10"],
@@ -482,14 +623,15 @@ def write_tables(rows, aggregate, output_dir: Path):
         "",
         "Times are nanoseconds per workload iteration; rows show selected representation boundaries.",
         "",
-        "| Workload | Variant | Relations | Median | P10 | P90 |",
-        "|:---|:---|---:|---:|---:|---:|",
+        "| Workload | Variant | Universe | Representation | Median | P10 | P90 |",
+        "|:---|:---|---:|:---|---:|---:|---:|",
     ]
     for row in relation_rows:
-        if row["relations"] not in {64, 65, 256, 1_024}:
+        if row["relations"] not in {64, 65, 128, 129, 256, 1_024, 16_385}:
             continue
         relation_lines.append(
             f"| {row['shape']} | {row['variant']} | {row['relations']} | "
+            f"{row['representation']} | "
             f"{row['median_ns']:.1f} | {row['p10_ns']:.1f} | {row['p90_ns']:.1f} |"
         )
     (output_dir / "relation_set_summary.md").write_text(
@@ -509,7 +651,17 @@ def write_readme(rows, aggregate, output_dir: Path):
     adaptive_100 = aggregate[(100, "adaptive")]["median"]
     adaptive_256 = aggregate[(256, "adaptive")]["median"]
     linear_256 = aggregate[(256, "linearized_dp")]["median"]
-    speedup = adaptive_256 / linear_256
+    adaptive_to_linear_256 = adaptive_256 / linear_256
+    adaptive_sizes = sorted(
+        relations
+        for relations, variant in aggregate
+        if variant == "adaptive"
+    )
+    largest_size = adaptive_sizes[-1]
+    largest = aggregate[(largest_size, "adaptive")]
+    largest_mix = "; ".join(
+        f"{name}={count}" for name, count in sorted(largest["selection"].items())
+    )
     relset = defaultdict(list)
     for row in rows:
         if row["suite"] == "relation_set":
@@ -529,6 +681,12 @@ def write_readme(rows, aggregate, output_dir: Path):
         median_relset[("set_build", "incremental_with", 1_024)]
         / median_relset[("set_build", "from_iter", 1_024)]
     )
+    sparse_speedup = (
+        median_relset[("sparse_set_ops", "allocating_assign", 16_385)]
+        / median_relset[("sparse_set_ops", "in_place_assign", 16_385)]
+        if ("sparse_set_ops", "in_place_assign", 16_385) in median_relset
+        else None
+    )
     generated_at = datetime.now(timezone.utc).date().isoformat()
     query_count = len({
         row["query_id"]
@@ -536,6 +694,21 @@ def write_readme(rows, aggregate, output_dir: Path):
         if row["suite"] == "random_tree_algorithms"
         and row["variant"] == "adaptive"
         and row["relations"] == 10
+    })
+    large_query_count = len({
+        row["query_id"]
+        for row in rows
+        if row["suite"] == "random_tree_algorithms"
+        and row["variant"] == "adaptive"
+        and row["relations"] == largest_size
+    })
+    repetitions = len({
+        row["repetition"]
+        for row in rows
+        if row["suite"] == "random_tree_algorithms"
+        and row["variant"] == "adaptive"
+        and row["relations"] == 10
+        and row["query_id"] == 0
     })
     cpu = command_output(["sysctl", "-n", "machdep.cpu.brand_string"])
     if cpu == "unavailable":
@@ -548,42 +721,45 @@ Generated on {generated_at} from commit `{command_output(['git', 'rev-parse', 'H
 ## Headline results
 
 - Adaptive median planning time grows from **{adaptive_10:.3f} ms at 10 relations** to
-  **{adaptive_100:.3f} ms at 100** and **{adaptive_256 / 1_000:.3f} s at 256**.
-- At 256 relations, forced linearized DP takes **{linear_256:.3f} ms**, or **{speedup:.1f}x less
-  time** than the current adaptive choice (`GooDp`) on these sparse random trees.
-- The policy chooses DPhyp for every 10-relation query, is mixed at 20 relations, uses linearized
-  DP from 30 through 100, and switches to GOO/DP at 128 relations.
-- Crossing from the inline 64-bit `RelationSet` representation to the dynamic representation
-  increases the mixed set-operation microbenchmark by **{boundary:.1f}x** at 64 -> 65 relations.
+  **{adaptive_100:.3f} ms at 100**, **{adaptive_256:.3f} ms at 256**, and
+  **{largest['median'] / 1_000:.3f} s at {largest_size:,}**.
+- The {largest_size:,}-relation adaptive runs selected **{largest_mix}**, built a median
+  **{largest['median_dp_states']:.0f} inner-DP states**, and contracted a median
+  **{largest['median_repairs']:.0f} subproblems**.
+- At 256 relations, forced whole-query linearized DP takes **{linear_256:.3f} ms**; the adaptive
+  to forced-linearized timing ratio is **{adaptive_to_linear_256:.2f}x**.
+- Crossing from the inline 64-bit `RelationSet` tier to `Inline128` changes the mixed
+  set-operation microbenchmark by **{boundary:.2f}x** at 64 -> 65 relations.
 - At 256 relations, in-place `|=` is **{assign_speedup:.1f}x faster** than the previous
   allocate-and-replace formulation.
-- At 1,024 relations, one-pass `FromIterator` is **{build_speedup:.1f}x faster** than repeated
+- At 1,024 relations, bulk `FromIterator` is **{build_speedup:.1f}x faster** than repeated
   singleton insertion and union.
+{f"- In the sparse 16,385-slot case, in-place `|=` is **{sparse_speedup:.1f}x faster** than allocate-and-replace." if sparse_speedup is not None else ""}
 
 ## Relationship to Neumann and Radke (SIGMOD 2018)
 
 Reference: [Adaptive Optimization of Very Large Join Queries](https://db.in.tum.de/~radke/papers/hugejoins.pdf).
 
-The experiment mirrors the paper's median optimization-time plots and appendix distributions:
-deterministic random tree join graphs, increasing relation counts, multiple algorithms, and
-min/quantile/median/max summaries. The paper uses 100 queries per size and its `Cout` cost model;
-this local run uses {query_count} queries per size and a constant-time enumeration cost so it
-isolates search and data-structure overhead.
+The experiment mirrors the paper's optimization-time plots: deterministic random-tree join
+graphs, increasing relation counts through 5,000, multiple algorithms, and
+min/quantile/median/max summaries. The implementation follows Figure 8: DPhyp when the bounded
+connected-subgraph count fits, IKKBZ-linearized interval DP for ordinary graphs through 100
+relations, and GOO with a global 10,000-state linearized-DP repair budget above that. Hypergraphs
+instead use bounded DPhyp repair.
 
-The comparison is directional, not a hardware-normalized reproduction. The paper's adaptive
-system uses GOO/linearized-DP for very large joins and reports roughly 10-70 ms around 100
-relations, about 500 ms around 700 relations, and less than 20 seconds for 5,000 relations. optd's
-current large-query path is GOO with bounded exact DPhyp repair (`GooDp`), not GOO/linearized-DP.
-The measured {adaptive_256 / 1_000:.1f}-second median at only 256 relations identifies the
-large-query path as the main remaining scalability gap.
+The comparison is directional, not hardware-normalized. The paper uses 100 queries per size and
+`C_out` as its full cost model. This local run uses {query_count} queries per ordinary size,
+{large_query_count} per mega-query size, and a constant-time execution-cost model so it isolates
+search, cardinality ranking, hypergraph construction, and data-structure overhead.
 
 ## Methodology
 
 - Hardware/platform: {cpu}; `{platform.platform()}`.
 - Toolchain: `{command_output(['rustc', '--version'])}`.
-- Workload: 10 deterministic random recursive trees per size; one timed pass per query.
+- Workload: {query_count} deterministic random recursive trees per ordinary size and
+  {large_query_count} per mega-query size; {repetitions} timed repetition(s) per query.
 - Timed region: `JoinOrdering::run`, excluding query construction, cloning, and CSV output.
-- Sizes: 10, 20, 30, 40, 70, 100, 128, 192, and 256 relations.
+- Sizes: {", ".join(f"{size:,}" for size in adaptive_sizes)} relations.
 - Forced DPhyp is limited to 10-18 relations to avoid unbounded exponential runs.
 - No timeout samples or extrapolated values are included.
 
@@ -591,10 +767,10 @@ Reproduce from the repository root:
 
 ```bash
 cargo bench -p optd-core --bench join_ordering_scalability -- \\
-  "$PWD/artifacts/join_ordering_scalability/raw_measurements.csv" 10 1
+  "$PWD/artifacts/join_ordering_paper_faithful/raw_measurements.csv" 3 1
 python3 optd/core/benches/render_join_ordering_scalability.py \\
-  artifacts/join_ordering_scalability/raw_measurements.csv \\
-  artifacts/join_ordering_scalability
+  artifacts/join_ordering_paper_faithful/raw_measurements.csv \\
+  artifacts/join_ordering_paper_faithful
 ```
 
 ## Files
@@ -602,11 +778,11 @@ python3 optd/core/benches/render_join_ordering_scalability.py \\
 - `raw_measurements.csv`: every measurement.
 - `adaptive_summary.csv` / `.md`: paper-style adaptive distribution table.
 - `algorithm_summary.csv`: all algorithm distributions.
-- `relation_set_summary.csv` / `.md`: dynamic-set operation and construction distributions.
+- `relation_set_summary.csv` / `.md`: four-tier RelationSet operation and construction distributions.
 - `figure_1_algorithm_scaling.*`: paper-style optimization-time curves.
 - `figure_2_adaptive_policy.*`: policy choices and transition costs.
 - `figure_3_work_scaling.*`: elapsed time versus materialized candidates.
-- `figure_4_relation_set_boundary.*`: inline/dynamic representation boundary.
+- `figure_4_relation_set_boundary.*`: Inline64/Inline128/dense representation boundaries.
 - `figure_5_topology_sensitivity.*`: chain, star, and clique behavior.
 - `manifest.json`: SHA-256 inventory.
 
@@ -615,10 +791,11 @@ python3 optd/core/benches/render_join_ordering_scalability.py \\
 - These are optimizer-kernel timings, not SQL parsing, execution, or end-to-end query latency.
 - A constant-time cost model makes algorithmic/data-structure effects visible but understates the
   production cardinality-costing overhead.
-- One timing per random graph gives a workload distribution, as in the paper, rather than repeated
-  microbenchmark confidence intervals for an identical graph.
-- Candidate counts are appended IR operators, not the number of pair-connectivity checks. GOO's
-  pair search therefore consumes much more time than its materialized-candidate count suggests.
+- The random-graph quantiles are a workload distribution, as in the paper. Repetitions improve
+  timing stability but are not independent query shapes.
+- Candidate counts are appended IR operators for the compatibility evaluator. DP-state and repair
+  columns are the algorithm's direct execution telemetry and are a better cross-representation
+  work measure.
 """
     (output_dir / "README.md").write_text(text)
 

@@ -128,13 +128,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             for measurement in measurements {
                 println!(
-                    "{}\t{}\t{}\t{}\t{}\t{:?}\t{}\t{}",
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                     case.shape.label(),
                     case.relations,
                     case.width,
                     measurement.evaluator.label(),
                     repetition,
-                    measurement.algorithm,
+                    measurement.algorithm.label(),
                     measurement.duration_ns,
                     measurement.appended_operators,
                 );
