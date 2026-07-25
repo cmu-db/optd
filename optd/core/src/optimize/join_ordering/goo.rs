@@ -22,6 +22,7 @@ use super::linearized;
 use super::plan::{PlanAtom, PlanState, SolveOutcome};
 use crate::OptimizeError;
 use crate::cost::CostModel;
+use crate::disjoint_set::DisjointSet;
 use crate::hypergraph::{NodeSet, nodeset_min, nodeset_singleton};
 
 /// Inner optimizer used for each contracted GOO subtree.
@@ -89,33 +90,20 @@ struct GooTree<C> {
 /// would make a long chain quadratic. This small disjoint-set forest instead changes only two
 /// roots and maps the surviving root to the new tree node.
 struct ComponentIndex {
-    parents: Vec<usize>,
-    sizes: Vec<usize>,
+    sets: DisjointSet,
     tree_nodes: Vec<usize>,
 }
 
 impl ComponentIndex {
     fn new(relation_count: usize) -> Self {
         Self {
-            parents: (0..relation_count).collect(),
-            sizes: vec![1; relation_count],
+            sets: DisjointSet::new(relation_count),
             tree_nodes: (0..relation_count).collect(),
         }
     }
 
     fn find(&mut self, relation: usize) -> usize {
-        let mut root = relation;
-        while self.parents[root] != root {
-            root = self.parents[root];
-        }
-
-        let mut current = relation;
-        while self.parents[current] != current {
-            let parent = self.parents[current];
-            self.parents[current] = root;
-            current = parent;
-        }
-        root
+        self.sets.find(relation)
     }
 
     fn component_covering(&mut self, relations: &NodeSet) -> Option<usize> {
@@ -147,15 +135,13 @@ impl ComponentIndex {
         right_relations: &NodeSet,
         parent_tree_node: usize,
     ) {
-        let mut left = self.find(nodeset_min(left_relations));
-        let mut right = self.find(nodeset_min(right_relations));
+        let left = self.find(nodeset_min(left_relations));
+        let right = self.find(nodeset_min(right_relations));
         debug_assert_ne!(left, right);
-        if self.sizes[left] < self.sizes[right] {
-            std::mem::swap(&mut left, &mut right);
-        }
-        self.parents[right] = left;
-        self.sizes[left] += self.sizes[right];
-        self.tree_nodes[left] = parent_tree_node;
+        let merged = self.sets.union(left, right);
+        debug_assert!(merged);
+        let root = self.sets.find(left);
+        self.tree_nodes[root] = parent_tree_node;
     }
 }
 
@@ -879,6 +865,37 @@ mod tests {
         };
 
         assert_eq!(indexed, pair_scan, "different result for {endpoints:?}");
+    }
+
+    #[test]
+    fn component_index_keeps_the_latest_tree_node_after_root_swaps() {
+        let mut components = ComponentIndex::new(4);
+        let zero_one = [0, 1].into_iter().collect::<NodeSet>();
+        components.merge(&nodeset_singleton(0), &nodeset_singleton(1), 4);
+        assert_eq!(components.component_covering(&zero_one), Some(4));
+
+        // Put the smaller component first so union by size retains the other root.
+        let zero_one_two = [0, 1, 2].into_iter().collect::<NodeSet>();
+        components.merge(&nodeset_singleton(2), &zero_one, 5);
+        for relation in 0..3 {
+            assert_eq!(
+                components.component_covering(&nodeset_singleton(relation)),
+                Some(5)
+            );
+        }
+        assert_eq!(components.component_covering(&zero_one_two), Some(5));
+        assert_eq!(
+            components.component_covering(&[0, 3].into_iter().collect()),
+            None
+        );
+
+        components.merge(&nodeset_singleton(3), &zero_one_two, 6);
+        for relation in 0..4 {
+            assert_eq!(
+                components.component_covering(&nodeset_singleton(relation)),
+                Some(6)
+            );
+        }
     }
 
     #[test]

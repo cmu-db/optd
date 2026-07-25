@@ -52,7 +52,9 @@ The pass uses these local state objects:
 - `UnnestingState`: local recursion state with equivalence classes and column
   replacements.
 - `ColumnEqClasses`: union-find over column handles, populated from equality
-  predicates.
+  predicates. It remains keyed and local because columns are discovered lazily
+  during lifting; lookup uses iterative path compression so adversarial chains
+  do not consume the Rust call stack.
 - `ColumnRewrite`: append-only expression cloning that replaces `ColumnRef`
   handles according to the current replacement map.
 

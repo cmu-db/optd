@@ -10,6 +10,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::analysis::Analysis;
+use crate::disjoint_set::DisjointSet;
 use crate::{
     AnalysisContext, AnalysisError, AnalysisResult, Analyzable, AvailableColumns, BinaryOp, Column,
     Expr, ExprData, JoinType, NaryOp, Operator, OperatorData, QueryContext, QueryFormatter,
@@ -480,32 +481,16 @@ impl<'a> HypergraphBuilder<'a> {
         if r1.is_empty() || r2.is_empty() {
             return false;
         }
-        // Union-find: parent[i] = i initially.
-        let n = self.nodes.len();
-        let mut parent: Vec<usize> = (0..n).collect();
-
-        fn find(parent: &mut Vec<usize>, x: usize) -> usize {
-            if parent[x] != x {
-                parent[x] = find(parent, parent[x]);
-            }
-            parent[x]
-        }
-        fn union(parent: &mut Vec<usize>, x: usize, y: usize) {
-            let rx = find(parent, x);
-            let ry = find(parent, y);
-            if rx != ry {
-                parent[rx] = ry;
-            }
-        }
+        let mut components = DisjointSet::new(self.nodes.len());
 
         // Merge nodes within r1 and within r2.
         let r1_rep = nodeset_min(r1);
         let r2_rep = nodeset_min(r2);
         for nid in nodeset_iter(r1) {
-            union(&mut parent, r1_rep, nid);
+            components.union(r1_rep, nid);
         }
         for nid in nodeset_iter(r2) {
-            union(&mut parent, r2_rep, nid);
+            components.union(r2_rep, nid);
         }
 
         // Repeatedly apply edges (excluding the one being tested) until fixpoint.
@@ -520,25 +505,23 @@ impl<'a> HypergraphBuilder<'a> {
                 // Edge is applicable if both sides are internally connected.
                 let l_rep = nodeset_min(&edge.left);
                 let r_rep = nodeset_min(&edge.right);
-                let all_l_same = nodeset_iter(&edge.left)
-                    .all(|n| find(&mut parent, n) == find(&mut parent, l_rep));
-                let all_r_same = nodeset_iter(&edge.right)
-                    .all(|n| find(&mut parent, n) == find(&mut parent, r_rep));
+                let l_root = components.find(l_rep);
+                let r_root = components.find(r_rep);
+                let all_l_same =
+                    nodeset_iter(&edge.left).all(|node| components.find(node) == l_root);
+                let all_r_same =
+                    nodeset_iter(&edge.right).all(|node| components.find(node) == r_root);
                 if all_l_same && all_r_same {
-                    let before = find(&mut parent, l_rep);
-                    union(&mut parent, l_rep, r_rep);
-                    if find(&mut parent, l_rep) != before {
-                        changed = true;
-                    }
+                    changed |= components.union(l_rep, r_rep);
                 }
             }
             // Early exit if r1 and r2 are already connected.
-            if find(&mut parent, r1_rep) == find(&mut parent, r2_rep) {
+            if components.find(r1_rep) == components.find(r2_rep) {
                 return true;
             }
         }
 
-        find(&mut parent, r1_rep) == find(&mut parent, r2_rep)
+        components.find(r1_rep) == components.find(r2_rep)
     }
 
     /// Computes the SES split for one predicate into (left, right) NodeSets.
@@ -690,6 +673,64 @@ mod tests {
         })
         .add(&mut ctx);
         (ctx, scan_a, scan_b, a, b)
+    }
+
+    #[test]
+    fn connectivity_revisits_edges_enabled_later_in_the_scan() {
+        let mut ctx = QueryContext::new();
+        let roots = (0..3)
+            .map(|index| {
+                OperatorData::Scan(Scan {
+                    table: TableRef::bare(format!("T{index}")),
+                    columns: vec![],
+                })
+                .add(&mut ctx)
+            })
+            .collect::<Vec<_>>();
+        let mut analyses = crate::test_analyses(&ctx);
+        let mut builder = HypergraphBuilder::new(&ctx, &mut analyses);
+        builder.nodes = roots
+            .iter()
+            .enumerate()
+            .map(|(index, &root)| HypergraphNode {
+                root,
+                label: format!("T{index}"),
+                available: vec![],
+            })
+            .collect();
+
+        // The first edge is not applicable until the second edge has connected 0 and 1.
+        // Keeping this order proves that the fixpoint notices a successful union even when
+        // union-by-size preserves the left representative.
+        builder.edges = vec![
+            Hyperedge {
+                predicate: None,
+                left: [0, 1].into_iter().collect(),
+                right: nodeset_singleton(2),
+                source: roots[0],
+                join_type: HyperedgeJoinType::Inner,
+            },
+            Hyperedge {
+                predicate: None,
+                left: nodeset_singleton(0),
+                right: nodeset_singleton(1),
+                source: roots[1],
+                join_type: HyperedgeJoinType::Inner,
+            },
+        ];
+
+        assert!(builder.connected(
+            &nodeset_singleton(0),
+            &nodeset_singleton(2),
+            &NodeSet::EMPTY,
+        ));
+
+        let second_edge_tes = [0, 1].into_iter().collect();
+        assert!(!builder.connected(
+            &nodeset_singleton(0),
+            &nodeset_singleton(2),
+            &second_edge_tes,
+        ));
     }
 
     #[test]

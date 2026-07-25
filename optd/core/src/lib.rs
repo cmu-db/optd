@@ -6,6 +6,7 @@ use std::sync::Arc;
 pub mod analysis;
 pub mod catalog;
 pub mod cost;
+mod disjoint_set;
 mod display;
 pub mod hypergraph;
 pub mod optimize;

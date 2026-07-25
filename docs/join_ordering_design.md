@@ -110,6 +110,28 @@ symmetric, they cost one canonical orientation. A physical cost model can opt in
 sensitivity through `CostModel::is_join_orientation_cost_sensitive`, in which case both inner
 orientations are costed and the cheaper one is retained.
 
+### Disjoint-set boundaries
+
+Connectivity algorithms share one crate-private dense disjoint-set forest with iterative path
+compression and union by size:
+
+- CD-E uses it while computing connectivity after removing one TES edge;
+- IKKBZ uses it for Kruskal cycle detection; and
+- GOO's `ComponentIndex` wraps it with the current append-only tree-node ID for each component.
+
+`union` returns whether two previously separate components were merged. Callers must use that
+result—not a change in representative identity—to drive fixpoints, because a balanced union can
+legitimately retain either existing root. GOO resolves the surviving root after every union before
+updating its tree-node metadata.
+
+Two column-equivalence structures intentionally remain domain-specific. Cardinality analysis uses
+a compact sorted forest containing only equality-participating columns; its representative owns
+NDV provenance, including deterministic left-root tie behavior that is covered by profile tests
+and was retained for the measured JOB 15c speedup. Holistic unnesting uses a lazy keyed forest
+because columns appear incrementally while predicates are lifted; its lookup is iterative for deep
+chains. Join-tree normalization no longer maintains equality classes: that state never affected
+predicate attachment or output and was therefore deleted rather than generalized.
+
 ### Verification strategy and historical measurements
 
 Correctness is checked at complementary levels:
@@ -563,6 +585,7 @@ suppress accidental fixed-point reinvocation.
 
 ```
 optd/core/src/relation_set.rs                  # canonical inline64/inline128/dense/sparse sets
+optd/core/src/disjoint_set.rs                   # shared dense connectivity partitions
 optd/core/src/optimize/join_ordering/mod.rs    # public API and pass orchestration
 optd/core/src/optimize/join_ordering/dphyp.rs  # exact csg-cmp enumeration and DP states
 optd/core/src/optimize/join_ordering/candidate.rs # shared search state and candidate commitment
@@ -651,6 +674,10 @@ published mappings into the final operator graph.
 16. `artifacts/join_ordering_paper_faithful/`: three-query/three-repetition measurements through
     5,000 relations, a catalog-corrected `7a98797` comparison, summary tables, five inspected
     figures, and a SHA-256 manifest.
+17. `optd/core/src/disjoint_set.rs`: one dense iterative union-find shared by CD-E, IKKBZ, and
+    GOO, with exhaustive six-node partition tests and domain regressions for CD-E fixpoints and
+    GOO representative metadata. Dead join-normalization equality state was removed; the
+    metadata-bearing cardinality forest remains specialized.
 
 ### Open / Follow-ups
 - **Directed-edge invariant defense**: CD-E guarantees simultaneously applicable directed edges

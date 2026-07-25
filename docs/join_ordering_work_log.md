@@ -37,6 +37,7 @@ token counts.
 | 2026-07-24 22:26 | 2026-07-24 22:33 | Final performance evidence | Ran the final and catalog-corrected `7a98797` controls on three identical query shapes with three release repetitions each. The current path adds at most 6.4 ms median below 100 relations, then is 5.7×/22.5×/55.1× faster at 128/192/256 relations and reaches 5,000 relations in 2.038 s median. Generated raw CSV, summaries, five inspected PNG/SVG figures, and a SHA-256 manifest under `artifacts/join_ordering_paper_faithful/`. | Post-goal; tracker unavailable |
 | 2026-07-24 22:33 | 2026-07-24 22:35 | Final correctness rerun | Repeated the complete gates after adding the property-routing canary: 274/274 default-feature core tests, 267/267 no-default tests, and 392/392 release workspace tests outside the known historical JOB fixture mismatch passed. The adaptive 101-way SLT remains enabled and passed; format, all-target clippy with warnings denied, workflow lint, and diff checks passed. | Post-goal; tracker unavailable |
 | 2026-07-24 22:35 | 2026-07-24 22:38 | Independent fidelity and artifact audits | A separate read-only paper audit traced Figure 8 routing, `C_out`/IKKBZ, cardinality-keyed GOO, Figure 7 contraction/budgeting, and directed TES orientation through implementation and oracle tests with no blocker. A second audit reconciled all 718 current and 601 baseline measurements, verified 288 shared deterministic inputs, reproduced all summaries byte-for-byte, and checked all 21 manifest hashes plus the exact fixture-only baseline patch. Residual hardening ideas are itemized in the design follow-ups. | Post-goal; tracker unavailable |
+| 2026-07-25 03:10 | 2026-07-25 03:24 | Disjoint-set consolidation | Confirmed clean baseline commit `24d41ca`; extracted one crate-private dense forest shared by CD-E, IKKBZ, and GOO; removed inert join-normalization equality state; made holistic column lookup iterative; and retained the metadata-bearing compact cardinality forest. Added exhaustive partitions through six nodes plus CD-E fixpoint, GOO root-metadata, and 16,384-column stack-safety regressions. All 279 default and 272 no-default core tests, 397 release workspace tests outside historical JOB fixtures, format, clippy, and workflow lint passed. Twenty-iteration benchmark deltas were +0.37% to +2.34%, with no repeatable 10% regression. | Post-goal; tracker unavailable |
 
 ## Evidence Baseline
 
@@ -87,6 +88,11 @@ validation completes.
   equivalent Samply capture fell to 214 matching samples; SipHash self samples dropped from 61 to
   2 and DSU lookup self samples from 26 to 3. `combine_join_columns`/B-tree insertion is now the
   largest profile-construction bucket.
+- Shared dense-DSU refactor, 20 release iterations per end-to-end case: DPhyp, dynamic-set, and
+  IKKBZ timings moved by +0.37% to +2.34%; the direct 18-relation IKKBZ case moved +1.73%. One
+  three-sample candidate row initially measured +12.59%, but its confirmation was +5.62%, so no
+  slowdown at or above 10% repeated. The 65-relation transitive-equality case moved +1.96%
+  deferred and +5.57% materializing.
 - `cargo bench -p optd-core --bench join_ordering_candidate_evaluation -- 6`: deferred evaluation
   was 2.4%--22.9% faster over five exact-DPhyp chain/clique cases. It appended only `n-1` joins,
   versus 286 candidates for a 12-chain, 45,760 for a 65-chain, and 24,604 for a 9-clique. The

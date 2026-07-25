@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 
 use super::asi::COutSummary;
+use crate::disjoint_set::DisjointSet;
 
 /// Cardinality information for one original hypergraph node.
 #[derive(Debug, Clone, Copy)]
@@ -267,49 +268,6 @@ fn non_negative_or_neutral(value: f64) -> f64 {
         1.0
     } else {
         value
-    }
-}
-
-struct DisjointSet {
-    parents: Vec<usize>,
-    ranks: Vec<u8>,
-}
-
-impl DisjointSet {
-    fn new(len: usize) -> Self {
-        Self {
-            parents: (0..len).collect(),
-            ranks: vec![0; len],
-        }
-    }
-
-    fn find(&mut self, mut node: usize) -> usize {
-        let mut root = node;
-        while self.parents[root] != root {
-            root = self.parents[root];
-        }
-        while self.parents[node] != node {
-            let parent = self.parents[node];
-            self.parents[node] = root;
-            node = parent;
-        }
-        root
-    }
-
-    fn union(&mut self, left: usize, right: usize) -> bool {
-        let mut left = self.find(left);
-        let mut right = self.find(right);
-        if left == right {
-            return false;
-        }
-        if self.ranks[left] < self.ranks[right] {
-            std::mem::swap(&mut left, &mut right);
-        }
-        self.parents[right] = left;
-        if self.ranks[left] == self.ranks[right] {
-            self.ranks[left] += 1;
-        }
-        true
     }
 }
 

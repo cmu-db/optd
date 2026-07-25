@@ -127,14 +127,18 @@ impl ColumnEqClasses {
 
     fn find(&mut self, column: Column) -> Column {
         self.add(column);
-        let parent = self.parent[&column];
-        if parent == column {
-            column
-        } else {
-            let root = self.find(parent);
-            self.parent.insert(column, root);
-            root
+        let mut root = column;
+        while self.parent[&root] != root {
+            root = self.parent[&root];
         }
+
+        let mut current = column;
+        while self.parent[&current] != current {
+            let parent = self.parent[&current];
+            self.parent.insert(current, root);
+            current = parent;
+        }
+        root
     }
 
     fn union(&mut self, left: Column, right: Column) {
@@ -1285,6 +1289,24 @@ mod tests {
         classes.union(b, c);
 
         assert!(classes.equivalent(a, c));
+    }
+
+    #[test]
+    fn column_eq_classes_compress_a_deep_chain_without_recursion() {
+        const COLUMN_COUNT: usize = 16_384;
+
+        let mut query = QueryContext::new();
+        let columns = (0..COLUMN_COUNT)
+            .map(|index| ColumnData::new(format!("key_{index}"), DataType::Int64).add(&mut query))
+            .collect::<Vec<_>>();
+        let mut classes = super::ColumnEqClasses::default();
+        for pair in columns.windows(2) {
+            classes.union(pair[1], pair[0]);
+        }
+
+        assert!(classes.equivalent(columns[0], columns[COLUMN_COUNT - 1]));
+        let root = classes.parent[&columns[COLUMN_COUNT - 1]];
+        assert!(columns.iter().all(|column| classes.parent[column] == root));
     }
 
     #[test]

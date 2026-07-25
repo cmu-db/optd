@@ -4,12 +4,10 @@
 //! ordering. It attaches predicates as soon as their hypergraph endpoints are
 //! available and preserves cross products for dummy edges.
 
-use std::collections::HashMap;
-
 use crate::hypergraph::{HyperedgeJoinType, NodeSet, QueryHypergraph, nodeset_singleton};
 use crate::{
-    BinaryOp, Column, Expr, ExprData, Join, NaryOp, Operator, OperatorData, OptimizerContext,
-    QueryContext, ScalarValue, build_hypergraph,
+    Expr, ExprData, Join, NaryOp, Operator, OperatorData, OptimizerContext, QueryContext,
+    ScalarValue, build_hypergraph,
 };
 
 use super::{
@@ -92,45 +90,6 @@ impl QueryPass for JoinTreeNormalize {
 struct Component {
     nodes: NodeSet,
     op: Operator,
-    equalities: EqualityClasses,
-}
-
-#[derive(Clone, Default)]
-struct EqualityClasses {
-    parent: HashMap<Column, Column>,
-}
-
-impl EqualityClasses {
-    fn merged(left: &Self, right: &Self) -> Self {
-        let mut merged = left.clone();
-        for (&column, &parent) in &right.parent {
-            merged.parent.entry(column).or_insert(parent);
-        }
-        merged
-    }
-
-    fn equivalent(&mut self, left: Column, right: Column) -> bool {
-        self.find(left) == self.find(right)
-    }
-
-    fn union(&mut self, left: Column, right: Column) {
-        let left_root = self.find(left);
-        let right_root = self.find(right);
-        if left_root != right_root {
-            self.parent.insert(right_root, left_root);
-        }
-    }
-
-    fn find(&mut self, column: Column) -> Column {
-        let parent = *self.parent.entry(column).or_insert(column);
-        if parent == column {
-            column
-        } else {
-            let root = self.find(parent);
-            self.parent.insert(column, root);
-            root
-        }
-    }
 }
 
 fn is_supported_group(hg: &QueryHypergraph) -> bool {
@@ -157,7 +116,6 @@ fn normalize_group(
         .map(|(idx, node)| Component {
             nodes: nodeset_singleton(idx),
             op: node.root,
-            equalities: EqualityClasses::default(),
         })
         .collect::<Vec<_>>();
 
@@ -180,11 +138,10 @@ fn normalize_group(
 
         let left = components[left_idx].clone();
         let right = components[right_idx].clone();
-        let (op, equalities) = build_join_input(hg, &edge_indices, &left, &right, ctx);
+        let op = build_join_input(hg, &edge_indices, &left, &right, ctx);
         let merged = Component {
             nodes: &left.nodes | &right.nodes,
             op,
-            equalities,
         };
 
         let (remove_first, remove_second) = if left_idx > right_idx {
@@ -277,48 +234,29 @@ fn build_join_input(
     outer: &Component,
     inner: &Component,
     ctx: &mut QueryContext,
-) -> (Operator, EqualityClasses) {
-    let mut equalities = EqualityClasses::merged(&outer.equalities, &inner.equalities);
-    let mut predicates = Vec::new();
-
-    for predicate in edge_indices
+) -> Operator {
+    let mut predicates = edge_indices
         .iter()
         .filter_map(|idx| hg.edges[*idx].predicate)
         .filter(|predicate| !is_true_literal(*predicate, ctx))
-    {
-        let Some((left_col, right_col)) = column_equality(predicate, ctx) else {
-            predicates.push(predicate);
-            continue;
-        };
-
-        if !equalities.equivalent(left_col, right_col) {
-            equalities.union(left_col, right_col);
-        }
-        predicates.push(predicate);
-    }
+        .collect::<Vec<_>>();
 
     if predicates.is_empty() {
-        return (
-            OperatorData::CrossProduct(crate::CrossProduct {
-                outer: outer.op,
-                inner: inner.op,
-            })
-            .add(ctx),
-            equalities,
-        );
-    }
-
-    let on = make_and(&mut predicates, ctx);
-    (
-        OperatorData::Join(Join {
-            join_type: crate::JoinType::Inner,
-            on,
+        return OperatorData::CrossProduct(crate::CrossProduct {
             outer: outer.op,
             inner: inner.op,
         })
-        .add(ctx),
-        equalities,
-    )
+        .add(ctx);
+    }
+
+    let on = make_and(&mut predicates, ctx);
+    OperatorData::Join(Join {
+        join_type: crate::JoinType::Inner,
+        on,
+        outer: outer.op,
+        inner: inner.op,
+    })
+    .add(ctx)
 }
 
 fn make_and(exprs: &mut Vec<Expr>, ctx: &mut QueryContext) -> Expr {
@@ -340,30 +278,12 @@ fn is_true_literal(expr: Expr, ctx: &QueryContext) -> bool {
     )
 }
 
-fn column_equality(expr: Expr, ctx: &QueryContext) -> Option<(Column, Column)> {
-    let ExprData::Binary {
-        op: BinaryOp::Eq,
-        left,
-        right,
-    } = ctx.expr(expr)
-    else {
-        return None;
-    };
-    let ExprData::ColumnRef(left_col) = ctx.expr(*left) else {
-        return None;
-    };
-    let ExprData::ColumnRef(right_col) = ctx.expr(*right) else {
-        return None;
-    };
-    Some((*left_col, *right_col))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        BinaryOp, ColumnData, CrossProduct, JoinType, OperatorData, PassManager, QueryFormatter,
-        Scan, TableRef,
+        BinaryOp, Column, ColumnData, CrossProduct, JoinType, OperatorData, PassManager,
+        QueryFormatter, Scan, TableRef,
     };
     use arrow_schema::DataType;
 
