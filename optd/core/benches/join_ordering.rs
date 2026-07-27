@@ -50,7 +50,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     run_case("exact_clique_10", iterations, clique_query(10))?;
     run_case("linearized_clique_18", iterations, clique_query(18))?;
     run_case("exact_dynamic_chain_65", iterations, chain_query(65))?;
-    run_case("goo_dynamic_chain_128", iterations, chain_query(128))?;
+    run_case_with_config(
+        "forced_goo_dynamic_chain_128",
+        iterations,
+        chain_query(128),
+        AdaptiveJoinOrderingConfig {
+            exact_relation_threshold: 0,
+            connected_subgraph_budget: 0,
+            linearized_relation_threshold: 0,
+            ..AdaptiveJoinOrderingConfig::default()
+        },
+    )?;
     run_case_with_config(
         "forced_exact_dynamic_chain_128",
         iterations,
