@@ -3501,6 +3501,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "optd-statsregtest"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "datafusion",
+ "itertools 0.14.0",
+ "optd-core",
+ "optd-datafusion",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,22 @@
+[package]
+name = "optd-statsregtest"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { version = "4.5.56", features = ["derive"] }
+datafusion = { workspace = true }
+itertools = { workspace = true }
+optd-core = { path = "../../optd/core", version = "0.1" }
+optd-datafusion = { path = "../../connectors/datafusion", version = "0.1" }
+regex = "1.11"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+sha2 = "0.10"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[dev-dependencies]
+tempfile = "3.13"
