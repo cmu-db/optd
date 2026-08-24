@@ -519,8 +519,25 @@ struct JoinEdge {
     probe_col: Column,
     /// Estimated selectivity for this key pair.
     selectivity: f64,
-    /// Whether column statistics were available for this pair (vs. pure fallback).
-    had_stats: bool,
+    /// Probability that a build-side row finds at least one probe-side
+    /// partner. Under the containment assumption this is
+    /// `min(1, NDV_probe / NDV_build)`. Unlike `selectivity`, which counts
+    /// matching tuples, this counts matching outer rows and powers the
+    /// semi-join and anti-join estimates.
+    match_prob: f64,
+}
+
+impl JoinEdge {
+    /// Edge with no statistics behind it: both factors fall back to the
+    /// default join selectivity constant.
+    fn fallback(build_col: Column, probe_col: Column) -> Self {
+        Self {
+            build_col,
+            probe_col,
+            selectivity: AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
+            match_prob: AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
+        }
+    }
 }
 
 /// Estimate cardinality for a PhysicalHashJoin on pre-extracted equi-join keys,
@@ -591,6 +608,9 @@ struct JoinEdge {
 /// - **Left**: `max(result, |left|)` — every left row appears at least once.
 /// - **Mark(col)**: `|left|` — adds a boolean column, no row change.
 /// - **Single**: `min(result, |left|)` — at-most-one match per left row.
+/// - **LeftSemi**: `|left| · match_prob` — only the matched fraction of
+///   outer rows survives; output width is unchanged.
+/// - **LeftAnti**: `|left| · (1 - match_prob)` — the complementary fraction.
 ///
 /// # Assumptions
 ///
@@ -625,21 +645,11 @@ pub fn equijoin_cardinality(
         ) {
             (Some((outer_ts, outer_off)), Some((inner_ts, inner_off))) => {
                 let Some(build_cs) = outer_ts.column_statistics.get(*outer_off) else {
-                    edges.push(JoinEdge {
-                        build_col: *outer_col,
-                        probe_col: *inner_col,
-                        selectivity: AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
-                        had_stats: false,
-                    });
+                    edges.push(JoinEdge::fallback(*outer_col, *inner_col));
                     continue;
                 };
                 let Some(probe_cs) = inner_ts.column_statistics.get(*inner_off) else {
-                    edges.push(JoinEdge {
-                        build_col: *outer_col,
-                        probe_col: *inner_col,
-                        selectivity: AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
-                        had_stats: false,
-                    });
+                    edges.push(JoinEdge::fallback(*outer_col, *inner_col));
                     continue;
                 };
 
@@ -655,13 +665,13 @@ pub fn equijoin_cardinality(
 
                 // Compute per-edge selectivity: prefer HLL, fall back to
                 // containment assumption, then row-count upper bound.
-                let (sel, had_stats) = if let Some(s) = hll_join_selectivity(build_cs, probe_cs) {
-                    (s, true)
+                let sel = if let Some(s) = hll_join_selectivity(build_cs, probe_cs) {
+                    s
                 } else {
                     match (ndv(build_cs), ndv(probe_cs)) {
                         (Some(build_ndv), Some(probe_ndv)) => {
                             let max_ndv = build_ndv.max(probe_ndv) as f64;
-                            (1.0 / max_ndv, true)
+                            1.0 / max_ndv
                         }
                         // We could also check the case where at least one of the sides has some cardinality
                         // statistics available. For example, we can assume that ndv of the other table is
@@ -675,22 +685,31 @@ pub fn equijoin_cardinality(
                             let br = outer_ts.row_count;
                             let pr = inner_ts.row_count;
                             if br > 0 && pr > 0 {
-                                (1.0 / br.max(pr) as f64, true)
+                                1.0 / br.max(pr) as f64
                             } else {
-                                (
-                                    AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
-                                    false,
-                                )
+                                AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY
                             }
                         }
                     }
+                };
+
+                // Fraction of build-side rows with a partner on the probe
+                // side. With containment (probe NDV fits inside build NDV),
+                // every distinct probe value matches some build value, so a
+                // random build row matches iff its value appears on the
+                // probe side: probability NDV_probe / NDV_build.
+                let match_prob = match (ndv(build_cs), ndv(probe_cs)) {
+                    (Some(build_ndv), Some(probe_ndv)) if build_ndv > 0 => {
+                        (probe_ndv as f64 / build_ndv as f64).clamp(0.0, 1.0)
+                    }
+                    _ => AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
                 };
 
                 edges.push(JoinEdge {
                     build_col: *outer_col,
                     probe_col: *inner_col,
                     selectivity: sel,
-                    had_stats,
+                    match_prob,
                 });
             }
             // At least one side has no column_stats at all, so we don't
@@ -702,12 +721,7 @@ pub fn equijoin_cardinality(
             // column-level stats so we can fall back to row_count even
             // when column stats are absent.
             (_, _) => {
-                edges.push(JoinEdge {
-                    build_col: *outer_col,
-                    probe_col: *inner_col,
-                    selectivity: AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY,
-                    had_stats: false,
-                });
+                edges.push(JoinEdge::fallback(*outer_col, *inner_col));
             }
         }
     }
@@ -730,20 +744,17 @@ pub fn equijoin_cardinality(
 
     let mut graph = ColumnConstraintGraph::new();
     let mut selectivity: f64 = 1.0;
-    let mut any_key_had_stats = false;
+    let mut match_prob: f64 = 1.0;
 
     for edge in &edges {
         // add_equality returns true iff this edge is a spanning-tree edge.
         if graph.add_equality(edge.build_col, edge.probe_col) {
             selectivity *= edge.selectivity;
-            any_key_had_stats |= edge.had_stats;
+            match_prob *= edge.match_prob;
         }
         // else: cycle-forming edge — transitively implied, skip.
     }
-
-    if keys.is_empty() && !any_key_had_stats {
-        selectivity = AdvancedCardinalityEstimator::FALLBACK_JOIN_SELECTIVITY;
-    }
+    let match_prob = match_prob.clamp(0.0, 1.0);
 
     // Apply selectivity of non-equi conditions (e.g. range predicates like x.b < y.b).
     // These are treated as a post-join filter on the equi-join result.
@@ -759,8 +770,8 @@ pub fn equijoin_cardinality(
         JoinType::LeftOuter => inner_result.max(left),
         JoinType::Mark(_) => left,
         JoinType::Single => inner_result.min(left),
-        JoinType::LeftSemi => todo!(),
-        JoinType::LeftAnti => todo!(),
+        JoinType::LeftSemi => left * match_prob,
+        JoinType::LeftAnti => left * (1.0 - match_prob),
     };
 
     Cardinality::new(adjusted)
