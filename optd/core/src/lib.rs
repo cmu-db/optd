@@ -20,11 +20,11 @@ pub use analysis::{
 };
 pub use catalog::{
     BoundedVec, Catalog, CatalogError, CatalogResult, CollectionTooLarge,
-    ColumnDistributionStatistics, ColumnStatistics, ForeignKey, ForeignKeyError, Histogram,
-    HistogramBucket, MAX_HISTOGRAM_BUCKETS, MAX_KEY_COLUMNS, MAX_MOST_COMMON_VALUES,
+    ColumnDistributionStatistics, ColumnStatistics, DistributionError, ForeignKey, ForeignKeyError,
+    Histogram, HistogramBucket, MAX_HISTOGRAM_BUCKETS, MAX_KEY_COLUMNS, MAX_MOST_COMMON_VALUES,
     MAX_TABLE_KEYS, MemoryCatalog, MostCommonValue, MostCommonValues, NullCountStatistics,
     ResolvedTableRef, StatisticsCompleteness, StatisticsProvenance, TableConstraints, TableId,
-    TableMetadata, TableRef, TableStatistics, UniqueKey,
+    TableMetadata, TableRef, TableStatistics, UniqueKey, UniqueKeyError,
 };
 pub use cost::{CostModel, DefaultCostModel, JoinAlgorithmClass, join_algorithm_cost};
 pub use display::{

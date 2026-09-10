@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, btree_map::Entry};
 use std::fmt;
 use std::ops::Deref;
@@ -8,15 +9,18 @@ pub use arrow_schema::{Schema, SchemaRef};
 use crate::ScalarValue;
 
 /// Maximum number of most-common-value entries retained for one column.
+///
+/// This is an entry-count limit, not a byte limit: scalar payloads such as strings have their own
+/// allocation sizes.
 pub const MAX_MOST_COMMON_VALUES: usize = 128;
 
-/// Maximum number of histogram buckets retained for one column.
+/// Maximum number of histogram buckets retained for one column (not a byte limit).
 pub const MAX_HISTOGRAM_BUCKETS: usize = 32;
 
-/// Maximum number of columns participating in one key relationship.
+/// Maximum number of columns participating in one key relationship (not a byte limit).
 pub const MAX_KEY_COLUMNS: usize = 16;
 
-/// Maximum number of unique or foreign keys retained for one table.
+/// Maximum number of unique or foreign keys retained for one table (not a byte limit).
 pub const MAX_TABLE_KEYS: usize = 64;
 
 /// Error returned when a bounded catalog collection exceeds its contract.
@@ -38,9 +42,10 @@ impl fmt::Display for CollectionTooLarge {
 
 impl std::error::Error for CollectionTooLarge {}
 
-/// A collection whose size is validated at construction and deserialization.
+/// A collection whose entry count is validated at construction and deserialization.
 ///
-/// The inner allocation is private so safe callers cannot grow it past `MAX`.
+/// The inner allocation is private so safe callers cannot grow it past `MAX` entries. `MAX` does
+/// not cap allocated bytes or the size of an individual `T`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BoundedVec<T, const MAX: usize>(Vec<T>);
 
@@ -341,16 +346,21 @@ pub struct ColumnStatistics {
     pub distribution: Option<ColumnDistributionStatistics>,
 }
 
-/// Whether a statistic describes the entire population represented by its source.
+/// Whether a stored representation covers every value in its documented population.
+///
+/// Completeness describes coverage, not accuracy. For example, an MCV list is `Complete` only if
+/// every distinct non-null value appears in it, while a histogram is `Complete` only if its
+/// buckets cover all non-null rows not represented by the MCV list. Frequencies remain estimates
+/// of full-table row counts even when their provenance is [`StatisticsProvenance::Sampled`].
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum StatisticsCompleteness {
     /// The provider did not state whether the statistic is complete.
     #[default]
     Unknown,
-    /// The statistic accounts for the entire source population.
+    /// The representation covers its entire documented population.
     Complete,
-    /// The statistic accounts for only part of the source population.
+    /// The representation deliberately omits part of its documented population.
     Partial,
 }
 
@@ -365,7 +375,10 @@ pub enum StatisticsProvenance {
     Catalog,
     /// Statistics were computed by scanning the full source population.
     FullScan,
-    /// Statistics were computed from a bounded sample of source rows.
+    /// Statistics were estimated from `rows` source rows selected for inspection.
+    ///
+    /// `rows` is the unscaled sample size, not a table row-count estimate. Counts stored in the
+    /// statistics remain estimates in full-table row units.
     Sampled { rows: usize },
     /// Statistics were supplied synthetically, for example by a benchmark fixture.
     Synthetic,
@@ -375,7 +388,9 @@ pub enum StatisticsProvenance {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NullCountStatistics {
-    /// Number of null values in the population described by this statistic.
+    /// Estimated number of null values in the full table.
+    ///
+    /// A sampled collector scales its observed nulls to table-row units before storing this value.
     pub count: usize,
     pub completeness: StatisticsCompleteness,
     pub provenance: StatisticsProvenance,
@@ -385,17 +400,89 @@ pub struct NullCountStatistics {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct MostCommonValue {
+    /// A non-null value. [`MostCommonValues::try_new`] rejects nulls and duplicates.
     pub value: ScalarValue,
+    /// Estimated number of full-table rows equal to `value`.
     pub frequency: usize,
 }
 
-/// A bounded most-common-value distribution.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+/// A bounded most-common-value distribution with unique, non-null entries.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MostCommonValues {
-    pub entries: BoundedVec<MostCommonValue, MAX_MOST_COMMON_VALUES>,
-    pub completeness: StatisticsCompleteness,
-    pub provenance: StatisticsProvenance,
+    entries: BoundedVec<MostCommonValue, MAX_MOST_COMMON_VALUES>,
+    completeness: StatisticsCompleteness,
+    provenance: StatisticsProvenance,
+}
+
+impl MostCommonValues {
+    /// Validates and constructs an MCV list.
+    pub fn try_new(
+        entries: Vec<MostCommonValue>,
+        completeness: StatisticsCompleteness,
+        provenance: StatisticsProvenance,
+    ) -> Result<Self, DistributionError> {
+        let entries = BoundedVec::try_new(entries)?;
+        for (index, entry) in entries.iter().enumerate() {
+            if matches!(entry.value, ScalarValue::Null(_)) {
+                return Err(DistributionError::NullMostCommonValue { index });
+            }
+            if scalar_order(&entry.value, &entry.value).is_none() {
+                return Err(DistributionError::IncomparableMostCommonValue { index });
+            }
+            if let Some(first_index) = entries[..index]
+                .iter()
+                .position(|previous| previous.value == entry.value)
+            {
+                return Err(DistributionError::DuplicateMostCommonValue { first_index, index });
+            }
+        }
+        Ok(Self {
+            entries,
+            completeness,
+            provenance,
+        })
+    }
+
+    /// Returns the validated MCV entries.
+    pub fn entries(&self) -> &[MostCommonValue] {
+        &self.entries
+    }
+
+    /// Returns the distribution coverage declaration.
+    pub fn completeness(&self) -> StatisticsCompleteness {
+        self.completeness
+    }
+
+    /// Returns how the distribution was produced.
+    pub fn provenance(&self) -> &StatisticsProvenance {
+        &self.provenance
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for MostCommonValues {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        #[derive(serde::Deserialize)]
+        struct SerializedMostCommonValues {
+            entries: BoundedVec<MostCommonValue, MAX_MOST_COMMON_VALUES>,
+            completeness: StatisticsCompleteness,
+            provenance: StatisticsProvenance,
+        }
+
+        let value = SerializedMostCommonValues::deserialize(deserializer)?;
+        Self::try_new(
+            value.entries.into_vec(),
+            value.completeness,
+            value.provenance,
+        )
+        .map_err(D::Error::custom)
+    }
 }
 
 /// One ordered value interval in a column histogram.
@@ -406,23 +493,221 @@ pub struct HistogramBucket {
     pub lower_bound: ScalarValue,
     /// Inclusive upper endpoint.
     pub upper_bound: ScalarValue,
-    /// Number of non-null values represented by the bucket.
+    /// Estimated number of full-table rows represented by the bucket.
+    ///
+    /// Rows equal to an MCV entry are excluded even when the value lies between these endpoints.
     pub frequency: usize,
 }
 
-/// A bounded ordered histogram.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+/// A bounded ordered histogram of the non-null, non-MCV residual population.
+///
+/// Buckets use inclusive endpoints, have compatible endpoint types, and must be strictly ordered
+/// and non-overlapping. Intervals may contain an MCV value, but their frequencies exclude rows for
+/// all MCV entries. `Complete` means every residual row belongs to a bucket.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Histogram {
-    pub buckets: BoundedVec<HistogramBucket, MAX_HISTOGRAM_BUCKETS>,
-    pub completeness: StatisticsCompleteness,
-    pub provenance: StatisticsProvenance,
+    buckets: BoundedVec<HistogramBucket, MAX_HISTOGRAM_BUCKETS>,
+    completeness: StatisticsCompleteness,
+    provenance: StatisticsProvenance,
 }
+
+impl Histogram {
+    /// Validates and constructs a residual histogram.
+    pub fn try_new(
+        buckets: Vec<HistogramBucket>,
+        completeness: StatisticsCompleteness,
+        provenance: StatisticsProvenance,
+    ) -> Result<Self, DistributionError> {
+        let buckets = BoundedVec::try_new(buckets)?;
+        for (index, bucket) in buckets.iter().enumerate() {
+            let Some(interval_order) = scalar_order(&bucket.lower_bound, &bucket.upper_bound)
+            else {
+                return Err(DistributionError::IncompatibleHistogramEndpoints { index });
+            };
+            if interval_order == Ordering::Greater {
+                return Err(DistributionError::ReversedHistogramInterval { index });
+            }
+            if index > 0 {
+                let previous = &buckets[index - 1];
+                let Some(bucket_order) = scalar_order(&previous.upper_bound, &bucket.lower_bound)
+                else {
+                    return Err(DistributionError::IncompatibleHistogramBuckets {
+                        previous: index - 1,
+                        index,
+                    });
+                };
+                if bucket_order != Ordering::Less {
+                    return Err(DistributionError::UnorderedHistogramBuckets {
+                        previous: index - 1,
+                        index,
+                    });
+                }
+            }
+        }
+        Ok(Self {
+            buckets,
+            completeness,
+            provenance,
+        })
+    }
+
+    /// Returns the validated ordered buckets.
+    pub fn buckets(&self) -> &[HistogramBucket] {
+        &self.buckets
+    }
+
+    /// Returns the residual-population coverage declaration.
+    pub fn completeness(&self) -> StatisticsCompleteness {
+        self.completeness
+    }
+
+    /// Returns how the histogram was produced.
+    pub fn provenance(&self) -> &StatisticsProvenance {
+        &self.provenance
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for Histogram {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        #[derive(serde::Deserialize)]
+        struct SerializedHistogram {
+            buckets: BoundedVec<HistogramBucket, MAX_HISTOGRAM_BUCKETS>,
+            completeness: StatisticsCompleteness,
+            provenance: StatisticsProvenance,
+        }
+
+        let value = SerializedHistogram::deserialize(deserializer)?;
+        Self::try_new(
+            value.buckets.into_vec(),
+            value.completeness,
+            value.provenance,
+        )
+        .map_err(D::Error::custom)
+    }
+}
+
+fn scalar_order(left: &ScalarValue, right: &ScalarValue) -> Option<Ordering> {
+    match (left, right) {
+        (ScalarValue::Boolean(left), ScalarValue::Boolean(right)) => Some(left.cmp(right)),
+        (ScalarValue::Int32(left), ScalarValue::Int32(right)) => Some(left.cmp(right)),
+        (ScalarValue::Int64(left), ScalarValue::Int64(right)) => Some(left.cmp(right)),
+        (ScalarValue::Float64(left), ScalarValue::Float64(right)) => left.partial_cmp(right),
+        (
+            ScalarValue::Decimal128 {
+                value: left,
+                precision: left_precision,
+                scale: left_scale,
+            },
+            ScalarValue::Decimal128 {
+                value: right,
+                precision: right_precision,
+                scale: right_scale,
+            },
+        ) if left_precision == right_precision && left_scale == right_scale => {
+            Some(left.cmp(right))
+        }
+        (ScalarValue::Date32(left), ScalarValue::Date32(right)) => Some(left.cmp(right)),
+        (ScalarValue::Utf8(left), ScalarValue::Utf8(right)) => Some(left.cmp(right)),
+        (
+            ScalarValue::IntervalMonthDayNano {
+                months: left_months,
+                days: left_days,
+                nanoseconds: left_nanoseconds,
+            },
+            ScalarValue::IntervalMonthDayNano {
+                months: right_months,
+                days: right_days,
+                nanoseconds: right_nanoseconds,
+            },
+        ) => Some((left_months, left_days, left_nanoseconds).cmp(&(
+            right_months,
+            right_days,
+            right_nanoseconds,
+        ))),
+        (
+            ScalarValue::IntervalDayTime {
+                days: left_days,
+                milliseconds: left_milliseconds,
+            },
+            ScalarValue::IntervalDayTime {
+                days: right_days,
+                milliseconds: right_milliseconds,
+            },
+        ) => Some((left_days, left_milliseconds).cmp(&(right_days, right_milliseconds))),
+        _ => None,
+    }
+}
+
+/// Error returned while validating an MCV list or histogram.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DistributionError {
+    TooManyEntries(CollectionTooLarge),
+    NullMostCommonValue { index: usize },
+    IncomparableMostCommonValue { index: usize },
+    DuplicateMostCommonValue { first_index: usize, index: usize },
+    IncompatibleHistogramEndpoints { index: usize },
+    IncompatibleHistogramBuckets { previous: usize, index: usize },
+    ReversedHistogramInterval { index: usize },
+    UnorderedHistogramBuckets { previous: usize, index: usize },
+}
+
+impl From<CollectionTooLarge> for DistributionError {
+    fn from(error: CollectionTooLarge) -> Self {
+        Self::TooManyEntries(error)
+    }
+}
+
+impl fmt::Display for DistributionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TooManyEntries(error) => error.fmt(f),
+            Self::NullMostCommonValue { index } => {
+                write!(f, "MCV entry {index} is null")
+            }
+            Self::IncomparableMostCommonValue { index } => {
+                write!(f, "MCV entry {index} is not equal to itself")
+            }
+            Self::DuplicateMostCommonValue { first_index, index } => {
+                write!(f, "MCV entry {index} duplicates entry {first_index}")
+            }
+            Self::IncompatibleHistogramEndpoints { index } => write!(
+                f,
+                "histogram bucket {index} has null, incomparable, or incompatible endpoints"
+            ),
+            Self::IncompatibleHistogramBuckets { previous, index } => write!(
+                f,
+                "histogram bucket {index} has an endpoint type incompatible with bucket {previous}"
+            ),
+            Self::ReversedHistogramInterval { index } => {
+                write!(
+                    f,
+                    "histogram bucket {index} has a lower endpoint above its upper endpoint"
+                )
+            }
+            Self::UnorderedHistogramBuckets { previous, index } => write!(
+                f,
+                "histogram bucket {index} overlaps, touches, or precedes bucket {previous}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for DistributionError {}
 
 /// Optional richer column statistics carried by the catalog contract.
 ///
 /// Each component records completeness and provenance separately because a backend may, for
-/// example, expose an exact null count alongside a sampled histogram.
+/// example, expose an exact null count alongside a sampled histogram. All stored counts and
+/// frequencies are estimates in full-table row units. Providers must reconcile cross-component
+/// totals with `ColumnStatistics::frequency` and `TableStatistics::row_count`; the core can check
+/// the shape of each component but cannot infer a backend's sampling or rounding policy.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ColumnDistributionStatistics {
@@ -444,18 +729,23 @@ pub struct ColumnDistributionStatistics {
 }
 
 /// One ordered set of columns known to uniquely identify a table row.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UniqueKey {
     columns: BoundedVec<String, MAX_KEY_COLUMNS>,
 }
 
 impl UniqueKey {
     /// Creates a bounded unique key.
-    pub fn try_new(columns: Vec<String>) -> Result<Self, CollectionTooLarge> {
-        Ok(Self {
-            columns: BoundedVec::try_new(columns)?,
-        })
+    pub fn try_new(columns: Vec<String>) -> Result<Self, UniqueKeyError> {
+        let columns = BoundedVec::try_new(columns)?;
+        if columns.is_empty() {
+            return Err(UniqueKeyError::Empty);
+        }
+        if let Some(column) = duplicate_column(&columns) {
+            return Err(UniqueKeyError::DuplicateColumn { column });
+        }
+        Ok(Self { columns })
     }
 
     /// Returns the ordered key columns.
@@ -463,6 +753,52 @@ impl UniqueKey {
         &self.columns
     }
 }
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for UniqueKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        #[derive(serde::Deserialize)]
+        struct SerializedUniqueKey {
+            columns: BoundedVec<String, MAX_KEY_COLUMNS>,
+        }
+
+        let value = SerializedUniqueKey::deserialize(deserializer)?;
+        Self::try_new(value.columns.into_vec()).map_err(D::Error::custom)
+    }
+}
+
+/// Error returned while validating a unique key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UniqueKeyError {
+    TooManyColumns(CollectionTooLarge),
+    Empty,
+    DuplicateColumn { column: String },
+}
+
+impl From<CollectionTooLarge> for UniqueKeyError {
+    fn from(error: CollectionTooLarge) -> Self {
+        Self::TooManyColumns(error)
+    }
+}
+
+impl fmt::Display for UniqueKeyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TooManyColumns(error) => error.fmt(f),
+            Self::Empty => f.write_str("unique key must contain at least one column"),
+            Self::DuplicateColumn { column } => {
+                write!(f, "unique key contains duplicate column '{column}'")
+            }
+        }
+    }
+}
+
+impl std::error::Error for UniqueKeyError {}
 
 /// An enforced relationship from local columns to a referenced unique key.
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
@@ -480,16 +816,27 @@ impl ForeignKey {
         referenced_table: TableRef,
         referenced_columns: Vec<String>,
     ) -> Result<Self, ForeignKeyError> {
+        if columns.is_empty() || referenced_columns.is_empty() {
+            return Err(ForeignKeyError::Empty);
+        }
         if columns.len() != referenced_columns.len() {
             return Err(ForeignKeyError::ArityMismatch {
                 columns: columns.len(),
                 referenced_columns: referenced_columns.len(),
             });
         }
+        let columns = BoundedVec::try_new(columns)?;
+        let referenced_columns = BoundedVec::try_new(referenced_columns)?;
+        if let Some(column) = duplicate_column(&columns) {
+            return Err(ForeignKeyError::DuplicateLocalColumn { column });
+        }
+        if let Some(column) = duplicate_column(&referenced_columns) {
+            return Err(ForeignKeyError::DuplicateReferencedColumn { column });
+        }
         Ok(Self {
-            columns: BoundedVec::try_new(columns)?,
+            columns,
             referenced_table,
-            referenced_columns: BoundedVec::try_new(referenced_columns)?,
+            referenced_columns,
         })
     }
 
@@ -530,12 +877,19 @@ impl<'de> serde::Deserialize<'de> for ForeignKey {
 }
 
 /// Error returned while validating a foreign-key relationship.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ForeignKeyError {
     TooManyColumns(CollectionTooLarge),
+    Empty,
     ArityMismatch {
         columns: usize,
         referenced_columns: usize,
+    },
+    DuplicateLocalColumn {
+        column: String,
+    },
+    DuplicateReferencedColumn {
+        column: String,
     },
 }
 
@@ -549,6 +903,7 @@ impl fmt::Display for ForeignKeyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::TooManyColumns(error) => error.fmt(f),
+            Self::Empty => f.write_str("foreign key must contain at least one column pair"),
             Self::ArityMismatch {
                 columns,
                 referenced_columns,
@@ -556,11 +911,25 @@ impl fmt::Display for ForeignKeyError {
                 f,
                 "foreign key has {columns} local columns but {referenced_columns} referenced columns"
             ),
+            Self::DuplicateLocalColumn { column } => {
+                write!(f, "foreign key contains duplicate local column '{column}'")
+            }
+            Self::DuplicateReferencedColumn { column } => write!(
+                f,
+                "foreign key contains duplicate referenced column '{column}'"
+            ),
         }
     }
 }
 
 impl std::error::Error for ForeignKeyError {}
+
+fn duplicate_column(columns: &[String]) -> Option<String> {
+    columns
+        .iter()
+        .enumerate()
+        .find_map(|(index, column)| columns[..index].contains(column).then(|| column.clone()))
+}
 
 /// Bounded structural constraints supplied independently from observed statistics.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -909,6 +1278,120 @@ mod tests {
     }
 
     #[test]
+    fn most_common_values_reject_nulls_and_duplicates() {
+        let null = MostCommonValues::try_new(
+            vec![MostCommonValue {
+                value: ScalarValue::Null(DataType::Int64),
+                frequency: 1,
+            }],
+            StatisticsCompleteness::Partial,
+            StatisticsProvenance::Catalog,
+        );
+        assert_eq!(
+            null,
+            Err(DistributionError::NullMostCommonValue { index: 0 })
+        );
+
+        let duplicate = MostCommonValues::try_new(
+            vec![
+                MostCommonValue {
+                    value: ScalarValue::Int64(7),
+                    frequency: 4,
+                },
+                MostCommonValue {
+                    value: ScalarValue::Int64(7),
+                    frequency: 3,
+                },
+            ],
+            StatisticsCompleteness::Partial,
+            StatisticsProvenance::Sampled { rows: 10 },
+        );
+        assert_eq!(
+            duplicate,
+            Err(DistributionError::DuplicateMostCommonValue {
+                first_index: 0,
+                index: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn histogram_rejects_invalid_intervals_and_ordering() {
+        let incompatible = Histogram::try_new(
+            vec![HistogramBucket {
+                lower_bound: ScalarValue::Int64(1),
+                upper_bound: ScalarValue::Utf8("10".to_string()),
+                frequency: 5,
+            }],
+            StatisticsCompleteness::Complete,
+            StatisticsProvenance::Catalog,
+        );
+        assert_eq!(
+            incompatible,
+            Err(DistributionError::IncompatibleHistogramEndpoints { index: 0 })
+        );
+
+        let reversed = Histogram::try_new(
+            vec![HistogramBucket {
+                lower_bound: ScalarValue::Int64(10),
+                upper_bound: ScalarValue::Int64(1),
+                frequency: 5,
+            }],
+            StatisticsCompleteness::Complete,
+            StatisticsProvenance::Catalog,
+        );
+        assert_eq!(
+            reversed,
+            Err(DistributionError::ReversedHistogramInterval { index: 0 })
+        );
+
+        let overlapping = Histogram::try_new(
+            vec![
+                HistogramBucket {
+                    lower_bound: ScalarValue::Int64(1),
+                    upper_bound: ScalarValue::Int64(5),
+                    frequency: 5,
+                },
+                HistogramBucket {
+                    lower_bound: ScalarValue::Int64(5),
+                    upper_bound: ScalarValue::Int64(9),
+                    frequency: 4,
+                },
+            ],
+            StatisticsCompleteness::Complete,
+            StatisticsProvenance::Catalog,
+        );
+        assert_eq!(
+            overlapping,
+            Err(DistributionError::UnorderedHistogramBuckets {
+                previous: 0,
+                index: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn keys_reject_empty_and_duplicate_column_sets() {
+        assert_eq!(UniqueKey::try_new(Vec::new()), Err(UniqueKeyError::Empty));
+        assert_eq!(
+            UniqueKey::try_new(vec!["id".to_string(), "id".to_string()]),
+            Err(UniqueKeyError::DuplicateColumn {
+                column: "id".to_string(),
+            })
+        );
+        assert_eq!(
+            ForeignKey::try_new(
+                vec!["id".to_string(), "id".to_string()],
+                TableRef::bare("parent"),
+                vec!["tenant_id".to_string(), "id".to_string()],
+            ),
+            Err(ForeignKeyError::DuplicateLocalColumn {
+                column: "id".to_string(),
+            })
+        );
+    }
+
+    #[test]
     fn foreign_key_validates_arity_and_column_bound() {
         let mismatch = ForeignKey::try_new(
             vec!["tenant_id".to_string(), "user_id".to_string()],
@@ -950,29 +1433,35 @@ mod tests {
                     distinct: Some(3),
                     distribution: Some(ColumnDistributionStatistics {
                         null_count: Some(NullCountStatistics {
-                            count: 5,
+                            count: 10,
                             completeness: StatisticsCompleteness::Complete,
                             provenance: StatisticsProvenance::FullScan,
                         }),
-                        most_common_values: Some(MostCommonValues {
-                            entries: BoundedVec::try_new(vec![MostCommonValue {
-                                value: ScalarValue::Utf8("active".to_string()),
-                                frequency: 80,
-                            }])
+                        most_common_values: Some(
+                            MostCommonValues::try_new(
+                                vec![MostCommonValue {
+                                    value: ScalarValue::Int64(5),
+                                    frequency: 40,
+                                }],
+                                StatisticsCompleteness::Partial,
+                                StatisticsProvenance::Sampled { rows: 25 },
+                            )
                             .unwrap(),
-                            completeness: StatisticsCompleteness::Partial,
-                            provenance: StatisticsProvenance::Sampled { rows: 100 },
-                        }),
-                        histogram: Some(Histogram {
-                            buckets: BoundedVec::try_new(vec![HistogramBucket {
-                                lower_bound: ScalarValue::Int64(1),
-                                upper_bound: ScalarValue::Int64(10),
-                                frequency: 10,
-                            }])
+                        ),
+                        histogram: Some(
+                            Histogram::try_new(
+                                vec![HistogramBucket {
+                                    lower_bound: ScalarValue::Int64(1),
+                                    upper_bound: ScalarValue::Int64(10),
+                                    // Full-table residual frequency: rows equal to MCV 5 are
+                                    // excluded even though 5 lies inside the interval.
+                                    frequency: 50,
+                                }],
+                                StatisticsCompleteness::Complete,
+                                StatisticsProvenance::Sampled { rows: 25 },
+                            )
                             .unwrap(),
-                            completeness: StatisticsCompleteness::Complete,
-                            provenance: StatisticsProvenance::Catalog,
-                        }),
+                        ),
                     }),
                 },
             )]
@@ -990,6 +1479,39 @@ mod tests {
         let json = serde_json::to_string(&statistics).unwrap();
         let decoded: TableStatistics = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, statistics);
+        let distribution = decoded.column_statistics["status"]
+            .distribution
+            .as_ref()
+            .unwrap();
+        let mcv_frequency: usize = distribution
+            .most_common_values
+            .as_ref()
+            .unwrap()
+            .entries()
+            .iter()
+            .map(|entry| entry.frequency)
+            .sum();
+        assert_eq!(
+            distribution
+                .most_common_values
+                .as_ref()
+                .unwrap()
+                .provenance(),
+            &StatisticsProvenance::Sampled { rows: 25 }
+        );
+        let residual_frequency: usize = distribution
+            .histogram
+            .as_ref()
+            .unwrap()
+            .buckets()
+            .iter()
+            .map(|bucket| bucket.frequency)
+            .sum();
+        assert_eq!(mcv_frequency + residual_frequency, 90);
+        assert_eq!(
+            mcv_frequency + residual_frequency + distribution.null_count.as_ref().unwrap().count,
+            decoded.row_count.unwrap()
+        );
     }
 
     #[cfg(feature = "serde")]
@@ -999,6 +1521,23 @@ mod tests {
         let error =
             serde_json::from_str::<BoundedVec<usize, MAX_HISTOGRAM_BUCKETS>>(&json).unwrap_err();
         assert!(error.to_string().contains("maximum length 32"));
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn deserialization_revalidates_distribution_shapes() {
+        let entry = serde_json::to_value(MostCommonValue {
+            value: ScalarValue::Int64(7),
+            frequency: 10,
+        })
+        .unwrap();
+        let value = serde_json::json!({
+            "entries": [entry.clone(), entry],
+            "completeness": "Partial",
+            "provenance": { "Sampled": { "rows": 20 } }
+        });
+        let error = serde_json::from_value::<MostCommonValues>(value).unwrap_err();
+        assert!(error.to_string().contains("duplicates entry 0"));
     }
 
     #[cfg(feature = "serde")]
