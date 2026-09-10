@@ -794,7 +794,7 @@ impl PlannedQuery {
         }
     }
 
-    /// Uses explicit V1 cardinality fallback assumptions for later analysis.
+    /// Uses explicit V1 cardinality configuration for later analysis.
     ///
     /// Invalid values are returned to the caller and are not installed.
     pub fn with_cardinality_estimation_config(
@@ -806,7 +806,7 @@ impl PlannedQuery {
         Ok(self)
     }
 
-    /// Returns the cardinality fallback assumptions retained with this plan.
+    /// Returns the cardinality configuration retained with this plan.
     pub fn cardinality_estimation_config(&self) -> CardinalityEstimationConfig {
         self.cardinality_config
     }

@@ -468,14 +468,22 @@ pub struct CardinalityEstimationV1 {
     state: OperatorAnalysisState<Arc<CardinalityProfile>>,
 }
 
-/// Tunable fallback assumptions used by [`CardinalityEstimationV1`].
+/// Tunable assumptions and opt-in predicate semantics used by [`CardinalityEstimationV1`].
 ///
-/// These values expose the constants already used by the V1 estimator; they do
-/// not enable any additional statistics or estimation models. The default is
+/// Every predicate-semantics switch defaults to `false`, while the numeric
+/// values retain the constants already used by V1. The complete default is
 /// therefore behaviorally identical to the estimator before configuration was
 /// introduced.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CardinalityEstimationConfig {
+    /// Looks through casts and folds literal arithmetic while recognizing predicates.
+    pub normalize_filter_operands: bool,
+    /// Estimates `NOT LIKE` as the complement of [`Self::like_selectivity`].
+    pub honor_negated_like: bool,
+    /// Combines range conjuncts on one column into one interval estimate.
+    pub correlate_same_column_ranges: bool,
+    /// Marks columns as non-null after predicates that reject nulls.
+    pub honor_filter_null_rejection: bool,
     pub like_selectivity: f64,
     pub default_predicate_selectivity: f64,
     pub range_fallback_selectivity: f64,
@@ -546,6 +554,10 @@ impl CardinalityEstimationConfig {
 impl Default for CardinalityEstimationConfig {
     fn default() -> Self {
         Self {
+            normalize_filter_operands: false,
+            honor_negated_like: false,
+            correlate_same_column_ranges: false,
+            honor_filter_null_rejection: false,
             like_selectivity: 0.1,
             default_predicate_selectivity: 0.25,
             range_fallback_selectivity: 0.33,
@@ -581,7 +593,7 @@ impl AnalysisContext {
         }
     }
 
-    /// Uses explicit V1 fallback assumptions for this analysis context.
+    /// Uses explicit V1 cardinality configuration for this analysis context.
     ///
     /// Returns an error when any value violates
     /// [`CardinalityEstimationConfig::validate`].
@@ -593,7 +605,7 @@ impl AnalysisContext {
         Ok(self)
     }
 
-    /// Replaces the V1 fallback assumptions used by this analysis context.
+    /// Replaces the V1 cardinality configuration used by this analysis context.
     ///
     /// Validation happens before mutation, so an invalid configuration leaves
     /// both the current configuration and all cached analysis results intact.
@@ -610,7 +622,7 @@ impl AnalysisContext {
         Ok(())
     }
 
-    /// Returns the fallback assumptions used by cardinality estimation.
+    /// Returns the configuration used by cardinality estimation.
     pub fn cardinality_estimation_config(&self) -> CardinalityEstimationConfig {
         self.cardinality_config
     }
@@ -1762,12 +1774,98 @@ fn apply_selection_profile(
 ) -> CardinalityProfile {
     // The caller passes an owned clone of the cached input, so each conjunct can safely tighten it
     // in place while later conjuncts observe the preceding selectivity and bounds.
-    for conjunct in conjuncts(predicate, ctx) {
-        let selectivity = filter_selectivity(&profile, conjunct, ctx, config);
-        profile = scale_profile(profile, selectivity.value);
-        tighten_filter_columns(&mut profile, conjunct, ctx);
+    let conjuncts = conjuncts(predicate, ctx);
+    let (range_selectivities, grouped_range_indices) = if config.correlate_same_column_ranges {
+        same_column_range_selectivities(&profile, &conjuncts, ctx, config)
+    } else {
+        (BTreeMap::new(), HashSet::new())
+    };
+    for (index, &conjunct) in conjuncts.iter().enumerate() {
+        if let Some(selectivity) = range_selectivities.get(&index) {
+            profile = scale_profile(profile, *selectivity);
+        } else if !grouped_range_indices.contains(&index) {
+            let selectivity = filter_selectivity(&profile, conjunct, ctx, config);
+            profile = scale_profile(profile, selectivity.value);
+        }
+        tighten_filter_columns(&mut profile, conjunct, ctx, config);
     }
     profile
+}
+
+fn same_column_range_selectivities(
+    profile: &CardinalityProfile,
+    conjuncts: &[Expr],
+    ctx: &QueryContext,
+    config: &CardinalityEstimationConfig,
+) -> (BTreeMap<usize, f64>, HashSet<usize>) {
+    let mut constraints = BTreeMap::<Column, Vec<(usize, BinaryOp, f64)>>::new();
+    for (index, &conjunct) in conjuncts.iter().enumerate() {
+        let ExprData::Binary { op, left, right } = conjunct.get(ctx) else {
+            continue;
+        };
+        let Some((column, literal, normalized_op)) =
+            column_literal_predicate(*op, *left, *right, ctx, config)
+        else {
+            continue;
+        };
+        if !matches!(
+            normalized_op,
+            BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq
+        ) {
+            continue;
+        }
+        let Some(value) = scalar_to_f64(&literal) else {
+            continue;
+        };
+        constraints
+            .entry(column)
+            .or_default()
+            .push((index, normalized_op, value));
+    }
+
+    let mut selectivities = BTreeMap::new();
+    let mut grouped_indices = HashSet::new();
+    for (column, constraints) in constraints {
+        if constraints.len() < 2 {
+            continue;
+        }
+        let Some(column_profile) = profile.columns.get(&column) else {
+            continue;
+        };
+        let selectivity = range_interval_selectivity(column_profile, &constraints, config);
+        let first_index = constraints
+            .iter()
+            .map(|(index, _, _)| *index)
+            .min()
+            .expect("range group is non-empty");
+        selectivities.insert(first_index, selectivity);
+        grouped_indices.extend(constraints.into_iter().map(|(index, _, _)| index));
+    }
+    (selectivities, grouped_indices)
+}
+
+fn range_interval_selectivity(
+    profile: &ColumnProfile,
+    constraints: &[(usize, BinaryOp, f64)],
+    config: &CardinalityEstimationConfig,
+) -> f64 {
+    let Some(min) = profile.lower_bound.as_ref().and_then(scalar_to_f64) else {
+        return config.range_fallback_selectivity;
+    };
+    let Some(max) = profile.upper_bound.as_ref().and_then(scalar_to_f64) else {
+        return config.range_fallback_selectivity;
+    };
+    let mut lower = min;
+    let mut upper = max;
+    for (_, op, value) in constraints {
+        match op {
+            BinaryOp::Lt | BinaryOp::LtEq => upper = upper.min(*value),
+            BinaryOp::Gt | BinaryOp::GtEq => lower = lower.max(*value),
+            _ => unreachable!("only range constraints are grouped"),
+        }
+    }
+    let width = (max - min).abs().max(1.0);
+    ((upper - lower).max(0.0) / width).clamp(0.0, 1.0)
 }
 
 fn scale_profile(profile: CardinalityProfile, factor: f64) -> CardinalityProfile {
@@ -2075,7 +2173,7 @@ fn join_selectivity_from_conjuncts_with_config(
     let mut equality_pairs = Vec::new();
     let mut residual_selectivity = 1.0;
     for &predicate in conjuncts {
-        if let Some((left_col, right_col)) = column_equality(predicate, ctx) {
+        if let Some((left_col, right_col)) = column_equality(predicate, ctx, config) {
             equality_pairs.push((left_col, right_col));
         } else {
             residual_selectivity *=
@@ -2209,7 +2307,7 @@ fn filter_selectivity_for_predicate(
             op: UnaryOp::IsNull,
             expr,
         } => {
-            let column = column_ref(*expr, ctx);
+            let column = predicate_column_ref(*expr, ctx, config);
             let frequency = column.and_then(|column| {
                 left.columns
                     .get(&column)
@@ -2227,7 +2325,7 @@ fn filter_selectivity_for_predicate(
             op: UnaryOp::IsNotNull,
             expr,
         } => {
-            let column = column_ref(*expr, ctx);
+            let column = predicate_column_ref(*expr, ctx, config);
             let frequency = column.and_then(|column| {
                 left.columns
                     .get(&column)
@@ -2241,7 +2339,14 @@ fn filter_selectivity_for_predicate(
                 Some(1.0),
             )
         }
-        ExprData::Like { .. } => Estimate::derived(config.like_selectivity, Some(0.0), Some(1.0)),
+        ExprData::Like { negated, .. } => {
+            let selectivity = if config.honor_negated_like && *negated {
+                1.0 - config.like_selectivity
+            } else {
+                config.like_selectivity
+            };
+            Estimate::derived(selectivity, Some(0.0), Some(1.0))
+        }
         _ => Estimate::derived(config.default_predicate_selectivity, Some(0.0), Some(1.0)),
     }
 }
@@ -2255,13 +2360,14 @@ fn binary_selectivity(
     ctx: &QueryContext,
     config: &CardinalityEstimationConfig,
 ) -> Estimate {
-    if let Some((column, literal)) = column_literal(left, right, ctx)
+    if let Some((column, literal, normalized_op)) =
+        column_literal_predicate(op, left, right, ctx, config)
         && let Some(profile) = left_profile
             .columns
             .get(&column)
             .or_else(|| right_profile.columns.get(&column))
     {
-        return match op {
+        return match normalized_op {
             BinaryOp::Eq => {
                 Estimate::derived(1.0 / profile.distinct.value.max(1.0), Some(0.0), Some(1.0))
             }
@@ -2271,12 +2377,12 @@ fn binary_selectivity(
                 Some(1.0),
             ),
             BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq => {
-                range_selectivity(profile, literal, op, config)
+                range_selectivity(profile, &literal, normalized_op, config)
             }
             _ => Estimate::derived(config.default_predicate_selectivity, Some(0.0), Some(1.0)),
         };
     }
-    if let Some((left_col, right_col)) = column_equality_from_parts(op, left, right, ctx) {
+    if let Some((left_col, right_col)) = column_equality_from_parts(op, left, right, ctx, config) {
         let left_ndv = left_profile
             .columns
             .get(&left_col)
@@ -2296,21 +2402,107 @@ fn binary_selectivity(
     Estimate::derived(config.default_predicate_selectivity, Some(0.0), Some(1.0))
 }
 
-fn tighten_filter_columns(profile: &mut CardinalityProfile, predicate: Expr, ctx: &QueryContext) {
+fn tighten_filter_columns(
+    profile: &mut CardinalityProfile,
+    predicate: Expr,
+    ctx: &QueryContext,
+    config: &CardinalityEstimationConfig,
+) {
     if let ExprData::Binary {
         op: BinaryOp::Eq,
         left,
         right,
     } = predicate.get(ctx)
-        && let Some((column, literal)) = column_literal(*left, *right, ctx)
+        && let Some((column, literal, _)) =
+            column_literal_predicate(BinaryOp::Eq, *left, *right, ctx, config)
         && let Some(column_profile) = profile.columns.get_mut(&column)
     {
         column_profile.lower_bound = Some(literal.clone());
-        column_profile.upper_bound = Some(literal.clone());
+        column_profile.upper_bound = Some(literal);
         column_profile.distinct = Estimate::derived(1.0, Some(0.0), Some(1.0));
         column_profile.frequency = column_profile
             .frequency
             .cap(profile.rows.value, EstimateSource::Derived);
+    }
+    if config.honor_filter_null_rejection {
+        for column in filter_null_rejected_columns(predicate, ctx, config) {
+            if let Some(column_profile) = profile.columns.get_mut(&column) {
+                column_profile.frequency = profile.rows.clone();
+                column_profile.distinct = column_profile
+                    .distinct
+                    .cap(profile.rows.value, EstimateSource::Derived);
+            }
+        }
+    }
+}
+
+fn filter_null_rejected_columns(
+    predicate: Expr,
+    ctx: &QueryContext,
+    config: &CardinalityEstimationConfig,
+) -> BTreeSet<Column> {
+    match predicate.get(ctx) {
+        ExprData::Binary {
+            op:
+                BinaryOp::Eq
+                | BinaryOp::NotEq
+                | BinaryOp::Lt
+                | BinaryOp::LtEq
+                | BinaryOp::Gt
+                | BinaryOp::GtEq,
+            left,
+            right,
+        } => [
+            predicate_column_ref(*left, ctx, config),
+            predicate_column_ref(*right, ctx, config),
+        ]
+        .into_iter()
+        .flatten()
+        .collect(),
+        ExprData::Unary {
+            op: UnaryOp::IsNotNull,
+            expr,
+        } => predicate_column_ref(*expr, ctx, config)
+            .into_iter()
+            .collect(),
+        ExprData::Unary {
+            op: UnaryOp::Not,
+            expr,
+        } => match expr.get(ctx) {
+            ExprData::Unary {
+                op: UnaryOp::IsNull,
+                expr,
+            } => predicate_column_ref(*expr, ctx, config)
+                .into_iter()
+                .collect(),
+            _ => BTreeSet::new(),
+        },
+        ExprData::Like { expr, .. } => predicate_column_ref(*expr, ctx, config)
+            .into_iter()
+            .collect(),
+        ExprData::Nary {
+            op: NaryOp::And,
+            exprs,
+        } => exprs
+            .iter()
+            .flat_map(|expr| filter_null_rejected_columns(*expr, ctx, config))
+            .collect(),
+        ExprData::Nary {
+            op: NaryOp::Or,
+            exprs,
+        } => {
+            let mut iter = exprs.iter();
+            let Some(first) = iter.next() else {
+                return BTreeSet::new();
+            };
+            let mut intersection = filter_null_rejected_columns(*first, ctx, config);
+            for expr in iter {
+                let branch = filter_null_rejected_columns(*expr, ctx, config);
+                intersection.retain(|column| branch.contains(column));
+            }
+            intersection
+        }
+        _ => BTreeSet::new(),
     }
 }
 
@@ -2353,26 +2545,99 @@ fn conjuncts(expr: Expr, ctx: &QueryContext) -> Vec<Expr> {
     }
 }
 
-fn column_ref(expr: Expr, ctx: &QueryContext) -> Option<Column> {
+fn predicate_column_ref(
+    expr: Expr,
+    ctx: &QueryContext,
+    config: &CardinalityEstimationConfig,
+) -> Option<Column> {
     match expr.get(ctx) {
         ExprData::ColumnRef(column) => Some(*column),
+        ExprData::Cast { expr, .. } if config.normalize_filter_operands => {
+            predicate_column_ref(*expr, ctx, config)
+        }
         _ => None,
     }
 }
 
-fn column_literal(left: Expr, right: Expr, ctx: &QueryContext) -> Option<(Column, &ScalarValue)> {
-    match (left.get(ctx), right.get(ctx)) {
-        (ExprData::ColumnRef(column), ExprData::Literal(value))
-        | (ExprData::Literal(value), ExprData::ColumnRef(column)) => Some((*column, value)),
+fn predicate_literal(
+    expr: Expr,
+    ctx: &QueryContext,
+    config: &CardinalityEstimationConfig,
+) -> Option<ScalarValue> {
+    match expr.get(ctx) {
+        ExprData::Literal(value) => Some(value.clone()),
+        ExprData::Cast { expr, .. } if config.normalize_filter_operands => {
+            predicate_literal(*expr, ctx, config)
+        }
+        ExprData::Unary {
+            op: UnaryOp::Negate,
+            expr,
+        } if config.normalize_filter_operands => {
+            let value = scalar_to_f64(&predicate_literal(*expr, ctx, config)?)?;
+            Some(ScalarValue::Float64(-value))
+        }
+        ExprData::Binary {
+            op: op @ (BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide),
+            left,
+            right,
+        } if config.normalize_filter_operands => {
+            let left = scalar_to_f64(&predicate_literal(*left, ctx, config)?)?;
+            let right = scalar_to_f64(&predicate_literal(*right, ctx, config)?)?;
+            let value = match op {
+                BinaryOp::Add => left + right,
+                BinaryOp::Subtract => left - right,
+                BinaryOp::Multiply => left * right,
+                BinaryOp::Divide if right != 0.0 => left / right,
+                BinaryOp::Divide => return None,
+                _ => unreachable!("matched arithmetic operator"),
+            };
+            value.is_finite().then_some(ScalarValue::Float64(value))
+        }
         _ => None,
     }
 }
 
-fn column_equality(expr: Expr, ctx: &QueryContext) -> Option<(Column, Column)> {
+fn column_literal_predicate(
+    op: BinaryOp,
+    left: Expr,
+    right: Expr,
+    ctx: &QueryContext,
+    config: &CardinalityEstimationConfig,
+) -> Option<(Column, ScalarValue, BinaryOp)> {
+    if let Some(column) = predicate_column_ref(left, ctx, config) {
+        return predicate_literal(right, ctx, config).map(|literal| (column, literal, op));
+    }
+    let column = predicate_column_ref(right, ctx, config)?;
+    let literal = predicate_literal(left, ctx, config)?;
+    let op = if config.normalize_filter_operands {
+        reverse_comparison(op)
+    } else {
+        // Preserve V1's historical operand-orientation behavior unless
+        // predicate normalization is explicitly enabled.
+        op
+    };
+    Some((column, literal, op))
+}
+
+fn reverse_comparison(op: BinaryOp) -> BinaryOp {
+    match op {
+        BinaryOp::Lt => BinaryOp::Gt,
+        BinaryOp::LtEq => BinaryOp::GtEq,
+        BinaryOp::Gt => BinaryOp::Lt,
+        BinaryOp::GtEq => BinaryOp::LtEq,
+        _ => op,
+    }
+}
+
+fn column_equality(
+    expr: Expr,
+    ctx: &QueryContext,
+    config: &CardinalityEstimationConfig,
+) -> Option<(Column, Column)> {
     let ExprData::Binary { op, left, right } = expr.get(ctx) else {
         return None;
     };
-    column_equality_from_parts(*op, *left, *right, ctx)
+    column_equality_from_parts(*op, *left, *right, ctx, config)
 }
 
 fn column_equality_from_parts(
@@ -2380,17 +2645,15 @@ fn column_equality_from_parts(
     left: Expr,
     right: Expr,
     ctx: &QueryContext,
+    config: &CardinalityEstimationConfig,
 ) -> Option<(Column, Column)> {
     if op != BinaryOp::Eq {
         return None;
     }
-    let ExprData::ColumnRef(left_col) = left.get(ctx) else {
-        return None;
-    };
-    let ExprData::ColumnRef(right_col) = right.get(ctx) else {
-        return None;
-    };
-    Some((*left_col, *right_col))
+    Some((
+        predicate_column_ref(left, ctx, config)?,
+        predicate_column_ref(right, ctx, config)?,
+    ))
 }
 
 struct EqualityEdge {
@@ -3891,6 +4154,10 @@ mod tests {
     fn cardinality_config_accepts_valid_boundaries_at_both_entry_paths() {
         for selectivity in [0.0, 1.0] {
             let config = CardinalityEstimationConfig {
+                normalize_filter_operands: selectivity == 1.0,
+                honor_negated_like: selectivity == 1.0,
+                correlate_same_column_ranges: selectivity == 1.0,
+                honor_filter_null_rejection: selectivity == 1.0,
                 like_selectivity: selectivity,
                 default_predicate_selectivity: selectivity,
                 range_fallback_selectivity: selectivity,
@@ -3962,6 +4229,248 @@ mod tests {
                 .value,
             30.0
         );
+    }
+
+    #[test]
+    fn cardinality_estimation_can_normalize_casts_and_literal_arithmetic() {
+        let mut ctx = QueryContext::new();
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let id_ref = ExprData::ColumnRef(id).add(&mut ctx);
+        let cast_id = ExprData::Cast {
+            expr: id_ref,
+            ty: DataType::Int64,
+        }
+        .add(&mut ctx);
+        let three = ExprData::Literal(ScalarValue::Int64(3)).add(&mut ctx);
+        let four = ExprData::Literal(ScalarValue::Int64(4)).add(&mut ctx);
+        let arithmetic = ExprData::Binary {
+            op: BinaryOp::Add,
+            left: three,
+            right: four,
+        }
+        .add(&mut ctx);
+        let cast_literal = ExprData::Cast {
+            expr: arithmetic,
+            ty: DataType::Int64,
+        }
+        .add(&mut ctx);
+        let predicate = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: cast_id,
+            right: cast_literal,
+        }
+        .add(&mut ctx);
+        let profile = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [(id, test_column_profile(100.0, 100.0))]
+                .into_iter()
+                .collect(),
+        );
+
+        let legacy = apply_selection_profile(
+            profile.clone(),
+            predicate,
+            &ctx,
+            &CardinalityEstimationConfig::default(),
+        );
+        let normalized = apply_selection_profile(
+            profile,
+            predicate,
+            &ctx,
+            &CardinalityEstimationConfig {
+                normalize_filter_operands: true,
+                ..CardinalityEstimationConfig::default()
+            },
+        );
+
+        assert_eq!(legacy.rows.value, 25.0);
+        assert_eq!(normalized.rows.value, 1.0);
+        assert_eq!(normalized.columns[&id].distinct.value, 1.0);
+        assert_eq!(
+            normalized.columns[&id].lower_bound,
+            Some(ScalarValue::Float64(7.0))
+        );
+    }
+
+    #[test]
+    fn cardinality_estimation_can_honor_negated_like() {
+        let mut ctx = QueryContext::new();
+        let name = ColumnData::new("name", DataType::Utf8).add(&mut ctx);
+        let name_ref = ExprData::ColumnRef(name).add(&mut ctx);
+        let pattern = ExprData::Literal(ScalarValue::Utf8("prefix%".to_string())).add(&mut ctx);
+        let predicate = ExprData::Like {
+            negated: true,
+            expr: name_ref,
+            pattern,
+            case_insensitive: false,
+        }
+        .add(&mut ctx);
+        let profile = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [(name, test_column_profile(100.0, 100.0))]
+                .into_iter()
+                .collect(),
+        );
+
+        let legacy = apply_selection_profile(
+            profile.clone(),
+            predicate,
+            &ctx,
+            &CardinalityEstimationConfig::default(),
+        );
+        let corrected = apply_selection_profile(
+            profile,
+            predicate,
+            &ctx,
+            &CardinalityEstimationConfig {
+                honor_negated_like: true,
+                ..CardinalityEstimationConfig::default()
+            },
+        );
+
+        assert_eq!(legacy.rows.value, 10.0);
+        assert_eq!(corrected.rows.value, 90.0);
+    }
+
+    #[test]
+    fn cardinality_estimation_can_correlate_same_column_ranges() {
+        let mut ctx = QueryContext::new();
+        let value = ColumnData::new("value", DataType::Int64).add(&mut ctx);
+        let value_ref = ExprData::ColumnRef(value).add(&mut ctx);
+        let lower = ExprData::Literal(ScalarValue::Int64(20)).add(&mut ctx);
+        let greater = ExprData::Binary {
+            op: BinaryOp::Gt,
+            left: value_ref,
+            right: lower,
+        }
+        .add(&mut ctx);
+        let value_ref = ExprData::ColumnRef(value).add(&mut ctx);
+        let upper = ExprData::Literal(ScalarValue::Int64(30)).add(&mut ctx);
+        let less = ExprData::Binary {
+            op: BinaryOp::Lt,
+            left: value_ref,
+            right: upper,
+        }
+        .add(&mut ctx);
+        let predicate = ExprData::Nary {
+            op: NaryOp::And,
+            exprs: vec![greater, less],
+        }
+        .add(&mut ctx);
+        let mut column = test_column_profile(100.0, 100.0);
+        column.lower_bound = Some(ScalarValue::Int64(0));
+        column.upper_bound = Some(ScalarValue::Int64(100));
+        let profile = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [(value, column)].into_iter().collect(),
+        );
+
+        let legacy = apply_selection_profile(
+            profile.clone(),
+            predicate,
+            &ctx,
+            &CardinalityEstimationConfig::default(),
+        );
+        let correlated = apply_selection_profile(
+            profile,
+            predicate,
+            &ctx,
+            &CardinalityEstimationConfig {
+                correlate_same_column_ranges: true,
+                ..CardinalityEstimationConfig::default()
+            },
+        );
+
+        assert_eq!(legacy.rows.value, 24.0);
+        assert_eq!(correlated.rows.value, 10.0);
+    }
+
+    #[test]
+    fn cardinality_estimation_can_propagate_filter_null_rejection() {
+        let mut ctx = QueryContext::new();
+        let key = ColumnData::new("key", DataType::Int64).add(&mut ctx);
+        let key_ref = ExprData::ColumnRef(key).add(&mut ctx);
+        let one = ExprData::Literal(ScalarValue::Int64(1)).add(&mut ctx);
+        let predicate = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: key_ref,
+            right: one,
+        }
+        .add(&mut ctx);
+        let profile = CardinalityProfile::new(
+            Estimate::catalog(100.0),
+            [(key, test_column_profile(50.0, 10.0))]
+                .into_iter()
+                .collect(),
+        );
+
+        let legacy = apply_selection_profile(
+            profile.clone(),
+            predicate,
+            &ctx,
+            &CardinalityEstimationConfig::default(),
+        );
+        let corrected = apply_selection_profile(
+            profile,
+            predicate,
+            &ctx,
+            &CardinalityEstimationConfig {
+                honor_filter_null_rejection: true,
+                ..CardinalityEstimationConfig::default()
+            },
+        );
+
+        assert_eq!(legacy.rows.value, 10.0);
+        assert_eq!(legacy.columns[&key].frequency.value, 5.0);
+        assert_eq!(corrected.rows.value, 10.0);
+        assert_eq!(corrected.columns[&key].frequency.value, 10.0);
+    }
+
+    #[test]
+    fn filter_null_rejection_intersects_or_branches() {
+        let mut ctx = QueryContext::new();
+        let a = ColumnData::new("a", DataType::Int64).add(&mut ctx);
+        let b = ColumnData::new("b", DataType::Int64).add(&mut ctx);
+        let one = ExprData::Literal(ScalarValue::Int64(1)).add(&mut ctx);
+        let two = ExprData::Literal(ScalarValue::Int64(2)).add(&mut ctx);
+        let a_eq_one = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: ExprData::ColumnRef(a).add(&mut ctx),
+            right: one,
+        }
+        .add(&mut ctx);
+        let a_eq_two = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: ExprData::ColumnRef(a).add(&mut ctx),
+            right: two,
+        }
+        .add(&mut ctx);
+        let b_eq_two = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: ExprData::ColumnRef(b).add(&mut ctx),
+            right: two,
+        }
+        .add(&mut ctx);
+        let same_column_or = ExprData::Nary {
+            op: NaryOp::Or,
+            exprs: vec![a_eq_one, a_eq_two],
+        }
+        .add(&mut ctx);
+        let different_columns_or = ExprData::Nary {
+            op: NaryOp::Or,
+            exprs: vec![a_eq_one, b_eq_two],
+        }
+        .add(&mut ctx);
+        let config = CardinalityEstimationConfig {
+            honor_filter_null_rejection: true,
+            ..CardinalityEstimationConfig::default()
+        };
+
+        assert_eq!(
+            filter_null_rejected_columns(same_column_or, &ctx, &config),
+            BTreeSet::from([a])
+        );
+        assert!(filter_null_rejected_columns(different_columns_or, &ctx, &config).is_empty());
     }
 
     #[test]
