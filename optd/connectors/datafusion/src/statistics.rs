@@ -54,6 +54,7 @@ async fn collect_table_statistics_from_sql(
                 upper_bound,
                 frequency,
                 distinct,
+                distribution: None,
             },
         );
     }
@@ -62,6 +63,7 @@ async fn collect_table_statistics_from_sql(
         row_count,
         size_bytes: None,
         column_statistics,
+        constraints: Default::default(),
     })
 }
 
