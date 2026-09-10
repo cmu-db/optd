@@ -482,7 +482,8 @@ pub struct CardinalityEstimationConfig {
     /// Partitions the known non-null population between `LIKE` and `NOT LIKE`
     /// using [`Self::like_selectivity`].
     pub honor_negated_like: bool,
-    /// Combines range conjuncts on one column into one interval estimate.
+    /// Combines range conjuncts on one column into one interval estimate and
+    /// normalizes their direct column/literal operand orientation.
     pub correlate_same_column_ranges: bool,
     /// Marks columns as non-null after predicates that reject nulls.
     pub honor_filter_null_rejection: bool,
@@ -1905,6 +1906,11 @@ fn range_interval_selectivity(
         return (1.0 / profile.distinct.value.max(1.0)).clamp(0.0, 1.0);
     }
 
+    if exact_scaled_interval_supported(domain_min, domain_max, &lower.value, &upper.value) {
+        return exact_scaled_interval_fraction(domain_min, domain_max, &lower.value, &upper.value)
+            .unwrap_or(config.range_fallback_selectivity);
+    }
+
     let Some(min) = scalar_to_f64(domain_min) else {
         return config.range_fallback_selectivity;
     };
@@ -1918,10 +1924,78 @@ fn range_interval_selectivity(
         return config.range_fallback_selectivity;
     };
     let width = (max - min).abs();
-    if width == 0.0 || !width.is_finite() {
+    let selected_width = upper - lower;
+    if width == 0.0 || selected_width == 0.0 || !width.is_finite() || !selected_width.is_finite() {
         return config.range_fallback_selectivity;
     }
-    ((upper - lower) / width).clamp(0.0, 1.0)
+    (selected_width / width).clamp(0.0, 1.0)
+}
+
+fn exact_scaled_interval_fraction(
+    domain_min: &ScalarValue,
+    domain_max: &ScalarValue,
+    lower: &ScalarValue,
+    upper: &ScalarValue,
+) -> Option<f64> {
+    let values = [domain_min, domain_max, lower, upper];
+    if !exact_scaled_interval_supported(domain_min, domain_max, lower, upper) {
+        return None;
+    }
+    let all_dates = values
+        .iter()
+        .all(|value| matches!(value, ScalarValue::Date32(_)));
+
+    let common_scale = if all_dates {
+        0
+    } else {
+        values
+            .iter()
+            .map(|value| match value {
+                ScalarValue::Decimal128 { scale, .. } => *scale,
+                _ => 0,
+            })
+            .max()?
+    };
+    let scaled = values
+        .iter()
+        .map(|value| scaled_integer(value, common_scale))
+        .collect::<Option<Vec<_>>>()?;
+    let domain_width = scaled[1].checked_sub(scaled[0])?;
+    let selected_width = scaled[3].checked_sub(scaled[2])?;
+    if domain_width <= 0 || selected_width <= 0 {
+        return None;
+    }
+    let fraction = selected_width as f64 / domain_width as f64;
+    (fraction.is_finite() && fraction > 0.0).then(|| fraction.clamp(0.0, 1.0))
+}
+
+fn exact_scaled_interval_supported(
+    domain_min: &ScalarValue,
+    domain_max: &ScalarValue,
+    lower: &ScalarValue,
+    upper: &ScalarValue,
+) -> bool {
+    let values = [domain_min, domain_max, lower, upper];
+    values
+        .iter()
+        .all(|value| matches!(value, ScalarValue::Date32(_)))
+        || values.iter().all(|value| {
+            matches!(
+                value,
+                ScalarValue::Int32(_) | ScalarValue::Int64(_) | ScalarValue::Decimal128 { .. }
+            )
+        })
+}
+
+fn scaled_integer(value: &ScalarValue, common_scale: i8) -> Option<i128> {
+    let (value, scale) = match value {
+        ScalarValue::Int32(value) => (i128::from(*value), 0),
+        ScalarValue::Int64(value) => (i128::from(*value), 0),
+        ScalarValue::Date32(value) => (i128::from(*value), 0),
+        ScalarValue::Decimal128 { value, scale, .. } => (*value, *scale),
+        _ => return None,
+    };
+    rescale_decimal(value, scale, common_scale)
 }
 
 #[derive(Clone)]
@@ -2423,16 +2497,25 @@ fn filter_selectivity_for_predicate(
                 Some(1.0),
             )
         }
-        ExprData::Like { negated, expr, .. } => {
+        ExprData::Like {
+            negated,
+            expr,
+            pattern,
+            ..
+        } => {
             let selectivity = if config.honor_negated_like {
-                let non_null_fraction =
-                    predicate_non_null_fraction(left, right, *expr, ctx, config);
-                non_null_fraction
-                    * if *negated {
-                        1.0 - config.like_selectivity
-                    } else {
-                        config.like_selectivity
-                    }
+                if predicate_known_null(*expr, ctx) || predicate_known_null(*pattern, ctx) {
+                    0.0
+                } else {
+                    let non_null_fraction =
+                        predicate_non_null_fraction(left, right, *expr, ctx, config);
+                    non_null_fraction
+                        * if *negated {
+                            1.0 - config.like_selectivity
+                        } else {
+                            config.like_selectivity
+                        }
+                }
             } else {
                 config.like_selectivity
             };
@@ -2440,6 +2523,16 @@ fn filter_selectivity_for_predicate(
         }
         _ => Estimate::derived(config.default_predicate_selectivity, Some(0.0), Some(1.0)),
     }
+}
+
+fn predicate_known_null(expr: Expr, ctx: &QueryContext) -> bool {
+    matches!(
+        evaluate_literal_expr(expr, ctx),
+        Some(EvaluatedLiteral {
+            value: ScalarValue::Null(_),
+            ..
+        })
+    )
 }
 
 fn predicate_non_null_fraction(
@@ -3019,7 +3112,7 @@ fn column_literal_predicate(
     }
     let column = normalized_column_ref(right, ctx, config)?;
     let literal = predicate_literal_for_column(left, &column, ctx, config)?;
-    let op = if config.normalize_filter_operands {
+    let op = if config.normalize_filter_operands || config.correlate_same_column_ranges {
         reverse_comparison(op)
     } else {
         // Preserve V1's historical operand-orientation behavior unless
@@ -5145,6 +5238,80 @@ mod tests {
     }
 
     #[test]
+    fn like_with_statically_null_operand_or_pattern_estimates_zero() {
+        let mut ctx = QueryContext::new();
+        let name = ColumnData::new("name", DataType::Utf8View).add(&mut ctx);
+        let name_ref = ExprData::ColumnRef(name).add(&mut ctx);
+        let null = ExprData::Literal(ScalarValue::Null(DataType::Utf8)).add(&mut ctx);
+        let not_like_null = ExprData::Like {
+            negated: true,
+            expr: name_ref,
+            pattern: null,
+            case_insensitive: false,
+        }
+        .add(&mut ctx);
+        let null_expr = ExprData::Literal(ScalarValue::Null(DataType::Utf8)).add(&mut ctx);
+        let pattern = ExprData::Literal(ScalarValue::Utf8("prefix%".to_string())).add(&mut ctx);
+        let null_not_like = ExprData::Like {
+            negated: true,
+            expr: null_expr,
+            pattern,
+            case_insensitive: false,
+        }
+        .add(&mut ctx);
+        let name_ref = ExprData::ColumnRef(name).add(&mut ctx);
+        let null = ExprData::Literal(ScalarValue::Null(DataType::Utf8)).add(&mut ctx);
+        let like_null = ExprData::Like {
+            negated: false,
+            expr: name_ref,
+            pattern: null,
+            case_insensitive: false,
+        }
+        .add(&mut ctx);
+        let name_ref = ExprData::ColumnRef(name).add(&mut ctx);
+        let null = ExprData::Literal(ScalarValue::Null(DataType::Utf8)).add(&mut ctx);
+        let cast_null = ExprData::Cast {
+            expr: null,
+            ty: DataType::Utf8View,
+        }
+        .add(&mut ctx);
+        let not_like_cast_null = ExprData::Like {
+            negated: true,
+            expr: name_ref,
+            pattern: cast_null,
+            case_insensitive: false,
+        }
+        .add(&mut ctx);
+        let profile = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [(name, test_column_profile(100.0, 100.0))]
+                .into_iter()
+                .collect(),
+        );
+        let estimate = |predicate, honor_negated_like, normalize_filter_operands| {
+            apply_selection_profile(
+                profile.clone(),
+                predicate,
+                &ctx,
+                &CardinalityEstimationConfig {
+                    honor_negated_like,
+                    normalize_filter_operands,
+                    ..CardinalityEstimationConfig::default()
+                },
+            )
+            .rows
+            .value
+        };
+
+        for predicate in [not_like_null, null_not_like, like_null, not_like_cast_null] {
+            assert_eq!(estimate(predicate, false, false), 10.0);
+            assert_eq!(estimate(predicate, false, true), 10.0);
+            assert_eq!(estimate(predicate, true, false), 0.0);
+            assert_eq!(estimate(predicate, true, true), 0.0);
+        }
+    }
+
+    #[test]
     fn cardinality_estimation_can_correlate_same_column_ranges() {
         let mut ctx = QueryContext::new();
         let value = ColumnData::new("value", DataType::Int64).add(&mut ctx);
@@ -5298,6 +5465,60 @@ mod tests {
     }
 
     #[test]
+    fn range_fraction_preserves_adjacent_large_integer_and_decimal_endpoints() {
+        let config = CardinalityEstimationConfig {
+            correlate_same_column_ranges: true,
+            ..CardinalityEstimationConfig::default()
+        };
+        let base = 9_007_199_254_740_992_i64;
+        let mut integer = test_column_profile(100.0, 3.0);
+        integer.lower_bound = Some(ScalarValue::Int64(base));
+        integer.upper_bound = Some(ScalarValue::Int64(base + 2));
+        let integer_interval = [
+            RangeConstraint {
+                index: 0,
+                op: BinaryOp::GtEq,
+                literal: ScalarValue::Int64(base),
+            },
+            RangeConstraint {
+                index: 1,
+                op: BinaryOp::LtEq,
+                literal: ScalarValue::Int64(base + 1),
+            },
+        ];
+        assert_eq!(
+            range_interval_selectivity(&integer, &integer_interval, &config),
+            0.5
+        );
+
+        let decimal = |value| ScalarValue::Decimal128 {
+            value,
+            precision: 20,
+            scale: 2,
+        };
+        let decimal_base = i128::from(base);
+        let mut decimal_profile = test_column_profile(100.0, 3.0);
+        decimal_profile.lower_bound = Some(decimal(decimal_base));
+        decimal_profile.upper_bound = Some(decimal(decimal_base + 2));
+        let decimal_interval = [
+            RangeConstraint {
+                index: 0,
+                op: BinaryOp::GtEq,
+                literal: decimal(decimal_base),
+            },
+            RangeConstraint {
+                index: 1,
+                op: BinaryOp::LtEq,
+                literal: decimal(decimal_base + 1),
+            },
+        ];
+        assert_eq!(
+            range_interval_selectivity(&decimal_profile, &decimal_interval, &config),
+            0.5
+        );
+    }
+
+    #[test]
     fn reversed_range_operands_respect_independent_normalization_flags() {
         let mut ctx = QueryContext::new();
         let value = ColumnData::new("value", DataType::Int64).add(&mut ctx);
@@ -5347,7 +5568,7 @@ mod tests {
 
         assert_eq!(estimate(false, false), 6.0);
         assert_eq!(estimate(true, false), 24.0);
-        assert_eq!(estimate(false, true), 20.0);
+        assert_eq!(estimate(false, true), 10.0);
         assert_eq!(estimate(true, true), 10.0);
     }
 
