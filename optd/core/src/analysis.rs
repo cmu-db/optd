@@ -284,12 +284,20 @@ impl ColumnProfile {
         profile
     }
 
+    /// Returns a capped clone after an operator reduces its output row count.
     fn cap_by_rows(&self, rows: &Estimate) -> Self {
         let mut profile = self.clone();
         profile.cap_by_rows_mut(rows);
         profile
     }
 
+    /// Restores `frequency <= rows` and `distinct <= frequency` on an owned output profile.
+    ///
+    /// `frequency` counts non-null values, so neither it nor the number of distinct non-null
+    /// values can exceed the enclosing row count. [`Estimate::cap`] also tightens estimate bounds
+    /// and marks their provenance as derived because the operator's row bound, rather than the
+    /// original statistic alone, now constrains them. In-place mutation is safe only for a newly
+    /// constructed or cloned output profile; cached `Arc` profiles are never mutated.
     fn cap_by_rows_mut(&mut self, rows: &Estimate) {
         self.frequency = self.frequency.cap(rows.value, EstimateSource::Derived);
         self.distinct = self
@@ -337,6 +345,7 @@ impl CardinalityProfile {
         }
     }
 
+    /// Clones a profile with a lower row estimate and reestablishes all column/class invariants.
     fn cap_by_rows(&self, rows: Estimate) -> Self {
         let columns = self
             .columns
@@ -352,6 +361,10 @@ impl CardinalityProfile {
     }
 }
 
+/// Restricts equality classes to output columns and drops classes that become singletons.
+///
+/// Recomputing the class NDV from retained columns prevents a removed column's statistic from
+/// continuing to constrain the projected profile.
 fn filter_equivalence_classes(
     classes: &[ColumnEquivalenceClass],
     columns: &BTreeMap<Column, ColumnProfile>,
@@ -385,7 +398,8 @@ fn filter_equivalence_classes(
 ///
 /// Join-profile construction owns the newly derived classes, so rebuilding every `BTreeSet` and
 /// the outer vector only creates allocator traffic. Other analysis paths still use the borrowed
-/// helper because their input classes must remain intact.
+/// helper because their input classes must remain intact. Retained class NDVs are recomputed for
+/// the same reason as in [`filter_equivalence_classes`].
 fn filter_owned_equivalence_classes(
     mut classes: Vec<ColumnEquivalenceClass>,
     columns: &BTreeMap<Column, ColumnProfile>,
@@ -1255,9 +1269,9 @@ impl Analyzable for CardinalityEstimationV1 {
 impl CardinalityEstimationV1 {
     /// Returns a shared cardinality profile for internal consumers that only need to inspect it.
     ///
-    /// [`Analyzable::get`] deliberately preserves the public owned-value API. Costing and
-    /// recursive cardinality estimation use this path to avoid cloning every column profile on a
-    /// cache hit.
+    /// [`Analyzable::get`] deliberately preserves the public owned-value API, which costing still
+    /// uses. Recursive cardinality estimation uses this path to avoid cloning every column profile
+    /// on a cache hit.
     pub(crate) fn get_shared(
         ctx: &QueryContext,
         analyses: &mut AnalysisContext,
@@ -1593,6 +1607,8 @@ fn apply_selection_profile(
     predicate: Expr,
     ctx: &QueryContext,
 ) -> CardinalityProfile {
+    // The caller passes an owned clone of the cached input, so each conjunct can safely tighten it
+    // in place while later conjuncts observe the preceding selectivity and bounds.
     for conjunct in conjuncts(predicate, ctx) {
         let selectivity = filter_selectivity(&profile, conjunct, ctx);
         profile = scale_profile(profile, selectivity.value);
@@ -1798,6 +1814,9 @@ fn combine_join_columns(
     }
     let mut columns = left.columns.clone();
     let mut right_columns = right.columns.clone();
+    // Preserve the established right-input precedence if malformed/derived plans reuse a column
+    // handle across inputs. Both maps are owned here, so append and subsequent capping cannot
+    // mutate either cached input profile.
     columns.append(&mut right_columns);
     columns
         .values_mut()
@@ -2160,11 +2179,17 @@ struct EquivalenceClassNode {
     distinct: Estimate,
 }
 
-/// Compact disjoint-set state for columns that participate in equality reasoning.
+/// Compact union-find state for columns that participate in equality reasoning.
 ///
 /// Wide profiles commonly contribute no equality columns at all. Relevant columns are sorted
 /// once, making this vector cheaper to initialize than maps spanning every output column while
 /// retaining logarithmic column lookup for large equivalence classes.
+///
+/// This remains local and specialized because it lazily maps participating [`Column`] handles to
+/// dense indices, stores per-root [`Estimate`] metadata for class NDVs, and preserves deterministic
+/// root precedence and serialized class order. A generic parent/rank utility could be extracted
+/// later, but doing so would broaden this cardinality-only refactor; generic disjoint-set work is
+/// deliberately excluded here.
 #[derive(Clone, Default)]
 struct EquivalenceClassState {
     nodes: Vec<EquivalenceClassNode>,
@@ -2262,7 +2287,7 @@ impl EquivalenceClassState {
         let index = self
             .nodes
             .binary_search_by_key(&column, |node| node.column)
-            .expect("equivalence-class columns must be pretracked before DSU lookup");
+            .expect("equivalence-class columns must be pretracked before union-find lookup");
         self.find_index(index)
     }
 
@@ -3739,7 +3764,7 @@ mod tests {
     }
 
     #[test]
-    fn sparse_equivalence_state_preserves_left_profile_ndv_precedence() {
+    fn overlapping_column_uses_left_profile_ndv_for_equality_domain() {
         let mut ctx = QueryContext::new();
         let shared = ColumnData::new("shared", DataType::Int64).add(&mut ctx);
         let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
@@ -3760,6 +3785,8 @@ mod tests {
         );
         let predicate = equality_expr(&mut ctx, shared, right_key);
 
+        // This documents the specialized state's intentional left-before-right lookup when a
+        // column handle appears in both inputs; it is not a parity assertion against main.
         let estimate = join_selectivity_from_conjuncts(&left, &right, &[predicate], &ctx);
 
         assert_eq!(estimate.selectivity.value, 0.01);

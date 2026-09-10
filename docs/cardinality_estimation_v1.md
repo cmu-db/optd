@@ -19,9 +19,9 @@ Each operator gets a `CardinalityProfile`:
 - `columns`: per-column profiles.
 - `equivalence_classes`: only nontrivial (two-or-more-column) equality classes.
 
-The cache stores profiles behind `Arc` so recursive estimation and costing can share immutable
-results. The public `AnalysisContext::get::<CardinalityEstimationV1>` contract still returns an
-owned profile; internal read-only consumers use the shared lookup.
+The cache stores profiles behind `Arc` so recursive estimation can share immutable results. The
+public `AnalysisContext::get::<CardinalityEstimationV1>` contract still returns an owned profile;
+costing currently uses that owned API, while internal recursive estimation uses the shared lookup.
 
 Each estimate stores:
 
@@ -96,8 +96,8 @@ at most one equality selectivity per new equivalence-class connection.
 
 ## JoinOrdering Integration
 
-`JoinOrdering` asks its `CostModel` to cost each DP candidate. The default model obtains cached
-`CardinalityProfile` values through the same analysis used by the rest of the optimizer. Join
+`JoinOrdering` asks its `CostModel` to cost each DP candidate. The default model obtains an owned
+`CardinalityProfile` through the same cached analysis used by the rest of the optimizer. Join
 predicates already split into hypergraph edges can call the pre-flattened conjunct entry point,
 avoiding repeated expression-tree traversal.
 
