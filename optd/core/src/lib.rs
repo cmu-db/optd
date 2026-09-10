@@ -14,9 +14,9 @@ pub mod tpch;
 
 pub use analysis::{
     Analysis, AnalysisContext, AnalysisError, AnalysisResult, Analyzable, AtMostOneRow,
-    AvailableColumns, CardinalityEstimationV1, CardinalityProfile, ColumnNullability,
-    ColumnProfile, CreatedColumns, Estimate, EstimateSource, FreeColumns, ParentIndex, ParentsOf,
-    UsedColumns, expr_used_columns,
+    AvailableColumns, CardinalityEstimationConfig, CardinalityEstimationV1, CardinalityProfile,
+    ColumnNullability, ColumnProfile, CreatedColumns, Estimate, EstimateSource, FreeColumns,
+    ParentIndex, ParentsOf, UsedColumns, expr_used_columns,
 };
 pub use catalog::{
     Catalog, CatalogError, CatalogResult, ColumnStatistics, MemoryCatalog, ResolvedTableRef,
@@ -777,17 +777,37 @@ pub struct OptimizerContext {
 pub struct PlannedQuery {
     pub query: QueryContext,
     pub catalog: Arc<dyn Catalog>,
+    cardinality_config: CardinalityEstimationConfig,
 }
 
 impl PlannedQuery {
     /// Creates a planned query backed by `catalog`.
     pub fn new(query: QueryContext, catalog: Arc<dyn Catalog>) -> Self {
-        Self { query, catalog }
+        Self {
+            query,
+            catalog,
+            cardinality_config: CardinalityEstimationConfig::default(),
+        }
+    }
+
+    /// Uses explicit V1 cardinality fallback assumptions for later analysis.
+    pub fn with_cardinality_estimation_config(
+        mut self,
+        config: CardinalityEstimationConfig,
+    ) -> Self {
+        self.cardinality_config = config;
+        self
+    }
+
+    /// Returns the cardinality fallback assumptions retained with this plan.
+    pub fn cardinality_estimation_config(&self) -> CardinalityEstimationConfig {
+        self.cardinality_config
     }
 
     /// Creates fresh analysis state backed by this plan's catalog.
     pub fn analyze(&self) -> AnalysisContext {
         AnalysisContext::new(Arc::clone(&self.catalog))
+            .with_cardinality_estimation_config(self.cardinality_config)
     }
 
     /// Consumes the planning context and returns its query IR.
@@ -817,6 +837,7 @@ impl OptimizerContext {
         PlannedQuery {
             query: self.query,
             catalog: Arc::clone(self.analyses.catalog()),
+            cardinality_config: self.analyses.cardinality_estimation_config(),
         }
     }
 }
@@ -2532,6 +2553,26 @@ mod tests {
         assert_eq!(ctx.root(), Some(scan));
         assert_eq!(ctx.operator_count(), 1);
         assert_eq!(QueryFormatter::new(&ctx).format().title, "⊞ Scan");
+    }
+
+    #[test]
+    fn planned_query_preserves_cardinality_config_across_analysis_boundaries() {
+        let query = QueryContext::new();
+        let catalog: Arc<dyn Catalog> = Arc::new(MemoryCatalog::new("memory", "public"));
+        let config = CardinalityEstimationConfig {
+            unknown_scan_rows: 42.0,
+            ..CardinalityEstimationConfig::default()
+        };
+        let mut optimizer = OptimizerContext::new(query, catalog);
+        optimizer.analyses = optimizer
+            .analyses
+            .fork()
+            .with_cardinality_estimation_config(config);
+
+        let planned = optimizer.into_planned_query();
+
+        assert_eq!(planned.cardinality_estimation_config(), config);
+        assert_eq!(planned.analyze().cardinality_estimation_config(), config);
     }
 
     #[test]
