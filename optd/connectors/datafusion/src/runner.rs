@@ -8,6 +8,7 @@ use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::common::TableReference;
 use datafusion::logical_expr::LogicalPlan;
 use datafusion::physical_plan::{collect, displayable};
+use datafusion::physical_planner::DefaultPhysicalPlanner;
 use datafusion::prelude::SessionContext;
 use datafusion_optimizer::Analyzer;
 use datafusion_optimizer::analyzer::type_coercion::TypeCoercion;
@@ -400,8 +401,12 @@ impl OptdRunner {
         planned: &PlannedQuery,
     ) -> Result<(SchemaRef, Vec<RecordBatch>), ToPhysicalError> {
         let plan = to_physical_plan(planned, &self.session).await?;
+        let state = self.session.state();
+        let plan = DefaultPhysicalPlanner::default()
+            .optimize_physical_plan(plan, &state, |_, _| {})
+            .map_err(ToPhysicalError::Build)?;
         let schema = plan.schema();
-        let batches = collect(plan, self.session.state().task_ctx())
+        let batches = collect(plan, state.task_ctx())
             .await
             .map_err(ToPhysicalError::Build)?;
         let schema = batches.first().map(|b| b.schema()).unwrap_or(schema);
@@ -475,8 +480,12 @@ mod tests {
     use super::{IrExecutionPath, OptdRunner};
     use crate::config::OptdExtensionConfig;
     use crate::setup::session_context_with_information_schema;
-    use datafusion::arrow::array::Int64Array;
+    use datafusion::arrow::array::{ArrayRef, Int64Array};
+    use datafusion::arrow::datatypes::{DataType, Field, Schema};
+    use datafusion::arrow::record_batch::RecordBatch;
+    use datafusion::datasource::MemTable;
     use datafusion::prelude::{SessionConfig, SessionContext};
+    use std::sync::Arc;
 
     fn session_with_optd_config(config: OptdExtensionConfig) -> SessionContext {
         SessionContext::new_with_config(SessionConfig::new().with_option_extension(config))
@@ -662,6 +671,56 @@ mod tests {
             batches.iter().map(|batch| batch.num_rows()).sum::<usize>(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn physical_path_merges_distinct_aggregate_states_across_partitions() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("group_id", DataType::Int64, false),
+            Field::new("value", DataType::Int64, false),
+        ]));
+        let batch = |values: &[i64]| {
+            RecordBatch::try_new(
+                Arc::clone(&schema),
+                vec![
+                    Arc::new(Int64Array::from(vec![1; values.len()])) as ArrayRef,
+                    Arc::new(Int64Array::from(values.to_vec())) as ArrayRef,
+                ],
+            )
+            .unwrap()
+        };
+        let table = MemTable::try_new(
+            Arc::clone(&schema),
+            vec![vec![batch(&[10, 20])], vec![batch(&[20, 30])]],
+        )
+        .unwrap();
+        let session = session_with_optd_config(OptdExtensionConfig {
+            optd_enabled: true,
+            log_explain_steps: false,
+            physical_planning: true,
+        });
+        session.register_table("t", Arc::new(table)).unwrap();
+        let runner = OptdRunner::new(session);
+
+        let (_, batches, path) = runner
+            .try_via_ir_with_path(
+                "SELECT group_id, count(DISTINCT value) AS distinct_values \
+                 FROM t GROUP BY group_id",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(path, IrExecutionPath::Physical);
+        assert_eq!(
+            batches.iter().map(|batch| batch.num_rows()).sum::<usize>(),
+            1
+        );
+        let distinct_values = batches[0]
+            .column(1)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        assert_eq!(distinct_values.values(), &[3]);
     }
 
     #[tokio::test]
