@@ -941,10 +941,12 @@ mod tests {
                     upper_bound: None,
                     frequency: Some(rows),
                     distinct: Some(distinct),
+                    distribution: None,
                 },
             )]
             .into_iter()
             .collect(),
+            constraints: Default::default(),
         }
     }
 
