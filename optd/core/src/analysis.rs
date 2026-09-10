@@ -266,11 +266,15 @@ pub struct ColumnProfile {
 
 impl ColumnProfile {
     pub fn unknown(rows: &Estimate) -> Self {
+        Self::unknown_with_ndv_cap(rows, 100.0)
+    }
+
+    fn unknown_with_ndv_cap(rows: &Estimate, ndv_cap: f64) -> Self {
         Self {
             lower_bound: None,
             upper_bound: None,
             frequency: rows.clone(),
-            distinct: Estimate::derived(rows.value.min(100.0), Some(0.0), rows.upper),
+            distinct: Estimate::derived(rows.value.min(ndv_cap), Some(0.0), rows.upper),
         }
     }
 
@@ -329,10 +333,18 @@ pub struct ColumnEquivalenceClass {
 
 impl CardinalityProfile {
     pub fn unknown_for_columns(row_count: f64, columns: impl IntoIterator<Item = Column>) -> Self {
+        Self::unknown_for_columns_with_ndv_cap(row_count, columns, 100.0)
+    }
+
+    fn unknown_for_columns_with_ndv_cap(
+        row_count: f64,
+        columns: impl IntoIterator<Item = Column>,
+        ndv_cap: f64,
+    ) -> Self {
         let rows = Estimate::default(row_count);
         let columns = columns
             .into_iter()
-            .map(|column| (column, ColumnProfile::unknown(&rows)))
+            .map(|column| (column, ColumnProfile::unknown_with_ndv_cap(&rows, ndv_cap)))
             .collect::<BTreeMap<_, _>>();
         Self::new(rows, columns)
     }
@@ -456,6 +468,33 @@ pub struct CardinalityEstimationV1 {
     state: OperatorAnalysisState<Arc<CardinalityProfile>>,
 }
 
+/// Tunable fallback assumptions used by [`CardinalityEstimationV1`].
+///
+/// These values expose the constants already used by the V1 estimator; they do
+/// not enable any additional statistics or estimation models. The default is
+/// therefore behaviorally identical to the estimator before configuration was
+/// introduced.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CardinalityEstimationConfig {
+    pub like_selectivity: f64,
+    pub default_predicate_selectivity: f64,
+    pub range_fallback_selectivity: f64,
+    pub unknown_scan_rows: f64,
+    pub unknown_column_ndv_cap: f64,
+}
+
+impl Default for CardinalityEstimationConfig {
+    fn default() -> Self {
+        Self {
+            like_selectivity: 0.1,
+            default_predicate_selectivity: 0.25,
+            range_fallback_selectivity: 0.33,
+            unknown_scan_rows: 1000.0,
+            unknown_column_ndv_cap: 100.0,
+        }
+    }
+}
+
 /// Exact logical proof that an operator can produce at most one row.
 ///
 /// Unlike cardinality estimation, this property never relies on catalog
@@ -469,6 +508,7 @@ pub struct AtMostOneRow {
 pub struct AnalysisContext {
     analyses: AnalysisRegistry,
     catalog: Arc<dyn Catalog>,
+    cardinality_config: CardinalityEstimationConfig,
 }
 
 impl AnalysisContext {
@@ -477,7 +517,25 @@ impl AnalysisContext {
         Self {
             analyses: AnalysisRegistry::new(),
             catalog,
+            cardinality_config: CardinalityEstimationConfig::default(),
         }
+    }
+
+    /// Uses explicit V1 fallback assumptions for this analysis context.
+    pub fn with_cardinality_estimation_config(
+        mut self,
+        config: CardinalityEstimationConfig,
+    ) -> Self {
+        if self.cardinality_config != config {
+            self.clear();
+        }
+        self.cardinality_config = config;
+        self
+    }
+
+    /// Returns the fallback assumptions used by cardinality estimation.
+    pub fn cardinality_estimation_config(&self) -> CardinalityEstimationConfig {
+        self.cardinality_config
     }
 
     /// Returns the catalog used by every analysis in this context.
@@ -490,6 +548,7 @@ impl AnalysisContext {
         Self {
             analyses: AnalysisRegistry::new(),
             catalog: Arc::clone(&self.catalog),
+            cardinality_config: self.cardinality_config,
         }
     }
 
@@ -1287,19 +1346,24 @@ fn cardinality_profile(
     ctx: &QueryContext,
     analyses: &mut AnalysisContext,
 ) -> AnalysisResult<Arc<CardinalityProfile>> {
+    let config = analyses.cardinality_estimation_config();
     match operator.get(ctx) {
-        OperatorData::Scan(scan) => scan_profile(scan, ctx, analyses).map(Arc::new),
+        OperatorData::Scan(scan) => scan_profile(scan, ctx, analyses, &config).map(Arc::new),
         OperatorData::ConstScan(data) => Ok(Arc::new(const_scan_profile(data, ctx))),
-        OperatorData::TableFunction(data) => Ok(Arc::new(CardinalityProfile::unknown_for_columns(
-            1000.0,
-            data.columns.clone(),
-        ))),
+        OperatorData::TableFunction(data) => Ok(Arc::new(
+            CardinalityProfile::unknown_for_columns_with_ndv_cap(
+                config.unknown_scan_rows,
+                data.columns.clone(),
+                config.unknown_column_ndv_cap,
+            ),
+        )),
         OperatorData::Selection(data) => {
             let input = CardinalityEstimationV1::get_shared(ctx, analyses, data.input)?;
             Ok(Arc::new(apply_selection_profile(
                 input.as_ref().clone(),
                 data.predicate,
                 ctx,
+                &config,
             )))
         }
         OperatorData::Projection(data) => {
@@ -1324,11 +1388,16 @@ fn cardinality_profile(
         }
         OperatorData::Map(data) => {
             let input = CardinalityEstimationV1::get_shared(ctx, analyses, data.input)?;
-            Ok(Arc::new(map_profile(&input, &data.computations, ctx)))
+            Ok(Arc::new(map_profile(
+                &input,
+                &data.computations,
+                ctx,
+                &config,
+            )))
         }
         OperatorData::Aggregation(data) => {
             let input = CardinalityEstimationV1::get_shared(ctx, analyses, data.input)?;
-            Ok(Arc::new(aggregation_profile(&input, data, ctx)))
+            Ok(Arc::new(aggregation_profile(&input, data, ctx, &config)))
         }
         OperatorData::CrossProduct(data) => {
             let left = CardinalityEstimationV1::get_shared(ctx, analyses, data.outer)?;
@@ -1338,12 +1407,13 @@ fn cardinality_profile(
         OperatorData::Join(data) => {
             let left = CardinalityEstimationV1::get_shared(ctx, analyses, data.outer)?;
             let right = CardinalityEstimationV1::get_shared(ctx, analyses, data.inner)?;
-            Ok(Arc::new(join_profile_from_predicate(
+            Ok(Arc::new(join_profile_from_predicate_with_config(
                 &left,
                 &right,
                 data.join_type.clone(),
                 data.on,
                 ctx,
+                &config,
             )))
         }
     }
@@ -1353,6 +1423,7 @@ fn scan_profile(
     scan: &Scan,
     ctx: &QueryContext,
     analyses: &AnalysisContext,
+    config: &CardinalityEstimationConfig,
 ) -> AnalysisResult<CardinalityProfile> {
     let catalog_stats = analyses
         .catalog
@@ -1364,7 +1435,7 @@ fn scan_profile(
         .as_ref()
         .and_then(|stats| stats.row_count)
         .map(|rows| Estimate::catalog(rows as f64))
-        .unwrap_or_else(|| Estimate::default(1000.0));
+        .unwrap_or_else(|| Estimate::default(config.unknown_scan_rows));
 
     let mut columns = BTreeMap::new();
     for column in &scan.columns {
@@ -1374,7 +1445,7 @@ fn scan_profile(
             .and_then(|stats| stats.column_statistics.get(column_name));
         let profile = catalog_column
             .map(|stats| column_profile_from_stats(stats, &row_estimate))
-            .unwrap_or_else(|| default_scan_column_profile(&row_estimate));
+            .unwrap_or_else(|| default_scan_column_profile(&row_estimate, config));
         columns.insert(*column, profile);
     }
 
@@ -1402,12 +1473,15 @@ fn column_profile_from_stats(stats: &ColumnStatistics, rows: &Estimate) -> Colum
     }
 }
 
-fn default_scan_column_profile(rows: &Estimate) -> ColumnProfile {
+fn default_scan_column_profile(
+    rows: &Estimate,
+    config: &CardinalityEstimationConfig,
+) -> ColumnProfile {
     ColumnProfile {
         lower_bound: None,
         upper_bound: None,
         frequency: Estimate::default(rows.value),
-        distinct: Estimate::default(rows.value.min(100.0)),
+        distinct: Estimate::default(rows.value.min(config.unknown_column_ndv_cap)),
     }
 }
 
@@ -1483,11 +1557,13 @@ fn map_profile(
     input: &CardinalityProfile,
     computations: &[(Column, Expr)],
     ctx: &QueryContext,
+    config: &CardinalityEstimationConfig,
 ) -> CardinalityProfile {
     let mut output = input.clone();
     for (column, expr) in computations {
-        let profile = profile_for_computation(input, *expr, ctx)
-            .unwrap_or_else(|| ColumnProfile::unknown(&input.rows));
+        let profile = profile_for_computation(input, *expr, ctx).unwrap_or_else(|| {
+            ColumnProfile::unknown_with_ndv_cap(&input.rows, config.unknown_column_ndv_cap)
+        });
         output
             .columns
             .insert(*column, profile.cap_by_rows(&input.rows));
@@ -1544,20 +1620,19 @@ fn aggregation_profile(
     input: &CardinalityProfile,
     data: &crate::Aggregation,
     ctx: &QueryContext,
+    config: &CardinalityEstimationConfig,
 ) -> CardinalityProfile {
     let mut group_rows = if data.keys.is_empty() {
         Estimate::exact(1.0)
     } else {
         let product = data.keys.iter().fold(1.0, |acc, expr| {
             if let ExprData::ColumnRef(column) = expr.get(ctx) {
-                acc * input
-                    .columns
-                    .get(column)
-                    .map_or(input.rows.value.min(100.0), |profile| {
-                        profile.distinct.value
-                    })
+                acc * input.columns.get(column).map_or(
+                    input.rows.value.min(config.unknown_column_ndv_cap),
+                    |profile| profile.distinct.value,
+                )
             } else {
-                acc * input.rows.value.min(100.0)
+                acc * input.rows.value.min(config.unknown_column_ndv_cap)
             }
         });
         Estimate::derived(product.min(input.rows.value), Some(0.0), input.rows.upper)
@@ -1595,7 +1670,7 @@ fn aggregation_profile(
                 frequency: group_rows.clone(),
                 distinct: group_rows.cap(group_rows.value, EstimateSource::Derived),
             },
-            _ => ColumnProfile::unknown(&group_rows),
+            _ => ColumnProfile::unknown_with_ndv_cap(&group_rows, config.unknown_column_ndv_cap),
         };
         columns.insert(*column, profile);
     }
@@ -1606,11 +1681,12 @@ fn apply_selection_profile(
     mut profile: CardinalityProfile,
     predicate: Expr,
     ctx: &QueryContext,
+    config: &CardinalityEstimationConfig,
 ) -> CardinalityProfile {
     // The caller passes an owned clone of the cached input, so each conjunct can safely tighten it
     // in place while later conjuncts observe the preceding selectivity and bounds.
     for conjunct in conjuncts(predicate, ctx) {
-        let selectivity = filter_selectivity(&profile, conjunct, ctx);
+        let selectivity = filter_selectivity(&profile, conjunct, ctx, config);
         profile = scale_profile(profile, selectivity.value);
         tighten_filter_columns(&mut profile, conjunct, ctx);
     }
@@ -1679,6 +1755,7 @@ pub(crate) fn cross_product_profile(
 ///
 /// This is the expression-tree entry point: it flattens nested conjunctions exactly once before
 /// delegating to [`join_profile_from_conjuncts`].
+#[cfg(test)]
 fn join_profile_from_predicate(
     left: &CardinalityProfile,
     right: &CardinalityProfile,
@@ -1686,20 +1763,57 @@ fn join_profile_from_predicate(
     predicate: Expr,
     ctx: &QueryContext,
 ) -> CardinalityProfile {
+    join_profile_from_predicate_with_config(
+        left,
+        right,
+        join_type,
+        predicate,
+        ctx,
+        &CardinalityEstimationConfig::default(),
+    )
+}
+
+fn join_profile_from_predicate_with_config(
+    left: &CardinalityProfile,
+    right: &CardinalityProfile,
+    join_type: JoinType,
+    predicate: Expr,
+    ctx: &QueryContext,
+    config: &CardinalityEstimationConfig,
+) -> CardinalityProfile {
     let conjuncts = conjuncts(predicate, ctx);
-    join_profile_from_conjuncts(left, right, join_type, &conjuncts, ctx)
+    join_profile_from_conjuncts_with_config(left, right, join_type, &conjuncts, ctx, config)
 }
 
 /// Estimates a join profile from predicates that are already flattened into atomic conjuncts.
 ///
 /// Join enumeration can use this entry point when hypergraph edges already carry individual
 /// conjuncts, avoiding expression reconstruction and another flattening pass.
+#[cfg(test)]
 pub(crate) fn join_profile_from_conjuncts(
     left: &CardinalityProfile,
     right: &CardinalityProfile,
     join_type: JoinType,
     conjuncts: &[Expr],
     ctx: &QueryContext,
+) -> CardinalityProfile {
+    join_profile_from_conjuncts_with_config(
+        left,
+        right,
+        join_type,
+        conjuncts,
+        ctx,
+        &CardinalityEstimationConfig::default(),
+    )
+}
+
+fn join_profile_from_conjuncts_with_config(
+    left: &CardinalityProfile,
+    right: &CardinalityProfile,
+    join_type: JoinType,
+    conjuncts: &[Expr],
+    ctx: &QueryContext,
+    config: &CardinalityEstimationConfig,
 ) -> CardinalityProfile {
     debug_assert!(
         conjuncts.iter().all(|predicate| !matches!(
@@ -1711,7 +1825,7 @@ pub(crate) fn join_profile_from_conjuncts(
         )),
         "join_profile_from_conjuncts requires atomic conjuncts"
     );
-    let estimate = join_selectivity_from_conjuncts(left, right, conjuncts, ctx);
+    let estimate = join_selectivity_from_conjuncts_with_config(left, right, conjuncts, ctx, config);
     join_profile_with_selectivity_and_classes(left, right, join_type, estimate)
 }
 
@@ -1836,7 +1950,14 @@ fn join_selectivity(
     conjuncts: &[Expr],
     ctx: &QueryContext,
 ) -> Estimate {
-    join_selectivity_from_conjuncts(left, right, conjuncts, ctx).selectivity
+    join_selectivity_from_conjuncts_with_config(
+        left,
+        right,
+        conjuncts,
+        ctx,
+        &CardinalityEstimationConfig::default(),
+    )
+    .selectivity
 }
 
 // ---------------------------------------------------------------------------
@@ -1851,11 +1972,28 @@ struct JoinSelectivityEstimate {
     equivalence_state_columns: usize,
 }
 
+#[cfg(test)]
 fn join_selectivity_from_conjuncts(
     left: &CardinalityProfile,
     right: &CardinalityProfile,
     conjuncts: &[Expr],
     ctx: &QueryContext,
+) -> JoinSelectivityEstimate {
+    join_selectivity_from_conjuncts_with_config(
+        left,
+        right,
+        conjuncts,
+        ctx,
+        &CardinalityEstimationConfig::default(),
+    )
+}
+
+fn join_selectivity_from_conjuncts_with_config(
+    left: &CardinalityProfile,
+    right: &CardinalityProfile,
+    conjuncts: &[Expr],
+    ctx: &QueryContext,
+    config: &CardinalityEstimationConfig,
 ) -> JoinSelectivityEstimate {
     let mut equality_pairs = Vec::new();
     let mut residual_selectivity = 1.0;
@@ -1864,12 +2002,16 @@ fn join_selectivity_from_conjuncts(
             equality_pairs.push((left_col, right_col));
         } else {
             residual_selectivity *=
-                filter_selectivity_for_predicate(left, right, predicate, ctx).value;
+                filter_selectivity_for_predicate(left, right, predicate, ctx, config).value;
         }
     }
 
-    let mut classes =
-        EquivalenceClassState::from_profiles_and_equalities(left, right, &equality_pairs);
+    let mut classes = EquivalenceClassState::from_profiles_and_equalities(
+        left,
+        right,
+        &equality_pairs,
+        config.unknown_column_ndv_cap,
+    );
     let mut equality_edges = equality_pairs
         .into_iter()
         .map(|(left_col, right_col)| EqualityEdge {
@@ -1945,8 +2087,9 @@ fn filter_selectivity(
     profile: &CardinalityProfile,
     predicate: Expr,
     ctx: &QueryContext,
+    config: &CardinalityEstimationConfig,
 ) -> Estimate {
-    filter_selectivity_for_predicate(profile, profile, predicate, ctx)
+    filter_selectivity_for_predicate(profile, profile, predicate, ctx, config)
 }
 
 fn filter_selectivity_for_predicate(
@@ -1954,6 +2097,7 @@ fn filter_selectivity_for_predicate(
     right: &CardinalityProfile,
     predicate: Expr,
     ctx: &QueryContext,
+    config: &CardinalityEstimationConfig,
 ) -> Estimate {
     match predicate.get(ctx) {
         ExprData::Literal(ScalarValue::Boolean(true)) => Estimate::exact(1.0),
@@ -1964,7 +2108,7 @@ fn filter_selectivity_for_predicate(
         } => {
             let value = exprs
                 .iter()
-                .map(|expr| filter_selectivity_for_predicate(left, right, *expr, ctx).value)
+                .map(|expr| filter_selectivity_for_predicate(left, right, *expr, ctx, config).value)
                 .product::<f64>();
             Estimate::derived(value, Some(0.0), Some(1.0))
         }
@@ -1975,7 +2119,7 @@ fn filter_selectivity_for_predicate(
             let mut not_selected = 1.0;
             for expr in exprs {
                 not_selected *=
-                    1.0 - filter_selectivity_for_predicate(left, right, *expr, ctx).value;
+                    1.0 - filter_selectivity_for_predicate(left, right, *expr, ctx, config).value;
             }
             Estimate::derived(1.0 - not_selected, Some(0.0), Some(1.0))
         }
@@ -1983,7 +2127,7 @@ fn filter_selectivity_for_predicate(
             op,
             left: l,
             right: r,
-        } => binary_selectivity(left, right, *op, *l, *r, ctx),
+        } => binary_selectivity(left, right, *op, *l, *r, ctx, config),
         ExprData::Unary {
             op: UnaryOp::IsNull,
             expr,
@@ -2020,8 +2164,8 @@ fn filter_selectivity_for_predicate(
                 Some(1.0),
             )
         }
-        ExprData::Like { .. } => Estimate::derived(0.1, Some(0.0), Some(1.0)),
-        _ => Estimate::derived(0.25, Some(0.0), Some(1.0)),
+        ExprData::Like { .. } => Estimate::derived(config.like_selectivity, Some(0.0), Some(1.0)),
+        _ => Estimate::derived(config.default_predicate_selectivity, Some(0.0), Some(1.0)),
     }
 }
 
@@ -2032,6 +2176,7 @@ fn binary_selectivity(
     left: Expr,
     right: Expr,
     ctx: &QueryContext,
+    config: &CardinalityEstimationConfig,
 ) -> Estimate {
     if let Some((column, literal)) = column_literal(left, right, ctx)
         && let Some(profile) = left_profile
@@ -2049,9 +2194,9 @@ fn binary_selectivity(
                 Some(1.0),
             ),
             BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq => {
-                range_selectivity(profile, literal, op)
+                range_selectivity(profile, literal, op, config)
             }
-            _ => Estimate::derived(0.25, Some(0.0), Some(1.0)),
+            _ => Estimate::derived(config.default_predicate_selectivity, Some(0.0), Some(1.0)),
         };
     }
     if let Some((left_col, right_col)) = column_equality_from_parts(op, left, right, ctx) {
@@ -2071,7 +2216,7 @@ fn binary_selectivity(
             });
         return Estimate::derived(1.0 / left_ndv.max(right_ndv).max(1.0), Some(0.0), Some(1.0));
     }
-    Estimate::derived(0.25, Some(0.0), Some(1.0))
+    Estimate::derived(config.default_predicate_selectivity, Some(0.0), Some(1.0))
 }
 
 fn tighten_filter_columns(profile: &mut CardinalityProfile, predicate: Expr, ctx: &QueryContext) {
@@ -2092,15 +2237,20 @@ fn tighten_filter_columns(profile: &mut CardinalityProfile, predicate: Expr, ctx
     }
 }
 
-fn range_selectivity(profile: &ColumnProfile, literal: &ScalarValue, op: BinaryOp) -> Estimate {
+fn range_selectivity(
+    profile: &ColumnProfile,
+    literal: &ScalarValue,
+    op: BinaryOp,
+    config: &CardinalityEstimationConfig,
+) -> Estimate {
     let Some(min) = profile.lower_bound.as_ref().and_then(scalar_to_f64) else {
-        return Estimate::derived(0.33, Some(0.0), Some(1.0));
+        return Estimate::derived(config.range_fallback_selectivity, Some(0.0), Some(1.0));
     };
     let Some(max) = profile.upper_bound.as_ref().and_then(scalar_to_f64) else {
-        return Estimate::derived(0.33, Some(0.0), Some(1.0));
+        return Estimate::derived(config.range_fallback_selectivity, Some(0.0), Some(1.0));
     };
     let Some(value) = scalar_to_f64(literal) else {
-        return Estimate::derived(0.33, Some(0.0), Some(1.0));
+        return Estimate::derived(config.range_fallback_selectivity, Some(0.0), Some(1.0));
     };
     // Assume values are uniformly distributed over the collected [min, max]
     // range. Missing or non-numeric bounds use the generic range fallback above.
@@ -2108,7 +2258,7 @@ fn range_selectivity(profile: &ColumnProfile, literal: &ScalarValue, op: BinaryO
     let selected = match op {
         BinaryOp::Lt | BinaryOp::LtEq => ((value - min) / width).clamp(0.0, 1.0),
         BinaryOp::Gt | BinaryOp::GtEq => ((max - value) / width).clamp(0.0, 1.0),
-        _ => 0.33,
+        _ => config.range_fallback_selectivity,
     };
     Estimate::derived(selected, Some(0.0), Some(1.0))
 }
@@ -2200,6 +2350,7 @@ impl EquivalenceClassState {
         left: &CardinalityProfile,
         right: &CardinalityProfile,
         equality_pairs: &[(Column, Column)],
+        unknown_column_ndv_cap: f64,
     ) -> Self {
         debug_assert!(
             [left, right]
@@ -2234,7 +2385,7 @@ impl EquivalenceClassState {
                     .get(&column)
                     .or_else(|| right.columns.get(&column))
                     .map(|profile| profile.distinct.clone())
-                    .unwrap_or_else(|| Estimate::default(100.0)),
+                    .unwrap_or_else(|| Estimate::default(unknown_column_ndv_cap)),
             })
             .collect();
         let mut state = Self { nodes };
@@ -3485,6 +3636,96 @@ mod tests {
     }
 
     #[test]
+    fn explicit_default_cardinality_config_preserves_v1_estimates() {
+        let (ctx, selection) = fallback_selection_query();
+        let catalog = crate::test_catalog(&ctx);
+        let mut implicit = AnalysisContext::new(Arc::clone(&catalog));
+        let mut explicit = AnalysisContext::new(catalog)
+            .with_cardinality_estimation_config(CardinalityEstimationConfig::default());
+
+        let implicit_profile = implicit
+            .get::<CardinalityEstimationV1>(&ctx, selection)
+            .unwrap();
+        let explicit_profile = explicit
+            .get::<CardinalityEstimationV1>(&ctx, selection)
+            .unwrap();
+
+        assert_eq!(implicit_profile, explicit_profile);
+        assert_eq!(implicit_profile.rows.value, 250.0);
+    }
+
+    #[test]
+    fn cardinality_config_survives_clear_fork_and_repeated_queries() {
+        let (first_query, first_selection) = fallback_selection_query();
+        let catalog = crate::test_catalog(&first_query);
+        let config = CardinalityEstimationConfig {
+            default_predicate_selectivity: 0.5,
+            ..CardinalityEstimationConfig::default()
+        };
+        let mut analyses = AnalysisContext::new(catalog).with_cardinality_estimation_config(config);
+
+        assert_eq!(
+            analyses
+                .get::<CardinalityEstimationV1>(&first_query, first_selection)
+                .unwrap()
+                .rows
+                .value,
+            500.0
+        );
+
+        analyses.clear();
+        assert_eq!(analyses.cardinality_estimation_config(), config);
+        let (second_query, second_selection) = fallback_selection_query();
+        assert_eq!(
+            analyses
+                .get::<CardinalityEstimationV1>(&second_query, second_selection)
+                .unwrap()
+                .rows
+                .value,
+            500.0
+        );
+
+        let mut fork = analyses.fork();
+        assert_eq!(fork.cardinality_estimation_config(), config);
+        assert_eq!(
+            fork.get::<CardinalityEstimationV1>(&second_query, second_selection)
+                .unwrap()
+                .rows
+                .value,
+            500.0
+        );
+    }
+
+    #[test]
+    fn changing_cardinality_config_invalidates_cached_estimates() {
+        let (ctx, selection) = fallback_selection_query();
+        let catalog = crate::test_catalog(&ctx);
+        let mut analyses = AnalysisContext::new(catalog);
+        assert_eq!(
+            analyses
+                .get::<CardinalityEstimationV1>(&ctx, selection)
+                .unwrap()
+                .rows
+                .value,
+            250.0
+        );
+
+        analyses = analyses.with_cardinality_estimation_config(CardinalityEstimationConfig {
+            default_predicate_selectivity: 0.5,
+            ..CardinalityEstimationConfig::default()
+        });
+
+        assert_eq!(
+            analyses
+                .get::<CardinalityEstimationV1>(&ctx, selection)
+                .unwrap()
+                .rows
+                .value,
+            500.0
+        );
+    }
+
+    #[test]
     fn parents_of_returns_multiple_immediate_parents() {
         let mut ctx = QueryContext::new();
         let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
@@ -3953,8 +4194,12 @@ mod tests {
             .map(|pair| (pair[1], pair[0]))
             .collect::<Vec<_>>();
         let empty = CardinalityProfile::new(Estimate::exact(1.0), BTreeMap::new());
-        let mut state =
-            EquivalenceClassState::from_profiles_and_equalities(&empty, &empty, &equality_pairs);
+        let mut state = EquivalenceClassState::from_profiles_and_equalities(
+            &empty,
+            &empty,
+            &equality_pairs,
+            CardinalityEstimationConfig::default().unknown_column_ndv_cap,
+        );
 
         for &(left, right) in &equality_pairs {
             assert!(state.union(left, right, Estimate::exact(100.0)));
@@ -5038,6 +5283,18 @@ mod tests {
         })
         .add(&mut ctx);
         (ctx, scan)
+    }
+
+    fn fallback_selection_query() -> (QueryContext, Operator) {
+        let (mut ctx, scan) = single_column_scan();
+        let predicate = ExprData::Literal(ScalarValue::Int64(1)).add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
+            predicate,
+            input: scan,
+        })
+        .add(&mut ctx);
+        ctx.set_root(selection);
+        (ctx, selection)
     }
 
     fn table_stats_for_column(column: &str, rows: usize, distinct: usize) -> TableStatistics {
