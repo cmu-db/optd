@@ -14,9 +14,9 @@ pub mod tpch;
 
 pub use analysis::{
     Analysis, AnalysisContext, AnalysisError, AnalysisResult, Analyzable, AtMostOneRow,
-    AvailableColumns, CardinalityEstimationConfig, CardinalityEstimationV1, CardinalityProfile,
-    ColumnNullability, ColumnProfile, CreatedColumns, Estimate, EstimateSource, FreeColumns,
-    ParentIndex, ParentsOf, UsedColumns, expr_used_columns,
+    AvailableColumns, CardinalityEstimationConfig, CardinalityEstimationConfigError,
+    CardinalityEstimationV1, CardinalityProfile, ColumnNullability, ColumnProfile, CreatedColumns,
+    Estimate, EstimateSource, FreeColumns, ParentIndex, ParentsOf, UsedColumns, expr_used_columns,
 };
 pub use catalog::{
     Catalog, CatalogError, CatalogResult, ColumnStatistics, MemoryCatalog, ResolvedTableRef,
@@ -791,12 +791,15 @@ impl PlannedQuery {
     }
 
     /// Uses explicit V1 cardinality fallback assumptions for later analysis.
+    ///
+    /// Invalid values are returned to the caller and are not installed.
     pub fn with_cardinality_estimation_config(
         mut self,
         config: CardinalityEstimationConfig,
-    ) -> Self {
+    ) -> Result<Self, CardinalityEstimationConfigError> {
+        config.validate()?;
         self.cardinality_config = config;
-        self
+        Ok(self)
     }
 
     /// Returns the cardinality fallback assumptions retained with this plan.
@@ -808,6 +811,7 @@ impl PlannedQuery {
     pub fn analyze(&self) -> AnalysisContext {
         AnalysisContext::new(Arc::clone(&self.catalog))
             .with_cardinality_estimation_config(self.cardinality_config)
+            .expect("a planned query only stores validated cardinality configuration")
     }
 
     /// Consumes the planning context and returns its query IR.
@@ -2567,12 +2571,52 @@ mod tests {
         optimizer.analyses = optimizer
             .analyses
             .fork()
-            .with_cardinality_estimation_config(config);
+            .with_cardinality_estimation_config(config)
+            .unwrap();
 
         let planned = optimizer.into_planned_query();
 
         assert_eq!(planned.cardinality_estimation_config(), config);
         assert_eq!(planned.analyze().cardinality_estimation_config(), config);
+    }
+
+    #[test]
+    fn planned_query_recreates_configured_estimates() {
+        let mut query = QueryContext::new();
+        let column = ColumnData::new("value", DataType::Int64).add(&mut query);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("t"),
+            columns: vec![column],
+        })
+        .add(&mut query);
+        let predicate = ExprData::Literal(ScalarValue::Int64(1)).add(&mut query);
+        let selection = OperatorData::Selection(Selection {
+            predicate,
+            input: scan,
+        })
+        .add(&mut query);
+        query.set_root(selection);
+        let catalog = test_catalog(&query);
+        let config = CardinalityEstimationConfig {
+            default_predicate_selectivity: 0.5,
+            unknown_scan_rows: 80.0,
+            ..CardinalityEstimationConfig::default()
+        };
+        let planned = PlannedQuery::new(query, catalog)
+            .with_cardinality_estimation_config(config)
+            .unwrap();
+
+        for _ in 0..2 {
+            let mut analyses = planned.analyze();
+            assert_eq!(
+                analyses
+                    .get::<CardinalityEstimationV1>(&planned.query, selection)
+                    .unwrap()
+                    .rows
+                    .value,
+                40.0
+            );
+        }
     }
 
     #[test]

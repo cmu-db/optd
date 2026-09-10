@@ -483,6 +483,66 @@ pub struct CardinalityEstimationConfig {
     pub unknown_column_ndv_cap: f64,
 }
 
+/// Invalid cardinality-estimation configuration supplied by a caller.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CardinalityEstimationConfigError {
+    /// A selectivity was not finite or fell outside the inclusive `[0, 1]` range.
+    InvalidSelectivity { field: &'static str, value: f64 },
+    /// A row-count or NDV assumption was not finite or was negative.
+    InvalidNonNegative { field: &'static str, value: f64 },
+}
+
+impl fmt::Display for CardinalityEstimationConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidSelectivity { field, value } => write!(
+                f,
+                "cardinality configuration {field} must be finite and in [0, 1], got {value}"
+            ),
+            Self::InvalidNonNegative { field, value } => write!(
+                f,
+                "cardinality configuration {field} must be finite and nonnegative, got {value}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for CardinalityEstimationConfigError {}
+
+impl CardinalityEstimationConfig {
+    /// Validates every numeric assumption before it is installed on an analysis context.
+    ///
+    /// Selectivities must be finite and within `[0, 1]`. Row-count and NDV
+    /// assumptions must be finite and nonnegative. Invalid values are rejected;
+    /// they are never silently clamped.
+    pub fn validate(&self) -> Result<(), CardinalityEstimationConfigError> {
+        for (field, value) in [
+            ("like_selectivity", self.like_selectivity),
+            (
+                "default_predicate_selectivity",
+                self.default_predicate_selectivity,
+            ),
+            (
+                "range_fallback_selectivity",
+                self.range_fallback_selectivity,
+            ),
+        ] {
+            if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                return Err(CardinalityEstimationConfigError::InvalidSelectivity { field, value });
+            }
+        }
+        for (field, value) in [
+            ("unknown_scan_rows", self.unknown_scan_rows),
+            ("unknown_column_ndv_cap", self.unknown_column_ndv_cap),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(CardinalityEstimationConfigError::InvalidNonNegative { field, value });
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Default for CardinalityEstimationConfig {
     fn default() -> Self {
         Self {
@@ -522,15 +582,32 @@ impl AnalysisContext {
     }
 
     /// Uses explicit V1 fallback assumptions for this analysis context.
+    ///
+    /// Returns an error when any value violates
+    /// [`CardinalityEstimationConfig::validate`].
     pub fn with_cardinality_estimation_config(
         mut self,
         config: CardinalityEstimationConfig,
-    ) -> Self {
+    ) -> Result<Self, CardinalityEstimationConfigError> {
+        self.set_cardinality_estimation_config(config)?;
+        Ok(self)
+    }
+
+    /// Replaces the V1 fallback assumptions used by this analysis context.
+    ///
+    /// Validation happens before mutation, so an invalid configuration leaves
+    /// both the current configuration and all cached analysis results intact.
+    /// Changing to a valid configuration invalidates every existing cache.
+    pub fn set_cardinality_estimation_config(
+        &mut self,
+        config: CardinalityEstimationConfig,
+    ) -> Result<(), CardinalityEstimationConfigError> {
+        config.validate()?;
         if self.cardinality_config != config {
             self.clear();
         }
         self.cardinality_config = config;
-        self
+        Ok(())
     }
 
     /// Returns the fallback assumptions used by cardinality estimation.
@@ -3641,7 +3718,8 @@ mod tests {
         let catalog = crate::test_catalog(&ctx);
         let mut implicit = AnalysisContext::new(Arc::clone(&catalog));
         let mut explicit = AnalysisContext::new(catalog)
-            .with_cardinality_estimation_config(CardinalityEstimationConfig::default());
+            .with_cardinality_estimation_config(CardinalityEstimationConfig::default())
+            .unwrap();
 
         let implicit_profile = implicit
             .get::<CardinalityEstimationV1>(&ctx, selection)
@@ -3651,7 +3729,15 @@ mod tests {
             .unwrap();
 
         assert_eq!(implicit_profile, explicit_profile);
-        assert_eq!(implicit_profile.rows.value, 250.0);
+        assert_eq!(
+            implicit_profile.rows,
+            Estimate {
+                value: 250.0,
+                lower: Some(0.0),
+                upper: None,
+                source: EstimateSource::Derived,
+            }
+        );
     }
 
     #[test]
@@ -3662,7 +3748,9 @@ mod tests {
             default_predicate_selectivity: 0.5,
             ..CardinalityEstimationConfig::default()
         };
-        let mut analyses = AnalysisContext::new(catalog).with_cardinality_estimation_config(config);
+        let mut analyses = AnalysisContext::new(catalog)
+            .with_cardinality_estimation_config(config)
+            .unwrap();
 
         assert_eq!(
             analyses
@@ -3710,10 +3798,29 @@ mod tests {
             250.0
         );
 
-        analyses = analyses.with_cardinality_estimation_config(CardinalityEstimationConfig {
-            default_predicate_selectivity: 0.5,
-            ..CardinalityEstimationConfig::default()
-        });
+        assert!(
+            analyses
+                .set_cardinality_estimation_config(CardinalityEstimationConfig {
+                    unknown_scan_rows: f64::NAN,
+                    ..CardinalityEstimationConfig::default()
+                })
+                .is_err()
+        );
+        assert_eq!(
+            analyses
+                .get::<CardinalityEstimationV1>(&ctx, selection)
+                .unwrap()
+                .rows
+                .value,
+            250.0
+        );
+
+        analyses
+            .set_cardinality_estimation_config(CardinalityEstimationConfig {
+                default_predicate_selectivity: 0.5,
+                ..CardinalityEstimationConfig::default()
+            })
+            .unwrap();
 
         assert_eq!(
             analyses
@@ -3722,6 +3829,138 @@ mod tests {
                 .rows
                 .value,
             500.0
+        );
+    }
+
+    #[test]
+    fn cardinality_config_rejects_invalid_numeric_assumptions_at_installation() {
+        let invalid = [
+            CardinalityEstimationConfig {
+                like_selectivity: -0.01,
+                ..CardinalityEstimationConfig::default()
+            },
+            CardinalityEstimationConfig {
+                default_predicate_selectivity: 1.01,
+                ..CardinalityEstimationConfig::default()
+            },
+            CardinalityEstimationConfig {
+                range_fallback_selectivity: f64::INFINITY,
+                ..CardinalityEstimationConfig::default()
+            },
+            CardinalityEstimationConfig {
+                like_selectivity: f64::NAN,
+                ..CardinalityEstimationConfig::default()
+            },
+            CardinalityEstimationConfig {
+                unknown_scan_rows: -1.0,
+                ..CardinalityEstimationConfig::default()
+            },
+            CardinalityEstimationConfig {
+                unknown_scan_rows: f64::NEG_INFINITY,
+                ..CardinalityEstimationConfig::default()
+            },
+            CardinalityEstimationConfig {
+                unknown_column_ndv_cap: f64::INFINITY,
+                ..CardinalityEstimationConfig::default()
+            },
+        ];
+
+        for config in invalid {
+            assert!(config.validate().is_err());
+            let catalog: Arc<dyn Catalog> = Arc::new(MemoryCatalog::new("memory", "public"));
+            let mut analyses = AnalysisContext::new(Arc::clone(&catalog));
+            assert!(analyses.set_cardinality_estimation_config(config).is_err());
+            assert_eq!(
+                analyses.cardinality_estimation_config(),
+                CardinalityEstimationConfig::default()
+            );
+            assert!(
+                AnalysisContext::new(Arc::clone(&catalog))
+                    .with_cardinality_estimation_config(config)
+                    .is_err()
+            );
+            assert!(
+                crate::PlannedQuery::new(QueryContext::new(), catalog)
+                    .with_cardinality_estimation_config(config)
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn cardinality_config_accepts_valid_boundaries_at_both_entry_paths() {
+        for selectivity in [0.0, 1.0] {
+            let config = CardinalityEstimationConfig {
+                like_selectivity: selectivity,
+                default_predicate_selectivity: selectivity,
+                range_fallback_selectivity: selectivity,
+                unknown_scan_rows: 0.0,
+                unknown_column_ndv_cap: 0.0,
+            };
+            let catalog: Arc<dyn Catalog> = Arc::new(MemoryCatalog::new("memory", "public"));
+            let mut analyses = AnalysisContext::new(Arc::clone(&catalog));
+            analyses.set_cardinality_estimation_config(config).unwrap();
+            assert_eq!(analyses.cardinality_estimation_config(), config);
+
+            assert_eq!(
+                AnalysisContext::new(Arc::clone(&catalog))
+                    .with_cardinality_estimation_config(config)
+                    .unwrap()
+                    .cardinality_estimation_config(),
+                config
+            );
+            assert_eq!(
+                crate::PlannedQuery::new(QueryContext::new(), catalog)
+                    .with_cardinality_estimation_config(config)
+                    .unwrap()
+                    .cardinality_estimation_config(),
+                config
+            );
+        }
+    }
+
+    #[test]
+    fn custom_config_controls_like_range_and_unknown_ndv_fallbacks() {
+        let config = CardinalityEstimationConfig {
+            like_selectivity: 0.4,
+            range_fallback_selectivity: 0.6,
+            unknown_scan_rows: 50.0,
+            unknown_column_ndv_cap: 7.0,
+            ..CardinalityEstimationConfig::default()
+        };
+
+        let (like_query, like_scan, like_selection) = like_selection_query();
+        let mut like_analyses = AnalysisContext::new(crate::test_catalog(&like_query))
+            .with_cardinality_estimation_config(config)
+            .unwrap();
+        let scan_profile = like_analyses
+            .get::<CardinalityEstimationV1>(&like_query, like_scan)
+            .unwrap();
+        assert_eq!(scan_profile.rows.value, 50.0);
+        assert_eq!(
+            scan_profile.columns.values().next().unwrap().distinct.value,
+            7.0
+        );
+        assert_eq!(
+            like_analyses
+                .get::<CardinalityEstimationV1>(&like_query, like_selection)
+                .unwrap()
+                .rows
+                .value,
+            20.0
+        );
+
+        let (range_query, range_selection) = range_selection_query();
+        let mut range_analyses = AnalysisContext::new(crate::test_catalog(&range_query))
+            .with_cardinality_estimation_config(config)
+            .unwrap();
+        assert_eq!(
+            range_analyses
+                .get::<CardinalityEstimationV1>(&range_query, range_selection)
+                .unwrap()
+                .rows
+                .value,
+            30.0
         );
     }
 
@@ -5288,6 +5527,53 @@ mod tests {
     fn fallback_selection_query() -> (QueryContext, Operator) {
         let (mut ctx, scan) = single_column_scan();
         let predicate = ExprData::Literal(ScalarValue::Int64(1)).add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
+            predicate,
+            input: scan,
+        })
+        .add(&mut ctx);
+        ctx.set_root(selection);
+        (ctx, selection)
+    }
+
+    fn like_selection_query() -> (QueryContext, Operator, Operator) {
+        let (mut ctx, scan) = single_column_scan();
+        let OperatorData::Scan(scan_data) = scan.get(&ctx) else {
+            unreachable!("single_column_scan returns a scan")
+        };
+        let column = scan_data.columns[0];
+        let expr = ExprData::ColumnRef(column).add(&mut ctx);
+        let pattern = ExprData::Literal(ScalarValue::Utf8("%x%".into())).add(&mut ctx);
+        let predicate = ExprData::Like {
+            negated: false,
+            expr,
+            pattern,
+            case_insensitive: false,
+        }
+        .add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
+            predicate,
+            input: scan,
+        })
+        .add(&mut ctx);
+        ctx.set_root(selection);
+        (ctx, scan, selection)
+    }
+
+    fn range_selection_query() -> (QueryContext, Operator) {
+        let (mut ctx, scan) = single_column_scan();
+        let OperatorData::Scan(scan_data) = scan.get(&ctx) else {
+            unreachable!("single_column_scan returns a scan")
+        };
+        let column = scan_data.columns[0];
+        let left = ExprData::ColumnRef(column).add(&mut ctx);
+        let right = ExprData::Literal(ScalarValue::Int64(10)).add(&mut ctx);
+        let predicate = ExprData::Binary {
+            op: BinaryOp::Lt,
+            left,
+            right,
+        }
+        .add(&mut ctx);
         let selection = OperatorData::Selection(Selection {
             predicate,
             input: scan,

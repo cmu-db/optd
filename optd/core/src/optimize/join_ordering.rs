@@ -1020,7 +1020,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_default_cardinality_config_preserves_plan_fingerprint() {
+    fn explicit_default_cardinality_config_matches_frozen_plan_fingerprint() {
         let (query, _) = three_way_chain();
         let mut implicit = crate::test_optimizer_context(query.clone());
         let catalog = crate::test_catalog(&query);
@@ -1028,7 +1028,8 @@ mod tests {
         explicit.analyses = explicit
             .analyses
             .fork()
-            .with_cardinality_estimation_config(CardinalityEstimationConfig::default());
+            .with_cardinality_estimation_config(CardinalityEstimationConfig::default())
+            .unwrap();
         let mut implicit_pm = PassManager::new();
         implicit_pm.add_pass(JoinOrdering::new());
         let mut explicit_pm = PassManager::new();
@@ -1038,6 +1039,29 @@ mod tests {
         explicit_pm.run(&mut explicit).unwrap();
 
         assert_eq!(implicit.query.pretty(), explicit.query.pretty());
+        let root = implicit.query.root().unwrap();
+        let OperatorData::Join(root_join) = root.get(&implicit.query) else {
+            panic!("frozen root should be an inner join");
+        };
+        let OperatorData::Join(inner_join) = root_join.inner.get(&implicit.query) else {
+            panic!("frozen inner input should be an inner join");
+        };
+        assert_eq!(
+            (
+                root.to_string(),
+                root_join.outer.to_string(),
+                root_join.inner.to_string(),
+                inner_join.outer.to_string(),
+                inner_join.inner.to_string(),
+            ),
+            (
+                "@7".into(),
+                "@0".into(),
+                "@5".into(),
+                "@1".into(),
+                "@2".into()
+            )
+        );
     }
 
     #[test]
