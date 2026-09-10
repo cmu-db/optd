@@ -476,9 +476,11 @@ pub struct CardinalityEstimationV1 {
 /// introduced.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CardinalityEstimationConfig {
-    /// Looks through casts and folds literal arithmetic while recognizing predicates.
+    /// Looks through proven injective, order-preserving casts and evaluates
+    /// supported typed literal arithmetic while recognizing predicates.
     pub normalize_filter_operands: bool,
-    /// Estimates `NOT LIKE` as the complement of [`Self::like_selectivity`].
+    /// Partitions the known non-null population between `LIKE` and `NOT LIKE`
+    /// using [`Self::like_selectivity`].
     pub honor_negated_like: bool,
     /// Combines range conjuncts on one column into one interval estimate.
     pub correlate_same_column_ranges: bool,
@@ -1798,7 +1800,7 @@ fn same_column_range_selectivities(
     ctx: &QueryContext,
     config: &CardinalityEstimationConfig,
 ) -> (BTreeMap<usize, f64>, HashSet<usize>) {
-    let mut constraints = BTreeMap::<Column, Vec<(usize, BinaryOp, f64)>>::new();
+    let mut constraints = BTreeMap::<Column, Vec<RangeConstraint>>::new();
     for (index, &conjunct) in conjuncts.iter().enumerate() {
         let ExprData::Binary { op, left, right } = conjunct.get(ctx) else {
             continue;
@@ -1814,13 +1816,17 @@ fn same_column_range_selectivities(
         ) {
             continue;
         }
-        let Some(value) = scalar_to_f64(&literal) else {
+        if scalar_to_f64(&literal).is_none() {
             continue;
-        };
+        }
         constraints
             .entry(column)
             .or_default()
-            .push((index, normalized_op, value));
+            .push(RangeConstraint {
+                index,
+                op: normalized_op,
+                literal,
+            });
     }
 
     let mut selectivities = BTreeMap::new();
@@ -1835,37 +1841,115 @@ fn same_column_range_selectivities(
         let selectivity = range_interval_selectivity(column_profile, &constraints, config);
         let first_index = constraints
             .iter()
-            .map(|(index, _, _)| *index)
+            .map(|constraint| constraint.index)
             .min()
             .expect("range group is non-empty");
         selectivities.insert(first_index, selectivity);
-        grouped_indices.extend(constraints.into_iter().map(|(index, _, _)| index));
+        grouped_indices.extend(constraints.into_iter().map(|constraint| constraint.index));
     }
     (selectivities, grouped_indices)
 }
 
 fn range_interval_selectivity(
     profile: &ColumnProfile,
-    constraints: &[(usize, BinaryOp, f64)],
+    constraints: &[RangeConstraint],
     config: &CardinalityEstimationConfig,
 ) -> f64 {
-    let Some(min) = profile.lower_bound.as_ref().and_then(scalar_to_f64) else {
+    let Some(domain_min) = profile.lower_bound.as_ref() else {
         return config.range_fallback_selectivity;
     };
-    let Some(max) = profile.upper_bound.as_ref().and_then(scalar_to_f64) else {
+    let Some(domain_max) = profile.upper_bound.as_ref() else {
         return config.range_fallback_selectivity;
     };
-    let mut lower = min;
-    let mut upper = max;
-    for (_, op, value) in constraints {
-        match op {
-            BinaryOp::Lt | BinaryOp::LtEq => upper = upper.min(*value),
-            BinaryOp::Gt | BinaryOp::GtEq => lower = lower.max(*value),
+    if scalar_cmp(domain_min, domain_max) == Some(std::cmp::Ordering::Greater) {
+        return config.range_fallback_selectivity;
+    }
+
+    let mut lower = RangeEndpoint {
+        value: domain_min.clone(),
+        inclusive: true,
+    };
+    let mut upper = RangeEndpoint {
+        value: domain_max.clone(),
+        inclusive: true,
+    };
+    for constraint in constraints {
+        if scalar_cmp(domain_min, &constraint.literal).is_none()
+            || scalar_cmp(domain_max, &constraint.literal).is_none()
+        {
+            return config.range_fallback_selectivity;
+        }
+        let endpoint = RangeEndpoint {
+            value: constraint.literal.clone(),
+            inclusive: matches!(constraint.op, BinaryOp::GtEq | BinaryOp::LtEq),
+        };
+        match constraint.op {
+            BinaryOp::Lt | BinaryOp::LtEq => tighten_upper_endpoint(&mut upper, endpoint),
+            BinaryOp::Gt | BinaryOp::GtEq => tighten_lower_endpoint(&mut lower, endpoint),
             _ => unreachable!("only range constraints are grouped"),
         }
     }
-    let width = (max - min).abs().max(1.0);
-    ((upper - lower).max(0.0) / width).clamp(0.0, 1.0)
+
+    let Some(ordering) = scalar_cmp(&lower.value, &upper.value) else {
+        return config.range_fallback_selectivity;
+    };
+    if ordering == std::cmp::Ordering::Greater
+        || (ordering == std::cmp::Ordering::Equal && !(lower.inclusive && upper.inclusive))
+    {
+        return 0.0;
+    }
+    if ordering == std::cmp::Ordering::Equal {
+        if scalar_cmp(domain_min, domain_max) == Some(std::cmp::Ordering::Equal) {
+            return 1.0;
+        }
+        return (1.0 / profile.distinct.value.max(1.0)).clamp(0.0, 1.0);
+    }
+
+    let Some(min) = scalar_to_f64(domain_min) else {
+        return config.range_fallback_selectivity;
+    };
+    let Some(max) = scalar_to_f64(domain_max) else {
+        return config.range_fallback_selectivity;
+    };
+    let Some(lower) = scalar_to_f64(&lower.value) else {
+        return config.range_fallback_selectivity;
+    };
+    let Some(upper) = scalar_to_f64(&upper.value) else {
+        return config.range_fallback_selectivity;
+    };
+    let width = (max - min).abs();
+    if width == 0.0 || !width.is_finite() {
+        return config.range_fallback_selectivity;
+    }
+    ((upper - lower) / width).clamp(0.0, 1.0)
+}
+
+#[derive(Clone)]
+struct RangeConstraint {
+    index: usize,
+    op: BinaryOp,
+    literal: ScalarValue,
+}
+
+struct RangeEndpoint {
+    value: ScalarValue,
+    inclusive: bool,
+}
+
+fn tighten_lower_endpoint(current: &mut RangeEndpoint, candidate: RangeEndpoint) {
+    match scalar_cmp(&candidate.value, &current.value) {
+        Some(std::cmp::Ordering::Greater) => *current = candidate,
+        Some(std::cmp::Ordering::Equal) => current.inclusive &= candidate.inclusive,
+        _ => {}
+    }
+}
+
+fn tighten_upper_endpoint(current: &mut RangeEndpoint, candidate: RangeEndpoint) {
+    match scalar_cmp(&candidate.value, &current.value) {
+        Some(std::cmp::Ordering::Less) => *current = candidate,
+        Some(std::cmp::Ordering::Equal) => current.inclusive &= candidate.inclusive,
+        _ => {}
+    }
 }
 
 fn scale_profile(profile: CardinalityProfile, factor: f64) -> CardinalityProfile {
@@ -2339,9 +2423,16 @@ fn filter_selectivity_for_predicate(
                 Some(1.0),
             )
         }
-        ExprData::Like { negated, .. } => {
-            let selectivity = if config.honor_negated_like && *negated {
-                1.0 - config.like_selectivity
+        ExprData::Like { negated, expr, .. } => {
+            let selectivity = if config.honor_negated_like {
+                let non_null_fraction =
+                    predicate_non_null_fraction(left, right, *expr, ctx, config);
+                non_null_fraction
+                    * if *negated {
+                        1.0 - config.like_selectivity
+                    } else {
+                        config.like_selectivity
+                    }
             } else {
                 config.like_selectivity
             };
@@ -2349,6 +2440,24 @@ fn filter_selectivity_for_predicate(
         }
         _ => Estimate::derived(config.default_predicate_selectivity, Some(0.0), Some(1.0)),
     }
+}
+
+fn predicate_non_null_fraction(
+    left: &CardinalityProfile,
+    right: &CardinalityProfile,
+    expr: Expr,
+    ctx: &QueryContext,
+    config: &CardinalityEstimationConfig,
+) -> f64 {
+    let Some(column) = predicate_column_ref(expr, ctx, config) else {
+        return 1.0;
+    };
+    for profile in [left, right] {
+        if let Some(column_profile) = profile.columns.get(&column) {
+            return (column_profile.frequency.value / profile.rows.value.max(1.0)).clamp(0.0, 1.0);
+        }
+    }
+    1.0
 }
 
 fn binary_selectivity(
@@ -2512,23 +2621,30 @@ fn range_selectivity(
     op: BinaryOp,
     config: &CardinalityEstimationConfig,
 ) -> Estimate {
-    let Some(min) = profile.lower_bound.as_ref().and_then(scalar_to_f64) else {
-        return Estimate::derived(config.range_fallback_selectivity, Some(0.0), Some(1.0));
+    if !config.correlate_same_column_ranges {
+        let Some(min) = profile.lower_bound.as_ref().and_then(scalar_to_f64) else {
+            return Estimate::derived(config.range_fallback_selectivity, Some(0.0), Some(1.0));
+        };
+        let Some(max) = profile.upper_bound.as_ref().and_then(scalar_to_f64) else {
+            return Estimate::derived(config.range_fallback_selectivity, Some(0.0), Some(1.0));
+        };
+        let Some(value) = scalar_to_f64(literal) else {
+            return Estimate::derived(config.range_fallback_selectivity, Some(0.0), Some(1.0));
+        };
+        let width = (max - min).abs().max(1.0);
+        let selected = match op {
+            BinaryOp::Lt | BinaryOp::LtEq => ((value - min) / width).clamp(0.0, 1.0),
+            BinaryOp::Gt | BinaryOp::GtEq => ((max - value) / width).clamp(0.0, 1.0),
+            _ => config.range_fallback_selectivity,
+        };
+        return Estimate::derived(selected, Some(0.0), Some(1.0));
+    }
+    let constraint = RangeConstraint {
+        index: 0,
+        op,
+        literal: literal.clone(),
     };
-    let Some(max) = profile.upper_bound.as_ref().and_then(scalar_to_f64) else {
-        return Estimate::derived(config.range_fallback_selectivity, Some(0.0), Some(1.0));
-    };
-    let Some(value) = scalar_to_f64(literal) else {
-        return Estimate::derived(config.range_fallback_selectivity, Some(0.0), Some(1.0));
-    };
-    // Assume values are uniformly distributed over the collected [min, max]
-    // range. Missing or non-numeric bounds use the generic range fallback above.
-    let width = (max - min).abs().max(1.0);
-    let selected = match op {
-        BinaryOp::Lt | BinaryOp::LtEq => ((value - min) / width).clamp(0.0, 1.0),
-        BinaryOp::Gt | BinaryOp::GtEq => ((max - value) / width).clamp(0.0, 1.0),
-        _ => config.range_fallback_selectivity,
-    };
+    let selected = range_interval_selectivity(profile, &[constraint], config);
     Estimate::derived(selected, Some(0.0), Some(1.0))
 }
 
@@ -2550,13 +2666,61 @@ fn predicate_column_ref(
     ctx: &QueryContext,
     config: &CardinalityEstimationConfig,
 ) -> Option<Column> {
+    normalized_column_ref(expr, ctx, config).map(|normalized| normalized.column)
+}
+
+struct NormalizedColumnRef {
+    column: Column,
+    effective_type: arrow_schema::DataType,
+    stripped_cast: bool,
+}
+
+fn normalized_column_ref(
+    expr: Expr,
+    ctx: &QueryContext,
+    config: &CardinalityEstimationConfig,
+) -> Option<NormalizedColumnRef> {
     match expr.get(ctx) {
-        ExprData::ColumnRef(column) => Some(*column),
-        ExprData::Cast { expr, .. } if config.normalize_filter_operands => {
-            predicate_column_ref(*expr, ctx, config)
+        ExprData::ColumnRef(column) => Some(NormalizedColumnRef {
+            column: *column,
+            effective_type: ctx.column(*column).ty.clone(),
+            stripped_cast: false,
+        }),
+        ExprData::Cast { expr, ty } if config.normalize_filter_operands => {
+            let mut normalized = normalized_column_ref(*expr, ctx, config)?;
+            estimation_safe_column_cast(&normalized.effective_type, ty)?;
+            normalized.effective_type = ty.clone();
+            normalized.stripped_cast = true;
+            Some(normalized)
         }
         _ => None,
     }
+}
+
+fn estimation_safe_column_cast(
+    source: &arrow_schema::DataType,
+    target: &arrow_schema::DataType,
+) -> Option<()> {
+    use arrow_schema::DataType;
+
+    let safe = source == target
+        || matches!(
+            (source, target),
+            (DataType::Int32, DataType::Int64 | DataType::Float64)
+        )
+        || matches!(
+            (source, target),
+            (
+                DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View,
+                DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View
+            )
+        )
+        || matches!(
+            (source, target),
+            (DataType::Decimal128(source_precision, source_scale), DataType::Decimal128(target_precision, target_scale))
+                if source_scale == target_scale && source_precision <= target_precision
+        );
+    safe.then_some(())
 }
 
 fn predicate_literal(
@@ -2564,37 +2728,282 @@ fn predicate_literal(
     ctx: &QueryContext,
     config: &CardinalityEstimationConfig,
 ) -> Option<ScalarValue> {
+    if !config.normalize_filter_operands {
+        return match expr.get(ctx) {
+            ExprData::Literal(value) => Some(value.clone()),
+            _ => None,
+        };
+    }
+    evaluate_literal_expr(expr, ctx).map(|evaluated| evaluated.value)
+}
+
+struct EvaluatedLiteral {
+    value: ScalarValue,
+    ty: arrow_schema::DataType,
+}
+
+fn evaluate_literal_expr(expr: Expr, ctx: &QueryContext) -> Option<EvaluatedLiteral> {
     match expr.get(ctx) {
-        ExprData::Literal(value) => Some(value.clone()),
-        ExprData::Cast { expr, .. } if config.normalize_filter_operands => {
-            predicate_literal(*expr, ctx, config)
+        ExprData::Literal(value) => Some(EvaluatedLiteral {
+            value: value.clone(),
+            ty: value.data_type(),
+        }),
+        ExprData::Cast { expr, ty } => {
+            let input = evaluate_literal_expr(*expr, ctx)?;
+            let value = cast_literal(input.value, &input.ty, ty)?;
+            Some(EvaluatedLiteral {
+                value,
+                ty: ty.clone(),
+            })
         }
         ExprData::Unary {
             op: UnaryOp::Negate,
             expr,
-        } if config.normalize_filter_operands => {
-            let value = scalar_to_f64(&predicate_literal(*expr, ctx, config)?)?;
-            Some(ScalarValue::Float64(-value))
+        } => {
+            let input = evaluate_literal_expr(*expr, ctx)?;
+            let value = negate_literal(input.value)?;
+            Some(EvaluatedLiteral {
+                value,
+                ty: input.ty,
+            })
         }
         ExprData::Binary {
             op: op @ (BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide),
             left,
             right,
-        } if config.normalize_filter_operands => {
-            let left = scalar_to_f64(&predicate_literal(*left, ctx, config)?)?;
-            let right = scalar_to_f64(&predicate_literal(*right, ctx, config)?)?;
+        } => {
+            let left = evaluate_literal_expr(*left, ctx)?;
+            let right = evaluate_literal_expr(*right, ctx)?;
+            evaluate_literal_arithmetic(*op, left, right)
+        }
+        _ => None,
+    }
+}
+
+fn cast_literal(
+    value: ScalarValue,
+    source: &arrow_schema::DataType,
+    target: &arrow_schema::DataType,
+) -> Option<ScalarValue> {
+    use arrow_schema::DataType;
+
+    if source == target {
+        return Some(value);
+    }
+    match (value, source, target) {
+        (ScalarValue::Int32(value), DataType::Int32, DataType::Int64) => {
+            Some(ScalarValue::Int64(i64::from(value)))
+        }
+        (ScalarValue::Int32(value), DataType::Int32, DataType::Float64) => {
+            Some(ScalarValue::Float64(f64::from(value)))
+        }
+        (ScalarValue::Int64(value), DataType::Int64, DataType::Int32) => {
+            i32::try_from(value).ok().map(ScalarValue::Int32)
+        }
+        (ScalarValue::Int64(value), DataType::Int64, DataType::Float64) => {
+            Some(ScalarValue::Float64(value as f64))
+        }
+        (ScalarValue::Int32(value), DataType::Int32, DataType::Decimal128(precision, scale)) => {
+            let value = i128::from(value).checked_mul(decimal_scale_factor(*scale)?)?;
+            decimal_literal(value, *precision, *scale)
+        }
+        (ScalarValue::Int64(value), DataType::Int64, DataType::Decimal128(precision, scale)) => {
+            let value = i128::from(value).checked_mul(decimal_scale_factor(*scale)?)?;
+            decimal_literal(value, *precision, *scale)
+        }
+        (
+            ScalarValue::Decimal128 {
+                value,
+                precision: _,
+                scale: source_scale,
+            },
+            DataType::Decimal128(_, _),
+            DataType::Decimal128(target_precision, target_scale),
+        ) => {
+            let value = rescale_decimal(value, source_scale, *target_scale)?;
+            decimal_literal(value, *target_precision, *target_scale)
+        }
+        (
+            ScalarValue::Utf8(value),
+            DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View,
+            DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View,
+        ) => Some(ScalarValue::Utf8(value)),
+        (ScalarValue::Null(_), _, target) => Some(ScalarValue::Null(target.clone())),
+        // Float-to-integer casts and other conversions with engine-specific
+        // rounding, saturation, or loss semantics are deliberately declined.
+        _ => None,
+    }
+}
+
+fn negate_literal(value: ScalarValue) -> Option<ScalarValue> {
+    match value {
+        ScalarValue::Int32(value) => value.checked_neg().map(ScalarValue::Int32),
+        ScalarValue::Int64(value) => value.checked_neg().map(ScalarValue::Int64),
+        ScalarValue::Float64(value) => (-value).is_finite().then_some(ScalarValue::Float64(-value)),
+        ScalarValue::Decimal128 {
+            value,
+            precision,
+            scale,
+        } => decimal_literal(value.checked_neg()?, precision, scale),
+        _ => None,
+    }
+}
+
+fn evaluate_literal_arithmetic(
+    op: BinaryOp,
+    left: EvaluatedLiteral,
+    right: EvaluatedLiteral,
+) -> Option<EvaluatedLiteral> {
+    if left.ty != right.ty {
+        return None;
+    }
+    let ty = left.ty;
+    let value = match (left.value, right.value) {
+        (ScalarValue::Int32(left), ScalarValue::Int32(right)) => ScalarValue::Int32(match op {
+            BinaryOp::Add => left.checked_add(right)?,
+            BinaryOp::Subtract => left.checked_sub(right)?,
+            BinaryOp::Multiply => left.checked_mul(right)?,
+            BinaryOp::Divide => left.checked_div(right)?,
+            _ => unreachable!("matched arithmetic operator"),
+        }),
+        (ScalarValue::Int64(left), ScalarValue::Int64(right)) => ScalarValue::Int64(match op {
+            BinaryOp::Add => left.checked_add(right)?,
+            BinaryOp::Subtract => left.checked_sub(right)?,
+            BinaryOp::Multiply => left.checked_mul(right)?,
+            BinaryOp::Divide => left.checked_div(right)?,
+            _ => unreachable!("matched arithmetic operator"),
+        }),
+        (ScalarValue::Float64(left), ScalarValue::Float64(right)) => {
+            if op == BinaryOp::Divide && right == 0.0 {
+                return None;
+            }
             let value = match op {
                 BinaryOp::Add => left + right,
                 BinaryOp::Subtract => left - right,
                 BinaryOp::Multiply => left * right,
-                BinaryOp::Divide if right != 0.0 => left / right,
-                BinaryOp::Divide => return None,
+                BinaryOp::Divide => left / right,
                 _ => unreachable!("matched arithmetic operator"),
             };
-            value.is_finite().then_some(ScalarValue::Float64(value))
+            value.is_finite().then_some(ScalarValue::Float64(value))?
         }
-        _ => None,
+        (
+            ScalarValue::Decimal128 {
+                value: left,
+                precision: left_precision,
+                scale: left_scale,
+            },
+            ScalarValue::Decimal128 {
+                value: right,
+                precision: right_precision,
+                scale: right_scale,
+            },
+        ) => {
+            return evaluate_decimal_arithmetic(
+                op,
+                left,
+                left_precision,
+                left_scale,
+                right,
+                right_precision,
+                right_scale,
+            );
+        }
+        _ => return None,
+    };
+    Some(EvaluatedLiteral { value, ty })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn evaluate_decimal_arithmetic(
+    op: BinaryOp,
+    left: i128,
+    left_precision: u8,
+    left_scale: i8,
+    right: i128,
+    right_precision: u8,
+    right_scale: i8,
+) -> Option<EvaluatedLiteral> {
+    let (value, precision, scale) = match op {
+        BinaryOp::Add | BinaryOp::Subtract => {
+            let scale = left_scale.max(right_scale);
+            let left = rescale_decimal(left, left_scale, scale)?;
+            let right = rescale_decimal(right, right_scale, scale)?;
+            let value = if op == BinaryOp::Add {
+                left.checked_add(right)?
+            } else {
+                left.checked_sub(right)?
+            };
+            let integer_digits = (i16::from(left_precision) - i16::from(left_scale))
+                .max(i16::from(right_precision) - i16::from(right_scale));
+            let precision = i16::from(scale)
+                .checked_add(integer_digits)?
+                .checked_add(1)?
+                .clamp(1, 38) as u8;
+            (value, precision, scale)
+        }
+        BinaryOp::Multiply => {
+            let precision = left_precision
+                .saturating_add(right_precision.saturating_add(1))
+                .min(38);
+            let scale = left_scale.checked_add(right_scale)?;
+            if scale > 38 {
+                return None;
+            }
+            (left.checked_mul(right)?, precision, scale)
+        }
+        BinaryOp::Divide => {
+            if right == 0 {
+                return None;
+            }
+            let scale = left_scale.saturating_add(4).min(38);
+            let scale_delta = scale.checked_sub(left_scale)?.checked_add(right_scale)?;
+            let (numerator, denominator) = if scale_delta >= 0 {
+                (left.checked_mul(decimal_scale_factor(scale_delta)?)?, right)
+            } else {
+                (
+                    left,
+                    right.checked_mul(decimal_scale_factor(scale_delta.checked_neg()?)?)?,
+                )
+            };
+            let precision = i16::from(scale_delta)
+                .checked_add(i16::from(left_precision))?
+                .clamp(1, 38) as u8;
+            (numerator.checked_div(denominator)?, precision, scale)
+        }
+        _ => unreachable!("matched arithmetic operator"),
+    };
+    Some(EvaluatedLiteral {
+        value: decimal_literal(value, precision, scale)?,
+        ty: arrow_schema::DataType::Decimal128(precision, scale),
+    })
+}
+
+fn decimal_scale_factor(scale: i8) -> Option<i128> {
+    (scale >= 0).then_some(())?;
+    10_i128.checked_pow(u32::try_from(scale).ok()?)
+}
+
+fn rescale_decimal(value: i128, source_scale: i8, target_scale: i8) -> Option<i128> {
+    let delta = target_scale.checked_sub(source_scale)?;
+    if delta >= 0 {
+        value.checked_mul(decimal_scale_factor(delta)?)
+    } else {
+        let divisor = decimal_scale_factor(delta.checked_neg()?)?;
+        (value % divisor == 0).then_some(value / divisor)
     }
+}
+
+fn decimal_literal(value: i128, precision: u8, scale: i8) -> Option<ScalarValue> {
+    let digits = if value == 0 {
+        1
+    } else {
+        value.checked_abs()?.ilog10() + 1
+    };
+    (digits <= u32::from(precision)).then_some(ScalarValue::Decimal128 {
+        value,
+        precision,
+        scale,
+    })
 }
 
 fn column_literal_predicate(
@@ -2604,11 +3013,12 @@ fn column_literal_predicate(
     ctx: &QueryContext,
     config: &CardinalityEstimationConfig,
 ) -> Option<(Column, ScalarValue, BinaryOp)> {
-    if let Some(column) = predicate_column_ref(left, ctx, config) {
-        return predicate_literal(right, ctx, config).map(|literal| (column, literal, op));
+    if let Some(column) = normalized_column_ref(left, ctx, config) {
+        let literal = predicate_literal_for_column(right, &column, ctx, config)?;
+        return Some((column.column, literal, op));
     }
-    let column = predicate_column_ref(right, ctx, config)?;
-    let literal = predicate_literal(left, ctx, config)?;
+    let column = normalized_column_ref(right, ctx, config)?;
+    let literal = predicate_literal_for_column(left, &column, ctx, config)?;
     let op = if config.normalize_filter_operands {
         reverse_comparison(op)
     } else {
@@ -2616,7 +3026,35 @@ fn column_literal_predicate(
         // predicate normalization is explicitly enabled.
         op
     };
-    Some((column, literal, op))
+    Some((column.column, literal, op))
+}
+
+fn predicate_literal_for_column(
+    expr: Expr,
+    column: &NormalizedColumnRef,
+    ctx: &QueryContext,
+    config: &CardinalityEstimationConfig,
+) -> Option<ScalarValue> {
+    if !config.normalize_filter_operands {
+        return predicate_literal(expr, ctx, config);
+    }
+    let literal = evaluate_literal_expr(expr, ctx)?;
+    comparison_types_compatible(&column.effective_type, &literal.ty).then_some(literal.value)
+}
+
+fn comparison_types_compatible(
+    left: &arrow_schema::DataType,
+    right: &arrow_schema::DataType,
+) -> bool {
+    use arrow_schema::DataType;
+    left == right
+        || matches!(
+            (left, right),
+            (
+                DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View,
+                DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View
+            )
+        )
 }
 
 fn reverse_comparison(op: BinaryOp) -> BinaryOp {
@@ -2650,10 +3088,15 @@ fn column_equality_from_parts(
     if op != BinaryOp::Eq {
         return None;
     }
-    Some((
-        predicate_column_ref(left, ctx, config)?,
-        predicate_column_ref(right, ctx, config)?,
-    ))
+    let left = normalized_column_ref(left, ctx, config)?;
+    let right = normalized_column_ref(right, ctx, config)?;
+    if config.normalize_filter_operands
+        && (left.stripped_cast || right.stripped_cast)
+        && !comparison_types_compatible(&left.effective_type, &right.effective_type)
+    {
+        return None;
+    }
+    Some((left.column, right.column))
 }
 
 struct EqualityEdge {
@@ -2863,6 +3306,76 @@ fn scalar_to_f64(value: &ScalarValue) -> Option<f64> {
         }
         _ => None,
     }
+}
+
+fn scalar_cmp(left: &ScalarValue, right: &ScalarValue) -> Option<std::cmp::Ordering> {
+    match (left, right) {
+        (ScalarValue::Int32(left), ScalarValue::Int32(right)) => Some(left.cmp(right)),
+        (ScalarValue::Int64(left), ScalarValue::Int64(right)) => Some(left.cmp(right)),
+        (ScalarValue::Int32(left), ScalarValue::Int64(right)) => Some(i64::from(*left).cmp(right)),
+        (ScalarValue::Int64(left), ScalarValue::Int32(right)) => Some(left.cmp(&i64::from(*right))),
+        (ScalarValue::Int32(left), ScalarValue::Float64(right)) => {
+            f64::from(*left).partial_cmp(right)
+        }
+        (ScalarValue::Float64(left), ScalarValue::Int32(right)) => {
+            left.partial_cmp(&f64::from(*right))
+        }
+        (ScalarValue::Float64(left), ScalarValue::Float64(right)) => left.partial_cmp(right),
+        (ScalarValue::Date32(left), ScalarValue::Date32(right)) => Some(left.cmp(right)),
+        (
+            ScalarValue::Decimal128 {
+                value: left,
+                scale: left_scale,
+                ..
+            },
+            ScalarValue::Decimal128 {
+                value: right,
+                scale: right_scale,
+                ..
+            },
+        ) => compare_scaled_integers(*left, *left_scale, *right, *right_scale),
+        (
+            ScalarValue::Int32(left),
+            ScalarValue::Decimal128 {
+                value: right,
+                scale,
+                ..
+            },
+        ) => compare_scaled_integers(i128::from(*left), 0, *right, *scale),
+        (
+            ScalarValue::Decimal128 {
+                value: left, scale, ..
+            },
+            ScalarValue::Int32(right),
+        ) => compare_scaled_integers(*left, *scale, i128::from(*right), 0),
+        (
+            ScalarValue::Int64(left),
+            ScalarValue::Decimal128 {
+                value: right,
+                scale,
+                ..
+            },
+        ) => compare_scaled_integers(i128::from(*left), 0, *right, *scale),
+        (
+            ScalarValue::Decimal128 {
+                value: left, scale, ..
+            },
+            ScalarValue::Int64(right),
+        ) => compare_scaled_integers(*left, *scale, i128::from(*right), 0),
+        _ => None,
+    }
+}
+
+fn compare_scaled_integers(
+    left: i128,
+    left_scale: i8,
+    right: i128,
+    right_scale: i8,
+) -> Option<std::cmp::Ordering> {
+    let common_scale = left_scale.max(right_scale);
+    let left = rescale_decimal(left, left_scale, common_scale)?;
+    let right = rescale_decimal(right, right_scale, common_scale)?;
+    Some(left.cmp(&right))
 }
 
 fn shift_scalar(value: Option<&ScalarValue>, delta: f64) -> Option<ScalarValue> {
@@ -4288,7 +4801,227 @@ mod tests {
         assert_eq!(normalized.columns[&id].distinct.value, 1.0);
         assert_eq!(
             normalized.columns[&id].lower_bound,
-            Some(ScalarValue::Float64(7.0))
+            Some(ScalarValue::Int64(7))
+        );
+    }
+
+    #[test]
+    fn predicate_normalization_declines_float_to_integer_casts() {
+        let mut ctx = QueryContext::new();
+        let integer = ColumnData::new("integer", DataType::Int64).add(&mut ctx);
+        let integer_ref = ExprData::ColumnRef(integer).add(&mut ctx);
+        let float = ExprData::Literal(ScalarValue::Float64(1.9)).add(&mut ctx);
+        let cast_float = ExprData::Cast {
+            expr: float,
+            ty: DataType::Int64,
+        }
+        .add(&mut ctx);
+        let literal_predicate = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: integer_ref,
+            right: cast_float,
+        }
+        .add(&mut ctx);
+
+        let floating = ColumnData::new("floating", DataType::Float64).add(&mut ctx);
+        let floating_ref = ExprData::ColumnRef(floating).add(&mut ctx);
+        let cast_column = ExprData::Cast {
+            expr: floating_ref,
+            ty: DataType::Int64,
+        }
+        .add(&mut ctx);
+        let one = ExprData::Literal(ScalarValue::Int64(1)).add(&mut ctx);
+        let column_predicate = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: cast_column,
+            right: one,
+        }
+        .add(&mut ctx);
+        let forty_two = ExprData::Literal(ScalarValue::Int64(42)).add(&mut ctx);
+        let checked_narrowing = ExprData::Cast {
+            expr: forty_two,
+            ty: DataType::Int32,
+        }
+        .add(&mut ctx);
+        let too_large =
+            ExprData::Literal(ScalarValue::Int64(i64::from(i32::MAX) + 1)).add(&mut ctx);
+        let overflowing_narrowing = ExprData::Cast {
+            expr: too_large,
+            ty: DataType::Int32,
+        }
+        .add(&mut ctx);
+        let config = CardinalityEstimationConfig {
+            normalize_filter_operands: true,
+            ..CardinalityEstimationConfig::default()
+        };
+
+        assert!(predicate_literal(cast_float, &ctx, &config).is_none());
+        assert_eq!(
+            predicate_literal(checked_narrowing, &ctx, &config),
+            Some(ScalarValue::Int32(42))
+        );
+        assert!(predicate_literal(overflowing_narrowing, &ctx, &config).is_none());
+        assert!(
+            column_literal_predicate(BinaryOp::Eq, integer_ref, cast_float, &ctx, &config)
+                .is_none()
+        );
+        assert!(column_literal_predicate(BinaryOp::Eq, cast_column, one, &ctx, &config).is_none());
+
+        let profile = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [
+                (integer, test_column_profile(100.0, 100.0)),
+                (floating, test_column_profile(100.0, 100.0)),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        assert_eq!(
+            apply_selection_profile(profile.clone(), literal_predicate, &ctx, &config)
+                .rows
+                .value,
+            25.0
+        );
+        assert_eq!(
+            apply_selection_profile(profile, column_predicate, &ctx, &config)
+                .rows
+                .value,
+            25.0
+        );
+    }
+
+    #[test]
+    fn casted_join_equality_requires_injective_order_preserving_casts() {
+        let mut ctx = QueryContext::new();
+        let int32 = ColumnData::new("int32", DataType::Int32).add(&mut ctx);
+        let int64 = ColumnData::new("int64", DataType::Int64).add(&mut ctx);
+        let float64 = ColumnData::new("float64", DataType::Float64).add(&mut ctx);
+        let int32_ref = ExprData::ColumnRef(int32).add(&mut ctx);
+        let safe_cast = ExprData::Cast {
+            expr: int32_ref,
+            ty: DataType::Int64,
+        }
+        .add(&mut ctx);
+        let int64_ref = ExprData::ColumnRef(int64).add(&mut ctx);
+        let safe_equality = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: safe_cast,
+            right: int64_ref,
+        }
+        .add(&mut ctx);
+        let float64_ref = ExprData::ColumnRef(float64).add(&mut ctx);
+        let unsafe_cast = ExprData::Cast {
+            expr: float64_ref,
+            ty: DataType::Int64,
+        }
+        .add(&mut ctx);
+        let int64_ref = ExprData::ColumnRef(int64).add(&mut ctx);
+        let unsafe_equality = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: unsafe_cast,
+            right: int64_ref,
+        }
+        .add(&mut ctx);
+        let config = CardinalityEstimationConfig {
+            normalize_filter_operands: true,
+            ..CardinalityEstimationConfig::default()
+        };
+
+        assert_eq!(
+            column_equality(safe_equality, &ctx, &config),
+            Some((int32, int64))
+        );
+        assert_eq!(column_equality(unsafe_equality, &ctx, &config), None);
+    }
+
+    #[test]
+    fn literal_arithmetic_is_typed_checked_and_precision_preserving() {
+        let mut ctx = QueryContext::new();
+        let seven = ExprData::Literal(ScalarValue::Int64(7)).add(&mut ctx);
+        let two = ExprData::Literal(ScalarValue::Int64(2)).add(&mut ctx);
+        let integer_division = ExprData::Binary {
+            op: BinaryOp::Divide,
+            left: seven,
+            right: two,
+        }
+        .add(&mut ctx);
+        let large = ExprData::Literal(ScalarValue::Int64(9_007_199_254_740_993)).add(&mut ctx);
+        let two = ExprData::Literal(ScalarValue::Int64(2)).add(&mut ctx);
+        let precise_addition = ExprData::Binary {
+            op: BinaryOp::Add,
+            left: large,
+            right: two,
+        }
+        .add(&mut ctx);
+        let max = ExprData::Literal(ScalarValue::Int64(i64::MAX)).add(&mut ctx);
+        let one = ExprData::Literal(ScalarValue::Int64(1)).add(&mut ctx);
+        let overflow = ExprData::Binary {
+            op: BinaryOp::Add,
+            left: max,
+            right: one,
+        }
+        .add(&mut ctx);
+        let decimal_left = ExprData::Literal(ScalarValue::Decimal128 {
+            value: 125,
+            precision: 5,
+            scale: 2,
+        })
+        .add(&mut ctx);
+        let decimal_right = ExprData::Literal(ScalarValue::Decimal128 {
+            value: 250,
+            precision: 5,
+            scale: 2,
+        })
+        .add(&mut ctx);
+        let decimal_addition = ExprData::Binary {
+            op: BinaryOp::Add,
+            left: decimal_left,
+            right: decimal_right,
+        }
+        .add(&mut ctx);
+        let decimal_left = ExprData::Literal(ScalarValue::Decimal128 {
+            value: 125,
+            precision: 5,
+            scale: 2,
+        })
+        .add(&mut ctx);
+        let decimal_right = ExprData::Literal(ScalarValue::Decimal128 {
+            value: 250,
+            precision: 5,
+            scale: 2,
+        })
+        .add(&mut ctx);
+        let decimal_division = ExprData::Binary {
+            op: BinaryOp::Divide,
+            left: decimal_left,
+            right: decimal_right,
+        }
+        .add(&mut ctx);
+
+        assert_eq!(
+            evaluate_literal_expr(integer_division, &ctx).map(|value| value.value),
+            Some(ScalarValue::Int64(3))
+        );
+        assert_eq!(
+            evaluate_literal_expr(precise_addition, &ctx).map(|value| value.value),
+            Some(ScalarValue::Int64(9_007_199_254_740_995))
+        );
+        assert!(evaluate_literal_expr(overflow, &ctx).is_none());
+        assert_eq!(
+            evaluate_literal_expr(decimal_addition, &ctx).map(|value| value.value),
+            Some(ScalarValue::Decimal128 {
+                value: 375,
+                precision: 6,
+                scale: 2,
+            })
+        );
+        assert_eq!(
+            evaluate_literal_expr(decimal_division, &ctx).map(|value| value.value),
+            Some(ScalarValue::Decimal128 {
+                value: 500_000,
+                precision: 11,
+                scale: 6,
+            })
         );
     }
 
@@ -4330,6 +5063,85 @@ mod tests {
 
         assert_eq!(legacy.rows.value, 10.0);
         assert_eq!(corrected.rows.value, 90.0);
+    }
+
+    #[test]
+    fn negated_like_complements_only_the_non_null_population() {
+        let mut ctx = QueryContext::new();
+        let name = ColumnData::new("name", DataType::Utf8).add(&mut ctx);
+        let name_ref = ExprData::ColumnRef(name).add(&mut ctx);
+        let pattern = ExprData::Literal(ScalarValue::Utf8("prefix%".to_string())).add(&mut ctx);
+        let negated = ExprData::Like {
+            negated: true,
+            expr: name_ref,
+            pattern,
+            case_insensitive: false,
+        }
+        .add(&mut ctx);
+        let name_ref = ExprData::ColumnRef(name).add(&mut ctx);
+        let pattern = ExprData::Literal(ScalarValue::Utf8("prefix%".to_string())).add(&mut ctx);
+        let positive = ExprData::Like {
+            negated: false,
+            expr: name_ref,
+            pattern,
+            case_insensitive: false,
+        }
+        .add(&mut ctx);
+        let mixed = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [(name, test_column_profile(60.0, 50.0))]
+                .into_iter()
+                .collect(),
+        );
+        let estimate = |predicate, honor_negated_like, honor_filter_null_rejection| {
+            apply_selection_profile(
+                mixed.clone(),
+                predicate,
+                &ctx,
+                &CardinalityEstimationConfig {
+                    honor_negated_like,
+                    honor_filter_null_rejection,
+                    ..CardinalityEstimationConfig::default()
+                },
+            )
+        };
+
+        let legacy = estimate(negated, false, false);
+        let complement_only = estimate(negated, true, false);
+        let rejection_only = estimate(negated, false, true);
+        let corrected = estimate(negated, true, true);
+        let positive = estimate(positive, true, true);
+
+        assert_eq!(legacy.rows.value, 10.0);
+        assert_eq!(legacy.columns[&name].frequency.value, 6.0);
+        assert_eq!(complement_only.rows.value, 54.0);
+        assert!((complement_only.columns[&name].frequency.value - 32.4).abs() < 1e-12);
+        assert_eq!(rejection_only.rows.value, 10.0);
+        assert_eq!(rejection_only.columns[&name].frequency.value, 10.0);
+        assert_eq!(corrected.rows.value, 54.0);
+        assert_eq!(corrected.columns[&name].frequency.value, 54.0);
+        assert_eq!(positive.rows.value, 6.0);
+        assert_eq!(positive.columns[&name].frequency.value, 6.0);
+        assert_eq!(corrected.rows.value + positive.rows.value, 60.0);
+
+        let all_null = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [(name, test_column_profile(0.0, 0.0))]
+                .into_iter()
+                .collect(),
+        );
+        let all_null = apply_selection_profile(
+            all_null,
+            negated,
+            &ctx,
+            &CardinalityEstimationConfig {
+                honor_negated_like: true,
+                honor_filter_null_rejection: true,
+                ..CardinalityEstimationConfig::default()
+            },
+        );
+        assert_eq!(all_null.rows.value, 0.0);
+        assert_eq!(all_null.columns[&name].frequency.value, 0.0);
     }
 
     #[test]
@@ -4383,6 +5195,160 @@ mod tests {
 
         assert_eq!(legacy.rows.value, 24.0);
         assert_eq!(correlated.rows.value, 10.0);
+    }
+
+    #[test]
+    fn range_intersection_tracks_inclusivity_contradictions_and_constant_domains() {
+        let config = CardinalityEstimationConfig {
+            correlate_same_column_ranges: true,
+            ..CardinalityEstimationConfig::default()
+        };
+        let mut ranged = test_column_profile(100.0, 100.0);
+        ranged.lower_bound = Some(ScalarValue::Int64(0));
+        ranged.upper_bound = Some(ScalarValue::Int64(100));
+        let inclusive_singleton = [
+            RangeConstraint {
+                index: 0,
+                op: BinaryOp::GtEq,
+                literal: ScalarValue::Int64(20),
+            },
+            RangeConstraint {
+                index: 1,
+                op: BinaryOp::LtEq,
+                literal: ScalarValue::Int64(20),
+            },
+        ];
+        let strict_contradiction = [
+            RangeConstraint {
+                index: 0,
+                op: BinaryOp::Gt,
+                literal: ScalarValue::Int64(20),
+            },
+            RangeConstraint {
+                index: 1,
+                op: BinaryOp::Lt,
+                literal: ScalarValue::Int64(20),
+            },
+        ];
+        let ordered_contradiction = [
+            RangeConstraint {
+                index: 0,
+                op: BinaryOp::GtEq,
+                literal: ScalarValue::Int64(30),
+            },
+            RangeConstraint {
+                index: 1,
+                op: BinaryOp::LtEq,
+                literal: ScalarValue::Int64(20),
+            },
+        ];
+
+        assert_eq!(
+            range_interval_selectivity(&ranged, &inclusive_singleton, &config),
+            0.01
+        );
+        assert_eq!(
+            range_interval_selectivity(&ranged, &strict_contradiction, &config),
+            0.0
+        );
+        assert_eq!(
+            range_interval_selectivity(&ranged, &ordered_contradiction, &config),
+            0.0
+        );
+
+        let mut constant = test_column_profile(100.0, 1.0);
+        constant.lower_bound = Some(ScalarValue::Int64(20));
+        constant.upper_bound = Some(ScalarValue::Int64(20));
+        assert_eq!(
+            range_interval_selectivity(
+                &constant,
+                &[RangeConstraint {
+                    index: 0,
+                    op: BinaryOp::GtEq,
+                    literal: ScalarValue::Int64(20),
+                }],
+                &config
+            ),
+            1.0
+        );
+        assert_eq!(
+            range_interval_selectivity(
+                &constant,
+                &[RangeConstraint {
+                    index: 0,
+                    op: BinaryOp::Gt,
+                    literal: ScalarValue::Int64(20),
+                }],
+                &config
+            ),
+            0.0
+        );
+        assert_eq!(
+            range_interval_selectivity(
+                &constant,
+                &[RangeConstraint {
+                    index: 0,
+                    op: BinaryOp::Lt,
+                    literal: ScalarValue::Int64(10),
+                }],
+                &config
+            ),
+            0.0
+        );
+    }
+
+    #[test]
+    fn reversed_range_operands_respect_independent_normalization_flags() {
+        let mut ctx = QueryContext::new();
+        let value = ColumnData::new("value", DataType::Int64).add(&mut ctx);
+        let twenty = ExprData::Literal(ScalarValue::Int64(20)).add(&mut ctx);
+        let value_ref = ExprData::ColumnRef(value).add(&mut ctx);
+        let reversed_lower = ExprData::Binary {
+            op: BinaryOp::LtEq,
+            left: twenty,
+            right: value_ref,
+        }
+        .add(&mut ctx);
+        let value_ref = ExprData::ColumnRef(value).add(&mut ctx);
+        let thirty = ExprData::Literal(ScalarValue::Int64(30)).add(&mut ctx);
+        let upper = ExprData::Binary {
+            op: BinaryOp::LtEq,
+            left: value_ref,
+            right: thirty,
+        }
+        .add(&mut ctx);
+        let predicate = ExprData::Nary {
+            op: NaryOp::And,
+            exprs: vec![reversed_lower, upper],
+        }
+        .add(&mut ctx);
+        let mut column = test_column_profile(100.0, 100.0);
+        column.lower_bound = Some(ScalarValue::Int64(0));
+        column.upper_bound = Some(ScalarValue::Int64(100));
+        let profile = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [(value, column)].into_iter().collect(),
+        );
+
+        let estimate = |normalize_filter_operands, correlate_same_column_ranges| {
+            apply_selection_profile(
+                profile.clone(),
+                predicate,
+                &ctx,
+                &CardinalityEstimationConfig {
+                    normalize_filter_operands,
+                    correlate_same_column_ranges,
+                    ..CardinalityEstimationConfig::default()
+                },
+            )
+            .rows
+            .value
+        };
+
+        assert_eq!(estimate(false, false), 6.0);
+        assert_eq!(estimate(true, false), 24.0);
+        assert_eq!(estimate(false, true), 20.0);
+        assert_eq!(estimate(true, true), 10.0);
     }
 
     #[test]
