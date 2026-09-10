@@ -728,7 +728,12 @@ pub struct ColumnDistributionStatistics {
     pub histogram: Option<Histogram>,
 }
 
-/// One ordered set of columns known to uniquely identify a table row.
+/// Provider-supplied assertion that an ordered column set forms a unique key.
+///
+/// The core validates only that the set is non-empty, bounded, and duplicate-free. It does not
+/// inspect the table schema or data, distinguish declared from enforced constraints, or assign SQL
+/// semantics to nullable key columns. Providers must include a key only when its enforcement and
+/// null treatment make the uniqueness claim safe for downstream optimizer use.
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UniqueKey {
@@ -736,7 +741,7 @@ pub struct UniqueKey {
 }
 
 impl UniqueKey {
-    /// Creates a bounded unique key.
+    /// Creates a structurally valid bounded unique-key assertion.
     pub fn try_new(columns: Vec<String>) -> Result<Self, UniqueKeyError> {
         let columns = BoundedVec::try_new(columns)?;
         if columns.is_empty() {
@@ -800,17 +805,25 @@ impl fmt::Display for UniqueKeyError {
 
 impl std::error::Error for UniqueKeyError {}
 
-/// An enforced relationship from local columns to a referenced unique key.
+/// Provider-supplied mapping from local columns to a referenced unique-key column set.
+///
+/// The core validates only local shape: both sets are non-empty, bounded, duplicate-free, and have
+/// equal arity. It does not resolve the referenced table or columns, prove referenced uniqueness,
+/// verify enforcement, or define how nullable local columns participate. In particular, SQL
+/// foreign-key null behavior depends on the provider's dialect and match mode. Providers must
+/// expose only relationships whose enforcement and null semantics are safe for the intended
+/// optimizer inference.
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForeignKey {
     columns: BoundedVec<String, MAX_KEY_COLUMNS>,
+    /// Table containing the provider-asserted referenced unique key.
     pub referenced_table: TableRef,
     referenced_columns: BoundedVec<String, MAX_KEY_COLUMNS>,
 }
 
 impl ForeignKey {
-    /// Creates a bounded key relationship when both ordered column sets have equal arity.
+    /// Creates a structurally valid bounded key relationship.
     pub fn try_new(
         columns: Vec<String>,
         referenced_table: TableRef,
@@ -931,11 +944,17 @@ fn duplicate_column(columns: &[String]) -> Option<String> {
         .find_map(|(index, column)| columns[..index].contains(column).then(|| column.clone()))
 }
 
-/// Bounded structural constraints supplied independently from observed statistics.
+/// Bounded provider-supplied structural metadata, independent from observed statistics.
+///
+/// These values are assertions rather than constraints enforced by the in-memory catalog. The
+/// provider is responsible for validating table and column existence, referenced-key uniqueness,
+/// enforcement state, and dialect-specific nullable-key semantics before publishing them.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TableConstraints {
+    /// Provider-asserted unique keys for this table.
     pub unique_keys: BoundedVec<UniqueKey, MAX_TABLE_KEYS>,
+    /// Provider-asserted relationships from this table to referenced unique keys.
     pub foreign_keys: BoundedVec<ForeignKey, MAX_TABLE_KEYS>,
 }
 
@@ -1429,7 +1448,7 @@ mod tests {
                 ColumnStatistics {
                     lower_bound: None,
                     upper_bound: None,
-                    frequency: Some(95),
+                    frequency: Some(90),
                     distinct: Some(3),
                     distribution: Some(ColumnDistributionStatistics {
                         null_count: Some(NullCountStatistics {
@@ -1508,6 +1527,10 @@ mod tests {
             .map(|bucket| bucket.frequency)
             .sum();
         assert_eq!(mcv_frequency + residual_frequency, 90);
+        assert_eq!(
+            mcv_frequency + residual_frequency,
+            decoded.column_statistics["status"].frequency.unwrap()
+        );
         assert_eq!(
             mcv_frequency + residual_frequency + distribution.null_count.as_ref().unwrap().count,
             decoded.row_count.unwrap()
