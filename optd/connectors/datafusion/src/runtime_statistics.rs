@@ -194,6 +194,7 @@ mod tests {
             stats.column_statistics["id"].lower_bound,
             Some(ScalarValue::Int64(1))
         );
+        assert!(stats.column_statistics["id"].distribution.is_none());
         assert_eq!(builder.cache_len().await, 1);
 
         let _ = builder.build_for_plan(&plan).await.unwrap();
