@@ -53,6 +53,8 @@ pub struct BoundedStatisticsCollectionMetrics {
     pub grouped_values: usize,
     pub eligible_columns: usize,
     pub skipped_columns: usize,
+    /// Columns whose grouped values cannot be represented by the core contract.
+    pub unsupported_columns: usize,
     pub elapsed: Duration,
 }
 
@@ -92,6 +94,10 @@ pub async fn collect_table_statistics_for_table_ref(
 /// offline preparation, then persist or install the returned statistics themselves. Eligible
 /// columns use the experiment policy: bounded distributions are collected when the non-null NDV
 /// is below either the absolute threshold or the configured fraction of non-null rows.
+///
+/// Collection issues multiple scans. The source must remain stable for the duration of the call,
+/// or the session/provider must supply a consistent snapshot. Detectable contradictions between
+/// the base profile and a grouped scan are rejected rather than published as exact statistics.
 pub async fn collect_bounded_table_statistics_for_table_ref(
     session: &SessionContext,
     table: &TableReference,
@@ -108,8 +114,10 @@ pub async fn collect_bounded_table_statistics_for_table_ref(
     let mut grouped_values = 0;
     let mut eligible_columns = 0;
     let mut skipped_columns = 0;
+    let mut unsupported_columns = 0;
 
     for column in columns {
+        let mut normalized_distinct = None;
         let column_statistics = statistics
             .column_statistics
             .get(*column)
@@ -126,21 +134,33 @@ pub async fn collect_bounded_table_statistics_for_table_ref(
             }),
             _ => None,
         };
+        let expected_frequency = column_statistics.frequency;
+        let expected_distinct = column_statistics.distinct;
         let eligible = distribution_eligible(column_statistics, config);
         let distribution = if eligible {
-            eligible_columns += 1;
             distribution_queries += 1;
-            let groups = collect_value_frequencies(session, &table_sql, column).await?;
-            grouped_values += groups.len();
-            build_distribution(
-                groups,
-                column_statistics
-                    .distinct
-                    .expect("eligibility requires NDV"),
-                null_count,
-                histogram_eligible(column_statistics),
-                config,
-            )?
+            let collected = collect_value_frequencies(session, &table_sql, column).await?;
+            grouped_values += collected.raw_groups;
+            if let Some(groups) = collected.groups {
+                eligible_columns += 1;
+                normalized_distinct = Some(groups.len());
+                build_distribution(
+                    groups,
+                    expected_distinct.expect("eligibility requires NDV"),
+                    collected.raw_groups,
+                    expected_frequency.expect("eligibility requires frequency"),
+                    null_count,
+                    histogram_eligible(column_statistics),
+                    config,
+                )?
+            } else {
+                skipped_columns += 1;
+                unsupported_columns += 1;
+                ColumnDistributionStatistics {
+                    null_count,
+                    ..Default::default()
+                }
+            }
         } else {
             skipped_columns += 1;
             ColumnDistributionStatistics {
@@ -148,11 +168,18 @@ pub async fn collect_bounded_table_statistics_for_table_ref(
                 ..Default::default()
             }
         };
-        statistics
+        let profile = statistics
             .column_statistics
             .get_mut(*column)
-            .expect("the column profile remains present")
-            .distribution = Some(distribution);
+            .expect("column exists");
+        if has_unrepresentable_float_bound(profile) {
+            profile.lower_bound = None;
+            profile.upper_bound = None;
+        }
+        if let Some(distinct) = normalized_distinct {
+            profile.distinct = Some(distinct);
+        }
+        profile.distribution = Some(distribution);
     }
 
     Ok(BoundedStatisticsCollection {
@@ -163,6 +190,7 @@ pub async fn collect_bounded_table_statistics_for_table_ref(
             grouped_values,
             eligible_columns,
             skipped_columns,
+            unsupported_columns,
             elapsed: started.elapsed(),
         },
     })
@@ -208,14 +236,22 @@ fn distribution_eligible(
 fn build_distribution(
     groups: Vec<MostCommonValue>,
     expected_distinct: usize,
+    raw_group_count: usize,
+    expected_frequency: usize,
     null_count: Option<NullCountStatistics>,
     collect_histogram: bool,
     config: &BoundedStatisticsCollectionConfig,
 ) -> DFResult<ColumnDistributionStatistics> {
     let distinct = groups.len();
-    if distinct != expected_distinct {
+    if raw_group_count != expected_distinct {
         return Err(DataFusionError::Internal(format!(
-            "statistics grouped {distinct} values but the base profile reported NDV {expected_distinct}"
+            "statistics grouped {raw_group_count} raw values but the base profile reported NDV {expected_distinct}; the source may have changed between scans"
+        )));
+    }
+    let grouped_frequency = checked_frequency_sum(&groups, "grouped values")?;
+    if grouped_frequency != expected_frequency {
+        return Err(DataFusionError::Internal(format!(
+            "statistics grouped frequency {grouped_frequency} but the base profile reported non-null frequency {expected_frequency}; the source may have changed between scans"
         )));
     }
     let mut ranked = (0..distinct).collect::<Vec<_>>();
@@ -231,6 +267,12 @@ fn build_distribution(
         .into_iter()
         .map(|index| groups[index].clone())
         .collect::<Vec<_>>();
+    let mcv_frequency = checked_frequency_sum(&mcv_entries, "MCV entries")?;
+    if mcv_frequency > expected_frequency {
+        return Err(DataFusionError::Internal(format!(
+            "MCV frequency {mcv_frequency} exceeds non-null frequency {expected_frequency}"
+        )));
+    }
     let mcv_completeness = if mcv_entries.len() == distinct {
         StatisticsCompleteness::Complete
     } else {
@@ -249,7 +291,26 @@ fn build_distribution(
             .enumerate()
             .filter_map(|(index, value)| (!mcv_indices.contains(&index)).then_some(value))
             .collect::<Vec<_>>();
-        let buckets = equi_depth_residual_buckets(&residual, config.histogram_buckets);
+        let expected_residual = expected_frequency - mcv_frequency;
+        let residual_frequency = checked_frequency_sum(&residual, "histogram residual")?;
+        if residual_frequency != expected_residual {
+            return Err(DataFusionError::Internal(format!(
+                "histogram residual frequency {residual_frequency} does not match non-MCV frequency {expected_residual}"
+            )));
+        }
+        let buckets = equi_depth_residual_buckets(&residual, config.histogram_buckets)?;
+        let histogram_frequency = buckets.iter().try_fold(0usize, |total, bucket| {
+            total.checked_add(bucket.frequency).ok_or_else(|| {
+                DataFusionError::Internal(
+                    "histogram bucket frequency sum overflowed usize".to_string(),
+                )
+            })
+        })?;
+        if histogram_frequency != expected_residual {
+            return Err(DataFusionError::Internal(format!(
+                "histogram frequency {histogram_frequency} does not match non-MCV frequency {expected_residual}"
+            )));
+        }
         Some(
             Histogram::try_new(
                 buckets,
@@ -269,6 +330,21 @@ fn build_distribution(
     })
 }
 
+fn checked_frequency_sum(entries: &[MostCommonValue], label: &str) -> DFResult<usize> {
+    entries.iter().try_fold(0usize, |total, entry| {
+        total.checked_add(entry.frequency).ok_or_else(|| {
+            DataFusionError::Internal(format!("{label} frequency sum overflowed usize"))
+        })
+    })
+}
+
+fn has_unrepresentable_float_bound(statistics: &ColumnStatistics) -> bool {
+    [&statistics.lower_bound, &statistics.upper_bound]
+        .into_iter()
+        .flatten()
+        .any(|bound| matches!(bound, ScalarValue::Float64(value) if value.is_nan()))
+}
+
 fn histogram_eligible(statistics: &ColumnStatistics) -> bool {
     matches!(
         statistics.lower_bound,
@@ -286,13 +362,13 @@ fn histogram_eligible(statistics: &ColumnStatistics) -> bool {
 fn equi_depth_residual_buckets(
     residual: &[MostCommonValue],
     bucket_count: usize,
-) -> Vec<HistogramBucket> {
+) -> DFResult<Vec<HistogramBucket>> {
     if residual.is_empty() || bucket_count == 0 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    let total = residual.iter().map(|entry| entry.frequency).sum::<usize>();
+    let total = checked_frequency_sum(residual, "histogram residual")?;
     if total == 0 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let mut buckets = Vec::<HistogramBucket>::new();
     let mut cumulative = 0usize;
@@ -310,18 +386,33 @@ fn equi_depth_residual_buckets(
         } else {
             let current = buckets.last_mut().expect("a histogram bucket exists");
             current.upper_bound = entry.value.clone();
-            current.frequency = current.frequency.saturating_add(entry.frequency);
+            current.frequency =
+                current
+                    .frequency
+                    .checked_add(entry.frequency)
+                    .ok_or_else(|| {
+                        DataFusionError::Internal(
+                            "histogram bucket frequency overflowed usize".to_string(),
+                        )
+                    })?;
         }
-        cumulative = cumulative.saturating_add(entry.frequency);
+        cumulative = cumulative.checked_add(entry.frequency).ok_or_else(|| {
+            DataFusionError::Internal("histogram cumulative frequency overflowed usize".to_string())
+        })?;
     }
-    buckets
+    Ok(buckets)
+}
+
+struct CollectedValueFrequencies {
+    groups: Option<Vec<MostCommonValue>>,
+    raw_groups: usize,
 }
 
 async fn collect_value_frequencies(
     session: &SessionContext,
     table_sql: &str,
     column: &str,
-) -> DFResult<Vec<MostCommonValue>> {
+) -> DFResult<CollectedValueFrequencies> {
     let quoted = quote_ident(column);
     let sql = format!(
         "SELECT {quoted} AS \"value\", COUNT(*) AS \"frequency\" \
@@ -329,7 +420,9 @@ async fn collect_value_frequencies(
          GROUP BY {quoted} ORDER BY \"value\" ASC"
     );
     let batches = session.sql(&sql).await?.collect().await?;
-    let mut groups = Vec::new();
+    let mut groups = Vec::<MostCommonValue>::new();
+    let mut raw_groups = 0;
+    let mut unsupported = false;
     for batch in &batches {
         let value_index = batch
             .schema()
@@ -340,16 +433,45 @@ async fn collect_value_frequencies(
             .index_of("frequency")
             .map_err(|error| DataFusionError::ArrowError(Box::new(error), None))?;
         for row in 0..batch.num_rows() {
+            raw_groups += 1;
             let value = DFScalarValue::try_from_array(batch.column(value_index), row)?;
             let frequency = DFScalarValue::try_from_array(batch.column(frequency_index), row)?;
-            if let (Some(value), Some(frequency)) =
-                (convert_scalar(value), scalar_to_usize(frequency))
+            let Some(value) = normalize_distribution_scalar(value) else {
+                unsupported = true;
+                continue;
+            };
+            let Some(frequency) = scalar_to_usize(frequency) else {
+                return Err(DataFusionError::Internal(
+                    "grouped statistics frequency was not a non-negative integer".to_string(),
+                ));
+            };
+            if matches!(value, ScalarValue::Float64(value) if value == 0.0)
+                && let Some(zero) = groups.iter_mut().find(
+                    |entry| matches!(entry.value, ScalarValue::Float64(value) if value == 0.0),
+                )
             {
+                zero.frequency = zero.frequency.checked_add(frequency).ok_or_else(|| {
+                    DataFusionError::Internal("signed-zero frequency overflowed usize".to_string())
+                })?;
+            } else {
                 groups.push(MostCommonValue { value, frequency });
             }
         }
     }
-    Ok(groups)
+    Ok(CollectedValueFrequencies {
+        groups: (!unsupported).then_some(groups),
+        raw_groups,
+    })
+}
+
+fn normalize_distribution_scalar(value: DFScalarValue) -> Option<ScalarValue> {
+    match value {
+        DFScalarValue::Float64(Some(value)) if value.is_nan() => None,
+        DFScalarValue::Float64(Some(value)) => {
+            Some(ScalarValue::Float64(if value == 0.0 { 0.0 } else { value }))
+        }
+        value => convert_scalar(value),
+    }
 }
 
 async fn collect_table_statistics_from_sql(
@@ -477,7 +599,9 @@ fn convert_scalar(value: DFScalarValue) -> Option<ScalarValue> {
         DFScalarValue::Boolean(Some(value)) => Some(ScalarValue::Boolean(value)),
         DFScalarValue::Int32(Some(value)) => Some(ScalarValue::Int32(value)),
         DFScalarValue::Int64(Some(value)) => Some(ScalarValue::Int64(value)),
-        DFScalarValue::Float64(Some(value)) => Some(ScalarValue::Float64(value)),
+        DFScalarValue::Float64(Some(value)) => {
+            Some(ScalarValue::Float64(if value == 0.0 { 0.0 } else { value }))
+        }
         DFScalarValue::Utf8(Some(value))
         | DFScalarValue::Utf8View(Some(value))
         | DFScalarValue::LargeUtf8(Some(value)) => Some(ScalarValue::Utf8(value)),
@@ -494,11 +618,57 @@ fn convert_scalar(value: DFScalarValue) -> Option<ScalarValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use datafusion::arrow::array::{Int64Array, StringArray};
+    use async_trait::async_trait;
+    use datafusion::arrow::array::{Decimal128Array, Float64Array, Int64Array, StringArray};
     use datafusion::arrow::datatypes::{DataType, Field, Schema};
+    use datafusion::catalog::TableProvider;
     use datafusion::datasource::MemTable;
+    use datafusion::logical_expr::{Expr, TableType};
+    use datafusion::physical_plan::ExecutionPlan;
+    use datafusion_catalog::Session;
+    use datafusion_datasource::memory::MemorySourceConfig;
     use optd_core::{BoundedVec, MemoryCatalog, TableConstraints, UniqueKey};
+    use std::any::Any;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Debug)]
+    struct ChangingTableProvider {
+        schema: Arc<Schema>,
+        batches: [RecordBatch; 2],
+        scans: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl TableProvider for ChangingTableProvider {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn schema(&self) -> Arc<Schema> {
+            self.schema.clone()
+        }
+
+        fn table_type(&self) -> TableType {
+            TableType::Base
+        }
+
+        async fn scan(
+            &self,
+            _state: &dyn Session,
+            projection: Option<&Vec<usize>>,
+            _filters: &[Expr],
+            _limit: Option<usize>,
+        ) -> DFResult<Arc<dyn ExecutionPlan>> {
+            let scan = self.scans.fetch_add(1, Ordering::SeqCst);
+            let batch = self.batches[usize::from(scan > 0)].clone();
+            Ok(MemorySourceConfig::try_new_exec(
+                &[vec![batch]],
+                self.schema.clone(),
+                projection.cloned(),
+            )?)
+        }
+    }
 
     #[tokio::test]
     async fn collect_table_statistics_extracts_column_profiles() {
@@ -653,6 +823,22 @@ mod tests {
             histogram_buckets: MAX_HISTOGRAM_BUCKETS + 1,
             ..Default::default()
         };
+        let zero_mcvs = BoundedStatisticsCollectionConfig {
+            mcv_limit: 0,
+            ..Default::default()
+        };
+        let zero_buckets = BoundedStatisticsCollectionConfig {
+            histogram_buckets: 0,
+            ..Default::default()
+        };
+        let invalid_fraction = BoundedStatisticsCollectionConfig {
+            max_distinct_fraction: f64::NAN,
+            ..Default::default()
+        };
+        let oversized_fraction = BoundedStatisticsCollectionConfig {
+            max_distinct_fraction: 1.01,
+            ..Default::default()
+        };
 
         let mcv_error = collect_bounded_table_statistics_for_table_ref(
             &session,
@@ -670,12 +856,56 @@ mod tests {
         )
         .await
         .unwrap_err();
+        let zero_mcv_error = collect_bounded_table_statistics_for_table_ref(
+            &session,
+            &TableReference::bare("unused"),
+            &[],
+            &zero_mcvs,
+        )
+        .await
+        .unwrap_err();
+        let zero_bucket_error = collect_bounded_table_statistics_for_table_ref(
+            &session,
+            &TableReference::bare("unused"),
+            &[],
+            &zero_buckets,
+        )
+        .await
+        .unwrap_err();
+        let fraction_error = collect_bounded_table_statistics_for_table_ref(
+            &session,
+            &TableReference::bare("unused"),
+            &[],
+            &invalid_fraction,
+        )
+        .await
+        .unwrap_err();
+        let oversized_fraction_error = collect_bounded_table_statistics_for_table_ref(
+            &session,
+            &TableReference::bare("unused"),
+            &[],
+            &oversized_fraction,
+        )
+        .await
+        .unwrap_err();
 
         assert!(mcv_error.to_string().contains("MCV limit"));
         assert!(
             histogram_error
                 .to_string()
                 .contains("histogram bucket count")
+        );
+        assert!(zero_mcv_error.to_string().contains("MCV limit 0"));
+        assert!(
+            zero_bucket_error
+                .to_string()
+                .contains("histogram bucket count 0")
+        );
+        assert!(fraction_error.to_string().contains("NDV fraction"));
+        assert!(
+            oversized_fraction_error
+                .to_string()
+                .contains("NDV fraction")
         );
     }
 
@@ -719,6 +949,339 @@ mod tests {
         assert_eq!(mcvs.entries()[0].value, ScalarValue::Utf8("b".into()));
         assert!(distribution.histogram.is_none());
         assert_eq!(collected.metrics.distribution_queries, 1);
+    }
+
+    #[tokio::test]
+    async fn bounded_collection_merges_signed_float_zero() {
+        let session = SessionContext::new();
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "value",
+            DataType::Float64,
+            false,
+        )]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(Float64Array::from(vec![-0.0, 0.0, 1.0]))],
+        )
+        .unwrap();
+        session
+            .register_table(
+                "signed_zero",
+                Arc::new(MemTable::try_new(schema, vec![vec![batch]]).unwrap()),
+            )
+            .unwrap();
+
+        let collected = collect_bounded_table_statistics_for_table_ref(
+            &session,
+            &TableReference::bare("signed_zero"),
+            &["value"],
+            &BoundedStatisticsCollectionConfig::default(),
+        )
+        .await
+        .unwrap();
+        let mcvs = collected.statistics.column_statistics["value"]
+            .distribution
+            .as_ref()
+            .unwrap()
+            .most_common_values
+            .as_ref()
+            .unwrap();
+
+        assert_eq!(
+            collected.statistics.column_statistics["value"].distinct,
+            Some(2)
+        );
+        assert_eq!(
+            collected.statistics.column_statistics["value"].lower_bound,
+            Some(ScalarValue::Float64(0.0))
+        );
+        assert_eq!(mcvs.entries().len(), 2);
+        assert_eq!(mcvs.entries()[0].value, ScalarValue::Float64(0.0));
+        assert_eq!(mcvs.entries()[0].frequency, 2);
+    }
+
+    #[tokio::test]
+    async fn bounded_collection_skips_nan_distribution_without_losing_safe_counts() {
+        let session = SessionContext::new();
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "value",
+            DataType::Float64,
+            true,
+        )]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(Float64Array::from(vec![
+                Some(f64::NAN),
+                Some(1.0),
+                Some(1.0),
+                None,
+            ]))],
+        )
+        .unwrap();
+        session
+            .register_table(
+                "nan_values",
+                Arc::new(MemTable::try_new(schema, vec![vec![batch]]).unwrap()),
+            )
+            .unwrap();
+
+        let collected = collect_bounded_table_statistics_for_table_ref(
+            &session,
+            &TableReference::bare("nan_values"),
+            &["value"],
+            &BoundedStatisticsCollectionConfig::default(),
+        )
+        .await
+        .unwrap();
+        let profile = &collected.statistics.column_statistics["value"];
+        let distribution = profile.distribution.as_ref().unwrap();
+
+        assert_eq!(profile.frequency, Some(3));
+        assert_eq!(profile.distinct, Some(2));
+        assert_eq!(profile.lower_bound, None);
+        assert_eq!(profile.upper_bound, None);
+        assert_eq!(
+            distribution.null_count,
+            Some(NullCountStatistics {
+                count: 1,
+                completeness: StatisticsCompleteness::Complete,
+                provenance: StatisticsProvenance::FullScan,
+            })
+        );
+        assert!(distribution.most_common_values.is_none());
+        assert!(distribution.histogram.is_none());
+        assert_eq!(collected.metrics.unsupported_columns, 1);
+    }
+
+    #[tokio::test]
+    async fn bounded_collection_accepts_float_infinities() {
+        let session = SessionContext::new();
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "value",
+            DataType::Float64,
+            false,
+        )]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(Float64Array::from(vec![
+                f64::NEG_INFINITY,
+                0.0,
+                f64::INFINITY,
+            ]))],
+        )
+        .unwrap();
+        session
+            .register_table(
+                "infinities",
+                Arc::new(MemTable::try_new(schema, vec![vec![batch]]).unwrap()),
+            )
+            .unwrap();
+
+        let collected = collect_bounded_table_statistics_for_table_ref(
+            &session,
+            &TableReference::bare("infinities"),
+            &["value"],
+            &BoundedStatisticsCollectionConfig {
+                mcv_limit: 1,
+                histogram_buckets: 2,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let histogram = collected.statistics.column_statistics["value"]
+            .distribution
+            .as_ref()
+            .unwrap()
+            .histogram
+            .as_ref()
+            .unwrap();
+
+        assert_eq!(histogram.buckets().len(), 2);
+        assert_eq!(
+            histogram.buckets()[1].upper_bound,
+            ScalarValue::Float64(f64::INFINITY)
+        );
+    }
+
+    #[tokio::test]
+    async fn bounded_collection_rejects_a_source_that_changes_between_scans() {
+        let session = SessionContext::new();
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "value",
+            DataType::Int64,
+            false,
+        )]));
+        let first =
+            RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(vec![1, 2]))])
+                .unwrap();
+        let second = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(Int64Array::from(vec![1, 1, 1, 2]))],
+        )
+        .unwrap();
+        session
+            .register_table(
+                "changing",
+                Arc::new(ChangingTableProvider {
+                    schema,
+                    batches: [first, second],
+                    scans: AtomicUsize::new(0),
+                }),
+            )
+            .unwrap();
+
+        let error = collect_bounded_table_statistics_for_table_ref(
+            &session,
+            &TableReference::bare("changing"),
+            &["value"],
+            &BoundedStatisticsCollectionConfig::default(),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("source may have changed between scans")
+        );
+        assert!(error.to_string().contains("grouped frequency 4"));
+        assert!(error.to_string().contains("non-null frequency 2"));
+    }
+
+    #[test]
+    fn bounded_weighted_histogram_keeps_value_groups_whole_at_bucket_boundaries() {
+        let residual = [(1, 1), (2, 8), (3, 1), (4, 8), (5, 1)]
+            .into_iter()
+            .map(|(value, frequency)| MostCommonValue {
+                value: ScalarValue::Int64(value),
+                frequency,
+            })
+            .collect::<Vec<_>>();
+
+        let buckets = equi_depth_residual_buckets(&residual, 2).unwrap();
+
+        assert_eq!(
+            buckets,
+            vec![
+                HistogramBucket {
+                    lower_bound: ScalarValue::Int64(1),
+                    upper_bound: ScalarValue::Int64(3),
+                    frequency: 10,
+                },
+                HistogramBucket {
+                    lower_bound: ScalarValue::Int64(4),
+                    upper_bound: ScalarValue::Int64(5),
+                    frequency: 9,
+                },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn bounded_collection_builds_decimal_histograms() {
+        let session = SessionContext::new();
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "value",
+            DataType::Decimal128(10, 2),
+            false,
+        )]));
+        let values = Decimal128Array::from_iter_values([100, 200, 300, 400])
+            .with_precision_and_scale(10, 2)
+            .unwrap();
+        let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(values)]).unwrap();
+        session
+            .register_table(
+                "decimals",
+                Arc::new(MemTable::try_new(schema, vec![vec![batch]]).unwrap()),
+            )
+            .unwrap();
+
+        let collected = collect_bounded_table_statistics_for_table_ref(
+            &session,
+            &TableReference::bare("decimals"),
+            &["value"],
+            &BoundedStatisticsCollectionConfig {
+                mcv_limit: 1,
+                histogram_buckets: 2,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let histogram = collected.statistics.column_statistics["value"]
+            .distribution
+            .as_ref()
+            .unwrap()
+            .histogram
+            .as_ref()
+            .unwrap();
+
+        assert_eq!(histogram.buckets().len(), 2);
+        assert!(histogram.buckets().iter().all(|bucket| matches!(
+            (&bucket.lower_bound, &bucket.upper_bound),
+            (
+                ScalarValue::Decimal128 {
+                    precision: 10,
+                    scale: 2,
+                    ..
+                },
+                ScalarValue::Decimal128 {
+                    precision: 10,
+                    scale: 2,
+                    ..
+                }
+            )
+        )));
+    }
+
+    #[tokio::test]
+    async fn bounded_collection_handles_empty_and_all_null_columns() {
+        let session = SessionContext::new();
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "value",
+            DataType::Int64,
+            true,
+        )]));
+        let empty = RecordBatch::new_empty(schema.clone());
+        let nulls = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(Int64Array::from(vec![None, None, None]))],
+        )
+        .unwrap();
+        session
+            .register_table(
+                "empty_values",
+                Arc::new(MemTable::try_new(schema.clone(), vec![vec![empty]]).unwrap()),
+            )
+            .unwrap();
+        session
+            .register_table(
+                "null_values",
+                Arc::new(MemTable::try_new(schema, vec![vec![nulls]]).unwrap()),
+            )
+            .unwrap();
+
+        for (table, rows, nulls) in [("empty_values", 0, 0), ("null_values", 3, 3)] {
+            let collected = collect_bounded_table_statistics_for_table_ref(
+                &session,
+                &TableReference::bare(table),
+                &["value"],
+                &BoundedStatisticsCollectionConfig::default(),
+            )
+            .await
+            .unwrap();
+            let profile = &collected.statistics.column_statistics["value"];
+            let distribution = profile.distribution.as_ref().unwrap();
+
+            assert_eq!(collected.statistics.row_count, Some(rows));
+            assert_eq!(profile.frequency, Some(0));
+            assert_eq!(profile.distinct, Some(0));
+            assert_eq!(distribution.null_count.as_ref().unwrap().count, nulls);
+            assert!(distribution.most_common_values.is_none());
+            assert!(distribution.histogram.is_none());
+            assert_eq!(collected.metrics.distribution_queries, 0);
+        }
     }
 
     #[tokio::test]
