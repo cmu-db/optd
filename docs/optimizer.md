@@ -1,333 +1,104 @@
-# Optimizer
+# Optimizer Architecture
 
-## Goal
+## Scope and Sources of Truth
 
-Build an optimization framework for `optd` that matches the existing IR model:
-operators, expressions, and columns are arena-allocated handles owned by `QueryContext`.
+The framework lives in `optd/core/src/optimize/`. The DataFusion connector assembles the production
+pipeline in `optd/connectors/datafusion/src/runner.rs::default_pass_manager`; use that function as
+the authoritative pass list and order.
 
-The optimizer should favor append-only rewrites. A pass creates replacement nodes and redirects
-parents or the query root to those replacements. Old nodes remain valid but may become unreachable.
+Related design documents:
 
-## Core Invariant
+- `docs/analysis_framework.md` — demand-driven analyses
+- `docs/holistic_unnesting.md` — unnesting design
+- `docs/join_ordering_design.md` — join enumeration and costing
+- `docs/query_hypergraph.md` — join hypergraph representation
 
-Optimization passes should treat existing IR handles as immutable.
+## Append-Only Invariant
 
-- Do not mutate existing `OperatorData`, `ExprData`, or `ColumnData` during normal optimization.
-- Add replacement operators and expressions with `QueryContext::add_operator` and
-  `QueryContext::add_expr`.
-- Update the reachable plan through rewrite maps and `QueryContext::set_root`.
-- Analysis cache entries for old handles remain correct because the payload behind each handle does
-  not change.
+Optimization treats existing `OperatorData`, `ExprData`, and `ColumnData` payloads as immutable.
+A pass appends replacement nodes to `OptimizerContext::query` and records old-to-new operator
+mappings in `OptimizerContext::rewrites`. Parents and the query root are then materialized with the
+resolved inputs.
 
-This means the first optimizer interface does not need LLVM-style preserved-analysis metadata.
-New handles simply compute analysis results on demand.
+This preserves analysis results associated with old handles: their payloads never change. Use
+`QueryContext::add_operator`, `add_expr`, and `add_column`, or the payload `.add(...)` helpers, rather
+than mutating an existing node during a normal rewrite.
 
-## Pass Interface
+## Pass Interfaces
 
-Passes should report whether they changed the reachable plan.
+All passes implement `Pass`, which supplies a stable name. There are two implementation levels:
 
-```rust
-pub type OptimizeResult<T> = Result<T, OptimizeError>;
+- `QueryPass` rewrites or analyzes a whole query and returns `PassResult::Changed` or
+  `PassResult::Unchanged`.
+- `OperatorRewrite` handles one operator and returns `Rewrite::Keep` or
+  `Rewrite::Replace(new_operator)`. `OperatorRewriteAdaptor` turns it into a `QueryPass` and owns
+  traversal, input resolution, parent rebuilding, and rewrite-map updates.
 
-pub trait Pass {
-    fn name(&self) -> &'static str;
-}
+`OperatorRewrite` defaults to bottom-up traversal and may opt into top-down traversal through
+`Direction`. Traversal visits each reachable operator handle once per pass invocation. Shared inputs
+are visited once, and rewritten paths are materialized through the rewrite map.
 
-pub trait QueryPass: Pass {
-    fn run(&mut self, ctx: &mut OptimizerContext) -> OptimizeResult<PassResult>;
-}
+A rule must return `Rewrite::Keep` when it made no change. A `QueryPass` must likewise return
+`PassResult::Unchanged` once stable. Reporting a change unconditionally prevents convergence and,
+when an iteration limit is configured, produces `OptimizeError::MaxIterationsReached`.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PassResult {
-    Unchanged,
-    Changed,
-}
-```
+## Rewrite Map and Root Materialization
 
-`QueryPass` is the primitive pass type stored by the pass manager. Smaller pass types can be adapted
-into query passes:
+`RewriteMap::replace(old, new)` records a replacement, and `RewriteMap::resolve(op)` follows a chain
+to its latest operator. The adaptor rebuilds reachable parents whose inputs resolve to replacements.
+After a changed pass invocation, `PassManager` resolves and updates the query root.
 
-- `OperatorRewrite`: local relational rewrite over one operator and its rewritten inputs.
-- `ExprRewrite`: local scalar-expression rewrite over one expression tree.
-- Cascades/memo optimization: whole-query pass that owns its own exploration state.
-
-Do not add more pass levels until the IR has a concrete need for them.
-
-## Operator Rewrite Interface
-
-```rust
-pub trait OperatorRewrite: Pass {
-    fn direction(&self) -> Direction {
-        Direction::BottomUp
-    }
-
-    fn rewrite(
-        &mut self,
-        operator: Operator,
-        ctx: &mut OptimizerContext,
-    ) -> OptimizeResult<Rewrite>;
-}
-
-pub enum Direction {
-    BottomUp,
-    TopDown,
-}
-
-pub enum Rewrite {
-    Keep,
-    Replace(Operator),
-}
-```
-
-`OperatorRewriteAdaptor` now owns traversal, rewrite-map updates, and parent/root
-materialization. Rules pattern-match one operator and return `Keep`/`Replace`.
-
-## Expression Rewrite Interface
-
-Expression rewrites should be a separate adaptor because scalar expression traversal and relational
-operator traversal have different concerns.
-
-```rust
-pub trait ExprRewrite: Pass {
-    fn rewrite_expr(
-        &mut self,
-        expr: Expr,
-        ctx: &mut OptimizerContext,
-    ) -> OptimizeResult<ExprRewriteResult>;
-}
-
-pub enum ExprRewriteResult {
-    Keep,
-    Replace(Expr),
-}
-```
-
-An expression rewrite adaptor walks expression fields inside reachable operators. If any expression
-field changes, the adaptor appends a replacement operator and updates the rewrite map.
-
-## Rewrite Map
-
-The pass manager or traversal adaptor should maintain replacement state.
-
-```rust
-pub struct RewriteMap {
-    replacements: HashMap<Operator, Operator>,
-}
-
-impl RewriteMap {
-    pub fn replace(&mut self, old: Operator, new: Operator);
-    pub fn resolve(&self, operator: Operator) -> Operator;
-}
-```
-
-`resolve` should follow chains so a later rewrite sees the latest replacement for each operator.
+Replacements may leave unreachable nodes in the arenas. This is intentional: deduplication and
+compaction are not responsibilities of `QueryContext`.
 
 ## Pass Manager
 
-The pass manager runs query passes in order and repeats while passes keep changing the plan.
+`PassManager` runs passes in registration order. Each individual pass runs to fixpoint before the
+next pass starts. `PassManager::new()` has no iteration limit;
+`PassManager::with_max_iterations(n)` applies a per-pass safeguard.
 
-```rust
-pub struct PassManager {
-    passes: Vec<Box<dyn QueryPass>>,
-    max_iterations: usize,
-}
+Every invocation records a `PassProfile` with pass index, pass-local iteration, result, and duration.
+`run_with_trace` additionally snapshots the query after each invocation for optimizer explain
+output.
+
+## DataFusion Pipeline
+
+At the time of writing, `default_pass_manager` registers:
+
+1. `SubqueryToJoin`
+2. `ExprSimplify`
+3. `HolisticUnnesting`
+4. `MarkJoinToSemiJoin`
+5. `PredicatePushdown`
+6. `JoinTreeNormalize`
+7. `ProjectionElimination`
+8. `JoinOrdering`
+
+Do not duplicate this list in operational instructions; it changes as the optimizer evolves. Update
+this section when the architecture changes, while treating `default_pass_manager` as canonical.
+
+## Adding or Changing a Pass
+
+1. Implement the pass under `optd/core/src/optimize/` and add its module/re-export.
+2. Implement `OperatorRewrite` for a local rule or `QueryPass` for a whole-query rewrite.
+3. Re-export public APIs from `optd/core/src/lib.rs` when needed.
+4. Register the pass in `default_pass_manager` at the semantically correct point.
+5. Add narrow core tests; add SLT coverage when behavior is observable through DataFusion.
+6. Verify convergence and run checks appropriate to the changed surface in `docs/development.md`.
+7. Update this document when the pipeline or framework contract changes.
+
+Ordering is semantic. For example, expression cleanup and unnesting must occur before passes that
+rely on explicit join shapes. Add or update a pipeline-order test when introducing such a dependency.
+
+## Profiling
+
+Build and run the profiling binary with an optional run count (default `100`):
+
+```sh
+cargo build --release -p optd-datafusion --bin profile_passes
+./target/release/profile_passes [runs]
 ```
 
-Initial behavior:
-
-- Read `ctx.query.root()`.
-- Run each pass in registration order.
-- Let passes or adaptors update the root when they replace it.
-- Stop when a full iteration reports no changes.
-- Return an error if `max_iterations` is reached.
-
-No analysis invalidation is needed under the append-only invariant.
-
-## Run Tracking and Scheduling
-
-Append-only rewrites avoid stale analysis caches, but they do not automatically avoid repeated rule
-work. A fixpoint pass manager can keep seeing equivalent replacement shapes unless the adaptor tracks
-what has already been attempted.
-
-The first implementation can be conservative and simple:
-
-- Within one pass invocation, visit each reachable operator handle once.
-- Across fixpoint iterations, allow revisiting new handles because new surrounding context may make
-  a rule applicable.
-- Use `max_iterations` to prevent accidental non-termination.
-
-Potential later improvements:
-
-- Track `(pass_name, operator)` attempts inside a single optimizer run.
-- Track `(pass_name, structural_fingerprint)` attempts to avoid retrying the same shape after it is
-  rebuilt with fresh handles.
-- Let a rewrite rule return a scheduling hint when retrying a replacement would be useless.
-
-Structural fingerprinting belongs in optimizer infrastructure, not `QueryContext`. `QueryContext`
-should keep returning fresh handles from `add_operator` and `add_expr`.
-
-## Traversal, Scope, and Boundaries
-
-The first traversal adaptor should support bottom-up relational traversal from the query root.
-
-It should:
-
-- Visit each reachable operator once per pass.
-- Rewrite children before parents.
-- Rebuild parent operators when any child input changes.
-- Update the root if the original root is replaced.
-
-Subqueries embedded in expressions should be opt-in. They are reachable plan fragments, but some
-rules may only be valid for the main relational tree.
-
-```rust
-pub enum RewriteScope {
-    MainQueryOnly,
-    IncludeSubqueries,
-}
-```
-
-Scope only answers which fragments are traversed. It does not answer whether a rewrite may cross a
-semantic boundary. CTEs, shared subplans, materialization points, and recursive queries will likely
-need a separate boundary policy later.
-
-```rust
-pub struct RewriteOptions {
-    pub scope: RewriteScope,
-    pub boundaries: BoundaryPolicy,
-}
-
-pub enum BoundaryPolicy {
-    RespectBarriers,
-    Transparent,
-}
-```
-
-For example, pushing a filter into a shared CTE producer may be invalid if other consumers do not
-have the same filter. With append-only IR, the valid rewrite is usually to create a filtered
-per-consumer alternative while leaving the shared producer unchanged.
-
-## Cascades Direction
-
-Cascades can be implemented as a `QueryPass` that builds an optimizer-owned memo over the reachable
-`QueryContext` plan. `QueryContext` remains the source and target IR; the memo owns equivalence
-classes and exploration indexes.
-
-```rust
-pub struct Memo {
-    classes: Vec<EquivalenceClass>,
-    exprs: Vec<MemoExpr>,
-    by_operator: HashMap<Operator, MemoExprId>,
-    by_fingerprint: HashMap<MemoFingerprint, MemoExprId>,
-}
-
-pub struct EquivalenceClass {
-    members: Vec<MemoExprId>,
-}
-
-pub struct MemoExpr {
-    operator: Operator,
-    inputs: Vec<EquivalenceClassId>,
-}
-```
-
-An equivalence class is a set of logically equivalent expressions. A memo expression points to child
-equivalence classes, not concrete child operators. That distinction is what lets Cascades represent
-alternatives cleanly.
-
-Deduplication should live in the memo, not in `QueryContext`. `QueryContext::add_operator` and
-`QueryContext::add_expr` should keep appending fresh handles.
-
-## Initial Passes
-
-Good first rules:
-
-- `EliminateIdentityProjection`: remove projections that preserve input column order exactly.
-- `MergeSelections`: combine adjacent selections with `AND`.
-- `MergeLimits`: combine adjacent limits when fetch/offset semantics are straightforward.
-- `PruneUnusedMapComputations`: remove computed columns that are not demanded by ancestors.
-
-These should be deterministic heuristic rewrites. Cost-based planning can come later.
-
-## Implementation Tasks
-
-1. Add arena convenience methods.
-
-   Add inherent methods on the arena payload types:
-
-   ```rust
-   impl OperatorData {
-       pub fn add(self, ctx: &mut QueryContext) -> Operator {
-           QueryContext::add_operator(ctx, self)
-       }
-   }
-
-   impl ExprData {
-       pub fn add(self, ctx: &mut QueryContext) -> Expr {
-           QueryContext::add_expr(ctx, self)
-       }
-   }
-
-   impl ColumnData {
-       pub fn add(self, ctx: &mut QueryContext) -> Column {
-           QueryContext::add_column(ctx, self)
-       }
-   }
-   ```
-
-   Keep the existing `ctx.add_operator`, `ctx.add_expr`, and `ctx.add_column` APIs. These methods
-   are only ergonomic helpers for builders and optimizer rewrites. Do not use `intern` naming
-   because `QueryContext` should not deduplicate payloads.
-
-2. Add optimizer module skeleton.
-
-   Create `optd/core/src/optimize.rs` or `optd/core/src/optimize/mod.rs` with `OptimizeError`, `OptimizeResult`,
-   `Pass`, `QueryPass`, `PassResult`, and `PassManager`. Re-export stable public pieces from
-   `optd/core/src/lib.rs`.
-
-3. Implement append-only rewrite infrastructure.
-
-   Add `RewriteMap`, root replacement handling, and helper functions for resolving replacement
-   chains. The first version can be handle-based and local to one pass invocation.
-
-4. Add traversal helpers.
-
-   Provide bottom-up traversal from `QueryContext::root()` over relational inputs. Keep subquery
-   traversal behind `RewriteScope::IncludeSubqueries`, even if the first implementation only uses
-   `MainQueryOnly`.
-
-5. Prototype operator rewrite adaptor.
-
-   Implement an adaptor from a candidate `OperatorRewrite` interface into `QueryPass`. Treat this as
-   experimental until input roles, shared subplans, and scheduling behavior are settled.
-
-6. Add expression rewrite adaptor.
-
-   Implement `ExprRewrite` separately from operator rewrites. The adaptor should rebuild expressions
-   append-only and append replacement operators when operator expression fields change.
-
-7. Add first deterministic cleanup passes.
-
-   Start with narrow, easy-to-test rules:
-
-   - `EliminateIdentityProjection`
-   - `MergeSelections`
-   - `MergeLimits`
-
-   Add unit tests beside the optimizer implementation and integration tests when display or
-   Substrait-visible behavior changes.
-
-8. Add run tracking safeguards.
-
-   Start with "visit each reachable operator once per pass invocation" and `max_iterations`.
-   Consider structural fingerprints only after a real rewrite loop appears.
-
-## Open Questions
-
-- Should mutation APIs like `operator_mut` remain available to optimizer passes, or should pass
-  implementations only receive append helpers?
-- Should run tracking be handle-based, fingerprint-based, or both?
-- How should expression-level rewrites compose with operator rewrites in one fixpoint pipeline?
-- What boundary model should be used once CTEs or shared-subplan operators exist?
-- Should unreachable arena nodes ever be compacted, or is append-only storage acceptable for all
-  optimization workflows?
+Output is TSV with query, run, iteration, pass index, pass name, result, and duration. Measure before
+encoding performance claims in documentation; do not preserve point-in-time timings as permanent
+agent instructions.
