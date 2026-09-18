@@ -13,7 +13,9 @@ use datafusion::datasource::provider_as_source;
 use datafusion::execution::FunctionRegistry;
 use datafusion::functions::core::coalesce;
 use datafusion::functions_aggregate::count::count_all;
-use datafusion::functions_aggregate::expr_fn::{avg, count, max, min, sum};
+use datafusion::functions_aggregate::expr_fn::{
+    avg, avg_distinct, count, count_distinct, max, min, sum, sum_distinct,
+};
 use datafusion::logical_expr::{
     BinaryExpr, Expr as DFExpr, JoinType as DFJoinType, LogicalPlan, LogicalPlanBuilder,
     Operator as DFOperator, SortExpr, TableSource, logical_plan::Values,
@@ -1378,11 +1380,18 @@ pub(crate) fn convert_agg_expr(
 ) -> ToDFResult<DFExpr> {
     match agg {
         AggregateExpr::CountStar => Ok(count_all()),
-        AggregateExpr::Func { func, arg, .. } => {
+        AggregateExpr::Func {
+            func,
+            arg,
+            distinct,
+        } => {
             let arg_expr = convert_expr(*arg, ctx, outer_refs, column_qualifiers)?;
             Ok(match func {
+                AggregateFunction::Count if *distinct => count_distinct(arg_expr),
                 AggregateFunction::Count => count(arg_expr),
+                AggregateFunction::Sum if *distinct => sum_distinct(arg_expr),
                 AggregateFunction::Sum => sum(arg_expr),
+                AggregateFunction::Avg if *distinct => avg_distinct(arg_expr),
                 AggregateFunction::Avg => avg(arg_expr),
                 AggregateFunction::Min => min(arg_expr),
                 AggregateFunction::Max => max(arg_expr),
@@ -1446,17 +1455,64 @@ pub(crate) fn convert_join_type(jt: &optd_core::JoinType) -> ToDFResult<DFJoinTy
 mod tests {
     use std::sync::Arc;
 
-    use super::{ToDFError, to_logical_plan};
+    use super::{TableMap, ToDFError, ToDfContext, convert_agg_expr, to_logical_plan};
     use datafusion::arrow::datatypes::DataType;
-    use datafusion::logical_expr::LogicalPlan;
+    use datafusion::logical_expr::{Expr as DFExpr, LogicalPlan};
     use datafusion::prelude::SessionContext;
     use optd_core::{
-        ColumnData, ConstScan, ExprData, MemoryCatalog, OperatorData, PlannedQuery, QueryContext,
-        ScalarValue,
+        AggregateExpr, AggregateFunction, ColumnData, ConstScan, ExprData, MemoryCatalog,
+        OperatorData, PlannedQuery, QueryContext, ScalarValue,
     };
 
     fn planned(query: QueryContext) -> PlannedQuery {
         PlannedQuery::new(query, Arc::new(MemoryCatalog::new("memory", "public")))
+    }
+
+    fn assert_distinct_aggregate_lowers(func: AggregateFunction, expected_name: &str) {
+        let session = SessionContext::new();
+        let mut query = QueryContext::new();
+        let input = ColumnData::new("input", DataType::Int64).add(&mut query);
+        let arg = ExprData::ColumnRef(input).add(&mut query);
+        let tables = TableMap::new();
+        let mut ctx = ToDfContext::new(
+            &query,
+            Arc::new(MemoryCatalog::new("memory", "public")),
+            &tables,
+            &session,
+        );
+
+        let lowered = convert_agg_expr(
+            &AggregateExpr::Func {
+                func,
+                arg,
+                distinct: true,
+            },
+            &mut ctx,
+            &Default::default(),
+            &Default::default(),
+        )
+        .unwrap();
+
+        let DFExpr::AggregateFunction(aggregate) = lowered else {
+            panic!("expected aggregate function")
+        };
+        assert_eq!(aggregate.func.name(), expected_name);
+        assert!(aggregate.params.distinct);
+    }
+
+    #[test]
+    fn lowers_count_distinct() {
+        assert_distinct_aggregate_lowers(AggregateFunction::Count, "count");
+    }
+
+    #[test]
+    fn lowers_sum_distinct() {
+        assert_distinct_aggregate_lowers(AggregateFunction::Sum, "sum");
+    }
+
+    #[test]
+    fn lowers_avg_distinct() {
+        assert_distinct_aggregate_lowers(AggregateFunction::Avg, "avg");
     }
 
     #[tokio::test]
