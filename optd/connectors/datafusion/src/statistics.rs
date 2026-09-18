@@ -54,6 +54,7 @@ async fn collect_table_statistics_from_sql(
                 upper_bound,
                 frequency,
                 distinct,
+                distribution: None,
             },
         );
     }
@@ -62,6 +63,7 @@ async fn collect_table_statistics_from_sql(
         row_count,
         size_bytes: None,
         column_statistics,
+        constraints: Default::default(),
     })
 }
 
@@ -73,7 +75,14 @@ pub async fn collect_and_set_table_statistics(
     table_name: &str,
     columns: &[&str],
 ) -> DFResult<()> {
-    let statistics = collect_table_statistics(session, table_name, columns).await?;
+    let constraints = catalog
+        .table_by_ref(&table_ref)
+        .map_err(|err| DataFusionError::External(Box::new(err)))?
+        .statistics
+        .map(|statistics| statistics.constraints)
+        .unwrap_or_default();
+    let mut statistics = collect_table_statistics(session, table_name, columns).await?;
+    statistics.constraints = constraints;
     catalog
         .set_table_statistics(table_ref, statistics)
         .map_err(|err| DataFusionError::External(Box::new(err)))
@@ -162,6 +171,7 @@ mod tests {
     use datafusion::arrow::array::{Int64Array, StringArray};
     use datafusion::arrow::datatypes::{DataType, Field, Schema};
     use datafusion::datasource::MemTable;
+    use optd_core::{BoundedVec, MemoryCatalog, TableConstraints, UniqueKey};
     use std::sync::Arc;
 
     #[tokio::test]
@@ -236,5 +246,53 @@ mod tests {
             stats.column_statistics["id"].upper_bound,
             Some(ScalarValue::Int64(4))
         );
+    }
+
+    #[tokio::test]
+    async fn refreshing_statistics_preserves_catalog_constraints() {
+        let session = SessionContext::new();
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(Int64Array::from(vec![1, 2, 3]))],
+        )
+        .unwrap();
+        let table = MemTable::try_new(schema.clone(), vec![vec![batch]]).unwrap();
+        session.register_table("t", Arc::new(table)).unwrap();
+
+        let catalog = MemoryCatalog::new("memory", "public");
+        catalog
+            .create_table(TableRef::bare("t"), schema, None)
+            .unwrap();
+        let constraints = TableConstraints {
+            unique_keys: BoundedVec::try_new(vec![
+                UniqueKey::try_new(vec!["id".to_string()]).unwrap(),
+            ])
+            .unwrap(),
+            foreign_keys: BoundedVec::default(),
+        };
+        catalog
+            .set_table_statistics(
+                TableRef::bare("t"),
+                TableStatistics {
+                    row_count: None,
+                    size_bytes: None,
+                    column_statistics: BTreeMap::new(),
+                    constraints: constraints.clone(),
+                },
+            )
+            .unwrap();
+
+        collect_and_set_table_statistics(&session, &catalog, TableRef::bare("t"), "t", &["id"])
+            .await
+            .unwrap();
+
+        let refreshed = catalog
+            .table_by_ref(&TableRef::bare("t"))
+            .unwrap()
+            .statistics
+            .unwrap();
+        assert_eq!(refreshed.row_count, Some(3));
+        assert_eq!(refreshed.constraints, constraints);
     }
 }

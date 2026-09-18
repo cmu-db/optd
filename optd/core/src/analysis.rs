@@ -4788,10 +4788,12 @@ mod tests {
                             upper_bound: Some(ScalarValue::Int64(100)),
                             frequency: Some(100),
                             distinct: Some(100),
+                            distribution: None,
                         },
                     )]
                     .into_iter()
                     .collect(),
+                    constraints: Default::default(),
                 },
             )
             .unwrap();
@@ -4847,10 +4849,12 @@ mod tests {
                             upper_bound: Some(ScalarValue::Int64(100)),
                             frequency: Some(100),
                             distinct: Some(100),
+                            distribution: None,
                         },
                     )]
                     .into_iter()
                     .collect(),
+                    constraints: Default::default(),
                 },
             )
             .unwrap();
@@ -4909,10 +4913,12 @@ mod tests {
                             upper_bound: Some(ScalarValue::Int64(9)),
                             frequency: Some(10),
                             distinct: Some(7),
+                            distribution: None,
                         },
                     )]
                     .into_iter()
                     .collect(),
+                    constraints: Default::default(),
                 },
             )
             .unwrap();
@@ -4966,10 +4972,12 @@ mod tests {
                             upper_bound: None,
                             frequency: Some(100),
                             distinct: Some(10),
+                            distribution: None,
                         },
                     )]
                     .into_iter()
                     .collect(),
+                    constraints: Default::default(),
                 },
             )
             .unwrap();
@@ -5594,10 +5602,12 @@ mod tests {
                     upper_bound: None,
                     frequency: Some(rows),
                     distinct: Some(distinct),
+                    distribution: None,
                 },
             )]
             .into_iter()
             .collect(),
+            constraints: Default::default(),
         }
     }
 
