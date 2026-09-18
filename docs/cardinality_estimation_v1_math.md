@@ -2,16 +2,15 @@
 
 ## Current Behavior
 
-`CardinalityEstimationV1` now has row and column profiles, but the first math
-version is intentionally rough:
+`CardinalityEstimationV1` has row and column profiles with sparse equality state:
 
 - `Scan` uses catalog statistics, then TPCH/JOB mocks, then defaults.
 - The TPCH/JOB mocks initially had table row counts but little column NDV data.
 - Unknown columns default to low NDV, which makes large PK/FK joins look too
   weakly selective.
 - Equality join selectivity is `1 / max(left_ndv, right_ndv)`.
-- Transient/redundant equalities are only deduped within a single selectivity
-  call, not carried across derived join profiles.
+- Transient/redundant equalities are deduplicated against classes carried by derived inner-join
+  profiles.
 
 ## Sample-Pass Evidence
 
@@ -33,14 +32,14 @@ building intermediate DP states.
 ## Problems
 
 - Row-only mocks make FK columns look like generic low-NDV columns.
-- Equality-class state needs to survive in `CardinalityProfile`.
+- Equality-class state must remain sparse: singleton columns already carry their own NDV.
 - Transient edges should remain in the IR when needed, but should not multiply
   selectivity after the equality class is already connected.
 - Multiple equalities connecting the same classes should pick the strongest
   containment domain, not multiply all predicates.
 - Semi/anti joins should use match probability, not inner-join output rows.
-- Outer joins need preserved-side lower bounds without losing the expected
-  inner-match estimate.
+- Outer joins need preserved-side lower bounds without losing the expected inner-match estimate,
+  and must not propagate ON-condition equality across null-extended rows.
 
 ## Design Direction
 
@@ -65,4 +64,7 @@ For transient/redundant equalities:
 - [x] Pick the largest NDV for transient/multiple equality edges.
 - [x] Fix semi/anti join row math to use match probability.
 - [x] Preserve outer-join lower bounds while keeping expected match estimates.
+- [x] Preserve only sound equivalence classes for left, right, and full outer joins.
+- [x] Keep point estimates and upper/lower row bounds mutually consistent after null extension.
+- [x] Use iterative compact equality state for wide classes and reverse-oriented chains.
 - [x] Add focused CE tests for PK/FK, transient edges, semi/anti, and outer joins.

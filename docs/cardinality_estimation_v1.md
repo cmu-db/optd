@@ -17,6 +17,11 @@ Each operator gets a `CardinalityProfile`:
 
 - `rows`: estimated output row count.
 - `columns`: per-column profiles.
+- `equivalence_classes`: only nontrivial (two-or-more-column) equality classes.
+
+The cache stores profiles behind `Arc` so recursive estimation can share immutable results. The
+public `AnalysisContext::get::<CardinalityEstimationV1>` contract still returns an owned profile;
+costing currently uses that owned API, while internal recursive estimation uses the shared lookup.
 
 Each estimate stores:
 
@@ -89,34 +94,17 @@ should not multiply selectivity for every redundant edge. V1 should classify
 join predicates into equivalence-class edges and residual predicates, then apply
 at most one equality selectivity per new equivalence-class connection.
 
-## JoinOrdering Statistics
+## JoinOrdering Integration
 
-`JoinOrdering` currently needs a cost for each DP state. V1 should make the DP
-state carry a `CardinalityProfile`, while cost continues to use
-`profile.rows.value`.
+`JoinOrdering` asks its `CostModel` to cost each DP candidate. The default model obtains an owned
+`CardinalityProfile` through the same cached analysis used by the rest of the optimizer. Join
+predicates already split into hypergraph edges can call the pre-flattened conjunct entry point,
+avoiding repeated expression-tree traversal.
 
-The statistics trait should provide base profiles and join selectivity. Full
-output profile construction should live in shared propagation helpers so the
-analysis and join ordering use the same formulas.
-
-The public trait should stay small:
-
-```rust
-pub trait Statistics: Send + Sync {
-    fn base_profile(&self, node_idx: usize, hg: &QueryHypergraph) -> CardinalityProfile;
-
-    fn join_selectivity(
-        &self,
-        left_nodes: NodeSet,
-        right_nodes: NodeSet,
-        hg: &QueryHypergraph,
-        inputs: JoinInputProfiles<'_>,
-    ) -> Estimate;
-}
-```
-
-`JoinOrdering` can infer connecting edges internally, compute selectivity, then
-call shared join-profile propagation.
+Outer joins deliberately do not carry equality knowledge across their null-supplying boundary:
+left outer joins retain only left-input classes, right outer joins retain only right-input classes,
+and full outer joins retain none. Row estimates and bounds are raised together to the preserved-side
+minimum, maintaining `lower <= value <= upper`.
 
 ## Implementation Progress
 
@@ -129,7 +117,10 @@ call shared join-profile propagation.
 - [x] Add computed-column improvement notes for expressions like `new_value := x + 1`.
 - [x] Add join equivalence-class handling for equality predicates.
 - [x] Treat transient/redundant equality edges specially so selectivity is not double-counted.
-- [x] Refactor `JoinOrdering` DP state to carry `CardinalityProfile`.
-- [x] Keep `UniformStatistics` as the fallback stats implementation.
+- [x] Share cached profiles internally with `Arc` while retaining the owned public API.
+- [x] Store only sparse, nontrivial equivalence classes and use iterative path compression.
+- [x] Flatten join conjuncts once and expose a pre-flattened internal entry point.
+- [x] Restrict outer-join equality propagation to sound input classes and preserve row bounds.
+- [x] Filter newly-owned equality classes in place and merge input column maps structurally.
 - [x] Add unit tests for scan, filter, map transformation, aggregation, join NDV, join ordering, redundant equality edges, and connector stats extraction.
 - [x] Add a DataFusion connector helper/API for SQL-based stats extraction into catalog statistics.
