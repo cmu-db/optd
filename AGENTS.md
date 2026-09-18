@@ -1,93 +1,56 @@
-# Repository Guidelines
+# Repository Guidance
 
-## Project Structure & Module Organization
+`optd` is a Rust 2024 workspace for relational query IR and query-optimizer experiments.
+Keep this file concise because it is loaded for every task. Read only the references
+that apply to the work at hand.
 
-This is a Rust 2024 workspace for relational query IR experiments.
+## Working Agreement
 
-- `optd/core/` is the `optd-core` package. `optd/core/src/lib.rs` defines the core IR handles, operator payloads, expressions, `QueryContext`, and public re-exports.
-- `optd/core/src/analysis.rs` contains demand-driven analyses such as available, used, free, created columns, and nullability.
-- `optd/core/src/catalog.rs` contains table references, in-memory catalog metadata, and schema resolution.
-- `optd/core/src/display.rs` contains generic display nodes and box/JSON rendering.
-- `optd/core/src/substrait.rs` imports and exports Substrait plans.
-- `optd/core/examples/basic.rs` is an executable example that builds and prints sample plans.
-- `optd/core/examples/rename.rs` demonstrates the rename operator.
-- `optd/core/src/optimize/` contains optimizer passes. Each pass lives in its own file and is re-exported from `optd/core/src/optimize/mod.rs` and `optd/core/src/lib.rs`.
-- `optd/connectors/datafusion/` contains the `optd-datafusion` bridge and its sqllogictest coverage.
-- `optd/crates/` is reserved for future authored support crates.
-- `.agents/` contains concise operational guidance for future agents; keep deeper design docs in `docs/`.
+- Inspect the relevant code and nearby tests before editing; do not require a full-repository tour for a local change.
+- Continue through implementation, focused verification, and fixes caused by the change. The local test suites use repository fixtures and have no production access, so routine build, lint, and test commands do not require separate approval.
+- Preserve unrelated work. Do not rewrite unrelated files or generated lockfile sections unless a dependency change requires it.
+- Prefer the smallest coherent change. Keep public APIs explicit and document public behavior.
+- If requirements are genuinely ambiguous or an action could affect external systems, credentials, or user data, stop and ask. Otherwise make the local, reversible choice and proceed.
+- In the handoff, summarize changed files, checks actually run, and any remaining limitations. Do not claim checks that were not run.
 
-## Build, Test, and Development Commands
+## Where to Look
 
-- `cargo build` compiles the workspace packages.
-- `cargo build --workspace` compiles all crates including the DataFusion connector.
-- `cargo run -p optd-core --example basic` builds and prints example query plans.
-- `cargo run -p optd-core --example rename` runs the rename operator example.
-- `cargo test` runs unit tests, integration tests, and doc tests.
-- `cargo nextest run --release -p optd-datafusion --test slt` runs DataFusion SLT tests with configured per-test timeouts; use release mode because debug SLT is slow. SLT uses optd physical planning by default; pass `-- --logical` only to compare against the old logical conversion path.
-- `cargo nextest run --release --workspace` runs tests across all crates including SLT tests.
-- `cargo fmt --all --check` verifies Rust formatting across the workspace.
-- `cargo clippy --workspace --all-targets --locked -- -D warnings` checks for lints; fix all warnings before committing.
-- `actionlint` validates GitHub Actions workflow files.
+- `optd/core/`: `optd-core`, including IR handles and payloads, analyses, catalog, display, Substrait conversion, and optimizer passes.
+- `optd/connectors/datafusion/`: DataFusion import/export, physical planning, runtime statistics, and SQLLogicTest coverage.
+- `docs/`: durable architecture, development, debugging, and investigation notes.
+- `.agents/skills/`: optional Codex skills. Add one only for a specialized recurring workflow that benefits from its own instructions, references, or scripts.
 
-The default feature set includes `serde`. Use `cargo test -p optd-core --no-default-features` when checking code that should not depend on serialization.
+Use these references contextually:
 
-## Optimizer Pass Architecture
+- Workspace layout and command selection: `docs/development.md`
+- Optimizer framework or pass changes: `docs/optimizer.md`
+- Join ordering: `docs/join_ordering_design.md` and `docs/query_hypergraph.md`
+- Analysis changes: `docs/analysis_framework.md`
+- Substrait conversion: `docs/substrait_integration.md`
+- Unnesting: `docs/holistic_unnesting.md` and `docs/unnesting_before_direct_physical_execution.md`
+- SLT failures: `docs/debugging-slt.md`; consult its linked failure notes only when relevant
 
-Passes live in `optd/core/src/optimize/`. The pipeline is assembled in `optd/connectors/datafusion/src/runner.rs` inside the `optimize()` function.
+Treat implementation as authoritative when a design note describes planned or historical work. Update the relevant document when behavior or architecture changes.
 
-### Current pass pipeline (in order)
+## Code Conventions
 
-1. `SubqueryToJoin` — converts `EXISTS`/`IN`/scalar subquery expressions into explicit join operators (`LeftSemi`, `LeftAnti`, `Single`, `LeftMark`).
-2. `ExprSimplify` — constant-folds boolean expressions (`true AND e → e`, `NOT(NOT(e)) → e`, etc.) and removes `Selection(true, input)`.
-3. `MarkJoinToSemiJoin` — converts `LeftMarkJoin` + `Selection(... AND marker)` into `LeftSemi` or `LeftAnti` joins.
-4. `PredicatePushdown` — pushes `Selection` predicates into join `ON` conditions or onto individual inputs.
-5. `ProjectionElimination` — collapses consecutive projections and removes identity projections.
-6. `JoinOrdering` — reorders joins using dynamic programming over the join hypergraph.
+Use standard Rust formatting with four-space indentation and `snake_case` names. Handles such as
+`Operator`, `Expr`, and `Column` are opaque arena references; payloads live in `OperatorData`,
+`ExprData`, and `ColumnData`. Follow the append-only optimizer invariant in `docs/optimizer.md`.
 
-### Adding a new pass
+Put narrow unit tests beside implementation code under `#[cfg(test)]`. Put DataFusion bridge and
+SQL-visible behavior coverage under `optd/connectors/datafusion/tests/`.
 
-1. Create `optd/core/src/optimize/my_pass.rs`. Implement `Pass` and either `OperatorRewrite` (for local per-operator rules) or `QueryPass` (for whole-query rewrites).
-2. Add `pub mod my_pass;` and `pub use my_pass::MyPass;` to `optd/core/src/optimize/mod.rs`.
-3. Add `MyPass` to the `pub use optimize::{...}` block in `optd/core/src/lib.rs`.
-4. Register the pass in `optd/connectors/datafusion/src/runner.rs` inside `optimize()`. Wrap `OperatorRewrite` impls with `OperatorRewriteAdaptor::new(MyPass)`.
+## Verification
 
-### Convergence requirement
+Choose checks based on the changed surface rather than running every command for every edit:
 
-`OperatorRewrite::rewrite` must return `Rewrite::Keep` when nothing changed. Returning `Rewrite::Replace` unconditionally causes `MaxIterationsReached`. Track a `changed: bool` flag and only return `Rewrite::Replace` when a rewrite actually fired.
+- Rust formatting changes: `cargo fmt --all --check`
+- Core code: focused `cargo test -p optd-core ...`; include `--no-default-features` when checking code that must not require serialization
+- DataFusion SQL behavior: focused release-mode SLT, then broader coverage when warranted
+- Rust changes before handoff: `cargo clippy --workspace --all-targets --locked -- -D warnings`
+- GitHub Actions changes: `actionlint`
 
-### Pass profiling
-
-```
-cargo build --release -p optd-datafusion --bin profile_passes
-./target/release/profile_passes [runs]   # default 100 runs
-```
-
-Output is TSV: `query / run / iteration / pass_index / pass / result / duration_ms`.
-
-Current bottleneck: `JoinOrdering` (~6 ms avg, up to ~100 ms on 64-table joins). All other passes are <0.05 ms.
-
-## Coding Style & Naming Conventions
-
-Use standard Rust formatting with 4-space indentation. Keep APIs explicit and small. Handles such as `Operator`, `Expr`, and `Column` are opaque arena references; payloads live in `OperatorData`, `ExprData`, and `ColumnData`.
-
-Prefer descriptive struct names for operator payloads, for example `Scan`, `Projection`, `Aggregation`, `Sort`, and `Limit`. Use `snake_case` for functions, fields, and test names. Keep doc comments on public types and methods.
-
-## Testing Guidelines
-
-Tests use Rust's built-in test framework plus async `tokio` tests for DataFusion interop. Put narrow module tests beside implementation code under `#[cfg(test)]`; DataFusion bridge behavior lives under `optd/connectors/datafusion/tests/`.
-
-Name tests by behavior, such as `imports_sort_and_fetch` or `datafusion_consumes_substrait_plan_produced_by_optd`. Add tests for new IR operators, analyses, formatter behavior, and Substrait conversion paths.
-
-For optimizer or SQL semantics changes, prefer an SLT regression test when the behavior is observable through the DataFusion bridge. Add the narrow SLT case first, run the focused release-mode nextest SLT command, and confirm it fails on the current branch while the bug is still present. Then implement the fix, re-run the focused SLT, and finish with `cargo nextest run --release --workspace`. In the handoff, explicitly note the before/after result: the new SLT failed before the fix and passed after.
-
-If a new SLT passes before the fix, check whether the relevant optimizer pass or conversion path is actually enabled in the tested execution path before treating the test as coverage.
-
-## Commit & Pull Request Guidelines
-
-Recent commits use short imperative titles, for example `Add sort and limit operators` and `Export simple plans to Substrait`. Keep commits focused and include tests with behavior changes.
-
-Pull requests should include a concise summary, important design notes, and the test commands run. Link related issues when available. Include rendered plan snippets only when display output changes materially.
-
-## Agent-Specific Instructions
-
-Avoid rewriting unrelated files or generated lockfile sections unless dependency changes require it. Preserve existing API style, run `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, and `actionlint` before handing off when the relevant tools and workflow files are present.
+For an optimizer or SQL-semantics regression, add the narrow failing test first when practical,
+confirm it exercises the affected execution path, implement the fix, and report the before/after
+result. See `docs/development.md` for exact commands and escalation to workspace-wide testing.
