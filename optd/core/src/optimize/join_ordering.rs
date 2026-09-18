@@ -501,10 +501,10 @@ impl<M: CostModel> QueryPass for JoinOrdering<M> {
 mod tests {
     use super::*;
     use crate::{
-        AnalysisContext, BinaryOp, Catalog, Column, ColumnData, ColumnStatistics, ExprData,
-        HypergraphNode, Join, JoinType, MemoryCatalog, OperatorData, OptimizerContext, Output,
-        PassManager, QueryContext, QueryHypergraph, ScalarValue, Scan, Selection, TableRef,
-        TableStatistics,
+        AnalysisContext, BinaryOp, CardinalityEstimationConfig, Catalog, Column, ColumnData,
+        ColumnStatistics, ExprData, HypergraphNode, Join, JoinType, MemoryCatalog, OperatorData,
+        OptimizerContext, Output, PassManager, QueryContext, QueryHypergraph, ScalarValue, Scan,
+        Selection, TableRef, TableStatistics,
     };
     use arrow_schema::{DataType, Field, Schema};
     use std::{cell::RefCell, rc::Rc, sync::Arc};
@@ -1017,6 +1017,51 @@ mod tests {
         pm.run(&mut opt).unwrap();
 
         assert_ne!(opt.query.root(), Some(root));
+    }
+
+    #[test]
+    fn explicit_default_cardinality_config_matches_frozen_plan_fingerprint() {
+        let (query, _) = three_way_chain();
+        let mut implicit = crate::test_optimizer_context(query.clone());
+        let catalog = crate::test_catalog(&query);
+        let mut explicit = OptimizerContext::new(query, catalog);
+        explicit.analyses = explicit
+            .analyses
+            .fork()
+            .with_cardinality_estimation_config(CardinalityEstimationConfig::default())
+            .unwrap();
+        let mut implicit_pm = PassManager::new();
+        implicit_pm.add_pass(JoinOrdering::new());
+        let mut explicit_pm = PassManager::new();
+        explicit_pm.add_pass(JoinOrdering::new());
+
+        implicit_pm.run(&mut implicit).unwrap();
+        explicit_pm.run(&mut explicit).unwrap();
+
+        assert_eq!(implicit.query.pretty(), explicit.query.pretty());
+        let root = implicit.query.root().unwrap();
+        let OperatorData::Join(root_join) = root.get(&implicit.query) else {
+            panic!("frozen root should be an inner join");
+        };
+        let OperatorData::Join(inner_join) = root_join.inner.get(&implicit.query) else {
+            panic!("frozen inner input should be an inner join");
+        };
+        assert_eq!(
+            (
+                root.to_string(),
+                root_join.outer.to_string(),
+                root_join.inner.to_string(),
+                inner_join.outer.to_string(),
+                inner_join.inner.to_string(),
+            ),
+            (
+                "@7".into(),
+                "@0".into(),
+                "@5".into(),
+                "@1".into(),
+                "@2".into()
+            )
+        );
     }
 
     #[test]
