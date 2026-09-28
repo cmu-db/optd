@@ -6,10 +6,12 @@
 
 pub mod catalog;
 pub mod entity;
+mod error;
 pub mod migration;
 pub mod relation;
 pub mod schema;
 pub mod snapshot;
 
 pub use catalog::{Catalog, CatalogReader};
+pub use error::{CatalogError, CatalogResult};
 pub use snapshot::SnapshotId;

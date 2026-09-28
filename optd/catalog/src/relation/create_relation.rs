@@ -1,9 +1,10 @@
 use sea_orm::{
-    ActiveValue::Set, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter,
+    ActiveValue::Set, ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter,
     QuerySelect,
 };
 
 use crate::{
+    CatalogError, CatalogResult,
     entity::{column, prelude::*, relation, schema},
     relation::{CreateColumnInfo, CreateRelationInfo},
 };
@@ -14,7 +15,7 @@ pub(crate) async fn create_relation<C>(
     db: &C,
     read_snapshot: i64,
     begin_snapshot: i64,
-) -> Result<i64, DbErr>
+) -> CatalogResult<i64>
 where
     C: ConnectionTrait,
 {
@@ -34,10 +35,8 @@ where
         .into_tuple::<i64>()
         .one(db)
         .await?
-        .ok_or_else(|| {
-            DbErr::Custom(format!(
-                "Schema '{schema_name}' does not exist at snapshot {read_snapshot}"
-            ))
+        .ok_or_else(|| CatalogError::SchemaNameNotFound {
+            schema_name: schema_name.to_owned(),
         })?;
 
     let existing_relation_id = Relation::find()
@@ -56,10 +55,10 @@ where
         .await?;
 
     if existing_relation_id.is_some() {
-        return Err(DbErr::Custom(format!(
-            "Relation '{}.{}' already exists",
-            schema_name, relation_name
-        )));
+        return Err(CatalogError::RelationAlreadyExists {
+            schema_name: schema_name.to_owned(),
+            relation_name: relation_name.to_owned(),
+        });
     }
 
     let relation_model = relation::ActiveModel {

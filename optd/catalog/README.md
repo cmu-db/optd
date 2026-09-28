@@ -13,6 +13,7 @@ flattened into this single crate. It currently provides:
 - Explicit relation and storage kinds for relational and file-backed tables.
 - Readers pinned to a branch head or an explicit historical snapshot.
 - Expected-base checks and atomic branch-head publication.
+- Structured SNAFU catalog errors for semantic and persistence failures.
 - SQLite-backed end-to-end coverage of historical visibility, stale writers,
   and failed-publication rollback.
 

@@ -21,6 +21,7 @@ sea-orm-migration = { version = "2.0.3", default-features = false, features = [
     "sqlx-postgres",
     "sqlx-sqlite",
 ] }
+snafu = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

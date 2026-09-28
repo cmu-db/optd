@@ -1,9 +1,9 @@
 use sea_orm::{
-    ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect,
-    sea_query::Expr,
+    ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect, sea_query::Expr,
 };
 
 use crate::{
+    CatalogError, CatalogResult,
     entity::{prelude::*, relation, schema},
     schema::DropSchemaInfo,
 };
@@ -13,7 +13,7 @@ pub async fn drop_schema<C>(
     db: &C,
     read_snapshot: i64,
     end_snapshot: i64,
-) -> Result<(), DbErr>
+) -> CatalogResult<()>
 where
     C: ConnectionTrait,
 {
@@ -32,9 +32,10 @@ where
         .one(db)
         .await?
     {
-        return Err(DbErr::Custom(format!(
-            "Cannot drop schema {schema_id}: active relation '{relation_name}' still exists"
-        )));
+        return Err(CatalogError::SchemaNotEmpty {
+            schema_id,
+            relation_name,
+        });
     }
 
     Schema::update_many()

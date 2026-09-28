@@ -1,8 +1,8 @@
 //! Snapshot-aware catalog API.
 
-use sea_orm::{ConnectionTrait, DbErr, TransactionTrait};
+use sea_orm::{ConnectionTrait, TransactionTrait};
 
-use crate::{relation, schema, snapshot};
+use crate::{CatalogError, CatalogResult, relation, schema, snapshot};
 
 /// Default catalog branch.
 pub const DEFAULT_BRANCH_NAME: &str = "main";
@@ -20,11 +20,11 @@ pub struct CatalogReader<'a, T> {
 }
 
 fn flatten_transaction_err<T>(
-    result: Result<T, sea_orm::TransactionError<DbErr>>,
-) -> Result<T, DbErr> {
+    result: Result<T, sea_orm::TransactionError<CatalogError>>,
+) -> CatalogResult<T> {
     result.map_err(|error| match error {
-        sea_orm::TransactionError::Connection(error)
-        | sea_orm::TransactionError::Transaction(error) => error,
+        sea_orm::TransactionError::Connection(error) => error.into(),
+        sea_orm::TransactionError::Transaction(error) => error,
     })
 }
 
@@ -60,35 +60,35 @@ impl<T: ConnectionTrait> CatalogReader<'_, T> {
     }
 
     /// Returns all schemas visible at the pinned snapshot.
-    pub async fn get_all_schemas(&self) -> Result<Vec<schema::SchemaInfo>, DbErr> {
-        schema::get_all_schema_infos(self.db, &self.snapshot).await
+    pub async fn get_all_schemas(&self) -> CatalogResult<Vec<schema::SchemaInfo>> {
+        Ok(schema::get_all_schema_infos(self.db, &self.snapshot).await?)
     }
 
     /// Returns one schema visible at the pinned snapshot.
     pub async fn get_schema(
         &self,
         info: schema::GetSchemaInfo,
-    ) -> Result<schema::SchemaInfo, DbErr> {
+    ) -> CatalogResult<schema::SchemaInfo> {
         let schema_id = info.schema_id;
         schema::get_schema(info, self.db, &self.snapshot)
             .await?
-            .ok_or_else(|| DbErr::RecordNotFound(format!("schema {schema_id} not found")))
+            .ok_or(CatalogError::SchemaNotFound { schema_id })
     }
 
     /// Returns all relations visible at the pinned snapshot.
-    pub async fn get_all_relations(&self) -> Result<Vec<relation::RelationInfo>, DbErr> {
-        relation::get_all_relation_infos(self.db, &self.snapshot).await
+    pub async fn get_all_relations(&self) -> CatalogResult<Vec<relation::RelationInfo>> {
+        Ok(relation::get_all_relation_infos(self.db, &self.snapshot).await?)
     }
 
     /// Returns one relation visible at the pinned snapshot.
     pub async fn get_relation(
         &self,
         info: relation::GetRelationInfo,
-    ) -> Result<relation::RelationInfo, DbErr> {
+    ) -> CatalogResult<relation::RelationInfo> {
         let relation_id = info.relation_id;
         relation::get_relation(info, self.db, &self.snapshot)
             .await?
-            .ok_or_else(|| DbErr::RecordNotFound(format!("relation {relation_id} not found")))
+            .ok_or(CatalogError::RelationNotFound { relation_id })
     }
 }
 
@@ -97,10 +97,10 @@ impl<T: ConnectionTrait> Catalog<T> {
     pub async fn reader_at(
         &self,
         snapshot_id: snapshot::SnapshotId,
-    ) -> Result<CatalogReader<'_, T>, DbErr> {
+    ) -> CatalogResult<CatalogReader<'_, T>> {
         let snapshot = snapshot::get_snapshot_info(&self.db, snapshot_id)
             .await?
-            .ok_or_else(|| DbErr::RecordNotFound(format!("snapshot {snapshot_id} not found")))?;
+            .ok_or(CatalogError::SnapshotNotFound { snapshot_id })?;
         Ok(CatalogReader {
             db: &self.db,
             snapshot,
@@ -108,11 +108,11 @@ impl<T: ConnectionTrait> Catalog<T> {
     }
 
     /// Creates a reader pinned to the branch's published head snapshot.
-    pub async fn reader(&self) -> Result<CatalogReader<'_, T>, DbErr> {
+    pub async fn reader(&self) -> CatalogResult<CatalogReader<'_, T>> {
         let snapshot = snapshot::get_current_snapshot_info(&self.db, &self.branch_name)
             .await?
-            .ok_or_else(|| {
-                DbErr::RecordNotFound(format!("branch '{}' not found", self.branch_name))
+            .ok_or_else(|| CatalogError::BranchNotFound {
+                branch_name: self.branch_name.clone(),
             })?;
         Ok(CatalogReader {
             db: &self.db,
@@ -127,11 +127,11 @@ impl<T: TransactionTrait> Catalog<T> {
         &self,
         expected_snapshot_id: snapshot::SnapshotId,
         info: schema::CreateSchemaInfo,
-    ) -> Result<i64, DbErr> {
+    ) -> CatalogResult<i64> {
         let branch_name = self.branch_name.clone();
         flatten_transaction_err(
             self.db
-                .transaction::<_, _, DbErr>(|txn| {
+                .transaction::<_, _, CatalogError>(|txn| {
                     Box::pin(async move {
                         let mut current_snapshot = snapshot::get_snapshot_for_write(
                             txn,
@@ -163,11 +163,11 @@ impl<T: TransactionTrait> Catalog<T> {
         &self,
         expected_snapshot_id: snapshot::SnapshotId,
         info: schema::DropSchemaInfo,
-    ) -> Result<(), DbErr> {
+    ) -> CatalogResult<()> {
         let branch_name = self.branch_name.clone();
         flatten_transaction_err(
             self.db
-                .transaction::<_, _, DbErr>(|txn| {
+                .transaction::<_, _, CatalogError>(|txn| {
                     Box::pin(async move {
                         let current_snapshot = snapshot::get_snapshot_for_write(
                             txn,
@@ -198,11 +198,11 @@ impl<T: TransactionTrait> Catalog<T> {
         &self,
         expected_snapshot_id: snapshot::SnapshotId,
         info: relation::CreateBaseTableInfo,
-    ) -> Result<i64, DbErr> {
+    ) -> CatalogResult<i64> {
         let branch_name = self.branch_name.clone();
         flatten_transaction_err(
             self.db
-                .transaction::<_, _, DbErr>(|txn| {
+                .transaction::<_, _, CatalogError>(|txn| {
                     Box::pin(async move {
                         let mut current_snapshot = snapshot::get_snapshot_for_write(
                             txn,
@@ -241,12 +241,12 @@ impl<T: TransactionTrait> Catalog<T> {
         &self,
         expected_snapshot_id: snapshot::SnapshotId,
         info: relation::DropRelationInfo,
-    ) -> Result<i64, DbErr> {
+    ) -> CatalogResult<i64> {
         let branch_name = self.branch_name.clone();
         let relation_id = info.relation_id;
         flatten_transaction_err(
             self.db
-                .transaction::<_, _, DbErr>(|txn| {
+                .transaction::<_, _, CatalogError>(|txn| {
                     Box::pin(async move {
                         let current_snapshot = snapshot::get_snapshot_for_write(
                             txn,
@@ -275,10 +275,11 @@ impl<T: TransactionTrait> Catalog<T> {
 #[cfg(test)]
 mod tests {
     use arrow_schema::DataType;
-    use sea_orm::{Database, DbErr};
+    use sea_orm::Database;
     use sea_orm_migration::MigratorTrait;
 
     use crate::{
+        CatalogError, CatalogResult,
         entity::column::ColumnType,
         migration::Migrator,
         relation::{
@@ -292,7 +293,7 @@ mod tests {
     use super::Catalog;
 
     #[tokio::test]
-    async fn historical_reader_does_not_see_later_relation() -> Result<(), DbErr> {
+    async fn historical_reader_does_not_see_later_relation() -> CatalogResult<()> {
         let db = Database::connect("sqlite::memory:").await?;
         Migrator::up(&db, None).await?;
         let catalog = Catalog::new(db.clone());
@@ -359,13 +360,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_write_does_not_publish_snapshot() -> Result<(), DbErr> {
+    async fn failed_write_does_not_publish_snapshot() -> CatalogResult<()> {
         let db = Database::connect("sqlite::memory:").await?;
         Migrator::up(&db, None).await?;
         let catalog = Catalog::new(db);
         let initial_snapshot_id = catalog.reader().await?.snapshot_id();
 
-        catalog
+        let error = catalog
             .create_base_table(
                 initial_snapshot_id,
                 CreateBaseTableInfo {
@@ -377,21 +378,24 @@ mod tests {
             )
             .await
             .expect_err("a relation cannot be created in a missing schema");
+        assert!(matches!(
+            error,
+            CatalogError::SchemaNameNotFound { schema_name } if schema_name == "missing"
+        ));
 
         assert_eq!(catalog.reader().await?.snapshot_id(), initial_snapshot_id);
-        assert!(
-            catalog
-                .reader_at(SnapshotId::from_raw(initial_snapshot_id.as_i64() + 1,))
-                .await
-                .is_err(),
-            "the rolled-back snapshot must not exist"
-        );
+        let missing_snapshot_id = SnapshotId::from_raw(initial_snapshot_id.as_i64() + 1);
+        assert!(matches!(
+            catalog.reader_at(missing_snapshot_id).await,
+            Err(CatalogError::SnapshotNotFound { snapshot_id })
+                if snapshot_id == missing_snapshot_id
+        ));
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn stale_writer_cannot_advance_branch_head() -> Result<(), DbErr> {
+    async fn stale_writer_cannot_advance_branch_head() -> CatalogResult<()> {
         let temp_dir = tempfile::tempdir().expect("temporary directory should be created");
         let path = temp_dir.path().join("catalog.sqlite");
         let url = format!("sqlite://{}?mode=rwc", path.display());
@@ -426,7 +430,14 @@ mod tests {
                 )
                 .await
                 .expect_err("the second client should have a stale base snapshot");
-            assert!(error.to_string().contains("stale snapshot"));
+            assert!(matches!(
+                error,
+                CatalogError::StaleSnapshot {
+                    expected,
+                    actual,
+                    ..
+                } if expected == initial_snapshot_id && actual != expected
+            ));
 
             assert_eq!(reader2.get_all_schemas().await?, Vec::new());
             let current = catalog2.reader().await?;
