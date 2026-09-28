@@ -8,7 +8,7 @@ use crate::{
     relation::{CreateColumnInfo, CreateRelationInfo},
 };
 
-pub async fn create_relation<C>(
+pub(crate) async fn create_relation<C>(
     info: CreateRelationInfo,
     relation_id: i64,
     db: &C,
@@ -68,6 +68,8 @@ where
         end_snapshot: Set(None),
         schema_id: Set(schema_id),
         relation_name: Set(relation_name.to_owned()),
+        relation_kind: Set(info.relation_kind),
+        storage_kind: Set(info.storage_kind),
         ..Default::default()
     };
 

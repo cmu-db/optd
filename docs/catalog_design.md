@@ -5,7 +5,7 @@ This document describes a snapshot-aware catalog for both relational storage and
 ## Goals and scope
 
 - Represent catalogs, schemas, tables, views, columns, constraints, indexes, statistics, partitions, sort orders, and physical storage.
-- Support relational, file-backed, and hybrid relations.
+- Support relational and file-backed relations.
 - Give every query a consistent metadata snapshot.
 - Keep enough history for time travel, auditing, and garbage collection.
 - Expose metadata to both the planner and users.
@@ -218,14 +218,14 @@ relation_id
 schema_id
 relation_name
 relation_kind       TABLE | VIEW | MATERIALIZED_VIEW | SEQUENCE
-storage_kind        RELATIONAL | FILES | HYBRID | NONE
+storage_kind        RELATIONAL | FILES | NONE
 owner_id
 properties
 begin_snapshot
 end_snapshot
 ```
 
-Logical views use `storage_kind = NONE`. Materialized views use relational or file storage. Hybrid tables may combine a mutable relational delta with immutable base files.
+Logical views use `storage_kind = NONE`. Base tables and materialized views use relational or file storage.
 
 Extension tables hold fields that do not apply to every relation:
 

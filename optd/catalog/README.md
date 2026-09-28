@@ -9,7 +9,8 @@ flattened into this single crate. It currently provides:
 
 - SeaORM entities and a SeaORM migration for `optd_snapshot`, `optd_branch`,
   `optd_schema`, `optd_relation`, and `optd_column`.
-- Transactional schema and relation create/drop operations.
+- Transactional schema and typed base-table create/drop operations.
+- Explicit relation and storage kinds for relational and file-backed tables.
 - Readers pinned to a branch head or an explicit historical snapshot.
 - Expected-base checks and atomic branch-head publication.
 - SQLite-backed end-to-end coverage of historical visibility, stale writers,
@@ -31,7 +32,7 @@ The target model is documented in
 
 ## Next revisions
 
-1. Add relation and storage kinds.
-2. Keep persistence-only row keys private and enforce stable ID scopes,
+1. Keep persistence-only row keys private and enforce stable ID scopes,
    including relation-scoped column IDs, in catalog operations.
-3. Add rename and drop end-to-end coverage.
+2. Add rename end-to-end coverage.
+3. Add view definitions and a typed `create_view` operation.

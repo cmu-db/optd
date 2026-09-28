@@ -48,6 +48,8 @@ where
         relation_id: relation.relation_id,
         schema_id: relation.schema_id,
         relation_name: relation.relation_name,
+        relation_kind: relation.relation_kind,
+        storage_kind: relation.storage_kind,
         columns: build_columns(columns),
     }))
 }

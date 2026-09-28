@@ -193,11 +193,11 @@ impl<T: TransactionTrait> Catalog<T> {
         )
     }
 
-    /// Creates a relation from `expected_snapshot_id` and publishes a new branch head.
-    pub async fn create_relation(
+    /// Creates a base table from `expected_snapshot_id` and publishes a new branch head.
+    pub async fn create_base_table(
         &self,
         expected_snapshot_id: snapshot::SnapshotId,
-        info: relation::CreateRelationInfo,
+        info: relation::CreateBaseTableInfo,
     ) -> Result<i64, DbErr> {
         let branch_name = self.branch_name.clone();
         flatten_transaction_err(
@@ -215,7 +215,7 @@ impl<T: TransactionTrait> Catalog<T> {
                         let new_snapshot_id =
                             snapshot::commit_snapshot(txn, current_snapshot).await?;
                         relation::create_relation(
-                            info,
+                            info.into(),
                             relation_id,
                             txn,
                             read_snapshot,
@@ -281,7 +281,10 @@ mod tests {
     use crate::{
         entity::column::ColumnType,
         migration::Migrator,
-        relation::{CreateColumnInfo, CreateRelationInfo, GetRelationInfo},
+        relation::{
+            BaseTableStorage, CreateBaseTableInfo, CreateColumnInfo, DropRelationInfo,
+            GetRelationInfo, RelationKind, StorageKind,
+        },
         schema::CreateSchemaInfo,
         snapshot::SnapshotId,
     };
@@ -307,11 +310,12 @@ mod tests {
         let schema_snapshot_id = catalog.reader().await?.snapshot_id();
 
         let relation_id = catalog
-            .create_relation(
+            .create_base_table(
                 schema_snapshot_id,
-                CreateRelationInfo {
+                CreateBaseTableInfo {
                     schema_name: "public".to_owned(),
                     relation_name: "orders".to_owned(),
+                    storage: BaseTableStorage::Relational,
                     columns: vec![CreateColumnInfo {
                         column_name: "order_id".to_owned(),
                         column_type: ColumnType(DataType::Int64),
@@ -330,8 +334,26 @@ mod tests {
             .await?;
         assert_eq!(relation.schema_id, schema_id);
         assert_eq!(relation.relation_name, "orders");
+        assert_eq!(relation.relation_kind, RelationKind::Table);
+        assert_eq!(relation.storage_kind, StorageKind::Relational);
         assert_eq!(relation.columns.len(), 1);
         assert_eq!(relation.columns[0].column_name, "order_id");
+
+        let relation_snapshot_id = current.snapshot_id();
+        catalog
+            .drop_relation(relation_snapshot_id, DropRelationInfo { relation_id })
+            .await?;
+
+        assert_eq!(
+            catalog.reader().await?.get_all_relations().await?,
+            Vec::new()
+        );
+        let historical = catalog.reader_at(relation_snapshot_id).await?;
+        let relation = historical
+            .get_relation(GetRelationInfo { relation_id })
+            .await?;
+        assert_eq!(relation.relation_name, "orders");
+        assert_eq!(relation.columns.len(), 1);
 
         Ok(())
     }
@@ -344,11 +366,12 @@ mod tests {
         let initial_snapshot_id = catalog.reader().await?.snapshot_id();
 
         catalog
-            .create_relation(
+            .create_base_table(
                 initial_snapshot_id,
-                CreateRelationInfo {
+                CreateBaseTableInfo {
                     schema_name: "missing".to_owned(),
                     relation_name: "orders".to_owned(),
+                    storage: BaseTableStorage::Files,
                     columns: Vec::new(),
                 },
             )

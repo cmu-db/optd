@@ -17,6 +17,34 @@ pub struct Model {
     pub schema_id: i64,
     /// Name of this relation version.
     pub relation_name: String,
+    /// Logical behavior of this relation version.
+    pub relation_kind: RelationKind,
+    /// Physical storage used by this relation version.
+    pub storage_kind: StorageKind,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
+pub enum RelationKind {
+    #[sea_orm(string_value = "TABLE")]
+    Table,
+    #[sea_orm(string_value = "VIEW")]
+    View,
+    #[sea_orm(string_value = "MATERIALIZED_VIEW")]
+    MaterializedView,
+    #[sea_orm(string_value = "SEQUENCE")]
+    Sequence,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
+pub enum StorageKind {
+    #[sea_orm(string_value = "RELATIONAL")]
+    Relational,
+    #[sea_orm(string_value = "FILES")]
+    Files,
+    #[sea_orm(string_value = "NONE")]
+    None,
+}
