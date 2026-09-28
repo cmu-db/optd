@@ -1,0 +1,25 @@
+[package]
+name = "optd-catalog"
+version = "0.1.0"
+edition = "2024"
+description = "Snapshot-aware catalog primitives and persistence adapters for Optd"
+license = "MIT"
+
+[dependencies]
+arrow-schema = "58.3.0"
+async-trait = "0.1"
+sea-orm = { version = "2.0.3", default-features = false, features = [
+    "macros",
+    "runtime-tokio-rustls",
+    "sqlx-postgres",
+    "sqlx-sqlite",
+    "with-chrono",
+] }
+sea-orm-migration = { version = "2.0.3", default-features = false, features = [
+    "runtime-tokio-rustls",
+    "sqlx-postgres",
+    "sqlx-sqlite",
+] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
