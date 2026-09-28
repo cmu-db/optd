@@ -7,8 +7,8 @@ use crate::entity::column::{self, ColumnType};
 
 pub use create_relation::*;
 pub use drop_relation::*;
-pub use get_all_relations::*;
-pub use get_relation::*;
+pub(crate) use get_all_relations::*;
+pub(crate) use get_relation::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateRelationInfo {

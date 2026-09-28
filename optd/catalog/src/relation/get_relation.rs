@@ -8,7 +8,7 @@ use crate::{
     snapshot::SnapshotInfo,
 };
 
-pub async fn get_relation<C>(
+pub(crate) async fn get_relation<C>(
     info: GetRelationInfo,
     db: &C,
     current_snapshot: &SnapshotInfo,
@@ -16,7 +16,7 @@ pub async fn get_relation<C>(
 where
     C: ConnectionTrait,
 {
-    let snapshot_id = current_snapshot.snapshot_id;
+    let snapshot_id = current_snapshot.snapshot_id.as_i64();
 
     let Some(relation) = Relation::find()
         .filter(relation::Column::BeginSnapshot.lte(snapshot_id))

@@ -1,28 +1,44 @@
 mod commit_snapshot_info;
 mod get_current_snapshot_info;
 mod get_snapshot_info;
+mod publish_snapshot;
 
-use crate::entity::snapshot;
-use sea_orm::DerivePartialModel;
+use std::fmt::{self, Display};
 
-pub use commit_snapshot_info::*;
-pub use get_current_snapshot_info::*;
-pub use get_snapshot_info::*;
+pub(crate) use commit_snapshot_info::*;
+pub(crate) use get_current_snapshot_info::*;
+pub(crate) use get_snapshot_info::*;
+pub(crate) use publish_snapshot::*;
 
-#[derive(Debug, Clone, PartialEq, Eq, DerivePartialModel)]
-#[sea_orm(entity = "snapshot::Entity")]
-pub struct SnapshotInfo {
-    pub snapshot_id: i64,
-    pub next_catalog_id: i64,
+/// Identifier of an immutable catalog snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SnapshotId(i64);
+
+impl SnapshotId {
+    /// Initial snapshot created with the catalog.
+    pub const INITIAL: Self = Self(0);
+
+    /// Constructs an identifier from its database representation.
+    pub const fn from_raw(value: i64) -> Self {
+        Self(value)
+    }
+
+    /// Returns the database representation.
+    pub const fn as_i64(self) -> i64 {
+        self.0
+    }
 }
 
-impl Default for SnapshotInfo {
-    fn default() -> Self {
-        Self {
-            snapshot_id: 0,
-            next_catalog_id: 1,
-        }
+impl Display for SnapshotId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SnapshotInfo {
+    pub snapshot_id: SnapshotId,
+    pub next_catalog_id: i64,
 }
 
 impl SnapshotInfo {

@@ -9,8 +9,8 @@ use crate::entity::schema;
 
 pub use create_schema::*;
 pub use drop_schema::*;
-pub use get_all_schemas::*;
-pub use get_schema::*;
+pub(crate) use get_all_schemas::*;
+pub(crate) use get_schema::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateSchemaInfo {

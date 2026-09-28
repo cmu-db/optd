@@ -3412,8 +3412,10 @@ version = "0.1.0"
 dependencies = [
  "arrow-schema 58.3.0",
  "async-trait",
+ "itertools 0.14.0",
  "sea-orm",
  "sea-orm-migration",
+ "tempfile",
  "tokio",
 ]
 

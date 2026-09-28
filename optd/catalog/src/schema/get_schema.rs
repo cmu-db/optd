@@ -8,7 +8,7 @@ use crate::{
     snapshot::SnapshotInfo,
 };
 
-pub async fn get_schema<C>(
+pub(crate) async fn get_schema<C>(
     info: GetSchemaInfo,
     db: &C,
     current_snapshot: &SnapshotInfo,
@@ -16,7 +16,7 @@ pub async fn get_schema<C>(
 where
     C: ConnectionTrait,
 {
-    let snapshot_id = current_snapshot.snapshot_id;
+    let snapshot_id = current_snapshot.snapshot_id.as_i64();
 
     Schema::find()
         .filter(schema::Column::BeginSnapshot.lte(snapshot_id))

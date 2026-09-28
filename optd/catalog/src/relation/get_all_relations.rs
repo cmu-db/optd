@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-
+use itertools::Itertools;
 use sea_orm::{
     ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QueryOrder,
 };
@@ -10,14 +9,14 @@ use crate::{
     snapshot::SnapshotInfo,
 };
 
-pub async fn get_all_relation_infos<C>(
+pub(crate) async fn get_all_relation_infos<C>(
     db: &C,
     current_snapshot: &SnapshotInfo,
 ) -> Result<Vec<RelationInfo>, DbErr>
 where
     C: ConnectionTrait,
 {
-    let snapshot_id = current_snapshot.snapshot_id;
+    let snapshot_id = current_snapshot.snapshot_id.as_i64();
     let relations = Relation::find()
         .filter(relation::Column::BeginSnapshot.lte(snapshot_id))
         .filter(
@@ -50,13 +49,9 @@ where
         .all(db)
         .await?;
 
-    let mut columns_by_relation = HashMap::<i64, Vec<column::Model>>::new();
-    for column in columns {
-        columns_by_relation
-            .entry(column.relation_id)
-            .or_default()
-            .push(column);
-    }
+    let mut columns_by_relation = columns
+        .into_iter()
+        .into_group_map_by(|column| column.relation_id);
 
     Ok(relations
         .into_iter()

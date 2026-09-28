@@ -1,17 +1,20 @@
-use sea_orm::{ConnectionTrait, DbErr, EntityTrait, QueryOrder, QuerySelect};
+use sea_orm::{ConnectionTrait, DbErr, EntityTrait};
 
-use crate::{entity::snapshot, snapshot::SnapshotInfo};
+use crate::{
+    entity::prelude::Branch,
+    snapshot::{SnapshotId, SnapshotInfo, get_snapshot_info},
+};
 
-pub async fn get_current_snapshot_info<C>(db: &C) -> Result<Option<SnapshotInfo>, DbErr>
+pub(crate) async fn get_current_snapshot_info<C>(
+    db: &C,
+    branch_name: &str,
+) -> Result<Option<SnapshotInfo>, DbErr>
 where
     C: ConnectionTrait,
 {
-    snapshot::Entity::find()
-        .select_only()
-        .column(snapshot::Column::SnapshotId)
-        .column(snapshot::Column::NextCatalogId)
-        .order_by_desc(snapshot::Column::SnapshotId)
-        .into_partial_model::<SnapshotInfo>()
-        .one(db)
-        .await
+    let Some(branch) = Branch::find_by_id(branch_name).one(db).await? else {
+        return Ok(None);
+    };
+
+    get_snapshot_info(db, SnapshotId::from_raw(branch.current_snapshot_id)).await
 }

@@ -4,9 +4,13 @@ use sea_orm::{ConnectionTrait, DbErr, TransactionTrait};
 
 use crate::{relation, schema, snapshot};
 
+/// Default catalog branch.
+pub const DEFAULT_BRANCH_NAME: &str = "main";
+
 /// Catalog backed by a SeaORM connection or transaction manager.
 pub struct Catalog<T> {
     db: T,
+    branch_name: String,
 }
 
 /// Read-only catalog handle pinned to one immutable snapshot.
@@ -25,21 +29,34 @@ fn flatten_transaction_err<T>(
 }
 
 impl<T> Catalog<T> {
-    /// Creates a catalog backed by `db`.
+    /// Creates a catalog backed by `db` on the `main` branch.
     pub fn new(db: T) -> Self {
-        Self { db }
+        Self::on_branch(db, DEFAULT_BRANCH_NAME)
+    }
+
+    /// Creates a catalog backed by `db` on `branch_name`.
+    pub fn on_branch(db: T, branch_name: impl Into<String>) -> Self {
+        Self {
+            db,
+            branch_name: branch_name.into(),
+        }
     }
 
     /// Returns the underlying database handle.
     pub fn connection(&self) -> &T {
         &self.db
     }
+
+    /// Returns the branch used by current reads and writes.
+    pub fn branch_name(&self) -> &str {
+        &self.branch_name
+    }
 }
 
 impl<T: ConnectionTrait> CatalogReader<'_, T> {
     /// Returns the snapshot used by every read from this handle.
-    pub fn snapshot(&self) -> &snapshot::SnapshotInfo {
-        &self.snapshot
+    pub fn snapshot_id(&self) -> snapshot::SnapshotId {
+        self.snapshot.snapshot_id
     }
 
     /// Returns all schemas visible at the pinned snapshot.
@@ -77,7 +94,10 @@ impl<T: ConnectionTrait> CatalogReader<'_, T> {
 
 impl<T: ConnectionTrait> Catalog<T> {
     /// Creates a reader pinned to `snapshot_id`.
-    pub async fn reader_at(&self, snapshot_id: i64) -> Result<CatalogReader<'_, T>, DbErr> {
+    pub async fn reader_at(
+        &self,
+        snapshot_id: snapshot::SnapshotId,
+    ) -> Result<CatalogReader<'_, T>, DbErr> {
         let snapshot = snapshot::get_snapshot_info(&self.db, snapshot_id)
             .await?
             .ok_or_else(|| DbErr::RecordNotFound(format!("snapshot {snapshot_id} not found")))?;
@@ -87,11 +107,13 @@ impl<T: ConnectionTrait> Catalog<T> {
         })
     }
 
-    /// Creates a reader pinned to the latest snapshot.
+    /// Creates a reader pinned to the branch's published head snapshot.
     pub async fn reader(&self) -> Result<CatalogReader<'_, T>, DbErr> {
-        let snapshot = snapshot::get_current_snapshot_info(&self.db)
+        let snapshot = snapshot::get_current_snapshot_info(&self.db, &self.branch_name)
             .await?
-            .unwrap_or_default();
+            .ok_or_else(|| {
+                DbErr::RecordNotFound(format!("branch '{}' not found", self.branch_name))
+            })?;
         Ok(CatalogReader {
             db: &self.db,
             snapshot,
@@ -100,19 +122,35 @@ impl<T: ConnectionTrait> Catalog<T> {
 }
 
 impl<T: TransactionTrait> Catalog<T> {
-    /// Creates a schema and publishes it in a new snapshot.
-    pub async fn create_schema(&self, info: schema::CreateSchemaInfo) -> Result<i64, DbErr> {
+    /// Creates a schema from `expected_snapshot_id` and publishes a new branch head.
+    pub async fn create_schema(
+        &self,
+        expected_snapshot_id: snapshot::SnapshotId,
+        info: schema::CreateSchemaInfo,
+    ) -> Result<i64, DbErr> {
+        let branch_name = self.branch_name.clone();
         flatten_transaction_err(
             self.db
                 .transaction::<_, _, DbErr>(|txn| {
                     Box::pin(async move {
-                        let mut current_snapshot = snapshot::get_current_snapshot_info(txn)
-                            .await?
-                            .unwrap_or_default();
+                        let mut current_snapshot = snapshot::get_snapshot_for_write(
+                            txn,
+                            &branch_name,
+                            expected_snapshot_id,
+                        )
+                        .await?;
                         let schema_id = current_snapshot.get_next_catalog_id();
                         let new_snapshot_id =
                             snapshot::commit_snapshot(txn, current_snapshot).await?;
-                        schema::create_new_schema(info, schema_id, txn, new_snapshot_id).await?;
+                        schema::create_new_schema(info, schema_id, txn, new_snapshot_id.as_i64())
+                            .await?;
+                        snapshot::publish_snapshot(
+                            txn,
+                            &branch_name,
+                            expected_snapshot_id,
+                            new_snapshot_id,
+                        )
+                        .await?;
                         Ok(schema_id)
                     })
                 })
@@ -120,43 +158,32 @@ impl<T: TransactionTrait> Catalog<T> {
         )
     }
 
-    /// Drops a schema and publishes the change in a new snapshot.
-    pub async fn drop_schema(&self, info: schema::DropSchemaInfo) -> Result<(), DbErr> {
+    /// Drops a schema from `expected_snapshot_id` and publishes a new branch head.
+    pub async fn drop_schema(
+        &self,
+        expected_snapshot_id: snapshot::SnapshotId,
+        info: schema::DropSchemaInfo,
+    ) -> Result<(), DbErr> {
+        let branch_name = self.branch_name.clone();
         flatten_transaction_err(
             self.db
                 .transaction::<_, _, DbErr>(|txn| {
                     Box::pin(async move {
-                        let current_snapshot = snapshot::get_current_snapshot_info(txn)
-                            .await?
-                            .unwrap_or_default();
-                        let read_snapshot = current_snapshot.snapshot_id;
-                        let new_snapshot_id =
-                            snapshot::commit_snapshot(txn, current_snapshot).await?;
-                        schema::drop_schema(info, txn, read_snapshot, new_snapshot_id).await
-                    })
-                })
-                .await,
-        )
-    }
-
-    /// Creates a relation and its columns and publishes them in a new snapshot.
-    pub async fn create_relation(&self, info: relation::CreateRelationInfo) -> Result<i64, DbErr> {
-        flatten_transaction_err(
-            self.db
-                .transaction::<_, _, DbErr>(|txn| {
-                    Box::pin(async move {
-                        let mut current_snapshot = snapshot::get_current_snapshot_info(txn)
-                            .await?
-                            .unwrap_or_default();
-                        let read_snapshot = current_snapshot.snapshot_id;
-                        let relation_id = current_snapshot.get_next_catalog_id();
-                        let new_snapshot_id =
-                            snapshot::commit_snapshot(txn, current_snapshot).await?;
-                        relation::create_relation(
-                            info,
-                            relation_id,
+                        let current_snapshot = snapshot::get_snapshot_for_write(
                             txn,
-                            read_snapshot,
+                            &branch_name,
+                            expected_snapshot_id,
+                        )
+                        .await?;
+                        let read_snapshot = current_snapshot.snapshot_id.as_i64();
+                        let new_snapshot_id =
+                            snapshot::commit_snapshot(txn, current_snapshot).await?;
+                        schema::drop_schema(info, txn, read_snapshot, new_snapshot_id.as_i64())
+                            .await?;
+                        snapshot::publish_snapshot(
+                            txn,
+                            &branch_name,
+                            expected_snapshot_id,
                             new_snapshot_id,
                         )
                         .await
@@ -166,19 +193,77 @@ impl<T: TransactionTrait> Catalog<T> {
         )
     }
 
-    /// Drops a relation and its columns and publishes the change in a new snapshot.
-    pub async fn drop_relation(&self, info: relation::DropRelationInfo) -> Result<i64, DbErr> {
+    /// Creates a relation from `expected_snapshot_id` and publishes a new branch head.
+    pub async fn create_relation(
+        &self,
+        expected_snapshot_id: snapshot::SnapshotId,
+        info: relation::CreateRelationInfo,
+    ) -> Result<i64, DbErr> {
+        let branch_name = self.branch_name.clone();
+        flatten_transaction_err(
+            self.db
+                .transaction::<_, _, DbErr>(|txn| {
+                    Box::pin(async move {
+                        let mut current_snapshot = snapshot::get_snapshot_for_write(
+                            txn,
+                            &branch_name,
+                            expected_snapshot_id,
+                        )
+                        .await?;
+                        let read_snapshot = current_snapshot.snapshot_id.as_i64();
+                        let relation_id = current_snapshot.get_next_catalog_id();
+                        let new_snapshot_id =
+                            snapshot::commit_snapshot(txn, current_snapshot).await?;
+                        relation::create_relation(
+                            info,
+                            relation_id,
+                            txn,
+                            read_snapshot,
+                            new_snapshot_id.as_i64(),
+                        )
+                        .await?;
+                        snapshot::publish_snapshot(
+                            txn,
+                            &branch_name,
+                            expected_snapshot_id,
+                            new_snapshot_id,
+                        )
+                        .await?;
+                        Ok(relation_id)
+                    })
+                })
+                .await,
+        )
+    }
+
+    /// Drops a relation from `expected_snapshot_id` and publishes a new branch head.
+    pub async fn drop_relation(
+        &self,
+        expected_snapshot_id: snapshot::SnapshotId,
+        info: relation::DropRelationInfo,
+    ) -> Result<i64, DbErr> {
+        let branch_name = self.branch_name.clone();
         let relation_id = info.relation_id;
         flatten_transaction_err(
             self.db
                 .transaction::<_, _, DbErr>(|txn| {
                     Box::pin(async move {
-                        let current_snapshot = snapshot::get_current_snapshot_info(txn)
-                            .await?
-                            .unwrap_or_default();
+                        let current_snapshot = snapshot::get_snapshot_for_write(
+                            txn,
+                            &branch_name,
+                            expected_snapshot_id,
+                        )
+                        .await?;
                         let new_snapshot_id =
                             snapshot::commit_snapshot(txn, current_snapshot).await?;
-                        relation::drop_relation(info, txn, new_snapshot_id).await?;
+                        relation::drop_relation(info, txn, new_snapshot_id.as_i64()).await?;
+                        snapshot::publish_snapshot(
+                            txn,
+                            &branch_name,
+                            expected_snapshot_id,
+                            new_snapshot_id,
+                        )
+                        .await?;
                         Ok(relation_id)
                     })
                 })
@@ -198,7 +283,7 @@ mod tests {
         migration::Migrator,
         relation::{CreateColumnInfo, CreateRelationInfo, GetRelationInfo},
         schema::CreateSchemaInfo,
-        snapshot::get_current_snapshot_info,
+        snapshot::SnapshotId,
     };
 
     use super::Catalog;
@@ -208,29 +293,35 @@ mod tests {
         let db = Database::connect("sqlite::memory:").await?;
         Migrator::up(&db, None).await?;
         let catalog = Catalog::new(db.clone());
+        let initial_snapshot_id = catalog.reader().await?.snapshot_id();
+        assert_eq!(initial_snapshot_id, SnapshotId::INITIAL);
 
         let schema_id = catalog
-            .create_schema(CreateSchemaInfo {
-                schema_name: "public".to_owned(),
-            })
+            .create_schema(
+                initial_snapshot_id,
+                CreateSchemaInfo {
+                    schema_name: "public".to_owned(),
+                },
+            )
             .await?;
-        let schema_snapshot = get_current_snapshot_info(&db)
-            .await?
-            .expect("schema commit should publish a snapshot");
+        let schema_snapshot_id = catalog.reader().await?.snapshot_id();
 
         let relation_id = catalog
-            .create_relation(CreateRelationInfo {
-                schema_name: "public".to_owned(),
-                relation_name: "orders".to_owned(),
-                columns: vec![CreateColumnInfo {
-                    column_name: "order_id".to_owned(),
-                    column_type: ColumnType(DataType::Int64),
-                    nulls_allowed: false,
-                }],
-            })
+            .create_relation(
+                schema_snapshot_id,
+                CreateRelationInfo {
+                    schema_name: "public".to_owned(),
+                    relation_name: "orders".to_owned(),
+                    columns: vec![CreateColumnInfo {
+                        column_name: "order_id".to_owned(),
+                        column_type: ColumnType(DataType::Int64),
+                        nulls_allowed: false,
+                    }],
+                },
+            )
             .await?;
 
-        let historical = catalog.reader_at(schema_snapshot.snapshot_id).await?;
+        let historical = catalog.reader_at(schema_snapshot_id).await?;
         assert_eq!(historical.get_all_relations().await?, Vec::new());
 
         let current = catalog.reader().await?;
@@ -241,6 +332,89 @@ mod tests {
         assert_eq!(relation.relation_name, "orders");
         assert_eq!(relation.columns.len(), 1);
         assert_eq!(relation.columns[0].column_name, "order_id");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn failed_write_does_not_publish_snapshot() -> Result<(), DbErr> {
+        let db = Database::connect("sqlite::memory:").await?;
+        Migrator::up(&db, None).await?;
+        let catalog = Catalog::new(db);
+        let initial_snapshot_id = catalog.reader().await?.snapshot_id();
+
+        catalog
+            .create_relation(
+                initial_snapshot_id,
+                CreateRelationInfo {
+                    schema_name: "missing".to_owned(),
+                    relation_name: "orders".to_owned(),
+                    columns: Vec::new(),
+                },
+            )
+            .await
+            .expect_err("a relation cannot be created in a missing schema");
+
+        assert_eq!(catalog.reader().await?.snapshot_id(), initial_snapshot_id);
+        assert!(
+            catalog
+                .reader_at(SnapshotId::from_raw(initial_snapshot_id.as_i64() + 1,))
+                .await
+                .is_err(),
+            "the rolled-back snapshot must not exist"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn stale_writer_cannot_advance_branch_head() -> Result<(), DbErr> {
+        let temp_dir = tempfile::tempdir().expect("temporary directory should be created");
+        let path = temp_dir.path().join("catalog.sqlite");
+        let url = format!("sqlite://{}?mode=rwc", path.display());
+
+        let db1 = Database::connect(&url).await?;
+        Migrator::up(&db1, None).await?;
+        let db2 = Database::connect(&url).await?;
+        {
+            let catalog1 = Catalog::new(db1.clone());
+            let catalog2 = Catalog::new(db2.clone());
+
+            let reader1 = catalog1.reader().await?;
+            let reader2 = catalog2.reader().await?;
+            let initial_snapshot_id = reader1.snapshot_id();
+            assert_eq!(initial_snapshot_id, reader2.snapshot_id());
+
+            catalog1
+                .create_schema(
+                    initial_snapshot_id,
+                    CreateSchemaInfo {
+                        schema_name: "public".to_owned(),
+                    },
+                )
+                .await?;
+
+            let error = catalog2
+                .create_schema(
+                    initial_snapshot_id,
+                    CreateSchemaInfo {
+                        schema_name: "stale".to_owned(),
+                    },
+                )
+                .await
+                .expect_err("the second client should have a stale base snapshot");
+            assert!(error.to_string().contains("stale snapshot"));
+
+            assert_eq!(reader2.get_all_schemas().await?, Vec::new());
+            let current = catalog2.reader().await?;
+            assert_ne!(current.snapshot_id(), initial_snapshot_id);
+            let schemas = current.get_all_schemas().await?;
+            assert_eq!(schemas.len(), 1);
+            assert_eq!(schemas[0].schema_name, "public");
+        }
+
+        db1.close().await?;
+        db2.close().await?;
 
         Ok(())
     }

@@ -12,3 +12,4 @@ pub mod schema;
 pub mod snapshot;
 
 pub use catalog::{Catalog, CatalogReader};
+pub use snapshot::SnapshotId;

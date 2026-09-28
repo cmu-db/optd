@@ -39,8 +39,8 @@ Required behavior:
 
 - Bootstrap snapshot `0` and branch `main`.
 - Pin readers to one immutable snapshot.
-- Lock the `main` branch row with `FOR UPDATE` before publishing.
-- Compare the expected base snapshot with the locked branch head.
+- Serialize publication through a conditional update of the `main` branch head; on PostgreSQL the update locks that row.
+- Compare the expected base snapshot with the branch head before and during publication.
 - Create, rename, and drop schemas and relations by inserting and closing temporal rows.
 - Advance the branch head in the same transaction.
 - Reject stale writers and leave the branch unchanged after failed commits.

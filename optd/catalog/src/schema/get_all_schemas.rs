@@ -9,14 +9,14 @@ use crate::{
     snapshot::SnapshotInfo,
 };
 
-pub async fn get_all_schema_infos<C>(
+pub(crate) async fn get_all_schema_infos<C>(
     db: &C,
     current_snapshot: &SnapshotInfo,
 ) -> Result<Vec<SchemaInfo>, DbErr>
 where
     C: ConnectionTrait,
 {
-    let snapshot_id = current_snapshot.snapshot_id;
+    let snapshot_id = current_snapshot.snapshot_id.as_i64();
     Schema::find()
         .filter(schema::Column::BeginSnapshot.lte(snapshot_id))
         .filter(

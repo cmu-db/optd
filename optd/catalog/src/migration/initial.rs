@@ -19,6 +19,10 @@ impl MigrationTrait for Migration {
                 .if_not_exists()
                 .to_owned(),
             schema
+                .create_table_from_entity(entity::branch::Entity)
+                .if_not_exists()
+                .to_owned(),
+            schema
                 .create_table_from_entity(entity::schema::Entity)
                 .if_not_exists()
                 .to_owned(),
@@ -34,14 +38,28 @@ impl MigrationTrait for Migration {
             manager.create_table(statement).await?;
         }
 
-        if entity::snapshot::Entity::find()
+        if entity::snapshot::Entity::find_by_id(0)
             .one(manager.get_connection())
             .await?
             .is_none()
         {
             entity::snapshot::Entity::insert(entity::snapshot::ActiveModel {
+                snapshot_id: Set(0),
                 next_catalog_id: Set(1),
                 ..Default::default()
+            })
+            .exec(manager.get_connection())
+            .await?;
+        }
+
+        if entity::branch::Entity::find_by_id("main")
+            .one(manager.get_connection())
+            .await?
+            .is_none()
+        {
+            entity::branch::Entity::insert(entity::branch::ActiveModel {
+                branch_name: Set("main".to_owned()),
+                current_snapshot_id: Set(0),
             })
             .exec(manager.get_connection())
             .await?;
@@ -62,6 +80,10 @@ impl MigrationTrait for Migration {
                 .to_owned(),
             Table::drop()
                 .table(entity::schema::Entity)
+                .if_exists()
+                .to_owned(),
+            Table::drop()
+                .table(entity::branch::Entity)
                 .if_exists()
                 .to_owned(),
             Table::drop()
