@@ -61,8 +61,10 @@ precise intersection sketch; it currently improves the join domain estimate thro
 
 DataFusion does not supply HLL or SpaceSaving payloads automatically. The connector's current
 runtime collector obtains exact aggregate row count, non-null count, NDV, minimum, and maximum for
-referenced columns. A future bounded/full-scan sketch collector will install sketches through the
-same `AnalysisContext` interface until catalog persistence is available.
+referenced columns. Connector tests also have a deliberately test-only `SELECT *` collector that
+builds exact statistics, HLL, and SpaceSaving directly from fixture values. Production collection
+still requires a bounded/full-scan collector that installs sketches through the same
+`AnalysisContext` interface until catalog persistence is available.
 
 Sketches are propagated only while their population remains unchanged:
 

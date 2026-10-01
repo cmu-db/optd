@@ -5,7 +5,8 @@ This is the local implementation backlog for closing the remaining estimation an
 ## Statistics collection and storage
 
 - [ ] Persist catalog statistics and query-local sketch payloads through the production catalog provider.
-- [ ] Add a collector for HLL and SpaceSaving data. DataFusion exposes ordinary `Statistics` (row counts, null counts, min/max, and sometimes distinct counts depending on the provider), but it does not provide HLL or SpaceSaving sketches automatically.
+- [x] Add a test-only `SELECT *` collector that builds exact fixture statistics plus HLL and SpaceSaving from real values.
+- [ ] Add a production collector for HLL and SpaceSaving data. DataFusion exposes ordinary `Statistics` (row counts, null counts, min/max, and sometimes distinct counts depending on the provider), but it does not provide HLL or SpaceSaving sketches automatically.
 - [ ] Decide between a full-scan collector and a bounded sampling collector; record provenance, population size, collection time, and freshness.
 - [ ] After sampling is available, collect and persist multi-column distinct counts for composite joins, grouping keys, and correlated predicates.
 - [ ] Add sample- or set-sketch-based distinct-domain overlap; do not use classic HLL inclusion/exclusion as a precise intersection estimate.
