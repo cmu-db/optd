@@ -26,19 +26,38 @@ expensive because each distinct closed subtree is executed independently.
 
 ## Running
 
+The root `Makefile` provides the supported build, test, baseline-update, and regression entry
+points. Run `make help` for the complete list. A typical TPC-H workflow is:
+
+```sh
+make build-binaries
+make test-tpch
+make regression-optd-smoke
+make load-postgres-tpch
+make regression-postgres-smoke
+make regression-compare-smoke PLOT_PYTHON="conda run -n c0bench python"
+```
+
+`regression-compare` validates that both reports can be grouped by join count and then writes the
+comparison plots and summary. It defaults to every normalization level; use
+`regression-compare-smoke` when a limited run may contain no joins. Set `PLOT_PYTHON` when plotting
+dependencies live in a separate environment. The comparison is distributional: optd rows are
+logical operator subtrees, while PostgreSQL rows are nodes in its chosen physical plan. They are
+not paired as if they represented identical subplans.
+
 Download the benchmark data first, then point the command at one `.sql`/`.slt` file or a directory.
 For SLT files, the first `query` block is measured.
 
 ```sh
 ./scripts/download_tpch_hf.sh
-cargo run --release -p optd-datafusion --bin cardinality-regression -- \
-  --dataset tpch \
-  --queries optd/connectors/datafusion/tests/slt/tpch/results \
-  --output target/cardinality-regression/tpch
+make regression-optd \
+  DATASET=tpch \
+  QUERIES=optd/connectors/datafusion/tests/slt/tpch/results \
+  OPTD_OUTPUT=target/cardinality-regression/tpch
 ```
 
-Use `--limit N` for a smoke run and `--target-partitions N` to control DataFusion execution
-parallelism. JOB uses `--dataset job` and requires `./scripts/download_job_hf.sh`.
+Set `OPTD_EXTRA_ARGS="--limit N --target-partitions N"` for a smoke run or to control DataFusion
+execution parallelism. JOB uses `DATASET=job` and requires `./scripts/download_job_hf.sh`.
 
 ### PostgreSQL chosen-plan measurements
 
@@ -48,21 +67,22 @@ the report. Parallel query and JIT are disabled in each measurement transaction 
 stable. InitPlan and SubPlan joins are measured in their own subtrees but do not contribute to their
 parent query block's join count.
 
-For the local PostgreSQL 18 container, load the same TPC-H Parquet data used by optd. This command
-recreates the eight benchmark tables in `optd_bench`, streams them through DuckDB's CSV output,
-creates primary-key and benchmark lookup indexes, and runs `ANALYZE`:
+For the local PostgreSQL 18 container, load the same TPC-H Parquet data used by optd. The container
+must already exist and be running, and the configured user and database must already exist. The
+repository does not provision the container. This command recreates the eight benchmark tables in
+`optd_bench`, streams them through DuckDB's CSV output, creates primary-key and benchmark lookup
+indexes, and runs `ANALYZE`:
 
 ```sh
-optd/connectors/datafusion/scripts/load_tpch_postgres.sh
+make load-postgres-tpch
 ```
 
 Then collect the selected PostgreSQL plans:
 
 ```sh
-conda run -n c0bench python \
-  optd/connectors/datafusion/scripts/postgres_cardinality_regression.py \
-  --queries optd/connectors/datafusion/tests/slt/tpch/results \
-  --output target/cardinality-regression/postgres
+make regression-postgres \
+  QUERIES=optd/connectors/datafusion/tests/slt/tpch/results \
+  POSTGRES_OUTPUT=target/cardinality-regression/postgres
 ```
 
 The collector defaults to container `optd-postgres-18`, database `optd_bench`, and user `optd`.
