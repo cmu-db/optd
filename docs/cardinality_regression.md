@@ -40,7 +40,39 @@ cargo run --release -p optd-datafusion --bin cardinality-regression -- \
 Use `--limit N` for a smoke run and `--target-partitions N` to control DataFusion execution
 parallelism. JOB uses `--dataset job` and requires `./scripts/download_job_hf.sh`.
 
-The command writes raw subtree measurements, including each subtree's join count, to `report.json`.
+### PostgreSQL chosen-plan measurements
+
+The PostgreSQL collector runs `EXPLAIN (ANALYZE, FORMAT JSON)` and records every node in the chosen
+physical plan. `Plan Rows` is compared with the per-loop `Actual Rows`; `Actual Loops` is retained in
+the report. Parallel query and JIT are disabled in each measurement transaction so row accounting is
+stable. InitPlan and SubPlan joins are measured in their own subtrees but do not contribute to their
+parent query block's join count.
+
+For the local PostgreSQL 18 container, load the same TPC-H Parquet data used by optd. This command
+recreates the eight benchmark tables in `optd_bench`, streams them through DuckDB's CSV output,
+creates primary-key and benchmark lookup indexes, and runs `ANALYZE`:
+
+```sh
+optd/connectors/datafusion/scripts/load_tpch_postgres.sh
+```
+
+Then collect the selected PostgreSQL plans:
+
+```sh
+conda run -n c0bench python \
+  optd/connectors/datafusion/scripts/postgres_cardinality_regression.py \
+  --queries optd/connectors/datafusion/tests/slt/tpch/results \
+  --output target/cardinality-regression/postgres
+```
+
+The collector defaults to container `optd-postgres-18`, database `optd_bench`, and user `optd`.
+Override them with `--container`, `--database`, and `--user`. Use `--limit N` for a smoke run and
+`--statement-timeout SECONDS` to bound each query. The report is checkpointed after every successful
+query; `--resume` skips queries already present in it, while `--continue-on-error` records failures
+in `errors.json` and proceeds. `EXPLAIN ANALYZE` executes the SQL, so the collector is intended only
+for trusted, read-only benchmark queries.
+
+The commands write raw subtree measurements, including each subtree's join count, to `report.json`.
 With Matplotlib, pandas, and Seaborn available in the active Python environment, generate box and
 violin plots grouped by join count with:
 
@@ -53,3 +85,34 @@ The script writes `qerror-boxplot.svg` and `qerror-violin.svg` beside the report
 `--output DIR` to choose another directory, or `--summary` to also write
 `summary-by-join-count.csv` with counts, geometric means, quartiles, and box-plot whiskers. Both
 plots use a logarithmic q-error axis.
+
+Use `--normalization LEVEL` to control how aggressively structurally duplicated measurements are
+removed:
+
+- `none` (the default) keeps every measured operator.
+- `wrappers` removes only `Output` and `Sort`. It retains projections, renames, maps and function
+  computations, selections, aggregations, limits, sources, and joins.
+- `row-preserving` additionally removes `Projection`, `Rename`, and `Map`, while retaining operators
+  that may determine cardinality, including selections, aggregations, limits, table functions, and
+  joins.
+- `joins` keeps only joins and cross products.
+
+Non-default levels add the level to generated filenames so several views can coexist in one output
+directory. Pass `--normalization all` to generate every view in one invocation.
+
+Once a PostgreSQL run has produced the same raw report schema, pass it with `--compare-report` to
+write side-by-side box plots and a comparison CSV, and print a Markdown table containing sample
+counts, geometric means, medians, 95th percentiles, and the percentage of measurements with q-error
+at least 10:
+
+```sh
+python3 optd/connectors/datafusion/scripts/plot_cardinality_regression.py \
+  target/cardinality-regression/tpch/report.json \
+  --compare-report target/cardinality-regression/postgres/report.json \
+  --normalization all --summary
+```
+
+This writes `comparison-by-join-count-all.csv` and one
+`qerror-comparison-boxplot-LEVEL.svg` per normalization level. Comparison requires raw per-node
+PostgreSQL measurements; aggregate percentages from a paper are insufficient to reconstruct the
+distributions.
