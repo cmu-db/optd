@@ -6,9 +6,16 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::{
-    AggregateExpr, AggregateFunction, BinaryOp, Catalog, Column, ColumnStatistics, Expr, ExprData,
-    JoinType, NaryOp, NodeSet, Operator, OperatorData, QueryContext, QueryHypergraph, Relation,
-    ScalarValue, Scan, UnaryOp,
+    AggregateExpr, AggregateFunction, BinaryOp, Catalog, Column, ColumnSketches, ColumnStatistics,
+    EncodedScalarValue, Expr, ExprData, JoinType, NaryOp, NodeSet, Operator, OperatorData,
+    QueryContext, QueryHypergraph, Relation, ScalarValue, Scan, TableId, TableRef, UnaryOp,
+};
+
+mod logical_facts;
+
+pub use logical_facts::{
+    BaseColumn, ConstraintSet, LogicalFacts, LogicalFactsAnalysis, ValueEquivalenceClasses,
+    ValueId, ValueRange,
 };
 
 /// Result type used by query analyses.
@@ -28,6 +35,8 @@ pub enum AnalysisError {
     AnalysisTypeMismatch(&'static str),
     /// A catalog-aware analysis could not resolve a referenced table.
     Catalog(String),
+    /// Query-local column sketches violated compatibility or population invariants.
+    InvalidColumnSketch(String),
 }
 
 impl fmt::Display for AnalysisError {
@@ -44,6 +53,7 @@ impl fmt::Display for AnalysisError {
                 write!(f, "registered analysis had the wrong type for {analysis}")
             }
             Self::Catalog(error) => write!(f, "catalog analysis failed: {error}"),
+            Self::InvalidColumnSketch(error) => write!(f, "invalid column sketch: {error}"),
         }
     }
 }
@@ -158,6 +168,8 @@ impl<T> OperatorAnalysisState<T> {
 pub enum EstimateSource {
     Exact,
     Catalog,
+    /// Estimate produced directly by a query-local probabilistic sketch.
+    Sketch,
     Derived,
     Default,
 }
@@ -234,6 +246,14 @@ impl Estimate {
             other
         }
     }
+
+    fn min_by_value(&self, other: Self) -> Self {
+        if self.value <= other.value {
+            self.clone()
+        } else {
+            other
+        }
+    }
 }
 
 impl std::fmt::Display for Estimate {
@@ -262,6 +282,11 @@ pub struct ColumnProfile {
     pub upper_bound: Option<ScalarValue>,
     pub frequency: Estimate,
     pub distinct: Estimate,
+    /// Logical value whose statistics this profile describes.
+    pub value: Option<ValueId>,
+    /// Base-population sketches. Operators that change the represented population invalidate this
+    /// field unless they can derive a sound replacement.
+    pub sketches: Option<Arc<ColumnSketches>>,
 }
 
 impl ColumnProfile {
@@ -275,6 +300,8 @@ impl ColumnProfile {
             upper_bound: None,
             frequency: rows.clone(),
             distinct: Estimate::derived(rows.value.min(ndv_cap), Some(0.0), rows.upper),
+            value: None,
+            sketches: None,
         }
     }
 
@@ -307,6 +334,7 @@ impl ColumnProfile {
         self.distinct = self
             .distinct
             .cap(self.frequency.value, EstimateSource::Derived);
+        self.sketches = None;
     }
 }
 
@@ -376,7 +404,8 @@ impl CardinalityProfile {
 /// Restricts equality classes to output columns and drops classes that become singletons.
 ///
 /// Recomputing the class NDV from retained columns prevents a removed column's statistic from
-/// continuing to constrain the projected profile.
+/// continuing to constrain the projected profile. Equal values cannot have more distinct values
+/// than the smallest member domain.
 fn filter_equivalence_classes(
     classes: &[ColumnEquivalenceClass],
     columns: &BTreeMap<Column, ColumnProfile>,
@@ -396,7 +425,7 @@ fn filter_equivalence_classes(
             .iter()
             .filter_map(|column| columns.get(column))
             .map(|profile| profile.distinct.clone())
-            .max_by(|a, b| a.value.total_cmp(&b.value))
+            .min_by(|a, b| a.value.total_cmp(&b.value))
             .unwrap_or_else(|| class.distinct.clone());
         filtered.push(ColumnEquivalenceClass {
             columns: kept,
@@ -426,7 +455,7 @@ fn filter_owned_equivalence_classes(
             .iter()
             .filter_map(|column| columns.get(column))
             .map(|profile| profile.distinct.clone())
-            .max_by(|a, b| a.value.total_cmp(&b.value))
+            .min_by(|a, b| a.value.total_cmp(&b.value))
             .unwrap_or_else(|| class.distinct.clone());
         true
     });
@@ -564,11 +593,16 @@ pub struct AtMostOneRow {
     state: OperatorAnalysisState<bool>,
 }
 
+pub(crate) type ColumnSketchStore = BTreeMap<(TableId, String), Arc<ColumnSketches>>;
+
 /// Registry of lazily-created analysis instances.
 pub struct AnalysisContext {
     analyses: AnalysisRegistry,
     catalog: Arc<dyn Catalog>,
     cardinality_config: CardinalityEstimationConfig,
+    /// Query-local base-column sketches. Derived operator statistics remain owned by their
+    /// demand-driven analyses; a future catalog cache can populate this same boundary.
+    column_sketches: ColumnSketchStore,
 }
 
 impl AnalysisContext {
@@ -578,6 +612,7 @@ impl AnalysisContext {
             analyses: AnalysisRegistry::new(),
             catalog,
             cardinality_config: CardinalityEstimationConfig::default(),
+            column_sketches: BTreeMap::new(),
         }
     }
 
@@ -620,12 +655,72 @@ impl AnalysisContext {
         &self.catalog
     }
 
-    /// Creates a fresh cache that uses the same catalog as this context.
+    /// Installs query-local sketches for a base column and invalidates derived analyses.
+    ///
+    /// Sketches are keyed by resolved table identity and catalog column name. The payload is shared
+    /// by derived profiles and remains available when analysis caches are cleared.
+    pub fn set_column_sketches(
+        &mut self,
+        table: TableRef,
+        column: impl Into<String>,
+        sketches: ColumnSketches,
+    ) -> AnalysisResult<()> {
+        sketches
+            .validate()
+            .map_err(AnalysisError::InvalidColumnSketch)?;
+        let table_id = self
+            .catalog
+            .table_by_ref(&table)
+            .map_err(|error| AnalysisError::Catalog(error.to_string()))?
+            .id;
+        self.column_sketches
+            .insert((table_id, column.into()), Arc::new(sketches));
+        self.clear();
+        Ok(())
+    }
+
+    /// Returns query-local sketches for a base column, when collected.
+    pub fn column_sketches(
+        &self,
+        table: &TableRef,
+        column: &str,
+    ) -> AnalysisResult<Option<Arc<ColumnSketches>>> {
+        let table_id = self
+            .catalog
+            .table_by_ref(table)
+            .map_err(|error| AnalysisError::Catalog(error.to_string()))?
+            .id;
+        Ok(self
+            .column_sketches
+            .get(&(table_id, column.to_owned()))
+            .cloned())
+    }
+
+    pub(crate) fn from_planned_parts(
+        catalog: Arc<dyn Catalog>,
+        cardinality_config: CardinalityEstimationConfig,
+        column_sketches: ColumnSketchStore,
+    ) -> Self {
+        Self {
+            analyses: AnalysisRegistry::new(),
+            catalog,
+            cardinality_config,
+            column_sketches,
+        }
+    }
+
+    pub(crate) fn planned_sketches(&self) -> ColumnSketchStore {
+        self.column_sketches.clone()
+    }
+
+    /// Creates a fresh derived-analysis cache with the same catalog, configuration, and base
+    /// sketches as this context.
     pub fn fork(&self) -> Self {
         Self {
             analyses: AnalysisRegistry::new(),
             catalog: Arc::clone(&self.catalog),
             cardinality_config: self.cardinality_config,
+            column_sketches: self.column_sketches.clone(),
         }
     }
 
@@ -1065,7 +1160,6 @@ fn collect_non_null_columns_from_predicate(
         },
         ExprData::Binary { op, left, right } => match op {
             crate::BinaryOp::Eq
-            | crate::BinaryOp::IsNotDistinctFrom
             | crate::BinaryOp::NotEq
             | crate::BinaryOp::Lt
             | crate::BinaryOp::LtEq
@@ -1074,7 +1168,8 @@ fn collect_non_null_columns_from_predicate(
                 collect_expr_used_columns(ctx, analyses, *left, columns)?;
                 collect_expr_used_columns(ctx, analyses, *right, columns)?;
             }
-            crate::BinaryOp::Add
+            crate::BinaryOp::IsNotDistinctFrom
+            | crate::BinaryOp::Add
             | crate::BinaryOp::Subtract
             | crate::BinaryOp::Multiply
             | crate::BinaryOp::Divide => {}
@@ -1376,7 +1471,52 @@ impl CachedAnalysis for CardinalityEstimationV1 {
         analyses: &mut AnalysisContext,
         operator: Operator,
     ) -> AnalysisResult<Self::Output> {
-        cardinality_profile(operator, ctx, analyses)
+        let mut profile = cardinality_profile(operator, ctx, analyses)?;
+        let facts = LogicalFactsAnalysis::get_shared(ctx, analyses, operator)?;
+
+        let mut classes = BTreeMap::<ValueId, BTreeSet<Column>>::new();
+        for (&column, value) in &facts.lineage {
+            if profile.columns.contains_key(&column) {
+                classes
+                    .entry(facts.constraints.canonical(value))
+                    .or_default()
+                    .insert(column);
+            }
+        }
+        let equivalence_classes = classes
+            .into_values()
+            .filter(|columns| columns.len() >= 2)
+            .map(|columns| {
+                let distinct = columns
+                    .iter()
+                    .filter_map(|column| profile.columns.get(column))
+                    .map(|column| column.distinct.clone())
+                    .min_by(|left, right| left.value.total_cmp(&right.value))
+                    .unwrap_or_else(|| Estimate::default(0.0));
+                ColumnEquivalenceClass { columns, distinct }
+            })
+            .collect::<Vec<_>>();
+        let lineage_changed = profile.columns.iter().any(|(column, column_profile)| {
+            column_profile.value.as_ref() != facts.lineage.get(column)
+        });
+        let contradiction_changed = facts.constraints.contradictory && profile.rows.value != 0.0;
+        if !lineage_changed
+            && profile.equivalence_classes == equivalence_classes
+            && !contradiction_changed
+        {
+            return Ok(profile);
+        }
+
+        let mutable_profile = Arc::make_mut(&mut profile);
+        for (column, column_profile) in &mut mutable_profile.columns {
+            column_profile.value = facts.lineage.get(column).cloned();
+        }
+        mutable_profile.equivalence_classes = equivalence_classes;
+        cap_equivalent_column_distinct_counts(mutable_profile);
+        if contradiction_changed {
+            *mutable_profile = mutable_profile.cap_by_rows(Estimate::exact(0.0));
+        }
+        Ok(profile)
     }
 }
 
@@ -1424,6 +1564,7 @@ fn cardinality_profile(
     analyses: &mut AnalysisContext,
 ) -> AnalysisResult<Arc<CardinalityProfile>> {
     let config = analyses.cardinality_estimation_config();
+    let catalog = Arc::clone(analyses.catalog());
     match operator.get(ctx) {
         OperatorData::Scan(scan) => scan_profile(scan, ctx, analyses, &config).map(Arc::new),
         OperatorData::ConstScan(data) => Ok(Arc::new(const_scan_profile(data, ctx))),
@@ -1436,8 +1577,10 @@ fn cardinality_profile(
         )),
         OperatorData::Selection(data) => {
             let input = CardinalityEstimationV1::get_shared(ctx, analyses, data.input)?;
+            let input_facts = LogicalFactsAnalysis::get_shared(ctx, analyses, data.input)?;
             Ok(Arc::new(apply_selection_profile(
                 input.as_ref().clone(),
+                input_facts.as_ref().clone(),
                 data.predicate,
                 ctx,
                 &config,
@@ -1453,9 +1596,15 @@ fn cardinality_profile(
         OperatorData::Sort(data) => CardinalityEstimationV1::get_shared(ctx, analyses, data.input),
         OperatorData::Limit(data) => {
             let input = CardinalityEstimationV1::get_shared(ctx, analyses, data.input)?;
+            let offset = data.offset as f64;
+            let remaining = Estimate::derived(
+                (input.rows.value - offset).max(0.0),
+                input.rows.lower.map(|lower| (lower - offset).max(0.0)),
+                input.rows.upper.map(|upper| (upper - offset).max(0.0)),
+            );
             let rows = match data.fetch {
-                Some(fetch) => input.rows.cap(fetch as f64, EstimateSource::Derived),
-                None => input.rows.clone(),
+                Some(fetch) => remaining.cap(fetch as f64, EstimateSource::Derived),
+                None => remaining,
             };
             Ok(Arc::new(input.cap_by_rows(rows)))
         }
@@ -1474,7 +1623,14 @@ fn cardinality_profile(
         }
         OperatorData::Aggregation(data) => {
             let input = CardinalityEstimationV1::get_shared(ctx, analyses, data.input)?;
-            Ok(Arc::new(aggregation_profile(&input, data, ctx, &config)))
+            let input_facts = LogicalFactsAnalysis::get_shared(ctx, analyses, data.input)?;
+            Ok(Arc::new(aggregation_profile(
+                &input,
+                &input_facts,
+                data,
+                ctx,
+                &config,
+            )))
         }
         OperatorData::CrossProduct(data) => {
             let left = CardinalityEstimationV1::get_shared(ctx, analyses, data.outer)?;
@@ -1491,6 +1647,7 @@ fn cardinality_profile(
                 data.on,
                 ctx,
                 &config,
+                Some(catalog.as_ref()),
             )))
         }
     }
@@ -1520,45 +1677,74 @@ fn scan_profile(
         let catalog_column = catalog_stats
             .as_ref()
             .and_then(|stats| stats.column_statistics.get(column_name));
+        let sketches = analyses.column_sketches(&scan.table, column_name)?;
         let profile = catalog_column
-            .map(|stats| column_profile_from_stats(stats, &row_estimate))
-            .unwrap_or_else(|| default_scan_column_profile(&row_estimate, config));
+            .map(|stats| column_profile_from_stats(stats, &row_estimate, sketches.clone()))
+            .unwrap_or_else(|| {
+                default_scan_column_profile(&row_estimate, config, sketches.clone())
+            });
         columns.insert(*column, profile);
     }
 
     Ok(CardinalityProfile::new(row_estimate, columns))
 }
 
-fn column_profile_from_stats(stats: &ColumnStatistics, rows: &Estimate) -> ColumnProfile {
+fn column_profile_from_stats(
+    stats: &ColumnStatistics,
+    rows: &Estimate,
+    sketches: Option<Arc<ColumnSketches>>,
+) -> ColumnProfile {
     let frequency = stats
         .frequency
         .map(|value| Estimate::catalog(value as f64))
         .unwrap_or_else(|| Estimate::default(rows.value));
-    let distinct_value = stats
-        .distinct
-        .map_or(frequency.value.min(rows.value), |value| value as f64);
-    let distinct_value = distinct_value.min(frequency.value);
-    let distinct = stats
-        .distinct
-        .map(|_| Estimate::catalog(distinct_value))
-        .unwrap_or_else(|| Estimate::default(distinct_value));
+    let sketch_distinct = sketches
+        .as_ref()
+        .and_then(|sketches| sketches.distinct_values.as_ref())
+        .map(|hll| hll.estimate().min(frequency.value));
+    let distinct_value = stats.distinct.map(|value| value as f64).or(sketch_distinct);
+    let distinct = match (stats.distinct, distinct_value) {
+        (Some(_), Some(value)) => Estimate::catalog(value.min(frequency.value)),
+        (None, Some(value)) => Estimate {
+            value: value.min(frequency.value),
+            lower: Some(0.0),
+            upper: Some(frequency.value),
+            source: EstimateSource::Sketch,
+        },
+        (_, None) => Estimate::default(frequency.value.min(rows.value)),
+    };
     ColumnProfile {
         lower_bound: stats.lower_bound.clone(),
         upper_bound: stats.upper_bound.clone(),
         frequency,
         distinct,
+        value: None,
+        sketches,
     }
 }
 
 fn default_scan_column_profile(
     rows: &Estimate,
     config: &CardinalityEstimationConfig,
+    sketches: Option<Arc<ColumnSketches>>,
 ) -> ColumnProfile {
+    let distinct = sketches
+        .as_ref()
+        .and_then(|sketches| sketches.distinct_values.as_ref())
+        .map(|hll| Estimate {
+            value: hll.estimate().min(rows.value),
+            lower: Some(0.0),
+            upper: Some(rows.value),
+            source: EstimateSource::Sketch,
+        })
+        .unwrap_or_else(|| Estimate::default(rows.value.min(config.unknown_column_ndv_cap)));
     ColumnProfile {
         lower_bound: None,
         upper_bound: None,
         frequency: Estimate::default(rows.value),
-        distinct: Estimate::default(rows.value.min(config.unknown_column_ndv_cap)),
+        distinct,
+        value: None,
+        sketches,
     }
 }
 
@@ -1583,6 +1769,8 @@ fn const_scan_profile(data: &crate::ConstScan, ctx: &QueryContext) -> Cardinalit
                 upper_bound: scalar_max(&values),
                 frequency: Estimate::exact(values.len() as f64),
                 distinct: Estimate::exact(distinct),
+                value: None,
+                sketches: None,
             },
         );
     }
@@ -1641,9 +1829,7 @@ fn map_profile(
         let profile = profile_for_computation(input, *expr, ctx).unwrap_or_else(|| {
             ColumnProfile::unknown_with_ndv_cap(&input.rows, config.unknown_column_ndv_cap)
         });
-        output
-            .columns
-            .insert(*column, profile.cap_by_rows(&input.rows));
+        output.columns.insert(*column, profile);
     }
     output
 }
@@ -1653,57 +1839,35 @@ fn profile_for_computation(
     expr: Expr,
     ctx: &QueryContext,
 ) -> Option<ColumnProfile> {
-    match expr.get(ctx) {
-        ExprData::ColumnRef(column) => input.columns.get(column).cloned(),
-        ExprData::Cast { expr, .. } => profile_for_computation(input, *expr, ctx),
-        ExprData::Binary {
-            op: op @ (BinaryOp::Add | BinaryOp::Subtract),
-            left,
-            right,
-        } => shifted_profile(input, *op, *left, *right, ctx),
-        _ => None,
-    }
-}
-
-fn shifted_profile(
-    input: &CardinalityProfile,
-    op: BinaryOp,
-    left: Expr,
-    right: Expr,
-    ctx: &QueryContext,
-) -> Option<ColumnProfile> {
-    let (column, literal, literal_on_right) = match (left.get(ctx), right.get(ctx)) {
-        (ExprData::ColumnRef(column), ExprData::Literal(value)) => (*column, value, true),
-        (ExprData::Literal(value), ExprData::ColumnRef(column)) => (*column, value, false),
-        _ => return None,
+    // Only direct aliases inherit statistics. Every other expression remains opaque until a
+    // generic statistics-transform provider can prove how its value domain changes.
+    let ExprData::ColumnRef(column) = expr.get(ctx) else {
+        return None;
     };
-    let delta = scalar_to_f64(literal)?;
-    let mut profile = input.columns.get(&column)?.clone();
-    match op {
-        BinaryOp::Add => {
-            profile.lower_bound = shift_scalar(profile.lower_bound.as_ref(), delta);
-            profile.upper_bound = shift_scalar(profile.upper_bound.as_ref(), delta);
-        }
-        BinaryOp::Subtract if literal_on_right => {
-            profile.lower_bound = shift_scalar(profile.lower_bound.as_ref(), -delta);
-            profile.upper_bound = shift_scalar(profile.upper_bound.as_ref(), -delta);
-        }
-        _ => return None,
-    }
-    Some(profile)
+    input.columns.get(column).cloned()
 }
 
 fn aggregation_profile(
     input: &CardinalityProfile,
+    input_facts: &LogicalFacts,
     data: &crate::Aggregation,
     ctx: &QueryContext,
     config: &CardinalityEstimationConfig,
 ) -> CardinalityProfile {
-    let mut group_rows = if data.keys.is_empty() {
+    let group_rows = if data.keys.is_empty() {
+        // SQL scalar aggregation emits exactly one row even for an empty input.
         Estimate::exact(1.0)
     } else {
+        // TODO(statistics): Once sampling is available, use sampled multi-column NDV for
+        // non-equivalent grouping keys instead of multiplying independent single-column NDVs.
+        let mut seen_values = BTreeSet::new();
         let product = data.keys.iter().fold(1.0, |acc, expr| {
             if let ExprData::ColumnRef(column) = expr.get(ctx) {
+                if let Some(value) = input_facts.canonical_value_for_column(*column)
+                    && !seen_values.insert(value)
+                {
+                    return acc;
+                }
                 acc * input.columns.get(column).map_or(
                     input.rows.value.min(config.unknown_column_ndv_cap),
                     |profile| profile.distinct.value,
@@ -1713,8 +1877,8 @@ fn aggregation_profile(
             }
         });
         Estimate::derived(product.min(input.rows.value), Some(0.0), input.rows.upper)
+            .cap(input.rows.value, EstimateSource::Derived)
     };
-    group_rows = group_rows.cap(input.rows.value, EstimateSource::Derived);
 
     let mut columns = BTreeMap::new();
     for expr in &data.keys {
@@ -1734,6 +1898,8 @@ fn aggregation_profile(
                     .map(|upper| ScalarValue::Int64(upper as i64)),
                 frequency: group_rows.clone(),
                 distinct: group_rows.cap(group_rows.value, EstimateSource::Derived),
+                value: None,
+                sketches: None,
             },
             AggregateExpr::Func {
                 func: AggregateFunction::Count,
@@ -1746,8 +1912,26 @@ fn aggregation_profile(
                     .map(|upper| ScalarValue::Int64(upper as i64)),
                 frequency: group_rows.clone(),
                 distinct: group_rows.cap(group_rows.value, EstimateSource::Derived),
+                value: None,
+                sketches: None,
             },
-            _ => ColumnProfile::unknown_with_ndv_cap(&group_rows, config.unknown_column_ndv_cap),
+            _ => {
+                let mut profile =
+                    ColumnProfile::unknown_with_ndv_cap(&group_rows, config.unknown_column_ndv_cap);
+                // Non-COUNT aggregates are nullable: empty scalar input and all-NULL groups
+                // produce NULL. Keep the estimate explicit rather than claiming every output is
+                // non-null.
+                let non_null_fraction = if input.rows.value == 0.0 { 0.0 } else { 0.9 };
+                profile.frequency = Estimate::derived(
+                    group_rows.value * non_null_fraction,
+                    Some(0.0),
+                    group_rows.upper,
+                );
+                profile.distinct = profile
+                    .distinct
+                    .cap(profile.frequency.value, EstimateSource::Derived);
+                profile
+            }
         };
         columns.insert(*column, profile);
     }
@@ -1756,27 +1940,88 @@ fn aggregation_profile(
 
 fn apply_selection_profile(
     mut profile: CardinalityProfile,
+    mut facts: LogicalFacts,
     predicate: Expr,
     ctx: &QueryContext,
     config: &CardinalityEstimationConfig,
 ) -> CardinalityProfile {
-    // The caller passes an owned clone of the cached input, so each conjunct can safely tighten it
-    // in place while later conjuncts observe the preceding selectivity and bounds.
+    // Charge only information newly introduced by each conjunct. This handles both predicates
+    // repeated across stacked selections and redundant equalities inside one conjunction.
     for conjunct in conjuncts(predicate, ctx) {
-        let selectivity = filter_selectivity(&profile, conjunct, ctx, config);
-        profile = scale_profile(profile, selectivity.value);
+        let before = facts.constraints.clone();
+        facts.apply_predicate(conjunct, ctx);
+        let selectivity = if facts.constraints == before {
+            1.0
+        } else if facts.constraints.contradictory {
+            0.0
+        } else {
+            filter_selectivity(&profile, conjunct, ctx, config).value
+        };
+        let value_restriction = value_restricted_filter_column(conjunct, ctx);
+        profile = scale_profile(profile, selectivity, value_restriction);
         tighten_filter_columns(&mut profile, conjunct, ctx);
     }
     profile
 }
 
-fn scale_profile(profile: CardinalityProfile, factor: f64) -> CardinalityProfile {
+fn scale_profile(
+    profile: CardinalityProfile,
+    factor: f64,
+    value_restriction: Option<(Column, BinaryOp)>,
+) -> CardinalityProfile {
     let factor = factor.clamp(0.0, 1.0);
     let rows = profile.rows.scale(factor, EstimateSource::Derived);
     let columns = profile
         .columns
         .iter()
-        .map(|(&column, column_profile)| (column, column_profile.scale_frequency(factor, &rows)))
+        .map(|(&column, column_profile)| {
+            let mut output = column_profile.scale_frequency(factor, &rows);
+            if let Some((_, restricted_op)) =
+                value_restriction.filter(|(restricted, _)| *restricted == column)
+            {
+                // A direct comparison with a literal removes values from this column's domain,
+                // rather than independently thinning every value's rows. Remove the input null
+                // fraction from the row selectivity before applying it to the non-null NDV.
+                let non_null_fraction = if profile.rows.value <= 0.0 {
+                    0.0
+                } else {
+                    (column_profile.frequency.value / profile.rows.value).clamp(0.0, 1.0)
+                };
+                let domain_fraction = if non_null_fraction <= 0.0 {
+                    0.0
+                } else {
+                    (factor / non_null_fraction).clamp(0.0, 1.0)
+                };
+                output.distinct = if restricted_op == BinaryOp::NotEq {
+                    Estimate::derived(
+                        (column_profile.distinct.value - 1.0)
+                            .max(0.0)
+                            .min(rows.value),
+                        Some(0.0),
+                        Some(
+                            (column_profile.distinct.value - 1.0)
+                                .max(0.0)
+                                .min(rows.value),
+                        ),
+                    )
+                } else {
+                    column_profile
+                        .distinct
+                        .scale(domain_fraction, EstimateSource::Derived)
+                        .cap(rows.value, EstimateSource::Derived)
+                };
+                // Ordinary comparisons reject NULL for the constrained column.
+                output.frequency = rows.clone();
+            } else {
+                output.distinct = surviving_distinct_after_row_filter(
+                    column_profile,
+                    factor,
+                    output.frequency.value,
+                );
+            }
+            output.sketches = None;
+            (column, output)
+        })
         .collect();
     let equivalence_classes = filter_equivalence_classes(&profile.equivalence_classes, &columns);
     CardinalityProfile {
@@ -1784,6 +2029,33 @@ fn scale_profile(profile: CardinalityProfile, factor: f64) -> CardinalityProfile
         columns,
         equivalence_classes,
     }
+}
+
+/// Expected surviving NDV after independently retaining each non-null row with `factor`.
+///
+/// Under uniform multiplicity, one value has `frequency / distinct` opportunities to survive, so
+/// its survival probability is `1 - (1 - factor)^(frequency / distinct)`. Direct value-domain
+/// predicates use proportional domain scaling above instead of this occupancy model.
+fn surviving_distinct_after_row_filter(
+    profile: &ColumnProfile,
+    factor: f64,
+    output_frequency: f64,
+) -> Estimate {
+    if profile.distinct.value <= 0.0 || profile.frequency.value <= 0.0 || factor <= 0.0 {
+        return Estimate::derived(0.0, Some(0.0), Some(0.0));
+    }
+    if factor >= 1.0 {
+        return profile
+            .distinct
+            .cap(output_frequency, EstimateSource::Derived);
+    }
+    let average_multiplicity = profile.frequency.value / profile.distinct.value;
+    let survival_probability = -(average_multiplicity * (-factor).ln_1p()).exp_m1();
+    Estimate::derived(
+        (profile.distinct.value * survival_probability).min(output_frequency),
+        Some(0.0),
+        Some(profile.distinct.value.min(output_frequency)),
+    )
 }
 
 pub(crate) fn cross_product_profile(
@@ -1805,6 +2077,7 @@ pub(crate) fn cross_product_profile(
         output.distinct = output
             .distinct
             .cap(output.frequency.value, EstimateSource::Derived);
+        output.sketches = None;
         columns.insert(column, output);
     }
     for (&column, profile) in &right.columns {
@@ -1816,6 +2089,7 @@ pub(crate) fn cross_product_profile(
         output.distinct = output
             .distinct
             .cap(output.frequency.value, EstimateSource::Derived);
+        output.sketches = None;
         columns.insert(column, output);
     }
     CardinalityProfile {
@@ -1847,6 +2121,7 @@ fn join_profile_from_predicate(
         predicate,
         ctx,
         &CardinalityEstimationConfig::default(),
+        None,
     )
 }
 
@@ -1857,9 +2132,12 @@ fn join_profile_from_predicate_with_config(
     predicate: Expr,
     ctx: &QueryContext,
     config: &CardinalityEstimationConfig,
+    catalog: Option<&dyn Catalog>,
 ) -> CardinalityProfile {
     let conjuncts = conjuncts(predicate, ctx);
-    join_profile_from_conjuncts_with_config(left, right, join_type, &conjuncts, ctx, config)
+    join_profile_from_conjuncts_with_config(
+        left, right, join_type, &conjuncts, ctx, config, catalog,
+    )
 }
 
 /// Estimates a join profile from predicates that are already flattened into atomic conjuncts.
@@ -1881,6 +2159,7 @@ pub(crate) fn join_profile_from_conjuncts(
         conjuncts,
         ctx,
         &CardinalityEstimationConfig::default(),
+        None,
     )
 }
 
@@ -1891,6 +2170,7 @@ fn join_profile_from_conjuncts_with_config(
     conjuncts: &[Expr],
     ctx: &QueryContext,
     config: &CardinalityEstimationConfig,
+    catalog: Option<&dyn Catalog>,
 ) -> CardinalityProfile {
     debug_assert!(
         conjuncts.iter().all(|predicate| !matches!(
@@ -1902,7 +2182,8 @@ fn join_profile_from_conjuncts_with_config(
         )),
         "join_profile_from_conjuncts requires atomic conjuncts"
     );
-    let estimate = join_selectivity_from_conjuncts_with_config(left, right, conjuncts, ctx, config);
+    let estimate =
+        join_selectivity_from_conjuncts_with_config(left, right, conjuncts, ctx, config, catalog);
     join_profile_with_selectivity_and_classes(left, right, join_type, estimate)
 }
 
@@ -1912,6 +2193,9 @@ fn join_profile_with_selectivity_and_classes(
     join_type: JoinType,
     estimate: JoinSelectivityEstimate,
 ) -> CardinalityProfile {
+    let non_null_equality_columns = estimate.non_null_equality_columns.clone();
+    let left_equality_coverages = estimate.left_equality_coverages.clone();
+    let residual_selectivity = estimate.residual_selectivity;
     let selectivity = estimate.selectivity;
     let inner_rows = Estimate::derived(
         left.rows.value * right.rows.value * selectivity.value,
@@ -1919,9 +2203,19 @@ fn join_profile_with_selectivity_and_classes(
         multiply_options(left.rows.upper, right.rows.upper).map(|v| v * selectivity.value),
     );
     match join_type {
-        JoinType::LeftSemi => semi_join_profile(left, estimate.match_probability.value),
-        JoinType::LeftAnti => anti_join_profile(left, estimate.match_probability.value),
-        JoinType::Single => left.cap_by_rows(left.rows.clone()),
+        JoinType::LeftSemi => semi_join_profile(
+            left,
+            estimate.match_probability.value,
+            &non_null_equality_columns,
+            &left_equality_coverages,
+        ),
+        JoinType::LeftAnti => anti_join_profile(
+            left,
+            estimate.match_probability.value,
+            &left_equality_coverages,
+            residual_selectivity,
+        ),
+        JoinType::Single => single_join_profile(left, right),
         JoinType::LeftOuter => combine_join_columns(
             left,
             right,
@@ -1931,6 +2225,8 @@ fn join_profile_with_selectivity_and_classes(
             // equality knowledge from the non-null-supplying input, but not from the right input
             // or across the join boundary.
             left.equivalence_classes.clone(),
+            true,
+            false,
         ),
         JoinType::RightOuter => combine_join_columns(
             left,
@@ -1938,57 +2234,189 @@ fn join_profile_with_selectivity_and_classes(
             inner_rows,
             Some(right.rows.value),
             right.equivalence_classes.clone(),
+            false,
+            true,
         ),
         JoinType::FullOuter => combine_join_columns(
             left,
             right,
             inner_rows,
-            Some(left.rows.value.max(right.rows.value)),
+            Some(if selectivity.value == 0.0 {
+                left.rows.value + right.rows.value
+            } else {
+                left.rows.value.max(right.rows.value)
+            }),
             Vec::new(),
+            true,
+            true,
         ),
         JoinType::LeftMark {
             marker: column,
             nullable,
         } => {
             let mut profile = left.cap_by_rows(left.rows.clone());
-            let max_distinct: f64 = if nullable { 3.0 } else { 2.0 };
+            let max_distinct = 2.0_f64;
+            let frequency = if nullable {
+                Estimate::derived(profile.rows.value * 0.9, Some(0.0), profile.rows.upper)
+            } else {
+                profile.rows.clone()
+            };
             profile.columns.insert(
                 column,
                 ColumnProfile {
                     lower_bound: Some(ScalarValue::Boolean(false)),
                     upper_bound: Some(ScalarValue::Boolean(true)),
-                    frequency: profile.rows.clone(),
+                    frequency,
                     distinct: Estimate::derived(
                         max_distinct.min(profile.rows.value),
                         Some(0.0),
                         Some(max_distinct),
                     ),
+                    value: None,
+                    sketches: None,
                 },
             );
             profile
         }
         JoinType::Inner => {
-            combine_join_columns(left, right, inner_rows, None, estimate.equivalence_classes)
+            let mut profile = combine_join_columns(
+                left,
+                right,
+                inner_rows,
+                None,
+                estimate.equivalence_classes,
+                false,
+                false,
+            );
+            mark_columns_non_null(&mut profile, &non_null_equality_columns);
+            profile
         }
     }
 }
 
-fn semi_join_profile(input: &CardinalityProfile, match_probability: f64) -> CardinalityProfile {
-    let rows = Estimate::derived(
-        (input.rows.value * match_probability.clamp(0.0, 1.0)).clamp(0.0, input.rows.value),
-        Some(0.0),
-        input.rows.upper,
-    );
-    input.cap_by_rows(rows)
+fn single_join_profile(
+    left: &CardinalityProfile,
+    right: &CardinalityProfile,
+) -> CardinalityProfile {
+    let mut columns = left.columns.clone();
+    for (&column, right_profile) in &right.columns {
+        let mut output = right_profile.clone();
+        let non_null_fraction = if right.rows.value <= 0.0 {
+            0.0
+        } else {
+            (right_profile.frequency.value / right.rows.value).clamp(0.0, 1.0)
+        };
+        let present_fraction = right.rows.value.clamp(0.0, 1.0) * non_null_fraction;
+        output.frequency = Estimate::derived(
+            left.rows.value * present_fraction,
+            Some(0.0),
+            left.rows.upper,
+        );
+        output.distinct = output
+            .distinct
+            .cap(output.frequency.value, EstimateSource::Derived);
+        output.sketches = None;
+        columns.insert(column, output);
+    }
+    CardinalityProfile {
+        rows: left.rows.clone(),
+        columns,
+        equivalence_classes: left.equivalence_classes.clone(),
+    }
 }
 
-fn anti_join_profile(input: &CardinalityProfile, match_probability: f64) -> CardinalityProfile {
+fn semi_join_profile(
+    input: &CardinalityProfile,
+    match_probability: f64,
+    non_null_equality_columns: &BTreeSet<Column>,
+    left_equality_coverages: &[LeftEqualityCoverage],
+) -> CardinalityProfile {
+    let match_probability = match_probability.clamp(0.0, 1.0);
     let rows = Estimate::derived(
-        (input.rows.value * (1.0 - match_probability.clamp(0.0, 1.0))).clamp(0.0, input.rows.value),
+        (input.rows.value * match_probability).clamp(0.0, input.rows.value),
         Some(0.0),
         input.rows.upper,
     );
-    input.cap_by_rows(rows)
+    let mut profile = scale_profile(input.clone(), match_probability, None);
+    profile.rows = rows.clone();
+    for column_profile in profile.columns.values_mut() {
+        column_profile.cap_by_rows_mut(&rows);
+    }
+    for coverage in left_equality_coverages {
+        let Some(column_profile) = profile.columns.get_mut(&coverage.column) else {
+            continue;
+        };
+        column_profile.distinct = column_profile
+            .distinct
+            .cap(coverage.intersection_distinct, EstimateSource::Derived);
+        if coverage.ordinary_non_null {
+            column_profile.frequency = rows.clone();
+        } else {
+            let edge_match = coverage.non_null_match_probability + coverage.null_match_probability;
+            let conditional_non_null = if edge_match <= 0.0 {
+                0.0
+            } else {
+                (coverage.non_null_match_probability / edge_match).clamp(0.0, 1.0)
+            };
+            column_profile.frequency =
+                Estimate::derived(rows.value * conditional_non_null, Some(0.0), rows.upper);
+        }
+        column_profile.cap_by_rows_mut(&rows);
+    }
+    mark_columns_non_null(&mut profile, non_null_equality_columns);
+    profile
+}
+
+fn mark_columns_non_null(profile: &mut CardinalityProfile, columns: &BTreeSet<Column>) {
+    for column in columns {
+        if let Some(column_profile) = profile.columns.get_mut(column) {
+            column_profile.frequency = profile.rows.clone();
+        }
+    }
+}
+
+fn anti_join_profile(
+    input: &CardinalityProfile,
+    match_probability: f64,
+    left_equality_coverages: &[LeftEqualityCoverage],
+    residual_selectivity: f64,
+) -> CardinalityProfile {
+    let unmatched_probability = 1.0 - match_probability.clamp(0.0, 1.0);
+    let rows = Estimate::derived(
+        (input.rows.value * unmatched_probability).clamp(0.0, input.rows.value),
+        Some(0.0),
+        input.rows.upper,
+    );
+    let mut profile = scale_profile(input.clone(), unmatched_probability, None);
+    profile.rows = rows.clone();
+    for column_profile in profile.columns.values_mut() {
+        column_profile.cap_by_rows_mut(&rows);
+    }
+
+    // For one pure equality, unmatched non-null mass and domain are the complement of directional
+    // coverage. With multiple keys or residual predicates, a row can fail for another reason, so
+    // subtracting every key domain would be unsound and the occupancy fallback is retained.
+    if left_equality_coverages.len() == 1 && residual_selectivity == 1.0 {
+        let coverage = left_equality_coverages[0];
+        if let Some(column_profile) = profile.columns.get_mut(&coverage.column) {
+            let unmatched_non_null_probability =
+                (coverage.input_non_null_fraction - coverage.non_null_match_probability).max(0.0);
+            column_profile.frequency = Estimate::derived(
+                (input.rows.value * unmatched_non_null_probability).min(rows.value),
+                Some(0.0),
+                rows.upper,
+            );
+            let unmatched_distinct =
+                (coverage.input_distinct - coverage.intersection_distinct).max(0.0);
+            column_profile.distinct = Estimate::derived(
+                unmatched_distinct.min(column_profile.frequency.value),
+                Some(0.0),
+                Some(unmatched_distinct.min(column_profile.frequency.value)),
+            );
+            column_profile.cap_by_rows_mut(&rows);
+        }
+    }
+    profile
 }
 
 fn combine_join_columns(
@@ -1997,26 +2425,79 @@ fn combine_join_columns(
     mut rows: Estimate,
     lower_bound: Option<f64>,
     equivalence_classes: Vec<ColumnEquivalenceClass>,
+    preserve_left: bool,
+    preserve_right: bool,
 ) -> CardinalityProfile {
+    let matched_rows = rows.value;
     if let Some(min_rows) = lower_bound {
         rows.value = rows.value.max(min_rows);
         rows.lower = Some(rows.lower.unwrap_or(0.0).max(min_rows));
         rows.upper = rows.upper.map(|upper| upper.max(min_rows));
     }
-    let mut columns = left.columns.clone();
-    let mut right_columns = right.columns.clone();
+    let mut columns = derive_join_side_columns(left, matched_rows, &rows, preserve_left);
     // Preserve the established right-input precedence if malformed/derived plans reuse a column
-    // handle across inputs. Both maps are owned here, so append and subsequent capping cannot
-    // mutate either cached input profile.
-    columns.append(&mut right_columns);
-    columns
-        .values_mut()
-        .for_each(|profile| profile.cap_by_rows_mut(&rows));
+    // handle across inputs.
+    columns.append(&mut derive_join_side_columns(
+        right,
+        matched_rows,
+        &rows,
+        preserve_right,
+    ));
     let equivalence_classes = filter_owned_equivalence_classes(equivalence_classes, &columns);
-    CardinalityProfile {
+    let mut output = CardinalityProfile {
         rows,
         columns,
         equivalence_classes,
+    };
+    cap_equivalent_column_distinct_counts(&mut output);
+    output
+}
+
+fn derive_join_side_columns(
+    input: &CardinalityProfile,
+    matched_rows: f64,
+    output_rows: &Estimate,
+    preserve_input: bool,
+) -> BTreeMap<Column, ColumnProfile> {
+    input
+        .columns
+        .iter()
+        .map(|(&column, profile)| {
+            let non_null_fraction = if input.rows.value <= 0.0 {
+                0.0
+            } else {
+                (profile.frequency.value / input.rows.value).clamp(0.0, 1.0)
+            };
+            let represented_rows = matched_rows
+                + if preserve_input {
+                    (input.rows.value - matched_rows).max(0.0)
+                } else {
+                    0.0
+                };
+            let mut output = profile.clone();
+            output.frequency = Estimate::derived(
+                (represented_rows * non_null_fraction).min(output_rows.value),
+                Some(0.0),
+                output_rows.upper,
+            );
+            output.distinct = output
+                .distinct
+                .cap(output.frequency.value, EstimateSource::Derived);
+            output.sketches = None;
+            (column, output)
+        })
+        .collect()
+}
+
+fn cap_equivalent_column_distinct_counts(profile: &mut CardinalityProfile) {
+    for class in &profile.equivalence_classes {
+        for column in &class.columns {
+            if let Some(column_profile) = profile.columns.get_mut(column) {
+                column_profile.distinct = column_profile
+                    .distinct
+                    .cap(class.distinct.value, EstimateSource::Derived);
+            }
+        }
     }
 }
 
@@ -2033,6 +2514,7 @@ fn join_selectivity(
         conjuncts,
         ctx,
         &CardinalityEstimationConfig::default(),
+        None,
     )
     .selectivity
 }
@@ -2045,6 +2527,9 @@ struct JoinSelectivityEstimate {
     selectivity: Estimate,
     equivalence_classes: Vec<ColumnEquivalenceClass>,
     match_probability: Estimate,
+    left_equality_coverages: Vec<LeftEqualityCoverage>,
+    residual_selectivity: f64,
+    non_null_equality_columns: BTreeSet<Column>,
     #[cfg(test)]
     equivalence_state_columns: usize,
 }
@@ -2062,6 +2547,7 @@ fn join_selectivity_from_conjuncts(
         conjuncts,
         ctx,
         &CardinalityEstimationConfig::default(),
+        None,
     )
 }
 
@@ -2071,76 +2557,779 @@ fn join_selectivity_from_conjuncts_with_config(
     conjuncts: &[Expr],
     ctx: &QueryContext,
     config: &CardinalityEstimationConfig,
+    catalog: Option<&dyn Catalog>,
 ) -> JoinSelectivityEstimate {
     let mut equality_pairs = Vec::new();
     let mut residual_selectivity = 1.0;
     for &predicate in conjuncts {
         if let Some((left_col, right_col)) = column_equality(predicate, ctx) {
-            equality_pairs.push((left_col, right_col));
+            let null_safe = matches!(
+                predicate.get(ctx),
+                ExprData::Binary {
+                    op: BinaryOp::IsNotDistinctFrom,
+                    ..
+                }
+            );
+            equality_pairs.push((left_col, right_col, null_safe));
         } else {
             residual_selectivity *=
                 filter_selectivity_for_predicate(left, right, predicate, ctx, config).value;
         }
     }
 
+    let class_pairs = equality_pairs
+        .iter()
+        .map(|(left, right, _)| (*left, *right))
+        .collect::<Vec<_>>();
     let mut classes = EquivalenceClassState::from_profiles_and_equalities(
         left,
         right,
-        &equality_pairs,
+        &class_pairs,
         config.unknown_column_ndv_cap,
     );
+    let mut non_null_equality_columns = equality_pairs
+        .iter()
+        .filter(|(_, _, null_safe)| !null_safe)
+        .flat_map(|(left, right, _)| [*left, *right])
+        .collect::<BTreeSet<_>>();
+    // Non-nullness propagates through null-safe equality once any member of the connected value
+    // class participates in ordinary equality.
+    loop {
+        let previous_len = non_null_equality_columns.len();
+        for (left, right, _) in &equality_pairs {
+            if non_null_equality_columns.contains(left) || non_null_equality_columns.contains(right)
+            {
+                non_null_equality_columns.extend([*left, *right]);
+            }
+        }
+        if non_null_equality_columns.len() == previous_len {
+            break;
+        }
+    }
     let mut equality_edges = equality_pairs
         .into_iter()
-        .map(|(left_col, right_col)| EqualityEdge {
-            left: left_col,
-            right: right_col,
-            chosen_ndv: classes
-                .class_distinct(left_col)
-                .max_by_value(classes.class_distinct(right_col)),
+        .map(|(left_col, right_col, null_safe)| {
+            let left_ndv = classes.class_distinct(left_col);
+            let right_ndv = classes.class_distinct(right_col);
+            EqualityEdge {
+                left: left_col,
+                right: right_col,
+                null_safe: null_safe && !non_null_equality_columns.contains(&left_col),
+                chosen_ndv: left_ndv.max_by_value(right_ndv.clone()),
+                left_ndv,
+                right_ndv,
+            }
         })
         .collect::<Vec<_>>();
 
     // Process the most selective equality first, then union equivalent columns.
     // This avoids multiplying selectivity again for transitive predicates such
     // as a = b AND b = c AND a = c.
-    equality_edges.sort_by(|a, b| b.chosen_ndv.value.total_cmp(&a.chosen_ndv.value));
+    equality_edges.sort_by(|a, b| {
+        b.chosen_ndv
+            .value
+            .total_cmp(&a.chosen_ndv.value)
+            .then_with(|| a.null_safe.cmp(&b.null_safe))
+    });
+    // TODO(statistics): Once sampling is available, replace products across composite equality
+    // keys with sampled multi-column NDV and overlap statistics.
     let mut equality_selectivity = 1.0;
-    let mut match_probability = 0.0_f64;
+    let mut equality_match_probability = 1.0;
+    let mut left_equality_coverages = Vec::new();
+    let mut has_cross_input_equality = false;
     for edge in equality_edges {
+        let connects_inputs =
+            column_sides(edge.left, left, right) != column_sides(edge.right, left, right);
+        let edge_estimate =
+            connects_inputs.then(|| equality_edge_estimate(&edge, left, right, catalog));
+
+        // Every equality remains a real constraint even when it closes a transitive cycle. A
+        // disjoint ordered domain therefore proves the whole conjunction unsatisfiable.
+        if edge_estimate
+            .as_ref()
+            .is_some_and(|estimate| estimate.domains_disjoint)
+        {
+            equality_selectivity = 0.0;
+            equality_match_probability = 0.0;
+        }
         if classes.equivalent(edge.left, edge.right) {
             continue;
         }
-        let connects_inputs =
-            column_sides(edge.left, left, right) != column_sides(edge.right, left, right);
-        let chosen_ndv = edge.chosen_ndv.value.max(1.0);
-        if connects_inputs {
-            equality_selectivity *= 1.0 / chosen_ndv;
-            let left_match = right.rows.value / chosen_ndv;
-            let right_match = left.rows.value / chosen_ndv;
-            match_probability = match_probability.max(left_match.min(right_match).clamp(0.0, 1.0));
+        if let Some(edge_estimate) = edge_estimate {
+            has_cross_input_equality = true;
+            equality_selectivity *= edge_estimate.pair_selectivity;
+            equality_match_probability *= edge_estimate.left_match_probability;
+            if let Some(coverage) = edge_estimate.left_coverage {
+                left_equality_coverages.push(coverage);
+            }
         }
         classes.union(edge.left, edge.right, edge.chosen_ndv);
     }
 
     let selectivity = (equality_selectivity * residual_selectivity).clamp(0.0, 1.0);
+    let first_moment_upper = (right.rows.value * selectivity).clamp(0.0, 1.0);
+    let match_probability = if has_cross_input_equality {
+        // TODO(statistics): Model residual predicates as probability that at least one candidate
+        // partner survives. Linear scaling is conservative in implementation complexity but loses
+        // fanout/correlation information.
+        (equality_match_probability * residual_selectivity).clamp(0.0, 1.0)
+    } else {
+        // With no equality-domain coverage information, retain the first-moment heuristic. It is
+        // an upper bound when pair selectivity is exact, not a calibrated existence probability.
+        first_moment_upper
+    };
     #[cfg(test)]
     let equivalence_state_columns = classes.tracked_column_count();
     JoinSelectivityEstimate {
         selectivity: Estimate::derived(selectivity, Some(0.0), Some(1.0)),
         equivalence_classes: classes.into_classes(),
         match_probability: Estimate::derived(
-            (if match_probability == 0.0 && equality_selectivity == 1.0 {
-                residual_selectivity
-            } else {
-                match_probability * residual_selectivity
-            })
-            .clamp(0.0, 1.0),
+            match_probability,
             Some(0.0),
-            Some(1.0),
+            Some(first_moment_upper.max(match_probability)),
         ),
+        left_equality_coverages,
+        residual_selectivity,
+        non_null_equality_columns,
         #[cfg(test)]
         equivalence_state_columns,
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LeftEqualityCoverage {
+    column: Column,
+    input_distinct: f64,
+    input_non_null_fraction: f64,
+    intersection_distinct: f64,
+    non_null_match_probability: f64,
+    null_match_probability: f64,
+    ordinary_non_null: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EqualityEdgeEstimate {
+    pair_selectivity: f64,
+    left_match_probability: f64,
+    left_coverage: Option<LeftEqualityCoverage>,
+    domains_disjoint: bool,
+}
+
+fn equality_edge_estimate(
+    edge: &EqualityEdge,
+    left: &CardinalityProfile,
+    right: &CardinalityProfile,
+    catalog: Option<&dyn Catalog>,
+) -> EqualityEdgeEstimate {
+    let first = edge.left;
+    let second = edge.right;
+    let null_safe = edge.null_safe;
+    let Some((left_column, right_column, left_profile, right_profile)) =
+        oriented_join_columns(first, second, left, right)
+    else {
+        let pair_selectivity = 1.0
+            / join_column_distinct(first, left, right)
+                .max(join_column_distinct(second, left, right))
+                .max(1.0);
+        return EqualityEdgeEstimate {
+            pair_selectivity,
+            left_match_probability: (right.rows.value * pair_selectivity).clamp(0.0, 1.0),
+            left_coverage: None,
+            domains_disjoint: false,
+        };
+    };
+
+    let left_base = base_column(left_profile);
+    let right_base = base_column(right_profile);
+    let (left_distinct_hint, right_distinct_hint) = if left_column == first {
+        (edge.left_ndv.value, edge.right_ndv.value)
+    } else {
+        (edge.right_ndv.value, edge.left_ndv.value)
+    };
+    let left_distinct =
+        effective_join_distinct(left, left_profile, left_base, catalog).max(left_distinct_hint);
+    let right_distinct =
+        effective_join_distinct(right, right_profile, right_base, catalog).max(right_distinct_hint);
+    let intersection =
+        estimated_distinct_intersection(left_profile, right_profile, left_distinct, right_distinct);
+    let left_non_null = join_column_non_null_fraction(left_column, left, right);
+    let right_non_null = join_column_non_null_fraction(right_column, left, right);
+    let left_has_null = left.rows.value > left_profile.frequency.value;
+    let right_has_null = right.rows.value > right_profile.frequency.value;
+    let null_pair_selectivity = if null_safe && left_has_null && right_has_null {
+        (1.0 - left_non_null) * (1.0 - right_non_null)
+    } else {
+        0.0
+    };
+    let null_match_probability = if null_safe && right_has_null {
+        1.0 - left_non_null
+    } else {
+        0.0
+    };
+    if intersection.domains_disjoint {
+        let nulls_can_match = null_pair_selectivity > 0.0;
+        return EqualityEdgeEstimate {
+            pair_selectivity: null_pair_selectivity,
+            left_match_probability: null_match_probability,
+            left_coverage: Some(LeftEqualityCoverage {
+                column: left_column,
+                input_distinct: left_distinct,
+                input_non_null_fraction: left_non_null,
+                intersection_distinct: 0.0,
+                non_null_match_probability: 0.0,
+                null_match_probability,
+                ordinary_non_null: !null_safe,
+            }),
+            domains_disjoint: !nulls_can_match,
+        };
+    }
+
+    if !null_safe
+        && right.rows.value > 0.0
+        && let (Some(catalog), Some(left_base), Some(right_base)) = (catalog, left_base, right_base)
+        && single_column_foreign_key(left_base, right_base, catalog)
+        && profile_has_complete_base_population(right, right_base, catalog)
+    {
+        // Every surviving non-null FK row has exactly one partner in the complete referenced key.
+        return EqualityEdgeEstimate {
+            pair_selectivity: if right.rows.value <= 0.0 {
+                0.0
+            } else {
+                left_non_null / right.rows.value
+            },
+            left_match_probability: left_non_null,
+            left_coverage: Some(LeftEqualityCoverage {
+                column: left_column,
+                input_distinct: left_distinct,
+                input_non_null_fraction: left_non_null,
+                intersection_distinct: left_distinct,
+                non_null_match_probability: left_non_null,
+                null_match_probability: 0.0,
+                ordinary_non_null: true,
+            }),
+            domains_disjoint: false,
+        };
+    }
+
+    let equal_non_null = if left_distinct <= 0.0 || right_distinct <= 0.0 {
+        0.0
+    } else {
+        left_non_null * right_non_null * intersection.distinct / (left_distinct * right_distinct)
+    };
+    let pair_selectivity = if !null_safe {
+        sketch_join_estimate(first, second, left, right).unwrap_or(equal_non_null)
+    } else {
+        equal_non_null + null_pair_selectivity
+    };
+    let uniform_non_null_match_probability = if left_distinct <= 0.0 {
+        0.0
+    } else {
+        left_non_null * intersection.distinct / left_distinct
+    };
+    let non_null_match_probability = if null_safe {
+        uniform_non_null_match_probability
+    } else {
+        sketch_left_match_probability(
+            first,
+            second,
+            left,
+            right,
+            intersection.distinct,
+            left_distinct,
+        )
+        .map(|sketch| sketch.max(uniform_non_null_match_probability))
+        .unwrap_or(uniform_non_null_match_probability)
+    };
+    EqualityEdgeEstimate {
+        pair_selectivity: pair_selectivity.clamp(0.0, 1.0),
+        left_match_probability: (non_null_match_probability + null_match_probability)
+            .clamp(0.0, 1.0),
+        left_coverage: Some(LeftEqualityCoverage {
+            column: left_column,
+            input_distinct: left_distinct,
+            input_non_null_fraction: left_non_null,
+            intersection_distinct: intersection.distinct,
+            non_null_match_probability,
+            null_match_probability,
+            ordinary_non_null: !null_safe,
+        }),
+        domains_disjoint: false,
+    }
+}
+
+fn oriented_join_columns<'a>(
+    first: Column,
+    second: Column,
+    left: &'a CardinalityProfile,
+    right: &'a CardinalityProfile,
+) -> Option<(Column, Column, &'a ColumnProfile, &'a ColumnProfile)> {
+    match (
+        left.columns.get(&first),
+        right.columns.get(&second),
+        left.columns.get(&second),
+        right.columns.get(&first),
+    ) {
+        (Some(left_profile), Some(right_profile), _, _) => {
+            Some((first, second, left_profile, right_profile))
+        }
+        (_, _, Some(left_profile), Some(right_profile)) => {
+            Some((second, first, left_profile, right_profile))
+        }
+        _ => None,
+    }
+}
+
+fn join_column_distinct(
+    column: Column,
+    left: &CardinalityProfile,
+    right: &CardinalityProfile,
+) -> f64 {
+    left.columns
+        .get(&column)
+        .or_else(|| right.columns.get(&column))
+        .map_or(1.0, |profile| profile.distinct.value)
+}
+
+fn base_column(profile: &ColumnProfile) -> Option<&BaseColumn> {
+    match profile.value.as_ref() {
+        Some(ValueId::Base(base)) => Some(base),
+        _ => None,
+    }
+}
+
+fn effective_join_distinct(
+    relation: &CardinalityProfile,
+    profile: &ColumnProfile,
+    base: Option<&BaseColumn>,
+    catalog: Option<&dyn Catalog>,
+) -> f64 {
+    if let (Some(base), Some(catalog)) = (base, catalog)
+        && single_column_unique(base, catalog)
+        && profile_has_complete_base_population(relation, base, catalog)
+    {
+        // A complete base population cannot duplicate a provider-asserted unique value. A later
+        // join may duplicate it, so uniqueness is not reused once row provenance becomes derived.
+        profile.frequency.value
+    } else {
+        profile.distinct.value
+    }
+}
+
+fn single_column_unique(base: &BaseColumn, catalog: &dyn Catalog) -> bool {
+    catalog
+        .table_by_ref(&base.table)
+        .ok()
+        .and_then(|metadata| metadata.statistics)
+        .is_some_and(|statistics| {
+            statistics
+                .constraints
+                .unique_keys
+                .iter()
+                .any(|key| key.columns() == [base.name.as_str()])
+        })
+}
+
+fn single_column_foreign_key(
+    local: &BaseColumn,
+    referenced: &BaseColumn,
+    catalog: &dyn Catalog,
+) -> bool {
+    let Ok(local_metadata) = catalog.table_by_ref(&local.table) else {
+        return false;
+    };
+    let Ok(referenced_metadata) = catalog.table_by_ref(&referenced.table) else {
+        return false;
+    };
+    local_metadata
+        .statistics
+        .as_ref()
+        .is_some_and(|statistics| {
+            statistics
+                .constraints
+                .foreign_keys
+                .iter()
+                .any(|foreign_key| {
+                    foreign_key.columns() == [local.name.as_str()]
+                        && foreign_key.referenced_columns() == [referenced.name.as_str()]
+                        && catalog
+                            .table_by_ref(&foreign_key.referenced_table)
+                            .is_ok_and(|metadata| metadata.id == referenced_metadata.id)
+                })
+        })
+}
+
+fn profile_has_complete_base_population(
+    profile: &CardinalityProfile,
+    base: &BaseColumn,
+    catalog: &dyn Catalog,
+) -> bool {
+    if profile.rows.source != EstimateSource::Catalog {
+        return false;
+    }
+    catalog
+        .table_by_ref(&base.table)
+        .ok()
+        .and_then(|metadata| metadata.statistics)
+        .and_then(|statistics| statistics.row_count)
+        .is_some_and(|row_count| profile.rows.value == row_count as f64)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DistinctIntersection {
+    distinct: f64,
+    domains_disjoint: bool,
+}
+
+fn estimated_distinct_intersection(
+    left: &ColumnProfile,
+    right: &ColumnProfile,
+    left_distinct: f64,
+    right_distinct: f64,
+) -> DistinctIntersection {
+    if left_distinct <= 0.0 || right_distinct <= 0.0 {
+        return DistinctIntersection {
+            distinct: 0.0,
+            domains_disjoint: false,
+        };
+    }
+    let Some((left_lower, left_upper, right_lower, right_upper)) = left
+        .lower_bound
+        .as_ref()
+        .zip(left.upper_bound.as_ref())
+        .zip(right.lower_bound.as_ref().zip(right.upper_bound.as_ref()))
+        .map(|((left_lower, left_upper), (right_lower, right_upper))| {
+            (left_lower, left_upper, right_lower, right_upper)
+        })
+    else {
+        return DistinctIntersection {
+            distinct: left_distinct.min(right_distinct),
+            domains_disjoint: false,
+        };
+    };
+
+    if crate::catalog::scalar_order(left_upper, right_lower).is_some_and(|order| order.is_lt())
+        || crate::catalog::scalar_order(right_upper, left_lower).is_some_and(|order| order.is_lt())
+    {
+        return DistinctIntersection {
+            distinct: 0.0,
+            domains_disjoint: true,
+        };
+    }
+
+    let overlap_lower = if crate::catalog::scalar_order(left_lower, right_lower)
+        .is_some_and(|order| order.is_lt())
+    {
+        right_lower
+    } else {
+        left_lower
+    };
+    let overlap_upper = if crate::catalog::scalar_order(left_upper, right_upper)
+        .is_some_and(|order| order.is_gt())
+    {
+        right_upper
+    } else {
+        left_upper
+    };
+    let left_fraction =
+        scalar_interval_fraction(left_lower, left_upper, overlap_lower, overlap_upper);
+    let right_fraction =
+        scalar_interval_fraction(right_lower, right_upper, overlap_lower, overlap_upper);
+    let distinct = match (left_fraction, right_fraction) {
+        (Some(left_fraction), Some(right_fraction)) => {
+            let estimate = (left_distinct * left_fraction)
+                .min(right_distinct * right_fraction)
+                .min(left_distinct.min(right_distinct));
+            if crate::catalog::scalar_order(overlap_lower, overlap_upper)
+                .is_some_and(|order| order.is_eq())
+            {
+                // A point overlap is a shared observed endpoint, so both domains contain it.
+                estimate.max(1.0)
+            } else {
+                estimate
+            }
+        }
+        _ => left_distinct.min(right_distinct),
+    };
+
+    // TODO(statistics): Replace uniform ordered-range overlap with histogram intersection and
+    // sample/set-sketch overlap once those statistics are collected and persisted.
+    DistinctIntersection {
+        distinct,
+        domains_disjoint: false,
+    }
+}
+
+fn scalar_interval_fraction(
+    lower: &ScalarValue,
+    upper: &ScalarValue,
+    overlap_lower: &ScalarValue,
+    overlap_upper: &ScalarValue,
+) -> Option<f64> {
+    fn discrete(lower: i128, upper: i128, overlap_lower: i128, overlap_upper: i128) -> Option<f64> {
+        let width = upper.checked_sub(lower)?.checked_add(1)? as f64;
+        let overlap = overlap_upper.checked_sub(overlap_lower)?.checked_add(1)? as f64;
+        (width > 0.0).then(|| (overlap / width).clamp(0.0, 1.0))
+    }
+    fn continuous(lower: f64, upper: f64, overlap_lower: f64, overlap_upper: f64) -> Option<f64> {
+        let width = upper - lower;
+        if !width.is_finite() || width < 0.0 {
+            return None;
+        }
+        if width == 0.0 {
+            return Some(1.0);
+        }
+        Some(((overlap_upper - overlap_lower) / width).clamp(0.0, 1.0))
+    }
+    fn continuous_i128(
+        lower: i128,
+        upper: i128,
+        overlap_lower: i128,
+        overlap_upper: i128,
+    ) -> Option<f64> {
+        let width = upper.checked_sub(lower)?;
+        if width == 0 {
+            return Some(1.0);
+        }
+        let overlap = overlap_upper.checked_sub(overlap_lower)?;
+        Some(((overlap as f64) / (width as f64)).clamp(0.0, 1.0))
+    }
+
+    match (lower, upper, overlap_lower, overlap_upper) {
+        (
+            ScalarValue::Boolean(lower),
+            ScalarValue::Boolean(upper),
+            ScalarValue::Boolean(overlap_lower),
+            ScalarValue::Boolean(overlap_upper),
+        ) => discrete(
+            i128::from(*lower),
+            i128::from(*upper),
+            i128::from(*overlap_lower),
+            i128::from(*overlap_upper),
+        ),
+        (
+            ScalarValue::Int32(lower),
+            ScalarValue::Int32(upper),
+            ScalarValue::Int32(overlap_lower),
+            ScalarValue::Int32(overlap_upper),
+        ) => discrete(
+            i128::from(*lower),
+            i128::from(*upper),
+            i128::from(*overlap_lower),
+            i128::from(*overlap_upper),
+        ),
+        (
+            ScalarValue::Int64(lower),
+            ScalarValue::Int64(upper),
+            ScalarValue::Int64(overlap_lower),
+            ScalarValue::Int64(overlap_upper),
+        ) => discrete(
+            i128::from(*lower),
+            i128::from(*upper),
+            i128::from(*overlap_lower),
+            i128::from(*overlap_upper),
+        ),
+        (
+            ScalarValue::Date32(lower),
+            ScalarValue::Date32(upper),
+            ScalarValue::Date32(overlap_lower),
+            ScalarValue::Date32(overlap_upper),
+        ) => discrete(
+            i128::from(*lower),
+            i128::from(*upper),
+            i128::from(*overlap_lower),
+            i128::from(*overlap_upper),
+        ),
+        (
+            ScalarValue::Float64(lower),
+            ScalarValue::Float64(upper),
+            ScalarValue::Float64(overlap_lower),
+            ScalarValue::Float64(overlap_upper),
+        ) => continuous(*lower, *upper, *overlap_lower, *overlap_upper),
+        (
+            ScalarValue::Decimal128 {
+                value: lower,
+                precision: lower_precision,
+                scale: lower_scale,
+            },
+            ScalarValue::Decimal128 {
+                value: upper,
+                precision: upper_precision,
+                scale: upper_scale,
+            },
+            ScalarValue::Decimal128 {
+                value: overlap_lower,
+                precision: overlap_lower_precision,
+                scale: overlap_lower_scale,
+            },
+            ScalarValue::Decimal128 {
+                value: overlap_upper,
+                precision: overlap_upper_precision,
+                scale: overlap_upper_scale,
+            },
+        ) if lower_precision == upper_precision
+            && lower_precision == overlap_lower_precision
+            && lower_precision == overlap_upper_precision
+            && lower_scale == upper_scale
+            && lower_scale == overlap_lower_scale
+            && lower_scale == overlap_upper_scale =>
+        {
+            continuous_i128(*lower, *upper, *overlap_lower, *overlap_upper)
+        }
+        _ => None,
+    }
+}
+
+fn join_column_non_null_fraction(
+    column: Column,
+    left: &CardinalityProfile,
+    right: &CardinalityProfile,
+) -> f64 {
+    let profile_and_rows = left
+        .columns
+        .get(&column)
+        .map(|profile| (profile, left.rows.value))
+        .or_else(|| {
+            right
+                .columns
+                .get(&column)
+                .map(|profile| (profile, right.rows.value))
+        });
+    let Some((profile, rows)) = profile_and_rows else {
+        return 1.0;
+    };
+    if rows <= 0.0 {
+        0.0
+    } else {
+        (profile.frequency.value / rows).clamp(0.0, 1.0)
+    }
+}
+
+fn sketch_join_estimate(
+    first: Column,
+    second: Column,
+    left: &CardinalityProfile,
+    right: &CardinalityProfile,
+) -> Option<f64> {
+    let (left_profile, right_profile) = match (
+        left.columns.get(&first),
+        right.columns.get(&second),
+        left.columns.get(&second),
+        right.columns.get(&first),
+    ) {
+        (Some(left_profile), Some(right_profile), _, _) => (left_profile, right_profile),
+        (_, _, Some(left_profile), Some(right_profile)) => (left_profile, right_profile),
+        _ => return None,
+    };
+    let left_sketches = left_profile.sketches.as_ref()?;
+    let right_sketches = right_profile.sketches.as_ref()?;
+    let left_frequent = left_sketches.frequent_values.as_ref()?;
+    let right_frequent = right_sketches.frequent_values.as_ref()?;
+    if left_sketches.population_rows == 0 || right_sketches.population_rows == 0 {
+        return None;
+    }
+
+    // Use guaranteed lower frequencies for tracked values; uncertain counter mass remains in the
+    // residual uniform estimate instead of being counted twice as a heavy hitter.
+    let tracked_frequency =
+        |item: &optd_sketches::FrequentItem<EncodedScalarValue>| item.lower_frequency() as f64;
+    let mut heavy_join_rows = 0.0;
+    let mut common_left_rows = 0.0;
+    let mut common_right_rows = 0.0;
+    let mut common_values = 0_u64;
+    for left_item in left_frequent.entries() {
+        if let Some(right_item) = right_frequent.estimate(&left_item.value) {
+            let left_frequency = tracked_frequency(left_item);
+            let right_frequency = tracked_frequency(right_item);
+            if left_frequency > 0.0 && right_frequency > 0.0 {
+                heavy_join_rows += left_frequency * right_frequency;
+                common_left_rows += left_frequency;
+                common_right_rows += right_frequency;
+                common_values += 1;
+            }
+        }
+    }
+
+    // Only non-null population can satisfy ordinary equality. Remove mass only for values tracked
+    // by both sketches; one-sided heavy hitters may still occur in the other untracked tail.
+    let left_non_null_rows = left_sketches.population_rows as f64
+        * if left.rows.value <= 0.0 {
+            0.0
+        } else {
+            (left_profile.frequency.value / left.rows.value).clamp(0.0, 1.0)
+        };
+    let right_non_null_rows = right_sketches.population_rows as f64
+        * if right.rows.value <= 0.0 {
+            0.0
+        } else {
+            (right_profile.frequency.value / right.rows.value).clamp(0.0, 1.0)
+        };
+    let left_residual_rows = (left_non_null_rows - common_left_rows).max(0.0);
+    let right_residual_rows = (right_non_null_rows - common_right_rows).max(0.0);
+    let left_residual_ndv = (left_profile.distinct.value - common_values as f64).max(1.0);
+    let right_residual_ndv = (right_profile.distinct.value - common_values as f64).max(1.0);
+    let residual_join_rows =
+        left_residual_rows * right_residual_rows / left_residual_ndv.max(right_residual_ndv);
+    let population_product =
+        left_sketches.population_rows as f64 * right_sketches.population_rows as f64;
+    let selectivity = ((heavy_join_rows + residual_join_rows) / population_product).clamp(0.0, 1.0);
+
+    Some(selectivity)
+}
+
+/// Estimates directional left-side key coverage from common SpaceSaving entries plus uniform
+/// residual-domain overlap. Unlike pair selectivity, right-side duplicate frequency does not
+/// increase this probability.
+fn sketch_left_match_probability(
+    first: Column,
+    second: Column,
+    left: &CardinalityProfile,
+    right: &CardinalityProfile,
+    intersection_distinct: f64,
+    left_distinct: f64,
+) -> Option<f64> {
+    let (_, _, left_profile, right_profile) = oriented_join_columns(first, second, left, right)?;
+    let left_sketches = left_profile.sketches.as_ref()?;
+    let right_sketches = right_profile.sketches.as_ref()?;
+    let left_frequent = left_sketches.frequent_values.as_ref()?;
+    let right_frequent = right_sketches.frequent_values.as_ref()?;
+    if left_sketches.population_rows == 0 || right_sketches.population_rows == 0 {
+        return None;
+    }
+
+    let mut known_matched_left_rows = 0.0;
+    let mut common_values = 0.0;
+    for left_item in left_frequent.entries() {
+        let left_frequency = left_item.lower_frequency() as f64;
+        if left_frequency > 0.0
+            && right_frequent
+                .estimate(&left_item.value)
+                .is_some_and(|item| item.lower_frequency() > 0)
+        {
+            known_matched_left_rows += left_frequency;
+            common_values += 1.0;
+        }
+    }
+    let left_non_null_rows = left_sketches.population_rows as f64
+        * if left.rows.value <= 0.0 {
+            0.0
+        } else {
+            (left_profile.frequency.value / left.rows.value).clamp(0.0, 1.0)
+        };
+    let residual_left_rows = (left_non_null_rows - known_matched_left_rows).max(0.0);
+    let residual_left_distinct = (left_distinct - common_values).max(0.0);
+    let residual_intersection = (intersection_distinct - common_values)
+        .max(0.0)
+        .min(residual_left_distinct);
+    let residual_matched_left_rows = if residual_left_distinct <= 0.0 {
+        0.0
+    } else {
+        residual_left_rows * residual_intersection / residual_left_distinct
+    };
+    Some(
+        ((known_matched_left_rows + residual_matched_left_rows)
+            / left_sketches.population_rows as f64)
+            .clamp(0.0, 1.0),
+    )
 }
 
 pub(crate) fn connecting_edge_indices(
@@ -2255,62 +3444,235 @@ fn binary_selectivity(
     ctx: &QueryContext,
     config: &CardinalityEstimationConfig,
 ) -> Estimate {
-    if let Some((column, literal)) = column_literal(left, right, ctx)
-        && let Some(profile) = left_profile
+    if let Some((column, literal, normalized_op)) = column_literal(op, left, right, ctx)
+        && let Some((profile, population_rows)) = left_profile
             .columns
             .get(&column)
-            .or_else(|| right_profile.columns.get(&column))
+            .map(|profile| (profile, left_profile.rows.value))
+            .or_else(|| {
+                right_profile
+                    .columns
+                    .get(&column)
+                    .map(|profile| (profile, right_profile.rows.value))
+            })
     {
-        return match op {
-            BinaryOp::Eq => {
-                Estimate::derived(1.0 / profile.distinct.value.max(1.0), Some(0.0), Some(1.0))
-            }
+        if matches!(literal, ScalarValue::Null(_)) {
+            return Estimate::exact(0.0);
+        }
+        let non_null_fraction = if population_rows <= 0.0 {
+            0.0
+        } else {
+            (profile.frequency.value / population_rows).clamp(0.0, 1.0)
+        };
+        let equality_selectivity = frequent_value_selectivity(profile, literal)
+            .unwrap_or_else(|| non_null_fraction / profile.distinct.value.max(1.0));
+        return match normalized_op {
+            BinaryOp::Eq => Estimate::derived(equality_selectivity, Some(0.0), Some(1.0)),
             BinaryOp::NotEq => Estimate::derived(
-                1.0 - (1.0 / profile.distinct.value.max(1.0)),
+                (non_null_fraction - equality_selectivity).max(0.0),
                 Some(0.0),
                 Some(1.0),
             ),
             BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq => {
-                range_selectivity(profile, literal, op, config)
+                let conditional = range_selectivity(profile, literal, normalized_op, config).value;
+                Estimate::derived(conditional * non_null_fraction, Some(0.0), Some(1.0))
             }
             _ => Estimate::derived(config.default_predicate_selectivity, Some(0.0), Some(1.0)),
         };
     }
     if let Some((left_col, right_col)) = column_equality_from_parts(op, left, right, ctx) {
-        let left_ndv = left_profile
-            .columns
-            .get(&left_col)
-            .or_else(|| right_profile.columns.get(&left_col))
-            .map_or(left_profile.rows.value.max(1.0), |profile| {
-                profile.distinct.value
-            });
-        let right_ndv = left_profile
-            .columns
-            .get(&right_col)
-            .or_else(|| right_profile.columns.get(&right_col))
-            .map_or(right_profile.rows.value.max(1.0), |profile| {
-                profile.distinct.value
-            });
-        return Estimate::derived(1.0 / left_ndv.max(right_ndv).max(1.0), Some(0.0), Some(1.0));
+        let profile_and_rows = |column| {
+            left_profile
+                .columns
+                .get(&column)
+                .map(|profile| (profile, left_profile.rows.value))
+                .or_else(|| {
+                    right_profile
+                        .columns
+                        .get(&column)
+                        .map(|profile| (profile, right_profile.rows.value))
+                })
+        };
+        let Some((left_column, left_rows)) = profile_and_rows(left_col) else {
+            return Estimate::derived(config.default_predicate_selectivity, Some(0.0), Some(1.0));
+        };
+        let Some((right_column, right_rows)) = profile_and_rows(right_col) else {
+            return Estimate::derived(config.default_predicate_selectivity, Some(0.0), Some(1.0));
+        };
+        let left_non_null = if left_rows <= 0.0 {
+            0.0
+        } else {
+            (left_column.frequency.value / left_rows).clamp(0.0, 1.0)
+        };
+        if left_col == right_col {
+            let value = if op == BinaryOp::IsNotDistinctFrom {
+                1.0
+            } else {
+                left_non_null
+            };
+            return Estimate::derived(value, Some(0.0), Some(1.0));
+        }
+        let right_non_null = if right_rows <= 0.0 {
+            0.0
+        } else {
+            (right_column.frequency.value / right_rows).clamp(0.0, 1.0)
+        };
+        let equal_non_null = left_non_null * right_non_null
+            / left_column
+                .distinct
+                .value
+                .max(right_column.distinct.value)
+                .max(1.0);
+        let null_match = if op == BinaryOp::IsNotDistinctFrom {
+            (1.0 - left_non_null) * (1.0 - right_non_null)
+        } else {
+            0.0
+        };
+        return Estimate::derived(
+            (equal_non_null + null_match).clamp(0.0, 1.0),
+            Some(0.0),
+            Some(1.0),
+        );
     }
     Estimate::derived(config.default_predicate_selectivity, Some(0.0), Some(1.0))
 }
 
+fn frequent_value_selectivity(profile: &ColumnProfile, literal: &ScalarValue) -> Option<f64> {
+    let encoded = EncodedScalarValue::from_scalar(literal)?;
+    let sketches = profile.sketches.as_ref()?;
+    let frequent = sketches.frequent_values.as_ref()?;
+    let population = sketches.population_rows as f64;
+    if population <= 0.0 {
+        return None;
+    }
+    if let Some(item) = frequent.estimate(&encoded) {
+        let midpoint = item.lower_frequency() as f64 + item.error as f64 * 0.5;
+        return Some((midpoint / population).clamp(0.0, 1.0));
+    }
+
+    let tracked_rows = frequent
+        .entries()
+        .iter()
+        .map(|item| item.lower_frequency())
+        .sum::<u64>()
+        .min(sketches.population_rows);
+    let residual_rows = sketches.population_rows.saturating_sub(tracked_rows) as f64;
+    let residual_distinct = (profile.distinct.value - frequent.entries().len() as f64).max(1.0);
+    Some((residual_rows / residual_distinct / population).clamp(0.0, 1.0))
+}
+
+fn value_restricted_filter_column(
+    predicate: Expr,
+    ctx: &QueryContext,
+) -> Option<(Column, BinaryOp)> {
+    let ExprData::Binary { op, left, right } = predicate.get(ctx) else {
+        return None;
+    };
+    matches!(
+        op,
+        BinaryOp::Eq
+            | BinaryOp::NotEq
+            | BinaryOp::Lt
+            | BinaryOp::LtEq
+            | BinaryOp::Gt
+            | BinaryOp::GtEq
+    )
+    .then(|| {
+        column_literal(*op, *left, *right, ctx)
+            .map(|(column, _, oriented_op)| (column, oriented_op))
+    })
+    .flatten()
+}
+
 fn tighten_filter_columns(profile: &mut CardinalityProfile, predicate: Expr, ctx: &QueryContext) {
-    if let ExprData::Binary {
-        op: BinaryOp::Eq,
-        left,
-        right,
-    } = predicate.get(ctx)
-        && let Some((column, literal)) = column_literal(*left, *right, ctx)
-        && let Some(column_profile) = profile.columns.get_mut(&column)
-    {
-        column_profile.lower_bound = Some(literal.clone());
-        column_profile.upper_bound = Some(literal.clone());
-        column_profile.distinct = Estimate::derived(1.0, Some(0.0), Some(1.0));
-        column_profile.frequency = column_profile
-            .frequency
-            .cap(profile.rows.value, EstimateSource::Derived);
+    let ExprData::Binary { op, left, right } = predicate.get(ctx) else {
+        return;
+    };
+    let Some((column, literal, oriented_op)) = column_literal(*op, *left, *right, ctx) else {
+        return;
+    };
+    let rows = profile.rows.clone();
+    let Some(column_profile) = profile.columns.get_mut(&column) else {
+        return;
+    };
+    match oriented_op {
+        BinaryOp::Eq => {
+            column_profile.lower_bound = Some(literal.clone());
+            column_profile.upper_bound = Some(literal.clone());
+            let distinct = if rows.value > 0.0 && !matches!(literal, ScalarValue::Null(_)) {
+                1.0_f64.min(rows.value)
+            } else {
+                0.0
+            };
+            column_profile.distinct = Estimate::derived(distinct, Some(0.0), Some(distinct));
+            column_profile.frequency = rows;
+        }
+        BinaryOp::Lt | BinaryOp::LtEq => {
+            let tightened = if oriented_op == BinaryOp::Lt {
+                strict_scalar_predecessor(literal).unwrap_or_else(|| literal.clone())
+            } else {
+                literal.clone()
+            };
+            if column_profile.upper_bound.as_ref().is_none_or(|current| {
+                crate::catalog::scalar_order(&tightened, current).is_some_and(|order| order.is_lt())
+            }) {
+                column_profile.upper_bound = Some(tightened);
+            }
+        }
+        BinaryOp::Gt | BinaryOp::GtEq => {
+            let tightened = if oriented_op == BinaryOp::Gt {
+                strict_scalar_successor(literal).unwrap_or_else(|| literal.clone())
+            } else {
+                literal.clone()
+            };
+            if column_profile.lower_bound.as_ref().is_none_or(|current| {
+                crate::catalog::scalar_order(&tightened, current).is_some_and(|order| order.is_gt())
+            }) {
+                column_profile.lower_bound = Some(tightened);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn strict_scalar_predecessor(value: &ScalarValue) -> Option<ScalarValue> {
+    match value {
+        ScalarValue::Boolean(true) => Some(ScalarValue::Boolean(false)),
+        ScalarValue::Int32(value) => value.checked_sub(1).map(ScalarValue::Int32),
+        ScalarValue::Int64(value) => value.checked_sub(1).map(ScalarValue::Int64),
+        ScalarValue::Date32(value) => value.checked_sub(1).map(ScalarValue::Date32),
+        ScalarValue::Decimal128 {
+            value,
+            precision,
+            scale,
+        } => value.checked_sub(1).map(|value| ScalarValue::Decimal128 {
+            value,
+            precision: *precision,
+            scale: *scale,
+        }),
+        // TODO(statistics): Preserve bound inclusivity explicitly for continuous and non-discrete
+        // ordered types instead of approximating a strict bound with the literal itself.
+        _ => None,
+    }
+}
+
+fn strict_scalar_successor(value: &ScalarValue) -> Option<ScalarValue> {
+    match value {
+        ScalarValue::Boolean(false) => Some(ScalarValue::Boolean(true)),
+        ScalarValue::Int32(value) => value.checked_add(1).map(ScalarValue::Int32),
+        ScalarValue::Int64(value) => value.checked_add(1).map(ScalarValue::Int64),
+        ScalarValue::Date32(value) => value.checked_add(1).map(ScalarValue::Date32),
+        ScalarValue::Decimal128 {
+            value,
+            precision,
+            scale,
+        } => value.checked_add(1).map(|value| ScalarValue::Decimal128 {
+            value,
+            precision: *precision,
+            scale: *scale,
+        }),
+        // TODO(statistics): See `strict_scalar_predecessor`.
+        _ => None,
     }
 }
 
@@ -2360,10 +3722,24 @@ fn column_ref(expr: Expr, ctx: &QueryContext) -> Option<Column> {
     }
 }
 
-fn column_literal(left: Expr, right: Expr, ctx: &QueryContext) -> Option<(Column, &ScalarValue)> {
+fn column_literal(
+    op: BinaryOp,
+    left: Expr,
+    right: Expr,
+    ctx: &QueryContext,
+) -> Option<(Column, &ScalarValue, BinaryOp)> {
     match (left.get(ctx), right.get(ctx)) {
-        (ExprData::ColumnRef(column), ExprData::Literal(value))
-        | (ExprData::Literal(value), ExprData::ColumnRef(column)) => Some((*column, value)),
+        (ExprData::ColumnRef(column), ExprData::Literal(value)) => Some((*column, value, op)),
+        (ExprData::Literal(value), ExprData::ColumnRef(column)) => {
+            let reversed = match op {
+                BinaryOp::Lt => BinaryOp::Gt,
+                BinaryOp::LtEq => BinaryOp::GtEq,
+                BinaryOp::Gt => BinaryOp::Lt,
+                BinaryOp::GtEq => BinaryOp::LtEq,
+                _ => op,
+            };
+            Some((*column, value, reversed))
+        }
         _ => None,
     }
 }
@@ -2381,7 +3757,7 @@ fn column_equality_from_parts(
     right: Expr,
     ctx: &QueryContext,
 ) -> Option<(Column, Column)> {
-    if op != BinaryOp::Eq {
+    if !matches!(op, BinaryOp::Eq | BinaryOp::IsNotDistinctFrom) {
         return None;
     }
     let ExprData::ColumnRef(left_col) = left.get(ctx) else {
@@ -2396,7 +3772,10 @@ fn column_equality_from_parts(
 struct EqualityEdge {
     left: Column,
     right: Column,
+    null_safe: bool,
     chosen_ndv: Estimate,
+    left_ndv: Estimate,
+    right_ndv: Estimate,
 }
 
 #[derive(Clone)]
@@ -2500,8 +3879,8 @@ impl EquivalenceClassState {
             let right_distinct = self.nodes[right_root].distinct.clone();
             self.nodes[right_root].parent = left_root;
             self.nodes[left_root].distinct = left_distinct
-                .max_by_value(right_distinct)
-                .max_by_value(distinct);
+                .min_by_value(right_distinct)
+                .min_by_value(distinct);
             true
         }
     }
@@ -2598,16 +3977,6 @@ fn scalar_to_f64(value: &ScalarValue) -> Option<f64> {
         ScalarValue::Decimal128 { value, scale, .. } => {
             Some(*value as f64 / 10_f64.powi(*scale as i32))
         }
-        _ => None,
-    }
-}
-
-fn shift_scalar(value: Option<&ScalarValue>, delta: f64) -> Option<ScalarValue> {
-    match value? {
-        ScalarValue::Int32(value) => Some(ScalarValue::Int32((*value as f64 + delta) as i32)),
-        ScalarValue::Int64(value) => Some(ScalarValue::Int64((*value as f64 + delta) as i64)),
-        ScalarValue::Float64(value) => Some(ScalarValue::Float64(*value + delta)),
-        ScalarValue::Date32(value) => Some(ScalarValue::Date32((*value as f64 + delta) as i32)),
         _ => None,
     }
 }
@@ -3042,8 +4411,9 @@ mod tests {
     use super::*;
     use crate::{
         AggregateExpr, AggregateFunction, Aggregation, BinaryOp, Catalog, ColumnData, ExprData,
-        Join, JoinType, Limit, Map, MemoryCatalog, OperatorData, Output, Projection, ScalarValue,
-        Scan, Selection, TableFunction, TableFunctionDef, TableRef, TableStatistics,
+        ForeignKey, Join, JoinType, Limit, Map, MemoryCatalog, OperatorData, Output, Projection,
+        ScalarValue, Scan, Selection, TableFunction, TableFunctionDef, TableRef, TableStatistics,
+        UniqueKey,
     };
     use arrow_schema::{DataType, Field, Schema};
     use std::sync::Arc;
@@ -3527,6 +4897,44 @@ mod tests {
         assert_eq!(
             analyses.get::<ColumnNullability>(&ctx, join).unwrap(),
             vec![(user_id, false), (order_user_id, false)]
+        );
+    }
+
+    #[test]
+    fn null_safe_equality_does_not_prove_columns_non_null() {
+        let mut ctx = QueryContext::new();
+        let left_column = ColumnData::new("left", DataType::Int64).add(&mut ctx);
+        let right_column = ColumnData::new("right", DataType::Int64).add(&mut ctx);
+        let left_scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("left_t"),
+            columns: vec![left_column],
+        })
+        .add(&mut ctx);
+        let right_scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("right_t"),
+            columns: vec![right_column],
+        })
+        .add(&mut ctx);
+        let left_ref = ExprData::ColumnRef(left_column).add(&mut ctx);
+        let right_ref = ExprData::ColumnRef(right_column).add(&mut ctx);
+        let predicate = ExprData::Binary {
+            op: BinaryOp::IsNotDistinctFrom,
+            left: left_ref,
+            right: right_ref,
+        }
+        .add(&mut ctx);
+        let join = OperatorData::Join(Join {
+            join_type: JoinType::Inner,
+            on: predicate,
+            outer: left_scan,
+            inner: right_scan,
+        })
+        .add(&mut ctx);
+
+        let mut analyses = crate::test_analyses(&ctx);
+        assert_eq!(
+            analyses.get::<ColumnNullability>(&ctx, join).unwrap(),
+            vec![(left_column, true), (right_column, true)]
         );
     }
 
@@ -4172,7 +5580,15 @@ mod tests {
                 .collect(),
         );
 
-        let output = combine_join_columns(&left, &right, Estimate::exact(50.0), None, Vec::new());
+        let output = combine_join_columns(
+            &left,
+            &right,
+            Estimate::exact(50.0),
+            None,
+            Vec::new(),
+            false,
+            false,
+        );
 
         assert_eq!(output.columns[&shared].frequency.value, 50.0);
         assert_eq!(output.columns[&shared].distinct.value, 20.0);
@@ -4271,7 +5687,7 @@ mod tests {
 
         assert_eq!(estimate.selectivity.value, 0.01);
         assert_eq!(estimate.equivalence_classes.len(), 1);
-        assert_eq!(estimate.equivalence_classes[0].distinct.value, 100.0);
+        assert_eq!(estimate.equivalence_classes[0].distinct.value, 50.0);
         assert_eq!(
             estimate.equivalence_classes[0].columns,
             BTreeSet::from([shared, right_key]),
@@ -4319,9 +5735,8 @@ mod tests {
             estimate.equivalence_classes[0],
             ColumnEquivalenceClass {
                 columns: BTreeSet::from([a, b, c]),
-                // The historical left-then-right overwrite/max sequence first installs 40 for
-                // the right class, then retains c's larger column NDV.
-                distinct: Estimate::exact(60.0),
+                // Equal outputs cannot exceed the smallest inherited equality domain.
+                distinct: Estimate::exact(40.0),
             },
         );
     }
@@ -4359,11 +5774,11 @@ mod tests {
             vec![
                 ColumnEquivalenceClass {
                     columns: BTreeSet::from([a, b]),
-                    distinct: Estimate::exact(50.0),
+                    distinct: Estimate::exact(30.0),
                 },
                 ColumnEquivalenceClass {
                     columns: BTreeSet::from([c, d]),
-                    distinct: Estimate::exact(50.0),
+                    distinct: Estimate::exact(40.0),
                 },
             ],
         );
@@ -4635,7 +6050,7 @@ mod tests {
                 both_columns.clone(),
                 100.0,
             ),
-            (JoinType::FullOuter, Vec::new(), both_columns, 100.0),
+            (JoinType::FullOuter, Vec::new(), both_columns.clone(), 100.0),
             (
                 JoinType::LeftSemi,
                 vec![left_class.clone()],
@@ -4651,7 +6066,7 @@ mod tests {
             (
                 JoinType::Single,
                 vec![left_class.clone()],
-                left_columns.clone(),
+                both_columns.clone(),
                 100.0,
             ),
             (
@@ -4709,8 +6124,10 @@ mod tests {
 
             let output =
                 join_profile_from_conjuncts(&left, &right, join_type.clone(), &[predicate], &ctx);
-            let lower = output.rows.lower.expect("exact inputs have a lower bound");
-            let upper = output.rows.upper.expect("exact inputs have an upper bound");
+            assert_eq!(output.rows.lower, Some(expected_minimum), "{join_type:?}");
+            assert_eq!(output.rows.upper, Some(expected_minimum), "{join_type:?}");
+            let lower = output.rows.lower.unwrap_or_default();
+            let upper = output.rows.upper.unwrap_or_default();
 
             assert_eq!(lower, expected_minimum, "{join_type:?}");
             assert_eq!(output.rows.value, expected_minimum, "{join_type:?}");
@@ -4757,8 +6174,8 @@ mod tests {
         assert!(outer.equivalence_classes.is_empty());
         assert_eq!(outer.columns[&a].distinct.value, 100.0);
         assert_eq!(outer.columns[&b].distinct.value, 10.0);
-        assert_eq!(downstream_selectivity.value, 0.0001);
-        assert_eq!(downstream.rows.value, 1.0);
+        assert_eq!(downstream_selectivity.value, 0.00001);
+        assert_eq!(downstream.rows.value, 0.1);
     }
 
     #[test]
@@ -4873,7 +6290,7 @@ mod tests {
     }
 
     #[test]
-    fn cardinality_estimation_shifts_simple_map_bounds() {
+    fn cardinality_estimation_keeps_computed_expressions_opaque() {
         let mut ctx = QueryContext::new();
         let value = ColumnData::new("value", DataType::Int64).add(&mut ctx);
         let shifted = ColumnData::new("shifted", DataType::Int64).add(&mut ctx);
@@ -4926,15 +6343,14 @@ mod tests {
 
         let profile = analyses.get::<CardinalityEstimationV1>(&ctx, map).unwrap();
 
+        assert_eq!(profile.columns[&shifted].lower_bound, None);
+        assert_eq!(profile.columns[&shifted].upper_bound, None);
+        assert_eq!(profile.columns[&shifted].distinct.value, 10.0);
         assert_eq!(
-            profile.columns[&shifted].lower_bound,
-            Some(ScalarValue::Int64(4))
+            profile.columns[&shifted].distinct.source,
+            EstimateSource::Derived
         );
-        assert_eq!(
-            profile.columns[&shifted].upper_bound,
-            Some(ScalarValue::Int64(10))
-        );
-        assert_eq!(profile.columns[&shifted].distinct.value, 7.0);
+        assert!(profile.columns[&shifted].sketches.is_none());
     }
 
     #[test]
@@ -4993,6 +6409,57 @@ mod tests {
     }
 
     #[test]
+    fn aggregation_counts_equivalent_grouping_keys_once() {
+        let mut ctx = QueryContext::new();
+        let first = ColumnData::new("first", DataType::Int64).add(&mut ctx);
+        let alias = ColumnData::new("alias", DataType::Int64).add(&mut ctx);
+        let count = ColumnData::new("count", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("pairs"),
+            columns: vec![first],
+        })
+        .add(&mut ctx);
+        let first_ref = ExprData::ColumnRef(first).add(&mut ctx);
+        let map = OperatorData::Map(Map {
+            computations: vec![(alias, first_ref)],
+            input: scan,
+        })
+        .add(&mut ctx);
+        let alias_ref = ExprData::ColumnRef(alias).add(&mut ctx);
+        let aggregation = OperatorData::Aggregation(Aggregation {
+            keys: vec![first_ref, alias_ref],
+            aggregates: vec![(count, AggregateExpr::CountStar)],
+            input: map,
+        })
+        .add(&mut ctx);
+
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(
+                TableRef::bare("pairs"),
+                Arc::new(Schema::new(vec![Field::new(
+                    "first",
+                    DataType::Int64,
+                    false,
+                )])),
+                None,
+            )
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                TableRef::bare("pairs"),
+                table_stats_for_column("first", 1_000, 100),
+            )
+            .unwrap();
+        let mut analyses = AnalysisContext::new(catalog);
+
+        let profile = analyses
+            .get::<CardinalityEstimationV1>(&ctx, aggregation)
+            .unwrap();
+        assert_eq!(profile.rows.value, 100.0);
+    }
+
+    #[test]
     fn cardinality_estimation_estimates_simple_equality_join() {
         let mut ctx = QueryContext::new();
         let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
@@ -5044,7 +6511,7 @@ mod tests {
 
     #[test]
     fn cardinality_estimation_uses_mark_join_nullable_distinct_bound() {
-        for (marker_nullable, expected_upper) in [(false, Some(2.0)), (true, Some(3.0))] {
+        for marker_nullable in [false, true] {
             let mut ctx = QueryContext::new();
             let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
             let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
@@ -5094,7 +6561,12 @@ mod tests {
 
             let profile = analyses.get::<CardinalityEstimationV1>(&ctx, join).unwrap();
 
-            assert_eq!(profile.columns[&marker].distinct.upper, expected_upper);
+            assert_eq!(profile.columns[&marker].distinct.upper, Some(2.0));
+            if marker_nullable {
+                assert!(profile.columns[&marker].frequency.lower == Some(0.0));
+            } else {
+                assert_eq!(profile.columns[&marker].frequency, profile.rows);
+            }
         }
     }
 
@@ -5110,6 +6582,8 @@ mod tests {
             upper_bound: None,
             frequency: rows.clone(),
             distinct: Estimate::exact(100.0),
+            value: None,
+            sketches: None,
         };
         let left = CardinalityProfile::new(
             rows.clone(),
@@ -5277,16 +6751,18 @@ mod tests {
         catalog
             .create_table(TableRef::bare("right_t"), schema(), None)
             .unwrap();
+        let left_values = (1..=1_000).map(Some).collect::<Vec<_>>();
+        let right_values = (1..=100).map(Some).collect::<Vec<_>>();
         catalog
             .set_table_statistics(
                 TableRef::bare("left_t"),
-                table_stats_for_column("left_key", 1_000, 1_000),
+                table_stats_from_i64_values("left_key", &left_values),
             )
             .unwrap();
         catalog
             .set_table_statistics(
                 TableRef::bare("right_t"),
-                table_stats_for_column("right_key", 100, 1_000),
+                table_stats_from_i64_values("right_key", &right_values),
             )
             .unwrap();
         let mut analyses = AnalysisContext::new(catalog);
@@ -5307,6 +6783,423 @@ mod tests {
                 .value,
             900.0
         );
+    }
+
+    #[test]
+    fn semi_join_coverage_is_invariant_to_right_duplicates() {
+        fn estimate(right_values: &[Option<i64>]) -> f64 {
+            let mut ctx = QueryContext::new();
+            let left_key = ColumnData::new("key", DataType::Int64).add(&mut ctx);
+            let right_key = ColumnData::new("key", DataType::Int64).add(&mut ctx);
+            let left_scan = OperatorData::Scan(Scan {
+                table: TableRef::bare("left_t"),
+                columns: vec![left_key],
+            })
+            .add(&mut ctx);
+            let right_scan = OperatorData::Scan(Scan {
+                table: TableRef::bare("right_t"),
+                columns: vec![right_key],
+            })
+            .add(&mut ctx);
+            let on = equality_expr(&mut ctx, left_key, right_key);
+            let semi = OperatorData::Join(Join {
+                join_type: JoinType::LeftSemi,
+                on,
+                outer: left_scan,
+                inner: right_scan,
+            })
+            .add(&mut ctx);
+
+            let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+            let key_schema = Arc::new(Schema::new(vec![Field::new("key", DataType::Int64, false)]));
+            for table in ["left_t", "right_t"] {
+                catalog
+                    .create_table(TableRef::bare(table), key_schema.clone(), None)
+                    .unwrap();
+            }
+            let left_values = (1..=1_000).map(Some).collect::<Vec<_>>();
+            catalog
+                .set_table_statistics(
+                    TableRef::bare("left_t"),
+                    table_stats_from_i64_values("key", &left_values),
+                )
+                .unwrap();
+            catalog
+                .set_table_statistics(
+                    TableRef::bare("right_t"),
+                    table_stats_from_i64_values("key", right_values),
+                )
+                .unwrap();
+            AnalysisContext::new(catalog)
+                .get::<CardinalityEstimationV1>(&ctx, semi)
+                .unwrap()
+                .rows
+                .value
+        }
+
+        assert_eq!(estimate(&[Some(1)]), 1.0);
+        assert_eq!(estimate(&vec![Some(1); 1_000]), 1.0);
+    }
+
+    #[test]
+    fn ordered_range_overlap_controls_join_domain_intersection() {
+        let mut ctx = QueryContext::new();
+        let left_column = ColumnData::new("left", DataType::Int64).add(&mut ctx);
+        let right_column = ColumnData::new("right", DataType::Int64).add(&mut ctx);
+        let profile_from_values = |column, values: Vec<Option<i64>>| {
+            let statistics = table_stats_from_i64_values("key", &values);
+            let rows = Estimate::catalog(values.len() as f64);
+            CardinalityProfile::new(
+                rows.clone(),
+                [(
+                    column,
+                    column_profile_from_stats(&statistics.column_statistics["key"], &rows, None),
+                )]
+                .into_iter()
+                .collect(),
+            )
+        };
+        let left = profile_from_values(
+            left_column,
+            (1..=100).map(Some).collect::<Vec<Option<i64>>>(),
+        );
+        let overlapping = profile_from_values(
+            right_column,
+            (51..=150).map(Some).collect::<Vec<Option<i64>>>(),
+        );
+        let disjoint = profile_from_values(
+            right_column,
+            (101..=200).map(Some).collect::<Vec<Option<i64>>>(),
+        );
+
+        let equality_edge = |null_safe, distinct| EqualityEdge {
+            left: left_column,
+            right: right_column,
+            null_safe,
+            chosen_ndv: Estimate::exact(distinct),
+            left_ndv: Estimate::exact(distinct),
+            right_ndv: Estimate::exact(distinct),
+        };
+        let overlap =
+            equality_edge_estimate(&equality_edge(false, 100.0), &left, &overlapping, None);
+        assert!((overlap.left_match_probability - 0.5).abs() < f64::EPSILON);
+        assert!((overlap.pair_selectivity - 0.005).abs() < f64::EPSILON);
+
+        let disjoint = equality_edge_estimate(&equality_edge(false, 100.0), &left, &disjoint, None);
+        assert!(disjoint.domains_disjoint);
+        assert_eq!(disjoint.pair_selectivity, 0.0);
+        assert_eq!(disjoint.left_match_probability, 0.0);
+
+        let nullable_left = profile_from_values(left_column, vec![None, Some(1)]);
+        let nullable_right = profile_from_values(right_column, vec![None, Some(100)]);
+        let null_safe = equality_edge_estimate(
+            &equality_edge(true, 1.0),
+            &nullable_left,
+            &nullable_right,
+            None,
+        );
+        assert!(!null_safe.domains_disjoint);
+        assert_eq!(null_safe.pair_selectivity, 0.25);
+        assert_eq!(null_safe.left_match_probability, 0.5);
+    }
+
+    #[test]
+    fn filtered_ndv_distinguishes_row_thinning_from_domain_restriction() {
+        let mut ctx = QueryContext::new();
+        let column = ColumnData::new("key", DataType::Int64).add(&mut ctx);
+        let values = (0..100)
+            .flat_map(|value| std::iter::repeat_n(Some(value), 10))
+            .collect::<Vec<_>>();
+        let statistics = table_stats_from_i64_values("key", &values);
+        let rows = Estimate::catalog(values.len() as f64);
+        let input = CardinalityProfile::new(
+            rows.clone(),
+            [(
+                column,
+                column_profile_from_stats(&statistics.column_statistics["key"], &rows, None),
+            )]
+            .into_iter()
+            .collect(),
+        );
+
+        let thinned = scale_profile(input.clone(), 0.1, None);
+        let expected_occupancy = 100.0 * (1.0 - 0.9_f64.powf(10.0));
+        assert!((thinned.columns[&column].distinct.value - expected_occupancy).abs() < 1e-9);
+
+        let domain_restricted = scale_profile(input, 0.1, Some((column, BinaryOp::Lt)));
+        assert!((domain_restricted.columns[&column].distinct.value - 10.0).abs() < 1e-9);
+        assert_eq!(domain_restricted.columns[&column].frequency.value, 100.0);
+    }
+
+    #[test]
+    fn semi_and_anti_profiles_propagate_equality_key_domains() {
+        let mut ctx = QueryContext::new();
+        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
+        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
+        let predicate = equality_expr(&mut ctx, left_key, right_key);
+        let left = CardinalityProfile::new(
+            Estimate::exact(1_000.0),
+            [(left_key, test_column_profile(1_000.0, 100.0))]
+                .into_iter()
+                .collect(),
+        );
+        let right = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [(right_key, test_column_profile(100.0, 10.0))]
+                .into_iter()
+                .collect(),
+        );
+
+        let semi =
+            join_profile_from_conjuncts(&left, &right, JoinType::LeftSemi, &[predicate], &ctx);
+        assert_eq!(semi.rows.value, 100.0);
+        assert_eq!(semi.columns[&left_key].frequency.value, 100.0);
+        assert_eq!(semi.columns[&left_key].distinct.value, 10.0);
+
+        let anti =
+            join_profile_from_conjuncts(&left, &right, JoinType::LeftAnti, &[predicate], &ctx);
+        assert_eq!(anti.rows.value, 900.0);
+        assert_eq!(anti.columns[&left_key].frequency.value, 900.0);
+        assert_eq!(anti.columns[&left_key].distinct.value, 90.0);
+
+        let mut nullable_left_key = test_column_profile(100.0, 10.0);
+        nullable_left_key.frequency = Estimate::exact(50.0);
+        let nullable_left = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [(left_key, nullable_left_key)].into_iter().collect(),
+        );
+        let covering_right = CardinalityProfile::new(
+            Estimate::exact(10.0),
+            [(right_key, test_column_profile(10.0, 10.0))]
+                .into_iter()
+                .collect(),
+        );
+        let nullable_anti = join_profile_from_conjuncts(
+            &nullable_left,
+            &covering_right,
+            JoinType::LeftAnti,
+            &[predicate],
+            &ctx,
+        );
+        assert_eq!(nullable_anti.rows.value, 50.0);
+        assert_eq!(nullable_anti.columns[&left_key].frequency.value, 0.0);
+        assert_eq!(nullable_anti.columns[&left_key].distinct.value, 0.0);
+    }
+
+    #[test]
+    fn filter_tightening_preserves_profile_invariants_and_strict_bounds() {
+        let mut ctx = QueryContext::new();
+        let column = ColumnData::new("key", DataType::Int64).add(&mut ctx);
+        let column_ref = ExprData::ColumnRef(column).add(&mut ctx);
+        let fifty = ExprData::Literal(ScalarValue::Int64(50)).add(&mut ctx);
+        let strict = ExprData::Binary {
+            op: BinaryOp::Lt,
+            left: column_ref,
+            right: fifty,
+        }
+        .add(&mut ctx);
+        let mut ranged = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [(
+                column,
+                ColumnProfile {
+                    lower_bound: Some(ScalarValue::Int64(1)),
+                    upper_bound: Some(ScalarValue::Int64(100)),
+                    frequency: Estimate::exact(100.0),
+                    distinct: Estimate::exact(100.0),
+                    value: None,
+                    sketches: None,
+                },
+            )]
+            .into_iter()
+            .collect(),
+        );
+        tighten_filter_columns(&mut ranged, strict, &ctx);
+        assert_eq!(
+            ranged.columns[&column].upper_bound,
+            Some(ScalarValue::Int64(49))
+        );
+
+        let one = ExprData::Literal(ScalarValue::Int64(1)).add(&mut ctx);
+        let equality = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: column_ref,
+            right: one,
+        }
+        .add(&mut ctx);
+        let empty = CardinalityProfile::new(
+            Estimate::exact(0.0),
+            [(column, test_column_profile(0.0, 0.0))]
+                .into_iter()
+                .collect(),
+        );
+        let mut empty = scale_profile(empty, 0.0, Some((column, BinaryOp::Eq)));
+        tighten_filter_columns(&mut empty, equality, &ctx);
+        assert_eq!(empty.columns[&column].frequency.value, 0.0);
+        assert_eq!(empty.columns[&column].distinct.value, 0.0);
+
+        let fractional = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [(column, test_column_profile(100.0, 100.0))]
+                .into_iter()
+                .collect(),
+        );
+        let mut fractional = scale_profile(fractional, 0.005, Some((column, BinaryOp::Eq)));
+        tighten_filter_columns(&mut fractional, equality, &ctx);
+        assert_eq!(fractional.rows.value, 0.5);
+        assert_eq!(fractional.columns[&column].distinct.value, 0.5);
+    }
+
+    #[test]
+    fn not_equal_and_uncertain_sketches_do_not_destroy_ndv_coverage() {
+        let mut ctx = QueryContext::new();
+        let left_column = ColumnData::new("left", DataType::Int64).add(&mut ctx);
+        let right_column = ColumnData::new("right", DataType::Int64).add(&mut ctx);
+        let input = CardinalityProfile::new(
+            Estimate::exact(1_000.0),
+            [(left_column, test_column_profile(1_000.0, 501.0))]
+                .into_iter()
+                .collect(),
+        );
+        let not_equal = scale_profile(input, 0.5, Some((left_column, BinaryOp::NotEq)));
+        assert_eq!(not_equal.columns[&left_column].distinct.value, 500.0);
+
+        let encoded = EncodedScalarValue::from_scalar(&ScalarValue::Int64(1)).unwrap();
+        let uncertain = optd_sketches::SpaceSaving::from_entries(
+            1,
+            100,
+            vec![optd_sketches::FrequentItem {
+                value: encoded,
+                frequency: 100,
+                error: 100,
+            }],
+        )
+        .unwrap();
+        let profile = |column| {
+            CardinalityProfile::new(
+                Estimate::exact(100.0),
+                [(
+                    column,
+                    ColumnProfile {
+                        lower_bound: None,
+                        upper_bound: None,
+                        frequency: Estimate::exact(100.0),
+                        distinct: Estimate::exact(100.0),
+                        value: None,
+                        sketches: Some(Arc::new(ColumnSketches {
+                            encoding_version: crate::SKETCH_VALUE_ENCODING_VERSION,
+                            population_rows: 100,
+                            distinct_values: None,
+                            frequent_values: Some(uncertain.clone()),
+                        })),
+                    },
+                )]
+                .into_iter()
+                .collect(),
+            )
+        };
+        let left = profile(left_column);
+        let right = profile(right_column);
+        let edge = EqualityEdge {
+            left: left_column,
+            right: right_column,
+            null_safe: false,
+            chosen_ndv: Estimate::exact(100.0),
+            left_ndv: Estimate::exact(100.0),
+            right_ndv: Estimate::exact(100.0),
+        };
+        let estimate = equality_edge_estimate(&edge, &left, &right, None);
+        assert_eq!(estimate.left_match_probability, 1.0);
+    }
+
+    #[test]
+    fn catalog_keys_enable_only_population_safe_foreign_key_coverage() {
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        let key_schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+        for table in ["child", "parent"] {
+            catalog
+                .create_table(TableRef::bare(table), key_schema.clone(), None)
+                .unwrap();
+        }
+        let parent_values = (1..=100).map(Some).collect::<Vec<_>>();
+        let child_values = (1..=100).cycle().take(1_000).map(Some).collect::<Vec<_>>();
+        let mut parent_statistics = table_stats_from_i64_values("id", &parent_values);
+        parent_statistics.constraints.unique_keys =
+            vec![UniqueKey::try_new(vec!["id".to_string()]).unwrap()]
+                .try_into()
+                .unwrap();
+        let mut child_statistics = table_stats_from_i64_values("id", &child_values);
+        child_statistics.constraints.foreign_keys = vec![
+            ForeignKey::try_new(
+                vec!["id".to_string()],
+                TableRef::bare("parent"),
+                vec!["id".to_string()],
+            )
+            .unwrap(),
+        ]
+        .try_into()
+        .unwrap();
+        catalog
+            .set_table_statistics(TableRef::bare("parent"), parent_statistics)
+            .unwrap();
+        catalog
+            .set_table_statistics(TableRef::bare("child"), child_statistics)
+            .unwrap();
+
+        let mut ctx = QueryContext::new();
+        let child_id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let parent_id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let child = OperatorData::Scan(Scan {
+            table: TableRef::bare("child"),
+            columns: vec![child_id],
+        })
+        .add(&mut ctx);
+        let parent = OperatorData::Scan(Scan {
+            table: TableRef::bare("parent"),
+            columns: vec![parent_id],
+        })
+        .add(&mut ctx);
+        let unfiltered_on = equality_expr(&mut ctx, child_id, parent_id);
+        let unfiltered_semi = OperatorData::Join(Join {
+            join_type: JoinType::LeftSemi,
+            on: unfiltered_on,
+            outer: child,
+            inner: parent,
+        })
+        .add(&mut ctx);
+
+        let parent_ref = ExprData::ColumnRef(parent_id).add(&mut ctx);
+        let fifty = ExprData::Literal(ScalarValue::Int64(50)).add(&mut ctx);
+        let predicate = ExprData::Binary {
+            op: BinaryOp::LtEq,
+            left: parent_ref,
+            right: fifty,
+        }
+        .add(&mut ctx);
+        let filtered_parent = OperatorData::Selection(Selection {
+            predicate,
+            input: parent,
+        })
+        .add(&mut ctx);
+        let filtered_on = equality_expr(&mut ctx, child_id, parent_id);
+        let filtered_semi = OperatorData::Join(Join {
+            join_type: JoinType::LeftSemi,
+            on: filtered_on,
+            outer: child,
+            inner: filtered_parent,
+        })
+        .add(&mut ctx);
+
+        let mut analyses = AnalysisContext::new(catalog);
+        let unfiltered = analyses
+            .get::<CardinalityEstimationV1>(&ctx, unfiltered_semi)
+            .unwrap();
+        assert_eq!(unfiltered.rows.value, 1_000.0);
+
+        let filtered = analyses
+            .get::<CardinalityEstimationV1>(&ctx, filtered_semi)
+            .unwrap();
+        assert!(filtered.rows.value > 490.0 && filtered.rows.value < 510.0);
     }
 
     #[test]
@@ -5484,6 +7377,576 @@ mod tests {
     }
 
     #[test]
+    fn accumulated_facts_do_not_charge_repeated_equalities_twice() {
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(
+                TableRef::bare("t"),
+                Arc::new(Schema::new(vec![Field::new(
+                    "value",
+                    DataType::Int64,
+                    false,
+                )])),
+                None,
+            )
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                TableRef::bare("t"),
+                table_stats_for_column("value", 100, 10),
+            )
+            .unwrap();
+
+        let (mut ctx, scan) = single_column_scan();
+        let OperatorData::Scan(scan_data) = scan.get(&ctx) else {
+            panic!("single_column_scan returns a scan");
+        };
+        let column = scan_data.columns[0];
+        let column_ref = ExprData::ColumnRef(column).add(&mut ctx);
+        let literal = ExprData::Literal(ScalarValue::Int64(7)).add(&mut ctx);
+        let predicate = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: column_ref,
+            right: literal,
+        }
+        .add(&mut ctx);
+        let first = OperatorData::Selection(Selection {
+            predicate,
+            input: scan,
+        })
+        .add(&mut ctx);
+        let repeated = OperatorData::Selection(Selection {
+            predicate,
+            input: first,
+        })
+        .add(&mut ctx);
+        ctx.set_root(repeated);
+
+        let mut analyses = AnalysisContext::new(catalog);
+        let first_profile = analyses
+            .get::<CardinalityEstimationV1>(&ctx, first)
+            .unwrap();
+        let repeated_profile = analyses
+            .get::<CardinalityEstimationV1>(&ctx, repeated)
+            .unwrap();
+        assert_eq!(first_profile.rows.value, 10.0);
+        assert_eq!(repeated_profile.rows.value, first_profile.rows.value);
+    }
+
+    #[test]
+    fn accumulated_facts_do_not_charge_repeated_residual_predicates_twice() {
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(
+                TableRef::bare("t"),
+                Arc::new(Schema::new(vec![Field::new(
+                    "value",
+                    DataType::Int64,
+                    false,
+                )])),
+                None,
+            )
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                TableRef::bare("t"),
+                table_stats_for_column("value", 100, 10),
+            )
+            .unwrap();
+
+        let (mut ctx, scan) = single_column_scan();
+        let OperatorData::Scan(scan_data) = scan.get(&ctx) else {
+            panic!("single_column_scan returns a scan");
+        };
+        let column_ref = ExprData::ColumnRef(scan_data.columns[0]).add(&mut ctx);
+        let literal = ExprData::Literal(ScalarValue::Int64(7)).add(&mut ctx);
+        let predicate = ExprData::Binary {
+            op: BinaryOp::NotEq,
+            left: column_ref,
+            right: literal,
+        }
+        .add(&mut ctx);
+        let first = OperatorData::Selection(Selection {
+            predicate,
+            input: scan,
+        })
+        .add(&mut ctx);
+        let repeated = OperatorData::Selection(Selection {
+            predicate,
+            input: first,
+        })
+        .add(&mut ctx);
+
+        let mut analyses = AnalysisContext::new(catalog);
+        let first_rows = analyses
+            .get::<CardinalityEstimationV1>(&ctx, first)
+            .unwrap()
+            .rows
+            .value;
+        let repeated_rows = analyses
+            .get::<CardinalityEstimationV1>(&ctx, repeated)
+            .unwrap()
+            .rows
+            .value;
+        assert_eq!(first_rows, 90.0);
+        assert_eq!(repeated_rows, first_rows);
+    }
+
+    #[test]
+    fn comparison_selectivity_respects_orientation_nulls_and_non_null_frequency() {
+        let mut ctx = QueryContext::new();
+        let column = ColumnData::new("value", DataType::Int64).add(&mut ctx);
+        let mut column_profile = test_column_profile(100.0, 10.0);
+        column_profile.lower_bound = Some(ScalarValue::Int64(0));
+        column_profile.upper_bound = Some(ScalarValue::Int64(100));
+        column_profile.frequency = Estimate::exact(80.0);
+        let profile = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [(column, column_profile)].into_iter().collect(),
+        );
+        let column_ref = ExprData::ColumnRef(column).add(&mut ctx);
+        let twenty_five = ExprData::Literal(ScalarValue::Int64(25)).add(&mut ctx);
+        let null = ExprData::Literal(ScalarValue::Null(DataType::Int64)).add(&mut ctx);
+        let config = CardinalityEstimationConfig::default();
+
+        let reversed_range = binary_selectivity(
+            &profile,
+            &profile,
+            BinaryOp::Lt,
+            twenty_five,
+            column_ref,
+            &ctx,
+            &config,
+        );
+        assert!((reversed_range.value - 0.6).abs() < f64::EPSILON);
+        let equality = binary_selectivity(
+            &profile,
+            &profile,
+            BinaryOp::Eq,
+            column_ref,
+            twenty_five,
+            &ctx,
+            &config,
+        );
+        assert_eq!(equality.value, 0.08);
+        for op in [BinaryOp::Eq, BinaryOp::NotEq, BinaryOp::Lt] {
+            assert_eq!(
+                binary_selectivity(&profile, &profile, op, column_ref, null, &ctx, &config,).value,
+                0.0,
+            );
+        }
+    }
+
+    #[test]
+    fn column_equality_accounts_for_nulls_and_marks_matched_keys_non_null() {
+        let mut ctx = QueryContext::new();
+        let left_column = ColumnData::new("left", DataType::Int64).add(&mut ctx);
+        let right_column = ColumnData::new("right", DataType::Int64).add(&mut ctx);
+        let mut left_column_profile = test_column_profile(100.0, 10.0);
+        left_column_profile.frequency = Estimate::exact(80.0);
+        let mut right_column_profile = test_column_profile(100.0, 10.0);
+        right_column_profile.frequency = Estimate::exact(50.0);
+        let left = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [(left_column, left_column_profile)].into_iter().collect(),
+        );
+        let right = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [(right_column, right_column_profile)].into_iter().collect(),
+        );
+        let left_ref = ExprData::ColumnRef(left_column).add(&mut ctx);
+        let right_ref = ExprData::ColumnRef(right_column).add(&mut ctx);
+        let equality = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: left_ref,
+            right: right_ref,
+        }
+        .add(&mut ctx);
+
+        let joined = join_profile_from_predicate(&left, &right, JoinType::Inner, equality, &ctx);
+        assert!((joined.rows.value - 400.0).abs() < f64::EPSILON);
+        assert_eq!(joined.columns[&left_column].frequency.value, 400.0);
+        assert_eq!(joined.columns[&right_column].frequency.value, 400.0);
+
+        let self_equality = binary_selectivity(
+            &left,
+            &left,
+            BinaryOp::Eq,
+            left_ref,
+            left_ref,
+            &ctx,
+            &CardinalityEstimationConfig::default(),
+        );
+        assert_eq!(self_equality.value, 0.8);
+        let null_safe_self_equality = binary_selectivity(
+            &left,
+            &left,
+            BinaryOp::IsNotDistinctFrom,
+            left_ref,
+            left_ref,
+            &ctx,
+            &CardinalityEstimationConfig::default(),
+        );
+        assert_eq!(null_safe_self_equality.value, 1.0);
+    }
+
+    #[test]
+    fn mixed_null_safe_and_ordinary_join_equality_rejects_nulls() {
+        let mut ctx = QueryContext::new();
+        let left_column = ColumnData::new("left", DataType::Int64).add(&mut ctx);
+        let right_column = ColumnData::new("right", DataType::Int64).add(&mut ctx);
+        let mut left_column_profile = test_column_profile(100.0, 10.0);
+        left_column_profile.frequency = Estimate::exact(50.0);
+        let mut right_column_profile = test_column_profile(100.0, 10.0);
+        right_column_profile.frequency = Estimate::exact(50.0);
+        let left = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [(left_column, left_column_profile)].into_iter().collect(),
+        );
+        let right = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [(right_column, right_column_profile)].into_iter().collect(),
+        );
+        let left_ref = ExprData::ColumnRef(left_column).add(&mut ctx);
+        let right_ref = ExprData::ColumnRef(right_column).add(&mut ctx);
+        let null_safe = ExprData::Binary {
+            op: BinaryOp::IsNotDistinctFrom,
+            left: left_ref,
+            right: right_ref,
+        }
+        .add(&mut ctx);
+        let ordinary = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: left_ref,
+            right: right_ref,
+        }
+        .add(&mut ctx);
+        let conjunction = ExprData::Nary {
+            op: NaryOp::And,
+            exprs: vec![null_safe, ordinary],
+        }
+        .add(&mut ctx);
+
+        let joined = join_profile_from_predicate(&left, &right, JoinType::Inner, conjunction, &ctx);
+        // Ordinary equality makes the null-safe edge redundant only after excluding NULLs.
+        assert_eq!(joined.rows.value, 250.0);
+        assert_eq!(joined.columns[&left_column].frequency.value, 250.0);
+        assert_eq!(joined.columns[&right_column].frequency.value, 250.0);
+    }
+
+    #[test]
+    fn limit_applies_offset_before_fetch() {
+        let mut ctx = QueryContext::new();
+        let column = ColumnData::new("value", DataType::Int64).add(&mut ctx);
+        let values = [1_i64, 2, 3]
+            .into_iter()
+            .map(|value| vec![ExprData::Literal(ScalarValue::Int64(value)).add(&mut ctx)])
+            .collect();
+        let input = OperatorData::ConstScan(crate::ConstScan {
+            columns: vec![column],
+            rows: values,
+        })
+        .add(&mut ctx);
+        let offset_only = OperatorData::Limit(Limit {
+            offset: 2,
+            fetch: None,
+            input,
+        })
+        .add(&mut ctx);
+        let beyond_end = OperatorData::Limit(Limit {
+            offset: 5,
+            fetch: None,
+            input,
+        })
+        .add(&mut ctx);
+        let offset_then_fetch = OperatorData::Limit(Limit {
+            offset: 2,
+            fetch: Some(2),
+            input,
+        })
+        .add(&mut ctx);
+
+        let mut analyses = crate::test_analyses(&ctx);
+        assert_eq!(
+            analyses
+                .get::<CardinalityEstimationV1>(&ctx, offset_only)
+                .unwrap()
+                .rows
+                .value,
+            1.0,
+        );
+        assert_eq!(
+            analyses
+                .get::<CardinalityEstimationV1>(&ctx, beyond_end)
+                .unwrap()
+                .rows
+                .value,
+            0.0,
+        );
+        assert_eq!(
+            analyses
+                .get::<CardinalityEstimationV1>(&ctx, offset_then_fetch)
+                .unwrap()
+                .rows
+                .value,
+            1.0,
+        );
+    }
+
+    #[test]
+    fn full_outer_join_on_false_includes_both_unmatched_inputs() {
+        let mut ctx = QueryContext::new();
+        let predicate = ExprData::Literal(ScalarValue::Boolean(false)).add(&mut ctx);
+        let left = CardinalityProfile::new(Estimate::exact(100.0), BTreeMap::new());
+        let right = CardinalityProfile::new(Estimate::exact(10.0), BTreeMap::new());
+        let full = join_profile_from_predicate(&left, &right, JoinType::FullOuter, predicate, &ctx);
+        assert_eq!(full.rows.value, 110.0);
+        assert_eq!(full.rows.lower, Some(110.0));
+    }
+
+    #[test]
+    fn semi_and_anti_join_respect_an_empty_right_input() {
+        let mut ctx = QueryContext::new();
+        let predicate = ExprData::Literal(ScalarValue::Boolean(true)).add(&mut ctx);
+        let left = CardinalityProfile::new(Estimate::exact(100.0), BTreeMap::new());
+        let right = CardinalityProfile::new(Estimate::exact(0.0), BTreeMap::new());
+        let semi = join_profile_from_predicate(&left, &right, JoinType::LeftSemi, predicate, &ctx);
+        let anti = join_profile_from_predicate(&left, &right, JoinType::LeftAnti, predicate, &ctx);
+        assert_eq!(semi.rows.value, 0.0);
+        assert_eq!(anti.rows.value, 100.0);
+    }
+
+    #[test]
+    fn scalar_aggregate_drops_input_contradiction_facts() {
+        let mut ctx = QueryContext::new();
+        let column = ColumnData::new("value", DataType::Int64).add(&mut ctx);
+        let count = ColumnData::new("count", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("t"),
+            columns: vec![column],
+        })
+        .add(&mut ctx);
+        let false_predicate = ExprData::Literal(ScalarValue::Boolean(false)).add(&mut ctx);
+        let empty = OperatorData::Selection(Selection {
+            predicate: false_predicate,
+            input: scan,
+        })
+        .add(&mut ctx);
+        let aggregate = OperatorData::Aggregation(Aggregation {
+            keys: Vec::new(),
+            aggregates: vec![(count, AggregateExpr::CountStar)],
+            input: empty,
+        })
+        .add(&mut ctx);
+        ctx.set_root(aggregate);
+
+        let mut analyses = crate::test_analyses(&ctx);
+        let profile = analyses
+            .get::<CardinalityEstimationV1>(&ctx, aggregate)
+            .unwrap();
+        assert_eq!(profile.rows.value, 1.0);
+    }
+
+    #[test]
+    fn skew_join_keeps_one_sided_heavy_hitters_in_the_residual_model() {
+        let mut ctx = QueryContext::new();
+        let left_column = ColumnData::new("left", DataType::Int64).add(&mut ctx);
+        let right_column = ColumnData::new("right", DataType::Int64).add(&mut ctx);
+        let left_value = EncodedScalarValue::from_scalar(&ScalarValue::Int64(1)).unwrap();
+        let right_value = EncodedScalarValue::from_scalar(&ScalarValue::Int64(2)).unwrap();
+        let left_frequent = optd_sketches::SpaceSaving::from_entries(
+            1,
+            1_000,
+            vec![optd_sketches::FrequentItem {
+                value: left_value,
+                frequency: 500,
+                error: 0,
+            }],
+        )
+        .unwrap();
+        let right_frequent = optd_sketches::SpaceSaving::from_entries(
+            1,
+            1_000,
+            vec![optd_sketches::FrequentItem {
+                value: right_value,
+                frequency: 1,
+                error: 0,
+            }],
+        )
+        .unwrap();
+        let profile = |column, distinct, frequent_values| {
+            CardinalityProfile::new(
+                Estimate::exact(1_000.0),
+                [(
+                    column,
+                    ColumnProfile {
+                        lower_bound: None,
+                        upper_bound: None,
+                        frequency: Estimate::exact(1_000.0),
+                        distinct: Estimate::exact(distinct),
+                        value: None,
+                        sketches: Some(Arc::new(ColumnSketches {
+                            encoding_version: crate::SKETCH_VALUE_ENCODING_VERSION,
+                            population_rows: 1_000,
+                            distinct_values: None,
+                            frequent_values: Some(frequent_values),
+                        })),
+                    },
+                )]
+                .into_iter()
+                .collect(),
+            )
+        };
+        let left = profile(left_column, 501.0, left_frequent);
+        let right = profile(right_column, 1_000.0, right_frequent);
+
+        let selectivity = sketch_join_estimate(left_column, right_column, &left, &right).unwrap();
+        assert!((selectivity - 0.001).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn hll_supplies_ndv_and_space_saving_improves_skewed_join_estimation() {
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        let key_schema = Arc::new(Schema::new(vec![Field::new("key", DataType::Int64, false)]));
+        for table in ["left_table", "right_table"] {
+            catalog
+                .create_table(TableRef::bare(table), key_schema.clone(), None)
+                .unwrap();
+            let mut statistics = table_stats_for_column("key", 1_000, 501);
+            statistics
+                .column_statistics
+                .get_mut("key")
+                .unwrap()
+                .distinct = None;
+            catalog
+                .set_table_statistics(TableRef::bare(table), statistics)
+                .unwrap();
+        }
+
+        let mut ctx = QueryContext::new();
+        let left_key =
+            ColumnData::with_qualifier("key", DataType::Int64, "left_table").add(&mut ctx);
+        let right_key =
+            ColumnData::with_qualifier("key", DataType::Int64, "right_table").add(&mut ctx);
+        let left = OperatorData::Scan(Scan {
+            table: TableRef::bare("left_table"),
+            columns: vec![left_key],
+        })
+        .add(&mut ctx);
+        let right = OperatorData::Scan(Scan {
+            table: TableRef::bare("right_table"),
+            columns: vec![right_key],
+        })
+        .add(&mut ctx);
+        let left_ref = ExprData::ColumnRef(left_key).add(&mut ctx);
+        let right_ref = ExprData::ColumnRef(right_key).add(&mut ctx);
+        let on = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: left_ref,
+            right: right_ref,
+        }
+        .add(&mut ctx);
+        let join = OperatorData::Join(Join {
+            join_type: JoinType::Inner,
+            on,
+            outer: left,
+            inner: right,
+        })
+        .add(&mut ctx);
+        ctx.set_root(join);
+
+        let mut sketches = ColumnSketches::new(1_000).hll().space_saving(16).unwrap();
+        for _ in 0..500 {
+            sketches.observe(&ScalarValue::Int64(1));
+        }
+        for value in 2..=501 {
+            sketches.observe(&ScalarValue::Int64(value));
+        }
+
+        let mut analyses = AnalysisContext::new(catalog);
+        analyses
+            .set_column_sketches(TableRef::bare("left_table"), "key", sketches.clone())
+            .unwrap();
+        analyses
+            .set_column_sketches(TableRef::bare("right_table"), "key", sketches)
+            .unwrap();
+
+        let left_profile = analyses.get::<CardinalityEstimationV1>(&ctx, left).unwrap();
+        assert_eq!(
+            left_profile.columns[&left_key].distinct.source,
+            EstimateSource::Sketch
+        );
+        assert!((left_profile.columns[&left_key].distinct.value - 501.0).abs() < 75.0);
+
+        let join_profile = analyses.get::<CardinalityEstimationV1>(&ctx, join).unwrap();
+        assert!(
+            join_profile.rows.value > 200_000.0,
+            "heavy-hitter overlap should dominate the join estimate: {}",
+            join_profile.rows.value
+        );
+    }
+
+    #[test]
+    fn space_saving_improves_heavy_hitter_filter_estimation() {
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(
+                TableRef::bare("t"),
+                Arc::new(Schema::new(vec![Field::new(
+                    "value",
+                    DataType::Int64,
+                    false,
+                )])),
+                None,
+            )
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                TableRef::bare("t"),
+                table_stats_for_column("value", 1_000, 501),
+            )
+            .unwrap();
+
+        let (mut ctx, scan) = single_column_scan();
+        let OperatorData::Scan(scan_data) = scan.get(&ctx) else {
+            panic!("single_column_scan returns a scan");
+        };
+        let column = scan_data.columns[0];
+        let column_ref = ExprData::ColumnRef(column).add(&mut ctx);
+        let one = ExprData::Literal(ScalarValue::Int64(1)).add(&mut ctx);
+        let predicate = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: column_ref,
+            right: one,
+        }
+        .add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
+            predicate,
+            input: scan,
+        })
+        .add(&mut ctx);
+        ctx.set_root(selection);
+
+        let mut sketches = ColumnSketches::new(1_000).space_saving(16).unwrap();
+        for _ in 0..500 {
+            sketches.observe(&ScalarValue::Int64(1));
+        }
+        for value in 2..=501 {
+            sketches.observe(&ScalarValue::Int64(value));
+        }
+        let mut analyses = AnalysisContext::new(catalog);
+        analyses
+            .set_column_sketches(TableRef::bare("t"), "value", sketches)
+            .unwrap();
+
+        let profile = analyses
+            .get::<CardinalityEstimationV1>(&ctx, selection)
+            .unwrap();
+        assert!((profile.rows.value - 500.0).abs() < 1.0);
+        assert!(profile.columns[&column].sketches.is_none());
+    }
+
+    #[test]
     fn resolved_scan_without_statistics_uses_explicit_defaults() {
         let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
         catalog
@@ -5591,6 +8054,28 @@ mod tests {
         (ctx, selection)
     }
 
+    fn table_stats_from_i64_values(column: &str, values: &[Option<i64>]) -> TableStatistics {
+        let observed = values.iter().flatten().copied().collect::<Vec<_>>();
+        let distinct = observed.iter().copied().collect::<BTreeSet<_>>().len();
+        TableStatistics {
+            row_count: Some(values.len()),
+            size_bytes: None,
+            column_statistics: [(
+                column.to_string(),
+                ColumnStatistics {
+                    lower_bound: observed.iter().min().copied().map(ScalarValue::Int64),
+                    upper_bound: observed.iter().max().copied().map(ScalarValue::Int64),
+                    frequency: Some(observed.len()),
+                    distinct: Some(distinct),
+                    distribution: None,
+                },
+            )]
+            .into_iter()
+            .collect(),
+            constraints: Default::default(),
+        }
+    }
+
     fn table_stats_for_column(column: &str, rows: usize, distinct: usize) -> TableStatistics {
         TableStatistics {
             row_count: Some(rows),
@@ -5632,6 +8117,8 @@ mod tests {
             upper_bound: None,
             frequency: Estimate::exact(rows),
             distinct: Estimate::exact(distinct),
+            value: None,
+            sketches: None,
         }
     }
 }

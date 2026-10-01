@@ -2845,6 +2845,7 @@ dependencies = [
  "anstyle",
  "arrow-schema",
  "fixedbitset",
+ "optd-sketches",
  "serde",
  "serde_json",
  "substrait 0.63.0",
@@ -2871,6 +2872,14 @@ dependencies = [
  "serde_json",
  "sqllogictest",
  "tokio",
+]
+
+[[package]]
+name = "optd-sketches"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
