@@ -3,9 +3,14 @@
 ## Summary
 
 `CardinalityEstimationV1` estimates row counts and column profiles for each
-operator. It should use `HypergraphOf` for join groups so cardinality
-estimation, join-tree normalization, and join ordering share predicate splitting
-and relation classification.
+operator. It uses lazily cached `LogicalFactsAnalysis` results for value lineage, accumulated
+constraints, and equality classes. Query-local HyperLogLog and SpaceSaving sketches can refine NDV,
+equality-filter, and skewed equijoin estimates. See
+[`statistics_architecture.md`](statistics_architecture.md) for the separation between logical facts
+and estimator policy.
+
+It should use `HypergraphOf` for join groups so cardinality estimation, join-tree normalization, and
+join ordering share predicate splitting and relation classification.
 
 The analysis should return both a point estimate and conservative bounds. The
 point estimate feeds costing; bounds preserve derivation facts such as
@@ -27,7 +32,7 @@ Each estimate stores:
 
 - `value`: current best estimate.
 - `lower` / `upper`: known or derived range.
-- `source`: exact, catalog, derived, mock, or default.
+- `source`: exact, catalog, sketch-derived, operator-derived, or default.
 
 Each column profile stores:
 
@@ -35,6 +40,8 @@ Each column profile stores:
 - `upper_bound` (`u_A`): maximum known value.
 - `frequency` (`f_A`): tuples with a value in the known bounds.
 - `distinct` (`d_A`): distinct values in the known bounds.
+- `value`: estimator-independent base or derived value identity.
+- `sketches`: compatible base-population sketches, retained only while the population is unchanged.
 
 V1 should keep the model explicit even when many fields are unknown. This avoids
 pretending rough estimates are exact.
@@ -44,7 +51,7 @@ pretending rough estimates are exact.
 For `Scan`, use statistics in this order:
 
 1. Catalog-provided table and column statistics.
-2. Deterministic mock statistics for TPCH and JOB tables.
+2. Query-local HLL for NDV when catalog NDV is absent.
 3. Stable default estimates.
 
 The core analysis should not execute SQL to collect statistics. Query-based
@@ -57,14 +64,16 @@ queries and load the results into the catalog before optimization.
 
 `Rename` copies profiles from original columns to renamed columns.
 
-`Map` preserves input columns. New computed columns are initially conservative,
-but this is a clear improvement area: simple expressions can transform profiles.
-For example, `new_value := x + 1` can shift `min/max` by `+1`, preserve
-`distinct`, and preserve frequency/null behavior.
+`Map` preserves input columns. Direct aliases preserve the source profile. Other computed columns
+remain opaque until a generic statistics-transform provider can prove bounds, NDV, and null/sketch
+behavior; expression-specific lineage variants are intentionally avoided.
 
-`Selection` splits conjuncts and applies predicate selectivity one predicate at a
-time. Equality predicates use NDV; range predicates use known bounds when
-available; unsupported predicates fall back to defaults.
+`Selection` splits conjuncts and applies predicate selectivity one predicate at a time. Equality
+predicates use NDV; range predicates use known bounds when available; unsupported predicates fall
+back to defaults. Literal equality yields at most one NDV, inequality removes one modeled value, and
+ordered comparisons proportionally restrict NDV while tightening bounds (including strict discrete
+predecessor/successor bounds). Other columns use a uniform occupancy estimate for surviving NDV
+instead of only capping the old NDV by output rows.
 
 `Aggregation` estimates group count from grouping-key distinct counts, capped by
 input rows. Grouping columns preserve adjusted profiles; aggregate output columns
@@ -72,7 +81,8 @@ start conservative except for simple count-like bounds.
 
 `Sort` preserves profiles.
 
-`Limit` caps rows, frequency, and distinct values by the fetch count.
+`Limit` subtracts the offset before applying the fetch cap, then caps column frequency and distinct
+values by the resulting row estimate.
 
 ## Join Estimation
 
@@ -83,10 +93,26 @@ Join estimation should be shared between `CardinalityEstimationV1` and
 from `left_nodes`, `right_nodes`, and the hypergraph; `edge_indices` should not
 be part of the public statistics API.
 
-Equivalent-column information is important. Equality predicates create
-equivalence classes, and under a join-containment assumption the estimator can
-use one NDV for the whole class instead of multiplying independent selectivities.
-This avoids over-penalizing chains such as `A.x = B.x` and `B.x = C.x`.
+Equivalent-column information is important. Equality predicates create equivalence classes, and
+under a join-containment assumption the estimator can use one NDV for the whole class instead of
+multiplying transitively redundant selectivities. This avoids over-penalizing chains such as
+`A.x = B.x` and `B.x = C.x`.
+
+Inner-join pair selectivity and semi/anti existence probability are separate estimates. For a left
+semi/anti equality, directional coverage is estimated as:
+
+```text
+left_non_null_fraction * intersection_ndv / left_ndv
+```
+
+The general fallback uses containment (`intersection_ndv = min(left_ndv, right_ndv)`). Compatible
+ordered ranges detect disjoint domains and estimate numeric/date overlap under uniformity.
+SpaceSaving common values refine known matched left-row mass without letting duplicate right rows
+inflate coverage; uncertain counters cannot lower the uniform baseline. Semi output key profiles are
+capped by the intersection domain, and pure single-key anti joins propagate complementary unmatched
+frequency and NDV. Single-column catalog unique/FK assertions provide stronger estimates only while
+the required base population is complete. Histograms, samples, and sampled multi-column NDV remain
+future work.
 
 Transient or redundant equality edges should be treated specially for costing.
 They may need to remain in the IR for execution or backend behavior, but CE
@@ -114,7 +140,7 @@ minimum, maintaining `lower <= value <= upper`.
 - [x] Implement filter selectivity for equality, ranges, `AND`, `OR`, and fallback predicates.
 - [ ] Add first-class literal-list `IN` selectivity if the IR gains an `IN`-list expression.
 - [x] Implement operator propagation for projection, rename, map, selection, aggregation, sort, limit, joins, and fallback operators.
-- [x] Add computed-column improvement notes for expressions like `new_value := x + 1`.
+- [x] Keep arbitrary computed columns opaque pending a generic statistics-transform provider.
 - [x] Add join equivalence-class handling for equality predicates.
 - [x] Treat transient/redundant equality edges specially so selectivity is not double-counted.
 - [x] Share cached profiles internally with `Arc` while retaining the owned public API.
@@ -124,3 +150,13 @@ minimum, maintaining `lower <= value <= upper`.
 - [x] Filter newly-owned equality classes in place and merge input column maps structurally.
 - [x] Add unit tests for scan, filter, map transformation, aggregation, join NDV, join ordering, redundant equality edges, and connector stats extraction.
 - [x] Add a DataFusion connector helper/API for SQL-based stats extraction into catalog statistics.
+- [x] Add demand-driven logical value lineage and accumulated constraints.
+- [x] Keep derived expressions opaque instead of adding expression-specific lineage transforms.
+- [x] Add query-local HLL and SpaceSaving storage with downstream filter/join consumers.
+- [x] Separate directional equality coverage from tuple-pair selectivity for semi/anti joins.
+- [x] Add ordered-range domain overlap and disjointness checks.
+- [x] Add occupancy-based filtered NDV and proportional literal-domain restriction.
+- [x] Consume population-safe single-column unique/FK catalog assertions.
+- [ ] Replace uniform range overlap with histograms/samples.
+- [ ] Add sampled multi-column NDV after sampling infrastructure is available.
+- [ ] Persist compatible sketches through the catalog statistics contract.

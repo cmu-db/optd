@@ -21,8 +21,6 @@ pub use analysis::{
     ParentIndex, ParentsOf, UsedColumns, ValueEquivalenceClasses, ValueId, ValueRange,
     expr_used_columns,
 };
-pub use statistics::{ColumnSketches, EncodedScalarValue, SKETCH_VALUE_ENCODING_VERSION};
-
 pub use catalog::{
     BoundedVec, Catalog, CatalogError, CatalogResult, CollectionTooLarge,
     ColumnDistributionStatistics, ColumnStatistics, DistributionError, ForeignKey, ForeignKeyError,
@@ -47,6 +45,7 @@ pub use optimize::{
     Pass, PassManager, PassProfile, PassResult, PassTrace, PredicatePushdown,
     ProjectionElimination, QueryPass, Rewrite, RewriteMap, SubqueryToJoin, Unnesting,
 };
+pub use statistics::{ColumnSketches, EncodedScalarValue, SKETCH_VALUE_ENCODING_VERSION};
 
 /// An opaque reference to a relational operator in a [`QueryContext`].
 ///
@@ -787,6 +786,7 @@ pub struct PlannedQuery {
     pub query: QueryContext,
     pub catalog: Arc<dyn Catalog>,
     cardinality_config: CardinalityEstimationConfig,
+    column_sketches: analysis::ColumnSketchStore,
 }
 
 impl PlannedQuery {
@@ -796,6 +796,7 @@ impl PlannedQuery {
             query,
             catalog,
             cardinality_config: CardinalityEstimationConfig::default(),
+            column_sketches: Default::default(),
         }
     }
 
@@ -818,9 +819,11 @@ impl PlannedQuery {
 
     /// Creates fresh analysis state backed by this plan's catalog.
     pub fn analyze(&self) -> AnalysisContext {
-        AnalysisContext::new(Arc::clone(&self.catalog))
-            .with_cardinality_estimation_config(self.cardinality_config)
-            .expect("a planned query only stores validated cardinality configuration")
+        AnalysisContext::from_planned_parts(
+            Arc::clone(&self.catalog),
+            self.cardinality_config,
+            self.column_sketches.clone(),
+        )
     }
 
     /// Consumes the planning context and returns its query IR.
@@ -851,6 +854,7 @@ impl OptimizerContext {
             query: self.query,
             catalog: Arc::clone(self.analyses.catalog()),
             cardinality_config: self.analyses.cardinality_estimation_config(),
+            column_sketches: self.analyses.planned_sketches(),
         }
     }
 }
@@ -2587,6 +2591,50 @@ mod tests {
 
         assert_eq!(planned.cardinality_estimation_config(), config);
         assert_eq!(planned.analyze().cardinality_estimation_config(), config);
+    }
+
+    #[test]
+    fn planned_query_preserves_query_local_sketches() {
+        let mut query = QueryContext::new();
+        let column = ColumnData::new("value", DataType::Int64).add(&mut query);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("t"),
+            columns: vec![column],
+        })
+        .add(&mut query);
+        query.set_root(scan);
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(
+                TableRef::bare("t"),
+                Arc::new(Schema::new(vec![Field::new(
+                    "value",
+                    DataType::Int64,
+                    false,
+                )])),
+                None,
+            )
+            .unwrap();
+        let mut optimizer = OptimizerContext::new(query, catalog);
+        let mut sketches = ColumnSketches::new(3).hll();
+        sketches.observe(&ScalarValue::Int64(1));
+        sketches.observe(&ScalarValue::Int64(2));
+        optimizer
+            .analyses
+            .set_column_sketches(TableRef::bare("t"), "value", sketches)
+            .unwrap();
+
+        let planned = optimizer.into_planned_query();
+        let mut analyses = planned.analyze();
+        let profile = analyses
+            .get::<CardinalityEstimationV1>(&planned.query, scan)
+            .unwrap();
+
+        assert_eq!(
+            profile.columns[&column].distinct.source,
+            EstimateSource::Sketch
+        );
+        assert!(profile.columns[&column].sketches.is_some());
     }
 
     #[test]

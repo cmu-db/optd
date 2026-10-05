@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use optd_sketches::HyperLogLog;
+use optd_sketches::{HyperLogLog, SpaceSaving};
 
 use crate::ScalarValue;
 
@@ -87,7 +87,9 @@ impl EncodedScalarValue {
 
 /// Query-local sketches attached to one base-column population.
 ///
-/// HLL summarizes non-null distinct values from `population_rows`.
+/// The same value encoding is shared by both sketches. HLL supplies a reliable NDV estimate;
+/// SpaceSaving retains heavy-hitter identities and frequency bounds for skew-aware filters and
+/// joins. `population_rows` describes the rows from which both sketches were built.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColumnSketches {
@@ -95,6 +97,7 @@ pub struct ColumnSketches {
     pub encoding_version: u16,
     pub population_rows: u64,
     pub distinct_values: Option<HyperLogLog>,
+    pub frequent_values: Option<SpaceSaving<EncodedScalarValue>>,
 }
 
 impl ColumnSketches {
@@ -103,6 +106,7 @@ impl ColumnSketches {
             encoding_version: SKETCH_VALUE_ENCODING_VERSION,
             population_rows,
             distinct_values: None,
+            frequent_values: None,
         }
     }
 
@@ -120,6 +124,13 @@ impl ColumnSketches {
         {
             return Err("HLL encoding version does not match its column sketch payload".into());
         }
+        if self
+            .frequent_values
+            .as_ref()
+            .is_some_and(|frequent| frequent.observations() > self.population_rows)
+        {
+            return Err("frequent-value observations exceed the sketch population".into());
+        }
         Ok(())
     }
 
@@ -130,11 +141,22 @@ impl ColumnSketches {
         if let Some(hll) = &mut self.distinct_values {
             hll.insert(encoded.as_bytes());
         }
+        if let Some(frequent) = &mut self.frequent_values {
+            frequent.insert(encoded);
+        }
     }
 
     pub fn hll(mut self) -> Self {
         self.distinct_values = Some(HyperLogLog::new(self.encoding_version));
         self
+    }
+
+    pub fn space_saving(
+        mut self,
+        capacity: usize,
+    ) -> Result<Self, optd_sketches::SpaceSavingError> {
+        self.frequent_values = Some(SpaceSaving::new(capacity)?);
+        Ok(self)
     }
 }
 
@@ -147,6 +169,12 @@ mod tests {
         let mut wrong_version = ColumnSketches::new(1);
         wrong_version.encoding_version += 1;
         assert!(wrong_version.validate().is_err());
+
+        let too_many_observations = ColumnSketches::new(1).space_saving(2).unwrap();
+        let mut too_many_observations = too_many_observations;
+        too_many_observations.observe(&ScalarValue::Int64(1));
+        too_many_observations.observe(&ScalarValue::Int64(2));
+        assert!(too_many_observations.validate().is_err());
     }
 
     #[test]

@@ -756,6 +756,10 @@ mod tests {
             facts.value_for_column(x).expect("x lineage"),
             facts.value_for_column(y).expect("y lineage"),
         ));
+        let profile = analyses
+            .get::<crate::CardinalityEstimationV1>(&ctx, contradictory)
+            .expect("cardinality should consume contradiction facts");
+        assert_eq!(profile.rows.value, 0.0);
     }
 
     #[test]
