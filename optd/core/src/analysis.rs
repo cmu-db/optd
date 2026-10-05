@@ -5,6 +5,13 @@ use std::fmt;
 use std::rc::Rc;
 use std::sync::Arc;
 
+mod logical_facts;
+
+pub use logical_facts::{
+    BaseColumn, ConstraintSet, LogicalFacts, LogicalFactsAnalysis, ValueEquivalenceClasses,
+    ValueId, ValueRange,
+};
+
 use crate::{
     AggregateExpr, AggregateFunction, BinaryOp, Catalog, Column, ColumnStatistics, Expr, ExprData,
     JoinType, NaryOp, NodeSet, Operator, OperatorData, QueryContext, QueryHypergraph, Relation,

@@ -14,9 +14,11 @@ pub mod tpch;
 
 pub use analysis::{
     Analysis, AnalysisContext, AnalysisError, AnalysisResult, Analyzable, AtMostOneRow,
-    AvailableColumns, CardinalityEstimationConfig, CardinalityEstimationConfigError,
-    CardinalityEstimationV1, CardinalityProfile, ColumnNullability, ColumnProfile, CreatedColumns,
-    Estimate, EstimateSource, FreeColumns, ParentIndex, ParentsOf, UsedColumns, expr_used_columns,
+    AvailableColumns, BaseColumn, CardinalityEstimationConfig, CardinalityEstimationConfigError,
+    CardinalityEstimationV1, CardinalityProfile, ColumnNullability, ColumnProfile, ConstraintSet,
+    CreatedColumns, Estimate, EstimateSource, FreeColumns, LogicalFacts, LogicalFactsAnalysis,
+    ParentIndex, ParentsOf, UsedColumns, ValueEquivalenceClasses, ValueId, ValueRange,
+    expr_used_columns,
 };
 pub use catalog::{
     BoundedVec, Catalog, CatalogError, CatalogResult, CollectionTooLarge,
