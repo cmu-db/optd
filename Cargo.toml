@@ -2,5 +2,6 @@
 members = [
     "optd/core",
     "optd/connectors/datafusion",
+    "optd/sketches",
 ]
 resolver = "2"

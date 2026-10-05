@@ -9,6 +9,7 @@ pub mod cost;
 mod display;
 pub mod hypergraph;
 pub mod optimize;
+pub mod statistics;
 pub mod substrait;
 pub mod tpch;
 
@@ -20,6 +21,8 @@ pub use analysis::{
     ParentIndex, ParentsOf, UsedColumns, ValueEquivalenceClasses, ValueId, ValueRange,
     expr_used_columns,
 };
+pub use statistics::{ColumnSketches, EncodedScalarValue, SKETCH_VALUE_ENCODING_VERSION};
+
 pub use catalog::{
     BoundedVec, Catalog, CatalogError, CatalogResult, CollectionTooLarge,
     ColumnDistributionStatistics, ColumnStatistics, DistributionError, ForeignKey, ForeignKeyError,
