@@ -29,8 +29,8 @@ FEATURES = [
     {
         "area": "Statistics foundation",
         "name": "Query-local HLL and SpaceSaving consumers",
-        "status": "pending",
-        "evidence": "Sketch-aware estimator integration is not included in this harness branch",
+        "status": "done",
+        "evidence": "docs/cardinality_estimation_v1.md: Summary and Implementation Progress",
     },
     {
         "area": "Statistics foundation",

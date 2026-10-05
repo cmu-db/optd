@@ -32,6 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int, help="First N queries from each suite")
     parser.add_argument("--query-timeout", type=int, help="Per-query child timeout in seconds")
     parser.add_argument("--target-partitions", type=int)
+    parser.add_argument("--full-scan-sketches", action="store_true")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--continue-on-error", action="store_true")
     return parser.parse_args()
@@ -122,6 +123,9 @@ def main() -> None:
             ]
             if args.target_partitions is not None:
                 command.extend(["--target-partitions", str(args.target_partitions)])
+            if args.full_scan_sketches:
+                command.append("--full-scan-sketches")
+
             print(f"measuring {display_name}", file=sys.stderr)
             try:
                 result = subprocess.run(

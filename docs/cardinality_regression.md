@@ -92,6 +92,12 @@ uses `optd_cardinality_regression.py` to execute each query in an isolated child
 memory-intensive JOB query from discarding the rest of a long run. Failed or timed-out children are
 recorded in `errors.json`; set `OPTD_QUERY_TIMEOUT` to change the default 900-second per-query bound.
 
+Pass `OPTD_EXTRA_ARGS="--full-scan-sketches"` to make the optd harness materialize each referenced
+base-table column and install query-local HLL and SpaceSaving sketches. This is deliberately
+opt-in because it adds unbounded table scans. The harness logs every full-scan collection and every
+measured subtree's sketch-backed column count, so a run can verify that the estimator did not fall
+back to an empty sketch payload.
+
 ### PostgreSQL chosen-plan measurements
 
 The PostgreSQL collector runs `EXPLAIN (ANALYZE, FORMAT JSON)` and records every node in the chosen
