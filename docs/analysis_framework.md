@@ -122,9 +122,11 @@ Under the append-only invariant, bottom-up cache entries for existing handles ar
 valid. Top-down cache entries are valid until the reachable root changes.
 
 `LogicalFactsAnalysis` keeps estimator-independent value lineage and predicate constraints separate
-from cardinality policy. `CardinalityEstimationV1` consumes those facts, catalog key relationships, and query-local HLL
-scan-NDV statistics. Pair selectivity, directional join-key coverage, and filtered NDV propagation
-remain estimator policy rather than logical facts.
+from cardinality policy. `CardinalityEstimationV1` consumes those facts, catalog key relationships,
+and query-local base-column sketches. Pair selectivity, directional join-key coverage, and filtered
+NDV propagation remain estimator policy rather than logical facts. See
+[`statistics_architecture.md`](statistics_architecture.md) for the ownership and propagation
+contracts.
 
 ## Future: Indexed Representation
 
