@@ -95,7 +95,20 @@ pub async fn to_physical_plan(
         .root()
         .ok_or_else(|| ToPhysicalError::Unsupported("query has no root".into()))?;
     let required = output_columns(root, ctx, &planned.catalog)?;
-    let node = convert_operator(root, &required, ctx, &planned.catalog, session).await?;
+    let node = convert_operator(root, &required, &planned.query, &planned.catalog, session).await?;
+    Ok(node.exec)
+}
+
+/// Builds a physical plan that preserves row counts without materializing output columns.
+pub(crate) async fn to_physical_plan_for_row_count(
+    planned: &PlannedQuery,
+    session: &SessionContext,
+) -> ToPhysicalResult<Arc<dyn ExecutionPlan>> {
+    let root = planned
+        .query
+        .root()
+        .ok_or_else(|| ToPhysicalError::Unsupported("query has no root".into()))?;
+    let node = convert_operator(root, &[], &planned.query, &planned.catalog, session).await?;
     Ok(node.exec)
 }
 
