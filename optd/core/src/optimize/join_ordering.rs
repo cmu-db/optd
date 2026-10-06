@@ -942,6 +942,7 @@ mod tests {
                     frequency: Some(rows),
                     distinct: Some(distinct),
                     distribution: None,
+                    sketches: None,
                 },
             )]
             .into_iter()
