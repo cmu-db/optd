@@ -6,9 +6,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::{
-    AggregateExpr, AggregateFunction, BinaryOp, Catalog, Column, ColumnStatistics, Expr, ExprData,
-    JoinType, NaryOp, NodeSet, Operator, OperatorData, QueryContext, QueryHypergraph, Relation,
-    ScalarValue, Scan, UnaryOp,
+    AggregateExpr, AggregateFunction, BinaryOp, Catalog, Column, ColumnSketches, ColumnStatistics,
+    Expr, ExprData, JoinType, NaryOp, NodeSet, Operator, OperatorData, QueryContext,
+    QueryHypergraph, Relation, ScalarValue, Scan, TableId, TableRef, UnaryOp,
 };
 
 mod logical_facts;
@@ -35,6 +35,8 @@ pub enum AnalysisError {
     AnalysisTypeMismatch(&'static str),
     /// A catalog-aware analysis could not resolve a referenced table.
     Catalog(String),
+    /// Query-local column sketches violated compatibility or population invariants.
+    InvalidColumnSketch(String),
 }
 
 impl fmt::Display for AnalysisError {
@@ -51,6 +53,7 @@ impl fmt::Display for AnalysisError {
                 write!(f, "registered analysis had the wrong type for {analysis}")
             }
             Self::Catalog(error) => write!(f, "catalog analysis failed: {error}"),
+            Self::InvalidColumnSketch(error) => write!(f, "invalid column sketch: {error}"),
         }
     }
 }
@@ -165,6 +168,8 @@ impl<T> OperatorAnalysisState<T> {
 pub enum EstimateSource {
     Exact,
     Catalog,
+    /// Estimate produced directly by a query-local probabilistic sketch.
+    Sketch,
     Derived,
     Default,
 }
@@ -279,6 +284,9 @@ pub struct ColumnProfile {
     pub distinct: Estimate,
     /// Logical value whose statistics this profile describes.
     pub value: Option<ValueId>,
+    /// Base-population sketches. Operators that change the represented population invalidate this
+    /// field unless they can derive a sound replacement.
+    pub sketches: Option<Arc<ColumnSketches>>,
 }
 
 impl ColumnProfile {
@@ -293,6 +301,7 @@ impl ColumnProfile {
             frequency: rows.clone(),
             distinct: Estimate::derived(rows.value.min(ndv_cap), Some(0.0), rows.upper),
             value: None,
+            sketches: None,
         }
     }
 
@@ -325,6 +334,7 @@ impl ColumnProfile {
         self.distinct = self
             .distinct
             .cap(self.frequency.value, EstimateSource::Derived);
+        self.sketches = None;
     }
 }
 
@@ -583,11 +593,16 @@ pub struct AtMostOneRow {
     state: OperatorAnalysisState<bool>,
 }
 
+pub(crate) type ColumnSketchStore = BTreeMap<(TableId, String), Arc<ColumnSketches>>;
+
 /// Registry of lazily-created analysis instances.
 pub struct AnalysisContext {
     analyses: AnalysisRegistry,
     catalog: Arc<dyn Catalog>,
     cardinality_config: CardinalityEstimationConfig,
+    /// Query-local base-column sketches. Derived operator statistics remain owned by their
+    /// demand-driven analyses; a future catalog cache can populate this same boundary.
+    column_sketches: ColumnSketchStore,
 }
 
 impl AnalysisContext {
@@ -597,6 +612,7 @@ impl AnalysisContext {
             analyses: AnalysisRegistry::new(),
             catalog,
             cardinality_config: CardinalityEstimationConfig::default(),
+            column_sketches: BTreeMap::new(),
         }
     }
 
@@ -639,12 +655,72 @@ impl AnalysisContext {
         &self.catalog
     }
 
-    /// Creates a fresh derived-analysis cache with the same catalog and configuration as this context.
+    /// Installs query-local sketches for a base column and invalidates derived analyses.
+    ///
+    /// Sketches are keyed by resolved table identity and catalog column name. The payload is shared
+    /// by derived profiles and remains available when analysis caches are cleared.
+    pub fn set_column_sketches(
+        &mut self,
+        table: TableRef,
+        column: impl Into<String>,
+        sketches: ColumnSketches,
+    ) -> AnalysisResult<()> {
+        sketches
+            .validate()
+            .map_err(AnalysisError::InvalidColumnSketch)?;
+        let table_id = self
+            .catalog
+            .table_by_ref(&table)
+            .map_err(|error| AnalysisError::Catalog(error.to_string()))?
+            .id;
+        self.column_sketches
+            .insert((table_id, column.into()), Arc::new(sketches));
+        self.clear();
+        Ok(())
+    }
+
+    /// Returns query-local sketches for a base column, when collected.
+    pub fn column_sketches(
+        &self,
+        table: &TableRef,
+        column: &str,
+    ) -> AnalysisResult<Option<Arc<ColumnSketches>>> {
+        let table_id = self
+            .catalog
+            .table_by_ref(table)
+            .map_err(|error| AnalysisError::Catalog(error.to_string()))?
+            .id;
+        Ok(self
+            .column_sketches
+            .get(&(table_id, column.to_owned()))
+            .cloned())
+    }
+
+    pub(crate) fn from_planned_parts(
+        catalog: Arc<dyn Catalog>,
+        cardinality_config: CardinalityEstimationConfig,
+        column_sketches: ColumnSketchStore,
+    ) -> Self {
+        Self {
+            analyses: AnalysisRegistry::new(),
+            catalog,
+            cardinality_config,
+            column_sketches,
+        }
+    }
+
+    pub(crate) fn planned_sketches(&self) -> ColumnSketchStore {
+        self.column_sketches.clone()
+    }
+
+    /// Creates a fresh derived-analysis cache with the same catalog, configuration, and base
+    /// sketches as this context.
     pub fn fork(&self) -> Self {
         Self {
             analyses: AnalysisRegistry::new(),
             catalog: Arc::clone(&self.catalog),
             cardinality_config: self.cardinality_config,
+            column_sketches: self.column_sketches.clone(),
         }
     }
 
@@ -1588,53 +1664,87 @@ fn scan_profile(
         .table_by_ref(&scan.table)
         .map_err(|error| AnalysisError::Catalog(error.to_string()))?
         .statistics;
+
     let row_estimate = catalog_stats
         .as_ref()
         .and_then(|stats| stats.row_count)
         .map(|rows| Estimate::catalog(rows as f64))
         .unwrap_or_else(|| Estimate::default(config.unknown_scan_rows));
+
     let mut columns = BTreeMap::new();
     for column in &scan.columns {
         let column_name = &ctx.column(*column).name;
         let catalog_column = catalog_stats
             .as_ref()
             .and_then(|stats| stats.column_statistics.get(column_name));
+        let sketches = analyses.column_sketches(&scan.table, column_name)?;
         let profile = catalog_column
-            .map(|stats| column_profile_from_stats(stats, &row_estimate))
-            .unwrap_or_else(|| default_scan_column_profile(&row_estimate, config));
+            .map(|stats| column_profile_from_stats(stats, &row_estimate, sketches.clone()))
+            .unwrap_or_else(|| {
+                default_scan_column_profile(&row_estimate, config, sketches.clone())
+            });
         columns.insert(*column, profile);
     }
+
     Ok(CardinalityProfile::new(row_estimate, columns))
 }
 
-fn column_profile_from_stats(stats: &ColumnStatistics, rows: &Estimate) -> ColumnProfile {
+fn column_profile_from_stats(
+    stats: &ColumnStatistics,
+    rows: &Estimate,
+    sketches: Option<Arc<ColumnSketches>>,
+) -> ColumnProfile {
     let frequency = stats
         .frequency
         .map(|value| Estimate::catalog(value as f64))
         .unwrap_or_else(|| Estimate::default(rows.value));
-    let distinct = stats
-        .distinct
-        .map(|value| Estimate::catalog((value as f64).min(frequency.value)))
-        .unwrap_or_else(|| Estimate::default(frequency.value.min(rows.value)));
+    let sketch_distinct = sketches
+        .as_ref()
+        .and_then(|sketches| sketches.distinct_values.as_ref())
+        .map(|hll| hll.estimate().min(frequency.value));
+    let distinct_value = stats.distinct.map(|value| value as f64).or(sketch_distinct);
+    let distinct = match (stats.distinct, distinct_value) {
+        (Some(_), Some(value)) => Estimate::catalog(value.min(frequency.value)),
+        (None, Some(value)) => Estimate {
+            value: value.min(frequency.value),
+            lower: Some(0.0),
+            upper: Some(frequency.value),
+            source: EstimateSource::Sketch,
+        },
+        (_, None) => Estimate::default(frequency.value.min(rows.value)),
+    };
     ColumnProfile {
         lower_bound: stats.lower_bound.clone(),
         upper_bound: stats.upper_bound.clone(),
         frequency,
         distinct,
         value: None,
+        sketches,
     }
 }
 
 fn default_scan_column_profile(
     rows: &Estimate,
     config: &CardinalityEstimationConfig,
+    sketches: Option<Arc<ColumnSketches>>,
 ) -> ColumnProfile {
+    let distinct = sketches
+        .as_ref()
+        .and_then(|sketches| sketches.distinct_values.as_ref())
+        .map(|hll| Estimate {
+            value: hll.estimate().min(rows.value),
+            lower: Some(0.0),
+            upper: Some(rows.value),
+            source: EstimateSource::Sketch,
+        })
+        .unwrap_or_else(|| Estimate::default(rows.value.min(config.unknown_column_ndv_cap)));
     ColumnProfile {
         lower_bound: None,
         upper_bound: None,
         frequency: Estimate::default(rows.value),
-        distinct: Estimate::default(rows.value.min(config.unknown_column_ndv_cap)),
+        distinct,
         value: None,
+        sketches,
     }
 }
 
@@ -1660,6 +1770,7 @@ fn const_scan_profile(data: &crate::ConstScan, ctx: &QueryContext) -> Cardinalit
                 frequency: Estimate::exact(values.len() as f64),
                 distinct: Estimate::exact(distinct),
                 value: None,
+                sketches: None,
             },
         );
     }
@@ -1788,6 +1899,7 @@ fn aggregation_profile(
                 frequency: group_rows.clone(),
                 distinct: group_rows.cap(group_rows.value, EstimateSource::Derived),
                 value: None,
+                sketches: None,
             },
             AggregateExpr::Func {
                 func: AggregateFunction::Count,
@@ -1801,6 +1913,7 @@ fn aggregation_profile(
                 frequency: group_rows.clone(),
                 distinct: group_rows.cap(group_rows.value, EstimateSource::Derived),
                 value: None,
+                sketches: None,
             },
             _ => {
                 let mut profile =
@@ -1906,6 +2019,7 @@ fn scale_profile(
                     output.frequency.value,
                 );
             }
+            output.sketches = None;
             (column, output)
         })
         .collect();
@@ -1963,6 +2077,7 @@ pub(crate) fn cross_product_profile(
         output.distinct = output
             .distinct
             .cap(output.frequency.value, EstimateSource::Derived);
+        output.sketches = None;
         columns.insert(column, output);
     }
     for (&column, profile) in &right.columns {
@@ -1974,6 +2089,7 @@ pub(crate) fn cross_product_profile(
         output.distinct = output
             .distinct
             .cap(output.frequency.value, EstimateSource::Derived);
+        output.sketches = None;
         columns.insert(column, output);
     }
     CardinalityProfile {
@@ -2157,6 +2273,7 @@ fn join_profile_with_selectivity_and_classes(
                         Some(max_distinct),
                     ),
                     value: None,
+                    sketches: None,
                 },
             );
             profile
@@ -2198,6 +2315,7 @@ fn single_join_profile(
         output.distinct = output
             .distinct
             .cap(output.frequency.value, EstimateSource::Derived);
+        output.sketches = None;
         columns.insert(column, output);
     }
     CardinalityProfile {
@@ -2365,6 +2483,7 @@ fn derive_join_side_columns(
             output.distinct = output
                 .distinct
                 .cap(output.frequency.value, EstimateSource::Derived);
+            output.sketches = None;
             (column, output)
         })
         .collect()
@@ -2920,6 +3039,7 @@ fn estimated_distinct_intersection(
     };
 
     // TODO(statistics): Replace uniform ordered-range overlap with histogram intersection and
+    // sample/set-sketch overlap once those statistics are collected and persisted.
     DistinctIntersection {
         distinct,
         domains_disjoint: false,
@@ -3087,6 +3207,7 @@ pub(crate) fn connecting_edge_indices(
         .map(|(idx, _)| idx)
         .collect()
 }
+
 fn filter_selectivity(
     profile: &CardinalityProfile,
     predicate: Expr,
@@ -6063,6 +6184,7 @@ mod tests {
             profile.columns[&shifted].distinct.source,
             EstimateSource::Derived
         );
+        assert!(profile.columns[&shifted].sketches.is_none());
     }
 
     #[test]
@@ -6295,6 +6417,7 @@ mod tests {
             frequency: rows.clone(),
             distinct: Estimate::exact(100.0),
             value: None,
+            sketches: None,
         };
         let left = CardinalityProfile::new(
             rows.clone(),
@@ -6564,7 +6687,7 @@ mod tests {
                 rows.clone(),
                 [(
                     column,
-                    column_profile_from_stats(&statistics.column_statistics["key"], &rows),
+                    column_profile_from_stats(&statistics.column_statistics["key"], &rows, None),
                 )]
                 .into_iter()
                 .collect(),
@@ -6627,7 +6750,7 @@ mod tests {
             rows.clone(),
             [(
                 column,
-                column_profile_from_stats(&statistics.column_statistics["key"], &rows),
+                column_profile_from_stats(&statistics.column_statistics["key"], &rows, None),
             )]
             .into_iter()
             .collect(),
@@ -6719,6 +6842,7 @@ mod tests {
                     frequency: Estimate::exact(100.0),
                     distinct: Estimate::exact(100.0),
                     value: None,
+                    sketches: None,
                 },
             )]
             .into_iter()
@@ -7567,6 +7691,48 @@ mod tests {
             frequency: Estimate::exact(rows),
             distinct: Estimate::exact(distinct),
             value: None,
+            sketches: None,
         }
+    }
+
+    #[test]
+    fn hll_supplies_scan_ndv_when_catalog_ndv_is_absent() {
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        let schema = Arc::new(Schema::new(vec![Field::new("key", DataType::Int64, false)]));
+        catalog
+            .create_table(TableRef::bare("t"), schema, None)
+            .unwrap();
+        let mut statistics = table_stats_for_column("key", 100, 100);
+        statistics
+            .column_statistics
+            .get_mut("key")
+            .unwrap()
+            .distinct = None;
+        catalog
+            .set_table_statistics(TableRef::bare("t"), statistics)
+            .unwrap();
+
+        let mut ctx = QueryContext::new();
+        let key = ColumnData::with_qualifier("key", DataType::Int64, "t").add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("t"),
+            columns: vec![key],
+        })
+        .add(&mut ctx);
+        ctx.set_root(scan);
+        let mut sketches = ColumnSketches::new(100).hll();
+        for value in 0..100 {
+            sketches.observe(&ScalarValue::Int64(value));
+        }
+        let mut analyses = AnalysisContext::new(catalog);
+        analyses
+            .set_column_sketches(TableRef::bare("t"), "key", sketches)
+            .unwrap();
+        let profile = analyses.get::<CardinalityEstimationV1>(&ctx, scan).unwrap();
+        assert_eq!(
+            profile.columns[&key].distinct.source,
+            EstimateSource::Sketch
+        );
+        assert!((profile.columns[&key].distinct.value - 100.0).abs() < 20.0);
     }
 }

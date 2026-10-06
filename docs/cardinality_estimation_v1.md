@@ -4,7 +4,10 @@
 
 `CardinalityEstimationV1` estimates row counts and column profiles for each
 operator. It uses lazily cached `LogicalFactsAnalysis` results for value lineage, accumulated
-constraints, and equality classes. See the analysis framework documentation for the separation between logical facts and estimator policy.
+constraints, and equality classes. Query-local HyperLogLog sketches refine scan NDV when catalog
+NDV is absent. See
+[`statistics_architecture.md`](statistics_architecture.md) for the separation between logical facts
+and estimator policy.
 
 It should use `HypergraphOf` for join groups so cardinality estimation, join-tree normalization, and
 join ordering share predicate splitting and relation classification.
@@ -29,7 +32,7 @@ Each estimate stores:
 
 - `value`: current best estimate.
 - `lower` / `upper`: known or derived range.
-- `source`: exact, catalog, derived, or default.
+- `source`: exact, catalog, sketch-derived, operator-derived, or default.
 
 Each column profile stores:
 
@@ -38,6 +41,7 @@ Each column profile stores:
 - `frequency` (`f_A`): tuples with a value in the known bounds.
 - `distinct` (`d_A`): distinct values in the known bounds.
 - `value`: estimator-independent base or derived value identity.
+- `sketches`: compatible base-population sketches, retained only while the population is unchanged.
 
 V1 should keep the model explicit even when many fields are unknown. This avoids
 pretending rough estimates are exact.
@@ -47,7 +51,8 @@ pretending rough estimates are exact.
 For `Scan`, use statistics in this order:
 
 1. Catalog-provided table and column statistics.
-2. Stable default estimates.
+2. Query-local HLL for NDV when catalog NDV is absent.
+3. Stable default estimates.
 
 The core analysis should not execute SQL to collect statistics. Query-based
 collection belongs in the DataFusion connector, which can run local aggregate
@@ -60,7 +65,8 @@ queries and load the results into the catalog before optimization.
 `Rename` copies profiles from original columns to renamed columns.
 
 `Map` preserves input columns. Direct aliases preserve the source profile. Other computed columns
-remain opaque until a generic statistics-transform provider can prove bounds, NDV, and null behavior; expression-specific lineage variants are intentionally avoided.
+remain opaque until a generic statistics-transform provider can prove bounds, NDV, and null/sketch
+behavior; expression-specific lineage variants are intentionally avoided.
 
 `Selection` splits conjuncts and applies predicate selectivity one predicate at a time. Equality
 predicates use NDV; range predicates use known bounds when available; unsupported predicates fall
@@ -101,11 +107,10 @@ left_non_null_fraction * intersection_ndv / left_ndv
 
 The general fallback uses containment (`intersection_ndv = min(left_ndv, right_ndv)`). Compatible
 ordered ranges detect disjoint domains and estimate numeric/date overlap under uniformity.
-Semi output key profiles are
-capped by the intersection domain, and pure single-key anti joins propagate complementary unmatched
-frequency and NDV. Single-column catalog unique/FK assertions provide stronger estimates only while
-the required base population is complete. Histograms, samples, and sampled multi-column NDV remain
-future work.
+Semi output key profiles are capped by the intersection domain, and pure single-key anti joins
+propagate complementary unmatched frequency and NDV. Single-column catalog unique/FK assertions
+provide stronger estimates only while the required base population is complete. Histograms, samples,
+and sampled multi-column NDV remain future work.
 
 Transient or redundant equality edges should be treated specially for costing.
 They may need to remain in the IR for execution or backend behavior, but CE
@@ -145,6 +150,7 @@ minimum, maintaining `lower <= value <= upper`.
 - [x] Add a DataFusion connector helper/API for SQL-based stats extraction into catalog statistics.
 - [x] Add demand-driven logical value lineage and accumulated constraints.
 - [x] Keep derived expressions opaque instead of adding expression-specific lineage transforms.
+- [x] Add query-local HLL scan-NDV storage and planned-query lifecycle retention.
 - [x] Separate directional equality coverage from tuple-pair selectivity for semi/anti joins.
 - [x] Add ordered-range domain overlap and disjointness checks.
 - [x] Add occupancy-based filtered NDV and proportional literal-domain restriction.
