@@ -294,6 +294,14 @@ mod tests {
     use optd_core::{BoundedVec, MemoryCatalog, TableConstraints, UniqueKey};
     use std::sync::Arc;
 
+    #[test]
+    fn converts_utf8_view_bounds() {
+        assert_eq!(
+            convert_scalar(DFScalarValue::Utf8View(Some("value".to_owned()))),
+            Some(ScalarValue::Utf8("value".to_owned()))
+        );
+    }
+
     #[tokio::test]
     async fn collect_table_statistics_extracts_column_profiles() {
         let session = SessionContext::new();

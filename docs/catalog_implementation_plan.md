@@ -47,6 +47,10 @@ Required behavior:
 
 Add `optd_column` only after choosing the first persisted type representation.
 
+## DataFusion DDL integration
+
+Wrap DataFusion's existing `CatalogProvider` and `SchemaProvider` instances so schema and table registration flows through `optd-catalog`. Do not repeat the `spring26` post-execution plan-inspection approach: it could leave DataFusion and the durable catalog inconsistent when persistence failed. The initial adapter mirrors schema creation, relational/file-backed base-table creation, and table drops, with compensating provider changes on persistence failure. See [datafusion_catalog_integration.md](datafusion_catalog_integration.md).
+
 ## Provisional view-definition decision
 
 Start with `optd_view_definition.definition_sql` rather than a persisted bound query tree. View creation or replacement validates the SQL and records explicit dependency edges; view expansion parses and binds the SQL using the reader's pinned snapshot. This avoids committing the catalog to Optd arena-handle serialization before the planner integration is stable.

@@ -16,7 +16,7 @@ use datafusion_sqllogictest::{
     DFColumnType, DFSqlLogicTestError, convert_batches, convert_schema_to_types,
 };
 use optd_core::{
-    ExprSimplify, HolisticUnnesting, JoinOrdering, JoinTreeNormalize, MarkJoinToSemiJoin,
+    Catalog, ExprSimplify, HolisticUnnesting, JoinOrdering, JoinTreeNormalize, MarkJoinToSemiJoin,
     OperatorRewriteAdaptor, OptimizerContext, PassManager, PlannedQuery, PredicatePushdown,
     ProjectionElimination, QueryContext, QueryFormatConfig, SubqueryToJoin,
 };
@@ -60,9 +60,33 @@ pub(crate) async fn optimizer_context_from_logical_plan(
         .await
         .map_err(TryViaIrError::Failed)?;
 
+    optimizer_context_from_prepared_plan(&plan, catalog)
+}
+
+pub(crate) async fn optimizer_context_from_logical_plan_with_catalog(
+    session: &SessionContext,
+    plan: &LogicalPlan,
+    catalog: Arc<dyn Catalog>,
+) -> Result<OptimizerContext, TryViaIrError> {
+    if !is_supported_relational_plan(plan) {
+        return Err(TryViaIrError::Unsupported("non-query plan".into()));
+    }
+
+    let plan =
+        apply_type_coercion(plan.clone()).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
+
+    reject_non_catalog_scans(&plan, session).await?;
+
+    optimizer_context_from_prepared_plan(&plan, catalog)
+}
+
+fn optimizer_context_from_prepared_plan(
+    plan: &LogicalPlan,
+    catalog: Arc<dyn Catalog>,
+) -> Result<OptimizerContext, TryViaIrError> {
     let mut ctx = QueryContext::new();
     let root =
-        from_logical_plan(&plan, &mut ctx).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
+        from_logical_plan(plan, &mut ctx).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
     ctx.set_root(root);
 
     Ok(OptimizerContext::new(ctx, catalog))

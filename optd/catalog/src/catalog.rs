@@ -2,7 +2,7 @@
 
 use sea_orm::{ConnectionTrait, TransactionTrait};
 
-use crate::{CatalogError, CatalogResult, relation, schema, snapshot};
+use crate::{CatalogError, CatalogResult, relation, schema, snapshot, statistics};
 
 /// Default catalog branch.
 pub const DEFAULT_BRANCH_NAME: &str = "main";
@@ -89,6 +89,14 @@ impl<T: ConnectionTrait> CatalogReader<'_, T> {
         relation::get_relation(info, self.db, &self.snapshot)
             .await?
             .ok_or(CatalogError::RelationNotFound { relation_id })
+    }
+
+    /// Returns the latest statistics payload visible for `relation_id`.
+    pub async fn get_relation_statistics(
+        &self,
+        relation_id: i64,
+    ) -> CatalogResult<Option<statistics::RelationStatistics>> {
+        statistics::get_relation_statistics(self.db, &self.snapshot, relation_id).await
     }
 }
 
@@ -236,6 +244,68 @@ impl<T: TransactionTrait> Catalog<T> {
         )
     }
 
+    /// Publishes collected relation statistics as a new catalog snapshot.
+    pub async fn set_relation_statistics(
+        &self,
+        expected_snapshot_id: snapshot::SnapshotId,
+        info: statistics::SetRelationStatisticsInfo,
+    ) -> CatalogResult<snapshot::SnapshotId> {
+        let branch_name = self.branch_name.clone();
+        flatten_transaction_err(
+            self.db
+                .transaction::<_, _, CatalogError>(|txn| {
+                    Box::pin(async move {
+                        let mut current_snapshot = snapshot::get_snapshot_for_write(
+                            txn,
+                            &branch_name,
+                            expected_snapshot_id,
+                        )
+                        .await?;
+                        let read_snapshot = current_snapshot.clone();
+                        let definition = statistics::get_statistics_definition(
+                            txn,
+                            &read_snapshot,
+                            info.relation_id,
+                        )
+                        .await?;
+                        let (statistics_id, definition_begin_snapshot, create_definition) =
+                            match definition {
+                                Some(definition) => {
+                                    (definition.statistics_id, definition.begin_snapshot, false)
+                                }
+                                None => (current_snapshot.get_next_catalog_id(), -1, true),
+                            };
+                        let new_snapshot_id =
+                            snapshot::commit_snapshot(txn, current_snapshot).await?;
+                        let definition_begin_snapshot = if create_definition {
+                            new_snapshot_id.as_i64()
+                        } else {
+                            definition_begin_snapshot
+                        };
+                        statistics::insert_relation_statistics(
+                            txn,
+                            &read_snapshot,
+                            new_snapshot_id.as_i64(),
+                            statistics_id,
+                            definition_begin_snapshot,
+                            create_definition,
+                            info,
+                        )
+                        .await?;
+                        snapshot::publish_snapshot(
+                            txn,
+                            &branch_name,
+                            expected_snapshot_id,
+                            new_snapshot_id,
+                        )
+                        .await?;
+                        Ok(new_snapshot_id)
+                    })
+                })
+                .await,
+        )
+    }
+
     /// Drops a relation from `expected_snapshot_id` and publishes a new branch head.
     pub async fn drop_relation(
         &self,
@@ -288,6 +358,10 @@ mod tests {
         },
         schema::CreateSchemaInfo,
         snapshot::SnapshotId,
+        statistics::{
+            ColumnStatistics, STATISTICS_VALUE_ENCODING_VERSION, SetRelationStatisticsInfo,
+            StatisticsValue,
+        },
     };
 
     use super::Catalog;
@@ -355,6 +429,151 @@ mod tests {
             .await?;
         assert_eq!(relation.relation_name, "orders");
         assert_eq!(relation.columns.len(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn statistics_payloads_advance_snapshots_and_preserve_history() -> CatalogResult<()> {
+        let db = Database::connect("sqlite::memory:").await?;
+        Migrator::up(&db, None).await?;
+        let catalog = Catalog::new(db);
+        let schema_id = catalog
+            .create_schema(
+                SnapshotId::INITIAL,
+                CreateSchemaInfo {
+                    schema_name: "public".to_owned(),
+                },
+            )
+            .await?;
+        let schema_snapshot_id = catalog.reader().await?.snapshot_id();
+        let relation_id = catalog
+            .create_base_table(
+                schema_snapshot_id,
+                CreateBaseTableInfo {
+                    schema_name: "public".to_owned(),
+                    relation_name: "orders".to_owned(),
+                    storage: BaseTableStorage::Relational,
+                    columns: vec![CreateColumnInfo {
+                        column_name: "order_id".to_owned(),
+                        column_type: ColumnType(DataType::Int64),
+                        nulls_allowed: false,
+                    }],
+                },
+            )
+            .await?;
+        let relation_snapshot_id = catalog.reader().await?.snapshot_id();
+        let relation = catalog
+            .reader()
+            .await?
+            .get_relation(GetRelationInfo { relation_id })
+            .await?;
+        assert_eq!(relation.schema_id, schema_id);
+        let column_id = relation.columns[0].column_id;
+        assert!(
+            catalog
+                .reader()
+                .await?
+                .get_relation_statistics(relation_id)
+                .await?
+                .is_none()
+        );
+
+        let first_statistics_snapshot = catalog
+            .set_relation_statistics(
+                relation_snapshot_id,
+                SetRelationStatisticsInfo {
+                    relation_id,
+                    data_snapshot_id: Some("data-v1".to_owned()),
+                    row_count: Some(10),
+                    size_bytes: None,
+                    column_statistics: vec![ColumnStatistics {
+                        column_id,
+                        frequency: Some(10),
+                        distinct_count: Some(5),
+                        lower_bound: Some(StatisticsValue::Int64(1)),
+                        upper_bound: Some(StatisticsValue::Int64(9)),
+                    }],
+                },
+            )
+            .await?;
+        assert!(
+            catalog
+                .reader_at(relation_snapshot_id)
+                .await?
+                .get_relation_statistics(relation_id)
+                .await?
+                .is_none()
+        );
+        let first = catalog
+            .reader_at(first_statistics_snapshot)
+            .await?
+            .get_relation_statistics(relation_id)
+            .await?
+            .unwrap();
+        assert_eq!(first.row_count, Some(10));
+        assert_eq!(
+            first.value_encoding_version,
+            STATISTICS_VALUE_ENCODING_VERSION
+        );
+        assert_eq!(first.column_statistics[0].distinct_count, Some(5));
+
+        let second_statistics_snapshot = catalog
+            .set_relation_statistics(
+                first_statistics_snapshot,
+                SetRelationStatisticsInfo {
+                    relation_id,
+                    data_snapshot_id: Some("data-v2".to_owned()),
+                    row_count: Some(20),
+                    size_bytes: None,
+                    column_statistics: vec![ColumnStatistics {
+                        column_id,
+                        frequency: Some(20),
+                        distinct_count: Some(8),
+                        lower_bound: Some(StatisticsValue::Int64(1)),
+                        upper_bound: Some(StatisticsValue::Int64(20)),
+                    }],
+                },
+            )
+            .await?;
+        let second = catalog
+            .reader_at(second_statistics_snapshot)
+            .await?
+            .get_relation_statistics(relation_id)
+            .await?
+            .unwrap();
+        assert_eq!(second.statistics_id, first.statistics_id);
+        assert_eq!(second.row_count, Some(20));
+        assert_eq!(
+            catalog
+                .reader_at(first_statistics_snapshot)
+                .await?
+                .get_relation_statistics(relation_id)
+                .await?
+                .unwrap()
+                .row_count,
+            Some(10)
+        );
+
+        catalog
+            .drop_relation(second_statistics_snapshot, DropRelationInfo { relation_id })
+            .await?;
+        assert!(
+            catalog
+                .reader()
+                .await?
+                .get_relation_statistics(relation_id)
+                .await?
+                .is_none()
+        );
+        assert!(
+            catalog
+                .reader_at(second_statistics_snapshot)
+                .await?
+                .get_relation_statistics(relation_id)
+                .await?
+                .is_some()
+        );
 
         Ok(())
     }

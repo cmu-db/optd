@@ -28,9 +28,9 @@ struct StatsCacheKey {
 }
 
 #[derive(Debug, Clone)]
-struct ReferencedScan {
-    table: TableReference,
-    columns: BTreeSet<String>,
+pub(crate) struct ReferencedScan {
+    pub(crate) table: TableReference,
+    pub(crate) columns: BTreeSet<String>,
 }
 
 /// Builds an optd catalog with runtime-collected stats for one DataFusion plan.
@@ -194,7 +194,7 @@ impl RuntimeStatisticsCatalogBuilder {
     }
 }
 
-fn referenced_scan_columns(plan: &LogicalPlan) -> Vec<ReferencedScan> {
+pub(crate) fn referenced_scan_columns(plan: &LogicalPlan) -> Vec<ReferencedScan> {
     let mut scans = BTreeMap::<String, ReferencedScan>::new();
     plan.apply_with_subqueries(|plan| {
         collect_referenced_scan(plan, &mut scans);
@@ -217,7 +217,7 @@ fn collect_referenced_scan(plan: &LogicalPlan, out: &mut BTreeMap<String, Refere
     }
 }
 
-fn table_ref_from_df(table: &TableReference) -> TableRef {
+pub(crate) fn table_ref_from_df(table: &TableReference) -> TableRef {
     match (table.catalog(), table.schema()) {
         (Some(catalog), Some(schema)) => TableRef::full(catalog, schema, table.table()),
         (None, Some(schema)) => TableRef::partial(schema, table.table()),

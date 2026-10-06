@@ -3415,6 +3415,8 @@ dependencies = [
  "itertools 0.14.0",
  "sea-orm",
  "sea-orm-migration",
+ "serde",
+ "serde_json",
  "snafu",
  "tempfile",
  "tokio",
@@ -3448,11 +3450,14 @@ dependencies = [
  "datafusion-sqllogictest",
  "duckdb",
  "futures",
+ "optd-catalog",
  "optd-core",
  "rustyline",
+ "sea-orm",
  "serde",
  "serde_json",
  "sqllogictest",
+ "tempfile",
  "tokio",
 ]
 

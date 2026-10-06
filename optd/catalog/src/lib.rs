@@ -11,6 +11,7 @@ pub mod migration;
 pub mod relation;
 pub mod schema;
 pub mod snapshot;
+pub mod statistics;
 
 pub use catalog::{Catalog, CatalogReader};
 pub use error::{CatalogError, CatalogResult};

@@ -9,12 +9,14 @@ use datafusion::prelude::{SessionConfig, SessionContext};
 use optd_core::{CardinalityEstimationV1, FreeColumns, QueryFormatConfig};
 use optd_datafusion::config::OptdExtensionConfig;
 use optd_datafusion::explain_udfs::ExplainStep;
+use optd_datafusion::persistent_catalog::{idempotent_import_guard, install_persistent_catalog};
 use optd_datafusion::runner::{OptdRunner, RunnerOutput};
 use optd_datafusion::setup::{
     register_job_tables, register_tpch_tables, session_context_with_information_schema,
 };
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
+use sea_orm::Database;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -50,6 +52,14 @@ struct Args {
     #[arg(long)]
     logical_physical_plan: bool,
 
+    /// Persist catalog metadata and statistics in this SQLite database.
+    #[arg(long, value_name = "PATH")]
+    catalog_db: Option<PathBuf>,
+
+    /// Suppress optimizer-step logging before each statement.
+    #[arg(long)]
+    no_log_explain_steps: bool,
+
     /// Override DataFusion target partitions before registering benchmark tables.
     #[arg(long)]
     target_partitions: Option<usize>,
@@ -59,9 +69,10 @@ struct Args {
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
-    let session = if args.logical || args.target_partitions.is_some() {
+    let session = if args.logical || args.no_log_explain_steps || args.target_partitions.is_some() {
         let mut optd_config = OptdExtensionConfig::default();
         optd_config.physical_planning = !args.logical;
+        optd_config.log_explain_steps = !args.no_log_explain_steps;
         let mut config = SessionConfig::new()
             .with_information_schema(true)
             .with_option_extension(optd_config);
@@ -72,17 +83,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
     } else {
         session_context_with_information_schema()
     };
+    let catalog_db = if let Some(path) = args.catalog_db.as_ref() {
+        let db = Database::connect(format!("sqlite://{}?mode=rwc", path.display())).await?;
+        install_persistent_catalog(&session, "datafusion", db.clone()).await?;
+        Some(db)
+    } else {
+        None
+    };
+    let import_guard = if catalog_db.is_some() && (args.tpch || args.job) {
+        Some(idempotent_import_guard(&session, "datafusion")?)
+    } else {
+        None
+    };
     if args.tpch {
         register_tpch_tables(&session).await?;
     }
     if args.job {
         register_job_tables(&session).await?;
     }
+    drop(import_guard);
     let runner = OptdRunner::new(session);
 
     if args.commands.is_empty() && args.files.is_empty() {
         repl(&runner).await?;
-        return Ok(());
     }
 
     for sql in args.commands {
@@ -106,6 +129,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
+    drop(runner);
+    if let Some(db) = catalog_db {
+        db.close().await?;
+    }
     Ok(())
 }
 
