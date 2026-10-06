@@ -34,9 +34,27 @@ impl MigrationTrait for Migration {
                 .create_table_from_entity(entity::column::Entity)
                 .if_not_exists()
                 .to_owned(),
+            schema
+                .create_table_from_entity(entity::index::Entity)
+                .if_not_exists()
+                .to_owned(),
         ] {
             manager.create_table(statement).await?;
         }
+
+        manager
+            .create_index(
+                Index::create()
+                    .if_not_exists()
+                    .name("idx_optd_index_visibility")
+                    .table(entity::index::Entity)
+                    .col(entity::index::Column::RelationId)
+                    .col(entity::index::Column::IndexName)
+                    .col(entity::index::Column::BeginSnapshot)
+                    .col(entity::index::Column::EndSnapshot)
+                    .to_owned(),
+            )
+            .await?;
 
         if entity::snapshot::Entity::find_by_id(0)
             .one(manager.get_connection())
@@ -70,6 +88,10 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         for table in [
+            Table::drop()
+                .table(entity::index::Entity)
+                .if_exists()
+                .to_owned(),
             Table::drop()
                 .table(entity::column::Entity)
                 .if_exists()

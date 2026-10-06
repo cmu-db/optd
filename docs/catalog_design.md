@@ -348,10 +348,9 @@ A primary or unique constraint may point to a backing unique index. A foreign ke
 
 ## Indexes
 
-- An index row contains both its logical definition and current physical state.
+- An index row contains its logical definition and current backend usability state.
 - Key and included fields are stored in one ordered array of typed records.
-- Keys can be columns or expressions.
-- Partial predicates are stored as expressions.
+- The initial representation supports column keys; expression keys and partial predicates are deferred.
 
 The catalog stores:
 
@@ -360,16 +359,11 @@ optd_index(
   index_id,
   relation_id,
   index_name,
-  access_method_id,
+  access_method,
   is_unique,
   nulls_not_distinct,
-  fields IndexField[],
-  predicate_expression,
-  built_from_snapshot,
-  storage_kind,
-  physical_location,
+  fields JSON,
   status,
-  properties,
   begin_snapshot,
   end_snapshot
 )
@@ -377,9 +371,9 @@ optd_index(
 
 Initially, each `IndexField` contains `role`, `column_id`, `direction`, `null_order`, `collation_id`, and `operator_class_id`. Included fields contain only `role = INCLUDE` and `column_id`. Expression keys and the Boolean `predicate_expression` for partial indexes remain part of the intended model, but their physical expression encoding is deferred.
 
-The current design publishes a replacement physical index by closing the old `optd_index` row and inserting a new row with the same `index_id`. A future implementation can reintroduce physical generations if it must expose multiple builds simultaneously.
+The first executable slice supports column-based relational indexes with ordered key and included fields, an engine access-method name, uniqueness/null semantics, and `BUILDING`, `READY`, or `INVALID` status. The field vector is JSON-encoded at the persistence boundary and validated by catalog writers. Index creation is rejected unless the relation uses `RELATIONAL` storage; file partitioning, sort order, Parquet min/max values, and row-group statistics are not modeled as ordinary indexes. Expression keys, partial predicates, backend discovery, and optimizer consumption remain follow-up work.
 
-Partitioning, sort order, Parquet min/max values, and row-group statistics are not modeled as ordinary indexes.
+A future physical-state refresh can publish a replacement index version by closing the old `optd_index` row and inserting a new row with the same `index_id`. Physical generations can be reintroduced if a connector must expose multiple builds simultaneously.
 
 **Decision:** fold current physical state into `optd_index` and store its small ordered field list as `IndexField[]`.
 

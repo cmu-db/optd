@@ -2,7 +2,7 @@
 
 use sea_orm::{ConnectionTrait, TransactionTrait};
 
-use crate::{CatalogError, CatalogResult, relation, schema, snapshot, statistics};
+use crate::{CatalogError, CatalogResult, index, relation, schema, snapshot, statistics};
 
 /// Default catalog branch.
 pub const DEFAULT_BRANCH_NAME: &str = "main";
@@ -89,6 +89,22 @@ impl<T: ConnectionTrait> CatalogReader<'_, T> {
         relation::get_relation(info, self.db, &self.snapshot)
             .await?
             .ok_or(CatalogError::RelationNotFound { relation_id })
+    }
+
+    /// Returns one index visible at the pinned snapshot.
+    pub async fn get_index(&self, info: index::GetIndexInfo) -> CatalogResult<index::IndexInfo> {
+        let index_id = info.index_id;
+        index::get_index(self.db, &self.snapshot, index_id)
+            .await?
+            .ok_or(CatalogError::IndexNotFound { index_id })
+    }
+
+    /// Returns all indexes for `relation_id` visible at the pinned snapshot.
+    pub async fn get_relation_indexes(
+        &self,
+        relation_id: i64,
+    ) -> CatalogResult<Vec<index::IndexInfo>> {
+        index::get_relation_indexes(self.db, &self.snapshot, relation_id).await
     }
 
     /// Returns the latest statistics payload visible for `relation_id`.
@@ -244,6 +260,89 @@ impl<T: TransactionTrait> Catalog<T> {
         )
     }
 
+    /// Creates an index on a relational table and publishes a new branch head.
+    pub async fn create_index(
+        &self,
+        expected_snapshot_id: snapshot::SnapshotId,
+        info: index::CreateIndexInfo,
+    ) -> CatalogResult<i64> {
+        let branch_name = self.branch_name.clone();
+        flatten_transaction_err(
+            self.db
+                .transaction::<_, _, CatalogError>(|txn| {
+                    Box::pin(async move {
+                        let mut current_snapshot = snapshot::get_snapshot_for_write(
+                            txn,
+                            &branch_name,
+                            expected_snapshot_id,
+                        )
+                        .await?;
+                        let read_snapshot = current_snapshot.clone();
+                        let index_id = current_snapshot.get_next_catalog_id();
+                        let new_snapshot_id =
+                            snapshot::commit_snapshot(txn, current_snapshot).await?;
+                        index::create_index(
+                            info,
+                            index_id,
+                            txn,
+                            &read_snapshot,
+                            new_snapshot_id.as_i64(),
+                        )
+                        .await?;
+                        snapshot::publish_snapshot(
+                            txn,
+                            &branch_name,
+                            expected_snapshot_id,
+                            new_snapshot_id,
+                        )
+                        .await?;
+                        Ok(index_id)
+                    })
+                })
+                .await,
+        )
+    }
+
+    /// Drops an index and publishes a new branch head.
+    pub async fn drop_index(
+        &self,
+        expected_snapshot_id: snapshot::SnapshotId,
+        info: index::DropIndexInfo,
+    ) -> CatalogResult<()> {
+        let branch_name = self.branch_name.clone();
+        flatten_transaction_err(
+            self.db
+                .transaction::<_, _, CatalogError>(|txn| {
+                    Box::pin(async move {
+                        let current_snapshot = snapshot::get_snapshot_for_write(
+                            txn,
+                            &branch_name,
+                            expected_snapshot_id,
+                        )
+                        .await?;
+                        let read_snapshot = current_snapshot.clone();
+                        let new_snapshot_id =
+                            snapshot::commit_snapshot(txn, current_snapshot).await?;
+                        index::drop_index(
+                            info.index_id,
+                            txn,
+                            &read_snapshot,
+                            new_snapshot_id.as_i64(),
+                        )
+                        .await?;
+                        snapshot::publish_snapshot(
+                            txn,
+                            &branch_name,
+                            expected_snapshot_id,
+                            new_snapshot_id,
+                        )
+                        .await
+                    })
+                })
+                .await,
+        )
+    }
+
     /// Publishes collected relation statistics as a new catalog snapshot.
     pub async fn set_relation_statistics(
         &self,
@@ -383,6 +482,8 @@ impl<T: TransactionTrait> Catalog<T> {
                         let new_snapshot_id =
                             snapshot::commit_snapshot(txn, current_snapshot).await?;
                         relation::drop_relation(info, txn, new_snapshot_id.as_i64()).await?;
+                        index::close_relation_indexes(relation_id, txn, new_snapshot_id.as_i64())
+                            .await?;
                         snapshot::publish_snapshot(
                             txn,
                             &branch_name,
@@ -407,6 +508,10 @@ mod tests {
     use crate::{
         CatalogError, CatalogResult,
         entity::column::ColumnType,
+        index::{
+            CreateIndexInfo, DropIndexInfo, GetIndexInfo, IndexField, IndexFieldRole, IndexStatus,
+            NullOrdering, SortDirection,
+        },
         migration::Migrator,
         relation::{
             BaseTableStorage, CreateBaseTableInfo, CreateColumnInfo, DropRelationInfo,
@@ -485,6 +590,176 @@ mod tests {
             .await?;
         assert_eq!(relation.relation_name, "orders");
         assert_eq!(relation.columns.len(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn relational_indexes_are_temporal_and_files_reject_them() -> CatalogResult<()> {
+        let db = Database::connect("sqlite::memory:").await?;
+        Migrator::up(&db, None).await?;
+        let catalog = Catalog::new(db);
+        catalog
+            .create_schema(
+                SnapshotId::INITIAL,
+                CreateSchemaInfo {
+                    schema_name: "public".to_owned(),
+                },
+            )
+            .await?;
+        let schema_snapshot = catalog.reader().await?.snapshot_id();
+        let relation_id = catalog
+            .create_base_table(
+                schema_snapshot,
+                CreateBaseTableInfo {
+                    schema_name: "public".to_owned(),
+                    relation_name: "orders".to_owned(),
+                    storage: BaseTableStorage::Relational,
+                    columns: vec![
+                        CreateColumnInfo {
+                            column_name: "customer_id".to_owned(),
+                            column_type: ColumnType(DataType::Int64),
+                            nulls_allowed: false,
+                        },
+                        CreateColumnInfo {
+                            column_name: "status".to_owned(),
+                            column_type: ColumnType(DataType::Utf8),
+                            nulls_allowed: true,
+                        },
+                    ],
+                },
+            )
+            .await?;
+        let relation_snapshot = catalog.reader().await?.snapshot_id();
+        let relation = catalog
+            .reader()
+            .await?
+            .get_relation(GetRelationInfo { relation_id })
+            .await?;
+        let customer_id = relation.columns[0].column_id;
+        let status = relation.columns[1].column_id;
+        let fields = vec![
+            IndexField {
+                role: IndexFieldRole::Key,
+                column_id: customer_id,
+                direction: Some(SortDirection::Desc),
+                null_order: Some(NullOrdering::Last),
+                collation: None,
+                operator_class: Some("int8_ops".to_owned()),
+            },
+            IndexField {
+                role: IndexFieldRole::Include,
+                column_id: status,
+                direction: None,
+                null_order: None,
+                collation: None,
+                operator_class: None,
+            },
+        ];
+        let index_id = catalog
+            .create_index(
+                relation_snapshot,
+                CreateIndexInfo {
+                    relation_id,
+                    index_name: "orders_customer_idx".to_owned(),
+                    access_method: "btree".to_owned(),
+                    is_unique: false,
+                    nulls_not_distinct: false,
+                    fields: fields.clone(),
+                    status: IndexStatus::Ready,
+                },
+            )
+            .await?;
+        assert!(
+            catalog
+                .reader_at(relation_snapshot)
+                .await?
+                .get_relation_indexes(relation_id)
+                .await?
+                .is_empty()
+        );
+        let index_snapshot = catalog.reader().await?.snapshot_id();
+        let index = catalog
+            .reader()
+            .await?
+            .get_index(GetIndexInfo { index_id })
+            .await?;
+        assert_eq!(index.access_method, "btree");
+        assert_eq!(index.fields, fields);
+        assert_eq!(index.status, IndexStatus::Ready);
+
+        catalog
+            .drop_index(index_snapshot, DropIndexInfo { index_id })
+            .await?;
+        assert!(
+            catalog
+                .reader()
+                .await?
+                .get_relation_indexes(relation_id)
+                .await?
+                .is_empty()
+        );
+        assert_eq!(
+            catalog
+                .reader_at(index_snapshot)
+                .await?
+                .get_index(GetIndexInfo { index_id })
+                .await?
+                .index_name,
+            "orders_customer_idx"
+        );
+
+        let current_snapshot = catalog.reader().await?.snapshot_id();
+        let files_relation_id = catalog
+            .create_base_table(
+                current_snapshot,
+                CreateBaseTableInfo {
+                    schema_name: "public".to_owned(),
+                    relation_name: "events".to_owned(),
+                    storage: BaseTableStorage::Files,
+                    columns: vec![CreateColumnInfo {
+                        column_name: "event_id".to_owned(),
+                        column_type: ColumnType(DataType::Int64),
+                        nulls_allowed: false,
+                    }],
+                },
+            )
+            .await?;
+        let files_snapshot = catalog.reader().await?.snapshot_id();
+        let event_id = catalog
+            .reader()
+            .await?
+            .get_relation(GetRelationInfo {
+                relation_id: files_relation_id,
+            })
+            .await?
+            .columns[0]
+            .column_id;
+        assert!(matches!(
+            catalog
+                .create_index(
+                    files_snapshot,
+                    CreateIndexInfo {
+                        relation_id: files_relation_id,
+                        index_name: "events_idx".to_owned(),
+                        access_method: "btree".to_owned(),
+                        is_unique: false,
+                        nulls_not_distinct: false,
+                        fields: vec![IndexField {
+                            role: IndexFieldRole::Key,
+                            column_id: event_id,
+                            direction: None,
+                            null_order: None,
+                            collation: None,
+                            operator_class: None,
+                        }],
+                        status: IndexStatus::Ready,
+                    },
+                )
+                .await,
+            Err(CatalogError::IndexUnsupportedStorage { .. })
+        ));
+        assert_eq!(catalog.reader().await?.snapshot_id(), files_snapshot);
 
         Ok(())
     }

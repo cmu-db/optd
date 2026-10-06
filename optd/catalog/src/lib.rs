@@ -7,6 +7,7 @@
 pub mod catalog;
 pub mod entity;
 mod error;
+pub mod index;
 pub mod migration;
 pub mod relation;
 pub mod schema;

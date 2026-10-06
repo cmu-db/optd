@@ -1,7 +1,7 @@
 use sea_orm::DbErr;
 use snafu::Snafu;
 
-use crate::SnapshotId;
+use crate::{SnapshotId, relation::StorageKind};
 
 /// Error returned by catalog reads and mutations.
 #[derive(Debug, Snafu)]
@@ -50,6 +50,38 @@ pub enum CatalogError {
         schema_name: String,
         relation_name: String,
     },
+
+    /// Requested index ID is not visible.
+    #[snafu(display("index {index_id} not found"))]
+    IndexNotFound { index_id: i64 },
+
+    /// A visible index already has the requested relation-local name.
+    #[snafu(display("index '{index_name}' already exists on relation {relation_id}"))]
+    IndexAlreadyExists {
+        relation_id: i64,
+        index_name: String,
+    },
+
+    /// Index metadata was requested for a relation without relational storage.
+    #[snafu(display(
+        "indexes are not supported for relation {relation_id} with storage {storage_kind:?}"
+    ))]
+    IndexUnsupportedStorage {
+        relation_id: i64,
+        storage_kind: StorageKind,
+    },
+
+    /// An index references a column not visible in its relation.
+    #[snafu(display("column {column_id} not found in indexed relation {relation_id}"))]
+    IndexColumnNotFound { relation_id: i64, column_id: i64 },
+
+    /// An index definition violates catalog invariants.
+    #[snafu(display("invalid index definition: {reason}"))]
+    InvalidIndexDefinition { reason: String },
+
+    /// Ordered index fields could not be encoded or decoded.
+    #[snafu(display("invalid index fields: {reason}"))]
+    IndexFields { reason: String },
 
     /// A statistics payload references a column not visible in its relation.
     #[snafu(display("column {column_id} not found in relation {relation_id}"))]

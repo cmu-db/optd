@@ -3,6 +3,7 @@
 pub mod branch;
 pub mod column;
 pub mod column_statistics;
+pub mod index;
 pub mod prelude;
 pub mod relation;
 pub mod schema;
