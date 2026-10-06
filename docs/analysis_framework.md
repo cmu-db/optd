@@ -66,7 +66,8 @@ The analysis calls `analyses.get` on its operator's inputs recursively. Results 
 leaves to root. Memoization per operator handle is safe under the append-only invariant —
 an operator's payload never changes, so its bottom-up value is stable forever.
 
-Examples: `AvailableColumns`, `CreatedColumns`, `ColumnNullability`, `FreeColumns`.
+Examples: `AvailableColumns`, `CreatedColumns`, `ColumnNullability`, `FreeColumns`,
+`LogicalFactsAnalysis`, and `CardinalityEstimationV1`.
 
 ### Top-down (inherited)
 
@@ -119,6 +120,11 @@ Each analysis owns its caching. The framework does not mandate or provide a cach
 
 Under the append-only invariant, bottom-up cache entries for existing handles are always
 valid. Top-down cache entries are valid until the reachable root changes.
+
+`LogicalFactsAnalysis` keeps estimator-independent value lineage and predicate constraints separate
+from cardinality policy. `CardinalityEstimationV1` consumes those facts and catalog key relationships. Pair selectivity,
+directional join-key coverage, and filtered NDV propagation remain estimator policy rather than
+logical facts.
 
 ## Future: Indexed Representation
 
