@@ -6,7 +6,6 @@ pub use sea_orm_migration::MigratorTrait;
 
 mod initial;
 mod statistics;
-mod statistics_value_encoding;
 
 pub struct Migrator;
 
@@ -16,7 +15,6 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(initial::Migration),
             Box::new(statistics::Migration),
-            Box::new(statistics_value_encoding::Migration),
         ]
     }
 }

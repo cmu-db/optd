@@ -16,7 +16,9 @@ SeaORM persistence only; durable catalog identity remains in stable object IDs.
 The initial migration bootstraps snapshot `0` and the `main` branch; writes
 publish new snapshots through an expected-base branch-head update.
 
-Statistics payloads carry an explicit typed-value encoding version. A follow-up
-migration adds that version column to catalogs created by the first statistics
-migration, while fresh catalogs receive it directly from the current entity
-schema.
+Statistics payloads carry an explicit typed-value encoding version and use
+unified `begin_snapshot`/`end_snapshot` visibility. The statistics migration
+creates the current tables and composite non-unique indexes for definition
+visibility, payload visibility, and per-payload column lookup. During this
+initial development phase, incompatible local SQLite catalogs should be deleted
+and recreated rather than upgraded through intermediate schema migrations.

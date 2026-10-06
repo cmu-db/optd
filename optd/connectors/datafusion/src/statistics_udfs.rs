@@ -179,6 +179,11 @@ async fn collect_and_persist_statistics(
     let session = SessionContext::from(state.clone());
     let table = TableReference::from(table_name);
     let provider = session.table_provider(table.clone()).await?;
+    let catalog = PersistentCatalog::new(db);
+    let reader = catalog.reader().await.map_err(external_error)?;
+    let schemas = reader.get_all_schemas().await.map_err(external_error)?;
+    let relations = reader.get_all_relations().await.map_err(external_error)?;
+    let relation = resolve_relation(&schemas, &relations, &table, &session)?;
     let column_names = provider
         .schema()
         .fields()
@@ -187,12 +192,6 @@ async fn collect_and_persist_statistics(
         .collect::<Vec<_>>();
     let column_refs = column_names.iter().map(String::as_str).collect::<Vec<_>>();
     let collected = collect_table_statistics_for_table_ref(&session, &table, &column_refs).await?;
-
-    let catalog = PersistentCatalog::new(db);
-    let reader = catalog.reader().await.map_err(external_error)?;
-    let schemas = reader.get_all_schemas().await.map_err(external_error)?;
-    let relations = reader.get_all_relations().await.map_err(external_error)?;
-    let relation = resolve_relation(&schemas, &relations, &table, &session)?;
     let mut columns = Vec::with_capacity(collected.column_statistics.len());
     for (column_name, statistics) in collected.column_statistics {
         let column = relation
@@ -218,7 +217,6 @@ async fn collect_and_persist_statistics(
             reader.snapshot_id(),
             SetRelationStatisticsInfo {
                 relation_id: relation.relation_id,
-                data_snapshot_id: None,
                 row_count: collected.row_count.map(|value| value as u64),
                 size_bytes: collected.size_bytes.map(|value| value as u64),
                 column_statistics: columns,
@@ -260,7 +258,7 @@ async fn estimate_cardinality(
         .value)
 }
 
-async fn build_persistent_statistics_catalog(
+pub(crate) async fn build_persistent_statistics_catalog(
     session: &SessionContext,
     db: DatabaseConnection,
     plan: &datafusion::logical_expr::LogicalPlan,

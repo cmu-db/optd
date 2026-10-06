@@ -8,7 +8,7 @@ The first executable catalog kernel was adapted from `origin/spring26` and
 flattened into this single crate. It currently provides:
 
 - SeaORM entities and migrations for snapshots, branches, schemas, relations,
-  columns, statistics definitions, and immutable statistics payloads.
+  columns, statistics definitions, and temporal statistics payloads.
 - Transactional schema and typed base-table create/drop operations.
 - Explicit relation and storage kinds for relational and file-backed tables.
 - Readers pinned to a branch head or an explicit historical snapshot.
@@ -38,4 +38,4 @@ The target model is documented in
    including relation-scoped column IDs, in catalog operations.
 2. Add rename end-to-end coverage.
 3. Add view definitions and a typed `create_view` operation.
-4. Add statistics freshness fingerprints, sampling, and richer distributions.
+4. Route DML through snapshot-based statistics invalidation, then add sampling and richer distributions.

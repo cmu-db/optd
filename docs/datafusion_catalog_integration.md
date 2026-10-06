@@ -93,16 +93,19 @@ atomically. Tests must cover compensation paths as catalog behavior expands.
   `TableProvider`.
 - Temporary tables and views remain DataFusion concerns and are not persisted.
 - The initial persistent-statistics UDFs are documented in
-  [persistent_statistics_demo.md](persistent_statistics_demo.md).
+  [persistent_statistics_demo.md](persistent_statistics_demo.md). Statistics
+  payloads use the unified catalog snapshot interval; DataFusion DML still needs
+  to publish through that path so successful writes close visible payloads.
 - PostgreSQL concurrency coverage remains deferred; SQLite exercises DDL
   mirroring, historical visibility, and branch publication.
 
 ## Next integration steps
 
-1. Add a file-definition payload for external tables and preserve location,
+1. Route successful DML through catalog snapshot publication and statistics
+   invalidation.
+2. Add a file-definition payload for external tables and preserve location,
    format, and options from `CreateExternalTable`.
-2. Add `optd_view_definition` and route `CreateView`/`DropView` through typed
+3. Add `optd_view_definition` and route `CreateView`/`DropView` through typed
    catalog operations.
-3. Extend the existing registration-compensation test to deregistration and schema failures.
 4. Decide whether startup hydration is required for file-backed providers.
 5. Replace the temporary-thread bridge with a long-lived actor only if needed.

@@ -57,8 +57,6 @@ pub struct ColumnStatistics {
 pub struct SetRelationStatisticsInfo {
     /// Stable identifier of the relation described by the payload.
     pub relation_id: i64,
-    /// Optional storage-level snapshot or version from which the payload was collected.
-    pub data_snapshot_id: Option<String>,
     /// Number of rows in the collected population.
     pub row_count: Option<u64>,
     /// Physical size of the collected population in bytes.
@@ -74,10 +72,10 @@ pub struct RelationStatistics {
     pub statistics_id: i64,
     /// Stable identifier of the relation described by the payload.
     pub relation_id: i64,
-    /// Catalog snapshot that published this payload.
-    pub catalog_snapshot_id: SnapshotId,
-    /// Optional storage-level snapshot or version from which the payload was collected.
-    pub data_snapshot_id: Option<String>,
+    /// First catalog snapshot in which this payload is visible.
+    pub begin_snapshot: SnapshotId,
+    /// First catalog snapshot in which this payload is no longer visible.
+    pub end_snapshot: Option<SnapshotId>,
     /// Encoding version used by the typed column bounds in this payload.
     pub value_encoding_version: i32,
     /// Number of rows in the collected population.

@@ -15,8 +15,10 @@ The persistence tables are:
 
 A collection commits and publishes a new catalog snapshot. A reader pinned
 before collection sees no payload; a reader pinned to the new snapshot sees it.
-Recollection keeps the same `statistics_id`, appends another immutable payload,
-and preserves the old result for historical readers.
+Recollection keeps the same `statistics_id`, closes the previous payload at the
+new snapshot, appends a replacement, and preserves the old result for historical
+readers. Data-changing commits use the same mechanism to close statistics without
+installing a replacement.
 
 ## SQL helpers
 
@@ -40,7 +42,9 @@ snapshot per input row. Qualified names such as `analytics.orders` are supported
 
 Both UDFs are removed when the persistent catalog adapter is uninstalled and
 restored when it is installed again. Previously persisted payloads remain in the
-catalog.
+catalog. `optd-cli --catalog-db` also configures ordinary `OptdRunner` planning
+to read these payloads; missing or invalidated statistics use fallback estimates
+rather than triggering an automatic table scan.
 
 ## JOB demonstration script
 
@@ -97,9 +101,9 @@ file before running.
 
 - Collection is a full scan; sampling, histograms, and most-common values are not
   implemented.
-- `data_snapshot_id` is currently unset, so freshness across DML is not yet
-  provable. The demo assumes immutable table contents between collection and
-  planning.
+- DataFusion DML is not yet routed through catalog publication, so the demo
+  assumes immutable table contents between catalog commits. The catalog already
+  exposes snapshot-based statistics invalidation for the future DML path.
 - `cardest` reads the current branch head. Historical catalog reads are covered
   by the Rust API; a SQL `cardest_at` helper is not currently exposed.
 - Persisted constraints are not yet merged into the planner-side statistics

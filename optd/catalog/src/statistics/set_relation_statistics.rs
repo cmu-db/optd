@@ -2,6 +2,7 @@ use sea_orm::{
     ActiveValue::{NotSet, Set},
     ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder,
     prelude::ChronoUtc,
+    sea_query::Expr,
 };
 
 use crate::{
@@ -80,12 +81,20 @@ pub(crate) async fn insert_relation_statistics<C: ConnectionTrait>(
         .await?;
     }
 
+    close_active_statistics_payload(
+        db,
+        statistics_id,
+        definition_begin_snapshot,
+        new_snapshot_id,
+    )
+    .await?;
+
     StatisticsPayload::insert(statistics_payload::ActiveModel {
         row_id: NotSet,
         statistics_id: Set(statistics_id),
         statistics_begin_snapshot: Set(definition_begin_snapshot),
-        catalog_snapshot_id: Set(new_snapshot_id),
-        data_snapshot_id: Set(info.data_snapshot_id),
+        begin_snapshot: Set(new_snapshot_id),
+        end_snapshot: Set(None),
         value_encoding_version: Set(STATISTICS_VALUE_ENCODING_VERSION),
         collected_at: Set(ChronoUtc::now()),
         row_count: Set(encode_count("row_count", info.row_count)?),
@@ -103,7 +112,7 @@ pub(crate) async fn insert_relation_statistics<C: ConnectionTrait>(
                     row_id: NotSet,
                     statistics_id: Set(statistics_id),
                     statistics_begin_snapshot: Set(definition_begin_snapshot),
-                    catalog_snapshot_id: Set(new_snapshot_id),
+                    payload_begin_snapshot: Set(new_snapshot_id),
                     column_id: Set(column.column_id),
                     frequency: Set(encode_count("frequency", column.frequency)?),
                     distinct_count: Set(encode_count("distinct_count", column.distinct_count)?),
@@ -115,6 +124,25 @@ pub(crate) async fn insert_relation_statistics<C: ConnectionTrait>(
         ColumnStatistics::insert_many(columns).exec(db).await?;
     }
 
+    Ok(())
+}
+
+pub(crate) async fn close_active_statistics_payload<C: ConnectionTrait>(
+    db: &C,
+    statistics_id: i64,
+    definition_begin_snapshot: i64,
+    end_snapshot: i64,
+) -> CatalogResult<()> {
+    StatisticsPayload::update_many()
+        .col_expr(
+            statistics_payload::Column::EndSnapshot,
+            Expr::value(end_snapshot),
+        )
+        .filter(statistics_payload::Column::StatisticsId.eq(statistics_id))
+        .filter(statistics_payload::Column::StatisticsBeginSnapshot.eq(definition_begin_snapshot))
+        .filter(statistics_payload::Column::EndSnapshot.is_null())
+        .exec(db)
+        .await?;
     Ok(())
 }
 

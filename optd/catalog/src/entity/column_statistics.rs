@@ -13,8 +13,8 @@ pub struct Model {
     pub statistics_id: i64,
     /// `begin_snapshot` of the exact temporal statistics definition version.
     pub statistics_begin_snapshot: i64,
-    /// Catalog snapshot of the relation-level payload containing this value.
-    pub catalog_snapshot_id: i64,
+    /// `begin_snapshot` of the relation-level payload containing this value.
+    pub payload_begin_snapshot: i64,
     /// Relation-scoped durable column identifier.
     pub column_id: i64,
     /// Number of non-null values in the collected population.

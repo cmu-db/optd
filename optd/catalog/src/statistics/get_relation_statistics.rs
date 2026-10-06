@@ -43,8 +43,13 @@ pub(crate) async fn get_relation_statistics<C: ConnectionTrait>(
     let Some(payload) = StatisticsPayload::find()
         .filter(statistics_payload::Column::StatisticsId.eq(definition.statistics_id))
         .filter(statistics_payload::Column::StatisticsBeginSnapshot.eq(definition.begin_snapshot))
-        .filter(statistics_payload::Column::CatalogSnapshotId.lte(snapshot_id))
-        .order_by_desc(statistics_payload::Column::CatalogSnapshotId)
+        .filter(statistics_payload::Column::BeginSnapshot.lte(snapshot_id))
+        .filter(
+            Condition::any()
+                .add(statistics_payload::Column::EndSnapshot.is_null())
+                .add(statistics_payload::Column::EndSnapshot.gt(snapshot_id)),
+        )
+        .order_by_desc(statistics_payload::Column::BeginSnapshot)
         .one(db)
         .await?
     else {
@@ -60,7 +65,7 @@ pub(crate) async fn get_relation_statistics<C: ConnectionTrait>(
     let columns = ColumnStatistics::find()
         .filter(column_statistics::Column::StatisticsId.eq(definition.statistics_id))
         .filter(column_statistics::Column::StatisticsBeginSnapshot.eq(definition.begin_snapshot))
-        .filter(column_statistics::Column::CatalogSnapshotId.eq(payload.catalog_snapshot_id))
+        .filter(column_statistics::Column::PayloadBeginSnapshot.eq(payload.begin_snapshot))
         .order_by_asc(column_statistics::Column::ColumnId)
         .all(db)
         .await?
@@ -79,8 +84,8 @@ pub(crate) async fn get_relation_statistics<C: ConnectionTrait>(
     Ok(Some(RelationStatistics {
         statistics_id: definition.statistics_id,
         relation_id,
-        catalog_snapshot_id: SnapshotId::from_raw(payload.catalog_snapshot_id),
-        data_snapshot_id: payload.data_snapshot_id,
+        begin_snapshot: SnapshotId::from_raw(payload.begin_snapshot),
+        end_snapshot: payload.end_snapshot.map(SnapshotId::from_raw),
         value_encoding_version: payload.value_encoding_version,
         row_count: decode_count("row_count", payload.row_count)?,
         size_bytes: decode_count("size_bytes", payload.size_bytes)?,

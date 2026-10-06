@@ -826,6 +826,88 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn failed_persistence_restores_deregistered_table_and_schema() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("catalog.sqlite");
+        let url = format!("sqlite://{}?mode=rwc", path.display());
+        let db = Database::connect(&url).await.unwrap();
+        let session = session_context_with_information_schema();
+        install_persistent_catalog(&session, "datafusion", db.clone())
+            .await
+            .unwrap();
+        session
+            .sql("CREATE SCHEMA analytics")
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        session
+            .sql("CREATE TABLE analytics.orders AS SELECT 1 AS order_id")
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        session
+            .sql("CREATE SCHEMA empty_schema")
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+
+        let catalog = Catalog::new(db.clone());
+        let reader = catalog.reader().await.unwrap();
+        let relation_id = reader.get_all_relations().await.unwrap()[0].relation_id;
+        catalog
+            .drop_relation(
+                reader.snapshot_id(),
+                optd_catalog::relation::DropRelationInfo { relation_id },
+            )
+            .await
+            .unwrap();
+
+        session
+            .sql("DROP TABLE analytics.orders")
+            .await
+            .expect_err("missing durable relation should reject the runtime drop");
+        assert!(session.table("analytics.orders").await.is_ok());
+
+        let reader = catalog.reader().await.unwrap();
+        let schema_id = reader
+            .get_all_schemas()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|schema| schema.schema_name == "empty_schema")
+            .unwrap()
+            .schema_id;
+        catalog
+            .drop_schema(
+                reader.snapshot_id(),
+                optd_catalog::schema::DropSchemaInfo { schema_id },
+            )
+            .await
+            .unwrap();
+
+        session
+            .sql("DROP SCHEMA empty_schema")
+            .await
+            .expect_err("missing durable schema should reject the runtime drop");
+        assert!(
+            session
+                .catalog("datafusion")
+                .unwrap()
+                .schema("empty_schema")
+                .is_some()
+        );
+
+        drop(catalog);
+        db.close().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn failed_persistence_rolls_back_datafusion_registration() {
         let temp_dir = tempfile::tempdir().unwrap();
         let path = temp_dir.path().join("catalog.sqlite");
@@ -836,6 +918,28 @@ mod tests {
             .await
             .unwrap();
 
+        let catalog = Catalog::new(db.clone());
+        let initial_snapshot = catalog.reader().await.unwrap().snapshot_id();
+        catalog
+            .create_schema(
+                initial_snapshot,
+                optd_catalog::schema::CreateSchemaInfo {
+                    schema_name: "durable_only".to_owned(),
+                },
+            )
+            .await
+            .unwrap();
+        session
+            .sql("CREATE SCHEMA durable_only")
+            .await
+            .expect_err("persistent schema conflict should roll back runtime registration");
+        assert!(
+            session
+                .catalog("datafusion")
+                .unwrap()
+                .schema("durable_only")
+                .is_none()
+        );
         session
             .sql("CREATE SCHEMA analytics")
             .await
@@ -844,7 +948,6 @@ mod tests {
             .await
             .unwrap();
 
-        let catalog = Catalog::new(db.clone());
         let reader = catalog.reader().await.unwrap();
         catalog
             .create_base_table(

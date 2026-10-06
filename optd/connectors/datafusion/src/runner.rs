@@ -20,6 +20,7 @@ use optd_core::{
     OperatorRewriteAdaptor, OptimizerContext, PassManager, PlannedQuery, PredicatePushdown,
     ProjectionElimination, QueryContext, QueryFormatConfig, SubqueryToJoin,
 };
+use sea_orm::DatabaseConnection;
 use sqllogictest::{AsyncDB, DBOutput};
 
 use crate::config::OptdExtensionConfig;
@@ -28,6 +29,7 @@ use crate::explain_udfs::{
 };
 use crate::from_df_logical::from_logical_plan;
 use crate::runtime_statistics::RuntimeStatisticsCatalogBuilder;
+use crate::statistics_udfs::build_persistent_statistics_catalog;
 use crate::to_df_logical::to_logical_plan;
 use crate::to_df_physical::{ToPhysicalError, to_physical_plan};
 
@@ -108,7 +110,15 @@ pub fn default_pass_manager() -> PassManager {
 
 pub struct OptdRunner {
     session: SessionContext,
-    runtime_stats: RuntimeStatisticsCatalogBuilder,
+    statistics_source: StatisticsSource,
+}
+
+/// Statistics source used while constructing query-local planner catalogs.
+enum StatisticsSource {
+    /// Collect and cache statistics directly from DataFusion providers.
+    Runtime(RuntimeStatisticsCatalogBuilder),
+    /// Read statistics from the snapshot-aware persistent catalog.
+    Persistent(DatabaseConnection),
 }
 
 #[derive(Debug)]
@@ -148,7 +158,22 @@ impl OptdRunner {
         let runtime_stats = RuntimeStatisticsCatalogBuilder::new(session.clone());
         Self {
             session,
-            runtime_stats,
+            statistics_source: StatisticsSource::Runtime(runtime_stats),
+        }
+    }
+
+    /// Creates a runner that reads planner statistics from `catalog_db`.
+    ///
+    /// Missing or invalidated payloads use optd's normal fallback estimates; this mode does not
+    /// scan tables automatically during optimization.
+    pub fn new_with_persistent_catalog(
+        session: SessionContext,
+        catalog_db: DatabaseConnection,
+    ) -> Self {
+        register_explain_udfs(&session);
+        Self {
+            session,
+            statistics_source: StatisticsSource::Persistent(catalog_db),
         }
     }
 
@@ -370,8 +395,18 @@ impl OptdRunner {
         &self,
         plan: &LogicalPlan,
     ) -> Result<PlannedQuery, TryViaIrError> {
-        let opt =
-            optimizer_context_from_logical_plan(&self.session, &self.runtime_stats, plan).await?;
+        let opt = match &self.statistics_source {
+            StatisticsSource::Runtime(runtime_stats) => {
+                optimizer_context_from_logical_plan(&self.session, runtime_stats, plan).await?
+            }
+            StatisticsSource::Persistent(db) => {
+                let catalog = build_persistent_statistics_catalog(&self.session, db.clone(), plan)
+                    .await
+                    .map_err(|error| TryViaIrError::Failed(error.to_string()))?;
+                optimizer_context_from_logical_plan_with_catalog(&self.session, plan, catalog)
+                    .await?
+            }
+        };
         optimize(opt).map_err(|e| TryViaIrError::Failed(e.to_string()))
     }
 
@@ -503,12 +538,16 @@ fn collect_table_scans(plan: &LogicalPlan, out: &mut Vec<datafusion::common::Tab
 mod tests {
     use super::{IrExecutionPath, OptdRunner};
     use crate::config::OptdExtensionConfig;
+    use crate::persistent_catalog::install_persistent_catalog;
     use crate::setup::session_context_with_information_schema;
     use datafusion::arrow::array::{ArrayRef, Int64Array};
     use datafusion::arrow::datatypes::{DataType, Field, Schema};
     use datafusion::arrow::record_batch::RecordBatch;
     use datafusion::datasource::MemTable;
     use datafusion::prelude::{SessionConfig, SessionContext};
+    use optd_catalog::Catalog;
+    use optd_core::CardinalityEstimationV1;
+    use sea_orm::Database;
     use std::sync::Arc;
 
     fn session_with_optd_config(config: OptdExtensionConfig) -> SessionContext {
@@ -521,6 +560,72 @@ mod tests {
             log_explain_steps: true,
             physical_planning: true,
         }))
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn persistent_runner_uses_catalog_statistics_without_runtime_collection() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("catalog.sqlite");
+        let db = Database::connect(format!("sqlite://{}?mode=rwc", path.display()))
+            .await
+            .unwrap();
+        let session = session_context_with_information_schema();
+        install_persistent_catalog(&session, "datafusion", db.clone())
+            .await
+            .unwrap();
+        session
+            .sql(
+                "CREATE TABLE numbers AS \
+                 SELECT * FROM (VALUES (1), (2), (2)) AS source(value)",
+            )
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        session
+            .sql("SELECT collect_stats('numbers')")
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+
+        let runner = OptdRunner::new_with_persistent_catalog(session, db.clone());
+        let plan = runner
+            .parse_logical_plan("SELECT * FROM numbers")
+            .await
+            .unwrap();
+        let planned = runner.optimized_ir_from_logical_plan(&plan).await.unwrap();
+        let root = planned.query.root().unwrap();
+        let mut analyses = planned.analyze();
+        let estimate = analyses
+            .get::<CardinalityEstimationV1>(&planned.query, root)
+            .unwrap();
+        assert_eq!(estimate.rows.value, 3.0);
+
+        let catalog = Catalog::new(db.clone());
+        let reader = catalog.reader().await.unwrap();
+        let relation_id = reader.get_all_relations().await.unwrap()[0].relation_id;
+        catalog
+            .invalidate_relation_statistics(reader.snapshot_id(), relation_id)
+            .await
+            .unwrap();
+        let plan = runner
+            .parse_logical_plan("SELECT * FROM numbers")
+            .await
+            .unwrap();
+        let planned = runner.optimized_ir_from_logical_plan(&plan).await.unwrap();
+        let root = planned.query.root().unwrap();
+        let mut analyses = planned.analyze();
+        let estimate = analyses
+            .get::<CardinalityEstimationV1>(&planned.query, root)
+            .unwrap();
+        assert_eq!(estimate.rows.value, 1000.0);
+
+        drop(catalog);
+        drop(runner);
+        db.close().await.unwrap();
     }
 
     #[test]

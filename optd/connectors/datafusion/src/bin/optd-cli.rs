@@ -102,7 +102,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         register_job_tables(&session).await?;
     }
     drop(import_guard);
-    let runner = OptdRunner::new(session);
+    let runner = match catalog_db.as_ref() {
+        Some(db) => OptdRunner::new_with_persistent_catalog(session, db.clone()),
+        None => OptdRunner::new(session),
+    };
 
     if args.commands.is_empty() && args.files.is_empty() {
         repl(&runner).await?;

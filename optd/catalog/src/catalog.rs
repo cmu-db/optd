@@ -306,6 +306,62 @@ impl<T: TransactionTrait> Catalog<T> {
         )
     }
 
+    /// Publishes a data-change snapshot and invalidates visible statistics for a relation.
+    ///
+    /// Future DML implementations should perform their storage mutation and call the underlying
+    /// invalidation helper in the same transaction rather than publishing a second snapshot.
+    pub async fn invalidate_relation_statistics(
+        &self,
+        expected_snapshot_id: snapshot::SnapshotId,
+        relation_id: i64,
+    ) -> CatalogResult<snapshot::SnapshotId> {
+        let branch_name = self.branch_name.clone();
+        flatten_transaction_err(
+            self.db
+                .transaction::<_, _, CatalogError>(|txn| {
+                    Box::pin(async move {
+                        let current_snapshot = snapshot::get_snapshot_for_write(
+                            txn,
+                            &branch_name,
+                            expected_snapshot_id,
+                        )
+                        .await?;
+                        let read_snapshot = current_snapshot.clone();
+                        relation::get_relation(
+                            relation::GetRelationInfo { relation_id },
+                            txn,
+                            &read_snapshot,
+                        )
+                        .await?
+                        .ok_or(CatalogError::RelationNotFound { relation_id })?;
+                        let definition =
+                            statistics::get_statistics_definition(txn, &read_snapshot, relation_id)
+                                .await?;
+                        let new_snapshot_id =
+                            snapshot::commit_snapshot(txn, current_snapshot).await?;
+                        if let Some(definition) = definition {
+                            statistics::close_active_statistics_payload(
+                                txn,
+                                definition.statistics_id,
+                                definition.begin_snapshot,
+                                new_snapshot_id.as_i64(),
+                            )
+                            .await?;
+                        }
+                        snapshot::publish_snapshot(
+                            txn,
+                            &branch_name,
+                            expected_snapshot_id,
+                            new_snapshot_id,
+                        )
+                        .await?;
+                        Ok(new_snapshot_id)
+                    })
+                })
+                .await,
+        )
+    }
+
     /// Drops a relation from `expected_snapshot_id` and publishes a new branch head.
     pub async fn drop_relation(
         &self,
@@ -484,7 +540,6 @@ mod tests {
                 relation_snapshot_id,
                 SetRelationStatisticsInfo {
                     relation_id,
-                    data_snapshot_id: Some("data-v1".to_owned()),
                     row_count: Some(10),
                     size_bytes: None,
                     column_statistics: vec![ColumnStatistics {
@@ -523,7 +578,6 @@ mod tests {
                 first_statistics_snapshot,
                 SetRelationStatisticsInfo {
                     relation_id,
-                    data_snapshot_id: Some("data-v2".to_owned()),
                     row_count: Some(20),
                     size_bytes: None,
                     column_statistics: vec![ColumnStatistics {
@@ -543,20 +597,43 @@ mod tests {
             .await?
             .unwrap();
         assert_eq!(second.statistics_id, first.statistics_id);
+        assert_eq!(second.begin_snapshot, second_statistics_snapshot);
+        assert_eq!(second.end_snapshot, None);
         assert_eq!(second.row_count, Some(20));
+        let historical_first = catalog
+            .reader_at(first_statistics_snapshot)
+            .await?
+            .get_relation_statistics(relation_id)
+            .await?
+            .unwrap();
+        assert_eq!(historical_first.row_count, Some(10));
         assert_eq!(
+            historical_first.end_snapshot,
+            Some(second_statistics_snapshot)
+        );
+
+        let invalidation_snapshot = catalog
+            .invalidate_relation_statistics(second_statistics_snapshot, relation_id)
+            .await?;
+        assert!(
             catalog
-                .reader_at(first_statistics_snapshot)
+                .reader_at(invalidation_snapshot)
                 .await?
                 .get_relation_statistics(relation_id)
                 .await?
-                .unwrap()
-                .row_count,
-            Some(10)
+                .is_none()
         );
+        let historical_second = catalog
+            .reader_at(second_statistics_snapshot)
+            .await?
+            .get_relation_statistics(relation_id)
+            .await?
+            .unwrap();
+        assert_eq!(historical_second.row_count, Some(20));
+        assert_eq!(historical_second.end_snapshot, Some(invalidation_snapshot));
 
         catalog
-            .drop_relation(second_statistics_snapshot, DropRelationInfo { relation_id })
+            .drop_relation(invalidation_snapshot, DropRelationInfo { relation_id })
             .await?;
         assert!(
             catalog

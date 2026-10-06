@@ -507,9 +507,9 @@ Files are written before the catalog commit. The commit publishes them atomicall
 ## Statistics
 
 - Statistics definitions are separate from collected payloads.
-- Payloads identify both metadata and data snapshots.
+- Payload visibility uses the same snapshot intervals as the rest of the catalog.
 - Single-column, multicolumn, file, and row-group statistics are supported.
-- Freshness is explicit.
+- Data-changing commits explicitly invalidate visible payloads.
 
 The main tables are:
 
@@ -528,8 +528,8 @@ optd_statistics(
 optd_statistics_payload(
   statistics_id,
   statistics_begin_snapshot,
-  catalog_snapshot_id,
-  data_snapshot_id,
+  begin_snapshot,
+  end_snapshot,
   collected_at,
   sample_fraction,
   row_count,
@@ -544,9 +544,11 @@ Initially, a `StatisticsField` contains `column_id`. Expression-based statistics
 
 File and row-group statistics use typed min/max values and null counts to support pruning. Large histograms and MCV sets may live in external statistics blobs referenced by the catalog.
 
-Logical views normally derive estimates from their expanded query. Persisted view statistics are allowed only when they record the view-definition snapshot and every dependency's data snapshot. Materialized views are analyzed like tables.
+Logical views normally derive estimates from their expanded query. Persisted view statistics are allowed only when dependency-changing commits close them in the same global snapshot history. Materialized views are analyzed like tables.
 
-**Decision:** versioned statistics payloads with dependency fingerprints.
+Statistics payloads use the same global snapshot domain as every other catalog object. Collection publishes a new snapshot and begins a payload version; a later data-changing DML or file-manifest commit closes that payload at its own snapshot. Metadata-only changes such as renames do not invalidate the payload. Collection scans from an expected base snapshot and publication fails as stale if any concurrent catalog-visible change advances the branch head.
+
+**Decision:** temporal statistics payloads in the unified catalog snapshot history.
 
 **Alternatives considered:**
 
@@ -593,7 +595,7 @@ optd_dependency(
 
 Dependency kinds distinguish normal references, ownership, automatic dependencies, and internal implementation dependencies. This graph supports `DROP RESTRICT`, `DROP CASCADE`, lineage, invalidation, and refresh planning.
 
-A materialized view records the catalog snapshot and data snapshots from which it was refreshed. It can therefore report whether it is current, stale, or invalid.
+A materialized view records the catalog snapshot from which it was refreshed. Later source-changing commits in the same snapshot history can therefore mark it stale or invalid.
 
 **Decision:** start with authoritative view SQL plus explicit dependency edges. Parse and bind the SQL when expanding a view; revisit a persisted AST or resolved-tree cache only after measuring that path.
 
