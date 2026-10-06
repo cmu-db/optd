@@ -69,6 +69,13 @@ pub enum CatalogError {
         value: String,
     },
 
+    /// A statistics definition contains an invalid column-ID vector.
+    #[snafu(display("invalid statistics column IDs: {reason}"))]
+    StatisticsColumnIds {
+        /// Explanation of the invalid JSON shape or non-canonical values.
+        reason: String,
+    },
+
     /// A typed statistics bound could not be encoded or decoded.
     #[snafu(display("invalid statistics value: {source}"))]
     StatisticsValue {

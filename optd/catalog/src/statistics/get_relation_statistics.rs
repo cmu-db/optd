@@ -7,7 +7,7 @@ use crate::{
     snapshot::{SnapshotId, SnapshotInfo},
     statistics::{
         ColumnStatistics as ColumnStatisticsInfo, RelationStatistics,
-        STATISTICS_VALUE_ENCODING_VERSION, StatisticsValue,
+        STATISTICS_VALUE_ENCODING_VERSION, StatisticsValue, decode_column_ids,
     },
 };
 
@@ -84,6 +84,7 @@ pub(crate) async fn get_relation_statistics<C: ConnectionTrait>(
     Ok(Some(RelationStatistics {
         statistics_id: definition.statistics_id,
         relation_id,
+        column_ids: decode_column_ids(definition.column_ids)?,
         begin_snapshot: SnapshotId::from_raw(payload.begin_snapshot),
         end_snapshot: payload.end_snapshot.map(SnapshotId::from_raw),
         value_encoding_version: payload.value_encoding_version,

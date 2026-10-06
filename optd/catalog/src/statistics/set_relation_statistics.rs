@@ -10,7 +10,10 @@ use crate::{
     entity::{column_statistics, prelude::*, statistics, statistics_payload},
     relation::{GetRelationInfo, get_relation},
     snapshot::SnapshotInfo,
-    statistics::{STATISTICS_VALUE_ENCODING_VERSION, SetRelationStatisticsInfo, StatisticsValue},
+    statistics::{
+        STATISTICS_VALUE_ENCODING_VERSION, SetRelationStatisticsInfo, StatisticsValue,
+        encode_column_ids,
+    },
 };
 
 pub(crate) async fn get_statistics_definition<C: ConnectionTrait>(
@@ -74,6 +77,7 @@ pub(crate) async fn insert_relation_statistics<C: ConnectionTrait>(
             relation_id: Set(info.relation_id),
             statistics_name: Set(None),
             statistics_kind: Set("table".to_owned()),
+            column_ids: Set(encode_column_ids(Vec::new())?),
             begin_snapshot: Set(definition_begin_snapshot),
             end_snapshot: Set(None),
         })

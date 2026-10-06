@@ -597,6 +597,7 @@ mod tests {
             .await?
             .unwrap();
         assert_eq!(second.statistics_id, first.statistics_id);
+        assert!(second.column_ids.is_empty());
         assert_eq!(second.begin_snapshot, second_statistics_snapshot);
         assert_eq!(second.end_snapshot, None);
         assert_eq!(second.row_count, Some(20));

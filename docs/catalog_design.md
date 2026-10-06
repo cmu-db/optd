@@ -508,7 +508,7 @@ Files are written before the catalog commit. The commit publishes them atomicall
 
 - Statistics definitions are separate from collected payloads.
 - Payload visibility uses the same snapshot intervals as the rest of the catalog.
-- Single-column, multicolumn, file, and row-group statistics are supported.
+- The definition schema can identify single-column and multicolumn targets; collected multicolumn, file, and row-group payloads remain future work.
 - Data-changing commits explicitly invalidate visible payloads.
 
 The main tables are:
@@ -520,7 +520,7 @@ optd_statistics(
   statistics_name,
   statistics_kind,
   collection_mode,
-  fields StatisticsField[],
+  column_ids JSON,
   begin_snapshot,
   end_snapshot
 )
@@ -540,7 +540,7 @@ optd_statistics_payload(
 
 The first executable slice implements one implicit table-statistics definition per relation. Relation-level payload rows are immutable, and basic per-column values are stored in `optd_column_statistics`, keyed by the definition version and collection snapshot. This normalized side table is the initial typed representation for non-null frequency, distinct count, and min/max bounds; collection modes, sampling, freshness fingerprints, and richer payload components remain follow-up work. See [persistent_statistics_demo.md](persistent_statistics_demo.md).
 
-Initially, a `StatisticsField` contains `column_id`. Expression-based statistics fields are deferred with the catalog expression representation. Single-column payloads can include null count, distinct count, average width, min/max, most-common values, frequencies, histograms, and physical correlation. Multicolumn payloads can include joint distinct counts, most-common combinations, and functional dependencies.
+`column_ids` is a canonical JSON integer array: writers validate durable relation-scoped column IDs, reject duplicates, and store them in ascending order. The implicit table definition uses `[]`; future named multicolumn definitions use the vector to align payload dimensions. Expression-based statistics fields remain deferred with the catalog expression representation. Single-column payloads can include null count, distinct count, average width, min/max, most-common values, frequencies, histograms, and physical correlation. Multicolumn payloads can include joint distinct counts, most-common combinations, and functional dependencies.
 
 File and row-group statistics use typed min/max values and null counts to support pruning. Large histograms and MCV sets may live in external statistics blobs referenced by the catalog.
 

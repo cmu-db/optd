@@ -17,6 +17,11 @@ pub struct Model {
     pub statistics_name: Option<String>,
     /// Statistics definition category, currently `table`.
     pub statistics_kind: String,
+    /// Canonically sorted durable column IDs encoded as a JSON array.
+    ///
+    /// The implicit table-statistics definition uses an empty array. Future named
+    /// multicolumn definitions use this vector to align payload dimensions.
+    pub column_ids: Json,
     /// First catalog snapshot in which this definition version is visible.
     pub begin_snapshot: i64,
     /// First catalog snapshot in which this definition version is no longer visible.
