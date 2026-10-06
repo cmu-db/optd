@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+#[cfg(test)]
+use std::collections::HashSet;
 
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::{
@@ -6,6 +8,8 @@ use datafusion::common::{
 };
 use datafusion::prelude::SessionContext;
 use optd_core::{Catalog, ColumnStatistics, ScalarValue, TableRef, TableStatistics};
+#[cfg(test)]
+use optd_core::{ColumnSketches, EncodedScalarValue};
 
 /// Collects table and column statistics by running local aggregate SQL.
 ///
@@ -165,6 +169,135 @@ fn convert_scalar(value: DFScalarValue) -> Option<ScalarValue> {
     }
 }
 
+/// Exact full-scan statistics used by connector tests.
+///
+/// This deliberately executes `SELECT *` and materializes the fixture. Production collection must
+/// use a bounded collector or persisted catalog statistics instead.
+#[cfg(test)]
+struct FullScanStatistics {
+    table: TableStatistics,
+    sketches: BTreeMap<String, ColumnSketches>,
+}
+
+#[cfg(test)]
+async fn collect_full_scan_statistics_for_test(
+    session: &SessionContext,
+    table_name: &str,
+    columns: &[&str],
+) -> DFResult<FullScanStatistics> {
+    let sql = format!("SELECT * FROM {}", quote_ident(table_name));
+    let batches = session.sql(&sql).await?.collect().await?;
+    let row_count = batches.iter().map(RecordBatch::num_rows).sum::<usize>();
+    let mut column_statistics = BTreeMap::new();
+    let mut sketches = BTreeMap::new();
+
+    for column_name in columns {
+        let mut values = Vec::new();
+        for batch in &batches {
+            let index = batch
+                .schema()
+                .index_of(column_name)
+                .map_err(|error| DataFusionError::ArrowError(Box::new(error), None))?;
+            for row in 0..batch.num_rows() {
+                let value = DFScalarValue::try_from_array(batch.column(index), row)?;
+                if value.is_null() {
+                    continue;
+                }
+                let value = convert_scalar(value).ok_or_else(|| {
+                    DataFusionError::NotImplemented(format!(
+                        "full-scan test statistics do not support column '{column_name}'"
+                    ))
+                })?;
+                values.push(value);
+            }
+        }
+
+        let mut exact_distinct = HashSet::new();
+        let mut lower_bound: Option<ScalarValue> = None;
+        let mut upper_bound: Option<ScalarValue> = None;
+        let mut column_sketches = ColumnSketches::new(row_count as u64)
+            .hll()
+            .space_saving(128)
+            .map_err(|error| DataFusionError::Execution(error.to_string()))?;
+        for value in &values {
+            if let Some(encoded) = EncodedScalarValue::from_scalar(value) {
+                exact_distinct.insert(encoded);
+            }
+            update_test_bounds(&mut lower_bound, &mut upper_bound, value);
+            column_sketches.observe(value);
+        }
+
+        column_statistics.insert(
+            (*column_name).to_string(),
+            ColumnStatistics {
+                lower_bound,
+                upper_bound,
+                frequency: Some(values.len()),
+                distinct: Some(exact_distinct.len()),
+                distribution: None,
+            },
+        );
+        sketches.insert((*column_name).to_string(), column_sketches);
+    }
+
+    Ok(FullScanStatistics {
+        table: TableStatistics {
+            row_count: Some(row_count),
+            size_bytes: None,
+            column_statistics,
+            constraints: Default::default(),
+        },
+        sketches,
+    })
+}
+
+#[cfg(test)]
+fn update_test_bounds(
+    lower: &mut Option<ScalarValue>,
+    upper: &mut Option<ScalarValue>,
+    value: &ScalarValue,
+) {
+    if lower
+        .as_ref()
+        .is_none_or(|current| test_scalar_order(value, current).is_some_and(|order| order.is_lt()))
+    {
+        *lower = Some(value.clone());
+    }
+    if upper
+        .as_ref()
+        .is_none_or(|current| test_scalar_order(value, current).is_some_and(|order| order.is_gt()))
+    {
+        *upper = Some(value.clone());
+    }
+}
+
+#[cfg(test)]
+fn test_scalar_order(left: &ScalarValue, right: &ScalarValue) -> Option<std::cmp::Ordering> {
+    match (left, right) {
+        (ScalarValue::Boolean(left), ScalarValue::Boolean(right)) => Some(left.cmp(right)),
+        (ScalarValue::Int32(left), ScalarValue::Int32(right)) => Some(left.cmp(right)),
+        (ScalarValue::Int64(left), ScalarValue::Int64(right)) => Some(left.cmp(right)),
+        (ScalarValue::Float64(left), ScalarValue::Float64(right)) => left.partial_cmp(right),
+        (ScalarValue::Date32(left), ScalarValue::Date32(right)) => Some(left.cmp(right)),
+        (ScalarValue::Utf8(left), ScalarValue::Utf8(right)) => Some(left.cmp(right)),
+        (
+            ScalarValue::Decimal128 {
+                value: left,
+                precision: left_precision,
+                scale: left_scale,
+            },
+            ScalarValue::Decimal128 {
+                value: right,
+                precision: right_precision,
+                scale: right_scale,
+            },
+        ) if left_precision == right_precision && left_scale == right_scale => {
+            Some(left.cmp(right))
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,6 +343,60 @@ mod tests {
         );
         assert_eq!(stats.column_statistics["name"].frequency, Some(3));
         assert_eq!(stats.column_statistics["name"].distinct, Some(2));
+    }
+
+    #[tokio::test]
+    async fn full_scan_test_collector_builds_exact_stats_and_sketches_from_values() {
+        let session = SessionContext::new();
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("name", DataType::Utf8, true),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(Int64Array::from(vec![1, 2, 2, 4])),
+                Arc::new(StringArray::from(vec![
+                    Some("a"),
+                    Some("b"),
+                    Some("b"),
+                    None,
+                ])),
+            ],
+        )
+        .unwrap();
+        let table = MemTable::try_new(schema, vec![vec![batch]]).unwrap();
+        session.register_table("t", Arc::new(table)).unwrap();
+
+        let collected = collect_full_scan_statistics_for_test(&session, "t", &["id", "name"])
+            .await
+            .unwrap();
+
+        assert_eq!(collected.table.row_count, Some(4));
+        assert_eq!(collected.table.column_statistics["id"].frequency, Some(4));
+        assert_eq!(collected.table.column_statistics["id"].distinct, Some(3));
+        assert_eq!(
+            collected.table.column_statistics["id"].lower_bound,
+            Some(ScalarValue::Int64(1))
+        );
+        assert_eq!(
+            collected.table.column_statistics["id"].upper_bound,
+            Some(ScalarValue::Int64(4))
+        );
+        assert_eq!(collected.table.column_statistics["name"].frequency, Some(3));
+
+        let id_sketches = &collected.sketches["id"];
+        let hll_estimate = id_sketches.distinct_values.as_ref().unwrap().estimate();
+        assert!((hll_estimate - 3.0).abs() < 1.0);
+        let two = EncodedScalarValue::from_scalar(&ScalarValue::Int64(2)).unwrap();
+        let frequent_two = id_sketches
+            .frequent_values
+            .as_ref()
+            .unwrap()
+            .estimate(&two)
+            .unwrap();
+        assert_eq!(frequent_two.frequency, 2);
+        assert_eq!(frequent_two.error, 0);
     }
 
     #[tokio::test]
