@@ -1,3 +1,4 @@
+pub mod cardinality_regression;
 pub mod config;
 pub mod explain_udfs;
 pub mod from_df_logical;
