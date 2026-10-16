@@ -54,6 +54,20 @@ def parse_args() -> argparse.Namespace:
             "side-by-side CSV and prints a Markdown table"
         ),
     )
+    parser.add_argument(
+        "--suite",
+        action="append",
+        help="Include one suite (repeat for an aggregate); defaults to all report suites",
+    )
+    parser.add_argument(
+        "--suite-matrix",
+        action="store_true",
+        help="Generate artifacts for every shared suite and for their aggregate",
+    )
+    parser.add_argument(
+        "--artifact-suffix",
+        help="Filename suffix for a non-matrix suite selection",
+    )
     return parser.parse_args()
 
 
@@ -70,7 +84,9 @@ def includes_operator(operator: str, normalization: str) -> bool:
 
 
 def load_groups(
-    report_path: Path, normalization: str = "none"
+    report_path: Path,
+    normalization: str = "none",
+    suites: set[str] | None = None,
 ) -> tuple[list[int], list[list[float]]]:
     groups: dict[int, list[float]] = defaultdict(list)
     try:
@@ -78,6 +94,9 @@ def load_groups(
         if not isinstance(measurements, list):
             raise ValueError("expected a JSON array")
         for measurement in measurements:
+            suite = str(measurement.get("suite") or "tpch").lower()
+            if suites is not None and suite not in suites:
+                continue
             operator = str(measurement["operator"])
             if not includes_operator(operator, normalization):
                 continue
@@ -91,7 +110,7 @@ def load_groups(
     if not groups:
         raise ValueError(
             f"{report_path} contains no finite q-error measurements "
-            f"after {normalization!r} normalization"
+            f"after {normalization!r} normalization and suite filtering"
         )
 
     join_counts = sorted(groups)
@@ -263,7 +282,11 @@ def plot_frame(join_counts: list[int], groups: list[list[float]]) -> pd.DataFram
     )
 
 
-def configure_axes(ax: Any, title: str, normalization: str) -> None:
+def configure_axes(
+    ax: Any, title: str, normalization: str, suite_label: str = ""
+) -> None:
+    if suite_label:
+        title = f"{title} — {suite_label}"
     if normalization != "none":
         title = f"{title} [{normalization} normalization]"
     ax.set_title(title)
@@ -299,6 +322,7 @@ def write_comparison_box_plot(
     postgres_groups: list[list[float]],
     path: Path,
     normalization: str,
+    suite_label: str = "",
 ) -> None:
     join_counts = sorted(set(ours_join_counts) | set(postgres_join_counts))
     figure, ax = plt.subplots(figsize=(max(8.0, len(join_counts) * 0.75), 5.5))
@@ -318,7 +342,12 @@ def write_comparison_box_plot(
         palette={"optd": "#8b5cf6", "PostgreSQL": "#f59e0b"},
         ax=ax,
     )
-    configure_axes(ax, "optd vs. PostgreSQL q-error by number of joins", normalization)
+    configure_axes(
+        ax,
+        "optd vs. PostgreSQL q-error by number of joins",
+        normalization,
+        suite_label,
+    )
     ax.legend(title="Engine")
     figure.tight_layout()
     figure.savefig(path)
@@ -331,6 +360,7 @@ def write_box_plot(
     groups: list[list[float]],
     path: Path,
     normalization: str = "none",
+    suite_label: str = "",
 ) -> None:
     figure, ax = plt.subplots(figsize=(max(8.0, len(join_counts) * 0.55), 5.5))
     sns.boxplot(
@@ -341,7 +371,9 @@ def write_box_plot(
         showmeans=True,
         ax=ax,
     )
-    configure_axes(ax, "Q-error by number of joins (box plot)", normalization)
+    configure_axes(
+        ax, "Q-error by number of joins (box plot)", normalization, suite_label
+    )
     figure.tight_layout()
     figure.savefig(path)
     plt.close(figure)
@@ -352,6 +384,7 @@ def write_violin_plot(
     groups: list[list[float]],
     path: Path,
     normalization: str = "none",
+    suite_label: str = "",
 ) -> None:
     frame = plot_frame(join_counts, groups)
     figure, ax = plt.subplots(figsize=(max(8.0, len(join_counts) * 0.55), 5.5))
@@ -375,10 +408,43 @@ def write_violin_plot(
         alpha=0.45,
         ax=ax,
     )
-    configure_axes(ax, "Q-error by number of joins (violin plot)", normalization)
+    configure_axes(
+        ax, "Q-error by number of joins (violin plot)", normalization, suite_label
+    )
     figure.tight_layout()
     figure.savefig(path)
     plt.close(figure)
+
+
+def report_suites(report_path: Path) -> set[str]:
+    try:
+        measurements = json.loads(report_path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"failed to read {report_path}: {error}") from error
+    if not isinstance(measurements, list):
+        raise ValueError(f"{report_path} must contain a JSON array")
+    return {str(row.get("suite") or "tpch").lower() for row in measurements}
+
+
+def artifact_selections(args: argparse.Namespace) -> list[tuple[set[str] | None, str]]:
+    requested = {suite.lower() for suite in (args.suite or [])}
+    if args.suite_matrix and requested:
+        raise ValueError("--suite and --suite-matrix cannot be combined")
+    if args.suite_matrix:
+        suites = report_suites(args.report)
+        if args.compare_report is not None:
+            suites &= report_suites(args.compare_report)
+        if not suites:
+            raise ValueError("reports have no shared benchmark suites")
+        ordered = sorted(suites)
+        selections: list[tuple[set[str] | None, str]] = [
+            ({suite}, suite) for suite in ordered
+        ]
+        if len(ordered) > 1:
+            selections.append((set(ordered), "all"))
+        return selections
+    suffix = args.artifact_suffix or ("+".join(sorted(requested)) if requested else "")
+    return [(requested or None, suffix)]
 
 
 def main() -> None:
@@ -390,57 +456,74 @@ def main() -> None:
         if args.normalization == "all"
         else (args.normalization,)
     )
-    comparison = []
 
-    for normalization in normalizations:
-        join_counts, groups = load_groups(args.report, normalization)
-        include_suffix = normalization != "none" or args.normalization == "all"
-        suffix = f"-{normalization}" if include_suffix else ""
-        box_plot = output_dir / f"qerror-boxplot{suffix}.svg"
-        violin_plot = output_dir / f"qerror-violin{suffix}.svg"
-        write_box_plot(join_counts, groups, box_plot, normalization)
-        write_violin_plot(join_counts, groups, violin_plot, normalization)
-        print(f"wrote {box_plot}")
-        print(f"wrote {violin_plot}")
-        if args.summary:
-            summary = output_dir / f"summary-by-join-count{suffix}.csv"
-            write_summary(summary, join_counts, groups)
-            print(f"wrote {summary}")
+    suite_labels = {"tpch": "TPC-H", "job": "JOB", "tpcds": "TPC-DS"}
+    for suites, artifact_suffix in artifact_selections(args):
+        comparison = []
+        suite_order = {"tpch": 0, "job": 1, "tpcds": 2}
+        ordered_suites = sorted(
+            suites or [],
+            key=lambda suite: (suite_order.get(suite, len(suite_order)), suite),
+        )
+        suite_label = " + ".join(
+            suite_labels.get(suite, suite.upper()) for suite in ordered_suites
+        )
+        selection_suffix = f"-{artifact_suffix}" if artifact_suffix else ""
+        for normalization in normalizations:
+            join_counts, groups = load_groups(args.report, normalization, suites)
+            include_normalization = normalization != "none" or args.normalization == "all"
+            normalization_suffix = f"-{normalization}" if include_normalization else ""
+            suffix = f"{normalization_suffix}{selection_suffix}"
+            box_plot = output_dir / f"qerror-boxplot{suffix}.svg"
+            violin_plot = output_dir / f"qerror-violin{suffix}.svg"
+            write_box_plot(
+                join_counts, groups, box_plot, normalization, suite_label
+            )
+            write_violin_plot(
+                join_counts, groups, violin_plot, normalization, suite_label
+            )
+            print(f"wrote {box_plot}")
+            print(f"wrote {violin_plot}")
+            if args.summary:
+                summary = output_dir / f"summary-by-join-count{suffix}.csv"
+                write_summary(summary, join_counts, groups)
+                print(f"wrote {summary}")
 
-        if args.compare_report is not None:
-            postgres_join_counts, postgres_groups = load_groups(
-                args.compare_report, normalization
-            )
-            comparison_box_plot = (
-                output_dir / f"qerror-comparison-boxplot{suffix}.svg"
-            )
-            write_comparison_box_plot(
-                join_counts,
-                groups,
-                postgres_join_counts,
-                postgres_groups,
-                comparison_box_plot,
-                normalization,
-            )
-            print(f"wrote {comparison_box_plot}")
-            comparison.extend(
-                comparison_rows(
-                    normalization,
+            if args.compare_report is not None:
+                postgres_join_counts, postgres_groups = load_groups(
+                    args.compare_report, normalization, suites
+                )
+                comparison_box_plot = (
+                    output_dir / f"qerror-comparison-boxplot{suffix}.svg"
+                )
+                write_comparison_box_plot(
                     join_counts,
                     groups,
                     postgres_join_counts,
                     postgres_groups,
+                    comparison_box_plot,
+                    normalization,
+                    suite_label,
                 )
-            )
+                print(f"wrote {comparison_box_plot}")
+                comparison.extend(
+                    comparison_rows(
+                        normalization,
+                        join_counts,
+                        groups,
+                        postgres_join_counts,
+                        postgres_groups,
+                    )
+                )
 
-    if args.compare_report is not None:
-        comparison_suffix = "all" if args.normalization == "all" else args.normalization
-        comparison_path = (
-            output_dir / f"comparison-by-join-count-{comparison_suffix}.csv"
-        )
-        write_comparison(comparison_path, comparison)
-        print(f"wrote {comparison_path}")
-        print(comparison_markdown(comparison))
+        if args.compare_report is not None:
+            comparison_level = "all" if args.normalization == "all" else args.normalization
+            comparison_path = output_dir / (
+                f"comparison-by-join-count-{comparison_level}{selection_suffix}.csv"
+            )
+            write_comparison(comparison_path, comparison)
+            print(f"wrote {comparison_path}")
+            print(comparison_markdown(comparison))
 
 
 if __name__ == "__main__":

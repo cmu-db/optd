@@ -13,6 +13,17 @@ use optd_datafusion::setup::{register_job_tables, register_tpch_tables};
 enum Dataset {
     Tpch,
     Job,
+    All,
+}
+
+impl Dataset {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Tpch => "tpch",
+            Self::Job => "job",
+            Self::All => "all",
+        }
+    }
 }
 
 #[derive(Debug, Parser)]
@@ -22,18 +33,32 @@ enum Dataset {
 )]
 struct Args {
     /// Benchmark dataset whose local Parquet tables should be registered.
-    #[arg(long, value_enum)]
+    #[arg(long, value_enum, default_value = "all")]
     dataset: Dataset,
 
-    /// One .sql/.slt file or a directory containing query files.
+    /// Override the query path when exactly one dataset is selected.
     #[arg(long)]
-    queries: PathBuf,
+    queries: Option<PathBuf>,
+
+    /// TPC-H .sql/.slt file or query directory.
+    #[arg(
+        long,
+        default_value = "optd/connectors/datafusion/tests/slt/tpch/results"
+    )]
+    tpch_queries: PathBuf,
+
+    /// JOB .sql/.slt file or query directory.
+    #[arg(
+        long,
+        default_value = "optd/connectors/datafusion/tests/slt/job/results"
+    )]
+    job_queries: PathBuf,
 
     /// Directory for report.json.
     #[arg(long, default_value = "target/cardinality-regression")]
     output: PathBuf,
 
-    /// Measure only the first N naturally sorted query files.
+    /// Measure only the first N naturally sorted query files from each selected suite.
     #[arg(long)]
     limit: Option<usize>,
 
@@ -55,21 +80,48 @@ async fn main() -> Result<(), Box<dyn Error>> {
     match args.dataset {
         Dataset::Tpch => register_tpch_tables(&session).await?,
         Dataset::Job => register_job_tables(&session).await?,
+        Dataset::All => {
+            register_tpch_tables(&session).await?;
+            register_job_tables(&session).await?;
+        }
+    }
+    if args.queries.is_some() && matches!(args.dataset, Dataset::All) {
+        return Err("--queries requires --dataset tpch or --dataset job".into());
     }
 
-    let mut queries = load_query_specs(&args.queries)?;
-    if let Some(limit) = args.limit {
-        queries.truncate(limit);
-    }
-    if queries.is_empty() {
-        return Err("query limit selected no queries".into());
-    }
+    let selected_suites = match args.dataset {
+        Dataset::Tpch => vec![(
+            Dataset::Tpch,
+            args.queries.as_ref().unwrap_or(&args.tpch_queries),
+        )],
+        Dataset::Job => vec![(
+            Dataset::Job,
+            args.queries.as_ref().unwrap_or(&args.job_queries),
+        )],
+        Dataset::All => vec![
+            (Dataset::Tpch, &args.tpch_queries),
+            (Dataset::Job, &args.job_queries),
+        ],
+    };
 
     let harness = CardinalityRegressionHarness::new(session);
     let mut measurements = Vec::new();
-    for query in &queries {
-        eprintln!("measuring {}", query.name);
-        measurements.extend(harness.measure_query(&query.name, &query.sql).await?);
+    for (dataset, query_path) in selected_suites {
+        let mut queries = load_query_specs(query_path)?;
+        if let Some(limit) = args.limit {
+            queries.truncate(limit);
+        }
+        if queries.is_empty() {
+            return Err(format!("{} query selection contains no queries", dataset.name()).into());
+        }
+        for query in &queries {
+            eprintln!("measuring {}/{}", dataset.name(), query.name);
+            let mut query_measurements = harness.measure_query(&query.name, &query.sql).await?;
+            for measurement in &mut query_measurements {
+                measurement.suite = dataset.name().to_string();
+            }
+            measurements.extend(query_measurements);
+        }
     }
     let report = write_report(&measurements, &args.output)?;
     eprintln!("wrote {}", report.display());

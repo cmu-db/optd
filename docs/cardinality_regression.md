@@ -26,19 +26,71 @@ expensive because each distinct closed subtree is executed independently.
 
 ## Running
 
+The root `justfile` provides the supported build, test, baseline-update, and regression entry
+points. Run `just` for the complete list. Regression recipes select both TPC-H and JOB by default;
+set `DATASET=tpch` or `DATASET=job` to run one suite. A typical two-suite workflow is:
+
+```sh
+just build-binaries
+just load-postgres-all
+just regression-optd-smoke
+just regression-postgres-smoke
+PLOT_PYTHON="conda run -n c0bench python" just regression-compare-smoke
+```
+
+For a TPC-H-only smoke workflow, prefix the collector recipes with `DATASET=tpch` and load only
+`just load-postgres-tpch`. `--limit N` is applied independently to each selected suite.
+
+### Portable end-to-end workflow
+
+`scripts/run_cardinality_regression.sh` is the end-to-end entry point for either a local or remote
+benchmark machine. It downloads the selected Parquet suite when needed, creates or starts a pinned
+`postgres:18.6-bookworm` container with persistent host storage, waits for readiness, loads and
+`ANALYZE`s the tables, runs the isolated optd collector and PostgreSQL `EXPLAIN ANALYZE` collector,
+then generates the suite matrix, logs, and run metadata. JOB is the script default:
+
+```sh
+PLOT_PYTHON="conda run -n c0bench python" \
+  scripts/run_cardinality_regression.sh --suite job
+```
+
+Use `--suite all` for TPC-H plus JOB or `--suite tpch` for TPC-H only. The machine needs Docker,
+DuckDB, curl, Git, the Rust toolchain, and a Python environment containing Matplotlib, pandas, and
+Seaborn. Important overrides include `POSTGRES_DATA_DIR`, `REGRESSION_ROOT`,
+`OPTD_QUERY_TIMEOUT`, and `POSTGRES_STATEMENT_TIMEOUT`. `--skip-download` and `--skip-load` reuse
+existing data; `--skip-optd` or `--skip-postgres` reuse an existing corresponding report. Outputs
+are written under `target/cardinality-regression` by default, including `run-metadata.json`,
+per-engine `report.json`/`errors.json`, checkpoint reports, plots, CSVs, and a
+UTC-stamped execution log.
+
+The same workflow is available as `DATASET=job just regression-run`.
+
+`regression-compare` validates that both reports can be grouped by join count and then writes the
+comparison plots and summary. It defaults to every normalization level; use
+`regression-compare-smoke` when a limited run may contain no joins. Set `PLOT_PYTHON` when plotting
+dependencies live in a separate environment. The comparison is distributional: optd rows are
+logical operator subtrees, while PostgreSQL rows are nodes in its chosen physical plan. They are
+not paired as if they represented identical subplans.
+
 Download the benchmark data first, then point the command at one `.sql`/`.slt` file or a directory.
 For SLT files, the first `query` block is measured.
 
 ```sh
 ./scripts/download_tpch_hf.sh
-cargo run --release -p optd-datafusion --bin cardinality-regression -- \
-  --dataset tpch \
-  --queries optd/connectors/datafusion/tests/slt/tpch/results \
-  --output target/cardinality-regression/tpch
+DATASET=tpch \
+  TPCH_QUERIES=optd/connectors/datafusion/tests/slt/tpch/results \
+  OPTD_OUTPUT=target/cardinality-regression/tpch \
+  just regression-optd
 ```
 
-Use `--limit N` for a smoke run and `--target-partitions N` to control DataFusion execution
-parallelism. JOB uses `--dataset job` and requires `./scripts/download_job_hf.sh`.
+Set `OPTD_EXTRA_ARGS="--limit N --target-partitions N"` for a smoke run or to control DataFusion
+execution parallelism. JOB uses `DATASET=job`, `JOB_QUERIES`, and requires
+`./scripts/download_job_hf.sh`. With `DATASET=all` (the default), the combined report adds a `suite`
+field to every measurement so identically named queries remain distinguishable. The `just` workflow
+uses `optd_cardinality_regression.py` to execute each query in an isolated child process, checkpoint
+`report.json` after every success, and resume completed `(suite, query)` pairs. This prevents one
+memory-intensive JOB query from discarding the rest of a long run. Failed or timed-out children are
+recorded in `errors.json`; set `OPTD_QUERY_TIMEOUT` to change the default 900-second per-query bound.
 
 ### PostgreSQL chosen-plan measurements
 
@@ -48,24 +100,30 @@ the report. Parallel query and JIT are disabled in each measurement transaction 
 stable. InitPlan and SubPlan joins are measured in their own subtrees but do not contribute to their
 parent query block's join count.
 
-For the local PostgreSQL 18 container, load the same TPC-H Parquet data used by optd. This command
-recreates the eight benchmark tables in `optd_bench`, streams them through DuckDB's CSV output,
-creates primary-key and benchmark lookup indexes, and runs `ANALYZE`:
+For the local PostgreSQL 18 container, load the same Parquet data used by optd. The container must
+already exist and be running, and the configured user and database must already exist. The repository
+does not provision the container. The loaders recreate their benchmark tables, stream Parquet
+through DuckDB's CSV output, create primary-key/benchmark lookup indexes, and run `ANALYZE`:
 
 ```sh
-optd/connectors/datafusion/scripts/load_tpch_postgres.sh
+just load-postgres-all       # TPC-H and JOB
+just load-postgres-tpch      # TPC-H only
+just load-postgres-job       # JOB only
 ```
 
-Then collect the selected PostgreSQL plans:
+Then collect both suites (the default), or select one with `DATASET`:
 
 ```sh
-conda run -n c0bench python \
-  optd/connectors/datafusion/scripts/postgres_cardinality_regression.py \
-  --queries optd/connectors/datafusion/tests/slt/tpch/results \
-  --output target/cardinality-regression/postgres
+POSTGRES_OUTPUT=target/cardinality-regression/postgres just regression-postgres
+DATASET=job POSTGRES_OUTPUT=target/cardinality-regression/postgres-job \
+  just regression-postgres
 ```
 
-The collector defaults to container `optd-postgres-18`, database `optd_bench`, and user `optd`.
+The Python collector has the equivalent `--suite all|tpch|job` option. `--tpch-queries` and
+`--job-queries` override each suite's query path; the legacy `--queries` override is accepted only
+with a single-suite selection.
+
+The collector defaults to both suites, container `optd-postgres-18`, database `optd_bench`, and user `optd`.
 Override them with `--container`, `--database`, and `--user`. Use `--limit N` for a smoke run and
 `--statement-timeout SECONDS` to bound each query. The report is checkpointed after every successful
 query; `--resume` skips queries already present in it, while `--continue-on-error` records failures
@@ -98,7 +156,9 @@ removed:
 - `joins` keeps only joins and cross products.
 
 Non-default levels add the level to generated filenames so several views can coexist in one output
-directory. Pass `--normalization all` to generate every view in one invocation.
+directory. Pass `--normalization all` to generate every view in one invocation. Reports that contain
+`suite` fields can be filtered with repeatable `--suite SUITE` arguments. `--suite-matrix` generates
+one artifact set per suite plus an `all` aggregate.
 
 Once a PostgreSQL run has produced the same raw report schema, pass it with `--compare-report` to
 write side-by-side box plots and a comparison CSV, and print a Markdown table containing sample

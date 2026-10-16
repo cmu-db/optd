@@ -31,6 +31,12 @@ pub struct QuerySpec {
 /// One estimated-versus-actual measurement for an operator subtree.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SubtreeMeasurement {
+    /// Benchmark suite that produced this measurement.
+    ///
+    /// The harness leaves this empty because it operates on an already-configured session; CLI
+    /// callers populate it from their dataset selection before serializing a report.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub suite: String,
     pub query: String,
     pub node_path: String,
     pub operator: String,
@@ -128,6 +134,7 @@ impl CardinalityRegressionHarness {
             let estimated_rows = profile.rows.value;
             let q_error = row_q_error(estimated_rows, actual_rows)?;
             measurements.push(SubtreeMeasurement {
+                suite: String::new(),
                 query: query_name.to_string(),
                 node_path: node.path,
                 operator: operator_name(node.operator.get(&planned.query)).to_string(),

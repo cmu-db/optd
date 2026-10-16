@@ -51,17 +51,41 @@ SET_OPERATION_NODE_TYPES = frozenset({"Append", "Merge Append", "Recursive Union
 
 @dataclass(frozen=True)
 class QuerySpec:
+    suite: str
     name: str
     sql: str
+
+
+SUITE_QUERY_PATHS = {
+    "tpch": Path("optd/connectors/datafusion/tests/slt/tpch/results"),
+    "job": Path("optd/connectors/datafusion/tests/slt/job/results"),
+}
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--suite",
+        choices=("all", *SUITE_QUERY_PATHS),
+        default="all",
+        help="Benchmark suite to measure (default: both TPC-H and JOB)",
+    )
+    parser.add_argument(
         "--queries",
-        required=True,
         type=Path,
-        help="One .sql/.slt file or a directory containing benchmark queries",
+        help="Override the query path when exactly one suite is selected",
+    )
+    parser.add_argument(
+        "--tpch-queries",
+        type=Path,
+        default=SUITE_QUERY_PATHS["tpch"],
+        help="TPC-H .sql/.slt file or query directory",
+    )
+    parser.add_argument(
+        "--job-queries",
+        type=Path,
+        default=SUITE_QUERY_PATHS["job"],
+        help="JOB .sql/.slt file or query directory",
     )
     parser.add_argument(
         "--output",
@@ -82,7 +106,11 @@ def parse_args() -> argparse.Namespace:
         default=300,
         help="Per-query timeout in seconds",
     )
-    parser.add_argument("--limit", type=int, help="Measure only the first N queries")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        help="Measure only the first N queries from each selected suite",
+    )
     parser.add_argument(
         "--resume",
         action="store_true",
@@ -116,7 +144,9 @@ def natural_query_key(path: Path) -> tuple[int, str]:
     return (int(match.group(1)) if match else sys.maxsize, path.stem.lower())
 
 
-def load_query_specs(path: Path) -> list[QuerySpec]:
+def load_query_specs(path: Path, suite: str) -> list[QuerySpec]:
+    if not path.exists():
+        raise ValueError(f"{suite} query path does not exist: {path}")
     paths = [path] if path.is_file() else sorted(
         (
             child
@@ -131,7 +161,7 @@ def load_query_specs(path: Path) -> list[QuerySpec]:
         sql = first_slt_query(text) if query_path.suffix.lower() == ".slt" else text.strip().removesuffix(";")
         if not sql:
             raise ValueError(f"{query_path} contains no non-empty query")
-        queries.append(QuerySpec(query_path.stem, sql))
+        queries.append(QuerySpec(suite, query_path.stem, sql))
     if not queries:
         raise ValueError(f"{path} contains no .sql or .slt query files")
     return queries
@@ -238,6 +268,7 @@ def row_q_error(estimated_rows: float, actual_rows: float) -> float:
 
 
 def collect_measurements(
+    suite: str,
     query_name: str,
     node: dict[str, Any],
     path: str = "0",
@@ -246,6 +277,7 @@ def collect_measurements(
     actual_rows = float(node["Actual Rows"])
     measurement = {
         "engine": "postgres",
+        "suite": suite,
         "query": query_name,
         "node_path": path,
         "operator": operator_name(node),
@@ -259,7 +291,7 @@ def collect_measurements(
     measurements = [measurement]
     for index, child in enumerate(node.get("Plans", [])):
         measurements.extend(
-            collect_measurements(query_name, child, f"{path}.{index}")
+            collect_measurements(suite, query_name, child, f"{path}.{index}")
         )
     return measurements
 
@@ -275,7 +307,10 @@ def load_existing_report(output_dir: Path) -> list[dict[str, Any]]:
     report = output_dir / "report.json"
     if not report.exists():
         return []
-    measurements = json.loads(report.read_text())
+    try:
+        measurements = json.loads(report.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"failed to read {report}: {error}") from error
     if not isinstance(measurements, list):
         raise ValueError(f"{report} must contain a JSON array")
     return measurements
@@ -292,20 +327,39 @@ def main() -> None:
     args = parse_args()
     if args.statement_timeout <= 0:
         raise ValueError("--statement-timeout must be positive")
-    queries = load_query_specs(args.queries)
-    if args.limit is not None:
-        queries = queries[: args.limit]
+    if args.limit is not None and args.limit <= 0:
+        raise ValueError("--limit must be positive")
+    suites = tuple(SUITE_QUERY_PATHS) if args.suite == "all" else (args.suite,)
+    if args.queries is not None and len(suites) != 1:
+        raise ValueError("--queries requires --suite tpch or --suite job")
+    queries = []
+    for suite in suites:
+        path = args.queries or getattr(args, f"{suite}_queries")
+        suite_queries = load_query_specs(path, suite)
+        queries.extend(suite_queries[: args.limit] if args.limit is not None else suite_queries)
     if not queries:
-        raise ValueError("query limit selected no queries")
+        raise ValueError("query selection contains no queries")
 
     measurements = load_existing_report(args.output) if args.resume else []
-    completed_queries = {str(row["query"]) for row in measurements}
+    if args.resume:
+        legacy_rows = [row for row in measurements if not row.get("suite")]
+        if legacy_rows and len(suites) != 1:
+            raise ValueError(
+                "cannot resume a multi-suite run from a legacy report without suite fields"
+            )
+        for row in legacy_rows:
+            row["suite"] = suites[0]
+    completed_queries = {
+        (str(row["suite"]), str(row["query"])) for row in measurements
+    }
     errors = []
     for query in queries:
-        if query.name in completed_queries:
-            print(f"skipping completed {query.name}", file=sys.stderr)
+        query_key = (query.suite, query.name)
+        display_name = f"{query.suite}/{query.name}"
+        if query_key in completed_queries:
+            print(f"skipping completed {display_name}", file=sys.stderr)
             continue
-        print(f"measuring {query.name}", file=sys.stderr)
+        print(f"measuring {display_name}", file=sys.stderr)
         try:
             plan = run_explain(
                 query,
@@ -315,14 +369,18 @@ def main() -> None:
                 args.statement_timeout,
             )
         except RuntimeError as error:
-            errors.append({"query": query.name, "error": str(error)})
+            errors.append(
+                {"suite": query.suite, "query": query.name, "error": str(error)}
+            )
             error_report = write_errors(errors, args.output)
             if args.continue_on_error:
                 print(str(error), file=sys.stderr)
                 continue
             print(f"wrote {error_report}", file=sys.stderr)
             raise
-        measurements.extend(collect_measurements(query.name, plan))
+        measurements.extend(
+            collect_measurements(query.suite, query.name, plan)
+        )
         write_report(measurements, args.output)
 
     report = write_report(measurements, args.output)
