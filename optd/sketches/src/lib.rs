@@ -5,5 +5,7 @@
 //! comparison boundaries.
 
 mod hyperloglog;
+mod space_saving;
 
 pub use hyperloglog::{HyperLogLog, HyperLogLogError};
+pub use space_saving::{FrequentItem, SpaceSaving, SpaceSavingError};

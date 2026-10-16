@@ -44,15 +44,27 @@ the same statistical inputs as optimization.
 
 The `optd-sketches` crate provides IR-independent, serializable implementations of:
 
-- HyperLogLog for approximate distinct counts.
+- HyperLogLog for approximate distinct counts;
+- SpaceSaving for bounded frequent-item summaries.
 
-HyperLogLog consumes the canonical scalar byte encoding defined by `optd-core`, so compatibility does
-not depend on display formatting or catalog JSON. The `ColumnSketches` payload records the encoding
-version and represented population; HyperLogLog additionally records precision and hash seed.
-Installation validates encoding compatibility between the payload and its HLL.
+Both consume the canonical scalar byte encoding defined by `optd-core`. Compatibility therefore
+does not depend on display formatting or catalog JSON. The complete `ColumnSketches` payload records
+the encoding version; HyperLogLog additionally records precision and hash seed. Deserialization and
+installation validate sketch shape, counter bounds, population, and encoding compatibility.
 
-A scan uses HLL when catalog NDV is absent. HLL is retained only while the represented base
-population is unchanged; it is invalidated when an operator changes that population.
+A scan uses HLL when no catalog NDV is available. SpaceSaving improves equality filters, skewed
+equality-join pair counts, and directional semi/anti key coverage. For an inner join, tracked values
+contribute their frequency cross-products; for left-side coverage, a tracked left frequency
+contributes once when the value is known to occur on the right, independent of right-side duplicate
+multiplicity. The untracked remainder uses the NDV-overlap model. Classic HLL is not treated as a
+precise intersection sketch; it currently improves the join domain estimate through NDV.
+
+DataFusion does not supply HLL or SpaceSaving payloads automatically. The connector's current
+runtime collector obtains exact aggregate row count, non-null count, NDV, minimum, and maximum for
+referenced columns. Connector tests also have a deliberately test-only `SELECT *` collector that
+builds exact statistics, HLL, and SpaceSaving directly from fixture values. Production collection
+still requires a bounded/full-scan collector that installs sketches through the same
+`AnalysisContext` interface until catalog persistence is available.
 
 Sketches are propagated only while their population remains unchanged:
 

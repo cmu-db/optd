@@ -4,8 +4,8 @@
 
 `CardinalityEstimationV1` estimates row counts and column profiles for each
 operator. It uses lazily cached `LogicalFactsAnalysis` results for value lineage, accumulated
-constraints, and equality classes. Query-local HyperLogLog sketches refine scan NDV when catalog
-NDV is absent. See
+constraints, and equality classes. Query-local HyperLogLog and SpaceSaving sketches can refine NDV,
+equality-filter, and skewed equijoin estimates. See
 [`statistics_architecture.md`](statistics_architecture.md) for the separation between logical facts
 and estimator policy.
 
@@ -107,10 +107,12 @@ left_non_null_fraction * intersection_ndv / left_ndv
 
 The general fallback uses containment (`intersection_ndv = min(left_ndv, right_ndv)`). Compatible
 ordered ranges detect disjoint domains and estimate numeric/date overlap under uniformity.
-Semi output key profiles are capped by the intersection domain, and pure single-key anti joins
-propagate complementary unmatched frequency and NDV. Single-column catalog unique/FK assertions
-provide stronger estimates only while the required base population is complete. Histograms, samples,
-and sampled multi-column NDV remain future work.
+SpaceSaving common values refine known matched left-row mass without letting duplicate right rows
+inflate coverage; uncertain counters cannot lower the uniform baseline. Semi output key profiles are
+capped by the intersection domain, and pure single-key anti joins propagate complementary unmatched
+frequency and NDV. Single-column catalog unique/FK assertions provide stronger estimates only while
+the required base population is complete. Histograms, samples, and sampled multi-column NDV remain
+future work.
 
 Transient or redundant equality edges should be treated specially for costing.
 They may need to remain in the IR for execution or backend behavior, but CE
@@ -150,7 +152,7 @@ minimum, maintaining `lower <= value <= upper`.
 - [x] Add a DataFusion connector helper/API for SQL-based stats extraction into catalog statistics.
 - [x] Add demand-driven logical value lineage and accumulated constraints.
 - [x] Keep derived expressions opaque instead of adding expression-specific lineage transforms.
-- [x] Add query-local HLL scan-NDV storage and planned-query lifecycle retention.
+- [x] Add query-local HLL and SpaceSaving storage with downstream filter/join consumers.
 - [x] Separate directional equality coverage from tuple-pair selectivity for semi/anti joins.
 - [x] Add ordered-range domain overlap and disjointness checks.
 - [x] Add occupancy-based filtered NDV and proportional literal-domain restriction.
