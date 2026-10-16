@@ -593,7 +593,7 @@ impl<'de> serde::Deserialize<'de> for Histogram {
     }
 }
 
-fn scalar_order(left: &ScalarValue, right: &ScalarValue) -> Option<Ordering> {
+pub(crate) fn scalar_order(left: &ScalarValue, right: &ScalarValue) -> Option<Ordering> {
     match (left, right) {
         (ScalarValue::Boolean(left), ScalarValue::Boolean(right)) => Some(left.cmp(right)),
         (ScalarValue::Int32(left), ScalarValue::Int32(right)) => Some(left.cmp(right)),
