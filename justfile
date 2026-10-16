@@ -62,6 +62,7 @@ help:
         '  TPCH_QUERIES=<path> JOB_QUERIES=<path> just regression-all' \
         '  OPTD_OUTPUT=<dir> POSTGRES_OUTPUT=<dir> just regression-compare' \
         '  OPTD_EXTRA_ARGS="--limit 5 --target-partitions 4" just regression-optd' \
+        '  OPTD_EXTRA_ARGS="--no-full-scan-sketches" just regression-optd  # opt out of default sketches' \
         '  OPTD_QUERY_TIMEOUT=900 just regression-optd' \
         '  POSTGRES_CONTAINER=<name> POSTGRES_DATABASE=<db> POSTGRES_USER=<user> just regression-postgres' \
         '  POSTGRES_EXTRA_ARGS="--limit 5 --resume --continue-on-error" just regression-postgres' \

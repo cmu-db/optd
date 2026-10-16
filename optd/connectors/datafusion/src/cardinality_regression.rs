@@ -57,6 +57,7 @@ pub struct SubtreeMeasurement {
 pub struct CardinalityRegressionHarness {
     session: SessionContext,
     runtime_stats: RuntimeStatisticsCatalogBuilder,
+    log_sketches: bool,
 }
 
 impl CardinalityRegressionHarness {
@@ -64,6 +65,20 @@ impl CardinalityRegressionHarness {
         Self {
             runtime_stats: RuntimeStatisticsCatalogBuilder::new(session.clone()),
             session,
+            log_sketches: false,
+        }
+    }
+
+    /// Creates a harness that materializes referenced tables to populate HLL and SpaceSaving.
+    ///
+    /// This is intentionally opt-in because every query plans with an unbounded `SELECT *` scan
+    /// for its referenced columns. It is useful for benchmark experiments, not normal execution.
+    pub fn with_full_scan_sketches(session: SessionContext) -> Self {
+        Self {
+            runtime_stats: RuntimeStatisticsCatalogBuilder::new(session.clone())
+                .with_full_scan_sketches(),
+            session,
+            log_sketches: true,
         }
     }
 
@@ -131,6 +146,37 @@ impl CardinalityRegressionHarness {
                 exact_rows.insert(node.operator, rows);
                 rows
             };
+            let sketch_columns = profile
+                .columns
+                .values()
+                .filter(|column| column.sketches.is_some())
+                .count();
+            let hll_columns = profile
+                .columns
+                .values()
+                .filter(|column| {
+                    column
+                        .sketches
+                        .as_ref()
+                        .is_some_and(|sketches| sketches.distinct_values.is_some())
+                })
+                .count();
+            let space_saving_columns = profile
+                .columns
+                .values()
+                .filter(|column| {
+                    column
+                        .sketches
+                        .as_ref()
+                        .is_some_and(|sketches| sketches.frequent_values.is_some())
+                })
+                .count();
+            if self.log_sketches {
+                eprintln!(
+                    "regression statistics: query={query_name} subtree={} sketch_columns={sketch_columns} hll_columns={hll_columns} spacesaving_columns={space_saving_columns}",
+                    node.path,
+                );
+            }
             let estimated_rows = profile.rows.value;
             let q_error = row_q_error(estimated_rows, actual_rows)?;
             measurements.push(SubtreeMeasurement {

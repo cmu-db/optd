@@ -51,7 +51,7 @@ pretending rough estimates are exact.
 For `Scan`, use statistics in this order:
 
 1. Catalog-provided table and column statistics.
-2. Query-local HLL for NDV when catalog NDV is absent.
+2. Query-local HLL for NDV when available; catalog NDV is the fallback.
 3. Stable default estimates.
 
 The core analysis should not execute SQL to collect statistics. Query-based
@@ -105,8 +105,10 @@ semi/anti equality, directional coverage is estimated as:
 left_non_null_fraction * intersection_ndv / left_ndv
 ```
 
-The general fallback uses containment (`intersection_ndv = min(left_ndv, right_ndv)`). Compatible
-ordered ranges detect disjoint domains and estimate numeric/date overlap under uniformity.
+The general fallback uses containment (`intersection_ndv = min(left_ndv, right_ndv)`). When
+an equality match has an estimated conditional fanout `f` and residual predicates have pair
+selectivity `r`, semi/anti survival uses `1 - (1 - r)^f`, rather than incorrectly multiplying the
+match probability by `r`. Compatible ordered ranges detect disjoint domains and estimate numeric/date overlap under uniformity.
 SpaceSaving common values refine known matched left-row mass without letting duplicate right rows
 inflate coverage; uncertain counters cannot lower the uniform baseline. Semi output key profiles are
 capped by the intersection domain, and pure single-key anti joins propagate complementary unmatched

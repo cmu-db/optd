@@ -65,6 +65,17 @@ struct Args {
     /// DataFusion target partition count used while executing exact subtree probes.
     #[arg(long)]
     target_partitions: Option<usize>,
+
+    /// Explicitly materialize referenced tables to populate HLL and SpaceSaving sketches.
+    ///
+    /// Full-scan sketch collection is enabled by default; this flag is retained so existing
+    /// invocations remain valid.
+    #[arg(long, conflicts_with = "no_full_scan_sketches")]
+    full_scan_sketches: bool,
+
+    /// Use bounded aggregate statistics instead of full-scan HLL and SpaceSaving sketches.
+    #[arg(long, conflicts_with = "full_scan_sketches")]
+    no_full_scan_sketches: bool,
 }
 
 #[tokio::main]
@@ -104,7 +115,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         ],
     };
 
-    let harness = CardinalityRegressionHarness::new(session);
+    let full_scan_sketches = args.full_scan_sketches || !args.no_full_scan_sketches;
+    let harness = if full_scan_sketches {
+        CardinalityRegressionHarness::with_full_scan_sketches(session)
+    } else {
+        CardinalityRegressionHarness::new(session)
+    };
     let mut measurements = Vec::new();
     for (dataset, query_path) in selected_suites {
         let mut queries = load_query_specs(query_path)?;

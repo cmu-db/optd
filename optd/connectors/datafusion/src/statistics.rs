@@ -1,15 +1,14 @@
-use std::collections::BTreeMap;
-#[cfg(test)]
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::{
     DataFusionError, Result as DFResult, ScalarValue as DFScalarValue, TableReference,
 };
 use datafusion::prelude::SessionContext;
-use optd_core::{Catalog, ColumnStatistics, ScalarValue, TableRef, TableStatistics};
-#[cfg(test)]
-use optd_core::{ColumnSketches, EncodedScalarValue};
+use optd_core::{
+    Catalog, ColumnSketches, ColumnStatistics, EncodedScalarValue, ScalarValue, TableRef,
+    TableStatistics,
+};
 
 /// Collects table and column statistics by running local aggregate SQL.
 ///
@@ -59,6 +58,7 @@ async fn collect_table_statistics_from_sql(
                 frequency,
                 distinct,
                 distribution: None,
+                sketches: None,
             },
         );
     }
@@ -156,9 +156,9 @@ fn convert_scalar(value: DFScalarValue) -> Option<ScalarValue> {
         DFScalarValue::Int32(Some(value)) => Some(ScalarValue::Int32(value)),
         DFScalarValue::Int64(Some(value)) => Some(ScalarValue::Int64(value)),
         DFScalarValue::Float64(Some(value)) => Some(ScalarValue::Float64(value)),
-        DFScalarValue::Utf8(Some(value)) | DFScalarValue::LargeUtf8(Some(value)) => {
-            Some(ScalarValue::Utf8(value))
-        }
+        DFScalarValue::Utf8(Some(value))
+        | DFScalarValue::LargeUtf8(Some(value))
+        | DFScalarValue::Utf8View(Some(value)) => Some(ScalarValue::Utf8(value)),
         DFScalarValue::Date32(Some(value)) => Some(ScalarValue::Date32(value)),
         DFScalarValue::Decimal128(Some(value), precision, scale) => Some(ScalarValue::Decimal128 {
             value,
@@ -169,27 +169,19 @@ fn convert_scalar(value: DFScalarValue) -> Option<ScalarValue> {
     }
 }
 
-/// Exact full-scan statistics used by connector tests.
+/// Exact full-scan statistics for explicit test fixtures and regression runs.
 ///
-/// This deliberately executes `SELECT *` and materializes the fixture. Production collection must
-/// use a bounded collector or persisted catalog statistics instead.
-#[cfg(test)]
-struct FullScanStatistics {
-    table: TableStatistics,
-    sketches: BTreeMap<String, ColumnSketches>,
-}
-
-#[cfg(test)]
-async fn collect_full_scan_statistics_for_test(
+/// This deliberately executes `SELECT *` and materializes the table. Normal query planning must
+/// use the bounded aggregate collector or persisted catalog statistics instead.
+pub(crate) async fn collect_full_scan_statistics(
     session: &SessionContext,
-    table_name: &str,
+    table: &TableReference,
     columns: &[&str],
-) -> DFResult<FullScanStatistics> {
-    let sql = format!("SELECT * FROM {}", quote_ident(table_name));
+) -> DFResult<TableStatistics> {
+    let sql = format!("SELECT * FROM {}", quote_table_reference(table));
     let batches = session.sql(&sql).await?.collect().await?;
     let row_count = batches.iter().map(RecordBatch::num_rows).sum::<usize>();
     let mut column_statistics = BTreeMap::new();
-    let mut sketches = BTreeMap::new();
 
     for column_name in columns {
         let mut values = Vec::new();
@@ -205,7 +197,7 @@ async fn collect_full_scan_statistics_for_test(
                 }
                 let value = convert_scalar(value).ok_or_else(|| {
                     DataFusionError::NotImplemented(format!(
-                        "full-scan test statistics do not support column '{column_name}'"
+                        "full-scan statistics do not support column '{column_name}'"
                     ))
                 })?;
                 values.push(value);
@@ -235,23 +227,19 @@ async fn collect_full_scan_statistics_for_test(
                 frequency: Some(values.len()),
                 distinct: Some(exact_distinct.len()),
                 distribution: None,
+                sketches: Some(column_sketches),
             },
         );
-        sketches.insert((*column_name).to_string(), column_sketches);
     }
 
-    Ok(FullScanStatistics {
-        table: TableStatistics {
-            row_count: Some(row_count),
-            size_bytes: None,
-            column_statistics,
-            constraints: Default::default(),
-        },
-        sketches,
+    Ok(TableStatistics {
+        row_count: Some(row_count),
+        size_bytes: None,
+        column_statistics,
+        constraints: Default::default(),
     })
 }
 
-#[cfg(test)]
 fn update_test_bounds(
     lower: &mut Option<ScalarValue>,
     upper: &mut Option<ScalarValue>,
@@ -271,7 +259,6 @@ fn update_test_bounds(
     }
 }
 
-#[cfg(test)]
 fn test_scalar_order(left: &ScalarValue, right: &ScalarValue) -> Option<std::cmp::Ordering> {
     match (left, right) {
         (ScalarValue::Boolean(left), ScalarValue::Boolean(right)) => Some(left.cmp(right)),
@@ -368,24 +355,25 @@ mod tests {
         let table = MemTable::try_new(schema, vec![vec![batch]]).unwrap();
         session.register_table("t", Arc::new(table)).unwrap();
 
-        let collected = collect_full_scan_statistics_for_test(&session, "t", &["id", "name"])
-            .await
-            .unwrap();
+        let collected =
+            collect_full_scan_statistics(&session, &TableReference::bare("t"), &["id", "name"])
+                .await
+                .unwrap();
 
-        assert_eq!(collected.table.row_count, Some(4));
-        assert_eq!(collected.table.column_statistics["id"].frequency, Some(4));
-        assert_eq!(collected.table.column_statistics["id"].distinct, Some(3));
+        assert_eq!(collected.row_count, Some(4));
+        assert_eq!(collected.column_statistics["id"].frequency, Some(4));
+        assert_eq!(collected.column_statistics["id"].distinct, Some(3));
         assert_eq!(
-            collected.table.column_statistics["id"].lower_bound,
+            collected.column_statistics["id"].lower_bound,
             Some(ScalarValue::Int64(1))
         );
         assert_eq!(
-            collected.table.column_statistics["id"].upper_bound,
+            collected.column_statistics["id"].upper_bound,
             Some(ScalarValue::Int64(4))
         );
-        assert_eq!(collected.table.column_statistics["name"].frequency, Some(3));
+        assert_eq!(collected.column_statistics["name"].frequency, Some(3));
 
-        let id_sketches = &collected.sketches["id"];
+        let id_sketches = collected.column_statistics["id"].sketches.as_ref().unwrap();
         let hll_estimate = id_sketches.distinct_values.as_ref().unwrap().estimate();
         assert!((hll_estimate - 3.0).abs() < 1.0);
         let two = EncodedScalarValue::from_scalar(&ScalarValue::Int64(2)).unwrap();

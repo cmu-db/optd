@@ -35,9 +35,8 @@ This distinction also separates two meanings of provenance:
 
 Both logical facts and cardinality profiles are operator analyses. Existing operator handles are
 immutable under the optimizer's append-only invariant, so bottom-up results remain valid until the
-analysis context is cleared. Query-local base-column sketches are installed on `AnalysisContext`;
-installing a sketch invalidates derived caches. `fork` shares sketch payloads while starting with
-fresh derived caches. `PlannedQuery` also retains those payloads so post-optimization analysis uses
+analysis context is cleared. Query-local base-column sketches are carried in each catalog
+`ColumnStatistics` payload. `PlannedQuery` retains that catalog so post-optimization analysis uses
 the same statistical inputs as optimization.
 
 ## Sketches
@@ -52,19 +51,21 @@ does not depend on display formatting or catalog JSON. The complete `ColumnSketc
 the encoding version; HyperLogLog additionally records precision and hash seed. Deserialization and
 installation validate sketch shape, counter bounds, population, and encoding compatibility.
 
-A scan uses HLL when no catalog NDV is available. SpaceSaving improves equality filters, skewed
+A scan prefers an installed HLL over catalog NDV; catalog NDV remains the fallback. SpaceSaving improves equality filters, skewed
 equality-join pair counts, and directional semi/anti key coverage. For an inner join, tracked values
 contribute their frequency cross-products; for left-side coverage, a tracked left frequency
 contributes once when the value is known to occur on the right, independent of right-side duplicate
-multiplicity. The untracked remainder uses the NDV-overlap model. Classic HLL is not treated as a
-precise intersection sketch; it currently improves the join domain estimate through NDV.
+multiplicity. The untracked remainder uses the NDV-overlap model. Classic HLL is forbidden for set-intersection estimation: inclusion-exclusion subtracts noisy
+cardinality estimates and is practically unstable, especially for small overlaps. It currently
+improves the join domain estimate only through per-column NDV. Use an intersection-capable
+Theta/KMV sketch or sampled overlap when available.
 
 DataFusion does not supply HLL or SpaceSaving payloads automatically. The connector's current
 runtime collector obtains exact aggregate row count, non-null count, NDV, minimum, and maximum for
-referenced columns. Connector tests also have a deliberately test-only `SELECT *` collector that
-builds exact statistics, HLL, and SpaceSaving directly from fixture values. Production collection
-still requires a bounded/full-scan collector that installs sketches through the same
-`AnalysisContext` interface until catalog persistence is available.
+referenced columns. The explicit full-scan collector used by fixture tests and the regression
+harness stores HLL and SpaceSaving in the same `ColumnStatistics` payload. Production collection
+still requires a bounded/full-scan collector or persisted catalog provider that supplies those
+sketches.
 
 Sketches are propagated only while their population remains unchanged:
 

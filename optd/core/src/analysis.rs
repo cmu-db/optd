@@ -1677,16 +1677,62 @@ fn scan_profile(
         let catalog_column = catalog_stats
             .as_ref()
             .and_then(|stats| stats.column_statistics.get(column_name));
-        let sketches = analyses.column_sketches(&scan.table, column_name)?;
+        let sketches = match catalog_column
+            .and_then(|stats| stats.sketches.clone())
+            .map(Arc::new)
+        {
+            Some(sketches) => Some(sketches),
+            None => analyses.column_sketches(&scan.table, column_name)?,
+        };
         let profile = catalog_column
             .map(|stats| column_profile_from_stats(stats, &row_estimate, sketches.clone()))
             .unwrap_or_else(|| {
                 default_scan_column_profile(&row_estimate, config, sketches.clone())
             });
+        log_scan_sketch_decision(
+            &scan.table,
+            column_name,
+            catalog_column,
+            sketches.as_deref(),
+            &profile,
+        );
         columns.insert(*column, profile);
     }
 
     Ok(CardinalityProfile::new(row_estimate, columns))
+}
+
+/// Emits sketch-estimator decisions when `OPTD_SKETCH_OBSERVABILITY=1` is set.
+///
+/// This uses stderr rather than a logging facade because `optd-core` intentionally has no runtime
+/// logging dependency. Values are terse, key-value fields so regression-harness output can be
+/// filtered without enabling logs during normal planning.
+fn sketch_observability_enabled() -> bool {
+    sketch_observability_enabled_from(std::env::var("OPTD_SKETCH_OBSERVABILITY").ok().as_deref())
+}
+
+fn sketch_observability_enabled_from(value: Option<&str>) -> bool {
+    matches!(value, Some("1" | "true" | "TRUE" | "yes" | "YES"))
+}
+
+fn log_scan_sketch_decision(
+    table: &TableRef,
+    column: &str,
+    catalog: Option<&ColumnStatistics>,
+    sketches: Option<&ColumnSketches>,
+    profile: &ColumnProfile,
+) {
+    if !sketch_observability_enabled() || sketches.is_none() {
+        return;
+    }
+    let catalog_ndv = catalog.and_then(|stats| stats.distinct);
+    let hll_ndv = sketches
+        .and_then(|sketches| sketches.distinct_values.as_ref())
+        .map(|hll| hll.estimate());
+    eprintln!(
+        "sketch_observability event=scan_ndv table={table:?} column={column:?} catalog_ndv={catalog_ndv:?} hll_ndv={hll_ndv:?} selected_ndv={} selected_source={:?}",
+        profile.distinct.value, profile.distinct.source,
+    );
 }
 
 fn column_profile_from_stats(
@@ -1702,16 +1748,15 @@ fn column_profile_from_stats(
         .as_ref()
         .and_then(|sketches| sketches.distinct_values.as_ref())
         .map(|hll| hll.estimate().min(frequency.value));
-    let distinct_value = stats.distinct.map(|value| value as f64).or(sketch_distinct);
-    let distinct = match (stats.distinct, distinct_value) {
-        (Some(_), Some(value)) => Estimate::catalog(value.min(frequency.value)),
-        (None, Some(value)) => Estimate {
-            value: value.min(frequency.value),
+    let distinct = match (sketch_distinct, stats.distinct) {
+        (Some(value), _) => Estimate {
+            value,
             lower: Some(0.0),
             upper: Some(frequency.value),
             source: EstimateSource::Sketch,
         },
-        (_, None) => Estimate::default(frequency.value.min(rows.value)),
+        (None, Some(value)) => Estimate::catalog((value as f64).min(frequency.value)),
+        (None, None) => Estimate::default(frequency.value.min(rows.value)),
     };
     ColumnProfile {
         lower_bound: stats.lower_bound.clone(),
@@ -1957,11 +2002,47 @@ fn apply_selection_profile(
         } else {
             filter_selectivity(&profile, conjunct, ctx, config).value
         };
+        log_filter_sketch_decision(&profile, conjunct, ctx, selectivity);
         let value_restriction = value_restricted_filter_column(conjunct, ctx);
         profile = scale_profile(profile, selectivity, value_restriction);
         tighten_filter_columns(&mut profile, conjunct, ctx);
     }
     profile
+}
+
+fn log_filter_sketch_decision(
+    profile: &CardinalityProfile,
+    predicate: Expr,
+    ctx: &QueryContext,
+    selectivity: f64,
+) {
+    if !sketch_observability_enabled() {
+        return;
+    }
+    let ExprData::Binary { op, left, right } = predicate.get(ctx) else {
+        return;
+    };
+    let Some((column, literal, _)) = column_literal(*op, *left, *right, ctx) else {
+        return;
+    };
+    let Some(column_profile) = profile.columns.get(&column) else {
+        return;
+    };
+    let Some(sketches) = column_profile.sketches.as_ref() else {
+        return;
+    };
+    let Some(frequent_values) = sketches.frequent_values.as_ref() else {
+        return;
+    };
+    let decision = EncodedScalarValue::from_scalar(literal)
+        .map(|value| frequent_values.estimate(&value).is_some())
+        .map(|tracked| if tracked { "override" } else { "fallback" })
+        .unwrap_or("fallback");
+    let column_data = ctx.column(column);
+    eprintln!(
+        "sketch_observability event=filter_spacesaving table={:?} column={:?} literal={literal:?} decision={decision} selectivity={selectivity} population_rows={}",
+        column_data.qualifier, column_data.name, sketches.population_rows,
+    );
 }
 
 fn scale_profile(
@@ -2641,7 +2722,7 @@ fn join_selectivity_from_conjuncts_with_config(
         let connects_inputs =
             column_sides(edge.left, left, right) != column_sides(edge.right, left, right);
         let edge_estimate =
-            connects_inputs.then(|| equality_edge_estimate(&edge, left, right, catalog));
+            connects_inputs.then(|| equality_edge_estimate(&edge, left, right, catalog, ctx));
 
         // Every equality remains a real constraint even when it closes a transitive cycle. A
         // disjoint ordered domain therefore proves the whole conjunction unsatisfiable.
@@ -2668,16 +2749,34 @@ fn join_selectivity_from_conjuncts_with_config(
 
     let selectivity = (equality_selectivity * residual_selectivity).clamp(0.0, 1.0);
     let first_moment_upper = (right.rows.value * selectivity).clamp(0.0, 1.0);
-    let match_probability = if has_cross_input_equality {
-        // TODO(statistics): Model residual predicates as probability that at least one candidate
-        // partner survives. Linear scaling is conservative in implementation complexity but loses
-        // fanout/correlation information.
-        (equality_match_probability * residual_selectivity).clamp(0.0, 1.0)
-    } else {
-        // With no equality-domain coverage information, retain the first-moment heuristic. It is
-        // an upper bound when pair selectivity is exact, not a calibrated existence probability.
-        first_moment_upper
-    };
+    let (match_probability, conditional_fanout, match_probability_mode) =
+        if has_cross_input_equality {
+            let conditional_fanout = residual_conditional_fanout(
+                equality_match_probability,
+                equality_selectivity,
+                right.rows.value,
+            );
+            (
+                residual_match_probability(
+                    equality_match_probability,
+                    equality_selectivity,
+                    right.rows.value,
+                    residual_selectivity,
+                ),
+                conditional_fanout,
+                "residual_survival",
+            )
+        } else {
+            // With no equality-domain coverage information, retain the first-moment heuristic. It is
+            // an upper bound when pair selectivity is exact, not a calibrated existence probability.
+            (first_moment_upper, 0.0, "first_moment_upper")
+        };
+    if sketch_observability_enabled() {
+        eprintln!(
+            "sketch_observability event=join_match_probability mode={match_probability_mode} equality_match_probability={equality_match_probability} equality_pair_selectivity={equality_selectivity} right_rows={} conditional_fanout={conditional_fanout} residual_selectivity={residual_selectivity} resulting_match_probability={match_probability}",
+            right.rows.value,
+        );
+    }
     #[cfg(test)]
     let equivalence_state_columns = classes.tracked_column_count();
     JoinSelectivityEstimate {
@@ -2694,6 +2793,43 @@ fn join_selectivity_from_conjuncts_with_config(
         #[cfg(test)]
         equivalence_state_columns,
     }
+}
+
+/// Estimates the probability that at least one equality-join candidate survives residual
+/// predicates. `equality_selectivity * right_rows` is the expected number of equality pairs per
+/// left row; conditional on a left row having a match, that yields the estimated fanout. Under an
+/// independent residual-predicate model, at least one of those candidates survives with probability
+/// `1 - (1 - residual_selectivity)^fanout`.
+fn residual_match_probability(
+    equality_match_probability: f64,
+    equality_selectivity: f64,
+    right_rows: f64,
+    residual_selectivity: f64,
+) -> f64 {
+    let equality_match_probability = equality_match_probability.clamp(0.0, 1.0);
+    let residual_selectivity = residual_selectivity.clamp(0.0, 1.0);
+    if equality_match_probability == 0.0 || residual_selectivity == 0.0 {
+        return 0.0;
+    }
+    if residual_selectivity == 1.0 {
+        return equality_match_probability;
+    }
+
+    let conditional_fanout =
+        residual_conditional_fanout(equality_match_probability, equality_selectivity, right_rows);
+    let survives_given_match = 1.0 - (1.0 - residual_selectivity).powf(conditional_fanout);
+    (equality_match_probability * survives_given_match).clamp(0.0, 1.0)
+}
+
+fn residual_conditional_fanout(
+    equality_match_probability: f64,
+    equality_selectivity: f64,
+    right_rows: f64,
+) -> f64 {
+    if equality_match_probability <= 0.0 {
+        return 0.0;
+    }
+    (right_rows * equality_selectivity / equality_match_probability).max(1.0)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2720,6 +2856,7 @@ fn equality_edge_estimate(
     left: &CardinalityProfile,
     right: &CardinalityProfile,
     catalog: Option<&dyn Catalog>,
+    ctx: &QueryContext,
 ) -> EqualityEdgeEstimate {
     let first = edge.left;
     let second = edge.right;
@@ -2816,11 +2953,35 @@ fn equality_edge_estimate(
     } else {
         left_non_null * right_non_null * intersection.distinct / (left_distinct * right_distinct)
     };
-    let pair_selectivity = if !null_safe {
-        sketch_join_estimate(first, second, left, right).unwrap_or(equal_non_null)
-    } else {
+    let sketch_selectivity = (!null_safe)
+        .then(|| sketch_join_estimate(first, second, left, right))
+        .flatten();
+    if sketch_observability_enabled() {
+        let left_column_data = ctx.column(left_column);
+        let right_column_data = ctx.column(right_column);
+        let decision = if null_safe {
+            "fallback_null_safe"
+        } else if sketch_selectivity.is_some() {
+            "override"
+        } else {
+            "fallback"
+        };
+        eprintln!(
+            "sketch_observability event=join_spacesaving left_table={:?} left_column={:?} right_table={:?} right_column={:?} left_ndv={left_distinct} right_ndv={right_distinct} intersection_ndv={} decision={decision} pair_selectivity={}",
+            left_column_data.qualifier,
+            left_column_data.name,
+            right_column_data.qualifier,
+            right_column_data.name,
+            intersection.distinct,
+            sketch_selectivity.unwrap_or(equal_non_null),
+        );
+    }
+    let uniform_pair_selectivity = if null_safe {
         equal_non_null + null_pair_selectivity
+    } else {
+        equal_non_null
     };
+    let pair_selectivity = sketch_selectivity.unwrap_or(uniform_pair_selectivity);
     let uniform_non_null_match_probability = if left_distinct <= 0.0 {
         0.0
     } else {
@@ -3051,8 +3212,10 @@ fn estimated_distinct_intersection(
         _ => left_distinct.min(right_distinct),
     };
 
-    // TODO(statistics): Replace uniform ordered-range overlap with histogram intersection and
-    // sample/set-sketch overlap once those statistics are collected and persisted.
+    // Do not derive set intersection through HLL inclusion-exclusion. It subtracts three noisy
+    // cardinality estimates and is practically unstable, especially when overlap is small.
+    // Use only sound disjoint-range detection and the existing range/NDV fallback until an
+    // intersection-capable sketch (for example Theta/KMV) or sampled overlap is available.
     DistinctIntersection {
         distinct,
         domains_disjoint: false,
@@ -4417,6 +4580,15 @@ mod tests {
     };
     use arrow_schema::{DataType, Field, Schema};
     use std::sync::Arc;
+
+    #[test]
+    fn sketch_observability_is_explicitly_opt_in() {
+        assert!(!sketch_observability_enabled_from(None));
+        assert!(!sketch_observability_enabled_from(Some("0")));
+        assert!(!sketch_observability_enabled_from(Some("debug")));
+        assert!(sketch_observability_enabled_from(Some("1")));
+        assert!(sketch_observability_enabled_from(Some("true")));
+    }
 
     #[test]
     fn created_columns_tracks_columns_introduced_by_operators() {
@@ -6206,6 +6378,7 @@ mod tests {
                             frequency: Some(100),
                             distinct: Some(100),
                             distribution: None,
+                            sketches: None,
                         },
                     )]
                     .into_iter()
@@ -6267,6 +6440,7 @@ mod tests {
                             frequency: Some(100),
                             distinct: Some(100),
                             distribution: None,
+                            sketches: None,
                         },
                     )]
                     .into_iter()
@@ -6331,6 +6505,7 @@ mod tests {
                             frequency: Some(10),
                             distinct: Some(7),
                             distribution: None,
+                            sketches: None,
                         },
                     )]
                     .into_iter()
@@ -6389,6 +6564,7 @@ mod tests {
                             frequency: Some(100),
                             distinct: Some(10),
                             distribution: None,
+                            sketches: None,
                         },
                     )]
                     .into_iter()
@@ -6713,6 +6889,19 @@ mod tests {
     }
 
     #[test]
+    fn residual_match_probability_models_at_least_one_surviving_candidate() {
+        // Half of left rows have equality candidates. Each matched row has 200 candidates, and
+        // each candidate independently survives the residual predicate with probability 0.1.
+        // Linear scaling would incorrectly estimate 0.05; nearly every matched row survives.
+        let probability = residual_match_probability(0.5, 0.1, 1_000.0, 0.1);
+        assert!(probability > 0.49);
+        assert!(probability <= 0.5);
+
+        assert_eq!(residual_match_probability(0.5, 0.1, 1_000.0, 0.0), 0.0);
+        assert_eq!(residual_match_probability(0.5, 0.1, 1_000.0, 1.0), 0.5);
+    }
+
+    #[test]
     fn cardinality_estimation_uses_match_probability_for_semi_and_anti() {
         let mut ctx = QueryContext::new();
         let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
@@ -6880,12 +7069,18 @@ mod tests {
             left_ndv: Estimate::exact(distinct),
             right_ndv: Estimate::exact(distinct),
         };
-        let overlap =
-            equality_edge_estimate(&equality_edge(false, 100.0), &left, &overlapping, None);
+        let overlap = equality_edge_estimate(
+            &equality_edge(false, 100.0),
+            &left,
+            &overlapping,
+            None,
+            &ctx,
+        );
         assert!((overlap.left_match_probability - 0.5).abs() < f64::EPSILON);
         assert!((overlap.pair_selectivity - 0.005).abs() < f64::EPSILON);
 
-        let disjoint = equality_edge_estimate(&equality_edge(false, 100.0), &left, &disjoint, None);
+        let disjoint =
+            equality_edge_estimate(&equality_edge(false, 100.0), &left, &disjoint, None, &ctx);
         assert!(disjoint.domains_disjoint);
         assert_eq!(disjoint.pair_selectivity, 0.0);
         assert_eq!(disjoint.left_match_probability, 0.0);
@@ -6897,6 +7092,7 @@ mod tests {
             &nullable_left,
             &nullable_right,
             None,
+            &ctx,
         );
         assert!(!null_safe.domains_disjoint);
         assert_eq!(null_safe.pair_selectivity, 0.25);
@@ -7108,7 +7304,7 @@ mod tests {
             left_ndv: Estimate::exact(100.0),
             right_ndv: Estimate::exact(100.0),
         };
-        let estimate = equality_edge_estimate(&edge, &left, &right, None);
+        let estimate = equality_edge_estimate(&edge, &left, &right, None, &ctx);
         assert_eq!(estimate.left_match_probability, 1.0);
     }
 
@@ -8068,6 +8264,7 @@ mod tests {
                     frequency: Some(observed.len()),
                     distinct: Some(distinct),
                     distribution: None,
+                    sketches: None,
                 },
             )]
             .into_iter()
@@ -8088,6 +8285,7 @@ mod tests {
                     frequency: Some(rows),
                     distinct: Some(distinct),
                     distribution: None,
+                    sketches: None,
                 },
             )]
             .into_iter()

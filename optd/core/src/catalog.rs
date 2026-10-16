@@ -6,7 +6,7 @@ use std::sync::{Arc, RwLock};
 
 pub use arrow_schema::{Schema, SchemaRef};
 
-use crate::ScalarValue;
+use crate::{ColumnSketches, ScalarValue};
 
 /// Maximum number of most-common-value entries retained for one column.
 ///
@@ -344,6 +344,12 @@ pub struct ColumnStatistics {
         serde(default, skip_serializing_if = "Option::is_none")
     )]
     pub distribution: Option<ColumnDistributionStatistics>,
+    /// Compatible HLL and frequent-value sketches for this column's base-table population.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub sketches: Option<ColumnSketches>,
 }
 
 /// Whether a stored representation covers every value in its documented population.
@@ -1482,6 +1488,7 @@ mod tests {
                             .unwrap(),
                         ),
                     }),
+                    sketches: None,
                 },
             )]
             .into_iter()
