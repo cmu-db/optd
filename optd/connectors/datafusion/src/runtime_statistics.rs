@@ -23,7 +23,8 @@ type RuntimeStatisticsResult<T> = Result<T, String>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct StatsCacheKey {
-    table: String,
+    table: TableRef,
+    schema_signature: Vec<(String, String, bool)>,
     columns: Vec<String>,
 }
 
@@ -93,10 +94,9 @@ impl RuntimeStatisticsCatalogBuilder {
                 .map_err(|e| e.to_string())?;
 
             let statistics = if self.full_scan_sketches {
-                let columns = scan.columns.iter().map(String::as_str).collect::<Vec<_>>();
-                let statistics = collect_full_scan_statistics(&self.session, &scan.table, &columns)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                let statistics = self
+                    .cached_full_scan_statistics(&scan.table, &table_ref, provider.as_ref())
+                    .await?;
                 let hll_columns = statistics
                     .column_statistics
                     .values()
@@ -168,7 +168,8 @@ impl RuntimeStatisticsCatalogBuilder {
     ) -> RuntimeStatisticsResult<TableStatistics> {
         let columns = columns.iter().cloned().collect::<Vec<_>>();
         let key = StatsCacheKey {
-            table: table.to_string(),
+            table: table_ref_from_df(table),
+            schema_signature: schema_signature(&provider.schema()),
             columns: columns.clone(),
         };
         if let Some(statistics) = self.cache.lock().await.get(&key).cloned() {
@@ -192,6 +193,42 @@ impl RuntimeStatisticsCatalogBuilder {
         self.cache.lock().await.insert(key, statistics.clone());
         Ok(statistics)
     }
+
+    async fn cached_full_scan_statistics(
+        &self,
+        table: &TableReference,
+        table_ref: &TableRef,
+        provider: &dyn TableProvider,
+    ) -> RuntimeStatisticsResult<TableStatistics> {
+        let schema = provider.schema();
+        let key = StatsCacheKey {
+            table: table_ref.clone(),
+            schema_signature: schema_signature(&schema),
+            columns: Vec::new(),
+        };
+        if let Some(statistics) = self.cache.lock().await.get(&key).cloned() {
+            return Ok(statistics);
+        }
+        let statistics = collect_full_scan_statistics(&self.session, table, &schema)
+            .await
+            .map_err(|e| e.to_string())?;
+        self.cache.lock().await.insert(key, statistics.clone());
+        Ok(statistics)
+    }
+}
+
+fn schema_signature(schema: &datafusion::arrow::datatypes::Schema) -> Vec<(String, String, bool)> {
+    schema
+        .fields()
+        .iter()
+        .map(|field| {
+            (
+                field.name().clone(),
+                field.data_type().to_string(),
+                field.is_nullable(),
+            )
+        })
+        .collect()
 }
 
 fn referenced_scan_columns(plan: &LogicalPlan) -> Vec<ReferencedScan> {

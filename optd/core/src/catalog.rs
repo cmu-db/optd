@@ -6,7 +6,9 @@ use std::sync::{Arc, RwLock};
 
 pub use arrow_schema::{Schema, SchemaRef};
 
-use crate::{ColumnSketches, ScalarValue};
+use optd_sketches::HyperLogLog;
+
+use crate::{ColumnSketches, ScalarValue, TUPLE_VALUE_ENCODING_VERSION};
 
 /// Maximum number of most-common-value entries retained for one column.
 ///
@@ -308,6 +310,81 @@ impl From<&ResolvedTableRef> for TableRef {
     }
 }
 
+/// Canonical, non-empty set of logical schema ordinals for a column group.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ColumnSet(Vec<usize>);
+
+impl ColumnSet {
+    /// Constructs a set after checking it against the owning logical schema width.
+    pub fn try_new(mut columns: Vec<usize>, schema_width: usize) -> Result<Self, String> {
+        if columns.is_empty() {
+            return Err("column group cannot be empty".into());
+        }
+        if columns.iter().any(|column| *column >= schema_width) {
+            return Err("column group ordinal is outside the logical schema".into());
+        }
+        columns.sort_unstable();
+        if columns.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err("column group contains duplicate ordinals".into());
+        }
+        Ok(Self(columns))
+    }
+
+    pub fn columns(&self) -> &[usize] {
+        &self.0
+    }
+}
+
+/// Origin of a collected column group.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnGroupSource {
+    SchemaPrefix,
+    IndexPrefix,
+}
+
+/// Cardinality-only payload shared by multi-column statistics.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq)]
+pub struct CardinalityStatistics {
+    pub population_rows: u64,
+    pub non_null_rows: u64,
+    pub distinct: Option<usize>,
+    pub distinct_values: Option<HyperLogLog>,
+}
+
+impl CardinalityStatistics {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.non_null_rows > self.population_rows {
+            return Err("non-null rows exceed population rows".into());
+        }
+        if self
+            .distinct
+            .is_some_and(|distinct| distinct > self.non_null_rows as usize)
+        {
+            return Err("distinct values exceed non-null rows".into());
+        }
+        if self
+            .distinct_values
+            .as_ref()
+            .is_some_and(|hll| hll.encoding_version() != TUPLE_VALUE_ENCODING_VERSION)
+        {
+            return Err("column-group HLL encoding version does not match tuple encoding".into());
+        }
+        Ok(())
+    }
+}
+
+/// Statistics for a generic set of logical columns.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColumnGroupStatistics {
+    pub columns: ColumnSet,
+    pub cardinality: CardinalityStatistics,
+    pub source: ColumnGroupSource,
+}
+
 /// Table-level statistics that a catalog may provide to optimizer analyses.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
@@ -318,12 +395,32 @@ pub struct TableStatistics {
     pub size_bytes: Option<usize>,
     /// Per-column statistics keyed by catalog column name.
     pub column_statistics: BTreeMap<String, ColumnStatistics>,
+    /// Statistics for multi-column groups. Single-column groups remain in `column_statistics`.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Vec::is_empty")
+    )]
+    pub column_groups: Vec<ColumnGroupStatistics>,
     /// Structural key relationships supplied independently of observed data.
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "TableConstraints::is_empty")
     )]
     pub constraints: TableConstraints,
+}
+
+impl TableStatistics {
+    /// Looks up a group after canonicalizing caller-supplied logical ordinals.
+    pub fn column_group(
+        &self,
+        columns: Vec<usize>,
+        schema_width: usize,
+    ) -> Option<&ColumnGroupStatistics> {
+        let columns = ColumnSet::try_new(columns, schema_width).ok()?;
+        self.column_groups
+            .iter()
+            .find(|group| group.columns == columns)
+    }
 }
 
 /// Column-level statistics that a catalog may provide to optimizer analyses.
@@ -1493,6 +1590,7 @@ mod tests {
             )]
             .into_iter()
             .collect(),
+            column_groups: Vec::new(),
             constraints: TableConstraints {
                 unique_keys: BoundedVec::try_new(vec![
                     UniqueKey::try_new(vec!["id".to_string()]).unwrap(),

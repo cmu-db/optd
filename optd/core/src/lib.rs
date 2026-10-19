@@ -22,12 +22,13 @@ pub use analysis::{
     expr_used_columns,
 };
 pub use catalog::{
-    BoundedVec, Catalog, CatalogError, CatalogResult, CollectionTooLarge,
-    ColumnDistributionStatistics, ColumnStatistics, DistributionError, ForeignKey, ForeignKeyError,
-    Histogram, HistogramBucket, MAX_HISTOGRAM_BUCKETS, MAX_KEY_COLUMNS, MAX_MOST_COMMON_VALUES,
-    MAX_TABLE_KEYS, MemoryCatalog, MostCommonValue, MostCommonValues, NullCountStatistics,
-    ResolvedTableRef, StatisticsCompleteness, StatisticsProvenance, TableConstraints, TableId,
-    TableMetadata, TableRef, TableStatistics, UniqueKey, UniqueKeyError,
+    BoundedVec, CardinalityStatistics, Catalog, CatalogError, CatalogResult, CollectionTooLarge,
+    ColumnDistributionStatistics, ColumnGroupSource, ColumnGroupStatistics, ColumnSet,
+    ColumnStatistics, DistributionError, ForeignKey, ForeignKeyError, Histogram, HistogramBucket,
+    MAX_HISTOGRAM_BUCKETS, MAX_KEY_COLUMNS, MAX_MOST_COMMON_VALUES, MAX_TABLE_KEYS, MemoryCatalog,
+    MostCommonValue, MostCommonValues, NullCountStatistics, ResolvedTableRef,
+    StatisticsCompleteness, StatisticsProvenance, TableConstraints, TableId, TableMetadata,
+    TableRef, TableStatistics, UniqueKey, UniqueKeyError,
 };
 pub use cost::{CostModel, DefaultCostModel, JoinAlgorithmClass, join_algorithm_cost};
 pub use display::{
@@ -45,7 +46,10 @@ pub use optimize::{
     Pass, PassManager, PassProfile, PassResult, PassTrace, PredicatePushdown,
     ProjectionElimination, QueryPass, Rewrite, RewriteMap, SubqueryToJoin, Unnesting,
 };
-pub use statistics::{ColumnSketches, EncodedScalarValue, SKETCH_VALUE_ENCODING_VERSION};
+pub use statistics::{
+    ColumnSketches, EncodedScalarValue, SKETCH_VALUE_ENCODING_VERSION,
+    TUPLE_VALUE_ENCODING_VERSION, encode_scalar_tuple,
+};
 
 /// An opaque reference to a relational operator in a [`QueryContext`].
 ///
