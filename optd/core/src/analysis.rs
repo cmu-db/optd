@@ -6499,6 +6499,7 @@ mod tests {
                     )]
                     .into_iter()
                     .collect(),
+                    column_groups: Vec::new(),
                     constraints: Default::default(),
                 },
             )
@@ -6561,6 +6562,7 @@ mod tests {
                     )]
                     .into_iter()
                     .collect(),
+                    column_groups: Vec::new(),
                     constraints: Default::default(),
                 },
             )
@@ -6626,6 +6628,7 @@ mod tests {
                     )]
                     .into_iter()
                     .collect(),
+                    column_groups: Vec::new(),
                     constraints: Default::default(),
                 },
             )
@@ -6685,6 +6688,7 @@ mod tests {
                     )]
                     .into_iter()
                     .collect(),
+                    column_groups: Vec::new(),
                     constraints: Default::default(),
                 },
             )
@@ -8385,6 +8389,7 @@ mod tests {
             )]
             .into_iter()
             .collect(),
+            column_groups: Vec::new(),
             constraints: Default::default(),
         }
     }
@@ -8406,6 +8411,7 @@ mod tests {
             )]
             .into_iter()
             .collect(),
+            column_groups: Vec::new(),
             constraints: Default::default(),
         }
     }
