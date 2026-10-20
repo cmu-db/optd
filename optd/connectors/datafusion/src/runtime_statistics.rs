@@ -24,6 +24,8 @@ type RuntimeStatisticsResult<T> = Result<T, String>;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct StatsCacheKey {
     table: TableRef,
+    /// Provider allocation identity prevents stale reuse after a same-named provider is replaced.
+    provider_identity: usize,
     schema_signature: Vec<(String, String, bool)>,
     columns: Vec<String>,
 }
@@ -34,10 +36,18 @@ struct ReferencedScan {
     columns: BTreeSet<String>,
 }
 
+#[derive(Clone)]
+struct CachedStatistics {
+    // Retaining the provider prevents allocator-address ABA when a same-named provider is
+    // replaced while this builder remains alive.
+    _provider: Arc<dyn TableProvider>,
+    statistics: TableStatistics,
+}
+
 /// Builds an optd catalog with runtime-collected stats for one DataFusion plan.
 pub(crate) struct RuntimeStatisticsCatalogBuilder {
     session: SessionContext,
-    cache: tokio::sync::Mutex<HashMap<StatsCacheKey, TableStatistics>>,
+    cache: tokio::sync::Mutex<HashMap<StatsCacheKey, CachedStatistics>>,
     #[cfg(test)]
     constraints: HashMap<TableRef, TableConstraints>,
     full_scan_sketches: bool,
@@ -95,7 +105,7 @@ impl RuntimeStatisticsCatalogBuilder {
 
             let statistics = if self.full_scan_sketches {
                 let statistics = self
-                    .cached_full_scan_statistics(&scan.table, &table_ref, provider.as_ref())
+                    .cached_full_scan_statistics(&scan.table, &table_ref, Arc::clone(&provider))
                     .await?;
                 let hll_columns = statistics
                     .column_statistics
@@ -124,7 +134,7 @@ impl RuntimeStatisticsCatalogBuilder {
                 );
                 statistics
             } else {
-                self.cached_table_statistics(&scan.table, provider.as_ref(), &scan.columns)
+                self.cached_table_statistics(&scan.table, provider, &scan.columns)
                     .await?
             };
 
@@ -163,17 +173,18 @@ impl RuntimeStatisticsCatalogBuilder {
     async fn cached_table_statistics(
         &self,
         table: &TableReference,
-        provider: &dyn TableProvider,
+        provider: Arc<dyn TableProvider>,
         columns: &BTreeSet<String>,
     ) -> RuntimeStatisticsResult<TableStatistics> {
         let columns = columns.iter().cloned().collect::<Vec<_>>();
         let key = StatsCacheKey {
             table: table_ref_from_df(table),
+            provider_identity: provider_identity(&provider),
             schema_signature: schema_signature(&provider.schema()),
             columns: columns.clone(),
         };
         if let Some(statistics) = self.cache.lock().await.get(&key).cloned() {
-            return Ok(statistics);
+            return Ok(statistics.statistics);
         }
 
         let schema = provider.schema();
@@ -190,7 +201,13 @@ impl RuntimeStatisticsCatalogBuilder {
         let statistics = collect_table_statistics_for_table_ref(&self.session, table, &columns)
             .await
             .map_err(|e| e.to_string())?;
-        self.cache.lock().await.insert(key, statistics.clone());
+        self.cache.lock().await.insert(
+            key,
+            CachedStatistics {
+                _provider: provider,
+                statistics: statistics.clone(),
+            },
+        );
         Ok(statistics)
     }
 
@@ -198,23 +215,34 @@ impl RuntimeStatisticsCatalogBuilder {
         &self,
         table: &TableReference,
         table_ref: &TableRef,
-        provider: &dyn TableProvider,
+        provider: Arc<dyn TableProvider>,
     ) -> RuntimeStatisticsResult<TableStatistics> {
         let schema = provider.schema();
         let key = StatsCacheKey {
             table: table_ref.clone(),
+            provider_identity: provider_identity(&provider),
             schema_signature: schema_signature(&schema),
             columns: Vec::new(),
         };
         if let Some(statistics) = self.cache.lock().await.get(&key).cloned() {
-            return Ok(statistics);
+            return Ok(statistics.statistics);
         }
         let statistics = collect_full_scan_statistics(&self.session, table, &schema)
             .await
             .map_err(|e| e.to_string())?;
-        self.cache.lock().await.insert(key, statistics.clone());
+        self.cache.lock().await.insert(
+            key,
+            CachedStatistics {
+                _provider: provider,
+                statistics: statistics.clone(),
+            },
+        );
         Ok(statistics)
     }
+}
+
+fn provider_identity(provider: &Arc<dyn TableProvider>) -> usize {
+    Arc::as_ptr(provider).cast::<()>() as usize
 }
 
 fn schema_signature(schema: &datafusion::arrow::datatypes::Schema) -> Vec<(String, String, bool)> {
@@ -326,7 +354,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn runtime_statistics_installs_real_hll_with_hll() {
+    async fn runtime_statistics_retains_hll_while_using_exact_distinct() {
         let session = SessionContext::new();
         let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
         let batch = RecordBatch::try_new(
@@ -375,12 +403,10 @@ mod tests {
                 .values()
                 .any(|column| column.sketches.is_some())
         );
-        assert!(
-            profile
-                .columns
-                .values()
-                .any(|column| { column.distinct.source == optd_core::EstimateSource::Sketch })
-        );
+        assert!(profile.columns.values().any(|column| {
+            column.distinct.source == optd_core::EstimateSource::Catalog
+                && column.distinct.value == 3.0
+        }));
     }
 
     #[tokio::test]
