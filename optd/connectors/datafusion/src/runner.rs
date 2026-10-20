@@ -27,14 +27,21 @@ use crate::config::OptdExtensionConfig;
 use crate::explain_udfs::{
     ExplainStep, explain_steps_box, explain_steps_box_with_config, register_explain_udfs,
 };
-use crate::from_df_logical::from_logical_plan;
+use crate::from_df_logical::{FromDFError, from_logical_plan};
 use crate::runtime_statistics::RuntimeStatisticsCatalogBuilder;
 use crate::statistics_udfs::build_persistent_statistics_catalog;
 use crate::to_df_logical::to_logical_plan;
 use crate::to_df_physical::{ToPhysicalError, to_physical_plan};
 
-fn optimize(mut opt: OptimizerContext) -> Result<PlannedQuery, optd_core::OptimizeError> {
-    let mut pm = default_pass_manager();
+fn optimize(opt: OptimizerContext) -> Result<PlannedQuery, optd_core::OptimizeError> {
+    run_optimizer(opt, &mut default_pass_manager())
+}
+
+/// Shared production optimizer boundary, including final root resolution.
+pub(crate) fn run_optimizer(
+    mut opt: OptimizerContext,
+    pm: &mut PassManager,
+) -> Result<PlannedQuery, optd_core::OptimizeError> {
     pm.run(&mut opt)?;
     if let Some(root) = opt.query.root() {
         let resolved = opt.rewrites.resolve(root);
@@ -47,6 +54,24 @@ pub(crate) async fn optimizer_context_from_logical_plan(
     session: &SessionContext,
     runtime_stats: &RuntimeStatisticsCatalogBuilder,
     plan: &LogicalPlan,
+) -> Result<OptimizerContext, TryViaIrError> {
+    optimizer_context_with_import_policy(session, runtime_stats, plan, false).await
+}
+
+/// Preserve known import limitations for coverage reporting, without changing runner fallback policy.
+pub(crate) async fn optimizer_context_for_benchmark(
+    session: &SessionContext,
+    runtime_stats: &RuntimeStatisticsCatalogBuilder,
+    plan: &LogicalPlan,
+) -> Result<OptimizerContext, TryViaIrError> {
+    optimizer_context_with_import_policy(session, runtime_stats, plan, true).await
+}
+
+async fn optimizer_context_with_import_policy(
+    session: &SessionContext,
+    runtime_stats: &RuntimeStatisticsCatalogBuilder,
+    plan: &LogicalPlan,
+    preserve_unsupported: bool,
 ) -> Result<OptimizerContext, TryViaIrError> {
     if !is_supported_relational_plan(plan) {
         return Err(TryViaIrError::Unsupported("non-query plan".into()));
@@ -62,7 +87,7 @@ pub(crate) async fn optimizer_context_from_logical_plan(
         .await
         .map_err(TryViaIrError::Failed)?;
 
-    optimizer_context_from_prepared_plan(&plan, catalog)
+    import_prepared_plan(&plan, catalog, preserve_unsupported)
 }
 
 pub(crate) async fn optimizer_context_from_logical_plan_with_catalog(
@@ -86,9 +111,21 @@ fn optimizer_context_from_prepared_plan(
     plan: &LogicalPlan,
     catalog: Arc<dyn Catalog>,
 ) -> Result<OptimizerContext, TryViaIrError> {
+    import_prepared_plan(plan, catalog, false)
+}
+
+fn import_prepared_plan(
+    plan: &LogicalPlan,
+    catalog: Arc<dyn Catalog>,
+    preserve_unsupported: bool,
+) -> Result<OptimizerContext, TryViaIrError> {
     let mut ctx = QueryContext::new();
-    let root =
-        from_logical_plan(plan, &mut ctx).map_err(|e| TryViaIrError::Failed(e.to_string()))?;
+    let root = from_logical_plan(plan, &mut ctx).map_err(|error| match error {
+        FromDFError::Unsupported(message) if preserve_unsupported => {
+            TryViaIrError::Unsupported(message)
+        }
+        error => TryViaIrError::Failed(error.to_string()),
+    })?;
     ctx.set_root(root);
 
     Ok(OptimizerContext::new(ctx, catalog))
@@ -459,11 +496,8 @@ impl OptdRunner {
         &self,
         planned: &PlannedQuery,
     ) -> Result<(SchemaRef, Vec<RecordBatch>), ToPhysicalError> {
-        let plan = to_physical_plan(planned, &self.session).await?;
+        let plan = build_physical_ir(planned, &self.session).await?;
         let state = self.session.state();
-        let plan = DefaultPhysicalPlanner::default()
-            .optimize_physical_plan(plan, &state, |_, _| {})
-            .map_err(ToPhysicalError::Build)?;
         let schema = plan.schema();
         let batches = collect(plan, state.task_ctx())
             .await
@@ -471,6 +505,17 @@ impl OptdRunner {
         let schema = batches.first().map(|b| b.schema()).unwrap_or(schema);
         Ok((schema, batches))
     }
+}
+
+/// Shared direct physical conversion and DataFusion physical optimization boundary.
+pub(crate) async fn build_physical_ir(
+    planned: &PlannedQuery,
+    session: &SessionContext,
+) -> Result<Arc<dyn datafusion::physical_plan::ExecutionPlan>, ToPhysicalError> {
+    let plan = to_physical_plan(planned, session).await?;
+    DefaultPhysicalPlanner::default()
+        .optimize_physical_plan(plan, &session.state(), |_, _| {})
+        .map_err(ToPhysicalError::Build)
 }
 
 fn apply_type_coercion(plan: LogicalPlan) -> datafusion::error::Result<LogicalPlan> {

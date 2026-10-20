@@ -1,3 +1,4 @@
+pub mod benchmark;
 pub mod cardinality_regression;
 pub mod config;
 pub mod explain_udfs;

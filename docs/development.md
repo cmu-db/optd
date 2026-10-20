@@ -55,6 +55,10 @@ Use release mode for SLT because debug runs are slow. Prefer a test filter or th
 SLT file while iterating, then widen coverage according to risk. See `docs/debugging-slt.md` for
 execution-path comparison, expected-output regeneration, and failure triage.
 
+For local TPC-H/JOB planning and execution measurements, use the isolated
+[benchmark emitter](benchmark_emitter.md). It emits raw samples and the benchmark action's custom
+JSON without publishing or replacing correctness tests.
+
 For estimator evaluation, use the per-subtree q-error harness described in
 [`cardinality_regression.md`](cardinality_regression.md). It executes each optimized operator
 subtree independently and reports distributions grouped by the number of joins in the subtree.
