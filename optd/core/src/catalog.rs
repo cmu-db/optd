@@ -311,28 +311,45 @@ impl From<&ResolvedTableRef> for TableRef {
 }
 
 /// Canonical, non-empty set of logical schema ordinals for a column group.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ColumnSet(Vec<usize>);
 
 impl ColumnSet {
-    /// Constructs a set after checking it against the owning logical schema width.
-    pub fn try_new(mut columns: Vec<usize>, schema_width: usize) -> Result<Self, String> {
+    fn validate_shape(columns: &[usize]) -> Result<(), String> {
         if columns.is_empty() {
             return Err("column group cannot be empty".into());
         }
+        if columns.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return Err("column group ordinals must be sorted and unique".into());
+        }
+        Ok(())
+    }
+
+    /// Constructs a set after checking it against the owning logical schema width.
+    pub fn try_new(mut columns: Vec<usize>, schema_width: usize) -> Result<Self, String> {
+        columns.sort_unstable();
+        Self::validate_shape(&columns)?;
         if columns.iter().any(|column| *column >= schema_width) {
             return Err("column group ordinal is outside the logical schema".into());
-        }
-        columns.sort_unstable();
-        if columns.windows(2).any(|pair| pair[0] == pair[1]) {
-            return Err("column group contains duplicate ordinals".into());
         }
         Ok(Self(columns))
     }
 
     pub fn columns(&self) -> &[usize] {
         &self.0
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for ColumnSet {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let columns = Vec::<usize>::deserialize(deserializer)?;
+        Self::validate_shape(&columns).map_err(serde::de::Error::custom)?;
+        Ok(Self(columns))
     }
 }
 
@@ -407,6 +424,23 @@ pub struct TableStatistics {
         serde(default, skip_serializing_if = "TableConstraints::is_empty")
     )]
     pub constraints: TableConstraints,
+}
+
+fn validate_table_statistics(
+    statistics: &TableStatistics,
+    schema_width: usize,
+) -> Result<(), String> {
+    for group in &statistics.column_groups {
+        ColumnSet::try_new(group.columns.columns().to_vec(), schema_width)?;
+        group.cardinality.validate()?;
+        if statistics
+            .row_count
+            .is_some_and(|rows| rows as u64 != group.cardinality.population_rows)
+        {
+            return Err("column-group population does not match table row count".into());
+        }
+    }
+    Ok(())
 }
 
 impl TableStatistics {
@@ -1095,6 +1129,7 @@ pub enum CatalogError {
         table: ResolvedTableRef,
         id: TableId,
     },
+    InvalidStatistics(String),
 }
 
 impl fmt::Display for CatalogError {
@@ -1112,6 +1147,7 @@ impl fmt::Display for CatalogError {
             Self::DanglingTableReference { table, id } => {
                 write!(f, "table '{table}' points to missing table id {}", id.0)
             }
+            Self::InvalidStatistics(error) => write!(f, "invalid table statistics: {error}"),
         }
     }
 }
@@ -1288,6 +1324,8 @@ impl Catalog for MemoryCatalog {
                 table: resolved,
                 id,
             })?;
+        validate_table_statistics(&statistics, metadata.schema.fields().len())
+            .map_err(CatalogError::InvalidStatistics)?;
         metadata.statistics = Some(statistics);
         Ok(())
     }
