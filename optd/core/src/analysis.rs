@@ -22,6 +22,7 @@ pub use observability::{
     ObservationRecord, ObservationScope, ObservationScopeKind, ObservationScopeStatus,
     ObservationSession,
 };
+mod statistics_transform;
 
 pub use logical_facts::{
     BaseColumn, ConstraintSet, LogicalFacts, LogicalFactsAnalysis, ValueEquivalenceClasses,
@@ -247,6 +248,43 @@ impl Estimate {
             upper: Some(self.upper.map_or(cap, |v| v.min(cap)).max(0.0)),
             source,
         }
+    }
+
+    /// Combines distinct-value domains without assuming their lower bounds are independent.
+    ///
+    /// The Cartesian product bounds the number of combinations from above. From below, correlated
+    /// columns may collapse to the larger individual domain, so multiplying lower bounds would be
+    /// unsound.
+    fn combine_distinct_domains(&self, other: &Self, source: EstimateSource) -> Self {
+        let lower = match (self.lower, other.lower) {
+            (Some(left), Some(right)) => Some(left.max(right)),
+            (Some(value), None) | (None, Some(value)) => Some(value),
+            (None, None) => None,
+        };
+        Self {
+            value: (self.value * other.value).max(0.0),
+            lower,
+            upper: multiply_options(self.upper, other.upper),
+            source,
+        }
+    }
+
+    /// Applies another estimate as a semantic upper cap without treating its point as a bound.
+    fn cap_by_estimate(&self, cap: &Self, source: EstimateSource) -> Self {
+        let upper = match (self.upper, cap.upper) {
+            (Some(left), Some(right)) => Some(left.min(right).max(0.0)),
+            (Some(value), None) | (None, Some(value)) => Some(value.max(0.0)),
+            (None, None) => None,
+        };
+        let lower = self
+            .lower
+            .map(|value| upper.map_or(value, |upper| value.min(upper)).max(0.0));
+        Self::derived(self.value.min(cap.value), lower, upper).with_source(source)
+    }
+
+    fn with_source(mut self, source: EstimateSource) -> Self {
+        self.source = source;
+        self
     }
 
     fn max_by_value(&self, other: Self) -> Self {
@@ -1838,9 +1876,11 @@ fn cardinality_profile(
         }
         OperatorData::Map(data) => {
             let input = CardinalityEstimationV1::get_shared(ctx, analyses, data.input)?;
+            let facts = LogicalFactsAnalysis::get_shared(ctx, analyses, operator)?;
             Ok(Arc::new(map_profile(
                 &input,
                 &data.computations,
+                &facts,
                 ctx,
                 &config,
             )))
@@ -2160,38 +2200,30 @@ fn rename_profile(input: &CardinalityProfile, defs: &[(Column, Column)]) -> Card
 fn map_profile(
     input: &CardinalityProfile,
     computations: &[(Column, Expr)],
+    facts: &LogicalFacts,
     ctx: &QueryContext,
     config: &CardinalityEstimationConfig,
 ) -> CardinalityProfile {
     let mut output = input.clone();
     for (column, expr) in computations {
-        let profile = profile_for_computation(input, *expr, ctx).unwrap_or_else(|| {
-            ColumnProfile::unknown_with_ndv_cap(&input.rows, config.unknown_column_ndv_cap)
-        });
+        let definition = facts.definitions.get(column).copied().unwrap_or(*expr);
+        let profile =
+            statistics_transform::derive_expression_profile(input, definition, *column, ctx)
+                .map(|transformed| transformed.profile)
+                .unwrap_or_else(|| {
+                    let mut profile = ColumnProfile::unknown_with_ndv_cap(
+                        &input.rows,
+                        config.unknown_column_ndv_cap,
+                    );
+                    profile.value = Some(ValueId::Derived(*column));
+                    profile
+                });
         output.columns.insert(*column, profile);
     }
-    output.joint_ndvs = if computations
-        .iter()
-        .all(|(_, expr)| matches!(expr.get(ctx), ExprData::ColumnRef(_)))
-    {
-        retained_joint_ndvs(input, &output.columns)
-    } else {
-        Vec::new()
-    };
+    // Map is population preserving and retains every input column. An opaque derived expression
+    // therefore invalidates only its own profile, not joint statistics over untouched inputs.
+    output.joint_ndvs = retained_joint_ndvs(input, &output.columns);
     output
-}
-
-fn profile_for_computation(
-    input: &CardinalityProfile,
-    expr: Expr,
-    ctx: &QueryContext,
-) -> Option<ColumnProfile> {
-    // Only direct aliases inherit statistics. Every other expression remains opaque until a
-    // generic statistics-transform provider can prove how its value domain changes.
-    let ExprData::ColumnRef(column) = expr.get(ctx) else {
-        return None;
-    };
-    input.columns.get(column).cloned()
 }
 
 fn aggregation_profile(
@@ -2229,32 +2261,43 @@ fn aggregation_profile(
         let covered_values = selected_joint
             .map(|joint| joint.values.clone())
             .unwrap_or_default();
-        let product = data.keys.iter().fold(
-            if unique_grouping {
-                input.rows.value
-            } else {
-                selected_joint.map_or(1.0, |joint| joint.distinct.value)
-            },
-            |acc, expr| {
-                if let ExprData::ColumnRef(column) = expr.get(ctx) {
-                    if let Some(value) = input_facts.canonical_value_for_column(*column) {
-                        if covered_values.contains(&value) || !seen_values.contains(&value) {
-                            return acc;
-                        }
-                        // Mark this value consumed after the optional joint group has covered it.
-                        seen_values.remove(&value);
+        let initial = if unique_grouping {
+            input.rows.clone()
+        } else {
+            selected_joint.map_or_else(
+                || Estimate::derived(1.0, Some(0.0), Some(1.0)),
+                |joint| joint.distinct.clone(),
+            )
+        };
+        let product = data.keys.iter().fold(initial, |acc, expr| {
+            let distinct = if let ExprData::ColumnRef(column) = expr.get(ctx) {
+                if let Some(value) = input_facts.canonical_value_for_column(*column) {
+                    if covered_values.contains(&value) || !seen_values.contains(&value) {
+                        return acc;
                     }
-                    acc * input.columns.get(column).map_or(
-                        input.rows.value.min(config.unknown_column_ndv_cap),
-                        |profile| profile.distinct.value,
-                    )
-                } else {
-                    acc * input.rows.value.min(config.unknown_column_ndv_cap)
+                    // Mark this value consumed after the optional joint group has covered it.
+                    seen_values.remove(&value);
                 }
-            },
-        );
-        Estimate::derived(product.min(input.rows.value), Some(0.0), input.rows.upper)
-            .cap(input.rows.value, EstimateSource::Derived)
+                input.columns.get(column).map_or_else(
+                    || {
+                        Estimate::derived(
+                            input.rows.value.min(config.unknown_column_ndv_cap),
+                            Some(0.0),
+                            input.rows.upper,
+                        )
+                    },
+                    |profile| profile.distinct.clone(),
+                )
+            } else {
+                Estimate::derived(
+                    input.rows.value.min(config.unknown_column_ndv_cap),
+                    Some(0.0),
+                    input.rows.upper,
+                )
+            };
+            acc.combine_distinct_domains(&distinct, EstimateSource::Derived)
+        });
+        product.cap_by_estimate(&input.rows, EstimateSource::Derived)
     };
 
     let mut columns = BTreeMap::new();
@@ -5138,11 +5181,37 @@ mod tests {
         AggregateExpr, AggregateFunction, Aggregation, BinaryOp, CardinalityStatistics, Catalog,
         ColumnData, ColumnGroupSource, ColumnGroupStatistics, ColumnSet, ColumnStatistics,
         ExprData, ForeignKey, Join, JoinType, Limit, Map, MemoryCatalog, OperatorData, Output,
-        Projection, ScalarValue, Scan, Selection, TableFunction, TableFunctionDef, TableRef,
-        TableStatistics, UniqueKey,
+        Projection, ScalarFunction, ScalarValue, Scan, Selection, TableFunction, TableFunctionDef,
+        TableRef, TableStatistics, UniqueKey,
     };
     use arrow_schema::{DataType, Field, Schema};
     use std::sync::Arc;
+
+    #[test]
+    fn distinct_domain_bounds_do_not_multiply_correlated_lower_bounds() {
+        let combined = Estimate::exact(10.0)
+            .combine_distinct_domains(&Estimate::exact(20.0), EstimateSource::Derived);
+        assert_eq!(combined.value, 200.0);
+        assert_eq!(combined.lower, Some(20.0));
+        assert_eq!(combined.upper, Some(200.0));
+
+        let identity = Estimate::derived(1.0, Some(0.0), Some(1.0));
+        let uncertain = Estimate::derived(0.25, Some(0.0), Some(10.0));
+        let combined = identity.combine_distinct_domains(&uncertain, EstimateSource::Derived);
+        assert_eq!(combined.value, 0.25);
+        assert_eq!(combined.lower, Some(0.0));
+        assert_eq!(combined.upper, Some(10.0));
+    }
+
+    #[test]
+    fn estimate_cap_uses_bound_instead_of_point_as_hard_upper_limit() {
+        let estimate = Estimate::derived(100.0, Some(10.0), Some(500.0));
+        let cap = Estimate::derived(80.0, Some(20.0), Some(200.0));
+        let capped = estimate.cap_by_estimate(&cap, EstimateSource::Derived);
+        assert_eq!(capped.value, 80.0);
+        assert_eq!(capped.lower, Some(10.0));
+        assert_eq!(capped.upper, Some(200.0));
+    }
 
     #[test]
     fn scan_statistic_selection_reason_reports_the_baseline_fallback() {
@@ -7037,7 +7106,7 @@ mod tests {
     }
 
     #[test]
-    fn cardinality_estimation_keeps_computed_expressions_opaque() {
+    fn cardinality_estimation_transforms_bounded_integer_affine_expressions() {
         let mut ctx = QueryContext::new();
         let value = ColumnData::new("value", DataType::Int64).add(&mut ctx);
         let shifted = ColumnData::new("shifted", DataType::Int64).add(&mut ctx);
@@ -7092,14 +7161,111 @@ mod tests {
 
         let profile = analyses.get::<CardinalityEstimationV1>(&ctx, map).unwrap();
 
-        assert_eq!(profile.columns[&shifted].lower_bound, None);
-        assert_eq!(profile.columns[&shifted].upper_bound, None);
-        assert_eq!(profile.columns[&shifted].distinct.value, 10.0);
+        assert_eq!(
+            profile.columns[&shifted].lower_bound,
+            Some(ScalarValue::Int64(4))
+        );
+        assert_eq!(
+            profile.columns[&shifted].upper_bound,
+            Some(ScalarValue::Int64(10))
+        );
+        assert_eq!(profile.columns[&shifted].distinct.value, 7.0);
+        assert_eq!(profile.columns[&shifted].distinct.lower, Some(7.0));
+        assert_eq!(profile.columns[&shifted].distinct.upper, Some(7.0));
+        assert_eq!(
+            profile.columns[&shifted].value,
+            Some(ValueId::Derived(shifted))
+        );
         assert_eq!(
             profile.columns[&shifted].distinct.source,
             EstimateSource::Derived
         );
         assert!(profile.columns[&shifted].sketches.is_none());
+    }
+
+    #[test]
+    fn aggregation_uses_year_transform_domain_from_logical_definition() {
+        let mut ctx = QueryContext::new();
+        let order_date = ColumnData::new("order_date", DataType::Date32).add(&mut ctx);
+        let order_year = ColumnData::new("order_year", DataType::Float64).add(&mut ctx);
+        let count = ColumnData::new("count", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("orders"),
+            columns: vec![order_date],
+        })
+        .add(&mut ctx);
+        let year_part = ExprData::Literal(ScalarValue::Utf8("YEAR".to_string())).add(&mut ctx);
+        let date_ref = ExprData::ColumnRef(order_date).add(&mut ctx);
+        let extract_year = ExprData::ScalarFunction {
+            function: ScalarFunction::extension("date_part"),
+            args: vec![year_part, date_ref],
+        }
+        .add(&mut ctx);
+        let map = OperatorData::Map(Map {
+            computations: vec![(order_year, extract_year)],
+            input: scan,
+        })
+        .add(&mut ctx);
+        let year_ref = ExprData::ColumnRef(order_year).add(&mut ctx);
+        let aggregation = OperatorData::Aggregation(Aggregation {
+            keys: vec![year_ref],
+            aggregates: vec![(count, AggregateExpr::CountStar)],
+            input: map,
+        })
+        .add(&mut ctx);
+
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(
+                TableRef::bare("orders"),
+                Arc::new(Schema::new(vec![Field::new(
+                    "order_date",
+                    DataType::Date32,
+                    false,
+                )])),
+                None,
+            )
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                TableRef::bare("orders"),
+                TableStatistics {
+                    row_count: Some(10_000),
+                    size_bytes: None,
+                    column_statistics: [(
+                        "order_date".to_string(),
+                        ColumnStatistics {
+                            lower_bound: Some(ScalarValue::Date32(8_035)),
+                            upper_bound: Some(ScalarValue::Date32(10_591)),
+                            frequency: Some(10_000),
+                            distinct: Some(2_557),
+                            distribution: None,
+                            sketches: None,
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                    column_groups: Vec::new(),
+                    constraints: Default::default(),
+                },
+            )
+            .unwrap();
+        let mut analyses = AnalysisContext::new(catalog);
+
+        let profile = analyses
+            .get::<CardinalityEstimationV1>(&ctx, aggregation)
+            .unwrap();
+
+        assert_eq!(profile.rows, Estimate::derived(7.0, Some(1.0), Some(7.0)));
+        assert_eq!(profile.columns[&order_year].distinct.value, 7.0);
+        assert_eq!(
+            profile.columns[&order_year].lower_bound,
+            Some(ScalarValue::Float64(1992.0))
+        );
+        assert_eq!(
+            profile.columns[&order_year].upper_bound,
+            Some(ScalarValue::Float64(1998.0))
+        );
     }
 
     #[test]
@@ -7211,7 +7377,7 @@ mod tests {
     }
 
     #[test]
-    fn aggregation_uses_largest_available_joint_ndv_regardless_of_key_order() {
+    fn aggregation_uses_joint_ndv_through_map_regardless_of_key_order() {
         let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
         catalog
             .create_table(TableRef::bare("pairs"), schema(), None)
@@ -7270,6 +7436,17 @@ mod tests {
             OperatorData::Scan(scan_data) => scan_data.columns.clone(),
             _ => unreachable!(),
         };
+        let computed = ColumnData::new("opaque", DataType::Int64).add(&mut ctx);
+        let computed_expr = ExprData::ScalarFunction {
+            function: ScalarFunction::extension("opaque"),
+            args: vec![ExprData::ColumnRef(scan_columns[0]).add(&mut ctx)],
+        }
+        .add(&mut ctx);
+        let map = OperatorData::Map(Map {
+            computations: vec![(computed, computed_expr)],
+            input: scan,
+        })
+        .add(&mut ctx);
         let count = ColumnData::new("count", DataType::Int64).add(&mut ctx);
         let aggregation = OperatorData::Aggregation(Aggregation {
             keys: vec![
@@ -7277,7 +7454,7 @@ mod tests {
                 ExprData::ColumnRef(scan_columns[0]).add(&mut ctx),
             ],
             aggregates: vec![(count, AggregateExpr::CountStar)],
-            input: scan,
+            input: map,
         })
         .add(&mut ctx);
         let mut analyses = AnalysisContext::new(catalog);
