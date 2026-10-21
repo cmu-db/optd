@@ -6,7 +6,7 @@ Optimizer statistics are derived lazily for one query and cached in `AnalysisCon
 caching and collection scheduling belong at the catalog boundary and are future work.
 
 The implementation borrows behavioral ideas from the `ac/test-card-est` exploration without
-sharing its IR property system or expression-specific statistic transforms.
+sharing its IR property system.
 
 ## Separation of concerns
 
@@ -22,8 +22,9 @@ sharing its IR property system or expression-specific statistic transforms.
 `CardinalityEstimationV1` consumes those facts alongside catalog statistics and query-local
 sketches. It owns estimator policy, fallback assumptions, and operator-specific row-count math.
 An expression such as `x + 1` is recorded as an opaque derivation by lineage; lineage does not gain
-an `AddOne`, `ExtractYear`, or function-specific variant. A future transformation provider may
-recognize the stored expression and derive statistics explicitly.
+an `AddOne`, `ExtractYear`, or function-specific variant. The centralized `statistics_transform`
+module recognizes selected expressions from `LogicalFacts::definitions` and derives profiles only
+when it can prove the required value-domain properties.
 
 This distinction also separates two meanings of provenance:
 
@@ -83,9 +84,30 @@ unchanged:
 
 - projection, output, rename, sorting, and direct aliases may retain compatible metadata;
 - filtering, limiting, joins, cross products, aggregation, and opaque computations invalidate it;
+- `Map` retains joint metadata over untouched input values because it preserves their population,
+  while a computed output receives no base sketch;
 - a join may consume immediate-input joint NDV but does not attach the base-population statistic to
   its output;
-- a future statistics-transform interface may produce a sound replacement statistic.
+- a proven transformation may produce a sound derived profile but not masquerade as the original
+  base-population sketch.
+
+## Expression-statistics transformations
+
+`statistics_transform` describes recognized expressions with three independent properties:
+injectivity, monotonicity, and NULL behavior. The first rules cover direct aliases, lossless integer
+and same-scale decimal widening casts, bounded integer affine transformations, and bounded
+`date_part('year', date)`/`extract` forms. Integer transformations require known endpoints and
+checked arithmetic, so possible overflow returns to the ordinary unknown-expression fallback.
+Year extraction is many-to-one: its NDV is capped by the inclusive year span proven by the input
+bounds. Recognized rules preserve non-null frequency because every current rule is NULL-preserving.
+Only direct aliases retain value identity and compatible sketches; all other results use the derived
+identity already recorded by `LogicalFacts`.
+
+Estimate endpoints are propagated as semantic bounds rather than confidence intervals. For a
+multi-key grouping estimate, the upper endpoint multiplies component-domain upper bounds while the
+lower endpoint takes their maximum: correlated columns make multiplying NDV lower bounds unsound.
+A row-count cap uses the row estimate's upper endpoint instead of treating its point estimate as a
+certainty. Probabilistic HLL uncertainty remains out of scope.
 
 ## Join and outer-join facts
 
@@ -151,6 +173,29 @@ Planned extensions should preserve these boundaries:
 - select bounded workload-, constraint-, or index-derived column groups beyond the leading schema
   prefixes;
 - add tuple-frequency and intersection-capable statistics where NDV alone is insufficient;
-- recognize derived expressions through an estimator/planner transformation interface rather than
-  adding variants to `ValueId`;
+- extend the centralized transformation rules or add a provider registry without adding variants to
+  `ValueId`;
 - expose derivation traces for explain output without making them part of logical identity.
+
+## Evidence base
+
+The design treats deployed-system behavior and established database venues as primary evidence.
+[PostgreSQL's multivariate statistics](https://www.postgresql.org/docs/current/multivariate-statistics-examples.html)
+provide the closest production precedent for combining `ndistinct`, MCV, and dependency synopses.
+Peer-reviewed foundations include:
+
+- *Bifocal Sampling for Skew-Resistant Join Size Estimation* (SIGMOD 1996,
+  [DOI 10.1145/233269.233340](https://doi.org/10.1145/233269.233340));
+- *Processing Data-Stream Join Aggregates Using Skimmed Sketches* (EDBT 2004,
+  [DOI 10.1007/978-3-540-24741-8_33](https://doi.org/10.1007/978-3-540-24741-8_33));
+- *Sketches for Size of Join Estimation* (ACM TODS 2008,
+  [DOI 10.1145/1386118.1386121](https://doi.org/10.1145/1386118.1386121));
+- *Join Size Estimation Subject to Filter Conditions* (PVLDB 2015,
+  [DOI 10.14778/2824032.2824051](https://doi.org/10.14778/2824032.2824051));
+- *Two-Level Sampling for Join Size Estimation* (SIGMOD 2017,
+  [DOI 10.1145/3035918.3035921](https://doi.org/10.1145/3035918.3035921));
+- *COMPASS* (SIGMOD 2021,
+  [DOI 10.1145/3448016.3452840](https://doi.org/10.1145/3448016.3452840)).
+
+ArXiv-only HLL-intersection proposals are not implementation authority; classic HLL remains an NDV
+synopsis only.
