@@ -69,9 +69,13 @@ queries and load the results into the catalog before optimization.
 
 `Rename` copies profiles from original columns to renamed columns.
 
-`Map` preserves input columns. Direct aliases preserve the source profile. Other computed columns
-remain opaque until a generic statistics-transform provider can prove bounds, NDV, and null/sketch
-behavior; expression-specific lineage variants are intentionally avoided.
+`Map` preserves input columns and joint metadata over untouched input values. Direct aliases
+preserve the source profile. The centralized statistics-transform layer reads opaque definitions
+from `LogicalFacts` and currently recognizes lossless widening casts, bounded integer affine
+expressions, and bounded year extraction. These rules explicitly prove injectivity or an output-domain
+cap, monotonicity, and NULL preservation; unsupported or potentially overflowing expressions retain
+the stable unknown-column fallback. Computed outputs never inherit base sketches, and
+expression-specific lineage variants remain intentionally avoided.
 
 `Selection` splits conjuncts and applies predicate selectivity one predicate at a time. Equality
 predicates use NDV; range predicates use known bounds when available; unsupported predicates fall
@@ -150,7 +154,7 @@ minimum, maintaining `lower <= value <= upper`.
 - [x] Implement filter selectivity for equality, ranges, `AND`, `OR`, and fallback predicates.
 - [ ] Add first-class literal-list `IN` selectivity if the IR gains an `IN`-list expression.
 - [x] Implement operator propagation for projection, rename, map, selection, aggregation, sort, limit, joins, and fallback operators.
-- [x] Keep arbitrary computed columns opaque pending a generic statistics-transform provider.
+- [x] Keep unsupported computed columns opaque behind a centralized statistics-transform layer.
 - [x] Add join equivalence-class handling for equality predicates.
 - [x] Treat transient/redundant equality edges specially so selectivity is not double-counted.
 - [x] Share cached profiles internally with `Arc` while retaining the owned public API.
@@ -161,7 +165,8 @@ minimum, maintaining `lower <= value <= upper`.
 - [x] Add unit tests for scan, filter, map transformation, aggregation, join NDV, join ordering, redundant equality edges, and connector stats extraction.
 - [x] Add a DataFusion connector helper/API for SQL-based stats extraction into catalog statistics.
 - [x] Add demand-driven logical value lineage and accumulated constraints.
-- [x] Keep derived expressions opaque instead of adding expression-specific lineage transforms.
+- [x] Retain opaque derived definitions instead of adding expression-specific lineage variants.
+- [x] Derive profiles for safe casts, bounded integer affine transforms, and year extraction.
 - [x] Add query-local HLL and SpaceSaving storage with downstream filter/join consumers.
 - [x] Separate directional equality coverage from tuple-pair selectivity for semi/anti joins.
 - [x] Add ordered-range domain overlap and disjointness checks.
