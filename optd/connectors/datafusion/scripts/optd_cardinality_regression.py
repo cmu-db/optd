@@ -4,12 +4,22 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+collector_store = importlib.import_module("scripts.cardinality_collection.collector")
+collection_run_id = collector_store.collection_run_id
+dump_report = collector_store.dump_report
+utc_now = collector_store.utc_now
 
 SUITE_QUERY_PATHS = {
     "tpch": Path("optd/connectors/datafusion/tests/slt/tpch/results"),
@@ -24,6 +34,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tpch-queries", type=Path, default=SUITE_QUERY_PATHS["tpch"])
     parser.add_argument("--job-queries", type=Path, default=SUITE_QUERY_PATHS["job"])
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--sqlite-path",
+        type=Path,
+        default=Path("target/cardinality-regression/cardinality.sqlite"),
+        help="SQLite collection database (default: target/cardinality-regression/cardinality.sqlite)",
+    )
+    parser.add_argument("--no-sqlite", action="store_true", help="Disable SQLite checkpoint dumps")
+    parser.add_argument("--run-id", help="Shared run identity; set the same value for vendor collection")
     parser.add_argument(
         "--binary",
         type=Path,
@@ -94,6 +112,21 @@ def write_json(path: Path, value: Any) -> None:
 
 def main() -> None:
     args = parse_args()
+    started_at = utc_now()
+    run_id = args.run_id or collection_run_id(REPO_ROOT, started_at)
+
+    def dump_checkpoint(report_path: Path) -> None:
+        if not args.no_sqlite:
+            dump_report(
+                args.sqlite_path,
+                report_path,
+                engine="optd",
+                run_id=run_id,
+                started_at=started_at,
+                repo_root=REPO_ROOT,
+                source_path=args.output,
+            )
+
     if args.limit is not None and args.limit <= 0:
         raise ValueError("--limit must be positive")
     if args.query_timeout is not None and args.query_timeout <= 0:
@@ -166,8 +199,10 @@ def main() -> None:
             measurements.extend(query_measurements)
             completed.add(key)
             write_json(report_path, measurements)
+            dump_checkpoint(report_path)
 
     write_json(report_path, measurements)
+    dump_checkpoint(report_path)
     errors_path = args.output / "errors.json"
     if errors:
         write_json(errors_path, errors)
@@ -175,6 +210,8 @@ def main() -> None:
     else:
         errors_path.unlink(missing_ok=True)
     print(f"wrote {report_path}", file=sys.stderr)
+    if not args.no_sqlite:
+        print(f"dumped run {run_id} to {args.sqlite_path}", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -1407,9 +1407,19 @@ impl<'a> QueryFormatter<'a> {
             .join(", ")
     }
 
-    /// Formats a scalar expression as a string. Public for use by hypergraph pretty printing.
+    /// Formats a column with its query-local opaque identifier.
+    pub fn format_column_pub(&self, column: Column) -> String {
+        self.format_column_name(column)
+    }
+
+    /// Formats a scalar expression as a string. Public for diagnostics and plan metadata.
     pub fn format_expr_pub(&self, expr: Expr) -> String {
         self.format_expr(expr)
+    }
+
+    /// Formats an aggregate expression as a string for diagnostics and plan metadata.
+    pub fn format_aggregate_expr_pub(&self, aggregate: &AggregateExpr) -> String {
+        self.format_aggregate_expr(aggregate)
     }
 
     fn format_expr(&self, expr: Expr) -> String {

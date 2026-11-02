@@ -9,6 +9,8 @@ tpch_queries := env_var_or_default("TPCH_QUERIES", "optd/connectors/datafusion/t
 job_queries := env_var_or_default("JOB_QUERIES", "optd/connectors/datafusion/tests/slt/job/results")
 slt_filter := env_var_or_default("SLT_FILTER", "")
 regression_root := env_var_or_default("REGRESSION_ROOT", "target/cardinality-regression")
+regression_db := env_var_or_default("REGRESSION_DB", regression_root + "/cardinality.sqlite")
+regression_run_id := env_var_or_default("REGRESSION_RUN_ID", "")
 optd_output := env_var_or_default("OPTD_OUTPUT", regression_root + "/optd")
 postgres_output := env_var_or_default("POSTGRES_OUTPUT", regression_root + "/postgres")
 optd_extra_args := env_var_or_default("OPTD_EXTRA_ARGS", "")
@@ -61,6 +63,8 @@ help:
         '  DATASET=all|tpch|job just regression-postgres' \
         '  TPCH_QUERIES=<path> JOB_QUERIES=<path> just regression-all' \
         '  OPTD_OUTPUT=<dir> POSTGRES_OUTPUT=<dir> just regression-compare' \
+        '  REGRESSION_DB=<path> just regression-all  # default: target/cardinality-regression/cardinality.sqlite' \
+        '  REGRESSION_RUN_ID=<id> just regression-all  # optional stable/shared run identity' \
         '  OPTD_EXTRA_ARGS="--limit 5 --target-partitions 4" just regression-optd' \
         '  OPTD_EXTRA_ARGS="--no-full-scan-sketches" just regression-optd  # opt out of default sketches' \
         '  OPTD_QUERY_TIMEOUT=900 just regression-optd' \
@@ -128,16 +132,16 @@ load-postgres-job:
 load-postgres-all: load-postgres-tpch load-postgres-job
 
 regression-optd: build-binaries
-    {{python}} optd/connectors/datafusion/scripts/optd_cardinality_regression.py --suite '{{dataset}}' --tpch-queries '{{tpch_queries}}' --job-queries '{{job_queries}}' --output '{{optd_output}}' --query-timeout '{{optd_query_timeout}}' --resume --continue-on-error {{optd_extra_args}}
+    if [ -n '{{regression_run_id}}' ]; then set -- --run-id '{{regression_run_id}}'; else set --; fi; {{python}} optd/connectors/datafusion/scripts/optd_cardinality_regression.py --suite '{{dataset}}' --tpch-queries '{{tpch_queries}}' --job-queries '{{job_queries}}' --output '{{optd_output}}' --sqlite-path '{{regression_db}}' --query-timeout '{{optd_query_timeout}}' --resume --continue-on-error "$@" {{optd_extra_args}}
 
 regression-optd-smoke: build-binaries
-    {{python}} optd/connectors/datafusion/scripts/optd_cardinality_regression.py --suite '{{dataset}}' --tpch-queries '{{tpch_queries}}' --job-queries '{{job_queries}}' --output '{{optd_output}}' --limit 1 {{optd_extra_args}}
+    if [ -n '{{regression_run_id}}' ]; then set -- --run-id '{{regression_run_id}}'; else set --; fi; {{python}} optd/connectors/datafusion/scripts/optd_cardinality_regression.py --suite '{{dataset}}' --tpch-queries '{{tpch_queries}}' --job-queries '{{job_queries}}' --output '{{optd_output}}' --sqlite-path '{{regression_db}}' --limit 1 "$@" {{optd_extra_args}}
 
 regression-postgres:
-    {{python}} optd/connectors/datafusion/scripts/postgres_cardinality_regression.py --suite '{{dataset}}' --tpch-queries '{{tpch_queries}}' --job-queries '{{job_queries}}' --output '{{postgres_output}}' --container '{{postgres_container}}' --database '{{postgres_database}}' --user '{{postgres_user}}' --statement-timeout '{{postgres_statement_timeout}}' {{postgres_extra_args}}
+    if [ -n '{{regression_run_id}}' ]; then set -- --run-id '{{regression_run_id}}'; else set --; fi; {{python}} optd/connectors/datafusion/scripts/postgres_cardinality_regression.py --suite '{{dataset}}' --tpch-queries '{{tpch_queries}}' --job-queries '{{job_queries}}' --output '{{postgres_output}}' --sqlite-path '{{regression_db}}' --container '{{postgres_container}}' --database '{{postgres_database}}' --user '{{postgres_user}}' --statement-timeout '{{postgres_statement_timeout}}' "$@" {{postgres_extra_args}}
 
 regression-postgres-smoke:
-    {{python}} optd/connectors/datafusion/scripts/postgres_cardinality_regression.py --suite '{{dataset}}' --tpch-queries '{{tpch_queries}}' --job-queries '{{job_queries}}' --output '{{postgres_output}}' --container '{{postgres_container}}' --database '{{postgres_database}}' --user '{{postgres_user}}' --statement-timeout '{{postgres_statement_timeout}}' --limit 1 {{postgres_extra_args}}
+    if [ -n '{{regression_run_id}}' ]; then set -- --run-id '{{regression_run_id}}'; else set --; fi; {{python}} optd/connectors/datafusion/scripts/postgres_cardinality_regression.py --suite '{{dataset}}' --tpch-queries '{{tpch_queries}}' --job-queries '{{job_queries}}' --output '{{postgres_output}}' --sqlite-path '{{regression_db}}' --container '{{postgres_container}}' --database '{{postgres_database}}' --user '{{postgres_user}}' --statement-timeout '{{postgres_statement_timeout}}' --limit 1 "$@" {{postgres_extra_args}}
 
 regression-compare:
     {{plot_python}} optd/connectors/datafusion/scripts/plot_cardinality_regression.py '{{optd_output}}/report.json' --compare-report '{{postgres_output}}/report.json' --output '{{regression_root}}/comparison' --normalization '{{normalization}}' --suite-matrix --summary
@@ -145,7 +149,8 @@ regression-compare:
 regression-compare-smoke:
     {{plot_python}} optd/connectors/datafusion/scripts/plot_cardinality_regression.py '{{optd_output}}/report.json' --compare-report '{{postgres_output}}/report.json' --output '{{regression_root}}/comparison' --normalization none --summary
 
-regression-all: regression-optd regression-postgres regression-compare
+regression-all:
+    run_id='{{regression_run_id}}'; if [ -z "$run_id" ]; then run_id="$(date -u +%Y%m%d-%H%M%SZ)"; fi; REGRESSION_RUN_ID="$run_id" just regression-optd; REGRESSION_RUN_ID="$run_id" just regression-postgres; just regression-compare
 
 regression-run:
     scripts/run_cardinality_regression.sh --suite '{{dataset}}'
