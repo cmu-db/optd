@@ -3,6 +3,7 @@
 //! Every reachable operator is treated as the root of a subtree. The harness compares the
 //! optimizer's estimated row count with the exact row count for that subtree.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -13,7 +14,7 @@ use datafusion::prelude::SessionContext;
 use futures::TryStreamExt;
 use optd_core::{
     CardinalityEstimationV1, FreeColumns, Operator, OperatorData, PlannedQuery, QueryContext,
-    Relation,
+    QueryFormatter, Relation,
 };
 use serde::{Deserialize, Serialize};
 
@@ -40,6 +41,9 @@ pub struct SubtreeMeasurement {
     pub query: String,
     pub node_path: String,
     pub operator: String,
+    /// Operator parameters retained for diagnostics and downstream plan visualization.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub parameters: BTreeMap<String, String>,
     /// Number of join-like operators in this subtree.
     ///
     /// Both predicate joins and cross products combine two relational inputs, so both contribute
@@ -179,11 +183,13 @@ impl CardinalityRegressionHarness {
             }
             let estimated_rows = profile.rows.value;
             let q_error = row_q_error(estimated_rows, actual_rows)?;
+            let operator = node.operator.get(&planned.query);
             measurements.push(SubtreeMeasurement {
                 suite: String::new(),
                 query: query_name.to_string(),
                 node_path: node.path,
-                operator: operator_name(node.operator.get(&planned.query)).to_string(),
+                operator: operator_name(operator).to_string(),
+                parameters: operator_parameters(operator, &planned.query),
                 join_count: node.join_count,
                 estimated_rows,
                 actual_rows,
@@ -396,6 +402,125 @@ fn collect_subtrees(
     join_count
 }
 
+fn operator_parameters(operator: &OperatorData, query: &QueryContext) -> BTreeMap<String, String> {
+    let formatter = QueryFormatter::new(query);
+    let mut parameters = BTreeMap::new();
+    match operator {
+        OperatorData::Scan(scan) => {
+            parameters.insert("table".into(), scan.table.to_string());
+        }
+        OperatorData::ConstScan(scan) => {
+            parameters.insert("rows".into(), scan.rows.len().to_string());
+        }
+        OperatorData::TableFunction(function) => {
+            parameters.insert("function".into(), function.function.to_string());
+            parameters.insert(
+                "arguments".into(),
+                function
+                    .args
+                    .iter()
+                    .map(|expr| formatter.format_expr_pub(*expr))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+        }
+        OperatorData::Selection(selection) => {
+            parameters.insert(
+                "filter".into(),
+                formatter.format_expr_pub(selection.predicate),
+            );
+        }
+        OperatorData::Projection(projection) => {
+            parameters.insert(
+                "columns".into(),
+                projection
+                    .columns
+                    .iter()
+                    .map(|column| formatter.format_column_pub(*column))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+        }
+        OperatorData::Output(_) | OperatorData::CrossProduct(_) => {}
+        OperatorData::Sort(sort) => {
+            parameters.insert(
+                "sort_keys".into(),
+                sort.keys
+                    .iter()
+                    .map(|key| {
+                        format!(
+                            "{} {} {}",
+                            formatter.format_expr_pub(key.expr),
+                            key.direction,
+                            key.nulls
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+        }
+        OperatorData::Limit(limit) => {
+            parameters.insert("offset".into(), limit.offset.to_string());
+            parameters.insert(
+                "fetch".into(),
+                limit
+                    .fetch
+                    .map_or_else(|| "all".into(), |value| value.to_string()),
+            );
+        }
+        OperatorData::Rename(rename) => {
+            parameters.insert("alias".into(), rename.alias.clone());
+        }
+        OperatorData::Map(map) => {
+            parameters.insert(
+                "computations".into(),
+                map.computations
+                    .iter()
+                    .map(|(column, expr)| {
+                        format!(
+                            "{} := {}",
+                            formatter.format_column_pub(*column),
+                            formatter.format_expr_pub(*expr)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+        }
+        OperatorData::Aggregation(aggregation) => {
+            parameters.insert(
+                "group_keys".into(),
+                aggregation
+                    .keys
+                    .iter()
+                    .map(|expr| formatter.format_expr_pub(*expr))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+            parameters.insert(
+                "aggregates".into(),
+                aggregation
+                    .aggregates
+                    .iter()
+                    .map(|(column, aggregate)| {
+                        format!(
+                            "{} := {}",
+                            formatter.format_column_pub(*column),
+                            formatter.format_aggregate_expr_pub(aggregate)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+        }
+        OperatorData::Join(join) => {
+            parameters.insert("join_type".into(), join.join_type.to_string());
+            parameters.insert("condition".into(), formatter.format_expr_pub(join.on));
+        }
+    }
+    parameters
+}
+
 fn operator_name(operator: &OperatorData) -> &'static str {
     match operator {
         OperatorData::Scan(_) => "scan",
@@ -530,7 +655,10 @@ mod tests {
 
         let harness = CardinalityRegressionHarness::new(session);
         let measurements = harness
-            .measure_query("synthetic", "SELECT id FROM t WHERE id = 2")
+            .measure_query(
+                "synthetic",
+                "SELECT id + 1 AS projected FROM t WHERE id = 2 ORDER BY projected DESC",
+            )
             .await
             .expect("test setup should succeed");
 
@@ -538,11 +666,24 @@ mod tests {
         assert_eq!(measurements[0].node_path, "0");
         assert!(measurements.iter().all(|row| row.join_count == 0));
         assert!(measurements.iter().all(|row| row.q_error >= 1.0));
-        assert!(
-            measurements
-                .iter()
-                .any(|row| row.operator == "selection" && row.actual_rows == 2)
-        );
+        assert!(measurements.iter().any(|row| {
+            row.operator == "selection"
+                && row.actual_rows == 2
+                && row.parameters.contains_key("filter")
+        }));
+        assert!(measurements.iter().any(|row| {
+            row.operator == "sort"
+                && row.parameters["sort_keys"].contains("projected(")
+                && row.parameters["sort_keys"].contains("Desc")
+        }));
+        assert!(measurements.iter().any(|row| {
+            row.operator == "map"
+                && row.parameters["computations"].contains("projected(")
+                && row.parameters["computations"].contains("+")
+        }));
+        assert!(measurements.iter().any(|row| {
+            row.operator == "projection" && row.parameters["columns"].contains("projected(")
+        }));
         assert!(
             measurements
                 .iter()
@@ -595,10 +736,10 @@ mod tests {
                 .iter()
                 .any(|row| row.operator == "selection" && row.actual_rows == 0)
         );
-        assert!(
-            aggregate_measurements
-                .iter()
-                .any(|row| row.operator == "aggregation" && row.actual_rows == 1)
-        );
+        assert!(aggregate_measurements.iter().any(|row| {
+            row.operator == "aggregation"
+                && row.actual_rows == 1
+                && row.parameters["aggregates"].contains("count_star()")
+        }));
     }
 }
