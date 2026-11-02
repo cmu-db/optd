@@ -6,3 +6,9 @@
 
 # Generated/scratch artifacts.
 /artifacts/
+
+# OS local metadata
+.DS_Store
+
+# Agent metadata
+.pi/
