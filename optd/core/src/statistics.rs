@@ -6,6 +6,8 @@ use crate::ScalarValue;
 
 /// Version of the canonical scalar encoding used by optimizer sketches.
 pub const SKETCH_VALUE_ENCODING_VERSION: u16 = 1;
+/// Version of the framed tuple encoding used by column-group sketches.
+pub const TUPLE_VALUE_ENCODING_VERSION: u16 = 1;
 
 /// Canonical, type-tagged scalar bytes used by mergeable sketches.
 ///
@@ -83,6 +85,23 @@ impl EncodedScalarValue {
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
+}
+
+/// Canonically encodes a non-null tuple of scalar values for a column-group sketch.
+///
+/// Components remain in logical schema order. Length framing prevents ambiguity between
+/// adjacent variable-length values.
+pub fn encode_scalar_tuple(values: &[ScalarValue]) -> Option<Vec<u8>> {
+    let mut encoded = Vec::new();
+    encoded.push(0x54);
+    encoded.extend_from_slice(&TUPLE_VALUE_ENCODING_VERSION.to_le_bytes());
+    encoded.extend_from_slice(&(u32::try_from(values.len()).ok()?).to_le_bytes());
+    for value in values {
+        let value = EncodedScalarValue::from_scalar(value)?;
+        encoded.extend_from_slice(&(u32::try_from(value.as_bytes().len()).ok()?).to_le_bytes());
+        encoded.extend_from_slice(value.as_bytes());
+    }
+    Some(encoded)
 }
 
 /// Query-local sketches attached to one base-column population.
@@ -175,6 +194,22 @@ mod tests {
         too_many_observations.observe(&ScalarValue::Int64(1));
         too_many_observations.observe(&ScalarValue::Int64(2));
         assert!(too_many_observations.validate().is_err());
+    }
+
+    #[test]
+    fn tuple_encoding_is_framed_and_omits_nulls() {
+        let left = encode_scalar_tuple(&[
+            ScalarValue::Utf8("1".into()),
+            ScalarValue::Utf8("23".into()),
+        ])
+        .unwrap();
+        let right = encode_scalar_tuple(&[
+            ScalarValue::Utf8("12".into()),
+            ScalarValue::Utf8("3".into()),
+        ])
+        .unwrap();
+        assert_ne!(left, right);
+        assert!(encode_scalar_tuple(&[ScalarValue::Null(arrow_schema::DataType::Utf8)]).is_none());
     }
 
     #[test]

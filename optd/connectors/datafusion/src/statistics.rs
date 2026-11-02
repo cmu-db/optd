@@ -6,9 +6,11 @@ use datafusion::common::{
 };
 use datafusion::prelude::SessionContext;
 use optd_core::{
-    Catalog, ColumnSketches, ColumnStatistics, EncodedScalarValue, ScalarValue, TableRef,
-    TableStatistics,
+    CardinalityStatistics, Catalog, ColumnGroupSource, ColumnGroupStatistics, ColumnSet,
+    ColumnSketches, ColumnStatistics, EncodedScalarValue, ScalarValue,
+    TUPLE_VALUE_ENCODING_VERSION, TableRef, TableStatistics, encode_scalar_tuple,
 };
+use optd_sketches::HyperLogLog;
 
 /// Collects table and column statistics by running local aggregate SQL.
 ///
@@ -67,6 +69,7 @@ async fn collect_table_statistics_from_sql(
         row_count,
         size_bytes: None,
         column_statistics,
+        column_groups: Vec::new(),
         constraints: Default::default(),
     })
 }
@@ -176,66 +179,111 @@ fn convert_scalar(value: DFScalarValue) -> Option<ScalarValue> {
 pub(crate) async fn collect_full_scan_statistics(
     session: &SessionContext,
     table: &TableReference,
-    columns: &[&str],
+    schema: &datafusion::arrow::datatypes::Schema,
 ) -> DFResult<TableStatistics> {
     let sql = format!("SELECT * FROM {}", quote_table_reference(table));
     let batches = session.sql(&sql).await?.collect().await?;
     let row_count = batches.iter().map(RecordBatch::num_rows).sum::<usize>();
     let mut column_statistics = BTreeMap::new();
-
-    for column_name in columns {
+    // `None` marks a logical field which cannot be represented by core scalar sketches.
+    let mut column_values = Vec::with_capacity(schema.fields().len());
+    for field in schema.fields() {
         let mut values = Vec::new();
+        let mut supported = true;
         for batch in &batches {
             let index = batch
                 .schema()
-                .index_of(column_name)
+                .index_of(field.name())
                 .map_err(|error| DataFusionError::ArrowError(Box::new(error), None))?;
             for row in 0..batch.num_rows() {
                 let value = DFScalarValue::try_from_array(batch.column(index), row)?;
                 if value.is_null() {
-                    continue;
+                    values.push(None);
+                } else if let Some(value) = convert_scalar(value) {
+                    values.push(Some(value));
+                } else {
+                    supported = false;
+                    break;
                 }
-                let value = convert_scalar(value).ok_or_else(|| {
-                    DataFusionError::NotImplemented(format!(
-                        "full-scan statistics do not support column '{column_name}'"
-                    ))
-                })?;
-                values.push(value);
+            }
+            if !supported {
+                break;
             }
         }
+        if !supported {
+            column_values.push(None);
+            continue;
+        }
 
+        let non_null = values.iter().flatten().collect::<Vec<_>>();
         let mut exact_distinct = HashSet::new();
-        let mut lower_bound: Option<ScalarValue> = None;
-        let mut upper_bound: Option<ScalarValue> = None;
-        let mut column_sketches = ColumnSketches::new(row_count as u64)
+        let mut lower_bound = None;
+        let mut upper_bound = None;
+        let mut sketches = ColumnSketches::new(row_count as u64)
             .hll()
             .space_saving(128)
             .map_err(|error| DataFusionError::Execution(error.to_string()))?;
-        for value in &values {
+        for value in &non_null {
             if let Some(encoded) = EncodedScalarValue::from_scalar(value) {
                 exact_distinct.insert(encoded);
             }
             update_test_bounds(&mut lower_bound, &mut upper_bound, value);
-            column_sketches.observe(value);
+            sketches.observe(value);
         }
-
         column_statistics.insert(
-            (*column_name).to_string(),
+            field.name().clone(),
             ColumnStatistics {
                 lower_bound,
                 upper_bound,
-                frequency: Some(values.len()),
+                frequency: Some(non_null.len()),
                 distinct: Some(exact_distinct.len()),
                 distribution: None,
-                sketches: Some(column_sketches),
+                sketches: Some(sketches),
             },
         );
+        column_values.push(Some(values));
+    }
+
+    let mut column_groups = Vec::new();
+    for length in 2..=schema.fields().len().min(5) {
+        if column_values[..length].iter().any(Option::is_none) {
+            continue;
+        }
+        let columns = ColumnSet::try_new((0..length).collect(), schema.fields().len())
+            .expect("schema prefixes are valid column sets");
+        let mut hll = HyperLogLog::new(TUPLE_VALUE_ENCODING_VERSION);
+        let mut non_null_rows = 0_u64;
+        for row in 0..row_count {
+            let values = column_values[..length]
+                .iter()
+                .map(|column| column.as_ref().unwrap()[row].as_ref())
+                .collect::<Option<Vec<_>>>();
+            let Some(values) = values else {
+                continue;
+            };
+            let values = values.into_iter().cloned().collect::<Vec<_>>();
+            let encoded =
+                encode_scalar_tuple(&values).expect("supported non-null scalar values encode");
+            hll.insert(&encoded);
+            non_null_rows += 1;
+        }
+        column_groups.push(ColumnGroupStatistics {
+            columns,
+            cardinality: CardinalityStatistics {
+                population_rows: row_count as u64,
+                non_null_rows,
+                distinct: None,
+                distinct_values: Some(hll),
+            },
+            source: ColumnGroupSource::SchemaPrefix,
+        });
     }
 
     Ok(TableStatistics {
         row_count: Some(row_count),
         size_bytes: None,
         column_statistics,
+        column_groups,
         constraints: Default::default(),
     })
 }
@@ -352,13 +400,12 @@ mod tests {
             ],
         )
         .unwrap();
-        let table = MemTable::try_new(schema, vec![vec![batch]]).unwrap();
+        let table = MemTable::try_new(schema.clone(), vec![vec![batch]]).unwrap();
         session.register_table("t", Arc::new(table)).unwrap();
 
-        let collected =
-            collect_full_scan_statistics(&session, &TableReference::bare("t"), &["id", "name"])
-                .await
-                .unwrap();
+        let collected = collect_full_scan_statistics(&session, &TableReference::bare("t"), &schema)
+            .await
+            .unwrap();
 
         assert_eq!(collected.row_count, Some(4));
         assert_eq!(collected.column_statistics["id"].frequency, Some(4));
@@ -372,6 +419,11 @@ mod tests {
             Some(ScalarValue::Int64(4))
         );
         assert_eq!(collected.column_statistics["name"].frequency, Some(3));
+        assert_eq!(collected.column_groups.len(), 1);
+        let group = &collected.column_groups[0];
+        assert_eq!(group.columns.columns(), &[0, 1]);
+        assert_eq!(group.cardinality.population_rows, 4);
+        assert_eq!(group.cardinality.non_null_rows, 3);
 
         let id_sketches = collected.column_statistics["id"].sketches.as_ref().unwrap();
         let hll_estimate = id_sketches.distinct_values.as_ref().unwrap().estimate();
@@ -453,6 +505,7 @@ mod tests {
                     row_count: None,
                     size_bytes: None,
                     column_statistics: BTreeMap::new(),
+                    column_groups: Vec::new(),
                     constraints: constraints.clone(),
                 },
             )

@@ -2867,6 +2867,7 @@ dependencies = [
  "duckdb",
  "futures",
  "optd-core",
+ "optd-sketches",
  "rustyline",
  "serde",
  "serde_json",

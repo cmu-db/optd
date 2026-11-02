@@ -5,7 +5,8 @@
 `CardinalityEstimationV1` estimates row counts and column profiles for each
 operator. It uses lazily cached `LogicalFactsAnalysis` results for value lineage, accumulated
 constraints, and equality classes. Query-local HyperLogLog and SpaceSaving sketches can refine NDV,
-equality-filter, and skewed equijoin estimates. See
+equality-filter, and skewed equijoin estimates. Population-compatible column-group HLLs additionally
+refine selected grouping and direct composite-inner-join estimates. See
 [`statistics_architecture.md`](statistics_architecture.md) for the separation between logical facts
 and estimator policy.
 
@@ -23,6 +24,7 @@ Each operator gets a `CardinalityProfile`:
 - `rows`: estimated output row count.
 - `columns`: per-column profiles.
 - `equivalence_classes`: only nontrivial (two-or-more-column) equality classes.
+- `joint_ndvs`: compatible immutable column-group estimates keyed by logical value identity.
 
 The cache stores profiles behind `Arc` so recursive estimation can share immutable results. The
 public `AnalysisContext::get::<CardinalityEstimationV1>` contract still returns an owned profile;
@@ -50,9 +52,12 @@ pretending rough estimates are exact.
 
 For `Scan`, use statistics in this order:
 
-1. Catalog-provided table and column statistics.
-2. Query-local HLL for NDV when available; catalog NDV is the fallback.
+1. Catalog-provided table, exact column, and semantic constraint statistics.
+2. A compatible query-local HLL when exact cardinality is unavailable.
 3. Stable default estimates.
+
+Validated column-group statistics are installed as joint NDVs only when their population matches the
+complete scan population. Their set lookup is independent of grouping or predicate order.
 
 The core analysis should not execute SQL to collect statistics. Query-based
 collection belongs in the DataFusion connector, which can run local aggregate
@@ -75,9 +80,10 @@ ordered comparisons proportionally restrict NDV while tightening bounds (includi
 predecessor/successor bounds). Other columns use a uniform occupancy estimate for surviving NDV
 instead of only capping the old NDV by output rows.
 
-`Aggregation` estimates group count from grouping-key distinct counts, capped by
-input rows. Grouping columns preserve adjusted profiles; aggregate output columns
-start conservative except for simple count-like bounds.
+`Aggregation` estimates group count from grouping-key distinct counts, capped by input rows.
+Semantic uniqueness wins first. Otherwise, the estimator uses the largest compatible joint NDV once
+and multiplies single-column NDVs only for uncovered keys. Grouping columns preserve adjusted
+profiles; aggregate output columns start conservative except for simple count-like bounds.
 
 `Sort` preserves profiles.
 
@@ -112,9 +118,11 @@ match probability by `r`. Compatible ordered ranges detect disjoint domains and 
 SpaceSaving common values refine known matched left-row mass without letting duplicate right rows
 inflate coverage; uncertain counters cannot lower the uniform baseline. Semi output key profiles are
 capped by the intersection domain, and pure single-key anti joins propagate complementary unmatched
-frequency and NDV. Single-column catalog unique/FK assertions provide stronger estimates only while
-the required base population is complete. Histograms, samples, and sampled multi-column NDV remain
-future work.
+frequency and NDV. Catalog unique/FK assertions provide stronger estimates only while the required
+base population is complete. Direct-column composite inner equalities may consume one compatible
+joint NDV from either input, with normalized edge orientation and per-edge fallback only for
+uncovered equalities. Histograms, samples, tuple-frequency statistics, and intersection-capable
+sketches remain future work.
 
 Transient or redundant equality edges should be treated specially for costing.
 They may need to remain in the IR for execution or backend behavior, but CE
@@ -159,6 +167,8 @@ minimum, maintaining `lower <= value <= upper`.
 - [x] Add ordered-range domain overlap and disjointness checks.
 - [x] Add occupancy-based filtered NDV and proportional literal-domain restriction.
 - [x] Consume population-safe single-column unique/FK catalog assertions.
+- [x] Collect query-local HLLs for leading logical-schema prefixes through length five.
+- [x] Consume population-safe joint NDV for grouping and direct composite inner equalities.
 - [ ] Replace uniform range overlap with histograms/samples.
-- [ ] Add sampled multi-column NDV after sampling infrastructure is available.
-- [ ] Persist compatible sketches through the catalog statistics contract.
+- [ ] Add sampled or workload-selected column groups beyond bounded schema prefixes.
+- [ ] Persist and refresh compatible sketches through a production catalog statistics provider.

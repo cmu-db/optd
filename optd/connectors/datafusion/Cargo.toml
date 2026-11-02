@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 optd-core = { path = "../../core" }
+optd-sketches = { path = "../../sketches" }
 datafusion = "=53.1.0"
 datafusion-catalog = "=53.1.0"
 datafusion-common = "=53.1.0"
