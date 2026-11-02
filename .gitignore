@@ -6,3 +6,7 @@
 
 # Generated/scratch artifacts.
 /artifacts/
+
+# Local OS metadata and Pi agent state.
+.DS_Store
+.pi/
