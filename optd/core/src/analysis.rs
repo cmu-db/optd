@@ -1659,11 +1659,13 @@ fn scan_profile(
     analyses: &AnalysisContext,
     config: &CardinalityEstimationConfig,
 ) -> AnalysisResult<CardinalityProfile> {
-    let catalog_stats = analyses
+    let table_metadata = analyses
         .catalog
         .table_by_ref(&scan.table)
-        .map_err(|error| AnalysisError::Catalog(error.to_string()))?
-        .statistics;
+        .map_err(|error| AnalysisError::Catalog(error.to_string()))?;
+    let table_id = table_metadata.id;
+    let resolved_table = table_metadata.table;
+    let catalog_stats = table_metadata.statistics;
 
     let row_estimate = catalog_stats
         .as_ref()
@@ -1689,12 +1691,14 @@ fn scan_profile(
             .unwrap_or_else(|| {
                 default_scan_column_profile(&row_estimate, config, sketches.clone())
             });
-        log_scan_sketch_decision(
-            &scan.table,
+        log_scan_statistic_selection(
+            table_id,
+            &resolved_table,
             column_name,
             catalog_column,
             sketches.as_deref(),
             &profile,
+            row_estimate.value,
         );
         columns.insert(*column, profile);
     }
@@ -1715,23 +1719,40 @@ fn sketch_observability_enabled_from(value: Option<&str>) -> bool {
     matches!(value, Some("1" | "true" | "TRUE" | "yes" | "YES"))
 }
 
-fn log_scan_sketch_decision(
-    table: &TableRef,
+fn scan_statistic_selection_reason(
+    catalog_ndv: Option<usize>,
+    hll_ndv: Option<f64>,
+    has_sketches: bool,
+) -> &'static str {
+    match (hll_ndv, catalog_ndv, has_sketches) {
+        (Some(_), _, _) => "hll_selected",
+        (None, Some(_), _) => "catalog_selected",
+        (None, None, true) => "default",
+        (None, None, false) => "no_sketch",
+    }
+}
+
+fn log_scan_statistic_selection(
+    table_id: TableId,
+    table: &crate::ResolvedTableRef,
     column: &str,
     catalog: Option<&ColumnStatistics>,
     sketches: Option<&ColumnSketches>,
     profile: &ColumnProfile,
+    table_rows: f64,
 ) {
-    if !sketch_observability_enabled() || sketches.is_none() {
+    if !sketch_observability_enabled() {
         return;
     }
     let catalog_ndv = catalog.and_then(|stats| stats.distinct);
     let hll_ndv = sketches
         .and_then(|sketches| sketches.distinct_values.as_ref())
         .map(|hll| hll.estimate());
+    let reason = scan_statistic_selection_reason(catalog_ndv, hll_ndv, sketches.is_some());
+    let population_rows = sketches.map_or(table_rows, |sketches| sketches.population_rows as f64);
     eprintln!(
-        "sketch_observability event=scan_ndv table={table:?} column={column:?} catalog_ndv={catalog_ndv:?} hll_ndv={hll_ndv:?} selected_ndv={} selected_source={:?}",
-        profile.distinct.value, profile.distinct.source,
+        "sketch_observability event=scan_ndv operator=scan table_id={table_id:?} table={table} requested_columns=[{column:?}] candidate_groups=[] selected_group=null column_group_source=null population_rows={population_rows} all_non_null_rows={} catalog_ndv={catalog_ndv:?} hll_ndv={hll_ndv:?} selected_ndv={} selected_source={:?} uncovered_columns=[] reason={reason}",
+        profile.frequency.value, profile.distinct.value, profile.distinct.source,
     );
 }
 
@@ -1925,6 +1946,8 @@ fn aggregation_profile(
             .cap(input.rows.value, EstimateSource::Derived)
     };
 
+    log_aggregation_statistic_selection(data, ctx, &input.rows, &group_rows);
+
     let mut columns = BTreeMap::new();
     for expr in &data.keys {
         if let ExprData::ColumnRef(column) = expr.get(ctx)
@@ -1981,6 +2004,65 @@ fn aggregation_profile(
         columns.insert(*column, profile);
     }
     CardinalityProfile::new(group_rows, columns)
+}
+
+fn observable_columns(
+    columns: impl IntoIterator<Item = Column>,
+    ctx: &QueryContext,
+) -> Vec<String> {
+    columns
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|column| {
+            let data = ctx.column(column);
+            match &data.qualifier {
+                Some(qualifier) => format!("{qualifier}.{}", data.name),
+                None => data.name.clone(),
+            }
+        })
+        .collect()
+}
+
+fn log_aggregation_statistic_selection(
+    data: &crate::Aggregation,
+    ctx: &QueryContext,
+    input_rows: &Estimate,
+    group_rows: &Estimate,
+) {
+    if !sketch_observability_enabled() || data.keys.is_empty() {
+        return;
+    }
+    let requested_columns = observable_columns(
+        data.keys.iter().filter_map(|expr| match expr.get(ctx) {
+            ExprData::ColumnRef(column) => Some(*column),
+            _ => None,
+        }),
+        ctx,
+    );
+    eprintln!(
+        "sketch_observability event=statistic_selection operator=aggregation requested_columns={requested_columns:?} candidate_groups=[] selected_group=null column_group_source=null population_rows={} all_non_null_rows=null raw_joint_hll_ndv=null uncovered_columns={requested_columns:?} final_ndv={} final_source={:?} reason=no_joint_statistics_baseline",
+        input_rows.value, group_rows.value, group_rows.source,
+    );
+}
+
+fn log_join_statistic_selection(
+    equality_pairs: &[(Column, Column)],
+    ctx: &QueryContext,
+    selectivity: f64,
+) {
+    if !sketch_observability_enabled() || equality_pairs.is_empty() {
+        return;
+    }
+    let requested_columns = observable_columns(
+        equality_pairs
+            .iter()
+            .flat_map(|(left, right)| [*left, *right]),
+        ctx,
+    );
+    eprintln!(
+        "sketch_observability event=statistic_selection operator=join requested_columns={requested_columns:?} candidate_groups=[] selected_group=null column_group_source=null population_rows=null all_non_null_rows=null raw_joint_hll_ndv=null uncovered_columns={requested_columns:?} final_selectivity={selectivity} reason=no_joint_statistics_baseline",
+    );
 }
 
 fn apply_selection_profile(
@@ -2748,6 +2830,7 @@ fn join_selectivity_from_conjuncts_with_config(
     }
 
     let selectivity = (equality_selectivity * residual_selectivity).clamp(0.0, 1.0);
+    log_join_statistic_selection(&class_pairs, ctx, selectivity);
     let first_moment_upper = (right.rows.value * selectivity).clamp(0.0, 1.0);
     let (match_probability, conditional_fanout, match_probability_mode) =
         if has_cross_input_equality {
@@ -4588,6 +4671,26 @@ mod tests {
         assert!(!sketch_observability_enabled_from(Some("debug")));
         assert!(sketch_observability_enabled_from(Some("1")));
         assert!(sketch_observability_enabled_from(Some("true")));
+        assert!(sketch_observability_enabled_from(Some("TRUE")));
+        assert!(sketch_observability_enabled_from(Some("yes")));
+        assert!(sketch_observability_enabled_from(Some("YES")));
+    }
+
+    #[test]
+    fn scan_statistic_selection_reason_reports_the_baseline_fallback() {
+        assert_eq!(
+            scan_statistic_selection_reason(Some(10), Some(12.0), true),
+            "hll_selected"
+        );
+        assert_eq!(
+            scan_statistic_selection_reason(Some(10), None, false),
+            "catalog_selected"
+        );
+        assert_eq!(scan_statistic_selection_reason(None, None, true), "default");
+        assert_eq!(
+            scan_statistic_selection_reason(None, None, false),
+            "no_sketch"
+        );
     }
 
     #[test]
