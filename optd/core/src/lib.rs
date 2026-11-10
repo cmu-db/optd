@@ -43,7 +43,8 @@ pub use hypergraph::{
     QueryHypergraph, build_hypergraph, nodeset_iter, nodeset_min, nodeset_singleton,
 };
 pub use optd_sampling::{
-    ReservoirSampler, SampleError, SampleProvenance, TableSample, reservoir_sample,
+    ReservoirSampler, SampleError, SamplePredicate, SampleProvenance, SampleRelation, SampleScalar,
+    TableSample, equijoin_relations, filter_relation, project_batches, reservoir_sample,
     table_sample_from_batches,
 };
 pub use optimize::{

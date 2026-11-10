@@ -16,6 +16,7 @@ use crate::{
 
 mod logical_facts;
 pub mod observability;
+mod sample_cardinality;
 
 pub use observability::{
     ObservationContext, ObservationMetadata, ObservationMode, ObservationPayload,
@@ -181,6 +182,8 @@ pub enum EstimateSource {
     Catalog,
     /// Estimate produced directly by a query-local probabilistic sketch.
     Sketch,
+    /// Estimate produced by evaluating catalog table samples.
+    Sample,
     Derived,
     Default,
 }
@@ -220,6 +223,16 @@ impl Estimate {
             lower: Some(value),
             upper: Some(value),
             source: EstimateSource::Catalog,
+        }
+    }
+
+    /// Point estimate from evaluating catalog samples. Bounds are left open for LpBound.
+    pub fn sample(value: f64) -> Self {
+        Self {
+            value: value.max(0.0),
+            lower: None,
+            upper: None,
+            source: EstimateSource::Sample,
         }
     }
 
@@ -1825,6 +1838,10 @@ fn cardinality_profile(
     ctx: &QueryContext,
     analyses: &mut AnalysisContext,
 ) -> AnalysisResult<Arc<CardinalityProfile>> {
+    if let Some(profile) = sample_cardinality::try_sample_cardinality(operator, ctx, analyses)? {
+        return Ok(Arc::new(profile));
+    }
+
     let config = analyses.cardinality_estimation_config();
     let catalog = Arc::clone(analyses.catalog());
     match operator.get(ctx) {
@@ -7103,6 +7120,226 @@ mod tests {
             profile.columns[&id].lower_bound,
             Some(ScalarValue::Int64(7))
         );
+    }
+
+    #[test]
+    fn cardinality_estimation_uses_samples_for_equality_filter() {
+        use arrow_array::{Int64Array, RecordBatch, StringArray};
+        use optd_sampling::{SampleProvenance, TableSample};
+
+        let mut ctx = QueryContext::new();
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![id],
+        })
+        .add(&mut ctx);
+        let id_ref = ExprData::ColumnRef(id).add(&mut ctx);
+        let literal = ExprData::Literal(ScalarValue::Int64(2)).add(&mut ctx);
+        let predicate = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: id_ref,
+            right: literal,
+        }
+        .add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
+            predicate,
+            input: scan,
+        })
+        .add(&mut ctx);
+
+        let users_schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("name", DataType::Utf8, true),
+        ]));
+        let batch = RecordBatch::try_new(
+            users_schema.clone(),
+            vec![
+                Arc::new(Int64Array::from(vec![1_i64, 2, 2, 3])),
+                Arc::new(StringArray::from(vec![
+                    Some("a"),
+                    Some("b"),
+                    Some("c"),
+                    Some("d"),
+                ])),
+            ],
+        )
+        .unwrap();
+        let samples = TableSample::try_new(
+            users_schema.clone(),
+            vec![batch],
+            4,
+            400,
+            SampleProvenance::Past,
+        )
+        .unwrap();
+
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(TableRef::bare("users"), users_schema, None)
+            .unwrap();
+        catalog
+            .set_table_samples(TableRef::bare("users"), samples)
+            .unwrap();
+        let mut analyses = AnalysisContext::new(catalog);
+
+        let profile = analyses
+            .get::<CardinalityEstimationV1>(&ctx, selection)
+            .unwrap();
+
+        // 2 of 4 sample rows match; scale 400/4 → 200.
+        assert_eq!(profile.rows.value, 200.0);
+        assert_eq!(profile.rows.source, EstimateSource::Sample);
+    }
+
+    #[test]
+    fn cardinality_estimation_uses_samples_for_inner_equijoin() {
+        use arrow_array::{Int64Array, RecordBatch};
+        use optd_sampling::{SampleProvenance, TableSample};
+
+        let mut ctx = QueryContext::new();
+        let left_key = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let right_key = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let left_scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("left_t"),
+            columns: vec![left_key],
+        })
+        .add(&mut ctx);
+        let right_scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("right_t"),
+            columns: vec![right_key],
+        })
+        .add(&mut ctx);
+        let on = equality_expr(&mut ctx, left_key, right_key);
+        let join = OperatorData::Join(Join {
+            join_type: JoinType::Inner,
+            on,
+            outer: left_scan,
+            inner: right_scan,
+        })
+        .add(&mut ctx);
+
+        let key_schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
+        let left_batch = RecordBatch::try_new(
+            key_schema.clone(),
+            vec![Arc::new(Int64Array::from(vec![1_i64, 2, 2]))],
+        )
+        .unwrap();
+        let right_batch = RecordBatch::try_new(
+            key_schema.clone(),
+            vec![Arc::new(Int64Array::from(vec![2_i64, 3]))],
+        )
+        .unwrap();
+        let left_samples = TableSample::try_new(
+            key_schema.clone(),
+            vec![left_batch],
+            3,
+            30,
+            SampleProvenance::Past,
+        )
+        .unwrap();
+        let right_samples = TableSample::try_new(
+            key_schema.clone(),
+            vec![right_batch],
+            2,
+            10,
+            SampleProvenance::Past,
+        )
+        .unwrap();
+
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(TableRef::bare("left_t"), key_schema.clone(), None)
+            .unwrap();
+        catalog
+            .create_table(TableRef::bare("right_t"), key_schema, None)
+            .unwrap();
+        catalog
+            .set_table_samples(TableRef::bare("left_t"), left_samples)
+            .unwrap();
+        catalog
+            .set_table_samples(TableRef::bare("right_t"), right_samples)
+            .unwrap();
+        let mut analyses = AnalysisContext::new(catalog);
+
+        let profile = analyses.get::<CardinalityEstimationV1>(&ctx, join).unwrap();
+
+        // 2 sample join rows * (30/3) * (10/2) = 2 * 10 * 5 = 100.
+        assert_eq!(profile.rows.value, 100.0);
+        assert_eq!(profile.rows.source, EstimateSource::Sample);
+    }
+
+    #[test]
+    fn cardinality_estimation_falls_back_when_a_leaf_lacks_samples() {
+        use arrow_array::{Int64Array, RecordBatch};
+        use optd_sampling::{SampleProvenance, TableSample};
+
+        let mut ctx = QueryContext::new();
+        let left_key = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let right_key = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let left_scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("left_t"),
+            columns: vec![left_key],
+        })
+        .add(&mut ctx);
+        let right_scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("right_t"),
+            columns: vec![right_key],
+        })
+        .add(&mut ctx);
+        let on = equality_expr(&mut ctx, left_key, right_key);
+        let join = OperatorData::Join(Join {
+            join_type: JoinType::Inner,
+            on,
+            outer: left_scan,
+            inner: right_scan,
+        })
+        .add(&mut ctx);
+
+        let key_schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
+        let left_batch = RecordBatch::try_new(
+            key_schema.clone(),
+            vec![Arc::new(Int64Array::from(vec![1_i64, 2]))],
+        )
+        .unwrap();
+        let left_samples = TableSample::try_new(
+            key_schema.clone(),
+            vec![left_batch],
+            2,
+            20,
+            SampleProvenance::Past,
+        )
+        .unwrap();
+
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(TableRef::bare("left_t"), key_schema.clone(), None)
+            .unwrap();
+        catalog
+            .create_table(TableRef::bare("right_t"), key_schema, None)
+            .unwrap();
+        catalog
+            .set_table_samples(TableRef::bare("left_t"), left_samples)
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                TableRef::bare("left_t"),
+                table_stats_for_column("id", 20, 20),
+            )
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                TableRef::bare("right_t"),
+                table_stats_for_column("id", 10, 10),
+            )
+            .unwrap();
+        let mut analyses = AnalysisContext::new(catalog);
+
+        let profile = analyses.get::<CardinalityEstimationV1>(&ctx, join).unwrap();
+
+        // Join is not fully sampled, so classic estimation wins even if one leaf has samples.
+        assert_ne!(profile.rows.source, EstimateSource::Sample);
+        assert!(profile.rows.value.is_finite() && profile.rows.value > 0.0);
     }
 
     #[test]

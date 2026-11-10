@@ -3,6 +3,13 @@
 //! Samples are Arrow record batches wrapped with collection metadata so a catalog can store past
 //! (or future current-run) reservoirs without embedding raw batches inside summary statistics.
 
+mod evaluate;
+
+pub use evaluate::{
+    SamplePredicate, SampleRelation, SampleScalar, equijoin_relations, filter_relation,
+    project_batches,
+};
+
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
 use arrow_select::concat::concat_batches;
@@ -66,13 +73,16 @@ impl TableSample {
     }
 }
 
-/// Errors produced while constructing or sampling table data.
+/// Errors produced while constructing, sampling, or evaluating table data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SampleError {
     ZeroBlockSize,
     SchemaMismatch,
     ExceedsBlockSize { rows: usize, block_size: usize },
     EmptyInput,
+    MissingColumn(String),
+    InvalidJoinKeys,
+    UnsupportedPredicate(String),
     Arrow(String),
 }
 
@@ -86,6 +96,11 @@ impl std::fmt::Display for SampleError {
                 "sample contains {rows} rows but block_size is {block_size}"
             ),
             Self::EmptyInput => f.write_str("cannot sample from zero input batches"),
+            Self::MissingColumn(name) => write!(f, "sample is missing column '{name}'"),
+            Self::InvalidJoinKeys => f.write_str("equijoin requires a nonempty matching key list"),
+            Self::UnsupportedPredicate(message) => {
+                write!(f, "unsupported sample predicate: {message}")
+            }
             Self::Arrow(message) => write!(f, "arrow error: {message}"),
         }
     }
