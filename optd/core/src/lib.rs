@@ -18,8 +18,10 @@ pub use analysis::{
     AvailableColumns, BaseColumn, CardinalityEstimationConfig, CardinalityEstimationConfigError,
     CardinalityEstimationV1, CardinalityProfile, ColumnNullability, ColumnProfile, ConstraintSet,
     CreatedColumns, Estimate, EstimateSource, FreeColumns, LogicalFacts, LogicalFactsAnalysis,
-    ParentIndex, ParentsOf, UsedColumns, ValueEquivalenceClasses, ValueId, ValueRange,
-    expr_used_columns,
+    ObservationContext, ObservationMetadata, ObservationMode, ObservationPayload,
+    ObservationRecord, ObservationScope, ObservationScopeKind, ObservationScopeStatus,
+    ObservationSession, ParentIndex, ParentsOf, UsedColumns, ValueEquivalenceClasses, ValueId,
+    ValueRange, expr_used_columns,
 };
 pub use catalog::{
     BoundedVec, Catalog, CatalogError, CatalogResult, CollectionTooLarge,

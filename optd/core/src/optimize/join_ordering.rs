@@ -222,6 +222,7 @@ impl<'a, M: CostModel> DPhyp<'a, M> {
             .dp
             .get(&combined)
             .is_none_or(|existing| self.cost_model.is_better(&new_cost, &existing.cost));
+        self.analyses.observe_candidate_decision(candidate, better);
 
         if better {
             self.dp.insert(
