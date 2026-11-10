@@ -14,6 +14,7 @@ Options:
   --skip-load           Reuse tables already loaded in PostgreSQL
   --skip-optd           Do not run the optd collector
   --skip-postgres       Do not run the PostgreSQL collector
+  --sqlite PATH         SQLite collection database (default: <REGRESSION_ROOT>/cardinality.sqlite)
   --help                Show this help
 
 Environment overrides:
@@ -25,6 +26,8 @@ Environment overrides:
   POSTGRES_PASSWORD          Password (default: optd)
   POSTGRES_DATA_DIR          Bind-mount directory (default: data/optd-pg18-data)
   REGRESSION_ROOT            Output directory (default: target/cardinality-regression)
+  REGRESSION_DB              SQLite path (default: <REGRESSION_ROOT>/cardinality.sqlite)
+  REGRESSION_RUN_ID          Optional shared run identity
   OPTD_QUERY_TIMEOUT         Per-query optd timeout in seconds (default: 900)
   POSTGRES_STATEMENT_TIMEOUT Per-query PostgreSQL timeout in seconds (default: 300)
   PYTHON                     Python command (default: python3)
@@ -38,6 +41,7 @@ download=true
 load_data=true
 run_optd=true
 run_postgres=true
+sqlite_path=""
 while (($#)); do
     case "$1" in
         --suite)
@@ -49,6 +53,11 @@ while (($#)); do
         --skip-load) load_data=false; shift ;;
         --skip-optd) run_optd=false; shift ;;
         --skip-postgres) run_postgres=false; shift ;;
+        --sqlite)
+            [[ $# -ge 2 ]] || { echo "error: --sqlite requires a path" >&2; exit 2; }
+            sqlite_path="$2"
+            shift 2
+            ;;
         --help|-h) usage; exit 0 ;;
         *) echo "error: unknown argument: $1" >&2; usage >&2; exit 2 ;;
     esac
@@ -67,6 +76,8 @@ user="${POSTGRES_USER:-optd}"
 password="${POSTGRES_PASSWORD:-optd}"
 postgres_data_dir="${POSTGRES_DATA_DIR:-data/optd-pg18-data}"
 regression_root="${REGRESSION_ROOT:-target/cardinality-regression}"
+sqlite_path="${sqlite_path:-${REGRESSION_DB:-${regression_root}/cardinality.sqlite}}"
+run_id="${REGRESSION_RUN_ID:-$(git rev-parse --short=7 HEAD)-$(date -u +%Y%m%d-%H%M%SZ)}"
 optd_timeout="${OPTD_QUERY_TIMEOUT:-900}"
 postgres_timeout="${POSTGRES_STATEMENT_TIMEOUT:-300}"
 tpch_data_dir="${TPCH_DATA_DIR:-optd/connectors/datafusion/data/tpch/sf-0.1}"
@@ -95,6 +106,8 @@ exec > >(tee -a "${log_path}") 2>&1
 echo "suite=${suite}"
 echo "repository=${repo_root}"
 echo "output=${regression_root}"
+echo "sqlite=${sqlite_path}"
+echo "run_id=${run_id}"
 echo "log=${log_path}"
 
 if ! docker inspect "${container}" >/dev/null 2>&1; then
@@ -159,6 +172,8 @@ if [[ "${run_optd}" == true ]]; then
         --tpch-queries "${tpch_queries}" \
         --job-queries "${job_queries}" \
         --output "${regression_root}/optd" \
+        --sqlite-path "${sqlite_path}" \
+        --run-id "${run_id}" \
         --query-timeout "${optd_timeout}" \
         --resume \
         --continue-on-error
@@ -170,6 +185,8 @@ if [[ "${run_postgres}" == true ]]; then
         --tpch-queries "${tpch_queries}" \
         --job-queries "${job_queries}" \
         --output "${regression_root}/postgres" \
+        --sqlite-path "${sqlite_path}" \
+        --run-id "${run_id}" \
         --container "${container}" \
         --database "${database}" \
         --user "${user}" \
@@ -225,3 +242,4 @@ PY
 
 echo "completed cardinality regression"
 echo "metadata=${regression_root}/run-metadata.json"
+echo "sqlite=${sqlite_path}"

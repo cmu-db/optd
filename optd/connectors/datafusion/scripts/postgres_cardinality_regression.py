@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import math
 import re
@@ -12,6 +13,14 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+collector_store = importlib.import_module("scripts.cardinality_collection.collector")
+collection_run_id = collector_store.collection_run_id
+dump_report = collector_store.dump_report
+utc_now = collector_store.utc_now
 
 JOIN_NODE_TYPES = frozenset({"Hash Join", "Merge Join", "Nested Loop"})
 SUBPLAN_RELATIONSHIPS = frozenset({"InitPlan", "SubPlan"})
@@ -93,6 +102,14 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Output directory for report.json",
     )
+    parser.add_argument(
+        "--sqlite-path",
+        type=Path,
+        default=Path("target/cardinality-regression/cardinality.sqlite"),
+        help="SQLite collection database (default: target/cardinality-regression/cardinality.sqlite)",
+    )
+    parser.add_argument("--no-sqlite", action="store_true", help="Disable SQLite checkpoint dumps")
+    parser.add_argument("--run-id", help="Shared run identity; set the same value for optd collection")
     parser.add_argument(
         "--container",
         default="optd-postgres-18",
@@ -267,6 +284,43 @@ def row_q_error(estimated_rows: float, actual_rows: float) -> float:
     return max(estimated, actual) / min(estimated, actual)
 
 
+def node_parameters(node: dict[str, Any]) -> dict[str, Any]:
+    fields = {
+        "Relation Name": "table",
+        "Schema": "schema",
+        "Alias": "alias",
+        "Index Name": "index",
+        "Scan Direction": "scan_direction",
+        "Function Name": "function",
+        "CTE Name": "cte",
+        "Subplan Name": "subplan",
+        "Filter": "filter",
+        "Index Cond": "index_condition",
+        "Hash Cond": "hash_condition",
+        "Merge Cond": "merge_condition",
+        "Join Filter": "join_filter",
+        "Recheck Cond": "recheck_condition",
+        "Group Key": "group_keys",
+        "Sort Key": "sort_keys",
+        "Presorted Key": "presorted_keys",
+        "Output": "output_columns",
+        "Strategy": "strategy",
+        "Partial Mode": "partial_mode",
+        "Join Type": "join_type",
+        "Inner Unique": "inner_unique",
+        "Parallel Aware": "parallel_aware",
+        "Sort Method": "sort_method",
+        "Rows Removed by Filter": "rows_removed_by_filter",
+        "Rows Removed by Join Filter": "rows_removed_by_join_filter",
+        "Rows Removed by Index Recheck": "rows_removed_by_index_recheck",
+    }
+    return {
+        output: node[source]
+        for source, output in fields.items()
+        if source in node
+    }
+
+
 def collect_measurements(
     suite: str,
     query_name: str,
@@ -282,6 +336,7 @@ def collect_measurements(
         "node_path": path,
         "operator": operator_name(node),
         "postgres_node_type": str(node["Node Type"]),
+        "parameters": node_parameters(node),
         "join_count": subtree_join_count(node),
         "estimated_rows": estimated_rows,
         "actual_rows": actual_rows,
@@ -325,6 +380,21 @@ def write_errors(errors: list[dict[str, str]], output_dir: Path) -> Path:
 
 def main() -> None:
     args = parse_args()
+    started_at = utc_now()
+    run_id = args.run_id or collection_run_id(REPO_ROOT, started_at)
+
+    def dump_checkpoint(report_path: Path) -> None:
+        if not args.no_sqlite:
+            dump_report(
+                args.sqlite_path,
+                report_path,
+                engine="postgres",
+                run_id=run_id,
+                started_at=started_at,
+                repo_root=REPO_ROOT,
+                source_path=args.output,
+            )
+
     if args.statement_timeout <= 0:
         raise ValueError("--statement-timeout must be positive")
     if args.limit is not None and args.limit <= 0:
@@ -381,10 +451,14 @@ def main() -> None:
         measurements.extend(
             collect_measurements(query.suite, query.name, plan)
         )
-        write_report(measurements, args.output)
+        report = write_report(measurements, args.output)
+        dump_checkpoint(report)
 
     report = write_report(measurements, args.output)
+    dump_checkpoint(report)
     print(f"wrote {report}", file=sys.stderr)
+    if not args.no_sqlite:
+        print(f"dumped run {run_id} to {args.sqlite_path}", file=sys.stderr)
     if errors:
         error_report = write_errors(errors, args.output)
         print(f"wrote {error_report}", file=sys.stderr)

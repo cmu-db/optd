@@ -41,6 +41,8 @@ PLOT_PYTHON="conda run -n c0bench python" just regression-compare-smoke
 For a TPC-H-only smoke workflow, prefix the collector recipes with `DATASET=tpch` and load only
 `just load-postgres-tpch`. `--limit N` is applied independently to each selected suite.
 
+Both collectors checkpoint into `target/cardinality-regression/cardinality.sqlite` by default in addition to retaining JSON files for query-level resume and compatibility with plotting tools. Override the database with `REGRESSION_DB=/path/to/cardinality.sqlite` in `just` commands or `--sqlite-path` on either Python collector. `just regression-all` creates one run identity and passes it to both collectors so optd and PostgreSQL measurements appear together. Standalone collectors generate an identity unless `--run-id` is supplied; use the same explicit ID when running engines separately. Pass `--no-sqlite` only when a JSON-only compatibility run is required.
+
 ### Portable end-to-end workflow
 
 `scripts/run_cardinality_regression.sh` is the end-to-end entry point for either a local or remote
@@ -59,9 +61,9 @@ DuckDB, curl, Git, the Rust toolchain, and a Python environment containing Matpl
 Seaborn. Important overrides include `POSTGRES_DATA_DIR`, `REGRESSION_ROOT`,
 `OPTD_QUERY_TIMEOUT`, and `POSTGRES_STATEMENT_TIMEOUT`. `--skip-download` and `--skip-load` reuse
 existing data; `--skip-optd` or `--skip-postgres` reuse an existing corresponding report. Outputs
-are written under `target/cardinality-regression` by default, including `run-metadata.json`,
-per-engine `report.json`/`errors.json`, checkpoint reports, plots, CSVs, and a
-UTC-stamped execution log.
+are written under `target/cardinality-regression` by default, including `cardinality.sqlite`,
+`run-metadata.json`, per-engine `report.json`/`errors.json`, checkpoint reports, plots, CSVs, and a
+UTC-stamped execution log. Pass `--sqlite PATH` to the portable workflow or set `REGRESSION_DB` to choose another database.
 
 The same workflow is available as `DATASET=job just regression-run`.
 
@@ -183,3 +185,7 @@ This writes `comparison-by-join-count-all.csv` and one
 `qerror-comparison-boxplot-LEVEL.svg` per normalization level. Comparison requires raw per-node
 PostgreSQL measurements; aggregate percentages from a paper are insufficient to reconstruct the
 distributions.
+
+The dashboard-independent SQLite writer, schema, and legacy report importer live in
+`scripts/cardinality_collection/` and use only the Python standard library. Run their tests with
+`python3 -m unittest scripts.cardinality_collection.tests.test_importer`.
