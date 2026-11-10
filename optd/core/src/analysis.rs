@@ -226,12 +226,12 @@ impl Estimate {
         }
     }
 
-    /// Point estimate from evaluating catalog samples. Bounds are left open for LpBound.
-    pub fn sample(value: f64) -> Self {
+    /// Point estimate from evaluating catalog samples, with optional LpBound endpoints.
+    pub fn sample(value: f64, lower: Option<f64>, upper: Option<f64>) -> Self {
         Self {
-            value: value.max(0.0),
-            lower: None,
-            upper: None,
+            value: clamp_to_bounds(value.max(0.0), lower, upper),
+            lower,
+            upper,
             source: EstimateSource::Sample,
         }
     }
@@ -7190,6 +7190,8 @@ mod tests {
         // 2 of 4 sample rows match; scale 400/4 → 200.
         assert_eq!(profile.rows.value, 200.0);
         assert_eq!(profile.rows.source, EstimateSource::Sample);
+        assert_eq!(profile.rows.lower, Some(0.0));
+        assert_eq!(profile.rows.upper, Some(400.0));
     }
 
     #[test]
@@ -7267,6 +7269,9 @@ mod tests {
         // 2 sample join rows * (30/3) * (10/2) = 2 * 10 * 5 = 100.
         assert_eq!(profile.rows.value, 100.0);
         assert_eq!(profile.rows.source, EstimateSource::Sample);
+        assert_eq!(profile.rows.lower, Some(0.0));
+        // LpBound: min(30*5, 10*20, 30*10) = 150
+        assert_eq!(profile.rows.upper, Some(150.0));
     }
 
     #[test]

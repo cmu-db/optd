@@ -7,7 +7,7 @@ mod evaluate;
 
 pub use evaluate::{
     SamplePredicate, SampleRelation, SampleScalar, equijoin_relations, filter_relation,
-    project_batches,
+    lpbound_equijoin_upper, project_batches,
 };
 
 use arrow_array::RecordBatch;

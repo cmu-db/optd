@@ -60,6 +60,10 @@ match the table schema (validated on set).
 - Mixed subtrees keep classic V1 math.
 - Past samples are used (not samples from the current query execution).
 - LpBound updates bounds; costing continues to use the sample point estimate.
+- Inner equijoin upper bounds use the max-degree LpBound formula
+  `min(|L|·maxdeg(R), |R|·maxdeg(L), |L|·|R|)` with degrees scaled from samples.
+- Filters inherit the input upper bound and use a zero lower bound; scans use
+  exact `source_rows` for both endpoints.
 
 ## Non-goals (this stack)
 

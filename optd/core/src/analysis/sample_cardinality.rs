@@ -37,7 +37,7 @@ pub(super) fn try_sample_cardinality(
     };
     let columns = analyses.get::<AvailableColumns>(ctx, operator)?;
     Ok(Some(profile_from_relation(
-        relation.estimated_rows(),
+        &relation,
         columns,
         analyses
             .cardinality_estimation_config()
@@ -46,11 +46,15 @@ pub(super) fn try_sample_cardinality(
 }
 
 fn profile_from_relation(
-    rows: f64,
+    relation: &SampleRelation,
     columns: impl IntoIterator<Item = Column>,
     ndv_cap: f64,
 ) -> CardinalityProfile {
-    let rows = Estimate::sample(rows);
+    let rows = Estimate::sample(
+        relation.estimated_rows(),
+        Some(relation.lower.max(0.0)),
+        Some(relation.upper.max(relation.estimated_rows()).max(0.0)),
+    );
     let columns = columns
         .into_iter()
         .map(|column| (column, ColumnProfile::unknown_with_ndv_cap(&rows, ndv_cap)))
@@ -138,6 +142,8 @@ fn evaluate_sample_tree(
                         schema,
                         batches,
                         scale: input.scale,
+                        lower: input.lower,
+                        upper: input.upper,
                     }))
                 }
                 // Renamed IR columns may not match sample field names; fall back to classic CE.

@@ -43,6 +43,10 @@ pub struct SampleRelation {
     pub batches: Vec<RecordBatch>,
     /// Product of leaf scale factors (`source_rows / sample_rows`) collected so far.
     pub scale: f64,
+    /// Conservative lower bound on the scaled cardinality (LpBound / exact-leaf cases).
+    pub lower: f64,
+    /// Pessimistic upper bound on the scaled cardinality (LpBound max-degree bounds).
+    pub upper: f64,
 }
 
 impl SampleRelation {
@@ -79,10 +83,14 @@ impl SampleRelation {
                 .collect::<Result<Vec<_>, _>>()?;
             Arc::new(Schema::new(fields))
         };
+        // A scan's population is known from collection metadata.
+        let rows = sample.source_rows as f64;
         Ok(Self {
             schema,
             batches,
             scale,
+            lower: rows,
+            upper: rows,
         })
     }
 
@@ -144,6 +152,10 @@ pub fn filter_relation(
         schema: relation.schema.clone(),
         batches: filtered,
         scale: relation.scale,
+        // Filtering cannot increase cardinality; without residual selectivity proofs the lower
+        // bound stays at zero while the upper inherits the input's pessimistic bound.
+        lower: 0.0,
+        upper: relation.upper,
     })
 }
 
@@ -151,6 +163,9 @@ pub fn filter_relation(
 ///
 /// Output columns are left columns followed by right columns. Duplicate names on the right are
 /// suffixed with `_right` when they collide with a left name.
+///
+/// The pessimistic upper bound follows the LpBound max-degree formula:
+/// `min(|L|·maxdeg(R), |R|·maxdeg(L), |L|·|R|)` with degrees scaled from the samples.
 pub fn equijoin_relations(
     left: &SampleRelation,
     right: &SampleRelation,
@@ -170,11 +185,48 @@ pub fn equijoin_relations(
     } else {
         vec![joined]
     };
+    let upper = lpbound_equijoin_upper(left, right, left_keys, right_keys)?;
     Ok(SampleRelation {
         schema,
         batches,
         scale: left.scale * right.scale,
+        lower: 0.0,
+        upper,
     })
+}
+
+/// Pessimistic upper bound for an inner equijoin from scaled sample max degrees.
+pub fn lpbound_equijoin_upper(
+    left: &SampleRelation,
+    right: &SampleRelation,
+    left_keys: &[String],
+    right_keys: &[String],
+) -> Result<f64, SampleError> {
+    let left_rows = left.upper;
+    let right_rows = right.upper;
+    let left_max_degree = max_key_frequency(left, left_keys)? as f64 * left.scale;
+    let right_max_degree = max_key_frequency(right, right_keys)? as f64 * right.scale;
+    Ok((left_rows * right_max_degree)
+        .min(right_rows * left_max_degree)
+        .min(left_rows * right_rows))
+}
+
+fn max_key_frequency(relation: &SampleRelation, keys: &[String]) -> Result<usize, SampleError> {
+    if relation.num_rows() == 0 {
+        return Ok(0);
+    }
+    let batch = concat_or_empty(relation)?;
+    let mut counts: HashMap<Vec<u8>, usize> = HashMap::new();
+    let mut max = 0usize;
+    for row in 0..batch.num_rows() {
+        let Some(key) = row_key(&batch, keys, row)? else {
+            continue;
+        };
+        let entry = counts.entry(key).or_insert(0);
+        *entry += 1;
+        max = max.max(*entry);
+    }
+    Ok(max)
 }
 
 fn concat_or_empty(relation: &SampleRelation) -> Result<RecordBatch, SampleError> {
@@ -455,16 +507,24 @@ mod tests {
             schema: left_batch.schema(),
             batches: vec![left_batch],
             scale: 10.0,
+            lower: 30.0,
+            upper: 30.0,
         };
         let right = SampleRelation {
             schema: right_batch.schema(),
             batches: vec![right_batch],
             scale: 5.0,
+            lower: 10.0,
+            upper: 10.0,
         };
         let joined = equijoin_relations(&left, &right, &["id".into()], &["id".into()]).unwrap();
         // left rows with id=2 appear twice against one right row → 2 output rows
         assert_eq!(joined.num_rows(), 2);
         assert_eq!(joined.scale, 50.0);
         assert_eq!(joined.estimated_rows(), 100.0);
+        // maxdeg_left_sample=2 → scaled 20; maxdeg_right_sample=1 → scaled 5
+        // min(30*5, 10*20, 30*10) = min(150, 200, 300) = 150
+        assert_eq!(joined.upper, 150.0);
+        assert_eq!(joined.lower, 0.0);
     }
 }
