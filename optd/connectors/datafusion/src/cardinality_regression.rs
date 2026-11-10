@@ -80,7 +80,10 @@ impl CardinalityRegressionHarness {
     pub fn with_full_scan_sketches(session: SessionContext) -> Self {
         Self {
             runtime_stats: RuntimeStatisticsCatalogBuilder::new(session.clone())
-                .with_full_scan_sketches(),
+                .with_full_scan_sketches()
+                .with_table_samples(
+                    crate::runtime_statistics::DEFAULT_REGRESSION_SAMPLE_BLOCK_SIZE,
+                ),
             session,
             log_sketches: true,
         }

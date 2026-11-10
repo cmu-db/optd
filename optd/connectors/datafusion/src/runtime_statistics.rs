@@ -13,13 +13,17 @@ use datafusion::common::TableReference;
 use datafusion::common::tree_node::TreeNodeRecursion;
 use datafusion::logical_expr::LogicalPlan;
 use datafusion::prelude::SessionContext;
-use optd_core::{Catalog, MemoryCatalog, TableRef, TableStatistics};
+use optd_core::{Catalog, MemoryCatalog, SampleProvenance, TableRef, TableStatistics, reservoir_sample};
+use rand::{SeedableRng, rngs::StdRng};
 
 use crate::statistics::{collect_full_scan_statistics, collect_table_statistics_for_table_ref};
 #[cfg(test)]
 use optd_core::TableConstraints;
 
 type RuntimeStatisticsResult<T> = Result<T, String>;
+
+/// Default reservoir capacity installed beside full-scan sketches in regression runs.
+pub(crate) const DEFAULT_REGRESSION_SAMPLE_BLOCK_SIZE: usize = 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct StatsCacheKey {
@@ -51,6 +55,8 @@ pub(crate) struct RuntimeStatisticsCatalogBuilder {
     #[cfg(test)]
     constraints: HashMap<TableRef, TableConstraints>,
     full_scan_sketches: bool,
+    /// When set, also reservoir-samples each referenced table into the catalog.
+    sample_block_size: Option<usize>,
 }
 
 impl RuntimeStatisticsCatalogBuilder {
@@ -61,6 +67,7 @@ impl RuntimeStatisticsCatalogBuilder {
             #[cfg(test)]
             constraints: HashMap::new(),
             full_scan_sketches: false,
+            sample_block_size: None,
         }
     }
 
@@ -83,6 +90,12 @@ impl RuntimeStatisticsCatalogBuilder {
     /// referenced table, so callers must opt into its benchmark-only cost.
     pub(crate) fn with_full_scan_sketches(mut self) -> Self {
         self.full_scan_sketches = true;
+        self
+    }
+
+    /// Also installs past table samples of `block_size` rows for sample-based cardinality estimation.
+    pub(crate) fn with_table_samples(mut self, block_size: usize) -> Self {
+        self.sample_block_size = Some(block_size);
         self
     }
 
@@ -159,10 +172,62 @@ impl RuntimeStatisticsCatalogBuilder {
                 }
             }
             catalog
-                .set_table_statistics(table_ref, statistics)
+                .set_table_statistics(table_ref.clone(), statistics.clone())
                 .map_err(|e| e.to_string())?;
+
+            if let Some(block_size) = self.sample_block_size {
+                let source_rows = statistics.row_count;
+                let samples = self
+                    .collect_table_samples(&scan.table, block_size, source_rows)
+                    .await?;
+                eprintln!(
+                    "runtime statistics: table samples table={table_ref:?} sample_rows={} block_size={} source_rows={:?}",
+                    samples.num_rows(),
+                    samples.block_size,
+                    samples.source_rows,
+                );
+                catalog
+                    .set_table_samples(table_ref, samples)
+                    .map_err(|e| e.to_string())?;
+            }
         }
         Ok(catalog)
+    }
+
+    async fn collect_table_samples(
+        &self,
+        table: &TableReference,
+        block_size: usize,
+        source_rows: Option<usize>,
+    ) -> RuntimeStatisticsResult<optd_core::TableSample> {
+        let frame = self
+            .session
+            .table(table.clone())
+            .await
+            .map_err(|error| error.to_string())?;
+        let batches = frame.collect().await.map_err(|error| error.to_string())?;
+        if batches.is_empty() {
+            return Err(format!(
+                "table '{table}' produced no record batches to sample"
+            ));
+        }
+        // Stable per-table seed so repeated regression runs keep the same reservoir.
+        let seed = {
+            let mut hash = 0u64;
+            for byte in table.to_string().as_bytes() {
+                hash = hash.wrapping_mul(131).wrapping_add(u64::from(*byte));
+            }
+            hash
+        };
+        let mut rng = StdRng::seed_from_u64(seed);
+        reservoir_sample(
+            batches,
+            block_size,
+            SampleProvenance::Past,
+            source_rows,
+            &mut rng,
+        )
+        .map_err(|error| error.to_string())
     }
 
     #[cfg(test)]
